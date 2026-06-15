@@ -166,6 +166,16 @@ type DeployTarget struct {
 	// rebuilds from scratch, which also clears SkipHelm and re-runs the
 	// helm upgrade even when no source change is detected.
 	Force bool
+	// InstallExistingVersion marks this as a consume operation that installs
+	// the artifact already published at VersionOverride instead of building
+	// it. A version is a content identity, so deploy/upgrade address the
+	// published image by reference rather than rebuilding the working tree
+	// and relabelling it (which would also overwrite the published tag on
+	// push). The build flow (build --deploy / --release) leaves this false:
+	// it is producing that version, not consuming it. Only meaningful on a
+	// builds-here env with a non-empty VersionOverride; remote-repo envs
+	// already install by reference via resolvePublishedDevopsDeploySpec.
+	InstallExistingVersion bool
 	// Publish, when true, packages each resolved chart and pushes the
 	// resulting tgz to the environment's container registry as an OCI
 	// Helm artifact (oci://<containerRegistry>/<chart-name>:<version>)
@@ -501,7 +511,7 @@ func ResolveDeploySpec(ctx Context, store DeployStore, findProjectRoot ProjectFi
 	if err != nil {
 		return DeploySpec{}, err
 	}
-	spec, err := resolveDeploySpecForOpenResult(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, resolvedTarget, componentName, versionOverride, resolvedTarget.EnvConfig.BuildsHere(), target.Force)
+	spec, err := resolveDeploySpecForOpenResult(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, resolvedTarget, componentName, versionOverride, resolvedTarget.EnvConfig.BuildsHere(), target.Force, target.InstallExistingVersion)
 	if err != nil {
 		return DeploySpec{}, err
 	}
@@ -557,7 +567,7 @@ func ResolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 		}
 	}
 	for _, deployContext := range deployContexts {
-		spec, err := resolveDeploySpecForContext(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, resolvedTarget, deployContext, target.VersionOverride, allowLocalBuilds, target.Force, currentBuild)
+		spec, err := resolveDeploySpecForContext(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, resolvedTarget, deployContext, target.VersionOverride, allowLocalBuilds, target.Force, target.InstallExistingVersion, currentBuild)
 		if err != nil {
 			return nil, err
 		}
@@ -640,7 +650,7 @@ func runtimeChartLockstepPublish(spec DeploySpec) (version string, ok bool) {
 	return "", false
 }
 
-func resolveDeploySpecForOpenResult(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, componentName, versionOverride string, allowLocalBuilds, force bool) (DeploySpec, error) {
+func resolveDeploySpecForOpenResult(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, componentName, versionOverride string, allowLocalBuilds, force, installExisting bool) (DeploySpec, error) {
 	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	now = freezeNow(now)
 
@@ -649,12 +659,23 @@ func resolveDeploySpecForOpenResult(ctx Context, store DeployStore, findProjectR
 		return DeploySpec{}, err
 	}
 
-	return resolveDeploySpecForContext(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, deployContext, versionOverride, allowLocalBuilds, force, nil)
+	return resolveDeploySpecForContext(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, deployContext, versionOverride, allowLocalBuilds, force, installExisting, nil)
 }
 
-func resolveDeploySpecForContext(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, deployContext KubernetesDeployContext, versionOverride string, allowLocalBuilds, force bool, currentBuild *DockerBuildSpec) (DeploySpec, error) {
+func resolveDeploySpecForContext(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, deployContext KubernetesDeployContext, versionOverride string, allowLocalBuilds, force, installExisting bool, currentBuild *DockerBuildSpec) (DeploySpec, error) {
 	store, findProjectRoot, resolveDockerBuildContext, _, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	target = applyDeployKubernetesContext(store, target)
+
+	// Install-by-reference: a consume command (deploy/upgrade) pinned an
+	// explicit version. A version is a content identity, so address the image
+	// already published at that version instead of rebuilding the working tree
+	// and relabelling it — which a builds-here deploy would also push,
+	// overwriting the published tag (#556). Remote-repo envs already install by
+	// reference via resolvePublishedDevopsDeploySpec, so this only covers
+	// builds-here envs.
+	if installExisting && allowLocalBuilds && strings.TrimSpace(versionOverride) != "" {
+		return resolveInstallExistingVersionDeploySpec(ctx, store, target, deployContext, versionOverride)
+	}
 
 	if currentBuild != nil && deployContextOwnsDockerBuild(deployContext, *currentBuild) {
 		return resolveDeploySpecForCurrentDockerBuild(ctx, store, target, deployContext, *currentBuild, force)
@@ -718,6 +739,103 @@ func resolveDeploySpecForContext(ctx Context, store DeployStore, findProjectRoot
 		Deploy:        deployInput,
 		SkipHelm:      resolveDeploySkipHelm(ctx, deployContext, deployInput, builds),
 	}, nil
+}
+
+// resolveInstallExistingVersionDeploySpec resolves a deploy that installs the
+// image already published at the pinned version, with no local build and no
+// push. deploy and upgrade are consume operations: a version names a content
+// identity, so a builds-here env addresses the published tag by reference
+// rather than rebuilding the working tree under that label. The chart's
+// referenced images are verified to exist (locally or in the registry) so a
+// version that was never built fails fast — deploy installs, it does not
+// build. helm still runs (no builds means SkipHelm stays false), pinned to the
+// requested version. See issue #556.
+func resolveInstallExistingVersionDeploySpec(ctx Context, store DeployStore, target OpenResult, deployContext KubernetesDeployContext, versionOverride string) (DeploySpec, error) {
+	deployInput, err := newHelmDeploySpec(target, deployContext, versionOverride)
+	if err != nil {
+		return DeploySpec{}, err
+	}
+	// allowLocalBuilds is true on this path (builds-here); mirror the build
+	// path's snapshot-reset decision so re-installing a snapshot behaves the
+	// same as deploying one.
+	deployInput.ResetDatabase = deployResetsDatabase(true, deployInput.Version)
+	if err := configureDeployInputMetadata(store, target, &deployInput); err != nil {
+		return DeploySpec{}, err
+	}
+
+	ctx.Trace("deploy: version " + deployInput.Version + " pinned; installing the published image, no local build")
+	images, err := findDockerImagesInChart(deployContext.ChartPath, deployInput.Version)
+	if err != nil {
+		return DeploySpec{}, err
+	}
+	for _, image := range images {
+		if err := verifyExistingDeployImage(ctx, image, deployInput.Version, deployInput.ContainerRegistry); err != nil {
+			return DeploySpec{}, err
+		}
+	}
+
+	return DeploySpec{
+		Target:        target,
+		DeployContext: deployContext,
+		Deploy:        deployInput,
+	}, nil
+}
+
+// verifyExistingDeployImage fails when the image a chart pulls at the pinned
+// version is absent both locally and in the registry. deploy installs an
+// existing version; a missing image means the version was never built, which
+// is an error, not a trigger to build it from the working tree.
+//
+// Only images at the deploy version are checked: charts also reference pinned
+// infra/base images (dind, binfmt) at their own versions, which are not the
+// version being installed and are skipped. Registry-less chart refs (the app
+// images, which get their registry from --set containerRegistry) are qualified
+// with the deploy registry so the lookup hits the published tag. Dry-run traces
+// the lookup and skips the network so the plan stays offline and deterministic;
+// a registry error that is not a definitive "absent" does not block the deploy
+// (the rollout would surface a real pull failure).
+func verifyExistingDeployImage(ctx Context, ref, version, registry string) error {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return nil
+	}
+	nameTag := ref
+	qualified := false
+	if idx := strings.LastIndex(ref, "/"); idx >= 0 {
+		nameTag = ref[idx+1:]
+		qualified = true
+	}
+	_, refVersion, ok := strings.Cut(nameTag, ":")
+	if !ok || strings.TrimSpace(refVersion) != strings.TrimSpace(version) {
+		// Not the version being installed (pinned infra/base image) — not ours
+		// to verify.
+		return nil
+	}
+
+	tag := ref
+	if !qualified && strings.TrimSpace(registry) != "" {
+		tag = strings.TrimRight(strings.TrimSpace(registry), "/") + "/" + ref
+	}
+
+	ctx.TraceCommand("", "docker", "manifest", "inspect", tag)
+	if ctx.DryRun {
+		return nil
+	}
+	remote, remoteErr := DockerManifestExists(tag)
+	if remote {
+		return nil
+	}
+	if local, _ := DockerImageExists(tag); local {
+		return nil
+	}
+	if remoteErr != nil {
+		// The registry could not confirm presence (network/auth, not a
+		// definitive "absent"); don't block the deploy on it — the rollout
+		// surfaces a real pull failure if the image is genuinely missing.
+		ctx.Trace("deploy: could not verify " + tag + " in the registry (" + remoteErr.Error() + "); proceeding")
+		return nil
+	}
+	return fmt.Errorf("deploy --version %s: image %s is not present locally or in the registry; deploy installs an existing version and does not build it — run erun build/push to create it first", version, tag)
 }
 
 // resolveDeploySkipHelm decides whether the chart's helm upgrade can be

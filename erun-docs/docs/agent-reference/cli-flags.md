@@ -195,6 +195,16 @@ If no TTY is attached, the retry skips the login prompt and surfaces the origina
 
 `--components`, `--version`, `--force`, `--dry-run`. Subcommand: `erun deploy <component>`.
 
+### `--version` (install an existing version)
+
+`erun deploy` and `erun upgrade` are *consume* operations: when an explicit version is pinned, the resolved version names a content identity to install, not a label to stamp on a fresh build. On a builds-here env (`EnvConfig.BuildsHere()`), an explicit `--version <v>`:
+
+1. Resolves **no** docker builds — the working tree is not built and nothing is pushed (so the deploy can never overwrite the published `<v>`). `SkipHelm` stays `false`, so the `helm upgrade --install` still runs, pinned to `<v>`.
+2. Verifies each image the chart references at `<v>` exists. For every `image:` ref the chart resolves at `AppVersion == <v>`: registry-less refs (the app images, which take their registry from `--set containerRegistry`) are qualified with the deploy registry; refs pinned at a different version (infra/base images such as dind and binfmt) are skipped. The check is `docker manifest inspect` (then a local `docker image inspect` fallback); in `--dry-run` it is traced and the network call is skipped. A registry error that is not a definitive "absent" does not block the deploy.
+3. Errors during resolution, before `helm upgrade`, when an image at `<v>` is absent both locally and in the registry: `deploy --version <v>: image <ref> is not present locally or in the registry; deploy installs an existing version and does not build it — run erun build/push to create it first`.
+
+The dry-run trace names the decision per spec: `deploy: version <v> pinned; installing the published image, no local build`. Remote-repo envs already install by reference (the published `oci://…/charts/erun-devops` chart). The build flow (`erun build [--release] --deploy`) leaves this off — it *produces* `<v>` from the working tree and builds as before.
+
 ### `--components` value set
 
 The `--components` flag's accepted values are derived from `<tenant>-devops/k8s/<component>/Chart.yaml` discovery at command-resolve time. For the erun repository itself, the registered set is `{erun-backend-postgres, erun-backend-db, erun-backend-api}`. Each tenant project ships its own set.

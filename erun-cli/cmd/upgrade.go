@@ -120,6 +120,9 @@ func newUpgradeDeployer(store common.DeployStore, saveEnvConfig common.EnvConfig
 			Environment:     item.Environment,
 			VersionOverride: item.Target,
 			Force:           force,
+			// Upgrade installs an already-published target version; never
+			// rebuild it from the working tree (#556).
+			InstallExistingVersion: true,
 		}
 		specs, err := common.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
 		if err != nil {

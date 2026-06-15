@@ -10,7 +10,7 @@ Flags:
   -h, --help                 help for deploy
       --publish              Package and push each resolved chart to the environment's container registry (oci://<containerRegistry>/<chart>:<version>) before helm upgrade
       --tenant string        Deploy for a specific tenant
-      --version string       Override the deployed chart and image version
+      --version string       Install an already-published version by reference instead of building from the working tree; fails if that version's image is absent
 
 Global Flags:
       --time            Print the elapsed runtime after the command finishes.

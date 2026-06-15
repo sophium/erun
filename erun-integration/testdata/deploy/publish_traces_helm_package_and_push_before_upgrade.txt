@@ -1,6 +1,7 @@
 audit: erun deploy --dry-run --publish --version <VERSION> team dev
 trace-log: would append the full trace to <TMP>
 deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=false publish=true
+deploy: version <VERSION> pinned; installing the published image, no local build
 deploy: resolved 1 spec(s)
 cd <TMP> && helm package team-devops --version <VERSION> --app-version <VERSION>
 cd <TMP> && helm push team-devops-<VERSION>.tgz oci://registry.example/test

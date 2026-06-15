@@ -81,7 +81,7 @@ func resolveOpenRuntimeDeploySpec(ctx Context, store DeployStore, findProjectRoo
 	}
 
 	for _, componentName := range openRuntimeComponentNames(target.Tenant) {
-		spec, err := resolveDeploySpecForOpenResult(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, componentName, "", allowLocalBuilds, false)
+		spec, err := resolveDeploySpecForOpenResult(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, componentName, "", allowLocalBuilds, false, false)
 		if err == nil {
 			spec.Deploy.ReleaseName = RuntimeReleaseName(target.Tenant)
 			return spec, nil
