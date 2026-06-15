@@ -146,6 +146,45 @@ func TestPush(t *testing.T) {
 		golden.Equal(t, "push/real_run_single_image_from_dockerfile_cwd", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_local_push_assembles_per_arch_manifest", func(t *testing.T) {
+		// Locks the fix for standalone `erun push` of local-env (snapshot) images.
+		// From the project root with no cwd Dockerfile, push resolves multiple
+		// docker contexts (ResolveDockerPushExecution). A locally-built multi-arch
+		// image only exists under per-arch tags, so push must push those and
+		// assemble a manifest list — the same multi-platform push release uses —
+		// not `docker push` the arch-less version tag (which would fail
+		// "tag does not exist"). The stub answers every fp inspect present, so
+		// images promote (mirroring the real failure); the plan must show, per
+		// image, the per-arch `docker push` + `docker manifest create`/`push`.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryAdvanced(t, stubs, "docker", fixture.StubBinarySpec{ExitCode: 0})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		result := erun.Run(t, []string{"push", "--dry-run", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "push/dry_run_local_push_assembles_per_arch_manifest", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_local_push_assembles_per_arch_manifest", func(t *testing.T) {
+		// Companion to the dry-run scenario: drives RunDockerPushExecution +
+		// pushMultiPlatformImage for real against the stub (promote, per-arch
+		// docker push, docker manifest create/push). Previously this path failed
+		// "tag does not exist" on the arch-less push; it must now complete.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryAdvanced(t, stubs, "docker", fixture.StubBinarySpec{ExitCode: 0})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		result := erun.Run(t, []string{"push", "-v", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "push/real_run_local_push_assembles_per_arch_manifest", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_auth_failure_prompts_login_and_retries", func(t *testing.T) {
 		// Exercises promptDockerLoginRetry's interactive Select (the
 		// non-ERUN_AUTO_LOGIN_ON_PUSH path) plus runDockerPushWithRetry's

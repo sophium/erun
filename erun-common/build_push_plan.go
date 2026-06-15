@@ -30,6 +30,13 @@ func ResolveDockerPushExecution(ctx Context, store DockerStore, findProjectRoot 
 			if err != nil {
 				return DockerPushExecutionSpec{}, err
 			}
+			// Push through the build's own multi-platform push so the per-arch
+			// images go up and a manifest list is assembled (pushMultiPlatformImage),
+			// the same path release/deploy use. A locally-built multi-arch image
+			// only exists under per-arch tags; pushing the bare version tag (the
+			// pushes entry below) would fail "tag does not exist", so RunDockerPushExecution
+			// skips it once the build is marked pushed.
+			build.Push = true
 			builds = append(builds, build)
 			imageRef = build.Image
 		}
@@ -67,6 +74,11 @@ func ResolveDockerPushSpec(ctx Context, store DockerStore, findProjectRoot Proje
 		if err != nil {
 			return DockerPushSpec{}, nil, err
 		}
+		// Push via the build's multi-platform push (per-arch + manifest list),
+		// not the bare version tag — a local multi-arch image has no arch-less
+		// tag to `docker push`. RunDockerPushSpec returns after the build once
+		// Push is set, skipping the redundant single-tag push.
+		resolvedBuild.Push = true
 		incremental, err := ApplyIncrementalToDockerBuilds(ctx, []DockerBuildSpec{resolvedBuild}, target.NoIncremental)
 		if err != nil {
 			return DockerPushSpec{}, nil, err
