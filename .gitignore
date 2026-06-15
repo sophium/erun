@@ -25,6 +25,9 @@ profile.cov
 
 .claude
 
+# macOS
+.DS_Store
+
 # Editor/IDE
 .idea/
 # .vscode/
