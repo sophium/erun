@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	common "github.com/sophium/erun/erun-common"
 	"github.com/spf13/cobra"
@@ -14,8 +15,10 @@ func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 		Use:   "deploy [TENANT] [ENVIRONMENT]",
 		Short: "Roll the project's charts out to an environment",
 		Long: "Roll the project's charts out to an environment.\n\n" +
-			"The deploy step of the build → release → push → deploy flow. Builds and pushes the " +
-			"images the charts need, then runs the rollout against the target environment. " +
+			"The deploy step of the build → release → push → deploy flow. With no --version it builds and " +
+			"pushes the images the charts need from the working tree, then runs the rollout against the " +
+			"target environment. With --version it installs that already-published version by reference " +
+			"without building (a version is an identity, not a label for a fresh build). " +
 			"Defaults to the current scope; pass TENANT and ENVIRONMENT (or --tenant/--environment) " +
 			"to target another.",
 		Example:       "  erun deploy\n  erun deploy team dev\n  erun deploy team prod --version 1.2.3",
@@ -29,6 +32,10 @@ func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 				return err
 			}
 			deployTarget.Components = components
+			// An explicit --version on deploy is an install target, not a
+			// build label: address the already-published version rather than
+			// rebuilding the working tree under it (#556).
+			deployTarget.InstallExistingVersion = strings.TrimSpace(deployTarget.VersionOverride) != ""
 			var closeEnvTrace func()
 			ctx, closeEnvTrace = common.ActivateEnvTrace(ctx, deployTarget.Tenant, deployTarget.Environment)
 			defer closeEnvTrace()
@@ -63,6 +70,9 @@ func newK8sDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSav
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := withCloudContextPreflight(commandContext(cmd), store)
+			// An explicit --version is an install target, not a build label
+			// (#556).
+			target.InstallExistingVersion = strings.TrimSpace(target.VersionOverride) != ""
 			deploySpec, err := common.ResolveDeploySpec(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target, args[0], "")
 			if err != nil {
 				return err
@@ -79,7 +89,7 @@ func newK8sDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSav
 }
 
 func addDeployCommandTargetFlags(cmd *cobra.Command, target *common.DeployTarget) {
-	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Override the deployed chart and image version")
+	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Install an already-published version by reference instead of building from the working tree; fails if that version's image is absent")
 	cmd.Flags().StringVar(&target.Tenant, "tenant", "", "Deploy for a specific tenant")
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Deploy for a specific environment; requires --tenant")
 	cmd.Flags().BoolVar(&target.Force, "force", false, "Bypass the fingerprint cache and re-run helm upgrade even when no source change is detected")

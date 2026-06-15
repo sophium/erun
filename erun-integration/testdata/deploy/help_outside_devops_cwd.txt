@@ -1,6 +1,6 @@
 Roll the project's charts out to an environment.
 
-The deploy step of the build → release → push → deploy flow. Builds and pushes the images the charts need, then runs the rollout against the target environment. Defaults to the current scope; pass TENANT and ENVIRONMENT (or --tenant/--environment) to target another.
+The deploy step of the build → release → push → deploy flow. With no --version it builds and pushes the images the charts need from the working tree, then runs the rollout against the target environment. With --version it installs that already-published version by reference without building (a version is an identity, not a label for a fresh build). Defaults to the current scope; pass TENANT and ENVIRONMENT (or --tenant/--environment) to target another.
 
 Usage:
   erun deploy [TENANT] [ENVIRONMENT] [flags]
@@ -18,7 +18,7 @@ Flags:
   -h, --help                 help for deploy
       --publish              Package and push each resolved chart to the environment's container registry (oci://<containerRegistry>/<chart>:<version>) before helm upgrade
       --tenant string        Deploy for a specific tenant
-      --version string       Override the deployed chart and image version
+      --version string       Install an already-published version by reference instead of building from the working tree; fails if that version's image is absent
 
 Global Flags:
       --time            Print the elapsed runtime after the command finishes.

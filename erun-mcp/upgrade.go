@@ -50,6 +50,9 @@ func upgradeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReque
 					RepoPath:        workDir,
 					VersionOverride: item.Target,
 					Force:           target.Force,
+					// Upgrade installs an already-published target version;
+					// never rebuild it from the working tree (#556).
+					InstallExistingVersion: true,
 				}
 				specs, err := eruncommon.ResolveCurrentDeploySpecs(ctx, runtime.Store, findProjectRoot, resolveBuildContext, resolveDeployContext, nil, deployTarget)
 				if err != nil {

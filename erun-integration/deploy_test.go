@@ -448,6 +448,53 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/force_flag_appears_in_trace", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_pinned_version_installs_buildable_chart_without_building", func(t *testing.T) {
+		// #556: deploy is a consume operation. Even when the chart references a
+		// runtime image that HAS a local build context (docker/team-devops/
+		// Dockerfile makes team-devops genuinely buildable), an explicit
+		// --version installs that already-published version by reference: the
+		// trace shows the decision line and a `docker manifest inspect` of the
+		// pinned image, then the helm upgrade — and crucially NO docker build,
+		// no `docker image inspect` fingerprint probe, and no promote/rebuild
+		// line. Without the fix this chart resolves a build for team-devops and
+		// rebuilds it on a fingerprint-cache miss, relabelling the working tree
+		// as the pinned version (and pushing over the published tag).
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsRuntimeDockerfile(t, setup, "team")
+		seedDevopsChartRuntimeImage(t, setup, "team", "ghcr.io/sophium/team-devops:{{ .Chart.AppVersion }}")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_pinned_version_installs_buildable_chart_without_building", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_pinned_version_missing_image_errors", func(t *testing.T) {
+		// #556: deploy installs an existing version and does not build it, so a
+		// version whose image is absent both locally and in the registry must
+		// fail fast rather than silently rebuild from the working tree. The
+		// existence check runs only in real mode (dry-run traces and skips it),
+		// so this is a real-run scenario: the docker stub exits non-zero for
+		// `manifest inspect` and `image inspect`, so both lookups report
+		// "absent" and resolution errors before helm/kubectl are touched.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		seedDevopsChartRuntimeImage(t, setup, "team", "ghcr.io/sophium/team-devops:{{ .Chart.AppVersion }}")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryAdvanced(t, stubs, "docker", fixture.StubBinarySpec{ExitCode: 1})
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm", "kubectl")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when the pinned version's image is absent, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/real_run_pinned_version_missing_image_errors", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_outside_devops_with_tenant_env", func(t *testing.T) {
 		// Regression for issue #252: when erun deploy <tenant> <env> is
 		// invoked from a cwd outside the devops module (e.g. the desktop
@@ -1557,6 +1604,24 @@ func TestDeploy(t *testing.T) {
 			t.Fatalf("expected 'dedup: would reclaim' trace, got:\n%s", out)
 		}
 	})
+}
+
+// seedDevopsChartRuntimeImage adds a templates/deployment.yaml to the seeded
+// <tenant>-devops chart that references imageRef (which may embed
+// {{ .Chart.AppVersion }}). It makes findDockerImagesInChart resolve a concrete
+// image the deploy must address, so the install-by-reference path (#556) has
+// something to verify — the stub SeedDevopsRepo chart has no templates and
+// therefore no chart-referenced image.
+func seedDevopsChartRuntimeImage(t *testing.T, setup env.Setup, tenant, imageRef string) {
+	t.Helper()
+	templates := filepath.Join(setup.Cwd, tenant+"-devops", "k8s", tenant+"-devops", "templates")
+	if err := os.MkdirAll(templates, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", templates, err)
+	}
+	body := "apiVersion: apps/v1\nkind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n        - name: runtime\n          image: " + imageRef + "\n"
+	if err := os.WriteFile(filepath.Join(templates, "deployment.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write deployment.yaml: %v", err)
+	}
 }
 
 // extractDedupHash pulls the live params hash off a "dedup: ready (release=..., hash=<HEX>)"

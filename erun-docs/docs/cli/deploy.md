@@ -33,7 +33,7 @@ The chart and runtime image are one contract — published together to the same 
 | Flag | Description |
 |---|---|
 | `--components <name,name,...>` | Opt-in components to include alongside the runtime chart. The accepted list is derived from each project's `<tenant>-devops/k8s/<component>/` charts. |
-| `--version <version>` | Override the deployed chart and image version. |
+| `--version <version>` | Install the image and chart already published at `<version>` by reference, instead of building from the working tree. The version's image must already exist (locally or in the registry) or the deploy errors — see [build vs install](#building-vs-installing-an-existing-version). |
 | `--publish` | Package and push each resolved chart to the environment's container registry as an OCI Helm artifact before the upgrade. |
 | `--force` | Bypass the fingerprint cache and re-run helm upgrade even when no source change is detected. |
 | `--dry-run` | Resolve and print every `docker`, `docker push`, and `helm upgrade --install` command without executing. |
@@ -43,6 +43,15 @@ Subcommand:
 | Command | Description |
 |---|---|
 | `erun deploy COMPONENT` | Deploy a single component's helm chart directly (no plan resolution). |
+
+## Building vs installing an existing version {#building-vs-installing-an-existing-version}
+
+`erun deploy` has two modes, chosen by whether you pass `--version`:
+
+- **No `--version` (build):** in an agent env, `erun deploy` builds the images the charts need from your working tree, pushes them, and rolls them out. This is the default delivery loop — the deploy *produces* a new version.
+- **With `--version <v>` (install):** `erun deploy` *consumes* an existing version. A version is a content identity, not a label, so ERun addresses the already-published image by reference — it does **not** rebuild your working tree under that version, and it does **not** push (so it can never overwrite the published `<v>`). Before the rollout it checks that the version's image exists; if it doesn't, the deploy errors instead of building one. `erun upgrade` deploys this same way.
+
+Use `--version` to redeploy or roll back to a version that was already built and pushed (by a release, or an earlier `erun build` / `build --deploy`). To produce a *new* version from your working tree, run `erun deploy` without `--version`, or use the build flow.
 
 ## Skipping helm when nothing changed
 
@@ -82,6 +91,12 @@ Deploy a specific component chart:
 erun deploy erun-backend-api
 ```
 
+Install an already-published version (no build — fails if that version isn't published):
+
+```bash
+erun deploy team prod --version 1.2.3
+```
+
 ## Error behaviour
 
 | Failure | Behaviour |
@@ -89,6 +104,7 @@ erun deploy erun-backend-api
 | Cluster unreachable. | Errors before any change; exit code 1, message identifies the context. |
 | Linked cloud context is stopped. | Starts the context, waits for readiness, then proceeds. If start fails, errors. |
 | Referenced image isn't in the registry. | Errors before `helm upgrade`; logs the missing image and the resolved registry. No partial deploy. |
+| `--version <v>` names a version whose image was never built. | Errors during resolution, before `helm upgrade`: `image <ref> is not present locally or in the registry; deploy installs an existing version and does not build it — run erun build/push to create it first`. No build, no push, no partial deploy. |
 | Runtime chart isn't published at the requested version. | Errors with `runtime chart <ref> version <v> could not be pulled from <registry>` and how to recover — deploy a released version, or publish the chart (`erun deploy --publish` / a push-deploy). Common when a snapshot image was pushed but its chart never was. No partial deploy. |
 | Helm upgrade fails on step N. | The plan stops at step N. Steps 1..N-1 are committed; step N is in helm's failure state. Fix and rerun, or `helm rollback` that release. The rest of the plan is left untouched. |
 | `erun deploy <component>` for a component not in the plan. | Deploys the single component directly — that's the documented bypass. No error. |
