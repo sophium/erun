@@ -231,13 +231,3 @@ func sleepWithCancel(ctx context.Context, d time.Duration) bool {
 		return true
 	}
 }
-
-// credentialRefresherRunning reports whether a refresher is currently tracked
-// for the selection. Exposed for tests.
-func (a *App) credentialRefresherRunning(selection uiSelection) bool {
-	key := a.cloudCredentialsRefresherKey(normalizeSelection(selection))
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	_, ok := a.credentialRefreshers[key]
-	return ok
-}
