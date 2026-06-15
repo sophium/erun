@@ -104,7 +104,7 @@ func TestSSHD(t *testing.T) {
 			"kubernetescontext: test-context\n" +
 			"containerregistry: registry.example/test\n" +
 			"runtimeversion: 1.0.0\n" +
-			"remote: true\n" +
+			"type: remote-agent\n" +
 			"sshd:\n" +
 			"  workspacesync:\n" +
 			"    enabled: true\n"

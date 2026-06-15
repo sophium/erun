@@ -314,7 +314,7 @@ func TestDeploy(t *testing.T) {
 		mustWriteFile(t, filepath.Join(tenantDir, "config.yaml"),
 			"projectroot: /nonexistent-remote/team\nname: team\ndefaultenvironment: dev\n")
 		mustWriteFile(t, filepath.Join(envDir, "config.yaml"),
-			"name: dev\nrepopath: /nonexistent-remote/team\nkubernetescontext: test-context\nremote: true\nruntimeversion: 1.0.0\n"+
+			"name: dev\nrepopath: /nonexistent-remote/team\nkubernetescontext: test-context\ntype: remote-agent\nruntimeversion: 1.0.0\n"+
 				"containerregistries:\n"+
 				"    - registry: ghcr.io/sophium\n      roles: [build, from]\n"+
 				"    - registry: registry.internal/team\n      roles: [to, deploy]\n")

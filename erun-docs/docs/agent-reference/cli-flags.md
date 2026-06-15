@@ -29,8 +29,8 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 | Flag | Type | Default | Validation | Persists to |
 |---|---|---|---|---|
 | `--project-root <path>` | string (absolute path) | `<cwd>`'s git repo root (`git rev-parse --show-toplevel`) | Must be an existing directory; must contain a `.git/` directory or `.git` file. | `TenantConfig.projectroot`. |
-| `--remote` | bool | `false` | — | Sets `EnvConfig.remote = true`. With `--remote`, init runs inside the runtime pod (writes the bootstrap marker). |
-| `--no-git` | bool | `false` | Only meaningful with `--remote`. | Skips the in-pod `git clone` step. |
+| `--remote` | bool | `false` | Conflicts with a `--type` whose value disagrees (e.g. `--type=local-agent --remote`). | Deprecated alias for `--type=remote-agent`: sets `EnvConfig.type = remote-agent`. Init then writes the in-pod bootstrap marker. |
+| `--no-git` | bool | `false` | Only meaningful with `--remote` / `--type=remote-agent`. | Skips the in-pod `git clone` step. |
 | `--version <version>` | string (semver) | The CLI's built-in `ERUN_VERSION`. | Must satisfy `^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$`. | `EnvConfig.runtimeversion`. |
 | `--runtime-image <ref>` | string | unset (the published `<registry>/erun-devops:<version>` image). | A full OCI reference (registry path and/or tag present) is used verbatim; a bare name resolves to `<registry>/<name>:<runtime version>` at deploy time. | `EnvConfig.runtimeimage`; applied as `imageOverrides.erun-devops` on every published-chart deploy. |
 | `--bootstrap` | bool | `false` | — | **Deprecated, ignored.** Prints a deprecation warning; `init` no longer scaffolds a `<tenant>-devops/` module — envs deploy the published `erun-devops` chart. |
@@ -84,7 +84,7 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 | `--no-alias-prompt` | bool | `false` | Only meaningful with `--no-shell`. | None (interactive choice only). |
 | `--version <version>` | string (semver) | `EnvConfig.runtimeversion` or the CLI built-in. | Same as `erun init --version`. | `EnvConfig.runtimeversion` for this run only (not persisted). |
 | `--runtime-image <ref>` | string | `EnvConfig.runtimeimage` (unset → the published image). | Same reference rules as `erun init --runtime-image`. Applies only to envs deploying the published chart (rides in as `imageOverrides.erun-devops`); envs with a repo-local chart ignore it. | Run-only override (not persisted). |
-| `--snapshot` / `--no-snapshot` | tri-state bool (`true` / `false` / unset) | `EnvConfig.snapshot` (defaults to `nil`). | Only applies to agent envs. Ignored against runtime envs (warning logged). | `EnvConfig.snapshot` for this run. |
+| `--snapshot` / `--no-snapshot` | tri-state bool (`true` / `false` / unset) | unset (the env's stored `type` is used unchanged). | Only affects the default `local` environment; ignored for other environments. | `EnvConfig.type` for the `local` env: `--snapshot` → `local-agent` (build a local snapshot), `--no-snapshot` → `runtime` (consume the published image). Persisted. |
 
 ### `erun open` lifecycle algorithm
 

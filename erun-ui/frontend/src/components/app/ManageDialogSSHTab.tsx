@@ -1,6 +1,7 @@
 import { FolderOpen, Server, Stethoscope } from 'lucide-react';
 import * as React from 'react';
 
+import { environmentTypeIsRemoteWorktree } from '@/app/environmentType';
 import { readError } from '@/app/errors';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import {
@@ -79,7 +80,9 @@ function SSHAccessHeader({ dialog }: { dialog: ManageDialog }): React.ReactEleme
           type="button"
           variant="outline"
           size="sm"
-          disabled={dialog.busy || dialog.configLoading || !config.remote}
+          disabled={
+            dialog.busy || dialog.configLoading || !environmentTypeIsRemoteWorktree(config.type)
+          }
           onClick={() =>
             void dispatch(enableManageSSHD()).catch((error: unknown) => {
               dispatch(showTerminalMessage(readError(error)));

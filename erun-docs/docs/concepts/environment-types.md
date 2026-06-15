@@ -87,7 +87,7 @@ To hotfix `erun-backend-api` in `erun-prod`:
 
 Set `EnvConfig.type` to one of `local-agent`, `remote-agent`, or `runtime`. When `type` is set it is the source of truth and downstream commands (`erun build`, `erun open`, `erun deploy`) branch on it.
 
-For backward compatibility, envs that have no `type` set fall back to deriving it from the legacy `EnvConfig.remote` and `EnvConfig.snapshot` fields per the truth table at [Configuration · Planned changes](/reference/configuration#planned-changes). A future release will drop the legacy fields; new envs created by `erun init --type` set `type` directly and avoid the legacy pair entirely.
+The retired `EnvConfig.remote` and `EnvConfig.snapshot` fields no longer exist. A config written before `type` existed is migrated on read — ERun derives `type` from the old `remote`/`snapshot` keys per the [legacy migration table](/reference/configuration#envconfig-type-truth-table) and discards them. New envs created by `erun init --type` set `type` directly.
 
 ```bash
 # Local-agent env (default if neither flag is given):

@@ -75,7 +75,7 @@ function deployRelevantSignature(config: UIEnvironmentConfig): string {
     containerRegistries: config.containerRegistries,
     disableBuildScript: config.disableBuildScript,
     cloudProviderAlias: config.cloudProviderAlias,
-    snapshot: config.snapshot,
+    type: config.type,
     runtimePod: config.runtimePod,
     idle: config.idle,
     claudePod: {
@@ -99,12 +99,7 @@ export function manageDialogTabHasUnsavedChanges(
     keys.some((key) => JSON.stringify(config[key]) !== JSON.stringify(initial[key]));
   switch (tab) {
     case 'general':
-      return compare(
-        'containerRegistries',
-        'cloudProviderAlias',
-        'snapshot',
-        'remoteHostCredentials',
-      );
+      return compare('containerRegistries', 'cloudProviderAlias', 'remoteHostCredentials');
     case 'runtime':
       return compare(
         'runtimePod',

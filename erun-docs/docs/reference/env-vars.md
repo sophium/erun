@@ -12,6 +12,7 @@ ERun reads a small number of `ERUN_*` variables, mostly when running inside a ru
 |---|---|---|---|---|
 | `ERUN_REPO_PATH` | absolute path | `/home/erun/git/<repo>` | Project checkout inside the pod. | Helm chart (`worktreeHostPath` template). |
 | `ERUN_REPO_REMOTE` | bool literal `true`/`false` | unset on host; `true` in pod | Marks the pod as a runtime pod. Used by `IsInRuntimeEnvironment`. | Helm chart, only when env type is `remote-agent` or `runtime`. |
+| `ERUN_ENV_TYPE` | enum `local-agent`/`remote-agent`/`runtime` | (set in pod) | The env's resolved type. The pod entrypoint writes it into the in-pod `EnvConfig.type`, so in-pod `erun` resolves the same type the laptop did. | Helm chart (the inverse of the `worktreeStorage` mapping). |
 | `ERUN_TENANT` | string | (required) | Tenant name. | Deploy plan (the tenant under which the chart runs); not a field on `EnvConfig`. |
 | `ERUN_ENVIRONMENT` | string | (required) | Environment name. | `EnvConfig.name`. |
 | `ERUN_KUBERNETES_CONTEXT` | string | `in-cluster` | Always `in-cluster` inside the pod. | Helm chart literal. |

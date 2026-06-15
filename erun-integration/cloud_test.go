@@ -427,7 +427,7 @@ func TestCloud(t *testing.T) {
 			"kubernetescontext: test-context\n" +
 			"containerregistry: registry.example/test\n" +
 			"runtimeversion: 1.0.0\n" +
-			"remote: true\n" +
+			"type: remote-agent\n" +
 			"cloudprovideralias: team-cloud\n"
 		if err := os.WriteFile(envCfgPath, []byte(body), 0o644); err != nil {
 			t.Fatalf("rewrite env config with alias: %v", err)
@@ -783,7 +783,7 @@ func TestCloud(t *testing.T) {
 			"kubernetescontext: test-context\n" +
 			"containerregistry: registry.example/test\n" +
 			"runtimeversion: 1.0.0\n" +
-			"remote: true\n"
+			"type: remote-agent\n"
 		if err := os.WriteFile(envCfgPath, []byte(body), 0o644); err != nil {
 			t.Fatalf("rewrite env config without alias: %v", err)
 		}

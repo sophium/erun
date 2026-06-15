@@ -222,7 +222,6 @@ func stateFromListResult(result eruncommon.ListResult, info eruncommon.BuildInfo
 				KubernetesContext: strings.TrimSpace(environment.KubernetesContext),
 				IsActive:          environment.IsActive,
 				SSHDEnabled:       environment.SSH.Enabled,
-				Remote:            environment.Remote,
 				AutoStart:         copyBoolPtr(environment.AutoStart),
 			})
 		}

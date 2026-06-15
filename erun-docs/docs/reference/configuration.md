@@ -43,8 +43,6 @@ One per tenant.
 | `api_url` | string | `erun open` (API port forward) | Backend API base URL for this tenant. |
 | `cloudprovideraliases[]` | list of strings | `erun init`, `erun open` | Cloud provider aliases the tenant is allowed to use. |
 | `primarycloudprovideralias` | string | `erun open` (suggesting cloud bindings) | Default cloud provider alias for new envs in this tenant. |
-| `remote` | bool | build path resolution | When true, ERun knows the tenant's `projectroot` describes a *remote* machine. ([Planned removal.](#planned-changes)) |
-| `snapshot` | `*bool` | (none) | ([Planned removal — does not belong on the tenant.](#planned-changes)) |
 
 ### `EnvConfig` (`~/.config/erun/<tenant>/<env>/config.yaml`) {#envconfig}
 
@@ -53,7 +51,7 @@ One per environment. This is the most-edited file.
 | Field | Type | Used by | Effect |
 |---|---|---|---|
 | `name` | string | All commands | Environment identifier. |
-| `type` | string (enum) | `erun build`, `erun open`, `erun deploy`, helm chart (`worktreeStorage`) | `local-agent`, `remote-agent`, or `runtime`. The canonical signal for what this env is for. When set, it takes precedence over the legacy `remote` and `snapshot` fields. See [Environment types](/concepts/environment-types). |
+| `type` | string (enum) | `erun build`, `erun open`, `erun deploy`, helm chart (`worktreeStorage`, `ERUN_ENV_TYPE`) | `local-agent`, `remote-agent`, or `runtime`. The canonical — and only — signal for what this env is for. Configs written before `type` existed are migrated to a concrete value on read (see [Legacy migration](#planned-changes)). See [Environment types](/concepts/environment-types). |
 | `localRepoPath` | string | helm chart (`worktreeHostPath` for `local-agent` envs), `erun deploy` (project-config load, registry resolution) | Absolute path to the repo on the local machine. Only meaningful for `local-agent` envs; left empty for `remote-agent` and `runtime`. |
 | `repopath` | string | (legacy) helm chart (`worktreeHostPath`), `erun deploy` (project-config load, registry resolution) | Legacy path field. Kept for backward compatibility with envs created before `localRepoPath` existed; new envs use `localRepoPath` instead. ([Planned removal.](#planned-changes)) |
 | `kubernetescontext` | string | `erun open`, `erun deploy`, `erun list` | Kubernetes context to deploy/open against. Special value `in-cluster` is set inside the runtime pod. |
@@ -85,8 +83,6 @@ One per environment. This is the most-edited file.
 | `claude.defaultmodel` | `*string` | desktop AI launcher (`claude --model`) | Model the env's Claude AI tab starts on. Applied only while it is one of the env's available models (`claude.models[]`, or the default available set when that list is empty); otherwise no `--model` is passed. Model names are opaque tokens to ERun — resolving one (e.g. `fable`) to a concrete model is Claude's concern. Same verbatim-launch carve-out and save-reopen behaviour as `claude.effort`. |
 | `claude.verbosedebug` | bool | desktop AI launcher (`claude --verbose --debug`) | Launch the env's Claude AI tab with Claude's own verbose + debug diagnostics streaming into the tab. Absent means off. Same verbatim-launch carve-out and save-reopen behaviour as `claude.effort`. |
 | `aitool` | string | desktop AI launcher, runtime entrypoint | Which Agent is the default for this env (`claude`, `codex`, …). |
-| `remote` | bool | helm chart (worktree storage selection), build path resolution | When true, the runtime pod uses a PVC-backed checkout; when false, the host project root is mounted via `hostPath`. ([Planned removal — subsumed by `type`.](#planned-changes)) |
-| `snapshot` | `*bool` | `erun build`, `erun push`, `erun deploy`, `erun open` | Marks this env as agent-mode: when `true`, builds happen here and produce snapshot-tagged artefacts; when `false`, the env only receives deploys. ([Planned removal — subsumed by `type`.](#planned-changes)) |
 | `localportrangestart` | int | desktop port allocator | Base port for this env's local forwards (MCP, API, SSH). |
 | `autostart` | `*bool` | desktop sidebar open | `nil` = ask, `true` = always start linked cloud context on open, `false` = never. |
 | `remotehostcredentials` | bool | helm chart (cloud credentials passthrough) | Mount the host's cloud credentials into the runtime pod (for managed cloud envs). |
@@ -254,35 +250,35 @@ For Docker build context / version resolution, see [Build path resolution](/refe
 
 ---
 
-## Planned changes
+## Migration and planned changes {#planned-changes}
 
-The migration from the three legacy fields (`TenantConfig.projectroot`, `EnvConfig.remote`, `EnvConfig.snapshot`) to one explicit `EnvConfig.type` has begun:
+ERun has moved from the legacy `remote` + `snapshot` field pair to one explicit `EnvConfig.type`. `type` is now the only signal commands and the helm chart branch on:
 
-- ✅ `EnvConfig.type` is writable today via `erun init --type` or by editing the YAML directly.
-- ✅ When `type` is set on an env, downstream commands (`erun build`, `erun open`, `erun deploy`) and the helm chart wiring (`worktreeStorage=host|pvc|none`) branch on it instead of the legacy fields.
-- ✅ `EnvConfig.localRepoPath` is the new name for the local-host worktree path; only `local-agent` envs populate it.
-- ⏳ Legacy fields stay readable for one release. Envs that have no `type` set fall back to deriving it from `remote` and `snapshot` per the truth table below.
-- ⏳ A follow-up release will drop the legacy fields and the deprecated `--remote` / `remote: true` aliases.
+- ✅ `EnvConfig.type` is written by `erun init --type`, the desktop env settings, or by editing the YAML directly.
+- ✅ Downstream commands (`erun build`, `erun open`, `erun deploy`) and the helm chart wiring (`worktreeStorage=host|pvc|none`, `ERUN_ENV_TYPE`) branch on `type`.
+- ✅ `EnvConfig.localRepoPath` is the local-host worktree path; only `local-agent` envs populate it.
+- ✅ `EnvConfig.remote`, `EnvConfig.snapshot`, and the matching `TenantConfig` fields are **removed**. A config written before `type` existed is migrated on read: ERun parses the legacy `remote`/`snapshot` keys, derives `type` per the table below, and discards them. No action is needed — re-saving an env (e.g. from the desktop) persists the resolved `type`.
+- ⏳ `TenantConfig.projectroot` and `EnvConfig.repopath` are still in flight (see [Field-level moves](#field-level-moves)).
 
-### `EnvConfig.type` truth table
+### Legacy `remote`/`snapshot` → `type` migration {#envconfig-type-truth-table}
 
-| Value | Worktree storage | Build behaviour | Legacy fallback (when `type` unset) |
-|---|---|---|---|
-| `local-agent` | `hostPath` mount of `localRepoPath` | snapshot tags, builds in-pod | `Remote: false` (the historical default) |
-| `remote-agent` | PVC checkout cloned from git | snapshot tags, builds in-pod | `Remote: true` + `snapshot: true` |
-| `runtime` | None | release tags only, no builds | `Remote: true` + `snapshot: false` |
+A config with no `type` is migrated from the retired keys on read. `snapshot` absent is read the same as `snapshot: false`:
+
+| `remote` | `snapshot` | Migrated `type` | Worktree storage | Build behaviour |
+|---|---|---|---|---|
+| `false` | `true` | `local-agent` | `hostPath` mount of `localRepoPath` | snapshot tags, builds in-pod |
+| `true` | `true` | `remote-agent` | PVC checkout cloned from git | snapshot tags, builds in-pod |
+| `true` | `false` / absent | `runtime` | none | release tags only, no builds |
+| `false` | `false` / absent | (unresolved) | `hostPath` (fallback) | — |
 
 See [Environment types](/concepts/environment-types) for what each value means in practice.
 
-### Field-level moves
+### Field-level moves {#field-level-moves}
 
-| Today | Planned | Why |
+| Field | Status | Why |
 |---|---|---|
-| `TenantConfig.projectroot` | Removed; cwd-to-tenant matching iterates over envs' `localRepoPath`. | A tenant can host both local and remote envs; the path lives on the env, not the tenant. |
-| `EnvConfig.repopath` | Replaced by `EnvConfig.localRepoPath`. | Scoped explicitly: the local-machine path mounted into the pod. For PVC envs the field is unset — the repo lives inside the pod at a fixed convention. |
-| `TenantConfig.remote` | Removed. | Subsumed by per-env `type`. |
-| `TenantConfig.snapshot` | Removed. | Doesn't belong on the tenant; subsumed by per-env `type`. |
-| `EnvConfig.remote` | Removed. | Subsumed by `type` (`local-agent` ↔ false; `remote-agent` and `runtime` ↔ true). |
-| `EnvConfig.snapshot` | Removed. | Subsumed by `type` (`local-agent` and `remote-agent` ↔ true; `runtime` ↔ false). |
-
-During the migration, ERun reads both shapes. Setting only `type` is sufficient; legacy fields stay supported for one release before being removed.
+| `EnvConfig.remote` | ✅ Removed | Subsumed by `type` (`local-agent` ↔ false; `remote-agent` / `runtime` ↔ true). Legacy YAML migrated on read. |
+| `EnvConfig.snapshot` | ✅ Removed | Subsumed by `type` (`local-agent` / `remote-agent` ↔ true; `runtime` ↔ false). Legacy YAML migrated on read. |
+| `TenantConfig.remote` / `TenantConfig.snapshot` | ✅ Removed | Belonged on the env, not the tenant; subsumed by per-env `type`. |
+| `TenantConfig.projectroot` | ⏳ Planned removal; cwd-to-tenant matching will iterate over envs' `localRepoPath`. | A tenant can host both local and remote envs; the path lives on the env, not the tenant. |
+| `EnvConfig.repopath` | ⏳ Planned replacement by `EnvConfig.localRepoPath`. | Scoped explicitly: the local-machine path mounted into the pod. For PVC envs the field is unset — the repo lives inside the pod at a fixed convention. |

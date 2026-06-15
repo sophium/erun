@@ -148,7 +148,11 @@ func applyOpenSnapshotPreference(result common.OpenResult, enabled *bool, saveEn
 		return result, nil
 	}
 
-	result.EnvConfig.SetSnapshot(*enabled)
+	if *enabled {
+		result.EnvConfig.Type = common.EnvironmentTypeLocalAgent
+	} else {
+		result.EnvConfig.Type = common.EnvironmentTypeRuntime
+	}
 	if saveEnvConfig == nil {
 		return result, nil
 	}

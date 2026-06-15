@@ -109,6 +109,7 @@ type ShellLaunchParams struct {
 	Namespace          string
 	KubernetesContext  string
 	RemoteRepo         bool
+	Type               EnvironmentType
 	ManagedCloud       bool
 	CloudProviderAlias string
 	Idle               EnvironmentIdleConfig
@@ -539,6 +540,7 @@ func ShellLaunchParamsFromResult(result OpenResult) ShellLaunchParams {
 		Namespace:          KubernetesNamespaceName(result.Tenant, result.Environment),
 		KubernetesContext:  strings.TrimSpace(result.EnvConfig.KubernetesContext),
 		RemoteRepo:         result.RemoteRepo(),
+		Type:               result.EnvConfig.ResolvedType(),
 		ManagedCloud:       result.EnvConfig.ManagedCloud,
 		CloudProviderAlias: strings.TrimSpace(result.EnvConfig.CloudProviderAlias),
 		Idle:               result.EnvConfig.Idle,
@@ -709,7 +711,7 @@ func remoteShellConfigForRequest(req ShellLaunchParams) (remoteShellConfig, erro
 		Name:               req.Environment,
 		RepoPath:           remoteWorkdir,
 		KubernetesContext:  req.KubernetesContext,
-		Remote:             req.RemoteRepo,
+		Type:               req.Type,
 		ManagedCloud:       req.ManagedCloud,
 		CloudProviderAlias: req.CloudProviderAlias,
 		Idle:               req.Idle,
