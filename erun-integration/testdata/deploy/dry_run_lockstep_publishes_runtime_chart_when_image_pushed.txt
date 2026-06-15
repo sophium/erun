@@ -9,8 +9,10 @@ rebuilding registry.example/test/erun-devops:<VERSION> because fingerprint image
 cd <TMP> && docker build --platform linux/amd64 --provenance=false --progress=plain -t registry.example/test/erun-devops:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
 cd <TMP> && docker tag registry.example/test/erun-devops:<VERSION> registry.example/test/erun-devops:fp-<HEX16>-amd64
 cd <TMP> && docker tag registry.example/test/erun-devops:<VERSION> registry.example/test/erun-devops:<VERSION>
+cd <TMP> && docker tag registry.example/test/erun-devops:<VERSION> registry.example/test/erun-devops:<VERSION>
 cd <TMP> && docker build --platform linux/arm64 --provenance=false --progress=plain -t registry.example/test/erun-devops:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
 cd <TMP> && docker tag registry.example/test/erun-devops:<VERSION> registry.example/test/erun-devops:fp-<HEX16>-arm64
+cd <TMP> && docker tag registry.example/test/erun-devops:<VERSION> registry.example/test/erun-devops:<VERSION>
 cd <TMP> && docker tag registry.example/test/erun-devops:<VERSION> registry.example/test/erun-devops:<VERSION>
 cd <TMP> && docker push registry.example/test/erun-devops:<VERSION>
 cd <TMP> && docker push registry.example/test/erun-devops:<VERSION>
