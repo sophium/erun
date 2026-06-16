@@ -105,6 +105,15 @@ func TestPush(t *testing.T) {
 		// dry-run: with a Dockerfile in the cwd, ResolveDockerPushSpec
 		// resolves one push spec and the dry-run trace must show the
 		// would-run docker build/push commands without executing them.
+		//
+		// push builds from source, so even in dry-run the incremental
+		// fingerprint check inspects the local image store (`docker image
+		// inspect`) to decide promote-vs-rebuild — a sanctioned dry-run
+		// decision input (erun-integration/AGENTS.md § "stubs as dry-run
+		// decision input"). Stub docker so the inspect is deterministic and
+		// needs no real daemon (the erun-devops image test stage runs this
+		// gate with no docker on PATH); `inspect` exits 1 so no fp-tag is
+		// present and the plan traces the rebuild path.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -112,7 +121,16 @@ func TestPush(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(setup.Cwd, "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
 			t.Fatalf("write VERSION: %v", err)
 		}
-		result := erun.Run(t, []string{"push", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  image)`,
+			`    case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		result := erun.Run(t, []string{"push", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
