@@ -440,6 +440,18 @@ export const activateLocalAfterCommand =
   (selection: UISelection, result: StartSessionResult): AppThunk<Promise<void>> =>
   async (dispatch, getState, extra) => {
     const controller = requireController(extra);
+    if (result.orchestrated) {
+      // Agent-env deploy runs build -> push -> deploy as a background
+      // orchestration (no foreground PTY session). There is no Local tab to
+      // attach, and recording one against the zero session id would create a
+      // dead tab. Visibility of system status comes from the activity queue:
+      // the sidebar spinner and the activity drawer's build/push/deploy
+      // entries, driven by the streamed `==>` trace lines. The only thing to
+      // do here is drop the transient "Deploying…" overlay so it does not
+      // linger over a deploy this thunk no longer owns.
+      dispatch(hideTerminalMessage());
+      return;
+    }
     const runSelection = { ...selection };
     const key = selectionKey(runSelection);
     dispatch(recordTab(key, result.sessionId, result.slot ?? 0, 'local', 'Local'));

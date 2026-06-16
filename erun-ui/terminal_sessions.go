@@ -303,6 +303,14 @@ func (a *App) StartInitSession(selection uiSelection, cols, rows int) (startSess
 }
 
 func (a *App) StartDeploySession(selection uiSelection, cols, rows int) (startSessionResult, error) {
+	// Agent envs (builds-here, source on this machine) deploy fresh code: the
+	// desktop composes the pure primitives — build -> push -> deploy, threading
+	// the minted version — rather than the `build --deploy` operator shortcut
+	// (erun-ui/AGENTS.md). Runtime/published-chart envs install a version by
+	// reference and keep the in-shell `erun deploy` path below.
+	if result, ok := a.maybeStartDeployOrchestration(selection, false); ok {
+		return result, nil
+	}
 	// The PTY trace handler picks up `==> Deploying tenant/env <ver>`
 	// from the Local tab and registers a deploy entry within milliseconds.
 	// The helm release poller converges onto the same record by ID once
@@ -316,6 +324,9 @@ func (a *App) StartDeploySession(selection uiSelection, cols, rows int) (startSe
 // looks like a missing-image case (the registry doesn't have the chart's
 // referenced tag yet, so a forced rebuild + push is the recovery path).
 func (a *App) StartForceDeploySession(selection uiSelection, cols, rows int) (startSessionResult, error) {
+	if result, ok := a.maybeStartDeployOrchestration(selection, true); ok {
+		return result, nil
+	}
 	args := append(buildDeployArgs(selection), "--force")
 	return a.runErunCommandInLocal(selection, cols, rows, args)
 }

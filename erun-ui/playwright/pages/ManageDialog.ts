@@ -74,6 +74,22 @@ export class ManageDialog {
     return this.locator().locator('#environment-config-idle-timeout');
   }
 
+  // runtimeVersionInput targets the Runtime tab's "Version to deploy" field
+  // (RuntimeDeployVersionPicker). Empty means "deploy the current code": for a
+  // builds-here agent env the desktop orchestrates build -> push -> deploy from
+  // it; a typed version installs that published version by reference (#558).
+  runtimeVersionInput(): Locator {
+    return this.locator().locator('#manage-version');
+  }
+
+  // deploy clicks the Runtime tab's "Deploy" action (the Rocket button) that
+  // submits submitManageDeploy with the current version field.
+  async deploy(): Promise<void> {
+    const button = this.locator().getByRole('button', { name: 'Deploy' });
+    await button.scrollIntoViewIfNeeded();
+    await button.click();
+  }
+
   async selectTab(name: ManageTab): Promise<void> {
     await this.tab(name).click();
   }

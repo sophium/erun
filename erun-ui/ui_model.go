@@ -360,6 +360,11 @@ type startSessionResult struct {
 	Selection uiSelection `json:"selection"`
 	Slot      int         `json:"slot,omitempty"`
 	Kind      string      `json:"kind,omitempty"`
+	// Orchestrated is true when the call started a background command
+	// orchestration (e.g. an agent-env deploy composing build -> push ->
+	// deploy) instead of a foreground PTY session. There is no Local tab to
+	// activate; progress and completion surface through the activity queue.
+	Orchestrated bool `json:"orchestrated,omitempty"`
 }
 
 type deleteEnvironmentResult struct {
