@@ -120,8 +120,16 @@ func TestBuild(t *testing.T) {
 			t.Fatalf("mkdir %s: %v", chartDir, err)
 		}
 		mustWriteFile(t, filepath.Join(chartDir, "Chart.yaml"), "apiVersion: v2\nname: erun-devops\ndescription: ERun DevOps\nversion: 0.1.0\nappVersion: 0.1.0\n")
+		// Seed the runtime image build context too: a real release builds and
+		// pushes the erun-devops image, and push publishes the erun-devops chart
+		// in lockstep with that image.
+		runtimeDockerDir := filepath.Join(setup.Cwd, "erun-devops", "docker", "erun-devops")
+		if err := os.MkdirAll(runtimeDockerDir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", runtimeDockerDir, err)
+		}
+		mustWriteFile(t, filepath.Join(runtimeDockerDir, "Dockerfile"), "FROM alpine:3.22\n")
 		fixture.RunGit(t, setup.Cwd, "add", ".")
-		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add runtime chart")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add runtime chart and image")
 		result := erun.Run(t, []string{"build", "--release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
