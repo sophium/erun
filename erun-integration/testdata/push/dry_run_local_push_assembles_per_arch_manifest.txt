@@ -1,15 +1,11 @@
-audit: erun push --dry-run --environment local
+audit: erun push --dry-run --environment local <VERSION>
 docker image inspect ghcr.io/sophium/api:fp-<HEX16>-amd64
 fingerprint image present locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
 docker image inspect ghcr.io/sophium/api:fp-<HEX16>-arm64
 fingerprint image present locally: ghcr.io/sophium/api:fp-<HEX16>-arm64
 promoting from cached fingerprint image: ghcr.io/sophium/api:<VERSION>
 cd <TMP> && docker tag ghcr.io/sophium/api:fp-<HEX16>-amd64 ghcr.io/sophium/api:<VERSION>
-cd <TMP> && docker tag ghcr.io/sophium/api:<VERSION> ghcr.io/sophium/api:<VERSION>
-cd <TMP> && docker tag ghcr.io/sophium/api:<VERSION> ghcr.io/sophium/api:<VERSION>
 cd <TMP> && docker tag ghcr.io/sophium/api:fp-<HEX16>-arm64 ghcr.io/sophium/api:<VERSION>
-cd <TMP> && docker tag ghcr.io/sophium/api:<VERSION> ghcr.io/sophium/api:<VERSION>
-cd <TMP> && docker tag ghcr.io/sophium/api:<VERSION> ghcr.io/sophium/api:<VERSION>
 cd <TMP> && docker push ghcr.io/sophium/api:<VERSION>
 cd <TMP> && docker push ghcr.io/sophium/api:<VERSION>
 cd <TMP> && docker manifest create --amend ghcr.io/sophium/api:<VERSION> ghcr.io/sophium/api:<VERSION> ghcr.io/sophium/api:<VERSION>

@@ -1,4 +1,4 @@
-audit: erun devops container push --version <VERSION>
+audit: erun devops container push <VERSION>
 ==> Pushing
 fingerprint image not found locally: ghcr.io/sophium/cwd:fp-<HEX16>-amd64
 fingerprint image not found locally: ghcr.io/sophium/cwd:fp-<HEX16>-arm64

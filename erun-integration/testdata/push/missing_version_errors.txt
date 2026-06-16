@@ -1,0 +1,2 @@
+audit: erun push --dry-run
+push requires a version: run `erun push <version>` with the version produced by `erun build`. push publishes a built version's images and chart; it does not mint a version

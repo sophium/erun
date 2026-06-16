@@ -18,6 +18,12 @@ const (
 
 var errVersionFileNotFound = common.ErrVersionFileNotFound
 
+// errPushVersionRequired is returned when `erun push` is run without an
+// explicit version. push is a pure primitive: it publishes the content
+// identity `erun build` minted, it never mints one (root AGENTS.md §
+// "Command primitives vs orchestration").
+var errPushVersionRequired = fmt.Errorf("push requires a version: run `erun push <version>` with the version produced by `erun build`. push publishes a built version's images and chart; it does not mint a version")
+
 func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
 	target := common.DockerCommandTarget{}
 	cmd := &cobra.Command{
@@ -92,14 +98,20 @@ func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFu
 	target := common.DockerCommandTarget{}
 	var force bool
 	cmd := &cobra.Command{
-		Use:           "push",
-		Short:         "Build and publish the current container image",
-		Args:          cobra.NoArgs,
+		Use:           "push <version>",
+		Short:         "Publish a built container image at a version",
+		Args:          cobra.MaximumNArgs(1),
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if force {
 				target.NoIncremental = true
+			}
+			if version := pushVersionArg(args); version != "" {
+				target.VersionOverride = version
+			}
+			if strings.TrimSpace(target.VersionOverride) == "" {
+				return errPushVersionRequired
 			}
 			ctx := commandContext(cmd)
 			pushInput, buildInput, err := common.ResolveDockerPushSpec(ctx, store, findProjectRoot, resolveBuildContext, now, target)
@@ -150,19 +162,31 @@ func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFind
 	target := common.DockerCommandTarget{}
 	var force bool
 	cmd := &cobra.Command{
-		Use:   "push",
-		Short: "Build and publish the project's container images",
-		Long: "Build the project's container images from source and publish them to the registry.\n\n" +
-			"The push step of the build → release → push → deploy flow. push always builds " +
-			"from the local source context (promoting unchanged images from the fingerprint " +
-			"cache) and pushes the multi-arch manifest; it does not push a prebuilt tag.",
-		Example:       "  erun push",
-		Args:          cobra.NoArgs,
+		Use:   "push <version>",
+		Short: "Publish a built version's container images and chart to the registry",
+		Long: "Publish a version's container images and runtime chart to the registry — the " +
+			"push step of the build → release → push → deploy flow.\n\n" +
+			"The version is required and is the one `erun build` minted; push publishes it, " +
+			"it does not mint one. push resolves that version's images from the local source " +
+			"(promoting unchanged images from the fingerprint cache, rebuilding only what " +
+			"changed), then pushes the multi-arch manifest and, for the runtime image, the " +
+			"runtime chart alongside it.",
+		Example:       "  erun push 1.2.3-snapshot-20260101010101",
+		Args:          cobra.MaximumNArgs(1),
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if force {
 				target.NoIncremental = true
+			}
+			// Version is required: push publishes a content identity that
+			// `erun build` minted, it does not mint one. With no version
+			// argument push would have nothing explicit to publish.
+			if version := pushVersionArg(args); version != "" {
+				target.VersionOverride = version
+			}
+			if strings.TrimSpace(target.VersionOverride) == "" {
+				return errPushVersionRequired
 			}
 			ctx := commandContext(cmd)
 			buildWithRetry := pushBuildWithRetry(ctx, buildDockerImage, loginToDockerRegistry, selectRunner)
@@ -263,6 +287,10 @@ func runDockerBuildWithRetry(ctx common.Context, buildInput common.DockerBuildSp
 
 func addBuildCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommandTarget) {
 	addPushCommandTargetFlags(cmd, target)
+	// build accepts --version to override the version it would otherwise mint;
+	// push (the other addPushCommandTargetFlags caller) takes its version
+	// positionally instead, so the flag lives here, not in the shared helper.
+	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Override the version build would mint")
 	cmd.Flags().BoolVar(&target.Deploy, "deploy", false, "Deploy the built version after the build completes")
 	cmd.Flags().BoolVar(&target.Release, "release", false, "Run release first and publish the release-tagged images")
 	cmd.Flags().BoolVar(&target.Force, "force", false, "Delete and recreate conflicting release tags when combined with --release")
@@ -272,9 +300,19 @@ func addBuildCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommand
 func addPushCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommandTarget) {
 	cmd.Flags().StringVar(&target.ProjectRoot, "project-root", "", "Project root override for internal tooling")
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Environment override for internal tooling")
-	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Override the resolved image version")
 	_ = cmd.Flags().MarkHidden("project-root")
 	_ = cmd.Flags().MarkHidden("environment")
+}
+
+// pushVersionArg reads the required positional version for `erun push`. The
+// version is a content identity `erun build` minted; push takes it as its one
+// argument and never mints one (root AGENTS.md § "Command primitives vs
+// orchestration").
+func pushVersionArg(args []string) string {
+	if len(args) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(args[0])
 }
 
 // handleNamespaceAuthError handles the create_package and scope-denied auth

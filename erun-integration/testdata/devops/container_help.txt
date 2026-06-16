@@ -5,7 +5,7 @@ Usage:
 
 Available Commands:
   build       Build the project's container images
-  push        Build and publish the current container image
+  push        Publish a built container image at a version
 
 Flags:
   -h, --help   help for container
