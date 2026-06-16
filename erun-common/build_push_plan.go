@@ -20,28 +20,19 @@ func ResolveDockerPushExecution(ctx Context, store DockerStore, findProjectRoot 
 	builds := make([]DockerBuildSpec, 0, len(buildContexts))
 	pushes := make([]DockerPushSpec, 0, len(buildContexts))
 	for _, buildContext := range buildContexts {
-		imageRef, err := ResolveDockerImageReference(store, findProjectRoot, resolveBuildContext, now, buildContext.Dir, target)
+		// push builds each image from its source context and pushes the
+		// multi-platform manifest (per-arch tags + assembled manifest list),
+		// the same path release uses. A multi-arch image only exists under
+		// per-arch tags, so the bare version tag has no arch-less image to
+		// docker push; RunDockerPushExecution skips the pushes entry once the
+		// build is marked pushed.
+		build, err := resolveDockerBuildSpec(store, findProjectRoot, resolveBuildContext, now, buildContext, target)
 		if err != nil {
 			return DockerPushExecutionSpec{}, err
 		}
-
-		if imageRef.IsLocalBuild {
-			build, err := resolveDockerBuildSpec(store, findProjectRoot, resolveBuildContext, now, buildContext, target)
-			if err != nil {
-				return DockerPushExecutionSpec{}, err
-			}
-			// Push through the build's own multi-platform push so the per-arch
-			// images go up and a manifest list is assembled (pushMultiPlatformImage),
-			// the same path release/deploy use. A locally-built multi-arch image
-			// only exists under per-arch tags; pushing the bare version tag (the
-			// pushes entry below) would fail "tag does not exist", so RunDockerPushExecution
-			// skips it once the build is marked pushed.
-			build.Push = true
-			builds = append(builds, build)
-			imageRef = build.Image
-		}
-
-		pushes = append(pushes, NewDockerPushSpec(buildContext.Dir, imageRef))
+		build.Push = true
+		builds = append(builds, build)
+		pushes = append(pushes, NewDockerPushSpec(buildContext.Dir, build.Image))
 	}
 
 	builds, err = ApplyIncrementalToDockerBuilds(ctx, builds, target.NoIncremental)
@@ -63,30 +54,20 @@ func ResolveDockerPushSpec(ctx Context, store DockerStore, findProjectRoot Proje
 		return DockerPushSpec{}, nil, fmt.Errorf("dockerfile not found in current directory")
 	}
 
-	imageRef, err := ResolveDockerImageReference(store, findProjectRoot, resolveBuildContext, now, buildContext.Dir, target)
+	// push builds the image from its source context and pushes the multi-arch
+	// manifest (per-arch + manifest list), not the bare version tag — a
+	// multi-arch image has no arch-less tag to `docker push`. RunDockerPushSpec
+	// returns after the build once Push is set, skipping the single-tag push.
+	resolvedBuild, err := resolveDockerBuildSpec(store, findProjectRoot, resolveBuildContext, now, buildContext, target)
 	if err != nil {
 		return DockerPushSpec{}, nil, err
 	}
-
-	var build *DockerBuildSpec
-	if imageRef.IsLocalBuild {
-		resolvedBuild, err := resolveDockerBuildSpec(store, findProjectRoot, resolveBuildContext, now, buildContext, target)
-		if err != nil {
-			return DockerPushSpec{}, nil, err
-		}
-		// Push via the build's multi-platform push (per-arch + manifest list),
-		// not the bare version tag — a local multi-arch image has no arch-less
-		// tag to `docker push`. RunDockerPushSpec returns after the build once
-		// Push is set, skipping the redundant single-tag push.
-		resolvedBuild.Push = true
-		incremental, err := ApplyIncrementalToDockerBuilds(ctx, []DockerBuildSpec{resolvedBuild}, target.NoIncremental)
-		if err != nil {
-			return DockerPushSpec{}, nil, err
-		}
-		resolvedBuild = incremental[0]
-		build = &resolvedBuild
-		imageRef = resolvedBuild.Image
+	resolvedBuild.Push = true
+	incremental, err := ApplyIncrementalToDockerBuilds(ctx, []DockerBuildSpec{resolvedBuild}, target.NoIncremental)
+	if err != nil {
+		return DockerPushSpec{}, nil, err
 	}
+	resolvedBuild = incremental[0]
 
-	return NewDockerPushSpec(buildContext.Dir, imageRef), build, nil
+	return NewDockerPushSpec(buildContext.Dir, resolvedBuild.Image), &resolvedBuild, nil
 }

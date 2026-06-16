@@ -139,34 +139,19 @@ func resolveRuntimePushExecution(ctx eruncommon.Context, runtime RuntimeConfig, 
 		return eruncommon.DockerPushExecutionSpecFromSpecs(builds, []eruncommon.DockerPushSpec{pushInput}), nil
 	}
 
-	buildContext, ok, err := eruncommon.FindComponentDockerBuildContext(projectRoot, component)
+	// push builds the component image from source and pushes its multi-arch
+	// manifest; it does not push a bare prebuilt tag.
+	build, err := eruncommon.ResolveDockerBuildForComponent(runtime.Store, findProjectRoot, resolveBuildContext, nil, projectRoot, target.Environment, component, strings.TrimSpace(target.VersionOverride))
 	if err != nil {
 		return eruncommon.DockerPushExecutionSpec{}, err
 	}
-	if !ok {
+	if build == nil {
 		return eruncommon.DockerPushExecutionSpec{}, fmt.Errorf("docker build context not found for component %q", component)
 	}
+	build.Push = true
 
-	imageRef, err := eruncommon.ResolveDockerImageReference(runtime.Store, findProjectRoot, resolveBuildContext, nil, buildContext.Dir, target)
-	if err != nil {
-		return eruncommon.DockerPushExecutionSpec{}, err
-	}
-
-	builds := make([]eruncommon.DockerBuildSpec, 0, 1)
-	if imageRef.IsLocalBuild {
-		build, err := eruncommon.ResolveDockerBuildForComponent(runtime.Store, findProjectRoot, resolveBuildContext, nil, projectRoot, target.Environment, component, strings.TrimSpace(target.VersionOverride))
-		if err != nil {
-			return eruncommon.DockerPushExecutionSpec{}, err
-		}
-		if build == nil {
-			return eruncommon.DockerPushExecutionSpec{}, fmt.Errorf("docker build context not found for component %q", component)
-		}
-		builds = append(builds, *build)
-		imageRef = build.Image
-	}
-
-	return eruncommon.DockerPushExecutionSpecFromSpecs(builds, []eruncommon.DockerPushSpec{
-		eruncommon.NewDockerPushSpec(projectRoot, imageRef),
+	return eruncommon.DockerPushExecutionSpecFromSpecs([]eruncommon.DockerBuildSpec{*build}, []eruncommon.DockerPushSpec{
+		eruncommon.NewDockerPushSpec(projectRoot, build.Image),
 	}), nil
 }
 

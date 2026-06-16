@@ -60,8 +60,10 @@ func TestPush(t *testing.T) {
 		}, "\n"))
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
 		envVars = append(envVars, "ERUN_AUTO_LOGIN_ON_PUSH=1")
-		// Use `erun push` so runDockerPushWithRetry actually drives the
-		// docker push. `erun build` alone does not push.
+		// push builds from source, so the build's image push drives the retry
+		// via runDockerBuildWithRetry: the first push fails auth,
+		// ERUN_AUTO_LOGIN_ON_PUSH bypasses the prompt, and login + retry land it
+		// (final exit 0). The auth failure is visible in the trace.
 		result := erun.Run(t, []string{"push", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -187,8 +189,9 @@ func TestPush(t *testing.T) {
 
 	t.Run("real_run_auth_failure_prompts_login_and_retries", func(t *testing.T) {
 		// Exercises promptDockerLoginRetry's interactive Select (the
-		// non-ERUN_AUTO_LOGIN_ON_PUSH path) plus runDockerPushWithRetry's
-		// docker-login leg: the first push fails with a generic auth error,
+		// non-ERUN_AUTO_LOGIN_ON_PUSH path) plus runDockerBuildWithRetry's
+		// docker-login leg (push builds from source): the first image push
+		// fails with a generic auth error,
 		// "\r" confirms the highlighted "Login and retry push" option, the
 		// stubbed `docker login` succeeds, and the retried push lands. The
 		// Select is the run's single interactive prompt.

@@ -183,7 +183,7 @@ func (d rootDependencies) containerCommand() *cobra.Command {
 		"container",
 		"Container utilities",
 		newBuildCmd(d.store, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.BuildScriptRunner, common.DockerImageBuilder, common.DockerRegistryLogin, runSelect, d.push, d.recoveringDeployHelmChart),
-		newPushCmd(d.store, common.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, common.DockerImageBuilder, d.push),
+		newPushCmd(d.store, common.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, common.DockerImageBuilder, common.DockerRegistryLogin, runSelect, d.push),
 	)
 }
 
@@ -208,7 +208,7 @@ func (d rootDependencies) optionalPushCommand() *cobra.Command {
 	if !hasOptionalPushCmd(common.FindProjectRoot, common.ResolveDockerBuildContext) {
 		return nil
 	}
-	pushCmd := newRootPushCmd(d.store, common.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, common.DockerImageBuilder, d.push)
+	pushCmd := newRootPushCmd(d.store, common.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, common.DockerImageBuilder, common.DockerRegistryLogin, runSelect, d.push)
 	pushCmd.Short = optionalPushCmdShort(common.FindProjectRoot, common.ResolveDockerBuildContext)
 	return pushCmd
 }

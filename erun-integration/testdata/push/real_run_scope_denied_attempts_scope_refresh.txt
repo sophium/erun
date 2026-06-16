@@ -1,5 +1,11 @@
 audit: erun push
 ==> Pushing
+fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
+fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-arm64
+rebuilding ghcr.io/sophium/api:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
 denied: token does not match expected scopes
 denied: token does not match expected scopes
+fingerprint image not found locally: ghcr.io/sophium/base:fp-<HEX16>-amd64
+fingerprint image not found locally: ghcr.io/sophium/base:fp-<HEX16>-arm64
+rebuilding ghcr.io/sophium/base:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
 ==> Pushed in <ELAPSED>

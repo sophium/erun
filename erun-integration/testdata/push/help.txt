@@ -1,6 +1,6 @@
-Build and push the project's container images to the registry.
+Build the project's container images from source and publish them to the registry.
 
-The push step of the build → release → push → deploy flow.
+The push step of the build → release → push → deploy flow. push always builds from the local source context (promoting unchanged images from the fingerprint cache) and pushes the multi-arch manifest; it does not push a prebuilt tag.
 
 Usage:
   erun push [flags]
