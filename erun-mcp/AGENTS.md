@@ -11,6 +11,7 @@ Module-specific guidance for `erun-mcp`. Follow the repository root `AGENTS.md` 
 - `erun-cli` and `erun-mcp` must not import each other.
 - `erun-mcp` should reach backend functionality through transport-neutral clients and contracts in `erun-common`, not by importing backend API packages directly.
 - Design MCP-facing handlers as non-interactive operations with explicit inputs and structured outputs. MCP-exposed paths should receive all required input explicitly and fail clearly when input is missing.
+- MCP is a programmatic orchestration layer, not an operator at a terminal: it composes the pure primitives and threads the version, rather than relying on operator-convenience switches. The `push`/`deploy` tools require an explicit version and fail clearly without one (an agent captures it from the `build` tool's result); they never build or synthesize a version. See root `AGENTS.md` § "Command primitives vs orchestration".
 - Action-oriented MCP endpoints should provide a preview or plan path so callers can inspect the resolved work before execution. Preview behavior should avoid side effects and return the concrete actions that would run.
 - By default, new commands should be implemented in both transports: CLI and MCP. Keep the MCP layer thin; shared planning and execution belong in `erun-common`.
 
