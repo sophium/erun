@@ -21,5 +21,6 @@ Flags:
       --version string       Install an already-published version by reference instead of building from the working tree; fails if that version's image is absent
 
 Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
       --time            Print the elapsed runtime after the command finishes.
   -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

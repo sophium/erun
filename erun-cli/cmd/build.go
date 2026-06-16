@@ -63,7 +63,10 @@ func runBuildCommand(ctx common.Context, store common.DockerStore, findProjectRo
 		)
 	}
 	if !target.Deploy {
-		return common.RunBuildExecution(ctx, execution, runBuildScript, buildWithRetry, push)
+		if err := common.RunBuildExecution(ctx, execution, runBuildScript, buildWithRetry, push); err != nil {
+			return err
+		}
+		return ctx.WriteResult(common.NewBuildResult(execution))
 	}
 	if common.BuildExecutionUsesBuildScript(execution) {
 		return errors.New("build deploy is not supported for project build scripts")
@@ -79,7 +82,10 @@ func runBuildCommand(ctx common.Context, store common.DockerStore, findProjectRo
 		return err
 	}
 
-	return common.RunBuildExecutionAndDeploy(ctx, execution, deploySpecs, runBuildScript, buildWithRetry, push, deployHelmChart)
+	if err := common.RunBuildExecutionAndDeploy(ctx, execution, deploySpecs, runBuildScript, buildWithRetry, push, deployHelmChart); err != nil {
+		return err
+	}
+	return ctx.WriteResult(common.NewBuildResult(execution))
 }
 
 func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc) *cobra.Command {
