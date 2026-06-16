@@ -157,7 +157,7 @@ func (s bootstrapRunner) ensureRemoteRuntime(target OpenResult, req ShellLaunchP
 	if err != nil {
 		return err
 	}
-	if err := RunDeploySpec(s.Context, spec, nil, nil, s.DeployHelmChart); err != nil {
+	if err := RunDeploySpec(s.Context, spec, s.DeployHelmChart); err != nil {
 		return err
 	}
 

@@ -1,0 +1,2 @@
+audit: erun deploy --dry-run team dev
+deploy requires a version: pass --version <version> produced by `erun build`/`erun push`, or --current to redeploy the version this environment already runs

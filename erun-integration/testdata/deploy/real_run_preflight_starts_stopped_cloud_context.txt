@@ -1,6 +1,6 @@
 audit: erun deploy --version <VERSION> team dev
 trace-log: appending the full trace to <TMP>
-deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=false publish=false
+deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=false current=false
 deploy: version <VERSION> pinned; installing the published image, no local build
 deploy: resolved 1 spec(s)
 cloud-context start: name=test-context force=false

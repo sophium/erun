@@ -1,24 +1,23 @@
-Roll the project's charts out to an environment.
+Install a published version into an environment with helm.
 
-The deploy step of the build → release → push → deploy flow. With no --version it builds and pushes the images the charts need from the working tree, then runs the rollout against the target environment. With --version it installs that already-published version by reference without building (a version is an identity, not a label for a fresh build). Defaults to the current scope; pass TENANT and ENVIRONMENT (or --tenant/--environment) to target another.
+deploy is a pure consume operation: it installs the image and chart already published at a version, by reference. It never builds or pushes — produce a version with `erun build` and `erun push` (or `erun build --deploy` to chain them) first. Pass the version with --version; use --current to redeploy the version this environment already runs. Defaults to the current scope; pass TENANT and ENVIRONMENT (or --tenant/--environment) to target another.
 
 Usage:
   erun deploy [TENANT] [ENVIRONMENT] [flags]
 
 Examples:
-  erun deploy
-  erun deploy team dev
   erun deploy team prod --version <VERSION>
+  erun deploy team dev --current
 
 Flags:
       --components strings   Opt-in components to include alongside the runtime chart (erun-backend-postgres, erun-backend-db, erun-backend-api)
+      --current              Redeploy the version this environment already runs (its persisted runtime version) instead of passing --version
       --dry-run              Resolve and trace mutating actions without executing them.
       --environment string   Deploy for a specific environment; requires --tenant
-      --force                Bypass the fingerprint cache and re-run helm upgrade even when no source change is detected
+      --force                Re-run the helm upgrade even when the deployed release already matches the requested version
   -h, --help                 help for deploy
-      --publish              Package and push each resolved chart to the environment's container registry (oci://<containerRegistry>/<chart>:<version>) before helm upgrade
       --tenant string        Deploy for a specific tenant
-      --version string       Install an already-published version by reference instead of building from the working tree; fails if that version's image is absent
+      --version erun build   Version to install by reference (produced by erun build/`erun push`); fails if that version's image is absent
 
 Global Flags:
       --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")

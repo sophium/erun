@@ -29,7 +29,7 @@ Available Commands:
   context     Manage ERun cloud Kubernetes contexts
   contribute  Run contribute-mode workflows that target the ERun source repository
   delete      Delete a tenant environment and tear down its remote runtime
-  deploy      Roll the project's charts out to an environment
+  deploy      Install a published version into an environment
   devops      DevOps utilities
   doctor      Diagnose and repair an environment's runtime and config
   exec        Repository execution utilities

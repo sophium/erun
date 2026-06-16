@@ -419,7 +419,7 @@ func (r *resolvedOpenRunner) resolveRuntimeExecution() (common.DeploySpec, error
 }
 
 func (r *resolvedOpenRunner) shouldDeployRuntime(shellReq common.ShellLaunchParams, execution common.DeploySpec) (bool, error) {
-	if len(execution.Builds) > 0 || strings.TrimSpace(r.options.VersionOverride) != "" || strings.TrimSpace(r.options.RuntimeImage) != "" {
+	if strings.TrimSpace(r.options.VersionOverride) != "" || strings.TrimSpace(r.options.RuntimeImage) != "" {
 		return true, nil
 	}
 	if r.checkKubernetesDeployment == nil {
@@ -457,7 +457,7 @@ func (r *resolvedOpenRunner) deployRuntime(execution common.DeploySpec) error {
 		execution.Deploy.SSHDEnabled = true
 	}
 	r.ctx.Logger.Debug("deploying the devops runtime before opening the shell")
-	if err := common.RunDeploySpec(r.ctx, execution, common.DockerImageBuilder, runOpenDockerPush, r.openHelmDeployer(execution)); err != nil {
+	if err := common.RunDeploySpec(r.ctx, execution, r.openHelmDeployer(execution)); err != nil {
 		return err
 	}
 	if execution.SkipHelm {
@@ -479,10 +479,6 @@ func (r *resolvedOpenRunner) deployRuntime(execution common.DeploySpec) error {
 		return r.persistRuntimeVersion(running, execution.Deploy.ContainerRegistry)
 	}
 	return r.persistRuntimeVersion(execution.Deploy.Version, execution.Deploy.ContainerRegistry)
-}
-
-func runOpenDockerPush(ctx common.Context, pushInput common.DockerPushSpec) error {
-	return common.RunDockerPush(ctx, pushInput, common.DockerImagePusher)
 }
 
 func (r *resolvedOpenRunner) openHelmDeployer(execution common.DeploySpec) common.HelmChartDeployerFunc {
@@ -671,7 +667,6 @@ func applyRuntimeDeployVersionOverride(execution common.DeploySpec, versionOverr
 	if versionOverride == "" {
 		return execution
 	}
-	execution.Builds = nil
 	execution.Deploy.Version = versionOverride
 	return execution
 }

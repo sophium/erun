@@ -1,5 +1,0 @@
-audit: erun deploy team local
-trace-log: appending the full trace to <TMP>
-deploy: tenant=team environment=local version-override= components=[] force=false publish=false
-deploy: resolved 1 spec(s)
-deploy: skipping team-devops (all images cached, no rebuild)

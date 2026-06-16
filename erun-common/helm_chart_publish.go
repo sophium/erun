@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 // HelmChartPublishSpec describes a single chart-publish step: package the
@@ -122,57 +120,3 @@ func runHelmCommand(ctx Context, spec commandSpec) error {
 	return cmd.Run()
 }
 
-// loadHelmChartName reads the `name` field from <chartPath>/Chart.yaml.
-// Callers use this to know the tgz filename `helm package` will produce so
-// `helm push` can reference it without globbing the destination dir.
-func loadHelmChartName(chartPath string) (string, error) {
-	data, err := os.ReadFile(filepath.Join(chartPath, "Chart.yaml"))
-	if err != nil {
-		return "", err
-	}
-	var chart struct {
-		Name string `yaml:"name"`
-	}
-	if err := yaml.Unmarshal(data, &chart); err != nil {
-		return "", fmt.Errorf("parse Chart.yaml at %s: %w", chartPath, err)
-	}
-	name := strings.TrimSpace(chart.Name)
-	if name == "" {
-		return "", fmt.Errorf("Chart.yaml at %s is missing the name field", chartPath)
-	}
-	return name, nil
-}
-
-// resolveHelmChartPublishSpec builds a HelmChartPublishSpec from a resolved
-// HelmDeploySpec and the chart path. It fails fast on a missing container
-// registry rather than surfacing the error in the middle of a deploy.
-func resolveHelmChartPublishSpec(chartPath, version, containerRegistry string) (HelmChartPublishSpec, error) {
-	chartName, err := loadHelmChartName(chartPath)
-	if err != nil {
-		return HelmChartPublishSpec{}, err
-	}
-	registry := strings.TrimSpace(containerRegistry)
-	if registry == "" {
-		return HelmChartPublishSpec{}, fmt.Errorf("publish %s: container registry is required (mark a registry with the deploy role in .erun/config.yaml)", chartName)
-	}
-	resolvedVersion := strings.TrimSpace(version)
-	if resolvedVersion == "" {
-		return HelmChartPublishSpec{}, fmt.Errorf("publish %s: chart version is required (pass --version or persist runtimeversion in env config)", chartName)
-	}
-	// The runtime chart and its image share a name; deploy pulls the chart from
-	// the registry's /charts path (PublishedDevopsChartOCIRepo) so its tag space
-	// stays separate from the image repo. Publish it there — matching the
-	// release path and where every published-chart env pulls from — so a pushed
-	// version is actually deployable. Other charts publish under the registry
-	// root unchanged.
-	ociRepo := "oci://" + registry
-	if chartName == DevopsComponentName {
-		ociRepo = PublishedDevopsChartOCIRepo(registry)
-	}
-	return HelmChartPublishSpec{
-		ChartPath: chartPath,
-		ChartName: chartName,
-		Version:   resolvedVersion,
-		OCIRepo:   ociRepo,
-	}, nil
-}

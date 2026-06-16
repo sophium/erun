@@ -128,24 +128,22 @@ func TestCachedDeployRunThenPersistHealsToRunningVersion(t *testing.T) {
 		SkipHelm: true,
 	}
 
-	built, pushed, helmed := false, false, false
+	helmed := false
 	var savedVersion string
-	build := func(DockerBuildSpec, io.Writer, io.Writer) error { built = true; return nil }
-	push := func(Context, DockerPushSpec) error { pushed = true; return nil }
 	deploy := func(HelmDeployParams) error { helmed = true; return nil }
 	save := func(_ string, cfg EnvConfig) error { savedVersion = cfg.RuntimeVersion; return nil }
 	resolveRunning := func(Context, string, string, string) (string, error) { return runningVersion, nil }
 
 	specs := []DeploySpec{spec}
-	if err := RunDeploySpecs(ctx, specs, build, push, deploy); err != nil {
+	if err := RunDeploySpecs(ctx, specs, deploy); err != nil {
 		t.Fatalf("RunDeploySpecs: %v", err)
 	}
 	if err := PersistRuntimeVersionFromDeploySpecs(ctx, specs, save, resolveRunning); err != nil {
 		t.Fatalf("persist: %v", err)
 	}
 
-	if built || pushed || helmed {
-		t.Fatalf("cached (SkipHelm) deploy must not build/push/helm: built=%v pushed=%v helmed=%v", built, pushed, helmed)
+	if helmed {
+		t.Fatalf("cached (SkipHelm) deploy must not run helm: helmed=%v", helmed)
 	}
 	if savedVersion != runningVersion {
 		t.Fatalf("RuntimeVersion = %q, want healed to the running version %q (never the minted %q)", savedVersion, runningVersion, mintedVersion)

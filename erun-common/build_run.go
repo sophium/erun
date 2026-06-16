@@ -138,8 +138,7 @@ func runBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []
 		ctx.Trace("skipping linux package scripts: host is not Linux or dpkg-deb is unavailable")
 	}
 
-	pushedTags, err := runBuildExecutionBuilds(ctx, execution, deploySpecs, runScript, build, push)
-	if err != nil {
+	if _, err = runBuildExecutionBuilds(ctx, execution, deploySpecs, runScript, build, push); err != nil {
 		return err
 	}
 	if execution.release != nil {
@@ -147,8 +146,11 @@ func runBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []
 			return err
 		}
 	}
-	for _, deploySpec := range filterDeploySpecsForPushedTags(deploySpecs, pushedTags) {
-		if err = RunDeploySpec(ctx, deploySpec, build, push, deploy); err != nil {
+	// The build phase above built and pushed the images; the deploy specs are
+	// pure (they reference those images via ImageOverride) so deploy only runs
+	// helm here.
+	for _, deploySpec := range deploySpecs {
+		if err = RunDeploySpec(ctx, deploySpec, deploy); err != nil {
 			return err
 		}
 	}
@@ -256,35 +258,6 @@ func buildAndPushDeployDockerImages(ctx Context, builds []DockerBuildSpec, build
 		pushedTags[pushInput.Image.Tag] = struct{}{}
 	}
 	return nil
-}
-
-func filterDeploySpecsForPushedTags(specs []DeploySpec, pushedTags map[string]struct{}) []DeploySpec {
-	if len(specs) == 0 || len(pushedTags) == 0 {
-		return specs
-	}
-
-	filtered := make([]DeploySpec, 0, len(specs))
-	for _, spec := range specs {
-		copySpec := spec
-		copySpec.Builds = filterDockerBuildsForPushedTags(spec.Builds, pushedTags)
-		filtered = append(filtered, copySpec)
-	}
-	return filtered
-}
-
-func filterDockerBuildsForPushedTags(builds []DockerBuildSpec, pushedTags map[string]struct{}) []DockerBuildSpec {
-	if len(builds) == 0 || len(pushedTags) == 0 {
-		return builds
-	}
-
-	filtered := make([]DockerBuildSpec, 0, len(builds))
-	for _, build := range builds {
-		if _, ok := pushedTags[build.Image.Tag]; ok {
-			continue
-		}
-		filtered = append(filtered, build)
-	}
-	return filtered
 }
 
 func deployedVersionForSpecs(specs []DeploySpec) string {

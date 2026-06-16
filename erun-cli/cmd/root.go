@@ -109,7 +109,7 @@ func (d rootDependencies) runManagedDeployForOpen(ctx common.Context, target com
 	if err != nil {
 		return err
 	}
-	return common.RunDeploySpecs(ctx, specs, common.DockerImageBuilder, d.push, d.recoveringDeployHelmChart)
+	return common.RunDeploySpecs(ctx, specs, d.recoveringDeployHelmChart)
 }
 
 func (d rootDependencies) rootCommand() *cobra.Command {
