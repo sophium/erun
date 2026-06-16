@@ -834,22 +834,6 @@ func ResolveCurrentDeploySpecsForDockerTarget(ctx Context, store BuildDeployStor
 	return resolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, deployTarget, true)
 }
 
-func ResolveDeploySpecForDockerTarget(ctx Context, store BuildDeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DockerCommandTarget, componentName string) (DeploySpec, error) {
-	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeBuildDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
-
-	target, _, err := ResolveDockerBuildTarget(findProjectRoot, target)
-	if err != nil {
-		return DeploySpec{}, err
-	}
-
-	deployTarget, err := resolveDeployTargetForDockerTarget(store, findProjectRoot, target)
-	if err != nil {
-		return DeploySpec{}, err
-	}
-
-	return ResolveDeploySpec(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, deployTarget, componentName, target.VersionOverride)
-}
-
 func resolveDeployTarget(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DeployTarget) (OpenResult, error) {
 	store, findProjectRoot, _, _, _ = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 
