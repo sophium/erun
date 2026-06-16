@@ -252,10 +252,10 @@ For Docker build context / version resolution, see [Build path resolution](/refe
 
 ## Migration and planned changes {#planned-changes}
 
-ERun has moved from the legacy `remote` + `snapshot` field pair to one explicit `EnvConfig.type`. `type` is now the only signal commands and the helm chart branch on:
+ERun has moved from the legacy `remote` + `snapshot` field pair to one explicit `EnvConfig.type`. `type` is the single signal for the env's *shape* — its worktree storage and chart wiring:
 
 - ✅ `EnvConfig.type` is written by `erun init --type`, the desktop env settings, or by editing the YAML directly.
-- ✅ Downstream commands (`erun build`, `erun open`, `erun deploy`) and the helm chart wiring (`worktreeStorage=host|pvc|none`, `ERUN_ENV_TYPE`) branch on `type`.
+- ✅ The helm chart wiring (`worktreeStorage=host|pvc|none`, `ERUN_ENV_TYPE`) branches on `type`. The delivery commands (`erun build`, `erun push`, `erun deploy`, `erun open`) are [pure primitives](/concepts/command-primitives) and do **not** branch on `type` — `build` mints a version, `push` publishes it, `deploy` installs it by reference, `open` opens a shell. The caller (the desktop app, or an Operator) decides which primitives to run for a given env.
 - ✅ `EnvConfig.localRepoPath` is the local-host worktree path; only `local-agent` envs populate it.
 - ✅ `EnvConfig.remote`, `EnvConfig.snapshot`, and the matching `TenantConfig` fields are **removed**. A config written before `type` existed is migrated on read: ERun parses the legacy `remote`/`snapshot` keys, derives `type` per the table below, and discards them. No action is needed — re-saving an env (e.g. from the desktop) persists the resolved `type`.
 - ⏳ `TenantConfig.projectroot` and `EnvConfig.repopath` are still in flight (see [Field-level moves](#field-level-moves)).

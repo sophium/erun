@@ -60,7 +60,7 @@ When `erun release` runs (or CI runs it for you), it reads the base number from 
 | feature / bug branch | prerelease | `1.0.81-pr.<commit>` | images + chart |
 | a plain local `build` (no release) | snapshot | `1.0.81-snapshot-<timestamp>` | only if pushed; disposable, for iterating |
 
-`<commit>` is the short commit hash; `<timestamp>` is the UTC build time. The first three come from [`erun release`](/cli/release); the snapshot is what a plain [`build`](/cli/build) stamps when you're iterating in a `local` environment (see the [Delivery pipeline](/pipeline)).
+`<commit>` is the short commit hash; `<timestamp>` is the UTC build time. The first three come from [`erun release`](/cli/release); the snapshot is what a plain [`build`](/cli/build) mints by default when you're iterating, whatever the environment type (see the [Delivery pipeline](/pipeline)). A version is a content identity, and [`build`](/cli/build) is the only command that mints one — [`push`](/cli/push) and [`deploy`](/cli/deploy) take a version as input, they never create it.
 
 ## Where next
 

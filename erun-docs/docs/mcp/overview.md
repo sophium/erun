@@ -112,11 +112,13 @@ Three categories. The protocol treats them all as MCP tools; the categorisation 
 
 These map 1:1 to the CLI commands of the same name. The MCP wrapper exists so Agents get typed input + output instead of stdout-parsing.
 
+These wrap the [pure command primitives](/concepts/command-primitives): `build` mints a version, `push` publishes a version's image + chart, `deploy` installs a published version by reference. An Agent orchestrating a rollout calls them in that order and threads the version between them — it does **not** use the operator-convenience switches (`build --deploy` / `build --release`). `push` and `deploy` require the version explicitly; MCP paths fail clearly when it's missing rather than building.
+
 | Tool | Wraps | Returns |
 |---|---|---|
-| `build` | `erun build` | Per-component status (`built` / `cached` / `error`), image tags, fingerprints. |
-| `push` | `erun push` | Per-component status, registry URLs. |
-| `deploy` | `erun deploy` | Per-chart rollout status, helm release info. |
+| `build` | `erun build` | Minted `version`, per-component status (`built` / `cached` / `error`), image tags, fingerprints. |
+| `push` | `erun push` | Per-component status, registry URLs, published chart ref. Requires `version`. |
+| `deploy` | `erun deploy` | Per-chart rollout status, helm release info. Requires `version`. |
 | `release` | `erun release` | Released version, tag, multi-arch confirmation. |
 | `open` | `erun open` | Local SSH + MCP ports, status (`opened` / `already_open`). |
 | `init` | `erun init` | Created files, deployed namespace. |
@@ -261,21 +263,25 @@ Tail logs from a container in the env's namespace. Useful when an Agent is debug
 
 ### `build`
 
-Trigger a build. Same semantics as the CLI `erun build`, returning typed status per component.
+Trigger a build. Same semantics as the CLI `erun build` — it builds the images and **mints the version** an Agent then threads into `push`/`deploy`. Returns the minted `version` plus typed status per component.
 
 **Input:**
 
 | Field | Type | Description |
 |---|---|---|
 | `components` | string[] (optional) | Specific components to build. Omitted = build the resolved scope (cwd-based, see [Conventions](/concepts/conventions#how-erun-commands-resolve-scope)). |
-| `release` | bool (optional) | Apply release tag instead of snapshot. |
+| `release` | bool (optional) | Pin a bare release version instead of minting a snapshot. |
 | `force` | bool (optional) | Bypass the fingerprint cache. |
 | `dry_run` | bool (optional) | Preview without building. |
+
+The MCP `build` tool does **not** expose the `--deploy` convenience switch — an Agent composes the rollout by calling `push` and `deploy` itself with the `version` from this tool's output.
 
 **Output:**
 
 ```jsonc
 {
+  "version": "1.0.0-snapshot-20260525143027",      // the minted version — pass to push/deploy
+  "base_version": "1.0.0",
   "results": [
     {
       "component": "api",
@@ -300,15 +306,16 @@ Trigger a build. Same semantics as the CLI `erun build`, returning typed status 
 
 ### `deploy`
 
-Run the env's deploy plan. Same semantics as the CLI `erun deploy`, returning per-chart rollout status.
+Install a published version into the env. Same semantics as the CLI `erun deploy` — a pure consume step that never builds or pushes. A **version is required**: supply `version`, or set `current: true` to redeploy the env's recorded version. Omitting both is rejected (`NO_VERSION`) — the MCP path never falls back to building.
 
 **Input:**
 
 | Field | Type | Description |
 |---|---|---|
+| `version` | string | The published version to install, by reference. Required unless `current` is set. |
+| `current` | bool (optional) | Redeploy the env's persisted runtime version. Required unless `version` is set. |
 | `components` | string[] (optional) | Subset of the plan to deploy. Omitted = full plan. |
-| `version` | string (optional) | Override the resolved version (typical for promotion to a runtime env). |
-| `force` | bool (optional) | Re-run helm even when nothing changed. |
+| `force` | bool (optional) | Re-run helm even when the version is unchanged. |
 | `dry_run` | bool (optional) | Preview without deploying. |
 
 **Output:**
@@ -336,7 +343,7 @@ Run the env's deploy plan. Same semantics as the CLI `erun deploy`, returning pe
 
 ### Other action tools
 
-`push`, `release`, `open`, `init`, `delete` follow the same shape — typed `arguments` matching their CLI flags, typed `result` payload mirroring the CLI's structured output. The MCP tool name matches the CLI subcommand exactly. Field-by-field semantics, flag defaults, and per-tool error codes live in the [CLI flag spec](/agent-reference/cli-flags) — every CLI command listed there corresponds 1:1 to the MCP tool of the same name.
+`push`, `release`, `open`, `init`, `delete` follow the same shape — typed `arguments` matching their CLI flags, typed `result` payload mirroring the CLI's structured output. The MCP tool name matches the CLI subcommand exactly. Like the CLI, the `push` tool takes a **required** `version` (it publishes a specific version's image + chart and never mints one); omitting it is rejected with `NO_VERSION`. Field-by-field semantics, flag defaults, and per-tool error codes live in the [CLI flag spec](/agent-reference/cli-flags) — every CLI command listed there corresponds 1:1 to the MCP tool of the same name.
 
 ### Tool-call error responses
 
