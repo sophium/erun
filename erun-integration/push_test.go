@@ -156,11 +156,13 @@ func TestPush(t *testing.T) {
 	})
 
 	t.Run("real_run_single_image_from_dockerfile_cwd", func(t *testing.T) {
-		// Exercises the root `erun push` single-image branch for real:
-		// ResolveDockerPushSpec resolves the cwd Dockerfile into one
-		// build+push pair, RunDockerPushSpec builds both platforms and
-		// pushes the tag. The docker stub reports no cached fingerprint
-		// images (image inspect exit 1) so the build path runs.
+		// Exercises the root `erun push` single-image branch for real, and the
+		// --version flag form of supplying the version (the positional form is
+		// covered by the dry-run scenario above; both resolve through
+		// resolvePushVersion). ResolveDockerPushSpec resolves the cwd Dockerfile
+		// into one build+push pair, RunDockerPushSpec builds both platforms and
+		// pushes the tag. The docker stub reports no cached fingerprint images
+		// (image inspect exit 1) so the build path runs.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -177,7 +179,7 @@ func TestPush(t *testing.T) {
 			`esac`,
 		}, "\n"))
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
-		result := erun.Run(t, []string{"push", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}

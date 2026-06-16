@@ -1,4 +1,4 @@
-audit: erun push <VERSION>
+audit: erun push --version <VERSION>
 ==> Pushing
 fingerprint image not found locally: ghcr.io/sophium/cwd:fp-<HEX16>-amd64
 fingerprint image not found locally: ghcr.io/sophium/cwd:fp-<HEX16>-arm64
