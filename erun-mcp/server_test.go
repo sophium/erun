@@ -518,12 +518,30 @@ func TestPushToolRejectsRepoRootWithoutComponent(t *testing.T) {
 		},
 	}))
 
-	_, _, err := handler(context.Background(), nil, PushInput{})
+	// Pass a version so the version-required gate passes and the test reaches
+	// the repo-root-without-component rejection it actually covers.
+	_, _, err := handler(context.Background(), nil, PushInput{Version: "1.0.0"})
 	if err == nil {
 		t.Fatal("expected missing Dockerfile error")
 	}
 	if err.Error() != "dockerfile not found in current directory" {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestPushToolRequiresVersion locks the version-required gate: push is a pure
+// primitive that publishes a built version and never mints one, so the tool
+// must fail before any work when no version is supplied (erun-mcp/AGENTS.md).
+func TestPushToolRequiresVersion(t *testing.T) {
+	handler := pushTool(normalizeRuntimeConfig(RuntimeConfig{
+		Context: RuntimeContext{
+			Environment: eruncommon.DefaultEnvironment,
+			RepoPath:    t.TempDir(),
+		},
+	}))
+
+	if _, _, err := handler(context.Background(), nil, PushInput{}); err != errMissingPushVersion {
+		t.Fatalf("expected errMissingPushVersion, got %v", err)
 	}
 }
 
