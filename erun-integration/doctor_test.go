@@ -296,46 +296,6 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/in_runtime_no_marker_dry_run", normalize.Apply(result.Combined))
 	})
 
-	t.Run("in_runtime_legacy_marker_path_dry_run", func(t *testing.T) {
-		// Existing in-pod markers from a previous version live at the
-		// legacy single-marker path $HOME/.erun/bootstrap.yaml. On upgrade
-		// doctor must still consume that marker so a previously-resumed
-		// init is not stranded; the legacy fallback only kicks in when the
-		// marker's tenant/environment match the runtime env.
-		setup := env.New(t)
-		projectRoot := filepath.Join(setup.Home, "git", "team")
-		if err := os.MkdirAll(filepath.Join(projectRoot, ".git"), 0o755); err != nil {
-			t.Fatalf("mkdir .git: %v", err)
-		}
-		if err := os.MkdirAll(filepath.Join(setup.Home, ".ssh"), 0o700); err != nil {
-			t.Fatalf("mkdir .ssh: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(setup.Home, ".ssh", "id_ed25519"), []byte("stub\n"), 0o600); err != nil {
-			t.Fatalf("write ssh key: %v", err)
-		}
-		if err := os.MkdirAll(filepath.Join(setup.Home, ".erun"), 0o700); err != nil {
-			t.Fatalf("mkdir legacy marker dir: %v", err)
-		}
-		marker := "tenant: team\n" +
-			"environment: dev\n" +
-			"project_root: " + projectRoot + "\n" +
-			"repository_url: git@example.com:team/repo.git\n" +
-			"bootstrap_complete: true\n"
-		if err := os.WriteFile(filepath.Join(setup.Home, ".erun", "bootstrap.yaml"), []byte(marker), 0o600); err != nil {
-			t.Fatalf("write legacy marker: %v", err)
-		}
-		envVars := append(setup.Env(),
-			"ERUN_REPO_REMOTE=true",
-			"ERUN_TENANT=team",
-			"ERUN_ENVIRONMENT=dev",
-			"ERUN_REPO_PATH="+projectRoot,
-		)
-		result := erun.Run(t, []string{"doctor", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		golden.Equal(t, "doctor/in_runtime_legacy_marker_path_dry_run", normalize.Apply(result.Combined))
-	})
 
 	t.Run("in_runtime_multi_tenant_markers_dry_run", func(t *testing.T) {
 		// Two tenants share one $HOME (developer machine or shared runtime

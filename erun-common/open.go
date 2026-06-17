@@ -709,7 +709,7 @@ func remoteShellConfigForRequest(req ShellLaunchParams) (remoteShellConfig, erro
 	}
 	envConfig, err := yaml.Marshal(EnvConfig{
 		Name:               req.Environment,
-		RepoPath:           remoteWorkdir,
+		LocalRepoPath:      remoteWorkdir,
 		KubernetesContext:  req.KubernetesContext,
 		Type:               req.Type,
 		ManagedCloud:       req.ManagedCloud,

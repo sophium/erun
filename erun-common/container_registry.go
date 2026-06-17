@@ -255,6 +255,7 @@ func (c *EnvConfig) UnmarshalYAML(value *yaml.Node) error {
 		LegacyContainerRegistry string `yaml:"containerregistry,omitempty"`
 		LegacyRemote            bool   `yaml:"remote,omitempty"`
 		LegacySnapshot          *bool  `yaml:"snapshot,omitempty"`
+		LegacyRepoPath          string `yaml:"repopath,omitempty"`
 	}{}
 	if err := value.Decode(&aux); err != nil {
 		return err
@@ -263,6 +264,16 @@ func (c *EnvConfig) UnmarshalYAML(value *yaml.Node) error {
 	c.ContainerRegistries = migrateLegacyContainerRegistry(c.ContainerRegistries, aux.LegacyContainerRegistry)
 	if !c.Type.IsValid() {
 		c.Type = legacyEnvTypeFromRemoteSnapshot(aux.LegacyRemote, aux.LegacySnapshot)
+	}
+	// Fold the pre-#376 `repopath` into `localRepoPath` (dropped struct field;
+	// migrated on read, dropped on next save — same envelope as
+	// `containerregistry`/`remote`/`snapshot`). Unconditional across all env
+	// types: EffectiveLocalRepoPath already resolved `repopath` for every type
+	// via its fallback, so the effective value is unchanged; only the stored
+	// field name moves. This intentionally broadens the old local-agent-only
+	// NormalizeEnvConfig backfill, which was inconsistent with that fallback.
+	if strings.TrimSpace(c.LocalRepoPath) == "" {
+		c.LocalRepoPath = strings.TrimSpace(aux.LegacyRepoPath)
 	}
 	return nil
 }
@@ -368,9 +379,6 @@ func ResolveEnvironmentContainerRegistries(env EnvConfig) ContainerRegistries {
 		return env.ContainerRegistries
 	}
 	repoPath := strings.TrimSpace(env.EffectiveLocalRepoPath())
-	if repoPath == "" {
-		repoPath = strings.TrimSpace(env.RepoPath)
-	}
 	if repoPath == "" {
 		return nil
 	}

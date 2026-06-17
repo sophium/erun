@@ -104,7 +104,6 @@ type EnvConfig struct {
 	Name               string
 	Type               EnvironmentType `yaml:"type,omitempty" json:"type,omitempty"`
 	LocalRepoPath      string          `yaml:"localrepopath,omitempty" json:"localRepoPath,omitempty"`
-	RepoPath           string          `yaml:"repopath,omitempty"`
 	KubernetesContext  string
 	CloudProviderAlias string `yaml:"cloudprovideralias,omitempty"`
 	ManagedCloud       bool   `yaml:"managedcloud,omitempty" json:"managedCloud,omitempty"`
@@ -229,15 +228,13 @@ func (c EnvConfig) ResolvedUpgradeChannel() string {
 	}
 }
 
-// EffectiveLocalRepoPath returns the new-shape LocalRepoPath when set,
-// falling back to the legacy RepoPath. Callers that need the path on the
+// EffectiveLocalRepoPath returns the env's host-machine repo path. The legacy
+// `repopath` key folds into LocalRepoPath on read (EnvConfig.UnmarshalYAML), so
+// this is now just the trimmed LocalRepoPath. Callers that need the path on the
 // host machine (chart worktreeHostPath, cwd→tenant matcher) should use this
-// helper instead of reading either field directly.
+// helper instead of reading the field directly.
 func (c EnvConfig) EffectiveLocalRepoPath() string {
-	if path := strings.TrimSpace(c.LocalRepoPath); path != "" {
-		return path
-	}
-	return strings.TrimSpace(c.RepoPath)
+	return strings.TrimSpace(c.LocalRepoPath)
 }
 
 type ProjectEnvironmentConfig struct {
@@ -549,17 +546,6 @@ func SaveTenantConfig(config TenantConfig) error {
 	return nil
 }
 
-// NormalizeEnvConfig backfills the host-shape LocalRepoPath from the legacy
-// RepoPath for local-agent envs. The env Type is migrated from the pre-#376
-// remote+snapshot pair during YAML decode (see EnvConfig.UnmarshalYAML), so it
-// is already populated by the time this runs. Idempotent.
-func NormalizeEnvConfig(config EnvConfig) EnvConfig {
-	if strings.TrimSpace(config.LocalRepoPath) == "" && config.Type == EnvironmentTypeLocalAgent {
-		config.LocalRepoPath = strings.TrimSpace(config.RepoPath)
-	}
-	return config
-}
-
 func NormalizeTenantConfig(config TenantConfig) TenantConfig {
 	config.Name = strings.TrimSpace(config.Name)
 	config.DefaultEnvironment = strings.TrimSpace(config.DefaultEnvironment)
@@ -697,7 +683,7 @@ func LoadEnvConfig(tenant, envName string) (EnvConfig, string, error) {
 		return config, configFilePath, ErrConfigCorrupted
 	}
 
-	return NormalizeEnvConfig(config), configFilePath, nil
+	return config, configFilePath, nil
 }
 
 func ListEnvConfigs(tenant string) ([]EnvConfig, error) {
