@@ -31,17 +31,25 @@ func (a *App) StartSession(selection uiSelection, slot, cols, rows int) (startSe
 	})
 }
 
-// runOpenSession is the original spawn logic for the ERun tab,
-// wrapped so the desktop action runner can call it on its turn.
-// Returns the result the Wails caller wants and the managedTerminal so
-// the runner can wait on its ready signal.
-func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, cols, rows int) (startSessionResult, *managedTerminal, error) {
+// clampTerminalSize substitutes the default PTY geometry (120x34) for
+// any non-positive cols/rows the Wails caller passed, so every session
+// start path shares one fallback instead of repeating the guards.
+func clampTerminalSize(cols, rows int) (int, int) {
 	if cols <= 0 {
 		cols = 120
 	}
 	if rows <= 0 {
 		rows = 34
 	}
+	return cols, rows
+}
+
+// runOpenSession is the original spawn logic for the ERun tab,
+// wrapped so the desktop action runner can call it on its turn.
+// Returns the result the Wails caller wants and the managedTerminal so
+// the runner can wait on its ready signal.
+func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, cols, rows int) (startSessionResult, *managedTerminal, error) {
+	cols, rows = clampTerminalSize(cols, rows)
 
 	key := openSessionKey(selection, slot)
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
@@ -129,12 +137,7 @@ func (a *App) StartLocalSession(selection uiSelection, slot, cols, rows int) (st
 	if selection.Tenant == "" || selection.Environment == "" {
 		return startSessionResult{}, fmt.Errorf("tenant and environment are required")
 	}
-	if cols <= 0 {
-		cols = 120
-	}
-	if rows <= 0 {
-		rows = 34
-	}
+	cols, rows = clampTerminalSize(cols, rows)
 
 	key := localSessionKey(selection, slot)
 
@@ -218,12 +221,7 @@ func (a *App) StartAISession(selection uiSelection, slot, cols, rows int) (start
 }
 
 func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, cols, rows int) (startSessionResult, *managedTerminal, error) {
-	if cols <= 0 {
-		cols = 120
-	}
-	if rows <= 0 {
-		rows = 34
-	}
+	cols, rows = clampTerminalSize(cols, rows)
 
 	key := aiSessionKey(selection, slot)
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
@@ -424,16 +422,30 @@ func shellQuoteIfNeeded(value string) string {
 		return "''"
 	}
 	for _, r := range value {
-		switch {
-		case r >= 'A' && r <= 'Z':
-		case r >= 'a' && r <= 'z':
-		case r >= '0' && r <= '9':
-		case r == '-' || r == '_' || r == '.' || r == '/' || r == '=' || r == '+' || r == ':' || r == '@' || r == ',':
-		default:
+		if !shellQuoteSafeRune(r) {
 			return shellQuote(value)
 		}
 	}
 	return value
+}
+
+// shellQuoteSafePunct lists the punctuation runes that are safe to leave
+// unquoted in a shell command word alongside alphanumerics.
+const shellQuoteSafePunct = "-_./=+:@,"
+
+// shellQuoteSafeRune reports whether r can appear unquoted in a shell
+// command word. Anything outside this allow-list forces shellQuote.
+func shellQuoteSafeRune(r rune) bool {
+	switch {
+	case r >= 'A' && r <= 'Z':
+		return true
+	case r >= 'a' && r <= 'z':
+		return true
+	case r >= '0' && r <= '9':
+		return true
+	default:
+		return strings.ContainsRune(shellQuoteSafePunct, r)
+	}
 }
 
 func (a *App) OpenIDE(selection uiSelection, ide string) error {
@@ -445,12 +457,32 @@ func (a *App) OpenIDE(selection uiSelection, ide string) error {
 	if ide != "vscode" && ide != "intellij" {
 		return fmt.Errorf("unsupported IDE %q", ide)
 	}
+	params, err := a.resolveOpenIDEParams(selection, ide)
+	if err != nil {
+		return err
+	}
+
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	output, err := a.deps.runIDECommand(ctx, params)
+	if err == nil {
+		return nil
+	}
+	return formatOpenIDEError(ide, output, err)
+}
+
+// resolveOpenIDEParams resolves the open target and builds the launch
+// params for `open <ide>`. Local repos launch the IDE directly; remote
+// repos go through `erun open` and require an sshd-enabled environment.
+func (a *App) resolveOpenIDEParams(selection uiSelection, ide string) (startTerminalSessionParams, error) {
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
 	if err != nil {
-		return err
+		return startTerminalSessionParams{}, err
 	}
 
 	params := startTerminalSessionParams{
@@ -462,22 +494,19 @@ func (a *App) OpenIDE(selection uiSelection, ide string) error {
 	if !result.RemoteRepo() {
 		localParams, err := buildLocalOpenIDEParams(result, ide)
 		if err != nil {
-			return err
+			return startTerminalSessionParams{}, err
 		}
 		params = localParams
 		params.Env = []string{appSessionEnvVar + "=1"}
 	} else if !result.EnvConfig.SSHD.Enabled {
-		return fmt.Errorf("open %s requires sshd-enabled remote environment; run `erun sshd init %s %s` first", ide, selection.Tenant, selection.Environment)
+		return startTerminalSessionParams{}, fmt.Errorf("open %s requires sshd-enabled remote environment; run `erun sshd init %s %s` first", ide, selection.Tenant, selection.Environment)
 	}
+	return params, nil
+}
 
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	output, err := a.deps.runIDECommand(ctx, params)
-	if err == nil {
-		return nil
-	}
+// formatOpenIDEError wraps a non-nil runIDECommand error with the IDE
+// name, appending the trimmed command output as detail when present.
+func formatOpenIDEError(ide, output string, err error) error {
 	if detail := strings.TrimSpace(output); detail != "" {
 		return fmt.Errorf("open %s: %w: %s", ide, err, detail)
 	}
@@ -485,12 +514,7 @@ func (a *App) OpenIDE(selection uiSelection, ide string) error {
 }
 
 func (a *App) StartCloudInitAWSSession(cols, rows int) (startSessionResult, error) {
-	if cols <= 0 {
-		cols = 120
-	}
-	if rows <= 0 {
-		rows = 34
-	}
+	cols, rows = clampTerminalSize(cols, rows)
 	key := "cloud/init/aws"
 
 	a.mu.Lock()
@@ -805,8 +829,18 @@ func (a *App) CloseEnvironmentSessions(selection uiSelection) ([]int, error) {
 	if selection.Tenant == "" || selection.Environment == "" {
 		return nil, fmt.Errorf("tenant and environment are required")
 	}
+	targets := a.collectLiveSessionsForSelection(selection)
+	return closeManagedTerminals(targets)
+}
+
+// collectLiveSessionsForSelection gathers, under a.mu, every live
+// (non-nil, not-yet-closed) managed PTY bound to the supplied
+// (tenant, environment) pair. The lock is released before the caller
+// closes them — see CloseEnvironmentSessions for the deadlock rationale.
+func (a *App) collectLiveSessionsForSelection(selection uiSelection) []*managedTerminal {
 	var targets []*managedTerminal
 	a.mu.Lock()
+	defer a.mu.Unlock()
 	for _, managed := range a.sessions {
 		if managed == nil || managed.closed {
 			continue
@@ -819,7 +853,13 @@ func (a *App) CloseEnvironmentSessions(selection uiSelection) ([]int, error) {
 		}
 		targets = append(targets, managed)
 	}
-	a.mu.Unlock()
+	return targets
+}
+
+// closeManagedTerminals closes each target's underlying session and
+// returns the serial IDs that closed cleanly along with the first close
+// error encountered (if any). Targets with no session are skipped.
+func closeManagedTerminals(targets []*managedTerminal) ([]int, error) {
 	closed := make([]int, 0, len(targets))
 	var firstErr error
 	for _, managed := range targets {
@@ -967,31 +1007,7 @@ func (a *App) streamSession(managed *managedTerminal) {
 		}
 		count, err := current.Read(buffer)
 		if count > 0 {
-			payload := terminalOutputPayload{
-				SessionID: managed.serial,
-				Data:      base64.StdEncoding.EncodeToString(buffer[:count]),
-			}
-			a.emitEvent(terminalOutputEvent, payload)
-			a.feedActivityTraceFromTerminal(managed, buffer[:count])
-			a.recordAIActivity(managed)
-			if managed.clearIdleBlockOnOutput {
-				a.mu.Lock()
-				a.releaseIdleBlockLocked(managed)
-				a.mu.Unlock()
-			}
-			if time.Since(lastOutputActivity) >= 2*time.Second {
-				// While the session is waiting for the first user
-				// input after a respawn, ignore the output ticker.
-				// Reconnect noise (audit lines, "── reconnecting ──"
-				// banners, the output of a respawned `erun open`
-				// that fails again) must not refresh the idle
-				// marker — only real interaction does. A real
-				// keystroke clears the flag in SendSessionInput.
-				if !a.isAwaitingPostRespawnInput(managed) {
-					a.recordTerminalActivity(managed.selection)
-					lastOutputActivity = time.Now()
-				}
-			}
+			a.handleSessionOutput(managed, buffer[:count], &lastOutputActivity)
 		}
 		if err == nil {
 			continue
@@ -1000,31 +1016,72 @@ func (a *App) streamSession(managed *managedTerminal) {
 		if a.tryReconnect(managed, reason) {
 			continue
 		}
-		a.finalizeAIActivity(managed)
+		a.finalizeSessionExit(managed, reason)
+		return
+	}
+}
+
+// handleSessionOutput forwards one PTY read to the frontend, feeds the
+// activity-trace parser and the AI-activity debounce, releases the idle
+// block on first output, and refreshes the idle-activity marker no more
+// than once every 2s. lastOutputActivity is advanced in place when the
+// marker is refreshed.
+func (a *App) handleSessionOutput(managed *managedTerminal, chunk []byte, lastOutputActivity *time.Time) {
+	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
+		SessionID: managed.serial,
+		Data:      base64.StdEncoding.EncodeToString(chunk),
+	})
+	a.feedActivityTraceFromTerminal(managed, chunk)
+	a.recordAIActivity(managed)
+	if managed.clearIdleBlockOnOutput {
 		a.mu.Lock()
-		managed.closed = true
-		if existing := a.sessions[managed.key]; existing == managed {
-			delete(a.sessions, managed.key)
-		}
 		a.releaseIdleBlockLocked(managed)
 		a.mu.Unlock()
-		a.emitEvent(terminalExitEvent, terminalExitPayload{
-			SessionID: managed.serial,
-			Reason:    reason,
-		})
-		// Release any action runner waiting on this session's ready
-		// signal. If the session never reached its setup-complete
-		// marker (e.g. process exited mid-build), the gate would
-		// otherwise hold until the action's hard timeout.
-		var readyErr error
-		if reason != "" {
-			readyErr = fmt.Errorf("%s", reason)
+	}
+	if time.Since(*lastOutputActivity) >= 2*time.Second {
+		// While the session is waiting for the first user
+		// input after a respawn, ignore the output ticker.
+		// Reconnect noise (audit lines, "── reconnecting ──"
+		// banners, the output of a respawned `erun open`
+		// that fails again) must not refresh the idle
+		// marker — only real interaction does. A real
+		// keystroke clears the flag in SendSessionInput.
+		if !a.isAwaitingPostRespawnInput(managed) {
+			a.recordTerminalActivity(managed.selection)
+			*lastOutputActivity = time.Now()
 		}
-		managed.signalReady(readyErr)
-		if reason == "" && strings.HasPrefix(managed.key, "sshd-init\x00") {
-			go a.startWorkspaceSyncForSelection(managed.selection)
-		}
-		return
+	}
+}
+
+// finalizeSessionExit tears down a managed PTY that streamSession could
+// not reconnect: it flips the AI busy latch off, removes the session
+// from the registry, releases its idle block, emits the exit event,
+// releases any action runner blocked on the ready signal, and kicks off
+// the post-sshd-init workspace sync on a clean exit.
+func (a *App) finalizeSessionExit(managed *managedTerminal, reason string) {
+	a.finalizeAIActivity(managed)
+	a.mu.Lock()
+	managed.closed = true
+	if existing := a.sessions[managed.key]; existing == managed {
+		delete(a.sessions, managed.key)
+	}
+	a.releaseIdleBlockLocked(managed)
+	a.mu.Unlock()
+	a.emitEvent(terminalExitEvent, terminalExitPayload{
+		SessionID: managed.serial,
+		Reason:    reason,
+	})
+	// Release any action runner waiting on this session's ready
+	// signal. If the session never reached its setup-complete
+	// marker (e.g. process exited mid-build), the gate would
+	// otherwise hold until the action's hard timeout.
+	var readyErr error
+	if reason != "" {
+		readyErr = fmt.Errorf("%s", reason)
+	}
+	managed.signalReady(readyErr)
+	if reason == "" && strings.HasPrefix(managed.key, "sshd-init\x00") {
+		go a.startWorkspaceSyncForSelection(managed.selection)
 	}
 }
 
@@ -1037,15 +1094,15 @@ func (a *App) currentSessionFor(managed *managedTerminal) terminalSession {
 	return managed.session
 }
 
-func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
-	a.mu.Lock()
-	if managed == nil || managed.closed || managed.respawn == nil {
-		a.mu.Unlock()
-		return false
-	}
-	respawn := managed.respawn
-	a.mu.Unlock()
-
+// reconnectRefused reports whether tryReconnect should decline to
+// respawn the managed PTY, emitting the matching terminal marker and env
+// status as a side effect. Each guard is a terminal condition (handover,
+// stopped cloud context, deploy failure, or a fast-exit loop) where an
+// automatic respawn would fight another actor or storm a broken env; the
+// user's recovery affordance is named in the emitted marker. A false
+// return means none of the terminal conditions apply and the caller may
+// respawn.
+func (a *App) reconnectRefused(managed *managedTerminal) bool {
 	// Another ERun window re-attached this persistent session — a
 	// deliberate handover, not a transient drop. Respawning would run
 	// `erun open` again, whose attach takes the session straight back,
@@ -1053,7 +1110,7 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	// Clicking the env in the sidebar is the deliberate take-back.
 	if a.sessionTakenOver(managed) {
 		a.emitTakenOverMarker(managed.serial)
-		return false
+		return true
 	}
 
 	// Refuse to respawn while the env's linked cloud context is not
@@ -1068,7 +1125,7 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	if !a.shouldRespawnForCloudContext(managed) {
 		a.emitStoppedContextMarker(managed.serial)
 		a.emitEnvStatus(managed.selection, envStatusStopped)
-		return false
+		return true
 	}
 
 	// A deploy failure is terminal, not a transient drop. Respawning
@@ -1083,7 +1140,7 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	if a.reconnectBlockedByDeployFailure(managed) {
 		a.emitDeployFailedMarker(managed.serial)
 		a.emitEnvStatus(managed.selection, envStatusFailed)
-		return false
+		return true
 	}
 
 	// The readyErr guard above only catches an open that emitted the
@@ -1097,7 +1154,7 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	if a.reconnectBlockedByActivityDeployFailure(managed) {
 		a.emitDeployFailedMarker(managed.serial)
 		a.emitEnvStatus(managed.selection, envStatusFailed)
-		return false
+		return true
 	}
 
 	// Cap consecutive fast-exit respawns. Without this, an env whose
@@ -1112,6 +1169,22 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	if a.trackExitForLoopGuard(managed) {
 		a.emitReconnectLoopMarker(managed.serial)
 		a.emitEnvStatus(managed.selection, envStatusFailed)
+		return true
+	}
+
+	return false
+}
+
+func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
+	a.mu.Lock()
+	if managed == nil || managed.closed || managed.respawn == nil {
+		a.mu.Unlock()
+		return false
+	}
+	respawn := managed.respawn
+	a.mu.Unlock()
+
+	if a.reconnectRefused(managed) {
 		return false
 	}
 
@@ -1737,4 +1810,3 @@ func (a *App) releaseIdleBlockLocked(managed *managedTerminal) {
 	managed.blocksIdleStop = false
 	managed.clearIdleBlockOnOutput = false
 }
-

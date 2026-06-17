@@ -22,8 +22,8 @@ This is reference material — for everyday use you don't need to think about it
 ## 2. Environment
 
 1. If `--environment` is supplied, use that.
-2. Otherwise, enumerate every tenant under `~/.config/erun/<tenant>/tenant.yaml`. Match by `projectroot` against the resolved project root from step 1 (string-equal on absolute paths). Pick the matching tenant's `defaultenvironment`.
-3. If no tenant matches and the cwd is in a git repo, fall back to the global `ERunConfig.default_tenant` and that tenant's `defaultenvironment`. **Remote tenants skip the path check** — their `projectroot` describes the *remote* machine, not the local one.
+2. Otherwise, enumerate every environment of every tenant and compare the resolved project root from step 1 against each env's `localRepoPath`. An env matches when the project root is **at or below** its `localRepoPath` (so a nested working directory still resolves); the **longest** matching path wins. Envs with no `localRepoPath` are skipped. A tie at the same longest path **across different tenants** is ambiguous and resolves to no match. On a unique match, pick that tenant's `defaultenvironment`.
+3. If no tenant matches and the cwd is in a git repo, fall back to the global `ERunConfig.default_tenant` and that tenant's `defaultenvironment`.
 4. If still unresolved and the caller is interactive (TTY), prompt for tenant + env.
 5. Otherwise abort with `ENVIRONMENT_NOT_RESOLVED`.
 

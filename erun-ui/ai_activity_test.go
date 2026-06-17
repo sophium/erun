@@ -57,46 +57,63 @@ func TestRecordAIActivityDebounce(t *testing.T) {
 			managed.aiActiveSince = time.Now().Add(-(aiActivitySustainedThreshold + time.Second))
 			app.mu.Unlock()
 			app.recordAIActivity(managed)
-			busyEvents := emits.events(aiActivityEvent)
-			if tc.wantEmits {
-				if len(busyEvents) != 1 {
-					t.Fatalf("expected one busy=true emit, got %+v", busyEvents)
-				}
-				payload, ok := busyEvents[0].(aiActivityPayload)
-				if !ok {
-					t.Fatalf("unexpected payload type: %T", busyEvents[0])
-				}
-				if !payload.Busy {
-					t.Fatalf("expected busy=true, got %+v", payload)
-				}
-				if payload.Tenant != "t" || payload.Environment != "e" {
-					t.Fatalf("expected selection echoed in payload, got %+v", payload)
-				}
-			} else {
-				if len(busyEvents) != 0 {
-					t.Fatalf("expected no emit for kind %s, got %+v", tc.kind, busyEvents)
-				}
-			}
+			assertBusyEmit(t, emits.events(aiActivityEvent), tc.kind, tc.wantEmits)
 
 			// finalizeAIActivity must release a latched busy=true. For
 			// non-AI kinds it must remain a no-op (no emits at all).
 			app.finalizeAIActivity(managed)
-			allEvents := emits.events(aiActivityEvent)
-			if tc.wantEmits {
-				if len(allEvents) != 2 {
-					t.Fatalf("expected busy=true then busy=false, got %+v", allEvents)
-				}
-				payload, ok := allEvents[1].(aiActivityPayload)
-				if !ok {
-					t.Fatalf("unexpected payload type: %T", allEvents[1])
-				}
-				if payload.Busy {
-					t.Fatalf("expected busy=false from finalize, got %+v", payload)
-				}
-			} else if len(allEvents) != 0 {
-				t.Fatalf("expected no emits for kind %s, got %+v", tc.kind, allEvents)
-			}
+			assertFinalizeEmit(t, emits.events(aiActivityEvent), tc.kind, tc.wantEmits)
 		})
+	}
+}
+
+// assertBusyEmit checks the emit set after sustained output: an AI session
+// must have produced exactly one busy=true payload echoing the selection,
+// while a silent kind must have produced nothing.
+func assertBusyEmit(t *testing.T, busyEvents []any, kind sessionKind, wantEmits bool) {
+	t.Helper()
+
+	if !wantEmits {
+		if len(busyEvents) != 0 {
+			t.Fatalf("expected no emit for kind %s, got %+v", kind, busyEvents)
+		}
+		return
+	}
+	if len(busyEvents) != 1 {
+		t.Fatalf("expected one busy=true emit, got %+v", busyEvents)
+	}
+	payload, ok := busyEvents[0].(aiActivityPayload)
+	if !ok {
+		t.Fatalf("unexpected payload type: %T", busyEvents[0])
+	}
+	if !payload.Busy {
+		t.Fatalf("expected busy=true, got %+v", payload)
+	}
+	if payload.Tenant != "t" || payload.Environment != "e" {
+		t.Fatalf("expected selection echoed in payload, got %+v", payload)
+	}
+}
+
+// assertFinalizeEmit checks the emit set after finalize: an AI session must
+// now show a trailing busy=false release, while a silent kind stays empty.
+func assertFinalizeEmit(t *testing.T, allEvents []any, kind sessionKind, wantEmits bool) {
+	t.Helper()
+
+	if !wantEmits {
+		if len(allEvents) != 0 {
+			t.Fatalf("expected no emits for kind %s, got %+v", kind, allEvents)
+		}
+		return
+	}
+	if len(allEvents) != 2 {
+		t.Fatalf("expected busy=true then busy=false, got %+v", allEvents)
+	}
+	payload, ok := allEvents[1].(aiActivityPayload)
+	if !ok {
+		t.Fatalf("unexpected payload type: %T", allEvents[1])
+	}
+	if payload.Busy {
+		t.Fatalf("expected busy=false from finalize, got %+v", payload)
 	}
 }
 
@@ -141,9 +158,7 @@ func (c *capturedEmits) fn() func(string, ...any) {
 	return func(name string, args ...any) {
 		c.mu.Lock()
 		defer c.mu.Unlock()
-		for _, arg := range args {
-			c.byName[name] = append(c.byName[name], arg)
-		}
+		c.byName[name] = append(c.byName[name], args...)
 		if len(args) == 0 {
 			c.byName[name] = append(c.byName[name], nil)
 		}

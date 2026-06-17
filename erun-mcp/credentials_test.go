@@ -86,23 +86,14 @@ func TestCloudInjectAWSCredentialsMergesIntoExistingFile(t *testing.T) {
 	if result.Profile != "erun-host" || result.Path != credsPath {
 		t.Fatalf("unexpected result: %+v", result)
 	}
-	data, err := os.ReadFile(credsPath)
-	if err != nil {
-		t.Fatalf("read back failed: %v", err)
-	}
-	content := string(data)
-	for _, want := range []string{
+	assertFileContainsAll(t, credsPath,
 		"[default]",
 		"aws_access_key_id = AKIA-USER",
 		"[erun-host]",
 		"aws_access_key_id = ASIA-HOST",
 		"aws_session_token = host-token",
 		"x_erun_expiration = 2026-05-19T18:30:00Z",
-	} {
-		if !strings.Contains(content, want) {
-			t.Fatalf("expected credentials file to contain %q, got:\n%s", want, content)
-		}
-	}
+	)
 	stat, err := os.Stat(credsPath)
 	if err != nil {
 		t.Fatalf("stat failed: %v", err)
@@ -170,5 +161,21 @@ func TestCloudInjectAWSCredentialsRequiresKeyAndSecret(t *testing.T) {
 	tool := cloudInjectAWSCredentialsTool()
 	if _, _, err := tool(context.Background(), nil, InjectAWSCredentialsInput{AccessKeyID: "ASIA"}); err == nil {
 		t.Fatal("expected missing secret access key error")
+	}
+}
+
+// assertFileContainsAll reads path and fails unless every wanted substring is
+// present, reporting the missing substring and full content on failure.
+func assertFileContainsAll(t *testing.T, path string, wants ...string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back failed: %v", err)
+	}
+	content := string(data)
+	for _, want := range wants {
+		if !strings.Contains(content, want) {
+			t.Fatalf("expected file %s to contain %q, got:\n%s", path, want, content)
+		}
 	}
 }

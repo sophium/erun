@@ -32,7 +32,7 @@ func TestListRemoteAppSessionsParsesPodSockets(t *testing.T) {
 
 	app := NewApp(erunUIDeps{store: stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: t.TempDir(), DefaultEnvironment: "remote"},
+			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {Name: "remote", KubernetesContext: "ctx"},
@@ -52,7 +52,7 @@ func TestListRemoteAppSessionsParsesPodSockets(t *testing.T) {
 func TestListRemoteAppSessionsFailsSoft(t *testing.T) {
 	app := NewApp(erunUIDeps{store: stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: t.TempDir(), DefaultEnvironment: "local"},
+			"erun": {Name: "erun", DefaultEnvironment: "local"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/local": {Name: "local"}, // no kubernetes context
@@ -88,10 +88,10 @@ func newEndAISessionsTestApp(t *testing.T, aiTool string) (*App, string) {
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
 			tenants: map[string]eruncommon.TenantConfig{
-				"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+				"erun": {Name: "erun", DefaultEnvironment: "remote"},
 			},
 			envs: map[string]eruncommon.EnvConfig{
-				"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "ctx", AITool: aiTool},
+				"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx", AITool: aiTool},
 			},
 		},
 		findProjectRoot: func() (string, string, error) { return "erun", projectRoot, nil },
@@ -218,10 +218,10 @@ func TestCloseSessionEndsRemoteCustomTerminal(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
 			tenants: map[string]eruncommon.TenantConfig{
-				"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+				"erun": {Name: "erun", DefaultEnvironment: "remote"},
 			},
 			envs: map[string]eruncommon.EnvConfig{
-				"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "ctx"},
+				"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
 			},
 		},
 		findProjectRoot: func() (string, string, error) { return "erun", projectRoot, nil },
@@ -241,18 +241,7 @@ func TestCloseSessionEndsRemoteCustomTerminal(t *testing.T) {
 	if err := app.CloseSession(extra.SessionID); err != nil {
 		t.Fatalf("CloseSession(extra): %v", err)
 	}
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		data, _ := os.ReadFile(captureFile)
-		if strings.Contains(string(data), "erun-remote-open-2.dtach") &&
-			strings.Contains(string(data), "rm -f") {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("expected the end-script kubectl exec for open-2, captured: %q", data)
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
+	waitForKubectlEndScript(t, captureFile, "erun-remote-open-2.dtach")
 
 	_ = os.Remove(captureFile)
 	def, err := app.StartSession(selection, 0, 80, 24)
@@ -265,5 +254,24 @@ func TestCloseSessionEndsRemoteCustomTerminal(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	if data, _ := os.ReadFile(captureFile); strings.Contains(string(data), "rm -f") {
 		t.Fatalf("default tab close must not end the pod session, captured: %q", data)
+	}
+}
+
+// waitForKubectlEndScript polls the PATH-stub kubectl capture file until it
+// records the end-script exec (an "rm -f" of the named dtach socket), failing
+// the test if it does not appear within the deadline.
+func waitForKubectlEndScript(t *testing.T, captureFile, socket string) {
+	t.Helper()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		data, _ := os.ReadFile(captureFile)
+		if strings.Contains(string(data), socket) && strings.Contains(string(data), "rm -f") {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected the end-script kubectl exec for %s, captured: %q", socket, data)
+		}
+		time.Sleep(25 * time.Millisecond)
 	}
 }

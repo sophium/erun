@@ -1,0 +1,9 @@
+In-pod config drift for team/dev:
+  env   cloudprovideralias on-disk="" injected="team-aws" [missing]
+  env   managedcloud       on-disk="false" injected="true" [wrong]
+  root  cloudproviders     on-disk="" injected="team-aws" [missing]
+  root  cloudcontexts      on-disk="" injected="team-context" [missing]
+Dry-run: would rewrite the in-pod config files traced above.
+audit: erun doctor --dry-run --sync-config
+write-yaml <TMP>
+write-yaml <TMP>

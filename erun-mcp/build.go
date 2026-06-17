@@ -167,4 +167,3 @@ func resolveRuntimePushExecution(ctx eruncommon.Context, runtime RuntimeConfig, 
 		eruncommon.NewDockerPushSpec(projectRoot, build.Image),
 	}), nil
 }
-

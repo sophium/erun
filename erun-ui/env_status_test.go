@@ -27,10 +27,10 @@ func envStatusTestApp(t *testing.T, emits *capturedEmits, sessionsMu *sync.Mutex
 			}},
 		},
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
-			"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "cluster-cloud"},
+			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "cluster-cloud"},
 		},
 	}
 	app := NewApp(erunUIDeps{

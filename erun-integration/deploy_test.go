@@ -293,6 +293,31 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/real_run_remote_env_published_chart_via_stubs", normalize.Apply(result.Combined))
 	})
 
+	t.Run("real_run_recreates_deployment_on_immutable_selector_change", func(t *testing.T) {
+		// Real-run deploy where the installed Deployment's immutable
+		// spec.selector differs from the chart's: helm aborts the first
+		// upgrade with "field is immutable". DeployHelmChart classifies that as
+		// a HelmImmutableSelectorError and RunHelmDeploy recovers — deleting the
+		// named Deployment (its PVCs are separate objects and survive) and
+		// retrying the upgrade, which the fail-first helm stub lets succeed.
+		// This branch is reachable only in real-run (the recovery fires on a
+		// helm side-effect failure, not a pre-action decision), so it is a
+		// stub-driven non-dry-run scenario. It locks the recover+retry trace.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		fixture.StubBinaryFailFirstThenSucceed(t, stubs, "helm",
+			`Error: UPGRADE FAILED: cannot patch "team-devops" with kind Deployment: Deployment.apps "team-devops" is invalid: spec.selector: Invalid value: {"matchLabels":{"app":"erun-devops"}}: field is immutable`, 1)
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/real_run_recreates_deployment_on_immutable_selector_change", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_copies_images_from_to_via_stubs", func(t *testing.T) {
 		// Real-run deploy of an env whose registry list marks a FROM source and
 		// a TO destination: before helm upgrade, the runtime image is mirrored
@@ -1090,11 +1115,21 @@ func TestDeploy(t *testing.T) {
 		if !strings.Contains(out, "deploy: step 1 (parallel): team-devops, erun-backend-postgres") {
 			t.Fatalf("expected parallel-step trace line, got:\n%s", out)
 		}
-		if got := strings.Count(out, "==> Deploying team/dev <VERSION>"); got != 2 {
+		// #531: the runtime chart names only the env, while the non-runtime
+		// component names itself after a ` · ` separator so a component
+		// rollout is not mistaken for a full-env redeploy. Both rollouts
+		// still appear; exactly one of each pair names the component.
+		if got := strings.Count(out, "==> Deploying team/dev"); got != 2 {
 			t.Fatalf("expected 2 parallel ==> Deploying lines, got %d:\n%s", got, out)
 		}
-		if got := strings.Count(out, "==> Deployed team/dev <VERSION> in <ELAPSED>"); got != 2 {
+		if got := strings.Count(out, "==> Deploying team/dev · erun-backend-postgres"); got != 1 {
+			t.Fatalf("expected the component ==> Deploying line to name the release, got %d:\n%s", got, out)
+		}
+		if got := strings.Count(out, "==> Deployed team/dev"); got != 2 {
 			t.Fatalf("expected 2 ==> Deployed completions, got %d:\n%s", got, out)
+		}
+		if got := strings.Count(out, "==> Deployed team/dev · erun-backend-postgres"); got != 1 {
+			t.Fatalf("expected the component ==> Deployed line to name the release, got %d:\n%s", got, out)
 		}
 	})
 

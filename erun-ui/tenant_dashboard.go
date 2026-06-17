@@ -55,32 +55,40 @@ func (a *App) LoadTenantDashboard(input uiTenantDashboardInput) (uiTenantDashboa
 	}
 	usernameHint := a.tenantDashboardUsernameHint(token.Alias)
 	client := &http.Client{Timeout: 10 * time.Second}
+	loadTenantDashboardData(ctx, client, apiURL, bearer, usernameHint, &dashboard)
+	return dashboard, nil
+}
 
+// loadTenantDashboardData fetches the whoami, reviews, merge-queue, and build
+// sections in sequence and writes them onto dashboard. The first failing
+// section records its error in dashboard.APIError and stops further loads,
+// matching the prior fail-fast behavior where each section's error short-
+// circuited the rest while keeping already-loaded sections.
+func loadTenantDashboardData(ctx context.Context, client *http.Client, apiURL, bearer, usernameHint string, dashboard *uiTenantDashboard) {
 	user, err := loadTenantDashboardJSON[uiTenantDashboardUser](ctx, client, apiURL, "/v1/whoami", bearer, usernameHint)
 	if err != nil {
 		dashboard.APIError = err.Error()
-		return dashboard, nil
+		return
 	}
 	dashboard.User = &user
 	reviews, err := loadTenantDashboardJSON[[]uiTenantDashboardReview](ctx, client, apiURL, "/v1/reviews", bearer, usernameHint)
 	if err != nil {
 		dashboard.APIError = err.Error()
-		return dashboard, nil
+		return
 	}
 	dashboard.Reviews = reviews
 	mergeQueue, err := loadTenantDashboardJSON[[]uiTenantDashboardReview](ctx, client, apiURL, "/v1/reviews/merge-queue", bearer, usernameHint)
 	if err != nil {
 		dashboard.APIError = err.Error()
-		return dashboard, nil
+		return
 	}
 	dashboard.MergeQueue = mergeQueue
 	builds, err := loadTenantDashboardBuilds(ctx, client, apiURL, bearer, usernameHint, reviews)
 	if err != nil {
 		dashboard.APIError = err.Error()
-		return dashboard, nil
+		return
 	}
 	dashboard.Builds = builds
-	return dashboard, nil
 }
 
 func (a *App) tenantDashboardUsernameHint(alias string) string {
@@ -130,7 +138,7 @@ func loadTenantDashboardJSON[T any](ctx context.Context, client *http.Client, ap
 	if err != nil {
 		return result, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return result, fmt.Errorf("load tenant dashboard %s: %s", apiPath, resp.Status)
 	}

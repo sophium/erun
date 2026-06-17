@@ -38,6 +38,10 @@ test.describe('diagnostics console', () => {
     await expect(app.debugPanel.refreshButton()).toBeVisible();
     await expect(app.debugPanel.copyButton()).toBeVisible();
     await expect(app.debugPanel.copyReportButton()).toBeVisible();
+    // #529: the erun-trace toolbar offers Clear (parity with UI trace),
+    // disabled until there is trace content to baseline.
+    await expect(app.debugPanel.clearButton()).toBeVisible();
+    await expect(app.debugPanel.clearButton()).toBeDisabled();
   });
 
   test('pane actions live outside the scroll regions and the report button spans tabs', async ({

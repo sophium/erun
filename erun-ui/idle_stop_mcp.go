@@ -187,7 +187,7 @@ func formatIdleStopMCPError(tool string, err error) error {
 		return fmt.Errorf(
 			"%s: this runtime image does not yet support the auto-stop history feature. "+
 				"Rebuild and redeploy the env (erun deploy <tenant> <env>) so the pod runs "+
-				"a runtime image that includes the idle_stop_* MCP tools.",
+				"a runtime image that includes the idle_stop_* MCP tools",
 			tool,
 		)
 	}

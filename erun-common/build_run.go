@@ -95,6 +95,29 @@ func RunDockerBuilds(ctx Context, builds []DockerBuildSpec, build DockerImageBui
 	return nil
 }
 
+// traceBuildUmbrella emits the `==> Building` start marker and returns a finish
+// func to defer with the run's error pointer; the finish func emits
+// `==> Built in N` or `==> Build failed after N`. These are the umbrella traces
+// the desktop's activity-queue parser keys off (mirrors RunHelmDeploy's
+// `==> Deploying` / `==> Deployed`). Real run only: dry-run performs no work so
+// there is nothing to put a spinner on, and skipping these lines in dry-run
+// also keeps the dry-run integration goldens stable.
+func traceBuildUmbrella(ctx Context) func(*error) {
+	if ctx.DryRun {
+		return func(*error) {}
+	}
+	started := time.Now()
+	ctx.Info("==> Building")
+	return func(errp *error) {
+		elapsed := time.Since(started).Round(time.Second)
+		if errp != nil && *errp != nil {
+			ctx.Info("==> Build failed after " + elapsed.String())
+			return
+		}
+		ctx.Info("==> Built in " + elapsed.String())
+	}
+}
+
 func RunBuildExecution(ctx Context, execution BuildExecutionSpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc) error {
 	return runBuildExecution(ctx, execution, nil, runScript, build, push, nil)
 }
@@ -104,25 +127,7 @@ func RunBuildExecutionAndDeploy(ctx Context, execution BuildExecutionSpec, deplo
 }
 
 func runBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) (err error) {
-	// `==> Building` / `==> Built in N` / `==> Build failed after N` are
-	// the umbrella traces the desktop's activity-queue parser keys off
-	// (mirrors RunHelmDeploy's `==> Deploying` / `==> Deployed`). Real
-	// run only: dry-run performs no work so there is nothing to put a
-	// spinner on, and skipping these lines in dry-run also keeps the
-	// dry-run integration goldens stable.
-	var started time.Time
-	if !ctx.DryRun {
-		started = time.Now()
-		ctx.Info("==> Building")
-		defer func() {
-			elapsed := time.Since(started).Round(time.Second)
-			if err != nil {
-				ctx.Info("==> Build failed after " + elapsed.String())
-				return
-			}
-			ctx.Info("==> Built in " + elapsed.String())
-		}()
-	}
+	defer traceBuildUmbrella(ctx)(&err)
 	if execution.release != nil {
 		// Call the unexported runReleaseSpec, not the exported
 		// RunReleaseSpec: the release phase here is already wrapped by

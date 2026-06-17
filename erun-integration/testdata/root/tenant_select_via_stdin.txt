@@ -10,8 +10,6 @@ Loading tenant configuration
 Loaded tenant configuration
 Loading environment configuration
 ==> Initializing beta/dev
-mkdir -p <TMP>
-write-yaml <TMP>
 init: runtime deploys use the published erun-devops chart; no devops scaffold is written
 ==> Initialized beta/dev
 Configuration initialized OK

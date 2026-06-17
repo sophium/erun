@@ -32,20 +32,8 @@ func TestActivateEnvTrace(t *testing.T) {
 			t.Fatalf("trace log not written: %v", err)
 		}
 		content := string(raw)
-		for _, want := range []string{"kubectl get pods", "==> Deploying team/dev 1.0.0", "appending the full trace"} {
-			if !strings.Contains(content, want) {
-				t.Fatalf("trace log missing %q:\n%s", want, content)
-			}
-		}
-		for _, line := range strings.Split(strings.TrimSpace(content), "\n") {
-			stamp, _, found := strings.Cut(line, " ")
-			if !found {
-				t.Fatalf("unstamped line %q", line)
-			}
-			if _, err := time.Parse(time.RFC3339, stamp); err != nil {
-				t.Fatalf("line %q does not start with an RFC3339 stamp: %v", line, err)
-			}
-		}
+		assertTraceLogContains(t, content, "kubectl get pods", "==> Deploying team/dev 1.0.0", "appending the full trace")
+		assertTraceLogLinesStamped(t, content)
 	})
 
 	t.Run("dry-run names the path and writes nothing", func(t *testing.T) {
@@ -97,4 +85,30 @@ func TestActivateEnvTrace(t *testing.T) {
 			t.Fatalf("expected a fresh capped log, got %d bytes", len(raw))
 		}
 	})
+}
+
+// assertTraceLogContains fails when content is missing any of the wanted
+// substrings, reporting the want and the full content.
+func assertTraceLogContains(t *testing.T, content string, wants ...string) {
+	t.Helper()
+	for _, want := range wants {
+		if !strings.Contains(content, want) {
+			t.Fatalf("trace log missing %q:\n%s", want, content)
+		}
+	}
+}
+
+// assertTraceLogLinesStamped fails unless every non-blank line begins with an
+// RFC3339 timestamp followed by a space.
+func assertTraceLogLinesStamped(t *testing.T, content string) {
+	t.Helper()
+	for _, line := range strings.Split(strings.TrimSpace(content), "\n") {
+		stamp, _, found := strings.Cut(line, " ")
+		if !found {
+			t.Fatalf("unstamped line %q", line)
+		}
+		if _, err := time.Parse(time.RFC3339, stamp); err != nil {
+			t.Fatalf("line %q does not start with an RFC3339 stamp: %v", line, err)
+		}
+	}
 }

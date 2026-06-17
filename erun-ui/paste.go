@@ -63,7 +63,7 @@ func buildPastedImageCopyCommand(result eruncommon.OpenResult, remoteDir, remote
 		"exec",
 		"-i",
 		"-c",
-		release,
+		eruncommon.DevopsComponentName,
 		"deployment/"+release,
 		"--",
 		"/bin/sh",

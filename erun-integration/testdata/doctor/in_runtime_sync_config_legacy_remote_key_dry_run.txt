@@ -1,0 +1,5 @@
+In-pod config drift for team/dev:
+  env   type               on-disk="remote" injected="runtime" [legacy]
+Dry-run: would rewrite the in-pod config files traced above.
+audit: erun doctor --dry-run --sync-config
+write-yaml <TMP>

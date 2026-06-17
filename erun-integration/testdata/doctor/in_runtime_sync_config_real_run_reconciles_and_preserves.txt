@@ -1,0 +1,4 @@
+In-pod config drift for team/dev:
+  env   kubernetescontext  on-disk="stale-context" injected="in-cluster" [wrong]
+In-pod config reconciled.
+audit: erun doctor --sync-config

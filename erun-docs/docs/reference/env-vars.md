@@ -29,6 +29,9 @@ ERun reads a small number of `ERUN_*` variables, mostly when running inside a ru
 | `ERUN_CLOUD_PROVIDER_ALIAS` | string | unset | Provider alias (admin-defined). | Cloud-context lookup. |
 | `ERUN_CLOUD_REGION` | string | unset | Cloud region (e.g. `eu-west-2`). | Cloud-context lookup. |
 | `ERUN_CLOUD_INSTANCE_ID` | string | unset | Provider-specific instance id (EC2 InstanceId, GCE name, etc.). | Cloud-context lookup. |
+| `ERUN_RUNTIME_REGISTRY` | string | unset | Registry erun resolves runtime image refs / runtime versions against. When unset the in-pod config omits it and resolution falls back to `ghcr.io/sophium`. | `EnvConfig.runtimeregistry` via the deploy spec (`--set-string runtimeRegistry`). |
+| `ERUN_CONTAINER_REGISTRIES` | JSON | unset | The env's marked registry list (`[{"registry":"…","roles":["build","deploy"]}]`), so in-pod build/push role resolution works on remote/runtime pods whose list lives only on the env config rather than in a repo `.erun/config.yaml`. When unset the in-pod config omits it. | `EnvConfig.containerregistries` via the deploy spec (`--set-json containerRegistries`). |
+| `ERUN_DISABLE_BUILD_SCRIPT` | bool | `false` | Disable `build.sh` discovery for in-pod (remote-agent) builds. Always written (`true` and `false`) when the chart sets it, so `erun doctor --sync-config` can reconcile a flip; an older chart that does not set it yields `false`. | `EnvConfig.disablebuildscript` via the deploy spec (`--set disableBuildScript`). |
 | `CLAUDE_CODE_USE_MANTLE` | bool | unset | Route Claude through Mantle. | `EnvConfig.claude.usemantle`. |
 | `CLAUDE_CODE_USE_BEDROCK` | bool | unset | Route Claude through AWS Bedrock. | `EnvConfig.claude.usebedrock`. |
 | `CLAUDE_CODE_MAX_OUTPUT_TOKENS` | int | unset | Max tokens per Claude response. | `EnvConfig.claude.maxoutputtokens`. |

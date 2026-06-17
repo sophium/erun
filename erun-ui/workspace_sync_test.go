@@ -251,14 +251,14 @@ func TestLoadEnvironmentConfigTreatsEnabledWorkspaceSyncWithoutLocalPathAsOff(t 
 func workspaceSyncStore(enabled bool) stubUIStore {
 	return stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"frs": {Name: "frs", ProjectRoot: "/home/erun/git/frs", DefaultEnvironment: "dev"},
+			"frs": {Name: "frs", DefaultEnvironment: "dev"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"frs/dev": {
 				Name:              "dev",
-				RepoPath:          "/home/erun/git/frs",
+				LocalRepoPath:     "/home/erun/git/frs",
 				KubernetesContext: "cluster-dev",
-				Type: eruncommon.EnvironmentTypeRuntime,
+				Type:              eruncommon.EnvironmentTypeRuntime,
 				SSHD: eruncommon.SSHDConfig{
 					Enabled: true,
 					WorkspaceSync: eruncommon.SSHDWorkspaceSyncConfig{

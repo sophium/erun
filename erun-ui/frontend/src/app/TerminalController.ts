@@ -27,7 +27,7 @@ import type {
   TerminalWriteData,
 } from './model';
 import { showTerminalMessage } from './notificationThunks';
-import { visibleDiffPath } from './reviewDiffNavigation';
+import { scrollSelectedTreeNodeIntoView, visibleDiffPath } from './reviewDiffNavigation';
 import { setSelectedDiffPath } from './slices/reviewSlice';
 import {
   computeMaxReviewWidth,
@@ -79,6 +79,7 @@ export class TerminalController {
   private _reviewView: HTMLElement | null = null;
   private reviewMain: HTMLDivElement | null = null;
   private _diffList: HTMLDivElement | null = null;
+  private treeContainer: HTMLDivElement | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private resizeTimer = 0;
   private resizeFrame = 0;
@@ -126,6 +127,16 @@ export class TerminalController {
 
   get diffList(): HTMLDivElement | null {
     return this._diffList;
+  }
+
+  // setTreeContainer registers the changed-files tree's scroll container so the
+  // diff→tree scrollspy can keep the active node visible (#547). It is a
+  // callback ref, not part of mount(): the tree container is conditionally
+  // rendered (only while the Changed files section is open), so it mounts and
+  // unmounts independently of the one-time controller mount — passing null on
+  // unmount keeps the reference from going stale.
+  setTreeContainer(element: HTMLDivElement | null): void {
+    this.treeContainer = element;
   }
 
   terminalSize(): { cols: number; rows: number } {
@@ -494,6 +505,11 @@ export class TerminalController {
       return;
     }
     store.dispatch(setSelectedDiffPath(path));
+    // Keep the now-active node visible in the changed-files tree (#547). Only
+    // the diff→tree direction drives this, and it scrolls the tree container,
+    // never the diff — so it can't feed back into visibleDiffPath above (which
+    // reads the diff/reviewMain scroll position) and re-trigger selection.
+    scrollSelectedTreeNodeIntoView(this.treeContainer, path);
   }
 
   // Review-diff refresh timer accessors. reviewThunks owns the polling logic

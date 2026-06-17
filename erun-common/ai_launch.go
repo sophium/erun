@@ -85,7 +85,8 @@ func AISessionLaunchCommand(aiTool string, claude EnvironmentClaudeConfig) strin
 	if tool := strings.TrimSpace(aiTool); tool != "" && tool != defaultAITool {
 		return tool
 	}
-	return `if [ -d "$HOME/.claude/projects/$(pwd | tr / -)" ]; then claude --continue` + claudeLaunchFlags(claude) + `; else claude` + claudeLaunchFlags(claude) + `; fi`
+	prefix := claudeLaunchEnvPrefix(claude)
+	return `if [ -d "$HOME/.claude/projects/$(pwd | tr / -)" ]; then ` + prefix + `claude --continue` + claudeLaunchFlags(claude) + `; else ` + prefix + `claude` + claudeLaunchFlags(claude) + `; fi`
 }
 
 // AISessionLaunchLines returns the dtach session's AI program as script
@@ -101,7 +102,7 @@ func AISessionLaunchCommand(aiTool string, claude EnvironmentClaudeConfig) strin
 func AISessionLaunchLines(aiTool string, claude EnvironmentClaudeConfig) []string {
 	launch := AISessionLaunchCommand(aiTool, claude)
 	label := "Claude"
-	resume := "claude --continue" + claudeLaunchFlags(claude)
+	resume := claudeLaunchEnvPrefix(claude) + "claude --continue" + claudeLaunchFlags(claude)
 	if tool := strings.TrimSpace(aiTool); tool != "" && tool != defaultAITool {
 		label = "The AI tool"
 		resume = tool
@@ -129,6 +130,24 @@ func claudeLaunchFlags(claude EnvironmentClaudeConfig) string {
 		flags += " --verbose --debug"
 	}
 	return flags
+}
+
+// claudeLaunchEnvPrefix returns the process-scoped env assignment that mirrors
+// the env's resolved default model into CLAUDE_CODE_SUBAGENT_MODEL, so
+// subagents spawned in the managed Claude session run on the same model the
+// session launches with via --model (issue #482). It is a command-string
+// prefix — not a launch flag and not a desktop PTY env entry — because for
+// remote-agent envs the guard executes `claude` inside the pod via kubectl
+// exec; only an in-string assignment crosses into the pod, exactly like
+// --effort/--model (issue #528). The token is already constrained to
+// claudeModelTokenPattern by resolveClaudeDefaultModel, so it needs no quoting
+// and composes with the single-quoted ultracode --settings JSON. Empty when no
+// model resolves, leaving Claude Code's own subagent default in place.
+func claudeLaunchEnvPrefix(claude EnvironmentClaudeConfig) string {
+	if model := resolveClaudeDefaultModel(claude); model != "" {
+		return "CLAUDE_CODE_SUBAGENT_MODEL=" + model + " "
+	}
+	return ""
 }
 
 // claudeEffortFlags maps a resolved effort level to its launch flags.

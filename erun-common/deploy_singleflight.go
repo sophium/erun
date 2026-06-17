@@ -178,66 +178,97 @@ func acquireHelmDeploySingleFlight(ctx Context, deploy HelmDeploySpec, deps helm
 	for attempt := 0; attempt < 2; attempt++ {
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
 		if err == nil {
-			if writeErr := writeInflightRecord(f, record); writeErr != nil {
-				_ = f.Close()
-				_ = os.Remove(path)
-				return HelmDeploySingleFlightProceed, nil, fmt.Errorf("write deploy in-flight marker: %w", writeErr)
+			handle, writeErr := writeFreshInflightMarker(ctx, f, path, record, releaseKey, paramsHash)
+			if writeErr != nil {
+				return HelmDeploySingleFlightProceed, nil, writeErr
 			}
-			if closeErr := f.Close(); closeErr != nil {
-				_ = os.Remove(path)
-				return HelmDeploySingleFlightProceed, nil, fmt.Errorf("close deploy in-flight marker: %w", closeErr)
-			}
-			ctx.Trace(fmt.Sprintf("dedup: claim (release=%s, hash=%s, pid=%d)", releaseKey, paramsHash, record.PID))
-			return HelmDeploySingleFlightProceed, &HelmDeploySingleFlightHandle{path: path}, nil
+			return HelmDeploySingleFlightProceed, handle, nil
 		}
 		if !errors.Is(err, os.ErrExist) {
 			return HelmDeploySingleFlightProceed, nil, fmt.Errorf("acquire deploy in-flight marker: %w", err)
 		}
 
-		existing, readErr := readInflightRecord(path)
-		if readErr != nil {
-			ctx.Trace("dedup: replacing unreadable in-flight marker (" + readErr.Error() + ")")
-			if rmErr := os.Remove(path); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
-				return HelmDeploySingleFlightProceed, nil, fmt.Errorf("remove unreadable in-flight marker: %w", rmErr)
-			}
+		reclaim, outcome, recErr := reconcileExistingInflightMarker(ctx, deps, deploy, path, releaseKey, paramsHash)
+		if reclaim {
 			continue
 		}
-		if !deps.isAlive(existing.PID) {
-			ctx.Trace(fmt.Sprintf("dedup: reclaim (release=%s, prior pid=%d is dead)", releaseKey, existing.PID))
-			if rmErr := os.Remove(path); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
-				return HelmDeploySingleFlightProceed, nil, fmt.Errorf("remove stale in-flight marker: %w", rmErr)
-			}
-			continue
-		}
-		// PID liveness alone is not sufficient inside containers: a pod
-		// restart resets the PID namespace, and a coincidentally-alive
-		// new PID can shadow the dead deploy's recorded PID. Fall back
-		// to a max-age check so any marker older than a sensible deploy
-		// ceiling is reclaimed regardless of what PID the kernel hands
-		// out.
-		if !existing.StartedAt.IsZero() && deps.now().Sub(existing.StartedAt) > helmDeploySingleFlightMaxAge {
-			ctx.Trace(fmt.Sprintf("dedup: reclaim (release=%s, marker age %s exceeds max %s)", releaseKey, deps.now().Sub(existing.StartedAt).Round(time.Second), helmDeploySingleFlightMaxAge))
-			if rmErr := os.Remove(path); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
-				return HelmDeploySingleFlightProceed, nil, fmt.Errorf("remove aged-out in-flight marker: %w", rmErr)
-			}
-			continue
-		}
-		if existing.ParamsHash == paramsHash {
-			ctx.Trace(fmt.Sprintf("dedup: skip (release=%s, hash=%s, pid=%d already running identical deploy)", releaseKey, paramsHash, existing.PID))
-			return HelmDeploySingleFlightSkipDuplicate, nil, nil
-		}
-		return HelmDeploySingleFlightProceed, nil, &HelmReleaseConcurrentDeployError{
-			ReleaseName:       deploy.ReleaseName,
-			Namespace:         deploy.Namespace,
-			KubernetesContext: deploy.KubernetesContext,
-			OtherPID:          existing.PID,
-			OtherStartedAt:    existing.StartedAt,
-			OtherTenant:       existing.Tenant,
-			OtherEnvironment:  existing.Environment,
-			OtherVersion:      existing.Version,
-		}
+		return outcome, nil, recErr
 	}
 	return HelmDeploySingleFlightProceed, nil, fmt.Errorf("could not acquire deploy in-flight marker after retries")
+}
+
+// writeFreshInflightMarker writes our claim record into the freshly created
+// (O_EXCL) marker file and returns the owning handle. On any failure it closes
+// and removes the partial marker so a retry or a later acquire is not blocked
+// by a half-written file.
+func writeFreshInflightMarker(ctx Context, f *os.File, path string, record deployInflightRecord, releaseKey, paramsHash string) (*HelmDeploySingleFlightHandle, error) {
+	if writeErr := writeInflightRecord(f, record); writeErr != nil {
+		_ = f.Close()
+		_ = os.Remove(path)
+		return nil, fmt.Errorf("write deploy in-flight marker: %w", writeErr)
+	}
+	if closeErr := f.Close(); closeErr != nil {
+		_ = os.Remove(path)
+		return nil, fmt.Errorf("close deploy in-flight marker: %w", closeErr)
+	}
+	ctx.Trace(fmt.Sprintf("dedup: claim (release=%s, hash=%s, pid=%d)", releaseKey, paramsHash, record.PID))
+	return &HelmDeploySingleFlightHandle{path: path}, nil
+}
+
+// removeInflightMarker deletes a marker file, treating an already-absent file
+// as success so a concurrent reclaim does not turn into an error.
+func removeInflightMarker(path string) error {
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// reconcileExistingInflightMarker inspects the marker that blocked our O_EXCL
+// claim and decides the outcome: reclaim it (reclaim=true, the caller retries
+// the claim), skip as an identical duplicate, or fail with a concurrent-deploy
+// error. Every reclaim path removes the marker first. PID liveness alone is not
+// sufficient inside containers — a pod restart resets the PID namespace and a
+// coincidentally-alive new PID can shadow the dead deploy's recorded PID — so a
+// max-age check reclaims any marker older than a sensible deploy ceiling
+// regardless of what PID the kernel hands out.
+func reconcileExistingInflightMarker(ctx Context, deps helmDeploySingleFlightDeps, deploy HelmDeploySpec, path, releaseKey, paramsHash string) (bool, HelmDeploySingleFlightOutcome, error) {
+	existing, readErr := readInflightRecord(path)
+	if readErr != nil {
+		ctx.Trace("dedup: replacing unreadable in-flight marker (" + readErr.Error() + ")")
+		if rmErr := removeInflightMarker(path); rmErr != nil {
+			return false, HelmDeploySingleFlightProceed, fmt.Errorf("remove unreadable in-flight marker: %w", rmErr)
+		}
+		return true, HelmDeploySingleFlightProceed, nil
+	}
+	if !deps.isAlive(existing.PID) {
+		ctx.Trace(fmt.Sprintf("dedup: reclaim (release=%s, prior pid=%d is dead)", releaseKey, existing.PID))
+		if rmErr := removeInflightMarker(path); rmErr != nil {
+			return false, HelmDeploySingleFlightProceed, fmt.Errorf("remove stale in-flight marker: %w", rmErr)
+		}
+		return true, HelmDeploySingleFlightProceed, nil
+	}
+	if !existing.StartedAt.IsZero() && deps.now().Sub(existing.StartedAt) > helmDeploySingleFlightMaxAge {
+		ctx.Trace(fmt.Sprintf("dedup: reclaim (release=%s, marker age %s exceeds max %s)", releaseKey, deps.now().Sub(existing.StartedAt).Round(time.Second), helmDeploySingleFlightMaxAge))
+		if rmErr := removeInflightMarker(path); rmErr != nil {
+			return false, HelmDeploySingleFlightProceed, fmt.Errorf("remove aged-out in-flight marker: %w", rmErr)
+		}
+		return true, HelmDeploySingleFlightProceed, nil
+	}
+	if existing.ParamsHash == paramsHash {
+		ctx.Trace(fmt.Sprintf("dedup: skip (release=%s, hash=%s, pid=%d already running identical deploy)", releaseKey, paramsHash, existing.PID))
+		return false, HelmDeploySingleFlightSkipDuplicate, nil
+	}
+	return false, HelmDeploySingleFlightProceed, &HelmReleaseConcurrentDeployError{
+		ReleaseName:       deploy.ReleaseName,
+		Namespace:         deploy.Namespace,
+		KubernetesContext: deploy.KubernetesContext,
+		OtherPID:          existing.PID,
+		OtherStartedAt:    existing.StartedAt,
+		OtherTenant:       existing.Tenant,
+		OtherEnvironment:  existing.Environment,
+		OtherVersion:      existing.Version,
+	}
 }
 
 // reportHelmDeploySingleFlightDryRun previews the dedup decision without

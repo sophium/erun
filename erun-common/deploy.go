@@ -9,7 +9,9 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -123,6 +125,18 @@ type HelmDeploySpec struct {
 	Version            string
 	Timeout            string
 	Verbosity          int
+	// RuntimeRegistry is the env's runtime image-ref / runtime-version
+	// registry (EnvConfig.RuntimeRegistry), distinct from ContainerRegistry
+	// (the DEPLOY-marked registry the cluster pulls from). Injected so in-pod
+	// runtime image-ref resolution does not fall back to ghcr.io/sophium (#548).
+	RuntimeRegistry string
+	// ContainerRegistries is the env's full marked registry list, injected so
+	// in-pod build/push role resolution works on remote/runtime pods whose list
+	// lives only on the env config (#548).
+	ContainerRegistries ContainerRegistries
+	// DisableBuildScript mirrors EnvConfig.DisableBuildScript so a remote-agent
+	// pod's in-pod build honours the operator's build.sh-discovery choice (#548).
+	DisableBuildScript bool
 }
 
 type HelmReleaseRecoveryParams struct {
@@ -414,10 +428,7 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 	if err != nil {
 		return err
 	}
-	target := deployInput.Tenant + "/" + deployInput.Environment
-	if version := strings.TrimSpace(deployInput.Version); version != "" {
-		target += " " + version
-	}
+	target := helmDeployTargetLabel(deployInput)
 	if outcome == HelmDeploySingleFlightSkipDuplicate {
 		ctx.Info("==> Skipping " + target + " (identical deploy already in progress)")
 		return nil
@@ -427,7 +438,34 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 	if ctx.DryRun {
 		return nil
 	}
+	return runHelmDeployRollout(ctx, deployInput, deploy, target)
+}
 
+// helmDeployTargetLabel builds the "<tenant>/<env>[ · <release>][ <version>]"
+// label used in deploy feedback. It names the release for a non-runtime
+// component so a single-component deploy (e.g. erun-backend-postgres) is not
+// mistaken for a full-env redeploy: "erun/local · erun-backend-postgres 18.3"
+// instead of the bare "erun/local 18.3". The runtime chart's line stays
+// "<tenant>/<env> <version>" — it *is* the env, carries the meaningful runtime
+// version, and feeds the helm-release poller + version persistence (#476). The
+// version on a component line is that component's own version.
+func helmDeployTargetLabel(deployInput HelmDeploySpec) string {
+	target := deployInput.Tenant + "/" + deployInput.Environment
+	if release := strings.TrimSpace(deployInput.ReleaseName); release != "" && release != RuntimeReleaseName(deployInput.Tenant) {
+		target += " · " + release
+	}
+	if version := strings.TrimSpace(deployInput.Version); version != "" {
+		target += " " + version
+	}
+	return target
+}
+
+// runHelmDeployRollout performs the real-run helm rollout for an acquired,
+// non-duplicate deploy: it emits the user-facing progress lines, runs the
+// deployer under a spinner, and reports timing plus success/failure. The
+// "==> Deploy of <release> failed" / "==> Deployed <target> in <elapsed>"
+// lines are part of the trace contract the desktop activity queue parses.
+func runHelmDeployRollout(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDeployerFunc, target string) error {
 	ctx.Info("==> Deploying " + target)
 	ctx.Info("    namespace " + deployInput.Namespace + " on context " + deployInput.KubernetesContext)
 	if timeout := strings.TrimSpace(deployInput.Timeout); timeout != "" {
@@ -437,9 +475,7 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 	}
 
 	started := time.Now()
-	spinner := StartSpinner(ctx.Stderr, "deploying "+target)
-	deployErr := deploy(deployInput.Params(ctx.Stdout, ctx.Stderr))
-	spinner.Stop()
+	deployErr := runHelmUpgradeWithSelectorRecovery(ctx, deployInput, deploy, target)
 	elapsed := time.Since(started).Round(time.Second)
 	if deployErr != nil {
 		// Name the release so a parallel step (multiple charts deploying at
@@ -510,29 +546,13 @@ func resolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 	}
 
 	if resolvedTarget.RemoteRepo() {
-		spec, err := resolvePublishedDevopsDeploySpec(ctx, resolvedTarget, target.VersionOverride)
-		if err != nil {
-			return nil, err
-		}
-		if err := configureDeployInputMetadata(store, resolvedTarget, &spec.Deploy); err != nil {
-			return nil, err
-		}
-		return []DeploySpec{spec}, nil
+		return resolveRemoteRepoDeploySpecs(ctx, store, resolvedTarget, target.VersionOverride)
 	}
 
-	deployContexts, err := ResolveCurrentKubernetesDeployContexts(findProjectRoot, resolveKubernetesDeployContext, resolvedTarget.RepoPath)
+	deployContexts, err := resolveCurrentLocalDeployContexts(findProjectRoot, resolveKubernetesDeployContext, resolvedTarget, target.Components)
 	if err != nil {
 		return nil, err
 	}
-	projectK8s, err := loadProjectK8sPlanForRepo(resolvedTarget.RepoPath, resolvedTarget.Environment)
-	if err != nil {
-		return nil, err
-	}
-	deployContexts, err = filterDeployContextsByComponents(deployContexts, target.Components, projectK8s)
-	if err != nil {
-		return nil, err
-	}
-	sortDeployContextsByDeployOrder(deployContexts, projectK8s)
 
 	var currentBuild *DockerBuildSpec
 	if buildOrchestration && resolvedTarget.EnvConfig.BuildsHere() {
@@ -556,6 +576,40 @@ func resolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 	}
 
 	return specs, nil
+}
+
+// resolveRemoteRepoDeploySpecs resolves the single published-devops deploy spec
+// for a remote-repo target (no local k8s tree), attaching cloud/tenant metadata
+// to the helm input.
+func resolveRemoteRepoDeploySpecs(ctx Context, store DeployStore, resolvedTarget OpenResult, versionOverride string) ([]DeploySpec, error) {
+	spec, err := resolvePublishedDevopsDeploySpec(ctx, resolvedTarget, versionOverride)
+	if err != nil {
+		return nil, err
+	}
+	if err := configureDeployInputMetadata(store, resolvedTarget, &spec.Deploy); err != nil {
+		return nil, err
+	}
+	return []DeploySpec{spec}, nil
+}
+
+// resolveCurrentLocalDeployContexts discovers the local k8s deploy contexts for
+// the target's repo, filters them to the requested components, and sorts them
+// into the project's configured deploy order.
+func resolveCurrentLocalDeployContexts(findProjectRoot ProjectFinderFunc, resolveKubernetesDeployContext DeployContextResolverFunc, resolvedTarget OpenResult, components []string) ([]KubernetesDeployContext, error) {
+	deployContexts, err := ResolveCurrentKubernetesDeployContexts(findProjectRoot, resolveKubernetesDeployContext, resolvedTarget.RepoPath)
+	if err != nil {
+		return nil, err
+	}
+	projectK8s, err := loadProjectK8sPlanForRepo(resolvedTarget.RepoPath, resolvedTarget.Environment)
+	if err != nil {
+		return nil, err
+	}
+	deployContexts, err = filterDeployContextsByComponents(deployContexts, components, projectK8s)
+	if err != nil {
+		return nil, err
+	}
+	sortDeployContextsByDeployOrder(deployContexts, projectK8s)
+	return deployContexts, nil
 }
 
 func resolveDeploySpecForOpenResult(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, componentName, versionOverride string, currentBuild *DockerBuildSpec) (DeploySpec, error) {
@@ -696,6 +750,14 @@ func verifyExistingDeployImage(ctx Context, ref, version, registry string) error
 	if ctx.DryRun {
 		return nil
 	}
+	return confirmDeployImagePresent(ctx, tag, version)
+}
+
+// confirmDeployImagePresent checks that the pinned tag exists locally or in the
+// registry, returning an error only when its absence is definitive. A registry
+// error that is not a "absent" verdict (network/auth) is traced and tolerated:
+// the rollout surfaces a real pull failure if the image is genuinely missing.
+func confirmDeployImagePresent(ctx Context, tag, version string) error {
 	remote, remoteErr := DockerManifestExists(tag)
 	if remote {
 		return nil
@@ -704,9 +766,6 @@ func verifyExistingDeployImage(ctx Context, ref, version, registry string) error
 		return nil
 	}
 	if remoteErr != nil {
-		// The registry could not confirm presence (network/auth, not a
-		// definitive "absent"); don't block the deploy on it — the rollout
-		// surfaces a real pull failure if the image is genuinely missing.
 		ctx.Trace("deploy: could not verify " + tag + " in the registry (" + remoteErr.Error() + "); proceeding")
 		return nil
 	}
@@ -1022,6 +1081,27 @@ func resolveDeployContext(findProjectRoot ProjectFinderFunc, resolveKubernetesDe
 	}, nil
 }
 
+// tenantOwnsProjectRoot reports whether one of the tenant's envs records the
+// given project root as its local repo path (#549; the path moved off the
+// tenant onto the env). A tenant whose envs aren't initialized simply doesn't
+// own the root.
+func tenantOwnsProjectRoot(store DeployStore, tenant, cleanProjectRoot string) (bool, error) {
+	envs, err := store.ListEnvConfigs(tenant)
+	if err != nil {
+		if errors.Is(err, ErrNotInitialized) {
+			return false, nil
+		}
+		return false, err
+	}
+	for _, env := range envs {
+		path := strings.TrimSpace(env.EffectiveLocalRepoPath())
+		if path != "" && filepath.Clean(path) == cleanProjectRoot {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func resolveProjectTenantForRoot(store DeployStore, projectRoot string) (string, error) {
 	tenants, err := store.ListTenantConfigs()
 	if err != nil {
@@ -1031,7 +1111,11 @@ func resolveProjectTenantForRoot(store DeployStore, projectRoot string) (string,
 	cleanProjectRoot := filepath.Clean(projectRoot)
 	matches := make([]TenantConfig, 0, len(tenants))
 	for _, tenant := range tenants {
-		if filepath.Clean(tenant.ProjectRoot) == cleanProjectRoot {
+		owns, ownErr := tenantOwnsProjectRoot(store, tenant.Name, cleanProjectRoot)
+		if ownErr != nil {
+			return "", ownErr
+		}
+		if owns {
 			matches = append(matches, tenant)
 		}
 	}
@@ -1081,28 +1165,39 @@ func newHelmDeploySpecWithValues(target OpenResult, deployContext KubernetesDepl
 	version := strings.TrimSpace(versionOverride)
 	ports := LocalPortsForResult(target)
 
+	// The full marked registry list the pod acts on (remote-agent build/push;
+	// runtime deploy). deployTargetContainerRegistries validates markers, so a
+	// bad list surfaces here at deploy time rather than silently in-pod (#548).
+	containerRegistries, err := deployTargetContainerRegistries(target)
+	if err != nil {
+		return HelmDeploySpec{}, err
+	}
+
 	return HelmDeploySpec{
-		ReleaseName:        deployContext.ComponentName,
-		ChartPath:          deployContext.ChartPath,
-		ValuesFilePath:     valuesFilePath,
-		Tenant:             target.Tenant,
-		Environment:        target.Environment,
-		Namespace:          KubernetesNamespaceName(target.Tenant, target.Environment),
-		KubernetesContext:  target.EnvConfig.KubernetesContext,
-		WorktreeStorage:    resolveWorktreeStorage(target),
-		WorktreeRepoName:   resolveWorktreeRepoName(target.RepoPath),
-		WorktreeHostPath:   resolveWorktreeHostPath(target.RepoPath),
-		SSHDEnabled:        target.EnvConfig.SSHD.Enabled,
-		MCPPort:            ports.MCP,
-		APIPort:            ports.API,
-		SSHPort:            ports.SSH,
-		CloudProviderAlias: target.EnvConfig.CloudProviderAlias,
-		ContainerRegistry:  resolveProjectContainerRegistry(target.RepoPath, target.Environment),
-		Idle:               target.EnvConfig.Idle,
-		Claude:             target.EnvConfig.Claude,
-		RuntimePod:         NormalizeRuntimePodResources(target.EnvConfig.RuntimePod),
-		Version:            version,
-		Timeout:            DefaultHelmDeploymentTimeout,
+		ReleaseName:         deployContext.ComponentName,
+		ChartPath:           deployContext.ChartPath,
+		ValuesFilePath:      valuesFilePath,
+		Tenant:              target.Tenant,
+		Environment:         target.Environment,
+		Namespace:           KubernetesNamespaceName(target.Tenant, target.Environment),
+		KubernetesContext:   target.EnvConfig.KubernetesContext,
+		WorktreeStorage:     resolveWorktreeStorage(target),
+		WorktreeRepoName:    resolveWorktreeRepoName(target.RepoPath),
+		WorktreeHostPath:    resolveWorktreeHostPath(target.RepoPath),
+		SSHDEnabled:         target.EnvConfig.SSHD.Enabled,
+		MCPPort:             ports.MCP,
+		APIPort:             ports.API,
+		SSHPort:             ports.SSH,
+		CloudProviderAlias:  target.EnvConfig.CloudProviderAlias,
+		ContainerRegistry:   resolveProjectContainerRegistry(target.RepoPath, target.Environment),
+		RuntimeRegistry:     strings.TrimSpace(target.EnvConfig.RuntimeRegistry),
+		ContainerRegistries: containerRegistries,
+		DisableBuildScript:  target.EnvConfig.DisableBuildScript,
+		Idle:                target.EnvConfig.Idle,
+		Claude:              target.EnvConfig.Claude,
+		RuntimePod:          NormalizeRuntimePodResources(target.EnvConfig.RuntimePod),
+		Version:             version,
+		Timeout:             DefaultHelmDeploymentTimeout,
 	}, nil
 }
 
@@ -1149,11 +1244,7 @@ func applyCloudProviderDeployMetadata(store CloudReadStore, env EnvConfig, deplo
 	alias := strings.TrimSpace(env.CloudProviderAlias)
 	deployInput.CloudProviderAlias = alias
 	if alias != "" {
-		if provider, err := ResolveCloudProvider(store, alias); err == nil {
-			deployInput.CloudProvider = provider.Provider
-		} else if provider := cloudProviderFromAlias(alias); provider != "" {
-			deployInput.CloudProvider = provider
-		}
+		deployInput.CloudProvider = resolveCloudProviderForAlias(store, alias, deployInput.CloudProvider)
 	}
 
 	status, ok, err := findCloudContextForKubernetesContext(store, env.KubernetesContext)
@@ -1169,6 +1260,20 @@ func applyCloudProviderDeployMetadata(store CloudReadStore, env EnvConfig, deplo
 	if deployInput.CloudRegion == "" && deployInput.CloudProvider == CloudProviderAWS {
 		deployInput.CloudRegion = cloudContextRegionFromName(env.KubernetesContext)
 	}
+}
+
+// resolveCloudProviderForAlias resolves the cloud provider for a non-empty
+// alias, preferring the store's configured provider and falling back to the
+// provider parsed from the alias suffix. When neither resolves, the existing
+// value is preserved.
+func resolveCloudProviderForAlias(store CloudReadStore, alias, current string) string {
+	if provider, err := ResolveCloudProvider(store, alias); err == nil {
+		return provider.Provider
+	}
+	if provider := cloudProviderFromAlias(alias); provider != "" {
+		return provider
+	}
+	return current
 }
 
 func cloudProviderFromAlias(alias string) string {
@@ -1313,6 +1418,20 @@ func (d HelmDeploySpec) command() commandSpec {
 	if registry := strings.TrimSpace(d.ContainerRegistry); registry != "" {
 		args = append(args, "--set-string", "containerRegistry="+registry)
 	}
+	// In-pod config injection (#548). RuntimeRegistry/containerRegistries are
+	// guarded on presence so an env that carries neither renders nothing (and
+	// an old chart with no .Values for them is unaffected). disableBuildScript
+	// is always set — a boolean projection must be able to reconcile a flip in
+	// either direction, so the chart always receives the actual value.
+	if registry := strings.TrimSpace(d.RuntimeRegistry); registry != "" {
+		args = append(args, "--set-string", "runtimeRegistry="+registry)
+	}
+	if len(d.ContainerRegistries) > 0 {
+		if encoded, marshalErr := json.Marshal(d.ContainerRegistries); marshalErr == nil {
+			args = append(args, "--set-json", "containerRegistries="+string(encoded))
+		}
+	}
+	args = append(args, "--set", "disableBuildScript="+formatHelmBool(d.DisableBuildScript))
 	for _, key := range sortedStringMapKeys(d.ImageOverrides) {
 		args = append(args, "--set-string", "imageOverrides."+key+"="+d.ImageOverrides[key])
 	}
@@ -1393,6 +1512,34 @@ func (e *HelmReleasePendingOperationError) Error() string {
 }
 
 func (e *HelmReleasePendingOperationError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+// HelmImmutableSelectorError is returned by DeployHelmChart when helm aborts an
+// upgrade because a Deployment's spec.selector — an immutable field — differs
+// from the installed object. RunHelmDeploy recovers by deleting the named
+// Deployment (whose PVCs are separate objects and survive) and retrying the
+// upgrade once, so the recreated Deployment carries the new selector.
+type HelmImmutableSelectorError struct {
+	Deployment string
+	Err        error
+}
+
+func (e *HelmImmutableSelectorError) Error() string {
+	if e == nil {
+		return ""
+	}
+	message := "deploy failed: Deployment " + e.Deployment + " has an immutable selector that changed"
+	if e.Err != nil {
+		message += ": " + e.Err.Error()
+	}
+	return message
+}
+
+func (e *HelmImmutableSelectorError) Unwrap() error {
 	if e == nil {
 		return nil
 	}
@@ -1660,13 +1807,8 @@ func resolveCurrentDevopsK8sDir(findProjectRoot ProjectFinderFunc, dir, projectR
 		return "", false, nil
 	}
 
-	k8sDir := filepath.Join(dir, "k8s")
-	if strings.HasSuffix(filepath.Base(dir), "-devops") {
-		if ok, err := isKubernetesDeployModuleDir(k8sDir); err != nil {
-			return "", false, err
-		} else if ok {
-			return k8sDir, true, nil
-		}
+	if k8sDir, ok, err := resolveDirDevopsK8sDir(dir); err != nil || ok {
+		return k8sDir, ok, err
 	}
 
 	if k8sDir, ok, err := resolveAncestorDevopsK8sDir(dir); err != nil || ok {
@@ -1686,6 +1828,24 @@ func resolveCurrentDevopsK8sDir(findProjectRoot ProjectFinderFunc, dir, projectR
 	}
 
 	return resolveProjectRootDevopsK8sDir(findProjectRoot, projectRoot)
+}
+
+// resolveDirDevopsK8sDir returns dir/k8s when dir is itself a "-devops" module
+// directory whose k8s subdir holds helm charts. It reports (k8sDir, true) on a
+// match and ("", false) when dir is not a devops module or has no charts.
+func resolveDirDevopsK8sDir(dir string) (string, bool, error) {
+	if !strings.HasSuffix(filepath.Base(dir), "-devops") {
+		return "", false, nil
+	}
+	k8sDir := filepath.Join(dir, "k8s")
+	ok, err := isKubernetesDeployModuleDir(k8sDir)
+	if err != nil {
+		return "", false, err
+	}
+	if ok {
+		return k8sDir, true, nil
+	}
+	return "", false, nil
 }
 
 func resolveAncestorDevopsK8sDir(dir string) (string, bool, error) {
@@ -1786,21 +1946,28 @@ func isKubernetesDeployModuleDir(dir string) (bool, error) {
 	return len(deployContexts) > 0, nil
 }
 
-func DeployHelmChart(params HelmDeployParams) error {
-	chartPath := params.ChartPath
-	var cleanup func()
-	// A published OCI chart cannot be copied and stamped locally; its
-	// version is pinned on the helm command line instead (see command()).
-	if strings.TrimSpace(params.Version) != "" && !isOCIChartReference(params.ChartPath) {
-		var err error
-		chartPath, cleanup, err = prepareHelmChartForDeploy(params.ChartPath, params.Version)
-		if err != nil {
-			return err
-		}
-		defer cleanup()
+// resolveHelmDeployChartPath returns the chart path to deploy and an optional
+// cleanup the caller must defer. A published OCI chart cannot be copied and
+// stamped locally; its version is pinned on the helm command line instead (see
+// command()), so it deploys from its original reference with no cleanup. A
+// local chart at a pinned version is copied and stamped into a temp dir, whose
+// removal is the returned cleanup.
+func resolveHelmDeployChartPath(params HelmDeployParams) (string, func(), error) {
+	if strings.TrimSpace(params.Version) == "" || isOCIChartReference(params.ChartPath) {
+		return params.ChartPath, nil, nil
 	}
+	chartPath, cleanup, err := prepareHelmChartForDeploy(params.ChartPath, params.Version)
+	if err != nil {
+		return "", nil, err
+	}
+	return chartPath, cleanup, nil
+}
 
-	command := HelmDeploySpec{
+// helmDeployCommandSpec builds the helm upgrade command for the deploy,
+// reusing the HelmDeploySpec command builder with the resolved (possibly
+// stamped) chart path.
+func helmDeployCommandSpec(params HelmDeployParams, chartPath string) commandSpec {
+	return HelmDeploySpec{
 		ReleaseName:        params.ReleaseName,
 		ChartPath:          chartPath,
 		ValuesFilePath:     params.ValuesFilePath,
@@ -1833,13 +2000,15 @@ func DeployHelmChart(params HelmDeployParams) error {
 		Timeout:            params.Timeout,
 		Verbosity:          params.Verbosity,
 	}.command()
+}
 
-	cmd := Command(command.Name, command.Args...)
-	cmd.Dir = command.Dir
-	// At VerbosityInfo helm output is captured silently so a successful run is
-	// quiet; the buffer feeds back into the returned error on failure. At
-	// VerbosityDebug or higher the output is also teed to params.Stdout/Stderr
-	// so the user sees the live --debug stream.
+// configureHelmDeployCmdOutput wires the command's stdout/stderr and returns
+// the capture buffers used for error classification. At VerbosityInfo helm
+// output is captured silently so a successful run is quiet; the buffer feeds
+// back into the returned error on failure. At VerbosityDebug or higher the
+// output is also teed to params.Stdout/Stderr so the user sees the live --debug
+// stream.
+func configureHelmDeployCmdOutput(cmd *exec.Cmd, params HelmDeployParams) (*bytes.Buffer, *strings.Builder) {
 	helmOutput := new(bytes.Buffer)
 	if params.Verbosity >= VerbosityDebug {
 		cmd.Stdout = teeWriter(params.Stdout, helmOutput)
@@ -1852,11 +2021,15 @@ func DeployHelmChart(params HelmDeployParams) error {
 		stderrWriters = append(stderrWriters, params.Stderr)
 	}
 	cmd.Stderr = io.MultiWriter(stderrWriters...)
+	return helmOutput, stderr
+}
 
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-
+// runHelmDeployWithPodWatch runs the already-started helm command alongside the
+// release pod watcher and returns once both finish. If the watcher reports an
+// early container failure before helm exits, helm is interrupted (then killed
+// after a grace period) so the deploy fails fast instead of waiting out the
+// helm timeout.
+func runHelmDeployWithPodWatch(cmd *exec.Cmd, params HelmDeployParams) (podWatchOutcome, error) {
 	watchCtx, cancelWatch := context.WithCancel(context.Background())
 	defer cancelWatch()
 	watchDone := make(chan podWatchOutcome, 1)
@@ -1897,13 +2070,50 @@ func DeployHelmChart(params HelmDeployParams) error {
 			}
 		}
 	}
+	return watchOutcome, helmErr
+}
 
+func DeployHelmChart(params HelmDeployParams) error {
+	chartPath, cleanup, err := resolveHelmDeployChartPath(params)
+	if err != nil {
+		return err
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+
+	command := helmDeployCommandSpec(params, chartPath)
+	cmd := Command(command.Name, command.Args...)
+	cmd.Dir = command.Dir
+	helmOutput, stderr := configureHelmDeployCmdOutput(cmd, params)
+
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	watchOutcome, helmErr := runHelmDeployWithPodWatch(cmd, params)
+	return classifyHelmDeployResult(params, watchOutcome, helmErr, helmOutput, stderr)
+}
+
+// classifyHelmDeployResult turns the raw helm/pod-watch outcome into the final
+// error: an early container failure (watchOutcome) wins, then the
+// pending-operation and published-chart-not-found special cases are recognized
+// from helm's stderr, and otherwise a helm failure is returned with its
+// captured output appended (at non-debug verbosity, where the stream was
+// silenced). A nil helmErr with no watch failure means success.
+func classifyHelmDeployResult(params HelmDeployParams, watchOutcome podWatchOutcome, helmErr error, helmOutput *bytes.Buffer, stderr *strings.Builder) error {
 	if watchOutcome.Failure != nil {
 		failure := watchOutcome.Failure
 		failure.Err = helmErr
 		return failure
 	}
-	if helmErr != nil && isHelmReleasePendingOperationMessage(stderr.String()) {
+	if helmErr == nil {
+		return nil
+	}
+	// The string matches below read the dedicated stderr capture, not
+	// helmOutput: helm errors land on stderr, and helmOutput doubles as
+	// cmd.Stdout so a stderr-only failure can race to empty there.
+	if isHelmReleasePendingOperationMessage(stderr.String()) {
 		return &HelmReleasePendingOperationError{
 			ReleaseName:       params.ReleaseName,
 			Namespace:         params.Namespace,
@@ -1912,11 +2122,10 @@ func DeployHelmChart(params HelmDeployParams) error {
 			Err:               helmErr,
 		}
 	}
-	// Match against the dedicated stderr capture, not helmOutput: helm errors
-	// land on stderr, and helmOutput doubles as cmd.Stdout so a stderr-only
-	// failure can race to empty there (the pending-operation check above reads
-	// stderr for the same reason).
-	if helmErr != nil && isOCIChartReference(params.ChartPath) && isHelmChartNotFoundMessage(stderr.String()) {
+	if deployment := immutableSelectorConflictDeployment(stderr.String()); deployment != "" {
+		return &HelmImmutableSelectorError{Deployment: deployment, Err: helmErr}
+	}
+	if isOCIChartReference(params.ChartPath) && isHelmChartNotFoundMessage(stderr.String()) {
 		return &PublishedChartNotFoundError{
 			ChartReference: params.ChartPath,
 			Version:        params.Version,
@@ -1925,7 +2134,7 @@ func DeployHelmChart(params HelmDeployParams) error {
 			Err:            helmErr,
 		}
 	}
-	if helmErr != nil && params.Verbosity < VerbosityDebug {
+	if params.Verbosity < VerbosityDebug {
 		if output := strings.TrimSpace(helmOutput.String()); output != "" {
 			return fmt.Errorf("%w\n%s", helmErr, output)
 		}
@@ -2004,6 +2213,93 @@ func isHelmReleasePendingOperationMessage(message string) bool {
 	return strings.Contains(message, "another operation") &&
 		strings.Contains(message, "install/upgrade/rollback") &&
 		strings.Contains(message, "in progress")
+}
+
+// runHelmUpgradeWithSelectorRecovery runs the helm upgrade once and, when it
+// fails because a Deployment's immutable spec.selector changed, recreates that
+// Deployment and retries the upgrade a single time. helm cannot patch an
+// immutable selector (e.g. an env first installed under the per-tenant chart
+// that labelled pods app=<release>, now upgraded by a chart that renders a
+// different selector), so the only fix is delete-and-recreate. The Deployment's
+// PVCs are separate objects and survive, so build cache and /home/erun are
+// preserved.
+func runHelmUpgradeWithSelectorRecovery(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDeployerFunc, target string) error {
+	spinner := StartSpinner(ctx.Stderr, "deploying "+target)
+	deployErr := deploy(deployInput.Params(ctx.Stdout, ctx.Stderr))
+	spinner.Stop()
+	var immutableSelector *HelmImmutableSelectorError
+	if errors.As(deployErr, &immutableSelector) {
+		return recreateDeploymentAndRetry(ctx, deployInput, deploy, immutableSelector.Deployment)
+	}
+	return deployErr
+}
+
+// recreateDeploymentAndRetry deletes the Deployment whose immutable selector
+// blocked the helm upgrade and retries the upgrade once. The delete removes
+// only the Deployment; the release's PVCs (home, docker, worktree) are
+// separate objects, so the recreated pod re-mounts the same data. The decision
+// is traced on the always-visible audit channel and the literal kubectl delete
+// is traced via TraceCommand (-vv), mirroring how the helm upgrade is logged.
+func recreateDeploymentAndRetry(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDeployerFunc, deployment string) error {
+	ctx.Trace("deploy: Deployment " + deployment + " selector is immutable and changed; deleting it (PVCs preserved) and retrying the upgrade")
+	command := deleteDeploymentCommand(deployment, deployInput.Namespace, deployInput.KubernetesContext)
+	ctx.TraceCommand(command.Dir, command.Name, command.Args...)
+	if err := runDeleteDeploymentCommand(command, ctx.Verbosity, ctx.Stdout, ctx.Stderr); err != nil {
+		return fmt.Errorf("recreate deployment %s: %w", deployment, err)
+	}
+	spinner := StartSpinner(ctx.Stderr, "redeploying "+deployInput.ReleaseName)
+	err := deploy(deployInput.Params(ctx.Stdout, ctx.Stderr))
+	spinner.Stop()
+	return err
+}
+
+func deleteDeploymentCommand(deployment, namespace, kubernetesContext string) commandSpec {
+	args := []string{}
+	if c := strings.TrimSpace(kubernetesContext); c != "" {
+		args = append(args, "--context", c)
+	}
+	args = append(args, "--namespace", namespace, "delete", "deployment", deployment, "--ignore-not-found")
+	return commandSpec{Name: "kubectl", Args: args}
+}
+
+func runDeleteDeploymentCommand(command commandSpec, verbosity int, stdout, stderr io.Writer) error {
+	cmd := Command(command.Name, command.Args...)
+	cmd.Dir = command.Dir
+	capture := new(bytes.Buffer)
+	if verbosity >= VerbosityDebug {
+		cmd.Stdout = teeWriter(stdout, capture)
+		cmd.Stderr = teeWriter(stderr, capture)
+	} else {
+		cmd.Stdout = capture
+		cmd.Stderr = capture
+	}
+	if err := cmd.Run(); err != nil {
+		if verbosity < VerbosityDebug {
+			if output := strings.TrimSpace(capture.String()); output != "" {
+				return fmt.Errorf("%w\n%s", err, output)
+			}
+		}
+		return err
+	}
+	return nil
+}
+
+var immutableSelectorDeploymentPattern = regexp.MustCompile(`(?i)Deployment\.apps "([^"]+)" is invalid`)
+
+// immutableSelectorConflictDeployment returns the Deployment name from a helm
+// upgrade failure caused by an immutable spec.selector change, or "" when the
+// failure is something else. Scoped to spec.selector specifically so an
+// unrelated immutable-field error never triggers a Deployment delete.
+func immutableSelectorConflictDeployment(message string) string {
+	lower := strings.ToLower(message)
+	if !strings.Contains(lower, "spec.selector") || !strings.Contains(lower, "field is immutable") {
+		return ""
+	}
+	match := immutableSelectorDeploymentPattern.FindStringSubmatch(message)
+	if len(match) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(match[1])
 }
 
 func prepareHelmChartForDeploy(chartPath, version string) (string, func(), error) {
@@ -2519,14 +2815,23 @@ func chartTemplateImageValue(line string) (string, bool) {
 			if !strings.Contains(value, "/") || !strings.Contains(value, ":") {
 				continue
 			}
-			if strings.Contains(value, "%s") && strings.Contains(line, ".Chart.AppVersion") {
-				if strings.Count(value, "%s") == 2 && strings.HasPrefix(value, "%s/") {
-					value = value[len("%s/"):]
-				}
-				value = strings.ReplaceAll(value, "%s", "{{ .Chart.AppVersion }}")
-			}
-			return value, true
+			return rewriteChartTemplateImageValue(value, line), true
 		}
 	}
 	return "", false
+}
+
+// rewriteChartTemplateImageValue rewrites a quoted Sprintf-style image template
+// (%s placeholders fed .Chart.AppVersion) into the same {{ .Chart.AppVersion }}
+// form the helm-rendered values produce. A leading "%s/" registry placeholder
+// is dropped so the value matches the registry-less chart refs. Values without
+// the %s/.Chart.AppVersion pattern are returned unchanged.
+func rewriteChartTemplateImageValue(value, line string) string {
+	if !strings.Contains(value, "%s") || !strings.Contains(line, ".Chart.AppVersion") {
+		return value
+	}
+	if strings.Count(value, "%s") == 2 && strings.HasPrefix(value, "%s/") {
+		value = value[len("%s/"):]
+	}
+	return strings.ReplaceAll(value, "%s", "{{ .Chart.AppVersion }}")
 }

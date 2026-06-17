@@ -40,30 +40,44 @@ func (a *App) SaveEnvironmentConfig(selection uiSelection, config uiEnvironmentC
 	if err != nil {
 		return uiEnvironmentConfig{}, err
 	}
-	updated, err := a.updatedEnvironmentConfig(config, existing)
+	updated, err := a.persistEnvironmentConfig(selection, config, existing)
 	if err != nil {
 		return uiEnvironmentConfig{}, err
 	}
-	registries, err := uiToContainerRegistries(config.ContainerRegistries)
-	if err != nil {
-		return uiEnvironmentConfig{}, err
-	}
-	if err := a.applyContainerRegistries(selection, &updated, registries); err != nil {
-		return uiEnvironmentConfig{}, err
-	}
-	if err := a.saveRemoteCloudAlias(selection, existing, updated); err != nil {
-		return uiEnvironmentConfig{}, err
-	}
-	if err := a.deps.store.SaveEnvConfig(selection.Tenant, updated); err != nil {
-		return uiEnvironmentConfig{}, err
-	}
-	a.reconcileWorkspaceSyncForSelection(selection, updated.SSHD.WorkspaceSync.Enabled)
-	a.reconcileCloudCredentialsRefresherForSelection(selection, updated.RemoteHostCredentials && updated.RemoteWorktree())
 	ports, err := eruncommon.ResolveEnvironmentLocalPorts(a.deps.store, selection.Tenant, selection.Environment)
 	if err != nil {
 		return uiEnvironmentConfig{}, err
 	}
 	return a.environmentConfigToUI(selection.Tenant, updated, selection.Environment, ports)
+}
+
+// persistEnvironmentConfig builds the updated env config from the edited UI
+// values and existing config, routes the container-registry list to its
+// owning store, applies a changed remote cloud alias, saves the env config,
+// and reconciles the workspace-sync and cloud-credentials refreshers. The
+// steps run in the same order and persist the same fields as before; it
+// returns the saved config so the caller can render it back to the UI.
+func (a *App) persistEnvironmentConfig(selection uiSelection, config uiEnvironmentConfig, existing eruncommon.EnvConfig) (eruncommon.EnvConfig, error) {
+	updated, err := a.updatedEnvironmentConfig(config, existing)
+	if err != nil {
+		return eruncommon.EnvConfig{}, err
+	}
+	registries, err := uiToContainerRegistries(config.ContainerRegistries)
+	if err != nil {
+		return eruncommon.EnvConfig{}, err
+	}
+	if err := a.applyContainerRegistries(selection, &updated, registries); err != nil {
+		return eruncommon.EnvConfig{}, err
+	}
+	if err := a.saveRemoteCloudAlias(selection, existing, updated); err != nil {
+		return eruncommon.EnvConfig{}, err
+	}
+	if err := a.deps.store.SaveEnvConfig(selection.Tenant, updated); err != nil {
+		return eruncommon.EnvConfig{}, err
+	}
+	a.reconcileWorkspaceSyncForSelection(selection, updated.SSHD.WorkspaceSync.Enabled)
+	a.reconcileCloudCredentialsRefresherForSelection(selection, updated.RemoteHostCredentials && updated.RemoteWorktree())
+	return updated, nil
 }
 
 // applyContainerRegistries persists the edited marked list to the place that
@@ -85,7 +99,7 @@ func (a *App) applyContainerRegistries(selection uiSelection, updated *eruncommo
 // project-config store can't be resolved — a local-agent env's list has nowhere
 // else to live.
 func (a *App) saveEnvironmentProjectRegistries(tenant string, config eruncommon.EnvConfig, registries eruncommon.ContainerRegistries) error {
-	projectRoot, store, ok := a.environmentProjectConfigStore(tenant, config)
+	projectRoot, store, ok := a.environmentProjectConfigStore(config)
 	if !ok {
 		return fmt.Errorf("cannot resolve the project root for %q; a local-agent environment's container registries are stored in its repo's .erun/config.yaml", strings.TrimSpace(config.Name))
 	}
@@ -277,7 +291,7 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 		Name:                 name,
 		Type:                 config.ResolvedType(),
 		LocalRepoPath:        strings.TrimSpace(config.LocalRepoPath),
-		RepoPath:             strings.TrimSpace(config.RepoPath),
+		RepoPath:             config.EffectiveLocalRepoPath(),
 		KubernetesContext:    strings.TrimSpace(config.KubernetesContext),
 		ContainerRegistries:  registries,
 		CloudProviderAlias:   strings.TrimSpace(config.CloudProviderAlias),
@@ -391,7 +405,7 @@ func (a *App) effectiveEnvironmentContainerRegistries(tenant, environment string
 // config then the env's repo path. ok is false when the project config can't be
 // reached (no project root, store can't load project config, or load failed).
 func (a *App) loadEnvironmentProjectConfig(tenant string, config eruncommon.EnvConfig) (eruncommon.ProjectConfig, bool) {
-	projectRoot, store, ok := a.environmentProjectConfigStore(tenant, config)
+	projectRoot, store, ok := a.environmentProjectConfigStore(config)
 	if !ok {
 		return eruncommon.ProjectConfig{}, false
 	}
@@ -405,17 +419,13 @@ func (a *App) loadEnvironmentProjectConfig(tenant string, config eruncommon.EnvC
 // environmentProjectConfigStore resolves the project root for an env and the
 // project-config store, used to read and write a local-agent env's registry
 // list in .erun/config.yaml.
-func (a *App) environmentProjectConfigStore(tenant string, config eruncommon.EnvConfig) (string, projectConfigStore, bool) {
+func (a *App) environmentProjectConfigStore(config eruncommon.EnvConfig) (string, projectConfigStore, bool) {
 	if a.deps.store == nil {
 		return "", nil, false
 	}
-	projectRoot := ""
-	if tenantConfig, _, err := a.deps.store.LoadTenantConfig(strings.TrimSpace(tenant)); err == nil {
-		projectRoot = strings.TrimSpace(tenantConfig.ProjectRoot)
-	}
-	if projectRoot == "" {
-		projectRoot = strings.TrimSpace(config.EffectiveLocalRepoPath())
-	}
+	// The env's own local repo path is the project root (#549: the path moved
+	// off TenantConfig onto the env).
+	projectRoot := strings.TrimSpace(config.EffectiveLocalRepoPath())
 	if projectRoot == "" {
 		return "", nil, false
 	}

@@ -108,8 +108,20 @@ function ChangedFilesSplitter({
 
 function ChangedFilesAside({ visible }: { visible: boolean }): React.ReactElement {
   const dispatch = useAppDispatch();
+  const controller = useController();
   const changedFilesOpen = useAppSelector((state) => state.layout.changedFilesOpen);
   const diffFilter = useAppSelector((state) => state.review.diffFilter);
+  // Register the tree's own scroll container with the controller so the
+  // diff→tree scrollspy can keep the active node visible (#547). A callback
+  // ref (stable across renders) tracks the conditionally-rendered container:
+  // it passes the node on mount and null when the Changed files section
+  // collapses, so the controller never holds a detached node.
+  const setTreeContainer = React.useCallback(
+    (element: HTMLDivElement | null) => {
+      controller.setTreeContainer(element);
+    },
+    [controller],
+  );
   return (
     <aside
       className={cn(
@@ -136,7 +148,11 @@ function ChangedFilesAside({ visible }: { visible: boolean }): React.ReactElemen
               }}
             />
           </Label>
-          <div className="min-h-0 flex-1 overflow-auto overscroll-contain pt-3.5">
+          <div
+            ref={setTreeContainer}
+            aria-label="Changed files tree"
+            className="min-h-0 flex-1 overflow-auto overscroll-contain pt-3.5"
+          >
             <ChangedFileTree />
           </div>
         </>

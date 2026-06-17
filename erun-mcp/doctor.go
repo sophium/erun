@@ -11,17 +11,17 @@ import (
 )
 
 type DoctorInput struct {
-	Tenant                  string                       `json:"tenant,omitempty" jsonschema:"optional explicit tenant override"`
-	Environment             string                       `json:"environment,omitempty" jsonschema:"optional explicit environment override"`
-	PruneImages             bool                         `json:"pruneImages,omitempty" jsonschema:"when true, prune unused Docker images"`
-	PruneBuildCache         bool                         `json:"pruneBuildCache,omitempty" jsonschema:"when true, prune unused BuildKit cache"`
-	PruneContainers         bool                         `json:"pruneContainers,omitempty" jsonschema:"when true, prune stopped Docker containers"`
-	ClearPendingHelm        bool                         `json:"clearPendingHelm,omitempty" jsonschema:"when true, clear a stuck helm pending-install/upgrade lock for the runtime release so the next deploy can proceed"`
-	Rollback                bool                         `json:"rollback,omitempty" jsonschema:"when true, roll the runtime release back to its last successful revision (recovers a bad/non-converging deploy)"`
-	Preview                 bool                         `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
-	Verbosity               int                          `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
-	RestoreConfigFromBackup string                       `json:"restoreConfigFromBackup,omitempty" jsonschema:"YYYY-MM-DD or absolute path; when set, restore the root erun config from the matching daily backup before any tenant/env work"`
-	RepairOrphanedAliases   []DoctorRepairAliasInput     `json:"repairOrphanedAliases,omitempty" jsonschema:"per-alias AWS init parameters; when present, doctor re-initializes each listed cloud provider alias before tenant/env work"`
+	Tenant                  string                   `json:"tenant,omitempty" jsonschema:"optional explicit tenant override"`
+	Environment             string                   `json:"environment,omitempty" jsonschema:"optional explicit environment override"`
+	PruneImages             bool                     `json:"pruneImages,omitempty" jsonschema:"when true, prune unused Docker images"`
+	PruneBuildCache         bool                     `json:"pruneBuildCache,omitempty" jsonschema:"when true, prune unused BuildKit cache"`
+	PruneContainers         bool                     `json:"pruneContainers,omitempty" jsonschema:"when true, prune stopped Docker containers"`
+	ClearPendingHelm        bool                     `json:"clearPendingHelm,omitempty" jsonschema:"when true, clear a stuck helm pending-install/upgrade lock for the runtime release so the next deploy can proceed"`
+	Rollback                bool                     `json:"rollback,omitempty" jsonschema:"when true, roll the runtime release back to its last successful revision (recovers a bad/non-converging deploy)"`
+	Preview                 bool                     `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
+	Verbosity               int                      `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+	RestoreConfigFromBackup string                   `json:"restoreConfigFromBackup,omitempty" jsonschema:"YYYY-MM-DD or absolute path; when set, restore the root erun config from the matching daily backup before any tenant/env work"`
+	RepairOrphanedAliases   []DoctorRepairAliasInput `json:"repairOrphanedAliases,omitempty" jsonschema:"per-alias AWS init parameters; when present, doctor re-initializes each listed cloud provider alias before tenant/env work"`
 }
 
 // DoctorRepairAliasInput is the MCP equivalent of the interactive
@@ -73,30 +73,35 @@ func runDoctorToolCommand(runtime RuntimeConfig, input DoctorInput, runCtx erunc
 	if err != nil {
 		return report, err
 	}
-	if fatal {
+	if fatal || onlyRootConfigDoctorInput(input) {
 		return report, nil
 	}
-	if onlyRootConfigDoctorInput(input) {
-		return report, nil
-	}
-	target, err := resolveDoctorOpenResult(runtime, input)
-	if err != nil {
-		return report, err
-	}
-	req := eruncommon.ShellLaunchParamsFromResult(target)
-	if err := writeDoctorDeployDiagnosis(runCtx, req); err != nil {
-		return report, err
-	}
-	if err := runDoctorRecoveryToolActions(runCtx, input, req); err != nil {
-		return report, err
-	}
-	if err := writeDoctorInspection(runCtx, target, req); err != nil {
-		return report, err
-	}
-	if err := runDoctorToolActions(runCtx, input, req); err != nil {
+	if err := runDoctorTenantEnvActions(runtime, input, runCtx); err != nil {
 		return report, err
 	}
 	return report, nil
+}
+
+// runDoctorTenantEnvActions resolves the open target for the env and runs the
+// tenant/env-scoped diagnosis, recovery, inspection, and prune actions in
+// order. Called only after the root-config flow reports non-fatal and the
+// caller asked for more than root-config work.
+func runDoctorTenantEnvActions(runtime RuntimeConfig, input DoctorInput, runCtx eruncommon.Context) error {
+	target, err := resolveDoctorOpenResult(runtime, input)
+	if err != nil {
+		return err
+	}
+	req := eruncommon.ShellLaunchParamsFromResult(target)
+	if err := writeDoctorDeployDiagnosis(runCtx, req); err != nil {
+		return err
+	}
+	if err := runDoctorRecoveryToolActions(runCtx, input, req); err != nil {
+		return err
+	}
+	if err := writeDoctorInspection(runCtx, target, req); err != nil {
+		return err
+	}
+	return runDoctorToolActions(runCtx, input, req)
 }
 
 // onlyRootConfigDoctorInput mirrors the CLI's doctorOnlyRepairConfig:
@@ -127,25 +132,10 @@ func runDoctorRootConfigToolFlow(runtime RuntimeConfig, input DoctorInput, runCt
 	report := &DoctorRootConfigReport{Inspection: inspection}
 
 	if selector := strings.TrimSpace(input.RestoreConfigFromBackup); selector != "" {
-		backup, ok, err := resolveDoctorBackupSelector(inspection, selector)
+		refreshed, err := restoreDoctorRootConfigFromBackup(runtime, runCtx, inspection, selector, report)
 		if err != nil {
 			return report, true, err
 		}
-		if !ok {
-			return report, true, fmt.Errorf("no root config backup matches %q", selector)
-		}
-		if !runCtx.DryRun {
-			if err := eruncommon.RestoreRootConfigFromBackup(backup.Path, inspection.ConfigPath); err != nil {
-				return report, true, err
-			}
-		}
-		runCtx.TraceCommand("", "cp", backup.Path, inspection.ConfigPath)
-		report.RestoredFromBackup = backup.Path
-		refreshed, refreshErr := eruncommon.InspectRootConfig(runtime.Store)
-		if refreshErr != nil {
-			return report, true, refreshErr
-		}
-		report.Inspection = refreshed
 		inspection = refreshed
 	}
 
@@ -153,24 +143,61 @@ func runDoctorRootConfigToolFlow(runtime RuntimeConfig, input DoctorInput, runCt
 		if err := runDoctorAliasRepairs(runtime, input, runCtx, inspection, report); err != nil {
 			return report, true, err
 		}
-		refreshed, refreshErr := eruncommon.InspectRootConfig(runtime.Store)
-		if refreshErr != nil {
-			return report, true, refreshErr
+		refreshed, err := refreshDoctorInspection(runtime, report)
+		if err != nil {
+			return report, true, err
 		}
-		report.Inspection = refreshed
 		inspection = refreshed
 	}
 
-	if inspection.ConfigStatus != eruncommon.RootConfigStatusOK {
-		return report, true, nil
-	}
-	if len(inspection.OrphanedAliases) > 0 && onlyRootConfigDoctorInput(input) {
-		// The caller scoped the work to root-config repair but did not
-		// supply enough input to finish it; surface the remaining
-		// orphans so the agent can re-call with the missing aliases.
+	if doctorRootConfigBlocks(inspection, input) {
 		return report, true, nil
 	}
 	return report, false, nil
+}
+
+// restoreDoctorRootConfigFromBackup applies a restore-from-backup selector,
+// traces the copy, records it on the report, and returns the inspection
+// refreshed from the restored file. Every failure here is fatal to the flow,
+// so the caller stops on a non-nil error.
+func restoreDoctorRootConfigFromBackup(runtime RuntimeConfig, runCtx eruncommon.Context, inspection eruncommon.RootConfigInspection, selector string, report *DoctorRootConfigReport) (eruncommon.RootConfigInspection, error) {
+	backup, ok, err := resolveDoctorBackupSelector(inspection, selector)
+	if err != nil {
+		return inspection, err
+	}
+	if !ok {
+		return inspection, fmt.Errorf("no root config backup matches %q", selector)
+	}
+	if !runCtx.DryRun {
+		if err := eruncommon.RestoreRootConfigFromBackup(backup.Path, inspection.ConfigPath); err != nil {
+			return inspection, err
+		}
+	}
+	runCtx.TraceCommand("", "cp", backup.Path, inspection.ConfigPath)
+	report.RestoredFromBackup = backup.Path
+	return refreshDoctorInspection(runtime, report)
+}
+
+// refreshDoctorInspection re-reads the root config after a mutation and stores
+// the fresh inspection on the report.
+func refreshDoctorInspection(runtime RuntimeConfig, report *DoctorRootConfigReport) (eruncommon.RootConfigInspection, error) {
+	refreshed, err := eruncommon.InspectRootConfig(runtime.Store)
+	if err != nil {
+		return eruncommon.RootConfigInspection{}, err
+	}
+	report.Inspection = refreshed
+	return refreshed, nil
+}
+
+// doctorRootConfigBlocks reports whether the root config is in a state that must
+// stop the flow before tenant/env work: the config is not OK, or orphaned
+// aliases remain and the caller scoped the run to root-config repair without
+// supplying enough input to finish it.
+func doctorRootConfigBlocks(inspection eruncommon.RootConfigInspection, input DoctorInput) bool {
+	if inspection.ConfigStatus != eruncommon.RootConfigStatusOK {
+		return true
+	}
+	return len(inspection.OrphanedAliases) > 0 && onlyRootConfigDoctorInput(input)
 }
 
 func runDoctorAliasRepairs(runtime RuntimeConfig, input DoctorInput, runCtx eruncommon.Context, inspection eruncommon.RootConfigInspection, report *DoctorRootConfigReport) error {

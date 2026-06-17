@@ -31,27 +31,19 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 
 	t.Run("bare CLI is unchanged (no dtach)", func(t *testing.T) {
 		script := preview(t, base)
-		if strings.Contains(script, "dtach") {
-			t.Fatalf("bare `erun open` must not use dtach:\n%s", script)
-		}
-		if !strings.Contains(script, bashrc+" || shell_status=$?") {
-			t.Fatalf("bare path lost its original bash invocation:\n%s", script)
-		}
+		assertScriptLacks(t, script, "dtach", "bare `erun open` must not use dtach")
+		assertScriptHas(t, script, bashrc+" || shell_status=$?", "bare path lost its original bash invocation")
 	})
 
 	t.Run("ERun tab persists via dtach, plain shell", func(t *testing.T) {
 		req := base
 		req.AppSession = "open-0"
 		script := preview(t, req)
-		if !strings.Contains(script, `dtach -A "/tmp/erun-app/erun-local-open-0.dtach" -r ctrl_l /bin/bash`) {
-			t.Fatalf("ERun tab missing dtach wrap:\n%s", script)
-		}
+		assertScriptHas(t, script, `dtach -A "/tmp/erun-app/erun-local-open-0.dtach" -r ctrl_l /bin/bash`, "ERun tab missing dtach wrap")
 		if strings.Contains(script, "claude") || strings.Contains(script, "ERUN_SKIP_LINT") {
 			t.Fatalf("plain ERun shell must not launch claude or set contribute env:\n%s", script)
 		}
-		if !strings.Contains(script, "exec "+bashrc) {
-			t.Fatalf("launcher must exec the interactive shell:\n%s", script)
-		}
+		assertScriptHas(t, script, "exec "+bashrc, "launcher must exec the interactive shell")
 	})
 
 	t.Run("attach takes the session over from other windows", func(t *testing.T) {
@@ -64,21 +56,11 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 		req.AppSession = "open-0"
 		script := preview(t, req)
 		owner := `/tmp/erun-app/erun-local-open-0.owner`
-		if !strings.Contains(script, `printf '%s' "$attach_id" > "`+owner+`"`) {
-			t.Fatalf("attach must claim the owner file:\n%s", script)
-		}
-		if !strings.Contains(script, `if [ "$dtach_pid" != "$master_pid" ]`) {
-			t.Fatalf("kick loop must spare the session master:\n%s", script)
-		}
-		if !strings.Contains(script, `[ "$child_comm" != "dtach" ]`) {
-			t.Fatalf("master detection must be the /proc child scan (runtime image has no ss):\n%s", script)
-		}
-		if !strings.Contains(script, `[ -S "/tmp/erun-app/erun-local-open-0.dtach" ] && [ -n "$master_pid" ]`) {
-			t.Fatalf("kick must be skipped when the master cannot be identified:\n%s", script)
-		}
-		if !strings.Contains(script, `!= "$attach_id" ]; then exit 76; fi`) {
-			t.Fatalf("kicked wrapper must exit 76 on foreign owner:\n%s", script)
-		}
+		assertScriptHas(t, script, `printf '%s' "$attach_id" > "`+owner+`"`, "attach must claim the owner file")
+		assertScriptHas(t, script, `if [ "$dtach_pid" != "$master_pid" ]`, "kick loop must spare the session master")
+		assertScriptHas(t, script, `[ "$child_comm" != "dtach" ]`, "master detection must be the /proc child scan (runtime image has no ss)")
+		assertScriptHas(t, script, `[ -S "/tmp/erun-app/erun-local-open-0.dtach" ] && [ -n "$master_pid" ]`, "kick must be skipped when the master cannot be identified")
+		assertScriptHas(t, script, `!= "$attach_id" ]; then exit 76; fi`, "kicked wrapper must exit 76 on foreign owner")
 	})
 
 	t.Run("each terminal slot owns its own session", func(t *testing.T) {
@@ -91,12 +73,8 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 		req := base
 		req.AppSession = "open-1"
 		script := preview(t, req)
-		if !strings.Contains(script, `dtach -A "/tmp/erun-app/erun-local-open-1.dtach" -r ctrl_l`) {
-			t.Fatalf("slot 1 missing its own dtach socket:\n%s", script)
-		}
-		if strings.Contains(script, "open-0") {
-			t.Fatalf("slot 1 must not touch slot 0's session:\n%s", script)
-		}
+		assertScriptHas(t, script, `dtach -A "/tmp/erun-app/erun-local-open-1.dtach" -r ctrl_l`, "slot 1 missing its own dtach socket")
+		assertScriptLacks(t, script, "open-0", "slot 1 must not touch slot 0's session")
 	})
 
 	t.Run("AI tab launches claude once as the session program", func(t *testing.T) {
@@ -104,20 +82,14 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 		req.AppSession = "ai"
 		req.AI = true
 		script := preview(t, req)
-		if !strings.Contains(script, `dtach -A "/tmp/erun-app/erun-local-ai.dtach" -r ctrl_l`) {
-			t.Fatalf("AI tab missing dtach wrap:\n%s", script)
-		}
-		if !strings.Contains(script, `claude --continue --settings '{"ultracode":true}'`) {
-			t.Fatalf("AI tab must launch the claude guard at the default effort (ultracode):\n%s", script)
-		}
+		assertScriptHas(t, script, `dtach -A "/tmp/erun-app/erun-local-ai.dtach" -r ctrl_l`, "AI tab missing dtach wrap")
+		assertScriptHas(t, script, `claude --continue --settings '{"ultracode":true}'`, "AI tab must launch the claude guard at the default effort (ultracode)")
 		// Claude's exit must not silently fall through to the shell: the
 		// wrapper names the exit and the resume command first (issue #464).
 		if !strings.Contains(script, "fi || ai_status=$?") || !strings.Contains(script, "resume with: %s") {
 			t.Fatalf("AI launcher missing the exit wrapper:\n%s", script)
 		}
-		if !strings.Contains(script, "exec "+bashrc) {
-			t.Fatalf("AI launcher must drop to an interactive shell after claude:\n%s", script)
-		}
+		assertScriptHas(t, script, "exec "+bashrc, "AI launcher must drop to an interactive shell after claude")
 	})
 
 	t.Run("contribute-AI tab cds to the clone, then claude", func(t *testing.T) {
@@ -131,10 +103,26 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 		if clone < 0 || claude < 0 || clone > claude {
 			t.Fatalf("contribute-AI must cd to the clone before launching claude:\n%s", script)
 		}
-		if !strings.Contains(script, "ERUN_SKIP_LINT") {
-			t.Fatalf("contribute env missing:\n%s", script)
-		}
+		assertScriptHas(t, script, "ERUN_SKIP_LINT", "contribute env missing")
 	})
+}
+
+// assertScriptHas fails the test when script does not contain want, reporting
+// msg followed by the full script.
+func assertScriptHas(t *testing.T, script, want, msg string) {
+	t.Helper()
+	if !strings.Contains(script, want) {
+		t.Fatalf("%s:\n%s", msg, script)
+	}
+}
+
+// assertScriptLacks fails the test when script contains unwanted, reporting
+// msg followed by the full script.
+func assertScriptLacks(t *testing.T, script, unwanted, msg string) {
+	t.Helper()
+	if strings.Contains(script, unwanted) {
+		t.Fatalf("%s:\n%s", msg, script)
+	}
 }
 
 // TestParseRemoteAppSessionIDs pins the detection contract: a pod's

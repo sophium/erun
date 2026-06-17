@@ -115,46 +115,65 @@ func (r ContainerRegistries) Validate() error {
 	if r.IsZero() {
 		return errors.New("registry list is empty")
 	}
-	var build, from, deploy int
-	var fromRegistry string
-	toRegistries := make(map[string]struct{}, len(r))
-	for _, entry := range r {
-		registry := strings.TrimSpace(entry.Registry)
-		if registry == "" {
-			return errors.New("registry list entry is missing a registry")
-		}
-		if entry.hasRole(RegistryRoleBuild) {
-			build++
-		}
-		if entry.hasRole(RegistryRoleFrom) {
-			from++
-			fromRegistry = registry
-		}
-		if entry.hasRole(RegistryRoleTo) {
-			toRegistries[registry] = struct{}{}
-		}
-		if entry.hasRole(RegistryRoleDeploy) {
-			deploy++
-		}
+	tally, err := r.tallyRoles()
+	if err != nil {
+		return err
 	}
-	if build > 1 {
+	if tally.build > 1 {
 		return errors.New("at most one registry may be marked build")
 	}
-	if from > 1 {
+	if tally.from > 1 {
 		return errors.New("at most one registry may be marked from")
 	}
-	if deploy < 1 {
+	if tally.deploy < 1 {
 		return errors.New("at least one registry must be marked deploy")
 	}
-	if (from > 0) != (len(toRegistries) > 0) {
+	if (tally.from > 0) != (len(tally.toRegistries) > 0) {
 		return errors.New("from and to must be set together (a copy needs both a source and a destination)")
 	}
-	if fromRegistry != "" {
-		if _, ok := toRegistries[fromRegistry]; ok {
-			return fmt.Errorf("registry %q cannot be both from and to", fromRegistry)
+	if tally.fromRegistry != "" {
+		if _, ok := tally.toRegistries[tally.fromRegistry]; ok {
+			return fmt.Errorf("registry %q cannot be both from and to", tally.fromRegistry)
 		}
 	}
 	return nil
+}
+
+// registryRoleTally accumulates the role counts and to/from registries needed
+// to enforce the marker invariants in Validate.
+type registryRoleTally struct {
+	build        int
+	from         int
+	deploy       int
+	fromRegistry string
+	toRegistries map[string]struct{}
+}
+
+// tallyRoles walks the list once, counting role markers and recording the from
+// and to registries. It errors on the first entry missing a registry, matching
+// Validate's original per-entry guard.
+func (r ContainerRegistries) tallyRoles() (registryRoleTally, error) {
+	tally := registryRoleTally{toRegistries: make(map[string]struct{}, len(r))}
+	for _, entry := range r {
+		registry := strings.TrimSpace(entry.Registry)
+		if registry == "" {
+			return registryRoleTally{}, errors.New("registry list entry is missing a registry")
+		}
+		if entry.hasRole(RegistryRoleBuild) {
+			tally.build++
+		}
+		if entry.hasRole(RegistryRoleFrom) {
+			tally.from++
+			tally.fromRegistry = registry
+		}
+		if entry.hasRole(RegistryRoleTo) {
+			tally.toRegistries[registry] = struct{}{}
+		}
+		if entry.hasRole(RegistryRoleDeploy) {
+			tally.deploy++
+		}
+	}
+	return tally, nil
 }
 
 // Equal reports whether two lists carry the same registries with the same
@@ -255,6 +274,7 @@ func (c *EnvConfig) UnmarshalYAML(value *yaml.Node) error {
 		LegacyContainerRegistry string `yaml:"containerregistry,omitempty"`
 		LegacyRemote            bool   `yaml:"remote,omitempty"`
 		LegacySnapshot          *bool  `yaml:"snapshot,omitempty"`
+		LegacyRepoPath          string `yaml:"repopath,omitempty"`
 	}{}
 	if err := value.Decode(&aux); err != nil {
 		return err
@@ -263,6 +283,16 @@ func (c *EnvConfig) UnmarshalYAML(value *yaml.Node) error {
 	c.ContainerRegistries = migrateLegacyContainerRegistry(c.ContainerRegistries, aux.LegacyContainerRegistry)
 	if !c.Type.IsValid() {
 		c.Type = legacyEnvTypeFromRemoteSnapshot(aux.LegacyRemote, aux.LegacySnapshot)
+	}
+	// Fold the pre-#376 `repopath` into `localRepoPath` (dropped struct field;
+	// migrated on read, dropped on next save — same envelope as
+	// `containerregistry`/`remote`/`snapshot`). Unconditional across all env
+	// types: EffectiveLocalRepoPath already resolved `repopath` for every type
+	// via its fallback, so the effective value is unchanged; only the stored
+	// field name moves. This intentionally broadens the old local-agent-only
+	// NormalizeEnvConfig backfill, which was inconsistent with that fallback.
+	if strings.TrimSpace(c.LocalRepoPath) == "" {
+		c.LocalRepoPath = strings.TrimSpace(aux.LegacyRepoPath)
 	}
 	return nil
 }
@@ -368,9 +398,6 @@ func ResolveEnvironmentContainerRegistries(env EnvConfig) ContainerRegistries {
 		return env.ContainerRegistries
 	}
 	repoPath := strings.TrimSpace(env.EffectiveLocalRepoPath())
-	if repoPath == "" {
-		repoPath = strings.TrimSpace(env.RepoPath)
-	}
 	if repoPath == "" {
 		return nil
 	}

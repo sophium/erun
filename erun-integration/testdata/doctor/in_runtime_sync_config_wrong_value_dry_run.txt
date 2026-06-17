@@ -1,0 +1,5 @@
+In-pod config drift for team/dev:
+  env   kubernetescontext  on-disk="stale-context" injected="in-cluster" [wrong]
+Dry-run: would rewrite the in-pod config files traced above.
+audit: erun doctor --dry-run --sync-config
+write-yaml <TMP>

@@ -21,10 +21,10 @@ func envEnsureTestApp(t *testing.T, ensures *int32, ensuresMu *sync.Mutex) *App 
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
-			"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "ctx"},
+			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
 		},
 	}
 	app := NewApp(erunUIDeps{

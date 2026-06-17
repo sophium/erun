@@ -54,6 +54,19 @@ export class DebugPanel {
     return this.page.getByRole('button', { name: 'Clear' });
   }
 
+  // erunTraceClearButton scopes to the erun-trace pane's grid (toolbar +
+  // scroll body share a parent), disambiguating from other "Clear" buttons
+  // elsewhere in the app (e.g. the activity panel) when an environment is open.
+  erunTraceClearButton(): Locator {
+    return this.erunTracePane().locator('..').getByRole('button', { name: 'Clear', exact: true });
+  }
+
+  // erunTraceShowAllButton is the "Show all" affordance in the since-cleared
+  // notice row, scoped to the same erun-trace grid.
+  erunTraceShowAllButton(): Locator {
+    return this.erunTracePane().locator('..').getByRole('button', { name: 'Show all' });
+  }
+
   copyReportButton(): Locator {
     return this.page.getByRole('button', { name: /^(Copy report|Copied|Copy failed)$/ });
   }

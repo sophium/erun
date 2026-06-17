@@ -250,20 +250,7 @@ func runOpenForReconnect(ctx context.Context, cliPath string, result eruncommon.
 	}
 	var lastErr strings.Builder
 	scan := func(reader io.Reader, captureErr bool) {
-		scanner := bufio.NewScanner(reader)
-		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if onLine != nil && strings.TrimSpace(line) != "" {
-				onLine(line)
-			}
-			if captureErr {
-				if lastErr.Len() > 0 {
-					lastErr.WriteByte('\n')
-				}
-				lastErr.WriteString(line)
-			}
-		}
+		scanReconnectOutput(reader, captureErr, onLine, &lastErr)
 	}
 	done := make(chan struct{}, 2)
 	go func() { scan(stdout, false); done <- struct{}{} }()
@@ -278,6 +265,29 @@ func runOpenForReconnect(ctx context.Context, cliPath string, result eruncommon.
 		return fmt.Errorf("activate MCP port-forward: %w: %s", err, detail)
 	}
 	return nil
+}
+
+// scanReconnectOutput streams one of runOpenForReconnect's child-process pipes
+// line by line: it forwards non-blank lines to onLine and, when captureErr is
+// set, accumulates every line into lastErr (newline-joined) so the trailing
+// stderr can be folded into the returned error. Extracted from the inline
+// closure so runOpenForReconnect stays under the cyclomatic limit; the
+// per-line behavior is unchanged.
+func scanReconnectOutput(reader io.Reader, captureErr bool, onLine func(string), lastErr *strings.Builder) {
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if onLine != nil && strings.TrimSpace(line) != "" {
+			onLine(line)
+		}
+		if captureErr {
+			if lastErr.Len() > 0 {
+				lastErr.WriteByte('\n')
+			}
+			lastErr.WriteString(line)
+		}
+	}
 }
 
 func ensureSSHDViaOpenCommand(ctx context.Context, cliPath string, result eruncommon.OpenResult) error {
@@ -305,24 +315,7 @@ func buildInitArgs(selection uiSelection) []string {
 		envType = "remote-agent"
 	}
 	args := []string{"init", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment), "--type=" + envType}
-	if version := strings.TrimSpace(selection.Version); version != "" {
-		args = append(args, "--version", version)
-	}
-	if runtimeImage := strings.TrimSpace(selection.RuntimeImage); runtimeImage != "" {
-		args = append(args, "--runtime-image", runtimeImage)
-	}
-	if runtimeCPU := strings.TrimSpace(selection.RuntimeCPU); runtimeCPU != "" {
-		args = append(args, "--runtime-cpu", runtimeCPU)
-	}
-	if runtimeMemory := strings.TrimSpace(selection.RuntimeMemory); runtimeMemory != "" {
-		args = append(args, "--runtime-memory", runtimeMemory)
-	}
-	if kubernetesContext := strings.TrimSpace(selection.KubernetesContext); kubernetesContext != "" {
-		args = append(args, "--kubernetes-context", kubernetesContext)
-	}
-	if containerRegistry := strings.TrimSpace(selection.ContainerRegistry); containerRegistry != "" {
-		args = append(args, "--container-registry", containerRegistry)
-	}
+	args = appendInitOptionalFlags(args, selection)
 	if envType == "local-agent" {
 		if localRepoPath := strings.TrimSpace(selection.LocalRepoPath); localRepoPath != "" {
 			args = append(args, "--project-root", localRepoPath)
@@ -335,6 +328,26 @@ func buildInitArgs(selection uiSelection) []string {
 	)
 	if selection.NoGit {
 		args = append(args, "--no-git")
+	}
+	return args
+}
+
+// appendInitOptionalFlags appends the optional `--flag value` pairs that
+// buildInitArgs threads through, in their established order, skipping any whose
+// trimmed value is empty. Extracted so buildInitArgs stays under the cyclomatic
+// limit; the produced argument order and spellings are unchanged.
+func appendInitOptionalFlags(args []string, selection uiSelection) []string {
+	for _, pair := range []struct{ flag, value string }{
+		{"--version", strings.TrimSpace(selection.Version)},
+		{"--runtime-image", strings.TrimSpace(selection.RuntimeImage)},
+		{"--runtime-cpu", strings.TrimSpace(selection.RuntimeCPU)},
+		{"--runtime-memory", strings.TrimSpace(selection.RuntimeMemory)},
+		{"--kubernetes-context", strings.TrimSpace(selection.KubernetesContext)},
+		{"--container-registry", strings.TrimSpace(selection.ContainerRegistry)},
+	} {
+		if pair.value != "" {
+			args = append(args, pair.flag, pair.value)
+		}
 	}
 	return args
 }

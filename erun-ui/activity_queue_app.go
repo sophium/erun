@@ -30,11 +30,6 @@ const (
 	activityQueuePollInterval = 2 * time.Second
 )
 
-// activityStateEvent is the payload shape pushed to the frontend on each
-// transition. Wails serializes the embedded entry directly; the type alias
-// keeps the contract documented and stable.
-type activityStateEvent = activityQueueEntry
-
 // activityLockEvent describes a terminal lock transition driven by the deploy
 // queue. The frontend keys overlays by SessionID.
 type activityLockEvent struct {
@@ -290,10 +285,12 @@ func namespaceForTenantEnv(tenant, environment string) string {
 	}
 }
 
-// activityDeployingLineRe matches the `==> Deploying tenant/env [version]`
-// trace emitted by RunHelmDeploy at deploy start. Captures: tenant,
-// environment, optional version.
-var activityDeployingLineRe = regexp.MustCompile(`^==> Deploying ([^/\s]+)/([^/\s]+)(?:\s+(\S+))?\s*$`)
+// activityDeployingLineRe matches the `==> Deploying tenant/env [· release]
+// [version]` trace emitted by RunHelmDeploy at deploy start. A non-runtime
+// component carries the release after a ` · ` separator (e.g. `erun/local ·
+// erun-backend-postgres 18.3`); the runtime chart omits it (`erun/local
+// 18.3`). Captures: tenant, environment, optional release, optional version.
+var activityDeployingLineRe = regexp.MustCompile(`^==> Deploying ([^/\s]+)/([^/\s]+)(?: · (\S+))?(?:\s+(\S+))?\s*$`)
 
 // activityDeployedLineRe matches the `==> Deployed tenant/env [version]
 // in <elapsed>` trace emitted at successful completion. Captures:
@@ -388,80 +385,110 @@ var (
 // Terminal-state lines (==> Deployed / ==> Deploy failed / ==> Skipping /
 // Error:) finalize the matching active entry from either channel.
 func newActivityTraceLineHandler(app *App, selection uiSelection, kind sessionKind) func(string) {
-	failedRe := regexp.MustCompile(`^==> Deploy failed`)
+	// RunHelmDeploy names the release on failure ("==> Deploy of <rel> failed
+	// after <elapsed>", #559) and falls back to "==> Deploy failed after
+	// <elapsed>" only when no release is set; match both shapes.
+	failedRe := regexp.MustCompile(`^==> Deploy (?:of \S+ )?failed`)
 	errorRe := regexp.MustCompile(`(?i)^Error: `)
 	_ = kind
 	return func(line string) {
 		line = strings.TrimSpace(line)
-		if match := activityDeployingLineRe.FindStringSubmatch(line); match != nil {
-			app.startDeployFromTrace(selection, match[1], match[2], match[3])
-			return
-		}
-		if match := activityDeployedLineRe.FindStringSubmatch(line); match != nil {
-			app.finishDeployByTenantEnv(selection, match[1], match[2], activityQueueStatusSucceeded, "")
-			return
-		}
-		if match := activitySkippingLineRe.FindStringSubmatch(line); match != nil {
-			app.finishDeployByTenantEnv(selection, match[1], match[2], activityQueueStatusSkipped, line)
-			return
-		}
-		if match := activityInitializingLineRe.FindStringSubmatch(line); match != nil {
-			app.startInitFromTrace(selection, match[1], match[2])
-			return
-		}
-		if match := activityInitializedLineRe.FindStringSubmatch(line); match != nil {
-			app.finishInitByTenantEnv(match[1], match[2], activityQueueStatusSucceeded, "")
-			app.emitEnvironmentInitialized(match[1], match[2])
-			return
-		}
-		if match := activityInitFailedLineRe.FindStringSubmatch(line); match != nil {
-			app.finishInitByTenantEnv(match[1], match[2], activityQueueStatusFailed, line)
-			app.emitEnvironmentInitFailed(match[1], match[2])
-			return
-		}
-		if activityBuildingLineRe.MatchString(line) {
-			app.startCommandFromTrace(selection, "build")
-			return
-		}
-		if activityBuiltLineRe.MatchString(line) {
-			app.finishCommandBySelection(selection, "build", activityQueueStatusSucceeded, "")
-			return
-		}
-		if activityBuildFailedLineRe.MatchString(line) {
-			app.finishCommandBySelection(selection, "build", activityQueueStatusFailed, line)
-			return
-		}
-		if activityReleasingLineRe.MatchString(line) {
-			app.startCommandFromTrace(selection, "release")
-			return
-		}
-		if activityReleasedLineRe.MatchString(line) {
-			app.finishCommandBySelection(selection, "release", activityQueueStatusSucceeded, "")
-			return
-		}
-		if activityReleaseFailedLineRe.MatchString(line) {
-			app.finishCommandBySelection(selection, "release", activityQueueStatusFailed, line)
-			return
-		}
-		if activityPushingLineRe.MatchString(line) {
-			app.startCommandFromTrace(selection, "push")
-			return
-		}
-		if activityPushedLineRe.MatchString(line) {
-			app.finishCommandBySelection(selection, "push", activityQueueStatusSucceeded, "")
-			return
-		}
-		if activityPushFailedLineRe.MatchString(line) {
-			app.finishCommandBySelection(selection, "push", activityQueueStatusFailed, line)
-			return
-		}
 		switch {
+		case app.handleDeployTraceLine(selection, line):
+		case app.handleInitTraceLine(selection, line):
+		case app.handleCommandTraceLine(selection, line):
 		case failedRe.MatchString(line):
 			app.finishActivityTracking(selection, activityQueueStatusFailed, line)
 		case errorRe.MatchString(line):
 			app.captureActivityErrorIfRunning(selection, line)
 		}
 	}
+}
+
+// handleDeployTraceLine dispatches the deploy lifecycle trace lines
+// (`==> Deploying` / `==> Deployed` / `==> Skipping`). Returns true when
+// the line matched one of them so the caller stops dispatching. The match
+// order is part of the trace-line contract and is preserved verbatim.
+func (a *App) handleDeployTraceLine(selection uiSelection, line string) bool {
+	if match := activityDeployingLineRe.FindStringSubmatch(line); match != nil {
+		a.startDeployFromTrace(selection, match[1], match[2], match[3], match[4])
+		return true
+	}
+	if match := activityDeployedLineRe.FindStringSubmatch(line); match != nil {
+		a.finishDeployByTenantEnv(selection, match[1], match[2], activityQueueStatusSucceeded, "")
+		return true
+	}
+	if match := activitySkippingLineRe.FindStringSubmatch(line); match != nil {
+		a.finishDeployByTenantEnv(selection, match[1], match[2], activityQueueStatusSkipped, line)
+		return true
+	}
+	return false
+}
+
+// handleInitTraceLine dispatches the init lifecycle trace lines
+// (`==> Initializing` / `==> Initialized` / `==> Initialization failed`).
+// Returns true when the line matched. The terminal lines also fire the
+// init Wails events the frontend listens for.
+func (a *App) handleInitTraceLine(selection uiSelection, line string) bool {
+	if match := activityInitializingLineRe.FindStringSubmatch(line); match != nil {
+		a.startInitFromTrace(selection, match[1], match[2])
+		return true
+	}
+	if match := activityInitializedLineRe.FindStringSubmatch(line); match != nil {
+		a.finishInitByTenantEnv(match[1], match[2], activityQueueStatusSucceeded, "")
+		a.emitEnvironmentInitialized(match[1], match[2])
+		return true
+	}
+	if match := activityInitFailedLineRe.FindStringSubmatch(line); match != nil {
+		a.finishInitByTenantEnv(match[1], match[2], activityQueueStatusFailed, line)
+		a.emitEnvironmentInitFailed(match[1], match[2])
+		return true
+	}
+	return false
+}
+
+// handleCommandTraceLine dispatches the build/release/push umbrella trace
+// lines. These carry no tenant/env, so the activity is keyed off the
+// session selection. Returns true when the line matched. The match order
+// is part of the trace-line contract and is preserved verbatim.
+func (a *App) handleCommandTraceLine(selection uiSelection, line string) bool {
+	if activityBuildingLineRe.MatchString(line) {
+		a.startCommandFromTrace(selection, "build")
+		return true
+	}
+	if activityBuiltLineRe.MatchString(line) {
+		a.finishCommandBySelection(selection, "build", activityQueueStatusSucceeded, "")
+		return true
+	}
+	if activityBuildFailedLineRe.MatchString(line) {
+		a.finishCommandBySelection(selection, "build", activityQueueStatusFailed, line)
+		return true
+	}
+	if activityReleasingLineRe.MatchString(line) {
+		a.startCommandFromTrace(selection, "release")
+		return true
+	}
+	if activityReleasedLineRe.MatchString(line) {
+		a.finishCommandBySelection(selection, "release", activityQueueStatusSucceeded, "")
+		return true
+	}
+	if activityReleaseFailedLineRe.MatchString(line) {
+		a.finishCommandBySelection(selection, "release", activityQueueStatusFailed, line)
+		return true
+	}
+	if activityPushingLineRe.MatchString(line) {
+		a.startCommandFromTrace(selection, "push")
+		return true
+	}
+	if activityPushedLineRe.MatchString(line) {
+		a.finishCommandBySelection(selection, "push", activityQueueStatusSucceeded, "")
+		return true
+	}
+	if activityPushFailedLineRe.MatchString(line) {
+		a.finishCommandBySelection(selection, "push", activityQueueStatusFailed, line)
+		return true
+	}
+	return false
 }
 
 // finishDeployByTenantEnv finalizes the active deploy entry for the
@@ -560,12 +587,13 @@ func (a *App) finishInitByTenantEnv(tenant, environment string, status activityQ
 // trace observed in any session's PTY. No-op when an active entry
 // already exists for the selection so the helm poller and trace
 // handler converge on the same record.
-func (a *App) startDeployFromTrace(selection uiSelection, tenant, environment, version string) {
+func (a *App) startDeployFromTrace(selection uiSelection, tenant, environment, release, version string) {
 	if a.activityQueue == nil {
 		return
 	}
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
+	release = strings.TrimSpace(release)
 	version = strings.TrimSpace(version)
 	if tenant == "" || environment == "" {
 		return
@@ -573,17 +601,28 @@ func (a *App) startDeployFromTrace(selection uiSelection, tenant, environment, v
 	if _, ok := a.activityQueue.findActiveByCommand("deploy", tenant, environment); ok {
 		return
 	}
+	// The runtime chart's `==> Deploying` line carries no release token, so an
+	// empty parsed release means the runtime deploy; fall back to its release
+	// name. A non-runtime component names itself, so the drawer labels it by
+	// component ("deploy erun/local · erun-backend-postgres") instead of
+	// reading like a full-env redeploy (#531).
+	summary := "deploy " + tenant + "/" + environment
+	if release == "" {
+		release = releaseNameForTenant(tenant)
+	} else {
+		summary += " · " + release
+	}
 	kubeContext := a.resolveActivityKubeContext(selection, tenant, environment)
 	entry, fresh := a.activityQueue.start(activityQueueEntry{
 		Command:           "deploy",
 		Tenant:            tenant,
 		Environment:       environment,
 		Version:           version,
-		Release:           releaseNameForTenant(tenant),
+		Release:           release,
 		Namespace:         namespaceForTenantEnv(tenant, environment),
 		KubernetesContext: kubeContext,
 		Source:            "trace",
-		Summary:           "deploy " + tenant + "/" + environment,
+		Summary:           summary,
 	})
 	if !fresh {
 		return
@@ -772,39 +811,49 @@ func (a *App) fetchActivityContainerStatuses(ctx context.Context, entry activity
 	return parseActivityContainerStatuses(out)
 }
 
+// kubectlPodList is the subset of `kubectl get pods -o json` the activity
+// container-status poller decodes. Named (rather than an anonymous struct
+// literal) so the per-container conversion can be split into a focused
+// helper without restating the anonymous type at each boundary.
+type kubectlPodList struct {
+	Items []kubectlPodItem `json:"items"`
+}
+
+type kubectlPodItem struct {
+	Spec struct {
+		Containers []struct {
+			Name  string `json:"name"`
+			Image string `json:"image"`
+		} `json:"containers"`
+	} `json:"spec"`
+	Status struct {
+		ContainerStatuses []kubectlContainerStatus `json:"containerStatuses"`
+	} `json:"status"`
+}
+
+type kubectlContainerStatus struct {
+	Name         string `json:"name"`
+	Image        string `json:"image"`
+	Ready        bool   `json:"ready"`
+	RestartCount int    `json:"restartCount"`
+	State        struct {
+		Waiting *struct {
+			Reason  string `json:"reason"`
+			Message string `json:"message"`
+		} `json:"waiting,omitempty"`
+		Running *struct {
+			StartedAt string `json:"startedAt"`
+		} `json:"running,omitempty"`
+		Terminated *struct {
+			Reason   string `json:"reason"`
+			Message  string `json:"message"`
+			ExitCode int    `json:"exitCode"`
+		} `json:"terminated,omitempty"`
+	} `json:"state"`
+}
+
 func parseActivityContainerStatuses(raw []byte) ([]activityQueueContainerStatus, error) {
-	var parsed struct {
-		Items []struct {
-			Spec struct {
-				Containers []struct {
-					Name  string `json:"name"`
-					Image string `json:"image"`
-				} `json:"containers"`
-			} `json:"spec"`
-			Status struct {
-				ContainerStatuses []struct {
-					Name         string `json:"name"`
-					Image        string `json:"image"`
-					Ready        bool   `json:"ready"`
-					RestartCount int    `json:"restartCount"`
-					State        struct {
-						Waiting *struct {
-							Reason  string `json:"reason"`
-							Message string `json:"message"`
-						} `json:"waiting,omitempty"`
-						Running *struct {
-							StartedAt string `json:"startedAt"`
-						} `json:"running,omitempty"`
-						Terminated *struct {
-							Reason   string `json:"reason"`
-							Message  string `json:"message"`
-							ExitCode int    `json:"exitCode"`
-						} `json:"terminated,omitempty"`
-					} `json:"state"`
-				} `json:"containerStatuses"`
-			} `json:"status"`
-		} `json:"items"`
-	}
+	var parsed kubectlPodList
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return nil, err
 	}
@@ -818,42 +867,50 @@ func parseActivityContainerStatuses(raw []byte) ([]activityQueueContainerStatus,
 			imageByName[c.Name] = c.Image
 		}
 		for _, cs := range item.Status.ContainerStatuses {
-			key := cs.Name
-			if seen[key] {
+			if seen[cs.Name] {
 				continue
 			}
-			seen[key] = true
-			image := strings.TrimSpace(cs.Image)
-			if image == "" {
-				image = imageByName[cs.Name]
-			}
-			status := activityQueueContainerStatus{
-				Name:     cs.Name,
-				Image:    image,
-				Ready:    cs.Ready,
-				Restarts: cs.RestartCount,
-			}
-			switch {
-			case cs.State.Running != nil:
-				status.Phase = "Running"
-			case cs.State.Waiting != nil:
-				status.Phase = "Waiting"
-				status.Reason = cs.State.Waiting.Reason
-				status.Message = cs.State.Waiting.Message
-			case cs.State.Terminated != nil:
-				status.Phase = "Terminated"
-				status.Reason = cs.State.Terminated.Reason
-				status.Message = fmt.Sprintf("exited with code %d", cs.State.Terminated.ExitCode)
-				if msg := strings.TrimSpace(cs.State.Terminated.Message); msg != "" {
-					status.Message += ": " + msg
-				}
-			default:
-				status.Phase = "Pending"
-			}
-			out = append(out, status)
+			seen[cs.Name] = true
+			out = append(out, convertActivityContainerStatus(cs, imageByName))
 		}
 	}
 	return out, nil
+}
+
+// convertActivityContainerStatus maps one decoded container status into the
+// queue's display shape, resolving the image from the spec fallback and
+// classifying the phase. Extracted from parseActivityContainerStatuses so
+// the parse loop stays under the cyclomatic-complexity limit; behavior is
+// identical to the inline body it replaced.
+func convertActivityContainerStatus(cs kubectlContainerStatus, imageByName map[string]string) activityQueueContainerStatus {
+	image := strings.TrimSpace(cs.Image)
+	if image == "" {
+		image = imageByName[cs.Name]
+	}
+	status := activityQueueContainerStatus{
+		Name:     cs.Name,
+		Image:    image,
+		Ready:    cs.Ready,
+		Restarts: cs.RestartCount,
+	}
+	switch {
+	case cs.State.Running != nil:
+		status.Phase = "Running"
+	case cs.State.Waiting != nil:
+		status.Phase = "Waiting"
+		status.Reason = cs.State.Waiting.Reason
+		status.Message = cs.State.Waiting.Message
+	case cs.State.Terminated != nil:
+		status.Phase = "Terminated"
+		status.Reason = cs.State.Terminated.Reason
+		status.Message = fmt.Sprintf("exited with code %d", cs.State.Terminated.ExitCode)
+		if msg := strings.TrimSpace(cs.State.Terminated.Message); msg != "" {
+			status.Message += ": " + msg
+		}
+	default:
+		status.Phase = "Pending"
+	}
+	return status
 }
 
 // activityTargetForRuntime returns the human-readable "tenant/env [version]"
@@ -888,6 +945,37 @@ func (a *App) feedActivityTraceFromTerminal(managed *managedTerminal, chunk []by
 	}
 	a.mu.Lock()
 	managed.activityTraceBuffer += stripActivityTraceANSI(string(chunk))
+	lines := drainActivityTraceLines(managed)
+	a.mu.Unlock()
+	if len(lines) == 0 {
+		return
+	}
+	handler := newActivityTraceLineHandler(a, managed.selection, managed.kind)
+	for _, line := range lines {
+		// Buffer the line for the active entry before dispatching it, so the
+		// "==> Deploy failed" line that finalizes the entry (and the error
+		// output preceding it) is already captured when finish() snapshots
+		// the buffer into entry.Detail.
+		a.activityQueue.recordOutputLine(managed.selection.Tenant, managed.selection.Environment, line)
+		handler(line)
+		signalSessionReadyOnLine(managed, line)
+		// The CLI's taken-over notice is a public contract line (see
+		// eruncommon.ShellSessionTakenOverNotice): another ERun window
+		// re-attached this persistent session, so the upcoming PTY exit
+		// must not trigger a reconnect that would steal it back.
+		if strings.TrimSpace(line) == eruncommon.ShellSessionTakenOverNotice {
+			a.markSessionTakenOver(managed)
+		}
+	}
+}
+
+// drainActivityTraceLines consumes every complete `\n`-terminated line from
+// the managed terminal's activity trace buffer, returning the cleaned lines
+// and leaving any trailing partial line buffered for the next chunk. The
+// caller must hold a.mu. Extracted from feedActivityTraceFromTerminal so the
+// feed stays under the cyclomatic-complexity limit; the line cleaning is
+// identical to the inline loop it replaced.
+func drainActivityTraceLines(managed *managedTerminal) []string {
 	lines := []string{}
 	for {
 		idx := strings.IndexByte(managed.activityTraceBuffer, '\n')
@@ -912,27 +1000,7 @@ func (a *App) feedActivityTraceFromTerminal(managed *managedTerminal, chunk []by
 		lines = append(lines, line)
 		managed.activityTraceBuffer = managed.activityTraceBuffer[idx+1:]
 	}
-	a.mu.Unlock()
-	if len(lines) == 0 {
-		return
-	}
-	handler := newActivityTraceLineHandler(a, managed.selection, managed.kind)
-	for _, line := range lines {
-		// Buffer the line for the active entry before dispatching it, so the
-		// "==> Deploy failed" line that finalizes the entry (and the error
-		// output preceding it) is already captured when finish() snapshots
-		// the buffer into entry.Detail.
-		a.activityQueue.recordOutputLine(managed.selection.Tenant, managed.selection.Environment, line)
-		handler(line)
-		signalSessionReadyOnLine(managed, line)
-		// The CLI's taken-over notice is a public contract line (see
-		// eruncommon.ShellSessionTakenOverNotice): another ERun window
-		// re-attached this persistent session, so the upcoming PTY exit
-		// must not trigger a reconnect that would steal it back.
-		if strings.TrimSpace(line) == eruncommon.ShellSessionTakenOverNotice {
-			a.markSessionTakenOver(managed)
-		}
-	}
+	return lines
 }
 
 // sessionReady*Re match lines that indicate the session's setup phase
@@ -942,7 +1010,7 @@ func (a *App) feedActivityTraceFromTerminal(managed *managedTerminal, chunk []by
 // is past the setup phase and a parallel queued action can safely run.
 var (
 	sessionReadyDeployedRe    = regexp.MustCompile(`^==> Deployed `)
-	sessionReadyFailedRe      = regexp.MustCompile(`^==> Deploy failed`)
+	sessionReadyFailedRe      = regexp.MustCompile(`^==> Deploy (?:of \S+ )?failed`)
 	sessionReadySkippedRe     = regexp.MustCompile(`^==> Skipping `)
 	sessionReadyAttachedRe    = regexp.MustCompile(`^Defaulted container "[^"]+" out of:`)
 	sessionReadyShellPromptRe = regexp.MustCompile(`[\w][\w.-]*@[\w][\w.-]*:[~/].*[\$#]\s*$`)
