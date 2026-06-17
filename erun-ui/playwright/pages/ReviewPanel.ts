@@ -34,4 +34,35 @@ export class ReviewPanel {
   async toggleChangedFiles(): Promise<void> {
     await this.page.getByRole('button', { name: 'Toggle changed files list' }).click();
   }
+
+  // changedFilesTree is the tree's own scroll container (#547).
+  changedFilesTree(): Locator {
+    return this.page.getByLabel('Changed files tree');
+  }
+
+  // treeFilePaths returns the data-path of each file node in the changed-files
+  // tree, in render order (directory rows carry no data-path).
+  async treeFilePaths(): Promise<string[]> {
+    return this.changedFilesTree()
+      .locator('[data-path]')
+      .evaluateAll((els) => els.map((el) => el.getAttribute('data-path') ?? ''));
+  }
+
+  // diffSectionPaths returns the data-path of each rendered diff section, in
+  // DOM order.
+  async diffSectionPaths(): Promise<string[]> {
+    return this.page
+      .locator('.diff-file[data-path]')
+      .evaluateAll((els) => els.map((el) => el.getAttribute('data-path') ?? ''));
+  }
+
+  async collapseDirectory(name: string): Promise<void> {
+    await this.page.getByRole('button', { name: `${name} directory` }).click();
+  }
+
+  // currentTreeNode is the highlighted (active) file node the diff scrollspy
+  // selected.
+  currentTreeNode(): Locator {
+    return this.changedFilesTree().locator('[aria-current="true"]');
+  }
 }
