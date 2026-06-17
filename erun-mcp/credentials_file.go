@@ -38,14 +38,10 @@ func parseAWSCredentialsFile(data []byte) []awsCredentialProfile {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
+		if isCommentOrBlankLine(line) {
 			continue
 		}
-		if strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
-			continue
-		}
-		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-			name := strings.TrimSpace(line[1 : len(line)-1])
+		if name, ok := parseAWSProfileHeader(line); ok {
 			if name == "" {
 				current = nil
 				continue
@@ -57,18 +53,41 @@ func parseAWSCredentialsFile(data []byte) []awsCredentialProfile {
 		if current == nil {
 			continue
 		}
-		eq := strings.IndexByte(line, '=')
-		if eq <= 0 {
-			continue
+		if entry, ok := parseAWSCredentialEntry(line); ok {
+			current.Entries = append(current.Entries, entry)
 		}
-		key := strings.TrimSpace(line[:eq])
-		value := strings.TrimSpace(line[eq+1:])
-		if key == "" {
-			continue
-		}
-		current.Entries = append(current.Entries, awsCredentialEntry{Key: key, Value: value})
 	}
 	return profiles
+}
+
+// isCommentOrBlankLine reports whether a trimmed credentials-file line carries
+// no profile data (empty, or a `#` / `;` comment).
+func isCommentOrBlankLine(line string) bool {
+	return line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";")
+}
+
+// parseAWSProfileHeader returns the profile name and true when line is a
+// `[name]` section header. The name may be empty (a malformed `[]`), which the
+// caller treats as ending the current profile.
+func parseAWSProfileHeader(line string) (string, bool) {
+	if !strings.HasPrefix(line, "[") || !strings.HasSuffix(line, "]") {
+		return "", false
+	}
+	return strings.TrimSpace(line[1 : len(line)-1]), true
+}
+
+// parseAWSCredentialEntry parses a `key = value` line into an entry. ok is
+// false for lines with no `=` or an empty key.
+func parseAWSCredentialEntry(line string) (awsCredentialEntry, bool) {
+	eq := strings.IndexByte(line, '=')
+	if eq <= 0 {
+		return awsCredentialEntry{}, false
+	}
+	key := strings.TrimSpace(line[:eq])
+	if key == "" {
+		return awsCredentialEntry{}, false
+	}
+	return awsCredentialEntry{Key: key, Value: strings.TrimSpace(line[eq+1:])}, true
 }
 
 func setAWSCredentialProfile(profiles []awsCredentialProfile, name string, entries []awsCredentialEntry) []awsCredentialProfile {

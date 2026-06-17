@@ -29,21 +29,9 @@ func TestIdleStopRecordToolWritesHostManualEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("idleStopRecordTool returned err: %v", err)
 	}
-	if result.Tenant != "tenant-a" || result.Environment != "dev" {
-		t.Fatalf("unexpected resolved target: %+v", result)
-	}
-	if time.Since(result.StoppedAt) > 5*time.Second {
-		t.Fatalf("StoppedAt should be near time.Now(), got %v", result.StoppedAt)
-	}
+	assertRecentStopTarget(t, result, "tenant-a", "dev")
 
-	entries, err := eruncommon.LoadEnvironmentStopHistory("tenant-a", "dev")
-	if err != nil {
-		t.Fatalf("LoadEnvironmentStopHistory: %v", err)
-	}
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 history entry, got %d", len(entries))
-	}
-	entry := entries[0]
+	entry := loadSingleStopHistoryEntry(t, "tenant-a", "dev")
 	if entry.Source != eruncommon.StopHistorySourceHostManual {
 		t.Fatalf("expected source=%q, got %q", eruncommon.StopHistorySourceHostManual, entry.Source)
 	}
@@ -100,14 +88,7 @@ func TestIdleStopRecordToolFoldsPendingArmedGrace(t *testing.T) {
 		t.Fatalf("idleStopRecordTool returned err: %v", err)
 	}
 
-	entries, err := eruncommon.LoadEnvironmentStopHistory("tenant-a", "dev")
-	if err != nil {
-		t.Fatalf("LoadEnvironmentStopHistory: %v", err)
-	}
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 history entry, got %d", len(entries))
-	}
-	entry := entries[0]
+	entry := loadSingleStopHistoryEntry(t, "tenant-a", "dev")
 	if entry.Source != eruncommon.StopHistorySourceHostManual {
 		t.Fatalf("expected source=host-manual even with armed grace, got %q", entry.Source)
 	}
@@ -127,19 +108,9 @@ func TestIdleStopRecordToolFoldsPendingArmedGrace(t *testing.T) {
 		t.Fatalf("expected 2 markers, got %d", len(entry.Markers))
 	}
 	// The pending file should be cleared after the record so a
-	// follow-up stop-ready tick arms a fresh grace from scratch.
-	pendingPath, err := eruncommon.EnvironmentStopPendingPath("tenant-a", "dev")
-	if err != nil {
-		t.Fatalf("EnvironmentStopPendingPath: %v", err)
-	}
-	if _, err := os.Stat(pendingPath); !os.IsNotExist(err) {
-		t.Fatalf("expected pending file cleared, stat err=%v", err)
-	}
-	// Sanity: the file is genuinely in the temp HOME, not the
-	// developer's real HOME.
-	if !filepath.HasPrefix(pendingPath, home) {
-		t.Fatalf("pending path escapes temp HOME: %s", pendingPath)
-	}
+	// follow-up stop-ready tick arms a fresh grace from scratch, and it
+	// must genuinely live under the temp HOME, not the developer's.
+	assertStopPendingCleared(t, "tenant-a", "dev", home)
 }
 
 // TestIdleStopRecordToolRequiresTenantAndEnvironment guards against
@@ -149,5 +120,50 @@ func TestIdleStopRecordToolRequiresTenantAndEnvironment(t *testing.T) {
 	handler := idleStopRecordTool(RuntimeConfig{})
 	if _, _, err := handler(context.Background(), nil, IdleStopRecordInput{}); err == nil {
 		t.Fatal("expected error when tenant and environment are both empty")
+	}
+}
+
+// assertRecentStopTarget checks the recorded result echoes the resolved
+// tenant/environment and stamps StoppedAt at roughly time.Now().
+func assertRecentStopTarget(t *testing.T, result IdleStopRecordResult, tenant, env string) {
+	t.Helper()
+	if result.Tenant != tenant || result.Environment != env {
+		t.Fatalf("unexpected resolved target: %+v", result)
+	}
+	if time.Since(result.StoppedAt) > 5*time.Second {
+		t.Fatalf("StoppedAt should be near time.Now(), got %v", result.StoppedAt)
+	}
+}
+
+// loadSingleStopHistoryEntry loads the env's stop history and fails unless
+// exactly one entry is present, returning it.
+func loadSingleStopHistoryEntry(t *testing.T, tenant, env string) eruncommon.EnvironmentStopHistoryEntry {
+	t.Helper()
+	entries, err := eruncommon.LoadEnvironmentStopHistory(tenant, env)
+	if err != nil {
+		t.Fatalf("LoadEnvironmentStopHistory: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 history entry, got %d", len(entries))
+	}
+	return entries[0]
+}
+
+// assertStopPendingCleared fails unless the env's pending-stop file is gone and
+// its resolved path sits under home (catching a path that escapes the temp
+// HOME). Uses filepath.IsLocal for the boundary check rather than the
+// deprecated filepath.HasPrefix.
+func assertStopPendingCleared(t *testing.T, tenant, env, home string) {
+	t.Helper()
+	pendingPath, err := eruncommon.EnvironmentStopPendingPath(tenant, env)
+	if err != nil {
+		t.Fatalf("EnvironmentStopPendingPath: %v", err)
+	}
+	if _, err := os.Stat(pendingPath); !os.IsNotExist(err) {
+		t.Fatalf("expected pending file cleared, stat err=%v", err)
+	}
+	rel, err := filepath.Rel(home, pendingPath)
+	if err != nil || !filepath.IsLocal(rel) {
+		t.Fatalf("pending path escapes temp HOME: %s", pendingPath)
 	}
 }
