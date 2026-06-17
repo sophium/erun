@@ -295,6 +295,7 @@ The skip emits `result: skipped (no change)` in the trace. `deploy` never pushes
 | `-y` | bool | `false` | Auto-approve every offered recovery action. |
 | `--clear-pending-helm` | bool | `false` | Run the clear-pending-helm recovery without prompting (see [Deploy recovery actions](#deploy-recovery-actions)). |
 | `--rollback` | bool | `false` | Run the rollback recovery without prompting (see [Deploy recovery actions](#deploy-recovery-actions)). |
+| `--sync-config` | bool | `false` | In-pod only. Reconcile the on-disk env config with the helm-injected `ERUN_*` env vars (injected env wins): rewrite the projected keys (`type`, `kubernetescontext`, `cloudprovideralias`, `managedcloud`, cloud provider/context blocks, `idle`, `runtimeregistry`, `containerregistries`, `disablebuildscript`), preserving every unprojected key. Reports per-key drift as `missing` / `wrong` / `legacy`; under `--dry-run` the file writes are traced but not performed. Short-circuits the remote-init flow. |
 
 ### Check catalogue
 

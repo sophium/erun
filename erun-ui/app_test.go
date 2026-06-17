@@ -97,7 +97,7 @@ func TestLoadStateUsesTenantSpecificDeployableVersionSuggestions(t *testing.T) {
 			envs: map[string]eruncommon.EnvConfig{
 				"frs/prod": {
 					Name:              "prod",
-					RepoPath:          projectRoot,
+					LocalRepoPath:     projectRoot,
 					KubernetesContext: "cluster-prod",
 				},
 			},
@@ -431,7 +431,7 @@ func TestLoadDiffUsesSelectedMCPPort(t *testing.T) {
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/local": {
 				Name:              "local",
-				RepoPath:          projectRoot,
+				LocalRepoPath:     projectRoot,
 				KubernetesContext: "rancher-desktop",
 			},
 		},
@@ -484,7 +484,7 @@ func TestLoadDiffReturnsUnreachableWhenPortClosed(t *testing.T) {
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/test": {
 				Name:              "test",
-				RepoPath:          projectRoot,
+				LocalRepoPath:     projectRoot,
 				KubernetesContext: "orbstack",
 			},
 		},
@@ -531,7 +531,7 @@ func TestLoadDiffWrapsDialFailureAsUnreachable(t *testing.T) {
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/test": {
 				Name:              "test",
-				RepoPath:          projectRoot,
+				LocalRepoPath:     projectRoot,
 				KubernetesContext: "orbstack",
 			},
 		},
@@ -576,7 +576,7 @@ func TestReconnectMCPRunsOpenAndStreamsLines(t *testing.T) {
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/test": {
 				Name:              "test",
-				RepoPath:          projectRoot,
+				LocalRepoPath:     projectRoot,
 				KubernetesContext: "orbstack",
 			},
 		},
@@ -824,7 +824,7 @@ func TestStartInitSessionPipesCommandToLocal(t *testing.T) {
 			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
-			"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
+			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
 		},
 	}
 
@@ -879,7 +879,7 @@ func TestStartInitSessionUsesSeparateSessionKey(t *testing.T) {
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {
 				Name:              "remote",
-				RepoPath:          projectRoot,
+				LocalRepoPath:     projectRoot,
 				KubernetesContext: "rancher-desktop",
 			},
 		},
@@ -915,7 +915,7 @@ func TestStartInitSessionReusesLocalAcrossInvocations(t *testing.T) {
 			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
-			"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
+			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
 		},
 	}
 
@@ -958,7 +958,7 @@ func TestStartSSHDInitSessionPipesCommandToLocal(t *testing.T) {
 			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
-			"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
+			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
 		},
 	}
 
@@ -995,7 +995,7 @@ func TestStartDoctorSessionPipesCommandToLocal(t *testing.T) {
 			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
-			"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
+			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
 		},
 	}
 
@@ -1032,7 +1032,7 @@ func TestStartDeploySessionPipesCommandToLocal(t *testing.T) {
 			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
-			"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
+			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
 		},
 	}
 
@@ -1069,7 +1069,7 @@ func TestRunErunCommandReusesLocalAndERunSpawnsSeparately(t *testing.T) {
 			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
-			"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
+			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
 		},
 	}
 
@@ -1112,9 +1112,9 @@ func TestOpenIDERunsWithoutConsumingTerminalWhenSSHDEnabled(t *testing.T) {
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {
 				Name:              "remote",
-				RepoPath:          projectRoot,
+				LocalRepoPath:     projectRoot,
 				KubernetesContext: "rancher-desktop",
-				Type: eruncommon.EnvironmentTypeRuntime,
+				Type:              eruncommon.EnvironmentTypeRuntime,
 				SSHD: eruncommon.SSHDConfig{
 					Enabled: true,
 				},
@@ -1166,7 +1166,7 @@ func TestOpenIDEOpensLocalProjectWithoutSSHD(t *testing.T) {
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/local": {
 				Name:              "local",
-				RepoPath:          projectRoot,
+				LocalRepoPath:     projectRoot,
 				KubernetesContext: "rancher-desktop",
 			},
 		},
@@ -1234,9 +1234,9 @@ func TestOpenIDERejectsMissingSSHDWithoutHiddenInit(t *testing.T) {
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {
 				Name:              "remote",
-				RepoPath:          projectRoot,
+				LocalRepoPath:     projectRoot,
 				KubernetesContext: "rancher-desktop",
-				Type: eruncommon.EnvironmentTypeRuntime,
+				Type:              eruncommon.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -1294,9 +1294,9 @@ func TestDeleteEnvironmentRequiresExactConfirmationAndDeletesConfig(t *testing.T
 		envs: map[string]eruncommon.EnvConfig{
 			"frs/prod": {
 				Name:              "prod",
-				RepoPath:          "/home/erun/git/frs",
+				LocalRepoPath:     "/home/erun/git/frs",
 				KubernetesContext: "cluster-prod",
-				Type: eruncommon.EnvironmentTypeRuntime,
+				Type:              eruncommon.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -1791,7 +1791,7 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 		envs: map[string]eruncommon.EnvConfig{
 			"frs/prod": {
 				Name:                "prod",
-				RepoPath:            projectRoot,
+				LocalRepoPath:       projectRoot,
 				KubernetesContext:   "cluster-old",
 				ContainerRegistries: eruncommon.SingleContainerRegistries("registry.example/old"),
 				CloudProviderAlias:  "team-cloud",
@@ -1900,7 +1900,7 @@ func assertStoredEnvironmentConfig(t *testing.T, stored eruncommon.EnvConfig, pr
 	t.Helper()
 
 	storedRegistry, _ := stored.ContainerRegistries.BuildRegistry()
-	if stored.RepoPath != projectRoot || stored.Type != eruncommon.EnvironmentTypeRuntime || stored.RuntimeVersion != "1.0.0" || storedRegistry != "registry.example/team" || stored.CloudProviderAlias != "other-cloud" || stored.SSHD.Enabled || stored.SSHD.LocalPort != 60022 || stored.SSHD.PublicKeyPath != "/tmp/old.pub" {
+	if stored.EffectiveLocalRepoPath() != projectRoot || stored.Type != eruncommon.EnvironmentTypeRuntime || stored.RuntimeVersion != "1.0.0" || storedRegistry != "registry.example/team" || stored.CloudProviderAlias != "other-cloud" || stored.SSHD.Enabled || stored.SSHD.LocalPort != 60022 || stored.SSHD.PublicKeyPath != "/tmp/old.pub" {
 		t.Fatalf("unexpected stored config: %+v", stored)
 	}
 	if stored.RuntimePod.CPU != "6" || stored.RuntimePod.Memory != "12Gi" {
@@ -1928,12 +1928,12 @@ func TestLoadEnvironmentConfigUsesProjectContainerRegistryForAllEnvironments(t *
 		envs: map[string]eruncommon.EnvConfig{
 			"frs/local": {
 				Name:              "local",
-				RepoPath:          projectRoot,
+				LocalRepoPath:     projectRoot,
 				KubernetesContext: "cluster-local",
 			},
 			"frs/prod": {
 				Name:              "prod",
-				RepoPath:          projectRoot,
+				LocalRepoPath:     projectRoot,
 				KubernetesContext: "cluster-prod",
 			},
 		},
@@ -1972,7 +1972,7 @@ func TestSaveEnvironmentConfigPreservesProjectContainerRegistryReadModel(t *test
 		envs: map[string]eruncommon.EnvConfig{
 			"frs/local": {
 				Name:              "local",
-				RepoPath:          projectRoot,
+				LocalRepoPath:     projectRoot,
 				KubernetesContext: "cluster-local",
 				RuntimePod: eruncommon.RuntimePodResources{
 					CPU:    "4",
@@ -2020,7 +2020,7 @@ func TestSaveEnvironmentConfigWritesLocalAgentRegistryListToProjectConfig(t *tes
 		},
 		tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs", ProjectRoot: projectRoot}},
 		envs: map[string]eruncommon.EnvConfig{
-			"frs/local": {Name: "local", RepoPath: projectRoot, KubernetesContext: "c", Type: eruncommon.EnvironmentTypeLocalAgent},
+			"frs/local": {Name: "local", LocalRepoPath: projectRoot, KubernetesContext: "c", Type: eruncommon.EnvironmentTypeLocalAgent},
 		},
 	}
 	app := NewApp(erunUIDeps{store: store})
@@ -2062,7 +2062,7 @@ func TestSaveEnvironmentConfigRejectsInvalidRegistryList(t *testing.T) {
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs", ProjectRoot: projectRoot}},
 		envs: map[string]eruncommon.EnvConfig{
-			"frs/local": {Name: "local", RepoPath: projectRoot, Type: eruncommon.EnvironmentTypeLocalAgent},
+			"frs/local": {Name: "local", LocalRepoPath: projectRoot, Type: eruncommon.EnvironmentTypeLocalAgent},
 		},
 	}
 	app := NewApp(erunUIDeps{store: store})
@@ -2090,7 +2090,7 @@ func TestSaveEnvironmentConfigAcceptsDeployOnlyRegistry(t *testing.T) {
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs", ProjectRoot: projectRoot}},
 		envs: map[string]eruncommon.EnvConfig{
-			"frs/prod": {Name: "prod", RepoPath: projectRoot, Type: eruncommon.EnvironmentTypeRuntime},
+			"frs/prod": {Name: "prod", LocalRepoPath: projectRoot, Type: eruncommon.EnvironmentTypeRuntime},
 		},
 	}
 	app := NewApp(erunUIDeps{store: store})
@@ -2122,7 +2122,7 @@ func TestLoadEnvironmentConfigExposesClaudeDefaultsAndOverrides(t *testing.T) {
 		envs: map[string]eruncommon.EnvConfig{
 			"frs/local": {
 				Name:              "local",
-				RepoPath:          projectRoot,
+				LocalRepoPath:     projectRoot,
 				KubernetesContext: "cluster-local",
 				Claude: eruncommon.EnvironmentClaudeConfig{
 					UseBedrock:      &useBedrock,
@@ -2171,7 +2171,7 @@ func TestSaveEnvironmentConfigRoundTripsClaudeOverrides(t *testing.T) {
 		envs: map[string]eruncommon.EnvConfig{
 			"frs/local": {
 				Name:              "local",
-				RepoPath:          projectRoot,
+				LocalRepoPath:     projectRoot,
 				KubernetesContext: "cluster-local",
 				RuntimePod: eruncommon.RuntimePodResources{
 					CPU:    "4",
@@ -2237,7 +2237,7 @@ func TestSaveEnvironmentConfigRoundTripsClaudeLaunchFlags(t *testing.T) {
 		envs: map[string]eruncommon.EnvConfig{
 			"frs/local": {
 				Name:              "local",
-				RepoPath:          projectRoot,
+				LocalRepoPath:     projectRoot,
 				KubernetesContext: "cluster-local",
 			},
 		},
@@ -2291,7 +2291,7 @@ func TestSetEnvironmentAutoStartPersistsTriStateValue(t *testing.T) {
 		envs: map[string]eruncommon.EnvConfig{
 			"frs/prod": {
 				Name:                "prod",
-				RepoPath:            projectRoot,
+				LocalRepoPath:       projectRoot,
 				KubernetesContext:   "cluster-prod",
 				ContainerRegistries: eruncommon.SingleContainerRegistries("registry.example/keep"),
 			},
@@ -2370,10 +2370,10 @@ func TestSaveRemoteEnvironmentConfigSetsCloudAliasViaMCP(t *testing.T) {
 		envs: map[string]eruncommon.EnvConfig{
 			"frs/dev": {
 				Name:               "dev",
-				RepoPath:           projectRoot,
+				LocalRepoPath:      projectRoot,
 				KubernetesContext:  "cluster-dev",
 				CloudProviderAlias: "old-cloud",
-				Type: eruncommon.EnvironmentTypeRuntime,
+				Type:               eruncommon.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -2439,9 +2439,9 @@ func TestStartSessionLeavesCloudContextStartupToErunCommand(t *testing.T) {
 			envs: map[string]eruncommon.EnvConfig{
 				"frs/prod": {
 					Name:              "prod",
-					RepoPath:          projectRoot,
+					LocalRepoPath:     projectRoot,
 					KubernetesContext: "cluster-prod",
-					Type: eruncommon.EnvironmentTypeRuntime,
+					Type:              eruncommon.EnvironmentTypeRuntime,
 				},
 			},
 		},
@@ -2500,9 +2500,9 @@ func TestDeleteEnvironmentStartsLinkedContextThenStopsIt(t *testing.T) {
 		envs: map[string]eruncommon.EnvConfig{
 			"frs/prod": {
 				Name:              "prod",
-				RepoPath:          projectRoot,
+				LocalRepoPath:     projectRoot,
 				KubernetesContext: "cluster-prod",
-				Type: eruncommon.EnvironmentTypeRuntime,
+				Type:              eruncommon.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -2579,7 +2579,7 @@ func TestStartSessionAllocatesIndependentSlots(t *testing.T) {
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/local": {
 				Name:              "local",
-				RepoPath:          projectRoot,
+				LocalRepoPath:     projectRoot,
 				KubernetesContext: "rancher-desktop",
 			},
 		},
@@ -2631,7 +2631,7 @@ func TestSendSessionInputRoutesPerSession(t *testing.T) {
 			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "local"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
-			"erun/local": {Name: "local", RepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
+			"erun/local": {Name: "local", LocalRepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
 		},
 	}
 
@@ -2688,7 +2688,7 @@ func TestStartSessionReusesExistingSessionForSelection(t *testing.T) {
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/local": {
 				Name:              "local",
-				RepoPath:          projectRoot,
+				LocalRepoPath:     projectRoot,
 				KubernetesContext: "rancher-desktop",
 			},
 		},
@@ -2737,7 +2737,7 @@ func TestSendSessionInputRecordsCLIActivityForCurrentEnvironment(t *testing.T) {
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/local": {
 				Name:              "local",
-				RepoPath:          projectRoot,
+				LocalRepoPath:     projectRoot,
 				KubernetesContext: "rancher-desktop",
 			},
 		},
@@ -2787,7 +2787,7 @@ func TestSendSessionInputClearsAwaitingPostRespawnInputFlag(t *testing.T) {
 			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "local"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
-			"erun/local": {Name: "local", RepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
+			"erun/local": {Name: "local", LocalRepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
 		},
 	}
 	app := NewApp(erunUIDeps{
@@ -2891,7 +2891,7 @@ func TestMergeLocalIdleActivityUsesSavedPolicyWithRemoteActivity(t *testing.T) {
 					WorkingHours: "00:00-23:59",
 				},
 				ManagedCloud: true,
-				Type: eruncommon.EnvironmentTypeRuntime,
+				Type:         eruncommon.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -2958,7 +2958,7 @@ func TestStartCloudContextClearsPreviousIdleStop(t *testing.T) {
 				KubernetesContext:  "cluster-cloud",
 				CloudProviderAlias: "team-cloud",
 				ManagedCloud:       true,
-				Type: eruncommon.EnvironmentTypeRuntime,
+				Type:               eruncommon.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -2994,11 +2994,11 @@ func TestLoadIdleStatusDoesNotStopWhileEnvironmentCommandRunning(t *testing.T) {
 		envs: map[string]eruncommon.EnvConfig{
 			"team-busy/dev-busy": {
 				Name:               "dev-busy",
-				RepoPath:           projectRoot,
+				LocalRepoPath:      projectRoot,
 				KubernetesContext:  "cluster-cloud",
 				CloudProviderAlias: "team-cloud",
 				ManagedCloud:       true,
-				Type: eruncommon.EnvironmentTypeRuntime,
+				Type:               eruncommon.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -3142,7 +3142,7 @@ func TestSavePastedImageCopiesIntoCurrentRuntime(t *testing.T) {
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/local": {
 				Name:              "local",
-				RepoPath:          projectRoot,
+				LocalRepoPath:     projectRoot,
 				KubernetesContext: "rancher-desktop",
 			},
 		},
@@ -3476,7 +3476,7 @@ func TestStartLocalSessionStartsShellAtRepoPath(t *testing.T) {
 			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
-			"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "ctx"},
+			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
 		},
 	}
 
@@ -3518,7 +3518,7 @@ func TestStartAISessionRunsErunOpenAsPersistentAITab(t *testing.T) {
 			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
-			"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "ctx"},
+			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
 		},
 	}
 
@@ -3567,7 +3567,7 @@ func TestStartSessionAutoReconnectsOnExit(t *testing.T) {
 			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
-			"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "ctx"},
+			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
 		},
 	}
 
@@ -3635,9 +3635,9 @@ func TestStartSessionDoesNotReconnectIntoStoppedCloudContext(t *testing.T) {
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {
 				Name:              "remote",
-				RepoPath:          projectRoot,
+				LocalRepoPath:     projectRoot,
 				KubernetesContext: "cluster-cloud",
-				Type: eruncommon.EnvironmentTypeRuntime,
+				Type:              eruncommon.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -3706,9 +3706,9 @@ func TestStartAISessionRespawnsAfterStoppedCloudContextDeath(t *testing.T) {
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {
 				Name:              "remote",
-				RepoPath:          projectRoot,
+				LocalRepoPath:     projectRoot,
 				KubernetesContext: "cluster-cloud",
-				Type: eruncommon.EnvironmentTypeRuntime,
+				Type:              eruncommon.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -3802,9 +3802,9 @@ func TestMaybeStopIdleClearsStaleIdleStopWhenContextIsRunningAgain(t *testing.T)
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {
 				Name:              "remote",
-				RepoPath:          projectRoot,
+				LocalRepoPath:     projectRoot,
 				KubernetesContext: "cluster-cloud",
-				Type: eruncommon.EnvironmentTypeRuntime,
+				Type:              eruncommon.EnvironmentTypeRuntime,
 				ManagedCloud:      true,
 			},
 		},
@@ -3861,9 +3861,9 @@ func TestIdleStatusToUIClearsStopErrorWhenContextIsRunning(t *testing.T) {
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {
 				Name:              "remote",
-				RepoPath:          projectRoot,
+				LocalRepoPath:     projectRoot,
 				KubernetesContext: "cluster-cloud",
-				Type: eruncommon.EnvironmentTypeRuntime,
+				Type:              eruncommon.EnvironmentTypeRuntime,
 				ManagedCloud:      true,
 			},
 		},
@@ -3909,9 +3909,9 @@ func TestIdleStatusToUIKeepsStopErrorWhenContextIsStopped(t *testing.T) {
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {
 				Name:              "remote",
-				RepoPath:          projectRoot,
+				LocalRepoPath:     projectRoot,
 				KubernetesContext: "cluster-cloud",
-				Type: eruncommon.EnvironmentTypeRuntime,
+				Type:              eruncommon.EnvironmentTypeRuntime,
 				ManagedCloud:      true,
 			},
 		},
@@ -3945,7 +3945,7 @@ func TestStartSessionLogsOpenCommandToLocal(t *testing.T) {
 			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
-			"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "ctx"},
+			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
 		},
 	}
 
@@ -3996,7 +3996,7 @@ func TestStartSessionDoesNotLogWhenLocalAbsent(t *testing.T) {
 			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
-			"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "ctx"},
+			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
 		},
 	}
 
@@ -4024,7 +4024,7 @@ func TestStartLocalSessionDoesNotAutoReconnect(t *testing.T) {
 			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
-			"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "ctx"},
+			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
 		},
 	}
 

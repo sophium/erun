@@ -759,7 +759,6 @@ func (s *bootstrapRunState) createEnvConfig() error {
 		Name:               s.envName,
 		Type:               s.params.ResolvedType(),
 		LocalRepoPath:      envProjectRootForType(s.params.ResolvedType(), envProjectRoot),
-		RepoPath:           envProjectRoot,
 		KubernetesContext:  kubernetesContext,
 		CloudProviderAlias: cloudProviderAlias,
 		ManagedCloud:       managedCloud,
@@ -845,10 +844,10 @@ func (s *bootstrapRunState) updateRemoteEnvConfig() {
 	if !s.params.RemoteWorktree() {
 		return
 	}
-	if s.envConfig.RepoPath != s.params.ProjectRoot {
-		s.envConfig.RepoPath = s.params.ProjectRoot
-		s.envConfigChanged = true
-	}
+	// A remote env carries no host repo path in its persisted config
+	// (LocalRepoPath is laptop-only; the worktree lives in-pod). The bootstrap
+	// run resolves the project root from params/tenant via projectRoot(), so
+	// there is no longer an env-config field to thread it through here.
 	if runtimeVersion := strings.TrimSpace(s.params.RuntimeVersion); runtimeVersion != "" && s.envConfig.RuntimeVersion != runtimeVersion {
 		s.envConfig.RuntimeVersion = runtimeVersion
 		s.envConfigChanged = true
@@ -924,11 +923,10 @@ func (s *bootstrapRunState) updateEnvContainerRegistry() error {
 }
 
 func (s *bootstrapRunState) projectRoot() string {
-	projectRoot := s.envConfig.RepoPath
-	if projectRoot == "" {
-		return s.tenantConfig.ProjectRoot
+	if projectRoot := strings.TrimSpace(s.params.ProjectRoot); projectRoot != "" {
+		return projectRoot
 	}
-	return projectRoot
+	return s.tenantConfig.ProjectRoot
 }
 
 // ensureDevopsAssets used to scaffold a per-tenant devops module and chart

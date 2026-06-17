@@ -1,6 +1,6 @@
 Diagnose and repair an environment's runtime and config.
 
-Reports why a deploy may have failed (helm release status and the runtime pods, read-only). When the release looks unhealthy it recommends the one recovery that fits — clear a stuck pending helm release, or roll back to the last successful revision — and prompts before running it. It also prunes Docker images, build cache, or stopped containers; restores or fixes the root erun config; and finishes an interrupted remote init. The recovery actions mutate the live release; run one directly with --clear-pending-helm or --rollback (the two are alternatives — pass only one).
+Reports why a deploy may have failed (helm release status and the runtime pods, read-only). When the release looks unhealthy it recommends the one recovery that fits — clear a stuck pending helm release, or roll back to the last successful revision — and prompts before running it. It also prunes Docker images, build cache, or stopped containers; restores or fixes the root erun config; and finishes an interrupted remote init. The recovery actions mutate the live release; run one directly with --clear-pending-helm or --rollback (the two are alternatives — pass only one). Run inside a runtime pod, --sync-config reconciles the on-disk env config with the helm-injected ERUN_* env vars (injected env wins) and rewrites the projected keys, preserving everything else.
 
 Usage:
   erun doctor [tenant] [environment] [flags]
@@ -19,6 +19,7 @@ Flags:
       --repair-jetbrains-gateway            Clear cached JetBrains Gateway backend metadata for this environment
       --restore-config-from-backup string   Restore the root erun config from a dated backup non-interactively (YYYY-MM-DD or absolute path)
       --rollback                            Roll the runtime release back to its last successful revision without prompting
+      --sync-config                         Reconcile the in-pod erun config with the helm-injected ERUN_* env vars (only takes effect inside a runtime pod)
 
 Global Flags:
       --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")

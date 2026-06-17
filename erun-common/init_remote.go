@@ -118,7 +118,7 @@ func remoteRepositoryEnvConfig(envName, kubernetesContext, projectRoot string, e
 	if !envType.IsValid() {
 		envType = EnvironmentTypeRemoteAgent
 	}
-	cfg := EnvConfig{Name: envName, RepoPath: projectRoot, KubernetesContext: kubernetesContext, Type: envType}
+	cfg := EnvConfig{Name: envName, KubernetesContext: kubernetesContext, Type: envType}
 	if envType == EnvironmentTypeLocalAgent {
 		cfg.LocalRepoPath = projectRoot
 	}

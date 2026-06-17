@@ -1737,4 +1737,3 @@ func (a *App) releaseIdleBlockLocked(managed *managedTerminal) {
 	managed.blocksIdleStop = false
 	managed.clearIdleBlockOnOutput = false
 }
-
