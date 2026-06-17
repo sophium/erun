@@ -290,10 +290,12 @@ func namespaceForTenantEnv(tenant, environment string) string {
 	}
 }
 
-// activityDeployingLineRe matches the `==> Deploying tenant/env [version]`
-// trace emitted by RunHelmDeploy at deploy start. Captures: tenant,
-// environment, optional version.
-var activityDeployingLineRe = regexp.MustCompile(`^==> Deploying ([^/\s]+)/([^/\s]+)(?:\s+(\S+))?\s*$`)
+// activityDeployingLineRe matches the `==> Deploying tenant/env [· release]
+// [version]` trace emitted by RunHelmDeploy at deploy start. A non-runtime
+// component carries the release after a ` · ` separator (e.g. `erun/local ·
+// erun-backend-postgres 18.3`); the runtime chart omits it (`erun/local
+// 18.3`). Captures: tenant, environment, optional release, optional version.
+var activityDeployingLineRe = regexp.MustCompile(`^==> Deploying ([^/\s]+)/([^/\s]+)(?: · (\S+))?(?:\s+(\S+))?\s*$`)
 
 // activityDeployedLineRe matches the `==> Deployed tenant/env [version]
 // in <elapsed>` trace emitted at successful completion. Captures:
@@ -388,13 +390,16 @@ var (
 // Terminal-state lines (==> Deployed / ==> Deploy failed / ==> Skipping /
 // Error:) finalize the matching active entry from either channel.
 func newActivityTraceLineHandler(app *App, selection uiSelection, kind sessionKind) func(string) {
-	failedRe := regexp.MustCompile(`^==> Deploy failed`)
+	// RunHelmDeploy names the release on failure ("==> Deploy of <rel> failed
+	// after <elapsed>", #559) and falls back to "==> Deploy failed after
+	// <elapsed>" only when no release is set; match both shapes.
+	failedRe := regexp.MustCompile(`^==> Deploy (?:of \S+ )?failed`)
 	errorRe := regexp.MustCompile(`(?i)^Error: `)
 	_ = kind
 	return func(line string) {
 		line = strings.TrimSpace(line)
 		if match := activityDeployingLineRe.FindStringSubmatch(line); match != nil {
-			app.startDeployFromTrace(selection, match[1], match[2], match[3])
+			app.startDeployFromTrace(selection, match[1], match[2], match[3], match[4])
 			return
 		}
 		if match := activityDeployedLineRe.FindStringSubmatch(line); match != nil {
@@ -560,12 +565,13 @@ func (a *App) finishInitByTenantEnv(tenant, environment string, status activityQ
 // trace observed in any session's PTY. No-op when an active entry
 // already exists for the selection so the helm poller and trace
 // handler converge on the same record.
-func (a *App) startDeployFromTrace(selection uiSelection, tenant, environment, version string) {
+func (a *App) startDeployFromTrace(selection uiSelection, tenant, environment, release, version string) {
 	if a.activityQueue == nil {
 		return
 	}
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
+	release = strings.TrimSpace(release)
 	version = strings.TrimSpace(version)
 	if tenant == "" || environment == "" {
 		return
@@ -573,17 +579,28 @@ func (a *App) startDeployFromTrace(selection uiSelection, tenant, environment, v
 	if _, ok := a.activityQueue.findActiveByCommand("deploy", tenant, environment); ok {
 		return
 	}
+	// The runtime chart's `==> Deploying` line carries no release token, so an
+	// empty parsed release means the runtime deploy; fall back to its release
+	// name. A non-runtime component names itself, so the drawer labels it by
+	// component ("deploy erun/local · erun-backend-postgres") instead of
+	// reading like a full-env redeploy (#531).
+	summary := "deploy " + tenant + "/" + environment
+	if release == "" {
+		release = releaseNameForTenant(tenant)
+	} else {
+		summary += " · " + release
+	}
 	kubeContext := a.resolveActivityKubeContext(selection, tenant, environment)
 	entry, fresh := a.activityQueue.start(activityQueueEntry{
 		Command:           "deploy",
 		Tenant:            tenant,
 		Environment:       environment,
 		Version:           version,
-		Release:           releaseNameForTenant(tenant),
+		Release:           release,
 		Namespace:         namespaceForTenantEnv(tenant, environment),
 		KubernetesContext: kubeContext,
 		Source:            "trace",
-		Summary:           "deploy " + tenant + "/" + environment,
+		Summary:           summary,
 	})
 	if !fresh {
 		return
@@ -942,7 +959,7 @@ func (a *App) feedActivityTraceFromTerminal(managed *managedTerminal, chunk []by
 // is past the setup phase and a parallel queued action can safely run.
 var (
 	sessionReadyDeployedRe    = regexp.MustCompile(`^==> Deployed `)
-	sessionReadyFailedRe      = regexp.MustCompile(`^==> Deploy failed`)
+	sessionReadyFailedRe      = regexp.MustCompile(`^==> Deploy (?:of \S+ )?failed`)
 	sessionReadySkippedRe     = regexp.MustCompile(`^==> Skipping `)
 	sessionReadyAttachedRe    = regexp.MustCompile(`^Defaulted container "[^"]+" out of:`)
 	sessionReadyShellPromptRe = regexp.MustCompile(`[\w][\w.-]*@[\w][\w.-]*:[~/].*[\$#]\s*$`)

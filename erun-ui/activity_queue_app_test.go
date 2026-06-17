@@ -157,6 +157,80 @@ func TestActivityTraceLineHandlerFinalizesOnDeployedAndFailed(t *testing.T) {
 	}
 }
 
+func TestActivityTraceLineHandlerFinalizesOnReleaseNamedFailure(t *testing.T) {
+	// #559 changed the failure line to "==> Deploy of <rel> failed after
+	// <elapsed>"; the desktop matcher must still finalize the entry as
+	// failed. The matcher was silently broken between #559 and #531.
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "team", Environment: "dev"}
+	app.activityQueue.start(activityQueueEntry{Command: "deploy", Tenant: "team", Environment: "dev"})
+	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+	handler("Error: UPGRADE FAILED: timeout")
+	handler("==> Deploy of team-devops failed after 2m0s")
+	all := app.activityQueue.list()
+	if len(all) != 1 || all[0].Status != activityQueueStatusFailed {
+		t.Fatalf("expected one failed entry, got %+v", all)
+	}
+}
+
+func TestSessionReadyFailedMatchesReleaseNamedFailure(t *testing.T) {
+	// The session-ready gate matcher must track the same #559 wording so a
+	// failed deploy still releases the action runner.
+	if !sessionReadyFailedRe.MatchString("==> Deploy of team-devops failed after 2m0s") {
+		t.Fatal("sessionReadyFailedRe must match the release-named failure line")
+	}
+	if !sessionReadyFailedRe.MatchString("==> Deploy failed after 2m0s") {
+		t.Fatal("sessionReadyFailedRe must still match the no-release fallback")
+	}
+}
+
+func TestActivityTraceLineHandlerLabelsComponentDeployByRelease(t *testing.T) {
+	// A non-runtime component names the release after a ` · ` separator
+	// ("erun/local · erun-backend-postgres 18.3"). The entry must be labeled
+	// by component so the drawer does not read like a full-env redeploy, and
+	// the version is the component's own (#531).
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "erun", Environment: "local"}
+	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+	handler("==> Deploying erun/local · erun-backend-postgres 18.3")
+	entry, ok := app.activityQueue.findActiveByCommand("deploy", "erun", "local")
+	if !ok {
+		t.Fatal("expected a deploy entry after the component ==> Deploying line")
+	}
+	if entry.Release != "erun-backend-postgres" {
+		t.Fatalf("expected release erun-backend-postgres, got %q", entry.Release)
+	}
+	if entry.Version != "18.3" {
+		t.Fatalf("expected the component version 18.3, got %q", entry.Version)
+	}
+	if !strings.Contains(entry.Summary, "· erun-backend-postgres") {
+		t.Fatalf("expected a component-labeled summary, got %q", entry.Summary)
+	}
+}
+
+func TestActivityTraceLineHandlerRuntimeDeployFallsBackToRuntimeRelease(t *testing.T) {
+	// The runtime chart's ==> Deploying line carries no release token; the
+	// entry falls back to the runtime release name and is not
+	// component-labeled (the runtime line shape is unchanged by #531).
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "erun", Environment: "local"}
+	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+	handler("==> Deploying erun/local 1.0.0")
+	entry, ok := app.activityQueue.findActiveByCommand("deploy", "erun", "local")
+	if !ok {
+		t.Fatal("expected a deploy entry after the runtime ==> Deploying line")
+	}
+	if entry.Release != releaseNameForTenant("erun") {
+		t.Fatalf("expected runtime release %q, got %q", releaseNameForTenant("erun"), entry.Release)
+	}
+	if entry.Version != "1.0.0" {
+		t.Fatalf("expected version 1.0.0, got %q", entry.Version)
+	}
+	if strings.Contains(entry.Summary, "·") {
+		t.Fatalf("runtime deploy summary must not be component-labeled, got %q", entry.Summary)
+	}
+}
+
 func TestActivityTraceLineHandlerFinalizesUsingTenantEnvFromLine(t *testing.T) {
 	// Regression: the trace handler used to look up the active deploy
 	// entry by the *session selection's* tenant/env when ==> Deployed
