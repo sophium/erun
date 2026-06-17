@@ -107,11 +107,6 @@ func ResolveInjectedRuntimeConfig(env func(string) string) (InjectedRuntimeConfi
 	instanceID := get("ERUN_CLOUD_INSTANCE_ID")
 	contextName := get("ERUN_CLOUD_CONTEXT_NAME")
 
-	// managedcloud mirrors the entrypoint: the explicit ERUN_CLOUD_ENVIRONMENT
-	// flag, or a remote env with a fully-resolved cloud provider/alias/region.
-	managedCloud := strings.EqualFold(get("ERUN_CLOUD_ENVIRONMENT"), "true") ||
-		(strings.EqualFold(get("ERUN_REPO_REMOTE"), "true") && provider != "" && alias != "" && region != "")
-
 	injected := InjectedRuntimeConfig{
 		Tenant:      tenant,
 		Environment: environment,
@@ -120,7 +115,7 @@ func ResolveInjectedRuntimeConfig(env func(string) string) (InjectedRuntimeConfi
 			Type:               envType,
 			KubernetesContext:  kubernetesContext,
 			CloudProviderAlias: alias,
-			ManagedCloud:       managedCloud,
+			ManagedCloud:       injectedManagedCloud(get, provider, alias, region),
 			RuntimeRegistry:    get("ERUN_RUNTIME_REGISTRY"),
 			DisableBuildScript: strings.EqualFold(get("ERUN_DISABLE_BUILD_SCRIPT"), "true"),
 			Idle:               injectedIdleConfig(get),
@@ -129,27 +124,43 @@ func ResolveInjectedRuntimeConfig(env func(string) string) (InjectedRuntimeConfi
 	if registries := parseInjectedContainerRegistries(env("ERUN_CONTAINER_REGISTRIES")); len(registries) > 0 {
 		injected.Env.ContainerRegistries = registries
 	}
-
-	if provider != "" && alias != "" {
-		username, accountID, _, _ := ParseCloudProviderAlias(alias)
-		injected.Providers = []CloudProviderConfig{{
-			Alias:     alias,
-			Provider:  provider,
-			Username:  username,
-			AccountID: accountID,
-		}}
-		if region != "" {
-			injected.Contexts = []CloudContextConfig{{
-				Name:               contextName,
-				Provider:           provider,
-				CloudProviderAlias: alias,
-				Region:             region,
-				InstanceID:         instanceID,
-				KubernetesContext:  kubernetesContext,
-			}}
-		}
-	}
+	injected.Providers, injected.Contexts = injectedCloudConfig(provider, alias, region, instanceID, contextName, kubernetesContext)
 	return injected, true
+}
+
+// injectedCloudConfig builds the root cloud provider/context the env's cloud
+// ERUN_* vars describe (empty when the env carries no cloud provider/alias).
+func injectedCloudConfig(provider, alias, region, instanceID, contextName, kubernetesContext string) ([]CloudProviderConfig, []CloudContextConfig) {
+	if provider == "" || alias == "" {
+		return nil, nil
+	}
+	username, accountID, _, _ := ParseCloudProviderAlias(alias)
+	providers := []CloudProviderConfig{{Alias: alias, Provider: provider, Username: username, AccountID: accountID}}
+	if region == "" {
+		return providers, nil
+	}
+	contexts := []CloudContextConfig{{
+		Name:               contextName,
+		Provider:           provider,
+		CloudProviderAlias: alias,
+		Region:             region,
+		InstanceID:         instanceID,
+		KubernetesContext:  kubernetesContext,
+	}}
+	return providers, contexts
+}
+
+// injectedManagedCloud mirrors the entrypoint's managedcloud computation: the
+// explicit ERUN_CLOUD_ENVIRONMENT flag, or a remote env with a fully-resolved
+// cloud provider/alias/region.
+func injectedManagedCloud(get func(string) string, provider, alias, region string) bool {
+	if strings.EqualFold(get("ERUN_CLOUD_ENVIRONMENT"), "true") {
+		return true
+	}
+	if !strings.EqualFold(get("ERUN_REPO_REMOTE"), "true") {
+		return false
+	}
+	return provider != "" && alias != "" && region != ""
 }
 
 func injectedIdleConfig(get func(string) string) EnvironmentIdleConfig {
@@ -266,18 +277,27 @@ func loadRuntimeRootConfigForSync(configHome string) (ERunConfig, bool, error) {
 	return config, true, nil
 }
 
+// envTypeDrift reports drift on the env `type`, flagging a lingering legacy
+// `remote:` key even when the migrated value already matches (so the rewrite
+// drops it in favour of the canonical type).
+func envTypeDrift(injected, onDisk EnvConfig, raw map[string]any) (ConfigDriftField, bool) {
+	if _, hasLegacyRemote := raw["remote"]; hasLegacyRemote {
+		return ConfigDriftField{Scope: "env", Key: "type", OnDisk: "remote", Injected: string(injected.Type), Kind: ConfigDriftLegacyKey}, true
+	}
+	if onDisk.Type != injected.Type {
+		return ConfigDriftField{Scope: "env", Key: "type", OnDisk: string(onDisk.Type), Injected: string(injected.Type), Kind: driftKind(string(onDisk.Type))}, true
+	}
+	return ConfigDriftField{}, false
+}
+
 func envConfigDrift(injected, onDisk EnvConfig, raw map[string]any) []ConfigDriftField {
 	var drift []ConfigDriftField
 	add := func(key, onDiskVal, injectedVal string, kind ConfigDriftKind) {
 		drift = append(drift, ConfigDriftField{Scope: "env", Key: key, OnDisk: onDiskVal, Injected: injectedVal, Kind: kind})
 	}
 
-	// type — flag a lingering legacy `remote:` key even when the migrated value
-	// already matches, so the rewrite drops it.
-	if _, hasLegacyRemote := raw["remote"]; hasLegacyRemote {
-		add("type", "remote", string(injected.Type), ConfigDriftLegacyKey)
-	} else if onDisk.Type != injected.Type {
-		add("type", string(onDisk.Type), string(injected.Type), driftKind(string(onDisk.Type)))
+	if field, ok := envTypeDrift(injected, onDisk, raw); ok {
+		drift = append(drift, field)
 	}
 
 	if strings.TrimSpace(onDisk.KubernetesContext) != strings.TrimSpace(injected.KubernetesContext) {
@@ -384,52 +404,47 @@ func formatBool(value bool) string {
 // fields, and marshals canonically — so a second run round-trips to InSync()
 // with no perpetual-drift loop. Each file write is traced for the --dry-run
 // contract and gated on !ctx.DryRun.
-func RunRuntimeConfigSync(ctx Context, inspection ConfigSyncInspection) (ConfigSyncInspection, error) {
+func RunRuntimeConfigSync(ctx Context, inspection ConfigSyncInspection) error {
 	if !inspection.HasInjected || inspection.InSync() {
-		return inspection, nil
+		return nil
 	}
 	injected := inspection.Injected
 
 	envPath := runtimeEnvConfigPath(inspection.ConfigHome, injected.Tenant, injected.Environment)
 	onDiskEnv, _, err := loadRuntimeEnvConfigForSync(inspection.ConfigHome, injected.Tenant, injected.Environment)
 	if err != nil {
-		return inspection, err
+		return err
 	}
-	reconciledEnv := overlayInjectedEnvConfig(onDiskEnv, injected.Env)
-	if err := writeRuntimeYAML(ctx, envPath, reconciledEnv); err != nil {
-		return inspection, err
+	if err := writeRuntimeYAML(ctx, envPath, overlayInjectedEnvConfig(onDiskEnv, injected.Env)); err != nil {
+		return err
 	}
+	return reconcileRuntimeRootConfig(ctx, inspection.ConfigHome, injected)
+}
 
-	if len(injected.Providers) > 0 || len(injected.Contexts) > 0 {
-		rootPath := runtimeRootConfigPath(inspection.ConfigHome)
-		rootConfig, _, err := loadRuntimeRootConfigForSync(inspection.ConfigHome)
-		if err != nil {
-			return inspection, err
-		}
-		if strings.TrimSpace(rootConfig.DefaultTenant) == "" {
-			rootConfig.DefaultTenant = injected.Tenant
-		}
-		for _, provider := range injected.Providers {
-			rootConfig.CloudProviders = upsertCloudProvider(rootConfig.CloudProviders, provider)
-		}
-		for _, context := range injected.Contexts {
-			rootConfig.CloudContexts = upsertCloudContext(rootConfig.CloudContexts, context)
-		}
-		if !ctx.DryRun {
-			_ = writeRootConfigBackupIfDue(rootPath, timeNow)
-		}
-		if err := writeRuntimeYAML(ctx, rootPath, rootConfig); err != nil {
-			return inspection, err
-		}
+// reconcileRuntimeRootConfig upserts the injected cloud provider/context into
+// the root config (preserving any other entries) when the env carries them.
+func reconcileRuntimeRootConfig(ctx Context, configHome string, injected InjectedRuntimeConfig) error {
+	if len(injected.Providers) == 0 && len(injected.Contexts) == 0 {
+		return nil
 	}
-
-	// Re-inspect so the returned inspection reflects the reconciled (or, in
-	// dry-run, still-drifted) state.
-	updated, err := InspectRuntimeConfigSync(inspection.ConfigHome, func(key string) string { return injectedEnvLookup(injected, key) })
+	rootPath := runtimeRootConfigPath(configHome)
+	rootConfig, _, err := loadRuntimeRootConfigForSync(configHome)
 	if err != nil {
-		return inspection, err
+		return err
 	}
-	return updated, nil
+	if strings.TrimSpace(rootConfig.DefaultTenant) == "" {
+		rootConfig.DefaultTenant = injected.Tenant
+	}
+	for _, provider := range injected.Providers {
+		rootConfig.CloudProviders = upsertCloudProvider(rootConfig.CloudProviders, provider)
+	}
+	for _, context := range injected.Contexts {
+		rootConfig.CloudContexts = upsertCloudContext(rootConfig.CloudContexts, context)
+	}
+	if !ctx.DryRun {
+		_ = writeRootConfigBackupIfDue(rootPath, timeNow)
+	}
+	return writeRuntimeYAML(ctx, rootPath, rootConfig)
 }
 
 // overlayInjectedEnvConfig replaces only the env-projected fields on the
@@ -461,62 +476,4 @@ func writeRuntimeYAML(ctx Context, path string, config any) error {
 		return ErrNoUserDataFolder
 	}
 	return writeFileAtomic(path, data, 0o644)
-}
-
-// injectedEnvLookup re-derives the ERUN_* env values from a resolved injected
-// config so the post-write re-inspection sees the same injected truth without
-// re-reading os.Getenv (the test seam passes a custom env func to the first
-// inspection; the re-inspection must use the same injected values).
-func injectedEnvLookup(injected InjectedRuntimeConfig, key string) string {
-	switch key {
-	case "ERUN_TENANT":
-		return injected.Tenant
-	case "ERUN_ENVIRONMENT":
-		return injected.Environment
-	case "ERUN_ENV_TYPE":
-		return string(injected.Env.Type)
-	case "ERUN_KUBERNETES_CONTEXT":
-		return injected.Env.KubernetesContext
-	case "ERUN_CLOUD_PROVIDER_ALIAS":
-		return injected.Env.CloudProviderAlias
-	case "ERUN_CLOUD_ENVIRONMENT":
-		return formatBool(injected.Env.ManagedCloud)
-	case "ERUN_RUNTIME_REGISTRY":
-		return injected.Env.RuntimeRegistry
-	case "ERUN_DISABLE_BUILD_SCRIPT":
-		return formatBool(injected.Env.DisableBuildScript)
-	case "ERUN_CONTAINER_REGISTRIES":
-		if len(injected.Env.ContainerRegistries) == 0 {
-			return ""
-		}
-		encoded, err := json.Marshal(injected.Env.ContainerRegistries)
-		if err != nil {
-			return ""
-		}
-		return string(encoded)
-	case "ERUN_IDLE_TIMEOUT":
-		return injected.Env.Idle.Timeout
-	case "ERUN_IDLE_WORKING_HOURS":
-		return injected.Env.Idle.WorkingHours
-	case "ERUN_IDLE_TIMEZONE":
-		return injected.Env.Idle.Timezone
-	}
-	if len(injected.Contexts) > 0 {
-		context := injected.Contexts[0]
-		switch key {
-		case "ERUN_CLOUD_PROVIDER":
-			return context.Provider
-		case "ERUN_CLOUD_REGION":
-			return context.Region
-		case "ERUN_CLOUD_INSTANCE_ID":
-			return context.InstanceID
-		case "ERUN_CLOUD_CONTEXT_NAME":
-			return context.Name
-		}
-	} else if len(injected.Providers) > 0 {
-		if key == "ERUN_CLOUD_PROVIDER" {
-			return injected.Providers[0].Provider
-		}
-	}
-	return ""
 }

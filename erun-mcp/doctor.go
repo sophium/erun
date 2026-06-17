@@ -11,17 +11,17 @@ import (
 )
 
 type DoctorInput struct {
-	Tenant                  string                       `json:"tenant,omitempty" jsonschema:"optional explicit tenant override"`
-	Environment             string                       `json:"environment,omitempty" jsonschema:"optional explicit environment override"`
-	PruneImages             bool                         `json:"pruneImages,omitempty" jsonschema:"when true, prune unused Docker images"`
-	PruneBuildCache         bool                         `json:"pruneBuildCache,omitempty" jsonschema:"when true, prune unused BuildKit cache"`
-	PruneContainers         bool                         `json:"pruneContainers,omitempty" jsonschema:"when true, prune stopped Docker containers"`
-	ClearPendingHelm        bool                         `json:"clearPendingHelm,omitempty" jsonschema:"when true, clear a stuck helm pending-install/upgrade lock for the runtime release so the next deploy can proceed"`
-	Rollback                bool                         `json:"rollback,omitempty" jsonschema:"when true, roll the runtime release back to its last successful revision (recovers a bad/non-converging deploy)"`
-	Preview                 bool                         `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
-	Verbosity               int                          `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
-	RestoreConfigFromBackup string                       `json:"restoreConfigFromBackup,omitempty" jsonschema:"YYYY-MM-DD or absolute path; when set, restore the root erun config from the matching daily backup before any tenant/env work"`
-	RepairOrphanedAliases   []DoctorRepairAliasInput     `json:"repairOrphanedAliases,omitempty" jsonschema:"per-alias AWS init parameters; when present, doctor re-initializes each listed cloud provider alias before tenant/env work"`
+	Tenant                  string                   `json:"tenant,omitempty" jsonschema:"optional explicit tenant override"`
+	Environment             string                   `json:"environment,omitempty" jsonschema:"optional explicit environment override"`
+	PruneImages             bool                     `json:"pruneImages,omitempty" jsonschema:"when true, prune unused Docker images"`
+	PruneBuildCache         bool                     `json:"pruneBuildCache,omitempty" jsonschema:"when true, prune unused BuildKit cache"`
+	PruneContainers         bool                     `json:"pruneContainers,omitempty" jsonschema:"when true, prune stopped Docker containers"`
+	ClearPendingHelm        bool                     `json:"clearPendingHelm,omitempty" jsonschema:"when true, clear a stuck helm pending-install/upgrade lock for the runtime release so the next deploy can proceed"`
+	Rollback                bool                     `json:"rollback,omitempty" jsonschema:"when true, roll the runtime release back to its last successful revision (recovers a bad/non-converging deploy)"`
+	Preview                 bool                     `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
+	Verbosity               int                      `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+	RestoreConfigFromBackup string                   `json:"restoreConfigFromBackup,omitempty" jsonschema:"YYYY-MM-DD or absolute path; when set, restore the root erun config from the matching daily backup before any tenant/env work"`
+	RepairOrphanedAliases   []DoctorRepairAliasInput `json:"repairOrphanedAliases,omitempty" jsonschema:"per-alias AWS init parameters; when present, doctor re-initializes each listed cloud provider alias before tenant/env work"`
 }
 
 // DoctorRepairAliasInput is the MCP equivalent of the interactive

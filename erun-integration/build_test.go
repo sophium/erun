@@ -612,13 +612,21 @@ func TestBuild(t *testing.T) {
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
 		fixture.SeedDevopsRuntimeDockerfile(t, setup, "team")
 		fixture.SeedGitRepo(t, setup.Cwd)
-		otherDir := filepath.Join(setup.ConfigHome, "erun", "other")
-		if err := os.MkdirAll(otherDir, 0o755); err != nil {
-			t.Fatalf("mkdir %s: %v", otherDir, err)
+		// The second tenant genuinely owns the same project root: cwd→tenant
+		// matching is now via each tenant's envs' localRepoPath (#549), so the
+		// other tenant needs an env recording this cwd, not just a bare
+		// tenant-level projectroot, for the ambiguity to hold.
+		otherEnvDir := filepath.Join(setup.ConfigHome, "erun", "other", "dev")
+		if err := os.MkdirAll(otherEnvDir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", otherEnvDir, err)
 		}
-		if err := os.WriteFile(filepath.Join(otherDir, "config.yaml"),
-			[]byte("projectroot: "+setup.Cwd+"\nname: other\n"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(setup.ConfigHome, "erun", "other", "config.yaml"),
+			[]byte("name: other\ndefaultenvironment: dev\n"), 0o644); err != nil {
 			t.Fatalf("other tenant cfg: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(otherEnvDir, "config.yaml"),
+			[]byte("name: dev\nlocalrepopath: "+setup.Cwd+"\ntype: local-agent\n"), 0o644); err != nil {
+			t.Fatalf("other env cfg: %v", err)
 		}
 		if err := os.WriteFile(filepath.Join(setup.ConfigHome, "erun", "config.yaml"),
 			[]byte("defaulttenant: elsewhere\n"), 0o644); err != nil {

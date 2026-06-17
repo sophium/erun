@@ -40,7 +40,7 @@ func workingIssueApp(t *testing.T, env eruncommon.EnvConfig, run workingIssueCom
 	t.Helper()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"acme": {Name: "acme", ProjectRoot: "/tmp/acme", DefaultEnvironment: "dev"},
+			"acme": {Name: "acme", DefaultEnvironment: "dev"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"acme/dev": env,
@@ -109,6 +109,7 @@ func TestEnvironmentWorkingIssueUnavailableForRemoteWorktree(t *testing.T) {
 	}
 	app := workingIssueApp(t, eruncommon.EnvConfig{
 		Name:              "dev",
+		LocalRepoPath:     "/home/erun/git/acme",
 		Type:              eruncommon.EnvironmentTypeRemoteAgent,
 		KubernetesContext: "ctx",
 	}, run)
@@ -132,11 +133,12 @@ func remoteWorkingIssueApp(t *testing.T, reachable bool, loadPodBranch func(cont
 	t.Helper()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"acme": {Name: "acme", ProjectRoot: "/tmp/acme", DefaultEnvironment: "dev"},
+			"acme": {Name: "acme", DefaultEnvironment: "dev"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"acme/dev": {
 				Name:                "dev",
+				LocalRepoPath:       "/home/erun/git/acme",
 				Type:                eruncommon.EnvironmentTypeRemoteAgent,
 				KubernetesContext:   "ctx",
 				LocalPortRangeStart: 17500,

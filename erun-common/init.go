@@ -610,10 +610,30 @@ func (s *bootstrapRunState) resolveTenantFromDirectory() error {
 	if err != nil {
 		return err
 	}
-	if currentTenant, found := findTenantForDirectory(workingDir, tenants); found {
+	if currentTenant, found := findTenantForDirectory(workingDir, tenants, s.envsByTenant(tenants)); found {
 		s.tenant = currentTenant.Name
 	}
 	return nil
+}
+
+// envsByTenant loads each tenant's environments for cwd→tenant matching. It is
+// best-effort: a store that does not expose ListEnvConfigs (or a tenant whose
+// envs fail to load) yields no envs for that tenant, so matching simply finds
+// no owner and the caller falls back to the default-tenant / selection path.
+func (s *bootstrapRunState) envsByTenant(tenants []TenantConfig) map[string][]EnvConfig {
+	lister, ok := s.runner.Store.(interface {
+		ListEnvConfigs(string) ([]EnvConfig, error)
+	})
+	if !ok {
+		return nil
+	}
+	envsByTenant := make(map[string][]EnvConfig, len(tenants))
+	for _, tenant := range tenants {
+		if envs, err := lister.ListEnvConfigs(tenant.Name); err == nil {
+			envsByTenant[tenant.Name] = envs
+		}
+	}
+	return envsByTenant
 }
 
 func (s *bootstrapRunState) resolveTenantFromSelection() error {
@@ -666,7 +686,6 @@ func (s *bootstrapRunState) createTenantConfig() error {
 	s.runner.Context.Trace("Adding new tenant")
 	s.tenantConfig = TenantConfig{
 		Name:               s.tenant,
-		ProjectRoot:        projectRoot,
 		DefaultEnvironment: defaultBootstrapEnvironment(s.params.Environment),
 	}
 	if err := s.runner.Store.SaveTenantConfig(s.tenantConfig); err != nil {
@@ -698,10 +717,6 @@ func defaultBootstrapEnvironment(envName string) string {
 func (s *bootstrapRunState) normalizeTenantConfig() {
 	if s.tenantConfig.Name == "" {
 		s.tenantConfig.Name = s.tenant
-		s.tenantConfigChanged = true
-	}
-	if s.params.RemoteWorktree() && s.tenantConfig.ProjectRoot != s.params.ProjectRoot {
-		s.tenantConfig.ProjectRoot = s.params.ProjectRoot
 		s.tenantConfigChanged = true
 	}
 }
@@ -755,10 +770,16 @@ func (s *bootstrapRunState) createEnvConfig() error {
 		return err
 	}
 	s.runner.Context.Trace("Adding new environment")
+	// Every env type records localRepoPath (#549): with TenantConfig.projectroot
+	// removed, the env's own localRepoPath is the single source for cwd→tenant
+	// matching, the open repo path, and the deploy worktree repo name. For
+	// local-agent envs it is also the hostPath mounted into the pod; remote/runtime
+	// envs use a PVC worktree, so the value is the init-time project root (its
+	// basename names the in-pod worktree) but is never mounted.
 	s.envConfig = EnvConfig{
 		Name:               s.envName,
 		Type:               s.params.ResolvedType(),
-		LocalRepoPath:      envProjectRootForType(s.params.ResolvedType(), envProjectRoot),
+		LocalRepoPath:      envProjectRoot,
 		KubernetesContext:  kubernetesContext,
 		CloudProviderAlias: cloudProviderAlias,
 		ManagedCloud:       managedCloud,
@@ -776,22 +797,8 @@ func (s *bootstrapRunState) createEnvConfig() error {
 	return nil
 }
 
-// envProjectRootForType returns the path that should populate the new env's
-// LocalRepoPath field. Only local-agent envs mount a host path; remote-agent
-// and runtime envs leave LocalRepoPath empty so consumers know to use the
-// in-pod convention path instead.
-func envProjectRootForType(envType EnvironmentType, envProjectRoot string) string {
-	if envType == EnvironmentTypeLocalAgent {
-		return envProjectRoot
-	}
-	return ""
-}
-
 func (s *bootstrapRunState) envProjectRoot() (string, error) {
 	envProjectRoot := s.params.ProjectRoot
-	if envProjectRoot == "" {
-		envProjectRoot = s.tenantConfig.ProjectRoot
-	}
 	if envProjectRoot != "" || s.params.RemoteWorktree() {
 		return envProjectRoot, nil
 	}
@@ -923,10 +930,7 @@ func (s *bootstrapRunState) updateEnvContainerRegistry() error {
 }
 
 func (s *bootstrapRunState) projectRoot() string {
-	if projectRoot := strings.TrimSpace(s.params.ProjectRoot); projectRoot != "" {
-		return projectRoot
-	}
-	return s.tenantConfig.ProjectRoot
+	return strings.TrimSpace(s.params.ProjectRoot)
 }
 
 // ensureDevopsAssets used to scaffold a per-tenant devops module and chart
@@ -1329,26 +1333,43 @@ func (s bootstrapRunner) selectTenant(params BootstrapInitParams, tenants []Tena
 	return selection, nil
 }
 
-func findTenantForDirectory(dir string, tenants []TenantConfig) (TenantConfig, bool) {
+// findTenantForDirectory resolves which tenant owns the working directory by
+// matching it against each tenant's environments' local repo paths
+// (EffectiveLocalRepoPath), longest match wins (#549). It replaces the old
+// match against TenantConfig.projectroot: a tenant can host both local and
+// remote envs, so the host path belongs on the env, not the tenant. An env
+// with no local repo path (a remote/runtime env with no host worktree) cannot
+// own a host directory and is skipped. Ties across tenants at the same
+// longest path are ambiguous and resolve to no match, so the caller falls back
+// to the default-tenant / selection path rather than guessing.
+func findTenantForDirectory(dir string, tenants []TenantConfig, envsByTenant map[string][]EnvConfig) (TenantConfig, bool) {
 	cleanDir := filepath.Clean(dir)
-	bestIndex := -1
+	bestTenant := -1
+	bestLen := -1
+	ambiguous := false
 
 	for i, tenant := range tenants {
-		if tenant.ProjectRoot == "" {
-			continue
-		}
-		if !isWithinDirectory(cleanDir, filepath.Clean(tenant.ProjectRoot)) {
-			continue
-		}
-		if bestIndex == -1 || len(tenant.ProjectRoot) > len(tenants[bestIndex].ProjectRoot) {
-			bestIndex = i
+		for _, env := range envsByTenant[tenant.Name] {
+			repoPath := strings.TrimSpace(env.EffectiveLocalRepoPath())
+			if repoPath == "" {
+				continue
+			}
+			if !isWithinDirectory(cleanDir, filepath.Clean(repoPath)) {
+				continue
+			}
+			switch {
+			case len(repoPath) > bestLen:
+				bestTenant, bestLen, ambiguous = i, len(repoPath), false
+			case len(repoPath) == bestLen && i != bestTenant:
+				ambiguous = true
+			}
 		}
 	}
 
-	if bestIndex == -1 {
+	if bestTenant == -1 || ambiguous {
 		return TenantConfig{}, false
 	}
-	return tenants[bestIndex], true
+	return tenants[bestTenant], true
 }
 
 func isWithinDirectory(path, root string) bool {

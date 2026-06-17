@@ -251,7 +251,7 @@ func TestLoadEnvironmentConfigTreatsEnabledWorkspaceSyncWithoutLocalPathAsOff(t 
 func workspaceSyncStore(enabled bool) stubUIStore {
 	return stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"frs": {Name: "frs", ProjectRoot: "/home/erun/git/frs", DefaultEnvironment: "dev"},
+			"frs": {Name: "frs", DefaultEnvironment: "dev"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"frs/dev": {

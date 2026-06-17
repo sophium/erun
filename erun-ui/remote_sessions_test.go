@@ -32,7 +32,7 @@ func TestListRemoteAppSessionsParsesPodSockets(t *testing.T) {
 
 	app := NewApp(erunUIDeps{store: stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: t.TempDir(), DefaultEnvironment: "remote"},
+			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {Name: "remote", KubernetesContext: "ctx"},
@@ -52,7 +52,7 @@ func TestListRemoteAppSessionsParsesPodSockets(t *testing.T) {
 func TestListRemoteAppSessionsFailsSoft(t *testing.T) {
 	app := NewApp(erunUIDeps{store: stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: t.TempDir(), DefaultEnvironment: "local"},
+			"erun": {Name: "erun", DefaultEnvironment: "local"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/local": {Name: "local"}, // no kubernetes context
@@ -88,7 +88,7 @@ func newEndAISessionsTestApp(t *testing.T, aiTool string) (*App, string) {
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
 			tenants: map[string]eruncommon.TenantConfig{
-				"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+				"erun": {Name: "erun", DefaultEnvironment: "remote"},
 			},
 			envs: map[string]eruncommon.EnvConfig{
 				"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx", AITool: aiTool},
@@ -218,7 +218,7 @@ func TestCloseSessionEndsRemoteCustomTerminal(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
 			tenants: map[string]eruncommon.TenantConfig{
-				"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+				"erun": {Name: "erun", DefaultEnvironment: "remote"},
 			},
 			envs: map[string]eruncommon.EnvConfig{
 				"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},

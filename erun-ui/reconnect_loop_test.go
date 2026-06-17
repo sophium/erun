@@ -26,7 +26,7 @@ func TestStartSessionStopsReconnectingAfterRepeatedFailures(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
@@ -172,7 +172,7 @@ func TestStopCloudContextSuppressesReconnect(t *testing.T) {
 			}},
 		},
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {
@@ -268,7 +268,7 @@ func TestClearIntentionalStopForCloudContext(t *testing.T) {
 			}},
 		},
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {
@@ -326,7 +326,7 @@ func TestStopCloudContextErrorClearsIntentionalStop(t *testing.T) {
 			}},
 		},
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {
@@ -503,7 +503,7 @@ func TestSessionTakenOverByAnotherWindowDoesNotReconnect(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},

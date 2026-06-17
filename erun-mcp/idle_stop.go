@@ -59,8 +59,8 @@ type IdleStopHistoryInput struct {
 // describes a stable object shape. Entries are newest-first, capped
 // at common.StopHistoryCap.
 type IdleStopHistoryResult struct {
-	Tenant      string                                    `json:"tenant"`
-	Environment string                                    `json:"environment"`
+	Tenant      string                                   `json:"tenant"`
+	Environment string                                   `json:"environment"`
 	Entries     []eruncommon.EnvironmentStopHistoryEntry `json:"entries"`
 }
 

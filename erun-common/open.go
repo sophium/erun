@@ -309,7 +309,7 @@ func resolveOpenWithFinder(store OpenStore, findProjectRoot ProjectFinderFunc, p
 	if err != nil {
 		return OpenResult{}, err
 	}
-	repoPath, err := resolveOpenRepoPath(tenantConfig, envConfig)
+	repoPath, err := resolveOpenRepoPath(envConfig)
 	if err != nil {
 		return OpenResult{}, err
 	}
@@ -397,11 +397,8 @@ func loadOpenEnvConfig(store OpenStore, tenant, environment string) (EnvConfig, 
 	return envConfig, nil
 }
 
-func resolveOpenRepoPath(tenantConfig TenantConfig, envConfig EnvConfig) (string, error) {
+func resolveOpenRepoPath(envConfig EnvConfig) (string, error) {
 	repoPath := envConfig.EffectiveLocalRepoPath()
-	if repoPath == "" {
-		repoPath = tenantConfig.ProjectRoot
-	}
 	if repoPath == "" {
 		return "", ErrRepoPathNotConfigured
 	}
@@ -695,7 +692,6 @@ func remoteShellConfigForRequest(req ShellLaunchParams) (remoteShellConfig, erro
 
 	tenantConfig, err := yaml.Marshal(TenantConfig{
 		Name:               req.Tenant,
-		ProjectRoot:        remoteWorkdir,
 		DefaultEnvironment: req.Environment,
 	})
 	if err != nil {

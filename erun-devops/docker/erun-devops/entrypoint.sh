@@ -336,7 +336,6 @@ EOF
     fi
 
     cat >"${config_dir}/${tenant}/config.yaml" <<EOF
-projectroot: ${repo_dir}
 name: ${tenant}
 defaultenvironment: ${environment}
 EOF

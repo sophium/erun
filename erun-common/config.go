@@ -92,7 +92,6 @@ func (c SSHDConfig) ResolvedLocalPort() int {
 }
 
 type TenantConfig struct {
-	ProjectRoot               string
 	Name                      string
 	DefaultEnvironment        string
 	APIURL                    string   `yaml:"api_url,omitempty" json:"apiUrl,omitempty"`

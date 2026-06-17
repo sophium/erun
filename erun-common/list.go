@@ -253,8 +253,7 @@ func listEnvironmentOpenResult(tenant TenantConfig, env EnvConfig, localPorts En
 		Tenant:      tenant.Name,
 		Environment: env.Name,
 		TenantConfig: TenantConfig{
-			Name:        tenant.Name,
-			ProjectRoot: tenant.ProjectRoot,
+			Name: tenant.Name,
 		},
 		EnvConfig:  env,
 		LocalPorts: localPorts,
