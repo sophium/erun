@@ -750,6 +750,25 @@ func StubBinaryWithScript(t testing.TB, dir, name, scriptBody string) string {
 	return path
 }
 
+// StubBinaryFailFirstThenSucceed writes a stub that fails on its first
+// invocation — printing stderrFirst to stderr and exiting exitCode — then
+// drops a marker file so every later invocation exits 0 silently. Use it to
+// drive a production retry/recovery loop through its failure arm into the
+// success path (e.g. helm aborting an upgrade once, then succeeding after the
+// recovery deletes the conflicting object). The marker lives in dir, so it is
+// scoped to the scenario's stub directory and reset per scenario by env.New.
+func StubBinaryFailFirstThenSucceed(t testing.TB, dir, name, stderrFirst string, exitCode int) string {
+	t.Helper()
+	marker := shellSingleQuote(filepath.Join(dir, name+"-failed-once"))
+	script := "if [ ! -f " + marker + " ]; then\n" +
+		"  : > " + marker + "\n" +
+		"  printf '%s\\n' " + shellSingleQuote(stderrFirst) + " >&2\n" +
+		"  exit " + strconv.Itoa(exitCode) + "\n" +
+		"fi\n" +
+		"exit 0"
+	return StubBinaryWithScript(t, dir, name, script)
+}
+
 // StubEnv returns the env-var pairs that route the named binary lookups to
 // the stub at dir/<name>. Pass each result through env.Setup.Env() concat.
 func StubEnv(dir string, names ...string) []string {
