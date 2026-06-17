@@ -202,20 +202,28 @@ func buildUpgradePlan(store DeployStore, target UpgradeTarget, resolveVersions E
 		if err != nil {
 			return UpgradePlan{}, err
 		}
-		for _, env := range envs {
-			if scopeEnv != "" && env.Name != scopeEnv {
-				continue
-			}
-			if !env.AutoUpgrade {
-				traceln(fmt.Sprintf("upgrade: %s/%s not opted in (autoupgrade=false), skipping", tenant.Name, env.Name))
-				continue
-			}
-			traceln(fmt.Sprintf("upgrade: %s/%s opted in, channel=%s current=%s", tenant.Name, env.Name, env.ResolvedUpgradeChannel(), strings.TrimSpace(env.RuntimeVersion)))
-			plan.Items = append(plan.Items, resolveEnvUpgradeItem(tenant.Name, env, override, resolveVersions, traceln))
-		}
+		plan.Items = appendTenantUpgradeItems(plan.Items, tenant.Name, envs, scopeEnv, override, resolveVersions, traceln)
 	}
 
 	return plan, nil
+}
+
+// appendTenantUpgradeItems resolves the upgrade decision for each opted-in env
+// of one tenant (scoped by scopeEnv when non-empty) and appends one plan item
+// per opted-in env, tracing the skip/opt-in decision for each.
+func appendTenantUpgradeItems(items []UpgradePlanItem, tenant string, envs []EnvConfig, scopeEnv, override string, resolveVersions EnvVersionsResolver, traceln func(string)) []UpgradePlanItem {
+	for _, env := range envs {
+		if scopeEnv != "" && env.Name != scopeEnv {
+			continue
+		}
+		if !env.AutoUpgrade {
+			traceln(fmt.Sprintf("upgrade: %s/%s not opted in (autoupgrade=false), skipping", tenant, env.Name))
+			continue
+		}
+		traceln(fmt.Sprintf("upgrade: %s/%s opted in, channel=%s current=%s", tenant, env.Name, env.ResolvedUpgradeChannel(), strings.TrimSpace(env.RuntimeVersion)))
+		items = append(items, resolveEnvUpgradeItem(tenant, env, override, resolveVersions, traceln))
+	}
+	return items
 }
 
 // resolveEnvUpgradeItem resolves one env's upgrade decision. With an explicit
@@ -250,24 +258,7 @@ func resolveEnvUpgradeItem(tenant string, env EnvConfig, override string, resolv
 		return item
 	}
 
-	candidates := make([]UpgradeVersionCandidate, 0, len(sourced))
-	seen := make(map[string]struct{}, len(sourced))
-	anyResolved := false
-	for _, sv := range sourced {
-		target := channelTarget(sv.Versions, channel)
-		if target == "" {
-			continue
-		}
-		anyResolved = true
-		if target == current {
-			continue
-		}
-		if _, ok := seen[target]; ok {
-			continue
-		}
-		seen[target] = struct{}{}
-		candidates = append(candidates, UpgradeVersionCandidate{Version: target, Registry: sv.Registry})
-	}
+	candidates, anyResolved := collectUpgradeCandidates(sourced, channel, current)
 	item.Candidates = candidates
 
 	switch len(candidates) {
@@ -291,6 +282,34 @@ func resolveEnvUpgradeItem(tenant string, env EnvConfig, override string, resolv
 		traceln(fmt.Sprintf("upgrade: %s/%s has %d newer candidates; needs a pick (%s)", tenant, env.Name, len(candidates), candidateSummary(candidates)))
 	}
 	return item
+}
+
+// collectUpgradeCandidates reduces the per-registry sourced versions to the
+// distinct newer candidates for the channel: it skips registries with no target
+// for the channel, skips the current version, and dedupes by version (first
+// registry wins). anyResolved reports whether at least one registry produced a
+// channel target (even when that target equals current), so the caller can tell
+// "up to date" from "nothing resolved".
+func collectUpgradeCandidates(sourced []SourcedRuntimeVersions, channel, current string) ([]UpgradeVersionCandidate, bool) {
+	candidates := make([]UpgradeVersionCandidate, 0, len(sourced))
+	seen := make(map[string]struct{}, len(sourced))
+	anyResolved := false
+	for _, sv := range sourced {
+		target := channelTarget(sv.Versions, channel)
+		if target == "" {
+			continue
+		}
+		anyResolved = true
+		if target == current {
+			continue
+		}
+		if _, ok := seen[target]; ok {
+			continue
+		}
+		seen[target] = struct{}{}
+		candidates = append(candidates, UpgradeVersionCandidate{Version: target, Registry: sv.Registry})
+	}
+	return candidates, anyResolved
 }
 
 // candidateRegistrySuffix renders " (from <registry>)" when the candidate

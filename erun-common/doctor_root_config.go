@@ -148,14 +148,7 @@ func InspectRootConfig(store RootConfigInspectionStore) (RootConfigInspection, e
 		return inspection, nil
 	}
 
-	configured := make(map[string]struct{}, len(config.CloudProviders))
-	for _, provider := range config.CloudProviders {
-		alias := strings.TrimSpace(provider.Alias)
-		if alias == "" {
-			continue
-		}
-		configured[alias] = struct{}{}
-	}
+	configured := configuredAliasSet(config.CloudProviders)
 	inspection.ConfiguredCount = len(configured)
 
 	tenants, err := store.ListTenantConfigs()
@@ -165,42 +158,37 @@ func InspectRootConfig(store RootConfigInspectionStore) (RootConfigInspection, e
 	inspection.TenantHits = len(tenants)
 	inspection.CloudContextHits = len(config.CloudContexts)
 
-	orphans := make(map[string]*OrphanedAlias)
-	addOrphanTenant := func(alias, tenant string) {
-		alias = strings.TrimSpace(alias)
-		tenant = strings.TrimSpace(tenant)
-		if alias == "" || tenant == "" {
-			return
-		}
-		entry := orphans[alias]
-		if entry == nil {
-			entry = newOrphanedAlias(alias)
-			orphans[alias] = entry
-		}
-		if !containsTrimmedAlias(entry.ReferencedByTenants, tenant) {
-			entry.ReferencedByTenants = append(entry.ReferencedByTenants, tenant)
-		}
-	}
-	addOrphanContext := func(alias, contextName, region string) {
-		alias = strings.TrimSpace(alias)
-		contextName = strings.TrimSpace(contextName)
-		if alias == "" || contextName == "" {
-			return
-		}
-		entry := orphans[alias]
-		if entry == nil {
-			entry = newOrphanedAlias(alias)
-			orphans[alias] = entry
-		}
-		ref := OrphanedAliasContextRef{Name: contextName, Region: strings.TrimSpace(region)}
-		for _, existing := range entry.ReferencedByCloudContexts {
-			if existing.Name == ref.Name {
-				return
-			}
-		}
-		entry.ReferencedByCloudContexts = append(entry.ReferencedByCloudContexts, ref)
-	}
+	inspection.OrphanedAliases = detectOrphanedAliases(configured, tenants, config.CloudContexts)
 
+	contextOrphans, err := collectOrphanedCloudContexts(store, config.CloudContexts, tenants)
+	if err != nil {
+		return RootConfigInspection{}, err
+	}
+	inspection.OrphanedContexts = contextOrphans
+
+	return inspection, nil
+}
+
+// configuredAliasSet returns the set of non-empty, trimmed cloud-provider
+// aliases declared in the root config — the source of truth orphan detection
+// compares tenant and cloud-context references against.
+func configuredAliasSet(providers []CloudProviderConfig) map[string]struct{} {
+	configured := make(map[string]struct{}, len(providers))
+	for _, provider := range providers {
+		alias := strings.TrimSpace(provider.Alias)
+		if alias == "" {
+			continue
+		}
+		configured[alias] = struct{}{}
+	}
+	return configured
+}
+
+// detectOrphanedAliases finds cloud-provider aliases referenced by tenants or
+// cloud contexts that are not present in the configured set, aggregated by
+// alias and returned in a stable sorted order.
+func detectOrphanedAliases(configured map[string]struct{}, tenants []TenantConfig, cloudContexts []CloudContextConfig) []OrphanedAlias {
+	orphans := make(map[string]*OrphanedAlias)
 	for _, tenant := range tenants {
 		aliases := append([]string{}, tenant.CloudProviderAliases...)
 		if primary := strings.TrimSpace(tenant.PrimaryCloudProviderAlias); primary != "" {
@@ -214,11 +202,10 @@ func InspectRootConfig(store RootConfigInspectionStore) (RootConfigInspection, e
 			if _, ok := configured[alias]; ok {
 				continue
 			}
-			addOrphanTenant(alias, tenant.Name)
+			addOrphanTenantRef(orphans, alias, tenant.Name)
 		}
 	}
-
-	for _, cloudContext := range config.CloudContexts {
+	for _, cloudContext := range cloudContexts {
 		alias := strings.TrimSpace(cloudContext.CloudProviderAlias)
 		if alias == "" {
 			continue
@@ -226,32 +213,73 @@ func InspectRootConfig(store RootConfigInspectionStore) (RootConfigInspection, e
 		if _, ok := configured[alias]; ok {
 			continue
 		}
-		addOrphanContext(alias, cloudContext.Name, cloudContext.Region)
+		addOrphanContextRef(orphans, alias, cloudContext.Name, cloudContext.Region)
 	}
+	return sortedOrphanedAliases(orphans)
+}
 
-	if len(orphans) > 0 {
-		aliases := make([]string, 0, len(orphans))
-		for alias := range orphans {
-			aliases = append(aliases, alias)
+// addOrphanTenantRef records that tenant references the orphaned alias,
+// de-duplicating tenant names.
+func addOrphanTenantRef(orphans map[string]*OrphanedAlias, alias, tenant string) {
+	alias = strings.TrimSpace(alias)
+	tenant = strings.TrimSpace(tenant)
+	if alias == "" || tenant == "" {
+		return
+	}
+	entry := orphans[alias]
+	if entry == nil {
+		entry = newOrphanedAlias(alias)
+		orphans[alias] = entry
+	}
+	if !containsTrimmedAlias(entry.ReferencedByTenants, tenant) {
+		entry.ReferencedByTenants = append(entry.ReferencedByTenants, tenant)
+	}
+}
+
+// addOrphanContextRef records that the named cloud context references the
+// orphaned alias, de-duplicating by context name.
+func addOrphanContextRef(orphans map[string]*OrphanedAlias, alias, contextName, region string) {
+	alias = strings.TrimSpace(alias)
+	contextName = strings.TrimSpace(contextName)
+	if alias == "" || contextName == "" {
+		return
+	}
+	entry := orphans[alias]
+	if entry == nil {
+		entry = newOrphanedAlias(alias)
+		orphans[alias] = entry
+	}
+	ref := OrphanedAliasContextRef{Name: contextName, Region: strings.TrimSpace(region)}
+	for _, existing := range entry.ReferencedByCloudContexts {
+		if existing.Name == ref.Name {
+			return
 		}
-		sort.Strings(aliases)
-		for _, alias := range aliases {
-			entry := orphans[alias]
-			sort.Strings(entry.ReferencedByTenants)
-			sort.Slice(entry.ReferencedByCloudContexts, func(i, j int) bool {
-				return entry.ReferencedByCloudContexts[i].Name < entry.ReferencedByCloudContexts[j].Name
-			})
-			inspection.OrphanedAliases = append(inspection.OrphanedAliases, *entry)
-		}
 	}
+	entry.ReferencedByCloudContexts = append(entry.ReferencedByCloudContexts, ref)
+}
 
-	contextOrphans, err := collectOrphanedCloudContexts(store, config.CloudContexts, tenants)
-	if err != nil {
-		return RootConfigInspection{}, err
+// sortedOrphanedAliases flattens the orphan map into a slice ordered by alias,
+// with each entry's tenant and cloud-context references sorted too, so the
+// inspection output is deterministic.
+func sortedOrphanedAliases(orphans map[string]*OrphanedAlias) []OrphanedAlias {
+	if len(orphans) == 0 {
+		return nil
 	}
-	inspection.OrphanedContexts = contextOrphans
-
-	return inspection, nil
+	aliases := make([]string, 0, len(orphans))
+	for alias := range orphans {
+		aliases = append(aliases, alias)
+	}
+	sort.Strings(aliases)
+	result := make([]OrphanedAlias, 0, len(aliases))
+	for _, alias := range aliases {
+		entry := orphans[alias]
+		sort.Strings(entry.ReferencedByTenants)
+		sort.Slice(entry.ReferencedByCloudContexts, func(i, j int) bool {
+			return entry.ReferencedByCloudContexts[i].Name < entry.ReferencedByCloudContexts[j].Name
+		})
+		result = append(result, *entry)
+	}
+	return result
 }
 
 // collectOrphanedCloudContexts walks every env config and reports

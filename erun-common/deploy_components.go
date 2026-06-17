@@ -148,28 +148,9 @@ func groupDeploySpecsByPlan(specs []DeploySpec, plan ProjectK8sConfig) [][]Deplo
 		return nil
 	}
 	if len(plan.Deployments) == 0 {
-		groups := make([][]DeploySpec, 0, len(specs))
-		for _, spec := range specs {
-			groups = append(groups, []DeploySpec{spec})
-		}
-		return groups
+		return serialDeploySpecGroups(specs)
 	}
-	specsByName := make(map[string]DeploySpec, len(specs))
-	stepIndex := make(map[string]int)
-	for i, step := range plan.Deployments {
-		for _, name := range step.Components {
-			stepIndex[strings.TrimSpace(name)] = i
-		}
-	}
-	var trailing []DeploySpec
-	for _, spec := range specs {
-		name := strings.TrimSpace(spec.DeployContext.ComponentName)
-		if _, planned := stepIndex[name]; planned {
-			specsByName[name] = spec
-			continue
-		}
-		trailing = append(trailing, spec)
-	}
+	specsByName, trailing := partitionDeploySpecsByPlan(specs, plan)
 	out := make([][]DeploySpec, 0, len(plan.Deployments)+len(trailing))
 	for _, step := range plan.Deployments {
 		group := make([]DeploySpec, 0, len(step.Components))
@@ -188,3 +169,36 @@ func groupDeploySpecsByPlan(specs []DeploySpec, plan ProjectK8sConfig) [][]Deplo
 	return out
 }
 
+// serialDeploySpecGroups puts each spec in its own step, preserving input
+// order — the empty-plan grouping (strictly serial deploys).
+func serialDeploySpecGroups(specs []DeploySpec) [][]DeploySpec {
+	groups := make([][]DeploySpec, 0, len(specs))
+	for _, spec := range specs {
+		groups = append(groups, []DeploySpec{spec})
+	}
+	return groups
+}
+
+// partitionDeploySpecsByPlan splits the specs into those whose component is
+// named in the plan (keyed by component name) and those that are not (the
+// trailing specs, in input order). It relies on the plan having at least one
+// deployment step.
+func partitionDeploySpecsByPlan(specs []DeploySpec, plan ProjectK8sConfig) (map[string]DeploySpec, []DeploySpec) {
+	stepIndex := make(map[string]int)
+	for i, step := range plan.Deployments {
+		for _, name := range step.Components {
+			stepIndex[strings.TrimSpace(name)] = i
+		}
+	}
+	specsByName := make(map[string]DeploySpec, len(specs))
+	var trailing []DeploySpec
+	for _, spec := range specs {
+		name := strings.TrimSpace(spec.DeployContext.ComponentName)
+		if _, planned := stepIndex[name]; planned {
+			specsByName[name] = spec
+			continue
+		}
+		trailing = append(trailing, spec)
+	}
+	return specsByName, trailing
+}

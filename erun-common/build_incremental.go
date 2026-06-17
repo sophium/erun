@@ -78,18 +78,7 @@ func parseDockerfileCopyInstructions(dockerfile string) [][]string {
 		if len(args) < 2 {
 			continue
 		}
-		fromStage := false
-		filtered := make([]string, 0, len(args))
-		for _, arg := range args {
-			if strings.HasPrefix(arg, "--from=") {
-				fromStage = true
-				continue
-			}
-			if strings.HasPrefix(arg, "--chown=") || strings.HasPrefix(arg, "--chmod=") || strings.HasPrefix(arg, "--link") || strings.HasPrefix(arg, "--parents") {
-				continue
-			}
-			filtered = append(filtered, arg)
-		}
+		filtered, fromStage := filterDockerfileCopyArgs(args)
 		if fromStage {
 			continue
 		}
@@ -101,6 +90,26 @@ func parseDockerfileCopyInstructions(dockerfile string) [][]string {
 		results = append(results, sources)
 	}
 	return results
+}
+
+// filterDockerfileCopyArgs strips COPY flags from a single instruction's
+// argument list, returning the remaining positional arguments (sources plus
+// destination) and whether a --from=<stage> flag was present. A --from
+// instruction references a build stage rather than the host filesystem, so the
+// caller skips it entirely.
+func filterDockerfileCopyArgs(args []string) (filtered []string, fromStage bool) {
+	filtered = make([]string, 0, len(args))
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "--from=") {
+			fromStage = true
+			continue
+		}
+		if strings.HasPrefix(arg, "--chown=") || strings.HasPrefix(arg, "--chmod=") || strings.HasPrefix(arg, "--link") || strings.HasPrefix(arg, "--parents") {
+			continue
+		}
+		filtered = append(filtered, arg)
+	}
+	return filtered, fromStage
 }
 
 // computeBuildFingerprint hashes the contents of the Dockerfile and every COPY
@@ -131,30 +140,41 @@ func computeBuildFingerprint(buildInput DockerBuildSpec) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	for _, path := range files {
-		rel, err := filepath.Rel(contextDir, path)
-		if err != nil {
-			return "", err
-		}
-		rel = filepath.ToSlash(rel)
-		if _, err := hasher.Write([]byte(rel)); err != nil {
-			return "", err
-		}
-		if _, err := hasher.Write([]byte{'\n'}); err != nil {
-			return "", err
-		}
-		if err := hashFileInto(hasher, path); err != nil {
-			return "", err
-		}
-		if _, err := hasher.Write([]byte{0}); err != nil {
-			return "", err
-		}
+	if err := hashFingerprintFiles(hasher, contextDir, files); err != nil {
+		return "", err
 	}
 	if err := hashComponentChartInto(hasher, buildInput); err != nil {
 		return "", err
 	}
 	digest := hex.EncodeToString(hasher.Sum(nil))
 	return digest[:16], nil
+}
+
+// hashFingerprintFiles folds each file's context-relative path and contents
+// into the hasher, separating entries with a NUL byte so distinct file lists
+// can never produce the same digest. Paths are slash-normalized so the result
+// is stable across host filesystems.
+func hashFingerprintFiles(hasher io.Writer, contextDir string, files []string) error {
+	for _, path := range files {
+		rel, err := filepath.Rel(contextDir, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if _, err := hasher.Write([]byte(rel)); err != nil {
+			return err
+		}
+		if _, err := hasher.Write([]byte{'\n'}); err != nil {
+			return err
+		}
+		if err := hashFileInto(hasher, path); err != nil {
+			return err
+		}
+		if _, err := hasher.Write([]byte{0}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // hashComponentChartInto folds the component's deployed Helm chart into the
@@ -241,43 +261,57 @@ func collectFingerprintFiles(contextDir string, sources []string, ignored *ignor
 			return nil, err
 		}
 		if !info.IsDir() {
-			rel, err := filepath.Rel(contextDir, full)
-			if err != nil {
+			if err := collectFingerprintFile(contextDir, full, ignored, add); err != nil {
 				return nil, err
-			}
-			rel = filepath.ToSlash(rel)
-			if !ignored.matches(rel, false) {
-				add(full)
 			}
 			continue
 		}
-		walkErr := filepath.WalkDir(full, func(path string, d os.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			rel, err := filepath.Rel(contextDir, path)
-			if err != nil {
-				return err
-			}
-			rel = filepath.ToSlash(rel)
-			if d.IsDir() {
-				if rel != "." && ignored.matches(rel, true) {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			if ignored.matches(rel, false) {
-				return nil
-			}
-			add(path)
-			return nil
-		})
-		if walkErr != nil {
-			return nil, walkErr
+		if err := collectFingerprintDir(contextDir, full, ignored, add); err != nil {
+			return nil, err
 		}
 	}
 	sort.Strings(files)
 	return files, nil
+}
+
+// collectFingerprintFile records a single non-directory source unless it is
+// excluded by the ignore set.
+func collectFingerprintFile(contextDir, full string, ignored *ignoreSet, add func(string)) error {
+	rel, err := filepath.Rel(contextDir, full)
+	if err != nil {
+		return err
+	}
+	rel = filepath.ToSlash(rel)
+	if !ignored.matches(rel, false) {
+		add(full)
+	}
+	return nil
+}
+
+// collectFingerprintDir walks a directory source, recording every file that
+// survives the ignore set and pruning ignored subtrees so they are not visited.
+func collectFingerprintDir(contextDir, full string, ignored *ignoreSet, add func(string)) error {
+	return filepath.WalkDir(full, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(contextDir, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if d.IsDir() {
+			if rel != "." && ignored.matches(rel, true) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if ignored.matches(rel, false) {
+			return nil
+		}
+		add(path)
+		return nil
+	})
 }
 
 func hashFileInto(w io.Writer, path string) error {
@@ -349,41 +383,49 @@ func loadNestedGitignores(contextDir string, sources []string, combined *ignoreS
 		if !info.IsDir() {
 			continue
 		}
-		walkErr := filepath.WalkDir(full, func(path string, d os.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			rel, err := filepath.Rel(contextDir, path)
-			if err != nil {
-				return err
-			}
-			rel = filepath.ToSlash(rel)
-			if d.IsDir() {
-				if _, seen := visited[rel]; seen {
-					return filepath.SkipDir
-				}
-				visited[rel] = struct{}{}
-				return nil
-			}
-			if d.Name() != ".gitignore" {
-				return nil
-			}
-			base := filepath.ToSlash(filepath.Dir(rel))
-			if base == "." || base == "" {
-				return nil // root, already loaded
-			}
-			set, err := loadIgnoreFile(path, base)
-			if err != nil {
-				return err
-			}
-			combined.patterns = append(combined.patterns, set.patterns...)
-			return nil
-		})
-		if walkErr != nil {
-			return walkErr
+		if err := walkNestedGitignores(contextDir, full, visited, combined); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// walkNestedGitignores walks one directory source, appending the patterns from
+// every nested .gitignore it encounters to combined. visited dedupes
+// directories so overlapping sources are not walked twice. Each nested file's
+// patterns are scoped to its own directory subtree; the root file is skipped
+// here because loadContextIgnoreSet already loaded it.
+func walkNestedGitignores(contextDir, full string, visited map[string]struct{}, combined *ignoreSet) error {
+	return filepath.WalkDir(full, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(contextDir, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if d.IsDir() {
+			if _, seen := visited[rel]; seen {
+				return filepath.SkipDir
+			}
+			visited[rel] = struct{}{}
+			return nil
+		}
+		if d.Name() != ".gitignore" {
+			return nil
+		}
+		base := filepath.ToSlash(filepath.Dir(rel))
+		if base == "." || base == "" {
+			return nil // root, already loaded
+		}
+		set, err := loadIgnoreFile(path, base)
+		if err != nil {
+			return err
+		}
+		combined.patterns = append(combined.patterns, set.patterns...)
+		return nil
+	})
 }
 
 func loadIgnoreFile(path, base string) (*ignoreSet, error) {
@@ -400,48 +442,60 @@ func loadIgnoreFile(path, base string) (*ignoreSet, error) {
 func parseIgnoreData(data []byte, base string) *ignoreSet {
 	set := &ignoreSet{}
 	for _, raw := range strings.Split(string(data), "\n") {
-		line := strings.TrimRight(raw, "\r")
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
+		pattern, ok := parseIgnoreLine(raw, base)
+		if !ok {
 			continue
 		}
-		negate := false
-		if strings.HasPrefix(line, "!") {
-			negate = true
-			line = strings.TrimSpace(line[1:])
-			if line == "" {
-				continue
-			}
-		}
-		anchored := false
-		if strings.HasPrefix(line, "/") {
-			anchored = true
-			line = strings.TrimPrefix(line, "/")
-		}
-		dirOnly := false
-		if strings.HasSuffix(line, "/") {
-			dirOnly = true
-			line = strings.TrimSuffix(line, "/")
-		}
-		// gitignore: a pattern that contains a slash anywhere except the
-		// trailing position is anchored to the file's directory. For our
-		// purposes the file's directory is contextDir, the same as
-		// leading-slash anchoring.
-		if !anchored && strings.Contains(line, "/") {
-			anchored = true
-		}
-		if line == "" {
-			continue
-		}
-		set.patterns = append(set.patterns, ignorePattern{
-			raw:      filepath.ToSlash(line),
-			anchored: anchored,
-			dirOnly:  dirOnly,
-			negate:   negate,
-			base:     base,
-		})
+		set.patterns = append(set.patterns, pattern)
 	}
 	return set
+}
+
+// parseIgnoreLine parses a single .gitignore/.dockerignore line into an
+// ignorePattern scoped to base. It returns ok=false for blank lines, comments,
+// and patterns that reduce to empty after stripping the negation, anchor, and
+// dir-only markers.
+func parseIgnoreLine(raw, base string) (ignorePattern, bool) {
+	line := strings.TrimRight(raw, "\r")
+	line = strings.TrimSpace(line)
+	if line == "" || strings.HasPrefix(line, "#") {
+		return ignorePattern{}, false
+	}
+	negate := false
+	if strings.HasPrefix(line, "!") {
+		negate = true
+		line = strings.TrimSpace(line[1:])
+		if line == "" {
+			return ignorePattern{}, false
+		}
+	}
+	anchored := false
+	if strings.HasPrefix(line, "/") {
+		anchored = true
+		line = strings.TrimPrefix(line, "/")
+	}
+	dirOnly := false
+	if strings.HasSuffix(line, "/") {
+		dirOnly = true
+		line = strings.TrimSuffix(line, "/")
+	}
+	// gitignore: a pattern that contains a slash anywhere except the
+	// trailing position is anchored to the file's directory. For our
+	// purposes the file's directory is contextDir, the same as
+	// leading-slash anchoring.
+	if !anchored && strings.Contains(line, "/") {
+		anchored = true
+	}
+	if line == "" {
+		return ignorePattern{}, false
+	}
+	return ignorePattern{
+		raw:      filepath.ToSlash(line),
+		anchored: anchored,
+		dirOnly:  dirOnly,
+		negate:   negate,
+		base:     base,
+	}, true
 }
 
 func (s *ignoreSet) matches(rel string, isDir bool) bool {
@@ -476,23 +530,29 @@ func patternMatchesPath(p ignorePattern, rel string) bool {
 		rel = strings.TrimPrefix(rel, p.base+"/")
 	}
 	if p.anchored {
-		if globMatch(p.raw, rel) {
-			return true
-		}
-		// Anchored directory patterns also match descendants so the walker can
-		// short-circuit before visiting the directory entry itself.
-		parts := strings.Split(rel, "/")
-		for i := 1; i < len(parts); i++ {
-			prefix := strings.Join(parts[:i], "/")
-			if globMatch(p.raw, prefix) {
-				return true
-			}
-		}
-		return false
+		return anchoredPatternMatches(p.raw, rel)
 	}
 	// Non-anchored gitignore patterns match a basename anywhere in the tree.
 	for _, part := range strings.Split(rel, "/") {
 		if globMatch(p.raw, part) {
+			return true
+		}
+	}
+	return false
+}
+
+// anchoredPatternMatches reports whether an anchored gitignore glob matches rel
+// or any of rel's ancestor prefixes. Matching a prefix lets the walker
+// short-circuit an ignored directory before visiting the directory entry
+// itself.
+func anchoredPatternMatches(raw, rel string) bool {
+	if globMatch(raw, rel) {
+		return true
+	}
+	parts := strings.Split(rel, "/")
+	for i := 1; i < len(parts); i++ {
+		prefix := strings.Join(parts[:i], "/")
+		if globMatch(raw, prefix) {
 			return true
 		}
 	}
@@ -520,31 +580,41 @@ func globToRegex(pattern string) string {
 	b.WriteString("^")
 	i := 0
 	for i < len(pattern) {
-		switch {
-		case i+1 < len(pattern) && pattern[i] == '*' && pattern[i+1] == '*':
-			b.WriteString(".*")
-			i += 2
-			// Collapse `**/` so `a/**/b` matches `a/b` as well as `a/x/b`.
-			if i < len(pattern) && pattern[i] == '/' {
-				i++
-			}
-		case pattern[i] == '*':
-			b.WriteString("[^/]*")
-			i++
-		case pattern[i] == '?':
-			b.WriteString("[^/]")
-			i++
-		case strings.ContainsRune(`.+()|^$\{}`, rune(pattern[i])):
-			b.WriteByte('\\')
-			b.WriteByte(pattern[i])
-			i++
-		default:
-			b.WriteByte(pattern[i])
-			i++
-		}
+		i = writeGlobToken(&b, pattern, i)
 	}
 	b.WriteString("$")
 	return b.String()
+}
+
+// writeGlobToken translates the glob token starting at index i in pattern into
+// its regex equivalent, writes it to b, and returns the index of the next
+// unconsumed character. `**` becomes `.*` (consuming a following `/` so
+// `a/**/b` matches `a/b`), `*` and `?` stay segment-local, and regex
+// metacharacters are escaped.
+func writeGlobToken(b *strings.Builder, pattern string, i int) int {
+	switch {
+	case i+1 < len(pattern) && pattern[i] == '*' && pattern[i+1] == '*':
+		b.WriteString(".*")
+		i += 2
+		// Collapse `**/` so `a/**/b` matches `a/b` as well as `a/x/b`.
+		if i < len(pattern) && pattern[i] == '/' {
+			i++
+		}
+		return i
+	case pattern[i] == '*':
+		b.WriteString("[^/]*")
+		return i + 1
+	case pattern[i] == '?':
+		b.WriteString("[^/]")
+		return i + 1
+	case strings.ContainsRune(`.+()|^$\{}`, rune(pattern[i])):
+		b.WriteByte('\\')
+		b.WriteByte(pattern[i])
+		return i + 1
+	default:
+		b.WriteByte(pattern[i])
+		return i + 1
+	}
 }
 
 // LocalDockerImageInspector reports whether an image with the given tag exists

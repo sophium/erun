@@ -80,7 +80,7 @@ func RunHelmChartPublish(ctx Context, spec HelmChartPublishSpec) error {
 		return fmt.Errorf("helm package %s: %w", spec.ChartName, err)
 	}
 	tgzPath := filepath.Join(pkg.Dir, spec.ChartName+"-"+spec.Version+".tgz")
-	defer os.Remove(tgzPath)
+	defer func() { _ = os.Remove(tgzPath) }()
 	if err := runHelmCommand(ctx, push); err != nil {
 		return fmt.Errorf("helm push %s: %w", spec.ChartName, err)
 	}
@@ -109,7 +109,7 @@ func VerifyPublishedHelmChart(ctx Context, ociRepo, chartName, version string) e
 	if err := runHelmCommand(ctx, commandSpec{Name: "helm", Args: args}); err != nil {
 		return fmt.Errorf("verify published chart %s:%s: %w", chartName, version, err)
 	}
-	defer os.Remove(filepath.Join(destination, chartName+"-"+version+".tgz"))
+	defer func() { _ = os.Remove(filepath.Join(destination, chartName+"-"+version+".tgz")) }()
 	ctx.Info("==> Verified published chart " + chartName + " " + version)
 	return nil
 }
@@ -137,7 +137,7 @@ func loadHelmChartName(chartPath string) (string, error) {
 	}
 	name := strings.TrimSpace(chart.Name)
 	if name == "" {
-		return "", fmt.Errorf("Chart.yaml at %s is missing the name field", chartPath)
+		return "", fmt.Errorf("missing name field in Chart.yaml at %s", chartPath)
 	}
 	return name, nil
 }
@@ -202,4 +202,3 @@ func publishRuntimeChartForPushedImage(ctx Context, image DockerImageReference) 
 	}
 	return VerifyPublishedHelmChart(ctx, publish.OCIRepo, publish.ChartName, publish.Version)
 }
-

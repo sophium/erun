@@ -289,14 +289,24 @@ func ResolveDockerBuildEnvConfig(store DockerStore, findProjectRoot ProjectFinde
 		if err != nil {
 			continue
 		}
-		for i := range envs {
-			if wantEnv != "" && envs[i].Name != wantEnv {
-				continue
-			}
-			path := strings.TrimSpace(envs[i].EffectiveLocalRepoPath())
-			if path != "" && filepath.Clean(path) == cleanRoot {
-				return &envs[i]
-			}
+		if match := matchDockerBuildEnvConfig(envs, wantEnv, cleanRoot); match != nil {
+			return match
+		}
+	}
+	return nil
+}
+
+// matchDockerBuildEnvConfig returns the first env in envs whose effective local
+// repo path matches cleanRoot, optionally filtered to wantEnv (when non-empty),
+// or nil when none matches.
+func matchDockerBuildEnvConfig(envs []EnvConfig, wantEnv, cleanRoot string) *EnvConfig {
+	for i := range envs {
+		if wantEnv != "" && envs[i].Name != wantEnv {
+			continue
+		}
+		path := strings.TrimSpace(envs[i].EffectiveLocalRepoPath())
+		if path != "" && filepath.Clean(path) == cleanRoot {
+			return &envs[i]
 		}
 	}
 	return nil

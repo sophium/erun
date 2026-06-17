@@ -157,14 +157,8 @@ func resolveGHCRRuntimeRegistryVersionsAt(ctx context.Context, client *http.Clie
 	if client == nil {
 		client = http.DefaultClient
 	}
-	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if baseURL == "" {
-		baseURL = defaultGHCRRegistryBaseURL
-	}
-	tokenURL = strings.TrimRight(strings.TrimSpace(tokenURL), "/")
-	if tokenURL == "" {
-		tokenURL = defaultGHCRRegistryBaseURL
-	}
+	baseURL = normalizeGHCRBaseURL(baseURL)
+	tokenURL = normalizeGHCRBaseURL(tokenURL)
 
 	repoPath := strings.ToLower(url.PathEscape(owner) + "/" + url.PathEscape(repository))
 	token, err := fetchGHCRPullToken(ctx, client, repoPath, tokenURL)
@@ -172,12 +166,34 @@ func resolveGHCRRuntimeRegistryVersionsAt(ctx context.Context, client *http.Clie
 		return RuntimeRegistryVersions{}, err
 	}
 
-	endpoint := baseURL + "/v2/" + repoPath + "/tags/list"
+	tags, err := collectGHCRTags(ctx, client, baseURL+"/v2/"+repoPath+"/tags/list", token)
+	if err != nil {
+		return RuntimeRegistryVersions{}, err
+	}
+
+	versions := latestRuntimeVersionsFromTags(tags)
+	versions.Image = "ghcr.io/" + strings.ToLower(owner+"/"+repository)
+	return versions, nil
+}
+
+// normalizeGHCRBaseURL trims a GHCR base/token URL and falls back to the
+// default registry endpoint when it is empty.
+func normalizeGHCRBaseURL(rawURL string) string {
+	trimmed := strings.TrimRight(strings.TrimSpace(rawURL), "/")
+	if trimmed == "" {
+		return defaultGHCRRegistryBaseURL
+	}
+	return trimmed
+}
+
+// collectGHCRTags walks the GHCR tag listing across all pages, returning every
+// non-empty tag name in encounter order.
+func collectGHCRTags(ctx context.Context, client *http.Client, endpoint, token string) ([]string, error) {
 	tags := make([]string, 0, 128)
 	for endpoint != "" {
 		page, next, err := fetchGHCRTagPage(ctx, client, endpoint, token)
 		if err != nil {
-			return RuntimeRegistryVersions{}, err
+			return nil, err
 		}
 		for _, tag := range page.Tags {
 			if name := strings.TrimSpace(tag); name != "" {
@@ -186,10 +202,7 @@ func resolveGHCRRuntimeRegistryVersionsAt(ctx context.Context, client *http.Clie
 		}
 		endpoint = next
 	}
-
-	versions := latestRuntimeVersionsFromTags(tags)
-	versions.Image = "ghcr.io/" + strings.ToLower(owner+"/"+repository)
-	return versions, nil
+	return tags, nil
 }
 
 func fetchGHCRPullToken(ctx context.Context, client *http.Client, repoPath, tokenBaseURL string) (string, error) {
@@ -270,27 +283,41 @@ func nextLinkFromHeader(resp *http.Response, baseEndpoint string) string {
 		if !strings.Contains(segment, `rel="next"`) {
 			continue
 		}
-		start := strings.Index(segment, "<")
-		end := strings.Index(segment, ">")
-		if start < 0 || end < 0 || end <= start+1 {
-			continue
-		}
-		target := strings.TrimSpace(segment[start+1 : end])
+		target := nextLinkTargetFromSegment(segment)
 		if target == "" {
 			continue
 		}
-		if strings.HasPrefix(target, "/") {
-			base, err := url.Parse(baseEndpoint)
-			if err == nil {
-				ref, err := url.Parse(target)
-				if err == nil {
-					return base.ResolveReference(ref).String()
-				}
-			}
-		}
-		return target
+		return resolveNextLinkTarget(target, baseEndpoint)
 	}
 	return ""
+}
+
+// nextLinkTargetFromSegment extracts the `<...>` target from a single Link
+// header segment, returning "" when the angle-bracket reference is missing or
+// empty.
+func nextLinkTargetFromSegment(segment string) string {
+	start := strings.Index(segment, "<")
+	end := strings.Index(segment, ">")
+	if start < 0 || end < 0 || end <= start+1 {
+		return ""
+	}
+	return strings.TrimSpace(segment[start+1 : end])
+}
+
+// resolveNextLinkTarget resolves a root-relative pagination target against the
+// base endpoint; absolute targets (or anything that fails to parse) are
+// returned unchanged.
+func resolveNextLinkTarget(target, baseEndpoint string) string {
+	if strings.HasPrefix(target, "/") {
+		base, err := url.Parse(baseEndpoint)
+		if err == nil {
+			ref, err := url.Parse(target)
+			if err == nil {
+				return base.ResolveReference(ref).String()
+			}
+		}
+	}
+	return target
 }
 
 type dockerHubTagPage struct {

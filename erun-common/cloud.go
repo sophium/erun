@@ -97,14 +97,14 @@ type SetEnvironmentCloudAliasParams struct {
 }
 
 type CloudDependencies struct {
-	RunAWSConfigureSSO     func(Context, AWSProfileConfig) error
-	RunAWSLogin            func(Context, string) error
-	RunAWSLogout           func(Context, string) error
-	RunAWSBearerToken      func(Context, string, string) (string, error)
-	RunAWSEnableOIDC       func(Context, string) (string, error)
+	RunAWSConfigureSSO      func(Context, AWSProfileConfig) error
+	RunAWSLogin             func(Context, string) error
+	RunAWSLogout            func(Context, string) error
+	RunAWSBearerToken       func(Context, string, string) (string, error)
+	RunAWSEnableOIDC        func(Context, string) (string, error)
 	RunAWSExportCredentials func(Context, string) (CloudProviderCredentials, error)
-	ResolveAWSIdentity     func(Context, string) (AWSIdentity, error)
-	CheckAWSStatus         func(Context, CloudProviderConfig) CloudProviderStatus
+	ResolveAWSIdentity      func(Context, string) (AWSIdentity, error)
+	CheckAWSStatus          func(Context, CloudProviderConfig) CloudProviderStatus
 }
 
 // CloudProviderCredentials is a snapshot of temporary AWS credentials derived
@@ -384,46 +384,65 @@ func CloudProviderBearerToken(ctx Context, store CloudReadStore, params CloudBea
 	deps = normalizeCloudDependencies(deps)
 	switch provider.Provider {
 	case CloudProviderAWS:
-		status := CloudProviderTokenStatus(provider, deps)
-		if status.Status != CloudTokenStatusActive {
-			if err := deps.RunAWSLogin(ctx, provider.Profile); err != nil {
-				return CloudBearerToken{}, err
-			}
-		}
-		audience := normalizeCloudBearerAudience(params.Audience)
-		rawToken, err := deps.RunAWSBearerToken(ctx, provider.Profile, audience)
-		if err != nil {
-			if !isAWSOutboundWebIdentityFederationDisabled(err) {
-				return CloudBearerToken{}, err
-			}
-			if _, enableErr := deps.RunAWSEnableOIDC(ctx, provider.Profile); enableErr != nil {
-				return CloudBearerToken{}, enableErr
-			}
-			rawToken, err = deps.RunAWSBearerToken(ctx, provider.Profile, audience)
-			if err != nil {
-				return CloudBearerToken{}, err
-			}
-		}
-		if ctx.DryRun && strings.TrimSpace(rawToken) == "" {
-			return CloudBearerToken{
-				Alias:    provider.Alias,
-				Provider: provider.Provider,
-				Issuer:   "derived-from-aws-web-identity-token",
-			}, nil
-		}
-		issuer, err := issuerFromJWT(rawToken)
-		if err != nil {
-			return CloudBearerToken{}, err
-		}
-		return CloudBearerToken{
-			Alias:    provider.Alias,
-			Provider: provider.Provider,
-			Token:    rawToken,
-			Issuer:   issuer,
-		}, nil
+		return awsCloudProviderBearerToken(ctx, provider, params, deps)
 	default:
 		return CloudBearerToken{}, fmt.Errorf("unsupported cloud provider %q", provider.Provider)
 	}
+}
+
+// awsCloudProviderBearerToken mints an AWS web-identity bearer token for
+// the resolved provider: it re-logs in when the SSO session is stale,
+// fetches the token (enabling outbound web identity federation and
+// retrying once when AWS reports it disabled), and derives the issuer
+// from the JWT. In dry-run mode with no real token it returns the
+// synthetic issuer the trace path expects.
+func awsCloudProviderBearerToken(ctx Context, provider CloudProviderConfig, params CloudBearerParams, deps CloudDependencies) (CloudBearerToken, error) {
+	status := CloudProviderTokenStatus(provider, deps)
+	if status.Status != CloudTokenStatusActive {
+		if err := deps.RunAWSLogin(ctx, provider.Profile); err != nil {
+			return CloudBearerToken{}, err
+		}
+	}
+	audience := normalizeCloudBearerAudience(params.Audience)
+	rawToken, err := awsBearerTokenWithOIDCRetry(ctx, provider, audience, deps)
+	if err != nil {
+		return CloudBearerToken{}, err
+	}
+	if ctx.DryRun && strings.TrimSpace(rawToken) == "" {
+		return CloudBearerToken{
+			Alias:    provider.Alias,
+			Provider: provider.Provider,
+			Issuer:   "derived-from-aws-web-identity-token",
+		}, nil
+	}
+	issuer, err := issuerFromJWT(rawToken)
+	if err != nil {
+		return CloudBearerToken{}, err
+	}
+	return CloudBearerToken{
+		Alias:    provider.Alias,
+		Provider: provider.Provider,
+		Token:    rawToken,
+		Issuer:   issuer,
+	}, nil
+}
+
+// awsBearerTokenWithOIDCRetry fetches the AWS web-identity token and, when
+// the first attempt fails because outbound web identity federation is
+// disabled, enables it and retries exactly once. Any other failure is
+// returned unchanged.
+func awsBearerTokenWithOIDCRetry(ctx Context, provider CloudProviderConfig, audience string, deps CloudDependencies) (string, error) {
+	rawToken, err := deps.RunAWSBearerToken(ctx, provider.Profile, audience)
+	if err == nil {
+		return rawToken, nil
+	}
+	if !isAWSOutboundWebIdentityFederationDisabled(err) {
+		return "", err
+	}
+	if _, enableErr := deps.RunAWSEnableOIDC(ctx, provider.Profile); enableErr != nil {
+		return "", enableErr
+	}
+	return deps.RunAWSBearerToken(ctx, provider.Profile, audience)
 }
 
 // ExportCloudProviderCredentials returns short-lived AWS credentials derived

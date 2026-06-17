@@ -17,13 +17,7 @@ func TestAISessionLaunchCommand(t *testing.T) {
 	}
 
 	t.Run("default claude wraps in the cwd guard at the env effort", func(t *testing.T) {
-		got := AISessionLaunchCommand("", effort("high"))
-		if strings.Count(got, "--effort high") != 2 {
-			t.Fatalf("expected --effort high in both guard branches, got %q", got)
-		}
-		if !strings.Contains(got, "claude --continue --effort high") || !strings.Contains(got, "else claude --effort high") {
-			t.Fatalf("guard missing the resume/fresh branches: %q", got)
-		}
+		assertDefaultClaudeGuardAtEffort(t, effort("high"))
 	})
 
 	t.Run("explicit claude tool also uses the guard", func(t *testing.T) {
@@ -45,16 +39,7 @@ func TestAISessionLaunchCommand(t *testing.T) {
 	})
 
 	t.Run("unset and invalid effort both resolve to ultracode", func(t *testing.T) {
-		got := AISessionLaunchCommand("", EnvironmentClaudeConfig{})
-		if !strings.Contains(got, `--settings '{"ultracode":true}'`) || strings.Contains(got, "--effort") {
-			t.Fatalf("unset effort must default to ultracode via --settings, got %q", got)
-		}
-		// A bad persisted value must never reach the shell verbatim; it resolves
-		// to the default instead of injecting `--effort turbo`.
-		got = AISessionLaunchCommand("", effort("turbo"))
-		if strings.Contains(got, "turbo") || !strings.Contains(got, `--settings '{"ultracode":true}'`) {
-			t.Fatalf("invalid effort must resolve to ultracode, got %q", got)
-		}
+		assertEffortResolvesToUltracode(t, effort)
 	})
 
 	// Issue #491 — ultracode is not a `claude --effort` value: it launches
@@ -62,13 +47,7 @@ func TestAISessionLaunchCommand(t *testing.T) {
 	// and the settings JSON appears in both branches of the cwd-guarded
 	// resume, composing after --continue.
 	t.Run("ultracode launches via --settings in both guard branches", func(t *testing.T) {
-		got := AISessionLaunchCommand("", effort("ultracode"))
-		if strings.Count(got, `--settings '{"ultracode":true}'`) != 2 || strings.Contains(got, "--effort") {
-			t.Fatalf("ultracode must inject --settings (never --effort) in both branches, got %q", got)
-		}
-		if !strings.Contains(got, `claude --continue --settings '{"ultracode":true}'`) {
-			t.Fatalf("--settings must compose after --continue in the resume branch, got %q", got)
-		}
+		assertUltracodeInBothBranches(t, effort("ultracode"))
 	})
 
 	t.Run("an explicit max still launches via --effort", func(t *testing.T) {
@@ -77,6 +56,49 @@ func TestAISessionLaunchCommand(t *testing.T) {
 			t.Fatalf("explicit max must keep --effort max, got %q", got)
 		}
 	})
+}
+
+// assertDefaultClaudeGuardAtEffort pins that a default claude launch wraps in
+// the cwd guard with the env's effort level injected into both the resume and
+// the fresh branch.
+func assertDefaultClaudeGuardAtEffort(t *testing.T, config EnvironmentClaudeConfig) {
+	t.Helper()
+	got := AISessionLaunchCommand("", config)
+	if strings.Count(got, "--effort high") != 2 {
+		t.Fatalf("expected --effort high in both guard branches, got %q", got)
+	}
+	if !strings.Contains(got, "claude --continue --effort high") || !strings.Contains(got, "else claude --effort high") {
+		t.Fatalf("guard missing the resume/fresh branches: %q", got)
+	}
+}
+
+// assertEffortResolvesToUltracode pins that both an unset and an invalid effort
+// fall back to the ultracode --settings launch, never a bad --effort flag.
+func assertEffortResolvesToUltracode(t *testing.T, effort func(string) EnvironmentClaudeConfig) {
+	t.Helper()
+	got := AISessionLaunchCommand("", EnvironmentClaudeConfig{})
+	if !strings.Contains(got, `--settings '{"ultracode":true}'`) || strings.Contains(got, "--effort") {
+		t.Fatalf("unset effort must default to ultracode via --settings, got %q", got)
+	}
+	// A bad persisted value must never reach the shell verbatim; it resolves
+	// to the default instead of injecting `--effort turbo`.
+	got = AISessionLaunchCommand("", effort("turbo"))
+	if strings.Contains(got, "turbo") || !strings.Contains(got, `--settings '{"ultracode":true}'`) {
+		t.Fatalf("invalid effort must resolve to ultracode, got %q", got)
+	}
+}
+
+// assertUltracodeInBothBranches pins that ultracode injects the --settings JSON
+// (never --effort) into both guard branches and composes after --continue.
+func assertUltracodeInBothBranches(t *testing.T, config EnvironmentClaudeConfig) {
+	t.Helper()
+	got := AISessionLaunchCommand("", config)
+	if strings.Count(got, `--settings '{"ultracode":true}'`) != 2 || strings.Contains(got, "--effort") {
+		t.Fatalf("ultracode must inject --settings (never --effort) in both branches, got %q", got)
+	}
+	if !strings.Contains(got, `claude --continue --settings '{"ultracode":true}'`) {
+		t.Fatalf("--settings must compose after --continue in the resume branch, got %q", got)
+	}
 }
 
 // TestAISessionLaunchCommandModelAndDebugFlags pins the per-env default model

@@ -72,11 +72,11 @@ type CloudContextConfig struct {
 // path deliberately does not fetch them so it stays one AWS call per
 // (alias,region) group.
 type CloudContextStatus struct {
-	CloudContextConfig `json:",inline" yaml:",inline"`
-	Status             string `json:"status,omitempty" yaml:"status,omitempty"`
-	Message            string `json:"message,omitempty" yaml:"message,omitempty"`
-	StopProtection     bool   `json:"stopProtection,omitempty" yaml:"stopprotection,omitempty"`
-	StopProtectionKnown bool  `json:"stopProtectionKnown,omitempty" yaml:"stopprotectionknown,omitempty"`
+	CloudContextConfig  `json:",inline" yaml:",inline"`
+	Status              string `json:"status,omitempty" yaml:"status,omitempty"`
+	Message             string `json:"message,omitempty" yaml:"message,omitempty"`
+	StopProtection      bool   `json:"stopProtection,omitempty" yaml:"stopprotection,omitempty"`
+	StopProtectionKnown bool   `json:"stopProtectionKnown,omitempty" yaml:"stopprotectionknown,omitempty"`
 }
 
 type InitCloudContextParams struct {
@@ -209,6 +209,17 @@ type cloudContextRefreshKey struct {
 }
 
 func refreshCloudContextStatusesFromAWS(ctx Context, store CloudReadStore, deps CloudContextDependencies, statuses []CloudContextStatus) {
+	groups := groupCloudContextRefreshIndices(statuses)
+	for key, indices := range groups {
+		refreshCloudContextRefreshGroup(ctx, store, deps, statuses, key, indices)
+	}
+}
+
+// groupCloudContextRefreshIndices buckets the status entries by
+// (alias,region) so each bucket can be refreshed with a single AWS
+// describe-instances call. Entries without an instance ID, alias, or
+// region keep their cached Status and are excluded from any group.
+func groupCloudContextRefreshIndices(statuses []CloudContextStatus) map[cloudContextRefreshKey][]int {
 	groups := make(map[cloudContextRefreshKey][]int)
 	for i, status := range statuses {
 		if strings.TrimSpace(status.InstanceID) == "" {
@@ -222,35 +233,52 @@ func refreshCloudContextStatusesFromAWS(ctx Context, store CloudReadStore, deps 
 		key := cloudContextRefreshKey{alias: alias, region: region}
 		groups[key] = append(groups[key], i)
 	}
-	for key, indices := range groups {
-		provider, err := ResolveCloudProvider(store, key.alias)
-		if err != nil {
-			applyCloudContextRefreshError(statuses, indices, err)
-			continue
-		}
-		instanceIDs := make([]string, 0, len(indices))
-		for _, i := range indices {
-			instanceIDs = append(instanceIDs, statuses[i].InstanceID)
-		}
-		states, err := describeCloudContextInstanceStates(ctx, deps, provider, key.region, instanceIDs)
-		if err != nil {
-			applyCloudContextRefreshError(statuses, indices, err)
-			continue
-		}
-		for _, i := range indices {
-			awsState, ok := states[statuses[i].InstanceID]
-			if !ok {
-				statuses[i].Status = CloudContextStatusUnknown
-				statuses[i].Message = "instance not found in AWS"
-				continue
-			}
-			statuses[i].Status = cloudContextStatusFromAWSInstanceState(awsState)
-			if statuses[i].Status == CloudContextStatusUnknown {
-				statuses[i].Message = "AWS instance state: " + awsState
-			} else {
-				statuses[i].Message = ""
-			}
-		}
+	return groups
+}
+
+// refreshCloudContextRefreshGroup resolves the provider for one
+// (alias,region) group, describes its instances in a single AWS call,
+// and overwrites each grouped status with the observed state. Any
+// provider-resolution or describe failure downgrades the whole group to
+// Unknown via applyCloudContextRefreshError so a stale "running" is not
+// surfaced as authoritative.
+func refreshCloudContextRefreshGroup(ctx Context, store CloudReadStore, deps CloudContextDependencies, statuses []CloudContextStatus, key cloudContextRefreshKey, indices []int) {
+	provider, err := ResolveCloudProvider(store, key.alias)
+	if err != nil {
+		applyCloudContextRefreshError(statuses, indices, err)
+		return
+	}
+	instanceIDs := make([]string, 0, len(indices))
+	for _, i := range indices {
+		instanceIDs = append(instanceIDs, statuses[i].InstanceID)
+	}
+	states, err := describeCloudContextInstanceStates(ctx, deps, provider, key.region, instanceIDs)
+	if err != nil {
+		applyCloudContextRefreshError(statuses, indices, err)
+		return
+	}
+	for _, i := range indices {
+		applyCloudContextRefreshState(&statuses[i], states)
+	}
+}
+
+// applyCloudContextRefreshState overwrites a single status's Status and
+// Message from the AWS-observed instance state map. A missing instance
+// reads as Unknown/"instance not found in AWS"; an unrecognized state
+// reads as Unknown with the raw state in the Message; a recognized state
+// clears the Message.
+func applyCloudContextRefreshState(status *CloudContextStatus, states map[string]string) {
+	awsState, ok := states[status.InstanceID]
+	if !ok {
+		status.Status = CloudContextStatusUnknown
+		status.Message = "instance not found in AWS"
+		return
+	}
+	status.Status = cloudContextStatusFromAWSInstanceState(awsState)
+	if status.Status == CloudContextStatusUnknown {
+		status.Message = "AWS instance state: " + awsState
+	} else {
+		status.Message = ""
 	}
 }
 
@@ -667,55 +695,29 @@ func classifyCloudContextPowerError(awsAction string, config CloudContextConfig,
 func StartCloudContext(ctx Context, store CloudContextStore, params CloudContextParams, deps CloudContextDependencies) (CloudContextStatus, error) {
 	deps = normalizeCloudContextDependencies(deps)
 	ctx.Trace(fmt.Sprintf("cloud-context start: name=%s force=%v", strings.TrimSpace(params.Name), params.Force))
-	if !params.Force {
-		if lookup, ok := store.(CloudContextEnvLookup); ok {
-			ctx.Trace("cloud-context start: checking working-hours gate")
-			reason, err := cloudContextStartBlockedByWorkingHours(store, lookup, params.Name, deps.Now())
-			if err != nil {
-				return CloudContextStatus{}, err
-			}
-			if reason != "" {
-				ctx.Trace("cloud-context start: gated: " + reason)
-				return CloudContextStatus{}, fmt.Errorf("cloud context %q cannot start: %s; pass force=true to override", strings.TrimSpace(params.Name), reason)
-			}
-			ctx.Trace("cloud-context start: working-hours gate clear")
-		}
-	} else {
-		ctx.Trace("cloud-context start: force=true bypasses working-hours gate")
+	if err := enforceCloudContextStartWorkingHoursGate(ctx, store, params, deps); err != nil {
+		return CloudContextStatus{}, err
 	}
 	if err := ensureCloudContextHostStopProfileAssociation(ctx, store, params, deps); err != nil {
 		ctx.Trace("skipping cloud context host-stop profile association: " + err.Error())
 	}
 	status, err := changeCloudContextPowerState(ctx, store, params, deps, "start-instances", CloudContextStatusRunning)
 	if err != nil {
-		if !isAWSIncorrectInstanceStateError(err) {
-			return CloudContextStatus{}, err
-		}
-		// IncorrectInstanceState means the instance is in a
-		// transitional state — almost always `stopping`, sometimes
-		// `pending` or `shutting-down`. start-instances only accepts
-		// fully-stopped instances. Wait for the transition to settle
-		// and retry once. Without this recovery the user's click on
-		// an env whose linked context just auto-stopped fails with a
-		// confusing AWS error and the desktop's reconnect loop spins
-		// pointlessly. See issue #361.
-		ctx.Trace("cloud-context start: instance is in a transitional state — waiting for stopped before retrying start-instances")
-		recovered, recoverErr := resolveCloudContextStatusForName(store, params.Name)
-		if recoverErr != nil {
-			return CloudContextStatus{}, recoverErr
-		}
-		provider, perr := ResolveCloudProvider(store, recovered.CloudProviderAlias)
-		if perr != nil {
-			return CloudContextStatus{}, perr
-		}
-		if _, werr := deps.RunAWS(ctx, provider, recovered.Region, []string{"ec2", "wait", "instance-stopped", "--instance-ids", recovered.InstanceID}); werr != nil {
-			return CloudContextStatus{}, werr
-		}
-		status, err = changeCloudContextPowerState(ctx, store, params, deps, "start-instances", CloudContextStatusRunning)
+		status, err = recoverCloudContextStartFromTransitionalState(ctx, store, params, deps, err)
 		if err != nil {
 			return CloudContextStatus{}, err
 		}
 	}
+	return finalizeStartedCloudContext(ctx, store, deps, status)
+}
+
+// finalizeStartedCloudContext brings a just-started instance fully up
+// and persists the result: it waits for instance-running, refreshes the
+// public IP, reconfigures the kube context, stamps UpdatedAt, and saves
+// the config (skipping the save in dry-run). This is Start's own
+// follow-up save that changeCloudContextPowerState deliberately leaves
+// to the caller.
+func finalizeStartedCloudContext(ctx Context, store CloudContextStore, deps CloudContextDependencies, status CloudContextStatus) (CloudContextStatus, error) {
 	deps = normalizeCloudContextDependencies(deps)
 	provider, err := ResolveCloudProvider(store, status.CloudProviderAlias)
 	if err != nil {
@@ -740,6 +742,61 @@ func StartCloudContext(ctx Context, store CloudContextStore, params CloudContext
 		return CloudContextStatus{}, err
 	}
 	return status, nil
+}
+
+// enforceCloudContextStartWorkingHoursGate applies the per-environment
+// working-hours gate before a start. force=true bypasses it; a store
+// that does not implement CloudContextEnvLookup skips it. When every
+// attached environment is outside its working hours the start is
+// rejected with the force-to-override hint.
+func enforceCloudContextStartWorkingHoursGate(ctx Context, store CloudContextStore, params CloudContextParams, deps CloudContextDependencies) error {
+	if params.Force {
+		ctx.Trace("cloud-context start: force=true bypasses working-hours gate")
+		return nil
+	}
+	lookup, ok := store.(CloudContextEnvLookup)
+	if !ok {
+		return nil
+	}
+	ctx.Trace("cloud-context start: checking working-hours gate")
+	reason, err := cloudContextStartBlockedByWorkingHours(store, lookup, params.Name, deps.Now())
+	if err != nil {
+		return err
+	}
+	if reason != "" {
+		ctx.Trace("cloud-context start: gated: " + reason)
+		return fmt.Errorf("cloud context %q cannot start: %s; pass force=true to override", strings.TrimSpace(params.Name), reason)
+	}
+	ctx.Trace("cloud-context start: working-hours gate clear")
+	return nil
+}
+
+// recoverCloudContextStartFromTransitionalState handles a failed
+// start-instances. A non-IncorrectInstanceState failure is returned
+// unchanged. IncorrectInstanceState means the instance is in a
+// transitional state — almost always `stopping`, sometimes `pending`
+// or `shutting-down`. start-instances only accepts fully-stopped
+// instances. Wait for the transition to settle and retry once. Without
+// this recovery the user's click on an env whose linked context just
+// auto-stopped fails with a confusing AWS error and the desktop's
+// reconnect loop spins pointlessly. See issue #361.
+func recoverCloudContextStartFromTransitionalState(ctx Context, store CloudContextStore, params CloudContextParams, deps CloudContextDependencies, startErr error) (CloudContextStatus, error) {
+	if !isAWSIncorrectInstanceStateError(startErr) {
+		return CloudContextStatus{}, startErr
+	}
+	ctx.Trace("cloud-context start: instance is in a transitional state — waiting for stopped before retrying start-instances")
+	recovered, recoverErr := resolveCloudContextStatusForName(store, params.Name)
+	if recoverErr != nil {
+		return CloudContextStatus{}, recoverErr
+	}
+	provider, perr := ResolveCloudProvider(store, recovered.CloudProviderAlias)
+	if perr != nil {
+		return CloudContextStatus{}, perr
+	}
+	if _, werr := deps.RunAWS(ctx, provider, recovered.Region, []string{"ec2", "wait", "instance-stopped", "--instance-ids", recovered.InstanceID}); werr != nil {
+		return CloudContextStatus{}, werr
+	}
+	return changeCloudContextPowerState(ctx, store, params, deps, "start-instances", CloudContextStatusRunning)
 }
 
 // CloudContextStopProtectionParams identifies the cloud context whose
@@ -1094,23 +1151,9 @@ func CloudContextPreflight(store CloudContextStore, deps CloudContextDependencie
 // working hours. If any attached environment permits start, or no environments
 // reference this context, the gate is not engaged.
 func cloudContextStartBlockedByWorkingHours(store CloudReadStore, lookup CloudContextEnvLookup, contextName string, now time.Time) (string, error) {
-	contextName = strings.TrimSpace(contextName)
-	if contextName == "" {
-		return "", nil
-	}
-	config, ok, err := findCloudContext(store, contextName)
-	if err != nil {
+	kubeContext, ok, err := resolveCloudContextWorkingHoursKubeContext(store, contextName)
+	if err != nil || !ok {
 		return "", err
-	}
-	if !ok {
-		return "", nil
-	}
-	kubeContext := strings.TrimSpace(config.KubernetesContext)
-	if kubeContext == "" {
-		kubeContext = strings.TrimSpace(config.Name)
-	}
-	if kubeContext == "" {
-		return "", nil
 	}
 
 	tenants, err := lookup.ListTenantConfigs()
@@ -1124,31 +1167,79 @@ func cloudContextStartBlockedByWorkingHours(store CloudReadStore, lookup CloudCo
 		if err != nil {
 			return "", err
 		}
-		for _, env := range envs {
-			if strings.TrimSpace(env.KubernetesContext) != kubeContext {
-				continue
-			}
-			hasAttachedEnv = true
-			policy, err := env.Idle.Resolve()
-			if err != nil {
-				continue
-			}
-			outside, _, err := workingHoursStatus(policy.WorkingHours, policy.Timezone, now)
-			if err != nil {
-				continue
-			}
-			if !outside {
-				return "", nil
-			}
-			if blockedReason == "" {
-				blockedReason = fmt.Sprintf("outside working hours %s for environment %s/%s", policy.WorkingHours, tenant.Name, env.Name)
-			}
+		permitsStart, tenantReason := evaluateTenantWorkingHoursGate(tenant, envs, kubeContext, now, &hasAttachedEnv)
+		if permitsStart {
+			return "", nil
+		}
+		if blockedReason == "" {
+			blockedReason = tenantReason
 		}
 	}
 	if !hasAttachedEnv {
 		return "", nil
 	}
 	return blockedReason, nil
+}
+
+// resolveCloudContextWorkingHoursKubeContext loads the named cloud
+// context and returns the kube-context name the working-hours gate
+// matches environments against (falling back to the context's own Name).
+// ok=false (with a nil error) means there is nothing to gate — a blank
+// name, an unknown context, or a context with no resolvable kube-context
+// — and the caller should treat the gate as not engaged.
+func resolveCloudContextWorkingHoursKubeContext(store CloudReadStore, contextName string) (string, bool, error) {
+	contextName = strings.TrimSpace(contextName)
+	if contextName == "" {
+		return "", false, nil
+	}
+	config, ok, err := findCloudContext(store, contextName)
+	if err != nil {
+		return "", false, err
+	}
+	if !ok {
+		return "", false, nil
+	}
+	kubeContext := strings.TrimSpace(config.KubernetesContext)
+	if kubeContext == "" {
+		kubeContext = strings.TrimSpace(config.Name)
+	}
+	if kubeContext == "" {
+		return "", false, nil
+	}
+	return kubeContext, true, nil
+}
+
+// evaluateTenantWorkingHoursGate inspects every environment in one
+// tenant that is attached to kubeContext. It sets *hasAttachedEnv when
+// it finds any attached env, returns permitsStart=true the moment an
+// attached env is inside its working hours (the caller treats that as
+// "gate clear" and stops), and otherwise returns the first
+// outside-working-hours reason it observed. Environments whose idle
+// policy or working-hours status cannot be resolved are skipped, matching
+// the original inline behavior.
+func evaluateTenantWorkingHoursGate(tenant TenantConfig, envs []EnvConfig, kubeContext string, now time.Time, hasAttachedEnv *bool) (bool, string) {
+	var blockedReason string
+	for _, env := range envs {
+		if strings.TrimSpace(env.KubernetesContext) != kubeContext {
+			continue
+		}
+		*hasAttachedEnv = true
+		policy, err := env.Idle.Resolve()
+		if err != nil {
+			continue
+		}
+		outside, _, err := workingHoursStatus(policy.WorkingHours, policy.Timezone, now)
+		if err != nil {
+			continue
+		}
+		if !outside {
+			return true, ""
+		}
+		if blockedReason == "" {
+			blockedReason = fmt.Sprintf("outside working hours %s for environment %s/%s", policy.WorkingHours, tenant.Name, env.Name)
+		}
+	}
+	return false, blockedReason
 }
 
 func findCloudContextForKubernetesContext(store CloudReadStore, kubernetesContext string) (CloudContextStatus, bool, error) {
