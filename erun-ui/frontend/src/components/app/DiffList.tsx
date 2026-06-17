@@ -1,7 +1,7 @@
 import { AlertCircle, CheckCircle2, Copy, PlugZap, RefreshCw } from 'lucide-react';
 import * as React from 'react';
 
-import { compactDiffError, diffLineMark } from '@/app/diffUtils';
+import { compactDiffError, diffLineMark, visibleDiffFilePaths } from '@/app/diffUtils';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { reconnectCopy } from '@/app/reconnectCopy';
 import { loadReviewDiff, requestReconnect } from '@/app/reviewThunks';
@@ -31,9 +31,23 @@ export function DiffList(): React.ReactElement {
       />
     );
   }
-  const files = review.diff?.files ?? [];
-  if (files.length === 0) {
+  const allFiles = review.diff?.files ?? [];
+  if (allFiles.length === 0) {
     return <ReviewStatus>No changes</ReviewStatus>;
+  }
+  // Render the same subset the changed-files tree shows — honouring the active
+  // filter and collapsed directories — in the tree's order (diff.files is
+  // already ordered to match the tree, #435). Without this the diff panel
+  // showed every file while the tree showed a filtered/collapsed subset, which
+  // read as an order mismatch (#547).
+  const visiblePaths = visibleDiffFilePaths(
+    review.diff?.tree ?? [],
+    review.diffFilter,
+    new Set(review.collapsedDiffDirs),
+  );
+  const files = allFiles.filter((file) => visiblePaths.has(file.path));
+  if (files.length === 0) {
+    return <ReviewStatus>No matching files</ReviewStatus>;
   }
   return (
     <>
