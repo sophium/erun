@@ -212,6 +212,28 @@ export function removeEnvironment(tenant: string, environment: string): void {
   fs.rmSync(path.join(erunConfigDir(), tenant, environment), { recursive: true, force: true });
 }
 
+// seedTenant writes a brand-new tenant's config.yaml (name + default
+// environment) — the minimum ListTenantConfigs needs to surface the tenant
+// at all (a tenant dir with no config.yaml is skipped as uninitialized).
+// Mirrors what `erun init` writes for a new tenant (see createTenantConfig in
+// erun-common/init.go). Pair with seedEnvironment to add the tenant's
+// environments, and removeTenant to clean up afterwards.
+export function seedTenant(tenant: string, defaultEnvironment: string): void {
+  const tenantDir = path.join(erunConfigDir(), tenant);
+  fs.mkdirSync(tenantDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(tenantDir, 'config.yaml'),
+    `name: ${tenant}\n` + `defaultenvironment: ${defaultEnvironment}\n`,
+  );
+}
+
+// removeTenant deletes a previously seeded tenant config dir (the tenant and
+// all of its environments). The backend's fsnotify config watcher picks the
+// deletion up and drops the sidebar rows.
+export function removeTenant(tenant: string): void {
+  fs.rmSync(path.join(erunConfigDir(), tenant), { recursive: true, force: true });
+}
+
 // removeIsolatedRoot deletes the whole suite-owned root. Only roots the
 // suite recognizably created are removed, so a caller-provided custom path
 // is never destroyed by accident.
