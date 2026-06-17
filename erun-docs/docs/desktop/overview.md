@@ -27,6 +27,8 @@ When something misbehaves, the panel at the bottom of the terminal area gives yo
 
 Both panes have a **Copy** button for their own stream, and the console's **Copy report** button packages everything at once — app build, the selected environment's identity and state, the erun trace (or the reason there isn't one), and the UI trace — into a single paste-ready block, so a bug report carries the evidence instead of a description of it.
 
+On a busy environment the erun trace can be a wall of scrollback. **Clear** baselines the view — it hides the lines shown so far so whatever happens next stands out — without deleting anything: the persistent log stays intact, **Show all** brings the earlier lines back, and Copy and Copy report always include the full log. The baseline is per-environment, so switching environments starts fresh.
+
 ## Open it in your editor
 
 - **Persistent terminal sessions.** Each environment owns its own terminals, and switching tabs doesn't kill them. For an environment backed by a runtime pod, the sessions live in the pod and keep running even while the environment is closed — a long-running Agent keeps working while you're away — so reopening reconnects you to the same sessions and scrollback instead of starting fresh ones.
