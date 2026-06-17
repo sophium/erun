@@ -91,7 +91,7 @@ func newEndAISessionsTestApp(t *testing.T, aiTool string) (*App, string) {
 				"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
 			},
 			envs: map[string]eruncommon.EnvConfig{
-				"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "ctx", AITool: aiTool},
+				"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx", AITool: aiTool},
 			},
 		},
 		findProjectRoot: func() (string, string, error) { return "erun", projectRoot, nil },
@@ -221,7 +221,7 @@ func TestCloseSessionEndsRemoteCustomTerminal(t *testing.T) {
 				"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
 			},
 			envs: map[string]eruncommon.EnvConfig{
-				"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "ctx"},
+				"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
 			},
 		},
 		findProjectRoot: func() (string, string, error) { return "erun", projectRoot, nil },

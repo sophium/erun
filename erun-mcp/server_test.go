@@ -287,7 +287,7 @@ func TestCloudSetToolSetsEnvironmentAlias(t *testing.T) {
 		envConfigs: map[string]eruncommon.EnvConfig{
 			"frs/dev": {
 				Name:               "dev",
-				RepoPath:           projectRoot,
+				LocalRepoPath:      projectRoot,
 				KubernetesContext:  "cluster-dev",
 				CloudProviderAlias: "old-cloud",
 			},
@@ -372,14 +372,14 @@ func TestListToolReturnsConfiguredTenantsAndEffectiveTarget(t *testing.T) {
 			envConfigs: map[string]eruncommon.EnvConfig{
 				"tenant-a/dev": {
 					Name:              "dev",
-					RepoPath:          projectRoot,
+					LocalRepoPath:     projectRoot,
 					KubernetesContext: "cluster-dev",
 				},
 			},
 			envsByTenant: map[string][]eruncommon.EnvConfig{
 				"tenant-a": {{
 					Name:              "dev",
-					RepoPath:          projectRoot,
+					LocalRepoPath:     projectRoot,
 					KubernetesContext: "cluster-dev",
 				}},
 			},

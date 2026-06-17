@@ -29,7 +29,7 @@ func TestStartSessionStopsReconnectingAfterRepeatedFailures(t *testing.T) {
 			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
-			"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "ctx"},
+			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
 		},
 	}
 
@@ -177,9 +177,9 @@ func TestStopCloudContextSuppressesReconnect(t *testing.T) {
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {
 				Name:              "remote",
-				RepoPath:          projectRoot,
+				LocalRepoPath:     projectRoot,
 				KubernetesContext: "cluster-cloud",
-				Type: eruncommon.EnvironmentTypeRuntime,
+				Type:              eruncommon.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -273,9 +273,9 @@ func TestClearIntentionalStopForCloudContext(t *testing.T) {
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {
 				Name:              "remote",
-				RepoPath:          projectRoot,
+				LocalRepoPath:     projectRoot,
 				KubernetesContext: "cluster-cloud",
-				Type: eruncommon.EnvironmentTypeRuntime,
+				Type:              eruncommon.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -331,9 +331,9 @@ func TestStopCloudContextErrorClearsIntentionalStop(t *testing.T) {
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {
 				Name:              "remote",
-				RepoPath:          projectRoot,
+				LocalRepoPath:     projectRoot,
 				KubernetesContext: "cluster-cloud",
-				Type: eruncommon.EnvironmentTypeRuntime,
+				Type:              eruncommon.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -506,7 +506,7 @@ func TestSessionTakenOverByAnotherWindowDoesNotReconnect(t *testing.T) {
 			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
-			"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "ctx"},
+			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
 		},
 	}
 

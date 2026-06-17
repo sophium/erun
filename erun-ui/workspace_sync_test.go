@@ -256,9 +256,9 @@ func workspaceSyncStore(enabled bool) stubUIStore {
 		envs: map[string]eruncommon.EnvConfig{
 			"frs/dev": {
 				Name:              "dev",
-				RepoPath:          "/home/erun/git/frs",
+				LocalRepoPath:     "/home/erun/git/frs",
 				KubernetesContext: "cluster-dev",
-				Type: eruncommon.EnvironmentTypeRuntime,
+				Type:              eruncommon.EnvironmentTypeRuntime,
 				SSHD: eruncommon.SSHDConfig{
 					Enabled: true,
 					WorkspaceSync: eruncommon.SSHDWorkspaceSyncConfig{

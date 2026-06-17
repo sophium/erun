@@ -25,6 +25,7 @@ type doctorOptions struct {
 	finishRemoteInit        bool
 	remoteRepositoryURL     string
 	codeCommitSSHKeyID      string
+	syncConfig              bool
 }
 
 type jetBrainsGatewayDoctorRepair struct {
@@ -46,7 +47,9 @@ func newDoctorCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error)
 			"prompts before running it. It also prunes Docker images, build cache, or stopped " +
 			"containers; restores or fixes the root erun config; and finishes an interrupted remote " +
 			"init. The recovery actions mutate the live release; run one directly with --clear-pending-helm " +
-			"or --rollback (the two are alternatives — pass only one).",
+			"or --rollback (the two are alternatives — pass only one). Run inside a runtime pod, " +
+			"--sync-config reconciles the on-disk env config with the helm-injected ERUN_* env vars " +
+			"(injected env wins) and rewrites the projected keys, preserving everything else.",
 		Args:          cobra.MaximumNArgs(2),
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -69,6 +72,7 @@ func newDoctorCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error)
 	cmd.Flags().BoolVar(&options.finishRemoteInit, "finish-remote-init", false, "Finish unfinished remote init tasks without prompting (only takes effect when run inside a runtime pod)")
 	cmd.Flags().StringVar(&options.remoteRepositoryURL, "remote-repository-url", "", "Git remote URL to use when finishing an unfinished remote init")
 	cmd.Flags().StringVar(&options.codeCommitSSHKeyID, "codecommit-ssh-key-id", "", "CodeCommit SSH public key ID to use when finishing an unfinished remote init for an AWS CodeCommit repository")
+	cmd.Flags().BoolVar(&options.syncConfig, "sync-config", false, "Reconcile the in-pod erun config with the helm-injected ERUN_* env vars (only takes effect inside a runtime pod)")
 	return cmd
 }
 
@@ -404,6 +408,13 @@ func runDoctorInRuntime(ctx common.Context, promptRunner PromptRunner, options d
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return err
+	}
+	// --sync-config reconciles the in-pod config and short-circuits before
+	// remote-init: config drift is cheaper and more fundamental (a wrong type:
+	// mis-drives everything downstream), and gating it here keeps plain
+	// `erun doctor` in-pod output byte-for-byte unchanged.
+	if options.syncConfig {
+		return runRuntimeConfigSync(ctx, promptRunner, options, resolveRuntimeConfigHome(homeDir))
 	}
 	inspection, err := common.InspectRemoteInit(homeDir, os.Getenv)
 	if err != nil {

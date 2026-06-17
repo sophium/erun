@@ -1,0 +1,2 @@
+In-pod config matches the injected env; nothing to reconcile.
+audit: erun doctor --dry-run --sync-config

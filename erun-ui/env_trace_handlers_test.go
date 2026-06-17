@@ -171,4 +171,3 @@ func writeHostTrace(t *testing.T, home, content string) {
 		t.Fatal(err)
 	}
 }
-
