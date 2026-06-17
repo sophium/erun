@@ -1090,11 +1090,21 @@ func TestDeploy(t *testing.T) {
 		if !strings.Contains(out, "deploy: step 1 (parallel): team-devops, erun-backend-postgres") {
 			t.Fatalf("expected parallel-step trace line, got:\n%s", out)
 		}
-		if got := strings.Count(out, "==> Deploying team/dev <VERSION>"); got != 2 {
+		// #531: the runtime chart names only the env, while the non-runtime
+		// component names itself after a ` · ` separator so a component
+		// rollout is not mistaken for a full-env redeploy. Both rollouts
+		// still appear; exactly one of each pair names the component.
+		if got := strings.Count(out, "==> Deploying team/dev"); got != 2 {
 			t.Fatalf("expected 2 parallel ==> Deploying lines, got %d:\n%s", got, out)
 		}
-		if got := strings.Count(out, "==> Deployed team/dev <VERSION> in <ELAPSED>"); got != 2 {
+		if got := strings.Count(out, "==> Deploying team/dev · erun-backend-postgres"); got != 1 {
+			t.Fatalf("expected the component ==> Deploying line to name the release, got %d:\n%s", got, out)
+		}
+		if got := strings.Count(out, "==> Deployed team/dev"); got != 2 {
 			t.Fatalf("expected 2 ==> Deployed completions, got %d:\n%s", got, out)
+		}
+		if got := strings.Count(out, "==> Deployed team/dev · erun-backend-postgres"); got != 1 {
+			t.Fatalf("expected the component ==> Deployed line to name the release, got %d:\n%s", got, out)
 		}
 	})
 

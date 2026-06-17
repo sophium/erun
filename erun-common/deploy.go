@@ -414,7 +414,17 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 	if err != nil {
 		return err
 	}
+	// Name the release for a non-runtime component so a single-component
+	// deploy (e.g. erun-backend-postgres) is not mistaken for a full-env
+	// redeploy: "erun/local · erun-backend-postgres 18.3" instead of the
+	// bare "erun/local 18.3". The runtime chart's line stays "<tenant>/<env>
+	// <version>" — it *is* the env, carries the meaningful runtime version,
+	// and feeds the helm-release poller + version persistence (#476). The
+	// version on a component line is that component's own version.
 	target := deployInput.Tenant + "/" + deployInput.Environment
+	if release := strings.TrimSpace(deployInput.ReleaseName); release != "" && release != RuntimeReleaseName(deployInput.Tenant) {
+		target += " · " + release
+	}
 	if version := strings.TrimSpace(deployInput.Version); version != "" {
 		target += " " + version
 	}
