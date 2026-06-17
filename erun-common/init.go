@@ -89,6 +89,10 @@ type BootstrapInitParams struct {
 	ConfirmRemoteKeyImport  *bool
 	AutoApprove             bool
 	ResolveTenant           bool
+	// DisableBuildScript sets EnvConfig.DisableBuildScript on the new env so
+	// erun build ignores any project build.sh and resolves docker/release
+	// builds directly.
+	DisableBuildScript bool
 }
 
 // ResolvedType returns the new env's type. When Type is explicitly set it is
@@ -762,12 +766,12 @@ func (s *bootstrapRunState) createEnvConfig() error {
 		RuntimeVersion:     strings.TrimSpace(s.params.RuntimeVersion),
 		RuntimeImage:       strings.TrimSpace(s.params.RuntimeImage),
 		RuntimePod:         NormalizeRuntimePodResources(s.params.RuntimePod),
-		Remote:             s.params.Remote,
+		DisableBuildScript: s.params.DisableBuildScript,
 	}
 	if err := saveEnvConfig(s.runner.Store, s.tenant, s.envConfig); err != nil {
 		return err
 	}
-	s.envConfig.ContainerRegistry = containerRegistry
+	s.envConfig.ContainerRegistries = SingleContainerRegistries(containerRegistry)
 	s.envConfigChanged = s.params.Remote && containerRegistry != ""
 	s.result.CreatedEnvConfig = true
 	return nil
@@ -820,7 +824,7 @@ func (s *bootstrapRunState) resolveNewEnvCloudConfig() (string, string, bool, er
 	managedCloud, err := managedCloudEnvironment(s.runner.Store, EnvConfig{
 		KubernetesContext:  kubernetesContext,
 		CloudProviderAlias: cloudProviderAlias,
-		Remote:             s.params.Remote,
+		Type:               s.params.ResolvedType(),
 	})
 	return kubernetesContext, cloudProviderAlias, managedCloud, err
 }
@@ -857,8 +861,8 @@ func (s *bootstrapRunState) updateRemoteEnvConfig() {
 		s.envConfig.RuntimePod = runtimePod
 		s.envConfigChanged = true
 	}
-	if !s.envConfig.Remote {
-		s.envConfig.Remote = true
+	if !s.envConfig.RemoteWorktree() {
+		s.envConfig.Type = s.params.ResolvedType()
 		s.envConfigChanged = true
 	}
 }
@@ -901,7 +905,8 @@ func (s *bootstrapRunState) updateEnvCloudProvider(kubernetesContext string) err
 
 func (s *bootstrapRunState) updateEnvContainerRegistry() error {
 	projectRoot := s.projectRoot()
-	containerRegistry, err := s.runner.resolveContainerRegistry(s.params, s.tenant, s.envName, projectRoot, s.envConfig.ContainerRegistry, false)
+	current, _ := s.envConfig.ContainerRegistries.BuildRegistry()
+	containerRegistry, err := s.runner.resolveContainerRegistry(s.params, s.tenant, s.envName, projectRoot, current, false)
 	if err != nil {
 		return err
 	}
@@ -911,8 +916,8 @@ func (s *bootstrapRunState) updateEnvContainerRegistry() error {
 	if err := s.runner.saveProjectContainerRegistry(projectRoot, s.envName, containerRegistry, s.params.Remote); err != nil {
 		return err
 	}
-	if containerRegistry != s.envConfig.ContainerRegistry {
-		s.envConfig.ContainerRegistry = containerRegistry
+	if existing, _ := s.envConfig.ContainerRegistries.BuildRegistry(); containerRegistry != existing {
+		s.envConfig.ContainerRegistries = SingleContainerRegistries(containerRegistry)
 		s.envConfigChanged = true
 	}
 	return nil
@@ -1201,7 +1206,8 @@ func (s bootstrapRunner) projectContainerRegistry(projectRoot, envName string) (
 		}
 		return "", err
 	}
-	return projectConfig.ContainerRegistryForEnvironment(envName), nil
+	registry, _ := projectConfig.ContainerRegistriesForEnvironment(envName).BuildRegistry()
+	return registry, nil
 }
 
 func (s bootstrapRunner) promptContainerRegistry(tenant, envName string) (string, error) {
@@ -1250,11 +1256,11 @@ func (s bootstrapRunner) saveProjectContainerRegistry(projectRoot, envName, regi
 		return err
 	}
 
-	if projectConfig.ContainerRegistryForEnvironment(envName) == registry {
+	if existing, _ := projectConfig.ContainerRegistriesForEnvironment(envName).BuildRegistry(); existing == registry {
 		return nil
 	}
 
-	projectConfig.SetContainerRegistryForEnvironment(envName, registry)
+	projectConfig.SetContainerRegistriesForEnvironment(envName, SingleContainerRegistries(registry))
 	return s.SaveProjectConfig(projectRoot, projectConfig)
 }
 
@@ -1382,8 +1388,8 @@ func normalizeNamespaceName(value string) string {
 
 func saveEnvConfig(store BootstrapStore, tenant string, config EnvConfig) error {
 	stored := config
-	if !stored.Remote {
-		stored.ContainerRegistry = ""
+	if !stored.RemoteWorktree() {
+		stored.ContainerRegistries = nil
 	}
 	return store.SaveEnvConfig(tenant, stored)
 }

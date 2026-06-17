@@ -61,10 +61,33 @@ export class ManageDialog {
     return this.locator().locator('#environment-config-autoupgrade');
   }
 
+  // disableBuildScriptCheckbox targets the Runtime tab's "Ignore project
+  // build.sh" toggle (EnvConfig.disableBuildScript, issue #533) — a build-time
+  // CLI setting, never a pod input.
+  disableBuildScriptCheckbox(): Locator {
+    return this.locator().locator('#environment-config-disablebuildscript');
+  }
+
   // idleTimeoutInput targets the Runtime tab's Idle-stop "Timeout" field — a
   // pod-shaping value (helm idle.* → pod env).
   idleTimeoutInput(): Locator {
     return this.locator().locator('#environment-config-idle-timeout');
+  }
+
+  // runtimeVersionInput targets the Runtime tab's "Version to deploy" field
+  // (RuntimeDeployVersionPicker). Empty means "deploy the current code": for a
+  // builds-here agent env the desktop orchestrates build -> push -> deploy from
+  // it; a typed version installs that published version by reference (#558).
+  runtimeVersionInput(): Locator {
+    return this.locator().locator('#manage-version');
+  }
+
+  // deploy clicks the Runtime tab's "Deploy" action (the Rocket button) that
+  // submits submitManageDeploy with the current version field.
+  async deploy(): Promise<void> {
+    const button = this.locator().getByRole('button', { name: 'Deploy' });
+    await button.scrollIntoViewIfNeeded();
+    await button.click();
   }
 
   async selectTab(name: ManageTab): Promise<void> {
@@ -101,6 +124,24 @@ export class ManageDialog {
     await this.locator()
       .getByRole('button', { name: /^Delete/ })
       .click();
+  }
+
+  // --- Container-registries editor (General tab, issue #527) ---
+
+  addRegistryButton(): Locator {
+    return this.locator().getByRole('button', { name: 'Add registry' });
+  }
+
+  registryInput(index: number): Locator {
+    return this.locator().locator(`#environment-config-registry-${String(index)}`);
+  }
+
+  registryRoleCheckbox(index: number, role: string): Locator {
+    return this.locator().getByLabel(`${role} role for registry ${String(index + 1)}`);
+  }
+
+  removeRegistryButton(index: number): Locator {
+    return this.locator().getByRole('button', { name: `Remove registry ${String(index + 1)}` });
   }
 
   // envTypeFieldValue reads the "Environment type" readonly field on the

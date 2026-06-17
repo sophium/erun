@@ -1,19 +1,20 @@
-Build and push the project's container images to the registry.
+Publish a version's container images and runtime chart to the registry — the push step of the build → release → push → deploy flow.
 
-The push step of the build → release → push → deploy flow.
+A version is required (--version <v>, the same flag deploy uses) and is the one `erun build` minted; push publishes it, it does not mint one. push resolves that version's images from the local source (promoting unchanged images from the fingerprint cache, rebuilding only what changed), then pushes the multi-arch manifest and, for the runtime image, the runtime chart alongside it.
 
 Usage:
   erun push [flags]
 
 Examples:
-  erun push
+  erun push --version <VERSION>
 
 Flags:
       --dry-run          Resolve and trace mutating actions without executing them.
       --force            Rebuild and re-push every image, bypassing the fingerprint cache
   -h, --help             help for push
-      --version string   Override the resolved image version
+      --version string   Version to publish, produced by erun build
 
 Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
       --time            Print the elapsed runtime after the command finishes.
   -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

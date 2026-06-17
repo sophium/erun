@@ -203,6 +203,8 @@ ERun looks for the script in this order:
 1. `<projectRoot>/<command>.sh` — the top-level project script.
 2. Otherwise, the first nested `*/<command>.sh` it finds during a walk, **skipping `docker/` and `linux/` artifact subtrees** (those are inside image build contexts, not module roots).
 
+The per-env [`disablebuildscript`](/reference/configuration#envconfig) flag suppresses `build.sh` discovery (both the top-level and nested steps above) for `erun build` and the build that `erun build --deploy` runs: the build then resolves docker/release contexts directly, or ends with no buildable context if none exist. Other `<command>.sh` overrides are unaffected.
+
 The override contract:
 
 - The script runs with the resolved env's environment variables in scope.

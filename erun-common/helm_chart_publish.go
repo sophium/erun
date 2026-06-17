@@ -122,9 +122,8 @@ func runHelmCommand(ctx Context, spec commandSpec) error {
 	return cmd.Run()
 }
 
-// loadHelmChartName reads the `name` field from <chartPath>/Chart.yaml.
-// Callers use this to know the tgz filename `helm package` will produce so
-// `helm push` can reference it without globbing the destination dir.
+// loadHelmChartName reads the `name` field from <chartPath>/Chart.yaml so the
+// publish step knows the tgz filename `helm package` produces.
 func loadHelmChartName(chartPath string) (string, error) {
 	data, err := os.ReadFile(filepath.Join(chartPath, "Chart.yaml"))
 	if err != nil {
@@ -143,9 +142,11 @@ func loadHelmChartName(chartPath string) (string, error) {
 	return name, nil
 }
 
-// resolveHelmChartPublishSpec builds a HelmChartPublishSpec from a resolved
-// HelmDeploySpec and the chart path. It fails fast on a missing container
-// registry rather than surfacing the error in the middle of a deploy.
+// resolveHelmChartPublishSpec builds a HelmChartPublishSpec for a chart at a
+// version + registry. The runtime devops chart publishes under the registry's
+// /charts path (PublishedDevopsChartOCIRepo) — separate from the image repo of
+// the same name — so a pushed version is deployable by envs that consume the
+// published chart; other charts publish under the registry root.
 func resolveHelmChartPublishSpec(chartPath, version, containerRegistry string) (HelmChartPublishSpec, error) {
 	chartName, err := loadHelmChartName(chartPath)
 	if err != nil {
@@ -153,16 +154,52 @@ func resolveHelmChartPublishSpec(chartPath, version, containerRegistry string) (
 	}
 	registry := strings.TrimSpace(containerRegistry)
 	if registry == "" {
-		return HelmChartPublishSpec{}, fmt.Errorf("publish %s: container registry is required (configure containerregistry in .erun/config.yaml)", chartName)
+		return HelmChartPublishSpec{}, fmt.Errorf("publish %s: container registry is required (mark a registry with the deploy role in .erun/config.yaml)", chartName)
 	}
 	resolvedVersion := strings.TrimSpace(version)
 	if resolvedVersion == "" {
-		return HelmChartPublishSpec{}, fmt.Errorf("publish %s: chart version is required (pass --version or persist runtimeversion in env config)", chartName)
+		return HelmChartPublishSpec{}, fmt.Errorf("publish %s: chart version is required", chartName)
+	}
+	ociRepo := "oci://" + registry
+	if chartName == DevopsComponentName {
+		ociRepo = PublishedDevopsChartOCIRepo(registry)
 	}
 	return HelmChartPublishSpec{
 		ChartPath: chartPath,
 		ChartName: chartName,
 		Version:   resolvedVersion,
-		OCIRepo:   "oci://" + registry,
+		OCIRepo:   ociRepo,
 	}, nil
 }
+
+// publishRuntimeChartForPushedImage publishes the runtime devops chart in
+// lockstep with the runtime image whenever push sends that image to a registry
+// — so a pushed version (release or snapshot) is always deployable by envs
+// that consume the published chart. It is a no-op for any other image. The
+// chart lives in the same module as the image build context
+// (<module>/k8s/erun-devops); registry and version come from the pushed image.
+func publishRuntimeChartForPushedImage(ctx Context, image DockerImageReference) error {
+	if strings.TrimSpace(image.ImageName) != DevopsComponentName {
+		return nil
+	}
+	projectRoot := strings.TrimSpace(image.ProjectRoot)
+	if projectRoot == "" {
+		return nil
+	}
+	chartPath, err := findComponentHelmChartPath(projectRoot, DevopsComponentName)
+	if err != nil {
+		// No local chart to publish (e.g. pushing a prebuilt image outside a
+		// project); nothing to do.
+		return nil
+	}
+	publish, err := resolveHelmChartPublishSpec(chartPath, image.Version, image.Registry)
+	if err != nil {
+		return err
+	}
+	publish.Verbosity = ctx.Verbosity
+	if err := RunHelmChartPublish(ctx, publish); err != nil {
+		return err
+	}
+	return VerifyPublishedHelmChart(ctx, publish.OCIRepo, publish.ChartName, publish.Version)
+}
+

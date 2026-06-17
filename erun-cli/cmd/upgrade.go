@@ -125,7 +125,7 @@ func newUpgradeDeployer(store common.DeployStore, saveEnvConfig common.EnvConfig
 		if err != nil {
 			return err
 		}
-		if err := common.RunDeploySpecs(ctx, specs, buildDockerImage, push, deployHelmChart); err != nil {
+		if err := common.RunDeploySpecs(ctx, specs, deployHelmChart); err != nil {
 			return err
 		}
 		return common.PersistRuntimeVersionFromDeploySpecs(ctx, specs, saveEnvConfig, common.ResolveDeployedHelmReleaseVersion)

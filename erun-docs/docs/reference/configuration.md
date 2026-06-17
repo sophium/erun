@@ -43,8 +43,6 @@ One per tenant.
 | `api_url` | string | `erun open` (API port forward) | Backend API base URL for this tenant. |
 | `cloudprovideraliases[]` | list of strings | `erun init`, `erun open` | Cloud provider aliases the tenant is allowed to use. |
 | `primarycloudprovideralias` | string | `erun open` (suggesting cloud bindings) | Default cloud provider alias for new envs in this tenant. |
-| `remote` | bool | build path resolution | When true, ERun knows the tenant's `projectroot` describes a *remote* machine. ([Planned removal.](#planned-changes)) |
-| `snapshot` | `*bool` | (none) | ([Planned removal — does not belong on the tenant.](#planned-changes)) |
 
 ### `EnvConfig` (`~/.config/erun/<tenant>/<env>/config.yaml`) {#envconfig}
 
@@ -53,17 +51,18 @@ One per environment. This is the most-edited file.
 | Field | Type | Used by | Effect |
 |---|---|---|---|
 | `name` | string | All commands | Environment identifier. |
-| `type` | string (enum) | `erun build`, `erun open`, `erun deploy`, helm chart (`worktreeStorage`) | `local-agent`, `remote-agent`, or `runtime`. The canonical signal for what this env is for. When set, it takes precedence over the legacy `remote` and `snapshot` fields. See [Environment types](/concepts/environment-types). |
+| `type` | string (enum) | `erun build`, `erun open`, `erun deploy`, helm chart (`worktreeStorage`, `ERUN_ENV_TYPE`) | `local-agent`, `remote-agent`, or `runtime`. The canonical — and only — signal for what this env is for. Configs written before `type` existed are migrated to a concrete value on read (see [Legacy migration](#planned-changes)). See [Environment types](/concepts/environment-types). |
 | `localRepoPath` | string | helm chart (`worktreeHostPath` for `local-agent` envs), `erun deploy` (project-config load, registry resolution) | Absolute path to the repo on the local machine. Only meaningful for `local-agent` envs; left empty for `remote-agent` and `runtime`. |
 | `repopath` | string | (legacy) helm chart (`worktreeHostPath`), `erun deploy` (project-config load, registry resolution) | Legacy path field. Kept for backward compatibility with envs created before `localRepoPath` existed; new envs use `localRepoPath` instead. ([Planned removal.](#planned-changes)) |
 | `kubernetescontext` | string | `erun open`, `erun deploy`, `erun list` | Kubernetes context to deploy/open against. Special value `in-cluster` is set inside the runtime pod. |
-| `containerregistry` | string | `erun build`, `erun push`, `erun deploy`, build image tag resolution | Highest-precedence registry for images this env produces or pulls. Becomes the `<registry>` portion of the image tag. |
+| `containerregistries` | list | `erun build`, `erun push`, `erun deploy`, build image tag resolution | Per-env marked registry list, set for `remote-agent`/`runtime` envs whose project config is not on the local machine (`local-agent` envs resolve the list from the project's `.erun/config.yaml` instead). Each entry is `{registry, roles}` where roles ⊆ `build`/`from`/`to`/`deploy`. See [Container registries](#container-registries). |
 | `cloudprovideralias` | string | `erun open`, `erun deploy`, idle-stop, audit labels | Which cloud provider identity backs this env. Resolves to the `cloudproviders[]` entry. |
 | `managedcloud` | bool | helm chart (`ERUN_CLOUD_ENVIRONMENT`) | When true, marks the env as running on a managed cloud context (enables idle-stop, cloud-credential refresh, etc.). |
 | `runtimeversion` | string | `erun open`, `erun deploy`, chart appVersion | Pins the version of the runtime image used by this env. |
 | `runtimeregistry` | string | `erun open`, `erun deploy` | Overrides the registry the runtime image is pulled from (per-env). |
 | `runtimeimage` | string | `erun open`, `erun deploy` | Points the env's runtime pod at a custom image instead of the published `<registry>/erun-devops:<version>` default. A full reference (`ghcr.io/acme/acme-runtime:1.2.3`) is used verbatim; a bare name resolves to `<registry>/<name>:<runtime version>`. Set by `erun init --runtime-image`; carried to the published chart as `imageOverrides.erun-devops` on every deploy (see [Advanced chart values](#advanced-chart-values)). |
 | `autoupgrade` | bool | [`erun upgrade`](/cli/upgrade), desktop Upgrade all | When true, this env joins the Upgrade-all set: `erun upgrade` redeploys it to the latest version for its channel when `runtimeversion` lags. |
+| `disablebuildscript` | bool | [`erun build`](/cli/build), `erun build --deploy` | When true, erun ignores any project `build.sh` for this env and resolves docker/release builds directly; if there is no docker build context either, the build errors with no buildable context. Default false. |
 | `upgradechannel` | string (enum) | [`erun upgrade`](/cli/upgrade) | Release channel an upgrade targets: `stable` (semver releases) or `snapshot` (latest snapshot build, or the stable release once one is published on top of it — see [`erun upgrade`](/cli/upgrade#what-opted-in-means)). Orthogonal to `type`. When unset, defaults from `type` — runtime → `stable`, agent → `snapshot`. |
 | `runtimepod.cpu` | string | helm chart (`runtime.resources.limits.cpu`) | CPU limit for the runtime pod (e.g. `4`, `500m`). |
 | `runtimepod.memory` | string | helm chart (`runtime.resources.limits.memory`) | Memory limit (e.g. `8916Mi`, `2Gi`). |
@@ -84,8 +83,6 @@ One per environment. This is the most-edited file.
 | `claude.defaultmodel` | `*string` | desktop AI launcher (`claude --model`) | Model the env's Claude AI tab starts on. Applied only while it is one of the env's available models (`claude.models[]`, or the default available set when that list is empty); otherwise no `--model` is passed. Model names are opaque tokens to ERun — resolving one (e.g. `fable`) to a concrete model is Claude's concern. Same verbatim-launch carve-out and save-reopen behaviour as `claude.effort`. |
 | `claude.verbosedebug` | bool | desktop AI launcher (`claude --verbose --debug`) | Launch the env's Claude AI tab with Claude's own verbose + debug diagnostics streaming into the tab. Absent means off. Same verbatim-launch carve-out and save-reopen behaviour as `claude.effort`. |
 | `aitool` | string | desktop AI launcher, runtime entrypoint | Which Agent is the default for this env (`claude`, `codex`, …). |
-| `remote` | bool | helm chart (worktree storage selection), build path resolution | When true, the runtime pod uses a PVC-backed checkout; when false, the host project root is mounted via `hostPath`. ([Planned removal — subsumed by `type`.](#planned-changes)) |
-| `snapshot` | `*bool` | `erun build`, `erun push`, `erun deploy`, `erun open` | Marks this env as agent-mode: when `true`, builds happen here and produce snapshot-tagged artefacts; when `false`, the env only receives deploys. ([Planned removal — subsumed by `type`.](#planned-changes)) |
 | `localportrangestart` | int | desktop port allocator | Base port for this env's local forwards (MCP, API, SSH). |
 | `autostart` | `*bool` | desktop sidebar open | `nil` = ask, `true` = always start linked cloud context on open, `false` = never. |
 | `remotehostcredentials` | bool | helm chart (cloud credentials passthrough) | Mount the host's cloud credentials into the runtime pod (for managed cloud envs). |
@@ -102,9 +99,9 @@ Committed to the repo, applies to anyone who checks it out.
 
 | Field | Type | Used by | Effect |
 |---|---|---|---|
-| `containerregistry` | string | `erun build`, `erun push`, `erun deploy`, build image tag resolution | Project-wide fallback registry. Lower precedence than `EnvConfig.containerregistry`. |
+| `containerregistries` | list | `erun build`, `erun push`, `erun deploy`, build image tag resolution | Project-wide marked registry list. Each entry is `{registry, roles}` with roles ⊆ `build`/`from`/`to`/`deploy`. See [Container registries](#container-registries). |
 | `environments` | map | per-env settings (below) | Map of `<env-name> → ProjectEnvironmentConfig`. |
-| `environments.<env>.containerregistry` | string | `erun build`, `erun push`, `erun deploy` | Per-env registry override. Higher precedence than the top-level project registry, lower than `EnvConfig.containerregistry`. |
+| `environments.<env>.containerregistries` | list | `erun build`, `erun push`, `erun deploy` | Per-env marked registry list override. Higher precedence than the top-level project list. |
 | `environments.<env>.docker.fingerprints` | map | `erun build`, `erun build --release` | Per-image content fingerprints from the last published build. Drives the [fingerprint cache](/agent-reference/conventions-spec#fingerprint-cache). |
 | `environments.<env>.k8s.deployments[]` | ordered list | `erun deploy` | The ordered deploy plan for this env. Each step is either a single component name or a list of names deployed in parallel. |
 | `release.mainbranch` | string | `erun release` | Main branch name (default `main`). |
@@ -183,12 +180,40 @@ runtime:
 
 Some values can be set in multiple layers. When that happens, ERun consults them in a fixed order.
 
-### Container registry (for the image tag)
+### Container registries
 
-1. `EnvConfig.containerregistry` (per-user, per-env).
-2. `ProjectConfig.environments.<env>.containerregistry` (per-project, per-env).
-3. `ProjectConfig.containerregistry` (per-project, top-level).
-4. Built-in default (`ghcr.io/sophium`).
+A project declares a **list** of registries, each marked with the roles it plays. The list resolves per environment, then individual registries are selected by role.
+
+**Resolving the list for an environment:**
+
+1. `EnvConfig.containerregistries` (per-user, per-env — set for `remote-agent`/`runtime` envs).
+2. `ProjectConfig.environments.<env>.containerregistries` (per-project, per-env override).
+3. `ProjectConfig.containerregistries` (per-project, top-level).
+4. Built-in default seed: a single `ghcr.io/sophium` entry marked `build` + `deploy`.
+
+**Roles** (each entry carries any subset):
+
+| Role | Meaning | Count |
+|---|---|---|
+| `build` | `erun build`/`erun push` push target; the `<registry>` of the build image tag. | ≤ 1 |
+| `from` | Copy source on deploy. | ≤ 1 |
+| `to` | Copy destination(s) on deploy. | ≥ 0 |
+| `deploy` | Registry the cluster pulls from (rendered as `containerRegistry` in the chart). | ≥ 1 (required) |
+
+**Role rules** (validated when the list is resolved for build or deploy):
+
+- At most one `build`, at most one `from`; at least one `deploy`.
+- `from` and `to` are set together and must name different registries.
+- More than one `deploy` → the first wins.
+
+A `deploy` registry need not also carry `build` or `to`: the image it serves may be published there externally (e.g. a runtime env that pulls a released image), which erun does not police at config time.
+
+**Behaviour:**
+
+- **Build** pushes to the `build` registry. No `build` registry → the environment cannot build (`erun build` aborts: `environment "<env>" has no build registry`; exit code 1).
+- **Deploy** copies each image the cluster needs (the runtime image and any locally-built component) from `from` to every `to` with `docker buildx imagetools create` (manifest-aware), then the cluster pulls from the `deploy` registry. The copy runs only when both `from` and `to` are set.
+
+**Migration:** a legacy single `containerregistry: X` scalar (project or env config) is read once as a one-entry list `[{registry: X, roles: [build, deploy]}]` and rewritten in the list shape on the next save.
 
 ### Kubernetes context
 
@@ -225,35 +250,35 @@ For Docker build context / version resolution, see [Build path resolution](/refe
 
 ---
 
-## Planned changes
+## Migration and planned changes {#planned-changes}
 
-The migration from the three legacy fields (`TenantConfig.projectroot`, `EnvConfig.remote`, `EnvConfig.snapshot`) to one explicit `EnvConfig.type` has begun:
+ERun has moved from the legacy `remote` + `snapshot` field pair to one explicit `EnvConfig.type`. `type` is the single signal for the env's *shape* — its worktree storage and chart wiring:
 
-- ✅ `EnvConfig.type` is writable today via `erun init --type` or by editing the YAML directly.
-- ✅ When `type` is set on an env, downstream commands (`erun build`, `erun open`, `erun deploy`) and the helm chart wiring (`worktreeStorage=host|pvc|none`) branch on it instead of the legacy fields.
-- ✅ `EnvConfig.localRepoPath` is the new name for the local-host worktree path; only `local-agent` envs populate it.
-- ⏳ Legacy fields stay readable for one release. Envs that have no `type` set fall back to deriving it from `remote` and `snapshot` per the truth table below.
-- ⏳ A follow-up release will drop the legacy fields and the deprecated `--remote` / `remote: true` aliases.
+- ✅ `EnvConfig.type` is written by `erun init --type`, the desktop env settings, or by editing the YAML directly.
+- ✅ The helm chart wiring (`worktreeStorage=host|pvc|none`, `ERUN_ENV_TYPE`) branches on `type`. The delivery commands (`erun build`, `erun push`, `erun deploy`, `erun open`) are [pure primitives](/concepts/command-primitives) and do **not** branch on `type` — `build` mints a version, `push` publishes it, `deploy` installs it by reference, `open` opens a shell. The caller (the desktop app, or an Operator) decides which primitives to run for a given env.
+- ✅ `EnvConfig.localRepoPath` is the local-host worktree path; only `local-agent` envs populate it.
+- ✅ `EnvConfig.remote`, `EnvConfig.snapshot`, and the matching `TenantConfig` fields are **removed**. A config written before `type` existed is migrated on read: ERun parses the legacy `remote`/`snapshot` keys, derives `type` per the table below, and discards them. No action is needed — re-saving an env (e.g. from the desktop) persists the resolved `type`.
+- ⏳ `TenantConfig.projectroot` and `EnvConfig.repopath` are still in flight (see [Field-level moves](#field-level-moves)).
 
-### `EnvConfig.type` truth table
+### Legacy `remote`/`snapshot` → `type` migration {#envconfig-type-truth-table}
 
-| Value | Worktree storage | Build behaviour | Legacy fallback (when `type` unset) |
-|---|---|---|---|
-| `local-agent` | `hostPath` mount of `localRepoPath` | snapshot tags, builds in-pod | `Remote: false` (the historical default) |
-| `remote-agent` | PVC checkout cloned from git | snapshot tags, builds in-pod | `Remote: true` + `snapshot: true` |
-| `runtime` | None | release tags only, no builds | `Remote: true` + `snapshot: false` |
+A config with no `type` is migrated from the retired keys on read. `snapshot` absent is read the same as `snapshot: false`:
+
+| `remote` | `snapshot` | Migrated `type` | Worktree storage | Build behaviour |
+|---|---|---|---|---|
+| `false` | `true` | `local-agent` | `hostPath` mount of `localRepoPath` | snapshot tags, builds in-pod |
+| `true` | `true` | `remote-agent` | PVC checkout cloned from git | snapshot tags, builds in-pod |
+| `true` | `false` / absent | `runtime` | none | release tags only, no builds |
+| `false` | `false` / absent | (unresolved) | `hostPath` (fallback) | — |
 
 See [Environment types](/concepts/environment-types) for what each value means in practice.
 
-### Field-level moves
+### Field-level moves {#field-level-moves}
 
-| Today | Planned | Why |
+| Field | Status | Why |
 |---|---|---|
-| `TenantConfig.projectroot` | Removed; cwd-to-tenant matching iterates over envs' `localRepoPath`. | A tenant can host both local and remote envs; the path lives on the env, not the tenant. |
-| `EnvConfig.repopath` | Replaced by `EnvConfig.localRepoPath`. | Scoped explicitly: the local-machine path mounted into the pod. For PVC envs the field is unset — the repo lives inside the pod at a fixed convention. |
-| `TenantConfig.remote` | Removed. | Subsumed by per-env `type`. |
-| `TenantConfig.snapshot` | Removed. | Doesn't belong on the tenant; subsumed by per-env `type`. |
-| `EnvConfig.remote` | Removed. | Subsumed by `type` (`local-agent` ↔ false; `remote-agent` and `runtime` ↔ true). |
-| `EnvConfig.snapshot` | Removed. | Subsumed by `type` (`local-agent` and `remote-agent` ↔ true; `runtime` ↔ false). |
-
-During the migration, ERun reads both shapes. Setting only `type` is sufficient; legacy fields stay supported for one release before being removed.
+| `EnvConfig.remote` | ✅ Removed | Subsumed by `type` (`local-agent` ↔ false; `remote-agent` / `runtime` ↔ true). Legacy YAML migrated on read. |
+| `EnvConfig.snapshot` | ✅ Removed | Subsumed by `type` (`local-agent` / `remote-agent` ↔ true; `runtime` ↔ false). Legacy YAML migrated on read. |
+| `TenantConfig.remote` / `TenantConfig.snapshot` | ✅ Removed | Belonged on the env, not the tenant; subsumed by per-env `type`. |
+| `TenantConfig.projectroot` | ⏳ Planned removal; cwd-to-tenant matching will iterate over envs' `localRepoPath`. | A tenant can host both local and remote envs; the path lives on the env, not the tenant. |
+| `EnvConfig.repopath` | ⏳ Planned replacement by `EnvConfig.localRepoPath`. | Scoped explicitly: the local-machine path mounted into the pod. For PVC envs the field is unset — the repo lives inside the pod at a fixed convention. |

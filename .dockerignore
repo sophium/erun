@@ -43,5 +43,16 @@ __debug_bin*
 /erun-ui/frontend/dist
 /erun-ui/frontend/wailsjs
 
+# Docs site dependencies and build outputs. The erun-docs image runs
+# `yarn install` + `yarn build` inside its Dockerfile, so these are
+# regenerated in-image and must never enter the build context: they bloat it
+# (~1GB of node_modules alone) and, because the build only honours this root
+# .dockerignore while the fingerprint also honours erun-docs/.gitignore, their
+# presence diverges the real context from the fingerprint.
+/erun-docs/node_modules
+/erun-docs/build
+/erun-docs/.docusaurus
+/erun-docs/.cache-loader
+
 # Env files
 .env

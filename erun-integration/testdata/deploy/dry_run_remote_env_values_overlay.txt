@@ -1,6 +1,6 @@
 audit: erun deploy --dry-run --version <VERSION> team dev
 trace-log: would append the full trace to <TMP>
-deploy: tenant=team environment=dev version-override=<VERSION> snapshot=true components=[] force=false publish=false
+deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=false current=false
 deploy: no local runtime chart; using published chart oci://registry.example/test/charts/erun-devops version <VERSION>
 deploy: applying values overlay <TMP>
 deploy: resolved 1 spec(s)

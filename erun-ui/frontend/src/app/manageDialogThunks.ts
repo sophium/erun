@@ -300,7 +300,11 @@ export const submitManageConfig = (): AppThunk<Promise<void>> => async (dispatch
     const result = await dispatch(
       environmentApi.endpoints.saveEnvironmentConfig.initiate({ selection, config: saveConfig }),
     ).unwrap();
-    rememberPastContainerRegistry(result.containerRegistry || saveConfig.containerRegistry);
+    for (const entry of result.containerRegistries.length
+      ? result.containerRegistries
+      : saveConfig.containerRegistries) {
+      rememberPastContainerRegistry(entry.registry);
+    }
     const displayConfig = { ...result, runtimePod: runtimePodConfigToDisplay(result.runtimePod) };
     const priorConfig = dialog.initialConfig;
     dispatch(

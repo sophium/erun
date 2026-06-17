@@ -4,7 +4,7 @@ title: erun deploy
 
 # `erun deploy`
 
-Build (if needed), push, and roll out the helm chart for the current devops module. `erun deploy` is the single-command workflow for moving code from your machine into a Kubernetes environment — the deploy step of the [delivery pipeline](/pipeline).
+Install a published version into a Kubernetes environment. `erun deploy` is a **pure consume** step — it helm-installs the image and chart that [`erun push`](/cli/push) already published at a version, addressing them by reference. It never builds, pushes, or publishes. It's the deploy step of the [delivery pipeline](/pipeline); see [Command primitives](/concepts/command-primitives) for how it composes with `build` and `push`.
 
 ## Synopsis
 
@@ -13,6 +13,8 @@ erun deploy [TENANT] [ENVIRONMENT] [flags]
 ```
 
 If `TENANT` and/or `ENVIRONMENT` are omitted, they resolve from defaults (same way as `erun open`).
+
+A version is **required**: pass `--version <v>` to install a specific published version, or `--current` to redeploy the version the environment already runs. Running `erun deploy` with neither errors — `deploy` does not mint a version, so there is nothing for it to install. Versions are minted only by [`erun build`](/cli/build); to produce a new one, build and push it first (or let the desktop app, which composes those steps for you).
 
 ## Deployment plan
 
@@ -26,72 +28,96 @@ When the project repo carries its own runtime chart (`<tenant>-devops/k8s/<tenan
 helm upgrade --install <tenant>-devops oci://<registry>/charts/erun-devops --version <runtime version> …
 ```
 
-The chart is published at release time alongside the runtime image with the same version — chart and image are one contract (see [Release flow](/deployment/release-flow)). The registry resolves from the env's recorded runtime registry, then the env's container registry, then the project registry, falling back to `ghcr.io/sophium`. The dry-run trace names the decision: `deploy: no local runtime chart; using published chart <ref> version <v>`. To customise a published-chart deploy, use the env's values overlay and the `runtimeimage` field — see [Configuration · Advanced chart values](/reference/configuration#advanced-chart-values).
+The chart and runtime image are one contract — published together to the same registry at the same version. [`erun push`](/cli/push) publishes both at once, so whatever version `deploy` is handed already has a matching chart waiting; `deploy` only pulls and installs it, never publishes. Because push publishes the chart for *every* version it pushes — snapshot or release — any pushed version is deployable, with no chart-versus-image gap (see [Release flow](/deployment/release-flow)). The cluster pulls from the `deploy`-marked registry in the env's [registry list](/deployment/registries) (the env's recorded runtime registry wins as provenance); when the list marks a `from` and a `to`, ERun copies the image there first. The dry-run trace names the decision: `deploy: no local runtime chart; using published chart <ref> version <v>`. To customise a published-chart deploy, use the env's values overlay and the `runtimeimage` field — see [Configuration · Advanced chart values](/reference/configuration#advanced-chart-values).
 
 ## Flags
 
 | Flag | Description |
 |---|---|
+| `--version <version>` | The published version to install, by reference. Required unless `--current` is given. The version's image and chart must already exist (locally or in the registry) or the deploy errors — `deploy` never builds them. |
+| `--current` | Redeploy the version the environment is already recorded as running (its persisted runtime version). Use it to re-roll the same version, or after a `--force`-style retry, without retyping the number. Required unless `--version` is given. |
 | `--components <name,name,...>` | Opt-in components to include alongside the runtime chart. The accepted list is derived from each project's `<tenant>-devops/k8s/<component>/` charts. |
-| `--version <version>` | Override the deployed chart and image version. |
-| `--snapshot` / `--no-snapshot` | Build and deploy local snapshot images in a local environment (on by default there). A snapshot deploy that includes the postgres component also **resets the environment's Postgres database**. |
-| `--publish` | Package and push each resolved chart to the environment's container registry as an OCI Helm artifact before the upgrade. |
-| `--force` | Bypass the fingerprint cache and re-run helm upgrade even when no source change is detected. |
-| `--dry-run` | Resolve and print every `docker`, `docker push`, and `helm upgrade --install` command without executing. |
+| `--force` | Re-run helm upgrade even when the resolved version is unchanged and nothing needs rolling. |
+| `--dry-run` | Resolve and print every `helm upgrade --install` command (and any image-copy step) without executing. |
 
 Subcommand:
 
 | Command | Description |
 |---|---|
-| `erun deploy COMPONENT` | Deploy a single component's helm chart directly (no plan resolution). |
+| `erun deploy COMPONENT` | Install a single component's helm chart directly at the resolved version (no plan resolution). Still requires `--version` or `--current`. |
+
+## What deploy installs {#what-deploy-installs}
+
+`erun deploy` *consumes* an already-published version — it never produces one. A version is a content identity, not a label, so ERun addresses the published image and chart by reference: it does **not** build your working tree, and it does **not** push (so it can never overwrite the published `<v>`). Before the rollout it checks that the version's image and chart exist; if they don't, the deploy errors instead of building or publishing them. `erun upgrade` rolls a fleet forward by calling deploy this same way.
+
+You always say *which* version:
+
+- **`--version <v>`** — install a specific published version. Use it to roll forward to a new build, or to roll back to an earlier one.
+- **`--current`** — reinstall the version the environment already runs (its persisted runtime version). Use it to re-roll the same version without retyping the number.
+
+To produce a *new* version from your working tree, build and push it first ([`erun build`](/cli/build) mints it, [`erun push`](/cli/push) publishes it), then `deploy --version` that version. The desktop app composes those steps for you; the `build --deploy` shortcut runs them end to end for an Operator at the terminal (see [Command primitives](/concepts/command-primitives)).
 
 ## Skipping helm when nothing changed
 
-When all of a chart's locally-built images were promoted from the fingerprint cache (no rebuild) and the chart itself didn't change, `erun deploy` skips both the redundant `docker push` and the `helm upgrade --install` for that chart. Pass `--force` to override.
+When the resolved version matches what the environment already runs and the chart didn't change, `erun deploy` skips the redundant `helm upgrade --install`. Pass `--force` to override.
 
-This means a no-op `erun deploy` after a clean clone is essentially free.
+This means a no-op `erun deploy --current` is essentially free.
 
-## Snapshot mode and the database
+## The database reset
 
-In a local environment, `deploy` builds and deploys local snapshot images by default (`--no-snapshot` opts out). A snapshot deploy that includes the `erun-backend-postgres` component also **resets the environment's Postgres database** — convenient for a throwaway local stack, surprising if you didn't expect it. The reset rides in the postgres chart itself, so it still runs when image caching would otherwise skip that chart's helm step (the dry-run trace names the decision). Runtime environments deploy released images from the registry and don't reset data.
+A deploy that includes the `erun-backend-postgres` component **resets the environment's Postgres database** — convenient for a throwaway local stack, surprising if you didn't expect it. The reset rides in the postgres chart itself, so it still runs when the version is unchanged and `deploy` would otherwise skip that chart's helm step (the dry-run trace names the decision). Reserve the postgres component for agent and throwaway envs; runtime envs that must keep their data should not include it.
 
-On a successful deploy of the runtime chart, the resolved version and registry are persisted to the environment's config, so the next `open` / `deploy` reuses them.
+On a successful deploy of the runtime chart, the resolved version and registry are persisted to the environment's config, so the next `open`, `deploy --current`, or `upgrade` reuses them.
 
 ## Examples
 
-Deploy the default runtime chart only:
+Install a published version into the default tenant/environment:
 
 ```bash
-erun deploy
+erun deploy --version 1.2.3
 ```
 
-Deploy the runtime plus the backend stack:
+Redeploy the version the environment already runs:
 
 ```bash
-erun deploy --components erun-backend-postgres,erun-backend-db,erun-backend-api
+erun deploy --current
+```
+
+Install a version plus the backend stack:
+
+```bash
+erun deploy --version 1.2.3 --components erun-backend-postgres,erun-backend-db,erun-backend-api
 ```
 
 Dry-run to inspect the plan:
 
 ```bash
-erun deploy --dry-run --components erun-backend-postgres
+erun deploy --version 1.2.3 --dry-run --components erun-backend-postgres
 ```
 
-Deploy a specific component chart:
+Deploy a single component chart at a version:
 
 ```bash
-erun deploy erun-backend-api
+erun deploy erun-backend-api --version 1.2.3
+```
+
+Install a published version into a specific environment:
+
+```bash
+erun deploy team prod --version 1.2.3
 ```
 
 ## Error behaviour
 
 | Failure | Behaviour |
 |---|---|
+| Neither `--version` nor `--current` given. | Errors before any change: `deploy requires a version — pass --version <v> or --current`. `deploy` never builds, so there is nothing to install without one. Exit code 1. |
 | Cluster unreachable. | Errors before any change; exit code 1, message identifies the context. |
 | Linked cloud context is stopped. | Starts the context, waits for readiness, then proceeds. If start fails, errors. |
-| Referenced image isn't in the registry. | Errors before `helm upgrade`; logs the missing image and the resolved registry. No partial deploy. |
+| `--version <v>` names a version whose image was never published. | Errors during resolution, before `helm upgrade`: `image <ref> is not present locally or in the registry; deploy installs an existing version and does not build it — run erun build/push to create it first`. No build, no push, no partial deploy. |
+| `--current` but the environment has no recorded version yet. | Errors before any change — there is no current version to redeploy. Deploy a specific `--version` once to seed it. |
+| Runtime chart isn't published at the requested version. | Errors with `runtime chart <ref> version <v> could not be pulled from <registry>` and how to recover — push that version first (push publishes image and chart together), then redeploy. No partial deploy. |
 | Helm upgrade fails on step N. | The plan stops at step N. Steps 1..N-1 are committed; step N is in helm's failure state. Fix and rerun, or `helm rollback` that release. The rest of the plan is left untouched. |
 | `erun deploy <component>` for a component not in the plan. | Deploys the single component directly — that's the documented bypass. No error. |
-| Stale fingerprint cache. | Cache misses silently and the build/push runs as if it weren't cached. Use `--force` to bypass it explicitly. |
 
 `erun deploy --dry-run` prints the exact command sequence ahead of time, so the Operator can preview the plan before committing.

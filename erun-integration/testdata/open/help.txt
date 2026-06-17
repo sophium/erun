@@ -17,13 +17,12 @@ Flags:
       --intellij               Open the remote environment in IntelliJ IDEA instead of a shell
       --no-alias-prompt        Skip prompting to add a local shell alias with --no-shell
       --no-shell               Print shell commands to switch kubectl context, namespace, and worktree locally
-      --no-snapshot            Alias for --snapshot=false
       --runtime-image string   Override the runtime image repository before opening
-      --snapshot               Build and deploy a local snapshot when opening the local environment (default true)
       --tenant string          Open a specific tenant
       --version string         Override the runtime chart and image version before opening
       --vscode                 Open the remote environment in VS Code instead of a shell
 
 Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
       --time            Print the elapsed runtime after the command finishes.
   -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

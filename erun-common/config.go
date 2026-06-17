@@ -98,8 +98,6 @@ type TenantConfig struct {
 	APIURL                    string   `yaml:"api_url,omitempty" json:"apiUrl,omitempty"`
 	CloudProviderAliases      []string `yaml:"cloudprovideraliases,omitempty" json:"cloudProviderAliases,omitempty"`
 	PrimaryCloudProviderAlias string   `yaml:"primarycloudprovideralias,omitempty" json:"primaryCloudProviderAlias,omitempty"`
-	Remote                    bool     `yaml:"remote,omitempty"`
-	Snapshot                  *bool    `yaml:"snapshot,omitempty"`
 }
 
 type EnvConfig struct {
@@ -108,11 +106,15 @@ type EnvConfig struct {
 	LocalRepoPath      string          `yaml:"localrepopath,omitempty" json:"localRepoPath,omitempty"`
 	RepoPath           string          `yaml:"repopath,omitempty"`
 	KubernetesContext  string
-	ContainerRegistry  string
 	CloudProviderAlias string `yaml:"cloudprovideralias,omitempty"`
 	ManagedCloud       bool   `yaml:"managedcloud,omitempty" json:"managedCloud,omitempty"`
 	RuntimeVersion     string `yaml:"runtimeversion,omitempty"`
 	RuntimeRegistry    string `yaml:"runtimeregistry,omitempty" json:"runtimeRegistry,omitempty"`
+	// ContainerRegistries carries the marked registry list for environments
+	// whose project config is not on the local machine (remote-agent and
+	// runtime envs). Local-agent envs resolve their list from the project's
+	// .erun/config.yaml instead; this field stays empty for them.
+	ContainerRegistries ContainerRegistries `yaml:"containerregistries,omitempty" json:"containerRegistries,omitempty"`
 	// RuntimeImage points the env's runtime pod at a custom image instead
 	// of the published <registry>/erun-devops:<version> default. A full
 	// reference ("ghcr.io/acme/my-devops:1.2.3") is used verbatim; a bare
@@ -125,8 +127,6 @@ type EnvConfig struct {
 	Idle                  EnvironmentIdleConfig   `yaml:"idle,omitempty"`
 	Claude                EnvironmentClaudeConfig `yaml:"claude,omitempty" json:"claude,omitempty"`
 	AITool                string                  `yaml:"aitool,omitempty" json:"aiTool,omitempty"`
-	Remote                bool                    `yaml:"remote,omitempty"`
-	Snapshot              *bool                   `yaml:"snapshot,omitempty"`
 	LocalPortRangeStart   int                     `yaml:"localportrangestart,omitempty" json:"localPortRangeStart,omitempty"`
 	AutoStart             *bool                   `yaml:"autostart,omitempty" json:"autoStart,omitempty"`
 	RemoteHostCredentials bool                    `yaml:"remotehostcredentials,omitempty" json:"remoteHostCredentials,omitempty"`
@@ -139,92 +139,61 @@ type EnvConfig struct {
 	// It is orthogonal to Type (build location); empty resolves via
 	// ResolvedUpgradeChannel from Type.
 	UpgradeChannel string `yaml:"upgradechannel,omitempty" json:"upgradeChannel,omitempty"`
+	// DisableBuildScript makes erun ignore any project build.sh for this env:
+	// erun build (and the build it runs for --deploy) skips root and nested
+	// build.sh discovery and resolves docker/release builds directly, erroring
+	// with no buildable context if none exist. Default false preserves today's
+	// build.sh-shadows-docker behaviour.
+	DisableBuildScript bool `yaml:"disablebuildscript,omitempty" json:"disableBuildScript,omitempty"`
 }
 
-func (c TenantConfig) SnapshotEnabled() bool {
-	if c.Snapshot == nil {
-		return false
-	}
-	return *c.Snapshot
-}
-
-func (c *TenantConfig) SetSnapshot(enabled bool) {
-	if c == nil {
-		return
-	}
-	value := enabled
-	c.Snapshot = &value
-}
-
-func (c EnvConfig) SnapshotEnabled() bool {
-	if c.Snapshot == nil {
-		return false
-	}
-	return *c.Snapshot
-}
-
-func (c *EnvConfig) SetSnapshot(enabled bool) {
-	if c == nil {
-		return
-	}
-	value := enabled
-	c.Snapshot = &value
-}
-
-// ResolvedType returns the env's type. When Type is set it is the source of
-// truth. When unset, derives the type from the legacy Remote+Snapshot pair
-// only when both signals are present per the documented truth table at
-// /reference/configuration#planned-changes — otherwise returns "" so callers
-// fall back to the legacy predicates (BuildsHere, RemoteWorktree) without
-// silently reclassifying ambiguous envs:
-//
-//	type set                                  → the set value
-//	type unset, snapshot==nil                 → "" (unresolved; legacy fallback)
-//	type unset, remote=false, snapshot=true   → local-agent
-//	type unset, remote=true,  snapshot=true   → remote-agent
-//	type unset, remote=true,  snapshot=false  → runtime
-//	type unset, remote=false, snapshot=false  → "" (ambiguous local env)
+// ResolvedType returns the env's type, or "" when unresolved. Pre-#376 configs
+// that carried only the legacy remote+snapshot pair are migrated to a concrete
+// Type during YAML decode (see EnvConfig.UnmarshalYAML), so Type is the single
+// source of truth here.
 func (c EnvConfig) ResolvedType() EnvironmentType {
 	if c.Type.IsValid() {
 		return c.Type
 	}
-	if c.Snapshot == nil {
-		return ""
-	}
-	snapshot := *c.Snapshot
-	if !c.Remote {
-		if snapshot {
-			return EnvironmentTypeLocalAgent
-		}
-		return ""
-	}
-	if snapshot {
-		return EnvironmentTypeRemoteAgent
-	}
-	return EnvironmentTypeRuntime
+	return ""
 }
 
 // BuildsHere reports whether builds happen inside this env (local-agent and
-// remote-agent build here; runtime envs only receive deploys). When Type is
-// explicitly set it is the source of truth; otherwise the result matches the
-// legacy SnapshotEnabled() value so callers preserve today's behavior.
+// remote-agent build here; runtime envs only receive deploys). An env whose
+// type is unresolved is treated as not building here.
 func (c EnvConfig) BuildsHere() bool {
-	if c.Type.IsValid() {
-		return c.Type != EnvironmentTypeRuntime
-	}
-	return c.SnapshotEnabled()
+	return c.Type.IsValid() && c.Type != EnvironmentTypeRuntime
 }
 
 // RemoteWorktree reports whether the worktree lives outside the local
 // machine (PVC for remote-agent, none for runtime). Local-agent mounts the
-// worktree from the local filesystem via hostPath. When Type is explicitly
-// set it is the source of truth; otherwise the result matches the legacy
-// Remote bool so callers preserve today's behavior.
+// worktree from the local filesystem via hostPath. An env whose type is
+// unresolved is treated as not having a remote worktree.
 func (c EnvConfig) RemoteWorktree() bool {
-	if c.Type.IsValid() {
-		return c.Type != EnvironmentTypeLocalAgent
+	return c.Type.IsValid() && c.Type != EnvironmentTypeLocalAgent
+}
+
+// legacyEnvTypeFromRemoteSnapshot derives the environment type from the
+// pre-#376 remote+snapshot pair, for configs written before the `type` field
+// existed. It reproduces the old fallback deciders exactly: RemoteWorktree()
+// fell back to the remote flag, and BuildsHere() fell back to SnapshotEnabled()
+// (snapshot != nil && *snapshot), so a missing snapshot key meant "does not
+// build here", identical to snapshot=false. Returns "" only for the one combo
+// with no concrete type — a non-remote env that does not build here — so its
+// deciders stay false on both axes as before. Used only by
+// EnvConfig.UnmarshalYAML to migrate legacy configs on read.
+func legacyEnvTypeFromRemoteSnapshot(remote bool, snapshot *bool) EnvironmentType {
+	buildsHere := snapshot != nil && *snapshot
+	if remote {
+		if buildsHere {
+			return EnvironmentTypeRemoteAgent
+		}
+		return EnvironmentTypeRuntime
 	}
-	return c.Remote
+	if buildsHere {
+		return EnvironmentTypeLocalAgent
+	}
+	return ""
 }
 
 // UpgradeChannel values for EnvConfig.UpgradeChannel / ResolvedUpgradeChannel.
@@ -272,9 +241,9 @@ func (c EnvConfig) EffectiveLocalRepoPath() string {
 }
 
 type ProjectEnvironmentConfig struct {
-	ContainerRegistry string              `yaml:"containerregistry,omitempty"`
-	Docker            ProjectDockerConfig `yaml:"docker,omitempty"`
-	K8s               ProjectK8sConfig    `yaml:"k8s,omitempty"`
+	ContainerRegistries ContainerRegistries `yaml:"containerregistries,omitempty"`
+	Docker              ProjectDockerConfig `yaml:"docker,omitempty"`
+	K8s                 ProjectK8sConfig    `yaml:"k8s,omitempty"`
 }
 
 // ProjectDockerConfig holds project-level docker settings per environment.
@@ -300,14 +269,14 @@ type ReleaseConfig struct {
 }
 
 type ProjectConfig struct {
-	ContainerRegistry string                              `yaml:"containerregistry,omitempty"`
-	Environments      map[string]ProjectEnvironmentConfig `yaml:"environments,omitempty"`
-	Release           ReleaseConfig                       `yaml:"release,omitempty"`
+	ContainerRegistries ContainerRegistries                 `yaml:"containerregistries,omitempty"`
+	Environments        map[string]ProjectEnvironmentConfig `yaml:"environments,omitempty"`
+	Release             ReleaseConfig                       `yaml:"release,omitempty"`
 }
 
 // K8sForEnvironment returns the k8s deploy plan declared for the given
 // environment in this project config, or an empty plan when none exists.
-// Mirrors ContainerRegistryForEnvironment in shape so callers can resolve a
+// Mirrors ContainerRegistriesForEnvironment in shape so callers can resolve a
 // plan by environment without reaching into the Environments map.
 func (c ProjectConfig) K8sForEnvironment(environment string) ProjectK8sConfig {
 	environment = strings.TrimSpace(environment)
@@ -413,57 +382,6 @@ func (c ProjectConfig) DockerFingerprintsForEnvironment(environment string) map[
 	return out
 }
 
-func (c ProjectConfig) ContainerRegistryForEnvironment(environment string) string {
-	environment = strings.TrimSpace(environment)
-	if environment != "" && c.Environments != nil {
-		if envConfig, ok := c.Environments[environment]; ok {
-			if registry := strings.TrimSpace(envConfig.ContainerRegistry); registry != "" {
-				return registry
-			}
-		}
-	}
-
-	return strings.TrimSpace(c.ContainerRegistry)
-}
-
-func (c *ProjectConfig) SetContainerRegistryForEnvironment(environment, registry string) {
-	environment = strings.TrimSpace(environment)
-	registry = strings.TrimSpace(registry)
-
-	if environment == "" {
-		c.ContainerRegistry = registry
-		return
-	}
-
-	if registry == "" {
-		if c.Environments != nil {
-			delete(c.Environments, environment)
-			if len(c.Environments) == 0 {
-				c.Environments = nil
-			}
-		}
-		return
-	}
-
-	if registry == strings.TrimSpace(c.ContainerRegistry) {
-		if c.Environments != nil {
-			delete(c.Environments, environment)
-			if len(c.Environments) == 0 {
-				c.Environments = nil
-			}
-		}
-		return
-	}
-
-	if c.Environments == nil {
-		c.Environments = make(map[string]ProjectEnvironmentConfig)
-	}
-
-	envConfig := c.Environments[environment]
-	envConfig.ContainerRegistry = registry
-	c.Environments[environment] = envConfig
-}
-
 func (c ProjectConfig) NormalizedReleaseConfig() ReleaseConfig {
 	config := c.Release
 	if strings.TrimSpace(config.MainBranch) == "" {
@@ -543,6 +461,10 @@ func (ConfigStore) DeleteEnvConfig(tenant, envName string) error {
 
 func (ConfigStore) LoadProjectConfig(projectRoot string) (ProjectConfig, string, error) {
 	return LoadProjectConfig(projectRoot)
+}
+
+func (ConfigStore) SaveProjectConfig(projectRoot string, config ProjectConfig) error {
+	return SaveProjectConfig(projectRoot, config)
 }
 
 func SaveERunConfig(config ERunConfig) error {
@@ -627,16 +549,11 @@ func SaveTenantConfig(config TenantConfig) error {
 	return nil
 }
 
-// NormalizeEnvConfig populates the new-shape fields (Type, LocalRepoPath)
-// from legacy fields when the new shape is unset. Idempotent: re-running it
-// on an already-normalized config is a no-op. Called by LoadEnvConfig so
-// loaded envs always expose a populated Type, and so subsequent saves write
-// both old and new shapes — letting old binaries read the file while the
-// migration window is open.
+// NormalizeEnvConfig backfills the host-shape LocalRepoPath from the legacy
+// RepoPath for local-agent envs. The env Type is migrated from the pre-#376
+// remote+snapshot pair during YAML decode (see EnvConfig.UnmarshalYAML), so it
+// is already populated by the time this runs. Idempotent.
 func NormalizeEnvConfig(config EnvConfig) EnvConfig {
-	if !config.Type.IsValid() {
-		config.Type = config.ResolvedType()
-	}
 	if strings.TrimSpace(config.LocalRepoPath) == "" && config.Type == EnvironmentTypeLocalAgent {
 		config.LocalRepoPath = strings.TrimSpace(config.RepoPath)
 	}

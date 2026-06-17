@@ -1,7 +1,13 @@
 Docker push requires login to ghcr.io:
   1) Login and retry push
   2) Cancel
-Select 1-2 [1]: audit: erun push
+Select 1-2 [1]: audit: erun push --version <VERSION>
 ==> Pushing
+fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
+fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-arm64
+rebuilding ghcr.io/sophium/api:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
 unauthorized: authentication required
+fingerprint image not found locally: ghcr.io/sophium/base:fp-<HEX16>-amd64
+fingerprint image not found locally: ghcr.io/sophium/base:fp-<HEX16>-arm64
+rebuilding ghcr.io/sophium/base:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
 ==> Pushed in <ELAPSED>

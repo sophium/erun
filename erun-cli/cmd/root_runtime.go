@@ -56,6 +56,7 @@ func newRootCommand(runRoot func(*cobra.Command, []string) error) *cobra.Command
 	}
 	addDryRunFlag(cmd)
 	addTimeFlag(cmd)
+	addOutputFlag(cmd)
 	wrapCommandTreeWithElapsedTime(cmd)
 	cmd.PersistentFlags().CountVarP(&verbosity, "verbose", "v", verboseFlagUsage)
 	return cmd
@@ -191,8 +192,21 @@ func hasOptionalPushCmd(findProjectRoot common.ProjectFinderFunc, resolveBuildCo
 	return false
 }
 
-func optionalBuildCmdShort(findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc) string {
-	hasRootScript, err := hasProjectRootBuildScript(findProjectRoot)
+// buildShortTarget resolves the per-env build toggle that shapes the build
+// command's short help (DisableBuildScript), so optionalBuildCmdShort advertises
+// docker builds rather than a build script when the env opts out of build.sh.
+func buildShortTarget(store common.DockerStore, findProjectRoot common.ProjectFinderFunc) common.DockerCommandTarget {
+	target := common.DockerCommandTarget{}
+	if env := common.ResolveDockerBuildEnvConfig(store, findProjectRoot, target); env != nil && env.DisableBuildScript {
+		target.DisableBuildScriptDiscovery = true
+	}
+	return target
+}
+
+func optionalBuildCmdShort(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc) string {
+	target := buildShortTarget(store, findProjectRoot)
+
+	hasRootScript, err := hasProjectRootBuildScript(findProjectRoot, target.DisableBuildScriptDiscovery)
 	if err == nil && hasRootScript {
 		return "Build the project"
 	}
@@ -201,12 +215,12 @@ func optionalBuildCmdShort(findProjectRoot common.ProjectFinderFunc, resolveBuil
 		return "Build the project"
 	}
 
-	buildContexts, err := common.ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, common.DockerCommandTarget{})
+	buildContexts, err := common.ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, target)
 	if err == nil && len(buildContexts) > 0 {
 		return dockerBuildCmdShort(findProjectRoot, resolveBuildContext, buildContexts)
 	}
 
-	hasScript, err := common.HasProjectBuildScript(findProjectRoot, common.DockerCommandTarget{})
+	hasScript, err := common.HasProjectBuildScript(findProjectRoot, target)
 	if err == nil && hasScript {
 		return "Build the project"
 	}
@@ -238,7 +252,10 @@ func currentBuildContextIsProjectRoot(findProjectRoot common.ProjectFinderFunc, 
 	return err == nil && projectRoot != "" && filepath.Clean(strings.TrimSpace(buildContext.Dir)) == projectRoot
 }
 
-func hasProjectRootBuildScript(findProjectRoot common.ProjectFinderFunc) (bool, error) {
+func hasProjectRootBuildScript(findProjectRoot common.ProjectFinderFunc, disabled bool) (bool, error) {
+	if disabled {
+		return false, nil
+	}
 	projectRoot, err := projectRootForHelp(findProjectRoot)
 	if err != nil || projectRoot == "" {
 		return false, err

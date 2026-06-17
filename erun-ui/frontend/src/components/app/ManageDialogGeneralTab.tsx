@@ -1,6 +1,7 @@
 import { Cog, LoaderCircle, Play, Power, Server } from 'lucide-react';
 import * as React from 'react';
 
+import { environmentTypeIsRemoteWorktree } from '@/app/environmentType';
 import { openGlobalConfigDialog } from '@/app/globalConfigThunks';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import {
@@ -10,7 +11,7 @@ import {
   updateManageConfig,
 } from '@/app/manageEnvironmentThunks';
 import { loadSavedPastContainerRegistries } from '@/app/storage';
-import { EditableComboField } from '@/components/app/EditableComboField';
+import { ContainerRegistriesField } from '@/components/app/ContainerRegistriesField';
 import { uniqueSuggestions } from '@/components/app/EditableComboField.helpers';
 import { EmptyState } from '@/components/app/EmptyState';
 import { CheckboxField, ReadonlyField, StatusBadge } from '@/components/app/ManageDialog.fields';
@@ -29,8 +30,12 @@ export function GeneralTab(): React.ReactElement {
   const dialog = useAppSelector((state) => state.manageDialog);
   const config = dialog.config;
   const containerRegistrySuggestions = React.useMemo(
-    () => uniqueSuggestions([config.containerRegistry, ...loadSavedPastContainerRegistries()]),
-    [config.containerRegistry],
+    () =>
+      uniqueSuggestions([
+        ...config.containerRegistries.map((entry) => entry.registry),
+        ...loadSavedPastContainerRegistries(),
+      ]),
+    [config.containerRegistries],
   );
   return (
     <>
@@ -44,14 +49,12 @@ export function GeneralTab(): React.ReactElement {
         label="Kubernetes context"
         value={config.kubernetesContext}
       />
-      <EditableComboField
-        id="environment-config-containerregistry"
-        label="Container registry"
-        value={config.containerRegistry}
+      <ContainerRegistriesField
+        entries={config.containerRegistries}
         suggestions={containerRegistrySuggestions}
         disabled={dialog.busy || dialog.configLoading}
-        onValueChange={(containerRegistry) => {
-          dispatch(updateManageConfig({ containerRegistry }));
+        onChange={(containerRegistries) => {
+          dispatch(updateManageConfig({ containerRegistries }));
         }}
       />
       <CloudAliasSelect
@@ -79,7 +82,7 @@ export function GeneralTab(): React.ReactElement {
         label="Environment type"
         value={environmentTypeLabel(config.type)}
       />
-      {config.remote && (
+      {environmentTypeIsRemoteWorktree(config.type) && (
         <CheckboxField
           id="environment-config-remotehostcredentials"
           label="Use host AWS credentials inside this env"
@@ -103,7 +106,7 @@ function environmentTypeLabel(type: string | undefined): string {
     case 'runtime':
       return 'Runtime (no worktree; receives deploys)';
     default:
-      return 'Legacy (derived from remote + snapshot)';
+      return 'Unknown';
   }
 }
 

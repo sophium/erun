@@ -28,7 +28,6 @@ type uiEnvironment struct {
 	KubernetesContext string `json:"kubernetesContext,omitempty"`
 	IsActive          bool   `json:"isActive,omitempty"`
 	SSHDEnabled       bool   `json:"sshdEnabled,omitempty"`
-	Remote            bool   `json:"remote"`
 	AutoStart         *bool  `json:"autoStart,omitempty"`
 }
 
@@ -206,13 +205,22 @@ type uiPortStatus struct {
 	Status    string `json:"status"`
 }
 
+// uiContainerRegistryEntry mirrors eruncommon.ContainerRegistryEntry for the
+// desktop env-settings registry-list editor: a registry host plus the roles it
+// carries (any of build/from/to/deploy). Roles ride as plain strings at the
+// Wails boundary (RegistryRole is a string alias).
+type uiContainerRegistryEntry struct {
+	Registry string   `json:"registry"`
+	Roles    []string `json:"roles"`
+}
+
 type uiEnvironmentConfig struct {
 	Name                  string                     `json:"name"`
 	Type                  eruncommon.EnvironmentType `json:"type,omitempty"`
 	LocalRepoPath         string                     `json:"localRepoPath,omitempty"`
 	RepoPath              string                     `json:"repoPath"`
 	KubernetesContext     string                     `json:"kubernetesContext"`
-	ContainerRegistry     string                     `json:"containerRegistry"`
+	ContainerRegistries   []uiContainerRegistryEntry `json:"containerRegistries"`
 	CloudProviderAlias    string                     `json:"cloudProviderAlias"`
 	CloudProviderAliases  []string                   `json:"cloudProviderAliases,omitempty"`
 	CloudContext          *uiCloudContextStatus      `json:"cloudContext,omitempty"`
@@ -224,12 +232,11 @@ type uiEnvironmentConfig struct {
 	ClaudeDefaults        uiClaudeDefaults           `json:"claudeDefaults"`
 	AITool                string                     `json:"aiTool,omitempty"`
 	LocalPorts            uiEnvironmentLocalPorts    `json:"localPorts"`
-	Remote                bool                       `json:"remote"`
-	Snapshot              bool                       `json:"snapshot"`
 	AutoStart             *bool                      `json:"autoStart,omitempty"`
 	RemoteHostCredentials bool                       `json:"remoteHostCredentials"`
 	AutoUpgrade           bool                       `json:"autoUpgrade"`
 	UpgradeChannel        string                     `json:"upgradeChannel,omitempty"`
+	DisableBuildScript    bool                       `json:"disableBuildScript"`
 }
 
 type uiClaudeConfig struct {
@@ -353,6 +360,11 @@ type startSessionResult struct {
 	Selection uiSelection `json:"selection"`
 	Slot      int         `json:"slot,omitempty"`
 	Kind      string      `json:"kind,omitempty"`
+	// Orchestrated is true when the call started a background command
+	// orchestration (e.g. an agent-env deploy composing build -> push ->
+	// deploy) instead of a foreground PTY session. There is no Local tab to
+	// activate; progress and completion surface through the activity queue.
+	Orchestrated bool `json:"orchestrated,omitempty"`
 }
 
 type deleteEnvironmentResult struct {

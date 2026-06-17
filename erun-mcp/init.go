@@ -19,7 +19,7 @@ type InitInput struct {
 	RuntimeCPU               string `json:"runtimeCpu,omitempty" jsonschema:"optional runtime pod CPU limit"`
 	RuntimeMemory            string `json:"runtimeMemory,omitempty" jsonschema:"optional runtime pod memory limit"`
 	KubernetesContext        string `json:"kubernetesContext,omitempty" jsonschema:"optional kubernetes context to associate with the environment"`
-	ContainerRegistry        string `json:"containerRegistry,omitempty" jsonschema:"optional container registry to associate with the environment"`
+	ContainerRegistry        string `json:"containerRegistry,omitempty" jsonschema:"optional container registry; seeds the project's registry list with this host marked build and deploy"`
 	Type                     string `json:"type,omitempty" jsonschema:"optional environment type (local-agent, remote-agent, runtime); takes precedence over remote"`
 	Remote                   bool   `json:"remote,omitempty" jsonschema:"deprecated alias for type=remote-agent; prefer type instead"`
 	NoGit                    bool   `json:"noGit,omitempty" jsonschema:"when true with remote initialization, create the remote worktree directory without configuring a Git checkout"`
@@ -31,6 +31,7 @@ type InitInput struct {
 	ConfirmRemoteHostConfig  *bool  `json:"confirmRemoteHostConfig,omitempty" jsonschema:"response to a prior existing remote SSH host config confirmation interaction"`
 	ConfirmRemoteKeyImport   *bool  `json:"confirmRemoteKeyImport,omitempty" jsonschema:"response to a prior remote SSH key import confirmation interaction"`
 	AutoApprove              bool   `json:"autoApprove,omitempty" jsonschema:"when true, automatically approve initialization prompts"`
+	DisableBuildScript       bool   `json:"disableBuildScript,omitempty" jsonschema:"when true, ignore any project build.sh for this env; erun build resolves docker/release contexts directly"`
 	Preview                  bool   `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
 	Verbosity                int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
@@ -70,6 +71,7 @@ func initTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 			ConfirmEnvironment:      input.ConfirmEnvironment,
 			ConfirmRemoteHostConfig: input.ConfirmRemoteHostConfig,
 			AutoApprove:             input.AutoApprove,
+			DisableBuildScript:      input.DisableBuildScript,
 		}
 
 		if envType := eruncommon.EnvironmentType(strings.TrimSpace(input.Type)); envType.IsValid() {

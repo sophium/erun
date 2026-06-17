@@ -50,6 +50,30 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_from_devops_cwd", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_copies_images_from_to_before_deploy", func(t *testing.T) {
+		// When the project registry list marks a FROM source and a TO
+		// destination, deploy mirrors every image the cluster pulls (the
+		// erun-devops runtime image plus any locally-built component) from FROM
+		// to each TO with a manifest-aware `docker buildx imagetools create`
+		// before the helm upgrade, and the cluster pulls from the DEPLOY (TO)
+		// registry. The copy is a dry-run trace line gated behind real-run.
+		setup := env.New(t)
+		fixture.SeedTenantEnvNoRegistry(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedProjectK8sConfig(t, setup,
+			"containerregistries:\n"+
+				"    - registry: ghcr.io/sophium\n"+
+				"      roles: [build, from]\n"+
+				"    - registry: registry.internal/team\n"+
+				"      roles: [to, deploy]\n",
+		)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_copies_images_from_to_before_deploy", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_from_devops_module_root", func(t *testing.T) {
 		// Exercises resolveCurrentDevopsK8sDir's first arm: when cwd is the
 		// <tenant>-devops module root (not its k8s/ subdir and not a chart
@@ -191,7 +215,7 @@ func TestDeploy(t *testing.T) {
 			t.Fatalf("env cfg: %v", err)
 		}
 		fixture.SeedDevopsRepo(t, setup, "team", "prod")
-		result := erun.Run(t, []string{"deploy", "team", "prod", "--version", "1.0.0", "--no-snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"deploy", "team", "prod", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -240,7 +264,7 @@ func TestDeploy(t *testing.T) {
 			t.Fatalf("env cfg: %v", err)
 		}
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -267,6 +291,42 @@ func TestDeploy(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "deploy/real_run_remote_env_published_chart_via_stubs", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_copies_images_from_to_via_stubs", func(t *testing.T) {
+		// Real-run deploy of an env whose registry list marks a FROM source and
+		// a TO destination: before helm upgrade, the runtime image is mirrored
+		// from FROM to TO with `docker buildx imagetools create` (executed
+		// through the docker stub), and the cluster pulls from the DEPLOY (TO)
+		// registry. This proves the copy ACTION runs in real-run, not just its
+		// dry-run trace.
+		setup := env.New(t)
+		root := filepath.Join(setup.ConfigHome, "erun")
+		tenantDir := filepath.Join(root, "team")
+		envDir := filepath.Join(tenantDir, "dev")
+		for _, dir := range []string{root, tenantDir, envDir} {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", dir, err)
+			}
+		}
+		mustWriteFile(t, filepath.Join(root, "config.yaml"), "defaulttenant: team\n")
+		mustWriteFile(t, filepath.Join(tenantDir, "config.yaml"),
+			"projectroot: /nonexistent-remote/team\nname: team\ndefaultenvironment: dev\n")
+		mustWriteFile(t, filepath.Join(envDir, "config.yaml"),
+			"name: dev\nrepopath: /nonexistent-remote/team\nkubernetescontext: test-context\ntype: remote-agent\nruntimeversion: 1.0.0\n"+
+				"containerregistries:\n"+
+				"    - registry: ghcr.io/sophium\n      roles: [build, from]\n"+
+				"    - registry: registry.internal/team\n      roles: [to, deploy]\n")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/real_run_copies_images_from_to_via_stubs", normalize.Apply(result.Combined))
 	})
 
 	t.Run("real_run_preflight_starts_stopped_cloud_context", func(t *testing.T) {
@@ -310,69 +370,25 @@ func TestDeploy(t *testing.T) {
 		fixture.StubBinary(t, stubs, "helm", "")
 		fixture.StubBinary(t, stubs, "docker", "")
 		envVars = append(envVars, fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "deploy/real_run_preflight_starts_stopped_cloud_context", normalize.Apply(result.Combined))
 	})
 
-	t.Run("publish_traces_helm_package_and_push_before_upgrade", func(t *testing.T) {
-		// --publish runs `helm package` then `helm push oci://<registry>` in
-		// the chart's parent directory before the helm upgrade. The trace
-		// must show the real commands so dry-run is auditable; both must
-		// appear in the resolved spec ahead of the helm upgrade line.
+	t.Run("version_required_without_switch_errors", func(t *testing.T) {
+		// deploy is a pure consume operation: with no --version and no
+		// --current it must fail with an actionable "version required" error
+		// rather than building the working tree.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
-		fixture.SeedProjectK8sConfig(t, setup, "containerregistry: registry.example/test\n")
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--publish", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		golden.Equal(t, "deploy/publish_traces_helm_package_and_push_before_upgrade", normalize.Apply(result.Combined))
-	})
-
-	t.Run("publish_real_run_invokes_helm_package_and_push_via_stubs", func(t *testing.T) {
-		// Real-run path: --publish without --dry-run exercises the
-		// runHelmCommand exec branch in helm_chart_publish.go. The helm
-		// stub exits 0 for any argv so package + push both succeed, and
-		// the deploy still drives helm upgrade after the publish step.
-		setup := env.New(t)
-		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		fixture.SeedDevopsRepo(t, setup, "team", "dev")
-		fixture.SeedProjectK8sConfig(t, setup, "containerregistry: registry.example/test\n")
-		stubs := setup.Cwd + "/stubs"
-		fixture.StubBinary(t, stubs, "kubectl", "")
-		fixture.StubBinary(t, stubs, "helm", "")
-		fixture.StubBinary(t, stubs, "docker", "")
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--publish", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		out := normalize.Apply(result.Combined)
-		if !strings.Contains(out, "==> Publishing team-devops <VERSION> to oci://registry.example/test") {
-			t.Fatalf("expected ==> Publishing info line in output:\n%s", out)
-		}
-		if !strings.Contains(out, "==> Deployed team/dev <VERSION>") {
-			t.Fatalf("expected clean deploy completion after publish, got:\n%s", out)
-		}
-	})
-
-	t.Run("publish_without_container_registry_errors", func(t *testing.T) {
-		// --publish requires a container registry to derive the OCI repo.
-		// When the project has none configured, resolution must fail with a
-		// clear, actionable error rather than tracing a half-built command
-		// or pushing to an empty target.
-		setup := env.New(t)
-		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		fixture.SeedDevopsRepo(t, setup, "team", "dev")
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--publish", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode == 0 {
-			t.Fatalf("expected non-zero exit when --publish has no container registry, got 0:\n%s", result.Combined)
+			t.Fatalf("expected non-zero exit when deploy has no version and no --current, got 0:\n%s", result.Combined)
 		}
-		golden.Equal(t, "deploy/publish_without_container_registry_errors", normalize.Apply(result.Combined))
+		golden.Equal(t, "deploy/version_required_without_switch_errors", normalize.Apply(result.Combined))
 	})
 
 	t.Run("force_flag_appears_in_trace", func(t *testing.T) {
@@ -385,6 +401,53 @@ func TestDeploy(t *testing.T) {
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--force", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		golden.Equal(t, "deploy/force_flag_appears_in_trace", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_pinned_version_installs_buildable_chart_without_building", func(t *testing.T) {
+		// #556: deploy is a consume operation. Even when the chart references a
+		// runtime image that HAS a local build context (docker/team-devops/
+		// Dockerfile makes team-devops genuinely buildable), an explicit
+		// --version installs that already-published version by reference: the
+		// trace shows the decision line and a `docker manifest inspect` of the
+		// pinned image, then the helm upgrade — and crucially NO docker build,
+		// no `docker image inspect` fingerprint probe, and no promote/rebuild
+		// line. Without the fix this chart resolves a build for team-devops and
+		// rebuilds it on a fingerprint-cache miss, relabelling the working tree
+		// as the pinned version (and pushing over the published tag).
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsRuntimeDockerfile(t, setup, "team")
+		seedDevopsChartRuntimeImage(t, setup, "team", "ghcr.io/sophium/team-devops:{{ .Chart.AppVersion }}")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_pinned_version_installs_buildable_chart_without_building", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_pinned_version_missing_image_errors", func(t *testing.T) {
+		// #556: deploy installs an existing version and does not build it, so a
+		// version whose image is absent both locally and in the registry must
+		// fail fast rather than silently rebuild from the working tree. The
+		// existence check runs only in real mode (dry-run traces and skips it),
+		// so this is a real-run scenario: the docker stub exits non-zero for
+		// `manifest inspect` and `image inspect`, so both lookups report
+		// "absent" and resolution errors before helm/kubectl are touched.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		seedDevopsChartRuntimeImage(t, setup, "team", "ghcr.io/sophium/team-devops:{{ .Chart.AppVersion }}")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryAdvanced(t, stubs, "docker", fixture.StubBinarySpec{ExitCode: 1})
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm", "kubectl")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when the pinned version's image is absent, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/real_run_pinned_version_missing_image_errors", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_outside_devops_with_tenant_env", func(t *testing.T) {
@@ -553,17 +616,6 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/components_rejects_unknown_name", normalize.Apply(result.Combined))
 	})
 
-	t.Run("snapshot_conflict_errors", func(t *testing.T) {
-		setup := env.New(t)
-		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		fixture.SeedDevopsRepo(t, setup, "team", "dev")
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--snapshot", "--no-snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode == 0 {
-			t.Fatalf("expected non-zero exit for conflicting snapshot flags, got 0:\n%s", result.Combined)
-		}
-		golden.Equal(t, "deploy/snapshot_conflict_errors", normalize.Apply(result.Combined))
-	})
-
 	t.Run("real_run_via_stubs", func(t *testing.T) {
 		// Drive the non-dry-run helm/kubectl runners via stub binaries so
 		// the deploy execution path (deploy.go's run* helpers, post-helm
@@ -576,7 +628,7 @@ func TestDeploy(t *testing.T) {
 		fixture.StubBinary(t, stubs, "helm", "")
 		fixture.StubBinary(t, stubs, "docker", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "deploy/real_run_via_stubs", normalize.Apply(result.Combined))
 	})
 
@@ -600,7 +652,7 @@ func TestDeploy(t *testing.T) {
 		fixture.StubBinary(t, stubs, "helm", "")
 		fixture.StubBinary(t, stubs, "docker", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.99", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.99"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -647,7 +699,7 @@ func TestDeploy(t *testing.T) {
 		}
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
 		fixture.SeedProjectK8sConfig(t, setup, "containerregistry: registry.example/current\n")
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--no-snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--current", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -682,7 +734,7 @@ func TestDeploy(t *testing.T) {
 		}
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
 		fixture.SeedProjectK8sConfig(t, setup, "containerregistry: registry.example/current\n")
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.5", "--no-snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.5", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -699,7 +751,7 @@ func TestDeploy(t *testing.T) {
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
 		fixture.SeedProjectK8sConfig(t, setup, "containerregistry: registry.example/current\n")
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--no-snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--current", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -732,7 +784,7 @@ func TestDeploy(t *testing.T) {
 			t.Fatalf("env cfg: %v", err)
 		}
 		fixture.SeedDevopsRepo(t, setup, "managed", "prod")
-		result := erun.Run(t, []string{"deploy", "managed", "prod", "--version", "1.0.0", "--no-snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"deploy", "managed", "prod", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -776,7 +828,7 @@ func TestDeploy(t *testing.T) {
 			t.Fatalf("env cfg: %v", err)
 		}
 		fixture.SeedDevopsRepo(t, setup, "managed", "prod")
-		result := erun.Run(t, []string{"deploy", "managed", "prod", "--version", "1.0.0", "--no-snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"deploy", "managed", "prod", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -816,7 +868,7 @@ func TestDeploy(t *testing.T) {
 		}, "\n"))
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
 		envVars = append(envVars, "ERUN_AUTO_RECOVER_HELM=1")
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -838,7 +890,7 @@ func TestDeploy(t *testing.T) {
 		fixture.StubBinary(t, stubs, "docker", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
 		envVars = append(envVars, "ERUN_DEPLOY_POD_WATCH_INTERVAL=100ms")
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -864,7 +916,7 @@ func TestDeploy(t *testing.T) {
 		fixture.StubBinary(t, stubs, "docker", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
 		envVars = append(envVars, "ERUN_DEPLOY_POD_WATCH_INTERVAL=100ms")
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit, got 0:\n%s", result.Combined)
 		}
@@ -891,7 +943,7 @@ func TestDeploy(t *testing.T) {
 		fixture.StubBinary(t, stubs, "docker", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
 		envVars = append(envVars, "ERUN_DEPLOY_POD_WATCH_INTERVAL=100ms")
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit, got 0:\n%s", result.Combined)
 		}
@@ -904,91 +956,48 @@ func TestDeploy(t *testing.T) {
 		}
 	})
 
-	t.Run("dry_run_local_docker_cwd_uses_current_build_for_owning_chart", func(t *testing.T) {
-		// Exercises resolveCurrentDockerComponentBuildForDeploy,
-		// deployContextOwnsDockerBuild, and resolveDeploySpecForCurrentDockerBuild:
-		// when deploy runs from a devops docker build dir
-		// (<repo>/team-devops/docker/team-devops) in the local environment
-		// with --snapshot, the cwd Dockerfile is resolved as the "current
-		// build", the owning chart claims it (the build dir sits inside the
-		// chart's module root), and the resolved spec pins that image via an
-		// imageOverrides entry instead of resolving a separate component
-		// build. The snapshot version is minted once (freezeNow) so build
-		// tag, helm appVersion, and the override stay identical.
+	t.Run("real_run_published_chart_not_found_reports_actionable_error", func(t *testing.T) {
+		// Safety net: when the resolved published runtime chart is not pullable
+		// at the requested version (a snapshot image whose chart was never
+		// published, or a pruned tag), helm upgrade exits non-zero with a
+		// registry "not found" on stderr. DeployHelmChart must classify that
+		// into a PublishedChartNotFoundError naming the version + registry and
+		// pointing at the recovery (deploy a released version / publish first),
+		// instead of surfacing a bare "exit status 1". The helm stub fails the
+		// upgrade with a 404-shaped message; kubectl/docker succeed so the
+		// failure is isolated to the chart pull.
 		setup := env.New(t)
-		fixture.SeedTenantEnv(t, setup, "team", "local")
-		fixture.SeedDevopsRepo(t, setup, "team", "local")
-		fixture.SeedDevopsRuntimeDockerfile(t, setup, "team")
-		dockerDir := filepath.Join(setup.Cwd, "team-devops", "docker", "team-devops")
-		result := erun.Run(t, []string{"deploy", "--snapshot", "--dry-run"}, erun.RunOptions{Cwd: dockerDir, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		golden.Equal(t, "deploy/dry_run_local_docker_cwd_uses_current_build_for_owning_chart", normalize.Apply(result.Combined))
-	})
-
-	t.Run("dry_run_snapshot_chart_image_scan_resolves_additional_builds", func(t *testing.T) {
-		// Exercises the chart image scan that discovers additional docker
-		// builds for a deploy: findDockerImagesInChart walks the chart's
-		// templates, dockerImageFromChartLine / chartImageValue /
-		// chartTemplateImageValue parse the four template shapes seeded
-		// below (plain pinned image with trailing comment, quoted
-		// {{ .Chart.AppVersion }} tag, printf "%s/name:%s" template, and a
-		// fully dynamic {{ .Values }} reference that must be rejected), and
-		// resolveAdditionalDockerBuildsForDeploy maps the survivors onto
-		// docker build contexts under <tenant>-devops/docker/. The extra
-		// image's Dockerfile FROMs a locally-buildable base image so
-		// resolveDockerfileBaseImageBuilds prepends the base build, and
-		// orderedDockerBuildSpecs places it before its consumer.
-		setup := env.New(t)
-		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		fixture.SeedDevopsRepo(t, setup, "team", "dev")
-		templates := filepath.Join(setup.Cwd, "team-devops", "k8s", "team-devops", "templates")
-		if err := os.MkdirAll(templates, 0o755); err != nil {
-			t.Fatalf("mkdir templates: %v", err)
-		}
-		mustWriteFile(t, filepath.Join(templates, "deployment.yaml"), strings.Join([]string{
-			"apiVersion: apps/v1",
-			"kind: Deployment",
-			"spec:",
-			"  template:",
-			"    spec:",
-			"      containers:",
-			"        - image: registry.example/test/extra:1.2.3 # chart-pinned helper",
-			`        - image: "registry.example/test/worker:{{ .Chart.AppVersion }}"`,
-			`        {{- $sidecar := printf "%s/sidecar:%s" .Values.registry .Chart.AppVersion }}`,
-			"        - image: {{ .Values.dynamicImage }}",
-			"",
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		// helm errors land on stderr; the stub scans every arg (the real argv
+		// carries --install, --wait, … before "upgrade") and fails the upgrade
+		// with a registry 404 shape.
+		fixture.StubBinaryWithScript(t, stubs, "helm", strings.Join([]string{
+			`for a in "$@"; do`,
+			`  if [ "$a" = "upgrade" ]; then`,
+			`    printf '%s\n' 'Error: failed to perform "FetchReference" on source: registry.example/test/charts/erun-devops: not found' >&2`,
+			`    exit 1`,
+			`  fi`,
+			`done`,
+			`exit 0`,
 		}, "\n"))
-		for name, dockerfile := range map[string]string{
-			"extra":  "FROM registry.example/test/base:9.9.9\n",
-			"worker": "FROM alpine:3.22\n",
-			"base":   "FROM alpine:3.22\n",
-		} {
-			dir := filepath.Join(setup.Cwd, "team-devops", "docker", name)
-			if err := os.MkdirAll(dir, 0o755); err != nil {
-				t.Fatalf("mkdir %s: %v", dir, err)
-			}
-			mustWriteFile(t, filepath.Join(dir, "Dockerfile"), dockerfile)
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when the published chart is not found, got 0:\n%s", result.Combined)
 		}
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		golden.Equal(t, "deploy/dry_run_snapshot_chart_image_scan_resolves_additional_builds", normalize.Apply(result.Combined))
+		golden.Equal(t, "deploy/real_run_published_chart_not_found_reports_actionable_error", normalize.Apply(result.Combined))
 	})
 
-	t.Run("dry_run_snapshot_postgres_reset_forces_helm_despite_cached_images", func(t *testing.T) {
-		// Locks the #506 fix: a snapshot deploy resolves ResetDatabase=true,
-		// and the erun-backend-postgres chart must then run its helm upgrade
-		// even when every locally-built image was promoted from the
-		// fingerprint cache (resolveDeploySkipHelm's reset branch) — the
-		// reset rides in the chart, so skipping helm would drop it. The
-		// docker stub is decision input: it answers every `image inspect`
-		// with exit 0 so all fp-tags appear present and the builds promote;
-		// without it the promotion branch depends on the host's docker
-		// state. The expected trace shows the forced-helm decision line and
-		// the helm upgrade with --set api.postgres.reset=true.
+	t.Run("dry_run_snapshot_version_resets_postgres_database", func(t *testing.T) {
+		// Locks the #270/#506 contract under pure deploy: installing a snapshot
+		// version resolves ResetDatabase=true (deployResetsDatabase), so the
+		// erun-backend-postgres chart's helm upgrade carries
+		// --set api.postgres.reset=true. deploy installs by reference (no build);
+		// the docker stub answers every `manifest inspect` with exit 0 so the
+		// install-existing image-presence check passes without a registry.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -1007,24 +1016,19 @@ func TestDeploy(t *testing.T) {
 			"        - image: registry.example/team/erun-backend-postgres:18.3 # pinned wrapper",
 			"",
 		}, "\n"))
-		dockerDir := filepath.Join(setup.Cwd, "team-devops", "docker", "erun-backend-postgres")
-		if err := os.MkdirAll(dockerDir, 0o755); err != nil {
-			t.Fatalf("mkdir %s: %v", dockerDir, err)
-		}
-		mustWriteFile(t, filepath.Join(dockerDir, "Dockerfile"), "FROM alpine:3.22\n")
 		stubs := setup.Cwd + "/stubs"
 		fixture.StubBinary(t, stubs, "docker", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
 		result := erun.Run(t, []string{
 			"deploy", "team", "dev",
-			"--snapshot",
+			"--version", "1.0.5-snapshot-20260101000000",
 			"--components", "erun-backend-postgres",
 			"--dry-run",
 		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		golden.Equal(t, "deploy/dry_run_snapshot_postgres_reset_forces_helm_despite_cached_images", normalize.Apply(result.Combined))
+		golden.Equal(t, "deploy/dry_run_snapshot_version_resets_postgres_database", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_from_chart_cwd_resolves_single_chart_context", func(t *testing.T) {
@@ -1059,56 +1063,6 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/devops_k8s_deploy_component_dry_run", normalize.Apply(result.Combined))
 	})
 
-	t.Run("real_run_skiphelm_heals_persisted_version_from_deployed_release", func(t *testing.T) {
-		// Exercises the cached-deploy heal path (issue #475):
-		// PersistRuntimeVersionFromDeploySpecs' SkipHelm arm,
-		// resolveRunningRuntimeVersion, and ResolveDeployedHelmReleaseVersion.
-		// The docker stub answers every `image inspect` with exit 0 so all
-		// fp-tags appear present, the snapshot build promotes, and the spec
-		// resolves SkipHelm=true — RunDeploySpec skips both the build and the
-		// helm upgrade. The persist step then reads the version the cluster
-		// actually runs via the helm stub's `get metadata` JSON and heals
-		// EnvConfig.RuntimeVersion to it instead of recording the never-pushed
-		// snapshot mint. The stubs are decision input for the real-run flow;
-		// no real daemon or cluster is touched.
-		setup := env.New(t)
-		fixture.SeedTenantEnv(t, setup, "team", "local")
-		fixture.SeedDevopsRepo(t, setup, "team", "local")
-		fixture.SeedDevopsRuntimeDockerfile(t, setup, "team")
-		// The deploy spec's container registry comes from the project config
-		// (.erun/config.yaml), not the env config; seed it so the heal also
-		// persists RuntimeRegistry provenance alongside the version.
-		fixture.SeedProjectK8sConfig(t, setup, "containerregistry: registry.example/published\n")
-		stubs := setup.Cwd + "/stubs"
-		fixture.StubBinary(t, stubs, "docker", "")
-		fixture.StubBinary(t, stubs, "kubectl", "")
-		fixture.StubBinaryWithScript(t, stubs, "helm", strings.Join([]string{
-			`case "$1 $2" in`,
-			`  "get metadata") printf '{"appVersion":"1.2.3"}\n' ;;`,
-			`esac`,
-			`exit 0`,
-		}, "\n"))
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "kubectl", "helm")...)
-		result := erun.Run(t, []string{"deploy", "team", "local", "--snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		golden.Equal(t, "deploy/real_run_skiphelm_heals_persisted_version_from_deployed_release", normalize.Apply(result.Combined))
-		// The healed version lives in the env config file, outside the
-		// captured streams, so assert the side effect directly.
-		raw, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", "team", "local", "config.yaml"))
-		if err != nil {
-			t.Fatalf("read env config: %v", err)
-		}
-		body := string(raw)
-		if !strings.Contains(body, "runtimeversion: 1.2.3") {
-			t.Fatalf("expected env config healed to runtimeversion: 1.2.3, got:\n%s", body)
-		}
-		if !strings.Contains(body, "runtimeregistry: registry.example/published") {
-			t.Fatalf("expected env config to record runtimeregistry: registry.example/published, got:\n%s", body)
-		}
-	})
-
 	t.Run("real_run_parallel_step_deploys_charts_concurrently", func(t *testing.T) {
 		// Exercises runDeployStep's real-run parallel branch (the goroutine
 		// fan-out + errors.Join), which dry-run never takes because dry-run
@@ -1128,7 +1082,7 @@ func TestDeploy(t *testing.T) {
 		fixture.StubBinary(t, stubs, "helm", "")
 		fixture.StubBinary(t, stubs, "docker", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -1157,7 +1111,7 @@ func TestDeploy(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
-		first := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		first := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if first.ExitCode != 0 {
 			t.Fatalf("first dry-run exited %d:\n%s", first.ExitCode, first.Combined)
 		}
@@ -1175,7 +1129,7 @@ func TestDeploy(t *testing.T) {
 		fixture.StubBinary(t, stubs, "helm", "")
 		fixture.StubBinary(t, stubs, "docker", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot", "-vv"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "-vv"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -1205,7 +1159,7 @@ func TestDeploy(t *testing.T) {
 		fixture.StubBinary(t, stubs, "helm", "")
 		fixture.StubBinary(t, stubs, "docker", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -1239,7 +1193,7 @@ func TestDeploy(t *testing.T) {
 		fixture.StubBinary(t, stubs, "helm", "")
 		fixture.StubBinary(t, stubs, "docker", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -1268,7 +1222,7 @@ func TestDeploy(t *testing.T) {
 		fixture.StubBinary(t, stubs, "helm", "")
 		fixture.StubBinary(t, stubs, "docker", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit on conflicting live deploy, got 0:\n%s", result.Combined)
 		}
@@ -1295,7 +1249,7 @@ func TestDeploy(t *testing.T) {
 		fixture.StubBinary(t, stubs, "helm", "")
 		fixture.StubBinary(t, stubs, "docker", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -1395,6 +1349,24 @@ func TestDeploy(t *testing.T) {
 			t.Fatalf("expected 'dedup: would reclaim' trace, got:\n%s", out)
 		}
 	})
+}
+
+// seedDevopsChartRuntimeImage adds a templates/deployment.yaml to the seeded
+// <tenant>-devops chart that references imageRef (which may embed
+// {{ .Chart.AppVersion }}). It makes findDockerImagesInChart resolve a concrete
+// image the deploy must address, so the install-by-reference path (#556) has
+// something to verify — the stub SeedDevopsRepo chart has no templates and
+// therefore no chart-referenced image.
+func seedDevopsChartRuntimeImage(t *testing.T, setup env.Setup, tenant, imageRef string) {
+	t.Helper()
+	templates := filepath.Join(setup.Cwd, tenant+"-devops", "k8s", tenant+"-devops", "templates")
+	if err := os.MkdirAll(templates, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", templates, err)
+	}
+	body := "apiVersion: apps/v1\nkind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n        - name: runtime\n          image: " + imageRef + "\n"
+	if err := os.WriteFile(filepath.Join(templates, "deployment.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write deployment.yaml: %v", err)
+	}
 }
 
 // extractDedupHash pulls the live params hash off a "dedup: ready (release=..., hash=<HEX>)"

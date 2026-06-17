@@ -10,7 +10,6 @@ Current Directory:
   effective target: team/prod
   kubernetes context: test-context
   type: runtime
-  snapshot: off
   assigned local port range: 17000-17099
   assigned mcp local port: 17000 (when MCP is running or forwarded)
   assigned api local port: 17033 (when API is running or forwarded)
@@ -26,8 +25,6 @@ Tenants:
     environments:
       - prod [default, effective] context=test-context
           type: runtime
-          remote: off
-          snapshot: off
           repo: none
           ports: 17000-17099
           mcp-port: 17000
@@ -35,7 +32,7 @@ Tenants:
           api-url: http://<LOOPBACK>:17033
           ssh-port: 17022
           contribute-app-port: 17050
-          container-registry: registry.example/test
+          container-registries: registry.example/test[build,deploy]
           runtime-version: <VERSION>
           runtime-pod: none
           managed-cloud: off

@@ -29,7 +29,7 @@ Available Commands:
   context     Manage ERun cloud Kubernetes contexts
   contribute  Run contribute-mode workflows that target the ERun source repository
   delete      Delete a tenant environment and tear down its remote runtime
-  deploy      Roll the project's charts out to an environment
+  deploy      Install a published version into an environment
   devops      DevOps utilities
   doctor      Diagnose and repair an environment's runtime and config
   exec        Repository execution utilities
@@ -47,6 +47,7 @@ Available Commands:
 Flags:
       --dry-run         Resolve and trace mutating actions without executing them.
   -h, --help            help for erun
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
       --time            Print the elapsed runtime after the command finishes.
   -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.
 

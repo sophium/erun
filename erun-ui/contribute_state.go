@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
 	"sync"
 )
 
@@ -101,15 +99,6 @@ func (s *contributeStore) set(selection uiSelection, on bool) {
 	s.mu.Unlock()
 }
 
-// snapshot returns a copy of the persisted flag map keyed by
-// "<tenant>/<env>" so callers (e.g. initial state assembly) can pass it
-// to the frontend without exposing internal locking.
-func (s *contributeStore) snapshot() map[string]bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return cloneContributeFlags(s.data.Flags)
-}
-
 func cloneContributeFlags(in map[string]bool) map[string]bool {
 	out := make(map[string]bool, len(in))
 	for k, v := range in {
@@ -123,21 +112,4 @@ func cloneContributeFlags(in map[string]bool) map[string]bool {
 func contributeFlagKey(selection uiSelection) string {
 	selection = normalizeSelection(selection)
 	return selection.Tenant + "/" + selection.Environment
-}
-
-// sortedContributeKeys returns the persisted env keys in deterministic
-// order for tests / logging.
-func sortedContributeKeys(in map[string]bool) []string {
-	keys := make([]string, 0, len(in))
-	for k, v := range in {
-		if !v {
-			continue
-		}
-		if strings.TrimSpace(k) == "" {
-			continue
-		}
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }

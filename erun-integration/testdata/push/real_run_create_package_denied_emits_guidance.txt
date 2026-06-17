@@ -1,5 +1,8 @@
-audit: erun push
+audit: erun push --version <VERSION>
 ==> Pushing
+fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
+fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-arm64
+rebuilding ghcr.io/sophium/api:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
 denied: denied: create_package permission_denied
 
 ghcr.io rejected the push: only the namespace owner can create new packages under ghcr.io/sophium/.

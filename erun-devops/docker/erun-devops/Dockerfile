@@ -183,7 +183,11 @@ COPY --chmod=0755 erun-devops/docker/erun-devops/entrypoint.sh /usr/local/bin/er
 COPY --chmod=0755 erun-devops/docker/erun-devops/codex-wrapper.sh /usr/local/bin/codex
 COPY --chmod=0755 erun-devops/docker/erun-devops/claude-wrapper.sh /usr/local/bin/claude
 COPY --chmod=0644 erun-devops/docker/erun-devops/bash_prompt.sh /etc/erun/bash_prompt.sh
-COPY --chmod=0644 erun-skills/skills /etc/erun/skills
+# Directories need the execute/search bit so the unprivileged erun user can
+# enter them; the entrypoint copies each skill into ~/.claude/skills and
+# ~/.codex/skills (re-chmodding the destination files to 0644). 0644 here would
+# leave the dirs un-searchable and the install would silently copy nothing.
+COPY --chmod=0755 erun-skills/skills /etc/erun/skills
 
 RUN /usr/local/bin/erun completion bash > /etc/bash_completion.d/erun && \
     chmod 0644 /etc/bash_completion.d/erun

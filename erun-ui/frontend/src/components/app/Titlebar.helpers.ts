@@ -1,3 +1,4 @@
+import { environmentTypeIsRemoteWorktree } from '@/app/environmentType';
 import type { AppState } from '@/app/state';
 import type { UISelection } from '@/types';
 
@@ -26,7 +27,8 @@ export function isIdeDisabled(selected: UISelection | null, tenants: AppState['t
   const env = tenants
     .find((tenant) => tenant.name === selected.tenant)
     ?.environments.find((environment) => environment.name === selected.environment);
-  return env?.remote !== false && env?.sshdEnabled !== true;
+  if (!env) return true;
+  return environmentTypeIsRemoteWorktree(env.type) && env.sshdEnabled !== true;
 }
 
 // isEnvOpenedAndRunning reports whether the env behind `selected` is
@@ -48,7 +50,7 @@ export function isEnvOpenedAndRunning(
     .find((tenant) => tenant.name === selected.tenant)
     ?.environments.find((environment) => environment.name === selected.environment);
   if (!env) return false;
-  if (!env.remote) return true;
+  if (!environmentTypeIsRemoteWorktree(env.type)) return true;
   if (idleStatus?.managedCloud) {
     return (idleStatus.cloudContextStatus ?? '').trim().toLowerCase() === 'running';
   }

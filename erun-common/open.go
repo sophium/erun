@@ -109,6 +109,7 @@ type ShellLaunchParams struct {
 	Namespace          string
 	KubernetesContext  string
 	RemoteRepo         bool
+	Type               EnvironmentType
 	ManagedCloud       bool
 	CloudProviderAlias string
 	Idle               EnvironmentIdleConfig
@@ -539,6 +540,7 @@ func ShellLaunchParamsFromResult(result OpenResult) ShellLaunchParams {
 		Namespace:          KubernetesNamespaceName(result.Tenant, result.Environment),
 		KubernetesContext:  strings.TrimSpace(result.EnvConfig.KubernetesContext),
 		RemoteRepo:         result.RemoteRepo(),
+		Type:               result.EnvConfig.ResolvedType(),
 		ManagedCloud:       result.EnvConfig.ManagedCloud,
 		CloudProviderAlias: strings.TrimSpace(result.EnvConfig.CloudProviderAlias),
 		Idle:               result.EnvConfig.Idle,
@@ -555,13 +557,6 @@ func LocalShellSetupScript(result OpenResult) string {
 		fmt.Sprintf("cd %s", shellQuote(result.RepoPath)),
 	}
 	return strings.Join(commands, " &&\n") + "\n"
-}
-
-func LaunchShell(req ShellLaunchParams) error {
-	if err := WaitForShellDeployment(req); err != nil {
-		return err
-	}
-	return ExecShell(req)
 }
 
 func WaitForShellDeployment(req ShellLaunchParams) error {
@@ -716,7 +711,7 @@ func remoteShellConfigForRequest(req ShellLaunchParams) (remoteShellConfig, erro
 		Name:               req.Environment,
 		RepoPath:           remoteWorkdir,
 		KubernetesContext:  req.KubernetesContext,
-		Remote:             req.RemoteRepo,
+		Type:               req.Type,
 		ManagedCloud:       req.ManagedCloud,
 		CloudProviderAlias: req.CloudProviderAlias,
 		Idle:               req.Idle,
@@ -860,13 +855,6 @@ func remoteSessionLauncherBody(req ShellLaunchParams, bashrcPath string) []strin
 		)
 	}
 	if req.AI {
-		// Discoverability of the erun-build-env skill where the user would
-		// use it: one advisory line, only when the remote env still runs
-		// the default published runtime image, printed once on session
-		// create (a reattach never re-runs the prelude). See #505.
-		if req.RemoteRepo && req.RuntimeImage == "" {
-			body = append(body, `printf '\033[2mTip: ask Claude to "init an erun build environment" to customize the toolchain of this env.\033[0m\n'`)
-		}
 		body = append(body, AISessionLaunchLines(req.AITool, req.Claude)...)
 	}
 	return append(body, fmt.Sprintf("exec /bin/bash --rcfile \"%s\" -i", bashrcPath))

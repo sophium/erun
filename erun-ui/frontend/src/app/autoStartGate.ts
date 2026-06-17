@@ -1,6 +1,7 @@
 import type { UIEnvironmentConfig, UISelection } from '@/types';
 
 import { LoadEnvironmentConfig } from '../../wailsjs/go/main/App';
+import { environmentTypeIsRemoteWorktree } from './environmentType';
 import type { RootState } from './store';
 
 // autoStartGate decides whether openSelection should let the ERun tab
@@ -17,7 +18,7 @@ export async function resolveAutoStartGate(
 ): Promise<AutoStartGateVerdict> {
   const env = findTenantEnvironment(getState(), selection);
   const autoStartPolicy = env?.autoStart;
-  if (!env?.remote || autoStartPolicy === true) {
+  if (!environmentTypeIsRemoteWorktree(env?.type) || autoStartPolicy === true) {
     return 'proceed';
   }
   const wouldStart = await wouldClickStartCloudContext(selection);

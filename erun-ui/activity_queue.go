@@ -129,8 +129,7 @@ type activityQueueStore struct {
 	// snapshots the tail into entry.Detail when the entry fails and drops the
 	// buffer. Not persisted and not part of the frontend snapshot — only the
 	// derived Detail crosses the wire.
-	outputByID      map[string][]string
-	closeNotifyOnce sync.Once
+	outputByID map[string][]string
 }
 
 // activityQueueHistoryCapacity caps in-memory history length so the
@@ -168,23 +167,16 @@ func newActivityQueueStore(notify func(activityQueueEntry), now func() time.Time
 	return s
 }
 
-// runNotifyLoop drains notifyCh in order, calling notify per snapshot.
-// Exits when notifyCh is closed (closeNotifyLoop, called from App
-// shutdown). A nil notify drains silently so unit tests that don't
-// wire a notifier don't accumulate snapshots in the buffer.
+// runNotifyLoop drains notifyCh in order, calling notify per snapshot,
+// for the lifetime of the store. A nil notify drains silently so unit
+// tests that don't wire a notifier don't accumulate snapshots in the
+// buffer.
 func (s *activityQueueStore) runNotifyLoop() {
 	for snapshot := range s.notifyCh {
 		if s.notify != nil {
 			s.notify(snapshot)
 		}
 	}
-}
-
-// closeNotifyLoop terminates the drain goroutine. Idempotent.
-func (s *activityQueueStore) closeNotifyLoop() {
-	s.closeNotifyOnce.Do(func() {
-		close(s.notifyCh)
-	})
 }
 
 // list returns a chronological snapshot (newest first) of every tracked
@@ -216,23 +208,6 @@ func (s *activityQueueStore) findActiveByCommand(command, tenant, environment st
 	defer s.mu.Unlock()
 	for _, entry := range s.active {
 		if entry.Command == command && entry.Tenant == tenant && entry.Environment == environment {
-			return *cloneActivityQueueEntry(entry), true
-		}
-	}
-	return activityQueueEntry{}, false
-}
-
-// findRunning returns the first running (status=running) entry matching
-// the predicate. Used for terminal-lock decisions, which only fire on
-// running deploys.
-func (s *activityQueueStore) findRunning(tenant, environment string) (activityQueueEntry, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, entry := range s.active {
-		if entry.Status != activityQueueStatusRunning {
-			continue
-		}
-		if entry.Tenant == tenant && entry.Environment == environment {
 			return *cloneActivityQueueEntry(entry), true
 		}
 	}

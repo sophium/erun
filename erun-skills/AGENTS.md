@@ -43,9 +43,11 @@ erun-skills/
 ## Skill body rules
 
 - **Be context-aware.** Skills run both inside a deployed env (where `${ERUN_TENANT}`, `${ERUN_ENVIRONMENT}`, in-pod tools like `erun version`, and the runtime MCP endpoint exist) and on a developer laptop (where none of that does). Gate pod-only fragments behind a check such as `[ -n "${ERUN_TENANT:-}" ]`.
-- Reference tools that are reliably present in both contexts (`gh`, `git`, `curl`) or check before use. Do not assume `kubectl`, `helm`, or `erun-real` are on PATH on a laptop.
+- Reference tools that are reliably present in both contexts (`gh`, `git`, `curl`) or check before use. Do not assume `kubectl`, `helm`, or `erun` are on PATH on a laptop.
 - Trigger the skill on **user intent**, not on individual mechanical steps. One workflow → one skill, not three sub-skills the user has to chain.
 - Keep skill bodies short. The body is loaded only when the skill fires; long bodies are fine when needed, but every line should be doing work — no "best practices" filler.
+- Two skill kinds: **Blueprint** (packages best practices plus a blueprint for building something) and **Workflow** (drives an ERun process, e.g. `erun-file-issue`, `erun-contribute`). Frame Blueprint skills as best-practices-plus-blueprints — never as "scaffolding" or "templates".
+- The `erun-contribute` workflow creates a **new** issue and PR (create-issue → implement → PR); it is not for working an already-open ticket.
 
 ## Editing skills
 

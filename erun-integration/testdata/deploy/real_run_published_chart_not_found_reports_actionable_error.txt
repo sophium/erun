@@ -1,0 +1,13 @@
+audit: erun deploy --version <VERSION> team dev
+trace-log: appending the full trace to <TMP>
+deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=false current=false
+deploy: no local runtime chart; using published chart oci://registry.example/test/charts/erun-devops version <VERSION>
+deploy: resolved 1 spec(s)
+deploy: watching pods in team-dev on context test-context for early container failure (release team-devops)
+dedup: claim (release=test-context-team-dev-team-devops, hash=<HASH>, pid=<PID>)
+==> Deploying team/dev <VERSION>
+    namespace team-dev on context test-context
+    waiting for helm rollout (timeout 2m0s)...
+==> Deploy of team-devops failed after <ELAPSED>
+runtime chart oci://registry.example/test/charts/erun-devops version <VERSION> could not be pulled from registry.example/test: that version has no published chart in the registry. `erun push` publishes a version's image and chart together, so a version is deployable only after it is pushed — run `erun push --version <VERSION>` (or `erun release` for a release version), then deploy.
+Error: failed to perform "FetchReference" on source: registry.example/test/charts/erun-devops: not found

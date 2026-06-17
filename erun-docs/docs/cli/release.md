@@ -14,12 +14,15 @@ erun release [flags]
 
 ## What it does
 
+`erun release` orchestrates the pure primitives — it composes **build → push → git-tag** and reuses [`erun push`](/cli/push) for *all* publishing, including the runtime helm chart. It does not have a separate chart-publishing step of its own; the chart is published the same way for a release as for any other pushed version.
+
 1. Resolves the current version from `erun-devops/VERSION`.
 2. Updates the chart `version` and `appVersion` to match.
 3. Updates package-manager metadata (Homebrew formula, Scoop manifest, etc.) when present.
-4. Creates the release commit and tag.
-5. Builds release-tagged Docker images for `linux/amd64` and `linux/arm64`, pushes per-arch tags, and assembles manifest lists.
-6. Prepares the next patch version for subsequent work.
+4. Builds the release-tagged Docker images for `linux/amd64` and `linux/arm64`.
+5. Runs `push` at the release version: pushes the per-arch image tags, assembles the multi-arch manifest list, and publishes + verifies the runtime helm chart.
+6. Creates the release commit and tag.
+7. Prepares the next patch version for subsequent work.
 
 ## Flags
 

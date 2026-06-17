@@ -1,9 +1,8 @@
 audit: erun upgrade --dry-run team
 upgrade: tenant=team environment= version-override= force=false
 upgrade: team/dev opted in, channel=snapshot current=<VERSION>
-upgrade: resolving latest registry versions for team
-upgrade: team latest stable=<VERSION> snapshot=<VERSION>
-upgrade: team stable <VERSION> supersedes snapshot <VERSION>; snapshot channel targets the stable release
+upgrade: resolving versions for team/dev from the listed registries
+upgrade: team/dev <VERSION> -> <VERSION>
 ==> Upgrade plan: 1 member(s), 1 lagging
     team/dev [snapshot] <VERSION> -> <VERSION>  (will upgrade)
 ==> Upgrading team/dev <VERSION> -> <VERSION> (snapshot)

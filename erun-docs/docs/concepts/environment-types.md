@@ -52,14 +52,17 @@ You don't develop in a runtime env. To make a change, you:
 
 ## What concretely changes per type
 
+The type describes the **environment** — where its worktree comes from and what it's for. It does **not** change what the `build` / `push` / `deploy` commands do: those are [pure primitives](/concepts/command-primitives) with no environment-type branch. What differs per type is whether the env has source to build from at all, and who supplies the commands (an Operator at the terminal, or the desktop app orchestrating them).
+
 | Behavior | local-agent | remote-agent | runtime |
 |---|---|---|---|
 | Worktree in pod | Mounted from host | Cloned to PVC | None |
-| `erun build` | Yes — multi-arch, snapshot tag | Yes — multi-arch, snapshot tag | n/a — builds don't happen here |
-| `erun push` rebuilds first | Yes | Yes | n/a |
-| `erun deploy` | build → push → roll out | build → push → roll out | Roll out an already-built version |
+| Source to build from | Yes | Yes | None — nothing for `build` to act on |
+| Typical loop | iterate: build → push → deploy a snapshot | iterate: build → push → deploy a snapshot | consume: `deploy --version` a published version |
 | Editor / IDE attach | Yes (SSH + MCP) | Yes (SSH + MCP) | Not the normal pattern |
 | Per-env helm overlay | Defaults are fine | Defaults are fine | Yes — each runtime env wants its own |
+
+A runtime env has no worktree, so there's no source for `build` to act on and no reason to build there — you deploy a version into it that was built and pushed elsewhere. An agent env has source, so it's where the iterate loop runs. The desktop app reads the env's type to decide *which* primitives to run on the Operator's behalf, but the primitives themselves stay the same everywhere (see [Command primitives](/concepts/command-primitives)).
 
 The exact snapshot tag format and how `erun build` resolves it lives at [Build path resolution](/reference/configuration-build-paths).
 
@@ -85,9 +88,9 @@ To hotfix `erun-backend-api` in `erun-prod`:
 
 ## Mapping to configuration
 
-Set `EnvConfig.type` to one of `local-agent`, `remote-agent`, or `runtime`. When `type` is set it is the source of truth and downstream commands (`erun build`, `erun open`, `erun deploy`) branch on it.
+Set `EnvConfig.type` to one of `local-agent`, `remote-agent`, or `runtime`. When `type` is set it is the source of truth for the env's shape — its worktree storage (`worktreeStorage=host|pvc|none`) and the `ERUN_ENV_TYPE` the helm chart wires in. The `build` / `push` / `deploy` commands do **not** branch on it; the caller (the desktop app, or an Operator) decides which primitives to run for a given env.
 
-For backward compatibility, envs that have no `type` set fall back to deriving it from the legacy `EnvConfig.remote` and `EnvConfig.snapshot` fields per the truth table at [Configuration · Planned changes](/reference/configuration#planned-changes). A future release will drop the legacy fields; new envs created by `erun init --type` set `type` directly and avoid the legacy pair entirely.
+The retired `EnvConfig.remote` and `EnvConfig.snapshot` fields no longer exist. A config written before `type` existed is migrated on read — ERun derives `type` from the old `remote`/`snapshot` keys per the [legacy migration table](/reference/configuration#envconfig-type-truth-table) and discards them. New envs created by `erun init --type` set `type` directly.
 
 ```bash
 # Local-agent env (default if neither flag is given):

@@ -9,8 +9,7 @@ Current Directory:
   configured tenant: none
   effective target: tenant-a/dev
   kubernetes context: cluster-dev
-  type: none
-  snapshot: off
+  type: remote-agent
   assigned local port range: 17000-17099
   assigned mcp local port: 17000 (when MCP is running or forwarded)
   assigned api local port: 17033 (when API is running or forwarded)
@@ -29,9 +28,7 @@ Tenants:
     default environment: dev
     environments:
       - dev [default, effective] context=cluster-dev
-          type: none
-          remote: on
-          snapshot: off
+          type: remote-agent
           repo: <TMP>
           ports: 17000-17099
           mcp-port: 17000
@@ -39,7 +36,7 @@ Tenants:
           api-url: http://<LOOPBACK>:17033
           ssh-port: 17022
           contribute-app-port: 17050
-          container-registry: none
+          container-registries: none
           runtime-version: none
           runtime-pod: none
           managed-cloud: off

@@ -1,8 +1,8 @@
 audit: erun upgrade --dry-run team
 upgrade: tenant=team environment= version-override= force=false
 upgrade: team/dev opted in, channel=stable current=<VERSION>
-upgrade: resolving latest registry versions for team
-upgrade: team version resolution failed: ghcr token request failed: 403 Forbidden
+upgrade: resolving versions for team/dev from the listed registries
+upgrade: team/dev version resolution failed: ghcr token request failed: 403 Forbidden
 ==> Upgrade plan: 1 member(s), 0 lagging
     team/dev [stable] <VERSION> -> (unset)  (target unresolved: ghcr token request failed: 403 Forbidden)
 upgrade: team/dev target unresolved, skipping: ghcr token request failed: 403 Forbidden

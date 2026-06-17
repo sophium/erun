@@ -14,12 +14,14 @@ ERun's other half. The [environment model](/intro) gives you a namespace per tas
 
 ## The steps
 
-- **[`build`](/cli/build)** — compile the project's container images, always multi-arch (`linux/amd64` + `linux/arm64`) and fingerprint-cached. Each image is tagged with a version.
-- **[`release`](/cli/release)** — stamp a stable, immutable version: bump the semver, update the version-bearing files, commit, tag it, and push the tag. See [Versioning](/versioning).
-- **[`push`](/cli/push)** — publish the built images to the project's container registry.
-- **[`deploy`](/cli/deploy)** — roll a version out to an environment with a Helm upgrade, building and pushing whatever it needs first.
+The four steps are **pure primitives** — each does exactly one thing, with no environment-type or env-name decision logic inside it. The unit that flows between them is the **version**: a content identity that [`build`](/cli/build) mints and the later steps consume. See [Command primitives](/concepts/command-primitives) for the full model.
 
-You rarely run the steps by hand. `erun build --release` folds the release step into the build, and `erun build --deploy` carries straight through push and rollout — so one command runs the flow and the version threads through for you.
+- **[`build`](/cli/build)** — compile the project's container images, always multi-arch (`linux/amd64` + `linux/arm64`) and fingerprint-cached, and **mint the version** (a snapshot by default; `--release` pins a bare semver). `build` is the only step that creates a version.
+- **[`release`](/cli/release)** — orchestrate build → push → git-tag for a stable, immutable version: bump the semver, update the version-bearing files, build, push, commit, and tag. It reuses `push` for all publishing. See [Versioning](/versioning).
+- **[`push`](/cli/push)** — publish a version's outputs to the project's container registry: the multi-arch image **and** the runtime helm chart, together at the same version.
+- **[`deploy`](/cli/deploy)** — install a published version into an environment with a Helm upgrade, by reference. It never builds or pushes; a version is required.
+
+You rarely run the four by hand. For an Operator at the terminal, **convenience shortcuts** compose them: `erun build --release` folds the release flow into the build, and `erun build --deploy` carries one build straight through push and rollout — so one command runs the flow and the version threads through for you. Programmatic callers (the desktop app, scripts, an Agent over MCP) don't use the shortcuts; they run the primitives themselves and thread the version (captured from `erun build --output json`), keeping the "for this env type, do build→push→deploy" policy in the caller, not the command.
 
 ## What `build` does
 
@@ -43,7 +45,7 @@ Each component builds for both architectures, reuses unchanged layers from the [
   <img src="/img/build-steps.svg" alt="Per component, left to right: from the component plus its Dockerfile, build for amd64 and arm64 (reusing unchanged layers from the cache), then tag with the version (snapshot or release), producing the container image." />
 </figure>
 
-A snapshot tag while you iterate; `--release` stamps a stable tag and assembles the multi-arch manifest list. Full contract: [multi-architecture build](/agent-reference/conventions-spec#multi-architecture-build-contract).
+A snapshot version while you iterate; `--release` pins a stable bare version instead. Either way, the multi-arch manifest list is assembled when the version is published by [`push`](/cli/push). Full contract: [multi-architecture build](/agent-reference/conventions-spec#multi-architecture-build-contract).
 
 ### How you set it up — and where tests run
 
@@ -61,8 +63,8 @@ See [`erun build`](/cli/build) for flags, dry-run output, and error behaviour.
 
 `release` is for stable, promotable versions — but you don't always need one, and that's the pipeline's range:
 
-- **Snapshot — iterate.** Skip `release`: a snapshot build goes straight `build → push → deploy` into an environment. You can deploy a snapshot to a **target environment** — `erun deploy <tenant> <environment>` puts it there — so you iterate against a shared or remote env, not just your local one.
-- **Release — promote.** Run `release` to cut a tagged, immutable version, then `deploy` promotes it to a [runtime env](/concepts/environment-types).
+- **Snapshot — iterate.** Skip `release`: `build` mints a snapshot version, `push --version <snapshot>` publishes it (image + chart), and `deploy <env> --version <snapshot>` rolls it out. Because push publishes the chart for snapshots too, you can deploy a snapshot to a **target environment** — a shared or remote env, not just your local one.
+- **Release — promote.** Run `release` to cut a tagged, immutable version (build → push → tag), then `deploy <env> --version <release>` promotes it to a [runtime env](/concepts/environment-types).
 
 Same pipeline; the only difference is whether you stop to cut a release.
 
@@ -82,7 +84,7 @@ The pipeline is the same whether a person or a machine runs it.
 - **CLI** — `erun build` / `release` / `push` / `deploy`, scriptable and headless. See the [CLI overview](/cli/overview).
 - **Desktop app** — the same commands behind buttons. See the [desktop app](/desktop/overview).
 - **MCP** — an Agent calls the `build` / `push` / `deploy` / `release` [tools](/mcp/overview), which run the identical logic and return structured results instead of stdout.
-- **CI** — a release-tagged commit triggers `erun release`; a later `erun deploy` rolls the published version out.
+- **CI** — a release-tagged commit triggers `erun release`; a later `erun deploy --version` rolls the published version out.
 
 ## Promotion: agent env to runtime env
 

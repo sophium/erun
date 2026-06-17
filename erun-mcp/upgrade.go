@@ -55,7 +55,7 @@ func upgradeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReque
 				if err != nil {
 					return err
 				}
-				if err := eruncommon.RunDeploySpecs(ctx, specs, runtime.BuildDockerImage, runtimePushFunc(runtime), runtime.DeployHelmChart); err != nil {
+				if err := eruncommon.RunDeploySpecs(ctx, specs, runtime.DeployHelmChart); err != nil {
 					return err
 				}
 				return eruncommon.PersistRuntimeVersionFromDeploySpecs(ctx, specs, runtime.Store.SaveEnvConfig, eruncommon.ResolveDeployedHelmReleaseVersion)

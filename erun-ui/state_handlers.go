@@ -97,18 +97,72 @@ func (a *App) runtimeRegistryNamespace(tenant, environment string) string {
 func (a *App) runtimeVersionSuggestions(info eruncommon.BuildInfo, tenant, environment string) []uiVersion {
 	tenant = strings.TrimSpace(tenant)
 	if tenant == "" {
-		return labelRuntimeVersionSuggestions("ERun", eruncommon.DefaultRuntimeImageName, eruncommon.RuntimeDeployVersionSuggestions(info, a.resolveRuntimeRegistryVersionsForTenant("", "")))
+		return labelRuntimeVersionSuggestions("ERun", eruncommon.DefaultContainerRegistry+"/"+eruncommon.DefaultRuntimeImageName, eruncommon.RuntimeDeployVersionSuggestions(info, a.resolveRuntimeRegistryVersionsForTenant("", "")))
 	}
 
-	namespace := a.runtimeRegistryNamespace(tenant, environment)
-	suggestions := make([]uiVersion, 0, 8)
 	tenantImage := eruncommon.RuntimeReleaseName(tenant)
-	suggestions = append(suggestions, labelRuntimeVersionSuggestions(tenant, tenantImage, eruncommon.RuntimeDeployVersionSuggestions(info, a.resolveRuntimeRegistryVersionsForTenant(namespace, tenant)))...)
-	if tenantImage == eruncommon.DefaultRuntimeImageName {
-		return suggestions
+	suggestions := make([]uiVersion, 0, 8)
+	for _, registry := range a.environmentDiscoveryRegistries(tenant, environment) {
+		versions := a.resolveRuntimeRegistryVersionsForTenant(registry, tenant)
+		image := strings.TrimRight(strings.TrimSpace(registry), "/") + "/" + tenantImage
+		suggestions = append(suggestions, labelRuntimeVersionSuggestions(tenant, image, eruncommon.RuntimeDeployVersionSuggestions(info, versions))...)
 	}
-	suggestions = append(suggestions, labelRuntimeVersionSuggestions("ERun", eruncommon.DefaultRuntimeImageName, eruncommon.RuntimeDeployVersionSuggestions(info, a.resolveRuntimeRegistryVersionsForTenant("", "")))...)
+	// #501: tenant images are thin wrappers rebuilt from the canonical ERun
+	// image, so the canonical channel-latest is part of the env's real target
+	// universe. Skipped when the tenant image is the canonical image itself.
+	if tenantImage != eruncommon.DefaultRuntimeImageName {
+		suggestions = append(suggestions, labelRuntimeVersionSuggestions("ERun", eruncommon.DefaultContainerRegistry+"/"+eruncommon.DefaultRuntimeImageName, eruncommon.RuntimeDeployVersionSuggestions(info, a.resolveRuntimeRegistryVersionsForTenant("", "")))...)
+	}
 	return suggestions
+}
+
+// environmentDiscoveryRegistries returns the registries the version picker
+// queries for an environment: the registry the env was last deployed from
+// (provenance, #475) plus every registry in the env's marked list, so an
+// offered version can come from any listed registry and carry its source.
+// Falls back to the canonical registry when nothing is configured.
+func (a *App) environmentDiscoveryRegistries(tenant, environment string) []string {
+	registries := make([]string, 0, 4)
+	seen := make(map[string]struct{}, 4)
+	add := func(registry string) {
+		registry = strings.TrimSpace(registry)
+		if registry == "" {
+			return
+		}
+		if _, ok := seen[registry]; ok {
+			return
+		}
+		seen[registry] = struct{}{}
+		registries = append(registries, registry)
+	}
+	add(a.runtimeRegistryNamespace(tenant, environment))
+	if env, ok := a.lookupEnvConfig(tenant, environment); ok {
+		for _, registry := range eruncommon.ResolveEnvironmentContainerRegistries(env).DistinctRegistries() {
+			add(registry)
+		}
+	}
+	if len(registries) == 0 {
+		add(eruncommon.DefaultContainerRegistry)
+	}
+	return registries
+}
+
+func (a *App) lookupEnvConfig(tenant, environment string) (eruncommon.EnvConfig, bool) {
+	tenant = strings.TrimSpace(tenant)
+	environment = strings.TrimSpace(environment)
+	if tenant == "" || environment == "" || a.deps.store == nil {
+		return eruncommon.EnvConfig{}, false
+	}
+	envs, err := a.deps.store.ListEnvConfigs(tenant)
+	if err != nil {
+		return eruncommon.EnvConfig{}, false
+	}
+	for _, env := range envs {
+		if strings.EqualFold(strings.TrimSpace(env.Name), environment) {
+			return env, true
+		}
+	}
+	return eruncommon.EnvConfig{}, false
 }
 
 func (a *App) LoadVersionSuggestions(selection uiSelection) ([]uiVersion, error) {
@@ -168,7 +222,6 @@ func stateFromListResult(result eruncommon.ListResult, info eruncommon.BuildInfo
 				KubernetesContext: strings.TrimSpace(environment.KubernetesContext),
 				IsActive:          environment.IsActive,
 				SSHDEnabled:       environment.SSH.Enabled,
-				Remote:            environment.Remote,
 				AutoStart:         copyBoolPtr(environment.AutoStart),
 			})
 		}

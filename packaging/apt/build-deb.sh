@@ -48,6 +48,14 @@ fi
 staging_dir=$(mktemp -d)
 trap 'rm -rf "$staging_dir"' EXIT
 
+# A PVC-backed $TMPDIR can carry the setgid bit — the runtime pod mounts
+# /home/erun that way — which every mkdir below would inherit as mode 2755.
+# dpkg-deb rejects a control directory with the setgid bit set ("control
+# directory has bad permissions 2755 (must be >=0755 and <=0775)"), failing
+# `erun build --release` in-pod. Drop it from the staging root so the package
+# tree created under it is mode 0755.
+chmod g-s "$staging_dir"
+
 package_root="$staging_dir/erun_${version}_${deb_arch}"
 mkdir -p "$package_root/DEBIAN" "$package_root/usr/bin" "$package_root/usr/share/doc/erun"
 

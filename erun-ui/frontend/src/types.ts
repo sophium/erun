@@ -20,7 +20,6 @@ export interface UIEnvironment {
   kubernetesContext?: string;
   isActive?: boolean;
   sshdEnabled?: boolean;
-  remote: boolean;
   autoStart?: boolean;
 }
 
@@ -46,6 +45,14 @@ export interface UIEnvTrace {
   notice?: string;
 }
 
+// UIUpgradeVersionCandidate mirrors the Go UpgradeVersionCandidate: one newer
+// version an env's registries offered, tagged with the registry it came from
+// (issue #527).
+export interface UIUpgradeVersionCandidate {
+  version: string;
+  registry?: string;
+}
+
 // UIUpgradePlanItem mirrors the Go UpgradePlanItem from the ResolveUpgradePlan
 // binding: one opted-in env's channel, current version, the latest version for
 // that channel, and whether it lags (will be redeployed by Upgrade all).
@@ -56,8 +63,13 @@ export interface UIUpgradePlanItem {
   current: string;
   target: string;
   lagging: boolean;
-  // Why target is empty (registry lookup failed, no published version for
-  // the channel) — rendered under "latest unknown" (issue #497).
+  // The distinct newer versions discovered across the env's listed registries,
+  // each with its source registry. One entry when a single target resolved;
+  // more than one when the operator must pick (issue #527).
+  candidates?: UIUpgradeVersionCandidate[];
+  // Why target is empty (registry lookup failed, no published version for the
+  // channel, or multiple newer candidates await a pick) — rendered under
+  // "latest unknown" / the picker (issues #497, #527).
   unresolvedReason?: string;
 }
 
@@ -360,11 +372,18 @@ export interface UIPortStatus {
   status: string;
 }
 
+// UIContainerRegistryEntry mirrors the Go uiContainerRegistryEntry: one
+// registry host plus the roles it carries (any of build/from/to/deploy).
+export interface UIContainerRegistryEntry {
+  registry: string;
+  roles: string[];
+}
+
 export interface UIEnvironmentConfig {
   name: string;
   repoPath: string;
   kubernetesContext: string;
-  containerRegistry: string;
+  containerRegistries: UIContainerRegistryEntry[];
   cloudProviderAlias: string;
   cloudProviderAliases?: string[];
   cloudContext?: UICloudContextStatus;
@@ -381,8 +400,6 @@ export interface UIEnvironmentConfig {
   localPorts: UIEnvironmentLocalPorts;
   type?: string;
   localRepoPath?: string;
-  remote: boolean;
-  snapshot: boolean;
   // AutoStart is the desktop-only auto-start policy for the linked cloud
   // context: undefined means "ask the user once" (first-time prompt), true
   // means "always auto-start", false means "never auto-start; render the
@@ -400,6 +417,10 @@ export interface UIEnvironmentConfig {
   // value is always one of the two.
   autoUpgrade: boolean;
   upgradeChannel?: string;
+  // DisableBuildScript makes `erun build` ignore any project build.sh for this
+  // env and resolve Docker/release builds directly. It changes how a redeploy
+  // rebuilds the runtime image, so saving it raises the pending-redeploy banner.
+  disableBuildScript: boolean;
 }
 
 export interface UIEnvironmentClaudeConfig {
@@ -457,6 +478,11 @@ export interface StartSessionResult {
   selection: UISelection;
   slot?: number;
   kind?: string;
+  // True when the call started a background command orchestration (e.g. an
+  // agent-env deploy composing build -> push -> deploy) instead of a
+  // foreground PTY session. There is no Local tab to activate; progress and
+  // completion surface through the activity queue.
+  orchestrated?: boolean;
 }
 
 export interface TerminalOutputPayload {

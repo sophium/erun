@@ -150,8 +150,75 @@ func computeBuildFingerprint(buildInput DockerBuildSpec) (string, error) {
 			return "", err
 		}
 	}
+	if err := hashComponentChartInto(hasher, buildInput); err != nil {
+		return "", err
+	}
 	digest := hex.EncodeToString(hasher.Sum(nil))
 	return digest[:16], nil
+}
+
+// hashComponentChartInto folds the component's deployed Helm chart into the
+// build fingerprint. The chart is a released artifact published in lockstep
+// with the image at the same version (oci://<registry>/charts/<component>),
+// but it lives outside the image build context — so a chart-only edit would
+// otherwise leave the fingerprint unchanged, the image would promote from
+// cache, and resolveDeploySkipHelm would silently drop the chart change
+// ("all images cached, no rebuild"). Hashing the chart here makes a chart
+// edit move the fingerprint, so the component rebuilds, republishes its chart,
+// and redeploys — keeping image and chart one versioned contract. Best-effort:
+// a component with no chart (erun-ubuntu, erun-dind, …) contributes nothing,
+// matching the prior image-only fingerprint.
+func hashComponentChartInto(w io.Writer, buildInput DockerBuildSpec) error {
+	chartDir := componentChartDirForBuild(buildInput)
+	if chartDir == "" {
+		return nil
+	}
+	return filepath.WalkDir(chartDir, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(chartDir, path)
+		if err != nil {
+			return err
+		}
+		if _, err := io.WriteString(w, "chart/"+filepath.ToSlash(rel)+"\n"); err != nil {
+			return err
+		}
+		if err := hashFileInto(w, path); err != nil {
+			return err
+		}
+		_, err = w.Write([]byte{0})
+		return err
+	})
+}
+
+// componentChartDirForBuild returns the component's Helm chart directory from
+// the build's known layout, without walking the repo: a charted component's
+// build dir is <module>/docker/<component> and its chart is the sibling
+// <module>/k8s/<component>, so the chart is derivable directly from the build's
+// Dockerfile path. Identical whether computed during `erun build` or
+// `erun deploy` (same DockerfilePath). Returns "" when the Dockerfile isn't in
+// the conventional docker/<component> location or the component has no chart.
+func componentChartDirForBuild(buildInput DockerBuildSpec) string {
+	dockerfilePath := strings.TrimSpace(buildInput.DockerfilePath)
+	if dockerfilePath == "" {
+		return ""
+	}
+	if !filepath.IsAbs(dockerfilePath) {
+		dockerfilePath = filepath.Join(strings.TrimSpace(buildInput.ContextDir), dockerfilePath)
+	}
+	dockerDir := filepath.Dir(dockerfilePath) // <module>/docker/<component>
+	if filepath.Base(filepath.Dir(dockerDir)) != "docker" {
+		return ""
+	}
+	chartDir := filepath.Join(filepath.Dir(filepath.Dir(dockerDir)), "k8s", filepath.Base(dockerDir))
+	if _, err := os.Stat(filepath.Join(chartDir, "Chart.yaml")); err != nil {
+		return ""
+	}
+	return chartDir
 }
 
 func collectFingerprintFiles(contextDir string, sources []string, ignored *ignoreSet) ([]string, error) {

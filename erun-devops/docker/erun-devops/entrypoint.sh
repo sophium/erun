@@ -239,7 +239,7 @@ initialize_erun_config() {
     cloud_region=""
     cloud_instance_id=""
     cloud_context_name="${ERUN_CLOUD_CONTEXT_NAME:-${ERUN_KUBERNETES_CONTEXT:-in-cluster}}"
-    env_remote_line=""
+    env_type_line=""
     env_managed_cloud_line=""
     env_cloud_provider_alias_line=""
 
@@ -251,8 +251,12 @@ initialize_erun_config() {
         cloud_instance_id=$(runtime_cloud_instance_id)
     fi
 
-    if runtime_repo_is_remote; then
-        env_remote_line="remote: true"
+    if [ -n "${ERUN_ENV_TYPE:-}" ]; then
+        env_type_line="type: ${ERUN_ENV_TYPE}"
+    elif runtime_repo_is_remote; then
+        # Fallback for charts that predate ERUN_ENV_TYPE: emit the legacy
+        # remote flag, which erun migrates to a concrete type on read.
+        env_type_line="remote: true"
     fi
     if [ -n "${cloud_provider_alias}" ]; then
         env_cloud_provider_alias_line="cloudprovideralias: ${cloud_provider_alias}"
@@ -319,7 +323,7 @@ EOF
 name: ${environment}
 repopath: ${repo_dir}
 kubernetescontext: ${ERUN_KUBERNETES_CONTEXT:-in-cluster}
-${env_remote_line}
+${env_type_line}
 ${env_cloud_provider_alias_line}
 ${env_managed_cloud_line}
 idle:
@@ -345,11 +349,17 @@ mcp_url="http://127.0.0.1:${ERUN_MCP_PORT:-17000}${ERUN_MCP_PATH:-/mcp}"
 mkdir -p "${codex_dir}"
 
 codex_instructions="${codex_dir}/instructions.md"
-agents_marker="erun-agents-md-hook"
-if [ ! -f "${codex_instructions}" ] || ! grep -qF "${agents_marker}" "${codex_instructions}" 2>/dev/null; then
-    printf '\n<!-- %s -->\n# Agent Instructions\n\nIMPORTANT: Before doing anything else, read `AGENTS.md` in the project root. This is mandatory — do not skip it.\nAlso read `AGENTS.md` in any subdirectory relevant to the task at hand,\nas subdirectories may contain more specific guidance.\n<!-- /%s -->\n' \
-        "${agents_marker}" "${agents_marker}" >> "${codex_instructions}"
+codex_existing=""
+if [ -f "${codex_instructions}" ]; then
+    codex_existing="$(awk '/<!-- erun-agents-md-hook -->/{skip=1} skip&&/<!-- \/erun-agents-md-hook -->/{skip=0;next} !skip{print}' "${codex_instructions}")"
 fi
+codex_tmp="${codex_instructions}.tmp.$$"
+{
+    if [ -n "${codex_existing}" ]; then
+        printf '%s\n\n' "${codex_existing}"
+    fi
+    printf '<!-- erun-agents-md-hook -->\n# Agent Instructions\n\nIMPORTANT: Before doing anything else, read `AGENTS.md` in the project root. This is mandatory — do not skip it.\nAlso read `AGENTS.md` in any subdirectory relevant to the task at hand,\nas subdirectories may contain more specific guidance.\n\nWhen the project'\''s structure is explicit — AGENTS.md, documented module boundaries, a named file or function — read the source directly instead of spawning sub-agent searches to rediscover it. Answer the operator'\''s questions before acting; a question is not authorization to begin the work it hints at.\n<!-- /erun-agents-md-hook -->\n'
+} > "${codex_tmp}" && mv "${codex_tmp}" "${codex_instructions}"
 
 if [ -d /etc/erun/skills ]; then
     for src_dir in /etc/erun/skills/*/; do
@@ -460,11 +470,17 @@ claude_mcp_url="http://127.0.0.1:${ERUN_MCP_PORT:-17000}${ERUN_MCP_PATH:-/mcp}"
 mkdir -p "${claude_dir}"
 
 claude_md="${claude_dir}/CLAUDE.md"
-agents_marker="erun-agents-md-hook"
-if [ ! -f "${claude_md}" ] || ! grep -qF "${agents_marker}" "${claude_md}" 2>/dev/null; then
-    printf '\n<!-- %s -->\n# Agent Instructions\n\nIMPORTANT: Before doing anything else, read `AGENTS.md` in the project root. This is mandatory — do not skip it.\nAlso read `AGENTS.md` in any subdirectory relevant to the task at hand,\nas subdirectories may contain more specific guidance.\n<!-- /%s -->\n' \
-        "${agents_marker}" "${agents_marker}" >> "${claude_md}"
+claude_existing=""
+if [ -f "${claude_md}" ]; then
+    claude_existing="$(awk '/<!-- erun-agents-md-hook -->/{skip=1} skip&&/<!-- \/erun-agents-md-hook -->/{skip=0;next} !skip{print}' "${claude_md}")"
 fi
+claude_md_tmp="${claude_md}.tmp.$$"
+{
+    if [ -n "${claude_existing}" ]; then
+        printf '%s\n\n' "${claude_existing}"
+    fi
+    printf '<!-- erun-agents-md-hook -->\n# Agent Instructions\n\nIMPORTANT: Before doing anything else, read `AGENTS.md` in the project root. This is mandatory — do not skip it.\nAlso read `AGENTS.md` in any subdirectory relevant to the task at hand,\nas subdirectories may contain more specific guidance.\n\nWhen the project'\''s structure is explicit — AGENTS.md, documented module boundaries, a named file or function — read the source directly instead of spawning sub-agent searches to rediscover it. Answer the operator'\''s questions before acting; a question is not authorization to begin the work it hints at.\n<!-- /erun-agents-md-hook -->\n'
+} > "${claude_md_tmp}" && mv "${claude_md_tmp}" "${claude_md}"
 
 if [ -d /etc/erun/skills ]; then
     for src_dir in /etc/erun/skills/*/; do
@@ -527,6 +543,20 @@ function setEnv(settings, name, value) {
   settings.env[name] = normalized;
 }
 
+// setBoolEnv writes name=1 only when the value is an enabled flag; otherwise it
+// removes any existing entry. Claude Code treats CLAUDE_CODE_USE_BEDROCK /
+// CLAUDE_CODE_USE_MANTLE as present-or-absent, not 1/0, so writing "0" would
+// *enable* them — the variable must be omitted (and any stale "0" deleted) to
+// disable.
+function setBoolEnv(settings, name) {
+  const normalized = envValue(name).toLowerCase();
+  if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') {
+    settings.env[name] = '1';
+  } else {
+    delete settings.env[name];
+  }
+}
+
 function listValue(value) {
   const result = [];
   const seen = new Set();
@@ -547,8 +577,8 @@ if (configureBedrock) {
   settings.$schema = settings.$schema || 'https://json.schemastore.org/claude-code-settings.json';
   settings.env = ensureObject(settings, 'env');
 
-  setEnv(settings, 'CLAUDE_CODE_USE_BEDROCK', envValue('CLAUDE_CODE_USE_BEDROCK', '1'));
-  setEnv(settings, 'CLAUDE_CODE_USE_MANTLE', envValue('CLAUDE_CODE_USE_MANTLE', '1'));
+  setBoolEnv(settings, 'CLAUDE_CODE_USE_BEDROCK');
+  setBoolEnv(settings, 'CLAUDE_CODE_USE_MANTLE');
   setEnv(settings, 'AWS_REGION', region);
   setEnv(settings, 'ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION', envValue('ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION', region));
   setEnv(settings, 'CLAUDE_CODE_MAX_OUTPUT_TOKENS', envValue('CLAUDE_CODE_MAX_OUTPUT_TOKENS', '4096'));
@@ -686,6 +716,25 @@ normalize_ssh_key_permissions() {
     find "${ssh_dir}" -mindepth 1 -maxdepth 1 -type f ! -name '*.pub' -exec chmod 600 {} + 2>/dev/null || true
 }
 
+# pid_running reports whether PID file $1 holds a live process whose
+# /proc/<pid>/cmdline matches $2. The sshd and ssh-proxy PID files live on the
+# persistent /home/erun PVC and survive pod restarts, but each pod gets a fresh
+# PID namespace that recycles low PIDs — so a stale PID written by a previous
+# pod can collide with an unrelated live process in this one (a previous pod's
+# ssh-proxy PID matching this pod's sshd, for example). A bare `kill -0` would
+# then report the process as running and the caller would skip (re)starting it,
+# leaving nothing listening on the SSH port. Matching the command line closes
+# that gap. Distinct `_`-prefixed locals avoid clobbering the caller's globals.
+pid_running() {
+    _pidfile="$1"
+    _pat="$2"
+    [ -r "${_pidfile}" ] || return 1
+    _pid=$(cat "${_pidfile}" 2>/dev/null) || return 1
+    [ -n "${_pid}" ] || return 1
+    kill -0 "${_pid}" 2>/dev/null || return 1
+    tr '\0' ' ' < "/proc/${_pid}/cmdline" 2>/dev/null | grep -q "${_pat}"
+}
+
 start_sshd() {
     if ! runtime_sshd_enabled; then
         return
@@ -702,7 +751,7 @@ start_sshd() {
     mkdir -p "${HOME}/.ssh" "${host_key_dir}"
     chmod 700 "${HOME}/.ssh" "${sshd_dir}" "${host_key_dir}"
 
-    if [ ! -r "${pid_file}" ] || ! kill -0 "$(cat "${pid_file}")" 2>/dev/null; then
+    if ! pid_running "${pid_file}" "sshd"; then
         rm -f "${pid_file}"
 
         host_key="${host_key_dir}/ssh_host_ed25519_key"
@@ -735,7 +784,7 @@ EOF
         /usr/sbin/sshd -f "${config_file}" -E "${sshd_dir}/sshd.log"
     fi
 
-    if [ -r "${proxy_pid_file}" ] && kill -0 "$(cat "${proxy_pid_file}")" 2>/dev/null; then
+    if pid_running "${proxy_pid_file}" "ssh-proxy"; then
         return
     fi
     rm -f "${proxy_pid_file}"

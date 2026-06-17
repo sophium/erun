@@ -1,6 +1,7 @@
 import { Check, ChevronsUpDown, Rocket } from 'lucide-react';
 import * as React from 'react';
 
+import { environmentTypeIsRemoteWorktree } from '@/app/environmentType';
 import { readError } from '@/app/errors';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import {
@@ -133,7 +134,7 @@ function IdleStopFields({ dialog }: { dialog: ManageDialog }): React.ReactElemen
           );
         }}
       />
-      {config.remote && (
+      {environmentTypeIsRemoteWorktree(config.type) && (
         <SelectField
           id="environment-config-autostart"
           label="Auto-start when opening"
@@ -168,6 +169,16 @@ function IdleStopFields({ dialog }: { dialog: ManageDialog }): React.ReactElemen
           }}
         />
       )}
+      <CheckboxField
+        id="environment-config-disablebuildscript"
+        label="Ignore project build.sh"
+        helper="erun build resolves Docker/release contexts directly instead of running a project build.sh in this environment."
+        checked={config.disableBuildScript}
+        disabled={dialog.busy || dialog.configLoading}
+        onChange={(disableBuildScript) => {
+          dispatch(updateManageConfig({ disableBuildScript }));
+        }}
+      />
     </div>
   );
 }

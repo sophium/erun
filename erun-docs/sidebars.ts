@@ -20,6 +20,8 @@ const sidebars: SidebarsConfig = {
       link: { type: 'generated-index' },
       items: [
         'pipeline',
+        'concepts/command-primitives',
+        'deployment/registries',
         'versioning',
       ],
     },
@@ -157,7 +159,6 @@ const sidebars: SidebarsConfig = {
       label: 'Admin',
       link: { type: 'generated-index' },
       items: [
-        'deployment/registries',
         'deployment/release-flow',
         'deployment/cloud-setup',
       ],

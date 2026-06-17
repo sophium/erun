@@ -26,8 +26,6 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 	var noShell bool
 	var vscode bool
 	var intellij bool
-	var snapshot bool
-	var noSnapshot bool
 	var noAliasPrompt bool
 	var versionOverride string
 	var runtimeImage string
@@ -66,18 +64,11 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 			if initRan {
 				return nil
 			}
-			snapshotOverride, err := resolveSnapshotFlagOverride(cmd, snapshot, noSnapshot)
-			if err != nil {
-				return err
-			}
-			result, err = prepareOpenResultForRun(ctx, result, snapshotOverride, saveEnvConfig)
+			result, err = common.EnsureLocalPortRangePersisted(ctx, saveEnvConfig, result)
 			if err != nil {
 				return err
 			}
 			allowLocalBuilds := result.EnvConfig.BuildsHere()
-			if snapshotOverride != nil {
-				allowLocalBuilds = *snapshotOverride
-			}
 			return runResolvedOpenCommandWithAPI(ctx, result, openOptions{
 				NoShell:          noShell,
 				NoAliasPrompt:    noAliasPrompt,
@@ -104,7 +95,6 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 	cmd.Flags().BoolVar(&intellij, "intellij", false, "Open the remote environment in IntelliJ IDEA instead of a shell")
 	cmd.Flags().StringVar(&versionOverride, "version", "", "Override the runtime chart and image version before opening")
 	cmd.Flags().StringVar(&runtimeImage, "runtime-image", "", "Override the runtime image repository before opening")
-	addSnapshotFlags(cmd, &snapshot, &noSnapshot, "Build and deploy a local snapshot when opening the local environment")
 	// Desktop-integration flags: the app runs the remote shell as a persistent,
 	// reattachable dtach session so closing/reopening a tab reconnects to the
 	// running shell (and the AI tab's claude keeps working). Hidden because they
@@ -133,29 +123,6 @@ type openOptions struct {
 	AI               bool
 	SkipEnsure       bool
 	Contribute       bool
-}
-
-func prepareOpenResultForRun(ctx common.Context, result common.OpenResult, snapshotOverride *bool, saveEnvConfig func(string, common.EnvConfig) error) (common.OpenResult, error) {
-	result, err := applyOpenSnapshotPreference(result, snapshotOverride, saveEnvConfig)
-	if err != nil {
-		return common.OpenResult{}, err
-	}
-	return common.EnsureLocalPortRangePersisted(ctx, saveEnvConfig, result)
-}
-
-func applyOpenSnapshotPreference(result common.OpenResult, enabled *bool, saveEnvConfig func(string, common.EnvConfig) error) (common.OpenResult, error) {
-	if enabled == nil || !strings.EqualFold(strings.TrimSpace(result.Environment), common.DefaultEnvironment) {
-		return result, nil
-	}
-
-	result.EnvConfig.SetSnapshot(*enabled)
-	if saveEnvConfig == nil {
-		return result, nil
-	}
-	if err := saveEnvConfig(result.Tenant, result.EnvConfig); err != nil {
-		return common.OpenResult{}, err
-	}
-	return result, nil
 }
 
 func persistOpenRuntimeVersion(result common.OpenResult, version, registry string, saveEnvConfig func(string, common.EnvConfig) error) (common.OpenResult, error) {
@@ -452,7 +419,7 @@ func (r *resolvedOpenRunner) resolveRuntimeExecution() (common.DeploySpec, error
 }
 
 func (r *resolvedOpenRunner) shouldDeployRuntime(shellReq common.ShellLaunchParams, execution common.DeploySpec) (bool, error) {
-	if len(execution.Builds) > 0 || strings.TrimSpace(r.options.VersionOverride) != "" || strings.TrimSpace(r.options.RuntimeImage) != "" {
+	if strings.TrimSpace(r.options.VersionOverride) != "" || strings.TrimSpace(r.options.RuntimeImage) != "" {
 		return true, nil
 	}
 	if r.checkKubernetesDeployment == nil {
@@ -490,7 +457,7 @@ func (r *resolvedOpenRunner) deployRuntime(execution common.DeploySpec) error {
 		execution.Deploy.SSHDEnabled = true
 	}
 	r.ctx.Logger.Debug("deploying the devops runtime before opening the shell")
-	if err := common.RunDeploySpec(r.ctx, execution, common.DockerImageBuilder, runOpenDockerPush, r.openHelmDeployer(execution)); err != nil {
+	if err := common.RunDeploySpec(r.ctx, execution, r.openHelmDeployer(execution)); err != nil {
 		return err
 	}
 	if execution.SkipHelm {
@@ -512,10 +479,6 @@ func (r *resolvedOpenRunner) deployRuntime(execution common.DeploySpec) error {
 		return r.persistRuntimeVersion(running, execution.Deploy.ContainerRegistry)
 	}
 	return r.persistRuntimeVersion(execution.Deploy.Version, execution.Deploy.ContainerRegistry)
-}
-
-func runOpenDockerPush(ctx common.Context, pushInput common.DockerPushSpec) error {
-	return common.RunDockerPush(ctx, pushInput, common.DockerImagePusher)
 }
 
 func (r *resolvedOpenRunner) openHelmDeployer(execution common.DeploySpec) common.HelmChartDeployerFunc {
@@ -704,7 +667,6 @@ func applyRuntimeDeployVersionOverride(execution common.DeploySpec, versionOverr
 	if versionOverride == "" {
 		return execution
 	}
-	execution.Builds = nil
 	execution.Deploy.Version = versionOverride
 	return execution
 }

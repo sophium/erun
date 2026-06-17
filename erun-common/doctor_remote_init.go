@@ -121,6 +121,9 @@ func InspectRemoteInit(homeDir string, env func(string) string) (RemoteInitInspe
 	if item, ok := inspectCodeCommitSSHKey(homeDir, marker, present); ok {
 		inspection.Items = append(inspection.Items, item)
 	}
+	if item, ok := inspectSkills(homeDir, env); ok {
+		inspection.Items = append(inspection.Items, item)
+	}
 	return inspection, nil
 }
 
@@ -204,6 +207,48 @@ func inspectCodeCommitSSHKey(homeDir string, marker RemoteInitMarker, markerPres
 		return item, true
 	}
 	item.Status = RemoteInitInspectionStatusMissing
+	return item, true
+}
+
+// bakedSkillsRoot is where the runtime image vendors the canonical agent
+// skills (COPY erun-skills/skills /etc/erun/skills). ERUN_SKILLS_DIR overrides
+// it as a test seam so the integration suite can stage skills without the
+// runtime image.
+func bakedSkillsRoot(env func(string) string) string {
+	if env != nil {
+		if override := strings.TrimSpace(env("ERUN_SKILLS_DIR")); override != "" {
+			return override
+		}
+	}
+	return "/etc/erun/skills"
+}
+
+// inspectSkills reports whether every baked agent skill is installed into
+// ~/.claude/skills (where Claude looks for them). Returns ok=false — omitting
+// the row — when the image has no baked skills, so the check only surfaces
+// inside a runtime pod; a plain checkout sees no skills row.
+func inspectSkills(homeDir string, env func(string) string) (RemoteInitInspectionItem, bool) {
+	entries, err := os.ReadDir(bakedSkillsRoot(env))
+	if err != nil {
+		return RemoteInitInspectionItem{}, false
+	}
+	installedRoot := filepath.Join(homeDir, ".claude", "skills")
+	item := RemoteInitInspectionItem{Label: "agent skills", Path: installedRoot}
+	anyBaked := false
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		anyBaked = true
+		if _, err := os.Stat(filepath.Join(installedRoot, entry.Name(), "SKILL.md")); err != nil {
+			item.Status = RemoteInitInspectionStatusMissing
+			return item, true
+		}
+	}
+	if !anyBaked {
+		return RemoteInitInspectionItem{}, false
+	}
+	item.Status = RemoteInitInspectionStatusOK
 	return item, true
 }
 
@@ -320,6 +365,10 @@ func RunRemoteInitFinish(ctx Context, inspection RemoteInitInspection, params Re
 			codeCommitKeyJustGenerated = true
 		case "git checkout":
 			needsGitCheckout = true
+		case "agent skills":
+			if err := finishRemoteInitSkills(ctx, inspection.HomeDir); err != nil {
+				return inspection, err
+			}
 		}
 	}
 
@@ -444,7 +493,7 @@ func remoteInitMarkerRepositoryURL(repository remoteRepositorySpec, fallback str
 // inspection didn't record one — this helper keeps the final order
 // stable in either case.
 func orderRemoteInitMissingItems(items []RemoteInitInspectionItem) []RemoteInitInspectionItem {
-	order := []string{"project root", "SSH keypair", "CodeCommit SSH keypair", "git checkout"}
+	order := []string{"project root", "SSH keypair", "CodeCommit SSH keypair", "git checkout", "agent skills"}
 	ordered := make([]RemoteInitInspectionItem, 0, len(items))
 	for _, label := range order {
 		for _, item := range items {
@@ -471,6 +520,47 @@ func finishRemoteInitProjectRoot(ctx Context, path string) error {
 		return nil
 	}
 	return os.MkdirAll(path, 0o755)
+}
+
+// finishRemoteInitSkills (re)installs the baked agent skills into
+// ~/.claude/skills and ~/.codex/skills, mirroring the entrypoint so doctor can
+// recover a pod whose skills never landed (e.g. an image built before the
+// /etc/erun/skills permissions were fixed). A skill whose destination SKILL.md
+// already exists is left untouched so in-env edits survive.
+func finishRemoteInitSkills(ctx Context, homeDir string) error {
+	root := bakedSkillsRoot(os.Getenv)
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	for _, destRoot := range []string{filepath.Join(homeDir, ".claude", "skills"), filepath.Join(homeDir, ".codex", "skills")} {
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			src := filepath.Join(root, entry.Name())
+			dst := filepath.Join(destRoot, entry.Name())
+			srcContents := src + string(os.PathSeparator) + "."
+			ctx.TraceCommand("", "cp", "-R", srcContents, dst)
+			if ctx.DryRun {
+				continue
+			}
+			if _, err := os.Stat(filepath.Join(dst, "SKILL.md")); err == nil {
+				continue
+			}
+			if err := os.MkdirAll(dst, 0o755); err != nil {
+				return err
+			}
+			capture := ctx.ToolCapture()
+			cmd := Command("cp", "-R", srcContents, dst+string(os.PathSeparator))
+			cmd.Stdout = capture.Stdout()
+			cmd.Stderr = capture.Stderr()
+			if err := capture.Apply(cmd.Run()); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func finishRemoteInitSSHKey(ctx Context, path string) error {

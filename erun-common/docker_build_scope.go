@@ -140,6 +140,31 @@ func findDevopsDockerDirs(projectRoot string) ([]string, error) {
 	return candidates, nil
 }
 
+// projectHasDevopsFolder reports whether the project root contains any
+// <name>-devops directory. This is a bare presence check — unlike
+// findDevopsDockerDirs it does not require a buildable docker module — so the
+// build-env advisory fires only when there is no devops module at all, not when
+// one exists but is still being set up.
+func projectHasDevopsFolder(projectRoot string) (bool, error) {
+	projectRoot = strings.TrimSpace(projectRoot)
+	if projectRoot == "" {
+		return false, nil
+	}
+	entries, err := os.ReadDir(projectRoot)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() && strings.HasSuffix(entry.Name(), "-devops") {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func isDockerBuildModuleDir(dir string) (bool, error) {
 	buildContexts, err := ResolveDockerBuildContextsAtDir(dir)
 	if err != nil {
@@ -244,15 +269,45 @@ func dockerBuildEnvironmentFromDetectedProject(store DockerStore, findProjectRoo
 		}
 		return "", err
 	}
-	// Remote tenants store the project root of the remote machine, not the local working
-	// directory. Skip the path check so that local builds still resolve the correct
-	// environment (e.g. "local" → snapshot versions) when the project was initialised
-	// on a different machine.
-	if !tenantConfig.Remote {
-		if projectRoot := strings.TrimSpace(tenantConfig.ProjectRoot); projectRoot != "" && filepath.Clean(projectRoot) != cleanProjectRoot {
-			return "", nil
-		}
+	if projectRoot := strings.TrimSpace(tenantConfig.ProjectRoot); projectRoot != "" && filepath.Clean(projectRoot) != cleanProjectRoot {
+		return "", nil
 	}
 
 	return strings.TrimSpace(tenantConfig.DefaultEnvironment), nil
+}
+
+// ResolveDockerBuildEnvConfig returns the saved EnvConfig for the environment a
+// build resolves to — the env whose local repo path matches the project root,
+// optionally filtered by target.Environment — or nil when none matches. The
+// build path is otherwise env-agnostic; this is the seam for reading per-env
+// build toggles such as DisableBuildScript. Best-effort: any store error or a
+// miss yields nil so the build proceeds with default behaviour.
+func ResolveDockerBuildEnvConfig(store DockerStore, findProjectRoot ProjectFinderFunc, target DockerCommandTarget) *EnvConfig {
+	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
+	if err != nil || strings.TrimSpace(projectRoot) == "" {
+		return nil
+	}
+	cleanRoot := filepath.Clean(projectRoot)
+
+	tenants, err := store.ListTenantConfigs()
+	if err != nil {
+		return nil
+	}
+	wantEnv := strings.TrimSpace(target.Environment)
+	for _, tenantConfig := range tenants {
+		envs, err := store.ListEnvConfigs(tenantConfig.Name)
+		if err != nil {
+			continue
+		}
+		for i := range envs {
+			if wantEnv != "" && envs[i].Name != wantEnv {
+				continue
+			}
+			path := strings.TrimSpace(envs[i].EffectiveLocalRepoPath())
+			if path != "" && filepath.Clean(path) == cleanRoot {
+				return &envs[i]
+			}
+		}
+	}
+	return nil
 }

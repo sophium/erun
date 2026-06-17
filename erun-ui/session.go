@@ -343,17 +343,27 @@ func buildDeployArgs(selection uiSelection) []string {
 	args := []string{"deploy", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment)}
 	if version := strings.TrimSpace(selection.Version); version != "" {
 		args = append(args, "--version", version)
+	} else {
+		// deploy is a pure primitive: it requires an explicit version. With no
+		// version the operator means "redeploy what this env already runs", so
+		// install the persisted version via --current rather than erroring.
+		args = append(args, "--current")
 	}
 	return args
 }
 
 // buildUpgradeArgs builds the per-environment `erun upgrade` invocation:
 // scoped to the selection's tenant + environment so each Upgrade-all member
-// upgrades in its own env, in parallel with the others (issue #497).
+// upgrades in its own env, in parallel with the others (issue #497). A
+// selection Version pins the exact target — used when the operator picked one
+// of several newer versions an env's registries offered (issue #527).
 func buildUpgradeArgs(selection uiSelection) []string {
-	return []string{"upgrade", "--tenant", selection.Tenant, "--environment", selection.Environment}
+	args := []string{"upgrade", "--tenant", selection.Tenant, "--environment", selection.Environment}
+	if version := strings.TrimSpace(selection.Version); version != "" {
+		args = append(args, "--version", version)
+	}
+	return args
 }
-
 
 func buildCloudInitAWSArgs() []string {
 	return []string{"cloud", "init", "aws"}

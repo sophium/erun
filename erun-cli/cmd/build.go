@@ -18,6 +18,12 @@ const (
 
 var errVersionFileNotFound = common.ErrVersionFileNotFound
 
+// errPushVersionRequired is returned when `erun push` is run without an
+// explicit version. push is a pure primitive: it publishes the content
+// identity `erun build` minted, it never mints one (root AGENTS.md §
+// "Command primitives vs orchestration").
+var errPushVersionRequired = fmt.Errorf("push requires a version: pass --version <version> produced by `erun build`. push publishes a built version's images and chart; it does not mint a version")
+
 func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
 	target := common.DockerCommandTarget{}
 	cmd := &cobra.Command{
@@ -63,7 +69,10 @@ func runBuildCommand(ctx common.Context, store common.DockerStore, findProjectRo
 		)
 	}
 	if !target.Deploy {
-		return common.RunBuildExecution(ctx, execution, runBuildScript, buildWithRetry, push)
+		if err := common.RunBuildExecution(ctx, execution, runBuildScript, buildWithRetry, push); err != nil {
+			return err
+		}
+		return ctx.WriteResult(common.NewBuildResult(execution))
 	}
 	if common.BuildExecutionUsesBuildScript(execution) {
 		return errors.New("build deploy is not supported for project build scripts")
@@ -79,15 +88,18 @@ func runBuildCommand(ctx common.Context, store common.DockerStore, findProjectRo
 		return err
 	}
 
-	return common.RunBuildExecutionAndDeploy(ctx, execution, deploySpecs, runBuildScript, buildWithRetry, push, deployHelmChart)
+	if err := common.RunBuildExecutionAndDeploy(ctx, execution, deploySpecs, runBuildScript, buildWithRetry, push, deployHelmChart); err != nil {
+		return err
+	}
+	return ctx.WriteResult(common.NewBuildResult(execution))
 }
 
-func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc) *cobra.Command {
+func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc) *cobra.Command {
 	target := common.DockerCommandTarget{}
 	var force bool
 	cmd := &cobra.Command{
 		Use:           "push",
-		Short:         "Build and push the current container image",
+		Short:         "Publish a built container image at a version",
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -95,35 +107,48 @@ func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFu
 			if force {
 				target.NoIncremental = true
 			}
+			if strings.TrimSpace(target.VersionOverride) == "" {
+				return errPushVersionRequired
+			}
 			ctx := commandContext(cmd)
 			pushInput, buildInput, err := common.ResolveDockerPushSpec(ctx, store, findProjectRoot, resolveBuildContext, now, target)
 			if err != nil {
 				return err
 			}
-			builder := buildDockerImage
-			if builder == nil {
-				builder = common.DockerImageBuilder
-			}
-			builderWithGuidance := func(buildInput common.DockerBuildSpec, stdout, stderr io.Writer) error {
-				buildErr := builder(buildInput, stdout, stderr)
-				var authErr common.DockerRegistryAuthError
-				if !errors.As(buildErr, &authErr) {
-					return buildErr
-				}
-				if handled, finalErr := handleNamespaceAuthError(authErr, func() error { return builder(buildInput, stdout, stderr) }, ctx.Stdin, stdout, stderr); handled {
-					return finalErr
-				}
-				return buildErr
-			}
+			buildWithRetry := pushBuildWithRetry(ctx, buildDockerImage, loginToDockerRegistry, selectRunner)
 			return common.RunPushCommand(ctx, func() error {
-				return common.RunDockerPushSpec(ctx, pushInput, buildInput, builderWithGuidance, push)
+				return common.RunDockerPushSpec(ctx, pushInput, buildInput, buildWithRetry, push)
 			})
 		},
 	}
 	addDryRunFlag(cmd)
 	addPushCommandTargetFlags(cmd, &target)
+	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Version to publish, produced by erun build")
 	cmd.Flags().BoolVar(&force, "force", false, "Rebuild and re-push every image, bypassing the fingerprint cache")
 	return cmd
+}
+
+// pushBuildWithRetry wraps the docker builder with the login-retry flow push
+// shares with build: an auth failure during the image push triggers a docker
+// login (interactive, or ERUN_AUTO_LOGIN_ON_PUSH in CI) and one retry. push
+// builds from source, so the push goes through the builder, not a bare tag.
+func pushBuildWithRetry(ctx common.Context, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner) common.DockerImageBuilderFunc {
+	return func(buildInput common.DockerBuildSpec, stdout, stderr io.Writer) error {
+		return runDockerBuildWithRetry(
+			ctx,
+			buildInput,
+			func(buildInput common.DockerBuildSpec, stdout, stderr io.Writer) error {
+				if buildDockerImage == nil {
+					return common.DockerImageBuilder(buildInput, stdout, stderr)
+				}
+				return buildDockerImage(buildInput, stdout, stderr)
+			},
+			loginToDockerRegistry,
+			selectRunner,
+			stdout,
+			stderr,
+		)
+	}
 }
 
 // newRootPushCmd is the top-level "erun push" shorthand. It supports both
@@ -131,15 +156,20 @@ func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFu
 // multi-image push (when run from the project root with multiple docker
 // contexts). The nested "devops container push" command uses newPushCmd which
 // is single-image only.
-func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc) *cobra.Command {
+func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc) *cobra.Command {
 	target := common.DockerCommandTarget{}
 	var force bool
 	cmd := &cobra.Command{
 		Use:   "push",
-		Short: "Build and push the current container image",
-		Long: "Build and push the project's container images to the registry.\n\n" +
-			"The push step of the build → release → push → deploy flow.",
-		Example:       "  erun push",
+		Short: "Publish a built version's container images and chart to the registry",
+		Long: "Publish a version's container images and runtime chart to the registry — the " +
+			"push step of the build → release → push → deploy flow.\n\n" +
+			"A version is required (--version <v>, the same flag deploy uses) and is the one " +
+			"`erun build` minted; push publishes it, it does not mint one. push resolves that " +
+			"version's images from the local source (promoting unchanged images from the " +
+			"fingerprint cache, rebuilding only what changed), then pushes the multi-arch " +
+			"manifest and, for the runtime image, the runtime chart alongside it.",
+		Example:       "  erun push --version 1.2.3-snapshot-20260101010101",
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -147,22 +177,13 @@ func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFind
 			if force {
 				target.NoIncremental = true
 			}
+			// Version is required: push publishes a content identity that
+			// `erun build` minted, it does not mint one.
+			if strings.TrimSpace(target.VersionOverride) == "" {
+				return errPushVersionRequired
+			}
 			ctx := commandContext(cmd)
-			builder := buildDockerImage
-			if builder == nil {
-				builder = common.DockerImageBuilder
-			}
-			builderWithGuidance := func(buildInput common.DockerBuildSpec, stdout, stderr io.Writer) error {
-				buildErr := builder(buildInput, stdout, stderr)
-				var authErr common.DockerRegistryAuthError
-				if !errors.As(buildErr, &authErr) {
-					return buildErr
-				}
-				if handled, finalErr := handleNamespaceAuthError(authErr, func() error { return builder(buildInput, stdout, stderr) }, ctx.Stdin, stdout, stderr); handled {
-					return finalErr
-				}
-				return buildErr
-			}
+			buildWithRetry := pushBuildWithRetry(ctx, buildDockerImage, loginToDockerRegistry, selectRunner)
 			buildContext, _ := resolveBuildContext()
 			if strings.TrimSpace(buildContext.DockerfilePath) != "" {
 				pushInput, buildInput, err := common.ResolveDockerPushSpec(ctx, store, findProjectRoot, resolveBuildContext, now, target)
@@ -170,7 +191,7 @@ func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFind
 					return err
 				}
 				return common.RunPushCommand(ctx, func() error {
-					return common.RunDockerPushSpec(ctx, pushInput, buildInput, builderWithGuidance, push)
+					return common.RunDockerPushSpec(ctx, pushInput, buildInput, buildWithRetry, push)
 				})
 			}
 			execution, err := common.ResolveDockerPushExecution(ctx, store, findProjectRoot, resolveBuildContext, now, target)
@@ -178,12 +199,13 @@ func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFind
 				return err
 			}
 			return common.RunPushCommand(ctx, func() error {
-				return common.RunDockerPushExecution(ctx, execution, builderWithGuidance, push)
+				return common.RunDockerPushExecution(ctx, execution, buildWithRetry, push)
 			})
 		},
 	}
 	addDryRunFlag(cmd)
 	addPushCommandTargetFlags(cmd, &target)
+	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Version to publish, produced by erun build")
 	cmd.Flags().BoolVar(&force, "force", false, "Rebuild and re-push every image, bypassing the fingerprint cache")
 	return cmd
 }
@@ -260,6 +282,10 @@ func runDockerBuildWithRetry(ctx common.Context, buildInput common.DockerBuildSp
 
 func addBuildCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommandTarget) {
 	addPushCommandTargetFlags(cmd, target)
+	// build accepts --version to override the version it would otherwise mint;
+	// push (the other addPushCommandTargetFlags caller) takes its version
+	// positionally instead, so the flag lives here, not in the shared helper.
+	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Override the version build would mint")
 	cmd.Flags().BoolVar(&target.Deploy, "deploy", false, "Deploy the built version after the build completes")
 	cmd.Flags().BoolVar(&target.Release, "release", false, "Run release first and publish the release-tagged images")
 	cmd.Flags().BoolVar(&target.Force, "force", false, "Delete and recreate conflicting release tags when combined with --release")
@@ -269,7 +295,6 @@ func addBuildCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommand
 func addPushCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommandTarget) {
 	cmd.Flags().StringVar(&target.ProjectRoot, "project-root", "", "Project root override for internal tooling")
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Environment override for internal tooling")
-	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Override the resolved image version")
 	_ = cmd.Flags().MarkHidden("project-root")
 	_ = cmd.Flags().MarkHidden("environment")
 }

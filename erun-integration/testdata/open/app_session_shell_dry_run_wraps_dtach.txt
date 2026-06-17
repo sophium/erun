@@ -38,10 +38,9 @@ bootstrap-script:
   mkdir -p "$config_home/erun/team/dev"
   cat > "$config_home/erun/team/dev/config.yaml" <<'EOF'
   name: dev
+  type: remote-agent
   repopath: <HOME>/git/team
   kubernetescontext: test-context
-  containerregistry: ""
-  remote: true
 
   EOF
   mkdir -p "$HOME/.erun/team/dev"

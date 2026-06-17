@@ -135,7 +135,7 @@ func deploySSHDConfig(ctx common.Context, result common.OpenResult, resolveRunti
 	if err != nil {
 		return err
 	}
-	return common.RunDeploySpec(ctx, spec, nil, nil, deployHelmChart)
+	return common.RunDeploySpec(ctx, spec, deployHelmChart)
 }
 
 func writeSSHDLocalConfig(ctx common.Context, result common.OpenResult, writeLocalConfig SSHDLocalConfigWriter) (SSHDLocalConfigResult, error) {

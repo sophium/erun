@@ -75,10 +75,13 @@ func TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing(t *te
 	}
 }
 
-// TestResolveUpgradePlanPrefersTenantImageOverDefault confirms the fallback only
-// fills gaps: when the tenant image publishes the tracked channel, its version
-// wins over the default ERun image's.
-func TestResolveUpgradePlanPrefersTenantImageOverDefault(t *testing.T) {
+// TestResolveUpgradePlanOffersCandidatesWhenRegistriesDisagree confirms the
+// multi-registry pick (issue #527): when the env's listed registries and the
+// canonical image publish different newer versions for the tracked channel, the
+// env is not auto-resolved — it carries every distinct candidate so the
+// operator picks one in the Upgrade-all dialog, and the run skips it until they
+// do.
+func TestResolveUpgradePlanOffersCandidatesWhenRegistriesDisagree(t *testing.T) {
 	const tenantSnapshot = "1.0.90-snapshot-20260606090000"
 	const defaultSnapshot = "1.0.86-snapshot-20260606082157"
 	app := NewApp(erunUIDeps{
@@ -122,8 +125,22 @@ func TestResolveUpgradePlanPrefersTenantImageOverDefault(t *testing.T) {
 	if len(plan.Items) != 1 {
 		t.Fatalf("expected 1 plan item, got %d", len(plan.Items))
 	}
-	if got := plan.Items[0].Target; got != tenantSnapshot {
-		t.Fatalf("expected tenant snapshot %q to win, got %q", tenantSnapshot, got)
+	item := plan.Items[0]
+	if item.Target != "" || item.Lagging {
+		t.Fatalf("expected an ambiguous (no auto-target) member awaiting a pick, got %+v", item)
+	}
+	if len(item.Candidates) != 2 {
+		t.Fatalf("expected two candidates to pick from, got %+v", item.Candidates)
+	}
+	if !strings.Contains(item.UnresolvedReason, "multiple newer versions") {
+		t.Fatalf("expected the multiple-newer reason, got %q", item.UnresolvedReason)
+	}
+	versions := map[string]bool{}
+	for _, candidate := range item.Candidates {
+		versions[candidate.Version] = true
+	}
+	if !versions[tenantSnapshot] || !versions[defaultSnapshot] {
+		t.Fatalf("expected both registry versions as candidates, got %+v", item.Candidates)
 	}
 }
 
@@ -176,7 +193,7 @@ func TestResolveUpgradePlanFallsBackToCanonicalOnFailedTenantLookup(t *testing.T
 
 // TestResolveUpgradePlanUnresolvedWhenCanonicalLookupAlsoFails keeps the
 // honest terminal state: when neither the tenant repo nor the canonical
-// image is resolvable, the member is "latest unknown" with the canonical
+// image is resolvable, the member is "latest unknown" with the registry
 // failure as the reason — the dialog renders it and the run skips it.
 func TestResolveUpgradePlanUnresolvedWhenCanonicalLookupAlsoFails(t *testing.T) {
 	app := NewApp(erunUIDeps{
@@ -209,7 +226,7 @@ func TestResolveUpgradePlanUnresolvedWhenCanonicalLookupAlsoFails(t *testing.T) 
 	if item.Target != "" || item.Lagging {
 		t.Fatalf("expected an unresolved, non-lagging member, got %+v", item)
 	}
-	if !strings.Contains(item.UnresolvedReason, "registry unreachable") {
-		t.Fatalf("expected the canonical failure as the reason, got %q", item.UnresolvedReason)
+	if strings.TrimSpace(item.UnresolvedReason) == "" {
+		t.Fatalf("expected a registry-error reason, got %q", item.UnresolvedReason)
 	}
 }

@@ -58,22 +58,24 @@ export function nextPendingRedeploy(
   return deployRelevantSignature(prior) !== deployRelevantSignature(saved);
 }
 
-// deployRelevantSignature distills the env config down to the fields that
-// shape the running pod — the values erun-common/deploy.go renders into the
-// Helm release (pod resources, idle.* pod env, the claude.* pod env subset)
+// deployRelevantSignature distills the env config down to the fields whose
+// change a redeploy would apply: the values erun-common/deploy.go renders into
+// the Helm release (pod resources, idle.* pod env, the claude.* pod env subset)
 // plus the image registry/channel and the cloud binding the deploy resolves
-// against. Fields that never reach the pod stay out: autoUpgrade /
-// upgradeChannel select a future `erun upgrade` run, autoStart and
-// remoteHostCredentials are desktop-side behaviour, sshd.workspaceSync* is
-// desktop sync, and claude effort/defaultModel/verboseDebug only change the
-// AI launch command (the save path relaunches AI tabs for those). A save
-// whose signature is unchanged must not raise the pending-redeploy banner
-// (issue #460).
+// against, and disablebuildscript — which changes how a redeploy rebuilds the
+// runtime image (project build.sh vs docker/release contexts). Fields a
+// redeploy would not apply stay out: autoUpgrade / upgradeChannel select a
+// future `erun upgrade` run, autoStart and remoteHostCredentials are
+// desktop-side behaviour, sshd.workspaceSync* is desktop sync, and claude
+// effort/defaultModel/verboseDebug only change the AI launch command (the save
+// path relaunches AI tabs for those). A save whose signature is unchanged must
+// not raise the pending-redeploy banner (issue #460).
 function deployRelevantSignature(config: UIEnvironmentConfig): string {
   return JSON.stringify({
-    containerRegistry: config.containerRegistry,
+    containerRegistries: config.containerRegistries,
+    disableBuildScript: config.disableBuildScript,
     cloudProviderAlias: config.cloudProviderAlias,
-    snapshot: config.snapshot,
+    type: config.type,
     runtimePod: config.runtimePod,
     idle: config.idle,
     claudePod: {
@@ -97,14 +99,16 @@ export function manageDialogTabHasUnsavedChanges(
     keys.some((key) => JSON.stringify(config[key]) !== JSON.stringify(initial[key]));
   switch (tab) {
     case 'general':
-      return compare(
-        'containerRegistry',
-        'cloudProviderAlias',
-        'snapshot',
-        'remoteHostCredentials',
-      );
+      return compare('containerRegistries', 'cloudProviderAlias', 'remoteHostCredentials');
     case 'runtime':
-      return compare('runtimePod', 'idle', 'autoStart', 'autoUpgrade', 'upgradeChannel');
+      return compare(
+        'runtimePod',
+        'idle',
+        'autoStart',
+        'autoUpgrade',
+        'upgradeChannel',
+        'disableBuildScript',
+      );
     case 'ai':
       return compare('claude');
     case 'ports':

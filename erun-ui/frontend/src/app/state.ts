@@ -351,7 +351,7 @@ export const defaultEnvironmentConfig = (): UIEnvironmentConfig => ({
   name: '',
   repoPath: '',
   kubernetesContext: '',
-  containerRegistry: '',
+  containerRegistries: [],
   cloudProviderAlias: '',
   runtimeVersion: '',
   runtimePod: defaultRuntimePodConfig(),
@@ -395,11 +395,11 @@ export const defaultEnvironmentConfig = (): UIEnvironmentConfig => ({
       status: '',
     },
   },
-  remote: false,
-  snapshot: true,
+  type: 'local-agent',
   remoteHostCredentials: false,
   autoUpgrade: false,
   upgradeChannel: 'stable',
+  disableBuildScript: false,
 });
 
 export const defaultRuntimePodConfig = (): { cpu: string; memory: string } => ({

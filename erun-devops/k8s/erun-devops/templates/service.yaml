@@ -25,6 +25,19 @@ docs/concepts/environment-types for the type→storage mapping.
 {{- if ne $worktreeStorage "none" -}}
   {{- $worktreePath = printf "/home/erun/git/%s" (required "worktreeRepoName is required when worktreeStorage is set" $worktreeRepoName) -}}
 {{- end -}}
+{{- /*
+envType is the canonical environment type written into the in-pod erun config
+(EnvConfig.Type). It is the inverse of the worktreeStorage→type mapping that
+erun-common/deploy.go:resolveWorktreeStorage applies, so the pod records the
+same type the laptop resolved. The retired remote/snapshot pair is no longer
+emitted; type is the single source of truth.
+*/ -}}
+{{- $envType := "runtime" -}}
+{{- if eq $worktreeStorage "host" -}}
+  {{- $envType = "local-agent" -}}
+{{- else if eq $worktreeStorage "pvc" -}}
+  {{- $envType = "remote-agent" -}}
+{{- end -}}
 {{- $idle := default dict .Values.idle -}}
 {{- $idleTimeout := default "5m0s" $idle.timeout -}}
 {{- $idleWorkingHours := default "08:00-20:00" $idle.workingHours -}}
@@ -71,7 +84,7 @@ docs/concepts/environment-types for the type→storage mapping.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: erun-devops-home
+  name: {{ .Release.Name }}-home
   labels:
     app: erun-devops
 spec:
@@ -84,7 +97,7 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: erun-devops-docker
+  name: {{ .Release.Name }}-docker
   labels:
     app: erun-devops
 spec:
@@ -98,7 +111,7 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: erun-devops-worktree
+  name: {{ .Release.Name }}-worktree
   labels:
     app: erun-devops
 spec:
@@ -112,19 +125,19 @@ spec:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: erun-devops
+  name: {{ .Release.Name }}
   labels:
     app: erun-devops
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: erun-devops
+  name: {{ .Release.Name }}
   labels:
     app: erun-devops
 subjects:
   - kind: ServiceAccount
-    name: erun-devops
+    name: {{ .Release.Name }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -134,7 +147,7 @@ roleRef:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: erun-devops-namespace-manager
+  name: {{ .Release.Name }}-namespace-manager
   labels:
     app: erun-devops
 rules:
@@ -150,12 +163,12 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: erun-devops
+  name: {{ .Release.Name }}
   labels:
     app: erun-devops
 subjects:
   - kind: ServiceAccount
-    name: erun-devops
+    name: {{ .Release.Name }}
     namespace: {{ .Release.Namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -165,23 +178,82 @@ roleRef:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: erun-devops-namespace-manager
+  name: {{ .Release.Name }}-namespace-manager
   labels:
     app: erun-devops
 subjects:
   - kind: ServiceAccount
-    name: erun-devops
+    name: {{ .Release.Name }}
     namespace: {{ .Release.Namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: erun-devops-namespace-manager
+  name: {{ .Release.Name }}-namespace-manager
+---
+# local-only: in contribute mode an operator runs `erun deploy` from inside the
+# runtime pod, where helm authenticates as this release's ServiceAccount. That
+# SA is bound to the built-in admin ClusterRole, which covers namespaced
+# resources but deliberately withholds cluster-scoped RBAC — so an in-pod
+# self-deploy could not even helm-diff the namespace-manager ClusterRole/
+# bindings above (helm fails with "cannot get clusterroles at the cluster
+# scope"). Grant the SA management of exactly this release's own cluster-scoped
+# RBAC, by name, so an in-pod redeploy works without granting broad clusterrole
+# escalation. The first install still comes from an admin context (which can
+# create these); the SA only upgrades them in place, and it already holds every
+# permission it re-applies, so the apiserver's escalation check passes.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Name }}-self-deploy
+  labels:
+    app: erun-devops
+rules:
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - clusterroles
+    resourceNames:
+      - {{ .Release.Name }}-namespace-manager
+      - {{ .Release.Name }}-self-deploy
+    verbs:
+      - get
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - clusterrolebindings
+    resourceNames:
+      - {{ .Release.Name }}
+      - {{ .Release.Name }}-namespace-manager
+      - {{ .Release.Name }}-self-deploy
+    verbs:
+      - get
+      - update
+      - patch
+      - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Name }}-self-deploy
+  labels:
+    app: erun-devops
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Release.Name }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Name }}-self-deploy
 ---
 {{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: erun-devops
+  name: {{ .Release.Name }}
   labels:
     app: erun-devops
 spec:
@@ -197,7 +269,7 @@ spec:
         app: erun-devops
     spec:
       automountServiceAccountToken: true
-      serviceAccountName: erun-devops
+      serviceAccountName: {{ .Release.Name }}
       securityContext:
         fsGroup: 1000
       initContainers:
@@ -226,6 +298,8 @@ spec:
               value: {{ $worktreePath | quote }}
             - name: ERUN_REPO_REMOTE
               value: {{ if eq $worktreeStorage "pvc" }}"true"{{ else }}"false"{{ end }}
+            - name: ERUN_ENV_TYPE
+              value: {{ $envType | quote }}
             - name: ERUN_CLOUD_ENVIRONMENT
               value: {{ if $managedCloud }}"true"{{ else }}"false"{{ end }}
             - name: ERUN_CLOUD_CONTEXT_NAME
@@ -243,10 +317,14 @@ spec:
             - name: AWS_PROFILE
               value: "erun-host"
             {{ end }}
+            {{- if eq $claudeUseBedrock "1" }}
             - name: CLAUDE_CODE_USE_BEDROCK
-              value: {{ $claudeUseBedrock | quote }}
+              value: "1"
+            {{- end }}
+            {{- if eq $claudeUseMantle "1" }}
             - name: CLAUDE_CODE_USE_MANTLE
-              value: {{ $claudeUseMantle | quote }}
+              value: "1"
+            {{- end }}
             - name: AWS_REGION
               value: {{ $cloudRegion | quote }}
             - name: ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION
@@ -360,6 +438,8 @@ spec:
               value: {{ $worktreePath | quote }}
             - name: ERUN_REPO_REMOTE
               value: {{ if eq $worktreeStorage "pvc" }}"true"{{ else }}"false"{{ end }}
+            - name: ERUN_ENV_TYPE
+              value: {{ $envType | quote }}
             - name: ERUN_KUBERNETES_CONTEXT
               value: in-cluster
             - name: ERUN_CLOUD_CONTEXT_NAME
@@ -418,7 +498,7 @@ spec:
       volumes:
         - name: erun-home
           persistentVolumeClaim:
-            claimName: erun-devops-home
+            claimName: {{ .Release.Name }}-home
         {{- if eq $worktreeStorage "host" }}
         - name: repo-worktree
           hostPath:
@@ -427,11 +507,11 @@ spec:
         {{- else if eq $worktreeStorage "pvc" }}
         - name: repo-worktree
           persistentVolumeClaim:
-            claimName: erun-devops-worktree
+            claimName: {{ .Release.Name }}-worktree
         {{- end }}
         - name: docker-socket
           emptyDir: {}
         - name: docker-state
           persistentVolumeClaim:
-            claimName: erun-devops-docker
+            claimName: {{ .Release.Name }}-docker
       restartPolicy: Always

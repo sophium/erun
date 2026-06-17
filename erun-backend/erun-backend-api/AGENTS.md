@@ -5,7 +5,7 @@ Module-specific guidance for `erun-backend-api`. Follow the repository root and 
 ## Module Role
 
 - `erun-backend-api` is the Go HTTP API module for hosted ERun backend functionality.
-- API endpoints must require an OIDC bearer token unless the endpoint is explicitly infrastructure-only, such as a future health check.
+- API endpoints must require an OIDC bearer token unless the endpoint is explicitly infrastructure-only, such as the `/healthz` health check.
 - The token `iss` claim determines the tenant. Resolve the tenant before invoking endpoint behavior, then pass tenant identity explicitly through request-scoped context.
 - Keep endpoint handlers thin: authenticate, adapt HTTP inputs, call focused workflow or persistence code, and return JSON-safe responses.
 - Do not let CLI or MCP import this module directly. Shared clients, request contracts, and result contracts used by CLI and MCP belong in `erun-common`.
@@ -80,7 +80,7 @@ Module-specific guidance for `erun-backend-api`. Follow the repository root and 
 
 - Routes own HTTP adaptation: path values, query values, request body decoding, status codes, and JSON responses.
 - Protected routes should be registered behind authentication middleware and may assume authenticated security context exists.
-- Do not repeat `SecurityFromContext` checks in every protected route just to reject invalid users. Authentication middleware must reject invalid, missing, or unknown users before route code runs.
+- Do not repeat `security.RequiredFromContext` checks in every protected route just to reject invalid users. Authentication middleware must reject invalid, missing, or unknown users before route code runs.
 - If a route needs authenticated identity as user-visible input, prefer a small helper that treats missing context as an internal wiring error.
 - Keep route request structs local to `internal/routes` unless the request contract is intentionally shared with CLI or MCP through `erun-common`.
 - Avoid route-to-model response mapping when the model already has the correct JSON shape.

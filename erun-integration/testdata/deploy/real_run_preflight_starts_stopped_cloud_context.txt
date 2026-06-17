@@ -1,6 +1,7 @@
-audit: erun deploy --no-snapshot --version <VERSION> team dev
+audit: erun deploy --version <VERSION> team dev
 trace-log: appending the full trace to <TMP>
-deploy: tenant=team environment=dev version-override=<VERSION> snapshot=false components=[] force=false publish=false
+deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=false current=false
+deploy: version <VERSION> pinned; installing the published image by reference (deploy never builds)
 deploy: resolved 1 spec(s)
 cloud-context start: name=test-context force=false
 cloud-context start: checking working-hours gate

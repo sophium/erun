@@ -158,38 +158,31 @@ type DeployTarget struct {
 	Environment     string
 	RepoPath        string
 	VersionOverride string
-	Snapshot        *bool
 	// Components lists optional opt-in charts to include alongside the
 	// always-on charts (e.g. the per-tenant runtime). Names must come from
 	// optInDeployComponents; unknown names produce an error during resolve.
 	Components []string
-	// Force disables fingerprint-based incremental promotion so every image
-	// rebuilds from scratch, which also clears SkipHelm and re-runs the
-	// helm upgrade even when no source change is detected.
+	// Force re-runs the helm upgrade even when the deployed release already
+	// matches the requested version (no-op rollouts are otherwise skipped).
 	Force bool
-	// Publish, when true, packages each resolved chart and pushes the
-	// resulting tgz to the environment's container registry as an OCI
-	// Helm artifact (oci://<containerRegistry>/<chart-name>:<version>)
-	// before the helm upgrade runs. A missing container registry fails
-	// resolution so the user never sees a half-finished publish.
-	Publish bool
 }
 
+// DeploySpec is a pure helm-install plan: it installs the image and chart
+// already published at a version, by reference. deploy does not build, push,
+// or publish — those are the build and push primitives, composed above deploy
+// by an orchestrator (the `build --deploy` shortcut, `erun open --deploy`, or
+// the UI). The image reference rides in via Deploy.ImageOverrides /
+// Deploy.Version; the chart reference is DeployContext.ChartPath (a local path
+// or a published OCI ref), resolved by the caller.
 type DeploySpec struct {
 	Target        OpenResult
 	DeployContext KubernetesDeployContext
-	Builds        []DockerBuildSpec
 	Deploy        HelmDeploySpec
-	// SkipHelm signals that every locally-built image for this chart was
-	// promoted from a cached fingerprint (no rebuild). RunDeploySpec then
-	// skips the helm command and the per-build push entirely so unchanged
-	// pods are not rolled. Charts with no locally-built images keep
-	// SkipHelm=false so chart-only changes still ship.
+	// SkipHelm lets an orchestrator suppress the helm upgrade when every
+	// image this chart references was promoted from cache (no rebuild), so
+	// unchanged pods are not rolled. A pure deploy leaves it false; the
+	// build orchestration sets it from its build results.
 	SkipHelm bool
-	// PublishChart toggles the chart-publish step performed before
-	// helm upgrade. Publish carries the package/push parameters.
-	PublishChart bool
-	Publish      HelmChartPublishSpec
 }
 
 // EnvConfigSaver writes an updated env config to disk. The contract
@@ -317,7 +310,7 @@ func specDeploysRuntimeChart(spec DeploySpec) bool {
 	return tenant != "" && strings.TrimSpace(spec.Deploy.ReleaseName) == RuntimeReleaseName(tenant)
 }
 
-func RunDeploySpecs(ctx Context, executions []DeploySpec, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
+func RunDeploySpecs(ctx Context, executions []DeploySpec, deploy HelmChartDeployerFunc) error {
 	if len(executions) == 0 {
 		return nil
 	}
@@ -327,7 +320,7 @@ func RunDeploySpecs(ctx Context, executions []DeploySpec, build DockerImageBuild
 	}
 	groups := groupDeploySpecsByPlan(executions, plan)
 	for stepIndex, group := range groups {
-		if err := runDeployStep(ctx, stepIndex, group, build, push, deploy); err != nil {
+		if err := runDeployStep(ctx, stepIndex, group, deploy); err != nil {
 			return err
 		}
 	}
@@ -372,7 +365,7 @@ func loadProjectK8sPlanForRepo(repoPath, environment string) (ProjectK8sConfig, 
 // invocations execute serially so traces remain deterministic; real runs with
 // multiple specs in the same step launch goroutines and wait for all to
 // finish, surfacing the joined error if any failed.
-func runDeployStep(ctx Context, stepIndex int, specs []DeploySpec, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
+func runDeployStep(ctx Context, stepIndex int, specs []DeploySpec, deploy HelmChartDeployerFunc) error {
 	if len(specs) == 0 {
 		return nil
 	}
@@ -385,7 +378,7 @@ func runDeployStep(ctx Context, stepIndex int, specs []DeploySpec, build DockerI
 	}
 	if ctx.DryRun || len(specs) == 1 {
 		for _, spec := range specs {
-			if err := RunDeploySpec(ctx, spec, build, push, deploy); err != nil {
+			if err := RunDeploySpec(ctx, spec, deploy); err != nil {
 				return err
 			}
 		}
@@ -397,7 +390,7 @@ func runDeployStep(ctx Context, stepIndex int, specs []DeploySpec, build DockerI
 		wg.Add(1)
 		go func(i int, spec DeploySpec) {
 			defer wg.Done()
-			errs[i] = RunDeploySpec(ctx, spec, build, push, deploy)
+			errs[i] = RunDeploySpec(ctx, spec, deploy)
 		}(i, spec)
 	}
 	wg.Wait()
@@ -449,44 +442,34 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 	spinner.Stop()
 	elapsed := time.Since(started).Round(time.Second)
 	if deployErr != nil {
-		ctx.Info("==> Deploy failed after " + elapsed.String())
+		// Name the release so a parallel step (multiple charts deploying at
+		// once) makes clear which one failed; the helm reason is in the
+		// returned error, surfaced by the command's error handler.
+		failed := "==> Deploy failed after " + elapsed.String()
+		if rel := strings.TrimSpace(deployInput.ReleaseName); rel != "" {
+			failed = "==> Deploy of " + rel + " failed after " + elapsed.String()
+		}
+		ctx.Info(failed)
 		return deployErr
 	}
 	ctx.Info("==> Deployed " + target + " in " + elapsed.String())
 	return nil
 }
 
-func RunDeploySpec(ctx Context, execution DeploySpec, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
-	if execution.SkipHelm && !execution.PublishChart {
-		ctx.Trace("deploy: skipping " + execution.DeployContext.ComponentName + " (all images cached, no rebuild)")
-		return nil
-	}
-	for _, buildInput := range orderedDockerBuildSpecs(execution.Builds) {
-		if err := RunDockerBuild(ctx, buildInput, build); err != nil {
-			return err
-		}
-		if buildInput.Push {
-			continue
-		}
-		pushInput := NewDockerPushSpec(buildInput.ContextDir, buildInput.Image)
-		if push != nil {
-			if err := push(ctx, pushInput); err != nil {
-				return err
-			}
-			continue
-		}
-		if err := RunDockerPush(ctx, pushInput, nil); err != nil {
-			return err
-		}
-	}
-	if execution.PublishChart {
-		if err := RunHelmChartPublish(ctx, execution.Publish); err != nil {
-			return err
-		}
-	}
+// RunDeploySpec runs the pure helm install for a resolved deploy plan. It
+// builds nothing, pushes nothing, and publishes nothing — the image and chart
+// it installs were produced and published by `build` and `push` before deploy
+// ran. It may still mirror an already-published image between registries when
+// the env marks a FROM/TO pair (a consume-side manifest copy, not a build).
+// SkipHelm (set by an orchestrator when every referenced image was cached)
+// suppresses the upgrade so unchanged pods are not rolled.
+func RunDeploySpec(ctx Context, execution DeploySpec, deploy HelmChartDeployerFunc) error {
 	if execution.SkipHelm {
 		ctx.Trace("deploy: skipping helm upgrade for " + execution.DeployContext.ComponentName + " (all images cached, no rebuild)")
 		return nil
+	}
+	if err := runDeployRegistryCopies(ctx, execution); err != nil {
+		return err
 	}
 	return RunHelmDeploy(ctx, execution.Deploy, deploy)
 }
@@ -499,17 +482,25 @@ func ResolveDeploySpec(ctx Context, store DeployStore, findProjectRoot ProjectFi
 	if err != nil {
 		return DeploySpec{}, err
 	}
-	spec, err := resolveDeploySpecForOpenResult(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, resolvedTarget, componentName, versionOverride, deployTargetSnapshotEnabled(resolvedTarget, target.Snapshot), target.Force)
+	spec, err := resolveDeploySpecForOpenResult(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, resolvedTarget, componentName, versionOverride, nil)
 	if err != nil {
-		return DeploySpec{}, err
-	}
-	if err := applyDeploySpecPublish(&spec, target.Publish); err != nil {
 		return DeploySpec{}, err
 	}
 	return spec, nil
 }
 
+// ResolveCurrentDeploySpecs resolves specs for `erun deploy` — the pure deploy
+// primitive that installs a version by reference and never builds.
 func ResolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DeployTarget) ([]DeploySpec, error) {
+	return resolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, false)
+}
+
+// resolveCurrentDeploySpecs is shared by `erun deploy` (buildOrchestration
+// false → pure, version required) and the `build --deploy` orchestration
+// (buildOrchestration true → reference the just-built working-tree image of a
+// builds-here env). The build/push of that image is run by the build phase
+// before these specs deploy; here it only supplies the image reference.
+func resolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DeployTarget, buildOrchestration bool) ([]DeploySpec, error) {
 	store, findProjectRoot, resolveDockerBuildContext, _, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	now = freezeNow(now)
 
@@ -524,9 +515,6 @@ func ResolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 			return nil, err
 		}
 		if err := configureDeployInputMetadata(store, resolvedTarget, &spec.Deploy); err != nil {
-			return nil, err
-		}
-		if err := applyDeploySpecPublish(&spec, target.Publish); err != nil {
 			return nil, err
 		}
 		return []DeploySpec{spec}, nil
@@ -545,21 +533,23 @@ func ResolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 		return nil, err
 	}
 	sortDeployContextsByDeployOrder(deployContexts, projectK8s)
-	specs := make([]DeploySpec, 0, len(deployContexts))
-	allowLocalBuilds := deployTargetSnapshotEnabled(resolvedTarget, target.Snapshot)
+
 	var currentBuild *DockerBuildSpec
-	if allowLocalBuilds && strings.TrimSpace(target.VersionOverride) == "" {
+	if buildOrchestration && resolvedTarget.EnvConfig.BuildsHere() {
+		// The build phase produces this version (a minted snapshot, or the
+		// explicit --version); deploy references the built image by tag rather
+		// than install-by-reference, which would verify a registry tag the
+		// build has not pushed yet.
 		currentBuild, err = resolveCurrentDockerComponentBuildForDeploy(store, findProjectRoot, resolveDockerBuildContext, now, resolvedTarget.RepoPath, resolvedTarget.Environment, target.VersionOverride)
 		if err != nil {
 			return nil, err
 		}
 	}
+
+	specs := make([]DeploySpec, 0, len(deployContexts))
 	for _, deployContext := range deployContexts {
-		spec, err := resolveDeploySpecForContext(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, resolvedTarget, deployContext, target.VersionOverride, allowLocalBuilds, target.Force, currentBuild)
+		spec, err := resolveDeploySpecForContext(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, resolvedTarget, deployContext, target.VersionOverride, currentBuild)
 		if err != nil {
-			return nil, err
-		}
-		if err := applyDeploySpecPublish(&spec, target.Publish); err != nil {
 			return nil, err
 		}
 		specs = append(specs, spec)
@@ -568,33 +558,7 @@ func ResolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 	return specs, nil
 }
 
-// applyDeploySpecPublish sets the publish parameters on the spec when the
-// caller requested --publish. The OCI repo is derived from the spec's
-// resolved container registry; resolveHelmChartPublishSpec fails when the
-// registry is empty so we never reach the package step without one.
-func applyDeploySpecPublish(spec *DeploySpec, publish bool) error {
-	if !publish || spec == nil {
-		return nil
-	}
-	// A published OCI chart is already in the registry; there is no local
-	// chart to package and push.
-	if isOCIChartReference(spec.DeployContext.ChartPath) {
-		return nil
-	}
-	publishSpec, err := resolveHelmChartPublishSpec(spec.DeployContext.ChartPath, spec.Deploy.Version, spec.Deploy.ContainerRegistry)
-	if err != nil {
-		return err
-	}
-	spec.PublishChart = true
-	spec.Publish = publishSpec
-	return nil
-}
-
-func ResolveDeploySpecForOpenResult(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, componentName, versionOverride string) (DeploySpec, error) {
-	return resolveDeploySpecForOpenResult(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, componentName, versionOverride, true, false)
-}
-
-func resolveDeploySpecForOpenResult(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, componentName, versionOverride string, allowLocalBuilds, force bool) (DeploySpec, error) {
+func resolveDeploySpecForOpenResult(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, componentName, versionOverride string, currentBuild *DockerBuildSpec) (DeploySpec, error) {
 	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	now = freezeNow(now)
 
@@ -603,92 +567,150 @@ func resolveDeploySpecForOpenResult(ctx Context, store DeployStore, findProjectR
 		return DeploySpec{}, err
 	}
 
-	return resolveDeploySpecForContext(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, deployContext, versionOverride, allowLocalBuilds, force, nil)
+	return resolveDeploySpecForContext(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, deployContext, versionOverride, currentBuild)
 }
 
-func resolveDeploySpecForContext(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, deployContext KubernetesDeployContext, versionOverride string, allowLocalBuilds, force bool, currentBuild *DockerBuildSpec) (DeploySpec, error) {
-	store, findProjectRoot, resolveDockerBuildContext, _, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
+func resolveDeploySpecForContext(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, deployContext KubernetesDeployContext, versionOverride string, currentBuild *DockerBuildSpec) (DeploySpec, error) {
+	// A pure deploy installs by reference; only the store is consulted (for
+	// cloud/tenant metadata and image verification). findProjectRoot,
+	// resolveDockerBuildContext, resolveKubernetesDeployContext, and now are
+	// retained on the signature for the shared resolution contract but are not
+	// needed once deploy stopped building.
+	store, _, _, _, _ = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	target = applyDeployKubernetesContext(store, target)
 
+	// Build-orchestration path: a `build --deploy` / `open --deploy` / UI
+	// orchestration has already built and pushed the working-tree image and
+	// hands it to deploy by reference. deploy installs it via an ImageOverride
+	// at the built version; it does not build it (see resolveDeploySpecForCurrentDockerBuild).
 	if currentBuild != nil && deployContextOwnsDockerBuild(deployContext, *currentBuild) {
-		return resolveDeploySpecForCurrentDockerBuild(ctx, store, target, deployContext, *currentBuild, force)
+		return resolveDeploySpecForCurrentDockerBuild(store, target, deployContext, *currentBuild)
 	}
 
-	builds := make([]DockerBuildSpec, 0, 2)
-	if allowLocalBuilds && strings.TrimSpace(versionOverride) == "" {
-		buildInput, err := ResolveDockerBuildForComponent(store, findProjectRoot, resolveDockerBuildContext, now, target.RepoPath, target.Environment, deployContext.ComponentName, "")
-		if err != nil {
-			return DeploySpec{}, err
-		}
-		if buildInput != nil {
-			builds = append(builds, *buildInput)
-			versionOverride = buildInput.Image.Version
-		}
-	}
-
+	// Pure deploy: install the image + chart already published at a version,
+	// by reference. A version is a content identity minted by build/push;
+	// deploy never builds or synthesizes one. The version comes from the
+	// explicit override or, for a redeploy of the env's current version, the
+	// persisted RuntimeVersion (the CLI --current switch). With neither, the
+	// operator has not said what to deploy — that is an error, not a trigger
+	// to build the working tree.
+	version := strings.TrimSpace(versionOverride)
 	versionFromPersist := false
-	if strings.TrimSpace(versionOverride) == "" {
-		versionOverride = strings.TrimSpace(target.EnvConfig.RuntimeVersion)
-		if versionOverride != "" {
+	if version == "" {
+		version = strings.TrimSpace(target.EnvConfig.RuntimeVersion)
+		if version != "" {
 			versionFromPersist = true
 		}
 	}
+	if version == "" {
+		return DeploySpec{}, fmt.Errorf("deploy: a version is required — pass a version produced by `erun build`/`erun push`, or `--current` to redeploy the version this environment already runs")
+	}
+	return resolveInstallExistingVersionDeploySpec(ctx, store, target, deployContext, version, versionFromPersist)
+}
 
-	deployInput, err := newHelmDeploySpec(target, deployContext, versionOverride)
+// resolveInstallExistingVersionDeploySpec resolves a deploy that installs the
+// image already published at the pinned version, without building or pushing
+// anything. deploy and upgrade are consume operations: a version names a content
+// identity, so a builds-here env addresses the published tag by reference
+// rather than rebuilding the working tree under that label. The chart's
+// referenced images are verified to exist (locally or in the registry) so a
+// version that was never built fails fast — deploy installs, it does not
+// build. helm still runs (no builds means SkipHelm stays false), pinned to the
+// requested version. See issue #556.
+func resolveInstallExistingVersionDeploySpec(ctx Context, store DeployStore, target OpenResult, deployContext KubernetesDeployContext, version string, versionFromPersist bool) (DeploySpec, error) {
+	deployInput, err := newHelmDeploySpec(target, deployContext, version)
 	if err != nil {
 		return DeploySpec{}, err
 	}
-	// Pull-path provenance: when re-rendering with the persisted
-	// version and no local build in flight, address the same image
-	// the previous deploy used. Protects reopens after the user
-	// edits the project's container registry. See issue #363.
-	if versionFromPersist && len(builds) == 0 && deployContextOwnsRuntimeChart(deployContext, target.Tenant) {
+	// Pull-path provenance: when installing the persisted version (a --current
+	// redeploy or an open ensure), address the same registry the previous
+	// deploy used, so a reopen survives the operator editing the project's
+	// container registry. See issue #363.
+	if versionFromPersist && deployContextOwnsRuntimeChart(deployContext, target.Tenant) {
 		if registry := strings.TrimSpace(target.EnvConfig.RuntimeRegistry); registry != "" {
 			deployInput.ContainerRegistry = registry
 		}
 	}
-	deployInput.ResetDatabase = deployResetsDatabase(allowLocalBuilds, deployInput.Version)
+	// Mirror the snapshot DB-reset decision so re-installing a snapshot behaves
+	// the same as first deploying one (#270).
+	deployInput.ResetDatabase = deployResetsDatabase(true, deployInput.Version)
 	if err := configureDeployInputMetadata(store, target, &deployInput); err != nil {
 		return DeploySpec{}, err
 	}
 
-	if allowLocalBuilds {
-		dependencyBuilds, err := resolveAdditionalDockerBuildsForDeploy(store, findProjectRoot, resolveDockerBuildContext, now, target.RepoPath, target.Environment, deployContext.ChartPath, deployInput.Version, builds)
-		if err != nil {
-			return DeploySpec{}, err
-		}
-		builds = append(builds, dependencyBuilds...)
-	}
-	builds = configureDockerBuildsForDeploy(builds)
-	builds, err = ApplyIncrementalToDockerBuilds(ctx, builds, force)
+	ctx.Trace("deploy: version " + deployInput.Version + " pinned; installing the published image by reference (deploy never builds)")
+	images, err := findDockerImagesInChart(deployContext.ChartPath, deployInput.Version)
 	if err != nil {
 		return DeploySpec{}, err
+	}
+	for _, image := range images {
+		if err := verifyExistingDeployImage(ctx, image, deployInput.Version, deployInput.ContainerRegistry); err != nil {
+			return DeploySpec{}, err
+		}
 	}
 
 	return DeploySpec{
 		Target:        target,
 		DeployContext: deployContext,
-		Builds:        builds,
 		Deploy:        deployInput,
-		SkipHelm:      resolveDeploySkipHelm(ctx, deployContext, deployInput, builds),
 	}, nil
 }
 
-// resolveDeploySkipHelm decides whether the chart's helm upgrade can be
-// skipped because every locally-built image was promoted from a cached
-// fingerprint. The postgres chart is the exception when a database reset is
-// pending: the reset ships inside the chart (reset init container plus a
-// per-version pod annotation), so skipping helm would silently drop it —
-// exactly the regression that orphaned `api.postgres.reset` in #270.
-func resolveDeploySkipHelm(ctx Context, deployContext KubernetesDeployContext, deployInput HelmDeploySpec, builds []DockerBuildSpec) bool {
-	if !allDockerBuildsPromoted(builds) {
-		return false
+// verifyExistingDeployImage fails when the image a chart pulls at the pinned
+// version is absent both locally and in the registry. deploy installs an
+// existing version; a missing image means the version was never built, which
+// is an error, not a trigger to build it from the working tree.
+//
+// Only images at the deploy version are checked: charts also reference pinned
+// infra/base images (dind, binfmt) at their own versions, which are not the
+// version being installed and are skipped. Registry-less chart refs (the app
+// images, which get their registry from --set containerRegistry) are qualified
+// with the deploy registry so the lookup hits the published tag. Dry-run traces
+// the lookup and skips the network so the plan stays offline and deterministic;
+// a registry error that is not a definitive "absent" does not block the deploy
+// (the rollout would surface a real pull failure).
+func verifyExistingDeployImage(ctx Context, ref, version, registry string) error {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return nil
 	}
-	if deployInput.ResetDatabase && strings.TrimSpace(deployContext.ComponentName) == postgresComponentName {
-		ctx.Trace("deploy: postgres reset requested; running helm upgrade for " + postgresComponentName + " despite cached images")
-		return false
+	nameTag := ref
+	qualified := false
+	if idx := strings.LastIndex(ref, "/"); idx >= 0 {
+		nameTag = ref[idx+1:]
+		qualified = true
 	}
-	return true
+	_, refVersion, ok := strings.Cut(nameTag, ":")
+	if !ok || strings.TrimSpace(refVersion) != strings.TrimSpace(version) {
+		// Not the version being installed (pinned infra/base image) — not ours
+		// to verify.
+		return nil
+	}
+
+	tag := ref
+	if !qualified && strings.TrimSpace(registry) != "" {
+		tag = strings.TrimRight(strings.TrimSpace(registry), "/") + "/" + ref
+	}
+
+	ctx.TraceCommand("", "docker", "manifest", "inspect", tag)
+	if ctx.DryRun {
+		return nil
+	}
+	remote, remoteErr := DockerManifestExists(tag)
+	if remote {
+		return nil
+	}
+	if local, _ := DockerImageExists(tag); local {
+		return nil
+	}
+	if remoteErr != nil {
+		// The registry could not confirm presence (network/auth, not a
+		// definitive "absent"); don't block the deploy on it — the rollout
+		// surfaces a real pull failure if the image is genuinely missing.
+		ctx.Trace("deploy: could not verify " + tag + " in the registry (" + remoteErr.Error() + "); proceeding")
+		return nil
+	}
+	return fmt.Errorf("deploy --version %s: image %s is not present locally or in the registry; deploy installs an existing version and does not build it — run erun build/push to create it first", version, tag)
 }
 
 func configureDeployInputMetadata(store DeployStore, target OpenResult, deployInput *HelmDeploySpec) error {
@@ -710,12 +732,12 @@ func configureDeployInputMetadata(store DeployStore, target OpenResult, deployIn
 	return nil
 }
 
-func resolveDeploySpecForCurrentDockerBuild(ctx Context, store DeployStore, target OpenResult, deployContext KubernetesDeployContext, build DockerBuildSpec, force bool) (DeploySpec, error) {
-	builds := configureDockerBuildsForDeploy([]DockerBuildSpec{build})
-	builds, err := ApplyIncrementalToDockerBuilds(ctx, builds, force)
-	if err != nil {
-		return DeploySpec{}, err
-	}
+// resolveDeploySpecForCurrentDockerBuild builds the pure deploy plan for a
+// `build --deploy` orchestration: the working-tree image has already been
+// built and pushed by the build phase, so deploy references it by tag via an
+// ImageOverride and never builds. SkipHelm stays false (a build-and-deploy
+// rolls the chart); the orchestrator may set it when nothing was rebuilt.
+func resolveDeploySpecForCurrentDockerBuild(store DeployStore, target OpenResult, deployContext KubernetesDeployContext, build DockerBuildSpec) (DeploySpec, error) {
 	deployInput, err := newHelmDeploySpec(target, deployContext, "")
 	if err != nil {
 		return DeploySpec{}, err
@@ -731,15 +753,18 @@ func resolveDeploySpecForCurrentDockerBuild(ctx Context, store DeployStore, targ
 	return DeploySpec{
 		Target:        target,
 		DeployContext: deployContext,
-		Builds:        builds,
 		Deploy:        deployInput,
-		SkipHelm:      resolveDeploySkipHelm(ctx, deployContext, deployInput, builds),
 	}, nil
 }
 
+// resolveCurrentDockerComponentBuildForDeploy resolves the working-tree docker
+// build of the current component for a `build --deploy` orchestration. The
+// caller gates this on the env being a builds-here type; this helper only
+// requires that the current directory is a docker build context
+// (<module>/docker/<component>). Returns nil when there is no such context.
 func resolveCurrentDockerComponentBuildForDeploy(store DockerStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, now NowFunc, projectRoot, environment, versionOverride string) (*DockerBuildSpec, error) {
 	_, _, resolveDockerBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveDockerBuildContext, now)
-	if !isLocalEnvironment(environment) || resolveDockerBuildContext == nil {
+	if resolveDockerBuildContext == nil {
 		return nil, nil
 	}
 
@@ -813,23 +838,7 @@ func ResolveCurrentDeploySpecsForDockerTarget(ctx Context, store BuildDeployStor
 		return nil, err
 	}
 
-	return ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, deployTarget)
-}
-
-func ResolveDeploySpecForDockerTarget(ctx Context, store BuildDeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DockerCommandTarget, componentName string) (DeploySpec, error) {
-	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeBuildDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
-
-	target, _, err := ResolveDockerBuildTarget(findProjectRoot, target)
-	if err != nil {
-		return DeploySpec{}, err
-	}
-
-	deployTarget, err := resolveDeployTargetForDockerTarget(store, findProjectRoot, target)
-	if err != nil {
-		return DeploySpec{}, err
-	}
-
-	return ResolveDeploySpec(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, deployTarget, componentName, target.VersionOverride)
+	return resolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, deployTarget, true)
 }
 
 func resolveDeployTarget(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DeployTarget) (OpenResult, error) {
@@ -953,13 +962,6 @@ func resolveDeployVersionOverride(target DeployTarget, versionOverride string) s
 	return strings.TrimSpace(target.VersionOverride)
 }
 
-func deployTargetSnapshotEnabled(target OpenResult, override *bool) bool {
-	if override != nil {
-		return *override
-	}
-	return target.EnvConfig.BuildsHere()
-}
-
 func deployResetsDatabase(snapshotEnabled bool, version string) bool {
 	return snapshotEnabled || strings.Contains(strings.TrimSpace(version), "-snapshot-")
 }
@@ -1018,107 +1020,6 @@ func resolveDeployContext(findProjectRoot ProjectFinderFunc, resolveKubernetesDe
 		ComponentName: componentName,
 		ChartPath:     chartPath,
 	}, nil
-}
-
-func resolveAdditionalDockerBuildsForDeploy(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, now NowFunc, projectRoot, environment, chartPath, appVersion string, existing []DockerBuildSpec) ([]DockerBuildSpec, error) {
-	images, err := findDockerImagesInChart(chartPath, appVersion)
-	if err != nil {
-		return nil, err
-	}
-
-	seenTags := make(map[string]struct{}, len(existing))
-	seenImageNames := make(map[string]struct{}, len(existing))
-	for _, plan := range existing {
-		seenTags[plan.Image.Tag] = struct{}{}
-		if name := strings.TrimSpace(plan.Image.ImageName); name != "" {
-			seenImageNames[name] = struct{}{}
-		}
-	}
-
-	builds := make([]DockerBuildSpec, 0, len(images))
-	for _, image := range images {
-		buildInput, ok, err := ResolveDockerBuildForImageReference(store, findProjectRoot, resolveDockerBuildContext, now, projectRoot, environment, image)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			continue
-		}
-		if _, exists := seenTags[buildInput.Image.Tag]; exists {
-			continue
-		}
-		// Also deduplicate by image name: the chart may reference the same component
-		// using a non-registry prefix (e.g. "{{ .Chart.AppVersion }}/name:version")
-		// which produces a malformed tag.  If a build for this image name already
-		// exists in the pipeline (e.g. the main component build with the correct
-		// registry tag), skip the chart-discovered entry.
-		if name := strings.TrimSpace(buildInput.Image.ImageName); name != "" {
-			if _, exists := seenImageNames[name]; exists {
-				continue
-			}
-			seenImageNames[name] = struct{}{}
-		}
-		seenTags[buildInput.Image.Tag] = struct{}{}
-		builds = append(builds, buildInput)
-	}
-
-	// Also include any Dockerfile FROM dependencies of the resolved builds that
-	// have a local build context in the project (e.g. erun-ubuntu used as a base
-	// by erun-devops). This ensures base images are present in the registry with
-	// the correct platform support before multi-platform builds of their
-	// dependents start. configureDockerBuildsForDeploy will set Platforms+Push
-	// on these entries; the fingerprint cache then promotes them on repeat runs
-	// instead of rebuilding when the local fp-tags are still present.
-	allBuilds := append(existing, builds...)
-	baseBuilds, err := resolveDockerfileBaseImageBuilds(store, findProjectRoot, resolveDockerBuildContext, now, projectRoot, environment, allBuilds, seenTags)
-	if err != nil {
-		return nil, err
-	}
-	// Prepend so orderedDockerBuildSpecs places base images before their consumers.
-	builds = append(baseBuilds, builds...)
-
-	return builds, nil
-}
-
-// resolveDockerfileBaseImageBuilds scans the Dockerfiles of the given builds
-// and returns DockerBuildSpec entries for any FROM-referenced images that have
-// a local build context in the project.  Only non-variable, non-scratch
-// references are considered.  Already-seen tags (tracked via seenTags) are
-// skipped and the map is updated in-place to prevent duplicate entries.
-func resolveDockerfileBaseImageBuilds(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, now NowFunc, projectRoot, environment string, builds []DockerBuildSpec, seenTags map[string]struct{}) ([]DockerBuildSpec, error) {
-	result := make([]DockerBuildSpec, 0)
-	for _, build := range builds {
-		data, err := os.ReadFile(build.DockerfilePath)
-		if err != nil {
-			continue
-		}
-		for _, match := range dockerfileFromPattern.FindAllStringSubmatch(string(data), -1) {
-			if len(match) < 2 {
-				continue
-			}
-			imageRef := strings.TrimSpace(match[1])
-			if imageRef == "" || strings.Contains(imageRef, "$") {
-				continue
-			}
-			buildSpec, ok, err := ResolveDockerBuildForImageReference(store, findProjectRoot, resolveDockerBuildContext, now, projectRoot, environment, imageRef)
-			if err != nil || !ok {
-				continue
-			}
-			if _, exists := seenTags[buildSpec.Image.Tag]; exists {
-				continue
-			}
-			seenTags[buildSpec.Image.Tag] = struct{}{}
-			result = append(result, buildSpec)
-		}
-	}
-	return result, nil
-}
-
-func configureDockerBuildsForDeploy(builds []DockerBuildSpec) []DockerBuildSpec {
-	for i := range builds {
-		builds[i].Push = true
-	}
-	return builds
 }
 
 func resolveProjectTenantForRoot(store DeployStore, projectRoot string) (string, error) {
@@ -1205,6 +1106,10 @@ func newHelmDeploySpecWithValues(target OpenResult, deployContext KubernetesDepl
 	}, nil
 }
 
+// resolveProjectContainerRegistry resolves the registry the cluster pulls from
+// — the DEPLOY-marked entry of the environment's configured registry list.
+// Returns "" when the project is uninitialized or marks no list, so callers'
+// own fallbacks (deploy provenance, default) still apply.
 func resolveProjectContainerRegistry(projectRoot, environment string) string {
 	projectRoot = strings.TrimSpace(projectRoot)
 	if projectRoot == "" {
@@ -1214,10 +1119,12 @@ func resolveProjectContainerRegistry(projectRoot, environment string) string {
 	if err != nil {
 		return ""
 	}
-	if registry := projectConfig.ContainerRegistryForEnvironment(environment); registry != "" {
-		return registry
+	list := projectConfig.ContainerRegistriesForEnvironment(environment)
+	if list.IsZero() {
+		return ""
 	}
-	return singleProjectContainerRegistry(projectConfig)
+	registry, _ := list.DeployRegistry()
+	return registry
 }
 
 func applyCloudContextStopMetadata(store CloudReadStore, env EnvConfig, deployInput *HelmDeploySpec) {
@@ -2005,12 +1912,37 @@ func DeployHelmChart(params HelmDeployParams) error {
 			Err:               helmErr,
 		}
 	}
+	// Match against the dedicated stderr capture, not helmOutput: helm errors
+	// land on stderr, and helmOutput doubles as cmd.Stdout so a stderr-only
+	// failure can race to empty there (the pending-operation check above reads
+	// stderr for the same reason).
+	if helmErr != nil && isOCIChartReference(params.ChartPath) && isHelmChartNotFoundMessage(stderr.String()) {
+		return &PublishedChartNotFoundError{
+			ChartReference: params.ChartPath,
+			Version:        params.Version,
+			Registry:       params.ContainerRegistry,
+			HelmOutput:     strings.TrimSpace(stderr.String()),
+			Err:            helmErr,
+		}
+	}
 	if helmErr != nil && params.Verbosity < VerbosityDebug {
 		if output := strings.TrimSpace(helmOutput.String()); output != "" {
 			return fmt.Errorf("%w\n%s", helmErr, output)
 		}
 	}
 	return helmErr
+}
+
+// isHelmChartNotFoundMessage reports whether helm's captured output indicates
+// the chart reference could not be resolved in the registry (a missing or
+// pruned OCI tag), as opposed to a rollout, values, or connectivity failure.
+// Scoped by the caller to OCI charts, it turns the opaque chart-pull exit
+// status into an actionable PublishedChartNotFoundError.
+func isHelmChartNotFoundMessage(output string) bool {
+	lower := strings.ToLower(output)
+	return strings.Contains(lower, "not found") ||
+		strings.Contains(lower, "manifest unknown") ||
+		strings.Contains(lower, "manifestunknown")
 }
 
 // tracePodWatchAction records the watcher action in the dry-run trace so the
@@ -2487,10 +2419,6 @@ func hasHelmChart(chartFilePath string) bool {
 	return !info.IsDir()
 }
 
-func findLiteralDockerImagesInChart(chartPath string) ([]string, error) {
-	return findDockerImagesInChart(chartPath, "")
-}
-
 func findDockerImagesInChart(chartPath, appVersion string) ([]string, error) {
 	images := make([]string, 0, 4)
 	seen := make(map[string]struct{}, 4)
@@ -2531,10 +2459,6 @@ func findDockerImagesInChart(chartPath, appVersion string) ([]string, error) {
 	}
 
 	return images, nil
-}
-
-func literalDockerImageFromChartLine(line string) string {
-	return dockerImageFromChartLine(line, "")
 }
 
 func dockerImageFromChartLine(line, appVersion string) string {

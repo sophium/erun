@@ -46,6 +46,10 @@ type CommandOutput struct {
 	Stdout           string                  `json:"stdout,omitempty"`
 	Stderr           string                  `json:"stderr,omitempty"`
 	RootConfig       *DoctorRootConfigReport `json:"rootConfig,omitempty"`
+	// Build carries the minted version and per-image tags from the `build`
+	// tool, so an Agent can capture the version and thread it into `push` /
+	// `deploy` (erun-mcp/AGENTS.md — MCP composes the pure primitives itself).
+	Build *eruncommon.BuildResult `json:"build,omitempty"`
 }
 
 var ansiRegexp = regexp.MustCompile(`\x1b\[[0-9;]*m`)
