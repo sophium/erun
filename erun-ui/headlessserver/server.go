@@ -150,29 +150,31 @@ func writeStatic(w http.ResponseWriter, path string, data []byte) {
 	_, _ = w.Write(data)
 }
 
+// contentTypeBySuffix maps a file-extension suffix to the Content-Type the
+// static handler advertises. Order matters: ".woff2" must precede ".woff" so
+// the longer suffix wins, mirroring the original switch.
+var contentTypeBySuffix = []struct {
+	suffix      string
+	contentType string
+}{
+	{".js", "application/javascript; charset=utf-8"},
+	{".css", "text/css; charset=utf-8"},
+	{".html", "text/html; charset=utf-8"},
+	{".json", "application/json; charset=utf-8"},
+	{".svg", "image/svg+xml"},
+	{".png", "image/png"},
+	{".woff2", "font/woff2"},
+	{".woff", "font/woff"},
+	{".map", "application/json; charset=utf-8"},
+}
+
 func contentTypeForPath(path string) string {
-	switch {
-	case strings.HasSuffix(path, ".js"):
-		return "application/javascript; charset=utf-8"
-	case strings.HasSuffix(path, ".css"):
-		return "text/css; charset=utf-8"
-	case strings.HasSuffix(path, ".html"):
-		return "text/html; charset=utf-8"
-	case strings.HasSuffix(path, ".json"):
-		return "application/json; charset=utf-8"
-	case strings.HasSuffix(path, ".svg"):
-		return "image/svg+xml"
-	case strings.HasSuffix(path, ".png"):
-		return "image/png"
-	case strings.HasSuffix(path, ".woff2"):
-		return "font/woff2"
-	case strings.HasSuffix(path, ".woff"):
-		return "font/woff"
-	case strings.HasSuffix(path, ".map"):
-		return "application/json; charset=utf-8"
-	default:
-		return ""
+	for _, entry := range contentTypeBySuffix {
+		if strings.HasSuffix(path, entry.suffix) {
+			return entry.contentType
+		}
 	}
+	return ""
 }
 
 // invokeRequest is the wire payload for /__erun_invoke. args is held as raw
@@ -217,10 +219,20 @@ func callMethod(method reflect.Value, rawArgs []json.RawMessage) (any, error) {
 	if len(rawArgs) != wantArgs {
 		return nil, fmt.Errorf("expected %d args, got %d", wantArgs, len(rawArgs))
 	}
-	in := make([]reflect.Value, wantArgs)
-	for i := 0; i < wantArgs; i++ {
-		paramType := mt.In(i)
-		slot := reflect.New(paramType)
+	in, err := decodeMethodArgs(mt, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	return mapMethodResults(method.Call(in))
+}
+
+// decodeMethodArgs reflectively unmarshals each raw JSON arg into the exact Go
+// type the method's matching parameter expects. A missing or null arg leaves
+// the parameter at its zero value, matching Wails' lenient call convention.
+func decodeMethodArgs(mt reflect.Type, rawArgs []json.RawMessage) ([]reflect.Value, error) {
+	in := make([]reflect.Value, mt.NumIn())
+	for i := 0; i < mt.NumIn(); i++ {
+		slot := reflect.New(mt.In(i))
 		if len(rawArgs[i]) > 0 && string(rawArgs[i]) != "null" {
 			if err := json.Unmarshal(rawArgs[i], slot.Interface()); err != nil {
 				return nil, fmt.Errorf("arg %d: %v", i, err)
@@ -228,9 +240,12 @@ func callMethod(method reflect.Value, rawArgs []json.RawMessage) (any, error) {
 		}
 		in[i] = slot.Elem()
 	}
-	results := method.Call(in)
-	// Wails methods return one of: (), (T), (error), or (T, error). Map
-	// the common shapes back to a {data, error?} envelope.
+	return in, nil
+}
+
+// mapMethodResults maps a Wails method's return values — one of (), (T),
+// (error), or (T, error) — back to a {data, error?} envelope.
+func mapMethodResults(results []reflect.Value) (any, error) {
 	var (
 		data any
 		err  error

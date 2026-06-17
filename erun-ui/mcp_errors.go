@@ -42,7 +42,14 @@ func isMCPDialFailure(err error) bool {
 	if errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ETIMEDOUT) {
 		return true
 	}
-	msg := err.Error()
+	return mcpDialFailureMessage(err.Error())
+}
+
+// mcpDialFailureMessage reports whether a surfaced error string matches one of
+// the substrings that indicate the MCP port-forward could not be dialed. Split
+// from isMCPDialFailure so the errno/net.OpError checks and the message scan
+// stay independently simple.
+func mcpDialFailureMessage(msg string) bool {
 	return strings.Contains(msg, "connection refused") ||
 		strings.Contains(msg, "EOF") ||
 		strings.Contains(msg, "connection reset") ||

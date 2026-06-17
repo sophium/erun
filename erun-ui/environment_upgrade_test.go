@@ -98,24 +98,7 @@ func TestResolveUpgradePlanOffersCandidatesWhenRegistriesDisagree(t *testing.T) 
 				},
 			},
 		},
-		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
-			switch repository {
-			case "petios-devops":
-				return eruncommon.RuntimeRegistryVersions{
-					Image:          namespace + "/" + repository,
-					Tags:           []string{tenantSnapshot},
-					LatestSnapshot: tenantSnapshot,
-				}, nil
-			case eruncommon.DefaultRuntimeImageName:
-				return eruncommon.RuntimeRegistryVersions{
-					Image:          namespace + "/" + repository,
-					LatestSnapshot: defaultSnapshot,
-				}, nil
-			default:
-				t.Fatalf("unexpected registry repository: %s", repository)
-			}
-			return eruncommon.RuntimeRegistryVersions{}, nil
-		},
+		resolveImageRegistry: disagreeingSnapshotRegistry(t, tenantSnapshot, defaultSnapshot),
 	})
 
 	plan, err := app.ResolveUpgradePlan()
@@ -135,12 +118,48 @@ func TestResolveUpgradePlanOffersCandidatesWhenRegistriesDisagree(t *testing.T) 
 	if !strings.Contains(item.UnresolvedReason, "multiple newer versions") {
 		t.Fatalf("expected the multiple-newer reason, got %q", item.UnresolvedReason)
 	}
+	assertCandidateVersions(t, item.Candidates, tenantSnapshot, defaultSnapshot)
+}
+
+// disagreeingSnapshotRegistry resolves the tenant image and the canonical ERun
+// image to different latest snapshots, so the upgrade planner sees two distinct
+// newer versions for the tracked channel.
+func disagreeingSnapshotRegistry(t *testing.T, tenantSnapshot, defaultSnapshot string) func(context.Context, string, string) (eruncommon.RuntimeRegistryVersions, error) {
+	t.Helper()
+
+	return func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
+		switch repository {
+		case "petios-devops":
+			return eruncommon.RuntimeRegistryVersions{
+				Image:          namespace + "/" + repository,
+				Tags:           []string{tenantSnapshot},
+				LatestSnapshot: tenantSnapshot,
+			}, nil
+		case eruncommon.DefaultRuntimeImageName:
+			return eruncommon.RuntimeRegistryVersions{
+				Image:          namespace + "/" + repository,
+				LatestSnapshot: defaultSnapshot,
+			}, nil
+		default:
+			t.Fatalf("unexpected registry repository: %s", repository)
+		}
+		return eruncommon.RuntimeRegistryVersions{}, nil
+	}
+}
+
+// assertCandidateVersions confirms each wanted version appears among the
+// offered upgrade candidates.
+func assertCandidateVersions(t *testing.T, candidates []eruncommon.UpgradeVersionCandidate, want ...string) {
+	t.Helper()
+
 	versions := map[string]bool{}
-	for _, candidate := range item.Candidates {
+	for _, candidate := range candidates {
 		versions[candidate.Version] = true
 	}
-	if !versions[tenantSnapshot] || !versions[defaultSnapshot] {
-		t.Fatalf("expected both registry versions as candidates, got %+v", item.Candidates)
+	for _, w := range want {
+		if !versions[w] {
+			t.Fatalf("expected %q among candidates, got %+v", w, candidates)
+		}
 	}
 }
 

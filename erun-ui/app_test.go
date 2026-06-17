@@ -48,20 +48,26 @@ func TestStateFromListResultUsesEffectiveSelection(t *testing.T) {
 	if len(state.Tenants) != 1 || len(state.Tenants[0].Environments) != 2 {
 		t.Fatalf("unexpected tenants: %+v", state.Tenants)
 	}
-	if state.Tenants[0].Environments[0].MCPURL != "http://127.0.0.1:17000/mcp" {
-		t.Fatalf("unexpected MCP URL: %+v", state.Tenants[0].Environments[0])
+	assertEffectiveSelectionEnvironments(t, state.Tenants[0].Environments)
+}
+
+func assertEffectiveSelectionEnvironments(t *testing.T, envs []uiEnvironment) {
+	t.Helper()
+
+	if envs[0].MCPURL != "http://127.0.0.1:17000/mcp" {
+		t.Fatalf("unexpected MCP URL: %+v", envs[0])
 	}
-	if state.Tenants[0].Environments[0].APIURL != "http://127.0.0.1:17033" {
-		t.Fatalf("unexpected API URL: %+v", state.Tenants[0].Environments[0])
+	if envs[0].APIURL != "http://127.0.0.1:17033" {
+		t.Fatalf("unexpected API URL: %+v", envs[0])
 	}
-	if state.Tenants[0].Environments[0].RuntimeVersion != "1.0.19-snapshot-20260418141901" {
-		t.Fatalf("unexpected runtime version: %+v", state.Tenants[0].Environments[0])
+	if envs[0].RuntimeVersion != "1.0.19-snapshot-20260418141901" {
+		t.Fatalf("unexpected runtime version: %+v", envs[0])
 	}
-	if !state.Tenants[0].Environments[0].SSHDEnabled || state.Tenants[0].Environments[1].SSHDEnabled {
-		t.Fatalf("unexpected SSHD flags: %+v", state.Tenants[0].Environments)
+	if !envs[0].SSHDEnabled || envs[1].SSHDEnabled {
+		t.Fatalf("unexpected SSHD flags: %+v", envs)
 	}
-	if state.Tenants[0].Environments[0].Type == string(eruncommon.EnvironmentTypeRemoteAgent) || state.Tenants[0].Environments[1].Type != string(eruncommon.EnvironmentTypeRemoteAgent) {
-		t.Fatalf("unexpected env types: %+v", state.Tenants[0].Environments)
+	if envs[0].Type == string(eruncommon.EnvironmentTypeRemoteAgent) || envs[1].Type != string(eruncommon.EnvironmentTypeRemoteAgent) {
+		t.Fatalf("unexpected env types: %+v", envs)
 	}
 }
 
@@ -1357,12 +1363,7 @@ func TestLoadAndSaveTenantConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadTenantConfig failed: %v", err)
 	}
-	if loaded.Name != "frs" || loaded.DefaultEnvironment != "dev" || loaded.APIURL != "https://api.old.example" || loaded.PrimaryCloudProviderAlias != "team-cloud" || len(loaded.CloudProviderAliases) != 1 || loaded.CloudProviderAliases[0] != "team-cloud" {
-		t.Fatalf("unexpected loaded config: %+v", loaded)
-	}
-	if len(loaded.CloudProviders) != 1 || loaded.CloudProviders[0].OIDCIssuerURL != "https://issuer.team.example" {
-		t.Fatalf("expected cloud provider statuses with issuer URL, got %+v", loaded.CloudProviders)
-	}
+	assertLoadedTenantConfig(t, loaded)
 
 	saved, err := app.SaveTenantConfig(uiTenantConfig{
 		Name:                      "frs",
@@ -1379,6 +1380,17 @@ func TestLoadAndSaveTenantConfig(t *testing.T) {
 	}
 	if store.tenants["frs"].APIURL != "https://api.new.example" || store.tenants["frs"].PrimaryCloudProviderAlias != "team-cloud" {
 		t.Fatalf("expected tenant project root to be preserved, got %+v", store.tenants["frs"])
+	}
+}
+
+func assertLoadedTenantConfig(t *testing.T, loaded uiTenantConfig) {
+	t.Helper()
+
+	if loaded.Name != "frs" || loaded.DefaultEnvironment != "dev" || loaded.APIURL != "https://api.old.example" || loaded.PrimaryCloudProviderAlias != "team-cloud" || len(loaded.CloudProviderAliases) != 1 || loaded.CloudProviderAliases[0] != "team-cloud" {
+		t.Fatalf("unexpected loaded config: %+v", loaded)
+	}
+	if len(loaded.CloudProviders) != 1 || loaded.CloudProviders[0].OIDCIssuerURL != "https://issuer.team.example" {
+		t.Fatalf("expected cloud provider statuses with issuer URL, got %+v", loaded.CloudProviders)
 	}
 }
 
@@ -1452,28 +1464,7 @@ func TestGetCloudProviderBearerTokenReturnsTokenAndStatus(t *testing.T) {
 func TestLoadTenantDashboardUsesPrimaryCloudBearer(t *testing.T) {
 	jwt := testUIJWT("https://sts.aws.example")
 	var requests []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.Header.Get("Authorization") != "Bearer "+jwt {
-			t.Fatalf("unexpected authorization header: %q", req.Header.Get("Authorization"))
-		}
-		if req.Header.Get("X-ERun-Username") != "Rihards.Freimanis" {
-			t.Fatalf("unexpected username hint: %q", req.Header.Get("X-ERun-Username"))
-		}
-		requests = append(requests, req.URL.Path)
-		w.Header().Set("Content-Type", "application/json")
-		switch req.URL.Path {
-		case "/v1/whoami":
-			_, _ = w.Write([]byte(`{"tenantId":"tenant-1","userId":"user-1","username":"Rihards.Freimanis","roles":["ReadAll","WriteAll"],"issuer":"https://sts.aws.example","subject":"subject-1"}`))
-		case "/v1/reviews":
-			_, _ = w.Write([]byte(`[{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}]`))
-		case "/v1/reviews/merge-queue":
-			_, _ = w.Write([]byte(`[{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}]`))
-		case "/v1/reviews/review-1/builds":
-			_, _ = w.Write([]byte(`[{"buildId":"build-1","tenantId":"tenant-1","reviewId":"review-1","successful":true,"commitId":"abc","version":"1.2.3"}]`))
-		default:
-			http.NotFound(w, req)
-		}
-	}))
+	server := httptest.NewServer(tenantDashboardHandler(t, jwt, &requests))
 	defer server.Close()
 
 	rootConfig := eruncommon.ERunConfig{CloudProviders: []eruncommon.CloudProviderConfig{{
@@ -1505,6 +1496,39 @@ func TestLoadTenantDashboardUsesPrimaryCloudBearer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadTenantDashboard failed: %v", err)
 	}
+	assertPrimaryCloudDashboard(t, dashboard, requests)
+}
+
+func tenantDashboardHandler(t *testing.T, jwt string, requests *[]string) http.HandlerFunc {
+	t.Helper()
+
+	return func(w http.ResponseWriter, req *http.Request) {
+		if req.Header.Get("Authorization") != "Bearer "+jwt {
+			t.Fatalf("unexpected authorization header: %q", req.Header.Get("Authorization"))
+		}
+		if req.Header.Get("X-ERun-Username") != "Rihards.Freimanis" {
+			t.Fatalf("unexpected username hint: %q", req.Header.Get("X-ERun-Username"))
+		}
+		*requests = append(*requests, req.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch req.URL.Path {
+		case "/v1/whoami":
+			_, _ = w.Write([]byte(`{"tenantId":"tenant-1","userId":"user-1","username":"Rihards.Freimanis","roles":["ReadAll","WriteAll"],"issuer":"https://sts.aws.example","subject":"subject-1"}`))
+		case "/v1/reviews":
+			_, _ = w.Write([]byte(`[{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}]`))
+		case "/v1/reviews/merge-queue":
+			_, _ = w.Write([]byte(`[{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}]`))
+		case "/v1/reviews/review-1/builds":
+			_, _ = w.Write([]byte(`[{"buildId":"build-1","tenantId":"tenant-1","reviewId":"review-1","successful":true,"commitId":"abc","version":"1.2.3"}]`))
+		default:
+			http.NotFound(w, req)
+		}
+	}
+}
+
+func assertPrimaryCloudDashboard(t *testing.T, dashboard uiTenantDashboard, requests []string) {
+	t.Helper()
+
 	if dashboard.User == nil || dashboard.User.Username != "Rihards.Freimanis" || len(dashboard.User.Roles) != 2 || len(dashboard.MergeQueue) != 1 || len(dashboard.Builds) != 1 || dashboard.Builds[0].ReviewName != "Review 1" {
 		t.Fatalf("unexpected dashboard: %+v", dashboard)
 	}
@@ -1887,11 +1911,20 @@ func assertStoredEnvironmentConfig(t *testing.T, stored eruncommon.EnvConfig, pr
 	t.Helper()
 
 	storedRegistry, _ := stored.ContainerRegistries.BuildRegistry()
-	if stored.EffectiveLocalRepoPath() != projectRoot || stored.Type != eruncommon.EnvironmentTypeRuntime || stored.RuntimeVersion != "1.0.0" || storedRegistry != "registry.example/team" || stored.CloudProviderAlias != "other-cloud" || stored.SSHD.Enabled || stored.SSHD.LocalPort != 60022 || stored.SSHD.PublicKeyPath != "/tmp/old.pub" {
+	if stored.EffectiveLocalRepoPath() != projectRoot || stored.Type != eruncommon.EnvironmentTypeRuntime || stored.RuntimeVersion != "1.0.0" || storedRegistry != "registry.example/team" || stored.CloudProviderAlias != "other-cloud" {
 		t.Fatalf("unexpected stored config: %+v", stored)
 	}
+	assertStoredEnvironmentSSHD(t, stored)
 	if stored.RuntimePod.CPU != "6" || stored.RuntimePod.Memory != "12Gi" {
 		t.Fatalf("unexpected stored runtime pod config: %+v", stored.RuntimePod)
+	}
+}
+
+func assertStoredEnvironmentSSHD(t *testing.T, stored eruncommon.EnvConfig) {
+	t.Helper()
+
+	if stored.SSHD.Enabled || stored.SSHD.LocalPort != 60022 || stored.SSHD.PublicKeyPath != "/tmp/old.pub" {
+		t.Fatalf("unexpected stored config: %+v", stored)
 	}
 }
 
@@ -2124,26 +2157,38 @@ func TestLoadEnvironmentConfigExposesClaudeDefaultsAndOverrides(t *testing.T) {
 		t.Fatalf("LoadEnvironmentConfig failed: %v", err)
 	}
 
-	if got.Claude.UseBedrock == nil || *got.Claude.UseBedrock {
-		t.Fatalf("expected Claude.UseBedrock=false, got %+v", got.Claude)
+	assertClaudeOverrides(t, got.Claude)
+	assertClaudeDefaults(t, got.ClaudeDefaults)
+}
+
+func assertClaudeOverrides(t *testing.T, claude uiClaudeConfig) {
+	t.Helper()
+
+	if claude.UseBedrock == nil || *claude.UseBedrock {
+		t.Fatalf("expected Claude.UseBedrock=false, got %+v", claude)
 	}
-	if got.Claude.UseMantle != nil {
-		t.Fatalf("expected Claude.UseMantle to remain unset, got %+v", got.Claude)
+	if claude.UseMantle != nil {
+		t.Fatalf("expected Claude.UseMantle to remain unset, got %+v", claude)
 	}
-	if got.Claude.MaxOutputTokens == nil || *got.Claude.MaxOutputTokens != 8192 {
-		t.Fatalf("expected Claude.MaxOutputTokens=8192, got %+v", got.Claude)
+	if claude.MaxOutputTokens == nil || *claude.MaxOutputTokens != 8192 {
+		t.Fatalf("expected Claude.MaxOutputTokens=8192, got %+v", claude)
 	}
-	if !equalStringSlices(got.Claude.Models, []string{"opus", "sonnet"}) {
-		t.Fatalf("expected Claude.Models=[opus sonnet], got %+v", got.Claude.Models)
+	if !equalStringSlices(claude.Models, []string{"opus", "sonnet"}) {
+		t.Fatalf("expected Claude.Models=[opus sonnet], got %+v", claude.Models)
 	}
-	if got.ClaudeDefaults.MaxOutputTokens != eruncommon.DefaultClaudeMaxOutputTokens {
-		t.Fatalf("expected default max output tokens, got %d", got.ClaudeDefaults.MaxOutputTokens)
+}
+
+func assertClaudeDefaults(t *testing.T, defaults uiClaudeDefaults) {
+	t.Helper()
+
+	if defaults.MaxOutputTokens != eruncommon.DefaultClaudeMaxOutputTokens {
+		t.Fatalf("expected default max output tokens, got %d", defaults.MaxOutputTokens)
 	}
-	if !equalStringSlices(got.ClaudeDefaults.Models, eruncommon.DefaultClaudeAvailableModels()) {
-		t.Fatalf("expected default models, got %+v", got.ClaudeDefaults.Models)
+	if !equalStringSlices(defaults.Models, eruncommon.DefaultClaudeAvailableModels()) {
+		t.Fatalf("expected default models, got %+v", defaults.Models)
 	}
-	if !equalStringSlices(got.ClaudeDefaults.KnownModels, eruncommon.KnownClaudeModels()) {
-		t.Fatalf("expected known models list, got %+v", got.ClaudeDefaults.KnownModels)
+	if !equalStringSlices(defaults.KnownModels, eruncommon.KnownClaudeModels()) {
+		t.Fatalf("expected known models list, got %+v", defaults.KnownModels)
 	}
 }
 
@@ -2284,42 +2329,58 @@ func TestSetEnvironmentAutoStartPersistsTriStateValue(t *testing.T) {
 	}
 	app := NewApp(erunUIDeps{store: store})
 
-	saved, err := app.SetEnvironmentAutoStart(uiSelection{Tenant: "frs", Environment: "prod"}, "never")
-	if err != nil {
-		t.Fatalf("SetEnvironmentAutoStart(never) failed: %v", err)
-	}
-	if saved.AutoStart == nil || *saved.AutoStart != false {
-		t.Fatalf("expected returned AutoStart=false, got %+v", saved.AutoStart)
-	}
-	if got := store.envs["frs/prod"].AutoStart; got == nil || *got != false {
-		t.Fatalf("expected stored AutoStart=false, got %+v", got)
-	}
+	never := false
+	saved := setAutoStartMode(t, app, "never")
+	assertReturnedAutoStart(t, saved.AutoStart, &never, "false")
+	assertStoredAutoStart(t, store.envs["frs/prod"].AutoStart, &never, "false")
 	if keptRegistry, _ := store.envs["frs/prod"].ContainerRegistries.BuildRegistry(); keptRegistry != "registry.example/keep" {
 		t.Fatalf("SetEnvironmentAutoStart must not rewrite unrelated fields, got %+v", store.envs["frs/prod"])
 	}
 
-	saved, err = app.SetEnvironmentAutoStart(uiSelection{Tenant: "frs", Environment: "prod"}, "always")
-	if err != nil {
-		t.Fatalf("SetEnvironmentAutoStart(always) failed: %v", err)
-	}
-	if saved.AutoStart == nil || *saved.AutoStart != true {
-		t.Fatalf("expected returned AutoStart=true, got %+v", saved.AutoStart)
-	}
+	always := true
+	saved = setAutoStartMode(t, app, "always")
+	assertReturnedAutoStart(t, saved.AutoStart, &always, "true")
 
-	saved, err = app.SetEnvironmentAutoStart(uiSelection{Tenant: "frs", Environment: "prod"}, "ask")
-	if err != nil {
-		t.Fatalf("SetEnvironmentAutoStart(ask) failed: %v", err)
-	}
-	if saved.AutoStart != nil {
-		t.Fatalf("expected returned AutoStart=nil after ask, got %+v", saved.AutoStart)
-	}
-	if got := store.envs["frs/prod"].AutoStart; got != nil {
-		t.Fatalf("expected stored AutoStart=nil after ask, got %+v", got)
-	}
+	saved = setAutoStartMode(t, app, "ask")
+	assertReturnedAutoStart(t, saved.AutoStart, nil, "nil after ask")
+	assertStoredAutoStart(t, store.envs["frs/prod"].AutoStart, nil, "nil after ask")
 
 	if _, err := app.SetEnvironmentAutoStart(uiSelection{Tenant: "frs", Environment: "prod"}, "bogus"); err == nil {
 		t.Fatal("expected unknown auto-start mode to be rejected")
 	}
+}
+
+func setAutoStartMode(t *testing.T, app *App, mode string) uiEnvironmentConfig {
+	t.Helper()
+
+	saved, err := app.SetEnvironmentAutoStart(uiSelection{Tenant: "frs", Environment: "prod"}, mode)
+	if err != nil {
+		t.Fatalf("SetEnvironmentAutoStart(%s) failed: %v", mode, err)
+	}
+	return saved
+}
+
+func assertReturnedAutoStart(t *testing.T, got, want *bool, label string) {
+	t.Helper()
+
+	if !equalBoolPtr(got, want) {
+		t.Fatalf("expected returned AutoStart=%s, got %+v", label, got)
+	}
+}
+
+func assertStoredAutoStart(t *testing.T, got, want *bool, label string) {
+	t.Helper()
+
+	if !equalBoolPtr(got, want) {
+		t.Fatalf("expected stored AutoStart=%s, got %+v", label, got)
+	}
+}
+
+func equalBoolPtr(a, b *bool) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
 }
 
 func equalStringSlices(a, b []string) bool {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -144,18 +145,7 @@ func runErunCaptured(ctx context.Context, cliPath, dir string, onLine func(strin
 		done <- struct{}{}
 	}()
 	go func() {
-		scanner := bufio.NewScanner(stderrPipe)
-		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if onLine != nil && strings.TrimSpace(line) != "" {
-				onLine(line)
-			}
-			if lastErr.Len() > 0 {
-				lastErr.WriteByte('\n')
-			}
-			lastErr.WriteString(line)
-		}
+		scanErunStderr(stderrPipe, onLine, &lastErr)
 		done <- struct{}{}
 	}()
 	<-done
@@ -168,6 +158,25 @@ func runErunCaptured(ctx context.Context, cliPath, dir string, onLine func(strin
 		return stdoutBuf.String(), fmt.Errorf("erun %s: %w", args[0], err)
 	}
 	return stdoutBuf.String(), nil
+}
+
+// scanErunStderr streams erun's trace stream line by line: every non-blank
+// line is forwarded to onLine (the activity-queue trace handler) and every
+// line is accumulated into lastErr (newline-separated) so the captured tail
+// can be attached to a non-zero-exit error.
+func scanErunStderr(stderrPipe io.Reader, onLine func(string), lastErr *strings.Builder) {
+	scanner := bufio.NewScanner(stderrPipe)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if onLine != nil && strings.TrimSpace(line) != "" {
+			onLine(line)
+		}
+		if lastErr.Len() > 0 {
+			lastErr.WriteByte('\n')
+		}
+		lastErr.WriteString(line)
+	}
 }
 
 // parseBuildResultVersion extracts the minted version from `erun build

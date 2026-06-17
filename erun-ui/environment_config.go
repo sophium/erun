@@ -40,30 +40,44 @@ func (a *App) SaveEnvironmentConfig(selection uiSelection, config uiEnvironmentC
 	if err != nil {
 		return uiEnvironmentConfig{}, err
 	}
-	updated, err := a.updatedEnvironmentConfig(config, existing)
+	updated, err := a.persistEnvironmentConfig(selection, config, existing)
 	if err != nil {
 		return uiEnvironmentConfig{}, err
 	}
-	registries, err := uiToContainerRegistries(config.ContainerRegistries)
-	if err != nil {
-		return uiEnvironmentConfig{}, err
-	}
-	if err := a.applyContainerRegistries(selection, &updated, registries); err != nil {
-		return uiEnvironmentConfig{}, err
-	}
-	if err := a.saveRemoteCloudAlias(selection, existing, updated); err != nil {
-		return uiEnvironmentConfig{}, err
-	}
-	if err := a.deps.store.SaveEnvConfig(selection.Tenant, updated); err != nil {
-		return uiEnvironmentConfig{}, err
-	}
-	a.reconcileWorkspaceSyncForSelection(selection, updated.SSHD.WorkspaceSync.Enabled)
-	a.reconcileCloudCredentialsRefresherForSelection(selection, updated.RemoteHostCredentials && updated.RemoteWorktree())
 	ports, err := eruncommon.ResolveEnvironmentLocalPorts(a.deps.store, selection.Tenant, selection.Environment)
 	if err != nil {
 		return uiEnvironmentConfig{}, err
 	}
 	return a.environmentConfigToUI(selection.Tenant, updated, selection.Environment, ports)
+}
+
+// persistEnvironmentConfig builds the updated env config from the edited UI
+// values and existing config, routes the container-registry list to its
+// owning store, applies a changed remote cloud alias, saves the env config,
+// and reconciles the workspace-sync and cloud-credentials refreshers. The
+// steps run in the same order and persist the same fields as before; it
+// returns the saved config so the caller can render it back to the UI.
+func (a *App) persistEnvironmentConfig(selection uiSelection, config uiEnvironmentConfig, existing eruncommon.EnvConfig) (eruncommon.EnvConfig, error) {
+	updated, err := a.updatedEnvironmentConfig(config, existing)
+	if err != nil {
+		return eruncommon.EnvConfig{}, err
+	}
+	registries, err := uiToContainerRegistries(config.ContainerRegistries)
+	if err != nil {
+		return eruncommon.EnvConfig{}, err
+	}
+	if err := a.applyContainerRegistries(selection, &updated, registries); err != nil {
+		return eruncommon.EnvConfig{}, err
+	}
+	if err := a.saveRemoteCloudAlias(selection, existing, updated); err != nil {
+		return eruncommon.EnvConfig{}, err
+	}
+	if err := a.deps.store.SaveEnvConfig(selection.Tenant, updated); err != nil {
+		return eruncommon.EnvConfig{}, err
+	}
+	a.reconcileWorkspaceSyncForSelection(selection, updated.SSHD.WorkspaceSync.Enabled)
+	a.reconcileCloudCredentialsRefresherForSelection(selection, updated.RemoteHostCredentials && updated.RemoteWorktree())
+	return updated, nil
 }
 
 // applyContainerRegistries persists the edited marked list to the place that

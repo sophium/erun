@@ -68,7 +68,7 @@ func TestIndexInjectsShim(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), "window.go.main.App[\"Echo\"]") {
 		t.Fatalf("shim missing Echo binding: %s", body)
@@ -87,7 +87,7 @@ func TestStaticAssetServed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), "console.log('main')") {
 		t.Fatalf("static asset body wrong: %s", body)
@@ -104,7 +104,7 @@ func TestInvokeReturnsData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 200 {
 		out, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status %d: %s", resp.StatusCode, out)
@@ -131,7 +131,7 @@ func TestInvokeReturnsErrorEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 500 {
 		t.Fatalf("status = %d, want 500", resp.StatusCode)
 	}
@@ -151,7 +151,7 @@ func TestInvokeUnknownMethod(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 404 {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
@@ -164,7 +164,7 @@ func TestInvokePlainReturn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var env invokeEnvelope
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
 		t.Fatal(err)
@@ -189,7 +189,7 @@ func TestEmitFansOutToSubscriber(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Subscription happens during the handler; give it a beat to register
 	// before emitting so the test does not race the subscriber map.
@@ -198,38 +198,11 @@ func TestEmitFansOutToSubscriber(t *testing.T) {
 	got := make(chan event, 1)
 	go func() {
 		defer wg.Done()
-		reader := bufioReaderForSSE(resp.Body)
-		for {
-			line, err := reader.ReadString('\n')
-			if err != nil {
-				return
-			}
-			line = strings.TrimSpace(line)
-			if !strings.HasPrefix(line, "data:") {
-				continue
-			}
-			var ev event
-			if err := json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &ev); err == nil {
-				got <- ev
-				return
-			}
-		}
+		readFirstSSEEvent(resp.Body, got)
 	}()
 
 	// Wait until at least one subscriber is registered before emitting.
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		srv.subsMu.Lock()
-		n := len(srv.subs)
-		srv.subsMu.Unlock()
-		if n > 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("no subscriber registered")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	waitForSubscriber(t, srv)
 
 	srv.Emit("ping", "hello", 42)
 
@@ -243,6 +216,47 @@ func TestEmitFansOutToSubscriber(t *testing.T) {
 	}
 }
 
+// readFirstSSEEvent reads SSE "data:" frames from the response body until it
+// decodes one event, then sends it on got and returns.
+func readFirstSSEEvent(body io.Reader, got chan<- event) {
+	reader := bufioReaderForSSE(body)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return
+		}
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		var ev event
+		if err := json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &ev); err == nil {
+			got <- ev
+			return
+		}
+	}
+}
+
+// waitForSubscriber blocks until the server has registered at least one SSE
+// subscriber, so an Emit cannot race ahead of the subscription.
+func waitForSubscriber(t *testing.T, srv *Server) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		srv.subsMu.Lock()
+		n := len(srv.subs)
+		srv.subsMu.Unlock()
+		if n > 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no subscriber registered")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func TestClipboardStoresInMemory(t *testing.T) {
 	_, _, ts := newTestServer(t)
 	body, _ := json.Marshal(clipboardRequest{Action: "set", Text: "hello"})
@@ -250,14 +264,14 @@ func TestClipboardStoresInMemory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	body, _ = json.Marshal(clipboardRequest{Action: "get"})
 	resp, err = http.Post(ts.URL+"/__erun_clipboard", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var got clipboardResponse
 	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
 		t.Fatal(err)

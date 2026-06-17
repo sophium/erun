@@ -49,28 +49,8 @@ func (a *App) cloudCredentialsRefresherKey(selection uiSelection) string {
 // selection is a no-op.
 func (a *App) startCloudCredentialsRefresherForSelection(selection uiSelection) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return
-	}
-	envConfig, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment)
-	if err != nil {
-		return
-	}
-	if !envConfig.RemoteHostCredentials || !envConfig.RemoteWorktree() {
-		return
-	}
-	if strings.TrimSpace(envConfig.CloudProviderAlias) == "" {
-		return
-	}
-	provider, err := eruncommon.ResolveCloudProvider(a.deps.store, envConfig.CloudProviderAlias)
-	if err != nil || provider.Provider != eruncommon.CloudProviderAWS {
-		return
-	}
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
-		Tenant:      selection.Tenant,
-		Environment: selection.Environment,
-	})
-	if err != nil {
+	alias, result, ok := a.resolveCloudCredentialsRefreshTarget(selection)
+	if !ok {
 		return
 	}
 
@@ -90,8 +70,42 @@ func (a *App) startCloudCredentialsRefresherForSelection(selection uiSelection) 
 
 	go func() {
 		defer close(refresher.done)
-		a.runCloudCredentialsRefresher(ctx, selection, envConfig.CloudProviderAlias, result)
+		a.runCloudCredentialsRefresher(ctx, selection, alias, result)
 	}()
+}
+
+// resolveCloudCredentialsRefreshTarget evaluates the per-env preconditions that
+// gate the host-credential refresher: a non-empty tenant/env, the
+// RemoteHostCredentials opt-in on a remote worktree, a configured AWS-backed
+// cloud provider alias, and a resolvable open target. It returns the provider
+// alias and resolved OpenResult plus ok=true only when every precondition holds;
+// any failing check returns ok=false so the caller becomes a no-op.
+func (a *App) resolveCloudCredentialsRefreshTarget(selection uiSelection) (string, eruncommon.OpenResult, bool) {
+	if selection.Tenant == "" || selection.Environment == "" {
+		return "", eruncommon.OpenResult{}, false
+	}
+	envConfig, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment)
+	if err != nil {
+		return "", eruncommon.OpenResult{}, false
+	}
+	if !envConfig.RemoteHostCredentials || !envConfig.RemoteWorktree() {
+		return "", eruncommon.OpenResult{}, false
+	}
+	if strings.TrimSpace(envConfig.CloudProviderAlias) == "" {
+		return "", eruncommon.OpenResult{}, false
+	}
+	provider, err := eruncommon.ResolveCloudProvider(a.deps.store, envConfig.CloudProviderAlias)
+	if err != nil || provider.Provider != eruncommon.CloudProviderAWS {
+		return "", eruncommon.OpenResult{}, false
+	}
+	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+		Tenant:      selection.Tenant,
+		Environment: selection.Environment,
+	})
+	if err != nil {
+		return "", eruncommon.OpenResult{}, false
+	}
+	return envConfig.CloudProviderAlias, result, true
 }
 
 // stopCloudCredentialsRefresherForSelection signals the refresher to exit and
