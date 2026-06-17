@@ -82,7 +82,7 @@ func TestPush(t *testing.T) {
 		// via runDockerBuildWithRetry: the first push fails auth,
 		// ERUN_AUTO_LOGIN_ON_PUSH bypasses the prompt, and login + retry land it
 		// (final exit 0). The auth failure is visible in the trace.
-		result := erun.Run(t, []string{"push", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -111,7 +111,7 @@ func TestPush(t *testing.T) {
 			`esac`,
 		}, "\n"))
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
-		result := erun.Run(t, []string{"devops", "container", "push", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"devops", "container", "push", "--version", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -148,7 +148,7 @@ func TestPush(t *testing.T) {
 			`esac`,
 		}, "\n"))
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
-		result := erun.Run(t, []string{"push", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"push", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -156,13 +156,11 @@ func TestPush(t *testing.T) {
 	})
 
 	t.Run("real_run_single_image_from_dockerfile_cwd", func(t *testing.T) {
-		// Exercises the root `erun push` single-image branch for real, and the
-		// --version flag form of supplying the version (the positional form is
-		// covered by the dry-run scenario above; both resolve through
-		// resolvePushVersion). ResolveDockerPushSpec resolves the cwd Dockerfile
-		// into one build+push pair, RunDockerPushSpec builds both platforms and
-		// pushes the tag. The docker stub reports no cached fingerprint images
-		// (image inspect exit 1) so the build path runs.
+		// Exercises the root `erun push` single-image branch for real:
+		// ResolveDockerPushSpec resolves the cwd Dockerfile into one build+push
+		// pair, RunDockerPushSpec builds both platforms and pushes the tag. The
+		// docker stub reports no cached fingerprint images (image inspect exit 1)
+		// so the build path runs.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -201,7 +199,7 @@ func TestPush(t *testing.T) {
 		stubs := setup.Cwd + "/stubs"
 		fixture.StubBinaryAdvanced(t, stubs, "docker", fixture.StubBinarySpec{ExitCode: 0})
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
-		result := erun.Run(t, []string{"push", "1.0.0", "--dry-run", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"push", "--version", "1.0.0", "--dry-run", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -218,7 +216,7 @@ func TestPush(t *testing.T) {
 		stubs := setup.Cwd + "/stubs"
 		fixture.StubBinaryAdvanced(t, stubs, "docker", fixture.StubBinarySpec{ExitCode: 0})
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
-		result := erun.Run(t, []string{"push", "1.0.0", "-v", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -256,7 +254,7 @@ func TestPush(t *testing.T) {
 			`esac`,
 		}, "\n"))
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
-		result := erun.Run(t, []string{"push", "1.0.0", "-v"}, erun.RunOptions{
+		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v"}, erun.RunOptions{
 			Cwd:   setup.Cwd,
 			Env:   envVars,
 			Stdin: "\r",
@@ -297,7 +295,7 @@ func TestPush(t *testing.T) {
 		// uses LookPath directly, not the ERUN_<NAME>_BIN override).
 		envVars = append(envVars, "PATH="+stubs+":"+os.Getenv("PATH"))
 		envVars = append(envVars, "ERUN_AUTO_LOGIN_ON_PUSH=1")
-		result := erun.Run(t, []string{"push", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit when create_package is denied, got 0:\n%s", result.Combined)
 		}
@@ -353,7 +351,7 @@ func TestPush(t *testing.T) {
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "gh")...)
 		envVars = append(envVars, "PATH="+stubs+":"+os.Getenv("PATH"))
 		envVars = append(envVars, "ERUN_AUTO_LOGIN_ON_PUSH=1")
-		result := erun.Run(t, []string{"push", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}

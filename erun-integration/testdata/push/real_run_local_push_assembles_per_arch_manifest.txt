@@ -1,4 +1,4 @@
-audit: erun push --environment local <VERSION>
+audit: erun push --environment local --version <VERSION>
 ==> Pushing
 fingerprint image present locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
 fingerprint image present locally: ghcr.io/sophium/api:fp-<HEX16>-arm64

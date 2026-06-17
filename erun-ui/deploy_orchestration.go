@@ -43,7 +43,7 @@ func (a *App) runDeployOrchestration(ctx context.Context, selection uiSelection,
 		if version == "" {
 			return fmt.Errorf("build did not report a version to deploy")
 		}
-		if _, err := runErunCaptured(ctx, cli, dir, onLine, "push", version); err != nil {
+		if _, err := runErunCaptured(ctx, cli, dir, onLine, "push", "--version", version); err != nil {
 			return err
 		}
 		deployArgs := []string{"deploy", selection.Tenant, selection.Environment, "--version", version}

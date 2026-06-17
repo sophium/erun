@@ -1,4 +1,4 @@
-audit: erun push --dry-run <VERSION>
+audit: erun push --dry-run --version <VERSION>
 docker image inspect ghcr.io/sophium/cwd:fp-<HEX16>-amd64
 fingerprint image not found locally: ghcr.io/sophium/cwd:fp-<HEX16>-amd64
 docker image inspect ghcr.io/sophium/cwd:fp-<HEX16>-arm64

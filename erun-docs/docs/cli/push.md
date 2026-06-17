@@ -4,12 +4,12 @@ title: erun push
 
 # `erun push`
 
-Publish a version's outputs to the configured container registry: the multi-arch image manifest **and** the runtime helm chart. `erun push <version>` is the publish step of the [delivery pipeline](/pipeline) — it takes a version [`erun build`](/cli/build) minted and makes it deployable.
+Publish a version's outputs to the configured container registry: the multi-arch image manifest **and** the runtime helm chart. `erun push --version <version>` is the publish step of the [delivery pipeline](/pipeline) — it takes a version [`erun build`](/cli/build) minted and makes it deployable.
 
 ## Synopsis
 
 ```
-erun push <version> [flags]
+erun push --version <version> [flags]
 ```
 
 The version is **required** and names what to publish. It's a content identity minted by `build`; `push` never mints one. There is no environment-type branch — push behaves the same everywhere.
@@ -41,13 +41,13 @@ Mint a version with `build`, then publish everything at it:
 
 ```bash
 erun build --output json     # prints {version, baseVersion, images} — capture the version
-erun push 1.0.81-snapshot-20260616120000
+erun push --version 1.0.81-snapshot-20260616120000
 ```
 
 Preview what a push would publish without executing:
 
 ```bash
-erun push 1.0.81-snapshot-20260616120000 --dry-run
+erun push --version 1.0.81-snapshot-20260616120000 --dry-run
 ```
 
 ## Authentication
@@ -58,8 +58,8 @@ If the registry rejects the push as unauthorised, `erun push` retries automatica
 
 | Failure | Behaviour |
 |---|---|
-| No version argument. | Errors before any work: `push requires a version` — push publishes a specific version, it does not mint one. Exit code 1. |
+| No `--version`. | Errors before any work: `push requires a version` — push publishes a specific version, it does not mint one. Exit code 1. |
 | No build context to publish. | Errors; nothing is pushed. |
 | Foreign-arch binfmt missing. | Fails before the per-arch build with a direct error. |
 | Registry rejects the push as unauthorised. | Retries with `docker login` (and `gh auth refresh` for GHCR scope mismatches); both need a TTY. Without one, errors with the auth failure. |
-| Chart `helm push` or the `helm pull` verification fails. | Errors after the images pushed; the version's images are published but its chart is not, so it is not yet deployable. Re-run `erun push <version>` once the registry/auth issue is fixed. |
+| Chart `helm push` or the `helm pull` verification fails. | Errors after the images pushed; the version's images are published but its chart is not, so it is not yet deployable. Re-run `erun push --version <version>` once the registry/auth issue is fixed. |

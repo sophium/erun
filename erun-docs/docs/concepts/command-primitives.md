@@ -23,7 +23,7 @@ When you ship a change, the version that `build` mints is the same value `push` 
 
 ```bash
 erun build --output json     # mints a version, prints {version, baseVersion, images}
-erun push <version>          # publishes the image + chart at that version
+erun push --version <version>   # publishes the image + chart at that version
 erun deploy <env> --version <version>   # installs that exact version
 ```
 

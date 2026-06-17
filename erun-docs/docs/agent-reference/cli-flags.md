@@ -34,7 +34,7 @@ Common flags inherited from the root command apply to every subcommand:
 }
 ```
 
-An orchestrator (the desktop app, a script, an Agent over MCP) runs `erun build --output json`, captures `version`, then threads that exact value into [`erun push <version>`](#erun-push) and [`erun deploy --version <version>`](#erun-deploy). This is why `push`/`deploy` require an explicit version and the convenience switches (`build --deploy` / `build --release`) are reserved for an Operator at the terminal — programmatic callers compose the primitives and pass the version themselves.
+An orchestrator (the desktop app, a script, an Agent over MCP) runs `erun build --output json`, captures `version`, then threads that exact value into [`erun push --version <version>`](#erun-push) and [`erun deploy --version <version>`](#erun-deploy). This is why `push`/`deploy` require an explicit version and the convenience switches (`build --deploy` / `build --release`) are reserved for an Operator at the terminal — programmatic callers compose the primitives and pass the version themselves.
 
 ## `erun init`
 
@@ -187,15 +187,15 @@ binfmt for <arch> not installed. Run:
 
 ## `erun push`
 
-### Positional argument
+### Version (required)
 
-| Argument | Type | Required | Notes |
+| Flag | Type | Required | Notes |
 |---|---|---|---|
-| `<version>` | string (semver, snapshot or bare) | **Yes** | The version to publish. `push` does not mint a version — it builds each image from source at this version (promoting unchanged images from the fingerprint cache), pushes the per-arch tags, assembles the multi-arch manifest list, then publishes the runtime helm chart. Missing → `NO_VERSION` (exit 1). |
+| `--version <version>` | string (semver, snapshot or bare) | **Yes** | The version to publish (the same flag `deploy` uses, for consistency across commands). `push` does not mint a version — it builds each image from source at this version (promoting unchanged images from the fingerprint cache), pushes the per-arch tags, assembles the multi-arch manifest list, then publishes the runtime helm chart. Missing → `NO_VERSION` (exit 1). |
 
 ### What push publishes
 
-For `<version>`, `push` always builds each image from its source context (never a prebuilt bare tag), pushes per-arch tags, assembles the manifest list, then runs `helm package` + `helm push` to `oci://<registry>/charts` and verifies with a `helm pull` round-trip. Image and chart are published together at the same version. There is no environment-type branch. [`erun release`](#erun-release) reuses this step for all its publishing.
+For the supplied `--version`, `push` always builds each image from its source context (never a prebuilt bare tag), pushes per-arch tags, assembles the manifest list, then runs `helm package` + `helm push` to `oci://<registry>/charts` and verifies with a `helm pull` round-trip. Image and chart are published together at the same version. There is no environment-type branch. [`erun release`](#erun-release) reuses this step for all its publishing.
 
 ### Common flags
 

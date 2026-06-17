@@ -22,7 +22,7 @@ var errVersionFileNotFound = common.ErrVersionFileNotFound
 // explicit version. push is a pure primitive: it publishes the content
 // identity `erun build` minted, it never mints one (root AGENTS.md §
 // "Command primitives vs orchestration").
-var errPushVersionRequired = fmt.Errorf("push requires a version: run `erun push <version>` with the version produced by `erun build`. push publishes a built version's images and chart; it does not mint a version")
+var errPushVersionRequired = fmt.Errorf("push requires a version: pass --version <version> produced by `erun build`. push publishes a built version's images and chart; it does not mint a version")
 
 func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
 	target := common.DockerCommandTarget{}
@@ -98,20 +98,18 @@ func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFu
 	target := common.DockerCommandTarget{}
 	var force bool
 	cmd := &cobra.Command{
-		Use:           "push <version>",
+		Use:           "push",
 		Short:         "Publish a built container image at a version",
-		Args:          cobra.MaximumNArgs(1),
+		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if force {
 				target.NoIncremental = true
 			}
-			version, err := resolvePushVersion(args, target.VersionOverride)
-			if err != nil {
-				return err
+			if strings.TrimSpace(target.VersionOverride) == "" {
+				return errPushVersionRequired
 			}
-			target.VersionOverride = version
 			ctx := commandContext(cmd)
 			pushInput, buildInput, err := common.ResolveDockerPushSpec(ctx, store, findProjectRoot, resolveBuildContext, now, target)
 			if err != nil {
@@ -125,7 +123,7 @@ func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFu
 	}
 	addDryRunFlag(cmd)
 	addPushCommandTargetFlags(cmd, &target)
-	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Version to publish, as an alternative to the positional argument (produced by erun build)")
+	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Version to publish, produced by erun build")
 	cmd.Flags().BoolVar(&force, "force", false, "Rebuild and re-push every image, bypassing the fingerprint cache")
 	return cmd
 }
@@ -162,18 +160,17 @@ func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFind
 	target := common.DockerCommandTarget{}
 	var force bool
 	cmd := &cobra.Command{
-		Use:   "push <version>",
+		Use:   "push",
 		Short: "Publish a built version's container images and chart to the registry",
 		Long: "Publish a version's container images and runtime chart to the registry — the " +
 			"push step of the build → release → push → deploy flow.\n\n" +
-			"The version is required — pass it as the argument (`erun push <version>`) or with " +
-			"--version — and is the one `erun build` minted; push publishes it, it does not " +
-			"mint one. push resolves that version's images from the local source (promoting " +
-			"unchanged images from the fingerprint cache, rebuilding only what changed), then " +
-			"pushes the multi-arch manifest and, for the runtime image, the runtime chart " +
-			"alongside it.",
-		Example:       "  erun push 1.2.3-snapshot-20260101010101",
-		Args:          cobra.MaximumNArgs(1),
+			"A version is required (--version <v>, the same flag deploy uses) and is the one " +
+			"`erun build` minted; push publishes it, it does not mint one. push resolves that " +
+			"version's images from the local source (promoting unchanged images from the " +
+			"fingerprint cache, rebuilding only what changed), then pushes the multi-arch " +
+			"manifest and, for the runtime image, the runtime chart alongside it.",
+		Example:       "  erun push --version 1.2.3-snapshot-20260101010101",
+		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -181,13 +178,10 @@ func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFind
 				target.NoIncremental = true
 			}
 			// Version is required: push publishes a content identity that
-			// `erun build` minted, it does not mint one. Accept it positionally
-			// or via --version.
-			version, err := resolvePushVersion(args, target.VersionOverride)
-			if err != nil {
-				return err
+			// `erun build` minted, it does not mint one.
+			if strings.TrimSpace(target.VersionOverride) == "" {
+				return errPushVersionRequired
 			}
-			target.VersionOverride = version
 			ctx := commandContext(cmd)
 			buildWithRetry := pushBuildWithRetry(ctx, buildDockerImage, loginToDockerRegistry, selectRunner)
 			buildContext, _ := resolveBuildContext()
@@ -211,7 +205,7 @@ func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFind
 	}
 	addDryRunFlag(cmd)
 	addPushCommandTargetFlags(cmd, &target)
-	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Version to publish, as an alternative to the positional argument (produced by erun build)")
+	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Version to publish, produced by erun build")
 	cmd.Flags().BoolVar(&force, "force", false, "Rebuild and re-push every image, bypassing the fingerprint cache")
 	return cmd
 }
@@ -303,31 +297,6 @@ func addPushCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommandT
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Environment override for internal tooling")
 	_ = cmd.Flags().MarkHidden("project-root")
 	_ = cmd.Flags().MarkHidden("environment")
-}
-
-// resolvePushVersion resolves the required version for `erun push`, accepting
-// it either as the positional argument (`erun push <version>`, the documented
-// form) or via `--version` (consistent with `erun deploy`). The version is a
-// content identity `erun build` minted; push takes it and never mints one
-// (root AGENTS.md § "Command primitives vs orchestration"). Returns
-// errPushVersionRequired when neither form supplies it, and errors if both are
-// given with different values.
-func resolvePushVersion(args []string, flagVersion string) (string, error) {
-	positional := ""
-	if len(args) > 0 {
-		positional = strings.TrimSpace(args[0])
-	}
-	flagVersion = strings.TrimSpace(flagVersion)
-	if positional != "" && flagVersion != "" && positional != flagVersion {
-		return "", fmt.Errorf("version given twice: positional %q and --version %q — specify it once", positional, flagVersion)
-	}
-	if positional != "" {
-		return positional, nil
-	}
-	if flagVersion == "" {
-		return "", errPushVersionRequired
-	}
-	return flagVersion, nil
 }
 
 // handleNamespaceAuthError handles the create_package and scope-denied auth

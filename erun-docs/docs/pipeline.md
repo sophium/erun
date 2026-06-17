@@ -63,7 +63,7 @@ See [`erun build`](/cli/build) for flags, dry-run output, and error behaviour.
 
 `release` is for stable, promotable versions — but you don't always need one, and that's the pipeline's range:
 
-- **Snapshot — iterate.** Skip `release`: `build` mints a snapshot version, `push <version>` publishes it (image + chart), and `deploy <env> --version <snapshot>` rolls it out. Because push publishes the chart for snapshots too, you can deploy a snapshot to a **target environment** — a shared or remote env, not just your local one.
+- **Snapshot — iterate.** Skip `release`: `build` mints a snapshot version, `push --version <snapshot>` publishes it (image + chart), and `deploy <env> --version <snapshot>` rolls it out. Because push publishes the chart for snapshots too, you can deploy a snapshot to a **target environment** — a shared or remote env, not just your local one.
 - **Release — promote.** Run `release` to cut a tagged, immutable version (build → push → tag), then `deploy <env> --version <release>` promotes it to a [runtime env](/concepts/environment-types).
 
 Same pipeline; the only difference is whether you stop to cut a release.

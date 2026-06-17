@@ -1,4 +1,4 @@
-audit: erun push --dry-run --environment local <VERSION>
+audit: erun push --dry-run --environment local --version <VERSION>
 docker image inspect ghcr.io/sophium/api:fp-<HEX16>-amd64
 fingerprint image present locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
 docker image inspect ghcr.io/sophium/api:fp-<HEX16>-arm64

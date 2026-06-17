@@ -51,7 +51,7 @@ erun build --deploy     # operator shortcut: build → push → deploy in one sh
 erun build --release    # operator shortcut: pin a stable version, then push + tag it
 ```
 
-To get a built artifact into a runtime env, push the minted version and then deploy it: `erun push <version>` publishes the image and chart, and `erun deploy <env> --version <version>` rolls it out. See [`erun push`](/cli/push) and [`erun deploy`](/cli/deploy).
+To get a built artifact into a runtime env, push the minted version and then deploy it: `erun push --version <version>` publishes the image and chart, and `erun deploy <env> --version <version>` rolls it out. See [`erun push`](/cli/push) and [`erun deploy`](/cli/deploy).
 
 ## Multi-architecture
 
