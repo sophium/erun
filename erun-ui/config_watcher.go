@@ -116,19 +116,27 @@ func (a *App) runConfigWatcher(ctx context.Context, cw *configWatcher, root stri
 			if !ok {
 				return
 			}
-			if event.Has(fsnotify.Create) {
-				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
-					_ = cw.watcher.Add(event.Name)
-				}
-			}
-			if event.Has(fsnotify.Create | fsnotify.Write | fsnotify.Remove | fsnotify.Rename) {
-				queueEmit()
-			}
+			handleConfigWatchEvent(cw.watcher, event, queueEmit)
 		case _, ok := <-cw.watcher.Errors:
 			if !ok {
 				return
 			}
 		}
+	}
+}
+
+// handleConfigWatchEvent reacts to a single fsnotify event: newly-created
+// directories are added to the watch set so deeper config writes are observed,
+// and any create/write/remove/rename queues a debounced environments-changed
+// emission via queueEmit.
+func handleConfigWatchEvent(watcher *fsnotify.Watcher, event fsnotify.Event, queueEmit func()) {
+	if event.Has(fsnotify.Create) {
+		if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
+			_ = watcher.Add(event.Name)
+		}
+	}
+	if event.Has(fsnotify.Create | fsnotify.Write | fsnotify.Remove | fsnotify.Rename) {
+		queueEmit()
 	}
 }
 

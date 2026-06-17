@@ -139,24 +139,36 @@ func (a *App) runEnsureErunClone(selection uiSelection) error {
 // port-forward for the contribute-app port, waits for the headless
 // server to accept connections, and returns the http URL the frontend
 // should open in the user's browser.
-func (a *App) StartContributeApp(selection uiSelection) (uiContributeAppLaunch, error) {
-	selection = normalizeSelection(selection)
+// resolveContributeAppPort validates that the selection is in contribute mode
+// and resolves the env's allocated contribute-app port. It returns an error
+// describing the first failing precondition (missing tenant/env, contribute
+// mode off, environment resolution failure, or an unallocated port).
+func (a *App) resolveContributeAppPort(selection uiSelection) (int, error) {
 	if selection.Tenant == "" || selection.Environment == "" {
-		return uiContributeAppLaunch{}, fmt.Errorf("tenant and environment are required")
+		return 0, fmt.Errorf("tenant and environment are required")
 	}
 	if !a.GetContributeMode(selection) {
-		return uiContributeAppLaunch{}, fmt.Errorf("contribute mode is not enabled for %s/%s", selection.Tenant, selection.Environment)
+		return 0, fmt.Errorf("contribute mode is not enabled for %s/%s", selection.Tenant, selection.Environment)
 	}
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
 	if err != nil {
-		return uiContributeAppLaunch{}, fmt.Errorf("resolve environment: %w", err)
+		return 0, fmt.Errorf("resolve environment: %w", err)
 	}
 	port := eruncommon.ContributeAppPortForResult(result)
 	if port <= 0 {
-		return uiContributeAppLaunch{}, fmt.Errorf("contribute-app port is not allocated for %s/%s", selection.Tenant, selection.Environment)
+		return 0, fmt.Errorf("contribute-app port is not allocated for %s/%s", selection.Tenant, selection.Environment)
+	}
+	return port, nil
+}
+
+func (a *App) StartContributeApp(selection uiSelection) (uiContributeAppLaunch, error) {
+	selection = normalizeSelection(selection)
+	port, err := a.resolveContributeAppPort(selection)
+	if err != nil {
+		return uiContributeAppLaunch{}, err
 	}
 
 	// Send the headless start command into the contribute ERun tab so
@@ -181,7 +193,6 @@ func (a *App) StartContributeApp(selection uiSelection) (uiContributeAppLaunch, 
 	if forward != nil {
 		a.contributeApps.put(selection, forward)
 	}
-	_ = result
 	if err := waitForContributeAppReachable(ctx, localPort, forward, args); err != nil {
 		a.stopContributeAppForward(selection)
 		return uiContributeAppLaunch{}, err

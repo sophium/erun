@@ -220,12 +220,6 @@ func dockerBuildEnvironmentFromTenantConfigs(store DockerStore, cleanProjectRoot
 		} else if envName != "" {
 			return envName, nil
 		}
-		// Legacy fallback: tenant-level ProjectRoot match. Removed in a
-		// follow-up release once all envs have been re-saved with the new
-		// localRepoPath field.
-		if filepath.Clean(tenantConfig.ProjectRoot) == cleanProjectRoot {
-			return strings.TrimSpace(tenantConfig.DefaultEnvironment), nil
-		}
 	}
 	return "", nil
 }
@@ -269,10 +263,6 @@ func dockerBuildEnvironmentFromDetectedProject(store DockerStore, findProjectRoo
 		}
 		return "", err
 	}
-	if projectRoot := strings.TrimSpace(tenantConfig.ProjectRoot); projectRoot != "" && filepath.Clean(projectRoot) != cleanProjectRoot {
-		return "", nil
-	}
-
 	return strings.TrimSpace(tenantConfig.DefaultEnvironment), nil
 }
 
@@ -299,14 +289,24 @@ func ResolveDockerBuildEnvConfig(store DockerStore, findProjectRoot ProjectFinde
 		if err != nil {
 			continue
 		}
-		for i := range envs {
-			if wantEnv != "" && envs[i].Name != wantEnv {
-				continue
-			}
-			path := strings.TrimSpace(envs[i].EffectiveLocalRepoPath())
-			if path != "" && filepath.Clean(path) == cleanRoot {
-				return &envs[i]
-			}
+		if match := matchDockerBuildEnvConfig(envs, wantEnv, cleanRoot); match != nil {
+			return match
+		}
+	}
+	return nil
+}
+
+// matchDockerBuildEnvConfig returns the first env in envs whose effective local
+// repo path matches cleanRoot, optionally filtered to wantEnv (when non-empty),
+// or nil when none matches.
+func matchDockerBuildEnvConfig(envs []EnvConfig, wantEnv, cleanRoot string) *EnvConfig {
+	for i := range envs {
+		if wantEnv != "" && envs[i].Name != wantEnv {
+			continue
+		}
+		path := strings.TrimSpace(envs[i].EffectiveLocalRepoPath())
+		if path != "" && filepath.Clean(path) == cleanRoot {
+			return &envs[i]
 		}
 	}
 	return nil

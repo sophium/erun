@@ -9,15 +9,29 @@ FROM --platform=$BUILDPLATFORM golang:1.26.0 AS test
 
 WORKDIR /src
 
+# Build golangci-lint from source against this stage's Go toolchain — same
+# reason as the builder stage: a prebuilt binary's embedded analyzer libraries
+# (go/ast, go/types, go/parser) drift behind erun's go.mod Go version and abort
+# with "go language version used to build golangci-lint is lower than the
+# targeted Go version". Installed before the source COPYs (stable, expensive)
+# so source changes do not invalidate this layer. Pinned repo-wide.
+ARG GOLANGCI_LINT_VERSION=v2.2.2
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    GOBIN=/usr/local/bin go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
+
 COPY Makefile /src/Makefile
 COPY erun-cli /src/erun-cli
 COPY erun-common /src/erun-common
 COPY erun-mcp /src/erun-mcp
 COPY erun-integration /src/erun-integration
 
+# `make check` runs golangci-lint across the Go modules then the integration
+# suite + coverage gate. A failing lint or test fails the build, the builder
+# stage's COPY --from=test /test-ok fails, and no image is tagged.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    make integration-test && touch /test-ok
+    make check && touch /test-ok
 
 FROM golang:1.26.0 AS builder
 

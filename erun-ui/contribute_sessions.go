@@ -69,18 +69,9 @@ func (a *App) runContributeSession(ctx context.Context, selection uiSelection, s
 		kind = sessionKindContributeAI
 	}
 
-	a.mu.Lock()
-	if existing := a.sessions[key]; existing != nil && !existing.closed && existing.session != nil {
-		a.mu.Unlock()
-		existing.signalReady(nil)
-		return startSessionResult{
-			SessionID: existing.serial,
-			Selection: existing.selection,
-			Slot:      slot,
-			Kind:      string(kind),
-		}, existing, nil
+	if reused, managed, ok := a.reuseExistingContributeSession(key, slot, kind); ok {
+		return reused, managed, nil
 	}
-	a.mu.Unlock()
 
 	// The contribute tab runs `erun open --app-session contribute-… --contribute
 	// [--ai]`: the persistent remote session cds into the contribute clone with
@@ -144,6 +135,28 @@ func (a *App) runContributeSession(ctx context.Context, selection uiSelection, s
 		Slot:      slot,
 		Kind:      string(kind),
 	}, managed, nil
+}
+
+// reuseExistingContributeSession reconnects to an already-live contribute
+// session for key when one exists, signalling it ready and returning its
+// start result. The third return value reports whether a reusable session was
+// found; when false the caller spawns a fresh session. The session map is
+// inspected under a.mu, matching the locking the spawn path uses.
+func (a *App) reuseExistingContributeSession(key string, slot int, kind sessionKind) (startSessionResult, *managedTerminal, bool) {
+	a.mu.Lock()
+	existing := a.sessions[key]
+	if existing == nil || existing.closed || existing.session == nil {
+		a.mu.Unlock()
+		return startSessionResult{}, nil, false
+	}
+	a.mu.Unlock()
+	existing.signalReady(nil)
+	return startSessionResult{
+		SessionID: existing.serial,
+		Selection: existing.selection,
+		Slot:      slot,
+		Kind:      string(kind),
+	}, existing, true
 }
 
 func contributeSessionKey(selection uiSelection, slot int, withAI bool) string {

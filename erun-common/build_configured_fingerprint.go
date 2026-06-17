@@ -36,19 +36,9 @@ func materializeConfiguredFingerprints(ctx Context, builds []DockerBuildSpec) (m
 		if projectRoot == "" || imageName == "" {
 			continue
 		}
-		key := projectRoot + "\x00" + environment
-		configured, loaded := configuredByEnv[key]
-		if !loaded {
-			cfg, _, err := LoadProjectConfig(projectRoot)
-			if err != nil {
-				if errors.Is(err, ErrNotInitialized) {
-					configuredByEnv[key] = nil
-					continue
-				}
-				return nil, err
-			}
-			configured = cfg.DockerFingerprintsForEnvironment(environment)
-			configuredByEnv[key] = configured
+		configured, err := loadConfiguredFingerprints(projectRoot, environment, configuredByEnv)
+		if err != nil {
+			return nil, err
 		}
 		if configured == nil {
 			continue
@@ -61,21 +51,53 @@ func materializeConfiguredFingerprints(ctx Context, builds []DockerBuildSpec) (m
 			ctx.Trace(fmt.Sprintf("ignoring invalid configured fingerprint for %s: %q", imageName, hash))
 			continue
 		}
-		for _, platform := range build.Platforms {
-			fpTag := fingerprintTag(build.Image, hash, platform)
-			if exists, err := DockerImageExists(fpTag); err == nil && exists {
-				materialized[fpTag] = struct{}{}
-				continue
-			}
-			if err := pullAndTagConfiguredFingerprint(ctx, build.Image.Tag, fpTag, platform); err != nil {
-				ctx.Trace(fmt.Sprintf("could not materialize configured fingerprint %s: %v", fpTag, err))
-				continue
-			}
-			materialized[fpTag] = struct{}{}
-		}
+		materializeBuildFingerprints(ctx, build, hash, materialized)
 	}
 
 	return materialized, nil
+}
+
+// loadConfiguredFingerprints returns the docker.fingerprints map for the
+// build's environment, caching the per-(projectRoot, environment) result in
+// cache so repeated builds avoid re-reading the config. An uninitialized
+// project caches a nil entry rather than erroring; any other config error
+// propagates.
+func loadConfiguredFingerprints(projectRoot, environment string, cache map[string]map[string]string) (map[string]string, error) {
+	key := projectRoot + "\x00" + environment
+	if configured, loaded := cache[key]; loaded {
+		return configured, nil
+	}
+	cfg, _, err := LoadProjectConfig(projectRoot)
+	if err != nil {
+		if errors.Is(err, ErrNotInitialized) {
+			cache[key] = nil
+			return nil, nil
+		}
+		return nil, err
+	}
+	configured := cfg.DockerFingerprintsForEnvironment(environment)
+	cache[key] = configured
+	return configured, nil
+}
+
+// materializeBuildFingerprints ensures the local Docker store holds the
+// fp-tagged image for each of the build's platforms at the configured hash,
+// recording each materialized fp-tag. An fp-tag already present is recorded
+// directly; otherwise the pull+tag sequence runs (or is traced in dry-run).
+// Per-platform failures fall through silently so the build rebuilds as today.
+func materializeBuildFingerprints(ctx Context, build DockerBuildSpec, hash string, materialized map[string]struct{}) {
+	for _, platform := range build.Platforms {
+		fpTag := fingerprintTag(build.Image, hash, platform)
+		if exists, err := DockerImageExists(fpTag); err == nil && exists {
+			materialized[fpTag] = struct{}{}
+			continue
+		}
+		if err := pullAndTagConfiguredFingerprint(ctx, build.Image.Tag, fpTag, platform); err != nil {
+			ctx.Trace(fmt.Sprintf("could not materialize configured fingerprint %s: %v", fpTag, err))
+			continue
+		}
+		materialized[fpTag] = struct{}{}
+	}
 }
 
 // pullAndTagConfiguredFingerprint pulls sourceTag for platform and tags the

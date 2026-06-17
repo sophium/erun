@@ -22,7 +22,6 @@ bootstrap-script:
   EOF
   mkdir -p "$config_home/erun/team"
   cat > "$config_home/erun/team/config.yaml" <<'EOF'
-  projectroot: <HOME>/git/team
   name: team
   defaultenvironment: dev
 
@@ -31,7 +30,7 @@ bootstrap-script:
   cat > "$config_home/erun/team/dev/config.yaml" <<'EOF'
   name: dev
   type: remote-agent
-  repopath: <HOME>/git/team
+  localrepopath: <HOME>/git/team
   kubernetescontext: test-context
 
   EOF

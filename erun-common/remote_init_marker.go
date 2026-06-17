@@ -24,12 +24,6 @@ const remoteInitMarkerBaseDir = ".erun"
 // marker inside its per-tenant/per-environment directory.
 const remoteInitMarkerFilename = "bootstrap.yaml"
 
-// legacyRemoteInitMarkerFilename is the pre-multitenant marker path
-// (relative to $HOME). LoadRemoteInitMarker falls back to it for a
-// single release so existing in-pod markers written by older versions
-// remain visible to doctor recovery.
-const legacyRemoteInitMarkerFilename = ".erun/bootstrap.yaml"
-
 // RemoteInitMarker captures the intent of `erun init --remote` so a
 // later doctor invocation can detect what was supposed to happen and
 // offer to finish it.
@@ -55,35 +49,10 @@ func RemoteInitMarkerPath(homeDir, tenant, environment string) string {
 // tenant/environment from homeDir. The found return value
 // distinguishes "no marker on disk" from a read/parse failure;
 // callers in doctor treat the former as "init never ran or was
-// interrupted before its first write". For one release after the
-// per-tenant/per-environment layout lands, LoadRemoteInitMarker also
-// falls back to the legacy single-marker path when the new path is
-// absent and the legacy file's tenant/environment match the requested
-// values.
+// interrupted before its first write".
 func LoadRemoteInitMarker(homeDir, tenant, environment string) (RemoteInitMarker, bool, error) {
 	path := RemoteInitMarkerPath(homeDir, tenant, environment)
-	marker, found, err := readRemoteInitMarker(path)
-	if err != nil {
-		return RemoteInitMarker{}, false, err
-	}
-	if found {
-		return marker, true, nil
-	}
-	if tenant == "" || environment == "" {
-		return RemoteInitMarker{}, false, nil
-	}
-	legacy := filepath.Join(homeDir, legacyRemoteInitMarkerFilename)
-	legacyMarker, legacyFound, err := readRemoteInitMarker(legacy)
-	if err != nil {
-		return RemoteInitMarker{}, false, err
-	}
-	if !legacyFound {
-		return RemoteInitMarker{}, false, nil
-	}
-	if legacyMarker.Tenant != tenant || legacyMarker.Environment != environment {
-		return RemoteInitMarker{}, false, nil
-	}
-	return legacyMarker, true, nil
+	return readRemoteInitMarker(path)
 }
 
 func readRemoteInitMarker(path string) (RemoteInitMarker, bool, error) {

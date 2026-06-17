@@ -202,7 +202,7 @@ func listEnvironmentResult(store ListStore, tenant TenantConfig, env EnvConfig, 
 		APIURL:              APIURLForListEnvironment(tenant, localPorts),
 		KubernetesContext:   strings.TrimSpace(env.KubernetesContext),
 		CloudProviderAlias:  strings.TrimSpace(env.CloudProviderAlias),
-		RepoPath:            strings.TrimSpace(env.RepoPath),
+		RepoPath:            env.EffectiveLocalRepoPath(),
 		LocalRepoPath:       strings.TrimSpace(env.LocalRepoPath),
 		ContainerRegistries: ResolveEnvironmentContainerRegistries(env),
 		RuntimeVersion:      strings.TrimSpace(env.RuntimeVersion),
@@ -253,12 +253,11 @@ func listEnvironmentOpenResult(tenant TenantConfig, env EnvConfig, localPorts En
 		Tenant:      tenant.Name,
 		Environment: env.Name,
 		TenantConfig: TenantConfig{
-			Name:        tenant.Name,
-			ProjectRoot: tenant.ProjectRoot,
+			Name: tenant.Name,
 		},
 		EnvConfig:  env,
 		LocalPorts: localPorts,
-		RepoPath:   env.RepoPath,
+		RepoPath:   env.EffectiveLocalRepoPath(),
 	}
 }
 

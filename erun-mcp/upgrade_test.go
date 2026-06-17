@@ -20,7 +20,7 @@ func TestUpgradeToolPreviewResolvesPlan(t *testing.T) {
 		Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev", RepoPath: projectRoot},
 		Store: listToolStore{
 			toolConfig:    eruncommon.ERunConfig{DefaultTenant: "tenant-a"},
-			tenantConfigs: map[string]eruncommon.TenantConfig{"tenant-a": {Name: "tenant-a", ProjectRoot: projectRoot, DefaultEnvironment: "dev"}},
+			tenantConfigs: map[string]eruncommon.TenantConfig{"tenant-a": {Name: "tenant-a", DefaultEnvironment: "dev"}},
 			envsByTenant: map[string][]eruncommon.EnvConfig{
 				"tenant-a": {{Name: "dev", Type: eruncommon.EnvironmentTypeRuntime, RuntimeVersion: "3.0.0", AutoUpgrade: true}},
 			},

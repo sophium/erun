@@ -17,7 +17,7 @@ func envTraceApp(t *testing.T, env eruncommon.EnvConfig, reachable bool, podOut 
 	t.Helper()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"acme": {Name: "acme", ProjectRoot: t.TempDir(), DefaultEnvironment: "dev"},
+			"acme": {Name: "acme", DefaultEnvironment: "dev"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"acme/dev": env,
@@ -46,7 +46,7 @@ func TestLoadEnvTraceHostFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	app := envTraceApp(t, eruncommon.EnvConfig{
-		Name: "dev", Type: eruncommon.EnvironmentTypeLocalAgent, KubernetesContext: "ctx",
+		Name: "dev", LocalRepoPath: t.TempDir(), Type: eruncommon.EnvironmentTypeLocalAgent, KubernetesContext: "ctx",
 	}, false, "", nil)
 
 	trace, err := app.LoadEnvTrace(uiSelection{Tenant: "acme", Environment: "dev"})
@@ -61,7 +61,7 @@ func TestLoadEnvTraceHostFile(t *testing.T) {
 func TestLoadEnvTraceHostFileMissing(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	app := envTraceApp(t, eruncommon.EnvConfig{
-		Name: "dev", Type: eruncommon.EnvironmentTypeLocalAgent, KubernetesContext: "ctx",
+		Name: "dev", LocalRepoPath: t.TempDir(), Type: eruncommon.EnvironmentTypeLocalAgent, KubernetesContext: "ctx",
 	}, false, "", nil)
 
 	trace, err := app.LoadEnvTrace(uiSelection{Tenant: "acme", Environment: "dev"})
@@ -81,7 +81,7 @@ func TestLoadEnvTraceRemoteUnreachableKeepsHostTrace(t *testing.T) {
 	t.Setenv("HOME", home)
 	writeHostTrace(t, home, "2026-06-11T00:00:00Z open: tenant=acme environment=dev\n")
 	app := envTraceApp(t, eruncommon.EnvConfig{
-		Name: "dev", Type: eruncommon.EnvironmentTypeRemoteAgent, KubernetesContext: "ctx", LocalPortRangeStart: 17500,
+		Name: "dev", LocalRepoPath: "/home/erun/git/acme", Type: eruncommon.EnvironmentTypeRemoteAgent, KubernetesContext: "ctx", LocalPortRangeStart: 17500,
 	}, false, "", nil)
 
 	trace, err := app.LoadEnvTrace(uiSelection{Tenant: "acme", Environment: "dev"})
@@ -106,7 +106,7 @@ func TestLoadEnvTraceRemoteMergesHostAndPod(t *testing.T) {
 		"2026-06-11T00:00:01Z open: tenant=acme environment=dev\n"+
 			"2026-06-11T00:00:04Z kubectl config use-context ctx\n")
 	app := envTraceApp(t, eruncommon.EnvConfig{
-		Name: "dev", Type: eruncommon.EnvironmentTypeRemoteAgent, KubernetesContext: "ctx", LocalPortRangeStart: 17500,
+		Name: "dev", LocalRepoPath: "/home/erun/git/acme", Type: eruncommon.EnvironmentTypeRemoteAgent, KubernetesContext: "ctx", LocalPortRangeStart: 17500,
 	}, true,
 		"2026-06-11T00:00:02Z deploy: resolved 1 spec(s)\n"+
 			"2026-06-11T00:00:05Z doctor: all checks passed\n", nil)
@@ -132,7 +132,7 @@ func TestLoadEnvTraceRemoteMergesHostAndPod(t *testing.T) {
 func TestLoadEnvTraceRemotePodOnly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	app := envTraceApp(t, eruncommon.EnvConfig{
-		Name: "dev", Type: eruncommon.EnvironmentTypeRemoteAgent, KubernetesContext: "ctx", LocalPortRangeStart: 17500,
+		Name: "dev", LocalRepoPath: "/home/erun/git/acme", Type: eruncommon.EnvironmentTypeRemoteAgent, KubernetesContext: "ctx", LocalPortRangeStart: 17500,
 	}, true, "2026-06-11T00:00:00Z deploy: resolved 1 spec(s)\n", nil)
 
 	trace, err := app.LoadEnvTrace(uiSelection{Tenant: "acme", Environment: "dev"})
@@ -149,7 +149,7 @@ func TestLoadEnvTraceRemotePodOnly(t *testing.T) {
 func TestLoadEnvTraceRemoteBothEmpty(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	app := envTraceApp(t, eruncommon.EnvConfig{
-		Name: "dev", Type: eruncommon.EnvironmentTypeRemoteAgent, KubernetesContext: "ctx", LocalPortRangeStart: 17500,
+		Name: "dev", LocalRepoPath: "/home/erun/git/acme", Type: eruncommon.EnvironmentTypeRemoteAgent, KubernetesContext: "ctx", LocalPortRangeStart: 17500,
 	}, true, "", nil)
 
 	trace, err := app.LoadEnvTrace(uiSelection{Tenant: "acme", Environment: "dev"})
@@ -171,4 +171,3 @@ func writeHostTrace(t *testing.T, home, content string) {
 		t.Fatal(err)
 	}
 }
-

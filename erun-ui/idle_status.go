@@ -380,9 +380,30 @@ func (a *App) clearIdleStopsForCloudContext(name string) bool {
 	if name == "" {
 		return false
 	}
+	cleared := a.selectionKeysForCloudContext(name)
+	if len(cleared) == 0 {
+		return false
+	}
+	removed := false
+	a.mu.Lock()
+	for _, key := range cleared {
+		if _, ok := a.idleStops[key]; ok {
+			delete(a.idleStops, key)
+			removed = true
+		}
+	}
+	a.mu.Unlock()
+	return removed
+}
+
+// selectionKeysForCloudContext returns the selection keys for every configured
+// environment linked to the supplied cloud context name. Extracted from
+// clearIdleStopsForCloudContext so the config scan and the latched-flag removal
+// stay independently simple; the matching rules are unchanged.
+func (a *App) selectionKeysForCloudContext(name string) []string {
 	tenants, err := a.deps.store.ListTenantConfigs()
 	if err != nil {
-		return false
+		return nil
 	}
 	cleared := make([]string, 0)
 	for _, tenant := range tenants {
@@ -398,19 +419,7 @@ func (a *App) clearIdleStopsForCloudContext(name string) bool {
 			cleared = append(cleared, selectionKey(uiSelection{Tenant: tenant.Name, Environment: env.Name}))
 		}
 	}
-	if len(cleared) == 0 {
-		return false
-	}
-	removed := false
-	a.mu.Lock()
-	for _, key := range cleared {
-		if _, ok := a.idleStops[key]; ok {
-			delete(a.idleStops, key)
-			removed = true
-		}
-	}
-	a.mu.Unlock()
-	return removed
+	return cleared
 }
 
 func activitySecondsUntilIdle(status eruncommon.EnvironmentIdleStatus) int64 {

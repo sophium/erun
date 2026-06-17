@@ -143,29 +143,48 @@ func MaybeArmOrFireIdleStop(params MaybeArmOrFireIdleStopParams) (MaybeArmOrFire
 		}
 		return MaybeArmOrFireIdleStopResult{Action: IdleStopActionSkip}, nil
 	}
-	grace := idleStopGraceSeconds(params.Status)
 	pending, ok, err := LoadEnvironmentStopPending(tenant, environment)
 	if err != nil {
 		return MaybeArmOrFireIdleStopResult{}, err
 	}
 	if !ok {
-		armed := EnvironmentStopPending{
-			Since:            now,
-			GraceSeconds:     grace,
-			CloudContextName: strings.TrimSpace(params.CloudContextName),
-			ReasonSummary:    strings.TrimSpace(params.ReasonSummary),
-			Markers:          cloneIdleMarkersForPending(params.Status.Markers),
-			Policy:           params.Status.Policy,
-		}
-		if err := SaveEnvironmentStopPending(tenant, environment, armed); err != nil {
-			return MaybeArmOrFireIdleStopResult{}, err
-		}
-		return MaybeArmOrFireIdleStopResult{
-			Action:           IdleStopActionArm,
-			State:            armed,
-			SecondsRemaining: grace,
-		}, nil
+		return armIdleStopGraceWindow(tenant, environment, params, now)
 	}
+	return resolveArmedIdleStopWindow(tenant, environment, pending, now)
+}
+
+// armIdleStopGraceWindow writes a fresh stop-pending entry and reports
+// the Arm action. Called by MaybeArmOrFireIdleStop on the first pass
+// for an eligible env that has no pending window on disk yet.
+func armIdleStopGraceWindow(tenant, environment string, params MaybeArmOrFireIdleStopParams, now time.Time) (MaybeArmOrFireIdleStopResult, error) {
+	grace := idleStopGraceSeconds(params.Status)
+	armed := EnvironmentStopPending{
+		Since:            now,
+		GraceSeconds:     grace,
+		CloudContextName: strings.TrimSpace(params.CloudContextName),
+		ReasonSummary:    strings.TrimSpace(params.ReasonSummary),
+		Markers:          cloneIdleMarkersForPending(params.Status.Markers),
+		Policy:           params.Status.Policy,
+	}
+	if err := SaveEnvironmentStopPending(tenant, environment, armed); err != nil {
+		return MaybeArmOrFireIdleStopResult{}, err
+	}
+	return MaybeArmOrFireIdleStopResult{
+		Action:           IdleStopActionArm,
+		State:            armed,
+		SecondsRemaining: grace,
+	}, nil
+}
+
+// resolveArmedIdleStopWindow decides between Wait and Fire for an env
+// whose grace window is already armed. While the window is still open
+// it reports Wait with the seconds remaining; once the grace has
+// elapsed it clears the pending file before reporting Fire so a
+// crashing caller does not leave the env stuck "armed forever" after a
+// successful stop attempt that didn't get a chance to clean up. The
+// history entry is written separately by the caller on successful AWS
+// stop.
+func resolveArmedIdleStopWindow(tenant, environment string, pending EnvironmentStopPending, now time.Time) (MaybeArmOrFireIdleStopResult, error) {
 	elapsed := now.Sub(pending.Since)
 	if elapsed < time.Duration(pending.GraceSeconds)*time.Second {
 		remaining := pending.GraceSeconds - int64(elapsed.Seconds())
@@ -178,11 +197,6 @@ func MaybeArmOrFireIdleStop(params MaybeArmOrFireIdleStopParams) (MaybeArmOrFire
 			SecondsRemaining: remaining,
 		}, nil
 	}
-	// Grace elapsed: clear the pending file before reporting Fire so
-	// a crashing caller does not leave the env stuck "armed forever"
-	// after a successful stop attempt that didn't get a chance to
-	// clean up. The history entry is written separately by the
-	// caller on successful AWS stop.
 	if err := ClearEnvironmentStopPending(tenant, environment); err != nil {
 		return MaybeArmOrFireIdleStopResult{}, err
 	}

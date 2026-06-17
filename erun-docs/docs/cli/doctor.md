@@ -39,6 +39,7 @@ The exact flags for running these non-interactively are on the [CLI flag spec](/
 | Flag | Description |
 |---|---|
 | `--dry-run` | Run the inspection and print the recovery plan without performing any recovery actions. |
+| `--sync-config` | Reconcile the in-pod erun config with the helm-injected `ERUN_*` env vars. Only takes effect inside a runtime pod. The injected env wins: erun rebuilds the canonical projection (`type`, `kubernetescontext`, `cloudprovideralias`, `managedcloud`, the cloud-context/provider blocks, `idle`, `runtimeregistry`, `containerregistries`, `disablebuildscript`) and rewrites those keys, **preserving** every key the env does not carry (`sshd`, `claude`, `runtimeversion`, `localrepopath`, …). Drift is reported per key as `missing`, `wrong`, or `legacy`; with `--dry-run` the file writes are traced but not performed. |
 
 ## Examples
 

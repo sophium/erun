@@ -1,0 +1,2 @@
+Cannot reconcile in-pod config: ERUN_TENANT/ERUN_ENVIRONMENT are unset.
+audit: erun doctor --dry-run --sync-config

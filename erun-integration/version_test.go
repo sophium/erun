@@ -93,9 +93,9 @@ func TestVersion(t *testing.T) {
 				next := server.URL + page2Path
 				stableLatest = "1.4.0"
 				snapshotLatest = "1.5.0-snapshot-20260101000000"
-				fmt.Fprintf(w, `{"next": %q, "results":[{"name":"1.3.9"},{"name":"1.4.0"},{"name":"latest"}]}`, next)
+				_, _ = fmt.Fprintf(w, `{"next": %q, "results":[{"name":"1.3.9"},{"name":"1.4.0"},{"name":"latest"}]}`, next)
 			case strings.TrimPrefix(page2Path, ""):
-				fmt.Fprintf(w, `{"next":"","results":[{"name":"1.5.0-snapshot-20260101000000"},{"name":"1.5.0-snapshot-20251231000000"}]}`)
+				_, _ = fmt.Fprintf(w, `{"next":"","results":[{"name":"1.5.0-snapshot-20260101000000"},{"name":"1.5.0-snapshot-20251231000000"}]}`)
 			default:
 				http.Error(w, "unexpected request "+r.URL.String(), http.StatusNotFound)
 			}
@@ -137,14 +137,14 @@ func TestVersion(t *testing.T) {
 			switch {
 			case r.URL.Path == "/token":
 				w.Header().Set("Content-Type", "application/json")
-				fmt.Fprintf(w, `{"token":"stub-token"}`)
+				_, _ = fmt.Fprintf(w, `{"token":"stub-token"}`)
 			case r.URL.Path == "/v2/acme/erun-devops/tags/list" && r.URL.RawQuery == "":
 				w.Header().Set("Content-Type", "application/json")
 				w.Header().Set("Link", `</v2/acme/erun-devops/tags/list?last=1.4.0>; rel="next"`)
-				fmt.Fprintf(w, `{"name":"acme/erun-devops","tags":["1.3.9","1.4.0","latest"]}`)
+				_, _ = fmt.Fprintf(w, `{"name":"acme/erun-devops","tags":["1.3.9","1.4.0","latest"]}`)
 			case r.URL.Path == "/v2/acme/erun-devops/tags/list" && r.URL.RawQuery == "last=1.4.0":
 				w.Header().Set("Content-Type", "application/json")
-				fmt.Fprintf(w, `{"name":"acme/erun-devops","tags":["1.4.1"]}`)
+				_, _ = fmt.Fprintf(w, `{"name":"acme/erun-devops","tags":["1.4.1"]}`)
 			default:
 				http.Error(w, "unexpected request "+r.URL.String(), http.StatusNotFound)
 			}
@@ -194,9 +194,9 @@ func TestVersion(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			switch r.URL.Path {
 			case "/token":
-				fmt.Fprintf(w, `{"token":"stub-token"}`)
+				_, _ = fmt.Fprintf(w, `{"token":"stub-token"}`)
 			case "/v2/sophium/erun-devops/tags/list":
-				fmt.Fprintf(w, `{"name":"sophium/erun-devops","tags":["1.2.3"]}`)
+				_, _ = fmt.Fprintf(w, `{"name":"sophium/erun-devops","tags":["1.2.3"]}`)
 			default:
 				http.Error(w, "unexpected request "+r.URL.String(), http.StatusNotFound)
 			}
@@ -275,7 +275,7 @@ func TestVersion(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/token" {
 				w.Header().Set("Content-Type", "application/json")
-				fmt.Fprintf(w, `{"token":"stub-token"}`)
+				_, _ = fmt.Fprintf(w, `{"token":"stub-token"}`)
 				return
 			}
 			http.Error(w, "rate limited", http.StatusTooManyRequests)
@@ -309,15 +309,15 @@ func TestVersion(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			switch {
 			case r.URL.Path == "/token":
-				fmt.Fprintf(w, `{"access_token":"stub-access-token"}`)
+				_, _ = fmt.Fprintf(w, `{"access_token":"stub-access-token"}`)
 			case r.URL.Path == "/v2/acme/erun-devops/tags/list" && r.URL.RawQuery == "":
 				pages = append(pages, "page1")
 				w.Header().Set("Link", `</v2/acme/erun-devops/tags/list?last=0>; rel="prev", <`+server.URL+`/v2/acme/erun-devops/tags/list?last=1.4.0>; rel="next"`)
-				fmt.Fprintf(w, `{"name":"acme/erun-devops","tags":["1.4.0"]}`)
+				_, _ = fmt.Fprintf(w, `{"name":"acme/erun-devops","tags":["1.4.0"]}`)
 			case r.URL.Path == "/v2/acme/erun-devops/tags/list" && r.URL.RawQuery == "last=1.4.0":
 				pages = append(pages, "page2")
 				w.Header().Set("Link", `malformed; rel="next", <>; rel="next"`)
-				fmt.Fprintf(w, `{"name":"acme/erun-devops","tags":["1.4.1"]}`)
+				_, _ = fmt.Fprintf(w, `{"name":"acme/erun-devops","tags":["1.4.1"]}`)
 			default:
 				http.Error(w, "unexpected request "+r.URL.String(), http.StatusNotFound)
 			}
@@ -354,9 +354,9 @@ func TestVersion(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			switch r.URL.RawQuery {
 			case "page_size=100":
-				fmt.Fprintf(w, `{"next": %q, "results":[{"name":"1..0"},{"name":"1.-1.0"},{"name":"1.4.0"},{"name":"1.5.0-snapshot-2026010100000x"}]}`, server.URL+r.URL.Path+"?page=2")
+				_, _ = fmt.Fprintf(w, `{"next": %q, "results":[{"name":"1..0"},{"name":"1.-1.0"},{"name":"1.4.0"},{"name":"1.5.0-snapshot-2026010100000x"}]}`, server.URL+r.URL.Path+"?page=2")
 			case "page=2":
-				fmt.Fprintf(w, `{"next":"","results":[{"name":"1.4.0"},{"name":"1.5.0"}]}`)
+				_, _ = fmt.Fprintf(w, `{"next":"","results":[{"name":"1.4.0"},{"name":"1.5.0"}]}`)
 			default:
 				http.Error(w, "unexpected request "+r.URL.String(), http.StatusNotFound)
 			}

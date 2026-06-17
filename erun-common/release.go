@@ -989,30 +989,18 @@ func discoverStableReleasePackaging(projectRoot, version string) ([]ReleaseFileU
 	syncSpec := &ReleasePackagingSyncSpec{ProjectRoot: projectRoot, Version: version}
 
 	formulaPath := filepath.Join(projectRoot, "Formula", "erun.rb")
-	formulaContent, formulaChanged, err := updateHomebrewFormulaReleaseVersion(formulaPath, version)
+	updates, err := appendReleasePackagingUpdate(updates, formulaPath, version, updateHomebrewFormulaReleaseVersion)
 	if err != nil {
 		return nil, nil, err
-	}
-	if formulaChanged {
-		updates = append(updates, ReleaseFileUpdate{
-			Path:    formulaPath,
-			Content: formulaContent,
-		})
 	}
 	if fileExists(formulaPath) {
 		syncSpec.FormulaPath = formulaPath
 	}
 
 	scoopPath := filepath.Join(projectRoot, "bucket", "erun.json")
-	scoopContent, scoopChanged, err := updateScoopManifestReleaseVersion(scoopPath, version)
+	updates, err = appendReleasePackagingUpdate(updates, scoopPath, version, updateScoopManifestReleaseVersion)
 	if err != nil {
 		return nil, nil, err
-	}
-	if scoopChanged {
-		updates = append(updates, ReleaseFileUpdate{
-			Path:    scoopPath,
-			Content: scoopContent,
-		})
 	}
 	if fileExists(scoopPath) {
 		syncSpec.ScoopPath = scoopPath
@@ -1028,6 +1016,27 @@ func discoverStableReleasePackaging(projectRoot, version string) ([]ReleaseFileU
 	}
 
 	return updates, syncSpec, nil
+}
+
+// appendReleasePackagingUpdate runs a packaging-file version updater and, when
+// it reports a change, appends the rewritten content as a ReleaseFileUpdate.
+// An updater error propagates unchanged so the discovery aborts as before.
+func appendReleasePackagingUpdate(
+	updates []ReleaseFileUpdate,
+	path, version string,
+	update func(string, string) (string, bool, error),
+) ([]ReleaseFileUpdate, error) {
+	content, changed, err := update(path, version)
+	if err != nil {
+		return nil, err
+	}
+	if changed {
+		updates = append(updates, ReleaseFileUpdate{
+			Path:    path,
+			Content: content,
+		})
+	}
+	return updates, nil
 }
 
 func updateHelmChartReleaseVersion(chartFilePath, version string) (string, bool, ReleaseChartSpec, error) {

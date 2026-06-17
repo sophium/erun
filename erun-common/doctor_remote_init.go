@@ -308,6 +308,33 @@ func RunRemoteInitFinish(ctx Context, inspection RemoteInitInspection, params Re
 		return inspection, nil
 	}
 
+	repositoryURL, err := resolveRemoteInitRepositoryURL(ctx, inspection, params, prompt, missing)
+	if err != nil {
+		return inspection, err
+	}
+
+	repository := resolveRemoteInitRepositorySpec(repositoryURL, inspection.Marker)
+	missing = appendMissingCodeCommitKeypair(missing, repository, inspection.HomeDir)
+
+	state, err := applyRemoteInitMissingItems(ctx, inspection, missing)
+	if err != nil {
+		return inspection, err
+	}
+
+	if state.needsGitCheckout {
+		if err := runRemoteInitGitCheckout(ctx, inspection, &repository, state, params, prompt); err != nil {
+			return inspection, err
+		}
+	}
+
+	return saveRemoteInitCompletionMarker(ctx, inspection, repository, repositoryURL)
+}
+
+// resolveRemoteInitRepositoryURL resolves the git repository URL for a finish
+// run: the explicit param, then the marker, then (only when a clone is needed
+// and we are not in dry-run) an interactive prompt. Returns an error when a
+// clone is required but no URL can be obtained.
+func resolveRemoteInitRepositoryURL(ctx Context, inspection RemoteInitInspection, params RemoteInitFinishParams, prompt RemoteInitFinishPrompt, missing []RemoteInitInspectionItem) (string, error) {
 	repositoryURL := strings.TrimSpace(params.RepositoryURL)
 	if repositoryURL == "" {
 		repositoryURL = strings.TrimSpace(inspection.Marker.RepositoryURL)
@@ -315,83 +342,116 @@ func RunRemoteInitFinish(ctx Context, inspection RemoteInitInspection, params Re
 	needsClone := remoteInitMissingItem(missing, "git checkout")
 	if needsClone && repositoryURL == "" && !ctx.DryRun {
 		if prompt == nil {
-			return inspection, errors.New("repository URL is required to finish git checkout")
+			return "", errors.New("repository URL is required to finish git checkout")
 		}
 		value, err := prompt(remoteInitRepositoryPromptLabel(inspection.Tenant, inspection.Environment))
 		if err != nil {
-			return inspection, err
+			return "", err
 		}
 		repositoryURL = strings.TrimSpace(value)
 		if repositoryURL == "" {
-			return inspection, errors.New("repository URL is required to finish git checkout")
+			return "", errors.New("repository URL is required to finish git checkout")
 		}
 	}
+	return repositoryURL, nil
+}
 
-	repository := resolveRemoteInitRepositorySpec(repositoryURL, inspection.Marker)
-
-	if repository.CodeCommitHost != "" && !remoteInitMissingItem(missing, "CodeCommit SSH keypair") {
-		rsaPath := defaultRemoteInitCodeCommitSSHKeyPath(inspection.HomeDir)
-		if _, err := os.Stat(rsaPath); err != nil {
-			missing = append(missing, RemoteInitInspectionItem{
-				Label:  "CodeCommit SSH keypair",
-				Path:   rsaPath,
-				Status: RemoteInitInspectionStatusMissing,
-			})
-		}
+// appendMissingCodeCommitKeypair adds the CodeCommit SSH keypair to the missing
+// set when the repo is a CodeCommit host whose keypair is absent on disk but was
+// not already flagged (the inspection only checks it conditionally).
+func appendMissingCodeCommitKeypair(missing []RemoteInitInspectionItem, repository remoteRepositorySpec, homeDir string) []RemoteInitInspectionItem {
+	if repository.CodeCommitHost == "" || remoteInitMissingItem(missing, "CodeCommit SSH keypair") {
+		return missing
 	}
+	rsaPath := defaultRemoteInitCodeCommitSSHKeyPath(homeDir)
+	if _, err := os.Stat(rsaPath); err != nil {
+		missing = append(missing, RemoteInitInspectionItem{
+			Label:  "CodeCommit SSH keypair",
+			Path:   rsaPath,
+			Status: RemoteInitInspectionStatusMissing,
+		})
+	}
+	return missing
+}
 
-	sshKeyPath := defaultRemoteInitSSHKeyPath(inspection.HomeDir)
-	sshKeyJustGenerated := false
-	codeCommitKeyPath := ""
-	codeCommitKeyJustGenerated := false
-	needsGitCheckout := false
+// remoteInitKeyState carries the SSH/CodeCommit key paths and just-generated
+// flags produced while materializing missing items, plus whether a git checkout
+// is still pending — the checkout runs after the keys exist.
+type remoteInitKeyState struct {
+	sshKeyPath                 string
+	sshKeyJustGenerated        bool
+	codeCommitKeyPath          string
+	codeCommitKeyJustGenerated bool
+	needsGitCheckout           bool
+}
+
+// applyRemoteInitMissingItems materializes each missing item (project root, SSH
+// keys, agent skills) in canonical order, returning the key state the checkout
+// phase needs. The "git checkout" item only sets needsGitCheckout here because
+// the clone depends on the keys generated above.
+func applyRemoteInitMissingItems(ctx Context, inspection RemoteInitInspection, missing []RemoteInitInspectionItem) (remoteInitKeyState, error) {
+	state := remoteInitKeyState{sshKeyPath: defaultRemoteInitSSHKeyPath(inspection.HomeDir)}
 	for _, item := range orderRemoteInitMissingItems(missing) {
-		switch item.Label {
-		case "project root":
-			if err := finishRemoteInitProjectRoot(ctx, item.Path); err != nil {
-				return inspection, err
-			}
-		case "SSH keypair":
-			if err := finishRemoteInitSSHKey(ctx, item.Path); err != nil {
-				return inspection, err
-			}
-			sshKeyPath = item.Path
-			sshKeyJustGenerated = true
-		case "CodeCommit SSH keypair":
-			if err := finishRemoteInitCodeCommitSSHKey(ctx, item.Path); err != nil {
-				return inspection, err
-			}
-			codeCommitKeyPath = item.Path
-			codeCommitKeyJustGenerated = true
-		case "git checkout":
-			needsGitCheckout = true
-		case "agent skills":
-			if err := finishRemoteInitSkills(ctx, inspection.HomeDir); err != nil {
-				return inspection, err
-			}
+		if err := applyRemoteInitMissingItem(ctx, inspection, item, &state); err != nil {
+			return state, err
 		}
 	}
+	return state, nil
+}
 
-	if needsGitCheckout {
-		if repository.CodeCommitHost != "" {
-			if codeCommitKeyPath == "" {
-				codeCommitKeyPath = defaultRemoteInitCodeCommitSSHKeyPath(inspection.HomeDir)
-			}
-			if err := resolveCodeCommitSSHKeyID(ctx, &repository, codeCommitKeyPath, inspection.Tenant, inspection.Environment, params.CodeCommitSSHKeyID, prompt); err != nil {
-				return inspection, err
-			}
-			if err := finishRemoteInitCodeCommitSSHConfig(ctx, inspection.HomeDir, repository); err != nil {
-				return inspection, err
-			}
+// applyRemoteInitMissingItem materializes a single missing item, recording any
+// generated key path/flag on state. The "git checkout" item only flags
+// needsGitCheckout — the clone is run later, after every key exists.
+func applyRemoteInitMissingItem(ctx Context, inspection RemoteInitInspection, item RemoteInitInspectionItem, state *remoteInitKeyState) error {
+	switch item.Label {
+	case "project root":
+		return finishRemoteInitProjectRoot(ctx, item.Path)
+	case "SSH keypair":
+		if err := finishRemoteInitSSHKey(ctx, item.Path); err != nil {
+			return err
 		}
-		if err := finishRemoteInitGitAccess(ctx, sshKeyPath, codeCommitKeyPath, repository, sshKeyJustGenerated, codeCommitKeyJustGenerated, params.Sleep); err != nil {
-			return inspection, err
+		state.sshKeyPath = item.Path
+		state.sshKeyJustGenerated = true
+	case "CodeCommit SSH keypair":
+		if err := finishRemoteInitCodeCommitSSHKey(ctx, item.Path); err != nil {
+			return err
 		}
-		if err := finishRemoteInitGitCheckout(ctx, inspection.ProjectRoot, sshKeyPath, repository); err != nil {
-			return inspection, err
+		state.codeCommitKeyPath = item.Path
+		state.codeCommitKeyJustGenerated = true
+	case "git checkout":
+		state.needsGitCheckout = true
+	case "agent skills":
+		return finishRemoteInitSkills(ctx, inspection.HomeDir)
+	}
+	return nil
+}
+
+// runRemoteInitGitCheckout completes the CodeCommit SSH config (when the repo is
+// a CodeCommit host) and clones the project into ProjectRoot using the resolved
+// keys. repository may be updated in place with a resolved CodeCommit SSH key ID.
+func runRemoteInitGitCheckout(ctx Context, inspection RemoteInitInspection, repository *remoteRepositorySpec, state remoteInitKeyState, params RemoteInitFinishParams, prompt RemoteInitFinishPrompt) error {
+	codeCommitKeyPath := state.codeCommitKeyPath
+	if repository.CodeCommitHost != "" {
+		if codeCommitKeyPath == "" {
+			codeCommitKeyPath = defaultRemoteInitCodeCommitSSHKeyPath(inspection.HomeDir)
+		}
+		if err := resolveCodeCommitSSHKeyID(ctx, repository, codeCommitKeyPath, inspection.Tenant, inspection.Environment, params.CodeCommitSSHKeyID, prompt); err != nil {
+			return err
+		}
+		if err := finishRemoteInitCodeCommitSSHConfig(ctx, inspection.HomeDir, *repository); err != nil {
+			return err
 		}
 	}
+	if err := finishRemoteInitGitAccess(ctx, state.sshKeyPath, codeCommitKeyPath, *repository, state.sshKeyJustGenerated, state.codeCommitKeyJustGenerated, params.Sleep); err != nil {
+		return err
+	}
+	return finishRemoteInitGitCheckout(ctx, inspection.ProjectRoot, state.sshKeyPath, *repository)
+}
 
+// saveRemoteInitCompletionMarker stamps the marker complete (tenant, env,
+// project root, and — unless NoGit — the resolved repository details) and
+// persists it, or traces the would-be write in dry-run.
+func saveRemoteInitCompletionMarker(ctx Context, inspection RemoteInitInspection, repository remoteRepositorySpec, repositoryURL string) (RemoteInitInspection, error) {
 	updated := inspection
 	updated.Marker.Tenant = inspection.Tenant
 	updated.Marker.Environment = inspection.Environment

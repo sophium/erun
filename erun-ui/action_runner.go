@@ -184,11 +184,7 @@ func (a *App) executeDesktopAction(action *desktopAction) {
 	// payloads via activityEntriesShallowEqual).
 	a.emitActivityState(promoted)
 	a.lockTerminalsForActivity(promoted)
-	if action.kind == "deploy" || action.kind == "force-deploy" {
-		if a.activityStatusPoller != nil {
-			a.activityStatusPoller(current)
-		}
-	}
+	a.startActivityStatusPollerForAction(action, current)
 	ctx, cancel := context.WithCancel(a.activityWatcherCtx())
 	a.registerCancel(action.id, cancel)
 	defer a.clearCancel(action.id)
@@ -196,20 +192,39 @@ func (a *App) executeDesktopAction(action *desktopAction) {
 
 	err := action.run(ctx)
 
-	status := activityQueueStatusSucceeded
-	errMsg := ""
-	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			status = activityQueueStatusCancelled
-			errMsg = "cancelled"
-		} else {
-			status = activityQueueStatusFailed
-			errMsg = err.Error()
-		}
-	}
+	status, errMsg := desktopActionTerminalStatus(err)
 	if final, finished := a.activityQueue.finish(action.id, status, errMsg); finished {
 		a.unlockTerminalsForActivity(final)
 	}
+}
+
+// startActivityStatusPollerForAction kicks off the container-status poller
+// for deploy/force-deploy actions when a poller is configured. Other action
+// kinds (and a nil poller) are a no-op. Extracted from executeDesktopAction
+// so it stays under the cyclomatic-complexity limit; behavior is unchanged.
+func (a *App) startActivityStatusPollerForAction(action *desktopAction, entry activityQueueEntry) {
+	if action.kind != "deploy" && action.kind != "force-deploy" {
+		return
+	}
+	if a.activityStatusPoller == nil {
+		return
+	}
+	a.activityStatusPoller(entry)
+}
+
+// desktopActionTerminalStatus maps an action's run error to the terminal
+// queue status and message. A nil error succeeds; a context.Canceled error
+// is reported as cancelled; anything else fails with the error text.
+// Extracted from executeDesktopAction so it stays under the
+// cyclomatic-complexity limit; the mapping is unchanged.
+func desktopActionTerminalStatus(err error) (activityQueueStatus, string) {
+	if err == nil {
+		return activityQueueStatusSucceeded, ""
+	}
+	if errors.Is(err, context.Canceled) {
+		return activityQueueStatusCancelled, "cancelled"
+	}
+	return activityQueueStatusFailed, err.Error()
 }
 
 // registerCancel and clearCancel track the active context.CancelFunc

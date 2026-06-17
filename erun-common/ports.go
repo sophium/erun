@@ -124,6 +124,54 @@ func ContributeAppPortForResult(result OpenResult) int {
 	return LocalPortsForResult(result).ContributeApp
 }
 
+// environmentPortRef pairs an env's tenant/environment key with its config so
+// the two-pass allocator can split envs into persisted and unpersisted groups.
+type environmentPortRef struct {
+	key string
+	env EnvConfig
+}
+
+// collectEnvironmentPortRefs walks every tenant's envs in alphabetical
+// (tenant, env) order, splitting them into those with a persisted
+// LocalPortRangeStart and those without. Tenants and envs with blank names are
+// skipped, matching the original inline collection.
+func collectEnvironmentPortRefs(store environmentPortStore) (persisted, unpersisted []environmentPortRef, err error) {
+	tenants, err := store.ListTenantConfigs()
+	if err != nil {
+		return nil, nil, err
+	}
+	sort.Slice(tenants, func(i, j int) bool {
+		return strings.TrimSpace(tenants[i].Name) < strings.TrimSpace(tenants[j].Name)
+	})
+
+	for _, tenant := range tenants {
+		tenantName := strings.TrimSpace(tenant.Name)
+		if tenantName == "" {
+			continue
+		}
+		envs, err := store.ListEnvConfigs(tenantName)
+		if err != nil {
+			return nil, nil, err
+		}
+		sort.Slice(envs, func(i, j int) bool {
+			return strings.TrimSpace(envs[i].Name) < strings.TrimSpace(envs[j].Name)
+		})
+		for _, env := range envs {
+			environmentName := strings.TrimSpace(env.Name)
+			if environmentName == "" {
+				continue
+			}
+			ref := environmentPortRef{key: environmentPortKey(tenantName, environmentName), env: env}
+			if env.LocalPortRangeStart > 0 {
+				persisted = append(persisted, ref)
+			} else {
+				unpersisted = append(unpersisted, ref)
+			}
+		}
+	}
+	return persisted, unpersisted, nil
+}
+
 // ResolveAllEnvironmentLocalPorts returns a per-env port allocation in two
 // passes. Pass A locks in any env whose config has a non-zero
 // LocalPortRangeStart at its declared range. Pass B walks the remaining envs
@@ -136,64 +184,49 @@ func ResolveAllEnvironmentLocalPorts(store environmentPortStore) (map[string]Env
 		return nil, fmt.Errorf("store is required")
 	}
 
-	tenants, err := store.ListTenantConfigs()
+	persisted, unpersisted, err := collectEnvironmentPortRefs(store)
 	if err != nil {
 		return nil, err
-	}
-	sort.Slice(tenants, func(i, j int) bool {
-		return strings.TrimSpace(tenants[i].Name) < strings.TrimSpace(tenants[j].Name)
-	})
-
-	type envRef struct {
-		key string
-		env EnvConfig
-	}
-	var persisted, unpersisted []envRef
-	for _, tenant := range tenants {
-		tenantName := strings.TrimSpace(tenant.Name)
-		if tenantName == "" {
-			continue
-		}
-		envs, err := store.ListEnvConfigs(tenantName)
-		if err != nil {
-			return nil, err
-		}
-		sort.Slice(envs, func(i, j int) bool {
-			return strings.TrimSpace(envs[i].Name) < strings.TrimSpace(envs[j].Name)
-		})
-		for _, env := range envs {
-			environmentName := strings.TrimSpace(env.Name)
-			if environmentName == "" {
-				continue
-			}
-			ref := envRef{key: environmentPortKey(tenantName, environmentName), env: env}
-			if env.LocalPortRangeStart > 0 {
-				persisted = append(persisted, ref)
-			} else {
-				unpersisted = append(unpersisted, ref)
-			}
-		}
 	}
 
 	allocations := make(map[string]EnvironmentLocalPorts, len(persisted)+len(unpersisted))
 	claimedByIndex := make(map[int]string, len(persisted)+len(unpersisted))
 
+	if err := allocatePersistedEnvironmentPorts(persisted, allocations, claimedByIndex); err != nil {
+		return nil, err
+	}
+	if err := allocateUnpersistedEnvironmentPorts(unpersisted, allocations, claimedByIndex); err != nil {
+		return nil, err
+	}
+
+	return allocations, nil
+}
+
+// allocatePersistedEnvironmentPorts locks each persisted env in at the index
+// derived from its declared range start, recording the claim and its ports. A
+// second env claiming the same index yields an ErrLocalPortRangeOverlap.
+func allocatePersistedEnvironmentPorts(persisted []environmentPortRef, allocations map[string]EnvironmentLocalPorts, claimedByIndex map[int]string) error {
 	for _, ref := range persisted {
 		index, err := environmentPortIndexForRangeStart(ref.env.LocalPortRangeStart, ref.key)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if other, dup := claimedByIndex[index]; dup {
-			return nil, ErrLocalPortRangeOverlap{A: other, B: ref.key, RangeStart: ref.env.LocalPortRangeStart}
+			return ErrLocalPortRangeOverlap{A: other, B: ref.key, RangeStart: ref.env.LocalPortRangeStart}
 		}
 		ports, err := environmentLocalPortsForIndex(index, ref.env)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		claimedByIndex[index] = ref.key
 		allocations[ref.key] = ports
 	}
+	return nil
+}
 
+// allocateUnpersistedEnvironmentPorts walks the remaining envs in order,
+// assigning each the lowest index not already claimed by the persisted pass.
+func allocateUnpersistedEnvironmentPorts(unpersisted []environmentPortRef, allocations map[string]EnvironmentLocalPorts, claimedByIndex map[int]string) error {
 	walkerIndex := 0
 	for _, ref := range unpersisted {
 		for {
@@ -204,14 +237,13 @@ func ResolveAllEnvironmentLocalPorts(store environmentPortStore) (map[string]Env
 		}
 		ports, err := environmentLocalPortsForIndex(walkerIndex, ref.env)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		claimedByIndex[walkerIndex] = ref.key
 		allocations[ref.key] = ports
 		walkerIndex++
 	}
-
-	return allocations, nil
+	return nil
 }
 
 func ResolveEnvironmentLocalPorts(store environmentPortStore, tenant, environment string) (EnvironmentLocalPorts, error) {

@@ -69,27 +69,69 @@ func parseHeadlessFlags(args []string) (headless bool, port int, leftover []stri
 	for i < len(args) {
 		a := args[i]
 		switch {
-		case a == "--headless" || a == "-headless":
-			headless = true
-		case strings.HasPrefix(a, "--headless=") || strings.HasPrefix(a, "-headless="):
-			headless = parseBoolFlag(stripFlagPrefix(a, "headless="))
-		case a == "--port" || a == "-port":
-			if i+1 < len(args) {
-				if p, err := strconv.Atoi(args[i+1]); err == nil && p > 0 {
-					port = p
-					i++
-				}
+		case matchHeadlessFlag(a, &headless):
+		case isPortFlag(a):
+			// --port value: consume the following arg only when it parses
+			// into port; otherwise the next arg flows through normally.
+			if consumePortFlagValue(args, i, &port) {
+				i++
 			}
-		case strings.HasPrefix(a, "--port=") || strings.HasPrefix(a, "-port="):
-			if p, err := strconv.Atoi(stripFlagPrefix(a, "port=")); err == nil && p > 0 {
-				port = p
-			}
+		case matchPortAssignFlag(a, &port):
 		default:
 			leftover = append(leftover, a)
 		}
 		i++
 	}
 	return headless, port, leftover
+}
+
+// matchHeadlessFlag reports whether arg is a --headless flag (bare or
+// =value form) and, when it is, updates headless accordingly.
+func matchHeadlessFlag(arg string, headless *bool) bool {
+	switch {
+	case arg == "--headless" || arg == "-headless":
+		*headless = true
+		return true
+	case strings.HasPrefix(arg, "--headless=") || strings.HasPrefix(arg, "-headless="):
+		*headless = parseBoolFlag(stripFlagPrefix(arg, "headless="))
+		return true
+	default:
+		return false
+	}
+}
+
+// isPortFlag reports whether arg is the bare `--port`/`-port` form, whose
+// value is the following argument.
+func isPortFlag(arg string) bool {
+	return arg == "--port" || arg == "-port"
+}
+
+// consumePortFlagValue parses the argument following a bare --port flag. When
+// it parses as a positive int, port is updated and true is returned so the
+// caller skips the consumed value; otherwise port is left untouched and the
+// following arg flows through to leftover, matching the prior behavior.
+func consumePortFlagValue(args []string, i int, port *int) bool {
+	if i+1 >= len(args) {
+		return false
+	}
+	p, err := strconv.Atoi(args[i+1])
+	if err != nil || p <= 0 {
+		return false
+	}
+	*port = p
+	return true
+}
+
+// matchPortAssignFlag reports whether arg is the `--port=value` form and, when
+// the value parses as a positive int, updates port.
+func matchPortAssignFlag(arg string, port *int) bool {
+	if !strings.HasPrefix(arg, "--port=") && !strings.HasPrefix(arg, "-port=") {
+		return false
+	}
+	if p, err := strconv.Atoi(stripFlagPrefix(arg, "port=")); err == nil && p > 0 {
+		*port = p
+	}
+	return true
 }
 
 func stripFlagPrefix(arg, name string) string {

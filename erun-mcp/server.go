@@ -142,6 +142,19 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig) *mcp.Server {
 		Version: info.Version,
 	}, nil)
 
+	registerReadModelTools(server, info, runtime)
+	registerIdleStopTools(server, runtime)
+	registerCloudTools(server, runtime)
+	registerContextTools(server, runtime)
+	registerDeliveryTools(server, runtime)
+	registerInspectionTools(server, runtime)
+
+	return server
+}
+
+// registerReadModelTools registers the read-only build/config introspection
+// tools.
+func registerReadModelTools(server *mcp.Server, info eruncommon.BuildInfo, runtime RuntimeConfig) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "version",
 		Description: "Return build metadata for the current erun binary",
@@ -150,6 +163,10 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig) *mcp.Server {
 		Name:        "list",
 		Description: "List configured tenants and environments, defaults, and the effective target for the current runtime directory",
 	}, listTool(runtime))
+}
+
+// registerIdleStopTools registers the idle status and auto-stop audit tools.
+func registerIdleStopTools(server *mcp.Server, runtime RuntimeConfig) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "idle",
 		Description: "Return environment idle stop timeout and marker status without recording activity",
@@ -166,6 +183,11 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig) *mcp.Server {
 		Name:        "idle_stop_record",
 		Description: "Record a host-driven stop entry in stop-history.json (source=host-manual). Called by the desktop's Stop button after the AWS stop succeeds, so the History tab can also explain 'you clicked Stop' alongside the in-pod monitor's auto-stops.",
 	}, idleStopRecordTool(runtime))
+}
+
+// registerCloudTools registers the cloud-provider-alias and AWS-credential
+// tools.
+func registerCloudTools(server *mcp.Server, runtime RuntimeConfig) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "cloud_list",
 		Description: "List configured root-level cloud provider aliases and token status",
@@ -194,6 +216,10 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig) *mcp.Server {
 		Name:        "cloud_clear_aws_credentials",
 		Description: "Remove the erun-host profile from the runtime pod's ~/.aws/credentials",
 	}, cloudClearAWSCredentialsTool())
+}
+
+// registerContextTools registers the managed-cloud Kubernetes context tools.
+func registerContextTools(server *mcp.Server, runtime RuntimeConfig) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "context_list",
 		Description: "List managed ERun cloud Kubernetes contexts",
@@ -210,6 +236,11 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig) *mcp.Server {
 		Name:        "context_start",
 		Description: "Start a managed ERun cloud Kubernetes context, with preview support",
 	}, contextStartTool(runtime))
+}
+
+// registerDeliveryTools registers the init → build → push → deploy lifecycle
+// tools plus upgrade, doctor, and delete.
+func registerDeliveryTools(server *mcp.Server, runtime RuntimeConfig) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "init",
 		Description: "Run `erun init` using the shared init flow; when more input is needed, return a structured interaction request for the caller to answer in a follow-up tool call",
@@ -238,6 +269,11 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig) *mcp.Server {
 		Name:        "delete",
 		Description: "Delete an environment from ERun configuration and remove its remote runtime namespace after explicit tenant-environment confirmation",
 	}, deleteTool(runtime))
+}
+
+// registerInspectionTools registers the repo-state and source-contribution
+// tools that operate from the runtime repo root.
+func registerInspectionTools(server *mcp.Server, runtime RuntimeConfig) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "diff",
 		Description: "Return the current git diff from the runtime repo root as raw text plus structured file, hunk, line, and tree data",
@@ -254,6 +290,4 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig) *mcp.Server {
 		Name:        "contribute_clone",
 		Description: "Clone the ERun source repository into $HOME/git/erun inside the environment so contribute-mode tabs can build and run a local ERun checkout",
 	}, contributeCloneTool(runtime))
-
-	return server
 }
