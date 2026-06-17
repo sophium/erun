@@ -609,8 +609,8 @@ func resolveDeploySpecForContext(ctx Context, store DeployStore, findProjectRoot
 }
 
 // resolveInstallExistingVersionDeploySpec resolves a deploy that installs the
-// image already published at the pinned version, with no local build and no
-// push. deploy and upgrade are consume operations: a version names a content
+// image already published at the pinned version, without building or pushing
+// anything. deploy and upgrade are consume operations: a version names a content
 // identity, so a builds-here env addresses the published tag by reference
 // rather than rebuilding the working tree under that label. The chart's
 // referenced images are verified to exist (locally or in the registry) so a
@@ -638,7 +638,7 @@ func resolveInstallExistingVersionDeploySpec(ctx Context, store DeployStore, tar
 		return DeploySpec{}, err
 	}
 
-	ctx.Trace("deploy: version " + deployInput.Version + " pinned; installing the published image, no local build")
+	ctx.Trace("deploy: version " + deployInput.Version + " pinned; installing the published image by reference (deploy never builds)")
 	images, err := findDockerImagesInChart(deployContext.ChartPath, deployInput.Version)
 	if err != nil {
 		return DeploySpec{}, err

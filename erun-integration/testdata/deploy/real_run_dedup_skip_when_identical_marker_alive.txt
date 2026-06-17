@@ -1,7 +1,7 @@
 audit: erun deploy --version <VERSION> team dev
 trace-log: appending the full trace to <TMP>
 deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=false current=false
-deploy: version <VERSION> pinned; installing the published image, no local build
+deploy: version <VERSION> pinned; installing the published image by reference (deploy never builds)
 deploy: resolved 1 spec(s)
 kubectl --context test-context get namespace team-dev -o name
 kubectl --context test-context create namespace team-dev

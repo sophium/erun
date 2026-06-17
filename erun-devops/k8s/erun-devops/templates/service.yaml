@@ -190,6 +190,65 @@ roleRef:
   kind: ClusterRole
   name: {{ .Release.Name }}-namespace-manager
 ---
+# local-only: in contribute mode an operator runs `erun deploy` from inside the
+# runtime pod, where helm authenticates as this release's ServiceAccount. That
+# SA is bound to the built-in admin ClusterRole, which covers namespaced
+# resources but deliberately withholds cluster-scoped RBAC — so an in-pod
+# self-deploy could not even helm-diff the namespace-manager ClusterRole/
+# bindings above (helm fails with "cannot get clusterroles at the cluster
+# scope"). Grant the SA management of exactly this release's own cluster-scoped
+# RBAC, by name, so an in-pod redeploy works without granting broad clusterrole
+# escalation. The first install still comes from an admin context (which can
+# create these); the SA only upgrades them in place, and it already holds every
+# permission it re-applies, so the apiserver's escalation check passes.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Name }}-self-deploy
+  labels:
+    app: erun-devops
+rules:
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - clusterroles
+    resourceNames:
+      - {{ .Release.Name }}-namespace-manager
+      - {{ .Release.Name }}-self-deploy
+    verbs:
+      - get
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - clusterrolebindings
+    resourceNames:
+      - {{ .Release.Name }}
+      - {{ .Release.Name }}-namespace-manager
+      - {{ .Release.Name }}-self-deploy
+    verbs:
+      - get
+      - update
+      - patch
+      - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Name }}-self-deploy
+  labels:
+    app: erun-devops
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Release.Name }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Name }}-self-deploy
+---
 {{- end }}
 apiVersion: apps/v1
 kind: Deployment
