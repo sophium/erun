@@ -272,6 +272,17 @@ The deploy plan comes from `ProjectConfig.environments.<env>.k8s.deployments[]` 
 
 The skip emits `result: skipped (no change)` in the trace. `deploy` never pushes, so there is no `docker push` to skip.
 
+### Immutable-selector recovery
+
+A Kubernetes `Deployment.spec.selector` is immutable: helm cannot patch a release whose installed selector differs from the chart's rendered selector, and aborts the upgrade with `Deployment.apps "<name>" is invalid: spec.selector: … field is immutable`. This happens when an environment was first installed under a chart that rendered a different selector than the one now being applied (e.g. a pre-cutover per-tenant chart that labelled pods `app: <release>` versus a chart that hardcoded `app: erun-devops`, or vice-versa).
+
+`erun deploy` detects this specific failure and recovers automatically, in `erun-common` so both CLI and MCP flows get it:
+
+1. It parses the offending Deployment name from helm's error and deletes **only** that Deployment (`kubectl delete deployment <name> --namespace <ns> [--context <ctx>] --ignore-not-found`). The release's PVCs (`<release>-home`, `<release>-docker`, `<release>-worktree`), ServiceAccount, and RBAC are separate objects and are **not** touched, so build cache and `/home/erun` survive.
+2. It retries the `helm upgrade --install` **once**. With the Deployment gone, helm creates it fresh with the new selector.
+
+The recovery is bounded to a single retry (the delete removes the conflict, so the retry cannot hit the same error) and fires only for an immutable `spec.selector` change — an unrelated immutable-field error is not caught and never triggers a delete. It runs only in real execution, not `--dry-run` (the conflict is a helm side-effect failure, not a pre-action decision). The trace names the decision on the audit channel: `deploy: Deployment <name> selector is immutable and changed; deleting it (PVCs preserved) and retrying the upgrade`; the literal `kubectl delete` is logged at `-vv`. If the retried upgrade fails for any other reason, that error surfaces as `HELM_UPGRADE_FAILED`.
+
 ### Error codes
 
 | Code | Cause | Exit code |

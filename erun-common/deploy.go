@@ -9,7 +9,9 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -447,9 +449,7 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 	}
 
 	started := time.Now()
-	spinner := StartSpinner(ctx.Stderr, "deploying "+target)
-	deployErr := deploy(deployInput.Params(ctx.Stdout, ctx.Stderr))
-	spinner.Stop()
+	deployErr := runHelmUpgradeWithSelectorRecovery(ctx, deployInput, deploy, target)
 	elapsed := time.Since(started).Round(time.Second)
 	if deployErr != nil {
 		// Name the release so a parallel step (multiple charts deploying at
@@ -1409,6 +1409,34 @@ func (e *HelmReleasePendingOperationError) Unwrap() error {
 	return e.Err
 }
 
+// HelmImmutableSelectorError is returned by DeployHelmChart when helm aborts an
+// upgrade because a Deployment's spec.selector — an immutable field — differs
+// from the installed object. RunHelmDeploy recovers by deleting the named
+// Deployment (whose PVCs are separate objects and survive) and retrying the
+// upgrade once, so the recreated Deployment carries the new selector.
+type HelmImmutableSelectorError struct {
+	Deployment string
+	Err        error
+}
+
+func (e *HelmImmutableSelectorError) Error() string {
+	if e == nil {
+		return ""
+	}
+	message := "deploy failed: Deployment " + e.Deployment + " has an immutable selector that changed"
+	if e.Err != nil {
+		message += ": " + e.Err.Error()
+	}
+	return message
+}
+
+func (e *HelmImmutableSelectorError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
 func (e *HelmReleasePendingOperationError) RecoveryParams(verbosity int, stdout, stderr io.Writer) HelmReleaseRecoveryParams {
 	if e == nil {
 		return HelmReleaseRecoveryParams{Verbosity: verbosity, Stdout: stdout, Stderr: stderr}
@@ -1844,12 +1872,27 @@ func DeployHelmChart(params HelmDeployParams) error {
 		Verbosity:          params.Verbosity,
 	}.command()
 
-	cmd := Command(command.Name, command.Args...)
-	cmd.Dir = command.Dir
-	// At VerbosityInfo helm output is captured silently so a successful run is
-	// quiet; the buffer feeds back into the returned error on failure. At
-	// VerbosityDebug or higher the output is also teed to params.Stdout/Stderr
-	// so the user sees the live --debug stream.
+	result := runHelmUpgradeProcess(params, command)
+	return classifyHelmDeployFailure(params, result.helmErr, result.watchFailure, result.stderr, result.output)
+}
+
+// helmUpgradeResult is the raw outcome of one helm upgrade process plus its
+// concurrent pod watch, handed to classifyHelmDeployFailure to turn into the
+// most specific error.
+type helmUpgradeResult struct {
+	helmErr      error
+	watchFailure *HelmReleaseContainerFailureError
+	stderr       string
+	output       string
+}
+
+// configureHelmProcessIO wires the helm command's stdout/stderr and returns
+// the captures the caller classifies on failure. At Info verbosity output is
+// captured silently so a successful run is quiet; the buffer feeds back into
+// the returned error on failure. At Debug or higher it is also teed to the
+// user's streams so the live --debug stream is visible. The dedicated stderr
+// builder isolates helm's error text (helmOutput doubles as stdout).
+func configureHelmProcessIO(cmd *exec.Cmd, params HelmDeployParams) (*strings.Builder, *bytes.Buffer) {
 	helmOutput := new(bytes.Buffer)
 	if params.Verbosity >= VerbosityDebug {
 		cmd.Stdout = teeWriter(params.Stdout, helmOutput)
@@ -1862,9 +1905,20 @@ func DeployHelmChart(params HelmDeployParams) error {
 		stderrWriters = append(stderrWriters, params.Stderr)
 	}
 	cmd.Stderr = io.MultiWriter(stderrWriters...)
+	return stderr, helmOutput
+}
+
+// runHelmUpgradeProcess starts the helm upgrade, watches the release's pods for
+// an early terminal container failure alongside it, and waits for both to
+// finish. A watcher-observed failure interrupts helm so the caller can report
+// the pod reason instead of helm's generic timeout.
+func runHelmUpgradeProcess(params HelmDeployParams, command commandSpec) helmUpgradeResult {
+	cmd := Command(command.Name, command.Args...)
+	cmd.Dir = command.Dir
+	stderr, helmOutput := configureHelmProcessIO(cmd, params)
 
 	if err := cmd.Start(); err != nil {
-		return err
+		return helmUpgradeResult{helmErr: err, stderr: stderr.String(), output: helmOutput.String()}
 	}
 
 	watchCtx, cancelWatch := context.WithCancel(context.Background())
@@ -1908,35 +1962,54 @@ func DeployHelmChart(params HelmDeployParams) error {
 		}
 	}
 
-	if watchOutcome.Failure != nil {
-		failure := watchOutcome.Failure
-		failure.Err = helmErr
-		return failure
+	return helmUpgradeResult{
+		helmErr:      helmErr,
+		watchFailure: watchOutcome.Failure,
+		stderr:       stderr.String(),
+		output:       helmOutput.String(),
 	}
-	if helmErr != nil && isHelmReleasePendingOperationMessage(stderr.String()) {
+}
+
+// classifyHelmDeployFailure turns a finished helm run into the most specific
+// error it can. A watcher-observed container failure wins (the rollout will
+// never converge); otherwise it matches helm's stderr to the recoverable and
+// actionable cases — a pending release operation, an immutable selector
+// change, or a missing published chart — before falling back to the raw helm
+// error (folding in captured output at Info verbosity so failures stay
+// debuggable). It matches against the dedicated stderr capture, not helmOutput:
+// helm errors land on stderr, and helmOutput doubles as cmd.Stdout so a
+// stderr-only failure can race to empty there.
+func classifyHelmDeployFailure(params HelmDeployParams, helmErr error, watchFailure *HelmReleaseContainerFailureError, stderr, helmOutput string) error {
+	if watchFailure != nil {
+		watchFailure.Err = helmErr
+		return watchFailure
+	}
+	if helmErr == nil {
+		return nil
+	}
+	if isHelmReleasePendingOperationMessage(stderr) {
 		return &HelmReleasePendingOperationError{
 			ReleaseName:       params.ReleaseName,
 			Namespace:         params.Namespace,
 			KubernetesContext: params.KubernetesContext,
-			Message:           stderr.String(),
+			Message:           stderr,
 			Err:               helmErr,
 		}
 	}
-	// Match against the dedicated stderr capture, not helmOutput: helm errors
-	// land on stderr, and helmOutput doubles as cmd.Stdout so a stderr-only
-	// failure can race to empty there (the pending-operation check above reads
-	// stderr for the same reason).
-	if helmErr != nil && isOCIChartReference(params.ChartPath) && isHelmChartNotFoundMessage(stderr.String()) {
+	if deployment := immutableSelectorConflictDeployment(stderr); deployment != "" {
+		return &HelmImmutableSelectorError{Deployment: deployment, Err: helmErr}
+	}
+	if isOCIChartReference(params.ChartPath) && isHelmChartNotFoundMessage(stderr) {
 		return &PublishedChartNotFoundError{
 			ChartReference: params.ChartPath,
 			Version:        params.Version,
 			Registry:       params.ContainerRegistry,
-			HelmOutput:     strings.TrimSpace(stderr.String()),
+			HelmOutput:     strings.TrimSpace(stderr),
 			Err:            helmErr,
 		}
 	}
-	if helmErr != nil && params.Verbosity < VerbosityDebug {
-		if output := strings.TrimSpace(helmOutput.String()); output != "" {
+	if params.Verbosity < VerbosityDebug {
+		if output := strings.TrimSpace(helmOutput); output != "" {
 			return fmt.Errorf("%w\n%s", helmErr, output)
 		}
 	}
@@ -2014,6 +2087,93 @@ func isHelmReleasePendingOperationMessage(message string) bool {
 	return strings.Contains(message, "another operation") &&
 		strings.Contains(message, "install/upgrade/rollback") &&
 		strings.Contains(message, "in progress")
+}
+
+// runHelmUpgradeWithSelectorRecovery runs the helm upgrade once and, when it
+// fails because a Deployment's immutable spec.selector changed, recreates that
+// Deployment and retries the upgrade a single time. helm cannot patch an
+// immutable selector (e.g. an env first installed under the per-tenant chart
+// that labelled pods app=<release>, now upgraded by a chart that renders a
+// different selector), so the only fix is delete-and-recreate. The Deployment's
+// PVCs are separate objects and survive, so build cache and /home/erun are
+// preserved.
+func runHelmUpgradeWithSelectorRecovery(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDeployerFunc, target string) error {
+	spinner := StartSpinner(ctx.Stderr, "deploying "+target)
+	deployErr := deploy(deployInput.Params(ctx.Stdout, ctx.Stderr))
+	spinner.Stop()
+	var immutableSelector *HelmImmutableSelectorError
+	if errors.As(deployErr, &immutableSelector) {
+		return recreateDeploymentAndRetry(ctx, deployInput, deploy, immutableSelector.Deployment)
+	}
+	return deployErr
+}
+
+// recreateDeploymentAndRetry deletes the Deployment whose immutable selector
+// blocked the helm upgrade and retries the upgrade once. The delete removes
+// only the Deployment; the release's PVCs (home, docker, worktree) are
+// separate objects, so the recreated pod re-mounts the same data. The decision
+// is traced on the always-visible audit channel and the literal kubectl delete
+// is traced via TraceCommand (-vv), mirroring how the helm upgrade is logged.
+func recreateDeploymentAndRetry(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDeployerFunc, deployment string) error {
+	ctx.Trace("deploy: Deployment " + deployment + " selector is immutable and changed; deleting it (PVCs preserved) and retrying the upgrade")
+	command := deleteDeploymentCommand(deployment, deployInput.Namespace, deployInput.KubernetesContext)
+	ctx.TraceCommand(command.Dir, command.Name, command.Args...)
+	if err := runDeleteDeploymentCommand(command, ctx.Verbosity, ctx.Stdout, ctx.Stderr); err != nil {
+		return fmt.Errorf("recreate deployment %s: %w", deployment, err)
+	}
+	spinner := StartSpinner(ctx.Stderr, "redeploying "+deployInput.ReleaseName)
+	err := deploy(deployInput.Params(ctx.Stdout, ctx.Stderr))
+	spinner.Stop()
+	return err
+}
+
+func deleteDeploymentCommand(deployment, namespace, kubernetesContext string) commandSpec {
+	args := []string{}
+	if c := strings.TrimSpace(kubernetesContext); c != "" {
+		args = append(args, "--context", c)
+	}
+	args = append(args, "--namespace", namespace, "delete", "deployment", deployment, "--ignore-not-found")
+	return commandSpec{Name: "kubectl", Args: args}
+}
+
+func runDeleteDeploymentCommand(command commandSpec, verbosity int, stdout, stderr io.Writer) error {
+	cmd := Command(command.Name, command.Args...)
+	cmd.Dir = command.Dir
+	capture := new(bytes.Buffer)
+	if verbosity >= VerbosityDebug {
+		cmd.Stdout = teeWriter(stdout, capture)
+		cmd.Stderr = teeWriter(stderr, capture)
+	} else {
+		cmd.Stdout = capture
+		cmd.Stderr = capture
+	}
+	if err := cmd.Run(); err != nil {
+		if verbosity < VerbosityDebug {
+			if output := strings.TrimSpace(capture.String()); output != "" {
+				return fmt.Errorf("%w\n%s", err, output)
+			}
+		}
+		return err
+	}
+	return nil
+}
+
+var immutableSelectorDeploymentPattern = regexp.MustCompile(`(?i)Deployment\.apps "([^"]+)" is invalid`)
+
+// immutableSelectorConflictDeployment returns the Deployment name from a helm
+// upgrade failure caused by an immutable spec.selector change, or "" when the
+// failure is something else. Scoped to spec.selector specifically so an
+// unrelated immutable-field error never triggers a Deployment delete.
+func immutableSelectorConflictDeployment(message string) string {
+	lower := strings.ToLower(message)
+	if !strings.Contains(lower, "spec.selector") || !strings.Contains(lower, "field is immutable") {
+		return ""
+	}
+	match := immutableSelectorDeploymentPattern.FindStringSubmatch(message)
+	if len(match) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(match[1])
 }
 
 func prepareHelmChartForDeploy(chartPath, version string) (string, func(), error) {

@@ -86,7 +86,7 @@ kind: PersistentVolumeClaim
 metadata:
   name: {{ .Release.Name }}-home
   labels:
-    app: erun-devops
+    app: {{ .Release.Name }}
 spec:
   accessModes:
     - ReadWriteOnce
@@ -99,7 +99,7 @@ kind: PersistentVolumeClaim
 metadata:
   name: {{ .Release.Name }}-docker
   labels:
-    app: erun-devops
+    app: {{ .Release.Name }}
 spec:
   accessModes:
     - ReadWriteOnce
@@ -113,7 +113,7 @@ kind: PersistentVolumeClaim
 metadata:
   name: {{ .Release.Name }}-worktree
   labels:
-    app: erun-devops
+    app: {{ .Release.Name }}
 spec:
   accessModes:
     - ReadWriteOnce
@@ -127,14 +127,14 @@ kind: ServiceAccount
 metadata:
   name: {{ .Release.Name }}
   labels:
-    app: erun-devops
+    app: {{ .Release.Name }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: {{ .Release.Name }}
   labels:
-    app: erun-devops
+    app: {{ .Release.Name }}
 subjects:
   - kind: ServiceAccount
     name: {{ .Release.Name }}
@@ -149,7 +149,7 @@ kind: ClusterRole
 metadata:
   name: {{ .Release.Name }}-namespace-manager
   labels:
-    app: erun-devops
+    app: {{ .Release.Name }}
 rules:
   - apiGroups:
       - ""
@@ -165,7 +165,7 @@ kind: ClusterRoleBinding
 metadata:
   name: {{ .Release.Name }}
   labels:
-    app: erun-devops
+    app: {{ .Release.Name }}
 subjects:
   - kind: ServiceAccount
     name: {{ .Release.Name }}
@@ -180,7 +180,7 @@ kind: ClusterRoleBinding
 metadata:
   name: {{ .Release.Name }}-namespace-manager
   labels:
-    app: erun-devops
+    app: {{ .Release.Name }}
 subjects:
   - kind: ServiceAccount
     name: {{ .Release.Name }}
@@ -206,7 +206,7 @@ kind: ClusterRole
 metadata:
   name: {{ .Release.Name }}-self-deploy
   labels:
-    app: erun-devops
+    app: {{ .Release.Name }}
 rules:
   - apiGroups:
       - rbac.authorization.k8s.io
@@ -239,7 +239,7 @@ kind: ClusterRoleBinding
 metadata:
   name: {{ .Release.Name }}-self-deploy
   labels:
-    app: erun-devops
+    app: {{ .Release.Name }}
 subjects:
   - kind: ServiceAccount
     name: {{ .Release.Name }}
@@ -255,18 +255,18 @@ kind: Deployment
 metadata:
   name: {{ .Release.Name }}
   labels:
-    app: erun-devops
+    app: {{ .Release.Name }}
 spec:
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      app: erun-devops
+      app: {{ .Release.Name }}
   replicas: 1
   template:
     metadata:
       labels:
-        app: erun-devops
+        app: {{ .Release.Name }}
     spec:
       automountServiceAccountToken: true
       serviceAccountName: {{ .Release.Name }}
