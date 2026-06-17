@@ -50,10 +50,15 @@ export const boot = (): AppThunk<Promise<void>> => async (dispatch, getState) =>
 // contexts to seed from.
 export const reloadStateAfterEnvironmentChange =
   (): AppThunk<Promise<void>> => async (dispatch, getState) => {
+    // initiate() registers a cache subscription that must be released, or
+    // repeated reloads (e.g. handleEnvironmentInitialized's retry loop) leak
+    // subscriptions and eventually stall RTK Query so a later refetch never
+    // resolves. Hold the request handle and unsubscribe in finally.
+    const request = dispatch(
+      stateApi.endpoints.getInitialState.initiate(undefined, { forceRefetch: true }),
+    );
     try {
-      const loaded = await dispatch(
-        stateApi.endpoints.getInitialState.initiate(undefined, { forceRefetch: true }),
-      ).unwrap();
+      const loaded = await request.unwrap();
       const current = getState().tenants;
       dispatch(setTenants(loaded.tenants));
       dispatch(setCloudProviders(loaded.cloudProviders ?? current.cloudProviders));
@@ -62,7 +67,15 @@ export const reloadStateAfterEnvironmentChange =
           normalizeVersionSuggestions(loaded.versionSuggestions ?? current.versionSuggestions),
         ),
       );
-    } catch {
-      // Silent failure: env-change reloads are best-effort.
+    } catch (error) {
+      // Env-change reloads are best-effort, but swallowing the failure
+      // silently used to leave the sidebar stale after a successful
+      // `erun init` with no diagnostic at all. Log it so a failed refresh is
+      // visible in the dev console / ErrorBoundary diagnostics; callers that
+      // depend on the new env surfacing (handleEnvironmentInitialized) retry
+      // rather than trusting a single best-effort pass.
+      console.error('reloadStateAfterEnvironmentChange failed:', error);
+    } finally {
+      request.unsubscribe();
     }
   };

@@ -110,6 +110,44 @@ export const handleAppNotification =
     dispatch(showNotification(kind, message));
   };
 
+// Bounded retry budget for surfacing a just-initialized env. The
+// `==> Initialized` trace fires only after `erun init` has written the
+// tenant/env config to disk, so the env is on disk by the time we reload.
+// A single reload can still miss it though: a transient getInitialState
+// failure (swallowed as best-effort by reloadStateAfterEnvironmentChange)
+// or a reload that coalesced with the fsnotify watcher's near-simultaneous
+// refresh leaves the sidebar stale with no other recovery for the targeted
+// init signal — the regression class in erun-ui/AGENTS.md § "Command
+// Completion And State-Refresh Wiring". Retrying until the known env
+// appears makes a missed first refresh self-heal instead of silently
+// dropping the new environment. The first attempt has no delay, so the
+// happy path (env already visible) adds no latency.
+const ENVIRONMENT_INIT_RELOAD_ATTEMPTS = 3;
+const ENVIRONMENT_INIT_RELOAD_DELAY_MS = 400;
+
+const delayMs = (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+
+// reloadUntilEnvironmentVisible refreshes the read model until the named env
+// surfaces in state.tenants, or the attempt budget is exhausted. Returns
+// whether the env became visible.
+const reloadUntilEnvironmentVisible =
+  (tenant: string, environment: string): AppThunk<Promise<boolean>> =>
+  async (dispatch, getState) => {
+    for (let attempt = 0; attempt < ENVIRONMENT_INIT_RELOAD_ATTEMPTS; attempt += 1) {
+      if (attempt > 0) {
+        await delayMs(ENVIRONMENT_INIT_RELOAD_DELAY_MS);
+      }
+      await dispatch(reloadStateAfterEnvironmentChange());
+      if (selectEnvironmentExists(getState(), tenant, environment)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
 // Fires when the backend's PTY trace handler observes
 // `==> Initialized <tenant>/<env>` from a piped `erun init` command, or
 // when the config-file watcher detects a new env. Reload state so the new
@@ -119,14 +157,24 @@ export const handleAppNotification =
 // "Command Completion And State-Refresh Wiring".
 export const handleEnvironmentInitialized =
   (payload: EnvironmentInitializedPayload): AppThunk<Promise<void>> =>
-  async (dispatch, getState) => {
+  async (dispatch) => {
     const tenant = payload.tenant.trim();
     const environment = payload.environment.trim();
     if (!tenant || !environment) {
       return;
     }
-    await dispatch(reloadStateAfterEnvironmentChange());
-    if (!selectEnvironmentExists(getState(), tenant, environment)) {
+    const visible = await dispatch(reloadUntilEnvironmentVisible(tenant, environment));
+    if (!visible) {
+      // The success trace fired (init wrote the config), but the env never
+      // surfaced in the read model after repeated refreshes. Surface a
+      // recoverable error instead of leaving the user staring at a sidebar
+      // that silently dropped their new environment (Nielsen #1 + #9).
+      dispatch(
+        showNotification(
+          'error',
+          `Created ${tenant} / ${environment}, but it did not appear in the sidebar. Reopen ERun to refresh.`,
+        ),
+      );
       return;
     }
     dispatch(showNotification('success', `Created ${tenant} / ${environment}.`));
