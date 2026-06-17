@@ -11,6 +11,7 @@ import * as React from 'react';
 
 import { stateApi } from '@/app/api/stateApi';
 import { formatDiagnosticsReport } from '@/app/diagnosticsReport';
+import { useErunTraceBaseline } from '@/app/erunTraceBaseline';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { setDebugOpen, startDebugResize } from '@/app/layoutThunks';
 import {
@@ -326,27 +327,78 @@ function ErunTracePane({ selection }: { selection: UISelection | null }): React.
   const environment = selection?.environment ?? '';
   const { trace, refresh } = useEnvTracePoll(tenant, environment);
   const content = trace?.content ?? '';
-  const { outputRef, handleScroll } = useStickToBottom(content);
+  // The Clear view baseline (issue #529) is owned by useErunTraceBaseline; the
+  // pane only renders its result. Refresh / Copy / Copy report all keep
+  // reading the full `content`, so a cleared view never truncates a report.
+  const { cleared, rotatedOut, visibleContent, clear, showAll } = useErunTraceBaseline(
+    `${tenant}/${environment}`,
+    content,
+  );
+  const { outputRef, handleScroll } = useStickToBottom(visibleContent);
 
-  // The toolbar sits in its own grid row, outside the scroll region:
-  // stick-to-bottom would otherwise scroll the actions out the top the
-  // moment the log outgrows the pane — an affordance that exists but cannot
-  // be seen does not exist (issue #514).
+  // The toolbar (and the since-cleared notice) sit in their own grid rows,
+  // outside the scroll region: stick-to-bottom would otherwise scroll the
+  // actions out the top the moment the log outgrows the pane — an affordance
+  // that exists but cannot be seen does not exist (issue #514).
   return (
-    <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)]">
+    <div
+      className={cn(
+        'grid min-h-0',
+        cleared ? 'grid-rows-[auto_auto_minmax(0,1fr)]' : 'grid-rows-[auto_minmax(0,1fr)]',
+      )}
+    >
       <ErunTraceToolbar
         label={erunTraceLabel(tenant, environment, trace)}
         content={content}
+        canClear={content.trim().length > 0}
         onRefresh={refresh}
+        onClear={clear}
       />
+      {cleared && <ClearedNotice rotatedOut={rotatedOut} onShowAll={showAll} />}
       <div
         ref={outputRef}
         onScroll={handleScroll}
         className="min-h-0 overflow-auto px-3 pb-2 font-mono text-[11px] leading-[1.35] text-[oklch(0.82_0_0)]"
         aria-label="erun trace output"
       >
-        <ErunTraceBody tenant={tenant} environment={environment} trace={trace} />
+        <ErunTraceBody
+          tenant={tenant}
+          environment={environment}
+          trace={trace}
+          visibleContent={visibleContent}
+          cleared={cleared}
+        />
       </div>
+    </div>
+  );
+}
+
+// ClearedNotice surfaces why earlier lines vanished after Clear and offers a
+// one-click return to the full view (issue #529). Visibility of system status
+// (Nielsen #1) + user control / reversibility (Nielsen #3): the baseline hides
+// scrollback but the operator can always recover it, and the persistent log is
+// untouched. Lives in its own pinned grid row so it is never scrolled away.
+function ClearedNotice({
+  rotatedOut,
+  onShowAll,
+}: {
+  rotatedOut: boolean;
+  onShowAll: () => void;
+}): React.ReactElement {
+  return (
+    <div className="flex items-center justify-between gap-2 border-b border-[oklch(0.14_0_0)] px-3 py-1 text-[10px] text-[oklch(0.55_0_0)]">
+      <span className="min-w-0 truncate">
+        {rotatedOut
+          ? 'Cleared entries have rotated out of the log — showing all.'
+          : 'Showing entries since you cleared.'}
+      </span>
+      <button
+        type="button"
+        className="flex-none cursor-pointer rounded border-0 bg-transparent px-1 text-[10px] text-[oklch(0.7_0_0)] underline-offset-2 hover:underline"
+        onClick={onShowAll}
+      >
+        Show all
+      </button>
     </div>
   );
 }
@@ -361,12 +413,18 @@ function erunTraceLabel(tenant: string, environment: string, trace: UIEnvTrace |
 function ErunTraceToolbar({
   label,
   content,
+  canClear,
   onRefresh,
+  onClear,
 }: {
   label: string;
   content: string;
+  canClear: boolean;
   onRefresh: () => void;
+  onClear: () => void;
 }): React.ReactElement {
+  // Copy reads the full content, never the cleared view — a baselined view
+  // must never produce a truncated bug report (issue #529).
   const { copyStatus, copy } = useCopyAction(content);
   return (
     <div className="flex items-center justify-between gap-2 px-3 pt-1.5 pb-1">
@@ -383,6 +441,17 @@ function ErunTraceToolbar({
           Refresh
         </Button>
         <CopyButton copyStatus={copyStatus} disabled={!content.trim()} onCopy={copy} />
+        <Button
+          className="h-6 px-2 text-[11px] [&_svg]:size-3.5"
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={!canClear}
+          onClick={onClear}
+        >
+          <Trash2 aria-hidden="true" />
+          Clear
+        </Button>
       </span>
     </div>
   );
@@ -392,10 +461,14 @@ function ErunTraceBody({
   tenant,
   environment,
   trace,
+  visibleContent,
+  cleared,
 }: {
   tenant: string;
   environment: string;
   trace: UIEnvTrace | null;
+  visibleContent: string;
+  cleared: boolean;
 }): React.ReactElement | null {
   if (!tenant || !environment) {
     return (
@@ -406,12 +479,19 @@ function ErunTraceBody({
     return null;
   }
   if (trace.available) {
+    // visibleContent is the cleared-view slice (== trace.content when not
+    // cleared). When cleared and nothing new has arrived yet, say so rather
+    // than rendering a blank pane (visibility of system status, #529).
     return (
       <>
         <TraceNotice notice={trace.notice} />
-        <pre className="m-0 font-mono text-[11px] leading-[1.35] break-words whitespace-pre-wrap">
-          {trace.content}
-        </pre>
+        {cleared && visibleContent.length === 0 ? (
+          <p className="m-0 text-[oklch(0.6_0_0)]">No new entries since you cleared.</p>
+        ) : (
+          <pre className="m-0 font-mono text-[11px] leading-[1.35] break-words whitespace-pre-wrap">
+            {visibleContent}
+          </pre>
+        )}
       </>
     );
   }
