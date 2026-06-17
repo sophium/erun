@@ -107,6 +107,60 @@ func TestAISessionLaunchCommandModelAndDebugFlags(t *testing.T) {
 	})
 }
 
+// TestAISessionLaunchSubagentModelPrefix pins the CLAUDE_CODE_SUBAGENT_MODEL
+// mirror (issue #528): whatever model is passed to --model is also exported as
+// the subagent model via a command-string env prefix on both guard branches
+// and the resume line, and nothing is exported when no model resolves or the
+// tool is not claude.
+func TestAISessionLaunchSubagentModelPrefix(t *testing.T) {
+	model := func(v string) *string { return &v }
+
+	t.Run("prefix mirrors the resolved model on both guard branches and composes with ultracode", func(t *testing.T) {
+		got := AISessionLaunchCommand("", EnvironmentClaudeConfig{
+			Models:       []string{"fable"},
+			DefaultModel: model("fable"),
+		})
+		if strings.Count(got, "CLAUDE_CODE_SUBAGENT_MODEL=fable claude") != 2 {
+			t.Fatalf("expected the subagent-model prefix on both guard branches, got %q", got)
+		}
+		// The prefix must sit before claude and leave the single-quoted
+		// ultracode --settings JSON intact.
+		if !strings.Contains(got, `CLAUDE_CODE_SUBAGENT_MODEL=fable claude --continue --settings '{"ultracode":true}' --model fable`) {
+			t.Fatalf("prefix must precede claude and compose with --settings/--model, got %q", got)
+		}
+	})
+
+	t.Run("no prefix when no model resolves", func(t *testing.T) {
+		got := AISessionLaunchCommand("", EnvironmentClaudeConfig{VerboseDebug: true})
+		if strings.Contains(got, "CLAUDE_CODE_SUBAGENT_MODEL") {
+			t.Fatalf("expected no subagent-model prefix without a resolved model, got %q", got)
+		}
+	})
+
+	t.Run("no prefix for a non-claude tool", func(t *testing.T) {
+		if got := AISessionLaunchCommand("codex", EnvironmentClaudeConfig{Models: []string{"fable"}, DefaultModel: model("fable")}); strings.Contains(got, "CLAUDE_CODE_SUBAGENT_MODEL") {
+			t.Fatalf("non-claude tool must launch verbatim with no prefix, got %q", got)
+		}
+	})
+
+	t.Run("resume line carries the prefix when a model resolves", func(t *testing.T) {
+		script := strings.Join(AISessionLaunchLines("", EnvironmentClaudeConfig{
+			Models:       []string{"fable"},
+			DefaultModel: model("fable"),
+		}), "\n")
+		if !strings.Contains(script, "resume with") || !strings.Contains(script, "CLAUDE_CODE_SUBAGENT_MODEL=fable claude --continue") {
+			t.Fatalf("resume command must carry the subagent-model prefix:\n%s", script)
+		}
+	})
+
+	t.Run("resume line has no prefix for a non-claude tool", func(t *testing.T) {
+		script := strings.Join(AISessionLaunchLines("codex", EnvironmentClaudeConfig{Models: []string{"fable"}, DefaultModel: model("fable")}), "\n")
+		if strings.Contains(script, "CLAUDE_CODE_SUBAGENT_MODEL") {
+			t.Fatalf("non-claude resume must not carry the prefix:\n%s", script)
+		}
+	})
+}
+
 // TestResolveClaudeDefaultModel covers the per-env default-model resolution
 // (issue #482): the model launches only while it is one of the env's available
 // models — the explicit models list, or the default available set when the env
