@@ -150,17 +150,36 @@ func (e *PublishedChartNotFoundError) Error() string {
 
 func (e *PublishedChartNotFoundError) Unwrap() error { return e.Err }
 
-// resolveRuntimeImageOverride normalizes a custom runtime image: a full
-// reference (anything carrying a registry path or tag) is used verbatim; a
-// bare image name — the historical `--runtime-image <name>` shape — resolves
-// against the env's registry and runtime version.
+// resolveRuntimeImageOverride normalizes a custom runtime image. A reference
+// that already pins a tag or digest is complete and used verbatim. A reference
+// without a tag is NOT complete — a registry path alone (e.g.
+// ghcr.io/sophium/erun-devops) made the old code return it verbatim, so
+// Kubernetes defaulted the pull to :latest, a tag the release flow never
+// publishes (ImagePullBackOff). A tagless reference is therefore pinned to the
+// env's runtime version, qualifying a bare image name (the historical
+// `--runtime-image <name>` shape) against the env's registry first.
 func resolveRuntimeImageOverride(registry, version, raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return ""
 	}
-	if strings.ContainsAny(raw, "/:") {
+	if imageReferenceHasTagOrDigest(raw) {
 		return raw
 	}
-	return strings.TrimSpace(registry) + "/" + raw + ":" + strings.TrimSpace(version)
+	if !strings.Contains(raw, "/") {
+		raw = strings.TrimSpace(registry) + "/" + raw
+	}
+	return raw + ":" + strings.TrimSpace(version)
+}
+
+// imageReferenceHasTagOrDigest reports whether an image reference already pins
+// a tag (a ":" in the final path segment) or a digest ("@sha256:..."). A ":"
+// in the registry host (a port, e.g. localhost:5000/img) is not a tag, so the
+// check looks only at the segment after the last "/".
+func imageReferenceHasTagOrDigest(ref string) bool {
+	if strings.Contains(ref, "@") {
+		return true
+	}
+	lastSegment := ref[strings.LastIndex(ref, "/")+1:]
+	return strings.Contains(lastSegment, ":")
 }
