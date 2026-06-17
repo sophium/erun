@@ -108,23 +108,11 @@ func (a *App) runWorkspaceSyncLoop(ctx context.Context, key string, selection ui
 	}
 	for {
 		a.setWorkspaceSyncStatus(key, workspaceSyncStatus{Status: "syncing", Message: "Syncing workspace"})
-		if a.deps.canConnectLocalPort != nil && !a.deps.canConnectLocalPort(eruncommon.SSHLocalPortForResult(result)) && a.deps.ensureSSHD != nil {
-			if err := a.deps.ensureSSHD(ctx, result); err != nil {
-				a.setWorkspaceSyncError(key, err)
-				if !sleepWorkspaceSyncInterval(ctx, a.deps.workspaceSyncInterval) {
-					return
-				}
-				continue
-			}
-		}
-		if a.deps.workspaceSyncReady != nil {
-			if err := a.deps.workspaceSyncReady(ctx, params.HostAlias); err != nil {
-				a.setWorkspaceSyncStatus(key, workspaceSyncStatus{Status: "starting", Message: "Waiting for SSHD"})
-				if !sleepWorkspaceSyncInterval(ctx, a.deps.workspaceSyncInterval) {
-					return
-				}
-				continue
-			}
+		switch a.prepareWorkspaceSyncPass(ctx, key, result, params) {
+		case workspaceSyncPassStop:
+			return
+		case workspaceSyncPassRetry:
+			continue
 		}
 		synced, err := a.deps.syncWorkspace(ctx, params)
 		if err != nil {
@@ -141,6 +129,51 @@ func (a *App) runWorkspaceSyncLoop(ctx context.Context, key string, selection ui
 			return
 		}
 	}
+}
+
+// workspaceSyncPassOutcome tells runWorkspaceSyncLoop how to proceed after the
+// pre-sync readiness checks.
+type workspaceSyncPassOutcome int
+
+const (
+	// workspaceSyncPassProceed means the prerequisites are satisfied and the
+	// loop should run the sync.
+	workspaceSyncPassProceed workspaceSyncPassOutcome = iota
+	// workspaceSyncPassRetry means a prerequisite was not ready (the loop should
+	// continue to the next iteration after the interval has already elapsed).
+	workspaceSyncPassRetry
+	// workspaceSyncPassStop means the context was cancelled while waiting (the
+	// loop should return).
+	workspaceSyncPassStop
+)
+
+// prepareWorkspaceSyncPass runs the per-iteration readiness checks for the sync
+// loop: it ensures SSHD when the local port cannot be reached and waits for the
+// remote SSHD to answer. On any failure it records the worker status, sleeps one
+// interval, and reports whether the loop should retry or stop; otherwise it
+// reports proceed. Extracted so runWorkspaceSyncLoop stays under the cyclomatic
+// limit; the guard order, status writes, and sleep-driven continue/return
+// semantics are unchanged.
+func (a *App) prepareWorkspaceSyncPass(ctx context.Context, key string, result eruncommon.OpenResult, params workspaceSyncParams) workspaceSyncPassOutcome {
+	if a.deps.canConnectLocalPort != nil && !a.deps.canConnectLocalPort(eruncommon.SSHLocalPortForResult(result)) && a.deps.ensureSSHD != nil {
+		if err := a.deps.ensureSSHD(ctx, result); err != nil {
+			a.setWorkspaceSyncError(key, err)
+			if !sleepWorkspaceSyncInterval(ctx, a.deps.workspaceSyncInterval) {
+				return workspaceSyncPassStop
+			}
+			return workspaceSyncPassRetry
+		}
+	}
+	if a.deps.workspaceSyncReady != nil {
+		if err := a.deps.workspaceSyncReady(ctx, params.HostAlias); err != nil {
+			a.setWorkspaceSyncStatus(key, workspaceSyncStatus{Status: "starting", Message: "Waiting for SSHD"})
+			if !sleepWorkspaceSyncInterval(ctx, a.deps.workspaceSyncInterval) {
+				return workspaceSyncPassStop
+			}
+			return workspaceSyncPassRetry
+		}
+	}
+	return workspaceSyncPassProceed
 }
 
 func sleepWorkspaceSyncInterval(ctx context.Context, interval time.Duration) bool {
@@ -226,20 +259,12 @@ func syncWorkspaceOnce(ctx context.Context, params workspaceSyncParams) (workspa
 	if err := ensureLocalWorkspaceSyncTarget(ctx, params.LocalPath); err != nil {
 		return workspaceSyncResult{}, err
 	}
-	remotePaths, err := remoteWorkspaceGitVisibleFiles(ctx, params.HostAlias, params.RemotePath)
-	if errors.Is(err, errRemoteNotGitRepo) {
+	remotePaths, localPaths, notGitRepo, err := resolveWorkspaceSyncPaths(ctx, params)
+	if err != nil {
+		return workspaceSyncResult{}, err
+	}
+	if notGitRepo {
 		return workspaceSyncResult{}, nil
-	}
-	if err != nil {
-		return workspaceSyncResult{}, err
-	}
-	localPaths, err := localWorkspaceGitVisibleFiles(ctx, params.LocalPath)
-	if err != nil {
-		return workspaceSyncResult{}, err
-	}
-	remotePaths, err = filterLocalIgnoredWorkspaceSyncPaths(ctx, params.LocalPath, remotePaths)
-	if err != nil {
-		return workspaceSyncResult{}, err
 	}
 	if len(remotePaths) > 0 {
 		if err := extractRemoteWorkspaceFiles(ctx, params.HostAlias, params.RemotePath, params.LocalPath, remotePaths); err != nil {
@@ -251,6 +276,31 @@ func syncWorkspaceOnce(ctx context.Context, params workspaceSyncParams) (workspa
 		return workspaceSyncResult{}, err
 	}
 	return workspaceSyncResult{FilesCopied: len(remotePaths), FilesDeleted: deleted}, nil
+}
+
+// resolveWorkspaceSyncPaths lists the Git-visible files on the remote and local
+// sides for one sync pass, applying the local ignore filter to the remote set.
+// notGitRepo is true (with a nil error) when the remote workspace is not a Git
+// repository, which syncWorkspaceOnce treats as a no-op. Extracted so
+// syncWorkspaceOnce stays under the cyclomatic limit; the listing and filtering
+// order is unchanged.
+func resolveWorkspaceSyncPaths(ctx context.Context, params workspaceSyncParams) (remotePaths, localPaths []string, notGitRepo bool, err error) {
+	remotePaths, err = remoteWorkspaceGitVisibleFiles(ctx, params.HostAlias, params.RemotePath)
+	if errors.Is(err, errRemoteNotGitRepo) {
+		return nil, nil, true, nil
+	}
+	if err != nil {
+		return nil, nil, false, err
+	}
+	localPaths, err = localWorkspaceGitVisibleFiles(ctx, params.LocalPath)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	remotePaths, err = filterLocalIgnoredWorkspaceSyncPaths(ctx, params.LocalPath, remotePaths)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	return remotePaths, localPaths, false, nil
 }
 
 func workspaceSyncSSHReady(ctx context.Context, hostAlias string) error {

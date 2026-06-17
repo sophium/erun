@@ -208,20 +208,8 @@ func waitForContributeAppReachable(ctx context.Context, port int, forward *contr
 			return nil
 		}
 		if forward != nil && len(args) > 0 {
-			if exited, msg := forward.exitedWithError(); exited {
-				if msg != "" {
-					lastExitMsg = msg
-				}
-				cmd, stderr, spawnErr := spawnContributeAppForwardCmd(ctx, args)
-				if spawnErr != nil {
-					return fmt.Errorf("respawn kubectl port-forward for 127.0.0.1:%d after early exit (%s): %w", port, lastExitMsgOrPlaceholder(lastExitMsg), spawnErr)
-				}
-				if !forward.adopt(cmd, stderr) {
-					if cmd.Process != nil {
-						_ = cmd.Process.Kill()
-					}
-					return fmt.Errorf("contribute-app port-forward for 127.0.0.1:%d was stopped before becoming reachable", port)
-				}
+			if err := respawnContributeAppForwardIfExited(ctx, port, forward, args, &lastExitMsg); err != nil {
+				return err
 			}
 		}
 		time.Sleep(contributeAppPortReachablePollInterval)
@@ -230,6 +218,33 @@ func waitForContributeAppReachable(ctx context.Context, port int, forward *contr
 		return fmt.Errorf("contribute-app on 127.0.0.1:%d did not become reachable within %s (last kubectl exit: %s)", port, contributeAppPortReachableTimeout, lastExitMsg)
 	}
 	return fmt.Errorf("contribute-app on 127.0.0.1:%d did not become reachable within %s", port, contributeAppPortReachableTimeout)
+}
+
+// respawnContributeAppForwardIfExited checks whether the forward's kubectl
+// process has already exited and, if so, spawns a fresh one and adopts it into
+// the forward. It records the most recent captured stderr in *lastExitMsg so a
+// genuine failure still surfaces if the in-pod app never binds. A nil return
+// means either the forward is still alive or a respawn succeeded; a non-nil
+// return is a terminal error that aborts the reachability wait.
+func respawnContributeAppForwardIfExited(ctx context.Context, port int, forward *contributeAppForward, args []string, lastExitMsg *string) error {
+	exited, msg := forward.exitedWithError()
+	if !exited {
+		return nil
+	}
+	if msg != "" {
+		*lastExitMsg = msg
+	}
+	cmd, stderr, spawnErr := spawnContributeAppForwardCmd(ctx, args)
+	if spawnErr != nil {
+		return fmt.Errorf("respawn kubectl port-forward for 127.0.0.1:%d after early exit (%s): %w", port, lastExitMsgOrPlaceholder(*lastExitMsg), spawnErr)
+	}
+	if !forward.adopt(cmd, stderr) {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		return fmt.Errorf("contribute-app port-forward for 127.0.0.1:%d was stopped before becoming reachable", port)
+	}
+	return nil
 }
 
 func lastExitMsgOrPlaceholder(msg string) string {

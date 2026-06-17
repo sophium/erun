@@ -241,18 +241,7 @@ func TestCloseSessionEndsRemoteCustomTerminal(t *testing.T) {
 	if err := app.CloseSession(extra.SessionID); err != nil {
 		t.Fatalf("CloseSession(extra): %v", err)
 	}
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		data, _ := os.ReadFile(captureFile)
-		if strings.Contains(string(data), "erun-remote-open-2.dtach") &&
-			strings.Contains(string(data), "rm -f") {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("expected the end-script kubectl exec for open-2, captured: %q", data)
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
+	waitForKubectlEndScript(t, captureFile, "erun-remote-open-2.dtach")
 
 	_ = os.Remove(captureFile)
 	def, err := app.StartSession(selection, 0, 80, 24)
@@ -265,5 +254,24 @@ func TestCloseSessionEndsRemoteCustomTerminal(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	if data, _ := os.ReadFile(captureFile); strings.Contains(string(data), "rm -f") {
 		t.Fatalf("default tab close must not end the pod session, captured: %q", data)
+	}
+}
+
+// waitForKubectlEndScript polls the PATH-stub kubectl capture file until it
+// records the end-script exec (an "rm -f" of the named dtach socket), failing
+// the test if it does not appear within the deadline.
+func waitForKubectlEndScript(t *testing.T, captureFile, socket string) {
+	t.Helper()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		data, _ := os.ReadFile(captureFile)
+		if strings.Contains(string(data), socket) && strings.Contains(string(data), "rm -f") {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected the end-script kubectl exec for %s, captured: %q", socket, data)
+		}
+		time.Sleep(25 * time.Millisecond)
 	}
 }

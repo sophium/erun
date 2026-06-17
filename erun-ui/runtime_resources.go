@@ -47,40 +47,7 @@ func normalizeRuntimeResourceInput(input uiRuntimeResourceInput) uiRuntimeResour
 func runtimeResourceStatusFromKubernetes(input uiRuntimeResourceInput, nodes kubernetesNodeList, pods kubernetesPodList) uiRuntimeResourceStatus {
 	input = normalizeRuntimeResourceInput(input)
 	target := runtimeResourceTarget(input)
-	usage := make(map[string]runtimeResourceTotals)
-	targetUsage := make(map[string]runtimeResourceTotals)
-	targetNode := ""
-	for _, pod := range pods.Items {
-		if isTerminalKubernetesPodPhase(pod.Status.Phase) {
-			continue
-		}
-		nodeName := strings.TrimSpace(pod.Spec.NodeName)
-		if nodeName == "" {
-			continue
-		}
-		totals := usage[nodeName]
-		for _, container := range pod.Spec.Containers {
-			if target.matches(pod, container) {
-				targetNode = nodeName
-				targetTotals := targetUsage[nodeName]
-				if cpu, err := eruncommon.ParseKubernetesCPUToMilli(container.Resources.Limits.CPU); err == nil {
-					targetTotals.CPUMilli += cpu
-				}
-				if memory, err := eruncommon.ParseKubernetesMemoryToMi(container.Resources.Limits.Memory); err == nil {
-					targetTotals.MemoryMi += memory
-				}
-				targetUsage[nodeName] = targetTotals
-				continue
-			}
-			if cpu, err := eruncommon.ParseKubernetesCPUToMilli(container.Resources.Limits.CPU); err == nil {
-				totals.CPUMilli += cpu
-			}
-			if memory, err := eruncommon.ParseKubernetesMemoryToMi(container.Resources.Limits.Memory); err == nil {
-				totals.MemoryMi += memory
-			}
-		}
-		usage[nodeName] = totals
-	}
+	usage, targetUsage, targetNode := accumulateRuntimePodUsage(pods, target)
 
 	result := uiRuntimeResourceStatus{
 		KubernetesContext: input.KubernetesContext,
@@ -118,6 +85,50 @@ func runtimeResourceStatusFromKubernetes(input uiRuntimeResourceInput, nodes kub
 	}
 	result.Message = fmt.Sprintf("Available on best node: %s CPU and %s memory.", result.CPU.Formatted, result.Memory.Formatted)
 	return result
+}
+
+// accumulateRuntimePodUsage walks the non-terminal scheduled pods and sums each
+// node's container resource limits, splitting out the target runtime's own
+// containers into targetUsage and reporting the node the target landed on.
+// Extracted from runtimeResourceStatusFromKubernetes so that function stays
+// under the cyclomatic limit; the per-container target/non-target split is
+// unchanged.
+func accumulateRuntimePodUsage(pods kubernetesPodList, target runtimeResourceTargetSpec) (usage, targetUsage map[string]runtimeResourceTotals, targetNode string) {
+	usage = make(map[string]runtimeResourceTotals)
+	targetUsage = make(map[string]runtimeResourceTotals)
+	for _, pod := range pods.Items {
+		if isTerminalKubernetesPodPhase(pod.Status.Phase) {
+			continue
+		}
+		nodeName := strings.TrimSpace(pod.Spec.NodeName)
+		if nodeName == "" {
+			continue
+		}
+		totals := usage[nodeName]
+		for _, container := range pod.Spec.Containers {
+			if target.matches(pod, container) {
+				targetNode = nodeName
+				targetUsage[nodeName] = addContainerLimits(targetUsage[nodeName], container)
+				continue
+			}
+			totals = addContainerLimits(totals, container)
+		}
+		usage[nodeName] = totals
+	}
+	return usage, targetUsage, targetNode
+}
+
+// addContainerLimits adds a container's parseable CPU and memory limits to the
+// running totals, ignoring limits that fail to parse (the same tolerance the
+// inline accumulation used).
+func addContainerLimits(totals runtimeResourceTotals, container kubernetesContainer) runtimeResourceTotals {
+	if cpu, err := eruncommon.ParseKubernetesCPUToMilli(container.Resources.Limits.CPU); err == nil {
+		totals.CPUMilli += cpu
+	}
+	if memory, err := eruncommon.ParseKubernetesMemoryToMi(container.Resources.Limits.Memory); err == nil {
+		totals.MemoryMi += memory
+	}
+	return totals
 }
 
 func shouldUseRuntimeResourceNode(name, targetNode string, item uiRuntimeResourceNode, result uiRuntimeResourceStatus) bool {

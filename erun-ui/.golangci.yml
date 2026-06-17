@@ -7,6 +7,7 @@ linters:
   exclusions:
     paths:
       - ^frontend/node_modules/
+      - ^playwright/node_modules/
   enable:
     - errcheck
     - govet

@@ -235,6 +235,16 @@ func withDefaultRuntimeDeps(deps erunUIDeps) erunUIDeps {
 }
 
 func withDefaultUIDeps(deps erunUIDeps) erunUIDeps {
+	deps = withDefaultWorkspaceDeps(deps)
+	deps = withDefaultPodDeps(deps)
+	deps = withDefaultWindowAndContributeDeps(deps)
+	return deps
+}
+
+// withDefaultWorkspaceDeps wires the read-model and workspace-sync defaults:
+// pasted-image save, diff/idle/API-log loaders, and the workspace sync
+// readiness check, runner, and interval.
+func withDefaultWorkspaceDeps(deps erunUIDeps) erunUIDeps {
 	if deps.savePastedImage == nil {
 		deps.savePastedImage = savePastedImageToRuntime
 	}
@@ -256,6 +266,13 @@ func withDefaultUIDeps(deps erunUIDeps) erunUIDeps {
 	if deps.workspaceSyncInterval <= 0 {
 		deps.workspaceSyncInterval = defaultWorkspaceSyncInterval
 	}
+	return deps
+}
+
+// withDefaultPodDeps wires the pod-facing defaults: working-issue command
+// runner, pod branch and raw-command loaders, activity recording, and the
+// cloud-context stop adapter.
+func withDefaultPodDeps(deps erunUIDeps) erunUIDeps {
 	if deps.runWorkingIssueCommand == nil {
 		deps.runWorkingIssueCommand = execWorkingIssueCommand
 	}
@@ -273,6 +290,13 @@ func withDefaultUIDeps(deps erunUIDeps) erunUIDeps {
 			return eruncommon.StopCloudContext(eruncommon.Context{}, deps.store, eruncommon.CloudContextParams{Name: name}, deps.cloudContextDeps)
 		}
 	}
+	return deps
+}
+
+// withDefaultWindowAndContributeDeps wires the window-state and contribute
+// defaults: window state path, maximised probe, ERun clone runner, and
+// contribute state path.
+func withDefaultWindowAndContributeDeps(deps erunUIDeps) erunUIDeps {
 	if deps.windowStatePath == "" {
 		deps.windowStatePath = defaultAppWindowStatePath()
 	}

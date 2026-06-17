@@ -64,10 +64,10 @@ func TestEnvironmentWorkingIssueResolvesBranchAndTitle(t *testing.T) {
 	var calls [][]string
 	run := func(_ context.Context, dir, name string, args ...string) (string, error) {
 		calls = append(calls, append([]string{name}, args...))
-		switch {
-		case name == "git":
+		switch name {
+		case "git":
 			return "feature/437-sidebar-env-hover", nil
-		case name == "gh":
+		case "gh":
 			return "Sidebar environment hover", nil
 		}
 		return "", nil
@@ -83,12 +83,7 @@ func TestEnvironmentWorkingIssueResolvesBranchAndTitle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnvironmentWorkingIssue: %v", err)
 	}
-	if !got.Available {
-		t.Fatalf("expected Available for a local-agent env, got %+v", got)
-	}
-	if got.Branch != "feature/437-sidebar-env-hover" || got.IssueNumber != 437 || got.IssueTitle != "Sidebar environment hover" {
-		t.Fatalf("unexpected working issue: %+v", got)
-	}
+	assertResolvedWorkingIssue(t, got)
 	if len(calls) != 2 {
 		t.Fatalf("expected git + gh (2 calls), got %d: %v", len(calls), calls)
 	}
@@ -99,6 +94,17 @@ func TestEnvironmentWorkingIssueResolvesBranchAndTitle(t *testing.T) {
 	}
 	if len(calls) != 2 {
 		t.Errorf("expected cache hit on second call (still 2 calls), got %d: %v", len(calls), calls)
+	}
+}
+
+func assertResolvedWorkingIssue(t *testing.T, got uiWorkingIssue) {
+	t.Helper()
+
+	if !got.Available {
+		t.Fatalf("expected Available for a local-agent env, got %+v", got)
+	}
+	if got.Branch != "feature/437-sidebar-env-hover" || got.IssueNumber != 437 || got.IssueTitle != "Sidebar environment hover" {
+		t.Fatalf("unexpected working issue: %+v", got)
 	}
 }
 
