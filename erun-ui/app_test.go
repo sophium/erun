@@ -3243,10 +3243,14 @@ func TestDecodePastedImagePayloadAcceptsDataURL(t *testing.T) {
 }
 
 func TestBuildPastedImageCopyCommandTargetsRuntimeDeployment(t *testing.T) {
+	// Use a non-erun tenant so the Helm release name (petios-devops) is distinct
+	// from the runtime container literal (erun-devops). For tenant "erun" the two
+	// coincide, which previously masked the bug where the release name was passed
+	// as the kubectl -c container flag (#532).
 	result := eruncommon.OpenResult{
-		Tenant:      "erun",
+		Tenant:      "petios",
 		Environment: "local",
-		RepoPath:    "/Users/example/git/erun",
+		RepoPath:    "/Users/example/git/petios",
 		EnvConfig: eruncommon.EnvConfig{
 			KubernetesContext: "rancher-desktop",
 		},
@@ -3263,10 +3267,10 @@ func TestBuildPastedImageCopyCommandTargetsRuntimeDeployment(t *testing.T) {
 	}
 	wantArgs := []string{
 		"--context", "rancher-desktop",
-		"--namespace", "erun-local",
+		"--namespace", "petios-local",
 		"exec", "-i",
 		"-c", "erun-devops",
-		"deployment/erun-devops",
+		"deployment/petios-devops",
 		"--",
 		"/bin/sh", "-lc",
 		"mkdir -p '/home/erun/.codex/attachments' && base64 -d > '/home/erun/.codex/attachments/paste.png'",
