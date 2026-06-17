@@ -1044,6 +1044,27 @@ func resolveDeployContext(findProjectRoot ProjectFinderFunc, resolveKubernetesDe
 	}, nil
 }
 
+// tenantOwnsProjectRoot reports whether one of the tenant's envs records the
+// given project root as its local repo path (#549; the path moved off the
+// tenant onto the env). A tenant whose envs aren't initialized simply doesn't
+// own the root.
+func tenantOwnsProjectRoot(store DeployStore, tenant, cleanProjectRoot string) (bool, error) {
+	envs, err := store.ListEnvConfigs(tenant)
+	if err != nil {
+		if errors.Is(err, ErrNotInitialized) {
+			return false, nil
+		}
+		return false, err
+	}
+	for _, env := range envs {
+		path := strings.TrimSpace(env.EffectiveLocalRepoPath())
+		if path != "" && filepath.Clean(path) == cleanProjectRoot {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func resolveProjectTenantForRoot(store DeployStore, projectRoot string) (string, error) {
 	tenants, err := store.ListTenantConfigs()
 	if err != nil {
@@ -1053,7 +1074,11 @@ func resolveProjectTenantForRoot(store DeployStore, projectRoot string) (string,
 	cleanProjectRoot := filepath.Clean(projectRoot)
 	matches := make([]TenantConfig, 0, len(tenants))
 	for _, tenant := range tenants {
-		if filepath.Clean(tenant.ProjectRoot) == cleanProjectRoot {
+		owns, ownErr := tenantOwnsProjectRoot(store, tenant.Name, cleanProjectRoot)
+		if ownErr != nil {
+			return "", ownErr
+		}
+		if owns {
 			matches = append(matches, tenant)
 		}
 	}

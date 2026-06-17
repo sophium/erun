@@ -90,7 +90,6 @@ func TestLoadStateUsesTenantSpecificDeployableVersionSuggestions(t *testing.T) {
 			tenants: map[string]eruncommon.TenantConfig{
 				"frs": {
 					Name:               "frs",
-					ProjectRoot:        projectRoot,
 					DefaultEnvironment: "prod",
 				},
 			},
@@ -424,7 +423,6 @@ func TestLoadDiffUsesSelectedMCPPort(t *testing.T) {
 		tenants: map[string]eruncommon.TenantConfig{
 			"erun": {
 				Name:               "erun",
-				ProjectRoot:        projectRoot,
 				DefaultEnvironment: "local",
 			},
 		},
@@ -477,7 +475,6 @@ func TestLoadDiffReturnsUnreachableWhenPortClosed(t *testing.T) {
 		tenants: map[string]eruncommon.TenantConfig{
 			"erun": {
 				Name:               "erun",
-				ProjectRoot:        projectRoot,
 				DefaultEnvironment: "test",
 			},
 		},
@@ -524,7 +521,6 @@ func TestLoadDiffWrapsDialFailureAsUnreachable(t *testing.T) {
 		tenants: map[string]eruncommon.TenantConfig{
 			"erun": {
 				Name:               "erun",
-				ProjectRoot:        projectRoot,
 				DefaultEnvironment: "test",
 			},
 		},
@@ -569,7 +565,6 @@ func TestReconnectMCPRunsOpenAndStreamsLines(t *testing.T) {
 		tenants: map[string]eruncommon.TenantConfig{
 			"erun": {
 				Name:               "erun",
-				ProjectRoot:        projectRoot,
 				DefaultEnvironment: "test",
 			},
 		},
@@ -821,7 +816,7 @@ func TestStartInitSessionPipesCommandToLocal(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
@@ -872,7 +867,6 @@ func TestStartInitSessionUsesSeparateSessionKey(t *testing.T) {
 		tenants: map[string]eruncommon.TenantConfig{
 			"erun": {
 				Name:               "erun",
-				ProjectRoot:        projectRoot,
 				DefaultEnvironment: "remote",
 			},
 		},
@@ -912,7 +906,7 @@ func TestStartInitSessionReusesLocalAcrossInvocations(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
@@ -955,7 +949,7 @@ func TestStartSSHDInitSessionPipesCommandToLocal(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
@@ -992,7 +986,7 @@ func TestStartDoctorSessionPipesCommandToLocal(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
@@ -1029,7 +1023,7 @@ func TestStartDeploySessionPipesCommandToLocal(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
@@ -1066,7 +1060,7 @@ func TestRunErunCommandReusesLocalAndERunSpawnsSeparately(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
@@ -1105,7 +1099,6 @@ func TestOpenIDERunsWithoutConsumingTerminalWhenSSHDEnabled(t *testing.T) {
 		tenants: map[string]eruncommon.TenantConfig{
 			"erun": {
 				Name:               "erun",
-				ProjectRoot:        projectRoot,
 				DefaultEnvironment: "remote",
 			},
 		},
@@ -1159,7 +1152,6 @@ func TestOpenIDEOpensLocalProjectWithoutSSHD(t *testing.T) {
 		tenants: map[string]eruncommon.TenantConfig{
 			"erun": {
 				Name:               "erun",
-				ProjectRoot:        projectRoot,
 				DefaultEnvironment: "local",
 			},
 		},
@@ -1227,7 +1219,6 @@ func TestOpenIDERejectsMissingSSHDWithoutHiddenInit(t *testing.T) {
 		tenants: map[string]eruncommon.TenantConfig{
 			"erun": {
 				Name:               "erun",
-				ProjectRoot:        projectRoot,
 				DefaultEnvironment: "remote",
 			},
 		},
@@ -1282,12 +1273,10 @@ func TestTerminalSessionExitReasonIgnoresCleanEOF(t *testing.T) {
 }
 
 func TestDeleteEnvironmentRequiresExactConfirmationAndDeletesConfig(t *testing.T) {
-	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
 			"frs": {
 				Name:               "frs",
-				ProjectRoot:        projectRoot,
 				DefaultEnvironment: "prod",
 			},
 		},
@@ -1355,7 +1344,6 @@ func TestLoadAndSaveTenantConfig(t *testing.T) {
 		tenants: map[string]eruncommon.TenantConfig{
 			"frs": {
 				Name:                      "frs",
-				ProjectRoot:               "/tmp/old",
 				DefaultEnvironment:        "dev",
 				APIURL:                    "https://api.old.example",
 				CloudProviderAliases:      []string{"team-cloud"},
@@ -1389,7 +1377,7 @@ func TestLoadAndSaveTenantConfig(t *testing.T) {
 	if saved.DefaultEnvironment != "prod" || saved.APIURL != "https://api.new.example" || saved.PrimaryCloudProviderAlias != "team-cloud" {
 		t.Fatalf("unexpected saved config: %+v", saved)
 	}
-	if store.tenants["frs"].ProjectRoot != "/tmp/old" || store.tenants["frs"].APIURL != "https://api.new.example" || store.tenants["frs"].PrimaryCloudProviderAlias != "team-cloud" {
+	if store.tenants["frs"].APIURL != "https://api.new.example" || store.tenants["frs"].PrimaryCloudProviderAlias != "team-cloud" {
 		t.Fatalf("expected tenant project root to be preserved, got %+v", store.tenants["frs"])
 	}
 }
@@ -1784,8 +1772,7 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 		},
 		tenants: map[string]eruncommon.TenantConfig{
 			"frs": {
-				Name:        "frs",
-				ProjectRoot: projectRoot,
+				Name: "frs",
 			},
 		},
 		envs: map[string]eruncommon.EnvConfig{
@@ -1921,8 +1908,7 @@ func TestLoadEnvironmentConfigUsesProjectContainerRegistryForAllEnvironments(t *
 		},
 		tenants: map[string]eruncommon.TenantConfig{
 			"frs": {
-				Name:        "frs",
-				ProjectRoot: projectRoot,
+				Name: "frs",
 			},
 		},
 		envs: map[string]eruncommon.EnvConfig{
@@ -1965,8 +1951,7 @@ func TestSaveEnvironmentConfigPreservesProjectContainerRegistryReadModel(t *test
 		},
 		tenants: map[string]eruncommon.TenantConfig{
 			"frs": {
-				Name:        "frs",
-				ProjectRoot: projectRoot,
+				Name: "frs",
 			},
 		},
 		envs: map[string]eruncommon.EnvConfig{
@@ -2018,7 +2003,7 @@ func TestSaveEnvironmentConfigWritesLocalAgentRegistryListToProjectConfig(t *tes
 		projectConfigs: map[string]eruncommon.ProjectConfig{
 			projectRoot: {ContainerRegistries: eruncommon.SingleContainerRegistries("ghcr.io/acme")},
 		},
-		tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs", ProjectRoot: projectRoot}},
+		tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs"}},
 		envs: map[string]eruncommon.EnvConfig{
 			"frs/local": {Name: "local", LocalRepoPath: projectRoot, KubernetesContext: "c", Type: eruncommon.EnvironmentTypeLocalAgent},
 		},
@@ -2060,7 +2045,7 @@ func TestSaveEnvironmentConfigWritesLocalAgentRegistryListToProjectConfig(t *tes
 func TestSaveEnvironmentConfigRejectsInvalidRegistryList(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs", ProjectRoot: projectRoot}},
+		tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs"}},
 		envs: map[string]eruncommon.EnvConfig{
 			"frs/local": {Name: "local", LocalRepoPath: projectRoot, Type: eruncommon.EnvironmentTypeLocalAgent},
 		},
@@ -2088,7 +2073,7 @@ func TestSaveEnvironmentConfigRejectsInvalidRegistryList(t *testing.T) {
 func TestSaveEnvironmentConfigAcceptsDeployOnlyRegistry(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs", ProjectRoot: projectRoot}},
+		tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs"}},
 		envs: map[string]eruncommon.EnvConfig{
 			"frs/prod": {Name: "prod", LocalRepoPath: projectRoot, Type: eruncommon.EnvironmentTypeRuntime},
 		},
@@ -2117,7 +2102,7 @@ func TestLoadEnvironmentConfigExposesClaudeDefaultsAndOverrides(t *testing.T) {
 	maxTokens := 8192
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"frs": {Name: "frs", ProjectRoot: projectRoot},
+			"frs": {Name: "frs"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"frs/local": {
@@ -2166,7 +2151,7 @@ func TestSaveEnvironmentConfigRoundTripsClaudeOverrides(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"frs": {Name: "frs", ProjectRoot: projectRoot},
+			"frs": {Name: "frs"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"frs/local": {
@@ -2232,7 +2217,7 @@ func TestSaveEnvironmentConfigRoundTripsClaudeLaunchFlags(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"frs": {Name: "frs", ProjectRoot: projectRoot},
+			"frs": {Name: "frs"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"frs/local": {
@@ -2286,7 +2271,7 @@ func TestSetEnvironmentAutoStartPersistsTriStateValue(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"frs": {Name: "frs", ProjectRoot: projectRoot},
+			"frs": {Name: "frs"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"frs/prod": {
@@ -2363,7 +2348,6 @@ func TestSaveRemoteEnvironmentConfigSetsCloudAliasViaMCP(t *testing.T) {
 		tenants: map[string]eruncommon.TenantConfig{
 			"frs": {
 				Name:               "frs",
-				ProjectRoot:        projectRoot,
 				DefaultEnvironment: "dev",
 			},
 		},
@@ -2434,7 +2418,7 @@ func TestStartSessionLeavesCloudContextStartupToErunCommand(t *testing.T) {
 		store: stubUIStore{
 			config: rootConfig,
 			tenants: map[string]eruncommon.TenantConfig{
-				"frs": {Name: "frs", ProjectRoot: projectRoot, DefaultEnvironment: "prod"},
+				"frs": {Name: "frs", DefaultEnvironment: "prod"},
 			},
 			envs: map[string]eruncommon.EnvConfig{
 				"frs/prod": {
@@ -2495,7 +2479,7 @@ func TestDeleteEnvironmentStartsLinkedContextThenStopsIt(t *testing.T) {
 	store := stubUIStore{
 		config: rootConfig,
 		tenants: map[string]eruncommon.TenantConfig{
-			"frs": {Name: "frs", ProjectRoot: projectRoot, DefaultEnvironment: "prod"},
+			"frs": {Name: "frs", DefaultEnvironment: "prod"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"frs/prod": {
@@ -2572,7 +2556,6 @@ func TestStartSessionAllocatesIndependentSlots(t *testing.T) {
 		tenants: map[string]eruncommon.TenantConfig{
 			"erun": {
 				Name:               "erun",
-				ProjectRoot:        projectRoot,
 				DefaultEnvironment: "local",
 			},
 		},
@@ -2628,7 +2611,7 @@ func TestSendSessionInputRoutesPerSession(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "local"},
+			"erun": {Name: "erun", DefaultEnvironment: "local"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/local": {Name: "local", LocalRepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
@@ -2681,7 +2664,6 @@ func TestStartSessionReusesExistingSessionForSelection(t *testing.T) {
 		tenants: map[string]eruncommon.TenantConfig{
 			"erun": {
 				Name:               "erun",
-				ProjectRoot:        projectRoot,
 				DefaultEnvironment: "local",
 			},
 		},
@@ -2730,7 +2712,6 @@ func TestSendSessionInputRecordsCLIActivityForCurrentEnvironment(t *testing.T) {
 		tenants: map[string]eruncommon.TenantConfig{
 			"erun": {
 				Name:               "erun",
-				ProjectRoot:        projectRoot,
 				DefaultEnvironment: "local",
 			},
 		},
@@ -2784,7 +2765,7 @@ func TestSendSessionInputClearsAwaitingPostRespawnInputFlag(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "local"},
+			"erun": {Name: "erun", DefaultEnvironment: "local"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/local": {Name: "local", LocalRepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
@@ -2987,7 +2968,6 @@ func TestLoadIdleStatusDoesNotStopWhileEnvironmentCommandRunning(t *testing.T) {
 		tenants: map[string]eruncommon.TenantConfig{
 			"team-busy": {
 				Name:               "team-busy",
-				ProjectRoot:        projectRoot,
 				DefaultEnvironment: "dev-busy",
 			},
 		},
@@ -3135,7 +3115,6 @@ func TestSavePastedImageCopiesIntoCurrentRuntime(t *testing.T) {
 		tenants: map[string]eruncommon.TenantConfig{
 			"erun": {
 				Name:               "erun",
-				ProjectRoot:        projectRoot,
 				DefaultEnvironment: "local",
 			},
 		},
@@ -3473,7 +3452,7 @@ func TestStartLocalSessionStartsShellAtRepoPath(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
@@ -3515,7 +3494,7 @@ func TestStartAISessionRunsErunOpenAsPersistentAITab(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
@@ -3564,7 +3543,7 @@ func TestStartSessionAutoReconnectsOnExit(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
@@ -3630,7 +3609,7 @@ func TestStartSessionDoesNotReconnectIntoStoppedCloudContext(t *testing.T) {
 			}},
 		},
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {
@@ -3701,7 +3680,7 @@ func TestStartAISessionRespawnsAfterStoppedCloudContextDeath(t *testing.T) {
 			}},
 		},
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {
@@ -3797,7 +3776,7 @@ func TestMaybeStopIdleClearsStaleIdleStopWhenContextIsRunningAgain(t *testing.T)
 			}},
 		},
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {
@@ -3856,7 +3835,7 @@ func TestIdleStatusToUIClearsStopErrorWhenContextIsRunning(t *testing.T) {
 			}},
 		},
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {
@@ -3904,7 +3883,7 @@ func TestIdleStatusToUIKeepsStopErrorWhenContextIsStopped(t *testing.T) {
 			}},
 		},
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {
@@ -3942,7 +3921,7 @@ func TestStartSessionLogsOpenCommandToLocal(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
@@ -3993,7 +3972,7 @@ func TestStartSessionDoesNotLogWhenLocalAbsent(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
@@ -4021,7 +4000,7 @@ func TestStartLocalSessionDoesNotAutoReconnect(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},

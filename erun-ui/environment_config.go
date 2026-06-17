@@ -85,7 +85,7 @@ func (a *App) applyContainerRegistries(selection uiSelection, updated *eruncommo
 // project-config store can't be resolved — a local-agent env's list has nowhere
 // else to live.
 func (a *App) saveEnvironmentProjectRegistries(tenant string, config eruncommon.EnvConfig, registries eruncommon.ContainerRegistries) error {
-	projectRoot, store, ok := a.environmentProjectConfigStore(tenant, config)
+	projectRoot, store, ok := a.environmentProjectConfigStore(config)
 	if !ok {
 		return fmt.Errorf("cannot resolve the project root for %q; a local-agent environment's container registries are stored in its repo's .erun/config.yaml", strings.TrimSpace(config.Name))
 	}
@@ -391,7 +391,7 @@ func (a *App) effectiveEnvironmentContainerRegistries(tenant, environment string
 // config then the env's repo path. ok is false when the project config can't be
 // reached (no project root, store can't load project config, or load failed).
 func (a *App) loadEnvironmentProjectConfig(tenant string, config eruncommon.EnvConfig) (eruncommon.ProjectConfig, bool) {
-	projectRoot, store, ok := a.environmentProjectConfigStore(tenant, config)
+	projectRoot, store, ok := a.environmentProjectConfigStore(config)
 	if !ok {
 		return eruncommon.ProjectConfig{}, false
 	}
@@ -405,17 +405,13 @@ func (a *App) loadEnvironmentProjectConfig(tenant string, config eruncommon.EnvC
 // environmentProjectConfigStore resolves the project root for an env and the
 // project-config store, used to read and write a local-agent env's registry
 // list in .erun/config.yaml.
-func (a *App) environmentProjectConfigStore(tenant string, config eruncommon.EnvConfig) (string, projectConfigStore, bool) {
+func (a *App) environmentProjectConfigStore(config eruncommon.EnvConfig) (string, projectConfigStore, bool) {
 	if a.deps.store == nil {
 		return "", nil, false
 	}
-	projectRoot := ""
-	if tenantConfig, _, err := a.deps.store.LoadTenantConfig(strings.TrimSpace(tenant)); err == nil {
-		projectRoot = strings.TrimSpace(tenantConfig.ProjectRoot)
-	}
-	if projectRoot == "" {
-		projectRoot = strings.TrimSpace(config.EffectiveLocalRepoPath())
-	}
+	// The env's own local repo path is the project root (#549: the path moved
+	// off TenantConfig onto the env).
+	projectRoot := strings.TrimSpace(config.EffectiveLocalRepoPath())
 	if projectRoot == "" {
 		return "", nil, false
 	}

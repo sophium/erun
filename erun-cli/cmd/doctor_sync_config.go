@@ -39,8 +39,10 @@ func runRuntimeConfigSync(ctx common.Context, promptRunner PromptRunner, options
 		_, err := fmt.Fprintln(ctx.Stdout, "In-pod config matches the injected env; nothing to reconcile.")
 		return err
 	}
-	writeConfigSyncDriftReport(ctx, inspection)
-	if _, err := common.RunRuntimeConfigSync(ctx, inspection); err != nil {
+	if err := writeConfigSyncDriftReport(ctx, inspection); err != nil {
+		return err
+	}
+	if err := common.RunRuntimeConfigSync(ctx, inspection); err != nil {
 		return err
 	}
 	if ctx.DryRun {
@@ -51,10 +53,15 @@ func runRuntimeConfigSync(ctx common.Context, promptRunner PromptRunner, options
 	return err
 }
 
-func writeConfigSyncDriftReport(ctx common.Context, inspection common.ConfigSyncInspection) {
-	fmt.Fprintf(ctx.Stdout, "In-pod config drift for %s/%s:\n", inspection.Tenant, inspection.Environment)
-	for _, field := range inspection.Drift {
-		fmt.Fprintf(ctx.Stdout, "  %-5s %-18s on-disk=%q injected=%q [%s]\n",
-			field.Scope, field.Key, field.OnDisk, field.Injected, field.Kind)
+func writeConfigSyncDriftReport(ctx common.Context, inspection common.ConfigSyncInspection) error {
+	if _, err := fmt.Fprintf(ctx.Stdout, "In-pod config drift for %s/%s:\n", inspection.Tenant, inspection.Environment); err != nil {
+		return err
 	}
+	for _, field := range inspection.Drift {
+		if _, err := fmt.Fprintf(ctx.Stdout, "  %-5s %-18s on-disk=%q injected=%q [%s]\n",
+			field.Scope, field.Key, field.OnDisk, field.Injected, field.Kind); err != nil {
+			return err
+		}
+	}
+	return nil
 }

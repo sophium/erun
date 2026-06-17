@@ -102,7 +102,7 @@ func (s bootstrapRunner) remoteRepositoryOpenResult(tenant, envName, kubernetesC
 	return OpenResult{
 		Tenant:       tenant,
 		Environment:  envName,
-		TenantConfig: remoteRepositoryTenantConfig(tenant, envName, projectRoot),
+		TenantConfig: remoteRepositoryTenantConfig(tenant, envName),
 		EnvConfig:    remoteRepositoryEnvConfig(envName, kubernetesContext, projectRoot, envType),
 		LocalPorts:   s.remoteRepositoryLocalPorts(tenant, envName),
 		RepoPath:     projectRoot,
@@ -110,18 +110,15 @@ func (s bootstrapRunner) remoteRepositoryOpenResult(tenant, envName, kubernetesC
 	}
 }
 
-func remoteRepositoryTenantConfig(tenant, envName, projectRoot string) TenantConfig {
-	return TenantConfig{Name: tenant, ProjectRoot: projectRoot, DefaultEnvironment: envName}
+func remoteRepositoryTenantConfig(tenant, envName string) TenantConfig {
+	return TenantConfig{Name: tenant, DefaultEnvironment: envName}
 }
 
 func remoteRepositoryEnvConfig(envName, kubernetesContext, projectRoot string, envType EnvironmentType) EnvConfig {
 	if !envType.IsValid() {
 		envType = EnvironmentTypeRemoteAgent
 	}
-	cfg := EnvConfig{Name: envName, KubernetesContext: kubernetesContext, Type: envType}
-	if envType == EnvironmentTypeLocalAgent {
-		cfg.LocalRepoPath = projectRoot
-	}
+	cfg := EnvConfig{Name: envName, LocalRepoPath: projectRoot, KubernetesContext: kubernetesContext, Type: envType}
 	return cfg
 }
 

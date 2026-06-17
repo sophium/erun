@@ -220,12 +220,6 @@ func dockerBuildEnvironmentFromTenantConfigs(store DockerStore, cleanProjectRoot
 		} else if envName != "" {
 			return envName, nil
 		}
-		// Legacy fallback: tenant-level ProjectRoot match. Removed in a
-		// follow-up release once all envs have been re-saved with the new
-		// localRepoPath field.
-		if filepath.Clean(tenantConfig.ProjectRoot) == cleanProjectRoot {
-			return strings.TrimSpace(tenantConfig.DefaultEnvironment), nil
-		}
 	}
 	return "", nil
 }
@@ -269,10 +263,6 @@ func dockerBuildEnvironmentFromDetectedProject(store DockerStore, findProjectRoo
 		}
 		return "", err
 	}
-	if projectRoot := strings.TrimSpace(tenantConfig.ProjectRoot); projectRoot != "" && filepath.Clean(projectRoot) != cleanProjectRoot {
-		return "", nil
-	}
-
 	return strings.TrimSpace(tenantConfig.DefaultEnvironment), nil
 }
 

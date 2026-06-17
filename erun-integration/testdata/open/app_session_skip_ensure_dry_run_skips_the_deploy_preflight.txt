@@ -22,7 +22,6 @@ bootstrap-script:
   EOF
   mkdir -p "$config_home/erun/team"
   cat > "$config_home/erun/team/config.yaml" <<'EOF'
-  projectroot: <HOME>/git/team
   name: team
   defaultenvironment: dev
 
