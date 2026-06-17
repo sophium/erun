@@ -41,16 +41,9 @@ func TestPersistRuntimeVersionFromDeploySpecs(t *testing.T) {
 	t.Run("rolled-out deploy persists the built and pushed version", func(t *testing.T) {
 		var savedTenant string
 		var saved *EnvConfig
-		save := func(tn string, cfg EnvConfig) error {
-			savedTenant = tn
-			c := cfg
-			saved = &c
-			return nil
-		}
+		save := capturingSave(&savedTenant, &saved)
 		// A real rollout records Deploy.Version and never consults the cluster.
-		if err := PersistRuntimeVersionFromDeploySpecs(Context{}, []DeploySpec{runtimeSpec(false)}, save, fixedRunningVersion(runningVersion)); err != nil {
-			t.Fatalf("persist: %v", err)
-		}
+		persistOrFatal(t, Context{}, []DeploySpec{runtimeSpec(false)}, save, fixedRunningVersion(runningVersion))
 		if saved == nil || savedTenant != tenant {
 			t.Fatalf("expected save for tenant %q after a real rollout (saved=%v tenant=%q)", tenant, saved != nil, savedTenant)
 		}
@@ -60,15 +53,10 @@ func TestPersistRuntimeVersionFromDeploySpecs(t *testing.T) {
 	})
 
 	t.Run("cached deploy (SkipHelm) heals to the running version, not the minted one", func(t *testing.T) {
+		var savedTenant string
 		var saved *EnvConfig
-		save := func(_ string, cfg EnvConfig) error {
-			c := cfg
-			saved = &c
-			return nil
-		}
-		if err := PersistRuntimeVersionFromDeploySpecs(Context{}, []DeploySpec{runtimeSpec(true)}, save, fixedRunningVersion(runningVersion)); err != nil {
-			t.Fatalf("persist: %v", err)
-		}
+		save := capturingSave(&savedTenant, &saved)
+		persistOrFatal(t, Context{}, []DeploySpec{runtimeSpec(true)}, save, fixedRunningVersion(runningVersion))
 		if saved == nil {
 			t.Fatalf("a cached deploy must heal RuntimeVersion to the running version")
 		}
@@ -81,9 +69,7 @@ func TestPersistRuntimeVersionFromDeploySpecs(t *testing.T) {
 		saved := false
 		save := func(string, EnvConfig) error { saved = true; return nil }
 		// Empty string models a missing release / unavailable helm.
-		if err := PersistRuntimeVersionFromDeploySpecs(Context{}, []DeploySpec{runtimeSpec(true)}, save, fixedRunningVersion("")); err != nil {
-			t.Fatalf("persist: %v", err)
-		}
+		persistOrFatal(t, Context{}, []DeploySpec{runtimeSpec(true)}, save, fixedRunningVersion(""))
 		if saved {
 			t.Fatalf("could not read the running version; must not persist (would be a phantom)")
 		}
@@ -93,14 +79,35 @@ func TestPersistRuntimeVersionFromDeploySpecs(t *testing.T) {
 		saved := false
 		resolverCalled := false
 		save := func(string, EnvConfig) error { saved = true; return nil }
-		resolver := func(Context, string, string, string) (string, error) { resolverCalled = true; return runningVersion, nil }
-		if err := PersistRuntimeVersionFromDeploySpecs(Context{DryRun: true}, []DeploySpec{runtimeSpec(true)}, save, resolver); err != nil {
-			t.Fatalf("persist: %v", err)
+		resolver := func(Context, string, string, string) (string, error) {
+			resolverCalled = true
+			return runningVersion, nil
 		}
+		persistOrFatal(t, Context{DryRun: true}, []DeploySpec{runtimeSpec(true)}, save, resolver)
 		if saved || resolverCalled {
 			t.Fatalf("dry-run must not persist (saved=%v) or query the cluster (resolverCalled=%v)", saved, resolverCalled)
 		}
 	})
+}
+
+// capturingSave returns a save func that records the tenant and a copy of the
+// saved EnvConfig through the given pointers.
+func capturingSave(savedTenant *string, saved **EnvConfig) func(string, EnvConfig) error {
+	return func(tn string, cfg EnvConfig) error {
+		*savedTenant = tn
+		c := cfg
+		*saved = &c
+		return nil
+	}
+}
+
+// persistOrFatal runs PersistRuntimeVersionFromDeploySpecs and fails the test
+// if it errors, so each subtest can focus on its persistence assertions.
+func persistOrFatal(t *testing.T, ctx Context, specs []DeploySpec, save func(string, EnvConfig) error, resolve HelmReleaseVersionResolverFunc) {
+	t.Helper()
+	if err := PersistRuntimeVersionFromDeploySpecs(ctx, specs, save, resolve); err != nil {
+		t.Fatalf("persist: %v", err)
+	}
 }
 
 // TestCachedDeployRunThenPersistHealsToRunningVersion drives the real

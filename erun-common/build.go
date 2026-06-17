@@ -31,7 +31,7 @@ func ResolveBuildExecution(ctx Context, store DockerStore, findProjectRoot Proje
 
 	recommendBuildEnvIfMissing(ctx, findProjectRoot, target)
 
-	if env := ResolveDockerBuildEnvConfig(store, findProjectRoot, target); env != nil && env.DisableBuildScript {
+	if buildEnvDisablesBuildScript(store, findProjectRoot, target) {
 		target.DisableBuildScriptDiscovery = true
 	}
 
@@ -63,6 +63,14 @@ func ResolveBuildExecution(ctx Context, store DockerStore, findProjectRoot Proje
 		execution = BuildExecutionSpecWithRelease(execution, *releaseSpec)
 	}
 	return ApplyIncrementalToBuildExecution(ctx, execution, target.NoIncremental)
+}
+
+// buildEnvDisablesBuildScript reports whether the env a build resolves to has
+// its DisableBuildScript toggle set, so the caller can suppress build-script
+// discovery for that env.
+func buildEnvDisablesBuildScript(store DockerStore, findProjectRoot ProjectFinderFunc, target DockerCommandTarget) bool {
+	env := ResolveDockerBuildEnvConfig(store, findProjectRoot, target)
+	return env != nil && env.DisableBuildScript
 }
 
 // recommendBuildEnvIfMissing emits a one-line advisory pointing at the

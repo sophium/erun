@@ -66,30 +66,41 @@ func currentComponentDockerBuildContext(resolveBuildContext BuildContextResolver
 	return buildContext, strings.TrimSpace(buildContext.DockerfilePath) != ""
 }
 
-func ResolveDockerBuildForImageReference(store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, projectRoot, environment, image string) (DockerBuildSpec, bool, error) {
-	image = strings.TrimSpace(image)
+// parseDockerImageReference splits a trimmed image reference into its registry,
+// image name, and version. ok is false when the reference is empty, lacks a
+// usable name:tag, or carries a registry that looks like a version string.
+//
+// A version-looking registry (e.g. "1.0.51-snapshot-20260505151841/image-name:tag")
+// arises from helm chart printf templates that embed .Chart.AppVersion as a
+// namespace prefix; such references are not valid Docker registry hosts and
+// would cause a push-time DNS lookup failure, so they are rejected here.
+func parseDockerImageReference(image string) (registry, imageName, version string, ok bool) {
 	if image == "" {
-		return DockerBuildSpec{}, false, nil
+		return "", "", "", false
 	}
 
 	nameTag := image
-	registry := ""
 	if idx := strings.LastIndex(image, "/"); idx >= 0 {
 		registry = image[:idx]
 		nameTag = image[idx+1:]
 	}
 
-	imageName, version, ok := strings.Cut(nameTag, ":")
-	if !ok || strings.TrimSpace(imageName) == "" || strings.TrimSpace(version) == "" {
-		return DockerBuildSpec{}, false, nil
+	imageName, version, found := strings.Cut(nameTag, ":")
+	if !found || strings.TrimSpace(imageName) == "" || strings.TrimSpace(version) == "" {
+		return "", "", "", false
 	}
 
-	// Reject image references where the registry looks like a version string
-	// (e.g. "1.0.51-snapshot-20260505151841/image-name:tag").  Such references
-	// arise from helm chart printf templates that embed .Chart.AppVersion as a
-	// namespace prefix; they are not valid Docker registry hosts and would cause
-	// a push-time DNS lookup failure.
 	if dockerRegistryLooksLikeVersion(registry) {
+		return "", "", "", false
+	}
+
+	return registry, imageName, version, true
+}
+
+func ResolveDockerBuildForImageReference(store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, projectRoot, environment, image string) (DockerBuildSpec, bool, error) {
+	image = strings.TrimSpace(image)
+	registry, imageName, version, ok := parseDockerImageReference(image)
+	if !ok {
 		return DockerBuildSpec{}, false, nil
 	}
 

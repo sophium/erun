@@ -23,17 +23,12 @@ func TestUpgradeVersionsResolverForStore(t *testing.T) {
 			queries = append(queries, namespace+"/"+repository)
 			return RuntimeRegistryVersions{LatestStable: "1.0.85", LatestSnapshot: "1.0.86-snapshot-1"}, nil
 		})
-		sourced, err := resolver(Context{}, "petios", petiosEnv)
-		if err != nil {
-			t.Fatalf("resolver: %v", err)
-		}
+		sourced := resolveOrFatal(t, resolver, "petios", petiosEnv, "resolver: %v")
 		want := []string{"ghcr.io/petios/petios-devops", DefaultContainerRegistry + "/" + DefaultRuntimeImageName}
 		if strings.Join(queries, ",") != strings.Join(want, ",") {
 			t.Fatalf("unexpected queries: got %v want %v", queries, want)
 		}
-		if len(sourced) != 2 || sourced[0].Registry != "ghcr.io/petios" {
-			t.Fatalf("expected the provenance and canonical sources, got %+v", sourced)
-		}
+		assertProvenanceAndCanonicalSources(t, sourced)
 	})
 
 	t.Run("a tenant lookup failure still resolves via the canonical image (#501)", func(t *testing.T) {
@@ -46,13 +41,8 @@ func TestUpgradeVersionsResolverForStore(t *testing.T) {
 			}
 			return RuntimeRegistryVersions{}, errors.New("ghcr token request failed: 403 Forbidden")
 		})
-		sourced, err := resolver(Context{}, "petios", petiosEnv)
-		if err != nil {
-			t.Fatalf("a failed tenant listing must not block, got %v", err)
-		}
-		if len(sourced) != 1 || sourced[0].Versions.LatestStable != "1.0.85" {
-			t.Fatalf("expected the canonical source to carry through, got %+v", sourced)
-		}
+		sourced := resolveOrFatal(t, resolver, "petios", petiosEnv, "a failed tenant listing must not block, got %v")
+		assertCanonicalSourceCarriedThrough(t, sourced)
 	})
 
 	t.Run("all lookups failing is an error with the first failure (#497)", func(t *testing.T) {
@@ -71,9 +61,7 @@ func TestUpgradeVersionsResolverForStore(t *testing.T) {
 			namespaces = append(namespaces, namespace)
 			return RuntimeRegistryVersions{LatestStable: "1.0.85"}, nil
 		})
-		if _, err := resolver(Context{}, "fresh", EnvConfig{Name: "dev"}); err != nil {
-			t.Fatalf("resolver: %v", err)
-		}
+		resolveOrFatal(t, resolver, "fresh", EnvConfig{Name: "dev"}, "resolver: %v")
 		if len(namespaces) != 2 || namespaces[0] != DefaultContainerRegistry {
 			t.Fatalf("expected the default registry namespace, got %v", namespaces)
 		}
@@ -92,6 +80,35 @@ func TestUpgradeVersionsResolverForStore(t *testing.T) {
 	})
 }
 
+// assertProvenanceAndCanonicalSources pins that both the provenance registry
+// and the canonical image resolved, with provenance first.
+func assertProvenanceAndCanonicalSources(t *testing.T, sourced []SourcedRuntimeVersions) {
+	t.Helper()
+	if len(sourced) != 2 || sourced[0].Registry != "ghcr.io/petios" {
+		t.Fatalf("expected the provenance and canonical sources, got %+v", sourced)
+	}
+}
+
+// assertCanonicalSourceCarriedThrough pins that the canonical source alone
+// carried its stable version through after a tenant-listing failure.
+func assertCanonicalSourceCarriedThrough(t *testing.T, sourced []SourcedRuntimeVersions) {
+	t.Helper()
+	if len(sourced) != 1 || sourced[0].Versions.LatestStable != "1.0.85" {
+		t.Fatalf("expected the canonical source to carry through, got %+v", sourced)
+	}
+}
+
+// resolveOrFatal runs the sourced-versions resolver and fails with failMsg (a
+// %v format) on error, returning the resolved sources for further assertions.
+func resolveOrFatal(t *testing.T, resolver func(Context, string, EnvConfig) ([]SourcedRuntimeVersions, error), tenant string, env EnvConfig, failMsg string) []SourcedRuntimeVersions {
+	t.Helper()
+	sourced, err := resolver(Context{}, tenant, env)
+	if err != nil {
+		t.Fatalf(failMsg, err)
+	}
+	return sourced
+}
+
 // TestResolveEnvUpgradeItemCandidates pins the per-env candidate logic (issue
 // #527): registries agreeing on the newest version yield a single target,
 // disagreeing registries yield an ambiguous item the caller must pick, and a
@@ -108,9 +125,7 @@ func TestResolveEnvUpgradeItemCandidates(t *testing.T) {
 			}, nil
 		}
 		item := resolveEnvUpgradeItem("team", env, "", resolver, noTrace)
-		if !item.Lagging || item.Target != "2.0.0" || len(item.Candidates) != 1 {
-			t.Fatalf("expected a single 2.0.0 target, got %+v", item)
-		}
+		assertLaggingSingleTarget(t, item, "2.0.0", "expected a single 2.0.0 target, got %+v")
 	})
 
 	t.Run("registries disagreeing yield multiple candidates and no auto-target", func(t *testing.T) {
@@ -138,10 +153,17 @@ func TestResolveEnvUpgradeItemCandidates(t *testing.T) {
 
 	t.Run("an explicit override is the single target", func(t *testing.T) {
 		item := resolveEnvUpgradeItem("team", env, "3.0.0", nil, noTrace)
-		if !item.Lagging || item.Target != "3.0.0" || len(item.Candidates) != 1 {
-			t.Fatalf("expected the override target, got %+v", item)
-		}
+		assertLaggingSingleTarget(t, item, "3.0.0", "expected the override target, got %+v")
 	})
+}
+
+// assertLaggingSingleTarget pins an item that lags with exactly one candidate
+// pointing at wantTarget, reporting failMsg (a %+v format) with the item.
+func assertLaggingSingleTarget(t *testing.T, item UpgradePlanItem, wantTarget, failMsg string) {
+	t.Helper()
+	if !item.Lagging || item.Target != wantTarget || len(item.Candidates) != 1 {
+		t.Fatalf(failMsg, item)
+	}
 }
 
 // TestBuildUpgradePlanPerEnv pins the per-env enumeration: only opted-in envs
@@ -199,11 +221,14 @@ type upgradeResolverStore struct {
 	envsByTenant map[string][]EnvConfig
 }
 
-func (s upgradeResolverStore) LoadERunConfig() (ERunConfig, string, error) { return ERunConfig{}, "", nil }
-func (s upgradeResolverStore) SaveERunConfig(ERunConfig) error             { return nil }
+func (s upgradeResolverStore) LoadERunConfig() (ERunConfig, string, error) {
+	return ERunConfig{}, "", nil
+}
+func (s upgradeResolverStore) SaveERunConfig(ERunConfig) error { return nil }
 func (s upgradeResolverStore) LoadTenantConfig(name string) (TenantConfig, string, error) {
 	return TenantConfig{Name: name}, "", nil
 }
+
 func (s upgradeResolverStore) LoadEnvConfig(tenant, environment string) (EnvConfig, string, error) {
 	return EnvConfig{Name: environment}, "", nil
 }

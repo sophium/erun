@@ -80,9 +80,9 @@ type podStatusItem struct {
 		Annotations map[string]string `json:"annotations"`
 	} `json:"metadata"`
 	Status struct {
-		Phase                 string                  `json:"phase"`
-		ContainerStatuses     []containerStatusEntry  `json:"containerStatuses"`
-		InitContainerStatuses []containerStatusEntry  `json:"initContainerStatuses"`
+		Phase                 string                 `json:"phase"`
+		ContainerStatuses     []containerStatusEntry `json:"containerStatuses"`
+		InitContainerStatuses []containerStatusEntry `json:"initContainerStatuses"`
 	} `json:"status"`
 }
 
@@ -139,9 +139,9 @@ const crashLoopRestartThreshold = 2
 // faster cadence than production. ERUN_DEPLOY_POD_WATCH_INTERVAL accepts any
 // time.ParseDuration value; values below 100ms are clamped to 100ms.
 const (
-	defaultPodWatchPollInterval  = 2 * time.Second
+	defaultPodWatchPollInterval   = 2 * time.Second
 	defaultPodWatchKubectlTimeout = 10 * time.Second
-	minPodWatchPollInterval      = 100 * time.Millisecond
+	minPodWatchPollInterval       = 100 * time.Millisecond
 )
 
 func resolvePodWatchPollInterval() time.Duration {
@@ -291,16 +291,8 @@ func classifyTerminalFailure(pods []podStatusItem, params podWatchParams) *HelmR
 
 func containerTerminalFailure(c containerStatusEntry) (reason, message string, ok bool) {
 	if c.State.Waiting != nil {
-		w := c.State.Waiting
-		if _, terminal := terminalWaitingReasons[w.Reason]; terminal {
-			return w.Reason, w.Message, true
-		}
-		if w.Reason == "CrashLoopBackOff" && c.RestartCount >= crashLoopRestartThreshold {
-			msg := w.Message
-			if t := c.LastState.Terminated; t != nil && strings.TrimSpace(t.Message) != "" {
-				msg = strings.TrimSpace(t.Message)
-			}
-			return w.Reason, msg, true
+		if r, m, waitingOK := containerWaitingTerminalFailure(c); waitingOK {
+			return r, m, true
 		}
 	}
 	if t := c.State.Terminated; t != nil && t.ExitCode != 0 && c.RestartCount >= crashLoopRestartThreshold {
@@ -309,6 +301,25 @@ func containerTerminalFailure(c containerStatusEntry) (reason, message string, o
 			reason = "Error"
 		}
 		return reason, t.Message, true
+	}
+	return "", "", false
+}
+
+// containerWaitingTerminalFailure classifies a waiting container as a terminal
+// failure: either a reason in terminalWaitingReasons, or a CrashLoopBackOff
+// that has restarted past the threshold (in which case the last terminated
+// message is preferred when present).
+func containerWaitingTerminalFailure(c containerStatusEntry) (reason, message string, ok bool) {
+	w := c.State.Waiting
+	if _, terminal := terminalWaitingReasons[w.Reason]; terminal {
+		return w.Reason, w.Message, true
+	}
+	if w.Reason == "CrashLoopBackOff" && c.RestartCount >= crashLoopRestartThreshold {
+		msg := w.Message
+		if t := c.LastState.Terminated; t != nil && strings.TrimSpace(t.Message) != "" {
+			msg = strings.TrimSpace(t.Message)
+		}
+		return w.Reason, msg, true
 	}
 	return "", "", false
 }
@@ -394,4 +405,3 @@ func renderPodSummaries(out io.Writer, summaries []podSummary, last map[string]s
 		_, _ = io.WriteString(out, "    "+s.Line+"\n")
 	}
 }
-

@@ -25,16 +25,16 @@ type RecoverCloudContextParams struct {
 // the caller can surface the values back to the user (and so MCP
 // callers can inspect them without re-reading the config).
 type RecoverCloudContextResult struct {
-	Saved      CloudContextConfig
-	Source     string // "aws-describe-instances"
-	TokenFrom  string // "kubeconfig" | "input" | "none"
+	Saved     CloudContextConfig
+	Source    string // "aws-describe-instances"
+	TokenFrom string // "kubeconfig" | "input" | "none"
 }
 
 type awsDescribeInstanceJSON struct {
 	Reservations []struct {
 		Instances []struct {
-			InstanceID         string `json:"InstanceId"`
-			State              struct {
+			InstanceID string `json:"InstanceId"`
+			State      struct {
 				Name string `json:"Name"`
 			} `json:"State"`
 			PublicIPAddress    string `json:"PublicIpAddress,omitempty"`
@@ -145,13 +145,13 @@ func resolveRecoverAdminToken(params RecoverCloudContextParams) (string, string)
 }
 
 type recoveredInstance struct {
-	id           string
-	publicIP     string
-	instanceType string
-	securityGroup string
+	id                 string
+	publicIP           string
+	instanceType       string
+	securityGroup      string
 	instanceProfileARN string
-	volumeID     string
-	launchTime   string
+	volumeID           string
+	launchTime         string
 }
 
 type recoveredVolume struct {

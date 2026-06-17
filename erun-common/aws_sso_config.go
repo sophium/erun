@@ -54,7 +54,7 @@ func LookupAWSSSOProfileByAccountID(accountID string) (AWSSSOProfile, bool, erro
 		}
 		return AWSSSOProfile{}, false, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	sections, err := parseAWSSharedConfig(file)
 	if err != nil {
 		return AWSSSOProfile{}, false, err
