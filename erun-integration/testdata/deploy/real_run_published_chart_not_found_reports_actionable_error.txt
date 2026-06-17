@@ -8,6 +8,6 @@ dedup: claim (release=test-context-team-dev-team-devops, hash=<HASH>, pid=<PID>)
 ==> Deploying team/dev <VERSION>
     namespace team-dev on context test-context
     waiting for helm rollout (timeout 2m0s)...
-==> Deploy failed after <ELAPSED>
+==> Deploy of team-devops failed after <ELAPSED>
 runtime chart oci://registry.example/test/charts/erun-devops version <VERSION> could not be pulled from registry.example/test: that version has no published chart in the registry. `erun push` publishes a version's image and chart together, so a version is deployable only after it is pushed — run `erun push --version <VERSION>` (or `erun release` for a release version), then deploy.
 Error: failed to perform "FetchReference" on source: registry.example/test/charts/erun-devops: not found

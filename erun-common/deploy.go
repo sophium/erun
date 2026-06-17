@@ -442,7 +442,14 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 	spinner.Stop()
 	elapsed := time.Since(started).Round(time.Second)
 	if deployErr != nil {
-		ctx.Info("==> Deploy failed after " + elapsed.String())
+		// Name the release so a parallel step (multiple charts deploying at
+		// once) makes clear which one failed; the helm reason is in the
+		// returned error, surfaced by the command's error handler.
+		failed := "==> Deploy failed after " + elapsed.String()
+		if rel := strings.TrimSpace(deployInput.ReleaseName); rel != "" {
+			failed = "==> Deploy of " + rel + " failed after " + elapsed.String()
+		}
+		ctx.Info(failed)
 		return deployErr
 	}
 	ctx.Info("==> Deployed " + target + " in " + elapsed.String())
