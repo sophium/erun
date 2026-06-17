@@ -36,6 +36,17 @@ func (s Setup) Env() []string {
 		// goldens.
 		"TERM=dumb",
 		"NO_COLOR=1",
+		// Isolate the agent-skills source. The runtime image bakes skills
+		// into /etc/erun/skills, which doctor's remote-init skills check
+		// (bakedSkillsRoot) reads when ERUN_SKILLS_DIR is unset. On a host
+		// that has that directory (a runtime image, or a box that installed
+		// one) the unset seam leaks the host's baked skills into doctor
+		// output and the in_runtime_* goldens drift. Default the seam to an
+		// isolated, non-existent path so the "no baked skills → row omitted"
+		// branch is deterministic everywhere; scenarios that test the skills
+		// row append their own ERUN_SKILLS_DIR after Env() (the last value
+		// for a duplicated key wins).
+		"ERUN_SKILLS_DIR=" + filepath.Join(s.Home, ".no-baked-skills"),
 	}
 }
 
