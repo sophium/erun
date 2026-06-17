@@ -312,6 +312,16 @@ spec:
               value: {{ $cloudRegion | quote }}
             - name: ERUN_CLOUD_INSTANCE_ID
               value: {{ $cloudInstanceID | quote }}
+            {{- if .Values.runtimeRegistry }}
+            - name: ERUN_RUNTIME_REGISTRY
+              value: {{ .Values.runtimeRegistry | quote }}
+            {{- end }}
+            {{- if .Values.containerRegistries }}
+            - name: ERUN_CONTAINER_REGISTRIES
+              value: {{ .Values.containerRegistries | toJson | quote }}
+            {{- end }}
+            - name: ERUN_DISABLE_BUILD_SCRIPT
+              value: {{ default false .Values.disableBuildScript | quote }}
             {{ if eq $cloudProvider "aws" }}
             {{ if $useHostCredentials }}
             - name: AWS_PROFILE

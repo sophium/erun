@@ -265,6 +265,28 @@ initialize_erun_config() {
         env_managed_cloud_line="managedcloud: true"
     fi
 
+    # In-pod config injection (#548): the build/deploy-relevant fields the pod
+    # acts on, written only when the chart injected them so an older chart
+    # produces a valid (thinner) config.
+    env_runtime_registry_line=""
+    if [ -n "${ERUN_RUNTIME_REGISTRY:-}" ]; then
+        env_runtime_registry_line="runtimeregistry: ${ERUN_RUNTIME_REGISTRY}"
+    fi
+    env_container_registries_line=""
+    if [ -n "${ERUN_CONTAINER_REGISTRIES:-}" ]; then
+        # JSON is valid YAML flow style; erun decodes it straight into
+        # EnvConfig.ContainerRegistries (no jq/yq needed).
+        env_container_registries_line="containerregistries: ${ERUN_CONTAINER_REGISTRIES}"
+    fi
+    # Write the actual boolean (true *and* false) whenever the chart injected
+    # it; skip only when the var is unset (older chart). A truthiness-gated
+    # write would leave a stale value that `erun doctor --sync-config` could
+    # never reconcile back to false.
+    env_disable_build_script_line=""
+    if [ -n "${ERUN_DISABLE_BUILD_SCRIPT:-}" ]; then
+        env_disable_build_script_line="disablebuildscript: ${ERUN_DISABLE_BUILD_SCRIPT}"
+    fi
+
     mkdir -p "${config_dir}/${tenant}/${environment}"
 
     cat >"${config_dir}/config.yaml" <<EOF
@@ -326,6 +348,9 @@ kubernetescontext: ${ERUN_KUBERNETES_CONTEXT:-in-cluster}
 ${env_type_line}
 ${env_cloud_provider_alias_line}
 ${env_managed_cloud_line}
+${env_runtime_registry_line}
+${env_container_registries_line}
+${env_disable_build_script_line}
 idle:
   timeout: ${ERUN_IDLE_TIMEOUT:-5m0s}
   workinghours: ${ERUN_IDLE_WORKING_HOURS:-08:00-20:00}

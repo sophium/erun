@@ -123,6 +123,18 @@ type HelmDeploySpec struct {
 	Version            string
 	Timeout            string
 	Verbosity          int
+	// RuntimeRegistry is the env's runtime image-ref / runtime-version
+	// registry (EnvConfig.RuntimeRegistry), distinct from ContainerRegistry
+	// (the DEPLOY-marked registry the cluster pulls from). Injected so in-pod
+	// runtime image-ref resolution does not fall back to ghcr.io/sophium (#548).
+	RuntimeRegistry string
+	// ContainerRegistries is the env's full marked registry list, injected so
+	// in-pod build/push role resolution works on remote/runtime pods whose list
+	// lives only on the env config (#548).
+	ContainerRegistries ContainerRegistries
+	// DisableBuildScript mirrors EnvConfig.DisableBuildScript so a remote-agent
+	// pod's in-pod build honours the operator's build.sh-discovery choice (#548).
+	DisableBuildScript bool
 }
 
 type HelmReleaseRecoveryParams struct {
@@ -1091,6 +1103,14 @@ func newHelmDeploySpecWithValues(target OpenResult, deployContext KubernetesDepl
 	version := strings.TrimSpace(versionOverride)
 	ports := LocalPortsForResult(target)
 
+	// The full marked registry list the pod acts on (remote-agent build/push;
+	// runtime deploy). deployTargetContainerRegistries validates markers, so a
+	// bad list surfaces here at deploy time rather than silently in-pod (#548).
+	containerRegistries, err := deployTargetContainerRegistries(target)
+	if err != nil {
+		return HelmDeploySpec{}, err
+	}
+
 	return HelmDeploySpec{
 		ReleaseName:        deployContext.ComponentName,
 		ChartPath:          deployContext.ChartPath,
@@ -1107,12 +1127,15 @@ func newHelmDeploySpecWithValues(target OpenResult, deployContext KubernetesDepl
 		APIPort:            ports.API,
 		SSHPort:            ports.SSH,
 		CloudProviderAlias: target.EnvConfig.CloudProviderAlias,
-		ContainerRegistry:  resolveProjectContainerRegistry(target.RepoPath, target.Environment),
-		Idle:               target.EnvConfig.Idle,
-		Claude:             target.EnvConfig.Claude,
-		RuntimePod:         NormalizeRuntimePodResources(target.EnvConfig.RuntimePod),
-		Version:            version,
-		Timeout:            DefaultHelmDeploymentTimeout,
+		ContainerRegistry:   resolveProjectContainerRegistry(target.RepoPath, target.Environment),
+		RuntimeRegistry:     strings.TrimSpace(target.EnvConfig.RuntimeRegistry),
+		ContainerRegistries: containerRegistries,
+		DisableBuildScript:  target.EnvConfig.DisableBuildScript,
+		Idle:                target.EnvConfig.Idle,
+		Claude:              target.EnvConfig.Claude,
+		RuntimePod:          NormalizeRuntimePodResources(target.EnvConfig.RuntimePod),
+		Version:             version,
+		Timeout:             DefaultHelmDeploymentTimeout,
 	}, nil
 }
 
@@ -1323,6 +1346,20 @@ func (d HelmDeploySpec) command() commandSpec {
 	if registry := strings.TrimSpace(d.ContainerRegistry); registry != "" {
 		args = append(args, "--set-string", "containerRegistry="+registry)
 	}
+	// In-pod config injection (#548). RuntimeRegistry/containerRegistries are
+	// guarded on presence so an env that carries neither renders nothing (and
+	// an old chart with no .Values for them is unaffected). disableBuildScript
+	// is always set — a boolean projection must be able to reconcile a flip in
+	// either direction, so the chart always receives the actual value.
+	if registry := strings.TrimSpace(d.RuntimeRegistry); registry != "" {
+		args = append(args, "--set-string", "runtimeRegistry="+registry)
+	}
+	if len(d.ContainerRegistries) > 0 {
+		if encoded, marshalErr := json.Marshal(d.ContainerRegistries); marshalErr == nil {
+			args = append(args, "--set-json", "containerRegistries="+string(encoded))
+		}
+	}
+	args = append(args, "--set", "disableBuildScript="+formatHelmBool(d.DisableBuildScript))
 	for _, key := range sortedStringMapKeys(d.ImageOverrides) {
 		args = append(args, "--set-string", "imageOverrides."+key+"="+d.ImageOverrides[key])
 	}
