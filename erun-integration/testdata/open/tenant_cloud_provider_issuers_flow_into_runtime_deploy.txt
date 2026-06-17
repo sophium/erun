@@ -5,6 +5,7 @@ audit: erun open --dry-run --no-alias-prompt --no-shell team dev
 config: would assign localportrangestart=17000 to team/dev
 trace-log: would append the full trace to <TMP>
 open: tenant=team environment=dev kubernetes-context=test-context remote=false no-shell=true ide=shell
+deploy: version <VERSION> pinned; installing the published image by reference (deploy never builds)
 kubectl --context test-context --namespace team-dev get deployment team-devops -o name
 deploying the devops runtime before opening the shell
 kubectl --context test-context get namespace team-dev -o name

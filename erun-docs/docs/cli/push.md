@@ -4,34 +4,32 @@ title: erun push
 
 # `erun push`
 
-Push built container images to the configured container registry.
+Publish a version's outputs to the configured container registry: the multi-arch image manifest **and** the runtime helm chart. `erun push --version <version>` is the publish step of the [delivery pipeline](/pipeline) — it takes a version [`erun build`](/cli/build) minted and makes it deployable.
 
 ## Synopsis
 
 ```
-erun push [flags]
+erun push --version <version> [flags]
 ```
 
-## Behavior by environment type
+The version is **required** and names what to publish. It's a content identity minted by `build`; `push` never mints one. There is no environment-type branch — push behaves the same everywhere.
 
-### Agent env (development)
+## What push publishes
 
-`erun push` resolves the current build context, **rebuilds** the image with a fresh snapshot tag (`<semver>-snapshot-<UTC-timestamp>`), then pushes per-arch tags and assembles a multi-arch manifest list. `push` in an agent env is build+push.
+For the given version, `erun push`:
 
-### Runtime env (release)
+1. **Builds each image from its source context.** It resolves the current build context and builds per-arch images, promoting unchanged images straight from the [fingerprint cache](/agent-reference/conventions-spec#fingerprint-cache) (a clean clone publishes without rebuilding). It does **not** push a prebuilt bare tag — it always builds from source so what lands is reproducible.
+2. **Pushes per-arch tags and assembles the multi-arch manifest list**, so `<registry>/<image>:<version>` resolves to either architecture automatically.
+3. **Publishes the runtime helm chart** — `helm package` + `helm push` to `oci://<registry>/charts`, then a `helm pull` round-trip to verify the artifact landed. The chart's `version` and `appVersion` equal `<version>`, so image and chart are one contract at the same version.
 
-`erun push` **skips the build step** and runs `docker push` directly against the tag `<registry>/<image>:<VERSION>`. It assumes the image already exists in the local docker daemon (typically produced by a prior `erun build` in an agent env).
-
-This split exists because runtime envs use stable release tags from the `VERSION` file. Silently rebuilding and overwriting those tags would mutate release artifacts — `push` here is the explicit "promote what was built" step.
-
-See [Environment types](/concepts/environment-types) for the full split between agent and runtime envs.
+Because push publishes the chart for every version — snapshot or release — any pushed version is deployable. There is no longer a gap where a snapshot image existed without a matching chart. [`erun release`](/cli/release) reuses `push` for all of this publishing; [`erun deploy`](/cli/deploy) only consumes what push produced.
 
 ## Flags
 
 | Flag | Description |
 |---|---|
-| `--force` | Rebuild and re-push every image, bypassing the fingerprint cache. Only meaningful in an agent env. |
-| `--dry-run` | Resolve and print every `docker push` command without executing. |
+| `--force` | Rebuild and re-push every image, bypassing the fingerprint cache. |
+| `--dry-run` | Resolve and print every `docker build` / `docker push` / `docker manifest` and `helm package` / `helm push` command without executing. |
 
 ## Registry resolution
 
@@ -39,18 +37,17 @@ The push target is the `build`-marked registry in the project's registry list; a
 
 ## Examples
 
-Push from an agent env (rebuilds + pushes):
+Mint a version with `build`, then publish everything at it:
 
 ```bash
-erun push --dry-run
-erun push
+erun build --output json     # prints {version, baseVersion, images} — capture the version
+erun push --version 1.0.81-snapshot-20260616120000
 ```
 
-Push from a runtime env (after `erun build` has run):
+Preview what a push would publish without executing:
 
 ```bash
-erun build       # produces tagged images (native multi-arch or ./build.sh)
-erun push        # docker push the tagged images
+erun push --version 1.0.81-snapshot-20260616120000 --dry-run
 ```
 
 ## Authentication
@@ -61,6 +58,8 @@ If the registry rejects the push as unauthorised, `erun push` retries automatica
 
 | Failure | Behaviour |
 |---|---|
-| No build context / image to push. | Errors; nothing is pushed. |
+| No `--version`. | Errors before any work: `push requires a version` — push publishes a specific version, it does not mint one. Exit code 1. |
+| No build context to publish. | Errors; nothing is pushed. |
+| Foreign-arch binfmt missing. | Fails before the per-arch build with a direct error. |
 | Registry rejects the push as unauthorised. | Retries with `docker login` (and `gh auth refresh` for GHCR scope mismatches); both need a TTY. Without one, errors with the auth failure. |
-| Foreign-arch binfmt missing (agent-env rebuild). | Fails before the per-arch build with a direct error. |
+| Chart `helm push` or the `helm pull` verification fails. | Errors after the images pushed; the version's images are published but its chart is not, so it is not yet deployable. Re-run `erun push --version <version>` once the registry/auth issue is fixed. |

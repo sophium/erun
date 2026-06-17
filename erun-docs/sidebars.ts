@@ -20,6 +20,7 @@ const sidebars: SidebarsConfig = {
       link: { type: 'generated-index' },
       items: [
         'pipeline',
+        'concepts/command-primitives',
         'deployment/registries',
         'versioning',
       ],

@@ -224,10 +224,6 @@ func (e DockerRegistryAuthError) Unwrap() error {
 	return e.Err
 }
 
-func isLocalEnvironment(environment string) bool {
-	return strings.EqualFold(strings.TrimSpace(environment), DefaultEnvironment)
-}
-
 // dockerVersionRegistryPattern matches strings that look like a semantic version
 // (e.g. "1.0.51-snapshot-20260505151841") rather than a Docker registry hostname
 // (e.g. "ghcr.io", "docker.io", "localhost:5000").  Such strings arise when helm

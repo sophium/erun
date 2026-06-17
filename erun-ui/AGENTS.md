@@ -7,6 +7,7 @@ Module-specific guidance for `erun-ui`. Follow the repository root `AGENTS.md` f
 - `erun-ui` is the desktop app transport for ERun.
 - Keep shared tenant, environment, and project-resolution logic in `erun-common`. Do not duplicate shared planning or config resolution in the desktop module.
 - `erun-ui` must not import `erun-cli`. When the desktop app needs an interactive shell, launch the installed `erun` executable as a child process instead of linking CLI packages directly.
+- The desktop is an orchestration layer over the pure command primitives, not an operator at a terminal. It must **not** use the operator-convenience switches (`build --deploy`, `open --deploy`); it composes `build` → `push <version>` → `deploy <version>` itself, capturing the version build minted from `erun build --output json` and threading it forward. The per-env-type policy ("an Operator's deploy on an agent env means build→push→deploy; on a runtime env it means deploy a chosen/`--current` version") lives here in the desktop, computed from `EnvConfig` type, never pushed down into the commands. See root `AGENTS.md` § "Command primitives vs orchestration".
 
 ## Frontend And Backend Split
 

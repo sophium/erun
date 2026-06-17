@@ -56,6 +56,7 @@ func newRootCommand(runRoot func(*cobra.Command, []string) error) *cobra.Command
 	}
 	addDryRunFlag(cmd)
 	addTimeFlag(cmd)
+	addOutputFlag(cmd)
 	wrapCommandTreeWithElapsedTime(cmd)
 	cmd.PersistentFlags().CountVarP(&verbosity, "verbose", "v", verboseFlagUsage)
 	return cmd

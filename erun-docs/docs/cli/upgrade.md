@@ -4,7 +4,7 @@ title: erun upgrade
 
 # `erun upgrade`
 
-Redeploy every environment opted into **Upgrade all** to the latest version for its release channel. `erun upgrade` is the one-command way to roll a fleet of environments forward without running `erun deploy` for each — it resolves the latest version per channel, then redeploys only the environments whose current version lags.
+Redeploy every environment opted into **Upgrade all** to the latest version for its release channel. `erun upgrade` is the one-command way to roll a fleet of environments forward without running `erun deploy` for each — it resolves the latest version per channel, then redeploys only the environments whose current version lags. It is an **orchestrator over [`erun deploy --version`](/cli/deploy)**: it never builds or pushes, it resolves a version per environment and installs it by reference. The versions it picks were minted by `build` and published by `push` (or by a [`release`](/cli/release)) ahead of time.
 
 ## Synopsis
 

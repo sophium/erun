@@ -31,10 +31,6 @@ func ResolveDockerImageReference(store DockerStore, findProjectRoot ProjectFinde
 func ResolveDockerBuildForComponent(store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, projectRoot, environment, componentName, versionOverride string) (*DockerBuildSpec, error) {
 	_, _, resolveBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
-	if !isLocalEnvironment(environment) {
-		return nil, nil
-	}
-
 	if buildContext, ok := currentComponentDockerBuildContext(resolveBuildContext, componentName); ok {
 		build, err := newDockerBuildSpec(now, projectRoot, environment, buildContext, versionOverride)
 		if err != nil {
@@ -116,13 +112,12 @@ func ResolveDockerBuildForImageReference(store DockerStore, findProjectRoot Proj
 	}
 
 	imageRef := DockerImageReference{
-		ProjectRoot:  projectRoot,
-		Environment:  strings.TrimSpace(environment),
-		Registry:     registry,
-		ImageName:    imageName,
-		Version:      version,
-		Tag:          tag,
-		IsLocalBuild: isLocalEnvironment(environment),
+		ProjectRoot: projectRoot,
+		Environment: strings.TrimSpace(environment),
+		Registry:    registry,
+		ImageName:   imageName,
+		Version:     version,
+		Tag:         tag,
 	}
 
 	return DockerBuildSpec{
@@ -158,7 +153,7 @@ func resolveDockerImageReferenceForProject(now NowFunc, projectRoot, environment
 		return DockerImageReference{}, fmt.Errorf("could not determine image name from current directory")
 	}
 
-	version, baseVersion, versionFromBuildDir, versionFilePath, err := resolveDockerImageVersion(now, projectRoot, environment, buildDir, versionOverride)
+	version, baseVersion, versionFromBuildDir, versionFilePath, err := resolveDockerImageVersion(now, projectRoot, buildDir, versionOverride)
 	if err != nil {
 		return DockerImageReference{}, err
 	}
@@ -170,7 +165,6 @@ func resolveDockerImageReferenceForProject(now NowFunc, projectRoot, environment
 		ImageName:           imageName,
 		Version:             version,
 		Tag:                 fmt.Sprintf("%s/%s:%s", strings.TrimRight(registry, "/"), imageName, version),
-		IsLocalBuild:        isLocalEnvironment(environment),
 		VersionFilePath:     versionFilePath,
 		VersionFromBuildDir: versionFromBuildDir,
 	}
@@ -181,9 +175,13 @@ func resolveDockerImageReferenceForProject(now NowFunc, projectRoot, environment
 }
 
 // resolveDockerImageVersion returns (version, baseVersion, versionFromBuildDir, versionFilePath, error).
-// version is the full tag version (may include a snapshot suffix for local builds).
-// baseVersion is always the stable semver without snapshot suffix.
-func resolveDockerImageVersion(now NowFunc, projectRoot, environment, buildDir, versionOverride string) (string, string, bool, string, error) {
+// version carries a snapshot suffix by default; baseVersion is the stable semver.
+//
+// build mints the version and no longer keys it off the environment: a snapshot
+// (<base>-snapshot-<utc-ts>) by default, the bare base version only when an
+// explicit --version/override pins it or a version-from-build-dir file fixes it
+// (release passes the resolved release version as the override).
+func resolveDockerImageVersion(now NowFunc, projectRoot, buildDir, versionOverride string) (string, string, bool, string, error) {
 	baseVersion, versionFromBuildDir, versionFilePath, err := ResolveDockerBuildVersion(buildDir, projectRoot)
 	if err != nil {
 		return "", "", false, "", err
@@ -196,7 +194,7 @@ func resolveDockerImageVersion(now NowFunc, projectRoot, environment, buildDir, 
 		return versionOverride, versionOverride, versionFromBuildDir, versionFilePath, nil
 	}
 
-	if !isLocalEnvironment(environment) || versionFromBuildDir {
+	if versionFromBuildDir {
 		return baseVersion, baseVersion, versionFromBuildDir, versionFilePath, nil
 	}
 	return formatLocalSnapshotVersion(baseVersion, now()), baseVersion, versionFromBuildDir, versionFilePath, nil

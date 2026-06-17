@@ -2,19 +2,46 @@ package eruncommon
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
 )
 
 type Context struct {
-	Logger                     Logger
-	Verbosity                  int
-	DryRun                     bool
+	Logger    Logger
+	Verbosity int
+	DryRun    bool
+	// Output selects how a command renders its machine-readable result.
+	// The default (zero value, OutputText) is the human text/trace stream on
+	// stderr — unchanged behaviour. OutputJSON additionally writes a single
+	// structured result object to Stdout so an orchestrator (the UI, a script)
+	// can capture it; the Logger already writes Info/Trace to Stderr, so the
+	// JSON payload on Stdout stays uncorrupted.
+	Output                     OutputMode
 	Stdin                      io.Reader
 	Stdout                     io.Writer
 	Stderr                     io.Writer
 	KubernetesContextPreflight KubernetesContextPreflightFunc
+}
+
+// WriteResult renders v as the command's structured result on Stdout when the
+// context is in JSON output mode, and is a no-op in text mode. Callers invoke
+// it on success after the human trace has already streamed to Stderr.
+func (c Context) WriteResult(v any) error {
+	if c.Output != OutputJSON {
+		return nil
+	}
+	out := c.Stdout
+	if out == nil {
+		return nil
+	}
+	encoded, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(out, string(encoded))
+	return err
 }
 
 type KubernetesContextPreflightFunc func(Context, string) error

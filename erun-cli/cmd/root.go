@@ -109,7 +109,7 @@ func (d rootDependencies) runManagedDeployForOpen(ctx common.Context, target com
 	if err != nil {
 		return err
 	}
-	return common.RunDeploySpecs(ctx, specs, common.DockerImageBuilder, d.push, d.recoveringDeployHelmChart)
+	return common.RunDeploySpecs(ctx, specs, d.recoveringDeployHelmChart)
 }
 
 func (d rootDependencies) rootCommand() *cobra.Command {
@@ -183,7 +183,7 @@ func (d rootDependencies) containerCommand() *cobra.Command {
 		"container",
 		"Container utilities",
 		newBuildCmd(d.store, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.BuildScriptRunner, common.DockerImageBuilder, common.DockerRegistryLogin, runSelect, d.push, d.recoveringDeployHelmChart),
-		newPushCmd(d.store, common.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, common.DockerImageBuilder, d.push),
+		newPushCmd(d.store, common.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, common.DockerImageBuilder, common.DockerRegistryLogin, runSelect, d.push),
 	)
 }
 
@@ -208,7 +208,7 @@ func (d rootDependencies) optionalPushCommand() *cobra.Command {
 	if !hasOptionalPushCmd(common.FindProjectRoot, common.ResolveDockerBuildContext) {
 		return nil
 	}
-	pushCmd := newRootPushCmd(d.store, common.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, common.DockerImageBuilder, d.push)
+	pushCmd := newRootPushCmd(d.store, common.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, common.DockerImageBuilder, common.DockerRegistryLogin, runSelect, d.push)
 	pushCmd.Short = optionalPushCmdShort(common.FindProjectRoot, common.ResolveDockerBuildContext)
 	return pushCmd
 }

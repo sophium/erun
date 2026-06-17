@@ -6,12 +6,12 @@ Usage:
 Flags:
       --dry-run              Resolve and trace mutating actions without executing them.
       --environment string   Deploy for a specific environment; requires --tenant
-      --force                Bypass the fingerprint cache and re-run helm upgrade even when no source change is detected
+      --force                Re-run the helm upgrade even when the deployed release already matches the requested version
   -h, --help                 help for deploy
-      --publish              Package and push each resolved chart to the environment's container registry (oci://<containerRegistry>/<chart>:<version>) before helm upgrade
       --tenant string        Deploy for a specific tenant
-      --version string       Install an already-published version by reference instead of building from the working tree; fails if that version's image is absent
+      --version erun build   Version to install by reference (produced by erun build/`erun push`); fails if that version's image is absent
 
 Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
       --time            Print the elapsed runtime after the command finishes.
   -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

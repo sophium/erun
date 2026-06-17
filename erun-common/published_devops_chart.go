@@ -139,9 +139,9 @@ func (e *PublishedChartNotFoundError) Error() string {
 	if registry := strings.TrimSpace(e.Registry); registry != "" {
 		msg += " from " + registry
 	}
-	msg += ": this version's image may exist without a published chart " +
-		"(snapshots and unreleased versions are not published as charts). " +
-		"Deploy a released version with --version, or publish the chart first with `erun deploy --publish`."
+	msg += ": that version has no published chart in the registry. " +
+		"`erun push` publishes a version's image and chart together, so a version is deployable only after it is pushed — " +
+		"run `erun push --version " + strings.TrimSpace(e.Version) + "` (or `erun release` for a release version), then deploy."
 	if out := strings.TrimSpace(e.HelmOutput); out != "" {
 		msg += "\n" + out
 	}

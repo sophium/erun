@@ -14,6 +14,7 @@ const (
 	dryRunFlagUsage  = "Resolve and trace mutating actions without executing them."
 	timeFlagUsage    = "Print the elapsed runtime after the command finishes."
 	verboseFlagUsage = "Increase verbosity: -v streams external tool output, -vv adds erun command traces."
+	outputFlagUsage  = "Result format: text (default, human stream) or json (structured result on stdout for orchestrators)."
 
 	timingWrappedAnnotation = "erun.dev/timing-wrapped"
 )
@@ -24,6 +25,25 @@ func addDryRunFlag(cmd *cobra.Command) {
 
 func addTimeFlag(cmd *cobra.Command) {
 	cmd.PersistentFlags().Bool("time", false, timeFlagUsage)
+}
+
+func addOutputFlag(cmd *cobra.Command) {
+	cmd.PersistentFlags().String("output", "text", outputFlagUsage)
+}
+
+// commandOutputMode reads the universal --output flag. An unparsable or unset
+// value falls back to text so output rendering never blocks a command; the
+// flag value is validated separately where it must be strict.
+func commandOutputMode(cmd *cobra.Command) common.OutputMode {
+	raw, err := cmd.Flags().GetString("output")
+	if err != nil {
+		return common.OutputText
+	}
+	mode, err := common.ParseOutputMode(raw)
+	if err != nil {
+		return common.OutputText
+	}
+	return mode
 }
 
 func isDryRunCommand(cmd *cobra.Command) bool {
@@ -78,6 +98,7 @@ func commandContext(cmd *cobra.Command) common.Context {
 		Logger:    common.NewLoggerWithWriters(verbosity, cmd.ErrOrStderr(), cmd.ErrOrStderr()),
 		Verbosity: verbosity,
 		DryRun:    isDryRunCommand(cmd),
+		Output:    commandOutputMode(cmd),
 		Stdin:     cmd.InOrStdin(),
 		Stdout:    cmd.OutOrStdout(),
 		Stderr:    cmd.ErrOrStderr(),

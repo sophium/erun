@@ -113,8 +113,14 @@ func deployCopyImages(execution DeploySpec) []string {
 		name, version := runtimeCopyImage(execution)
 		add(name, version)
 	}
-	for _, build := range execution.Builds {
-		add(build.Image.ImageName, build.Image.Version)
+	// The chart's own images at the deploy version (a pure deploy installs by
+	// reference, so there are no local builds to enumerate; the chart names the
+	// images the cluster pulls).
+	chartImages, err := findDockerImagesInChart(execution.DeployContext.ChartPath, execution.Deploy.Version)
+	if err == nil {
+		for _, image := range chartImages {
+			add(imageNameVersion(image))
+		}
 	}
 	return images
 }

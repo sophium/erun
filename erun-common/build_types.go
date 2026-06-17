@@ -56,7 +56,6 @@ type DockerImageReference struct {
 	// cache instead of pulling from the registry.
 	BaseVersion         string
 	Tag                 string
-	IsLocalBuild        bool
 	VersionFilePath     string
 	VersionFromBuildDir bool
 }

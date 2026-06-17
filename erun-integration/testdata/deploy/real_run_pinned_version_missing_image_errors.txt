@@ -1,6 +1,6 @@
 audit: erun deploy --version <VERSION> team dev
 trace-log: appending the full trace to <TMP>
-deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=false publish=false
-deploy: version <VERSION> pinned; installing the published image, no local build
+deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=false current=false
+deploy: version <VERSION> pinned; installing the published image by reference (deploy never builds)
 deploy: spec resolution failed: deploy --version <VERSION>: image ghcr.io/sophium/team-devops:<VERSION> is not present locally or in the registry; deploy installs an existing version and does not build it — run erun build/push to create it first
 deploy --version <VERSION>: image ghcr.io/sophium/team-devops:<VERSION> is not present locally or in the registry; deploy installs an existing version and does not build it — run erun build/push to create it first

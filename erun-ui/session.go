@@ -343,6 +343,11 @@ func buildDeployArgs(selection uiSelection) []string {
 	args := []string{"deploy", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment)}
 	if version := strings.TrimSpace(selection.Version); version != "" {
 		args = append(args, "--version", version)
+	} else {
+		// deploy is a pure primitive: it requires an explicit version. With no
+		// version the operator means "redeploy what this env already runs", so
+		// install the persisted version via --current rather than erroring.
+		args = append(args, "--current")
 	}
 	return args
 }
