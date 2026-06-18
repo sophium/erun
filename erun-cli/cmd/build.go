@@ -24,6 +24,11 @@ var errVersionFileNotFound = common.ErrVersionFileNotFound
 // "Command primitives vs orchestration").
 var errPushVersionRequired = fmt.Errorf("push requires a version: pass --version <version> produced by `erun build`. push publishes a built version's images and chart; it does not mint a version")
 
+// errPushBuildVersionConflict is returned when `erun push --build` is combined
+// with an explicit --version. With --build the version is whatever the build
+// step mints, so an explicit version is contradictory.
+var errPushBuildVersionConflict = fmt.Errorf("push --build builds and pushes the version it mints; do not also pass --version")
+
 func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
 	target := common.DockerCommandTarget{}
 	cmd := &cobra.Command{
@@ -156,7 +161,12 @@ func pushBuildWithRetry(ctx common.Context, buildDockerImage common.DockerImageB
 // multi-image push (when run from the project root with multiple docker
 // contexts). The nested "devops container push" command uses newPushCmd which
 // is single-image only.
-func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc) *cobra.Command {
+//
+// --build is an operator-convenience shortcut: it builds the current source
+// first (minting a snapshot version), then pushes that minted version. The
+// orchestration lives here in the CLI caller, exactly like `build --deploy` —
+// push itself stays a pure primitive that publishes an explicit version.
+func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc) *cobra.Command {
 	target := common.DockerCommandTarget{}
 	var force bool
 	cmd := &cobra.Command{
@@ -168,8 +178,11 @@ func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFind
 			"`erun build` minted; push publishes it, it does not mint one. push resolves that " +
 			"version's images from the local source (promoting unchanged images from the " +
 			"fingerprint cache, rebuilding only what changed), then pushes the multi-arch " +
-			"manifest and, for the runtime image, the runtime chart alongside it.",
-		Example:       "  erun push --version 1.2.3-snapshot-20260101010101",
+			"manifest and, for the runtime image, the runtime chart alongside it.\n\n" +
+			"--build is an operator shortcut that builds the current source first and then " +
+			"pushes the version that build mints, so you don't have to copy the snapshot " +
+			"version out of `erun build` by hand. It is mutually exclusive with --version.",
+		Example:       "  erun push --version 1.2.3-snapshot-20260101010101\n  erun push --build",
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -177,12 +190,23 @@ func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFind
 			if force {
 				target.NoIncremental = true
 			}
-			// Version is required: push publishes a content identity that
-			// `erun build` minted, it does not mint one.
-			if strings.TrimSpace(target.VersionOverride) == "" {
+			ctx := commandContext(cmd)
+			if target.Build {
+				// Operator shortcut: build the current source (which mints a
+				// snapshot version), then push that exact version. --version is
+				// redundant here — the version is whatever build mints — so
+				// reject the combination for a single clear contract.
+				if strings.TrimSpace(target.VersionOverride) != "" {
+					return errPushBuildVersionConflict
+				}
+				if err := runPushBuildStep(ctx, store, findProjectRoot, resolveBuildContext, now, &target, runBuildScript, buildDockerImage, loginToDockerRegistry, selectRunner, push); err != nil {
+					return err
+				}
+			} else if strings.TrimSpace(target.VersionOverride) == "" {
+				// Version is required: push publishes a content identity that
+				// `erun build` minted, it does not mint one.
 				return errPushVersionRequired
 			}
-			ctx := commandContext(cmd)
 			buildWithRetry := pushBuildWithRetry(ctx, buildDockerImage, loginToDockerRegistry, selectRunner)
 			buildContext, _ := resolveBuildContext()
 			if strings.TrimSpace(buildContext.DockerfilePath) != "" {
@@ -206,8 +230,31 @@ func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFind
 	addDryRunFlag(cmd)
 	addPushCommandTargetFlags(cmd, &target)
 	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Version to publish, produced by erun build")
-	cmd.Flags().BoolVar(&force, "force", false, "Rebuild and re-push every image, bypassing the fingerprint cache")
+	cmd.Flags().BoolVar(&force, "force", false, "Rebuild and re-push every image, bypassing the fingerprint cache (also forces the --build step)")
+	cmd.Flags().BoolVar(&target.Build, "build", false, "Build the current source first, then push the version it mints (operator shortcut for build → push)")
 	return cmd
+}
+
+// runPushBuildStep runs the pure build (the same resolve+run `erun build`
+// performs) so it mints a snapshot version, then sets that minted version on
+// target so the push path that follows publishes exactly what was just built.
+// The orchestration — and the version threading — lives here in the CLI caller,
+// not in the push primitive.
+func runPushBuildStep(ctx common.Context, store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, target *common.DockerCommandTarget, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc) error {
+	execution, err := common.ResolveBuildExecution(ctx, store, findProjectRoot, resolveBuildContext, now, *target)
+	if err != nil {
+		return err
+	}
+	buildWithRetry := pushBuildWithRetry(ctx, buildDockerImage, loginToDockerRegistry, selectRunner)
+	if err := common.RunBuildExecution(ctx, execution, runBuildScript, buildWithRetry, push); err != nil {
+		return err
+	}
+	version := strings.TrimSpace(common.NewBuildResult(execution).Version)
+	if version == "" {
+		return errors.New("erun push --build: the build did not mint a version to push")
+	}
+	target.VersionOverride = version
+	return nil
 }
 
 func runDockerPushWithRetry(ctx common.Context, pushInput common.DockerPushSpec, push common.DockerPushFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner) error {
