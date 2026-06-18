@@ -53,7 +53,7 @@ type erunUIDeps struct {
 	setRemoteCloudAlias    func(context.Context, string, string, string, string) (eruncommon.EnvConfig, error)
 	startTerminal          func(startTerminalSessionParams) (terminalSession, error)
 	runIDECommand          func(context.Context, startTerminalSessionParams) (string, error)
-	savePastedImage        func(pastedImageSaveParams) (string, error)
+	savePastedFile         func(pastedFileSaveParams) (string, error)
 	loadDiff               func(context.Context, string, uiDiffOptions) (eruncommon.DiffResult, error)
 	loadIdleStatus         func(context.Context, string) (eruncommon.EnvironmentIdleStatus, error)
 	loadAPILog             func(context.Context, uiTenantDashboardInput) (string, error)
@@ -245,8 +245,8 @@ func withDefaultUIDeps(deps erunUIDeps) erunUIDeps {
 // pasted-image save, diff/idle/API-log loaders, and the workspace sync
 // readiness check, runner, and interval.
 func withDefaultWorkspaceDeps(deps erunUIDeps) erunUIDeps {
-	if deps.savePastedImage == nil {
-		deps.savePastedImage = savePastedImageToRuntime
+	if deps.savePastedFile == nil {
+		deps.savePastedFile = savePastedFileToRuntime
 	}
 	if deps.loadDiff == nil {
 		deps.loadDiff = loadDiffFromMCP
