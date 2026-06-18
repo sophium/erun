@@ -310,7 +310,10 @@ func addPushCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommandT
 // still fails with a scope error (the stored gh token itself lacks the
 // scope), it runs `gh auth refresh -s write:packages,read:packages`
 // interactively and retries once more. The user only types a one-time
-// device code; the rest is automated.
+// device code; the rest is automated. In a headless runtime pod or any
+// non-interactive context that escalation cannot complete, so
+// RefreshGHCRPackageScopes returns an actionable error instead of launching
+// the flow (#587) and that error surfaces here as finalErr.
 func handleNamespaceAuthError(authErr common.DockerRegistryAuthError, retry func() error, stdin io.Reader, stdout, stderr io.Writer) (bool, error) {
 	if !common.IsDockerCreatePackageDenied(authErr.Message) && !common.IsDockerScopeDenied(authErr.Message) {
 		return false, nil

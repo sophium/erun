@@ -534,6 +534,13 @@ func captureGHCommand(args ...string) (string, error) {
 // (gh not installed, non-ghcr tag, missing namespace), and (false, err)
 // for gh or docker errors.
 //
+// When the context cannot complete an interactive browser login — a
+// chart-injected runtime pod (headless, no browser) or any non-interactive
+// stdin (MCP, CI, pipes) — it does not launch gh and returns (false, err)
+// with the actionable recovery error from newNonInteractiveGHCRScopeRefreshError,
+// so the caller fails clearly with the manual recovery commands instead of
+// stranding the operator on a device-code prompt that can never advance (#587).
+//
 // Use this only after TryGHCRNamespaceLogin + retry fails with a
 // scope-denied error: that signals the gh-stored token itself lacks the
 // scope, and the only remedy is replacing the token.
@@ -547,6 +554,16 @@ func RefreshGHCRPackageScopes(tag string, stdin io.Reader, stdout, stderr io.Wri
 	}
 	if _, err := exec.LookPath("gh"); err != nil {
 		return false, nil
+	}
+
+	// gh auth switch/refresh/login below all drive (or depend on) gh's
+	// interactive browser device-code flow. In a headless runtime pod there is
+	// no browser, and in any non-interactive context (MCP, CI, pipes) there is
+	// no operator at the prompt — launching the flow there hangs forever. Bail
+	// out before mutating any gh state and tell the operator exactly how to
+	// widen the scope from a host shell with a browser.
+	if !interactiveGHAuthAllowed(stdin) {
+		return false, newNonInteractiveGHCRScopeRefreshError(tag, namespace)
 	}
 
 	switchCmd := Command("gh", "auth", "switch", "-h", "github.com", "-u", namespace)
@@ -572,6 +589,64 @@ func RefreshGHCRPackageScopes(tag string, stdin io.Reader, stdout, stderr io.Wri
 	}
 
 	return TryGHCRNamespaceLogin(tag, stdout, stderr)
+}
+
+// interactiveGHAuthAllowed reports whether RefreshGHCRPackageScopes may launch
+// gh's interactive browser device-code flow. It is false in a chart-injected
+// runtime pod (headless — even the desktop terminal is a pod shell with a PTY,
+// but there is no browser to complete the device flow) and in any context
+// where stdin is not a real terminal (MCP, CI, pipes). The in-pod check comes
+// first so the PTY-backed pod shell is still treated as headless.
+//
+// ERUN_FORCE_TTY=1 is the same deliberate test seam the CLI uses
+// (writerIsTerminal) so the integration harness, whose stdin is always a pipe,
+// can still exercise the interactive success path.
+func interactiveGHAuthAllowed(stdin io.Reader) bool {
+	if inInjectedRuntimePod() {
+		return false
+	}
+	if os.Getenv("ERUN_FORCE_TTY") == "1" {
+		return true
+	}
+	file, ok := stdin.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := file.Stat()
+	return err == nil && (info.Mode()&os.ModeCharDevice) != 0
+}
+
+// inInjectedRuntimePod reports whether the process is running inside the
+// chart-injected runtime pod, detected the same way ResolveInjectedRuntimeConfig
+// does: the entrypoint sets both ERUN_TENANT and ERUN_ENVIRONMENT for every
+// runtime pod, and nothing else does.
+func inInjectedRuntimePod() bool {
+	return strings.TrimSpace(os.Getenv("ERUN_TENANT")) != "" &&
+		strings.TrimSpace(os.Getenv("ERUN_ENVIRONMENT")) != ""
+}
+
+// newNonInteractiveGHCRScopeRefreshError builds the actionable error returned
+// when the scope-refresh escalation cannot run its interactive gh flow. It
+// names the missing write:packages scope and the exact commands to run from a
+// host shell with a browser, so the operator has a clear path forward instead
+// of a hung prompt (#587).
+func newNonInteractiveGHCRScopeRefreshError(tag, namespace string) error {
+	registry := dockerRegistryFromImageTag(tag)
+	if registry == "" {
+		registry = "ghcr.io"
+	}
+	reason := "stdin is not an interactive terminal"
+	if inInjectedRuntimePod() {
+		reason = "this runtime pod is headless and has no browser"
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "%s rejected the push: the gh-stored token lacks the write:packages scope.\n\n", registry)
+	fmt.Fprintf(&sb, "erun can widen the scope automatically, but that needs gh's interactive browser login, which cannot run here (%s).\n", reason)
+	sb.WriteString("From a host shell signed in to the namespace owner's GitHub account, with a browser available, run:\n")
+	fmt.Fprintf(&sb, "  gh auth refresh -h github.com -u %s -s write:packages,read:packages\n", namespace)
+	fmt.Fprintf(&sb, "  gh auth token -u %s -h github.com | docker login %s -u %s --password-stdin\n", namespace, registry, namespace)
+	sb.WriteString("then re-run erun push.")
+	return errors.New(sb.String())
 }
 
 // TryGHCRNamespaceLogin re-authenticates docker to ghcr.io as the GitHub user

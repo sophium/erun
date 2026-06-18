@@ -311,6 +311,12 @@ func TestPush(t *testing.T) {
 		// retryAfterScopeRefresh which runs `gh auth refresh`. The
 		// stubbed gh exits 0 so RefreshGHCRPackageScopes returns true,
 		// and the retry push succeeds on the second invocation.
+		//
+		// ERUN_FORCE_TTY=1 is the deliberate seam that lets the gate added
+		// in #587 treat this piped-stdin harness run as interactive, so the
+		// interactive scope-refresh success path stays covered. The two
+		// scenarios below assert the non-interactive and in-pod paths fail
+		// clearly instead of launching gh.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 		stubs := setup.Cwd + "/stubs"
@@ -350,11 +356,97 @@ func TestPush(t *testing.T) {
 		}, "\n"))
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "gh")...)
 		envVars = append(envVars, "PATH="+stubs+":"+os.Getenv("PATH"))
-		envVars = append(envVars, "ERUN_AUTO_LOGIN_ON_PUSH=1")
+		envVars = append(envVars, "ERUN_AUTO_LOGIN_ON_PUSH=1", "ERUN_FORCE_TTY=1")
 		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "push/real_run_scope_denied_attempts_scope_refresh", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_scope_denied_non_interactive_fails_clearly", func(t *testing.T) {
+		// #587: with no interactive terminal (the harness pipes stdin and
+		// ERUN_FORCE_TTY is unset), RefreshGHCRPackageScopes must NOT launch
+		// gh's interactive device-code flow — which would hang forever — and
+		// must instead return the actionable write:packages-scope error. The
+		// gh stub records any auth switch/refresh/login call to a marker file;
+		// the assertion below proves that flow was never launched.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		stubs := setup.Cwd + "/stubs"
+		marker := setup.Cwd + "/gh-interactive-marker"
+		// docker push always fails the scope check, so the only way the push
+		// could succeed is the (gated) interactive scope refresh.
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  push)`,
+			`    printf 'denied: token does not match expected scopes\n' >&2`,
+			`    exit 1 ;;`,
+			`  image)`,
+			`    case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		// gh: token works (so the namespace-login retry runs), but any
+		// interactive auth call writes the marker — it must never fire.
+		fixture.StubBinaryWithScript(t, stubs, "gh", strings.Join([]string{
+			`case "$1 $2" in`,
+			`  "auth switch"|"auth refresh"|"auth login") printf 'launched\n' > '` + marker + `'; exit 0 ;;`,
+			`  "auth token") printf 'gh-token\n'; exit 0 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "gh")...)
+		envVars = append(envVars, "PATH="+stubs+":"+os.Getenv("PATH"))
+		envVars = append(envVars, "ERUN_AUTO_LOGIN_ON_PUSH=1")
+		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when scope refresh is gated, got 0:\n%s", result.Combined)
+		}
+		if _, err := os.Stat(marker); err == nil {
+			t.Fatalf("interactive gh auth flow was launched in a non-interactive context:\n%s", result.Combined)
+		}
+		golden.Equal(t, "push/real_run_scope_denied_non_interactive_fails_clearly", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_scope_denied_in_pod_fails_clearly", func(t *testing.T) {
+		// #587: inside a chart-injected runtime pod (ERUN_TENANT/
+		// ERUN_ENVIRONMENT set) the desktop terminal is a PTY-backed pod
+		// shell, so ERUN_FORCE_TTY=1 is set to prove the in-pod check wins
+		// over the TTY seam: even with a "terminal", there is no browser, so
+		// the gate must still fire and the interactive gh flow must not run.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		stubs := setup.Cwd + "/stubs"
+		marker := setup.Cwd + "/gh-interactive-marker"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  push)`,
+			`    printf 'denied: token does not match expected scopes\n' >&2`,
+			`    exit 1 ;;`,
+			`  image)`,
+			`    case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		fixture.StubBinaryWithScript(t, stubs, "gh", strings.Join([]string{
+			`case "$1 $2" in`,
+			`  "auth switch"|"auth refresh"|"auth login") printf 'launched\n' > '` + marker + `'; exit 0 ;;`,
+			`  "auth token") printf 'gh-token\n'; exit 0 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "gh")...)
+		envVars = append(envVars, "PATH="+stubs+":"+os.Getenv("PATH"))
+		envVars = append(envVars, "ERUN_AUTO_LOGIN_ON_PUSH=1", "ERUN_FORCE_TTY=1")
+		envVars = append(envVars, "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev")
+		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when scope refresh is gated in-pod, got 0:\n%s", result.Combined)
+		}
+		if _, err := os.Stat(marker); err == nil {
+			t.Fatalf("interactive gh auth flow was launched inside the runtime pod:\n%s", result.Combined)
+		}
+		golden.Equal(t, "push/real_run_scope_denied_in_pod_fails_clearly", normalize.Apply(result.Combined))
 	})
 }
