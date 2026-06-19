@@ -1,11 +1,11 @@
-import type { PastedImageResult, StartSessionResult, UISelection } from '@/types';
+import type { PastedFileResult, StartSessionResult, UISelection } from '@/types';
 
 import {
   CloseSession,
   OpenIDE,
   ReconnectMCP,
   ResizeSession,
-  SavePastedImage,
+  SavePastedFile,
   SendSessionInput,
   StartAISession,
   StartCloudInitAWSSession,
@@ -20,7 +20,7 @@ import {
 import { wailsApi } from './wailsApi';
 import { type NoValue, wailsQueryFn } from './wailsBaseQuery';
 
-export interface PastedImagePayload {
+export interface PastedFilePayload {
   data: string;
   mimeType: string;
   name: string;
@@ -60,9 +60,9 @@ interface OpenIDEArgs {
   ide: string;
 }
 
-interface SavePastedImageArgs {
+interface SavePastedFileArgs {
   sessionId: number;
-  payload: PastedImagePayload;
+  payload: PastedFilePayload;
 }
 
 export const sessionApi = wailsApi.injectEndpoints({
@@ -131,9 +131,9 @@ export const sessionApi = wailsApi.injectEndpoints({
     reconnectMCP: builder.mutation<NoValue, UISelection>({
       queryFn: wailsQueryFn<UISelection, NoValue>((selection) => ReconnectMCP(selection)),
     }),
-    savePastedImage: builder.mutation<PastedImageResult, SavePastedImageArgs>({
-      queryFn: wailsQueryFn<SavePastedImageArgs, PastedImageResult>(({ sessionId, payload }) =>
-        SavePastedImage(sessionId, payload),
+    savePastedFile: builder.mutation<PastedFileResult, SavePastedFileArgs>({
+      queryFn: wailsQueryFn<SavePastedFileArgs, PastedFileResult>(({ sessionId, payload }) =>
+        SavePastedFile(sessionId, payload),
       ),
     }),
   }),
@@ -154,5 +154,5 @@ export const {
   useCloseSessionMutation,
   useOpenIDEMutation,
   useReconnectMCPMutation,
-  useSavePastedImageMutation,
+  useSavePastedFileMutation,
 } = sessionApi;

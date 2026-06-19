@@ -39,6 +39,7 @@ Available Commands:
   list        List configured tenants and environments
   mcp         Run ERun as an MCP server over HTTP
   open        Open a shell in the tenant environment
+  outputs     List and download files an agent produced in the runtime pod
   release     Cut a release: stamp the version, tag it, and push the tag
   sshd        Remote SSH utilities
   upgrade     Redeploy opted-in environments to the latest version for their channel

@@ -1,10 +1,11 @@
-import { LoaderCircle, MoreHorizontal, TriangleAlert } from 'lucide-react';
+import { Download, LoaderCircle, MoreHorizontal, TriangleAlert } from 'lucide-react';
 import * as React from 'react';
 
 import { readError } from '@/app/errors';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { openManageDialog } from '@/app/manageEnvironmentThunks';
 import { showTerminalMessage } from '@/app/notificationThunks';
+import { openOutputs } from '@/app/outputsThunks';
 import { closeEnvironment, openSelection } from '@/app/sessionThunks';
 import { envKey } from '@/app/slices/sessionsSlice';
 import { selectionKey } from '@/app/versionSuggestions';
@@ -60,6 +61,40 @@ function EnvironmentRowEditButton({
         }}
       >
         <MoreHorizontal />
+      </Button>
+    </IconTooltip>
+  );
+}
+
+function EnvironmentRowOutputsButton({
+  tenantName,
+  environmentName,
+  selected,
+  selection,
+}: {
+  tenantName: string;
+  environmentName: string;
+  selected: boolean;
+  selection: UISelection;
+}): React.ReactElement {
+  const dispatch = useAppDispatch();
+  return (
+    <IconTooltip label="View and download agent outputs">
+      <Button
+        type="button"
+        className={cn(
+          'pointer-events-none size-[26px] flex-none cursor-pointer border-0 bg-transparent text-current opacity-0 transition-[opacity,background-color,color] duration-150 hover:bg-[color-mix(in_oklch,currentColor_12%,transparent)] hover:text-current group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 [&_svg]:size-4',
+          selected && 'pointer-events-auto opacity-100',
+        )}
+        variant="ghost"
+        size="icon"
+        aria-label={`Outputs for ${tenantName} / ${environmentName}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          void dispatch(openOutputs(selection));
+        }}
+      >
+        <Download />
       </Button>
     </IconTooltip>
   );
@@ -290,6 +325,12 @@ export function EnvironmentRow({
           envState={envState}
         />
       )}
+      <EnvironmentRowOutputsButton
+        tenantName={tenantName}
+        environmentName={environmentName}
+        selected={selected}
+        selection={selection}
+      />
       <EnvironmentRowEditButton
         tenantName={tenantName}
         environmentName={environmentName}

@@ -659,17 +659,21 @@ func (a *App) recordTerminalActivity(selection uiSelection) {
 	})
 }
 
-func (a *App) SavePastedImage(sessionID int, payload pastedImagePayload) (pastedImageResult, error) {
-	data, mimeType, err := decodePastedImagePayload(payload)
+// SavePastedFile copies a file pasted into the desktop terminal into the
+// current env's runtime pod and returns its in-pod path, which the caller types
+// into the shell. Any file type is accepted (not just images); the runtime copy
+// is content-agnostic.
+func (a *App) SavePastedFile(sessionID int, payload pastedFilePayload) (pastedFileResult, error) {
+	data, mimeType, err := decodePastedFilePayload(payload)
 	if err != nil {
-		return pastedImageResult{}, err
+		return pastedFileResult{}, err
 	}
 
 	a.mu.Lock()
 	managed := a.sessionBySerialLocked(sessionID)
 	a.mu.Unlock()
 	if managed == nil || managed.session == nil {
-		return pastedImageResult{}, fmt.Errorf("no active terminal session")
+		return pastedFileResult{}, fmt.Errorf("no active terminal session")
 	}
 
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
@@ -677,19 +681,19 @@ func (a *App) SavePastedImage(sessionID int, payload pastedImagePayload) (pasted
 		Environment: managed.selection.Environment,
 	})
 	if err != nil {
-		return pastedImageResult{}, err
+		return pastedFileResult{}, err
 	}
 
-	path, err := a.deps.savePastedImage(pastedImageSaveParams{
+	path, err := a.deps.savePastedFile(pastedFileSaveParams{
 		Result:   result,
 		Data:     data,
 		MIMEType: mimeType,
 		Name:     payload.Name,
 	})
 	if err != nil {
-		return pastedImageResult{}, err
+		return pastedFileResult{}, err
 	}
-	return pastedImageResult{Path: path}, nil
+	return pastedFileResult{Path: path}, nil
 }
 
 func (a *App) LoadDiff(selection uiSelection, options uiDiffOptions) (eruncommon.DiffResult, error) {
@@ -966,13 +970,13 @@ func (a *App) sessionBySerialLocked(sessionID int) *managedTerminal {
 	return nil
 }
 
-func decodePastedImagePayload(payload pastedImagePayload) ([]byte, string, error) {
+func decodePastedFilePayload(payload pastedFilePayload) ([]byte, string, error) {
 	value := strings.TrimSpace(payload.Data)
 	mimeType := strings.TrimSpace(payload.MIMEType)
 	if strings.HasPrefix(value, "data:") {
 		header, body, ok := strings.Cut(value, ",")
 		if !ok {
-			return nil, "", fmt.Errorf("pasted image data URL is malformed")
+			return nil, "", fmt.Errorf("pasted file data URL is malformed")
 		}
 		value = body
 		if mimeType == "" {
@@ -982,17 +986,14 @@ func decodePastedImagePayload(payload pastedImagePayload) ([]byte, string, error
 		}
 	}
 	if value == "" {
-		return nil, "", fmt.Errorf("pasted image data is empty")
+		return nil, "", fmt.Errorf("pasted file data is empty")
 	}
 	data, err := base64.StdEncoding.DecodeString(value)
 	if err != nil {
-		return nil, "", fmt.Errorf("decode pasted image: %w", err)
+		return nil, "", fmt.Errorf("decode pasted file: %w", err)
 	}
 	if len(data) == 0 {
-		return nil, "", fmt.Errorf("pasted image data is empty")
-	}
-	if !strings.HasPrefix(strings.ToLower(mimeType), "image/") {
-		return nil, "", fmt.Errorf("clipboard item is not an image")
+		return nil, "", fmt.Errorf("pasted file data is empty")
 	}
 	return data, mimeType, nil
 }

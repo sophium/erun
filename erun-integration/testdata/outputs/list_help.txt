@@ -1,0 +1,23 @@
+List the files and folders an agent (Claude/Codex) wrote to the runtime pod's outputs directory, newest first.
+
+The outputs directory is the canonical place agents and skills drop deliverables (reports, generated artifacts, logs) for you to pull out with `erun outputs download`. It defaults to the pod's $ERUN_OUTPUTS_DIR (<HOME>/.erun/outputs); pass --path to list another directory. This is read-only.
+
+Usage:
+  erun outputs list [flags]
+
+Examples:
+  erun outputs list
+  erun outputs list --environment prod --limit 20
+
+Flags:
+      --dry-run              Resolve and trace mutating actions without executing them.
+      --environment string   Target a specific environment; requires --tenant
+  -h, --help                 help for list
+      --limit int            Maximum number of entries to list (newest-first); 0 lists all
+      --path string          Pod directory to operate on (default: $ERUN_OUTPUTS_DIR, <HOME>/.erun/outputs)
+      --tenant string        Target a specific tenant (default: the current scope)
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

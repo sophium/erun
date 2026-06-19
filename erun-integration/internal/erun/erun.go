@@ -203,9 +203,13 @@ func Run(t testing.TB, args []string, opts RunOptions) Result {
 	env = append(env, opts.Env...)
 	env = append(env, CoverDirEnv+"="+coverDir)
 	cmd.Env = env
-	if opts.Stdin != "" {
-		cmd.Stdin = bytes.NewBufferString(opts.Stdin)
-	}
+	// Always feed stdin from a buffer (empty when the scenario passes no
+	// Stdin) so the subprocess never inherits the developer's terminal. This
+	// keeps stdin a non-terminal pipe locally, matching CI's /dev/null stdin,
+	// so stdin-TTY-gated branches (e.g. the #587 interactive-gh-auth gate)
+	// behave the same everywhere. Scenarios that need the interactive branch
+	// opt in explicitly via the ERUN_FORCE_TTY seam.
+	cmd.Stdin = bytes.NewBufferString(opts.Stdin)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

@@ -526,6 +526,28 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_remote_env_custom_runtime_image", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_remote_env_runtime_image_without_tag", func(t *testing.T) {
+		// A registry-qualified runtime image with NO tag (the
+		// `--runtime-image ghcr.io/sophium/erun-devops` shape) must be
+		// pinned to the env's runtime version, not passed through bare:
+		// a tagless override makes Kubernetes default the pull to :latest,
+		// which the release flow never publishes (ImagePullBackOff). The
+		// override in the helm command must carry :<version>, not :latest.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"runtimeimage: registry.example/acme/my-devops\n")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_runtime_image_without_tag", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_remote_env_values_overlay", func(t *testing.T) {
 		// A published-chart deploy has no chart directory to host the
 		// operator's values.<env>.yaml overlay; the env config dir's

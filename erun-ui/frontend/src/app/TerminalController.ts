@@ -8,12 +8,7 @@ import { ResizeSession, SendSessionInput } from '../../wailsjs/go/main/App';
 import { EventsOn } from '../../wailsjs/runtime/runtime';
 import { sessionApi } from './api/sessionApi';
 import { boot, reloadStateAfterEnvironmentChange } from './bootThunks';
-import {
-  decodeBase64Bytes,
-  fileToBase64,
-  isTerminalPasteTarget,
-  pastedImageFiles,
-} from './clipboard';
+import { decodeBase64Bytes, fileToBase64, isTerminalPasteTarget, pastedFiles } from './clipboard';
 import { readError } from './errors';
 import { refreshIdleStatus } from './idleThunks';
 import type {
@@ -537,8 +532,8 @@ export class TerminalController {
       return;
     }
 
-    const images = pastedImageFiles(event);
-    if (images.length === 0) {
+    const files = pastedFiles(event);
+    if (files.length === 0) {
       return;
     }
 
@@ -548,15 +543,15 @@ export class TerminalController {
       return;
     }
     const paths: string[] = [];
-    for (const image of images) {
+    for (const file of files) {
       const result = await store
         .dispatch(
-          sessionApi.endpoints.savePastedImage.initiate({
+          sessionApi.endpoints.savePastedFile.initiate({
             sessionId,
             payload: {
-              data: await fileToBase64(image),
-              mimeType: image.type,
-              name: image.name,
+              data: await fileToBase64(file),
+              mimeType: file.type,
+              name: file.name,
             },
           }),
         )

@@ -78,6 +78,12 @@ export function backendEnv(): Record<string, string> {
     XDG_CACHE_HOME: path.join(home, '.cache'),
     XDG_DATA_HOME: path.join(home, '.local', 'share'),
     PATH: `${stubsDir()}${path.delimiter}${process.env.PATH ?? ''}`,
+    // Force the desktop's ERun/AI tabs to run the inert `erun` stub. The PATH
+    // prepend alone is not enough: resolveCLIExecutable resolves a real
+    // erun-cli/bin/erun next to the app binary (a dev build artifact) before
+    // falling back to PATH, which makes the env-open specs loop red on a
+    // developer machine that has that artifact (#525). This seam pins the stub.
+    ERUN_APP_CLI: path.join(stubsDir(), 'erun'),
   };
 }
 
@@ -210,6 +216,28 @@ export function seedEnvironment(tenant: string, environment: string, extraYaml =
 // sidebar row.
 export function removeEnvironment(tenant: string, environment: string): void {
   fs.rmSync(path.join(erunConfigDir(), tenant, environment), { recursive: true, force: true });
+}
+
+// seedTenant writes a brand-new tenant's config.yaml (name + default
+// environment) — the minimum ListTenantConfigs needs to surface the tenant
+// at all (a tenant dir with no config.yaml is skipped as uninitialized).
+// Mirrors what `erun init` writes for a new tenant (see createTenantConfig in
+// erun-common/init.go). Pair with seedEnvironment to add the tenant's
+// environments, and removeTenant to clean up afterwards.
+export function seedTenant(tenant: string, defaultEnvironment: string): void {
+  const tenantDir = path.join(erunConfigDir(), tenant);
+  fs.mkdirSync(tenantDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(tenantDir, 'config.yaml'),
+    `name: ${tenant}\n` + `defaultenvironment: ${defaultEnvironment}\n`,
+  );
+}
+
+// removeTenant deletes a previously seeded tenant config dir (the tenant and
+// all of its environments). The backend's fsnotify config watcher picks the
+// deletion up and drops the sidebar rows.
+export function removeTenant(tenant: string): void {
+  fs.rmSync(path.join(erunConfigDir(), tenant), { recursive: true, force: true });
 }
 
 // removeIsolatedRoot deletes the whole suite-owned root. Only roots the

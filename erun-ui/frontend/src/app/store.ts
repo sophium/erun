@@ -30,6 +30,7 @@ import idleReducer from './slices/idleSlice';
 import layoutReducer from './slices/layoutSlice';
 import manageDialogReducer from './slices/manageDialogSlice';
 import notificationReducer from './slices/notificationSlice';
+import outputsDialogReducer from './slices/outputsDialogSlice';
 import requestCountersReducer from './slices/requestCountersSlice';
 import reviewReducer from './slices/reviewSlice';
 import selectionReducer from './slices/selectionSlice';
@@ -68,6 +69,7 @@ export const store = configureStore({
     autoStartPrompt: autoStartPromptReducer,
     contribute: contributeReducer,
     upgradeAll: upgradeAllReducer,
+    outputsDialog: outputsDialogReducer,
     [wailsApi.reducerPath]: wailsApi.reducer,
   },
   middleware: (getDefaultMiddleware) =>
