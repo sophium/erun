@@ -779,6 +779,17 @@ func TestResolveCLIExecutableFromPathUsesExecutableSibling(t *testing.T) {
 	}
 }
 
+func TestResolveCLIExecutableHonorsAppCLISeam(t *testing.T) {
+	// The Playwright harness sets ERUN_APP_CLI to its inert `erun` stub so the
+	// desktop runs the stub regardless of any real erun-cli/bin/erun build
+	// artifact sitting next to the app binary (#525). The seam wins over the
+	// build-relative + PATH resolution.
+	t.Setenv("ERUN_APP_CLI", "/seam/stub/erun")
+	if got := resolveCLIExecutable(); got != "/seam/stub/erun" {
+		t.Fatalf("resolveCLIExecutable() = %q, want the ERUN_APP_CLI override", got)
+	}
+}
+
 func TestResolveTerminalStartDirUsesExistingPreferredDirectory(t *testing.T) {
 	preferred := t.TempDir()
 
