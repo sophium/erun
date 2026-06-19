@@ -3234,6 +3234,57 @@ func TestSavePastedImageCopiesIntoCurrentRuntime(t *testing.T) {
 	}
 }
 
+func TestListAgentOutputsResolvesEnvAndLists(t *testing.T) {
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {Name: "erun", DefaultEnvironment: "local"},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/local": {Name: "local", LocalRepoPath: t.TempDir(), KubernetesContext: "rancher-desktop"},
+		},
+	}
+	var gotResult eruncommon.OpenResult
+	app := NewApp(erunUIDeps{
+		store: store,
+		listAgentOutputs: func(result eruncommon.OpenResult, _ eruncommon.RuntimeOutputsParams) (eruncommon.RuntimeOutputsListResult, error) {
+			gotResult = result
+			return eruncommon.RuntimeOutputsListResult{
+				Dir:     "/home/erun/.erun/outputs",
+				Total:   1,
+				Entries: []eruncommon.OutputEntry{{Name: "report.pdf", Size: 10}},
+			}, nil
+		},
+	})
+	defer app.shutdown(context.Background())
+
+	got, err := app.ListAgentOutputs(uiSelection{Tenant: "erun", Environment: "local"})
+	if err != nil {
+		t.Fatalf("ListAgentOutputs failed: %v", err)
+	}
+	if gotResult.Tenant != "erun" || gotResult.Environment != "local" {
+		t.Fatalf("dep resolved the wrong env: %+v", gotResult)
+	}
+	if len(got.Entries) != 1 || got.Entries[0].Name != "report.pdf" {
+		t.Fatalf("unexpected list result: %+v", got)
+	}
+}
+
+func TestListAgentOutputsRequiresSelection(t *testing.T) {
+	app := NewApp(erunUIDeps{store: stubUIStore{}})
+	defer app.shutdown(context.Background())
+	if _, err := app.ListAgentOutputs(uiSelection{}); err == nil {
+		t.Fatal("expected an error when tenant/environment are missing")
+	}
+}
+
+func TestDownloadAgentOutputRequiresSelection(t *testing.T) {
+	app := NewApp(erunUIDeps{store: stubUIStore{}})
+	defer app.shutdown(context.Background())
+	if _, err := app.DownloadAgentOutput(uiSelection{}, "report.pdf"); err == nil {
+		t.Fatal("expected an error when tenant/environment are missing")
+	}
+}
+
 func TestBeforeClosePersistsMaximisedWindowState(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "window-state.json")
 	app := NewApp(erunUIDeps{

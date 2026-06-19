@@ -73,6 +73,14 @@ export class Sidebar {
     await this.environmentRow(tenant, env).click();
   }
 
+  // openOutputs reveals the row's hover actions and clicks the Outputs button,
+  // which opens the Agent outputs dialog for the env. The button stops
+  // propagation, so this never opens the env itself.
+  async openOutputs(tenant: string, env: string): Promise<void> {
+    await this.hoverEnvironmentRow(tenant, env);
+    await this.page.getByRole('button', { name: `Outputs for ${tenant} / ${env}` }).click();
+  }
+
   // openManageDialogViaKeyboard activates the row's edit button with the
   // keyboard instead of the mouse. The button is pointer-events-none until the
   // row is hovered/selected/focused; focusing flips group-focus-within so it

@@ -1,0 +1,18 @@
+audit: erun outputs download --dry-run report.pdf
+outputs: downloading <HOME>/.erun/outputs/report.pdf
+kubectl --context test-context --namespace team-dev exec deployment/team-devops -- /bin/sh -lc '<remote-script>'
+outputs download script:
+  target='<HOME>/.erun/outputs/report.pdf'
+  if [ -d "$target" ]; then
+    printf 'dir\n'
+    tar czf - --exclude=/dev --exclude=/proc --exclude=/sys -C '<HOME>/.erun/outputs' 'report.pdf' | base64
+  elif [ -f "$target" ]; then
+    size=$(stat -c %s "$target" 2>/dev/null || echo 0)
+    if [ "$size" -gt 104857600 ]; then echo "erun-outputs: file exceeds size limit" >&2; exit 4; fi
+    printf 'file\n'
+    base64 "$target"
+  else
+    echo "erun-outputs: not found: $target" >&2
+    exit 3
+  fi
+outputs: would write report.pdf

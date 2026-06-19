@@ -1,0 +1,30 @@
+{
+  "dir": "<HOME>/.erun/outputs",
+  "entries": [
+    {
+      "name": "results",
+      "path": "<HOME>/.erun/outputs/results",
+      "size": 4096,
+      "modTime": "<TS>",
+      "isDir": true
+    },
+    {
+      "name": "report.pdf",
+      "path": "<HOME>/.erun/outputs/report.pdf",
+      "size": 1024,
+      "modTime": "<TS>",
+      "isDir": false
+    },
+    {
+      "name": "notes.txt",
+      "path": "<HOME>/.erun/outputs/notes.txt",
+      "size": 512,
+      "modTime": "<TS>",
+      "isDir": false
+    }
+  ],
+  "total": 3,
+  "truncated": false
+}
+audit: erun outputs list --output json
+outputs: listing <HOME>/.erun/outputs

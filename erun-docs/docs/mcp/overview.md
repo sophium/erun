@@ -107,6 +107,8 @@ Three categories. The protocol treats them all as MCP tools; the categorisation 
 | `list` | Same data as the CLI `erun list`, structured. |
 | `version` | Build version and commit of the MCP server. |
 | `logs` | Tail logs from any container in the env's namespace, with optional filters. |
+| `outputs_list` | List the files an agent produced in the pod's outputs directory (`$ERUN_OUTPUTS_DIR`), newest-first. Read-only. |
+| `outputs_download` | Read one entry from the outputs directory and return its bytes inline as base64 (a folder as a `tar.gz`); the server is co-located with the files, so it returns the content directly. `preview` returns name/type/size without the bytes. |
 
 ### Action — typed wrappers around the CLI
 

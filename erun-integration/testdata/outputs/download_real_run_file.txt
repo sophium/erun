@@ -1,0 +1,3 @@
+audit: erun outputs download report.pdf
+outputs: downloading <HOME>/.erun/outputs/report.pdf
+Downloaded report.pdf (5B, sha256 <HEX>) to report.pdf

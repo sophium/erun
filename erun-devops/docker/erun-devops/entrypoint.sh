@@ -77,6 +77,19 @@ runtime_repo_dir() {
     printf '%s\n' "${ERUN_REPO_PATH:-${HOME}/git/erun}"
 }
 
+runtime_outputs_dir() {
+    printf '%s\n' "${ERUN_OUTPUTS_DIR:-${HOME}/.erun/outputs}"
+}
+
+# ensure_outputs_dir creates the agent outputs directory at boot. The image
+# already creates it (Dockerfile) and the chart exports ERUN_OUTPUTS_DIR, but
+# older images / overridden paths may not have it, so create it here as a
+# boot-time fallback. Agents and skills write deliverables there; `erun outputs`
+# lists and downloads from it.
+ensure_outputs_dir() {
+    mkdir -p "$(runtime_outputs_dir)" 2>/dev/null || true
+}
+
 runtime_repo_is_remote() {
     case "${ERUN_REPO_REMOTE:-}" in
         1|true|TRUE|True|yes|YES|on|ON)
@@ -912,6 +925,7 @@ run_shell() {
 
 write_kubeconfig
 normalize_ssh_key_permissions
+ensure_outputs_dir
 start_sshd
 start_environment_idle_monitor
 

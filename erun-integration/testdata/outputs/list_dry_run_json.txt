@@ -1,0 +1,11 @@
+{
+  "dir": "<HOME>/.erun/outputs",
+  "entries": null,
+  "total": 0,
+  "truncated": false
+}
+audit: erun outputs list --dry-run --output json
+outputs: listing <HOME>/.erun/outputs
+kubectl --context test-context --namespace team-dev exec deployment/team-devops -- /bin/sh -lc '<remote-script>'
+outputs list script:
+  if [ -d '<HOME>/.erun/outputs' ]; then find '<HOME>/.erun/outputs' -mindepth 1 -maxdepth 1 -printf '%y\t%s\t%T@\t%f\n'; fi

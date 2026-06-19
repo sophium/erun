@@ -358,6 +358,34 @@ Both actions are also exposed on the [MCP `doctor` tool](/mcp/overview#doctor) v
 
 ---
 
+## `erun outputs`
+
+`erun outputs` lists and downloads files an agent produced in an environment's runtime pod outputs directory (`$ERUN_OUTPUTS_DIR`, default `/home/erun/.erun/outputs`). Both subcommands resolve the pod from tenant/environment scope and read it over `kubectl exec`; the MCP `outputs_list`/`outputs_download` tools cover the same operations for in-pod callers (which read the filesystem directly).
+
+### `erun outputs list`
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--tenant <t>` | string | current scope | Target tenant. |
+| `--environment <e>` | string | current scope | Target environment; requires `--tenant`. |
+| `--path <dir>` | absolute path | `$ERUN_OUTPUTS_DIR` → `/home/erun/.erun/outputs` | Pod directory to list. Must be absolute and free of `..`. |
+| `--limit <n>` | int | `0` (all) | Cap on entries returned, newest-first. |
+
+Lists one directory one level deep over `kubectl exec … find <dir> -maxdepth 1`, sorted newest-first by mtime. A missing directory yields an empty result, not an error. `--output json` emits `{dir, entries:[{name,path,size,modTime,isDir}], total, truncated}`.
+
+### `erun outputs download`
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `<name>` (arg) | string | **required** | Entry to download, a single path segment under the directory. A name with directory components is reduced to its base segment; `.`/`..`/empty are rejected. |
+| `--tenant` / `--environment` / `--path` | — | — | As for `list`. |
+| `--dest <local-path>` | path | current directory | Local file or directory to write to. (`--dest`, not `--output`, which is the global mode flag.) |
+| `--force` | bool | `false` | Overwrite an existing local destination. |
+
+A file streams as base64; a folder streams as a `tar.gz` archive (saved as `<name>.tar.gz`). The payload is SHA-256'd and capped at 100 MB (`MaxRuntimeOutputBytes`) — a larger file errors before transfer. `--output json` emits `{name, dest, size, sha256, isArchive, archiveFormat}`. Both subcommands support `--dry-run` (traces the `kubectl exec` argv + script and the planned destination; no I/O).
+
+---
+
 ## `erun release`
 
 `erun release` orchestrates **build → push → git-tag**: it builds the release-tagged images, then reuses [`erun push`](#erun-push) to publish the multi-arch image manifest **and** the runtime chart at the release version, then creates the commit + tag. It has no chart-publishing step of its own. See [Release version policy](/agent-reference/release-policy) for the version-pattern rules and the publishing contract; the `erun release` flag set is just `--dry-run` and `--output`, and is documented on the [Operator page](/cli/release).
