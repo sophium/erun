@@ -428,6 +428,61 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/force_flag_appears_in_trace", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_env_deploy_timeout_overrides_default", func(t *testing.T) {
+		// The env's deploy.timeout (7m0s) flows into the helm `upgrade
+		// --timeout` arg, overriding the 5m0s default. Locks per-env rollout
+		// timeout resolution (config > default).
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithDeployTimeout(t, setup, "team", "dev", "7m0s")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_env_deploy_timeout_overrides_default", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_rollout_timeout_flag_overrides_env_config", func(t *testing.T) {
+		// --rollout-timeout 9m beats the env's deploy.timeout (7m0s), which in
+		// turn beats the default. Locks the full precedence chain (flag > env
+		// config > default) at the resolved helm `--timeout` arg.
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithDeployTimeout(t, setup, "team", "dev", "7m0s")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--rollout-timeout", "9m", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_rollout_timeout_flag_overrides_env_config", normalize.Apply(result.Combined))
+	})
+
+	t.Run("rollout_timeout_flag_invalid_duration_errors", func(t *testing.T) {
+		// A malformed --rollout-timeout fails the deploy loudly rather than
+		// silently falling back to the default.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--rollout-timeout", "bogus", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit on a malformed rollout timeout:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/rollout_timeout_flag_invalid_duration_errors", normalize.Apply(result.Combined))
+	})
+
+	t.Run("env_deploy_timeout_invalid_duration_errors", func(t *testing.T) {
+		// A malformed per-env deploy.timeout fails the deploy loudly at spec
+		// resolution (EnvironmentDeployConfig.Resolve) rather than reverting to
+		// the default.
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithDeployTimeout(t, setup, "team", "dev", "nonsense")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit on a malformed env deploy timeout:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/env_deploy_timeout_invalid_duration_errors", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_pinned_version_installs_buildable_chart_without_building", func(t *testing.T) {
 		// #556: deploy is a consume operation. Even when the chart references a
 		// runtime image that HAS a local build context (docker/team-devops/
@@ -950,29 +1005,64 @@ func TestDeploy(t *testing.T) {
 		}
 	})
 
-	t.Run("real_run_pod_watch_aborts_on_image_pull_backoff", func(t *testing.T) {
-		// kubectl stub reports a pod with one container in
-		// ImagePullBackOff. helm sleeps so the watcher fires first and
-		// kills it. Locks the structured early-fail error message.
+	t.Run("real_run_pod_watch_waits_through_image_pull_backoff", func(t *testing.T) {
+		// kubectl stub reports a pod with one container in ImagePullBackOff
+		// whose message is the generic "Back-off pulling image" (no permanent
+		// rejection). A slow/large pull legitimately cycles through this state,
+		// so the watcher must NOT abort: it keeps waiting and lets helm finish.
+		// helm exits 0 quickly to stand in for the pull eventually succeeding.
+		// Proves the "wait while the image is still pulling" contract and the
+		// "Pulling image (...)" status labelling.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
 		stubs := setup.Cwd + "/stubs"
 		fixture.StubBinaryAdvanced(t, stubs, "kubectl", fixture.StubBinarySpec{Stdout: imagePullBackOffPodJSON})
+		fixture.StubBinaryWithScript(t, stubs, "helm", "sleep 0.5\nexit 0\n")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		envVars = append(envVars, "ERUN_DEPLOY_POD_WATCH_INTERVAL=100ms")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("expected clean exit (pull-in-progress must not abort), got %d:\n%s", result.ExitCode, result.Combined)
+		}
+		out := normalize.Apply(result.Combined)
+		if !strings.Contains(out, "    pod team-devops-7d4b4c: erun-dind Pulling image (ImagePullBackOff)") {
+			t.Fatalf("missing pull-in-progress status line in output:\n%s", out)
+		}
+		if strings.Contains(out, "deploy failed early") {
+			t.Fatalf("watcher must not abort while the image is still pulling:\n%s", out)
+		}
+		if !strings.Contains(out, "==> Deployed team/dev <VERSION>") {
+			t.Fatalf("expected deploy to complete once helm finished:\n%s", out)
+		}
+	})
+
+	t.Run("real_run_pod_watch_aborts_on_permanent_image_pull_failure", func(t *testing.T) {
+		// kubectl stub reports a container in ErrImagePull whose message is a
+		// permanent registry rejection ("manifest unknown") — retrying will
+		// never succeed (typo'd/absent tag, bad auth). helm sleeps so the
+		// watcher fires first and kills it. Proves the "fail fast on a real
+		// failure" half of the pull-aware policy.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryAdvanced(t, stubs, "kubectl", fixture.StubBinarySpec{Stdout: permanentImagePullFailurePodJSON})
 		fixture.StubBinaryWithScript(t, stubs, "helm", "exec sleep 30\n")
 		fixture.StubBinary(t, stubs, "docker", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
 		envVars = append(envVars, "ERUN_DEPLOY_POD_WATCH_INTERVAL=100ms")
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode == 0 {
-			t.Fatalf("expected non-zero exit, got 0:\n%s", result.Combined)
+			t.Fatalf("expected non-zero exit on a permanent pull failure, got 0:\n%s", result.Combined)
 		}
 		out := normalize.Apply(result.Combined)
-		if !strings.Contains(out, "    pod team-devops-7d4b4c: erun-dind Waiting (ImagePullBackOff)") {
-			t.Fatalf("missing pod-watch summary line in output:\n%s", out)
-		}
-		if !strings.Contains(out, `deploy failed early: pod team-devops-7d4b4c container erun-dind ImagePullBackOff: Back-off pulling image "ghcr.io/sophium/erun-dind:<VERSION>"`) {
+		if !strings.Contains(out, "deploy failed early: pod team-devops-7d4b4c container erun-dind ErrImagePull") {
 			t.Fatalf("missing structured early-fail error in output:\n%s", out)
+		}
+		if !strings.Contains(out, "manifest unknown") {
+			t.Fatalf("missing permanent pull-failure message in output:\n%s", out)
 		}
 	})
 
@@ -1509,6 +1599,28 @@ const imagePullBackOffPodJSON = `{
             "ready": false,
             "restartCount": 0,
             "state": {"waiting": {"reason": "ImagePullBackOff", "message": "Back-off pulling image \"ghcr.io/sophium/erun-dind:1.0.0\""}}
+          }
+        ]
+      }
+    }
+  ]
+}`
+
+const permanentImagePullFailurePodJSON = `{
+  "items": [
+    {
+      "metadata": {
+        "name": "team-devops-7d4b4c",
+        "annotations": {"meta.helm.sh/release-name": "team-devops"}
+      },
+      "status": {
+        "phase": "Pending",
+        "containerStatuses": [
+          {
+            "name": "erun-dind",
+            "ready": false,
+            "restartCount": 0,
+            "state": {"waiting": {"reason": "ErrImagePull", "message": "rpc error: code = NotFound desc = failed to pull and unpack image \"ghcr.io/sophium/erun-dind:1.0.0\": failed to resolve reference: ghcr.io/sophium/erun-dind:1.0.0: manifest unknown"}}
           }
         ]
       }

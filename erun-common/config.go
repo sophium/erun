@@ -123,6 +123,7 @@ type EnvConfig struct {
 	RuntimePod            RuntimePodResources     `yaml:"runtimepod,omitempty"`
 	SSHD                  SSHDConfig              `yaml:"sshd,omitempty"`
 	Idle                  EnvironmentIdleConfig   `yaml:"idle,omitempty"`
+	Deploy                EnvironmentDeployConfig `yaml:"deploy,omitempty" json:"deploy,omitempty"`
 	Claude                EnvironmentClaudeConfig `yaml:"claude,omitempty" json:"claude,omitempty"`
 	AITool                string                  `yaml:"aitool,omitempty" json:"aiTool,omitempty"`
 	LocalPortRangeStart   int                     `yaml:"localportrangestart,omitempty" json:"localPortRangeStart,omitempty"`

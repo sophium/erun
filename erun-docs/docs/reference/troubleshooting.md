@@ -134,6 +134,20 @@ The rest of the deploy plan (steps before and after) is unaffected — `erun dep
 
 When you deploy from the desktop app, the [Activities panel](/desktop/overview#control-panel) keeps the captured output behind the failed entry: **Show output** to read the error inline, or **Copy failure report** to send the full context (output, environment, version, container status) to whoever can help.
 
+## `erun deploy` timed out waiting for the rollout
+
+**Symptoms:** `erun deploy` reports a chart that "never converged" / a rollout timeout, and the new pods showed `Pulling image (ImagePullBackOff)` the whole time.
+
+This is usually the **first deploy of a fresh image tag onto a cold node** — a large runtime image can take several minutes to pull, and the deploy gives up only when the rollout timeout elapses. Nothing was wrong with the image; the pull just outlasted the wait. The fix is to give the pull more room:
+
+```bash
+erun deploy <tenant> <env> --version <v> --rollout-timeout 10m   # one-off
+```
+
+To make it the default for an environment whose images are consistently large, set `deploy.timeout` in the env's config (see [Configuration · `EnvConfig`](/reference/configuration#envconfig)). A retried deploy is also faster once the image is cached on the node.
+
+`erun deploy` distinguishes a slow pull from a real failure: it **keeps waiting** while a container is still pulling (including `ImagePullBackOff` retries against a slow registry), and **stops early** — `deploy failed early: pod … container … <reason>` — only on a real failure (a crash loop, a bad config, or a permanent image-pull rejection like a missing tag or denied credentials). If you see the early-fail message, the image or container is genuinely broken; fix the cause (push the image, fix the config, check registry credentials) and rerun. The full decision rules are in [Agent reference · Rollout wait and pod monitoring](/agent-reference/cli-flags#rollout-wait-and-pod-monitoring).
+
 ## When all else fails
 
 - `erun doctor` from your laptop: reports local config issues.

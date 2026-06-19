@@ -38,6 +38,7 @@ The chart and runtime image are one contract — published together to the same 
 | `--current` | Redeploy the version the environment is already recorded as running (its persisted runtime version). Use it to re-roll the same version, or after a `--force`-style retry, without retyping the number. Required unless `--version` is given. |
 | `--components <name,name,...>` | Opt-in components to include alongside the runtime chart. The accepted list is derived from each project's `<tenant>-devops/k8s/<component>/` charts. |
 | `--force` | Re-run helm upgrade even when the resolved version is unchanged and nothing needs rolling. |
+| `--rollout-timeout <dur>` | How long to wait for the rollout before giving up (e.g. `10m`). Defaults to the env's setting, or 5 minutes. Raise it for the first deploy of a large image on a slow connection; see [rollout wait and monitoring](/agent-reference/cli-flags#rollout-wait-and-pod-monitoring). |
 | `--dry-run` | Resolve and print every `helm upgrade --install` command (and any image-copy step) without executing. |
 
 Subcommand:
@@ -119,6 +120,8 @@ erun deploy team prod --version 1.2.3
 | Runtime chart isn't published at the requested version. | Errors with `runtime chart <ref> version <v> could not be pulled from <registry>` and how to recover — push that version first (push publishes image and chart together), then redeploy. No partial deploy. |
 | A Deployment's selector changed (an immutable Kubernetes field) — e.g. upgrading an environment first deployed under an older chart. | `deploy` recreates that Deployment for you: it deletes it and retries the upgrade once. The Deployment's data volumes (PVCs — build cache, home directory) are separate objects and survive the delete, so no data is lost; the pod restarts. No manual `helm` surgery needed. The trace names it: `deploy: Deployment <name> selector is immutable and changed; deleting it (PVCs preserved) and retrying the upgrade`. |
 | Helm upgrade fails on step N. | The plan stops at step N. Steps 1..N-1 are committed; step N is in helm's failure state. Fix and rerun, or `helm rollback` that release. The rest of the plan is left untouched. |
+| A pod's image is still pulling when the rollout starts. | `deploy` keeps waiting (up to the rollout timeout) and shows `Pulling image (...)` lines — a large image on a slow or rate-limited registry is normal. Raise `--rollout-timeout` (or the env's deploy timeout) if the first pull of a fresh image regularly outlasts the default. |
+| A pod hits a real failure — crash loop, bad config, or a missing/denied image. | `deploy` stops immediately rather than waiting out the timeout, naming the pod, container, and reason (`deploy failed early: …`). Fix the cause (push the image, fix the config) and rerun. See [rollout wait and monitoring](/agent-reference/cli-flags#rollout-wait-and-pod-monitoring). |
 | `erun deploy <component>` for a component not in the plan. | Deploys the single component directly — that's the documented bypass. No error. |
 
 `erun deploy --dry-run` prints the exact command sequence ahead of time, so the Operator can preview the plan before committing.

@@ -21,7 +21,47 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const DefaultHelmDeploymentTimeout = "2m0s"
+// DefaultHelmDeploymentTimeout is the fallback `helm upgrade --wait --timeout`
+// for a rollout when the environment sets no `deploy.timeout`. It is 5m so the
+// first deploy of a fresh, large image tag against a cold node cache is not
+// failed mid-pull: a ~1GB runtime image can take minutes to pull, and the pod
+// watcher keeps waiting through an in-progress pull up to this bound (aborting
+// early only on a real, non-pull failure). Override per environment via
+// EnvConfig.Deploy.Timeout or per deploy via the --rollout-timeout flag /
+// MCP `timeout` input.
+const DefaultHelmDeploymentTimeout = "5m0s"
+
+// EnvironmentDeployConfig carries per-environment deploy tuning persisted on
+// EnvConfig (the `deploy:` block of ~/.config/erun/<tenant>/<env>/config.yaml),
+// the neighbour of the `idle:` block. Today it holds only the helm rollout
+// timeout; it is a struct (rather than a bare field) so future per-env deploy
+// knobs extend it without another config migration.
+type EnvironmentDeployConfig struct {
+	// Timeout is the `helm upgrade --wait --timeout` duration for this env's
+	// rollouts, as a Go duration string (e.g. "5m0s"). Empty falls back to
+	// DefaultHelmDeploymentTimeout.
+	Timeout string `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+}
+
+// Resolve validates the configured rollout timeout and returns the canonical
+// duration string handed to `helm upgrade --timeout`. An empty value falls back
+// to DefaultHelmDeploymentTimeout; a malformed or non-positive duration is a
+// hard error so a misconfigured environment fails the deploy loudly instead of
+// silently reverting to the default. Mirrors EnvironmentIdleConfig.Resolve.
+func (c EnvironmentDeployConfig) Resolve() (string, error) {
+	timeout := strings.TrimSpace(c.Timeout)
+	if timeout == "" {
+		return DefaultHelmDeploymentTimeout, nil
+	}
+	duration, err := time.ParseDuration(timeout)
+	if err != nil {
+		return "", fmt.Errorf("invalid environment deploy timeout %q", timeout)
+	}
+	if duration <= 0 {
+		return "", fmt.Errorf("environment deploy timeout must be greater than zero")
+	}
+	return duration.String(), nil
+}
 
 const DevopsComponentName = "erun-devops"
 
@@ -179,6 +219,12 @@ type DeployTarget struct {
 	// Force re-runs the helm upgrade even when the deployed release already
 	// matches the requested version (no-op rollouts are otherwise skipped).
 	Force bool
+	// RolloutTimeout overrides the helm rollout `--timeout` for this deploy
+	// only, taking precedence over the env's `deploy.timeout` config and the
+	// DefaultHelmDeploymentTimeout. A Go duration string (e.g. "8m"); empty
+	// leaves the resolved per-env/default value untouched. Set by the CLI
+	// `--rollout-timeout` flag and the MCP `timeout` input.
+	RolloutTimeout string
 }
 
 // DeploySpec is a pure helm-install plan: it installs the image and chart
@@ -522,13 +568,55 @@ func ResolveDeploySpec(ctx Context, store DeployStore, findProjectRoot ProjectFi
 	if err != nil {
 		return DeploySpec{}, err
 	}
+	override, ok, err := resolveRolloutTimeoutOverride(target.RolloutTimeout)
+	if err != nil {
+		return DeploySpec{}, err
+	}
+	if ok {
+		spec.Deploy.Timeout = override
+	}
 	return spec, nil
 }
 
 // ResolveCurrentDeploySpecs resolves specs for `erun deploy` — the pure deploy
 // primitive that installs a version by reference and never builds.
 func ResolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DeployTarget) ([]DeploySpec, error) {
-	return resolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, false)
+	specs, err := resolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, false)
+	if err != nil {
+		return nil, err
+	}
+	override, ok, err := resolveRolloutTimeoutOverride(target.RolloutTimeout)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		for i := range specs {
+			specs[i].Deploy.Timeout = override
+		}
+	}
+	return specs, nil
+}
+
+// resolveRolloutTimeoutOverride validates an explicit per-deploy rollout-timeout
+// override (the CLI --rollout-timeout flag / MCP `timeout` input). It returns
+// the canonical duration string and ok=true when a non-empty value is set,
+// ok=false when blank (no override), and a hard error on a malformed or
+// non-positive duration so the deploy fails loudly rather than silently
+// ignoring the operator's input. Precedence: this override > env deploy.timeout
+// > DefaultHelmDeploymentTimeout.
+func resolveRolloutTimeoutOverride(raw string) (string, bool, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", false, nil
+	}
+	duration, err := time.ParseDuration(raw)
+	if err != nil {
+		return "", false, fmt.Errorf("invalid rollout timeout %q", raw)
+	}
+	if duration <= 0 {
+		return "", false, fmt.Errorf("rollout timeout must be greater than zero")
+	}
+	return duration.String(), true, nil
 }
 
 // resolveCurrentDeploySpecs is shared by `erun deploy` (buildOrchestration
@@ -1173,6 +1261,13 @@ func newHelmDeploySpecWithValues(target OpenResult, deployContext KubernetesDepl
 		return HelmDeploySpec{}, err
 	}
 
+	// Per-env rollout timeout (config > default). A flag/MCP override, when
+	// present, is applied on top of this by the public resolve entrypoints.
+	rolloutTimeout, err := target.EnvConfig.Deploy.Resolve()
+	if err != nil {
+		return HelmDeploySpec{}, err
+	}
+
 	return HelmDeploySpec{
 		ReleaseName:         deployContext.ComponentName,
 		ChartPath:           deployContext.ChartPath,
@@ -1197,7 +1292,7 @@ func newHelmDeploySpecWithValues(target OpenResult, deployContext KubernetesDepl
 		Claude:              target.EnvConfig.Claude,
 		RuntimePod:          NormalizeRuntimePodResources(target.EnvConfig.RuntimePod),
 		Version:             version,
-		Timeout:             DefaultHelmDeploymentTimeout,
+		Timeout:             rolloutTimeout,
 	}, nil
 }
 

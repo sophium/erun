@@ -59,6 +59,39 @@ func SeedTenantEnv(t testing.TB, setup env.Setup, tenant, environment string) {
 	)
 }
 
+// SeedTenantEnvWithDeployTimeout writes the same minimal config tree as
+// SeedTenantEnv plus a per-env `deploy.timeout`, so deploy scenarios can
+// exercise the configurable helm rollout timeout (the value flows into the
+// helm `upgrade --timeout` arg).
+func SeedTenantEnvWithDeployTimeout(t testing.TB, setup env.Setup, tenant, environment, timeout string) {
+	t.Helper()
+	root := filepath.Join(setup.ConfigHome, "erun")
+	tenantDir := filepath.Join(root, tenant)
+	envDir := filepath.Join(tenantDir, environment)
+	for _, dir := range []string{root, tenantDir, envDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	mustWrite(t, filepath.Join(root, "config.yaml"), "defaulttenant: "+tenant+"\n")
+	mustWrite(t, filepath.Join(tenantDir, "config.yaml"),
+		"projectroot: "+setup.Cwd+"\n"+
+			"name: "+tenant+"\n"+
+			"defaultenvironment: "+environment+"\n",
+	)
+	mustWrite(t, filepath.Join(envDir, "config.yaml"),
+		"name: "+environment+"\n"+
+			"repopath: "+setup.Cwd+"\n"+
+			"kubernetescontext: test-context\n"+
+			"containerregistry: registry.example/test\n"+
+			"runtimeversion: 1.0.0\n"+
+			"type: local-agent\n"+
+			"deploy:\n"+
+			"  timeout: "+timeout+"\n",
+	)
+}
+
 // SeedTenantEnvNoRegistry writes the same minimal config tree as SeedTenantEnv
 // but omits the per-env container registry, so the env's registry list resolves
 // entirely from the project's .erun/config.yaml (seed it with

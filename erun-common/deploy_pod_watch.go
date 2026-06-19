@@ -118,15 +118,63 @@ type containerStateTerminated struct {
 // terminalWaitingReasons enumerate container `state.waiting.reason` values
 // that will not recover without operator intervention. Once a container
 // reports any of these, the watcher kills the helm upgrade rather than
-// waiting for the timeout.
+// waiting for the timeout. Image-pull reasons are deliberately NOT here — they
+// are handled by imagePullWaitingReasons / permanentImagePullFailure so a slow
+// pull keeps waiting. InvalidImageName stays terminal: the image reference is
+// malformed, so no amount of waiting makes it pullable.
 var terminalWaitingReasons = map[string]struct{}{
-	"ImagePullBackOff":           {},
-	"ErrImagePull":               {},
 	"InvalidImageName":           {},
 	"CreateContainerConfigError": {},
 	"CreateContainerError":       {},
 	"RunContainerError":          {},
 	"ContainerCannotRun":         {},
+}
+
+// imagePullWaitingReasons mark a container as still trying to fetch its image.
+// A large image on a slow or rate-limited registry legitimately cycles through
+// these states (Pulling -> ErrImagePull -> ImagePullBackOff -> retry) while the
+// kubelet retries with growing backoff, so they are NOT terminal on their own:
+// the watcher keeps waiting up to the rollout timeout. Only a *permanent* pull
+// error (permanentImagePullFailure) aborts the deploy early. ImagePullBackOff's
+// own message is a generic "Back-off pulling image" with no detail, but the
+// kubelet alternates into ErrImagePull whose message carries the real registry
+// error — that is where a permanent failure (missing tag, bad auth) is caught.
+var imagePullWaitingReasons = map[string]struct{}{
+	"ImagePullBackOff": {},
+	"ErrImagePull":     {},
+}
+
+// permanentImagePullFailureSubstrings are lowercased fragments of kubelet
+// image-pull error messages that retrying will never resolve: the registry has
+// definitively rejected the reference (missing tag/repo, denied auth, malformed
+// name). Transient causes (timeouts, DNS blips, connection resets, TLS
+// handshake failures) are deliberately excluded so a slow or briefly
+// unreachable registry keeps waiting up to the rollout timeout rather than
+// failing the deploy on a recoverable hiccup.
+var permanentImagePullFailureSubstrings = []string{
+	"manifest unknown",
+	"manifestunknown",
+	"not found",
+	"repository does not exist",
+	"pull access denied",
+	"unauthorized",
+	"authentication required",
+	"forbidden",
+	"denied",
+	"invalid reference format",
+	"no such image",
+}
+
+// permanentImagePullFailure reports whether an image-pull error message
+// indicates a failure that will not recover by waiting.
+func permanentImagePullFailure(message string) bool {
+	lower := strings.ToLower(message)
+	for _, frag := range permanentImagePullFailureSubstrings {
+		if strings.Contains(lower, frag) {
+			return true
+		}
+	}
+	return false
 }
 
 // crashLoopRestartThreshold is the number of restarts a CrashLoopBackOff
@@ -311,6 +359,14 @@ func containerTerminalFailure(c containerStatusEntry) (reason, message string, o
 // message is preferred when present).
 func containerWaitingTerminalFailure(c containerStatusEntry) (reason, message string, ok bool) {
 	w := c.State.Waiting
+	if _, isPull := imagePullWaitingReasons[w.Reason]; isPull {
+		// Still fetching the image: keep waiting up to the rollout timeout
+		// unless the registry has permanently rejected the reference.
+		if permanentImagePullFailure(w.Message) {
+			return w.Reason, w.Message, true
+		}
+		return "", "", false
+	}
 	if _, terminal := terminalWaitingReasons[w.Reason]; terminal {
 		return w.Reason, w.Message, true
 	}
@@ -368,10 +424,18 @@ func formatContainerStatus(c containerStatusEntry) string {
 		if reason == "" {
 			reason = "Waiting"
 		}
-		if c.RestartCount > 0 {
-			return fmt.Sprintf("%s Waiting (%s, restarts=%d)", c.Name, reason, c.RestartCount)
+		// Image-pull states are progress, not failure: label them "Pulling
+		// image" so the operator reads the rollout as still fetching the image
+		// (the deploy keeps waiting up to the rollout timeout) rather than
+		// mistaking "Waiting (ImagePullBackOff)" for a hard error.
+		verb := "Waiting"
+		if _, isPull := imagePullWaitingReasons[c.State.Waiting.Reason]; isPull {
+			verb = "Pulling image"
 		}
-		return fmt.Sprintf("%s Waiting (%s)", c.Name, reason)
+		if c.RestartCount > 0 {
+			return fmt.Sprintf("%s %s (%s, restarts=%d)", c.Name, verb, reason, c.RestartCount)
+		}
+		return fmt.Sprintf("%s %s (%s)", c.Name, verb, reason)
 	}
 	if c.State.Running != nil {
 		ready := "NotReady"

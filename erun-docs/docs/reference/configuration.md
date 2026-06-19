@@ -70,6 +70,7 @@ One per environment. This is the most-edited file.
 | `sshd.publickeypath` | string | `erun open --vscode`, `erun open --intellij`, SSH key sync | Path to the SSH public key authorized for the env. |
 | `sshd.workspacesync.enabled` | bool | desktop workspace-sync poller | Mirror a local folder into the runtime workspace. |
 | `sshd.workspacesync.localpath` | string | desktop workspace-sync poller | The local folder to mirror. |
+| `deploy.timeout` | duration (e.g. `5m0s`) | `erun deploy`, `erun upgrade` (helm `--timeout`) | Per-env helm rollout wait. How long `deploy` waits for the rollout to become ready before helm times out; the [pod monitor](/agent-reference/cli-flags#rollout-wait-and-pod-monitoring) keeps waiting up to this bound while an image is still pulling and aborts earlier on a real failure. Unset → `5m0s`. Overridden per-deploy by `--rollout-timeout` / the MCP `deploy` `timeout` input. A malformed value fails the deploy. |
 | `idle.timeout` | duration (e.g. `5m0s`) | chart (`ERUN_IDLE_TIMEOUT`), in-pod idle monitor | How long the env must be quiet before idle-stop fires. |
 | `idle.workinghours` | string (`HH:MM-HH:MM`) | chart (`ERUN_IDLE_WORKING_HOURS`), idle monitor | Window during which idle-stop is allowed to fire. |
 | `idle.timezone` | string | chart (`ERUN_IDLE_TIMEZONE`), idle monitor | Time zone for `workinghours`. |
