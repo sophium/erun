@@ -54,6 +54,8 @@ type erunUIDeps struct {
 	startTerminal          func(startTerminalSessionParams) (terminalSession, error)
 	runIDECommand          func(context.Context, startTerminalSessionParams) (string, error)
 	savePastedImage        func(pastedImageSaveParams) (string, error)
+	listAgentOutputs       func(eruncommon.OpenResult, eruncommon.RuntimeOutputsParams) (eruncommon.RuntimeOutputsListResult, error)
+	downloadAgentOutput    func(eruncommon.OpenResult, eruncommon.RuntimeOutputDownloadParams) (eruncommon.RuntimeOutputResult, error)
 	loadDiff               func(context.Context, string, uiDiffOptions) (eruncommon.DiffResult, error)
 	loadIdleStatus         func(context.Context, string) (eruncommon.EnvironmentIdleStatus, error)
 	loadAPILog             func(context.Context, uiTenantDashboardInput) (string, error)
@@ -247,6 +249,12 @@ func withDefaultUIDeps(deps erunUIDeps) erunUIDeps {
 func withDefaultWorkspaceDeps(deps erunUIDeps) erunUIDeps {
 	if deps.savePastedImage == nil {
 		deps.savePastedImage = savePastedImageToRuntime
+	}
+	if deps.listAgentOutputs == nil {
+		deps.listAgentOutputs = listAgentOutputsViaRuntime
+	}
+	if deps.downloadAgentOutput == nil {
+		deps.downloadAgentOutput = downloadAgentOutputViaRuntime
 	}
 	if deps.loadDiff == nil {
 		deps.loadDiff = loadDiffFromMCP

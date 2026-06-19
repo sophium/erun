@@ -27,7 +27,7 @@ One pod with three containers:
 | `erun-mcp` | MCP server for Agents. Exposes structured tools (`idle`, `doctor`, `list`, `version`, `build`, `deploy`, `raw`, …). Reached at loopback by the in-pod Agent and via port-forward from laptop-side clients. |
 | `erun-dind` | Docker daemon sidecar. Backs `/var/run/docker.sock` for the shell container's `docker` invocations. |
 
-The three share two persistent volume claims: `/home/erun` (workspace + config) and `/var/lib/docker` (the daemon's image store, so builds stay cache-warm across pod restarts).
+The three share two persistent volume claims: `/home/erun` (workspace + config) and `/var/lib/docker` (the daemon's image store, so builds stay cache-warm across pod restarts). The home PVC also holds the **agent outputs directory** (`$ERUN_OUTPUTS_DIR`, default `/home/erun/.erun/outputs`) — where agents and skills drop deliverables you pull out with [`erun outputs`](/cli/outputs); because it's on the PVC, those files survive pod restarts.
 
 This pod is the **shared surface** for Operator and Agent. Two endpoints on the same pod, both accepting any client:
 

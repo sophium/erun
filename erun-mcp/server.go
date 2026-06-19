@@ -283,6 +283,14 @@ func registerInspectionTools(server *mcp.Server, runtime RuntimeConfig) {
 		Description: "Run an arbitrary command from the runtime repo root and return captured stdout, stderr, and trace output",
 	}, rawTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "outputs_list",
+		Description: "List the files and folders an agent produced in the runtime pod's outputs directory ($ERUN_OUTPUTS_DIR, default /home/erun/.erun/outputs), newest-first. Read-only.",
+	}, outputsListTool())
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "outputs_download",
+		Description: "Read one entry from the runtime pod's outputs directory and return its bytes inline as base64 (a folder as a tar.gz archive). The server runs in the pod, so it returns the content directly for the caller to save. Set preview to return name/type/size without the bytes.",
+	}, outputsDownloadTool())
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "release",
 		Description: "Plan and execute a project release from the runtime repo root using .erun/config.yaml branch policy",
 	}, releaseTool(runtime))

@@ -1,0 +1,24 @@
+Download one entry from the runtime pod's outputs directory onto this machine.
+
+A file lands as-is; a folder lands as a <name>.tar.gz archive. The source defaults to the pod's $ERUN_OUTPUTS_DIR (<HOME>/.erun/outputs); pass --path to download from another directory. Use --dest to choose where it lands locally (default: the current directory) and --force to overwrite an existing local file.
+
+Usage:
+  erun outputs download <name> [flags]
+
+Examples:
+  erun outputs download report.pdf
+  erun outputs download results --dest ./out
+
+Flags:
+      --dest string          Local destination file or directory (default: the current directory)
+      --dry-run              Resolve and trace mutating actions without executing them.
+      --environment string   Target a specific environment; requires --tenant
+      --force                Overwrite the local destination if it already exists
+  -h, --help                 help for download
+      --path string          Pod directory to operate on (default: $ERUN_OUTPUTS_DIR, <HOME>/.erun/outputs)
+      --tenant string        Target a specific tenant (default: the current scope)
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

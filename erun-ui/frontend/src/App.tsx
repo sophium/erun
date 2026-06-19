@@ -12,6 +12,7 @@ import { ErrorBoundary } from '@/components/app/ErrorBoundary';
 import { GlobalConfigDialogView } from '@/components/app/GlobalConfigDialogView';
 import { MainPane } from '@/components/app/MainPane';
 import { ManageDialogView } from '@/components/app/ManageDialogView';
+import { OutputsDialog } from '@/components/app/OutputsDialog';
 import { ReconnectDialog } from '@/components/app/ReconnectDialog';
 import { ReconnectStatusPanel } from '@/components/app/ReconnectStatusPanel';
 import { ResizeHandle } from '@/components/app/ResizeHandle';
@@ -108,6 +109,7 @@ export function App(): React.ReactElement {
         <ReconnectStatusPanel />
         <TenantDialogView />
         <UpgradeAllDialog />
+        <OutputsDialog />
         <AutoStartPromptDialog />
         <ActivityQueueLauncher
           open={activityQueueOpen}

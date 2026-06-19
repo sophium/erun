@@ -1,0 +1,6 @@
+Outputs in <HOME>/.erun/outputs:
+  results  4.0KB  <TS>  dir
+  report.pdf  1.0KB  <TS>  file
+  notes.txt  512B  <TS>  file
+audit: erun outputs list
+outputs: listing <HOME>/.erun/outputs

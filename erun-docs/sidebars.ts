@@ -43,6 +43,7 @@ const sidebars: SidebarsConfig = {
         'cli/context',
         'cli/sshd',
         'cli/list',
+        'cli/outputs',
         'cli/idle',
         'cli/doctor',
         'cli/version',

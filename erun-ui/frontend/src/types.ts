@@ -499,6 +499,26 @@ export interface PastedImageResult {
   path: string;
 }
 
+// AgentOutputEntry mirrors the Go OutputEntry from the ListAgentOutputs
+// binding: one file or folder an agent produced in the runtime pod's outputs
+// directory.
+export interface AgentOutputEntry {
+  name: string;
+  path: string;
+  size: number;
+  modTime: string;
+  isDir: boolean;
+}
+
+// AgentOutputsList mirrors the Go RuntimeOutputsListResult: the entries in the
+// pod's outputs directory, newest-first.
+export interface AgentOutputsList {
+  dir: string;
+  entries: AgentOutputEntry[];
+  total: number;
+  truncated: boolean;
+}
+
 export interface DeleteEnvironmentResult {
   tenant: string;
   environment: string;
