@@ -1041,9 +1041,9 @@ func kubectlDeployedOptionalArms(t testing.TB, stubsDir string, spec KubectlDepl
 		arms.WriteString(`    printf 'call\n' >> '` + counterFile + `'` + "\n")
 		arms.WriteString(`    case "$count" in` + "\n")
 		for index, code := range spec.ExecExitCodes[:len(spec.ExecExitCodes)-1] {
-			arms.WriteString(fmt.Sprintf(`      %d) exit %d ;;`+"\n", index, code))
+			fmt.Fprintf(&arms, `      %d) exit %d ;;`+"\n", index, code)
 		}
-		arms.WriteString(fmt.Sprintf(`      *) exit %d ;;`+"\n", spec.ExecExitCodes[len(spec.ExecExitCodes)-1]))
+		fmt.Fprintf(&arms, `      *) exit %d ;;`+"\n", spec.ExecExitCodes[len(spec.ExecExitCodes)-1])
 		arms.WriteString(`    esac ;;` + "\n")
 	}
 	if spec.SeedKeyFile != "" {
@@ -1056,7 +1056,7 @@ func kubectlDeployedOptionalArms(t testing.TB, stubsDir string, spec KubectlDepl
 		if spec.WaitStderr != "" {
 			arms.WriteString(`    printf '%s\n' ` + shellSingleQuote(spec.WaitStderr) + ` >&2` + "\n")
 		}
-		arms.WriteString(fmt.Sprintf(`    exit %d ;;`+"\n", spec.WaitExitCode))
+		fmt.Fprintf(&arms, `    exit %d ;;`+"\n", spec.WaitExitCode)
 	}
 	if spec.PodsJSON != "" {
 		podsFile := filepath.Join(stubsDir, "pods.json")

@@ -39,7 +39,7 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	handler, err := backendapi.NewHandler(backendapi.HandlerOptions{
 		TokenVerifier: backendapi.NewOIDCTokenVerifierWithOptions(backendapi.OIDCTokenVerifierOptions{

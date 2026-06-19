@@ -1,6 +1,6 @@
 apiVersion: v2
-appVersion: 1.0.92
+appVersion: 1.0.93
 description: ERun backend PostgreSQL
 name: erun-backend-postgres
 type: application
-version: 1.0.92
+version: 1.0.93
