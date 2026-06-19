@@ -187,11 +187,12 @@ binfmt for <arch> not installed. Run:
 
 ## `erun push`
 
-### Version (required)
+### Version (required, unless `--build`)
 
 | Flag | Type | Required | Notes |
 |---|---|---|---|
-| `--version <version>` | string (semver, snapshot or bare) | **Yes** | The version to publish (the same flag `deploy` uses, for consistency across commands). `push` does not mint a version — it builds each image from source at this version (promoting unchanged images from the fingerprint cache), pushes the per-arch tags, assembles the multi-arch manifest list, then publishes the runtime helm chart. Missing → `NO_VERSION` (exit 1). |
+| `--version <version>` | string (semver, snapshot or bare) | **Yes**, unless `--build` is set | The version to publish (the same flag `deploy` uses, for consistency across commands). `push` does not mint a version — it builds each image from source at this version (promoting unchanged images from the fingerprint cache), pushes the per-arch tags, assembles the multi-arch manifest list, then publishes the runtime helm chart. Missing (and no `--build`) → `NO_VERSION` (exit 1). |
+| `--build` | bool (default `false`) | — | **Operator-only convenience switch** (CLI top-level `erun push` only). Builds the current source first — the same pure build `erun build` runs, minting a snapshot version — then pushes that exact minted version. Equivalent to `erun build && erun push --version <minted>`. Mutually exclusive with `--version` (the version is whatever build mints); passing both → exit 1, `push --build builds and pushes the version it mints; do not also pass --version`. `--force` propagates to the build step. **Not exposed over MCP**: the `push` tool keeps `version` required, because programmatic callers compose `build` → `push` themselves and thread the minted version (see [Command primitives](/concepts/command-primitives)). |
 
 ### What push publishes
 
@@ -210,10 +211,22 @@ When `docker push` returns one of these registry-side error strings, `erun push`
 | `unauthorized` | Re-runs `docker login <registry>` interactively (TTY required). |
 | `denied` | Same. |
 | `insufficient_scope` | Same. |
-| `does not match expected scopes` (GHCR-specific) | Invokes `gh auth refresh -s write:packages,read:packages` and retries. |
+| `does not match expected scopes` (GHCR-specific) | Invokes `gh auth refresh -s write:packages,read:packages` and retries. Requires an interactive browser login (see gating below). |
 | `permission_denied` (GHCR-specific) | Same as above. |
 
-If no TTY is attached, the retry skips the login prompt and surfaces the original error.
+If no TTY is attached, the generic `docker login` retry skips the login prompt and surfaces the original error.
+
+The GHCR scope refresh has a stricter gate: it drives `gh`'s interactive browser device-code flow, so `erun push` never launches it when there is no browser or no operator at the prompt. It is skipped when **either**:
+
+- the process runs inside the chart-injected runtime pod (`ERUN_TENANT` and `ERUN_ENVIRONMENT` set) — headless, no browser, even though the desktop terminal is a PTY-backed pod shell; or
+- `stdin` is not an interactive terminal (MCP, CI, pipes).
+
+When the refresh is skipped, `erun push` does **not** hang on a device-code prompt. It fails with an actionable error naming the missing `write:packages` scope and the exact commands to run from a host shell with a browser:
+
+```
+gh auth refresh -h github.com -u <owner> -s write:packages,read:packages
+gh auth token -u <owner> -h github.com | docker login ghcr.io -u <owner> --password-stdin
+```
 
 ### Error codes
 
@@ -355,6 +368,34 @@ Both actions are also exposed on the [MCP `doctor` tool](/mcp/overview#doctor) v
 | `0` | All checks `ok`, or every `missing` check was recovered. |
 | `1` | At least one check `missing` and recovery declined (or `--dry-run`). |
 | `2` | At least one check `error` (parse failure, permission denied). Inspect the trace to find which. |
+
+---
+
+## `erun outputs`
+
+`erun outputs` lists and downloads files an agent produced in an environment's runtime pod outputs directory (`$ERUN_OUTPUTS_DIR`, default `/home/erun/.erun/outputs`). Both subcommands resolve the pod from tenant/environment scope and read it over `kubectl exec`; the MCP `outputs_list`/`outputs_download` tools cover the same operations for in-pod callers (which read the filesystem directly).
+
+### `erun outputs list`
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--tenant <t>` | string | current scope | Target tenant. |
+| `--environment <e>` | string | current scope | Target environment; requires `--tenant`. |
+| `--path <dir>` | absolute path | `$ERUN_OUTPUTS_DIR` → `/home/erun/.erun/outputs` | Pod directory to list. Must be absolute and free of `..`. |
+| `--limit <n>` | int | `0` (all) | Cap on entries returned, newest-first. |
+
+Lists one directory one level deep over `kubectl exec … find <dir> -maxdepth 1`, sorted newest-first by mtime. A missing directory yields an empty result, not an error. `--output json` emits `{dir, entries:[{name,path,size,modTime,isDir}], total, truncated}`.
+
+### `erun outputs download`
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `<name>` (arg) | string | **required** | Entry to download, a single path segment under the directory. A name with directory components is reduced to its base segment; `.`/`..`/empty are rejected. |
+| `--tenant` / `--environment` / `--path` | — | — | As for `list`. |
+| `--dest <local-path>` | path | current directory | Local file or directory to write to. (`--dest`, not `--output`, which is the global mode flag.) |
+| `--force` | bool | `false` | Overwrite an existing local destination. |
+
+A file streams as base64; a folder streams as a `tar.gz` archive (saved as `<name>.tar.gz`). The payload is SHA-256'd and capped at 100 MB (`MaxRuntimeOutputBytes`) — a larger file errors before transfer. `--output json` emits `{name, dest, size, sha256, isArchive, archiveFormat}`. Both subcommands support `--dry-run` (traces the `kubectl exec` argv + script and the planned destination; no I/O).
 
 ---
 

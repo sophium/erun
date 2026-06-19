@@ -31,8 +31,8 @@ kubectl logs -n <tenant>-<env> <pod> -c erun-devops --tail=200
 
 **Fix path:**
 
-1. `erun push` will retry automatically with an interactive `docker login`. If you're not in a TTY, that retry fails silently — run `docker login <registry>` once by hand and retry.
-2. For GHCR, the token needs `write:packages`. `gh auth refresh -s write:packages` fixes most cases.
+1. `erun push` will retry automatically with an interactive `docker login`. If you're not in a TTY, that retry is skipped — run `docker login <registry>` once by hand and retry.
+2. For GHCR, the token needs `write:packages`. `erun push` tries to widen it automatically with `gh auth refresh -s write:packages,read:packages`, but that needs an interactive browser login — so it's skipped in CI, over MCP, and inside a runtime pod (the desktop terminal is a pod shell with no browser). When it's skipped, the push fails with the exact recovery commands. Run them from a host shell with a browser: `gh auth refresh -h github.com -u <owner> -s write:packages,read:packages` then `gh auth token -u <owner> -h github.com | docker login ghcr.io -u <owner> --password-stdin`.
 3. For ECR, the token expires after 12 hours. `aws ecr get-login-password --region <r> | docker login --username AWS --password-stdin <account>.dkr.ecr.<r>.amazonaws.com`.
 
 ## "kubernetes context not found"

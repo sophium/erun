@@ -37,6 +37,16 @@ type startTerminalSessionParams struct {
 }
 
 func resolveCLIExecutable() string {
+	// ERUN_APP_CLI is a deliberate test seam (mirrors ERUN_HOST_OS_OVERRIDE /
+	// ERUN_FORCE_TTY): when set, the desktop runs exactly this `erun` and skips
+	// the build-relative + PATH resolution below. The Playwright harness points
+	// it at its inert `erun` stub so the ERun/AI tabs run the stub regardless of
+	// whether a real erun-cli/bin/erun build artifact happens to sit next to the
+	// app binary — otherwise that artifact is resolved here, the real `erun open`
+	// hits the stubbed cluster, and the env-open specs loop red (#525).
+	if override := strings.TrimSpace(os.Getenv("ERUN_APP_CLI")); override != "" {
+		return override
+	}
 	executableName := "erun"
 	if runtime.GOOS == "windows" {
 		executableName += ".exe"

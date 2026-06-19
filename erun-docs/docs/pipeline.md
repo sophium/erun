@@ -21,7 +21,7 @@ The four steps are **pure primitives** — each does exactly one thing, with no 
 - **[`push`](/cli/push)** — publish a version's outputs to the project's container registry: the multi-arch image **and** the runtime helm chart, together at the same version.
 - **[`deploy`](/cli/deploy)** — install a published version into an environment with a Helm upgrade, by reference. It never builds or pushes; a version is required.
 
-You rarely run the four by hand. For an Operator at the terminal, **convenience shortcuts** compose them: `erun build --release` folds the release flow into the build, and `erun build --deploy` carries one build straight through push and rollout — so one command runs the flow and the version threads through for you. Programmatic callers (the desktop app, scripts, an Agent over MCP) don't use the shortcuts; they run the primitives themselves and thread the version (captured from `erun build --output json`), keeping the "for this env type, do build→push→deploy" policy in the caller, not the command.
+You rarely run the four by hand. For an Operator at the terminal, **convenience shortcuts** compose them: `erun build --release` folds the release flow into the build, `erun build --deploy` carries one build straight through push and rollout, and `erun push --build` builds the current source then publishes the version it mints — so one command runs the flow and the version threads through for you. Programmatic callers (the desktop app, scripts, an Agent over MCP) don't use the shortcuts; they run the primitives themselves and thread the version (captured from `erun build --output json`), keeping the "for this env type, do build→push→deploy" policy in the caller, not the command.
 
 ## What `build` does
 

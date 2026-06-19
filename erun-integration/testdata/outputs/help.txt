@@ -1,0 +1,18 @@
+List and download files an agent produced in the runtime pod
+
+Usage:
+  erun outputs [command]
+
+Available Commands:
+  download    Download a file or folder an agent produced in the runtime pod
+  list        List files an agent produced in the runtime pod's outputs directory
+
+Flags:
+  -h, --help   help for outputs
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.
+
+Use "erun outputs [command] --help" for more information about a command.

@@ -1,0 +1,15 @@
+audit: erun push --version <VERSION>
+==> Pushing
+fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
+fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-arm64
+rebuilding ghcr.io/sophium/api:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
+denied: token does not match expected scopes
+denied: token does not match expected scopes
+==> Push failed after <ELAPSED>
+ghcr.io rejected the push: the gh-stored token lacks the write:packages scope.
+
+erun can widen the scope automatically, but that needs gh's interactive browser login, which cannot run here (stdin is not an interactive terminal).
+From a host shell signed in to the namespace owner's GitHub account, with a browser available, run:
+  gh auth refresh -h github.com -u sophium -s write:packages,read:packages
+  gh auth token -u sophium -h github.com | docker login ghcr.io -u sophium --password-stdin
+then re-run erun push.

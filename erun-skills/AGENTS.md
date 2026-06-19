@@ -42,7 +42,8 @@ erun-skills/
 
 ## Skill body rules
 
-- **Be context-aware.** Skills run both inside a deployed env (where `${ERUN_TENANT}`, `${ERUN_ENVIRONMENT}`, in-pod tools like `erun version`, and the runtime MCP endpoint exist) and on a developer laptop (where none of that does). Gate pod-only fragments behind a check such as `[ -n "${ERUN_TENANT:-}" ]`.
+- **Be context-aware.** Skills run both inside a deployed env (where `${ERUN_TENANT}`, `${ERUN_ENVIRONMENT}`, `${ERUN_OUTPUTS_DIR}`, in-pod tools like `erun version`, and the runtime MCP endpoint exist) and on a developer laptop (where none of that does). Gate pod-only fragments behind a check such as `[ -n "${ERUN_TENANT:-}" ]`.
+- **Write deliverables to the outputs dir.** When a skill produces a file the operator will want off the pod (a report, generated artifact, build output, log bundle) and it does not belong in the git worktree, write it under `${ERUN_OUTPUTS_DIR}` so `erun outputs list`/`download` can pull it out. Gate on it the same way: `[ -n "${ERUN_OUTPUTS_DIR:-}" ] && cp report.md "${ERUN_OUTPUTS_DIR}/"`. Files that belong in the repo still go to git.
 - Reference tools that are reliably present in both contexts (`gh`, `git`, `curl`) or check before use. Do not assume `kubectl`, `helm`, or `erun` are on PATH on a laptop.
 - Trigger the skill on **user intent**, not on individual mechanical steps. One workflow → one skill, not three sub-skills the user has to chain.
 - Keep skill bodies short. The body is loaded only when the skill fires; long bodies are fine when needed, but every line should be doing work — no "best practices" filler.

@@ -78,6 +78,12 @@ export function backendEnv(): Record<string, string> {
     XDG_CACHE_HOME: path.join(home, '.cache'),
     XDG_DATA_HOME: path.join(home, '.local', 'share'),
     PATH: `${stubsDir()}${path.delimiter}${process.env.PATH ?? ''}`,
+    // Force the desktop's ERun/AI tabs to run the inert `erun` stub. The PATH
+    // prepend alone is not enough: resolveCLIExecutable resolves a real
+    // erun-cli/bin/erun next to the app binary (a dev build artifact) before
+    // falling back to PATH, which makes the env-open specs loop red on a
+    // developer machine that has that artifact (#525). This seam pins the stub.
+    ERUN_APP_CLI: path.join(stubsDir(), 'erun'),
   };
 }
 
