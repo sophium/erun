@@ -184,11 +184,17 @@ func DownloadRuntimeOutput(ctx Context, req ShellLaunchParams, params RuntimeOut
 	if err != nil {
 		return RuntimeOutputResult{}, fmt.Errorf("download runtime output %q%s: %w", name, formatRemoteCommandStderr(out.Stderr), err)
 	}
-	kind, encoded, ok := strings.Cut(strings.TrimSpace(out.Stdout), "\n")
+	return parseRuntimeOutputDownload(name, out.Stdout)
+}
+
+// parseRuntimeOutputDownload decodes the download script's response: a single
+// type-marker line ("dir"/"file") followed by the base64 payload. It enforces
+// the size cap and builds the result.
+func parseRuntimeOutputDownload(name, stdout string) (RuntimeOutputResult, error) {
+	kind, encoded, ok := strings.Cut(strings.TrimSpace(stdout), "\n")
 	if !ok && kind == "" {
 		return RuntimeOutputResult{}, fmt.Errorf("download runtime output %q: empty response", name)
 	}
-	isDir := strings.TrimSpace(kind) == "dir"
 	data, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(encoded), ""))
 	if err != nil {
 		return RuntimeOutputResult{}, fmt.Errorf("decode runtime output %q: %w", name, err)
@@ -196,6 +202,13 @@ func DownloadRuntimeOutput(ctx Context, req ShellLaunchParams, params RuntimeOut
 	if len(data) > MaxRuntimeOutputBytes {
 		return RuntimeOutputResult{}, fmt.Errorf("runtime output %q is too large (%d bytes); the limit is %d bytes", name, len(data), MaxRuntimeOutputBytes)
 	}
+	return newRuntimeOutputResult(name, strings.TrimSpace(kind) == "dir", data), nil
+}
+
+// newRuntimeOutputResult builds a download result from the decoded bytes,
+// SHA-256'ing the payload and renaming a directory entry to its <name>.tar.gz
+// archive. Shared by the kubectl-exec and in-pod local download paths.
+func newRuntimeOutputResult(name string, isDir bool, data []byte) RuntimeOutputResult {
 	sum := sha256.Sum256(data)
 	result := RuntimeOutputResult{
 		Name:   name,
@@ -208,7 +221,7 @@ func DownloadRuntimeOutput(ctx Context, req ShellLaunchParams, params RuntimeOut
 		result.ArchiveFormat = outputDownloadArchiveFormat
 		result.Name = name + "." + outputDownloadArchiveFormat
 	}
-	return result, nil
+	return result
 }
 
 // traceRuntimeOutputsScript traces the kubectl exec argv (with the script body
@@ -370,15 +383,7 @@ func DownloadLocalOutput(params RuntimeOutputDownloadParams) (RuntimeOutputResul
 		if len(data) > MaxRuntimeOutputBytes {
 			return RuntimeOutputResult{}, fmt.Errorf("runtime output %q is too large (%d bytes); the limit is %d bytes", name, len(data), MaxRuntimeOutputBytes)
 		}
-		sum := sha256.Sum256(data)
-		return RuntimeOutputResult{
-			Name:          name + "." + outputDownloadArchiveFormat,
-			IsArchive:     true,
-			ArchiveFormat: outputDownloadArchiveFormat,
-			Size:          int64(len(data)),
-			SHA256:        hex.EncodeToString(sum[:]),
-			Bytes:         data,
-		}, nil
+		return newRuntimeOutputResult(name, true, data), nil
 	}
 	if info.Size() > MaxRuntimeOutputBytes {
 		return RuntimeOutputResult{}, fmt.Errorf("runtime output %q is too large (%d bytes); the limit is %d bytes", name, info.Size(), MaxRuntimeOutputBytes)
@@ -387,13 +392,7 @@ func DownloadLocalOutput(params RuntimeOutputDownloadParams) (RuntimeOutputResul
 	if err != nil {
 		return RuntimeOutputResult{}, err
 	}
-	sum := sha256.Sum256(data)
-	return RuntimeOutputResult{
-		Name:   name,
-		Size:   int64(len(data)),
-		SHA256: hex.EncodeToString(sum[:]),
-		Bytes:  data,
-	}, nil
+	return newRuntimeOutputResult(name, false, data), nil
 }
 
 func resolveLocalOutputTarget(params RuntimeOutputDownloadParams) (dir, name, target string, err error) {
@@ -431,37 +430,7 @@ func tarGzLocalDir(parent, name string) ([]byte, error) {
 		if err != nil {
 			return err
 		}
-		rel, err := filepath.Rel(parent, p)
-		if err != nil {
-			return err
-		}
-		link := ""
-		if info.Mode()&os.ModeSymlink != 0 {
-			if link, err = os.Readlink(p); err != nil {
-				return err
-			}
-		}
-		hdr, err := tar.FileInfoHeader(info, link)
-		if err != nil {
-			return err
-		}
-		hdr.Name = filepath.ToSlash(rel)
-		if info.IsDir() {
-			hdr.Name += "/"
-		}
-		if err := tw.WriteHeader(hdr); err != nil {
-			return err
-		}
-		if !info.Mode().IsRegular() {
-			return nil
-		}
-		f, err := os.Open(p)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = f.Close() }()
-		_, err = io.Copy(tw, f)
-		return err
+		return tarGzWriteEntry(tw, parent, p, info)
 	})
 	if walkErr != nil {
 		return nil, walkErr
@@ -473,6 +442,43 @@ func tarGzLocalDir(parent, name string) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// tarGzWriteEntry writes one filesystem entry into the tar stream, with its name
+// relative to parent. Symlinks are stored as links; only regular files carry
+// content.
+func tarGzWriteEntry(tw *tar.Writer, parent, p string, info os.FileInfo) error {
+	rel, err := filepath.Rel(parent, p)
+	if err != nil {
+		return err
+	}
+	link := ""
+	if info.Mode()&os.ModeSymlink != 0 {
+		if link, err = os.Readlink(p); err != nil {
+			return err
+		}
+	}
+	hdr, err := tar.FileInfoHeader(info, link)
+	if err != nil {
+		return err
+	}
+	hdr.Name = filepath.ToSlash(rel)
+	if info.IsDir() {
+		hdr.Name += "/"
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return nil
+	}
+	f, err := os.Open(p)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	_, err = io.Copy(tw, f)
+	return err
 }
 
 // parseFindEpoch parses find's `%T@` mtime (`<seconds>.<nanos>`) into a UTC
