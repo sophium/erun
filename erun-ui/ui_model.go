@@ -412,13 +412,13 @@ type appNotificationPayload struct {
 	Message string `json:"message"`
 }
 
-type pastedImagePayload struct {
+type pastedFilePayload struct {
 	Data     string `json:"data"`
 	MIMEType string `json:"mimeType,omitempty"`
 	Name     string `json:"name,omitempty"`
 }
 
-type pastedImageResult struct {
+type pastedFileResult struct {
 	Path string `json:"path"`
 }
 

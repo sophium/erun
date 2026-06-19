@@ -495,7 +495,7 @@ export interface TerminalExitPayload {
   reason?: string;
 }
 
-export interface PastedImageResult {
+export interface PastedFileResult {
   path: string;
 }
 

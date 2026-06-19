@@ -53,7 +53,7 @@ type erunUIDeps struct {
 	setRemoteCloudAlias    func(context.Context, string, string, string, string) (eruncommon.EnvConfig, error)
 	startTerminal          func(startTerminalSessionParams) (terminalSession, error)
 	runIDECommand          func(context.Context, startTerminalSessionParams) (string, error)
-	savePastedImage        func(pastedImageSaveParams) (string, error)
+	savePastedFile         func(pastedFileSaveParams) (string, error)
 	listAgentOutputs       func(eruncommon.OpenResult, eruncommon.RuntimeOutputsParams) (eruncommon.RuntimeOutputsListResult, error)
 	downloadAgentOutput    func(eruncommon.OpenResult, eruncommon.RuntimeOutputDownloadParams) (eruncommon.RuntimeOutputResult, error)
 	loadDiff               func(context.Context, string, uiDiffOptions) (eruncommon.DiffResult, error)
@@ -247,8 +247,8 @@ func withDefaultUIDeps(deps erunUIDeps) erunUIDeps {
 // pasted-image save, diff/idle/API-log loaders, and the workspace sync
 // readiness check, runner, and interval.
 func withDefaultWorkspaceDeps(deps erunUIDeps) erunUIDeps {
-	if deps.savePastedImage == nil {
-		deps.savePastedImage = savePastedImageToRuntime
+	if deps.savePastedFile == nil {
+		deps.savePastedFile = savePastedFileToRuntime
 	}
 	if deps.listAgentOutputs == nil {
 		deps.listAgentOutputs = listAgentOutputsViaRuntime
