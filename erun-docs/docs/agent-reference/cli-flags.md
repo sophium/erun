@@ -187,11 +187,12 @@ binfmt for <arch> not installed. Run:
 
 ## `erun push`
 
-### Version (required)
+### Version (required, unless `--build`)
 
 | Flag | Type | Required | Notes |
 |---|---|---|---|
-| `--version <version>` | string (semver, snapshot or bare) | **Yes** | The version to publish (the same flag `deploy` uses, for consistency across commands). `push` does not mint a version — it builds each image from source at this version (promoting unchanged images from the fingerprint cache), pushes the per-arch tags, assembles the multi-arch manifest list, then publishes the runtime helm chart. Missing → `NO_VERSION` (exit 1). |
+| `--version <version>` | string (semver, snapshot or bare) | **Yes**, unless `--build` is set | The version to publish (the same flag `deploy` uses, for consistency across commands). `push` does not mint a version — it builds each image from source at this version (promoting unchanged images from the fingerprint cache), pushes the per-arch tags, assembles the multi-arch manifest list, then publishes the runtime helm chart. Missing (and no `--build`) → `NO_VERSION` (exit 1). |
+| `--build` | bool (default `false`) | — | **Operator-only convenience switch** (CLI top-level `erun push` only). Builds the current source first — the same pure build `erun build` runs, minting a snapshot version — then pushes that exact minted version. Equivalent to `erun build && erun push --version <minted>`. Mutually exclusive with `--version` (the version is whatever build mints); passing both → exit 1, `push --build builds and pushes the version it mints; do not also pass --version`. `--force` propagates to the build step. **Not exposed over MCP**: the `push` tool keeps `version` required, because programmatic callers compose `build` → `push` themselves and thread the minted version (see [Command primitives](/concepts/command-primitives)). |
 
 ### What push publishes
 

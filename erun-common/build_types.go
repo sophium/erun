@@ -126,6 +126,12 @@ type DockerCommandTarget struct {
 	Release         bool
 	Force           bool
 	Deploy          bool
+	// Build is the `erun push --build` operator shortcut: build the current
+	// source first (minting a snapshot version), then push that version. It is
+	// orchestration policy that lives in the CLI caller, not in any primitive —
+	// the shared resolvers never read it. See root AGENTS.md § "Command
+	// primitives vs orchestration".
+	Build bool
 	// NoIncremental disables the default fingerprint-based incremental build
 	// caching. When false (the default), each docker build context is fingerprinted
 	// from its Dockerfile and COPY sources; if a local image with the matching

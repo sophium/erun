@@ -155,6 +155,79 @@ func TestPush(t *testing.T) {
 		golden.Equal(t, "push/dry_run_single_image_from_dockerfile_cwd", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_build_shortcut_builds_then_pushes_minted_version", func(t *testing.T) {
+		// #585: `erun push --build` is the operator shortcut that builds the
+		// current source first (minting a snapshot version) and then pushes
+		// that exact version — no --version needed. The dry-run trace must
+		// show the build actions (==> would not appear in dry-run, but the
+		// docker build commands do) followed by the push actions, with the
+		// minted version threaded into the push lines.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedProjectDockerfile(t, setup)
+		if err := os.WriteFile(filepath.Join(setup.Cwd, "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
+			t.Fatalf("write VERSION: %v", err)
+		}
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  image)`,
+			`    case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		result := erun.Run(t, []string{"push", "--build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "push/dry_run_build_shortcut_builds_then_pushes_minted_version", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_build_shortcut_force_rebuilds", func(t *testing.T) {
+		// #585: --force must propagate to the --build step, so the build
+		// rebuilds every image instead of promoting from the fingerprint
+		// cache. The dry-run trace differs from the plain --build run (no
+		// fingerprint-promote decision lines) which is what this golden locks.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedProjectDockerfile(t, setup)
+		if err := os.WriteFile(filepath.Join(setup.Cwd, "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
+			t.Fatalf("write VERSION: %v", err)
+		}
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  image)`,
+			`    case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		result := erun.Run(t, []string{"push", "--build", "--force", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "push/dry_run_build_shortcut_force_rebuilds", normalize.Apply(result.Combined))
+	})
+
+	t.Run("build_shortcut_with_explicit_version_errors", func(t *testing.T) {
+		// #585: --build mints the version itself, so combining it with an
+		// explicit --version is contradictory and must fail clearly before any
+		// build or push work.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedProjectDockerfile(t, setup)
+		result := erun.Run(t, []string{"push", "--build", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for --build with --version, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "push/build_shortcut_with_explicit_version_errors", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_single_image_from_dockerfile_cwd", func(t *testing.T) {
 		// Exercises the root `erun push` single-image branch for real:
 		// ResolveDockerPushSpec resolves the cwd Dockerfile into one build+push
