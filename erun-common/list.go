@@ -74,6 +74,7 @@ type ListEnvironmentResult struct {
 	AITool              string                  `json:"aiTool,omitempty"`
 	Claude              EnvironmentClaudeConfig `json:"claude,omitempty"`
 	Idle                EnvironmentIdleConfig   `json:"idle,omitempty"`
+	Deploy              EnvironmentDeployConfig `json:"deploy,omitempty"`
 	IsActive            bool                    `json:"isActive,omitempty"`
 	LocalPorts          EnvironmentLocalPorts   `json:"localPorts,omitempty"`
 	IsDefault           bool                    `json:"isDefault,omitempty"`
@@ -212,6 +213,7 @@ func listEnvironmentResult(store ListStore, tenant TenantConfig, env EnvConfig, 
 		AITool:              strings.TrimSpace(env.AITool),
 		Claude:              env.Claude,
 		Idle:                env.Idle,
+		Deploy:              env.Deploy,
 		IsActive:            listEnvironmentIsActive(store, env),
 		LocalPorts:          localPorts,
 		IsDefault:           env.Name == tenant.DefaultEnvironment,

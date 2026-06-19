@@ -4,12 +4,13 @@ Usage:
   erun devops k8s deploy COMPONENT [flags]
 
 Flags:
-      --dry-run              Resolve and trace mutating actions without executing them.
-      --environment string   Deploy for a specific environment; requires --tenant
-      --force                Re-run the helm upgrade even when the deployed release already matches the requested version
-  -h, --help                 help for deploy
-      --tenant string        Deploy for a specific tenant
-      --version erun build   Version to install by reference (produced by erun build/`erun push`); fails if that version's image is absent
+      --dry-run                  Resolve and trace mutating actions without executing them.
+      --environment string       Deploy for a specific environment; requires --tenant
+      --force                    Re-run the helm upgrade even when the deployed release already matches the requested version
+  -h, --help                     help for deploy
+      --rollout-timeout string   Override the helm rollout wait for this deploy (Go duration, e.g. 8m); empty uses the env's deploy.timeout or the 5m default
+      --tenant string            Deploy for a specific tenant
+      --version erun build       Version to install by reference (produced by erun build/`erun push`); fails if that version's image is absent
 
 Global Flags:
       --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
