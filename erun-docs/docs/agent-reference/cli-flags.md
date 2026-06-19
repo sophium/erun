@@ -210,10 +210,22 @@ When `docker push` returns one of these registry-side error strings, `erun push`
 | `unauthorized` | Re-runs `docker login <registry>` interactively (TTY required). |
 | `denied` | Same. |
 | `insufficient_scope` | Same. |
-| `does not match expected scopes` (GHCR-specific) | Invokes `gh auth refresh -s write:packages,read:packages` and retries. |
+| `does not match expected scopes` (GHCR-specific) | Invokes `gh auth refresh -s write:packages,read:packages` and retries. Requires an interactive browser login (see gating below). |
 | `permission_denied` (GHCR-specific) | Same as above. |
 
-If no TTY is attached, the retry skips the login prompt and surfaces the original error.
+If no TTY is attached, the generic `docker login` retry skips the login prompt and surfaces the original error.
+
+The GHCR scope refresh has a stricter gate: it drives `gh`'s interactive browser device-code flow, so `erun push` never launches it when there is no browser or no operator at the prompt. It is skipped when **either**:
+
+- the process runs inside the chart-injected runtime pod (`ERUN_TENANT` and `ERUN_ENVIRONMENT` set) — headless, no browser, even though the desktop terminal is a PTY-backed pod shell; or
+- `stdin` is not an interactive terminal (MCP, CI, pipes).
+
+When the refresh is skipped, `erun push` does **not** hang on a device-code prompt. It fails with an actionable error naming the missing `write:packages` scope and the exact commands to run from a host shell with a browser:
+
+```
+gh auth refresh -h github.com -u <owner> -s write:packages,read:packages
+gh auth token -u <owner> -h github.com | docker login ghcr.io -u <owner> --password-stdin
+```
 
 ### Error codes
 
