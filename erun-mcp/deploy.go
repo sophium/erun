@@ -19,6 +19,7 @@ type DeployInput struct {
 	Components []string `json:"components,omitempty" jsonschema:"opt-in components to include alongside the runtime chart (erun-backend-postgres, erun-backend-db, erun-backend-api); ignored when component is set"`
 	Version    string   `json:"version" jsonschema:"required published version to install by reference (produced by build then push); deploy installs by reference and never builds"`
 	Force      bool     `json:"force,omitempty" jsonschema:"when true, re-run the helm upgrade even when the deployed release already matches the requested version"`
+	Timeout    string   `json:"timeout,omitempty" jsonschema:"override the helm rollout wait for this deploy as a Go duration (e.g. 8m); empty uses the env's deploy.timeout or the 5m default. The deploy keeps waiting while an image is still pulling and aborts early on a real container failure"`
 	Preview    bool     `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
 	Verbosity  int      `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
@@ -49,6 +50,7 @@ func deployTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 				VersionOverride: strings.TrimSpace(input.Version),
 				Components:      input.Components,
 				Force:           input.Force,
+				RolloutTimeout:  strings.TrimSpace(input.Timeout),
 			}
 
 			component := strings.TrimSpace(input.Component)

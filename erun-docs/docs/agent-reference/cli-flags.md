@@ -246,7 +246,7 @@ gh auth token -u <owner> -h github.com | docker login ghcr.io -u <owner> --passw
 
 ### Common flags
 
-`--version`, `--current`, `--components`, `--force`, `--dry-run`, `--output`. Subcommand: `erun deploy <component>`.
+`--version`, `--current`, `--components`, `--force`, `--rollout-timeout`, `--dry-run`, `--output`. Subcommand: `erun deploy <component>`.
 
 ### Version selection — `--version` / `--current` (required)
 
@@ -285,6 +285,30 @@ The deploy plan comes from `ProjectConfig.environments.<env>.k8s.deployments[]` 
 
 The skip emits `result: skipped (no change)` in the trace. `deploy` never pushes, so there is no `docker push` to skip.
 
+### Rollout wait and pod monitoring
+
+`erun deploy` runs `helm upgrade --install --wait --wait-for-jobs --timeout <t>` and, concurrently, polls the release's pods to fail fast on a real failure while staying patient through a slow image pull.
+
+**Timeout resolution** (`<t>`), highest precedence first:
+
+| Source | Value |
+|---|---|
+| `--rollout-timeout <dur>` flag (MCP `deploy` `timeout` input) | Per-deploy override. Go duration (e.g. `8m`, `90s`); a malformed or non-positive value aborts before any rollout: `invalid rollout timeout "<v>"`, exit 1. |
+| `EnvConfig.deploy.timeout` | Per-environment default (see [Configuration · `EnvConfig`](/reference/configuration#envconfig)). A malformed value aborts at spec resolution: `invalid environment deploy timeout "<v>"`, exit 1. |
+| Built-in default | `5m0s`. |
+
+The resolved value is the `helm --timeout` argument (visible in the dry-run helm command line) and the `waiting for helm rollout (timeout <t>)...` real-run line. It is the upper bound on how long a still-progressing rollout waits; it does **not** apply to the rollback path (`helm rollback --wait --timeout 2m0s`) or the shell-launch wait, which carry their own fixed timeout.
+
+**Pod monitor.** While helm waits, erun polls `kubectl get pods -o json` for the release (filtered by the `meta.helm.sh/release-name` annotation) every 2s (`ERUN_DEPLOY_POD_WATCH_INTERVAL`, default `2s`, floor `100ms`). It classifies each init + main container state and decides between *keep waiting* and *abort early*:
+
+- **Keep waiting (image still pulling).** A container in `ImagePullBackOff` or `ErrImagePull` whose message is **not** a permanent rejection is treated as a pull in progress — a large image on a slow or rate-limited registry legitimately cycles `Pulling → ErrImagePull → ImagePullBackOff → retry`. The watcher does not abort; it keeps waiting up to `<t>` and prints `pod <p>: <c> Pulling image (<reason>)` status lines so the wait is visible. `helm --timeout` is the only bound on this case.
+- **Abort early (real failure).** When a container reaches a state that will not recover, the watcher sends `SIGINT` (then `SIGKILL` after 2s) to the helm process and the deploy fails immediately with `deploy failed early: pod <p> container <c> <reason>: <message>` rather than waiting out `<t>`. The terminal states are:
+  - `InvalidImageName`, `CreateContainerConfigError`, `CreateContainerError`, `RunContainerError`, `ContainerCannotRun` — config/runtime errors that no wait fixes.
+  - `CrashLoopBackOff` once `restartCount ≥ 2` (a single transient init crash is tolerated). The last terminated message is surfaced.
+  - A **permanent** image-pull rejection: an `ImagePullBackOff`/`ErrImagePull` message containing `manifest unknown`, `not found`, `repository does not exist`, `pull access denied`, `unauthorized`, `authentication required`, `forbidden`, `denied`, `invalid reference format`, or `no such image` — a missing tag, absent repository, or bad credentials that retrying will never resolve. (Transient causes — timeouts, DNS blips, connection resets, TLS handshake failures — are deliberately **not** treated as permanent, so a briefly unreachable registry keeps waiting.)
+
+The monitor is best-effort: a transient `kubectl get pods` error is ignored (it never aborts a deploy helm would otherwise drive to success). In `--dry-run` the watcher action is traced (`deploy: watching pods in <ns> …`) and the `kubectl get pods -o json` command is shown, but no polling happens.
+
 ### Immutable-selector recovery
 
 A Kubernetes `Deployment.spec.selector` is immutable: helm cannot patch a release whose installed selector differs from the chart's rendered selector, and aborts the upgrade with `Deployment.apps "<name>" is invalid: spec.selector: … field is immutable`. This happens when an environment was first installed under a chart that rendered a different selector than the one now being applied (e.g. a pre-cutover per-tenant chart that labelled pods `app: <release>` versus a chart that hardcoded `app: erun-devops`, or vice-versa).
@@ -305,7 +329,9 @@ The recovery is bounded to a single retry (the delete removes the conflict, so t
 | `CLUSTER_UNREACHABLE` | Same as `erun open`. | `2` |
 | `MISSING_IMAGE_IN_REGISTRY` | A chart references `<registry>/<component>:<version>` that does not exist (and was never built/pushed). | `1` |
 | `MISSING_CHART_IN_REGISTRY` | The runtime chart was not published at the requested version (`helm pull` failed). Push the version first — push publishes image and chart together. | `1` |
-| `HELM_UPGRADE_FAILED` | A step in the plan failed; later steps are not executed. | `2` |
+| `HELM_UPGRADE_FAILED` | A step in the plan failed (or helm's own `--timeout` elapsed while the rollout was still not ready); later steps are not executed. | `2` |
+| `ROLLOUT_CONTAINER_FAILED` | The [pod monitor](#rollout-wait-and-pod-monitoring) observed a terminal container failure (crash loop, config/runtime error, or a permanent image-pull rejection) and aborted the rollout early instead of waiting out the timeout. The message names the pod, container, and reason. | `2` |
+| `INVALID_ROLLOUT_TIMEOUT` | `--rollout-timeout` or `EnvConfig.deploy.timeout` is not a positive Go duration. Nothing runs. | `1` |
 
 ---
 
@@ -355,7 +381,7 @@ Gating: each action runs non-interactively with its flag. With **no flag**, `doc
 | Action | Flag | Command run | Use when |
 |---|---|---|---|
 | Clear pending helm release | `--clear-pending-helm` | `kubectl [--context <ctx>] --namespace <ns> delete secrets,configmaps -l 'owner=helm,name=<release>,status in (pending-install,pending-upgrade,pending-rollback)' --ignore-not-found` | A deploy died mid-upgrade and left the release locked in a pending state, so the next `erun deploy` refuses to start. |
-| Roll back to last successful revision | `--rollback` | `helm rollback <release> --namespace <ns> [--kube-context <ctx>] --wait --timeout <deploy-wait>` | The current revision is bad or never converged and a previous revision was healthy. |
+| Roll back to last successful revision | `--rollback` | `helm rollback <release> --namespace <ns> [--kube-context <ctx>] --wait --timeout 2m0s` | The current revision is bad or never converged and a previous revision was healthy. |
 
 `<release>` is the runtime release name for the tenant; `<ns>` and `<ctx>` are the resolved env namespace and kube-context. To rebuild and roll out fresh images instead of recovering the existing release, re-run [`erun deploy --force`](/cli/deploy) — the desktop's failed-deploy card surfaces that as its **Force rebuild & redeploy** button.
 

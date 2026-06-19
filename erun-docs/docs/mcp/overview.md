@@ -318,6 +318,7 @@ Install a published version into the env. Same semantics as the CLI `erun deploy
 | `current` | bool (optional) | Redeploy the env's persisted runtime version. Required unless `version` is set. |
 | `components` | string[] (optional) | Subset of the plan to deploy. Omitted = full plan. |
 | `force` | bool (optional) | Re-run helm even when the version is unchanged. |
+| `timeout` | string (optional) | Override the helm rollout wait, as a Go duration (e.g. `8m0s`). Empty uses the env's `deploy.timeout` or the 5m default. The deploy keeps waiting while an image is still pulling and aborts early on a real container failure — see [rollout wait and monitoring](/agent-reference/cli-flags#rollout-wait-and-pod-monitoring). A malformed value is rejected (`INVALID_ROLLOUT_TIMEOUT`). |
 | `dry_run` | bool (optional) | Preview without deploying. |
 
 **Output:**

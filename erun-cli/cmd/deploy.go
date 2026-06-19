@@ -20,8 +20,12 @@ func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 			"at a version, by reference. It never builds or pushes — produce a version with `erun build` " +
 			"and `erun push` (or `erun build --deploy` to chain them) first. Pass the version with " +
 			"--version; use --current to redeploy the version this environment already runs. " +
-			"Defaults to the current scope; pass TENANT and ENVIRONMENT (or --tenant/--environment) to target another.",
-		Example:       "  erun deploy team prod --version 1.2.3\n  erun deploy team dev --current",
+			"Defaults to the current scope; pass TENANT and ENVIRONMENT (or --tenant/--environment) to target another.\n\n" +
+			"deploy waits for the rollout to become ready — default 5m, or the env's `deploy.timeout`, " +
+			"or --rollout-timeout — and watches the new pods: it keeps waiting while an image is still " +
+			"pulling and aborts early on a real container failure (crash, config error, or a permanent " +
+			"image-pull rejection) instead of waiting out the timeout.",
+		Example:       "  erun deploy team prod --version 1.2.3\n  erun deploy team dev --current\n  erun deploy team prod --version 1.2.3 --rollout-timeout 10m",
 		Args:          cobra.MaximumNArgs(2),
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -94,6 +98,7 @@ func addDeployCommandTargetFlags(cmd *cobra.Command, target *common.DeployTarget
 	cmd.Flags().StringVar(&target.Tenant, "tenant", "", "Deploy for a specific tenant")
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Deploy for a specific environment; requires --tenant")
 	cmd.Flags().BoolVar(&target.Force, "force", false, "Re-run the helm upgrade even when the deployed release already matches the requested version")
+	cmd.Flags().StringVar(&target.RolloutTimeout, "rollout-timeout", "", "Override the helm rollout wait for this deploy (Go duration, e.g. 8m); empty uses the env's deploy.timeout or the 5m default")
 	cmd.Flags().StringVar(&target.RepoPath, "repo-path", "", "Repo path override for internal tooling")
 	_ = cmd.Flags().MarkHidden("repo-path")
 }
