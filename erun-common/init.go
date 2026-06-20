@@ -676,6 +676,9 @@ func (s *bootstrapRunState) loadTenantConfig() error {
 }
 
 func (s *bootstrapRunState) createTenantConfig() error {
+	if err := ValidateTenantName(s.tenant); err != nil {
+		return err
+	}
 	projectRoot, err := s.tenantProjectRoot()
 	if err != nil {
 		return err
@@ -1030,6 +1033,37 @@ func remoteKeyImportLabel(tenant, envName string) string {
 
 func remoteHostConfigLabel(tenant, envName string) string {
 	return fmt.Sprintf("Use existing SSH host config for environment %q in tenant %q", envName, tenant)
+}
+
+// maxTenantNameLength caps a tenant name at the RFC 1123 DNS label limit. The
+// combined `<tenant>-<env>` namespace is normalized and truncated separately by
+// normalizeNamespaceName; this bound just keeps a tenant name a single label.
+const maxTenantNameLength = 63
+
+// ValidateTenantName enforces that a tenant name is a single DNS-safe label of
+// lowercase letters and digits with no hyphens. Tenant names feed the
+// `<tenant>-<env>` namespace mapping (KubernetesNamespaceName); forbidding
+// hyphens keeps that mapping unambiguous (split on the first hyphen) and
+// injective, so `a-b`+`c` and `a`+`b-c` can no longer collide on one namespace.
+//
+// The rule is checked before normalization so a caller cannot rely on
+// normalizeNamespaceName to silently repair an invalid name. It is enforced at
+// tenant creation only; tenants created before this rule keep working unchanged
+// (no re-validation on load), preserving back-compat.
+func ValidateTenantName(name string) error {
+	if name == "" {
+		return fmt.Errorf("tenant name is required")
+	}
+	if len(name) > maxTenantNameLength {
+		return fmt.Errorf("invalid tenant name %q: must be at most %d characters", name, maxTenantNameLength)
+	}
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			continue
+		}
+		return fmt.Errorf("invalid tenant name %q: tenant names must use only lowercase letters and digits with no hyphens, so the <tenant>-<env> namespace is unambiguous", name)
+	}
+	return nil
 }
 
 func KubernetesNamespaceName(tenant, envName string) string {
