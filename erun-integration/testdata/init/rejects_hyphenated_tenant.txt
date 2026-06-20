@@ -1,0 +1,8 @@
+audit: erun init --confirm-environment --container-registry registry.example/test --dry-run --kubernetes-context test-context --no-git --set-default-tenant --type runtime --version <VERSION> team-one prod
+Loading erun tool configuration, configPath=<TMP>
+Saving default config
+mkdir -p <TMP>
+write-yaml <TMP>
+Loaded erun tool configuration
+Loading tenant configuration
+invalid tenant name "team-one": tenant names must use only lowercase letters and digits with no hyphens, so the <tenant>-<env> namespace is unambiguous

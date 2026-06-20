@@ -680,7 +680,7 @@ func TestInitToolUsesExplicitRuntimeVersionOverride(t *testing.T) {
 	}))
 
 	_, output, err := handler(context.Background(), nil, InitInput{
-		Tenant:             "tenant-a",
+		Tenant:             "tenanta",
 		Environment:        "dev",
 		Version:            "1.0.19-snapshot-20260418141901",
 		Remote:             true,
