@@ -269,6 +269,10 @@ type ProjectConfig struct {
 	ContainerRegistries ContainerRegistries                 `yaml:"containerregistries,omitempty"`
 	Environments        map[string]ProjectEnvironmentConfig `yaml:"environments,omitempty"`
 	Release             ReleaseConfig                       `yaml:"release,omitempty"`
+	// Platform is the per-instance erunpaas platform configuration (base
+	// domain, delegated services zone, authoritative nameserver, platform
+	// env). Empty for projects that do not run a platform deployment.
+	Platform PlatformConfig `yaml:"platform,omitempty"`
 }
 
 // K8sForEnvironment returns the k8s deploy plan declared for the given
