@@ -1,0 +1,5 @@
+audit: erun deploy --dry-run --version <VERSION> team dev
+trace-log: would append the full trace to <TMP>
+deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=false current=false
+deploy: spec resolution failed: platform config: serviceszone "services.kppaas.com" must be "erunpaas.com" or a subdomain of it
+platform config: serviceszone "services.kppaas.com" must be "erunpaas.com" or a subdomain of it

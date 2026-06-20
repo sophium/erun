@@ -418,6 +418,13 @@ func loadProjectK8sPlanForRepo(repoPath, environment string) (ProjectK8sConfig, 
 		}
 		return ProjectK8sConfig{}, err
 	}
+	// A malformed platform block would otherwise surface only later, when
+	// deploy templates platform artifacts (PowerDNS zone, exposure hostnames)
+	// from these values. Reject it here so an inconsistent base-domain /
+	// services-zone / authoritative-IP fails the deploy plan up front.
+	if err := config.Platform.Validate(); err != nil {
+		return ProjectK8sConfig{}, err
+	}
 	return config.K8sForEnvironment(environment), nil
 }
 
