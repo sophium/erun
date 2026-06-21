@@ -16,7 +16,7 @@ var errMissingDeployVersion = errors.New("deploy requires a version: it installs
 
 type DeployInput struct {
 	Component  string   `json:"component,omitempty" jsonschema:"component name for the devops k8s deploy COMPONENT command"`
-	Components []string `json:"components,omitempty" jsonschema:"opt-in components to include alongside the runtime chart (erun-backend-postgres, erun-backend-db, erun-backend-api); ignored when component is set"`
+	Components []string `json:"components,omitempty" jsonschema:"opt-in components to include alongside the runtime chart (erun-backend-postgres, erun-backend-db, erun-backend-api, erun-powerdns); ignored when component is set"`
 	Version    string   `json:"version" jsonschema:"required published version to install by reference (produced by build then push); deploy installs by reference and never builds"`
 	Force      bool     `json:"force,omitempty" jsonschema:"when true, re-run the helm upgrade even when the deployed release already matches the requested version"`
 	Timeout    string   `json:"timeout,omitempty" jsonschema:"override the helm rollout wait for this deploy as a Go duration (e.g. 8m); empty uses the env's deploy.timeout or the 5m default. The deploy keeps waiting while an image is still pulling and aborts early on a real container failure"`
