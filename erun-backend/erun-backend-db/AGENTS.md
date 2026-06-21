@@ -107,19 +107,20 @@ Module-specific guidance for `erun-backend-db`. Follow the repository root and `
 
 - Prefer natural keys when the source value is globally stable, already externally defined, and is the exact lookup key used by the workflow.
 - Do not add surrogate IDs to mapping tables when a natural key already exists and is stable.
-- `tenant_issuers` uses `issuer` as its primary key because the OIDC issuer is the authenticated lookup key and must be globally unique.
+- `tenant_issuers` does not use `issuer` as a global primary key: a shared (org-scoped) issuer maps to many tenants. Its identity is `UNIQUE (tenant_id, issuer)` (a tenant maps an issuer once), and resolution uses `UNIQUE NULLS NOT DISTINCT (issuer, org_field_value)`. The per-issuer org-scoping mode lives once on `issuers.org_field_key`, and `issuers.issuer` is the globally unique issuer registry key.
 - Mapping tables may still include `tenant_id` or other foreign keys for traversal and integrity, but those foreign keys should not replace the natural lookup key.
 - Add composite uniqueness when another table needs to prove that two columns belong together. `tenant_issuers` keeps `UNIQUE (tenant_id, issuer)` so `user_external_ids` can foreign-key `(tenant_id, issuer)`.
 - Use UUIDv7 surrogate primary keys only for domain records that need their own externally visible identity, such as `tenants.tenant_id` or `users.user_id`.
 - Do not use UUID primary keys for purely internal association rows unless there is a current API, audit, or lifecycle requirement to address that row directly.
-- Keep identity-provider issuers globally unique in `tenant_issuers.issuer`, while allowing multiple issuer rows to reference the same `tenant_id`.
+- Register each OIDC issuer once in `issuers` (the globally unique issuer key). It may resolve to one tenant (single-tenant, NULL `org_field_value`) or many (org-scoped, one `tenant_issuers` row per org value). Multiple distinct issuers may still map to the same tenant.
 
 ## Multi-Tenant Database Plan
 
 - Use a shared database with tenant-scoped rows by default, not one database per tenant.
 - The `tenants` table is the root tenant registry. It stores tenant identity and tenant type without assuming a single identity provider issuer.
 - `tenants.type` must be one of `OPERATIONS` or `COMPANY` and defaults to `COMPANY`.
-- The `tenant_issuers` table maps OIDC issuers (`iss`) to tenants. Multiple issuers may map to the same tenant, but each issuer must be globally unique.
+- The `issuers` table holds each OIDC issuer once with its org-scoping mode: `org_field_key` NULL means a single-tenant issuer (the common case — BYO/external IdPs like cloud workload identity or a tenant's own OIDC); a set `org_field_key` names the token claim carrying the org for a shared multi-tenant issuer (e.g. a hosted Zitadel).
+- The `tenant_issuers` table maps `(issuer, org_field_value) → tenant`. An issuer is **not** globally unique to one tenant: a single-tenant issuer maps to exactly one tenant (NULL `org_field_value`), and an org-scoped issuer maps to many tenants (one row per org value). `UNIQUE NULLS NOT DISTINCT (issuer, org_field_value)` keeps the resolution key unambiguous; `tenant_issuers.issuer` foreign-keys `issuers(issuer)`. Multiple distinct issuers may still map to the same tenant.
 - The `users` table stores tenant-owned users with `user_id` as the UUIDv7 externally visible user identity.
 - The `user_external_ids` table maps multiple external identity-provider subjects to one user.
 - User external IDs must be unique per tenant with `PRIMARY KEY (tenant_id, issuer, external_id)`.
@@ -158,7 +159,7 @@ Module-specific guidance for `erun-backend-db`. Follow the repository root and `
 ## Initial Schema Direction
 
 - `tenants` stores tenant ID, name, type, and timestamps.
-- `tenant_issuers` stores globally unique OIDC issuers mapped to tenants.
+- `issuers` stores each OIDC issuer once with its org-scoping mode (`org_field_key`). `tenant_issuers` maps `(issuer, org_field_value)` to tenants — single-tenant (NULL org) or org-scoped (one row per org value).
 - `users` stores tenant-owned user records with a tenant-scoped `username`.
 - `user_external_ids` stores one or more external identity-provider subject IDs for each user, unique per tenant, issuer, and external ID.
 - `roles` stores tenant-owned role records with tenant-scoped names.
@@ -178,6 +179,7 @@ Module-specific guidance for `erun-backend-db`. Follow the repository root and `
 - Required common audit fields are `tenant_id`, `erun_user_id`, `external_user_id`, `external_issuer_id`, `type`, and `created_at`.
 - `type` must be one of `API`, `MCP`, or `CLI`.
 - `external_issuer_id` stores the OIDC `iss` value that mapped to the tenant.
+- `external_org_id` stores the org/resource-owner claim value (for org-scoped issuers) that, together with `iss`, resolved the tenant; NULL for single-tenant issuers.
 - `external_user_id` stores the external subject/user ID presented by the identity provider.
 - `erun_user_id` stores the internal ERun user ID resolved from the external identity.
 - API audit events must set `api_method` and `api_path`. `api_method` must be one of `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`, or `HEAD`.

@@ -7,6 +7,7 @@ env "default" {
   src = [
     "file://schema/rls/context.sql",
     "file://schema/tables/tenants.sql",
+    "file://schema/tables/issuers.sql",
     "file://schema/tables/tenant_issuers.sql",
     "file://schema/tables/users.sql",
     "file://schema/tables/user_external_ids.sql",
