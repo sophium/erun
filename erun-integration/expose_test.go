@@ -32,6 +32,22 @@ func TestExpose(t *testing.T) {
 		golden.Equal(t, "expose/dry_run", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_cross_cluster", func(t *testing.T) {
+		// The platform env (frs-prod) that owns PowerDNS is on a different
+		// cluster than the target env (team-dev). The per-env wildcard DNS write
+		// must exec against the platform env's own kube context, while the Ingress
+		// applies against the target env's context — the two must not collapse to
+		// one (a cross-cluster misroute). The platform env is seeded with a
+		// distinct context to lock that the DNS exec uses it.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedTenantEnvWithContext(t, setup, "frs", "prod", "platform-context")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectK8sConfig(t, setup, "platform:\n  basedomain: erunpaas.com\n  env: frs-prod\n  authoritativeip: 203.0.113.10\n")
+		result := erun.Run(t, []string{"expose", "team", "dev", "api", "--ip", "203.0.113.10", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "expose/dry_run_cross_cluster", normalize.Apply(result.Combined))
+	})
+
 	t.Run("requires_platform_config", func(t *testing.T) {
 		// expose only makes sense for a platform deployment; without a platform
 		// block in .erun/config.yaml it fails with an actionable error rather

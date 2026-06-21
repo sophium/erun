@@ -7,6 +7,8 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
@@ -17,13 +19,106 @@ import (
 type IdentityRepository struct {
 	db      *bun.DB
 	dialect Dialect
+	orgKeys *issuerOrgKeyCache
 }
 
 func NewIdentityRepository(db *sql.DB, dialect Dialect) *IdentityRepository {
 	if dialect == "" {
 		dialect = DialectPostgres
 	}
-	return &IdentityRepository{db: bun.NewDB(db, pgdialect.New()), dialect: dialect}
+	return &IdentityRepository{db: bun.NewDB(db, pgdialect.New()), dialect: dialect, orgKeys: newIssuerOrgKeyCache()}
+}
+
+// issuerOrgKeyCacheTTL bounds how long a cached issuers.org_field_key (the
+// per-issuer org-scoping mode) is trusted before re-reading it, so an issuer
+// reconfigured between single-tenant and org-scoped converges without a restart.
+const issuerOrgKeyCacheTTL = 5 * time.Minute
+
+// issuerOrgKeyCache memoizes the small, stable issuers.org_field_key lookup so
+// the authenticated hot path (cache-key derivation and resolution) does not read
+// the issuers table on every request.
+type issuerOrgKeyCache struct {
+	mu      sync.Mutex
+	entries map[string]issuerOrgKeyEntry
+}
+
+type issuerOrgKeyEntry struct {
+	orgFieldKey string
+	registered  bool
+	expiresAt   time.Time
+}
+
+func newIssuerOrgKeyCache() *issuerOrgKeyCache {
+	return &issuerOrgKeyCache{entries: make(map[string]issuerOrgKeyEntry)}
+}
+
+func (c *issuerOrgKeyCache) get(issuer string) (issuerOrgKeyEntry, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.entries[issuer]
+	if !ok {
+		return issuerOrgKeyEntry{}, false
+	}
+	if !time.Now().Before(entry.expiresAt) {
+		delete(c.entries, issuer)
+		return issuerOrgKeyEntry{}, false
+	}
+	return entry, true
+}
+
+func (c *issuerOrgKeyCache) set(issuer string, entry issuerOrgKeyEntry) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry.expiresAt = time.Now().Add(issuerOrgKeyCacheTTL)
+	c.entries[issuer] = entry
+}
+
+// orgFieldKeyForIssuer returns the issuer's org-scoping mode: registered=false
+// means the issuer is not in the issuers registry, registered=true with an empty
+// orgFieldKey means a single-tenant issuer, and a non-empty orgFieldKey names the
+// token claim whose value selects the tenant. Reads are memoized for a bounded TTL.
+func (r *IdentityRepository) orgFieldKeyForIssuer(ctx context.Context, issuer string) (orgFieldKey string, registered bool, err error) {
+	if r.orgKeys != nil {
+		if entry, ok := r.orgKeys.get(issuer); ok {
+			return entry.orgFieldKey, entry.registered, nil
+		}
+	}
+	var key sql.NullString
+	scanErr := r.db.NewRaw(`SELECT org_field_key FROM issuers WHERE issuer = ?`, issuer).Scan(ctx, &key)
+	if scanErr != nil {
+		if errors.Is(normalizeNoRows(scanErr), ErrNotFound) {
+			// Do not cache the unregistered case: an issuer registered by
+			// first-identity bootstrap would otherwise stay falsely unknown for
+			// the whole TTL. Unregistered lookups are rare and cheap.
+			return "", false, nil
+		}
+		return "", false, scanErr
+	}
+	value := ""
+	if key.Valid {
+		value = strings.TrimSpace(key.String)
+	}
+	if r.orgKeys != nil {
+		r.orgKeys.set(issuer, issuerOrgKeyEntry{orgFieldKey: value, registered: true})
+	}
+	return value, true, nil
+}
+
+// ResolveOrg returns the org claim value that, with the issuer, resolves the
+// tenant for an org-scoped issuer; it returns "" for single-tenant or
+// unregistered issuers. It is the authoritative source for the identity cache
+// key's org dimension, so the same (issuer, subject) presenting different org
+// claims cannot collide on one cached tenant. Resolution failures are surfaced
+// as errors so the caller can fall through to full resolution.
+func (r *IdentityRepository) ResolveOrg(ctx context.Context, claims security.Claims) (string, error) {
+	orgFieldKey, registered, err := r.orgFieldKeyForIssuer(ctx, strings.TrimSpace(claims.Issuer))
+	if err != nil {
+		return "", err
+	}
+	if !registered || orgFieldKey == "" {
+		return "", nil
+	}
+	return orgClaimValue(claims.Raw, orgFieldKey), nil
 }
 
 func (r *IdentityRepository) ResolveIdentity(ctx context.Context, claims security.Claims) (model.Tenant, model.User, error) {
@@ -92,15 +187,19 @@ func (r *IdentityRepository) refreshUserUsername(ctx context.Context, tenant mod
 // routes to first-identity bootstrap when the database is empty.
 func (r *IdentityRepository) ResolveTenantByIssuer(ctx context.Context, claims security.Claims) (model.Tenant, error) {
 	issuer := strings.TrimSpace(claims.Issuer)
-	var orgFieldKey sql.NullString
-	if err := r.db.NewRaw(`SELECT org_field_key FROM issuers WHERE issuer = ?`, issuer).Scan(ctx, &orgFieldKey); err != nil {
-		return model.Tenant{}, normalizeNoRows(err)
+	orgFieldKey, registered, err := r.orgFieldKeyForIssuer(ctx, issuer)
+	if err != nil {
+		return model.Tenant{}, err
+	}
+	if !registered {
+		// Unregistered issuer: unauthorized, or routes to first-identity
+		// bootstrap when the database is empty.
+		return model.Tenant{}, ErrNotFound
 	}
 
 	var tenant model.Tenant
-	var err error
-	if key := strings.TrimSpace(orgFieldKey.String); orgFieldKey.Valid && key != "" {
-		org := orgClaimValue(claims.Raw, key)
+	if orgFieldKey != "" {
+		org := orgClaimValue(claims.Raw, orgFieldKey)
 		if org == "" {
 			// Org-scoped issuer but the token carries no usable org claim.
 			return model.Tenant{}, ErrNotFound

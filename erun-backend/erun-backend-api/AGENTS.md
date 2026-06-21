@@ -126,6 +126,7 @@ Module-specific guidance for `erun-backend-api`. Follow the repository root and 
 - Keep negative-cache TTL short enough that newly created users become usable without a long delay.
 - Keep positive-cache TTL bounded so tenant issuer and user mapping changes converge without restarting the API.
 - Key identity caches by issuer and external subject. Do not cache only by subject because subjects are issuer-scoped.
+- Also key on the resolved org claim value for org-scoped (shared) issuers. Under a shared issuer the same `(issuer, subject)` resolves to different tenants per org, so an `(issuer, subject)`-only key would serve one tenant's resolved RLS context to another. Derive the org before the cache lookup (its claim name lives on `issuers.org_field_key`) and include it in the key; single-tenant issuers resolve org to empty and keep `(issuer, subject)` behavior.
 - Do not cache raw bearer tokens as identity keys.
 - Do not let identity cache decisions bypass token verification. Verify the bearer token first, then use claims to look up cached tenant/user resolution.
 - Cache entries must be safe for concurrent requests and must not use package-level mutable globals. Pass cache instances through API construction.

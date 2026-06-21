@@ -28,6 +28,7 @@ func (r *AuditEventRepository) LogAuditEvent(ctx context.Context, event model.Au
 				erun_user_id,
 				external_user_id,
 				external_issuer_id,
+				external_org_id,
 				type,
 				api_method,
 				api_path,
@@ -36,12 +37,13 @@ func (r *AuditEventRepository) LogAuditEvent(ctx context.Context, event model.Au
 				mcp_tool,
 				mcp_tool_parameters,
 				created_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 			event.TenantID,
 			event.ErunUserID,
 			event.ExternalUserID,
 			event.ExternalIssuerID,
+			nullString(event.ExternalOrgID),
 			string(event.Type),
 			nullString(event.APIMethod),
 			nullString(event.APIPath),

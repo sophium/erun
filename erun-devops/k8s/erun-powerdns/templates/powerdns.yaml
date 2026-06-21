@@ -9,8 +9,21 @@
   - :53 is bound on the node via hostNetwork so the public glue record
     (ns1.<base-domain> -> <authoritativeIP>) resolves to this pod. dnsPolicy
     ClusterFirstWithHostNet keeps cluster DNS so `erun-postgres` still resolves.
-  - The HTTP API (used by the DNS-01 broker to write _acme-challenge / wildcard
-    records) is exposed on a ClusterIP Service, guarded by an api-key Secret.
+    The container runs as the image's non-root `pdns` user, so it carries
+    NET_BIND_SERVICE to bind the privileged :53 portably (k8s does not relax
+    ip_unprivileged_port_start the way the local Docker default does).
+  - The HTTP API/webserver is bound to loopback only (127.0.0.1) and is NOT
+    exposed cluster-wide: record writes happen via `pdnsutil` against the gpgsql
+    backend (see `erun-common/expose_exec.go`), not the HTTP API. The api-key
+    Secret and the local webserver remain so a future in-pod DNS-01 broker has a
+    foundation; reaching the API from another pod is a deliberate Phase B change.
+  - The gpgsql backend config (including the postgres password and api-key) is
+    written once to a generated pdns.conf on a per-pod volume and consumed via
+    --config-dir, so secrets never appear in process argv. pdnsutil in this
+    PowerDNS line does not accept --launch/--gpgsql-* on the command line, so a
+    config file is the only way to point it at the backend; pdns_server uses the
+    same file. The image ships a default sqlite pdns.conf that is fatal under
+    --launch=gpgsql, which --config-dir to the generated file also avoids.
   - The gpgsql schema is lifted out of the pinned PowerDNS image itself, so it
     always matches the server version, then loaded once into the powerdns DB.
 
@@ -44,6 +57,7 @@
 {{- $platform := default dict .Values.platform -}}
 {{- $servicesZone := default "" $platform.servicesZone -}}
 {{- $nameservers := default (list) $platform.nameservers -}}
+{{- $configDir := "/etc/pdns-shared" -}}
 apiVersion: v1
 kind: Secret
 metadata:
@@ -53,21 +67,6 @@ metadata:
 type: Opaque
 stringData:
   {{ $apiKeySecretKey }}: {{ $apiKey | quote }}
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: erun-powerdns-api
-  labels:
-    app: erun-powerdns
-spec:
-  type: ClusterIP
-  selector:
-    app: erun-powerdns
-  ports:
-    - name: api
-      port: {{ $apiPort }}
-      targetPort: api
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -90,6 +89,49 @@ spec:
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
       initContainers:
+        # Generate the gpgsql backend config (with the postgres password and
+        # api-key from their Secrets) onto a per-pod volume, consumed by both
+        # pdns_server and pdnsutil via --config-dir. Keeps secrets out of argv,
+        # and avoids the image's default sqlite pdns.conf that is fatal under
+        # --launch=gpgsql.
+        - name: config-gen
+          image: {{ $powerdnsImage }}
+          env:
+            - name: PDNS_GPGSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $postgresPasswordSecretName }}
+                  key: {{ $postgresPasswordSecretKey }}
+            - name: PDNS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $apiKeySecretName }}
+                  key: {{ $apiKeySecretKey }}
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              umask 077
+              cat > {{ $configDir }}/pdns.conf <<EOF
+              launch=gpgsql
+              gpgsql-host={{ $postgresHost }}
+              gpgsql-port={{ $postgresPort }}
+              gpgsql-dbname={{ $powerdnsDatabase }}
+              gpgsql-user={{ $postgresUser }}
+              gpgsql-password=$PDNS_GPGSQL_PASSWORD
+              local-address=0.0.0.0
+              local-port=53
+              api=yes
+              api-key=$PDNS_API_KEY
+              webserver=yes
+              webserver-address=127.0.0.1
+              webserver-port={{ $apiPort }}
+              webserver-allow-from=127.0.0.1
+              EOF
+          volumeMounts:
+            - name: config
+              mountPath: {{ $configDir }}
         # Lift the gpgsql schema out of the pinned PowerDNS image so it always
         # matches the server version, onto a shared volume the loader can read.
         - name: schema-source
@@ -97,7 +139,7 @@ spec:
           command:
             - sh
             - -c
-            - cp /usr/share/pdns-backend-pgsql/schema/schema.pgsql.sql /schema/schema.sql
+            - cp /usr/local/share/doc/pdns/schema.pgsql.sql /schema/schema.sql
           volumeMounts:
             - name: schema
               mountPath: /schema
@@ -139,60 +181,32 @@ spec:
         # Bootstrap the authoritative services zone once, with its nameservers,
         # from the per-instance platform config that deploy threads in as
         # platform.* values. Idempotent (skips when the zone already exists).
-        # Per-env wildcard/_acme-challenge records are added later via the API.
+        # Per-env wildcard/_acme-challenge records are added later via pdnsutil.
         - name: zone-bootstrap
           image: {{ $powerdnsImage }}
-          env:
-            - name: PDNS_GPGSQL_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ $postgresPasswordSecretName }}
-                  key: {{ $postgresPasswordSecretKey }}
           command:
             - sh
             - -c
             - |
               set -e
-              pdnsutil="pdnsutil --launch=gpgsql --gpgsql-host={{ $postgresHost }} --gpgsql-port={{ $postgresPort }} --gpgsql-dbname={{ $powerdnsDatabase }} --gpgsql-user={{ $postgresUser }} --gpgsql-password=$PDNS_GPGSQL_PASSWORD"
-              if ! $pdnsutil list-zone {{ $servicesZone | quote }} >/dev/null 2>&1; then
-                $pdnsutil create-zone {{ $servicesZone | quote }}{{ range $ns := $nameservers }} {{ $ns | quote }}{{ end }}
+              if ! pdnsutil --config-dir={{ $configDir }} list-zone {{ $servicesZone | quote }} >/dev/null 2>&1; then
+                pdnsutil --config-dir={{ $configDir }} create-zone {{ $servicesZone | quote }}{{ range $ns := $nameservers }} {{ $ns | quote }}{{ end }}
               fi
+          volumeMounts:
+            - name: config
+              mountPath: {{ $configDir }}
         {{- end }}
       containers:
         - name: erun-powerdns
           image: {{ $powerdnsImage }}
           imagePullPolicy: IfNotPresent
-          env:
-            - name: PDNS_GPGSQL_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ $postgresPasswordSecretName }}
-                  key: {{ $postgresPasswordSecretKey }}
-            - name: PDNS_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ $apiKeySecretName }}
-                  key: {{ $apiKeySecretKey }}
+          securityContext:
+            # Non-root pdns user binding privileged :53 under hostNetwork.
+            capabilities:
+              add: ["NET_BIND_SERVICE"]
           command:
             - pdns_server
-          # CLI args take precedence over the image's default pdns.conf, so the
-          # backend/API config is explicit here. Secrets are injected via the
-          # $(VAR) env substitution kubelet performs on args.
-          args:
-            - --launch=gpgsql
-            - --gpgsql-host={{ $postgresHost }}
-            - --gpgsql-port={{ $postgresPort }}
-            - --gpgsql-dbname={{ $powerdnsDatabase }}
-            - --gpgsql-user={{ $postgresUser }}
-            - --gpgsql-password=$(PDNS_GPGSQL_PASSWORD)
-            - --local-address=0.0.0.0
-            - --local-port=53
-            - --api=yes
-            - --api-key=$(PDNS_API_KEY)
-            - --webserver=yes
-            - --webserver-address=0.0.0.0
-            - --webserver-port={{ $apiPort }}
-            - --webserver-allow-from=0.0.0.0/0
+            - --config-dir={{ $configDir }}
           ports:
             - name: dns-udp
               containerPort: 53
@@ -202,20 +216,26 @@ spec:
               containerPort: 53
               hostPort: 53
               protocol: TCP
-            - name: api
-              containerPort: {{ $apiPort }}
+          # Probe the authoritative DNS port (the served surface). The HTTP API
+          # is loopback-only, so kubelet (which probes the pod/node IP under
+          # hostNetwork) cannot reach it.
           readinessProbe:
             tcpSocket:
-              port: api
+              port: dns-tcp
             periodSeconds: 5
             timeoutSeconds: 2
           startupProbe:
             tcpSocket:
-              port: api
+              port: dns-tcp
             periodSeconds: 2
             timeoutSeconds: 2
             failureThreshold: 60
+          volumeMounts:
+            - name: config
+              mountPath: {{ $configDir }}
       volumes:
         - name: schema
+          emptyDir: {}
+        - name: config
           emptyDir: {}
       restartPolicy: Always

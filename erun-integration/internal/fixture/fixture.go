@@ -59,6 +59,36 @@ func SeedTenantEnv(t testing.TB, setup env.Setup, tenant, environment string) {
 	)
 }
 
+// SeedTenantEnvWithContext writes the same minimal config tree as SeedTenantEnv
+// but with a caller-chosen kubernetes context, so a scenario can place a second
+// environment on a distinct cluster (e.g. the platform env that owns PowerDNS
+// vs. a target env on another cluster, for expose's cross-cluster DNS routing).
+func SeedTenantEnvWithContext(t testing.TB, setup env.Setup, tenant, environment, kubernetesContext string) {
+	t.Helper()
+	root := filepath.Join(setup.ConfigHome, "erun")
+	tenantDir := filepath.Join(root, tenant)
+	envDir := filepath.Join(tenantDir, environment)
+	for _, dir := range []string{root, tenantDir, envDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	mustWrite(t, filepath.Join(tenantDir, "config.yaml"),
+		"projectroot: "+setup.Cwd+"\n"+
+			"name: "+tenant+"\n"+
+			"defaultenvironment: "+environment+"\n",
+	)
+	mustWrite(t, filepath.Join(envDir, "config.yaml"),
+		"name: "+environment+"\n"+
+			"repopath: "+setup.Cwd+"\n"+
+			"kubernetescontext: "+kubernetesContext+"\n"+
+			"containerregistry: registry.example/test\n"+
+			"runtimeversion: 1.0.0\n"+
+			"type: local-agent\n",
+	)
+}
+
 // SeedTenantEnvWithDeployTimeout writes the same minimal config tree as
 // SeedTenantEnv plus a per-env `deploy.timeout`, so deploy scenarios can
 // exercise the configurable helm rollout timeout (the value flows into the

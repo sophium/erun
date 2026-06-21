@@ -2,5 +2,5 @@ audit: erun expose --dry-run --ip <VERSION>.10 team dev api
 expose: api.team-dev.services.erunpaas.com -> service api.team-dev.svc:80
 expose: per-env wildcard *.team-dev.services.erunpaas.com A <VERSION>.10 ttl 60 (zone services.erunpaas.com)
 expose: platform powerdns namespace frs-prod
-kubectl -n frs-prod exec deploy/erun-powerdns -- pdnsutil --config-dir=/etc/pdns-shared replace-rrset services.erunpaas.com '*.team-dev' A 60 <VERSION>.10
+kubectl --context platform-context -n frs-prod exec deploy/erun-powerdns -- pdnsutil --config-dir=/etc/pdns-shared replace-rrset services.erunpaas.com '*.team-dev' A 60 <VERSION>.10
 kubectl --context test-context -n team-dev apply -f -
