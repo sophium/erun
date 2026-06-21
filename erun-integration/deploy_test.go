@@ -719,6 +719,20 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/rejects_inconsistent_platform_config", normalize.Apply(result.Combined))
 	})
 
+	t.Run("platform_config_threads_into_helm_set", func(t *testing.T) {
+		// A valid `platform:` block flows into every chart's helm command as
+		// guarded platform.* --set args, with Resolve's defaults filled in
+		// (serviceszone/authhost/nameservers derived from basedomain). Only the
+		// PowerDNS singleton reads them; the runtime chart ignores them. Proves
+		// the deploy -> platform-config -> helm wiring end to end.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedProjectK8sConfig(t, setup, "platform:\n  basedomain: erunpaas.com\n  env: frs-prod\n  authoritativeip: 212.93.120.230\n")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "deploy/platform_config_threads_into_helm_set", normalize.Apply(result.Combined))
+	})
+
 	t.Run("components_rejects_unknown_name", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
