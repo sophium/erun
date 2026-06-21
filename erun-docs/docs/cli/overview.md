@@ -29,6 +29,7 @@ The `build → release → push → deploy` commands form ERun's delivery pipeli
 | [`erun release`](/cli/release) | Cut a release: stamp the version, tag it, push the tag. |
 | [`erun push`](/cli/push) | Push built images to the configured container registry. |
 | [`erun deploy`](/cli/deploy) | Roll a version out to an environment (build · push · helm upgrade). |
+| [`erun expose`](/cli/expose) | Expose an env's Service at a public hostname under the platform's services zone. |
 | [`erun cloud`](/cli/cloud) | Set up and manage cloud provider aliases (AWS SSO). |
 | [`erun context`](/cli/context) | Create and power managed cloud contexts (an EC2 instance running k3s). |
 | [`erun sshd`](/cli/sshd) | Enable SSH (and IDE) access to a remote environment. |

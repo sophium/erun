@@ -23,6 +23,10 @@ type Context struct {
 	ErunUserID     string
 	ExternalIssuer string
 	ExternalUserID string
+	// ExternalOrgID is the org/resource-owner claim value that, together with
+	// ExternalIssuer, resolved the tenant for an org-scoped (shared) issuer.
+	// Empty for single-tenant issuers, where the issuer alone resolves the tenant.
+	ExternalOrgID string
 }
 
 type contextKey struct{}

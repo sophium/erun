@@ -123,6 +123,7 @@ These wrap the [pure command primitives](/concepts/command-primitives): `build` 
 | `deploy` | `erun deploy` | Per-chart rollout status, helm release info. Requires `version`. |
 | `release` | `erun release` | Released version, tag, multi-arch confirmation. |
 | `open` | `erun open` | Local SSH + MCP ports, status (`opened` / `already_open`). |
+| `expose` | `erun expose` | Resolved public hostname, per-env wildcard record, Host-routing Ingress. Requires a `platform:` block. Supports preview (dry-run). |
 | `init` | `erun init` | Created files, deployed namespace. |
 | `delete` | `erun delete` | Namespace deleted, local config removed. |
 

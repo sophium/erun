@@ -102,17 +102,31 @@ func (c PlatformConfig) Validate() error {
 	if !isDNSName(resolved.BaseDomain) {
 		return fmt.Errorf("platform config: basedomain %q is not a valid domain name", resolved.BaseDomain)
 	}
-	if !isUnderDomain(resolved.ServicesZone, resolved.BaseDomain) {
-		return fmt.Errorf("platform config: serviceszone %q must be %q or a subdomain of it", resolved.ServicesZone, resolved.BaseDomain)
+	if err := validatePlatformHost("serviceszone", resolved.ServicesZone, resolved.BaseDomain); err != nil {
+		return err
 	}
-	if !isUnderDomain(resolved.AuthHost, resolved.BaseDomain) {
-		return fmt.Errorf("platform config: authhost %q must be %q or a subdomain of it", resolved.AuthHost, resolved.BaseDomain)
+	if err := validatePlatformHost("authhost", resolved.AuthHost, resolved.BaseDomain); err != nil {
+		return err
 	}
 	if resolved.AuthoritativeIP != "" && net.ParseIP(resolved.AuthoritativeIP) == nil {
 		return fmt.Errorf("platform config: authoritativeip %q is not a valid IP address", resolved.AuthoritativeIP)
 	}
 	if resolved.Env != "" && normalizeNamespaceName(resolved.Env) != resolved.Env {
 		return fmt.Errorf("platform config: env %q must be a DNS-safe namespace label (lowercase letters, digits, and hyphens)", resolved.Env)
+	}
+	return nil
+}
+
+// validatePlatformHost checks that a derived platform host (the services zone or
+// the auth host) is a valid domain name and sits at or under the base domain,
+// keeping the nothing-hardcoded invariant honest and the value safe to thread
+// into helm --set-string.
+func validatePlatformHost(field, host, base string) error {
+	if !isDNSName(host) {
+		return fmt.Errorf("platform config: %s %q is not a valid domain name", field, host)
+	}
+	if !isUnderDomain(host, base) {
+		return fmt.Errorf("platform config: %s %q must be %q or a subdomain of it", field, host, base)
 	}
 	return nil
 }

@@ -267,9 +267,9 @@ Once the version is resolved, `deploy`:
 
 The dry-run trace names the decision per spec: `deploy: version <v> pinned; installing the published image, no local build`. Every env installs by reference from the published `oci://…/charts/erun-devops` chart (or the repo-local chart when the project carries one).
 
-### `--components` value set
+### `--components` value set {#components-value-set}
 
-The `--components` flag's accepted values are derived from `<tenant>-devops/k8s/<component>/Chart.yaml` discovery at command-resolve time. For the erun repository itself, the registered set is `{erun-backend-postgres, erun-backend-db, erun-backend-api}`. Each tenant project ships its own set.
+The `--components` flag accepts a **fixed opt-in set** defined in code (`erun-common/deploy_components.go`, `OptInDeployComponentNames`), not values discovered from chart files. The set is `{erun-backend-postgres, erun-backend-db, erun-backend-api, erun-powerdns}`. These charts are never deployed by default — they ship only when explicitly named via `--components` or listed in the env's `k8s.deployments` plan (listing a chart in the plan is an implicit opt-in). An unrecognised name is rejected before any deploy runs with `unknown deploy component "<name>"; valid opt-in components are: erun-backend-postgres, erun-backend-db, erun-backend-api, erun-powerdns`, so typos surface immediately. `erun-powerdns` is the platform's authoritative DNS singleton; it runs the gpgsql backend against `erun-backend-postgres`, so it must be sequenced after it in the plan.
 
 ### Deploy-plan resolution
 

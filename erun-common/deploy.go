@@ -1783,11 +1783,11 @@ func helmPlatformSetArgs(p PlatformConfig) []string {
 		return nil
 	}
 	args := []string{
-		"--set-string", "platform.baseDomain=" + p.BaseDomain,
-		"--set-string", "platform.env=" + p.Env,
-		"--set-string", "platform.servicesZone=" + p.ServicesZone,
-		"--set-string", "platform.authoritativeIP=" + p.AuthoritativeIP,
-		"--set-string", "platform.authHost=" + p.AuthHost,
+		"--set-string", "platform.baseDomain=" + escapeHelmSetValue(p.BaseDomain),
+		"--set-string", "platform.env=" + escapeHelmSetValue(p.Env),
+		"--set-string", "platform.servicesZone=" + escapeHelmSetValue(p.ServicesZone),
+		"--set-string", "platform.authoritativeIP=" + escapeHelmSetValue(p.AuthoritativeIP),
+		"--set-string", "platform.authHost=" + escapeHelmSetValue(p.AuthHost),
 	}
 	if len(p.Nameservers) > 0 {
 		if encoded, marshalErr := json.Marshal(p.Nameservers); marshalErr == nil {

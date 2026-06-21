@@ -122,6 +122,34 @@ For the public form, each segment must match:
 | `<environment>` | `[a-z][a-z0-9-]*` (the cluster's environment alias, e.g. `dev` / `staging` / `prod`) |
 | `<domain>` | RFC-1035 domain, set by the cluster admin. |
 
+## Platform service exposure
+
+`erun expose <tenant> <env> <service>` (CLI and the `expose` MCP tool) automates Pattern 3 for a platform deployment — an install that runs the `erun-powerdns` singleton and declares a [`platform:` block](/reference/configuration#platform-block). For the Operator view see [Networking · Platform service exposure](/concepts/networking#platform-service-exposure).
+
+**Inputs.** `tenant`, `env`, `service` (positional); `--ip` (the env's ingress IP the wildcard record points at; required); `--port` (Service port, default `80`); `--dry-run`.
+
+**Resolved plan.**
+
+| Field | Value |
+|---|---|
+| Public hostname | `<service>.<tenant>-<env>.<servicesZone>` |
+| Per-env wildcard record | `*.<tenant>-<env>.<servicesZone>` `A` `<ip>`, TTL `60` |
+| Services zone | `platform.serviceszone` (defaults to `services.<platform.basedomain>`) |
+| Ingress | `expose-<service>` in namespace `<tenant>-<env>`, Host-routing the hostname to `<service>:<port>` |
+
+**Execution.** Two side effects, in order:
+
+1. **DNS write.** `kubectl [--context <platform-ctx>] -n <platform-namespace> exec deploy/erun-powerdns -- pdnsutil --config-dir=/etc/pdns-shared replace-rrset <zone> <rel-name> A 60 <ip>`. The platform namespace is `platform.env` normalised to a namespace label; the **platform** env's own kube context is resolved from its env config (`platform.env` is a `<tenant>-<env>` label — tenant names carry no hyphen, so the first hyphen splits it). This is distinct from the target env's context — the DNS write lands on the cluster PowerDNS runs on, the Ingress on the target env's cluster, which may differ. If the platform env config is not loadable, the platform context is empty and `kubectl` falls back to the current context.
+2. **Ingress apply.** `kubectl [--context <env-ctx>] -n <tenant>-<env> apply -f -` with a `networking.k8s.io/v1` Ingress (`app.kubernetes.io/managed-by: erun-expose`), manifest piped on stdin.
+
+The dry-run trace prints both `kubectl` commands verbatim (including the TTL) plus the resolved hostname, wildcard, and platform namespace — no synthetic verbs, no side effects.
+
+**Records, not the HTTP API.** Writes go through `pdnsutil` against the gpgsql backend (the PowerDNS pod reads its connection — including the postgres password — from a generated `--config-dir` config, so no secret appears in the exec argv). The PowerDNS HTTP API is bound to loopback only and is not used by `expose`.
+
+**TLS.** The applied Ingress is HTTP-only (no `tls:`, no cert-manager annotation). The CLI prints `http://<hostname>`. A wildcard TLS certificate is `(Planned.)` — it arrives with the DNS-01 broker, at which point the hostname serves `https://`.
+
+**Idempotency / errors.** `replace-rrset` and `apply` are both idempotent; re-running converges. The wildcard record is written before the Ingress, so a failure applying the Ingress can leave the DNS record in place — re-run after resolving the cluster issue. Pre-flight validation (missing/malformed `platform:` block, missing `--ip`, non-DNS-1035 service name) fails before any write; see [`erun expose` · Error behaviour](/cli/expose#error-behaviour).
+
 ## Cross-namespace traffic semantics
 
 ERun's runtime chart deploys a default-deny `NetworkPolicy` per env that blocks ingress from outside the namespace. The shape:

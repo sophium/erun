@@ -28,6 +28,10 @@ type User = model.User
 type Identity struct {
 	Tenant Tenant
 	User   User
+	// Org is the resolved org claim value for an org-scoped issuer (empty for
+	// single-tenant issuers). It is part of the identity cache key and is recorded
+	// on audit events as external_org_id.
+	Org string
 }
 
 type IdentityResolver interface {
@@ -37,6 +41,21 @@ type IdentityResolver interface {
 type IdentityResolverFunc func(ctx context.Context, claims Claims) (Tenant, User, error)
 
 func (f IdentityResolverFunc) ResolveIdentity(ctx context.Context, claims Claims) (Tenant, User, error) {
+	return f(ctx, claims)
+}
+
+// OrgResolver derives the org claim value that, together with the issuer,
+// resolves the tenant for an org-scoped (shared) issuer. It returns "" for
+// single-tenant or unregistered issuers. The middleware uses it to compute the
+// identity cache key's org dimension before resolution, so a shared issuer
+// cannot collide different orgs onto one cached tenant.
+type OrgResolver interface {
+	ResolveOrg(ctx context.Context, claims Claims) (string, error)
+}
+
+type OrgResolverFunc func(ctx context.Context, claims Claims) (string, error)
+
+func (f OrgResolverFunc) ResolveOrg(ctx context.Context, claims Claims) (string, error) {
 	return f(ctx, claims)
 }
 
@@ -99,6 +118,9 @@ type AuthContext struct {
 	Claims Claims
 	Tenant Tenant
 	User   User
+	// Org is the resolved org claim value for an org-scoped issuer; empty for
+	// single-tenant issuers.
+	Org string
 }
 
 type authContextKey struct{}
@@ -109,13 +131,14 @@ func AuthFromContext(ctx context.Context) (AuthContext, bool) {
 }
 
 type AuthMiddleware struct {
-	verifier   TokenVerifier
-	identities IdentityResolver
-	tenants    TenantResolver
-	users      UserResolver
-	cache      *IdentityResolutionCache
-	audit      AuditLogger
-	authz      Authorizer
+	verifier    TokenVerifier
+	identities  IdentityResolver
+	tenants     TenantResolver
+	users       UserResolver
+	orgResolver OrgResolver
+	cache       *IdentityResolutionCache
+	audit       AuditLogger
+	authz       Authorizer
 }
 
 type AuthMiddlewareOptions struct {
@@ -123,6 +146,7 @@ type AuthMiddlewareOptions struct {
 	IdentityResolver IdentityResolver
 	TenantResolver   TenantResolver
 	UserResolver     UserResolver
+	OrgResolver      OrgResolver
 	IdentityCache    *IdentityResolutionCache
 	AuditLogger      AuditLogger
 	Authorizer       Authorizer
@@ -139,13 +163,14 @@ func NewAuthMiddleware(options AuthMiddlewareOptions) (*AuthMiddleware, error) {
 		return nil, errors.New("user resolver is required")
 	}
 	return &AuthMiddleware{
-		verifier:   options.TokenVerifier,
-		identities: options.IdentityResolver,
-		tenants:    options.TenantResolver,
-		users:      options.UserResolver,
-		cache:      options.IdentityCache,
-		audit:      options.AuditLogger,
-		authz:      options.Authorizer,
+		verifier:    options.TokenVerifier,
+		identities:  options.IdentityResolver,
+		tenants:     options.TenantResolver,
+		users:       options.UserResolver,
+		orgResolver: options.OrgResolver,
+		cache:       options.IdentityCache,
+		audit:       options.AuditLogger,
+		authz:       options.Authorizer,
 	}, nil
 }
 
@@ -181,6 +206,7 @@ func (m *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 			Claims: claims,
 			Tenant: identity.Tenant,
 			User:   identity.User,
+			Org:    identity.Org,
 		})
 		ctx = security.WithContext(ctx, security.Context{
 			TenantID:       identity.Tenant.TenantID,
@@ -188,6 +214,7 @@ func (m *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 			ErunUserID:     identity.User.UserID,
 			ExternalIssuer: claims.Issuer,
 			ExternalUserID: claims.Subject,
+			ExternalOrgID:  identity.Org,
 		})
 		req := r.WithContext(ctx)
 		if m.authz != nil {
@@ -216,8 +243,15 @@ func (m *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 }
 
 func (m *AuthMiddleware) resolveIdentity(ctx context.Context, claims Claims) (Identity, error) {
+	// Derive the org claim value first so it is part of the cache key: a shared
+	// org-scoped issuer maps the same (issuer, subject) to different tenants per
+	// org, so (issuer, subject) alone would leak one tenant's RLS context to
+	// another. A failed org lookup degrades to org="" and falls through to full
+	// resolution, which surfaces the real error.
+	org := m.resolveOrg(ctx, claims)
+
 	if m.cache != nil {
-		if identity, err, ok := m.cache.Get(claims.Issuer, claims.Subject); ok {
+		if identity, err, ok := m.cache.Get(claims.Issuer, claims.Subject, org); ok {
 			if !cachedIdentityNeedsUsernameRefresh(identity, err, claims) {
 				return identity, err
 			}
@@ -231,13 +265,13 @@ func (m *AuthMiddleware) resolveIdentity(ctx context.Context, claims Claims) (Id
 				err = ErrUserNotResolved
 			}
 			if m.cache != nil {
-				m.cache.SetFailure(claims.Issuer, claims.Subject, err)
+				m.cache.SetFailure(claims.Issuer, claims.Subject, org, err)
 			}
 			return Identity{}, err
 		}
-		identity := Identity{Tenant: tenant, User: user}
+		identity := Identity{Tenant: tenant, User: user, Org: org}
 		if m.cache != nil {
-			m.cache.SetSuccess(claims.Issuer, claims.Subject, identity)
+			m.cache.SetSuccess(claims.Issuer, claims.Subject, org, identity)
 		}
 		return identity, nil
 	}
@@ -246,7 +280,7 @@ func (m *AuthMiddleware) resolveIdentity(ctx context.Context, claims Claims) (Id
 	if err != nil || strings.TrimSpace(tenant.TenantID) == "" {
 		err = ErrTenantNotResolved
 		if m.cache != nil {
-			m.cache.SetFailure(claims.Issuer, claims.Subject, err)
+			m.cache.SetFailure(claims.Issuer, claims.Subject, org, err)
 		}
 		return Identity{}, err
 	}
@@ -254,16 +288,31 @@ func (m *AuthMiddleware) resolveIdentity(ctx context.Context, claims Claims) (Id
 	if err != nil || strings.TrimSpace(user.UserID) == "" {
 		err = ErrUserNotResolved
 		if m.cache != nil {
-			m.cache.SetFailure(claims.Issuer, claims.Subject, err)
+			m.cache.SetFailure(claims.Issuer, claims.Subject, org, err)
 		}
 		return Identity{}, err
 	}
 
-	identity := Identity{Tenant: tenant, User: user}
+	identity := Identity{Tenant: tenant, User: user, Org: org}
 	if m.cache != nil {
-		m.cache.SetSuccess(claims.Issuer, claims.Subject, identity)
+		m.cache.SetSuccess(claims.Issuer, claims.Subject, org, identity)
 	}
 	return identity, nil
+}
+
+// resolveOrg derives the org claim value used in the identity cache key. A nil
+// resolver (e.g. non-DB test wiring) or a single-tenant/unregistered issuer
+// yields "", preserving (issuer, subject) keying. Lookup errors also yield ""
+// and are left for full resolution to surface.
+func (m *AuthMiddleware) resolveOrg(ctx context.Context, claims Claims) string {
+	if m.orgResolver == nil {
+		return ""
+	}
+	org, err := m.orgResolver.ResolveOrg(ctx, claims)
+	if err != nil {
+		return ""
+	}
+	return org
 }
 
 func claimsWithUsernameHint(claims Claims, hint string) Claims {
@@ -303,6 +352,7 @@ func (m *AuthMiddleware) logAuditEvent(r *http.Request) error {
 		ErunUserID:       auth.User.UserID,
 		ExternalUserID:   auth.Claims.Subject,
 		ExternalIssuerID: auth.Claims.Issuer,
+		ExternalOrgID:    auth.Org,
 		Type:             model.AuditEventTypeAPI,
 		APIMethod:        r.Method,
 		APIPath:          apiPath,
