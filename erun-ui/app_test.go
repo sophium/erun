@@ -3601,6 +3601,7 @@ type stubTerminalSession struct {
 	mu            sync.Mutex
 	written       []byte
 	initialOutput []byte
+	resizes       [][2]int
 }
 
 // stubSessionReadyOutput is the line every newStubTerminalSession emits
@@ -3644,8 +3645,17 @@ func (s *stubTerminalSession) WrittenString() string {
 	return string(s.written)
 }
 
-func (s *stubTerminalSession) Resize(int, int) error {
+func (s *stubTerminalSession) Resize(cols, rows int) error {
+	s.mu.Lock()
+	s.resizes = append(s.resizes, [2]int{cols, rows})
+	s.mu.Unlock()
 	return nil
+}
+
+func (s *stubTerminalSession) Resizes() [][2]int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([][2]int(nil), s.resizes...)
 }
 
 func (s *stubTerminalSession) Wait() error {
@@ -3753,6 +3763,85 @@ func TestStartAISessionRunsErunOpenAsPersistentAITab(t *testing.T) {
 	}
 	if len(started.InitialInput) != 0 {
 		t.Fatalf("AI tab must not pipe an initial input (claude launches pod-side), got %q", string(started.InitialInput))
+	}
+}
+
+func swapAIRepaintNudgeTimings(delay, settle time.Duration) func() {
+	prevDelay, prevSettle := aiRepaintNudgeDelay, aiRepaintNudgeSettle
+	aiRepaintNudgeDelay, aiRepaintNudgeSettle = delay, settle
+	return func() { aiRepaintNudgeDelay, aiRepaintNudgeSettle = prevDelay, prevSettle }
+}
+
+// TestAISessionRepaintNudgeFiresOnAttachMarker pins the #618 fix: an AI tab
+// reattaching to a running Claude renders blank because Claude (a main-screen
+// TUI) only repaints on a real geometry change, and a same-size reattach
+// raises none. The desktop forces the repaint by briefly resizing the pty one
+// row shorter then back. The attach is detected by the bootstrap's window-title
+// escape (OSC 0), emitted right before `dtach -A` — nudging on the first output
+// overall would fire too early (it is the `erun open` audit trace). Verified
+// end-to-end against a live pod via the headless app + DOM read; this locks the
+// backend contract.
+func TestAISessionRepaintNudgeFiresOnAttachMarker(t *testing.T) {
+	defer swapAIRepaintNudgeTimings(time.Millisecond, time.Millisecond)()
+
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{"erun": {Name: "erun", DefaultEnvironment: "remote"}},
+		envs:    map[string]eruncommon.EnvConfig{"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"}},
+	}
+	session := newStubTerminalSession()
+	app := NewApp(erunUIDeps{
+		store:           store,
+		findProjectRoot: func() (string, string, error) { return "erun", projectRoot, nil },
+		resolveCLIPath:  func() string { return "/tmp/erun" },
+		startTerminal:   func(startTerminalSessionParams) (terminalSession, error) { return session, nil },
+	})
+	defer app.shutdown(context.Background())
+
+	managed := &managedTerminal{
+		session:   session,
+		selection: uiSelection{Tenant: "erun", Environment: "remote"},
+		key:       aiSessionKey(uiSelection{Tenant: "erun", Environment: "remote"}, 0),
+		serial:    1,
+		kind:      sessionKindAI,
+		lastCols:  80,
+		lastRows:  24,
+	}
+	app.mu.Lock()
+	app.sessions[managed.key] = managed
+	app.mu.Unlock()
+
+	var lastActivity time.Time
+	// Output without the attach marker (the open audit trace) must not nudge.
+	app.handleSessionOutput(managed, []byte("audit: erun open --ai --app-session ai erun remote\n"), &lastActivity)
+	time.Sleep(20 * time.Millisecond)
+	if got := session.Resizes(); len(got) != 0 {
+		t.Fatalf("non-marker output must not nudge; got resizes %v", got)
+	}
+
+	// The attach marker (OSC 0 window-title set) triggers shrink-then-restore.
+	app.handleSessionOutput(managed, []byte("\x1b]0;erun-remote\x07"), &lastActivity)
+	want := [][2]int{{80, 23}, {80, 24}}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		got := session.Resizes()
+		if len(got) >= 2 {
+			if got[0] != want[0] || got[1] != want[1] {
+				t.Fatalf("unexpected nudge resizes: got %v want %v", got, want)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("repaint nudge did not fire; resizes=%v", got)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// The nudge is once per attach: a second marker chunk must not re-fire it.
+	app.handleSessionOutput(managed, []byte("\x1b]0;erun-remote\x07"), &lastActivity)
+	time.Sleep(30 * time.Millisecond)
+	if got := session.Resizes(); len(got) != 2 {
+		t.Fatalf("nudge must fire once per attach; got %v", got)
 	}
 }
 

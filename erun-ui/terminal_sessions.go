@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -279,6 +280,8 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 			return a.deps.startTerminal(params)
 		},
 		startedAt: time.Now(),
+		lastCols:  cols,
+		lastRows:  rows,
 	}
 	a.sessions[key] = managed
 	a.mu.Unlock()
@@ -778,6 +781,10 @@ func (a *App) ResizeSession(sessionID, cols, rows int) error {
 
 	a.mu.Lock()
 	managed := a.sessionBySerialLocked(sessionID)
+	if managed != nil {
+		managed.lastCols = cols
+		managed.lastRows = rows
+	}
 	a.mu.Unlock()
 	if managed == nil || managed.session == nil {
 		return nil
@@ -1034,6 +1041,7 @@ func (a *App) handleSessionOutput(managed *managedTerminal, chunk []byte, lastOu
 	})
 	a.feedActivityTraceFromTerminal(managed, chunk)
 	a.recordAIActivity(managed)
+	a.maybeNudgeAIRepaint(managed, chunk)
 	if managed.clearIdleBlockOnOutput {
 		a.mu.Lock()
 		a.releaseIdleBlockLocked(managed)
@@ -1052,6 +1060,85 @@ func (a *App) handleSessionOutput(managed *managedTerminal, chunk []byte, lastOu
 			*lastOutputActivity = time.Now()
 		}
 	}
+}
+
+// aiRepaintNudgeDelay is how long maybeNudgeAIRepaint waits after the
+// attach marker before resizing, so the bootstrap's `dtach -A` (which runs
+// immediately after the marker) has reattached the client to Claude and
+// Claude is listening for the WINCH. aiRepaintNudgeSettle is the gap between
+// the shrink and the restore so the two SIGWINCHes are not coalesced.
+// Vars, not consts, so tests can shrink them; production keeps the defaults.
+var (
+	aiRepaintNudgeDelay  = 400 * time.Millisecond
+	aiRepaintNudgeSettle = 150 * time.Millisecond
+)
+
+// aiAttachMarker is the window-title escape (OSC 0) the open bootstrap prints
+// immediately before `dtach -A` reattaches the client to the running program.
+// It is the precise "Claude is about to be (re)attached" signal — unlike the
+// first output overall, which is the `erun open` audit trace emitted well
+// before the pod-side attach, so nudging on it would fire too early.
+var aiAttachMarker = []byte("\x1b]0;")
+
+// isAITabKind reports whether the session is one of the AI-tab kinds (env AI
+// tab or contribute AI tab) whose program is the managed Claude.
+func isAITabKind(managed *managedTerminal) bool {
+	return managed != nil &&
+		(managed.kind == sessionKindAI || managed.kind == sessionKindContributeAI)
+}
+
+// maybeNudgeAIRepaint fires the once-per-attach AI repaint nudge when the
+// attach marker first appears in the output. dtach hands a reattached client a
+// cleared screen and signals the program to redraw, but Claude is a main-screen
+// TUI (Ink) that only does a full repaint on an actual geometry change — a
+// same-size reattach raises no effective WINCH, so the tab renders blank
+// (#618). The nudge below forces that geometry change once Claude is attached.
+func (a *App) maybeNudgeAIRepaint(managed *managedTerminal, chunk []byte) {
+	if !isAITabKind(managed) || !bytes.Contains(chunk, aiAttachMarker) {
+		return
+	}
+	a.mu.Lock()
+	if managed.repaintNudged || managed.closed {
+		a.mu.Unlock()
+		return
+	}
+	managed.repaintNudged = true
+	cols, rows := managed.lastCols, managed.lastRows
+	a.mu.Unlock()
+	go a.nudgeAIRepaint(managed, cols, rows)
+}
+
+// nudgeAIRepaint briefly tells the backend pty it is one row shorter, then
+// restores it. The size change crosses kubectl exec -> dtach master -> Claude
+// as a real WINCH and forces a full repaint after a same-size reattach. The
+// local xterm is never resized, so the user sees no reflow — only the AI
+// tab's content appearing. No-op when the session has no usable size or has
+// already closed.
+func (a *App) nudgeAIRepaint(managed *managedTerminal, cols, rows int) {
+	if cols <= 0 || rows <= 1 {
+		return
+	}
+	time.Sleep(aiRepaintNudgeDelay)
+	if !a.resizeSessionIfLive(managed, cols, rows-1) {
+		return
+	}
+	time.Sleep(aiRepaintNudgeSettle)
+	a.resizeSessionIfLive(managed, cols, rows)
+}
+
+// resizeSessionIfLive resizes the managed pty unless it has closed, reporting
+// whether the resize was attempted. Used by the AI repaint nudge so a session
+// that exits mid-nudge does not panic on a nil/closed pty.
+func (a *App) resizeSessionIfLive(managed *managedTerminal, cols, rows int) bool {
+	a.mu.Lock()
+	session := managed.session
+	closed := managed.closed
+	a.mu.Unlock()
+	if session == nil || closed {
+		return false
+	}
+	_ = session.Resize(cols, rows)
+	return true
 }
 
 // finalizeSessionExit tears down a managed PTY that streamSession could
@@ -1210,6 +1297,10 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	}
 	managed.session = next
 	managed.awaitingPostRespawnInput = true
+	// A reconnect is a fresh attach to the (possibly same) pod session, so
+	// re-arm the AI repaint nudge: the new client gets a cleared screen and
+	// Claude needs the geometry-change WINCH again to repaint (#618).
+	managed.repaintNudged = false
 	a.mu.Unlock()
 	// The respawn went through — whatever stopped/failed condition the row
 	// was flagged with is being retried, so clear it (the refusal paths
@@ -1653,6 +1744,18 @@ type managedTerminal struct {
 	lockedByActivity       string
 	activityTraceBuffer    string
 	startedAt              time.Time
+
+	// lastCols/lastRows track the most recent pty size (seeded from the
+	// spawn params, refreshed on every ResizeSession). The AI-tab repaint
+	// nudge needs a known size to resize to; the session itself does not
+	// expose its current geometry.
+	lastCols int
+	lastRows int
+
+	// repaintNudged guards the once-per-attach AI repaint nudge so it fires
+	// on the first output after a (re)attach and not on every chunk.
+	// tryReconnect clears it so the next attach nudges again.
+	repaintNudged bool
 
 	// awaitingPostRespawnInput, when true, tells streamSession to skip
 	// the 2s output-activity ticker. Set on each successful respawn so

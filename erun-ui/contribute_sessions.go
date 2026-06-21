@@ -112,6 +112,8 @@ func (a *App) runContributeSession(ctx context.Context, selection uiSelection, s
 			return a.deps.startTerminal(params)
 		},
 		startedAt: time.Now(),
+		lastCols:  cols,
+		lastRows:  rows,
 	}
 	a.sessions[key] = managed
 	a.busyEnvs[selectionKey(selection)]++
