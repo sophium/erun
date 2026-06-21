@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"log"
+	"strconv"
 	"strings"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
@@ -26,7 +27,7 @@ func NewIdentityRepository(db *sql.DB, dialect Dialect) *IdentityRepository {
 }
 
 func (r *IdentityRepository) ResolveIdentity(ctx context.Context, claims security.Claims) (model.Tenant, model.User, error) {
-	tenant, err := r.ResolveTenantByIssuer(ctx, claims.Issuer)
+	tenant, err := r.ResolveTenantByIssuer(ctx, claims)
 	if err == nil {
 		user, err := r.ResolveUserByExternalID(ctx, tenant.TenantID, claims.Issuer, claims.Subject)
 		if err == nil {
@@ -80,19 +81,68 @@ func (r *IdentityRepository) refreshUserUsername(ctx context.Context, tenant mod
 	return user, nil
 }
 
-func (r *IdentityRepository) ResolveTenantByIssuer(ctx context.Context, issuer string) (model.Tenant, error) {
+// resolveTenant maps a verified token to its tenant. The issuer's org-scoping
+// mode lives once on issuers.org_field_key: NULL means a single-tenant issuer
+// (resolve by issuer alone, the common BYO/external-IdP case); a set key names
+// the token claim whose value selects the tenant among that issuer's orgs
+// (shared multi-tenant issuer, e.g. a hosted Zitadel). An org-scoped issuer
+// whose token carries no matching org claim returns ErrNotFound — unauthorized,
+// and never bootstraps once tenants exist (bootstrapFirstIdentity guards on an
+// empty tenants table). An unregistered issuer also returns ErrNotFound, which
+// routes to first-identity bootstrap when the database is empty.
+func (r *IdentityRepository) ResolveTenantByIssuer(ctx context.Context, claims security.Claims) (model.Tenant, error) {
+	issuer := strings.TrimSpace(claims.Issuer)
+	var orgFieldKey sql.NullString
+	if err := r.db.NewRaw(`SELECT org_field_key FROM issuers WHERE issuer = ?`, issuer).Scan(ctx, &orgFieldKey); err != nil {
+		return model.Tenant{}, normalizeNoRows(err)
+	}
+
 	var tenant model.Tenant
-	err := r.db.NewRaw(`
-		SELECT t.tenant_id, t.name, t.type, t.created_at, t.updated_at
-		  FROM tenant_issuers ti
-		  JOIN tenants t
-		    ON t.tenant_id = ti.tenant_id
-		 WHERE ti.issuer = ?
-	`, issuer).Scan(ctx, &tenant)
+	var err error
+	if key := strings.TrimSpace(orgFieldKey.String); orgFieldKey.Valid && key != "" {
+		org := orgClaimValue(claims.Raw, key)
+		if org == "" {
+			// Org-scoped issuer but the token carries no usable org claim.
+			return model.Tenant{}, ErrNotFound
+		}
+		err = r.db.NewRaw(`
+			SELECT t.tenant_id, t.name, t.type, t.created_at, t.updated_at
+			  FROM tenant_issuers ti
+			  JOIN tenants t ON t.tenant_id = ti.tenant_id
+			 WHERE ti.issuer = ? AND ti.org_field_value = ?
+		`, issuer, org).Scan(ctx, &tenant)
+	} else {
+		err = r.db.NewRaw(`
+			SELECT t.tenant_id, t.name, t.type, t.created_at, t.updated_at
+			  FROM tenant_issuers ti
+			  JOIN tenants t ON t.tenant_id = ti.tenant_id
+			 WHERE ti.issuer = ? AND ti.org_field_value IS NULL
+		`, issuer).Scan(ctx, &tenant)
+	}
 	if err != nil {
 		return model.Tenant{}, normalizeNoRows(err)
 	}
 	return tenant, nil
+}
+
+// orgClaimValue extracts the org-identifying claim value as a string. JSON
+// numbers (some IdPs emit numeric org/resource-owner IDs) decode as float64;
+// integers render without a decimal so they match the stored org_field_value.
+func orgClaimValue(raw map[string]any, key string) string {
+	if raw == nil {
+		return ""
+	}
+	switch v := raw[key].(type) {
+	case string:
+		return strings.TrimSpace(v)
+	case float64:
+		if v == float64(int64(v)) {
+			return strconv.FormatInt(int64(v), 10)
+		}
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	default:
+		return ""
+	}
 }
 
 func (r *IdentityRepository) bootstrapFirstIdentity(ctx context.Context, claims security.Claims) (model.Tenant, model.User, error) {

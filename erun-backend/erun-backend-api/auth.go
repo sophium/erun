@@ -51,13 +51,16 @@ func (f TokenVerifierFunc) VerifyBearerToken(ctx context.Context, token string) 
 }
 
 type TenantResolver interface {
-	ResolveTenantByIssuer(ctx context.Context, issuer string) (Tenant, error)
+	// ResolveTenantByIssuer maps a verified token to its tenant. It takes the
+	// full Claims (not just the issuer) so it can read a per-issuer org claim
+	// for (iss, org) -> tenant resolution; single-tenant issuers ignore the org.
+	ResolveTenantByIssuer(ctx context.Context, claims Claims) (Tenant, error)
 }
 
-type TenantResolverFunc func(ctx context.Context, issuer string) (Tenant, error)
+type TenantResolverFunc func(ctx context.Context, claims Claims) (Tenant, error)
 
-func (f TenantResolverFunc) ResolveTenantByIssuer(ctx context.Context, issuer string) (Tenant, error) {
-	return f(ctx, issuer)
+func (f TenantResolverFunc) ResolveTenantByIssuer(ctx context.Context, claims Claims) (Tenant, error) {
+	return f(ctx, claims)
 }
 
 type UserResolver interface {
@@ -239,7 +242,7 @@ func (m *AuthMiddleware) resolveIdentity(ctx context.Context, claims Claims) (Id
 		return identity, nil
 	}
 
-	tenant, err := m.tenants.ResolveTenantByIssuer(ctx, claims.Issuer)
+	tenant, err := m.tenants.ResolveTenantByIssuer(ctx, claims)
 	if err != nil || strings.TrimSpace(tenant.TenantID) == "" {
 		err = ErrTenantNotResolved
 		if m.cache != nil {
