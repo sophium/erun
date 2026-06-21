@@ -91,36 +91,65 @@ const defaultExposeWildcardTTL = 60
 func RunExposeService(ctx Context, params ExposeServiceParams, store ExposeStore, upsertDNSRecord DNSRecordUpserterFunc, applyIngress IngressApplierFunc) (ExposeServiceResult, error) {
 	store, upsertDNSRecord, applyIngress = normalizeExposeDependencies(store, upsertDNSRecord, applyIngress)
 
-	tenant := strings.TrimSpace(params.Tenant)
-	environment := strings.TrimSpace(params.Environment)
-	service := strings.TrimSpace(params.Service)
-	if tenant == "" || environment == "" || service == "" {
-		return ExposeServiceResult{}, fmt.Errorf("tenant, environment, and service are required")
-	}
-	if err := ValidateTenantName(tenant); err != nil {
-		return ExposeServiceResult{}, err
-	}
-
-	platform := resolveProjectPlatform(params.ProjectRoot)
-	if platform.IsZero() || strings.TrimSpace(platform.ServicesZone) == "" {
-		return ExposeServiceResult{}, fmt.Errorf("expose requires a platform block with a base domain in .erun/config.yaml (the services zone tenant hostnames live under)")
-	}
-
-	envConfig, _, err := store.LoadEnvConfig(tenant, environment)
+	result, platform, err := resolveExposeServicePlan(params, store)
 	if err != nil {
 		return ExposeServiceResult{}, err
 	}
 
-	targetIP := strings.TrimSpace(params.TargetIP)
-	if targetIP == "" {
-		return ExposeServiceResult{}, fmt.Errorf("a target IP is required (the env's ingress IP the wildcard record points at, e.g. 127.0.0.1 for a local cluster)")
+	ctx.Trace(fmt.Sprintf("expose: %s -> service %s.%s.svc:%d", result.Hostname, result.Service, result.Namespace, result.ServicePort))
+	ctx.Trace(fmt.Sprintf("expose: per-env wildcard %s A %s (zone %s)", result.WildcardName, result.TargetIP, result.ServicesZone))
+	ctx.TraceCommand("", "powerdns-upsert-record", result.ServicesZone, result.WildcardName, "A", result.TargetIP)
+	ctx.TraceCommand("", "kubectl", "apply", "ingress/"+result.IngressName, "-n", result.Namespace)
+	if ctx.DryRun {
+		return result, nil
 	}
 
+	if err := applyExposeService(ctx, result, platform, upsertDNSRecord, applyIngress); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+// validateExposeTarget trims and validates the required identity inputs,
+// returning the cleaned tenant/environment/service.
+func validateExposeTarget(params ExposeServiceParams) (tenant, environment, service string, err error) {
+	tenant = strings.TrimSpace(params.Tenant)
+	environment = strings.TrimSpace(params.Environment)
+	service = strings.TrimSpace(params.Service)
+	if tenant == "" || environment == "" || service == "" {
+		return "", "", "", fmt.Errorf("tenant, environment, and service are required")
+	}
+	if err := ValidateTenantName(tenant); err != nil {
+		return "", "", "", err
+	}
+	return tenant, environment, service, nil
+}
+
+// resolveExposeServicePlan validates inputs, resolves the platform and env, and
+// assembles the side-effect-free ExposeServiceResult plus the resolved platform
+// the execution phase needs. It does no tracing or mutation, so RunExposeService
+// keeps ownership of the dry-run trace order.
+func resolveExposeServicePlan(params ExposeServiceParams, store ExposeStore) (ExposeServiceResult, PlatformConfig, error) {
+	tenant, environment, service, err := validateExposeTarget(params)
+	if err != nil {
+		return ExposeServiceResult{}, PlatformConfig{}, err
+	}
+	platform := resolveProjectPlatform(params.ProjectRoot)
+	if platform.IsZero() || strings.TrimSpace(platform.ServicesZone) == "" {
+		return ExposeServiceResult{}, PlatformConfig{}, fmt.Errorf("expose requires a platform block with a base domain in .erun/config.yaml (the services zone tenant hostnames live under)")
+	}
+	envConfig, _, err := store.LoadEnvConfig(tenant, environment)
+	if err != nil {
+		return ExposeServiceResult{}, PlatformConfig{}, err
+	}
+	targetIP := strings.TrimSpace(params.TargetIP)
+	if targetIP == "" {
+		return ExposeServiceResult{}, PlatformConfig{}, fmt.Errorf("a target IP is required (the env's ingress IP the wildcard record points at, e.g. 127.0.0.1 for a local cluster)")
+	}
 	servicePort := params.ServicePort
 	if servicePort <= 0 {
 		servicePort = defaultExposeServicePort
 	}
-
 	envLabel := KubernetesNamespaceName(tenant, environment)
 	result := ExposeServiceResult{
 		Tenant:            tenant,
@@ -135,40 +164,38 @@ func RunExposeService(ctx Context, params ExposeServiceParams, store ExposeStore
 		IngressName:       fmt.Sprintf("expose-%s", service),
 		ServicePort:       servicePort,
 	}
+	return result, platform, nil
+}
 
-	ctx.Trace(fmt.Sprintf("expose: %s -> service %s.%s.svc:%d", result.Hostname, service, result.Namespace, servicePort))
-	ctx.Trace(fmt.Sprintf("expose: per-env wildcard %s A %s (zone %s)", result.WildcardName, targetIP, platform.ServicesZone))
-	ctx.TraceCommand("", "powerdns-upsert-record", platform.ServicesZone, result.WildcardName, "A", targetIP)
-	ctx.TraceCommand("", "kubectl", "apply", "ingress/"+result.IngressName, "-n", result.Namespace)
-	if ctx.DryRun {
-		return result, nil
-	}
-
+// applyExposeService performs the post-dry-run side effects: require the env's
+// kubernetes context, ensure the per-env wildcard A record, and apply the
+// Host-routing ingress.
+func applyExposeService(ctx Context, result ExposeServiceResult, platform PlatformConfig, upsertDNSRecord DNSRecordUpserterFunc, applyIngress IngressApplierFunc) error {
 	if err := ctx.RequireKubernetesContext(result.KubernetesContext); err != nil {
-		return result, fmt.Errorf("expose %s/%s: %w", tenant, environment, err)
+		return fmt.Errorf("expose %s/%s: %w", result.Tenant, result.Environment, err)
 	}
 	if err := upsertDNSRecord(DNSRecordUpsertParams{
 		Zone:              platform.ServicesZone,
 		Name:              result.WildcardName,
 		Type:              "A",
 		TTL:               defaultExposeWildcardTTL,
-		Value:             targetIP,
+		Value:             result.TargetIP,
 		PlatformNamespace: normalizeNamespaceName(platform.Env),
 		KubernetesContext: result.KubernetesContext,
 	}); err != nil {
-		return result, fmt.Errorf("upsert wildcard DNS record %s: %w", result.WildcardName, err)
+		return fmt.Errorf("upsert wildcard DNS record %s: %w", result.WildcardName, err)
 	}
 	if err := applyIngress(IngressApplyParams{
 		KubernetesContext: result.KubernetesContext,
 		Namespace:         result.Namespace,
 		Name:              result.IngressName,
 		Host:              result.Hostname,
-		ServiceName:       service,
-		ServicePort:       servicePort,
+		ServiceName:       result.Service,
+		ServicePort:       result.ServicePort,
 	}); err != nil {
-		return result, fmt.Errorf("apply ingress %s: %w", result.IngressName, err)
+		return fmt.Errorf("apply ingress %s: %w", result.IngressName, err)
 	}
-	return result, nil
+	return nil
 }
 
 func normalizeExposeDependencies(store ExposeStore, upsertDNSRecord DNSRecordUpserterFunc, applyIngress IngressApplierFunc) (ExposeStore, DNSRecordUpserterFunc, IngressApplierFunc) {

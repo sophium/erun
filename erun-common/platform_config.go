@@ -131,15 +131,30 @@ func isDNSName(name string) bool {
 		return false
 	}
 	for _, label := range strings.Split(name, ".") {
-		if label == "" || label[0] == '-' || label[len(label)-1] == '-' {
-			return false
-		}
-		for _, r := range label {
-			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
-				continue
-			}
+		if !isDNSLabel(label) {
 			return false
 		}
 	}
 	return true
+}
+
+// isDNSLabel reports whether label is a valid single DNS label: non-empty,
+// not hyphen-bounded, and composed only of lowercase letters, digits, and
+// hyphens.
+func isDNSLabel(label string) bool {
+	if label == "" || label[0] == '-' || label[len(label)-1] == '-' {
+		return false
+	}
+	for _, r := range label {
+		if !isDNSLabelChar(r) {
+			return false
+		}
+	}
+	return true
+}
+
+// isDNSLabelChar reports whether r is allowed inside a DNS label under erun's
+// strict, lowercase-only charset.
+func isDNSLabelChar(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-'
 }
