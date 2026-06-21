@@ -177,6 +177,11 @@ type HelmDeploySpec struct {
 	// DisableBuildScript mirrors EnvConfig.DisableBuildScript so a remote-agent
 	// pod's in-pod build honours the operator's build.sh-discovery choice (#548).
 	DisableBuildScript bool
+	// Platform is the resolved per-instance platform config (base domain,
+	// services zone, authoritative IP, nameservers). Zero for non-platform
+	// projects; when set, deploy threads it to every chart as platform.*
+	// values so the PowerDNS singleton can bootstrap its authoritative zone.
+	Platform PlatformConfig
 }
 
 type HelmReleaseRecoveryParams struct {
@@ -1294,6 +1299,7 @@ func newHelmDeploySpecWithValues(target OpenResult, deployContext KubernetesDepl
 		ContainerRegistry:   resolveProjectContainerRegistry(target.RepoPath, target.Environment),
 		RuntimeRegistry:     strings.TrimSpace(target.EnvConfig.RuntimeRegistry),
 		ContainerRegistries: containerRegistries,
+		Platform:            resolveProjectPlatform(target.RepoPath),
 		DisableBuildScript:  target.EnvConfig.DisableBuildScript,
 		Idle:                target.EnvConfig.Idle,
 		Claude:              target.EnvConfig.Claude,
@@ -1322,6 +1328,24 @@ func resolveProjectContainerRegistry(projectRoot, environment string) string {
 	}
 	registry, _ := list.DeployRegistry()
 	return registry
+}
+
+// resolveProjectPlatform loads the per-instance platform config from the
+// project's .erun/config.yaml and returns it with defaults resolved. Returns a
+// zero PlatformConfig when the project is uninitialized or declares no platform
+// block, so deploy threads no platform.* values for non-platform projects. The
+// block is validated earlier (loadProjectK8sPlanForRepo), so a malformed block
+// fails the plan before reaching here.
+func resolveProjectPlatform(projectRoot string) PlatformConfig {
+	projectRoot = strings.TrimSpace(projectRoot)
+	if projectRoot == "" {
+		return PlatformConfig{}
+	}
+	projectConfig, _, err := LoadProjectConfig(projectRoot)
+	if err != nil {
+		return PlatformConfig{}
+	}
+	return projectConfig.Platform.Resolve()
 }
 
 func applyCloudContextStopMetadata(store CloudReadStore, env EnvConfig, deployInput *HelmDeploySpec) {
@@ -1536,6 +1560,23 @@ func (d HelmDeploySpec) command() commandSpec {
 	args = append(args, "--set", "disableBuildScript="+formatHelmBool(d.DisableBuildScript))
 	for _, key := range sortedStringMapKeys(d.ImageOverrides) {
 		args = append(args, "--set-string", "imageOverrides."+key+"="+d.ImageOverrides[key])
+	}
+	// Per-instance platform values, guarded on presence so non-platform deploys
+	// (every existing env) render no platform.* args. Threaded to every chart;
+	// only the PowerDNS singleton reads them (to bootstrap its services zone).
+	if p := d.Platform; !p.IsZero() {
+		args = append(args,
+			"--set-string", "platform.baseDomain="+p.BaseDomain,
+			"--set-string", "platform.env="+p.Env,
+			"--set-string", "platform.servicesZone="+p.ServicesZone,
+			"--set-string", "platform.authoritativeIP="+p.AuthoritativeIP,
+			"--set-string", "platform.authHost="+p.AuthHost,
+		)
+		if len(p.Nameservers) > 0 {
+			if encoded, marshalErr := json.Marshal(p.Nameservers); marshalErr == nil {
+				args = append(args, "--set-json", "platform.nameservers="+string(encoded))
+			}
+		}
 	}
 	args = append(args,
 		"--set-string", "idle.timeout="+helmIdleTimeout(d.Idle),

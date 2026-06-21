@@ -41,6 +41,9 @@
 {{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
 {{- $powerdnsImage := default (printf "%s/erun-powerdns:4.9.3" $containerRegistry) (index $imageOverrides "erun-powerdns") -}}
 {{- $postgresImage := default (printf "%s/erun-backend-postgres:18.3" $containerRegistry) (index $imageOverrides "erun-backend-postgres") -}}
+{{- $platform := default dict .Values.platform -}}
+{{- $servicesZone := default "" $platform.servicesZone -}}
+{{- $nameservers := default (list) $platform.nameservers -}}
 apiVersion: v1
 kind: Secret
 metadata:
@@ -132,6 +135,29 @@ spec:
           volumeMounts:
             - name: schema
               mountPath: /schema
+        {{- if $servicesZone }}
+        # Bootstrap the authoritative services zone once, with its nameservers,
+        # from the per-instance platform config that deploy threads in as
+        # platform.* values. Idempotent (skips when the zone already exists).
+        # Per-env wildcard/_acme-challenge records are added later via the API.
+        - name: zone-bootstrap
+          image: {{ $powerdnsImage }}
+          env:
+            - name: PDNS_GPGSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $postgresPasswordSecretName }}
+                  key: {{ $postgresPasswordSecretKey }}
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              pdnsutil="pdnsutil --launch=gpgsql --gpgsql-host={{ $postgresHost }} --gpgsql-port={{ $postgresPort }} --gpgsql-dbname={{ $powerdnsDatabase }} --gpgsql-user={{ $postgresUser }} --gpgsql-password=$PDNS_GPGSQL_PASSWORD"
+              if ! $pdnsutil list-zone {{ $servicesZone | quote }} >/dev/null 2>&1; then
+                $pdnsutil create-zone {{ $servicesZone | quote }}{{ range $ns := $nameservers }} {{ $ns | quote }}{{ end }}
+              fi
+        {{- end }}
       containers:
         - name: erun-powerdns
           image: {{ $powerdnsImage }}
