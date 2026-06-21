@@ -13,7 +13,7 @@ Examples:
   erun deploy team prod --version <VERSION> --rollout-timeout 10m
 
 Flags:
-      --components strings       Opt-in components to include alongside the runtime chart (erun-backend-postgres, erun-backend-db, erun-backend-api)
+      --components strings       Opt-in components to include alongside the runtime chart (erun-backend-postgres, erun-backend-db, erun-backend-api, erun-powerdns)
       --current                  Redeploy the version this environment already runs (its persisted runtime version) instead of passing --version
       --dry-run                  Resolve and trace mutating actions without executing them.
       --environment string       Deploy for a specific environment; requires --tenant

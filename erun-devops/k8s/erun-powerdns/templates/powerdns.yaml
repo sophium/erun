@@ -1,0 +1,195 @@
+{{/*
+  PowerDNS authoritative nameserver — the per-deployment global singleton that
+  is authoritative for the platform's delegated services zone
+  (services.<base-domain>). It runs the gpgsql backend against the SHARED
+  erun-backend-postgres instance (the same Service + password Secret the API
+  uses) in its own `powerdns` database, so it must be sequenced AFTER
+  erun-backend-postgres in the deploy plan.
+
+  - :53 is bound on the node via hostNetwork so the public glue record
+    (ns1.<base-domain> -> <authoritativeIP>) resolves to this pod. dnsPolicy
+    ClusterFirstWithHostNet keeps cluster DNS so `erun-postgres` still resolves.
+  - The HTTP API (used by the DNS-01 broker to write _acme-challenge / wildcard
+    records) is exposed on a ClusterIP Service, guarded by an api-key Secret.
+  - The gpgsql schema is lifted out of the pinned PowerDNS image itself, so it
+    always matches the server version, then loaded once into the powerdns DB.
+
+  Wrap-and-pin (erun-devops/AGENTS.md): the image rides
+  imageOverrides.erun-powerdns (default <registry>/erun-powerdns:<VERSION>); the
+  schema-load step reuses the erun-backend-postgres image for psql/createdb.
+*/}}
+{{- $postgres := default dict (default dict .Values.api).postgres -}}
+{{- $postgresUser := default "erun" $postgres.user -}}
+{{- $postgresPort := default 5432 $postgres.port -}}
+{{- $postgresHost := default "erun-postgres" $postgres.host -}}
+{{- $postgresPasswordSecretName := default "erun-backend-postgres" $postgres.passwordSecretName -}}
+{{- $postgresPasswordSecretKey := default "password" $postgres.passwordSecretKey -}}
+{{- $powerdns := default dict .Values.powerdns -}}
+{{- $powerdnsDatabase := default "powerdns" $powerdns.database -}}
+{{- $apiPort := default 8081 $powerdns.apiPort -}}
+{{- $apiKeySecretName := default "erun-powerdns-api" $powerdns.apiKeySecretName -}}
+{{- $apiKeySecretKey := default "api-key" $powerdns.apiKeySecretKey -}}
+{{- $apiKey := default "" $powerdns.apiKey -}}
+{{- $existingAPISecret := lookup "v1" "Secret" .Release.Namespace $apiKeySecretName -}}
+{{- if and (eq $apiKey "") $existingAPISecret (hasKey $existingAPISecret.data $apiKeySecretKey) -}}
+{{- $apiKey = (index $existingAPISecret.data $apiKeySecretKey | b64dec) -}}
+{{- end -}}
+{{- if eq $apiKey "" -}}
+{{- $apiKey = randAlphaNum 40 -}}
+{{- end -}}
+{{- $imageOverrides := default dict .Values.imageOverrides -}}
+{{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
+{{- $powerdnsImage := default (printf "%s/erun-powerdns:4.9.3" $containerRegistry) (index $imageOverrides "erun-powerdns") -}}
+{{- $postgresImage := default (printf "%s/erun-backend-postgres:18.3" $containerRegistry) (index $imageOverrides "erun-backend-postgres") -}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $apiKeySecretName }}
+  labels:
+    app: erun-powerdns
+type: Opaque
+stringData:
+  {{ $apiKeySecretKey }}: {{ $apiKey | quote }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: erun-powerdns-api
+  labels:
+    app: erun-powerdns
+spec:
+  type: ClusterIP
+  selector:
+    app: erun-powerdns
+  ports:
+    - name: api
+      port: {{ $apiPort }}
+      targetPort: api
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: erun-powerdns
+  labels:
+    app: erun-powerdns
+spec:
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: erun-powerdns
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: erun-powerdns
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      initContainers:
+        # Lift the gpgsql schema out of the pinned PowerDNS image so it always
+        # matches the server version, onto a shared volume the loader can read.
+        - name: schema-source
+          image: {{ $powerdnsImage }}
+          command:
+            - sh
+            - -c
+            - cp /usr/share/pdns-backend-pgsql/schema/schema.pgsql.sql /schema/schema.sql
+          volumeMounts:
+            - name: schema
+              mountPath: /schema
+        # Create the powerdns database on the shared postgres and load the
+        # schema once. Both steps are guarded so re-deploys are idempotent.
+        # Reuses the postgres image for psql/createdb/pg_isready.
+        - name: schema-load
+          image: {{ $postgresImage }}
+          env:
+            - name: PGHOST
+              value: {{ $postgresHost | quote }}
+            - name: PGPORT
+              value: {{ $postgresPort | quote }}
+            - name: PGUSER
+              value: {{ $postgresUser | quote }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $postgresPasswordSecretName }}
+                  key: {{ $postgresPasswordSecretKey }}
+            - name: PDNS_DB
+              value: {{ $powerdnsDatabase | quote }}
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              until pg_isready -q; do echo "waiting for postgres"; sleep 2; done
+              if ! psql -tAc "SELECT 1 FROM pg_database WHERE datname = '$PDNS_DB'" | grep -q 1; then
+                createdb "$PDNS_DB"
+              fi
+              if ! psql -d "$PDNS_DB" -tAc "SELECT to_regclass('public.domains')" | grep -q domains; then
+                psql -d "$PDNS_DB" -v ON_ERROR_STOP=1 -f /schema/schema.sql
+              fi
+          volumeMounts:
+            - name: schema
+              mountPath: /schema
+      containers:
+        - name: erun-powerdns
+          image: {{ $powerdnsImage }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PDNS_GPGSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $postgresPasswordSecretName }}
+                  key: {{ $postgresPasswordSecretKey }}
+            - name: PDNS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $apiKeySecretName }}
+                  key: {{ $apiKeySecretKey }}
+          command:
+            - pdns_server
+          # CLI args take precedence over the image's default pdns.conf, so the
+          # backend/API config is explicit here. Secrets are injected via the
+          # $(VAR) env substitution kubelet performs on args.
+          args:
+            - --launch=gpgsql
+            - --gpgsql-host={{ $postgresHost }}
+            - --gpgsql-port={{ $postgresPort }}
+            - --gpgsql-dbname={{ $powerdnsDatabase }}
+            - --gpgsql-user={{ $postgresUser }}
+            - --gpgsql-password=$(PDNS_GPGSQL_PASSWORD)
+            - --local-address=0.0.0.0
+            - --local-port=53
+            - --api=yes
+            - --api-key=$(PDNS_API_KEY)
+            - --webserver=yes
+            - --webserver-address=0.0.0.0
+            - --webserver-port={{ $apiPort }}
+            - --webserver-allow-from=0.0.0.0/0
+          ports:
+            - name: dns-udp
+              containerPort: 53
+              hostPort: 53
+              protocol: UDP
+            - name: dns-tcp
+              containerPort: 53
+              hostPort: 53
+              protocol: TCP
+            - name: api
+              containerPort: {{ $apiPort }}
+          readinessProbe:
+            tcpSocket:
+              port: api
+            periodSeconds: 5
+            timeoutSeconds: 2
+          startupProbe:
+            tcpSocket:
+              port: api
+            periodSeconds: 2
+            timeoutSeconds: 2
+            failureThreshold: 60
+      volumes:
+        - name: schema
+          emptyDir: {}
+      restartPolicy: Always

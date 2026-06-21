@@ -1,5 +1,5 @@
 audit: erun deploy --components [bogus] --dry-run --version <VERSION> team dev
 trace-log: would append the full trace to <TMP>
 deploy: tenant=team environment=dev version-override=<VERSION> components=[bogus] force=false current=false
-deploy: spec resolution failed: unknown deploy component "bogus"; valid opt-in components are: erun-backend-postgres, erun-backend-db, erun-backend-api
-unknown deploy component "bogus"; valid opt-in components are: erun-backend-postgres, erun-backend-db, erun-backend-api
+deploy: spec resolution failed: unknown deploy component "bogus"; valid opt-in components are: erun-backend-postgres, erun-backend-db, erun-backend-api, erun-powerdns
+unknown deploy component "bogus"; valid opt-in components are: erun-backend-postgres, erun-backend-db, erun-backend-api, erun-powerdns
