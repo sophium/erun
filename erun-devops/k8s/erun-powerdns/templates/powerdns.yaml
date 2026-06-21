@@ -190,7 +190,14 @@ spec:
             - |
               set -e
               if ! pdnsutil --config-dir={{ $configDir }} list-zone {{ $servicesZone | quote }} >/dev/null 2>&1; then
-                pdnsutil --config-dir={{ $configDir }} create-zone {{ $servicesZone | quote }}{{ range $ns := $nameservers }} {{ $ns | quote }}{{ end }}
+                # `pdnsutil create-zone ZONE [nsname]` takes at most ONE
+                # nameserver; passing more prints a usage error, exits 0, and
+                # creates nothing — silently leaving the zone unbootstrapped. So
+                # create with the first NS (if any) and add the rest as NS records.
+                pdnsutil --config-dir={{ $configDir }} create-zone {{ $servicesZone | quote }}{{ with (first $nameservers) }} {{ . | quote }}{{ end }}
+                {{- range $ns := (rest $nameservers) }}
+                pdnsutil --config-dir={{ $configDir }} add-record {{ $servicesZone | quote }} @ NS {{ $ns | quote }}
+                {{- end }}
               fi
           volumeMounts:
             - name: config

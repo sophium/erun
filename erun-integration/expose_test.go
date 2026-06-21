@@ -62,6 +62,22 @@ func TestExpose(t *testing.T) {
 		golden.Equal(t, "expose/requires_platform_config", normalize.Apply(result.Combined))
 	})
 
+	t.Run("requires_platform_env", func(t *testing.T) {
+		// platform.env locates the PowerDNS pod's namespace for the per-env
+		// wildcard DNS write. A platform block with a base domain but no env would
+		// otherwise produce a `kubectl -n "" exec` that silently misroutes, so
+		// expose fails fast with an actionable error.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectK8sConfig(t, setup, "platform:\n  basedomain: erunpaas.com\n")
+		result := erun.Run(t, []string{"expose", "team", "dev", "api", "--ip", "127.0.0.1", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit without platform.env, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "expose/requires_platform_env", normalize.Apply(result.Combined))
+	})
+
 	t.Run("requires_ip", func(t *testing.T) {
 		// The per-env wildcard record needs a target IP (the env's ingress IP);
 		// omitting --ip fails clearly instead of writing an empty record.
