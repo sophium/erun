@@ -1,0 +1,2 @@
+audit: erun expose --dry-run team dev api
+a target IP is required (the env's ingress IP the wildcard record points at, e.g. <LOOPBACK> for a local cluster)
