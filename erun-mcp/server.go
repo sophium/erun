@@ -269,6 +269,10 @@ func registerDeliveryTools(server *mcp.Server, runtime RuntimeConfig) {
 		Name:        "delete",
 		Description: "Delete an environment from ERun configuration and remove its remote runtime namespace after explicit tenant-environment confirmation",
 	}, deleteTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "expose",
+		Description: "Expose an in-namespace Service at a stable public hostname under the platform's services zone (requires a platform block in .erun/config.yaml): ensure the per-environment wildcard DNS record points at the env's ingress IP and apply a Host-routing Ingress. Supports preview.",
+	}, exposeTool(runtime))
 }
 
 // registerInspectionTools registers the repo-state and source-contribution
