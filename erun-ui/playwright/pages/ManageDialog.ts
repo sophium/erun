@@ -246,6 +246,26 @@ export class ManageDialog {
     await this.page.getByRole('option', { name: label, exact: true }).click();
   }
 
+  // environmentTypeSelect targets the "Environment type" SelectField on the
+  // General tab (issue #615). It is an editable selector — not a read-only
+  // label — so a mis-set type can be corrected in place; the value shows the
+  // env's type label.
+  environmentTypeSelect(): Locator {
+    return this.locator().locator('#environment-config-type');
+  }
+
+  async environmentTypeSelectedValue(): Promise<string> {
+    return (await this.environmentTypeSelect().textContent())?.trim() ?? '';
+  }
+
+  // chooseEnvironmentType opens the type listbox and picks an option by its
+  // visible label. The Radix listbox is portal'd to the document body, so the
+  // option is queried at the page root rather than inside the dialog.
+  async chooseEnvironmentType(label: string): Promise<void> {
+    await this.environmentTypeSelect().click();
+    await this.page.getByRole('option', { name: label, exact: true }).click();
+  }
+
   // claudeModelCheckbox targets one "Available models" checkbox in the Claude
   // section of the AI tab. The id suffix is the model token itself.
   claudeModelCheckbox(model: string): Locator {

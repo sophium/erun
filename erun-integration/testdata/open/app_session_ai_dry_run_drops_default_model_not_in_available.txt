@@ -71,7 +71,7 @@ bootstrap-script:
   master_pid=""
   for dtach_pid in $(pgrep -x dtach 2>/dev/null || true); do if grep -qF "<TMP>" "/proc/$dtach_pid/cmdline" 2>/dev/null; then for child_pid in $(pgrep -P "$dtach_pid" 2>/dev/null || true); do child_comm="$(cat "/proc/$child_pid/comm" 2>/dev/null)"; if [ -n "$child_comm" ] && [ "$child_comm" != "dtach" ]; then master_pid="$dtach_pid"; fi; done; fi; done
   if [ -S "<TMP>" ] && [ -n "$master_pid" ]; then for dtach_pid in $(pgrep -x dtach 2>/dev/null || true); do if [ "$dtach_pid" != "$master_pid" ] && grep -qF "<TMP>" "/proc/$dtach_pid/cmdline" 2>/dev/null; then kill "$dtach_pid" 2>/dev/null || true; fi; done; fi
-  dtach -A "<TMP>" -r ctrl_l /bin/bash "$HOME/.erun/team/dev/launch-ai.sh" || shell_status=$?
+  dtach -A "<TMP>" -r winch /bin/bash "$HOME/.erun/team/dev/launch-ai.sh" || shell_status=$?
   if [ "$(cat "<TMP>" 2>/dev/null)" != "$attach_id" ]; then exit 76; fi
   if [ -e "$request_file" ]; then rm -f "$request_file"; exit 75; fi
   rm -f "$request_file"

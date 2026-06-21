@@ -1,0 +1,3 @@
+Dry-run: would restore team/dev config from <TMP>
+audit: erun doctor --dry-run --restore-env-config-from-backup 2026-05-19 team dev
+cp <TMP> <TMP>

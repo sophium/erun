@@ -99,7 +99,7 @@ export function manageDialogTabHasUnsavedChanges(
     keys.some((key) => JSON.stringify(config[key]) !== JSON.stringify(initial[key]));
   switch (tab) {
     case 'general':
-      return compare('containerRegistries', 'cloudProviderAlias', 'remoteHostCredentials');
+      return compare('containerRegistries', 'cloudProviderAlias', 'remoteHostCredentials', 'type');
     case 'runtime':
       return compare(
         'runtimePod',

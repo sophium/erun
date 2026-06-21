@@ -107,4 +107,6 @@ erun init team prod --type runtime --no-git
 
 The desktop app's **New environment** dialog exposes the same choice as an **Environment type** field. Picking `Local agent` also reveals a **Local repo path** input (with a native folder picker) — that's the host directory mounted into the agent pod as the worktree, equivalent to the CLI's `--project-root`.
 
+The type is also editable after creation: the **Environment type** field on an existing env's **Manage → General** tab is a selector, so a mis-set type can be corrected in place. Changing it alters build and deploy behaviour and takes effect on the next deploy (which reconfigures the worktree), so reach for it to fix a wrong type, not as a routine toggle.
+
 Inside a runtime pod, the on-disk env config is a projection of the env's configuration, written from the helm-injected `ERUN_*` env vars. It carries the build/deploy-relevant fields the pod acts on — `runtimeregistry`, `containerregistries`, and `disablebuildscript` (a `remote-agent` pod builds in-pod and needs the build/push registry list; a `runtime` pod only deploys and needs the deploy/runtime registry). If a pod's config drifts from the deploy spec, [`erun doctor --sync-config`](/cli/doctor) reconciles it in place (injected env wins), preserving the keys the env does not carry.

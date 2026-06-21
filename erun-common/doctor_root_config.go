@@ -53,7 +53,7 @@ type RootConfigInspection struct {
 	ConfigError      string                 `json:"configError,omitempty"`
 	OrphanedAliases  []OrphanedAlias        `json:"orphanedAliases,omitempty"`
 	OrphanedContexts []OrphanedCloudContext `json:"orphanedCloudContexts,omitempty"`
-	Backups          []RootConfigBackup     `json:"backups,omitempty"`
+	Backups          []ConfigBackup         `json:"backups,omitempty"`
 	ConfiguredCount  int                    `json:"configuredProviderCount"`
 	CloudContextHits int                    `json:"cloudContextCount"`
 	TenantHits       int                    `json:"tenantCount"`

@@ -1,0 +1,2 @@
+audit: erun doctor --restore-env-config-from-backup 2026-05-19
+--restore-env-config-from-backup needs an explicit tenant and environment: erun doctor <tenant> <environment> --restore-env-config-from-backup 2026-05-19
