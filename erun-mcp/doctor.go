@@ -11,17 +11,18 @@ import (
 )
 
 type DoctorInput struct {
-	Tenant                  string                   `json:"tenant,omitempty" jsonschema:"optional explicit tenant override"`
-	Environment             string                   `json:"environment,omitempty" jsonschema:"optional explicit environment override"`
-	PruneImages             bool                     `json:"pruneImages,omitempty" jsonschema:"when true, prune unused Docker images"`
-	PruneBuildCache         bool                     `json:"pruneBuildCache,omitempty" jsonschema:"when true, prune unused BuildKit cache"`
-	PruneContainers         bool                     `json:"pruneContainers,omitempty" jsonschema:"when true, prune stopped Docker containers"`
-	ClearPendingHelm        bool                     `json:"clearPendingHelm,omitempty" jsonschema:"when true, clear a stuck helm pending-install/upgrade lock for the runtime release so the next deploy can proceed"`
-	Rollback                bool                     `json:"rollback,omitempty" jsonschema:"when true, roll the runtime release back to its last successful revision (recovers a bad/non-converging deploy)"`
-	Preview                 bool                     `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
-	Verbosity               int                      `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
-	RestoreConfigFromBackup string                   `json:"restoreConfigFromBackup,omitempty" jsonschema:"YYYY-MM-DD or absolute path; when set, restore the root erun config from the matching daily backup before any tenant/env work"`
-	RepairOrphanedAliases   []DoctorRepairAliasInput `json:"repairOrphanedAliases,omitempty" jsonschema:"per-alias AWS init parameters; when present, doctor re-initializes each listed cloud provider alias before tenant/env work"`
+	Tenant                     string                   `json:"tenant,omitempty" jsonschema:"optional explicit tenant override"`
+	Environment                string                   `json:"environment,omitempty" jsonschema:"optional explicit environment override"`
+	PruneImages                bool                     `json:"pruneImages,omitempty" jsonschema:"when true, prune unused Docker images"`
+	PruneBuildCache            bool                     `json:"pruneBuildCache,omitempty" jsonschema:"when true, prune unused BuildKit cache"`
+	PruneContainers            bool                     `json:"pruneContainers,omitempty" jsonschema:"when true, prune stopped Docker containers"`
+	ClearPendingHelm           bool                     `json:"clearPendingHelm,omitempty" jsonschema:"when true, clear a stuck helm pending-install/upgrade lock for the runtime release so the next deploy can proceed"`
+	Rollback                   bool                     `json:"rollback,omitempty" jsonschema:"when true, roll the runtime release back to its last successful revision (recovers a bad/non-converging deploy)"`
+	Preview                    bool                     `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
+	Verbosity                  int                      `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+	RestoreConfigFromBackup    string                   `json:"restoreConfigFromBackup,omitempty" jsonschema:"YYYY-MM-DD or absolute path; when set, restore the root erun config from the matching daily backup before any tenant/env work"`
+	RestoreEnvConfigFromBackup string                   `json:"restoreEnvConfigFromBackup,omitempty" jsonschema:"YYYY-MM-DD or absolute path; when set, restore the target environment's config.yaml from the matching daily backup (requires explicit tenant and environment) before any tenant/env work"`
+	RepairOrphanedAliases      []DoctorRepairAliasInput `json:"repairOrphanedAliases,omitempty" jsonschema:"per-alias AWS init parameters; when present, doctor re-initializes each listed cloud provider alias before tenant/env work"`
 }
 
 // DoctorRepairAliasInput is the MCP equivalent of the interactive
@@ -44,10 +45,11 @@ type DoctorRepairAliasInput struct {
 // output so an LLM agent can decide whether to retry with full
 // per-alias init params or escalate to the user.
 type DoctorRootConfigReport struct {
-	Inspection         eruncommon.RootConfigInspection `json:"inspection"`
-	RestoredFromBackup string                          `json:"restoredFromBackup,omitempty"`
-	RepairedAliases    []string                        `json:"repairedAliases,omitempty"`
-	UnresolvedAliases  []string                        `json:"unresolvedAliases,omitempty"`
+	Inspection                  eruncommon.RootConfigInspection `json:"inspection"`
+	RestoredFromBackup          string                          `json:"restoredFromBackup,omitempty"`
+	RestoredEnvConfigFromBackup string                          `json:"restoredEnvConfigFromBackup,omitempty"`
+	RepairedAliases             []string                        `json:"repairedAliases,omitempty"`
+	UnresolvedAliases           []string                        `json:"unresolvedAliases,omitempty"`
 }
 
 func doctorTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, DoctorInput) (*mcp.CallToolResult, CommandOutput, error) {
@@ -76,10 +78,91 @@ func runDoctorToolCommand(runtime RuntimeConfig, input DoctorInput, runCtx erunc
 	if fatal || onlyRootConfigDoctorInput(input) {
 		return report, nil
 	}
+	if selector := strings.TrimSpace(input.RestoreEnvConfigFromBackup); selector != "" {
+		if err := restoreDoctorEnvConfigFromBackup(runCtx, input, selector, report); err != nil {
+			return report, err
+		}
+		if onlyEnvConfigRestoreInput(input) {
+			return report, nil
+		}
+	}
 	if err := runDoctorTenantEnvActions(runtime, input, runCtx); err != nil {
 		return report, err
 	}
 	return report, nil
+}
+
+// restoreDoctorEnvConfigFromBackup restores the target environment's config
+// from a dated backup (or absolute path) before any tenant/env work, so a
+// config that was changed or corrupted — for example a type silently resolved
+// to the wrong value — can be recovered first. Requires explicit tenant and
+// environment (MCP paths take all input explicitly). Traces the copy for the
+// preview contract and records the source on the report.
+func restoreDoctorEnvConfigFromBackup(runCtx eruncommon.Context, input DoctorInput, selector string, report *DoctorRootConfigReport) error {
+	tenant := strings.TrimSpace(input.Tenant)
+	environment := strings.TrimSpace(input.Environment)
+	if tenant == "" || environment == "" {
+		return errors.New("restoreEnvConfigFromBackup requires explicit tenant and environment")
+	}
+	livePath, err := eruncommon.EnvConfigPath(tenant, environment)
+	if err != nil {
+		return err
+	}
+	backup, ok, err := resolveDoctorEnvBackupSelector(tenant, environment, selector)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		if dates := availableEnvBackupDates(tenant, environment); dates != "" {
+			return fmt.Errorf("no env config backup matches %q for %s/%s; available: %s", selector, tenant, environment, dates)
+		}
+		return fmt.Errorf("no env config backup matches %q for %s/%s (no backups exist yet)", selector, tenant, environment)
+	}
+	if !runCtx.DryRun {
+		if err := eruncommon.RestoreEnvConfigFromBackup(backup.Path, tenant, environment); err != nil {
+			return err
+		}
+	}
+	runCtx.TraceCommand("", "cp", backup.Path, livePath)
+	report.RestoredEnvConfigFromBackup = backup.Path
+	return nil
+}
+
+// availableEnvBackupDates returns the env's dated backups as a newest-first
+// comma list for the no-match error, so a caller can pick a real date. Empty
+// when none exist or listing fails.
+func availableEnvBackupDates(tenant, environment string) string {
+	backups, err := eruncommon.ListEnvConfigBackups(tenant, environment)
+	if err != nil || len(backups) == 0 {
+		return ""
+	}
+	dates := make([]string, 0, len(backups))
+	for _, backup := range backups {
+		dates = append(dates, backup.Date.Format("2006-01-02"))
+	}
+	return strings.Join(dates, ", ")
+}
+
+// resolveDoctorEnvBackupSelector maps a selector to an env-config backup: an
+// absolute/relative path is taken verbatim; otherwise it is a YYYY-MM-DD stamp
+// resolved against the env's dated backups (FindEnvConfigBackupByDate rejects a
+// malformed date).
+func resolveDoctorEnvBackupSelector(tenant, environment, selector string) (eruncommon.ConfigBackup, bool, error) {
+	if strings.ContainsAny(selector, "/\\") {
+		return eruncommon.ConfigBackup{Path: selector}, true, nil
+	}
+	return eruncommon.FindEnvConfigBackupByDate(tenant, environment, selector)
+}
+
+// onlyEnvConfigRestoreInput reports whether the only action requested is the
+// per-env config restore, so the tool stops after it instead of resolving the
+// env and running tenant/env diagnosis and prune actions.
+func onlyEnvConfigRestoreInput(input DoctorInput) bool {
+	return strings.TrimSpace(input.RestoreEnvConfigFromBackup) != "" &&
+		len(input.RepairOrphanedAliases) == 0 &&
+		strings.TrimSpace(input.RestoreConfigFromBackup) == "" &&
+		!input.PruneImages && !input.PruneBuildCache && !input.PruneContainers &&
+		!input.ClearPendingHelm && !input.Rollback
 }
 
 // runDoctorTenantEnvActions resolves the open target for the env and runs the
@@ -232,13 +315,13 @@ func runDoctorAliasRepairs(runtime RuntimeConfig, input DoctorInput, runCtx erun
 	return nil
 }
 
-func resolveDoctorBackupSelector(inspection eruncommon.RootConfigInspection, selector string) (eruncommon.RootConfigBackup, bool, error) {
+func resolveDoctorBackupSelector(inspection eruncommon.RootConfigInspection, selector string) (eruncommon.ConfigBackup, bool, error) {
 	if strings.ContainsAny(selector, "/\\") {
-		return eruncommon.RootConfigBackup{Path: selector}, true, nil
+		return eruncommon.ConfigBackup{Path: selector}, true, nil
 	}
 	backup, ok, err := eruncommon.FindRootConfigBackupByDate(inspection.ConfigPath, selector)
 	if err != nil {
-		return eruncommon.RootConfigBackup{}, false, err
+		return eruncommon.ConfigBackup{}, false, err
 	}
 	return backup, ok, nil
 }

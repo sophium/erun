@@ -29,6 +29,7 @@ Beyond reporting, `doctor` offers these fixes (each prompts first, or runs non-i
 - **Deploy recovery** — when the diagnosis shows the runtime release is unhealthy, `doctor` recommends the **one** recovery that fits: clearing a stuck pending helm release when a deploy died mid-upgrade and left it locked, or rolling back to the last successful revision when the current one is bad. It prompts for that single action (never both — they are alternative fixes, and running both would roll the release back a revision too far). These mutate the live release and are offered only when the release looks unhealthy, never on a healthy env. To rebuild and roll out fresh images instead, re-run `erun deploy --force`.
 - **Docker cleanup** — prune the environment's unused images, build cache, or stopped containers. These run against the environment's Docker, not your laptop's.
 - **Root config repair** — restore the root erun config from a dated backup, or re-initialize orphaned cloud provider aliases.
+- **Environment config restore** — restore one environment's `config.yaml` from a dated backup when a setting was changed or corrupted (for example an environment type that resolved to the wrong value). Each save snapshots the previous config alongside it, so there is a daily backup to roll back to.
 - **JetBrains Gateway** — clear cached backend metadata for the environment when a Gateway connection is stuck.
 - **Remote init** — inside a runtime pod, finish an interrupted init (SSH keygen, repo clone).
 
@@ -40,6 +41,7 @@ The exact flags for running these non-interactively are on the [CLI flag spec](/
 |---|---|
 | `--dry-run` | Run the inspection and print the recovery plan without performing any recovery actions. |
 | `--sync-config` | Reconcile the in-pod erun config with the helm-injected `ERUN_*` env vars. Only takes effect inside a runtime pod. The injected env wins: erun rebuilds the canonical projection (`type`, `kubernetescontext`, `cloudprovideralias`, `managedcloud`, the cloud-context/provider blocks, `idle`, `runtimeregistry`, `containerregistries`, `disablebuildscript`) and rewrites those keys, **preserving** every key the env does not carry (`sshd`, `claude`, `runtimeversion`, `localrepopath`, …). Drift is reported per key as `missing`, `wrong`, or `legacy`; with `--dry-run` the file writes are traced but not performed. |
+| `--restore-env-config-from-backup <date\|path>` | Restore the target environment's `config.yaml` from a dated backup (`YYYY-MM-DD`) or an absolute path, before the rest of the inspection runs so a corrupted env config can be recovered first. Needs an explicit tenant and environment. With `--dry-run`, the copy is traced but not performed. |
 
 ## Examples
 
@@ -102,6 +104,8 @@ The check format is fixed (`<category>: <name> <status> <detail>`); machine-read
 | Failure | Behaviour |
 |---|---|
 | Root config missing or corrupted. | Reports it; with `--repair-config` offers to restore from a dated backup, otherwise leaves it untouched. |
+| `--restore-env-config-from-backup` without an explicit tenant and environment. | Aborts with `--restore-env-config-from-backup needs an explicit tenant and environment`; exit code 1; nothing is changed. |
+| `--restore-env-config-from-backup <date>` with no matching backup. | Aborts naming the unmatched selector and the target env (`no env config backup matches "<date>" for <tenant>/<env>`); exit code 1; nothing is changed. |
 | Helm release missing or cluster unreachable during deploy diagnosis. | The helm/pod probe output (including the error) is shown as part of the diagnosis and `doctor` continues; the diagnosis is read-only, so nothing is changed. |
 | Deploy recovery (`--clear-pending-helm` / `--rollback`) fails. | The failing helm/kubectl output is surfaced and `doctor` aborts with that error; the release is left as helm leaves it (a failed rollback does not partially apply). Re-run the diagnosis to see the new state, then retry or `erun deploy --force`. |
 | `--rollback` with no prior successful revision. | `helm rollback` reports it has no revision to roll back to; nothing changes. Use `--clear-pending-helm` then `erun deploy --force` instead. |

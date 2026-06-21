@@ -14,18 +14,19 @@ import (
 )
 
 type doctorOptions struct {
-	pruneImages             bool
-	pruneBuildCache         bool
-	pruneContainers         bool
-	clearPendingHelm        bool
-	rollback                bool
-	repairJetBrainsGateway  bool
-	repairConfig            bool
-	restoreConfigFromBackup string
-	finishRemoteInit        bool
-	remoteRepositoryURL     string
-	codeCommitSSHKeyID      string
-	syncConfig              bool
+	pruneImages                bool
+	pruneBuildCache            bool
+	pruneContainers            bool
+	clearPendingHelm           bool
+	rollback                   bool
+	repairJetBrainsGateway     bool
+	repairConfig               bool
+	restoreConfigFromBackup    string
+	restoreEnvConfigFromBackup string
+	finishRemoteInit           bool
+	remoteRepositoryURL        string
+	codeCommitSSHKeyID         string
+	syncConfig                 bool
 }
 
 type jetBrainsGatewayDoctorRepair struct {
@@ -69,6 +70,7 @@ func newDoctorCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error)
 	cmd.Flags().BoolVar(&options.repairJetBrainsGateway, "repair-jetbrains-gateway", false, "Clear cached JetBrains Gateway backend metadata for this environment")
 	cmd.Flags().BoolVar(&options.repairConfig, "repair-config", false, "Inspect the root erun config and offer to restore from backup or re-init orphaned cloud provider aliases; stops before running tenant/env cleanup actions")
 	cmd.Flags().StringVar(&options.restoreConfigFromBackup, "restore-config-from-backup", "", "Restore the root erun config from a dated backup non-interactively (YYYY-MM-DD or absolute path)")
+	cmd.Flags().StringVar(&options.restoreEnvConfigFromBackup, "restore-env-config-from-backup", "", "Restore the target environment's config.yaml from a dated backup (YYYY-MM-DD or absolute path); needs an explicit tenant and environment")
 	cmd.Flags().BoolVar(&options.finishRemoteInit, "finish-remote-init", false, "Finish unfinished remote init tasks without prompting (only takes effect when run inside a runtime pod)")
 	cmd.Flags().StringVar(&options.remoteRepositoryURL, "remote-repository-url", "", "Git remote URL to use when finishing an unfinished remote init")
 	cmd.Flags().StringVar(&options.codeCommitSSHKeyID, "codecommit-ssh-key-id", "", "CodeCommit SSH public key ID to use when finishing an unfinished remote init for an AWS CodeCommit repository")
@@ -85,17 +87,12 @@ func runDoctorCommand(ctx common.Context, resolveOpen func(common.OpenParams) (c
 		return runDoctorInRuntime(ctx, promptRunner, options)
 	}
 
-	// Run the root-config inspection before any tenant/env work so a
-	// broken root config (the failure mode that motivated this flow:
-	// missing CloudProviders blocking resolveOpen) does not prevent
-	// recovery. The repair path here writes via SaveERunConfig +
-	// InitAWSCloudProvider; resolveOpen below picks up the healed
-	// state.
-	if _, err := runRootConfigDoctor(ctx, configStore, cloudDeps, cloudContextDeps, promptRunner, options); err != nil {
+	// Run the host-side config repairs (root config, then per-env config)
+	// before any tenant/env work: a broken or mis-set config can block the
+	// resolveOpen the rest of doctor relies on. done=true means the caller
+	// asked only for config repair, so stop before tenant/env cleanup.
+	if done, err := runDoctorConfigRepairs(ctx, configStore, cloudDeps, cloudContextDeps, promptRunner, options, args); err != nil || done {
 		return err
-	}
-	if doctorOnlyRepairConfig(options) {
-		return nil
 	}
 
 	params, err := common.OpenParamsForArgs(args)
@@ -122,6 +119,34 @@ func runDoctorCommand(ctx common.Context, resolveOpen func(common.OpenParams) (c
 	return runDoctorCleanupActions(ctx, promptRunner, result, options)
 }
 
+// runDoctorConfigRepairs runs the host-side config recoveries that must
+// precede resolveOpen, in order, and reports whether the run should stop after
+// them. The root-config inspection runs first so a broken root config (the
+// failure mode that motivated this flow: missing CloudProviders blocking
+// resolveOpen) does not prevent recovery — its repair path writes via
+// SaveERunConfig + InitAWSCloudProvider, and resolveOpen later picks up the
+// healed state. The per-env restore runs next, since a config that was changed
+// or corrupted (e.g. a type silently resolved to the wrong value) can block the
+// resolve too. Returns done=true when the caller asked only for config repair,
+// so the outer flow stops before tenant/env cleanup.
+func runDoctorConfigRepairs(ctx common.Context, configStore common.ConfigStore, cloudDeps common.CloudDependencies, cloudContextDeps common.CloudContextDependencies, promptRunner PromptRunner, options doctorOptions, args []string) (bool, error) {
+	if _, err := runRootConfigDoctor(ctx, configStore, cloudDeps, cloudContextDeps, promptRunner, options); err != nil {
+		return false, err
+	}
+	if doctorOnlyRepairConfig(options) {
+		return true, nil
+	}
+	if selector := strings.TrimSpace(options.restoreEnvConfigFromBackup); selector != "" {
+		if _, err := runEnvConfigRestoreFromArgs(ctx, args, selector); err != nil {
+			return false, err
+		}
+		if doctorOnlyRestoreEnvConfig(options) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // doctorOnlyRepairConfig mirrors doctorOnlySelectedJetBrainsGatewayRepair:
 // when the only repair-style flag set is --repair-config (or
 // --restore-config-from-backup), the doctor flow should stop after
@@ -133,6 +158,23 @@ func doctorOnlyRepairConfig(options doctorOptions) bool {
 		!options.pruneBuildCache &&
 		!options.pruneContainers &&
 		!options.repairJetBrainsGateway &&
+		!options.finishRemoteInit
+}
+
+// doctorOnlyRestoreEnvConfig reports whether --restore-env-config-from-backup
+// is the only action requested, so doctor stops after the env-config restore
+// instead of also resolving the env and running tenant/env cleanup. Mirrors
+// doctorOnlyRepairConfig for the per-env restore path.
+func doctorOnlyRestoreEnvConfig(options doctorOptions) bool {
+	return strings.TrimSpace(options.restoreEnvConfigFromBackup) != "" &&
+		!options.repairConfig &&
+		strings.TrimSpace(options.restoreConfigFromBackup) == "" &&
+		!options.pruneImages &&
+		!options.pruneBuildCache &&
+		!options.pruneContainers &&
+		!options.repairJetBrainsGateway &&
+		!options.clearPendingHelm &&
+		!options.rollback &&
 		!options.finishRemoteInit
 }
 

@@ -786,13 +786,26 @@ func remoteShellLaunchLines(req ShellLaunchParams, bashrcPath, markerDir string)
 		fmt.Sprintf("printf '%%s' \"$attach_id\" > \"%s\"", owner),
 	}
 	lines = append(lines, remoteAppSessionMasterScanLines(socket)...)
+	// Redraw method on reattach. dtach keeps no screen buffer, so a reattach
+	// shows nothing until the program itself repaints. The two tab kinds need
+	// different triggers:
+	//   - bash shell tabs (Local/ERun): readline repaints on the ^L byte dtach
+	//     injects, so -r ctrl_l works and is quieter than a resize.
+	//   - the AI tab's Claude: a main-screen TUI (no alternate screen) that does
+	//     NOT repaint on a bare ^L — it consumes the 0x0c as a keystroke (and can
+	//     nudge its exit/confirm footer). It only re-renders on a real SIGWINCH,
+	//     so the AI session uses -r winch: dtach raises WINCH on attach, forcing
+	//     a full repaint even when the reattached pane is the same size and the
+	//     pty would otherwise emit no WINCH of its own (issue #613). Switching
+	//     bash to ^L in #481 silently regressed the AI tab once ultracode/opus
+	//     became the default (#494) and changed Claude's idle key handling.
+	redraw := "ctrl_l"
+	if req.AI {
+		redraw = "winch"
+	}
 	return append(lines,
 		fmt.Sprintf("if [ -S \"%s\" ] && [ -n \"$master_pid\" ]; then for dtach_pid in $(pgrep -x dtach 2>/dev/null || true); do if [ \"$dtach_pid\" != \"$master_pid\" ] && grep -qF \"%s\" \"/proc/$dtach_pid/cmdline\" 2>/dev/null; then kill \"$dtach_pid\" 2>/dev/null || true; fi; done; fi", socket, socket),
-		// ctrl_l, not winch: dtach keeps no screen buffer, so a reattach shows
-		// nothing until the program repaints. A same-size attach yields no
-		// effective WINCH (bash's readline and claude's TUI both stay silent);
-		// the ^L dtach sends on attach makes both repaint immediately.
-		fmt.Sprintf("dtach -A \"%s\" -r ctrl_l /bin/bash \"%s\" || shell_status=$?", socket, launchScript),
+		fmt.Sprintf("dtach -A \"%s\" -r %s /bin/bash \"%s\" || shell_status=$?", socket, redraw, launchScript),
 		fmt.Sprintf("if [ \"$(cat \"%s\" 2>/dev/null)\" != \"$attach_id\" ]; then exit %d; fi", owner, remoteShellTakenOverExitCode),
 	)
 }

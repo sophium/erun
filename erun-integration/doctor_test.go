@@ -931,6 +931,77 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/restore_config_from_backup_no_match_error", normalize.Apply(result.Combined))
 	})
 
+	t.Run("restore_env_config_from_backup_dry_run", func(t *testing.T) {
+		// Per-env restore (issue #614): a dated backup sits next to the
+		// env's config.yaml. Doctor team dev --restore-env-config-from-backup
+		// 2026-05-19 --dry-run must trace the planned cp and stop without
+		// touching the live file.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envBackup := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml.2026-05-19.bak")
+		backupBody := "name: dev\ntype: remote-agent\nkubernetescontext: team-dev\n"
+		if err := os.WriteFile(envBackup, []byte(backupBody), 0o644); err != nil {
+			t.Fatalf("write env backup: %v", err)
+		}
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--restore-env-config-from-backup", "2026-05-19", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/restore_env_config_from_backup_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("restore_env_config_from_backup_real_run", func(t *testing.T) {
+		// Real-run per-env restore: covers RestoreEnvConfigFromBackup
+		// validating the bytes deserialize into an EnvConfig and atomically
+		// replacing the live file. The roundtrip is asserted on disk.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		envBackup := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml.2026-05-19.bak")
+		backupBody := "name: dev\ntype: remote-agent\nkubernetescontext: team-dev\n"
+		if err := os.WriteFile(envBackup, []byte(backupBody), 0o644); err != nil {
+			t.Fatalf("write env backup: %v", err)
+		}
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--restore-env-config-from-backup", "2026-05-19"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/restore_env_config_from_backup_real_run", normalize.Apply(result.Combined))
+		if restored := readFileForTest(t, envPath); restored != backupBody {
+			t.Errorf("expected restored env config to equal backup body, got:\n%s", restored)
+		}
+	})
+
+	t.Run("restore_env_config_from_backup_no_match_error", func(t *testing.T) {
+		// A well-formed date with no matching env backup must name the
+		// unmatched selector and the target env, and list the dates that
+		// ARE available (recognition over recall) — here a 2026-05-19 backup
+		// exists but 2026-01-01 was requested.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envBackup := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml.2026-05-19.bak")
+		if err := os.WriteFile(envBackup, []byte("name: dev\ntype: remote-agent\n"), 0o644); err != nil {
+			t.Fatalf("write env backup: %v", err)
+		}
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--restore-env-config-from-backup", "2026-01-01"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit, got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "doctor/restore_env_config_from_backup_no_match_error", normalize.Apply(result.Combined))
+	})
+
+	t.Run("restore_env_config_from_backup_requires_target_error", func(t *testing.T) {
+		// Without an explicit tenant and environment there is no env to
+		// restore; the flag must fail fast rather than guess a default.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"doctor", "--restore-env-config-from-backup", "2026-05-19"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit, got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "doctor/restore_env_config_from_backup_requires_target_error", normalize.Apply(result.Combined))
+	})
+
 	t.Run("repair_config_restores_backup_via_prompt", func(t *testing.T) {
 		// Real-run --repair-config on a corrupted root config with a
 		// backup available: the repair flow's first move is the restore
