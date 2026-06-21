@@ -117,6 +117,9 @@ func RunExposeService(ctx Context, params ExposeServiceParams, store ExposeStore
 	ctx.Trace(fmt.Sprintf("expose: platform powerdns namespace %s", result.PlatformNamespace))
 	ctx.TraceCommand("", "kubectl", powerDNSUpsertArgs(dnsParams)...)
 	ctx.TraceCommand("", "kubectl", ingressApplyArgs(ingressParams)...)
+	// The Ingress manifest is piped to `kubectl apply -f -` on stdin, so trace
+	// its body too — the argv alone hides the exact resource the real run applies.
+	ctx.TraceBlock("expose: ingress manifest", renderHostRoutingIngress(ingressParams))
 	if ctx.DryRun {
 		return result, nil
 	}
@@ -202,6 +205,13 @@ func resolveExposeServicePlan(params ExposeServiceParams, store ExposeStore) (Ex
 	// deriving any hostnames or zone names from it.
 	if err := platform.Validate(); err != nil {
 		return ExposeServiceResult{}, err
+	}
+	// platform.env is optional for the deploy/PowerDNS chart (it deploys into the
+	// release namespace), but expose derives the PowerDNS pod's namespace from it
+	// to exec the DNS write. Without it the write would run `kubectl -n "" exec`
+	// and silently target the current/default namespace, so require it here.
+	if strings.TrimSpace(platform.Env) == "" {
+		return ExposeServiceResult{}, fmt.Errorf("expose requires platform.env in .erun/config.yaml (the platform environment that runs the PowerDNS singleton)")
 	}
 	envConfig, _, err := store.LoadEnvConfig(tenant, environment)
 	if err != nil {

@@ -4,3 +4,23 @@ expose: per-env wildcard *.team-dev.services.erunpaas.com A <VERSION>.10 ttl 60 
 expose: platform powerdns namespace frs-prod
 kubectl --context platform-context -n frs-prod exec deploy/erun-powerdns -- pdnsutil --config-dir=/etc/pdns-shared replace-rrset services.erunpaas.com '*.team-dev' A 60 <VERSION>.10
 kubectl --context test-context -n team-dev apply -f -
+expose: ingress manifest:
+  apiVersion: networking.k8s.io/v1
+  kind: Ingress
+  metadata:
+    name: expose-api
+    namespace: team-dev
+    labels:
+      app.kubernetes.io/managed-by: erun-expose
+  spec:
+    rules:
+      - host: api.team-dev.services.erunpaas.com
+        http:
+          paths:
+            - path: /
+              pathType: Prefix
+              backend:
+                service:
+                  name: api
+                  port:
+                    number: 80

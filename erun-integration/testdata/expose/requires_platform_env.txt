@@ -1,0 +1,2 @@
+audit: erun expose --dry-run --ip <LOOPBACK> team dev api
+expose requires platform.env in .erun/config.yaml (the platform environment that runs the PowerDNS singleton)

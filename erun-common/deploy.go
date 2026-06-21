@@ -1333,9 +1333,15 @@ func resolveProjectContainerRegistry(projectRoot, environment string) string {
 // resolveProjectPlatform loads the per-instance platform config from the
 // project's .erun/config.yaml and returns it with defaults resolved. Returns a
 // zero PlatformConfig when the project is uninitialized or declares no platform
-// block, so deploy threads no platform.* values for non-platform projects. The
-// block is validated earlier (loadProjectK8sPlanForRepo), so a malformed block
-// fails the plan before reaching here.
+// block, so deploy threads no platform.* values for non-platform projects.
+//
+// On the `erun deploy` / `build --deploy` path the block is validated up front
+// (loadProjectK8sPlanForRepo), so a malformed block fails the plan before
+// reaching here. The open-runtime deploy path does not pass through that plan
+// step, so it reaches here unvalidated — harmless today because the runtime
+// chart it deploys ignores the threaded platform.* values (only the PowerDNS
+// singleton reads them, and open never deploys it). Do not rely on this function
+// having validated the block.
 func resolveProjectPlatform(projectRoot string) PlatformConfig {
 	projectRoot = strings.TrimSpace(projectRoot)
 	if projectRoot == "" {

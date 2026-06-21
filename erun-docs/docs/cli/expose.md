@@ -37,6 +37,7 @@ The exposed URL is **HTTP** today: the applied Ingress carries no TLS. A wildcar
 |---|---|---|
 | No `platform:` block (or no base domain) in `.erun/config.yaml` | Aborts: `expose requires a platform block with a base domain in .erun/config.yaml`; exit 1. | Add a [`platform:` block](/reference/configuration#platform-block). |
 | Malformed `platform:` block | Aborts with the specific validation error (bad base domain, services zone not under it, unparseable authoritative IP, …); exit 1. | Fix the offending field. |
+| `platform:` block has no `env` | Aborts: `expose requires platform.env in .erun/config.yaml …`; exit 1. `expose` derives the PowerDNS pod's namespace from `platform.env`, so it cannot run without it. | Set `platform.env` to the platform environment that runs PowerDNS. |
 | `--ip` omitted | Aborts: `a target IP is required …`; exit 1. | Pass `--ip <env ingress IP>`. |
 | Service name is not a DNS-1035 label | Aborts before any DNS write: `service name "…" must be a DNS-1035 label …`; exit 1. | Use a lowercase letters/digits/hyphen name. |
 | `pdnsutil` exec or Ingress apply fails (live run) | Surfaces the underlying `kubectl` error; the wildcard record and the Ingress are applied in that order, so a later failure can leave the DNS record written. | Re-run once the cluster issue is resolved — both operations are idempotent (record replace, Ingress apply). |
