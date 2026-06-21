@@ -127,6 +127,12 @@ func (r *IdentityRepository) bootstrapFirstIdentity(ctx context.Context, claims 
 			username = claims.Subject
 		}
 
+		// Register the issuer in the root issuers table first: tenant_issuers.issuer
+		// now foreign-keys issuers(issuer). The bootstrap issuer is single-tenant
+		// (org_field_key left NULL), so the token's iss alone resolves the tenant.
+		if _, err := tx.NewRaw(`INSERT INTO issuers (issuer) VALUES (?) ON CONFLICT (issuer) DO NOTHING`, claims.Issuer).Exec(ctx); err != nil {
+			return err
+		}
 		if _, err := tx.NewRaw(`INSERT INTO tenant_issuers (issuer, name) VALUES (?, ?)`, claims.Issuer, defaultTenantIssuerName(claims.Issuer)).Exec(ctx); err != nil {
 			return err
 		}

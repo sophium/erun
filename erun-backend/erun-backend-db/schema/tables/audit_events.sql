@@ -4,6 +4,7 @@ CREATE TABLE audit_events (
   erun_user_id UUID NOT NULL,
   external_user_id TEXT NOT NULL,
   external_issuer_id TEXT NOT NULL,
+  external_org_id TEXT,
   type TEXT NOT NULL,
   api_method TEXT,
   api_path TEXT,
