@@ -14,7 +14,7 @@ func TestHandlerRequiresBearerTokenForAPIEndpoint(t *testing.T) {
 		TokenVerifier: TokenVerifierFunc(func(ctx context.Context, token string) (Claims, error) {
 			return Claims{Issuer: "https://issuer.example", Subject: "user-1"}, nil
 		}),
-		TenantResolver: TenantResolverFunc(func(ctx context.Context, issuer string) (Tenant, error) {
+		TenantResolver: TenantResolverFunc(func(ctx context.Context, claims Claims) (Tenant, error) {
 			return Tenant{TenantID: "019a7fa5-c2c0-7c55-bc70-714873a71f10"}, nil
 		}),
 		UserResolver: UserResolverFunc(func(ctx context.Context, tenantID string, issuer string, externalID string) (User, error) {
@@ -38,7 +38,7 @@ func TestHandlerHealthzDoesNotRequireBearerToken(t *testing.T) {
 		TokenVerifier: TokenVerifierFunc(func(ctx context.Context, token string) (Claims, error) {
 			return Claims{}, errors.New("verifier should not be called")
 		}),
-		TenantResolver: TenantResolverFunc(func(ctx context.Context, issuer string) (Tenant, error) {
+		TenantResolver: TenantResolverFunc(func(ctx context.Context, claims Claims) (Tenant, error) {
 			return Tenant{}, errors.New("tenant resolver should not be called")
 		}),
 		UserResolver: UserResolverFunc(func(ctx context.Context, tenantID string, issuer string, externalID string) (User, error) {
@@ -65,7 +65,7 @@ func TestHandlerWhoamiReturnsResolvedTenant(t *testing.T) {
 		TokenVerifier: TokenVerifierFunc(func(ctx context.Context, token string) (Claims, error) {
 			return Claims{Issuer: "https://issuer.example", Subject: "user-1"}, nil
 		}),
-		TenantResolver: TenantResolverFunc(func(ctx context.Context, issuer string) (Tenant, error) {
+		TenantResolver: TenantResolverFunc(func(ctx context.Context, claims Claims) (Tenant, error) {
 			return Tenant{TenantID: "019a7fa5-c2c0-7c55-bc70-714873a71f10"}, nil
 		}),
 		UserResolver: UserResolverFunc(func(ctx context.Context, tenantID string, issuer string, externalID string) (User, error) {

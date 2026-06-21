@@ -17,9 +17,9 @@ func TestAuthMiddlewareResolvesTenantFromIssuer(t *testing.T) {
 			}
 			return Claims{Issuer: "https://issuer.example", Subject: "user-1"}, nil
 		}),
-		TenantResolver: TenantResolverFunc(func(ctx context.Context, issuer string) (Tenant, error) {
-			if issuer != "https://issuer.example" {
-				t.Fatalf("unexpected issuer: %q", issuer)
+		TenantResolver: TenantResolverFunc(func(ctx context.Context, claims Claims) (Tenant, error) {
+			if claims.Issuer != "https://issuer.example" {
+				t.Fatalf("unexpected issuer: %q", claims.Issuer)
 			}
 			return Tenant{TenantID: "019a7fa5-c2c0-7c55-bc70-714873a71f10"}, nil
 		}),
@@ -174,7 +174,7 @@ func TestAuthMiddlewareRejectsMissingBearerToken(t *testing.T) {
 			t.Fatal("verifier should not be called")
 			return Claims{}, nil
 		}),
-		TenantResolver: TenantResolverFunc(func(ctx context.Context, issuer string) (Tenant, error) {
+		TenantResolver: TenantResolverFunc(func(ctx context.Context, claims Claims) (Tenant, error) {
 			t.Fatal("tenant resolver should not be called")
 			return Tenant{}, nil
 		}),
@@ -203,7 +203,7 @@ func TestAuthMiddlewareRejectsMalformedBearerToken(t *testing.T) {
 			t.Fatal("verifier should not be called")
 			return Claims{}, nil
 		}),
-		TenantResolver: TenantResolverFunc(func(ctx context.Context, issuer string) (Tenant, error) {
+		TenantResolver: TenantResolverFunc(func(ctx context.Context, claims Claims) (Tenant, error) {
 			t.Fatal("tenant resolver should not be called")
 			return Tenant{}, nil
 		}),
@@ -233,7 +233,7 @@ func TestAuthMiddlewareRejectsUnknownTenantIssuer(t *testing.T) {
 		TokenVerifier: TokenVerifierFunc(func(ctx context.Context, token string) (Claims, error) {
 			return Claims{Issuer: "https://unknown.example", Subject: "user-1"}, nil
 		}),
-		TenantResolver: TenantResolverFunc(func(ctx context.Context, issuer string) (Tenant, error) {
+		TenantResolver: TenantResolverFunc(func(ctx context.Context, claims Claims) (Tenant, error) {
 			return Tenant{}, errors.New("not found")
 		}),
 		UserResolver: UserResolverFunc(func(ctx context.Context, tenantID string, issuer string, externalID string) (User, error) {
@@ -262,7 +262,7 @@ func TestAuthMiddlewareRejectsUnknownExternalUser(t *testing.T) {
 		TokenVerifier: TokenVerifierFunc(func(ctx context.Context, token string) (Claims, error) {
 			return Claims{Issuer: "https://issuer.example", Subject: "unknown-user"}, nil
 		}),
-		TenantResolver: TenantResolverFunc(func(ctx context.Context, issuer string) (Tenant, error) {
+		TenantResolver: TenantResolverFunc(func(ctx context.Context, claims Claims) (Tenant, error) {
 			return Tenant{TenantID: "019a7fa5-c2c0-7c55-bc70-714873a71f10"}, nil
 		}),
 		UserResolver: UserResolverFunc(func(ctx context.Context, tenantID string, issuer string, externalID string) (User, error) {
@@ -299,7 +299,7 @@ func TestAuthMiddlewareCachesFailedExternalUserResolution(t *testing.T) {
 		TokenVerifier: TokenVerifierFunc(func(ctx context.Context, token string) (Claims, error) {
 			return Claims{Issuer: "https://issuer.example", Subject: "unknown-user"}, nil
 		}),
-		TenantResolver: TenantResolverFunc(func(ctx context.Context, issuer string) (Tenant, error) {
+		TenantResolver: TenantResolverFunc(func(ctx context.Context, claims Claims) (Tenant, error) {
 			return Tenant{TenantID: "019a7fa5-c2c0-7c55-bc70-714873a71f10"}, nil
 		}),
 		UserResolver: UserResolverFunc(func(ctx context.Context, tenantID string, issuer string, externalID string) (User, error) {
@@ -343,7 +343,7 @@ func TestAuthMiddlewareExpiresFailedExternalUserResolutionCache(t *testing.T) {
 		TokenVerifier: TokenVerifierFunc(func(ctx context.Context, token string) (Claims, error) {
 			return Claims{Issuer: "https://issuer.example", Subject: "unknown-user"}, nil
 		}),
-		TenantResolver: TenantResolverFunc(func(ctx context.Context, issuer string) (Tenant, error) {
+		TenantResolver: TenantResolverFunc(func(ctx context.Context, claims Claims) (Tenant, error) {
 			return Tenant{TenantID: "019a7fa5-c2c0-7c55-bc70-714873a71f10"}, nil
 		}),
 		UserResolver: UserResolverFunc(func(ctx context.Context, tenantID string, issuer string, externalID string) (User, error) {
@@ -380,7 +380,7 @@ func TestAuthMiddlewareLogsAuditEventForAuthorizedRequest(t *testing.T) {
 		TokenVerifier: TokenVerifierFunc(func(ctx context.Context, token string) (Claims, error) {
 			return Claims{Issuer: "https://issuer.example", Subject: "user-1"}, nil
 		}),
-		TenantResolver: TenantResolverFunc(func(ctx context.Context, issuer string) (Tenant, error) {
+		TenantResolver: TenantResolverFunc(func(ctx context.Context, claims Claims) (Tenant, error) {
 			return Tenant{TenantID: "019a7fa5-c2c0-7c55-bc70-714873a71f10"}, nil
 		}),
 		UserResolver: UserResolverFunc(func(ctx context.Context, tenantID string, issuer string, externalID string) (User, error) {
@@ -437,7 +437,7 @@ func TestAuthMiddlewareAuthorizesBeforeAuditAndHandler(t *testing.T) {
 		TokenVerifier: TokenVerifierFunc(func(ctx context.Context, token string) (Claims, error) {
 			return Claims{Issuer: "https://issuer.example", Subject: "user-1"}, nil
 		}),
-		TenantResolver: TenantResolverFunc(func(ctx context.Context, issuer string) (Tenant, error) {
+		TenantResolver: TenantResolverFunc(func(ctx context.Context, claims Claims) (Tenant, error) {
 			return Tenant{TenantID: "019a7fa5-c2c0-7c55-bc70-714873a71f10"}, nil
 		}),
 		UserResolver: UserResolverFunc(func(ctx context.Context, tenantID string, issuer string, externalID string) (User, error) {
@@ -486,7 +486,7 @@ func TestAuthMiddlewareRejectsDeniedPermissionBeforeAuditAndHandler(t *testing.T
 		TokenVerifier: TokenVerifierFunc(func(ctx context.Context, token string) (Claims, error) {
 			return Claims{Issuer: "https://issuer.example", Subject: "user-1"}, nil
 		}),
-		TenantResolver: TenantResolverFunc(func(ctx context.Context, issuer string) (Tenant, error) {
+		TenantResolver: TenantResolverFunc(func(ctx context.Context, claims Claims) (Tenant, error) {
 			return Tenant{TenantID: "019a7fa5-c2c0-7c55-bc70-714873a71f10"}, nil
 		}),
 		UserResolver: UserResolverFunc(func(ctx context.Context, tenantID string, issuer string, externalID string) (User, error) {
@@ -528,7 +528,7 @@ func TestAuthMiddlewareDoesNotLogAuditEventForRejectedRequest(t *testing.T) {
 		TokenVerifier: TokenVerifierFunc(func(ctx context.Context, token string) (Claims, error) {
 			return Claims{}, errors.New("invalid")
 		}),
-		TenantResolver: TenantResolverFunc(func(ctx context.Context, issuer string) (Tenant, error) {
+		TenantResolver: TenantResolverFunc(func(ctx context.Context, claims Claims) (Tenant, error) {
 			t.Fatal("tenant resolver should not be called")
 			return Tenant{}, nil
 		}),

@@ -11,6 +11,10 @@ type Claims struct {
 	Issuer   string
 	Subject  string
 	Username string
+	// Raw is the full set of token claims, kept so the identity resolver can
+	// read a per-issuer org claim (issuers.org_field_key) for (iss, org) -> tenant
+	// resolution. The claim's name is configured per issuer, not known at verify time.
+	Raw map[string]any
 }
 
 type Context struct {
