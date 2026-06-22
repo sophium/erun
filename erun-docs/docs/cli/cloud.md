@@ -37,7 +37,7 @@ Omitted flags are prompted for interactively.
 
 Saves a delegated, account-scoped Cloudflare API token as a cloud provider alias. Run with **no flags** for a guided, step-by-step setup:
 
-1. **Create the token** — ERun prints the Cloudflare token page and the exact **Custom Token** permissions to set — `Zone → Zone → Edit` and `Zone → DNS → Edit`, with Zone Resources `Include → All zones` — then waits while you mint it in your already-logged-in browser session.
+1. **Create the token** — ERun prints the Cloudflare token page and the **Custom Token** permissions to set — `Zone → Zone → Edit` and `Zone → DNS → Edit` (Zone Resources `Include → All zones`), plus `Account → Cloudflare Pages → Edit` and any other scopes you'll use (Account Resources `Include → your account`) — then waits while you mint it in your already-logged-in browser session.
 2. **Paste the token** — entered masked and verified against the Cloudflare API; an invalid token re-prompts in place.
 3. **Confirm the account** — ERun resolves the account ID from the token automatically (a picker appears if the token sees more than one account), and proposes an editable token label.
 
