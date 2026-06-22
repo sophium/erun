@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/manifoldco/promptui"
 	common "github.com/sophium/erun/erun-common"
@@ -18,19 +20,19 @@ func newCloudCmd(store cloudCommandStoreInterface, promptRunner PromptRunner, se
 	return newCommandGroup(
 		"cloud",
 		"Cloud provider utilities",
-		newCloudInitCmd(store, promptRunner, deps),
+		newCloudInitCmd(store, promptRunner, selectRunner, deps),
 		newCloudLoginCmd(store, promptRunner, selectRunner, deps),
 		newCloudOIDCCmd(store, promptRunner, selectRunner, deps),
 		newCloudSetCmd(store),
 	)
 }
 
-func newCloudInitCmd(store common.CloudStore, promptRunner PromptRunner, deps common.CloudDependencies) *cobra.Command {
+func newCloudInitCmd(store common.CloudStore, promptRunner PromptRunner, selectRunner SelectRunner, deps common.CloudDependencies) *cobra.Command {
 	return newCommandGroup(
 		"init",
 		"Initialize cloud provider configuration",
 		newCloudInitAWSCmd(store, promptRunner, deps),
-		newCloudInitCloudflareCmd(store, promptRunner, deps),
+		newCloudInitCloudflareCmd(store, promptRunner, selectRunner, deps),
 	)
 }
 
@@ -99,36 +101,43 @@ func runCloudInitAWSCommand(ctx common.Context, store common.CloudStore, promptR
 	return writeCloudProviderSaved(ctx, provider)
 }
 
-func newCloudInitCloudflareCmd(store common.CloudStore, promptRunner PromptRunner, deps common.CloudDependencies) *cobra.Command {
+func newCloudInitCloudflareCmd(store common.CloudStore, promptRunner PromptRunner, selectRunner SelectRunner, deps common.CloudDependencies) *cobra.Command {
 	var params common.InitCloudflareCloudProviderParams
 	cmd := &cobra.Command{
 		Use:   "cloudflare",
 		Short: "Set up a Cloudflare cloud provider alias",
 		Long: "Set up a Cloudflare cloud provider alias.\n\n" +
-			"Verifies a delegated, account-scoped Cloudflare API token (account-level Zone:Edit + " +
-			"DNS:Edit) against the Cloudflare API and stores it on this machine as a cloud provider " +
-			"alias. The token is held in a local secret store referenced from erun config — it is " +
+			"Run with no flags for a guided setup: ERun shows you where to mint a delegated, " +
+			"account-scoped API token (account-level Zone:Edit + DNS:Edit), then prompts for it, " +
+			"verifies it against the Cloudflare API, and auto-resolves the account ID from the " +
+			"token. The token is held in a local secret store referenced from erun config — it is " +
 			"never written into erun-config.yaml. Environments that attach this alias receive the " +
-			"token as CLOUDFLARE_API_TOKEN so in-pod tooling (e.g. terraform) authenticates as it.",
+			"token as CLOUDFLARE_API_TOKEN so in-pod tooling (e.g. terraform) authenticates as it.\n\n" +
+			"Pass --api-token (with --account-id and --token-name) for non-interactive setup.",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
-		Example:      "  erun cloud init cloudflare --account-id <account> --token-name <label> --api-token <token>",
+		Example:      "  erun cloud init cloudflare\n  erun cloud init cloudflare --account-id <account> --token-name <label> --api-token <token>",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runCloudInitCloudflareCommand(commandContext(cmd), store, promptRunner, params, deps)
+			return runCloudInitCloudflareCommand(commandContext(cmd), store, promptRunner, selectRunner, params, deps)
 		},
 	}
-	cmd.Flags().StringVar(&params.AccountID, "account-id", "", "Cloudflare account ID the token belongs to")
-	cmd.Flags().StringVar(&params.TokenName, "token-name", "", "Label for the scoped API token")
+	cmd.Flags().StringVar(&params.AccountID, "account-id", "", "Cloudflare account ID the token belongs to (auto-resolved in guided setup)")
+	cmd.Flags().StringVar(&params.TokenName, "token-name", "", "Label for the scoped API token (defaults in guided setup)")
 	cmd.Flags().StringVar(&params.APIToken, "api-token", "", "Cloudflare scoped API token value (account-level Zone:Edit + DNS:Edit)")
 	addDryRunFlag(cmd)
 	return cmd
 }
 
-func runCloudInitCloudflareCommand(ctx common.Context, store common.CloudStore, promptRunner PromptRunner, params common.InitCloudflareCloudProviderParams, deps common.CloudDependencies) error {
-	var err error
-	params, err = promptCloudflareInitParams(promptRunner, params)
-	if err != nil {
-		return err
+func runCloudInitCloudflareCommand(ctx common.Context, store common.CloudStore, promptRunner PromptRunner, selectRunner SelectRunner, params common.InitCloudflareCloudProviderParams, deps common.CloudDependencies) error {
+	// Non-interactive path: a token was supplied (script/MCP) or this is a
+	// dry-run. Delegate straight to the shared init, which validates, verifies,
+	// stores, and saves — and traces the plan under --dry-run.
+	if !ctx.DryRun && strings.TrimSpace(params.APIToken) == "" {
+		var err error
+		params, err = runCloudflareInitWizard(ctx, promptRunner, selectRunner, params, deps)
+		if err != nil {
+			return err
+		}
 	}
 	provider, err := common.InitCloudflareCloudProvider(ctx, store, params, deps)
 	if err != nil {
@@ -141,23 +150,100 @@ func runCloudInitCloudflareCommand(ctx common.Context, store common.CloudStore, 
 	return writeCloudProviderSaved(ctx, provider)
 }
 
-func promptCloudflareInitParams(promptRunner PromptRunner, params common.InitCloudflareCloudProviderParams) (common.InitCloudflareCloudProviderParams, error) {
-	var err error
-	params.AccountID, err = promptCloudValueIfEmpty(promptRunner, params.AccountID, "Cloudflare account ID", "")
+// runCloudflareInitWizard is the guided, step-by-step interactive setup: it
+// points the operator at the token-creation page, takes the token (masked) and
+// verifies it (re-prompting on failure), auto-resolves the account ID from the
+// token, and defaults an editable label. Each step validates before advancing.
+func runCloudflareInitWizard(ctx common.Context, promptRunner PromptRunner, selectRunner SelectRunner, params common.InitCloudflareCloudProviderParams, deps common.CloudDependencies) (common.InitCloudflareCloudProviderParams, error) {
+	out := ctx.Stdout
+	fmt.Fprintln(out, "\nAdd a Cloudflare cloud alias")
+	fmt.Fprintln(out, "ERun needs a delegated, account-scoped API token (Zone:Edit + DNS:Edit). It never sees your Cloudflare password.")
+	fmt.Fprintln(out, "\nStep 1 of 3 · Create the token")
+	fmt.Fprintln(out, "  Open this page (you're already logged in to Cloudflare there):")
+	fmt.Fprintln(out, "    "+common.CloudflareCreateTokenURL)
+	fmt.Fprintln(out, "  Click Create Token → Create Custom Token, then set:")
+	fmt.Fprintln(out, "    Permissions:        Zone → Edit,  DNS → Edit")
+	fmt.Fprintln(out, "    Account Resources:  Include → <your account>")
+	fmt.Fprintln(out, "  Create the token and copy it.")
+	if _, err := promptRunner(promptui.Prompt{Label: "Press Enter once you've copied the token"}); err != nil {
+		return params, err
+	}
+
+	fmt.Fprintln(out, "\nStep 2 of 3 · Paste the token")
+	token, err := verifyCloudflareTokenInteractive(ctx, promptRunner, deps)
 	if err != nil {
 		return params, err
 	}
-	params.TokenName, err = promptCloudValueIfEmpty(promptRunner, params.TokenName, "Cloudflare token name", "")
+	params.APIToken = token
+
+	fmt.Fprintln(out, "\nStep 3 of 3 · Confirm the account")
+	accountID, err := resolveCloudflareAccountInteractive(ctx, promptRunner, selectRunner, token, deps)
 	if err != nil {
 		return params, err
 	}
-	if strings.TrimSpace(params.APIToken) == "" {
-		params.APIToken, err = requiredCloudSecretPrompt(promptRunner, "Cloudflare API token")
+	params.AccountID = accountID
+
+	if strings.TrimSpace(params.TokenName) == "" {
+		label, err := requiredCloudPrompt(promptRunner, "Token label", defaultCloudflareTokenLabel())
 		if err != nil {
 			return params, err
 		}
+		params.TokenName = label
 	}
 	return params, nil
+}
+
+// verifyCloudflareTokenInteractive prompts for the token (masked) and verifies
+// it, re-prompting in place until a valid token is entered.
+func verifyCloudflareTokenInteractive(ctx common.Context, promptRunner PromptRunner, deps common.CloudDependencies) (string, error) {
+	for {
+		token, err := requiredCloudSecretPrompt(promptRunner, "Cloudflare API token")
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintln(ctx.Stdout, "  Verifying with Cloudflare…")
+		if _, err := common.VerifyCloudflareAPIToken(ctx, token, deps); err != nil {
+			fmt.Fprintln(ctx.Stdout, "  ✗ "+err.Error())
+			continue
+		}
+		fmt.Fprintln(ctx.Stdout, "  ✓ token is active")
+		return token, nil
+	}
+}
+
+// resolveCloudflareAccountInteractive auto-resolves the account from the token,
+// shows a picker when the token sees several, and falls back to a manual prompt
+// when none can be listed.
+func resolveCloudflareAccountInteractive(ctx common.Context, promptRunner PromptRunner, selectRunner SelectRunner, token string, deps common.CloudDependencies) (string, error) {
+	accounts, err := common.ResolveCloudflareAccounts(ctx, token, deps)
+	if err != nil || len(accounts) == 0 {
+		fmt.Fprintln(ctx.Stdout, "  Could not auto-resolve the account from the token; enter it manually.")
+		return requiredCloudPrompt(promptRunner, "Cloudflare account ID", "")
+	}
+	if len(accounts) == 1 {
+		fmt.Fprintf(ctx.Stdout, "  Using account %q (%s)\n", accounts[0].Name, accounts[0].ID)
+		return accounts[0].ID, nil
+	}
+	items := make([]string, 0, len(accounts))
+	for _, account := range accounts {
+		items = append(items, fmt.Sprintf("%s (%s)", account.Name, account.ID))
+	}
+	index, _, err := selectRunner(promptui.Select{Label: "Select Cloudflare account", Items: items})
+	if err != nil {
+		return "", err
+	}
+	return accounts[index].ID, nil
+}
+
+// defaultCloudflareTokenLabel proposes a recognizable label tied to this host
+// and day so the operator can accept it without typing.
+func defaultCloudflareTokenLabel() string {
+	host, _ := os.Hostname()
+	host = strings.TrimSpace(host)
+	if host == "" {
+		host = "erun"
+	}
+	return "erun-" + host + "-" + time.Now().UTC().Format("20060102")
 }
 
 func requiredCloudSecretPrompt(promptRunner PromptRunner, label string) (string, error) {

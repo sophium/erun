@@ -131,11 +131,14 @@ type CloudDependencies struct {
 	CheckAWSStatus          func(Context, CloudProviderConfig) CloudProviderStatus
 
 	// VerifyCloudflareToken validates a Cloudflare scoped API token against the
-	// Cloudflare API. CloudSecretStore persists Cloudflare tokens off-config;
-	// it is nil unless a transport wires one, and Cloudflare operations that
-	// need it fail clearly when it is absent.
-	VerifyCloudflareToken func(Context, string) (CloudflareTokenInfo, error)
-	CloudSecretStore      CloudSecretStore
+	// Cloudflare API. ListCloudflareAccounts resolves the accounts a token can
+	// act on (used to auto-derive the account id during guided setup).
+	// CloudSecretStore persists Cloudflare tokens off-config; it is nil unless a
+	// transport wires one, and Cloudflare operations that need it fail clearly
+	// when it is absent.
+	VerifyCloudflareToken  func(Context, string) (CloudflareTokenInfo, error)
+	ListCloudflareAccounts func(Context, string) ([]CloudflareAccount, error)
+	CloudSecretStore       CloudSecretStore
 }
 
 // CloudProviderCredentials is a snapshot of temporary AWS credentials derived
@@ -880,6 +883,9 @@ func normalizeCloudDependencies(deps CloudDependencies) CloudDependencies {
 	}
 	if deps.VerifyCloudflareToken == nil {
 		deps.VerifyCloudflareToken = defaultVerifyCloudflareToken
+	}
+	if deps.ListCloudflareAccounts == nil {
+		deps.ListCloudflareAccounts = defaultListCloudflareAccounts
 	}
 	return deps
 }

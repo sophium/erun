@@ -1,19 +1,22 @@
 Set up a Cloudflare cloud provider alias.
 
-Verifies a delegated, account-scoped Cloudflare API token (account-level Zone:Edit + DNS:Edit) against the Cloudflare API and stores it on this machine as a cloud provider alias. The token is held in a local secret store referenced from erun config — it is never written into erun-config.yaml. Environments that attach this alias receive the token as CLOUDFLARE_API_TOKEN so in-pod tooling (e.g. terraform) authenticates as it.
+Run with no flags for a guided setup: ERun shows you where to mint a delegated, account-scoped API token (account-level Zone:Edit + DNS:Edit), then prompts for it, verifies it against the Cloudflare API, and auto-resolves the account ID from the token. The token is held in a local secret store referenced from erun config — it is never written into erun-config.yaml. Environments that attach this alias receive the token as CLOUDFLARE_API_TOKEN so in-pod tooling (e.g. terraform) authenticates as it.
+
+Pass --api-token (with --account-id and --token-name) for non-interactive setup.
 
 Usage:
   erun cloud init cloudflare [flags]
 
 Examples:
+  erun cloud init cloudflare
   erun cloud init cloudflare --account-id <account> --token-name <label> --api-token <token>
 
 Flags:
-      --account-id string   Cloudflare account ID the token belongs to
+      --account-id string   Cloudflare account ID the token belongs to (auto-resolved in guided setup)
       --api-token string    Cloudflare scoped API token value (account-level Zone:Edit + DNS:Edit)
       --dry-run             Resolve and trace mutating actions without executing them.
   -h, --help                help for cloudflare
-      --token-name string   Label for the scoped API token
+      --token-name string   Label for the scoped API token (defaults in guided setup)
 
 Global Flags:
       --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")

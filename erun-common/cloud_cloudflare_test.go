@@ -145,6 +145,32 @@ func TestVerifyCloudflareTokenAtClassifiesResponses(t *testing.T) {
 	})
 }
 
+func TestListCloudflareAccountsAt(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer tok" {
+			t.Fatalf("authorization header = %q", got)
+		}
+		_, _ = w.Write([]byte(`{"success":true,"result":[{"id":"a1","name":"Acme"},{"id":"a2","name":"Beta"},{"id":"","name":"skip-blank"}]}`))
+	}))
+	defer srv.Close()
+	accounts, err := listCloudflareAccountsAt(srv.URL, "tok")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	// Blank-id entries are dropped.
+	if len(accounts) != 2 || accounts[0].ID != "a1" || accounts[1].Name != "Beta" {
+		t.Fatalf("accounts = %+v", accounts)
+	}
+
+	rejected := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"success":false,"errors":[{"message":"bad token"}]}`))
+	}))
+	defer rejected.Close()
+	if _, err := listCloudflareAccountsAt(rejected.URL, "tok"); err == nil || !strings.Contains(err.Error(), "bad token") {
+		t.Fatalf("expected rejection error, got %v", err)
+	}
+}
+
 func TestResolveTenantCloudProviderIssuersSkipsCloudflare(t *testing.T) {
 	store := stubCloudContextStore{config: ERunConfig{CloudProviders: []CloudProviderConfig{
 		{Alias: "alice+123456789012@aws", Provider: CloudProviderAWS, OIDCIssuerURL: "https://issuer.example.com"},
