@@ -18,6 +18,15 @@ import (
 // successful response confirms the scoped API token is valid and active.
 const cloudflareTokenVerifyURL = "https://api.cloudflare.com/client/v4/user/tokens/verify"
 
+// cloudflareAccountsURL lists the accounts a token can act on, used to
+// auto-resolve the account id during guided alias setup.
+const cloudflareAccountsURL = "https://api.cloudflare.com/client/v4/accounts"
+
+// CloudflareCreateTokenURL is the Cloudflare dashboard page where an operator
+// mints an API token. The guided CLI flow prints it so the operator creates the
+// scoped token in their already-authenticated browser session.
+const CloudflareCreateTokenURL = "https://dash.cloudflare.com/profile/api-tokens"
+
 // CloudSecretStore persists provider secrets (today: Cloudflare scoped API
 // tokens) outside erun-config.yaml. Implementations key on an opaque ref so
 // the config file only ever carries the ref, never the secret value. The
@@ -34,6 +43,12 @@ type CloudSecretStore interface {
 type CloudflareTokenInfo struct {
 	ID     string
 	Status string
+}
+
+// CloudflareAccount identifies a Cloudflare account a token can act on.
+type CloudflareAccount struct {
+	ID   string
+	Name string
 }
 
 // InitCloudflareCloudProviderParams are the explicit inputs for adding a
@@ -95,6 +110,19 @@ func InitCloudflareCloudProvider(ctx Context, store CloudStore, params InitCloud
 		return CloudProviderConfig{}, err
 	}
 	return saved, nil
+}
+
+// VerifyCloudflareAPIToken validates a scoped token using the wired (or
+// default) Cloudflare verifier. Exposed so the guided CLI setup can validate a
+// pasted token before asking for anything else.
+func VerifyCloudflareAPIToken(ctx Context, token string, deps CloudDependencies) (CloudflareTokenInfo, error) {
+	return normalizeCloudDependencies(deps).VerifyCloudflareToken(ctx, token)
+}
+
+// ResolveCloudflareAccounts lists the accounts a token can act on, so the
+// guided CLI setup can auto-derive the account id instead of asking for it.
+func ResolveCloudflareAccounts(ctx Context, token string, deps CloudDependencies) ([]CloudflareAccount, error) {
+	return normalizeCloudDependencies(deps).ListCloudflareAccounts(ctx, token)
 }
 
 // cloudflareProviderConfig assembles a normalized Cloudflare CloudProviderConfig.
@@ -243,6 +271,68 @@ func verifyCloudflareTokenAt(url, token string) (CloudflareTokenInfo, error) {
 		return CloudflareTokenInfo{}, fmt.Errorf("cloudflare api token is %s", payload.Result.Status)
 	}
 	return CloudflareTokenInfo{ID: payload.Result.ID, Status: payload.Result.Status}, nil
+}
+
+// defaultListCloudflareAccounts lists the accounts a token can act on, so the
+// guided setup can auto-resolve the account id. Dry-run returns a synthetic
+// account without touching the network.
+func defaultListCloudflareAccounts(ctx Context, token string) ([]CloudflareAccount, error) {
+	ctx.Trace("GET " + cloudflareAccountsURL)
+	if ctx.DryRun {
+		return []CloudflareAccount{{ID: "cf-account-id", Name: "Cloudflare account"}}, nil
+	}
+	return listCloudflareAccountsAt(cloudflareAccountsURL, token)
+}
+
+// listCloudflareAccountsAt performs the live accounts lookup against url. Split
+// from defaultListCloudflareAccounts (which owns the trace and dry-run
+// short-circuit) so the response parsing is unit testable against httptest.
+func listCloudflareAccountsAt(url, token string) ([]CloudflareAccount, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return nil, fmt.Errorf("cloudflare api token is required")
+	}
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build cloudflare accounts request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/json")
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("list cloudflare accounts: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<18))
+	var payload struct {
+		Success bool `json:"success"`
+		Errors  []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+		Result []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("parse cloudflare accounts response (status %d): %w", resp.StatusCode, err)
+	}
+	if !payload.Success {
+		message := "cloudflare rejected the accounts request"
+		if len(payload.Errors) > 0 && strings.TrimSpace(payload.Errors[0].Message) != "" {
+			message = payload.Errors[0].Message
+		}
+		return nil, fmt.Errorf("list cloudflare accounts: %s", message)
+	}
+	accounts := make([]CloudflareAccount, 0, len(payload.Result))
+	for _, account := range payload.Result {
+		if strings.TrimSpace(account.ID) == "" {
+			continue
+		}
+		accounts = append(accounts, CloudflareAccount{ID: account.ID, Name: account.Name})
+	}
+	return accounts, nil
 }
 
 // fileCloudSecretStore is a 0600 file-backed CloudSecretStore. The ref is

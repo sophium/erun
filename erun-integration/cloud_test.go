@@ -147,6 +147,30 @@ func TestCloud(t *testing.T) {
 		golden.Equal(t, "cloud/init_cloudflare_dry_run", normalize.Apply(result.Combined))
 	})
 
+	t.Run("init_cloudflare_dry_run_auto_resolves_account", func(t *testing.T) {
+		// Same guided setup, but the operator answers only the token and label
+		// (no --account-id). The command runs the wizard's account step
+		// non-interactively: it traces the GET /accounts lookup (short-circuited
+		// in dry-run, no network), resolves the single synthetic account, and
+		// threads it into the alias write. Locks the "options answer the wizard
+		// questions" dry-run contract for the auto-resolve path.
+		setup := env.New(t)
+		args := []string{
+			"cloud", "init", "cloudflare",
+			"--token-name", "ci-token",
+			"--api-token", "dummy-token",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "dummy-token") {
+			t.Fatalf("expected the api token to be redacted, but found the literal value in output:\n%s", result.Combined)
+		}
+		golden.Equal(t, "cloud/init_cloudflare_dry_run_auto_account", normalize.Apply(result.Combined))
+	})
+
 	t.Run("init_aws_dry_run_traces_sso_setup_and_oidc_persistence", func(t *testing.T) {
 		// Exercises cloud.go runCloudInitAWSCommand: --dry-run must trace
 		// the aws configure sso plan, the sso login command, the sts

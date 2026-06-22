@@ -6,25 +6,28 @@ import {
   SEED_TENANT,
 } from '../fixtures/seedRoot.js';
 
-// Multi-provider cloud aliases (issue #630): the desktop surfaces AWS and
+// Multi-provider cloud aliases (issue #630, #632): the desktop surfaces AWS and
 // Cloudflare aliases as distinct provider types. These specs lock the three
-// new user-facing surfaces against the seeded baseline (one AWS alias, one
+// user-facing surfaces against the seeded baseline (one AWS alias, one
 // Cloudflare alias, and the `gamma` env attaching both):
 //
-//  1. the settings dialog's provider picker + Cloudflare add form,
+//  1. the settings dialog's provider picker, which delegates BOTH providers'
+//     add-alias flows to the CLI's guided `erun cloud init <provider>` PTY,
 //  2. the per-provider-type sidebar login rows,
 //  3. the per-provider-type env cloud-alias selectors.
 //
-// The seeded Cloudflare alias has no token in the off-config secret store, so
-// its status resolves to not_configured deterministically and offline — the
-// scoped-token verify never hits the network. Submitting the add form would
-// call the live Cloudflare API, so the add-form spec asserts the form's
-// presence, masking, and validation gating without submitting; the Go unit
-// coverage for the verify/store round-trip lives in erun-common
-// (cloud_cloudflare.go) and the erun-cli integration goldens.
+// Add-alias is delegated to the CLI for every provider type (issue #632): there
+// is no in-app add form. Clicking either "AWS" or "Cloudflare" in the picker
+// launches the guided CLI flow over a PTY and closes the settings dialog,
+// handing the terminal over to the CLI. The harness cannot drive the
+// interactive CLI prompts (the seeded `erun` stub is inert for `cloud init`),
+// so the observable invariant the spec locks is: the add button closes the
+// dialog (the session took over) and no in-app add-token form ever renders. The
+// guided prompt/verify/resolve flow itself is owned and tested by the CLI
+// (erun-common cloud_cloudflare.go + the erun-cli integration goldens).
 
 test.describe('multi-provider cloud aliases', () => {
-  test('settings provider picker reveals the masked Cloudflare add form', async ({ app }) => {
+  test('settings provider picker delegates both add flows to the CLI', async ({ app }) => {
     await app.sidebar.openSettings();
     await app.globalConfigDialog.waitForOpen();
 
@@ -34,30 +37,25 @@ test.describe('multi-provider cloud aliases', () => {
     await expect(app.globalConfigDialog.cloudAliasRow(SEED_CLOUD_ALIAS)).toBeVisible();
     await expect(app.globalConfigDialog.cloudAliasRow(SEED_CLOUDFLARE_ALIAS)).toBeVisible();
 
-    // The provider picker offers both providers; Cloudflare reveals the inline
-    // masked-token form (no terminal/PTY).
+    // The provider picker offers both providers as explicit buttons.
     await expect(app.globalConfigDialog.addAWSButton()).toBeVisible();
-    await app.globalConfigDialog.openCloudflareForm();
-    await expect(app.globalConfigDialog.cloudflareForm()).toBeVisible();
+    await expect(app.globalConfigDialog.addCloudflareButton()).toBeVisible();
 
-    // The API token field is masked (error prevention / shoulder-surfing).
-    await expect(app.globalConfigDialog.cloudflareApiTokenInput()).toHaveAttribute(
-      'type',
-      'password',
-    );
+    // Clicking Cloudflare launches the guided CLI flow (a PTY session running
+    // `erun cloud init cloudflare`) and closes the settings dialog — exactly
+    // like AWS. No in-app "add token" form is ever revealed.
+    await app.globalConfigDialog.clickAddCloudflare();
+    await app.globalConfigDialog.waitForClosed();
+    await expect(app.globalConfigDialog.cloudflareForm()).toHaveCount(0);
+  });
 
-    // Submit stays disabled until every field is filled (error prevention,
-    // Nielsen #5). Filling the form enables it; we do not submit because the
-    // verify would call the live Cloudflare API.
-    await expect(app.globalConfigDialog.cloudflareSubmitButton()).toBeDisabled();
-    await app.globalConfigDialog.fillCloudflareForm({
-      accountId: '0123456789abcdef',
-      tokenName: 'pw-new-token',
-      apiToken: 'cf-test-token-value',
-    });
-    await expect(app.globalConfigDialog.cloudflareSubmitButton()).toBeEnabled();
-
-    await app.globalConfigDialog.cancel();
+  test('settings AWS add also delegates to the CLI', async ({ app }) => {
+    // The AWS add mirrors Cloudflare: clicking it launches `erun cloud init
+    // aws` over a PTY and closes the dialog. Asserting both paths the same way
+    // is the consistency invariant issue #632 enforces (Nielsen #4).
+    await app.sidebar.openSettings();
+    await app.globalConfigDialog.waitForOpen();
+    await app.globalConfigDialog.clickAddAWS();
     await app.globalConfigDialog.waitForClosed();
   });
 

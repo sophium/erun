@@ -559,6 +559,55 @@ func (a *App) StartCloudInitAWSSession(cols, rows int) (startSessionResult, erro
 	return startSessionResult{SessionID: serial}, nil
 }
 
+// StartCloudInitCloudflareSession opens an interactive PTY running
+// `erun cloud init cloudflare`, mirroring StartCloudInitAWSSession. The CLI
+// owns Cloudflare alias creation end-to-end: it prompts for the scoped token,
+// verifies it against the Cloudflare API, auto-resolves the account, and
+// defaults a label. The desktop only launches the guided flow and hands the
+// terminal over to it; there is no in-app form.
+func (a *App) StartCloudInitCloudflareSession(cols, rows int) (startSessionResult, error) {
+	cols, rows = clampTerminalSize(cols, rows)
+	key := "cloud/init/cloudflare"
+
+	a.mu.Lock()
+	if existing := a.sessions[key]; existing != nil && !existing.closed && existing.session != nil {
+		a.mu.Unlock()
+		return startSessionResult{
+			SessionID: existing.serial,
+			Selection: existing.selection,
+		}, nil
+	}
+	a.mu.Unlock()
+
+	session, err := a.deps.startTerminal(startTerminalSessionParams{
+		Dir:        resolveTerminalStartDir(""),
+		Executable: a.deps.resolveCLIPath(),
+		Args:       buildCloudInitCloudflareArgs(),
+		Env:        []string{appSessionEnvVar + "=1"},
+		Cols:       cols,
+		Rows:       rows,
+	})
+	if err != nil {
+		return startSessionResult{}, err
+	}
+
+	a.mu.Lock()
+	a.nextSerial++
+	serial := a.nextSerial
+	managed := &managedTerminal{
+		session:   session,
+		key:       key,
+		serial:    serial,
+		startedAt: time.Now(),
+	}
+	a.sessions[key] = managed
+	a.mu.Unlock()
+
+	go a.streamSession(managed)
+
+	return startSessionResult{SessionID: serial}, nil
+}
+
 func (a *App) DeleteEnvironment(selection uiSelection, confirmation string) (deleteEnvironmentResult, error) {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {

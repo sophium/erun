@@ -1,16 +1,15 @@
 import { Cloud, LoaderCircle, Plus, RefreshCw } from 'lucide-react';
 import * as React from 'react';
 
-import { openCloudflareCloudInitForm } from '@/app/cloudflareProviderThunks';
 import {
   loginGlobalCloudProvider,
   refreshCloudProviders,
   startAWSCloudInit,
+  startCloudflareCloudInit,
 } from '@/app/globalConfigThunks';
 import { useAppDispatch } from '@/app/hooks';
 import type { AppState } from '@/app/state';
 import { EmptyState } from '@/components/app/EmptyState';
-import { CloudflareAliasForm } from '@/components/app/GlobalConfigDialog.CloudflareForm';
 import {
   cloudProviderSummary,
   cloudProviderTypeLabel,
@@ -54,7 +53,6 @@ export function CloudAliasesSection({
           </Button>
         </div>
       </div>
-      {dialog.cloudflareFormOpen && <CloudflareAliasForm dialog={dialog} />}
       {providers.length === 0 ? (
         <CloudAliasesEmptyState dialog={dialog} />
       ) : (
@@ -65,10 +63,12 @@ export function CloudAliasesSection({
 }
 
 // AddProviderButtons is the provider picker: one explicit button per provider
-// type. AWS opens an SSO PTY session (startAWSCloudInit); Cloudflare reveals
-// the inline masked-token form (no terminal). Two named buttons beat a generic
-// "Add" + a hidden type chooser — the operator sees both supported providers up
-// front (recognition over recall, Nielsen #6).
+// type. Both delegate alias creation to the CLI's guided `erun cloud init
+// <provider>` flow over a PTY session — AWS runs an SSO browser login,
+// Cloudflare prompts for and verifies a scoped token — so the desktop never
+// hosts a bespoke add form. Two named buttons beat a generic "Add" + a hidden
+// type chooser — the operator sees both supported providers up front
+// (recognition over recall, Nielsen #6).
 function AddProviderButtons({ dialog }: { dialog: GlobalConfigDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
   return (
@@ -91,12 +91,14 @@ function AddProviderButtons({ dialog }: { dialog: GlobalConfigDialog }): React.R
         type="button"
         variant="outline"
         size="sm"
-        disabled={dialog.busy || dialog.cloudflareFormOpen}
-        onClick={() => {
-          dispatch(openCloudflareCloudInitForm());
-        }}
+        disabled={dialog.busy}
+        onClick={() => void dispatch(startCloudflareCloudInit())}
       >
-        <Plus aria-hidden="true" />
+        {dialog.busyAction === 'cloud-provider-cloudflare-init' ? (
+          <LoaderCircle className="animate-spin" aria-hidden="true" />
+        ) : (
+          <Plus aria-hidden="true" />
+        )}
         Cloudflare
       </Button>
     </>
@@ -130,12 +132,14 @@ function CloudAliasesEmptyState({ dialog }: { dialog: GlobalConfigDialog }): Rea
             type="button"
             variant="outline"
             size="sm"
-            disabled={dialog.busy || dialog.cloudflareFormOpen}
-            onClick={() => {
-              dispatch(openCloudflareCloudInitForm());
-            }}
+            disabled={dialog.busy}
+            onClick={() => void dispatch(startCloudflareCloudInit())}
           >
-            <Plus aria-hidden="true" />
+            {dialog.busyAction === 'cloud-provider-cloudflare-init' ? (
+              <LoaderCircle className="animate-spin" aria-hidden="true" />
+            ) : (
+              <Plus aria-hidden="true" />
+            )}
             Add Cloudflare token
           </Button>
         </div>
