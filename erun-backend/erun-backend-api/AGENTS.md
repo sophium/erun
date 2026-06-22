@@ -107,7 +107,7 @@ Module-specific guidance for `erun-backend-api`. Follow the repository root and 
 - Avoid package-level mutable auth configuration. Pass verifiers and tenant resolvers through explicit API construction.
 - Prefer a single identity resolver when database-backed auth is used, because empty-database bootstrap must resolve or create tenant, issuer, user, roles, and permissions atomically.
 - If there are no tenants, the first valid authenticated identity may create the initial `OPERATIONS` tenant and first ERun user. That user must receive both predefined roles: `ReadAll` and `WriteAll`.
-- Once any tenant exists, unknown issuers or unknown external subjects are unauthorized and must not create users implicitly.
+- Once any tenant exists, unknown or unregistered issuers are unauthorized, and an unknown external subject is unauthorized for a tenant that already has a user. The one implicit-creation case beyond empty-database bootstrap is per-tenant first-user bootstrap: when a token resolves to a tenant that has zero users, enrol that subject as the tenant's first user with both `ReadAll` and `WriteAll`. This is how a newly-provisioned tenant gets its first admin; for an org-scoped issuer it means the first valid caller in a new org becomes that tenant's admin. Do not create users implicitly in any other case.
 - Operations tenants are system tenants. PostgreSQL RLS allows them to access tenant-owned rows across tenants by setting the transaction role to `erun_operations`, but API authorization must still require assigned roles and permissions.
 - Normal tenant transactions must use PostgreSQL role `erun_tenant`; operations tenant transactions must use PostgreSQL role `erun_operations`.
 
