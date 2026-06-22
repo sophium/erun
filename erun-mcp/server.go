@@ -198,7 +198,7 @@ func registerCloudTools(server *mcp.Server, runtime RuntimeConfig) {
 	}, cloudInitAWSTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "cloud_init_cloudflare",
-		Description: "Initialize a Cloudflare cloud provider alias from a delegated, account-scoped API token (account-level Zone:Edit + DNS:Edit). The token is verified against the Cloudflare API and held in a local secret store referenced from erun config, never written into erun-config.yaml; environments that attach the alias receive it as CLOUDFLARE_API_TOKEN. Supports preview.",
+		Description: "Initialize a Cloudflare cloud provider alias from a delegated API token (Zone:Edit + DNS:Edit across the account's zones). The token is verified against the Cloudflare API and held in a local secret store referenced from erun config, never written into erun-config.yaml; environments that attach the alias receive it as CLOUDFLARE_API_TOKEN. Supports preview.",
 	}, cloudInitCloudflareTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "cloud_login",

@@ -52,9 +52,9 @@ type CloudflareAccount struct {
 }
 
 // InitCloudflareCloudProviderParams are the explicit inputs for adding a
-// Cloudflare cloud alias. The API token is an account-scoped, delegated token
-// (account-level Zone:Edit + DNS:Edit) the operator minted in the Cloudflare
-// dashboard; erun stores it via the CloudSecretStore, never inline.
+// Cloudflare cloud alias. The API token is a delegated, custom token the
+// operator minted in the Cloudflare dashboard with Zone:Edit + DNS:Edit across
+// the account's zones; erun stores it via the CloudSecretStore, never inline.
 type InitCloudflareCloudProviderParams struct {
 	AccountID string
 	TokenName string

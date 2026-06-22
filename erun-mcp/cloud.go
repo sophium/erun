@@ -27,7 +27,7 @@ type CloudInitAWSInput struct {
 type CloudInitCloudflareInput struct {
 	AccountID string `json:"accountId" jsonschema:"Cloudflare account ID the scoped API token belongs to"`
 	TokenName string `json:"tokenName" jsonschema:"label for the scoped API token"`
-	APIToken  string `json:"apiToken" jsonschema:"Cloudflare scoped API token value (account-level Zone:Edit + DNS:Edit); held in the local secret store, never written to erun-config.yaml"`
+	APIToken  string `json:"apiToken" jsonschema:"Cloudflare scoped API token value (Zone:Edit + DNS:Edit across the account's zones); held in the local secret store, never written to erun-config.yaml"`
 	Preview   bool   `json:"preview,omitempty" jsonschema:"when true, return the planned operation without verifying the token or saving config"`
 	Verbosity int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }

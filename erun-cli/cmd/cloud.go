@@ -107,8 +107,8 @@ func newCloudInitCloudflareCmd(store common.CloudStore, promptRunner PromptRunne
 		Use:   "cloudflare",
 		Short: "Set up a Cloudflare cloud provider alias",
 		Long: "Set up a Cloudflare cloud provider alias.\n\n" +
-			"Run with no flags for a guided setup: ERun shows you where to mint a delegated, " +
-			"account-scoped API token (account-level Zone:Edit + DNS:Edit), then prompts for it, " +
+			"Run with no flags for a guided setup: ERun shows you where to mint a delegated " +
+			"API token (Zone:Edit + DNS:Edit across your account's zones), then prompts for it, " +
 			"verifies it against the Cloudflare API, and auto-resolves the account ID from the " +
 			"token. The token is held in a local secret store referenced from erun config — it is " +
 			"never written into erun-config.yaml. Environments that attach this alias receive the " +
@@ -123,7 +123,7 @@ func newCloudInitCloudflareCmd(store common.CloudStore, promptRunner PromptRunne
 	}
 	cmd.Flags().StringVar(&params.AccountID, "account-id", "", "Cloudflare account ID the token belongs to (auto-resolved in guided setup)")
 	cmd.Flags().StringVar(&params.TokenName, "token-name", "", "Label for the scoped API token (defaults in guided setup)")
-	cmd.Flags().StringVar(&params.APIToken, "api-token", "", "Cloudflare scoped API token value (account-level Zone:Edit + DNS:Edit)")
+	cmd.Flags().StringVar(&params.APIToken, "api-token", "", "Cloudflare scoped API token value (Zone:Edit + DNS:Edit across the account's zones)")
 	addDryRunFlag(cmd)
 	return cmd
 }
@@ -193,10 +193,13 @@ func runCloudflareInitWizard(ctx common.Context, promptRunner PromptRunner, sele
 	fmt.Fprintln(out, "\nStep 1 of 3 · Create the token")
 	fmt.Fprintln(out, "  Open this page (you're already logged in to Cloudflare there):")
 	fmt.Fprintln(out, "    "+common.CloudflareCreateTokenURL)
-	fmt.Fprintln(out, "  Click Create Token → Create Custom Token, then set:")
-	fmt.Fprintln(out, "    Permissions:        Zone → Edit,  DNS → Edit")
-	fmt.Fprintln(out, "    Account Resources:  Include → <your account>")
-	fmt.Fprintln(out, "  Create the token and copy it.")
+	fmt.Fprintln(out, "  Click Create Token → Create Custom Token, give it a name, then add")
+	fmt.Fprintln(out, "  two permission rows (each row is Scope → Permission → Access; use")
+	fmt.Fprintln(out, "  \"+ Add more\" for the second):")
+	fmt.Fprintln(out, "    Zone → Zone → Edit    (create the delegated subzone)")
+	fmt.Fprintln(out, "    Zone → DNS  → Edit    (manage DNS records)")
+	fmt.Fprintln(out, "  Set Zone Resources to:  Include → All zones")
+	fmt.Fprintln(out, "  Continue to summary → Create Token, then copy the token.")
 	if _, err := promptRunner(promptui.Prompt{Label: "Press Enter once you've copied the token"}); err != nil {
 		return params, err
 	}
