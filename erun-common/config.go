@@ -269,6 +269,10 @@ type ProjectConfig struct {
 	ContainerRegistries ContainerRegistries                 `yaml:"containerregistries,omitempty"`
 	Environments        map[string]ProjectEnvironmentConfig `yaml:"environments,omitempty"`
 	Release             ReleaseConfig                       `yaml:"release,omitempty"`
+	// Platform is the per-instance erunpaas platform configuration (base
+	// domain, delegated services zone, authoritative nameserver, platform
+	// env). Empty for projects that do not run a platform deployment.
+	Platform PlatformConfig `yaml:"platform,omitempty"`
 }
 
 // K8sForEnvironment returns the k8s deploy plan declared for the given
@@ -643,6 +647,15 @@ func SaveEnvConfig(tenant string, config EnvConfig) error {
 	if err != nil {
 		return ErrFailedToSaveConfig
 	}
+
+	// Snapshot the previous live env config before overwriting it, the
+	// same way SaveERunConfig guards the root config. Best-effort and
+	// idempotent within one local day: it protects against a wrong value
+	// (e.g. a type silently resolved to "runtime" on a remote-agent env)
+	// being persisted with no way back. A backup failure must not block
+	// the save — the bug being guarded against is data loss, so refusing
+	// to save when the backup directory is unwritable would be worse.
+	_ = writeEnvConfigBackupIfDue(configFilePath, timeNow)
 
 	if err := writeFileAtomic(configFilePath, data, 0o644); err != nil {
 		return ErrFailedToSaveConfig

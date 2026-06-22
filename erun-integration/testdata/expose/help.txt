@@ -1,0 +1,21 @@
+Expose an in-namespace Service at a stable public hostname under the platform's services zone.
+
+Ensures the per-environment wildcard DNS record points at the env's ingress IP and applies a Host-routing Ingress for the Service. Requires a platform block in .erun/config.yaml; it mutates the platform DNS zone and applies to the env's cluster. Use --dry-run to preview the resolved hostname and actions.
+
+Usage:
+  erun expose TENANT ENVIRONMENT SERVICE [flags]
+
+Examples:
+  erun expose team dev api --ip <LOOPBACK>
+  erun expose team dev api --ip <VERSION>.10 --port 8080
+
+Flags:
+      --dry-run     Resolve and trace mutating actions without executing them.
+  -h, --help        help for expose
+      --ip string   Ingress IP the per-env wildcard record points at (e.g. <LOOPBACK> for a local cluster, the public LB IP for remote)
+      --port int    Service port to route to (default 80)
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

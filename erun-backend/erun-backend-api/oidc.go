@@ -79,10 +79,17 @@ func (v *OIDCTokenVerifier) VerifyBearerToken(ctx context.Context, token string)
 	if err := idToken.Claims(&claims); err != nil {
 		return Claims{}, err
 	}
-	return claimsFromOIDCTokenClaims(claims), nil
+	// Also capture the full claim set as a map so the identity resolver can read
+	// a per-issuer org claim (issuers.org_field_key) whose name is not known here
+	// — it is configured per issuer in the DB, not baked into the verifier.
+	var raw map[string]any
+	if err := idToken.Claims(&raw); err != nil {
+		return Claims{}, err
+	}
+	return claimsFromOIDCTokenClaims(claims, raw), nil
 }
 
-func claimsFromOIDCTokenClaims(claims oidcTokenClaims) Claims {
+func claimsFromOIDCTokenClaims(claims oidcTokenClaims, raw map[string]any) Claims {
 	username := strings.TrimSpace(claims.PreferredUsername)
 	if username == "" {
 		username = strings.TrimSpace(claims.Username)
@@ -98,6 +105,7 @@ func claimsFromOIDCTokenClaims(claims oidcTokenClaims) Claims {
 		Issuer:   strings.TrimSpace(claims.Issuer),
 		Subject:  subject,
 		Username: username,
+		Raw:      raw,
 	}
 }
 

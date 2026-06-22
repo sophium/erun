@@ -379,23 +379,23 @@ func runRootConfigRestoreFromBackup(ctx common.Context, inspection common.RootCo
 	return runRootConfigRestore(ctx, inspection.ConfigPath, backup)
 }
 
-func resolveRootConfigBackupSelector(inspection common.RootConfigInspection, selector string) (common.RootConfigBackup, bool, error) {
+func resolveRootConfigBackupSelector(inspection common.RootConfigInspection, selector string) (common.ConfigBackup, bool, error) {
 	if strings.ContainsAny(selector, "/\\") {
-		return common.RootConfigBackup{Path: selector}, true, nil
+		return common.ConfigBackup{Path: selector}, true, nil
 	}
 	parsed, err := time.Parse("2006-01-02", selector)
 	if err != nil {
-		return common.RootConfigBackup{}, false, fmt.Errorf("invalid backup date %q (expected YYYY-MM-DD or an absolute path)", selector)
+		return common.ConfigBackup{}, false, fmt.Errorf("invalid backup date %q (expected YYYY-MM-DD or an absolute path)", selector)
 	}
 	for _, backup := range inspection.Backups {
 		if backup.Date.Equal(parsed) {
 			return backup, true, nil
 		}
 	}
-	return common.RootConfigBackup{}, false, nil
+	return common.ConfigBackup{}, false, nil
 }
 
-func runRootConfigRestore(ctx common.Context, livePath string, backup common.RootConfigBackup) (bool, error) {
+func runRootConfigRestore(ctx common.Context, livePath string, backup common.ConfigBackup) (bool, error) {
 	ctx.TraceCommand("", "cp", backup.Path, livePath)
 	if ctx.DryRun {
 		_, err := fmt.Fprintf(ctx.Stdout, "Dry-run: would restore root config from %s\n", backup.Path)

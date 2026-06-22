@@ -123,6 +123,7 @@ These wrap the [pure command primitives](/concepts/command-primitives): `build` 
 | `deploy` | `erun deploy` | Per-chart rollout status, helm release info. Requires `version`. |
 | `release` | `erun release` | Released version, tag, multi-arch confirmation. |
 | `open` | `erun open` | Local SSH + MCP ports, status (`opened` / `already_open`). |
+| `expose` | `erun expose` | Resolved public hostname, per-env wildcard record, Host-routing Ingress. Requires a `platform:` block. Supports preview (dry-run). |
 | `init` | `erun init` | Created files, deployed namespace. |
 | `delete` | `erun delete` | Namespace deleted, local config removed. |
 
@@ -193,6 +194,8 @@ Runs a fixed set of in-pod health checks. Each check returns `ok | warn | fail` 
 A failing check returns `status: "fail"` and a `detail` describing the symptom. Agents should prefer running `doctor` before `raw` when they see unexpected behaviour.
 
 `doctor` also reports why a deploy may have failed (helm release status + runtime pods, read-only) and can recover a failing runtime release. Two boolean inputs request the recovery actions, each mutating the live release: `clearPendingHelm` clears a stuck helm pending-install/upgrade lock, and `rollback` rolls the release back to its last successful revision. They are alternative fixes — requesting both in one call is rejected. See [CLI flag spec · Deploy recovery actions](/agent-reference/cli-flags#deploy-recovery-actions) for the exact commands and when to use each.
+
+Two string inputs restore a config from its dated backup before any tenant/env work: `restoreConfigFromBackup` recovers the root erun config, and `restoreEnvConfigFromBackup` recovers the target environment's `config.yaml` (requires explicit `tenant` + `environment`). Each takes a `YYYY-MM-DD` stamp or an absolute path; under `preview` the copy is reported but not performed. See [Config backups](/reference/config-locations#config-backups).
 
 ### `list`
 

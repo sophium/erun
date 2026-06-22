@@ -18,7 +18,7 @@ import { CheckboxField, ReadonlyField, StatusBadge } from '@/components/app/Mana
 import { SelectField } from '@/components/app/SelectField';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import type { UICloudContextStatus } from '@/types';
+import { EnvironmentTypeValues, type UICloudContextStatus } from '@/types';
 
 // Sentinel for the clear ("— None —") option in the cloud-alias dropdown.
 // Radix Select rejects an empty-string item value, so the option carries this
@@ -77,10 +77,12 @@ export function GeneralTab(): React.ReactElement {
         onStart={(name) => void dispatch(startManageCloudContext(name))}
         onStop={(name) => void dispatch(stopManageCloudContext(name))}
       />
-      <ReadonlyField
-        id="environment-config-type"
-        label="Environment type"
-        value={environmentTypeLabel(config.type)}
+      <EnvironmentTypeField
+        value={config.type}
+        disabled={dialog.busy || dialog.configLoading}
+        onChange={(type) => {
+          dispatch(updateManageConfig({ type }));
+        }}
       />
       {environmentTypeIsRemoteWorktree(config.type) && (
         <CheckboxField
@@ -108,6 +110,40 @@ function environmentTypeLabel(type: string | undefined): string {
     default:
       return 'Unknown';
   }
+}
+
+// EnvironmentTypeField makes the env type a correctable, constrained selector
+// rather than a read-only label. The type drives build/deploy policy
+// (BuildsHere / RemoteWorktree), so it is set deliberately at init and is not a
+// derived value — but a wrong value (e.g. a type that resolved to "runtime" on
+// what is really a remote-agent env, issue #615) otherwise has no recovery
+// surface short of hand-editing config.yaml. Recognition over recall: the
+// option set is the three known types. The change is applied on Save and takes
+// effect on the next deploy, which reconfigures the worktree storage.
+function EnvironmentTypeField({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: string | undefined;
+  disabled?: boolean;
+  onChange: (value: string) => void;
+}): React.ReactElement {
+  return (
+    <SelectField
+      id="environment-config-type"
+      label="Environment type"
+      value={value ?? ''}
+      placeholder="Select environment type"
+      options={EnvironmentTypeValues.map((type) => ({
+        value: type,
+        label: environmentTypeLabel(type),
+      }))}
+      helper="Sets whether this environment builds here and where its worktree lives. Change it only to correct a mis-set type; the new type is applied on Save and takes effect on the next deploy, which reconfigures the worktree."
+      disabled={disabled}
+      onChange={onChange}
+    />
+  );
 }
 
 function CloudAliasSelect({

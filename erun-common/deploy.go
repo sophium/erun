@@ -177,6 +177,11 @@ type HelmDeploySpec struct {
 	// DisableBuildScript mirrors EnvConfig.DisableBuildScript so a remote-agent
 	// pod's in-pod build honours the operator's build.sh-discovery choice (#548).
 	DisableBuildScript bool
+	// Platform is the resolved per-instance platform config (base domain,
+	// services zone, authoritative IP, nameservers). Zero for non-platform
+	// projects; when set, deploy threads it to every chart as platform.*
+	// values so the PowerDNS singleton can bootstrap its authoritative zone.
+	Platform PlatformConfig
 }
 
 type HelmReleaseRecoveryParams struct {
@@ -416,6 +421,13 @@ func loadProjectK8sPlanForRepo(repoPath, environment string) (ProjectK8sConfig, 
 		if errors.Is(err, ErrNotInitialized) {
 			return ProjectK8sConfig{}, nil
 		}
+		return ProjectK8sConfig{}, err
+	}
+	// A malformed platform block would otherwise surface only later, when
+	// deploy templates platform artifacts (PowerDNS zone, exposure hostnames)
+	// from these values. Reject it here so an inconsistent base-domain /
+	// services-zone / authoritative-IP fails the deploy plan up front.
+	if err := config.Platform.Validate(); err != nil {
 		return ProjectK8sConfig{}, err
 	}
 	return config.K8sForEnvironment(environment), nil
@@ -1287,6 +1299,7 @@ func newHelmDeploySpecWithValues(target OpenResult, deployContext KubernetesDepl
 		ContainerRegistry:   resolveProjectContainerRegistry(target.RepoPath, target.Environment),
 		RuntimeRegistry:     strings.TrimSpace(target.EnvConfig.RuntimeRegistry),
 		ContainerRegistries: containerRegistries,
+		Platform:            resolveProjectPlatform(target.RepoPath),
 		DisableBuildScript:  target.EnvConfig.DisableBuildScript,
 		Idle:                target.EnvConfig.Idle,
 		Claude:              target.EnvConfig.Claude,
@@ -1315,6 +1328,30 @@ func resolveProjectContainerRegistry(projectRoot, environment string) string {
 	}
 	registry, _ := list.DeployRegistry()
 	return registry
+}
+
+// resolveProjectPlatform loads the per-instance platform config from the
+// project's .erun/config.yaml and returns it with defaults resolved. Returns a
+// zero PlatformConfig when the project is uninitialized or declares no platform
+// block, so deploy threads no platform.* values for non-platform projects.
+//
+// On the `erun deploy` / `build --deploy` path the block is validated up front
+// (loadProjectK8sPlanForRepo), so a malformed block fails the plan before
+// reaching here. The open-runtime deploy path does not pass through that plan
+// step, so it reaches here unvalidated — harmless today because the runtime
+// chart it deploys ignores the threaded platform.* values (only the PowerDNS
+// singleton reads them, and open never deploys it). Do not rely on this function
+// having validated the block.
+func resolveProjectPlatform(projectRoot string) PlatformConfig {
+	projectRoot = strings.TrimSpace(projectRoot)
+	if projectRoot == "" {
+		return PlatformConfig{}
+	}
+	projectConfig, _, err := LoadProjectConfig(projectRoot)
+	if err != nil {
+		return PlatformConfig{}
+	}
+	return projectConfig.Platform.Resolve()
 }
 
 func applyCloudContextStopMetadata(store CloudReadStore, env EnvConfig, deployInput *HelmDeploySpec) {
@@ -1510,26 +1547,15 @@ func (d HelmDeploySpec) command() commandSpec {
 		"--set-string", "api.oidcAllowedIssuers="+escapeHelmSetValue(d.OIDCAllowedIssuers),
 		"--set", "api.postgres.reset="+formatHelmBool(d.ResetDatabase),
 	)
-	if registry := strings.TrimSpace(d.ContainerRegistry); registry != "" {
-		args = append(args, "--set-string", "containerRegistry="+registry)
-	}
-	// In-pod config injection (#548). RuntimeRegistry/containerRegistries are
-	// guarded on presence so an env that carries neither renders nothing (and
-	// an old chart with no .Values for them is unaffected). disableBuildScript
-	// is always set — a boolean projection must be able to reconcile a flip in
-	// either direction, so the chart always receives the actual value.
-	if registry := strings.TrimSpace(d.RuntimeRegistry); registry != "" {
-		args = append(args, "--set-string", "runtimeRegistry="+registry)
-	}
-	if len(d.ContainerRegistries) > 0 {
-		if encoded, marshalErr := json.Marshal(d.ContainerRegistries); marshalErr == nil {
-			args = append(args, "--set-json", "containerRegistries="+string(encoded))
-		}
-	}
+	args = append(args, helmRegistrySetArgs(d)...)
+	// disableBuildScript is always set — a boolean projection must be able to
+	// reconcile a flip in either direction, so the chart always receives the
+	// actual value (#548).
 	args = append(args, "--set", "disableBuildScript="+formatHelmBool(d.DisableBuildScript))
 	for _, key := range sortedStringMapKeys(d.ImageOverrides) {
 		args = append(args, "--set-string", "imageOverrides."+key+"="+d.ImageOverrides[key])
 	}
+	args = append(args, helmPlatformSetArgs(d.Platform)...)
 	args = append(args,
 		"--set-string", "idle.timeout="+helmIdleTimeout(d.Idle),
 		"--set-string", "idle.workingHours="+helmIdleWorkingHours(d.Idle),
@@ -1731,6 +1757,50 @@ func helmIdleTimezone(config EnvironmentIdleConfig) string {
 		return ""
 	}
 	return policy.Timezone
+}
+
+// helmRegistrySetArgs returns the registry-projection helm --set args: the
+// deploy/build container registry plus the in-pod runtime registry and marked
+// container-registry list (#548). Each is guarded on presence so an env that
+// carries none renders nothing and an old chart with no .Values for them is
+// unaffected.
+func helmRegistrySetArgs(d HelmDeploySpec) []string {
+	var args []string
+	if registry := strings.TrimSpace(d.ContainerRegistry); registry != "" {
+		args = append(args, "--set-string", "containerRegistry="+registry)
+	}
+	if registry := strings.TrimSpace(d.RuntimeRegistry); registry != "" {
+		args = append(args, "--set-string", "runtimeRegistry="+registry)
+	}
+	if len(d.ContainerRegistries) > 0 {
+		if encoded, marshalErr := json.Marshal(d.ContainerRegistries); marshalErr == nil {
+			args = append(args, "--set-json", "containerRegistries="+string(encoded))
+		}
+	}
+	return args
+}
+
+// helmPlatformSetArgs returns the per-instance platform.* helm --set args,
+// guarded on presence so non-platform deploys (every existing env) render none.
+// Threaded to every chart; only the PowerDNS singleton reads them (to bootstrap
+// its services zone).
+func helmPlatformSetArgs(p PlatformConfig) []string {
+	if p.IsZero() {
+		return nil
+	}
+	args := []string{
+		"--set-string", "platform.baseDomain=" + escapeHelmSetValue(p.BaseDomain),
+		"--set-string", "platform.env=" + escapeHelmSetValue(p.Env),
+		"--set-string", "platform.servicesZone=" + escapeHelmSetValue(p.ServicesZone),
+		"--set-string", "platform.authoritativeIP=" + escapeHelmSetValue(p.AuthoritativeIP),
+		"--set-string", "platform.authHost=" + escapeHelmSetValue(p.AuthHost),
+	}
+	if len(p.Nameservers) > 0 {
+		if encoded, marshalErr := json.Marshal(p.Nameservers); marshalErr == nil {
+			args = append(args, "--set-json", "platform.nameservers="+string(encoded))
+		}
+	}
+	return args
 }
 
 func helmClaudeSetArgs(config EnvironmentClaudeConfig) []string {

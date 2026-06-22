@@ -13,10 +13,13 @@ const (
 )
 
 type AuditEvent struct {
-	TenantID          string         `json:"tenantId"`
-	ErunUserID        string         `json:"erunUserId"`
-	ExternalUserID    string         `json:"externalUserId"`
-	ExternalIssuerID  string         `json:"externalIssuerId"`
+	TenantID         string `json:"tenantId"`
+	ErunUserID       string `json:"erunUserId"`
+	ExternalUserID   string `json:"externalUserId"`
+	ExternalIssuerID string `json:"externalIssuerId"`
+	// ExternalOrgID is the org claim value that resolved the tenant for an
+	// org-scoped issuer; empty/omitted for single-tenant issuers.
+	ExternalOrgID     string         `json:"externalOrgId,omitempty"`
 	Type              AuditEventType `json:"type"`
 	APIMethod         string         `json:"apiMethod,omitempty"`
 	APIPath           string         `json:"apiPath,omitempty"`

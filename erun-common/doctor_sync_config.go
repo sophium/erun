@@ -415,6 +415,13 @@ func RunRuntimeConfigSync(ctx Context, inspection ConfigSyncInspection) error {
 	if err != nil {
 		return err
 	}
+	// Snapshot the env config before the overlay rewrites it (in
+	// particular Type, which the injected ERUN_ENV_TYPE drives) so an
+	// in-pod sync that resolves the wrong value stays recoverable, the
+	// same guard reconcileRuntimeRootConfig applies to the root config.
+	if !ctx.DryRun {
+		_ = writeEnvConfigBackupIfDue(envPath, timeNow)
+	}
 	if err := writeRuntimeYAML(ctx, envPath, overlayInjectedEnvConfig(onDiskEnv, injected.Env)); err != nil {
 		return err
 	}

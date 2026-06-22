@@ -1,0 +1,5 @@
+# Local-environment overlay for erun-powerdns. Empty by default: the chart's
+# defaults (gpgsql against the shared erun-postgres, :53 via hostNetwork, the
+# API on a ClusterIP) are the intended local shape. The authoritative services
+# zone and public NS IP come from the per-instance platform config at deploy
+# time, not from this overlay.

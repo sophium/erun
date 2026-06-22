@@ -12,6 +12,11 @@ import (
 // helm step even when every image was promoted from the fingerprint cache.
 const postgresComponentName = "erun-backend-postgres"
 
+// powerdnsComponentName is the platform PowerDNS authoritative nameserver
+// singleton. It runs the gpgsql backend against the shared
+// erun-backend-postgres instance, so it must deploy after postgres.
+const powerdnsComponentName = "erun-powerdns"
+
 // optInDeployComponents lists charts that are not deployed by default and must
 // be explicitly included via DeployTarget.Components or the deploy --components
 // flag. Other charts (notably the per-tenant runtime chart) are always
@@ -20,6 +25,14 @@ var optInDeployComponents = []string{
 	postgresComponentName,
 	"erun-backend-db",
 	"erun-backend-api",
+	powerdnsComponentName,
+}
+
+// OptInDeployComponentNames returns the opt-in component names a caller may
+// pass to deploy --components, in canonical order. Exposed so transport help
+// text stays in sync with the validation list rather than drifting from it.
+func OptInDeployComponentNames() []string {
+	return slices.Clone(optInDeployComponents)
 }
 
 // defaultDeployComponentOrder is the fallback rank used when the project
@@ -30,6 +43,7 @@ var defaultDeployComponentOrder = []string{
 	postgresComponentName,
 	"erun-backend-db",
 	"erun-backend-api",
+	powerdnsComponentName,
 }
 
 // filterDeployContextsByComponents drops charts whose ComponentName is in the

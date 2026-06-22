@@ -106,6 +106,37 @@ Committed to the repo, applies to anyone who checks it out.
 | `environments.<env>.k8s.deployments[]` | ordered list | `erun deploy` | The ordered deploy plan for this env. Each step is either a single component name or a list of names deployed in parallel. |
 | `release.mainbranch` | string | `erun release` | Main branch name (default `main`). |
 | `release.developbranch` | string | `erun release` | Develop branch name (default `develop`). |
+| `platform` | map | `erun deploy` (PowerDNS), `erun expose` | Per-instance platform deployment config. Absent for non-platform projects. See [`platform:` block](#platform-block). |
+
+#### `platform:` block {#platform-block}
+
+The `platform:` block configures an **erunpaas platform deployment** — an installation that runs the global DNS singleton (PowerDNS) and exposes tenant services under a delegated zone. ERun's platform is generic, installable software: any vendor deploys it under their **own** names, so every value is configuration — nothing (not even the base domain) is hardcoded. `erun deploy` threads these as `platform.*` helm values (only the `erun-powerdns` chart reads them today); [`erun expose`](/cli/expose) reads them to resolve service hostnames.
+
+The whole block is optional. An empty block means the project runs no platform deployment. Once any field is set the block is "in use" and is validated at deploy/expose time — a malformed block fails fast.
+
+| Field | Type | Required | Effect / default |
+|---|---|---|---|
+| `basedomain` | string | yes (when block in use) | The registered domain this deployment serves, e.g. `erunpaas.com`. Everything else derives from it. Must be a valid domain name. |
+| `env` | string | no | The dedicated platform environment that owns the singletons (PowerDNS, the DNS-01 broker), e.g. `frs-prod`. Must be a DNS-safe `<tenant>-<env>` namespace label. |
+| `serviceszone` | string | no | The child zone delegated to this deployment's PowerDNS, under which tenant services are exposed. Default `services.<basedomain>`. Must be a valid domain at or under `basedomain`. |
+| `authoritativeip` | string | no | The public IP this deployment's authoritative nameserver answers on (the glue-record target for `serviceszone`). Must parse as an IP when set. |
+| `nameservers` | list | no | The NS hostnames the parent zone delegates `serviceszone` to. Default `[ns1.<basedomain>, ns2.<basedomain>]`. |
+| `authhost` | string | no | The hosted-IdP host, served from the apex zone (not `serviceszone`). Default `auth.<basedomain>`. Must be a valid domain at or under `basedomain`. |
+| `acmeemail` | string | no | The account email for this deployment's Let's Encrypt registration (LE rate limits are per registered domain, so each deployment uses its own account). |
+
+```yaml
+# <repo>/.erun/config.yaml
+platform:
+  basedomain: erunpaas.com
+  env: frs-prod
+  authoritativeip: 203.0.113.10
+  # serviceszone, authhost, and nameservers default from basedomain:
+  #   serviceszone: services.erunpaas.com
+  #   authhost:     auth.erunpaas.com
+  #   nameservers:  [ns1.erunpaas.com, ns2.erunpaas.com]
+```
+
+A second vendor installs the same artifacts under their own names — e.g. `basedomain: kppaas.com`, `env: kp-prod` — with no code changes.
 
 ---
 

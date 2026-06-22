@@ -14,6 +14,7 @@ type HandlerOptions struct {
 	IdentityResolver IdentityResolver
 	TenantResolver   TenantResolver
 	UserResolver     UserResolver
+	OrgResolver      OrgResolver
 	IdentityCache    *IdentityResolutionCache
 	AuditLogger      AuditLogger
 	Authorizer       Authorizer
@@ -29,7 +30,8 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 	identityResolver := options.IdentityResolver
 	tenantResolver := options.TenantResolver
 	userResolver := options.UserResolver
-	if options.DB != nil && (tenantResolver == nil || userResolver == nil) {
+	orgResolver := options.OrgResolver
+	if options.DB != nil && (tenantResolver == nil || userResolver == nil || orgResolver == nil) {
 		identities := repository.NewIdentityRepository(options.DB, options.DBDialect)
 		if identityResolver == nil && tenantResolver == nil && userResolver == nil {
 			identityResolver = identities
@@ -38,6 +40,9 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 		}
 		if userResolver == nil {
 			userResolver = identities
+		}
+		if orgResolver == nil {
+			orgResolver = identities
 		}
 	}
 	audit := options.AuditLogger
@@ -53,6 +58,7 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 		IdentityResolver: identityResolver,
 		TenantResolver:   tenantResolver,
 		UserResolver:     userResolver,
+		OrgResolver:      orgResolver,
 		IdentityCache:    options.IdentityCache,
 		AuditLogger:      audit,
 		Authorizer:       authorizer,

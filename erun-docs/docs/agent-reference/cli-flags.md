@@ -267,9 +267,9 @@ Once the version is resolved, `deploy`:
 
 The dry-run trace names the decision per spec: `deploy: version <v> pinned; installing the published image, no local build`. Every env installs by reference from the published `oci://…/charts/erun-devops` chart (or the repo-local chart when the project carries one).
 
-### `--components` value set
+### `--components` value set {#components-value-set}
 
-The `--components` flag's accepted values are derived from `<tenant>-devops/k8s/<component>/Chart.yaml` discovery at command-resolve time. For the erun repository itself, the registered set is `{erun-backend-postgres, erun-backend-db, erun-backend-api}`. Each tenant project ships its own set.
+The `--components` flag accepts a **fixed opt-in set** defined in code (`erun-common/deploy_components.go`, `OptInDeployComponentNames`), not values discovered from chart files. The set is `{erun-backend-postgres, erun-backend-db, erun-backend-api, erun-powerdns}`. These charts are never deployed by default — they ship only when explicitly named via `--components` or listed in the env's `k8s.deployments` plan (listing a chart in the plan is an implicit opt-in). An unrecognised name is rejected before any deploy runs with `unknown deploy component "<name>"; valid opt-in components are: erun-backend-postgres, erun-backend-db, erun-backend-api, erun-powerdns`, so typos surface immediately. `erun-powerdns` is the platform's authoritative DNS singleton; it runs the gpgsql backend against `erun-backend-postgres`, so it must be sequenced after it in the plan.
 
 ### Deploy-plan resolution
 
@@ -346,6 +346,7 @@ The recovery is bounded to a single retry (the delete removes the conflict, so t
 | `--clear-pending-helm` | bool | `false` | Run the clear-pending-helm recovery without prompting (see [Deploy recovery actions](#deploy-recovery-actions)). |
 | `--rollback` | bool | `false` | Run the rollback recovery without prompting (see [Deploy recovery actions](#deploy-recovery-actions)). |
 | `--sync-config` | bool | `false` | In-pod only. Reconcile the on-disk env config with the helm-injected `ERUN_*` env vars (injected env wins): rewrite the projected keys (`type`, `kubernetescontext`, `cloudprovideralias`, `managedcloud`, cloud provider/context blocks, `idle`, `runtimeregistry`, `containerregistries`, `disablebuildscript`), preserving every unprojected key. Reports per-key drift as `missing` / `wrong` / `legacy`; under `--dry-run` the file writes are traced but not performed. Short-circuits the remote-init flow. |
+| `--restore-env-config-from-backup` | string | `""` | Restore the target environment's `config.yaml` from a dated backup (`YYYY-MM-DD`) or an absolute path, before any tenant/env work so a corrupted env config can be recovered first. Requires explicit `<tenant> <environment>` args. Under `--dry-run` the copy is traced but not performed. Errors: missing explicit tenant+environment → `--restore-env-config-from-backup needs an explicit tenant and environment` (exit 1); no matching backup → `no env config backup matches "<date>" for <tenant>/<env>` (exit 1). The MCP `doctor` tool exposes the same operation as the `restoreEnvConfigFromBackup` input. |
 
 ### Check catalogue
 

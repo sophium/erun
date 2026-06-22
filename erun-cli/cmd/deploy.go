@@ -64,7 +64,7 @@ func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 	addDryRunFlag(cmd)
 	addDeployCommandTargetFlags(cmd, &target)
 	cmd.Flags().BoolVar(&useCurrent, "current", false, "Redeploy the version this environment already runs (its persisted runtime version) instead of passing --version")
-	cmd.Flags().StringSliceVar(&components, "components", nil, "Opt-in components to include alongside the runtime chart (erun-backend-postgres, erun-backend-db, erun-backend-api)")
+	cmd.Flags().StringSliceVar(&components, "components", nil, fmt.Sprintf("Opt-in components to include alongside the runtime chart (%s)", strings.Join(common.OptInDeployComponentNames(), ", ")))
 	return cmd
 }
 

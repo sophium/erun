@@ -166,7 +166,7 @@ func TestHTTPHandlerExposesVersionTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools failed: %v", err)
 	}
-	if len(tools.Tools) != 30 {
+	if len(tools.Tools) != 31 {
 		t.Fatalf("unexpected tools: %+v", tools.Tools)
 	}
 
@@ -680,7 +680,7 @@ func TestInitToolUsesExplicitRuntimeVersionOverride(t *testing.T) {
 	}))
 
 	_, output, err := handler(context.Background(), nil, InitInput{
-		Tenant:             "tenant-a",
+		Tenant:             "tenanta",
 		Environment:        "dev",
 		Version:            "1.0.19-snapshot-20260418141901",
 		Remote:             true,

@@ -22,6 +22,10 @@ type IdentityResolutionCache struct {
 type identityCacheKey struct {
 	issuer  string
 	subject string
+	// org is the resolved org claim value for org-scoped (shared) issuers, so the
+	// same (issuer, subject) presenting different org claims cannot collide on one
+	// cached tenant. Empty for single-tenant issuers.
+	org string
 }
 
 type identityCacheEntry struct {
@@ -52,12 +56,12 @@ func NewIdentityResolutionCache(options IdentityCacheOptions) *IdentityResolutio
 	}
 }
 
-func (c *IdentityResolutionCache) Get(issuer string, subject string) (Identity, error, bool) {
+func (c *IdentityResolutionCache) Get(issuer string, subject string, org string) (Identity, error, bool) {
 	if c == nil {
 		return Identity{}, nil, false
 	}
 
-	key := identityCacheKey{issuer: issuer, subject: subject}
+	key := identityCacheKey{issuer: issuer, subject: subject, org: org}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -72,25 +76,25 @@ func (c *IdentityResolutionCache) Get(issuer string, subject string) (Identity, 
 	return entry.identity, entry.err, true
 }
 
-func (c *IdentityResolutionCache) SetSuccess(issuer string, subject string, identity Identity) {
+func (c *IdentityResolutionCache) SetSuccess(issuer string, subject string, org string, identity Identity) {
 	if c == nil {
 		return
 	}
-	c.set(issuer, subject, identity, nil, c.positiveTTL)
+	c.set(issuer, subject, org, identity, nil, c.positiveTTL)
 }
 
-func (c *IdentityResolutionCache) SetFailure(issuer string, subject string, err error) {
+func (c *IdentityResolutionCache) SetFailure(issuer string, subject string, org string, err error) {
 	if c == nil {
 		return
 	}
-	c.set(issuer, subject, Identity{}, err, c.negativeTTL)
+	c.set(issuer, subject, org, Identity{}, err, c.negativeTTL)
 }
 
-func (c *IdentityResolutionCache) set(issuer string, subject string, identity Identity, err error, ttl time.Duration) {
+func (c *IdentityResolutionCache) set(issuer string, subject string, org string, identity Identity, err error, ttl time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.entries[identityCacheKey{issuer: issuer, subject: subject}] = identityCacheEntry{
+	c.entries[identityCacheKey{issuer: issuer, subject: subject, org: org}] = identityCacheEntry{
 		identity:  identity,
 		err:       err,
 		expiresAt: c.now().Add(ttl),

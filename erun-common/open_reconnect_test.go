@@ -82,7 +82,12 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 		req.AppSession = "ai"
 		req.AI = true
 		script := preview(t, req)
-		assertScriptHas(t, script, `dtach -A "/tmp/erun-app/erun-local-ai.dtach" -r ctrl_l`, "AI tab missing dtach wrap")
+		// AI tab repaints on reattach via -r winch, not -r ctrl_l: Claude's
+		// main-screen TUI ignores a bare ^L (and can mis-consume it as a
+		// keystroke), so only a SIGWINCH redraws it. Bash tabs keep -r ctrl_l
+		// (asserted above). Regression guard for issue #613.
+		assertScriptHas(t, script, `dtach -A "/tmp/erun-app/erun-local-ai.dtach" -r winch`, "AI tab must reattach with -r winch so Claude repaints")
+		assertScriptLacks(t, script, `erun-local-ai.dtach" -r ctrl_l`, "AI tab must not use -r ctrl_l (Claude ignores the bare ^L)")
 		assertScriptHas(t, script, `claude --continue --settings '{"ultracode":true}'`, "AI tab must launch the claude guard at the default effort (ultracode)")
 		// Claude's exit must not silently fall through to the shell: the
 		// wrapper names the exit and the resume command first (issue #464).

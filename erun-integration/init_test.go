@@ -363,6 +363,31 @@ func TestInit(t *testing.T) {
 		golden.Equal(t, "init/type_rejects_invalid_value", normalize.Apply(result.Combined))
 	})
 
+	t.Run("rejects_hyphenated_tenant", func(t *testing.T) {
+		// A new tenant name containing a hyphen is rejected at creation, before
+		// any tenant/env config is written, so the `<tenant>-<env>` namespace
+		// mapping stays unambiguous (split on the first hyphen) and injective.
+		// The gate fires only when the tenant is new; existing hyphenated
+		// tenants load without re-validation, preserving back-compat.
+		setup := env.New(t)
+		args := []string{
+			"init", "team-one", "prod",
+			"--type", "runtime",
+			"--version", "1.0.0",
+			"--kubernetes-context", "test-context",
+			"--container-registry", "registry.example/test",
+			"--no-git",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "init/rejects_hyphenated_tenant", normalize.Apply(result.Combined))
+	})
+
 	t.Run("prompts_for_container_registry_via_stdin", func(t *testing.T) {
 		// Executes containerRegistryPrompt (init.go): --container-registry is
 		// omitted so the bootstrap falls through to the interactive promptui

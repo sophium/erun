@@ -11,6 +11,10 @@ type Claims struct {
 	Issuer   string
 	Subject  string
 	Username string
+	// Raw is the full set of token claims, kept so the identity resolver can
+	// read a per-issuer org claim (issuers.org_field_key) for (iss, org) -> tenant
+	// resolution. The claim's name is configured per issuer, not known at verify time.
+	Raw map[string]any
 }
 
 type Context struct {
@@ -19,6 +23,10 @@ type Context struct {
 	ErunUserID     string
 	ExternalIssuer string
 	ExternalUserID string
+	// ExternalOrgID is the org/resource-owner claim value that, together with
+	// ExternalIssuer, resolved the tenant for an org-scoped (shared) issuer.
+	// Empty for single-tenant issuers, where the issuer alone resolves the tenant.
+	ExternalOrgID string
 }
 
 type contextKey struct{}

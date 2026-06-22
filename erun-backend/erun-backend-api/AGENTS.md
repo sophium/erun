@@ -107,7 +107,7 @@ Module-specific guidance for `erun-backend-api`. Follow the repository root and 
 - Avoid package-level mutable auth configuration. Pass verifiers and tenant resolvers through explicit API construction.
 - Prefer a single identity resolver when database-backed auth is used, because empty-database bootstrap must resolve or create tenant, issuer, user, roles, and permissions atomically.
 - If there are no tenants, the first valid authenticated identity may create the initial `OPERATIONS` tenant and first ERun user. That user must receive both predefined roles: `ReadAll` and `WriteAll`.
-- Once any tenant exists, unknown issuers or unknown external subjects are unauthorized and must not create users implicitly.
+- Once any tenant exists, unknown or unregistered issuers are unauthorized, and an unknown external subject is unauthorized for a tenant that already has a user. The one implicit-creation case beyond empty-database bootstrap is per-tenant first-user bootstrap: when a token resolves to a tenant that has zero users, enrol that subject as the tenant's first user with both `ReadAll` and `WriteAll`. This is how a newly-provisioned tenant gets its first admin; for an org-scoped issuer it means the first valid caller in a new org becomes that tenant's admin. Do not create users implicitly in any other case.
 - Operations tenants are system tenants. PostgreSQL RLS allows them to access tenant-owned rows across tenants by setting the transaction role to `erun_operations`, but API authorization must still require assigned roles and permissions.
 - Normal tenant transactions must use PostgreSQL role `erun_tenant`; operations tenant transactions must use PostgreSQL role `erun_operations`.
 
@@ -126,6 +126,7 @@ Module-specific guidance for `erun-backend-api`. Follow the repository root and 
 - Keep negative-cache TTL short enough that newly created users become usable without a long delay.
 - Keep positive-cache TTL bounded so tenant issuer and user mapping changes converge without restarting the API.
 - Key identity caches by issuer and external subject. Do not cache only by subject because subjects are issuer-scoped.
+- Also key on the resolved org claim value for org-scoped (shared) issuers. Under a shared issuer the same `(issuer, subject)` resolves to different tenants per org, so an `(issuer, subject)`-only key would serve one tenant's resolved RLS context to another. Derive the org before the cache lookup (its claim name lives on `issuers.org_field_key`) and include it in the key; single-tenant issuers resolve org to empty and keep `(issuer, subject)` behavior.
 - Do not cache raw bearer tokens as identity keys.
 - Do not let identity cache decisions bypass token verification. Verify the bearer token first, then use claims to look up cached tenant/user resolution.
 - Cache entries must be safe for concurrent requests and must not use package-level mutable globals. Pass cache instances through API construction.

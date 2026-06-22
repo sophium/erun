@@ -5,7 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"log"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
@@ -16,17 +19,110 @@ import (
 type IdentityRepository struct {
 	db      *bun.DB
 	dialect Dialect
+	orgKeys *issuerOrgKeyCache
 }
 
 func NewIdentityRepository(db *sql.DB, dialect Dialect) *IdentityRepository {
 	if dialect == "" {
 		dialect = DialectPostgres
 	}
-	return &IdentityRepository{db: bun.NewDB(db, pgdialect.New()), dialect: dialect}
+	return &IdentityRepository{db: bun.NewDB(db, pgdialect.New()), dialect: dialect, orgKeys: newIssuerOrgKeyCache()}
+}
+
+// issuerOrgKeyCacheTTL bounds how long a cached issuers.org_field_key (the
+// per-issuer org-scoping mode) is trusted before re-reading it, so an issuer
+// reconfigured between single-tenant and org-scoped converges without a restart.
+const issuerOrgKeyCacheTTL = 5 * time.Minute
+
+// issuerOrgKeyCache memoizes the small, stable issuers.org_field_key lookup so
+// the authenticated hot path (cache-key derivation and resolution) does not read
+// the issuers table on every request.
+type issuerOrgKeyCache struct {
+	mu      sync.Mutex
+	entries map[string]issuerOrgKeyEntry
+}
+
+type issuerOrgKeyEntry struct {
+	orgFieldKey string
+	registered  bool
+	expiresAt   time.Time
+}
+
+func newIssuerOrgKeyCache() *issuerOrgKeyCache {
+	return &issuerOrgKeyCache{entries: make(map[string]issuerOrgKeyEntry)}
+}
+
+func (c *issuerOrgKeyCache) get(issuer string) (issuerOrgKeyEntry, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.entries[issuer]
+	if !ok {
+		return issuerOrgKeyEntry{}, false
+	}
+	if !time.Now().Before(entry.expiresAt) {
+		delete(c.entries, issuer)
+		return issuerOrgKeyEntry{}, false
+	}
+	return entry, true
+}
+
+func (c *issuerOrgKeyCache) set(issuer string, entry issuerOrgKeyEntry) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry.expiresAt = time.Now().Add(issuerOrgKeyCacheTTL)
+	c.entries[issuer] = entry
+}
+
+// orgFieldKeyForIssuer returns the issuer's org-scoping mode: registered=false
+// means the issuer is not in the issuers registry, registered=true with an empty
+// orgFieldKey means a single-tenant issuer, and a non-empty orgFieldKey names the
+// token claim whose value selects the tenant. Reads are memoized for a bounded TTL.
+func (r *IdentityRepository) orgFieldKeyForIssuer(ctx context.Context, issuer string) (orgFieldKey string, registered bool, err error) {
+	if r.orgKeys != nil {
+		if entry, ok := r.orgKeys.get(issuer); ok {
+			return entry.orgFieldKey, entry.registered, nil
+		}
+	}
+	var key sql.NullString
+	scanErr := r.db.NewRaw(`SELECT org_field_key FROM issuers WHERE issuer = ?`, issuer).Scan(ctx, &key)
+	if scanErr != nil {
+		if errors.Is(normalizeNoRows(scanErr), ErrNotFound) {
+			// Do not cache the unregistered case: an issuer registered by
+			// first-identity bootstrap would otherwise stay falsely unknown for
+			// the whole TTL. Unregistered lookups are rare and cheap.
+			return "", false, nil
+		}
+		return "", false, scanErr
+	}
+	value := ""
+	if key.Valid {
+		value = strings.TrimSpace(key.String)
+	}
+	if r.orgKeys != nil {
+		r.orgKeys.set(issuer, issuerOrgKeyEntry{orgFieldKey: value, registered: true})
+	}
+	return value, true, nil
+}
+
+// ResolveOrg returns the org claim value that, with the issuer, resolves the
+// tenant for an org-scoped issuer; it returns "" for single-tenant or
+// unregistered issuers. It is the authoritative source for the identity cache
+// key's org dimension, so the same (issuer, subject) presenting different org
+// claims cannot collide on one cached tenant. Resolution failures are surfaced
+// as errors so the caller can fall through to full resolution.
+func (r *IdentityRepository) ResolveOrg(ctx context.Context, claims security.Claims) (string, error) {
+	orgFieldKey, registered, err := r.orgFieldKeyForIssuer(ctx, strings.TrimSpace(claims.Issuer))
+	if err != nil {
+		return "", err
+	}
+	if !registered || orgFieldKey == "" {
+		return "", nil
+	}
+	return orgClaimValue(claims.Raw, orgFieldKey), nil
 }
 
 func (r *IdentityRepository) ResolveIdentity(ctx context.Context, claims security.Claims) (model.Tenant, model.User, error) {
-	tenant, err := r.ResolveTenantByIssuer(ctx, claims.Issuer)
+	tenant, err := r.ResolveTenantByIssuer(ctx, claims)
 	if err == nil {
 		user, err := r.ResolveUserByExternalID(ctx, tenant.TenantID, claims.Issuer, claims.Subject)
 		if err == nil {
@@ -80,19 +176,72 @@ func (r *IdentityRepository) refreshUserUsername(ctx context.Context, tenant mod
 	return user, nil
 }
 
-func (r *IdentityRepository) ResolveTenantByIssuer(ctx context.Context, issuer string) (model.Tenant, error) {
+// resolveTenant maps a verified token to its tenant. The issuer's org-scoping
+// mode lives once on issuers.org_field_key: NULL means a single-tenant issuer
+// (resolve by issuer alone, the common BYO/external-IdP case); a set key names
+// the token claim whose value selects the tenant among that issuer's orgs
+// (shared multi-tenant issuer, e.g. a hosted Zitadel). An org-scoped issuer
+// whose token carries no matching org claim returns ErrNotFound — unauthorized,
+// and never bootstraps once tenants exist (bootstrapFirstIdentity guards on an
+// empty tenants table). An unregistered issuer also returns ErrNotFound, which
+// routes to first-identity bootstrap when the database is empty.
+func (r *IdentityRepository) ResolveTenantByIssuer(ctx context.Context, claims security.Claims) (model.Tenant, error) {
+	issuer := strings.TrimSpace(claims.Issuer)
+	orgFieldKey, registered, err := r.orgFieldKeyForIssuer(ctx, issuer)
+	if err != nil {
+		return model.Tenant{}, err
+	}
+	if !registered {
+		// Unregistered issuer: unauthorized, or routes to first-identity
+		// bootstrap when the database is empty.
+		return model.Tenant{}, ErrNotFound
+	}
+
 	var tenant model.Tenant
-	err := r.db.NewRaw(`
-		SELECT t.tenant_id, t.name, t.type, t.created_at, t.updated_at
-		  FROM tenant_issuers ti
-		  JOIN tenants t
-		    ON t.tenant_id = ti.tenant_id
-		 WHERE ti.issuer = ?
-	`, issuer).Scan(ctx, &tenant)
+	if orgFieldKey != "" {
+		org := orgClaimValue(claims.Raw, orgFieldKey)
+		if org == "" {
+			// Org-scoped issuer but the token carries no usable org claim.
+			return model.Tenant{}, ErrNotFound
+		}
+		err = r.db.NewRaw(`
+			SELECT t.tenant_id, t.name, t.type, t.created_at, t.updated_at
+			  FROM tenant_issuers ti
+			  JOIN tenants t ON t.tenant_id = ti.tenant_id
+			 WHERE ti.issuer = ? AND ti.org_field_value = ?
+		`, issuer, org).Scan(ctx, &tenant)
+	} else {
+		err = r.db.NewRaw(`
+			SELECT t.tenant_id, t.name, t.type, t.created_at, t.updated_at
+			  FROM tenant_issuers ti
+			  JOIN tenants t ON t.tenant_id = ti.tenant_id
+			 WHERE ti.issuer = ? AND ti.org_field_value IS NULL
+		`, issuer).Scan(ctx, &tenant)
+	}
 	if err != nil {
 		return model.Tenant{}, normalizeNoRows(err)
 	}
 	return tenant, nil
+}
+
+// orgClaimValue extracts the org-identifying claim value as a string. JSON
+// numbers (some IdPs emit numeric org/resource-owner IDs) decode as float64;
+// integers render without a decimal so they match the stored org_field_value.
+func orgClaimValue(raw map[string]any, key string) string {
+	if raw == nil {
+		return ""
+	}
+	switch v := raw[key].(type) {
+	case string:
+		return strings.TrimSpace(v)
+	case float64:
+		if v == float64(int64(v)) {
+			return strconv.FormatInt(int64(v), 10)
+		}
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	default:
+		return ""
+	}
 }
 
 func (r *IdentityRepository) bootstrapFirstIdentity(ctx context.Context, claims security.Claims) (model.Tenant, model.User, error) {
@@ -127,6 +276,12 @@ func (r *IdentityRepository) bootstrapFirstIdentity(ctx context.Context, claims 
 			username = claims.Subject
 		}
 
+		// Register the issuer in the root issuers table first: tenant_issuers.issuer
+		// now foreign-keys issuers(issuer). The bootstrap issuer is single-tenant
+		// (org_field_key left NULL), so the token's iss alone resolves the tenant.
+		if _, err := tx.NewRaw(`INSERT INTO issuers (issuer) VALUES (?) ON CONFLICT (issuer) DO NOTHING`, claims.Issuer).Exec(ctx); err != nil {
+			return err
+		}
 		if _, err := tx.NewRaw(`INSERT INTO tenant_issuers (issuer, name) VALUES (?, ?)`, claims.Issuer, defaultTenantIssuerName(claims.Issuer)).Exec(ctx); err != nil {
 			return err
 		}

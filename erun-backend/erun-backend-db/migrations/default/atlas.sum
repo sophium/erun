@@ -1,4 +1,5 @@
-h1:e3EWIAiDpr+mYOc1y9zf1h8Uyjl2B2NlO1DVQtJdzJA=
+h1:LEdSekWby0ba1ScXOls4DNXhOJImEU5cEAuA0f0DvKg=
 20260501120000_initial_tenant_identity.sql h1:RpS03/4sFjbCggwYgcGNn6k3jNZCNTNl0BD/afOKFzo=
 20260503143000_tenant_issuer_names.sql h1:VEZjICG3/jU2YtEx0XX05l9Q8lJyWKeiRY8f4dXOkvE=
 20260503170000_audit_events.sql h1:OLjiGP/FhLTWvkx1bxS2xCcJK6tExdufnEC8R6LsKWA=
+20260621080214_tenant_issuer_org_scoping.sql h1:0j307UhB2vONxxTgh8edO8L6skfgTvy0eP2xHWCm1wo=

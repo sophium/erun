@@ -6,20 +6,21 @@ Usage:
   erun doctor [tenant] [environment] [flags]
 
 Flags:
-      --clear-pending-helm                  Clear a stuck helm pending-install/upgrade lock for the runtime release without prompting
-      --codecommit-ssh-key-id string        CodeCommit SSH public key ID to use when finishing an unfinished remote init for an AWS CodeCommit repository
-      --dry-run                             Resolve and trace mutating actions without executing them.
-      --finish-remote-init                  Finish unfinished remote init tasks without prompting (only takes effect when run inside a runtime pod)
-  -h, --help                                help for doctor
-      --prune-build-cache                   Prune unused BuildKit cache without prompting
-      --prune-containers                    Prune stopped Docker containers without prompting
-      --prune-images                        Prune unused Docker images without prompting
-      --remote-repository-url string        Git remote URL to use when finishing an unfinished remote init
-      --repair-config                       Inspect the root erun config and offer to restore from backup or re-init orphaned cloud provider aliases; stops before running tenant/env cleanup actions
-      --repair-jetbrains-gateway            Clear cached JetBrains Gateway backend metadata for this environment
-      --restore-config-from-backup string   Restore the root erun config from a dated backup non-interactively (YYYY-MM-DD or absolute path)
-      --rollback                            Roll the runtime release back to its last successful revision without prompting
-      --sync-config                         Reconcile the in-pod erun config with the helm-injected ERUN_* env vars (only takes effect inside a runtime pod)
+      --clear-pending-helm                      Clear a stuck helm pending-install/upgrade lock for the runtime release without prompting
+      --codecommit-ssh-key-id string            CodeCommit SSH public key ID to use when finishing an unfinished remote init for an AWS CodeCommit repository
+      --dry-run                                 Resolve and trace mutating actions without executing them.
+      --finish-remote-init                      Finish unfinished remote init tasks without prompting (only takes effect when run inside a runtime pod)
+  -h, --help                                    help for doctor
+      --prune-build-cache                       Prune unused BuildKit cache without prompting
+      --prune-containers                        Prune stopped Docker containers without prompting
+      --prune-images                            Prune unused Docker images without prompting
+      --remote-repository-url string            Git remote URL to use when finishing an unfinished remote init
+      --repair-config                           Inspect the root erun config and offer to restore from backup or re-init orphaned cloud provider aliases; stops before running tenant/env cleanup actions
+      --repair-jetbrains-gateway                Clear cached JetBrains Gateway backend metadata for this environment
+      --restore-config-from-backup string       Restore the root erun config from a dated backup non-interactively (YYYY-MM-DD or absolute path)
+      --restore-env-config-from-backup string   Restore the target environment's config.yaml from a dated backup (YYYY-MM-DD or absolute path); needs an explicit tenant and environment
+      --rollback                                Roll the runtime release back to its last successful revision without prompting
+      --sync-config                             Reconcile the in-pod erun config with the helm-injected ERUN_* env vars (only takes effect inside a runtime pod)
 
 Global Flags:
       --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")

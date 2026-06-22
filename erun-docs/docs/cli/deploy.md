@@ -36,7 +36,7 @@ The chart and runtime image are one contract — published together to the same 
 |---|---|
 | `--version <version>` | The published version to install, by reference. Required unless `--current` is given. The version's image and chart must already exist (locally or in the registry) or the deploy errors — `deploy` never builds them. |
 | `--current` | Redeploy the version the environment is already recorded as running (its persisted runtime version). Use it to re-roll the same version, or after a `--force`-style retry, without retyping the number. Required unless `--version` is given. |
-| `--components <name,name,...>` | Opt-in components to include alongside the runtime chart. The accepted list is derived from each project's `<tenant>-devops/k8s/<component>/` charts. |
+| `--components <name,name,...>` | Opt-in components to include alongside the runtime chart. The accepted values are a fixed set — `erun-backend-postgres`, `erun-backend-db`, `erun-backend-api`, `erun-powerdns` — and an unknown name is rejected with `unknown deploy component`. See [Agent reference · `--components`](/agent-reference/cli-flags#components-value-set). |
 | `--force` | Re-run helm upgrade even when the resolved version is unchanged and nothing needs rolling. |
 | `--rollout-timeout <dur>` | How long to wait for the rollout before giving up (e.g. `10m`). Defaults to the env's setting, or 5 minutes. Raise it for the first deploy of a large image on a slow connection; see [rollout wait and monitoring](/agent-reference/cli-flags#rollout-wait-and-pod-monitoring). |
 | `--dry-run` | Resolve and print every `helm upgrade --install` command (and any image-copy step) without executing. |

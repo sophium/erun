@@ -29,6 +29,18 @@ Four patterns, picked by what the env is for. The manifest skeletons for each (I
 | **Ingress per env** | Production-ish. Each env gets its own hostname (`<service>.<env>.<domain>`) without per-env chart edits. Requires a cluster-wide Ingress controller + wildcard DNS + wildcard TLS. |
 | **LoadBalancer per env** | Cloud envs without a shared Ingress controller. One cloud LB per env — easy to wire, more expensive at scale. |
 
+## Platform service exposure
+
+The four patterns above are manual building blocks. A **platform deployment** — an installation that runs ERun's PowerDNS singleton and declares a [`platform:` block](/reference/configuration#platform-block) — automates the Ingress-per-env pattern with one command:
+
+```bash
+erun expose team dev api --ip 203.0.113.10
+```
+
+This exposes the `api` Service in `team-dev` at `api.team-dev.services.<base-domain>`. ERun ensures a per-environment wildcard DNS record (`*.team-dev.services.<base-domain>` → the env's ingress IP) in the platform's authoritative zone and applies a Host-routing Ingress for the Service. The wildcard covers every service in the env, so exposing more services only adds an Ingress. The platform is generic: any vendor installs it under their own base domain and services zone — nothing is hardcoded.
+
+The exposed URL is HTTP today; a wildcard TLS certificate (making it `https://`) arrives with the DNS-01 broker. See [`erun expose`](/cli/expose) for the workflow and [Networking spec · Platform service exposure](/agent-reference/networking-spec#platform-service-exposure) for the exact records and Ingress.
+
 ## Inter-env communication
 
 By default, **envs cannot reach each other.** ERun's runtime chart deploys a default-deny NetworkPolicy on every env's namespace. Cross-env traffic requires an explicit opt-in NetworkPolicy on the target plus a matching label on the consumer namespace; this is rare and usually a sign you should be using one env rather than two. See [Networking spec · Cross-namespace traffic semantics](/agent-reference/networking-spec#cross-namespace-traffic-semantics) for the manifests.

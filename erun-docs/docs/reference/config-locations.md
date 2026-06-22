@@ -11,12 +11,20 @@ ERun's configuration lives in a small number of well-known files.
 ```
 $XDG_CONFIG_HOME/erun/                    # or ~/.config/erun on Linux/macOS
 ├── config.yaml                           # global defaults (default tenant, default env)
+├── config.yaml.<YYYY-MM-DD>.bak          # daily backups of the global config (last 5 kept)
 └── <tenant>/
     ├── tenant.yaml                       # tenant config
     └── <environment>/
         ├── config.yaml                   # env config (kube context, registry, runtime)
+        ├── config.yaml.<YYYY-MM-DD>.bak  # daily backups of this env's config (last 5 kept)
         └── (workspace caches, idle logs, …)
 ```
+
+### Config backups {#config-backups}
+
+Both the global config and each environment's `config.yaml` are snapshotted before they are overwritten. The first save on any given day copies the previous file to `<name>.<YYYY-MM-DD>.bak` next to it; later saves the same day are no-ops, and only the five most recent dailies are kept. Backups carry no secrets the live file does not.
+
+To roll a file back, run [`erun doctor`](/cli/doctor): `--restore-config-from-backup <date>` for the global config, or `--restore-env-config-from-backup <date>` (with an explicit tenant and environment) for one environment's config — useful when a setting was changed or corrupted, such as an environment type that resolved to the wrong value.
 
 Alongside the config tree, ERun keeps per-environment **state** under `~/.erun` (always the home directory, not the XDG dir):
 
