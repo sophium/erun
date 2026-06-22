@@ -16,6 +16,20 @@ type cloudCommandStoreInterface interface {
 	common.EnvironmentCloudAliasStore
 }
 
+// cloudDependencies wires the CLI's cloud-command dependencies. The AWS runners
+// and the Cloudflare verifier/account-lister default inside erun-common, but the
+// secret store is nil unless a transport wires one — so Cloudflare alias init,
+// login, and doctor repair can persist and read the scoped token. A missing
+// config dir leaves the store nil and those Cloudflare operations fail clearly.
+// This mirrors the MCP transport's wiring in erun-mcp/cloud.go.
+func cloudDependencies() common.CloudDependencies {
+	deps := common.CloudDependencies{}
+	if store, err := common.DefaultCloudSecretStore(); err == nil {
+		deps.CloudSecretStore = store
+	}
+	return deps
+}
+
 func newCloudCmd(store cloudCommandStoreInterface, promptRunner PromptRunner, selectRunner SelectRunner, deps common.CloudDependencies) *cobra.Command {
 	return newCommandGroup(
 		"cloud",
@@ -189,33 +203,29 @@ func resolveCloudflareAccountNonInteractive(ctx common.Context, token string, de
 // token, and defaults an editable label. Each step validates before advancing.
 func runCloudflareInitWizard(ctx common.Context, promptRunner PromptRunner, selectRunner SelectRunner, params common.InitCloudflareCloudProviderParams, deps common.CloudDependencies) (common.InitCloudflareCloudProviderParams, error) {
 	out := ctx.Stdout
-	fmt.Fprintln(out, "\nAdd a Cloudflare cloud alias")
-	fmt.Fprintln(out, "ERun needs a delegated Cloudflare API token. It never sees your Cloudflare password.")
-	fmt.Fprintln(out, "\nStep 1 of 3 · Create the token")
-	fmt.Fprintln(out, "  Open this page (you're already logged in to Cloudflare there):")
-	fmt.Fprintln(out, "    "+common.CloudflareCreateTokenURL)
-	fmt.Fprintln(out, "  Click Create Token → Create Custom Token, give it a name, then add")
-	fmt.Fprintln(out, "  these permission rows (each row is Scope → Permission → Access; use")
-	fmt.Fprintln(out, "  \"+ Add more\" for each):")
-	fmt.Fprintln(out, "    Zone    → Zone             → Edit   (create/manage zones)")
-	fmt.Fprintln(out, "    Zone    → DNS              → Edit   (manage DNS records)")
-	fmt.Fprintln(out, "    Account → Cloudflare Pages → Edit   (deploy static sites)")
-	fmt.Fprintln(out, "  Set Zone Resources to:    Include → All zones")
-	fmt.Fprintln(out, "  Set Account Resources to: Include → your account")
-	fmt.Fprintln(out, "  Add more rows (Workers, R2, etc.) if this token will manage those too.")
-	fmt.Fprintln(out, "  Continue to summary → Create Token, then copy the token.")
-	if _, err := promptRunner(promptui.Prompt{Label: "Press Enter once you've copied the token"}); err != nil {
-		return params, err
-	}
-
-	fmt.Fprintln(out, "\nStep 2 of 3 · Paste the token")
+	_, _ = fmt.Fprintln(out, "\nAdd a Cloudflare cloud alias")
+	_, _ = fmt.Fprintln(out, "ERun needs a delegated Cloudflare API token. It never sees your Cloudflare password.")
+	_, _ = fmt.Fprintln(out, "\nStep 1 of 2 · Create the token, then paste it below")
+	_, _ = fmt.Fprintln(out, "  Open this page (you're already logged in to Cloudflare there):")
+	_, _ = fmt.Fprintln(out, "    "+common.CloudflareCreateTokenURL)
+	_, _ = fmt.Fprintln(out, "  Click Create Token → Create Custom Token, give it a name, then add")
+	_, _ = fmt.Fprintln(out, "  these permission rows (each row is Scope → Permission → Access; use")
+	_, _ = fmt.Fprintln(out, "  \"+ Add more\" for each):")
+	_, _ = fmt.Fprintln(out, "    Zone    → Zone             → Edit   (create/manage zones)")
+	_, _ = fmt.Fprintln(out, "    Zone    → DNS              → Edit   (manage DNS records)")
+	_, _ = fmt.Fprintln(out, "    Account → Cloudflare Pages → Edit   (deploy static sites)")
+	_, _ = fmt.Fprintln(out, "  Set Zone Resources to:    Include → All zones")
+	_, _ = fmt.Fprintln(out, "  Set Account Resources to: Include → your account")
+	_, _ = fmt.Fprintln(out, "  Add more rows (Workers, R2, etc.) if this token will manage those too.")
+	_, _ = fmt.Fprintln(out, "  Continue to summary → Create Token, then copy it and paste it here.")
+	_, _ = fmt.Fprintln(out)
 	token, err := verifyCloudflareTokenInteractive(ctx, promptRunner, deps)
 	if err != nil {
 		return params, err
 	}
 	params.APIToken = token
 
-	fmt.Fprintln(out, "\nStep 3 of 3 · Confirm the account")
+	_, _ = fmt.Fprintln(out, "\nStep 2 of 2 · Confirm the account")
 	accountID, err := resolveCloudflareAccountInteractive(ctx, promptRunner, selectRunner, token, deps)
 	if err != nil {
 		return params, err
@@ -240,12 +250,12 @@ func verifyCloudflareTokenInteractive(ctx common.Context, promptRunner PromptRun
 		if err != nil {
 			return "", err
 		}
-		fmt.Fprintln(ctx.Stdout, "  Verifying with Cloudflare…")
+		_, _ = fmt.Fprintln(ctx.Stdout, "  Verifying with Cloudflare…")
 		if _, err := common.VerifyCloudflareAPIToken(ctx, token, deps); err != nil {
-			fmt.Fprintln(ctx.Stdout, "  ✗ "+err.Error())
+			_, _ = fmt.Fprintln(ctx.Stdout, "  ✗ "+err.Error())
 			continue
 		}
-		fmt.Fprintln(ctx.Stdout, "  ✓ token is active")
+		_, _ = fmt.Fprintln(ctx.Stdout, "  ✓ token is active")
 		return token, nil
 	}
 }
@@ -256,11 +266,11 @@ func verifyCloudflareTokenInteractive(ctx common.Context, promptRunner PromptRun
 func resolveCloudflareAccountInteractive(ctx common.Context, promptRunner PromptRunner, selectRunner SelectRunner, token string, deps common.CloudDependencies) (string, error) {
 	accounts, err := common.ResolveCloudflareAccounts(ctx, token, deps)
 	if err != nil || len(accounts) == 0 {
-		fmt.Fprintln(ctx.Stdout, "  Could not auto-resolve the account from the token; enter it manually.")
+		_, _ = fmt.Fprintln(ctx.Stdout, "  Could not auto-resolve the account from the token; enter it manually.")
 		return requiredCloudPrompt(promptRunner, "Cloudflare account ID", "")
 	}
 	if len(accounts) == 1 {
-		fmt.Fprintf(ctx.Stdout, "  Using account %q (%s)\n", accounts[0].Name, accounts[0].ID)
+		_, _ = fmt.Fprintf(ctx.Stdout, "  Using account %q (%s)\n", accounts[0].Name, accounts[0].ID)
 		return accounts[0].ID, nil
 	}
 	items := make([]string, 0, len(accounts))

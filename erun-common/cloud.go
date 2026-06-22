@@ -857,6 +857,13 @@ func issuerFromJWT(token string) (string, error) {
 }
 
 func normalizeCloudDependencies(deps CloudDependencies) CloudDependencies {
+	deps = normalizeAWSCloudDependencies(deps)
+	deps = normalizeCloudflareCloudDependencies(deps)
+	return deps
+}
+
+// normalizeAWSCloudDependencies fills any unset AWS runner with its default.
+func normalizeAWSCloudDependencies(deps CloudDependencies) CloudDependencies {
 	if deps.RunAWSConfigureSSO == nil {
 		deps.RunAWSConfigureSSO = defaultRunAWSConfigureSSO
 	}
@@ -881,6 +888,13 @@ func normalizeCloudDependencies(deps CloudDependencies) CloudDependencies {
 	if deps.CheckAWSStatus == nil {
 		deps.CheckAWSStatus = defaultCheckAWSStatus
 	}
+	return deps
+}
+
+// normalizeCloudflareCloudDependencies fills any unset Cloudflare runner with
+// its default. The CloudSecretStore is intentionally left nil unless a transport
+// wires one (Cloudflare operations that need it fail clearly when it is absent).
+func normalizeCloudflareCloudDependencies(deps CloudDependencies) CloudDependencies {
 	if deps.VerifyCloudflareToken == nil {
 		deps.VerifyCloudflareToken = defaultVerifyCloudflareToken
 	}

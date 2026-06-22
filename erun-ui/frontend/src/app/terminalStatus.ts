@@ -2,6 +2,7 @@ import type { UISelection } from '@/types';
 
 import type {
   ClassifiedTerminalFailure,
+  CloudInitProvider,
   HiddenSessionMode,
   IDEKind,
   TerminalExitSelections,
@@ -32,7 +33,7 @@ export function failedTerminalExitReason(
     return selectionReason;
   }
   if (selections.cloudInit) {
-    return `Failed to initialize AWS cloud alias: ${reason}`;
+    return `Failed to initialize ${cloudProviderLabel(selections.cloudInit)} cloud alias: ${reason}`;
   }
   return reason;
 }
@@ -43,9 +44,16 @@ export function successfulTerminalExitReason(selections: TerminalExitSelections)
     return selectionReason;
   }
   if (selections.cloudInit) {
-    return 'AWS cloud alias setup ended.';
+    return `${cloudProviderLabel(selections.cloudInit)} cloud alias setup ended.`;
   }
   return 'Session ended.';
+}
+
+// cloudProviderLabel renders the user-facing provider name for cloud-init exit
+// toasts so they name the provider the session actually set up, rather than
+// always saying "AWS".
+function cloudProviderLabel(provider: CloudInitProvider): string {
+  return provider === 'cloudflare' ? 'Cloudflare' : 'AWS';
 }
 
 export function cleanTerminalOutput(value: string): string {
