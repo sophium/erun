@@ -105,7 +105,14 @@ type EnvConfig struct {
 	LocalRepoPath      string          `yaml:"localrepopath,omitempty" json:"localRepoPath,omitempty"`
 	KubernetesContext  string
 	CloudProviderAlias string `yaml:"cloudprovideralias,omitempty"`
-	ManagedCloud       bool   `yaml:"managedcloud,omitempty" json:"managedCloud,omitempty"`
+	// CloudProviderAliases attaches additional cloud aliases to this env, one
+	// per provider type (keyed by provider type, e.g. "cloudflare"). The legacy
+	// CloudProviderAlias scalar above stays the AWS slot for backward
+	// compatibility — pre-existing configs keep working untouched —
+	// while ResolvedCloudAliases folds both into one per-type view. Each env
+	// carries at most one alias per provider type.
+	CloudProviderAliases map[string]string `yaml:"cloudprovideraliases,omitempty" json:"cloudProviderAliases,omitempty"`
+	ManagedCloud         bool              `yaml:"managedcloud,omitempty" json:"managedCloud,omitempty"`
 	RuntimeVersion     string `yaml:"runtimeversion,omitempty"`
 	RuntimeRegistry    string `yaml:"runtimeregistry,omitempty" json:"runtimeRegistry,omitempty"`
 	// ContainerRegistries carries the marked registry list for environments
@@ -144,6 +151,28 @@ type EnvConfig struct {
 	// with no buildable context if none exist. Default false preserves today's
 	// build.sh-shadows-docker behaviour.
 	DisableBuildScript bool `yaml:"disablebuildscript,omitempty" json:"disableBuildScript,omitempty"`
+}
+
+// ResolvedCloudAliases returns the env's attached cloud aliases keyed by
+// provider type. The legacy CloudProviderAlias scalar is folded in under its
+// own provider type (AWS for every pre-existing config), and explicit
+// CloudProviderAliases entries are layered on top. An env holds at most one
+// alias per provider type, so the runtime can be seeded with, e.g., both an
+// AWS identity and a Cloudflare token at once.
+func (c EnvConfig) ResolvedCloudAliases() map[string]string {
+	resolved := make(map[string]string)
+	if alias := strings.TrimSpace(c.CloudProviderAlias); alias != "" {
+		resolved[cloudProviderTypeFromAlias(alias)] = alias
+	}
+	for providerType, alias := range c.CloudProviderAliases {
+		providerType = strings.ToLower(strings.TrimSpace(providerType))
+		alias = strings.TrimSpace(alias)
+		if providerType == "" || alias == "" {
+			continue
+		}
+		resolved[providerType] = alias
+	}
+	return resolved
 }
 
 // ResolvedType returns the env's type, or "" when unresolved. Pre-#376 configs

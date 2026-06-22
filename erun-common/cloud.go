@@ -14,7 +14,8 @@ import (
 )
 
 const (
-	CloudProviderAWS = "aws"
+	CloudProviderAWS        = "aws"
+	CloudProviderCloudflare = "cloudflare"
 
 	CloudProviderBearerAudience = "erun-api"
 
@@ -23,6 +24,12 @@ const (
 	CloudTokenStatusNotConfigured = "not_configured"
 	CloudTokenStatusUnknown       = "unknown"
 )
+
+// ErrCloudProviderNoOIDC reports that a provider type does not participate in
+// OIDC web-identity federation (Cloudflare aliases authenticate the runtime
+// with a scoped API token, not a JWT issuer). Callers that aggregate issuers
+// — ResolveTenantCloudProviderIssuers — skip such providers rather than fail.
+var ErrCloudProviderNoOIDC = errors.New("cloud provider does not support OIDC issuance")
 
 type CloudStore interface {
 	CloudReadStore
@@ -47,6 +54,23 @@ type CloudProviderConfig struct {
 	SSORegion     string `json:"ssoRegion,omitempty" yaml:"ssoregion,omitempty"`
 	SSOStartURL   string `json:"ssoStartUrl,omitempty" yaml:"ssostarturl,omitempty"`
 	OIDCIssuerURL string `json:"oidcIssuerUrl,omitempty" yaml:"oidcissuerurl,omitempty"`
+
+	// Cloudflare carries the provider-specific identity for a Cloudflare
+	// alias. It is set only when Provider == CloudProviderCloudflare. The
+	// scoped API token itself is never stored inline; CloudflareProviderConfig
+	// holds a TokenRef pointing at the secret store instead.
+	Cloudflare *CloudflareProviderConfig `json:"cloudflare,omitempty" yaml:"cloudflare,omitempty"`
+}
+
+// CloudflareProviderConfig is the Cloudflare-specific identity for a cloud
+// alias. AccountID is the Cloudflare account the delegated, account-scoped
+// API token belongs to; TokenName is an operator-facing label for the token;
+// TokenRef is an opaque handle the CloudSecretStore resolves to the token
+// value, so the raw token never lands in erun-config.yaml.
+type CloudflareProviderConfig struct {
+	AccountID string `json:"accountId,omitempty" yaml:"accountid,omitempty"`
+	TokenName string `json:"tokenName,omitempty" yaml:"tokenname,omitempty"`
+	TokenRef  string `json:"tokenRef,omitempty" yaml:"tokenref,omitempty"`
 }
 
 type CloudProviderStatus struct {
@@ -105,6 +129,13 @@ type CloudDependencies struct {
 	RunAWSExportCredentials func(Context, string) (CloudProviderCredentials, error)
 	ResolveAWSIdentity      func(Context, string) (AWSIdentity, error)
 	CheckAWSStatus          func(Context, CloudProviderConfig) CloudProviderStatus
+
+	// VerifyCloudflareToken validates a Cloudflare scoped API token against the
+	// Cloudflare API. CloudSecretStore persists Cloudflare tokens off-config;
+	// it is nil unless a transport wires one, and Cloudflare operations that
+	// need it fail clearly when it is absent.
+	VerifyCloudflareToken func(Context, string) (CloudflareTokenInfo, error)
+	CloudSecretStore      CloudSecretStore
 }
 
 // CloudProviderCredentials is a snapshot of temporary AWS credentials derived
@@ -137,6 +168,11 @@ func NormalizeCloudProviderConfig(config CloudProviderConfig) CloudProviderConfi
 	config.SSORegion = strings.TrimSpace(config.SSORegion)
 	config.SSOStartURL = strings.TrimSpace(config.SSOStartURL)
 	config.OIDCIssuerURL = normalizeOIDCIssuerURL(config.OIDCIssuerURL)
+	if config.Cloudflare != nil {
+		config.Cloudflare.AccountID = strings.TrimSpace(config.Cloudflare.AccountID)
+		config.Cloudflare.TokenName = strings.TrimSpace(config.Cloudflare.TokenName)
+		config.Cloudflare.TokenRef = strings.TrimSpace(config.Cloudflare.TokenRef)
+	}
 	if config.Alias == "" && config.Provider != "" && config.Username != "" && config.AccountID != "" {
 		config.Alias = CloudProviderAlias(config.Username, config.AccountID, config.Provider)
 	}
@@ -325,6 +361,9 @@ func LoginCloudProviderAlias(ctx Context, store CloudStore, params CloudLoginPar
 		if err := deps.RunAWSLogin(ctx, provider.Profile); err != nil {
 			return status, err
 		}
+	case CloudProviderCloudflare:
+		// Cloudflare aliases carry a stored scoped token; there is no
+		// interactive login. Fall through to the token status re-check below.
 	default:
 		return status, fmt.Errorf("unsupported cloud provider %q", provider.Provider)
 	}
@@ -341,6 +380,12 @@ func LogoutCloudProviderAlias(ctx Context, store CloudStore, params CloudLoginPa
 	switch provider.Provider {
 	case CloudProviderAWS:
 		if err := deps.RunAWSLogout(ctx, provider.Profile); err != nil {
+			return status, err
+		}
+	case CloudProviderCloudflare:
+		// Cloudflare has no SSO session; "logout" removes the stored token so
+		// the alias keeps its identity but loses its credential.
+		if err := deleteCloudflareToken(ctx, provider, deps); err != nil {
 			return status, err
 		}
 	default:
@@ -385,6 +430,8 @@ func CloudProviderBearerToken(ctx Context, store CloudReadStore, params CloudBea
 	switch provider.Provider {
 	case CloudProviderAWS:
 		return awsCloudProviderBearerToken(ctx, provider, params, deps)
+	case CloudProviderCloudflare:
+		return CloudBearerToken{}, ErrCloudProviderNoOIDC
 	default:
 		return CloudBearerToken{}, fmt.Errorf("unsupported cloud provider %q", provider.Provider)
 	}
@@ -489,10 +536,11 @@ func SetEnvironmentCloudProviderAlias(ctx Context, store EnvironmentCloudAliasSt
 	if config.Name == "" {
 		config.Name = environment
 	}
-	if config.CloudProviderAlias == alias {
+	providerType := cloudProviderTypeFromAlias(alias)
+	if cloudEnvAliasForType(config, providerType) == alias {
 		return saveManagedCloudAliasIfNeeded(ctx, store, tenant, config)
 	}
-	config.CloudProviderAlias = alias
+	setCloudEnvAliasForType(&config, providerType, alias)
 	if config.RemoteWorktree() {
 		config.ManagedCloud = true
 	}
@@ -536,6 +584,38 @@ func saveManagedCloudAliasIfNeeded(ctx Context, store EnvironmentCloudAliasStore
 	return config, nil
 }
 
+// cloudProviderTypeFromAlias extracts the provider type from an alias's
+// "@provider" suffix, defaulting to AWS for any legacy or unparseable value so
+// pre-existing single-alias configs keep resolving to the AWS slot.
+func cloudProviderTypeFromAlias(alias string) string {
+	if _, _, provider, ok := ParseCloudProviderAlias(alias); ok {
+		return provider
+	}
+	return CloudProviderAWS
+}
+
+// cloudEnvAliasForType reads the env's attached alias for a provider type. AWS
+// lives in the legacy scalar; every other type lives in the per-type map.
+func cloudEnvAliasForType(config EnvConfig, providerType string) string {
+	if providerType == CloudProviderAWS {
+		return config.CloudProviderAlias
+	}
+	return config.CloudProviderAliases[providerType]
+}
+
+// setCloudEnvAliasForType writes the env's attached alias for a provider type,
+// keeping AWS in the legacy scalar so AWS behavior is byte-for-byte unchanged.
+func setCloudEnvAliasForType(config *EnvConfig, providerType, alias string) {
+	if providerType == CloudProviderAWS {
+		config.CloudProviderAlias = alias
+		return
+	}
+	if config.CloudProviderAliases == nil {
+		config.CloudProviderAliases = make(map[string]string)
+	}
+	config.CloudProviderAliases[providerType] = alias
+}
+
 func ResolveCloudProvider(store CloudReadStore, alias string) (CloudProviderConfig, error) {
 	alias = strings.TrimSpace(alias)
 	if alias == "" {
@@ -565,6 +645,12 @@ func ResolveTenantCloudProviderIssuers(store CloudReadStore, tenant TenantConfig
 		if err != nil {
 			return nil, err
 		}
+		if !cloudProviderSupportsOIDC(provider.Provider) {
+			// Cloudflare aliases authenticate the runtime with a scoped API
+			// token, not an OIDC JWT, so they contribute no issuer. Skip them
+			// rather than fail the tenant's issuer aggregation.
+			continue
+		}
 		issuer := CloudProviderOIDCIssuerURL(provider)
 		if issuer == "" {
 			return nil, fmt.Errorf("cloud provider alias %q does not have an OIDC issuer URL", alias)
@@ -576,6 +662,14 @@ func ResolveTenantCloudProviderIssuers(store CloudReadStore, tenant TenantConfig
 		seen[issuer] = struct{}{}
 	}
 	return issuers, nil
+}
+
+// cloudProviderSupportsOIDC reports whether a provider type participates in
+// OIDC web-identity federation. AWS mints web-identity JWTs; Cloudflare does
+// not. The check gates issuer aggregation strictly on provider type so an AWS
+// alias with a genuinely missing issuer still surfaces as an error.
+func cloudProviderSupportsOIDC(provider string) bool {
+	return strings.ToLower(strings.TrimSpace(provider)) != CloudProviderCloudflare
 }
 
 func CloudProviderOIDCIssuerURL(provider CloudProviderConfig) string {
@@ -631,6 +725,9 @@ func CloudProviderTokenStatus(provider CloudProviderConfig, deps CloudDependenci
 	}
 	if deps.CheckAWSStatus != nil && provider.Provider == CloudProviderAWS {
 		return deps.CheckAWSStatus(Context{}, provider)
+	}
+	if provider.Provider == CloudProviderCloudflare {
+		return cloudflareCloudProviderTokenStatus(provider, deps)
 	}
 	if provider.Provider != CloudProviderAWS {
 		return CloudProviderStatus{CloudProviderConfig: provider, Status: CloudTokenStatusUnknown, Message: "unsupported provider"}
@@ -780,6 +877,9 @@ func normalizeCloudDependencies(deps CloudDependencies) CloudDependencies {
 	}
 	if deps.CheckAWSStatus == nil {
 		deps.CheckAWSStatus = defaultCheckAWSStatus
+	}
+	if deps.VerifyCloudflareToken == nil {
+		deps.VerifyCloudflareToken = defaultVerifyCloudflareToken
 	}
 	return deps
 }
