@@ -91,9 +91,18 @@ func (a *App) resolveCloudCredentialsRefreshTarget(selection uiSelection) (strin
 	if !envConfig.RemoteHostCredentials || !envConfig.RemoteWorktree() {
 		return "", eruncommon.OpenResult{}, false
 	}
+	// CloudProviderAlias is the legacy scalar that always holds the env's AWS
+	// alias; non-AWS aliases (Cloudflare) live in EnvConfig.CloudProviderAliases
+	// and never reach this scalar. So a Cloudflare-attached env that carries no
+	// AWS alias reads as "" here and the refresher no-ops — exactly the desired
+	// behavior. Cloudflare credentials are delivered at deploy time via a chart
+	// Secret minted by the erun binary, not pushed by this host-credential timer.
 	if strings.TrimSpace(envConfig.CloudProviderAlias) == "" {
 		return "", eruncommon.OpenResult{}, false
 	}
+	// Defense in depth: even if a Cloudflare alias somehow landed in the scalar,
+	// the strict provider-type gate keeps the AWS-only credential push from
+	// trying to export temporary credentials from a token-based provider.
 	provider, err := eruncommon.ResolveCloudProvider(a.deps.store, envConfig.CloudProviderAlias)
 	if err != nil || provider.Provider != eruncommon.CloudProviderAWS {
 		return "", eruncommon.OpenResult{}, false

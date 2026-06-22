@@ -47,7 +47,61 @@ export class GlobalConfigDialog {
   }
 
   cloudAliasRow(alias: string): Locator {
-    return this.locator().locator(`text=${alias}`).first();
+    return this.locator().locator(`[data-cloud-alias="${alias}"]`).first();
+  }
+
+  // cloudAliasGroupHeading targets the labelled group heading for a provider
+  // type (issue #630). data-cloud-alias-group carries the provider type token.
+  cloudAliasGroupHeading(providerType: string): Locator {
+    return this.locator().locator(`[data-cloud-alias-group="${providerType}"]`);
+  }
+
+  // --- Add-provider picker + Cloudflare form (issue #630) ---
+
+  // addAWSButton targets the "AWS" add button in the provider picker (opens an
+  // SSO PTY session).
+  addAWSButton(): Locator {
+    return this.locator().getByRole('button', { name: 'AWS', exact: true });
+  }
+
+  // addCloudflareButton targets the "Cloudflare" add button in the provider
+  // picker (reveals the inline masked-token form).
+  addCloudflareButton(): Locator {
+    return this.locator().getByRole('button', { name: 'Cloudflare', exact: true });
+  }
+
+  async openCloudflareForm(): Promise<void> {
+    await this.addCloudflareButton().click();
+  }
+
+  cloudflareForm(): Locator {
+    return this.locator().locator('form[aria-label="Add Cloudflare token"]');
+  }
+
+  cloudflareAccountIdInput(): Locator {
+    return this.locator().locator('#global-config-cloudflare-accountid');
+  }
+
+  cloudflareTokenNameInput(): Locator {
+    return this.locator().locator('#global-config-cloudflare-tokenname');
+  }
+
+  cloudflareApiTokenInput(): Locator {
+    return this.locator().locator('#global-config-cloudflare-apitoken');
+  }
+
+  cloudflareSubmitButton(): Locator {
+    return this.cloudflareForm().getByRole('button', { name: /Add token|Verifying/ });
+  }
+
+  async fillCloudflareForm(input: {
+    accountId: string;
+    tokenName: string;
+    apiToken: string;
+  }): Promise<void> {
+    await this.cloudflareAccountIdInput().fill(input.accountId);
+    await this.cloudflareTokenNameInput().fill(input.tokenName);
+    await this.cloudflareApiTokenInput().fill(input.apiToken);
   }
 
   async refreshCloudProviders(): Promise<void> {
@@ -59,7 +113,10 @@ export class GlobalConfigDialog {
   }
 
   async cancel(): Promise<void> {
-    const button = this.locator().getByRole('button', { name: 'Cancel' });
+    // Match the footer Cancel exactly: the Cloudflare add form's close button
+    // is labelled "Cancel adding Cloudflare token", which a substring match
+    // would also resolve.
+    const button = this.locator().getByRole('button', { name: 'Cancel', exact: true });
     await button.scrollIntoViewIfNeeded();
     await button.click();
   }

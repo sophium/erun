@@ -7,11 +7,12 @@ import { readError } from './errors';
 import { showNotification, showTerminalMessage } from './notificationThunks';
 import { setSidebarCloudAliasBusy } from './slices/sidebarSlice';
 import { setCloudProviders } from './slices/tenantsSlice';
-import type { AppThunk } from './store';
+import type { AppThunk, RootState } from './store';
 
-// cloudProviderThunks own the sidebar's primary-cloud-alias controls. The
-// busy/action flags it writes live on the sidebar slice; the thunks dispatch
-// the matching slice actions directly.
+// cloudProviderThunks own the sidebar's per-provider-type cloud-alias controls.
+// The busy/action flags it writes live on the sidebar slice keyed by alias, so
+// AWS and Cloudflare rows spin independently; the thunks dispatch the matching
+// slice actions directly.
 
 export const loginPrimaryCloudProvider =
   (alias: string): AppThunk<Promise<void>> =>
@@ -37,10 +38,10 @@ export const getPrimaryCloudProviderBearerToken =
   (alias: string): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
     alias = alias.trim();
-    if (!alias || getState().sidebar.sidebarCloudAliasBusy) {
+    if (!alias || aliasBusy(getState, alias)) {
       return;
     }
-    dispatch(setSidebarCloudAliasBusy({ busy: true, action: 'bearer' }));
+    dispatch(setSidebarCloudAliasBusy({ alias, busy: true, action: 'bearer' }));
     try {
       const result = await dispatch(
         cloudApi.endpoints.getCloudProviderBearerToken.initiate(alias),
@@ -49,7 +50,7 @@ export const getPrimaryCloudProviderBearerToken =
       dispatch(
         setCloudProviders(replaceCloudProvider(getState().tenants.cloudProviders, result.provider)),
       );
-      dispatch(setSidebarCloudAliasBusy({ busy: false, action: '' }));
+      dispatch(setSidebarCloudAliasBusy({ alias, busy: false, action: '' }));
       const issuer = result.issuer?.trim();
       dispatch(
         showTerminalMessage(
@@ -61,11 +62,15 @@ export const getPrimaryCloudProviderBearerToken =
       dispatch(showNotification('success', `Copied bearer token for ${result.alias}.`));
     } catch (error) {
       const message = readError(error);
-      dispatch(setSidebarCloudAliasBusy({ busy: false, action: '' }));
+      dispatch(setSidebarCloudAliasBusy({ alias, busy: false, action: '' }));
       dispatch(showTerminalMessage(message));
       dispatch(showNotification('error', message));
     }
   };
+
+function aliasBusy(getState: () => RootState, alias: string): boolean {
+  return Boolean(getState().sidebar.sidebarCloudAliasBusyByAlias[alias]);
+}
 
 const updatePrimaryCloudProvider =
   (
@@ -75,20 +80,20 @@ const updatePrimaryCloudProvider =
   ): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
     alias = alias.trim();
-    if (!alias || getState().sidebar.sidebarCloudAliasBusy) {
+    if (!alias || aliasBusy(getState, alias)) {
       return;
     }
-    dispatch(setSidebarCloudAliasBusy({ busy: true, action }));
+    dispatch(setSidebarCloudAliasBusy({ alias, busy: true, action }));
     try {
       const provider = (await run(alias)) as UICloudProviderStatus;
       dispatch(
         setCloudProviders(replaceCloudProvider(getState().tenants.cloudProviders, provider)),
       );
-      dispatch(setSidebarCloudAliasBusy({ busy: false, action: '' }));
+      dispatch(setSidebarCloudAliasBusy({ alias, busy: false, action: '' }));
       dispatch(showTerminalMessage(`${provider.alias}: ${provider.status}`));
     } catch (error) {
       const message = readError(error);
-      dispatch(setSidebarCloudAliasBusy({ busy: false, action: '' }));
+      dispatch(setSidebarCloudAliasBusy({ alias, busy: false, action: '' }));
       dispatch(showTerminalMessage(message));
       dispatch(showNotification('error', message));
     }

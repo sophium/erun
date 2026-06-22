@@ -309,6 +309,33 @@ export interface UIAWSCloudAliasInput {
   oidcIssuerUrl: string;
 }
 
+// UICloudflareCloudAliasInput mirrors the Go uiCloudflareCloudAliasInput: the
+// explicit inputs for the non-interactive "add Cloudflare token" form. The
+// apiToken rides through a masked field and is never echoed back from the
+// backend.
+export interface UICloudflareCloudAliasInput {
+  accountId: string;
+  tokenName: string;
+  apiToken: string;
+}
+
+// Canonical cloud provider type strings, matching erun-common's
+// CloudProviderAWS / CloudProviderCloudflare. Used to label and group cloud
+// aliases by their provider type across the settings dialog, sidebar, and env
+// manage tab.
+export const CloudProviderAWS = 'aws';
+export const CloudProviderCloudflare = 'cloudflare';
+
+// UIEnvironmentCloudAlias is one provider-type slot in the env's cloud-alias
+// view: the provider type, the alias currently attached for that type (empty
+// when none), and the configured aliases of that type the operator can choose
+// from.
+export interface UIEnvironmentCloudAlias {
+  provider: string;
+  alias: string;
+  options: string[];
+}
+
 export interface UICloudContextStatus {
   name: string;
   provider: string;
@@ -386,6 +413,11 @@ export interface UIEnvironmentConfig {
   containerRegistries: UIContainerRegistryEntry[];
   cloudProviderAlias: string;
   cloudProviderAliases?: string[];
+  // cloudAliasSlots is the per-provider-type cloud-alias view: one entry per
+  // provider type (aws, cloudflare) that has a configured alias or a current
+  // attachment, each carrying the env's chosen alias for that type plus the
+  // selectable options. The frontend renders one selector per slot.
+  cloudAliasSlots?: UIEnvironmentCloudAlias[];
   cloudContext?: UICloudContextStatus;
   runtimeVersion: string;
   runtimePod: UIRuntimePodConfig;

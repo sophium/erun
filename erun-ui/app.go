@@ -150,6 +150,7 @@ func (a *App) emit(name string, args ...any) {
 
 func NewApp(deps erunUIDeps) *App {
 	deps = withDefaultCoreDeps(deps)
+	deps = withDefaultCloudDeps(deps)
 	deps = withDefaultRuntimeDeps(deps)
 	deps = withDefaultUIDeps(deps)
 	app := &App{
@@ -195,6 +196,25 @@ func withDefaultCoreDeps(deps erunUIDeps) erunUIDeps {
 	}
 	if deps.deleteNamespace == nil {
 		deps.deleteNamespace = eruncommon.DeleteKubernetesNamespace
+	}
+	return deps
+}
+
+// withDefaultCloudDeps wires the cloud-provider dependency defaults the
+// desktop needs for cloud-alias operations. erun-common fills the AWS hooks
+// and VerifyCloudflareToken itself via normalizeCloudDependencies, but the
+// off-config CloudSecretStore that Cloudflare init/status/export require has
+// no usable zero value — it must be backed by a real directory. Wire the
+// file-backed default rooted beside erun-config.yaml so Cloudflare token
+// persistence works (today the desktop passes empty deps, so Cloudflare ops
+// would fail with "cloud secret store is not configured"). A resolution
+// failure leaves the store nil; erun-common then surfaces a clear error on
+// the Cloudflare path rather than touching AWS-only flows.
+func withDefaultCloudDeps(deps erunUIDeps) erunUIDeps {
+	if deps.cloudDeps.CloudSecretStore == nil {
+		if store, err := eruncommon.DefaultCloudSecretStore(); err == nil {
+			deps.cloudDeps.CloudSecretStore = store
+		}
 	}
 	return deps
 }
