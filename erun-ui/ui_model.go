@@ -223,6 +223,7 @@ type uiEnvironmentConfig struct {
 	ContainerRegistries   []uiContainerRegistryEntry `json:"containerRegistries"`
 	CloudProviderAlias    string                     `json:"cloudProviderAlias"`
 	CloudProviderAliases  []string                   `json:"cloudProviderAliases,omitempty"`
+	CloudAliasSlots       []uiEnvironmentCloudAlias  `json:"cloudAliasSlots,omitempty"`
 	CloudContext          *uiCloudContextStatus      `json:"cloudContext,omitempty"`
 	RuntimeVersion        string                     `json:"runtimeVersion"`
 	RuntimePod            uiRuntimePodConfig         `json:"runtimePod"`
@@ -344,6 +345,28 @@ type uiAWSCloudAliasInput struct {
 	SSORegion     string `json:"ssoRegion,omitempty"`
 	SSOStartURL   string `json:"ssoStartUrl,omitempty"`
 	OIDCIssuerURL string `json:"oidcIssuerUrl,omitempty"`
+}
+
+// uiCloudflareCloudAliasInput carries the explicit inputs for the
+// non-interactive Cloudflare "add token" form: the account the scoped token
+// belongs to, a human label for the token, and the secret token itself. The
+// token rides through a masked field; it is persisted to the off-config secret
+// store, never echoed back to the UI or written into erun-config.yaml.
+type uiCloudflareCloudAliasInput struct {
+	AccountID string `json:"accountId,omitempty"`
+	TokenName string `json:"tokenName,omitempty"`
+	APIToken  string `json:"apiToken,omitempty"`
+}
+
+// uiEnvironmentCloudAlias is one provider-type slot in the env's cloud-alias
+// view: the provider type ("aws", "cloudflare"), the alias currently attached
+// to the env for that type (empty when none), and the configured aliases of
+// that type the operator can choose from. The frontend renders one selector
+// per slot so an env can attach an AWS alias AND a Cloudflare alias at once.
+type uiEnvironmentCloudAlias struct {
+	Provider string   `json:"provider"`
+	Alias    string   `json:"alias"`
+	Options  []string `json:"options"`
 }
 
 type uiCloudContextInitInput struct {

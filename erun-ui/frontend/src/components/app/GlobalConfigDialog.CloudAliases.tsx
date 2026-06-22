@@ -1,6 +1,7 @@
 import { Cloud, LoaderCircle, Plus, RefreshCw } from 'lucide-react';
 import * as React from 'react';
 
+import { openCloudflareCloudInitForm } from '@/app/cloudflareProviderThunks';
 import {
   loginGlobalCloudProvider,
   refreshCloudProviders,
@@ -9,12 +10,24 @@ import {
 import { useAppDispatch } from '@/app/hooks';
 import type { AppState } from '@/app/state';
 import { EmptyState } from '@/components/app/EmptyState';
-import { cloudProviderSummary } from '@/components/app/GlobalConfigDialog.helpers';
+import { CloudflareAliasForm } from '@/components/app/GlobalConfigDialog.CloudflareForm';
+import {
+  cloudProviderSummary,
+  cloudProviderTypeLabel,
+} from '@/components/app/GlobalConfigDialog.helpers';
 import { CloudAliasAction, CloudStatusBadge } from '@/components/app/GlobalConfigDialog.shared';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { CloudProviderAWS, CloudProviderCloudflare, type UICloudProviderStatus } from '@/types';
 
 type GlobalConfigDialog = AppState['globalConfigDialog'];
+
+// providerGroupOrder fixes the render order of the grouped alias list: AWS
+// first (the legacy primary), then Cloudflare, then any other configured
+// provider type alphabetically. Recognition over recall: aliases stay grouped
+// under a labelled heading so an operator with both an AWS account and a
+// Cloudflare token can tell which is which at a glance (Nielsen #6).
+const providerGroupOrder = [CloudProviderAWS, CloudProviderCloudflare];
 
 export function CloudAliasesSection({
   dialog,
@@ -28,20 +41,7 @@ export function CloudAliasesSection({
       <div className="flex items-center justify-between gap-2">
         <Label>Cloud aliases</Label>
         <div className="flex gap-1.5">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={dialog.busy}
-            onClick={() => void dispatch(startAWSCloudInit())}
-          >
-            {dialog.busyAction === 'cloud-provider-init' ? (
-              <LoaderCircle className="animate-spin" aria-hidden="true" />
-            ) : (
-              <Plus aria-hidden="true" />
-            )}
-            AWS
-          </Button>
+          <AddProviderButtons dialog={dialog} />
           <Button
             type="button"
             variant="ghost"
@@ -54,67 +54,200 @@ export function CloudAliasesSection({
           </Button>
         </div>
       </div>
+      {dialog.cloudflareFormOpen && <CloudflareAliasForm dialog={dialog} />}
       {providers.length === 0 ? (
-        <EmptyState
-          icon={<Cloud />}
-          heading="No cloud aliases yet"
-          body="Add a cloud account so ERun can deploy environments to it. AWS is the only provider supported today."
-          action={
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={dialog.busy}
-              onClick={() => void dispatch(startAWSCloudInit())}
-            >
-              {dialog.busyAction === 'cloud-provider-init' ? (
-                <LoaderCircle className="animate-spin" aria-hidden="true" />
-              ) : (
-                <Plus aria-hidden="true" />
-              )}
-              Add AWS account
-            </Button>
-          }
-        />
+        <CloudAliasesEmptyState dialog={dialog} />
       ) : (
-        <CloudAliasList dialog={dialog} />
+        <GroupedCloudAliasList dialog={dialog} providers={providers} />
       )}
     </div>
   );
 }
 
-function CloudAliasList({ dialog }: { dialog: GlobalConfigDialog }): React.ReactElement {
+// AddProviderButtons is the provider picker: one explicit button per provider
+// type. AWS opens an SSO PTY session (startAWSCloudInit); Cloudflare reveals
+// the inline masked-token form (no terminal). Two named buttons beat a generic
+// "Add" + a hidden type chooser — the operator sees both supported providers up
+// front (recognition over recall, Nielsen #6).
+function AddProviderButtons({ dialog }: { dialog: GlobalConfigDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
   return (
-    <div className="overflow-hidden rounded-[var(--radius)] border border-border">
-      {(dialog.config.cloudProviders ?? []).map((provider, index) => (
-        <div
-          key={provider.alias}
-          className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-border px-3 py-2.5 data-[border=true]:border-t"
-          data-border={index > 0}
-          data-cloud-alias={provider.alias}
-          data-cloud-status={provider.status}
-        >
-          <CloudAliasSummary provider={provider} />
-          <CloudAliasAction
-            status={provider.status}
-            busy={dialog.busy}
-            loading={
-              dialog.busyAction === 'cloud-provider-login' && dialog.busyTarget === provider.alias
-            }
-            onLogin={() => void dispatch(loginGlobalCloudProvider(provider.alias))}
-          />
+    <>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={dialog.busy}
+        onClick={() => void dispatch(startAWSCloudInit())}
+      >
+        {dialog.busyAction === 'cloud-provider-init' ? (
+          <LoaderCircle className="animate-spin" aria-hidden="true" />
+        ) : (
+          <Plus aria-hidden="true" />
+        )}
+        AWS
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={dialog.busy || dialog.cloudflareFormOpen}
+        onClick={() => {
+          dispatch(openCloudflareCloudInitForm());
+        }}
+      >
+        <Plus aria-hidden="true" />
+        Cloudflare
+      </Button>
+    </>
+  );
+}
+
+function CloudAliasesEmptyState({ dialog }: { dialog: GlobalConfigDialog }): React.ReactElement {
+  const dispatch = useAppDispatch();
+  return (
+    <EmptyState
+      icon={<Cloud />}
+      heading="No cloud aliases yet"
+      body="Add a cloud account so ERun can deploy environments to it. Add an AWS account for compute, or a Cloudflare token for DNS and zone delegation."
+      action={
+        <div className="flex flex-wrap justify-center gap-1.5">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={dialog.busy}
+            onClick={() => void dispatch(startAWSCloudInit())}
+          >
+            {dialog.busyAction === 'cloud-provider-init' ? (
+              <LoaderCircle className="animate-spin" aria-hidden="true" />
+            ) : (
+              <Plus aria-hidden="true" />
+            )}
+            Add AWS account
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={dialog.busy || dialog.cloudflareFormOpen}
+            onClick={() => {
+              dispatch(openCloudflareCloudInitForm());
+            }}
+          >
+            <Plus aria-hidden="true" />
+            Add Cloudflare token
+          </Button>
+        </div>
+      }
+    />
+  );
+}
+
+// GroupedCloudAliasList renders the configured aliases under a labelled heading
+// per provider type so AWS accounts and Cloudflare tokens are visually
+// distinct. Each row independently logs in (or, for Cloudflare, re-verifies
+// the stored token) and shows its own status and spinner.
+function GroupedCloudAliasList({
+  dialog,
+  providers,
+}: {
+  dialog: GlobalConfigDialog;
+  providers: UICloudProviderStatus[];
+}): React.ReactElement {
+  const groups = groupProvidersByType(providers);
+  return (
+    <div className="grid gap-3">
+      {groups.map((group) => (
+        <div key={group.provider} className="grid gap-1.5">
+          <div
+            className="text-xs font-medium text-muted-foreground"
+            data-cloud-alias-group={group.provider}
+          >
+            {cloudProviderTypeLabel(group.provider)}
+          </div>
+          <div className="overflow-hidden rounded-[var(--radius)] border border-border">
+            {group.aliases.map((provider, index) => (
+              <CloudAliasRow
+                key={provider.alias}
+                dialog={dialog}
+                provider={provider}
+                bordered={index > 0}
+              />
+            ))}
+          </div>
         </div>
       ))}
     </div>
   );
 }
 
-function CloudAliasSummary({
+interface ProviderGroup {
+  provider: string;
+  aliases: UICloudProviderStatus[];
+}
+
+function groupProvidersByType(providers: UICloudProviderStatus[]): ProviderGroup[] {
+  const byType = new Map<string, UICloudProviderStatus[]>();
+  for (const provider of providers) {
+    const key = (provider.provider || '').trim().toLowerCase() || 'other';
+    const bucket = byType.get(key) ?? [];
+    bucket.push(provider);
+    byType.set(key, bucket);
+  }
+  const ordered: ProviderGroup[] = [];
+  for (const type of providerGroupOrder) {
+    const aliases = byType.get(type);
+    if (aliases) {
+      ordered.push({ provider: type, aliases });
+      byType.delete(type);
+    }
+  }
+  for (const key of [...byType.keys()].sort()) {
+    ordered.push({ provider: key, aliases: byType.get(key) ?? [] });
+  }
+  return ordered;
+}
+
+function CloudAliasRow({
+  dialog,
   provider,
+  bordered,
 }: {
-  provider: NonNullable<GlobalConfigDialog['config']['cloudProviders']>[number];
+  dialog: GlobalConfigDialog;
+  provider: UICloudProviderStatus;
+  bordered: boolean;
 }): React.ReactElement {
+  const dispatch = useAppDispatch();
+  const isCloudflare = (provider.provider || '').trim().toLowerCase() === CloudProviderCloudflare;
+  return (
+    <div
+      className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-border px-3 py-2.5 data-[border=true]:border-t"
+      data-border={bordered}
+      data-cloud-alias={provider.alias}
+      data-cloud-status={provider.status}
+      data-cloud-provider={provider.provider}
+    >
+      <CloudAliasSummary provider={provider} />
+      <CloudAliasAction
+        status={provider.status}
+        busy={dialog.busy}
+        loading={
+          dialog.busyAction === 'cloud-provider-login' && dialog.busyTarget === provider.alias
+        }
+        // Cloudflare "login" re-verifies the stored scoped token against the
+        // Cloudflare API — there is no browser SSO — so the action reads
+        // "Verify token" rather than "Login" (match between system and the
+        // real world, Nielsen #2).
+        loginLabel={isCloudflare ? 'Verify token' : undefined}
+        loadingLabel={isCloudflare ? 'Verifying...' : undefined}
+        onLogin={() => void dispatch(loginGlobalCloudProvider(provider.alias))}
+      />
+    </div>
+  );
+}
+
+function CloudAliasSummary({ provider }: { provider: UICloudProviderStatus }): React.ReactElement {
   return (
     <div className="grid min-w-0 gap-1">
       <div className="flex min-w-0 items-center gap-2 text-sm font-medium">

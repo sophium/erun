@@ -75,6 +75,9 @@ function deployRelevantSignature(config: UIEnvironmentConfig): string {
     containerRegistries: config.containerRegistries,
     disableBuildScript: config.disableBuildScript,
     cloudProviderAlias: config.cloudProviderAlias,
+    // Cloudflare (and any non-AWS) alias attachments are delivered into the pod
+    // at deploy time via a chart Secret, so changing a slot is deploy-relevant.
+    cloudAliasSlots: config.cloudAliasSlots,
     type: config.type,
     runtimePod: config.runtimePod,
     idle: config.idle,
@@ -99,7 +102,13 @@ export function manageDialogTabHasUnsavedChanges(
     keys.some((key) => JSON.stringify(config[key]) !== JSON.stringify(initial[key]));
   switch (tab) {
     case 'general':
-      return compare('containerRegistries', 'cloudProviderAlias', 'remoteHostCredentials', 'type');
+      return compare(
+        'containerRegistries',
+        'cloudProviderAlias',
+        'cloudAliasSlots',
+        'remoteHostCredentials',
+        'type',
+      );
     case 'runtime':
       return compare(
         'runtimePod',

@@ -160,6 +160,38 @@ export class Sidebar {
     return this.locator().getByRole('button').last();
   }
 
+  // --- Per-provider-type cloud-alias rows (issue #630) ---
+
+  // cloudAliasRowTrigger targets one bottom-of-sidebar cloud-status row by its
+  // alias. Each provider type the active tenant uses gets its own row, labelled
+  // "<alias> cloud status".
+  cloudAliasRowTrigger(alias: string): Locator {
+    return this.locator().getByRole('button', { name: `${alias} cloud status` });
+  }
+
+  // cloudAliasRowCount reports how many cloud-status rows render — one per
+  // provider type the active tenant references.
+  async cloudAliasRowCount(): Promise<number> {
+    return this.locator()
+      .getByRole('button', { name: /cloud status$/ })
+      .count();
+  }
+
+  async openCloudAliasPopover(alias: string): Promise<void> {
+    await this.cloudAliasRowTrigger(alias).click();
+  }
+
+  // cloudAliasPopover targets the open popover for a cloud-alias row. The
+  // popover is portal'd to the document body, so it is queried at the page
+  // root. Scoping by the alias text inside it keeps the right one selected.
+  cloudAliasPopover(): Locator {
+    return this.page.locator('[data-radix-popper-content-wrapper]').first();
+  }
+
+  cloudAliasPopoverButton(name: string | RegExp): Locator {
+    return this.cloudAliasPopover().getByRole('button', { name });
+  }
+
   async tenants(): Promise<string[]> {
     // The toggle button's aria-label is "Collapse <name>" or "Expand
     // <name>"; strip the prefix to recover the tenant name in DOM order.

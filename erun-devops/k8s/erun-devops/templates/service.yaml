@@ -64,6 +64,10 @@ emitted; type is the single source of truth.
 {{- $cloudRegion := default "" $cloudContext.region -}}
 {{- $cloudInstanceID := default "" $cloudContext.instanceId -}}
 {{- $useHostCredentials := default false $cloudContext.useHostCredentials -}}
+{{- $cloudflare := default dict $cloudContext.cloudflare -}}
+{{- $cloudflareEnabled := default false $cloudflare.enabled -}}
+{{- $cloudflareAccountId := default "" $cloudflare.accountId -}}
+{{- $cloudflareSecretName := default "" $cloudflare.secretName -}}
 {{- $claude := default dict .Values.claude -}}
 {{- $claudeUseBedrock := default "0" $claude.useBedrock -}}
 {{- $claudeUseMantle := default "0" $claude.useMantle -}}
@@ -388,6 +392,16 @@ spec:
               value: {{ $claudeEnablePromptCaching1H | quote }}
             {{ end }}
             {{ end }}
+            {{- if $cloudflareEnabled }}
+            - name: CLOUDFLARE_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $cloudflareSecretName | quote }}
+                  key: CLOUDFLARE_API_TOKEN
+                  optional: true
+            - name: CLOUDFLARE_ACCOUNT_ID
+              value: {{ $cloudflareAccountId | quote }}
+            {{- end }}
             - name: ERUN_KUBERNETES_CONTEXT
               value: in-cluster
             - name: ERUN_TENANT

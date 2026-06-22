@@ -30,6 +30,7 @@ func newCloudInitCmd(store common.CloudStore, promptRunner PromptRunner, deps co
 		"init",
 		"Initialize cloud provider configuration",
 		newCloudInitAWSCmd(store, promptRunner, deps),
+		newCloudInitCloudflareCmd(store, promptRunner, deps),
 	)
 }
 
@@ -96,6 +97,85 @@ func runCloudInitAWSCommand(ctx common.Context, store common.CloudStore, promptR
 		return err
 	}
 	return writeCloudProviderSaved(ctx, provider)
+}
+
+func newCloudInitCloudflareCmd(store common.CloudStore, promptRunner PromptRunner, deps common.CloudDependencies) *cobra.Command {
+	var params common.InitCloudflareCloudProviderParams
+	cmd := &cobra.Command{
+		Use:   "cloudflare",
+		Short: "Set up a Cloudflare cloud provider alias",
+		Long: "Set up a Cloudflare cloud provider alias.\n\n" +
+			"Verifies a delegated, account-scoped Cloudflare API token (account-level Zone:Edit + " +
+			"DNS:Edit) against the Cloudflare API and stores it on this machine as a cloud provider " +
+			"alias. The token is held in a local secret store referenced from erun config — it is " +
+			"never written into erun-config.yaml. Environments that attach this alias receive the " +
+			"token as CLOUDFLARE_API_TOKEN so in-pod tooling (e.g. terraform) authenticates as it.",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		Example:      "  erun cloud init cloudflare --account-id <account> --token-name <label> --api-token <token>",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runCloudInitCloudflareCommand(commandContext(cmd), store, promptRunner, params, deps)
+		},
+	}
+	cmd.Flags().StringVar(&params.AccountID, "account-id", "", "Cloudflare account ID the token belongs to")
+	cmd.Flags().StringVar(&params.TokenName, "token-name", "", "Label for the scoped API token")
+	cmd.Flags().StringVar(&params.APIToken, "api-token", "", "Cloudflare scoped API token value (account-level Zone:Edit + DNS:Edit)")
+	addDryRunFlag(cmd)
+	return cmd
+}
+
+func runCloudInitCloudflareCommand(ctx common.Context, store common.CloudStore, promptRunner PromptRunner, params common.InitCloudflareCloudProviderParams, deps common.CloudDependencies) error {
+	var err error
+	params, err = promptCloudflareInitParams(promptRunner, params)
+	if err != nil {
+		return err
+	}
+	provider, err := common.InitCloudflareCloudProvider(ctx, store, params, deps)
+	if err != nil {
+		return err
+	}
+	if ctx.DryRun {
+		_, err := fmt.Fprintln(ctx.Stdout, "Dry run: Cloudflare cloud provider initialization planned.")
+		return err
+	}
+	return writeCloudProviderSaved(ctx, provider)
+}
+
+func promptCloudflareInitParams(promptRunner PromptRunner, params common.InitCloudflareCloudProviderParams) (common.InitCloudflareCloudProviderParams, error) {
+	var err error
+	params.AccountID, err = promptCloudValueIfEmpty(promptRunner, params.AccountID, "Cloudflare account ID", "")
+	if err != nil {
+		return params, err
+	}
+	params.TokenName, err = promptCloudValueIfEmpty(promptRunner, params.TokenName, "Cloudflare token name", "")
+	if err != nil {
+		return params, err
+	}
+	if strings.TrimSpace(params.APIToken) == "" {
+		params.APIToken, err = requiredCloudSecretPrompt(promptRunner, "Cloudflare API token")
+		if err != nil {
+			return params, err
+		}
+	}
+	return params, nil
+}
+
+func requiredCloudSecretPrompt(promptRunner PromptRunner, label string) (string, error) {
+	prompt := promptui.Prompt{
+		Label: label,
+		Mask:  '*',
+		Validate: func(input string) error {
+			if strings.TrimSpace(input) == "" {
+				return fmt.Errorf("%s is required", label)
+			}
+			return nil
+		},
+	}
+	value, err := promptRunner(prompt)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(value), nil
 }
 
 func promptAWSInitParams(promptRunner PromptRunner, params common.InitAWSCloudProviderParams) (common.InitAWSCloudProviderParams, error) {
@@ -250,7 +330,7 @@ func runCloudLoginCommand(ctx common.Context, store common.CloudStore, promptRun
 	}
 	if ctx.DryRun {
 		ctx.Trace("check cloud provider token status")
-		ctx.TraceCommand("", "aws", "sso", "login", "--profile", provider.Profile)
+		traceCloudLoginPlan(ctx, provider)
 		_, err := fmt.Fprintf(ctx.Stdout, "Dry run: cloud login planned for %s.\n", provider.Alias)
 		return err
 	}
@@ -270,6 +350,18 @@ func runCloudLoginCommand(ctx common.Context, store common.CloudStore, promptRun
 		return err
 	}
 	return writeCloudStatus(ctx, status)
+}
+
+// traceCloudLoginPlan emits the provider-appropriate login plan for dry-run.
+// AWS re-runs the SSO browser login; Cloudflare re-verifies its stored scoped
+// token against the Cloudflare API.
+func traceCloudLoginPlan(ctx common.Context, provider common.CloudProviderConfig) {
+	switch provider.Provider {
+	case common.CloudProviderCloudflare:
+		ctx.Trace("verify cloudflare api token via the Cloudflare API")
+	default:
+		ctx.TraceCommand("", "aws", "sso", "login", "--profile", provider.Profile)
+	}
 }
 
 func newCloudOIDCCmd(store common.CloudStore, promptRunner PromptRunner, selectRunner SelectRunner, deps common.CloudDependencies) *cobra.Command {
@@ -305,6 +397,9 @@ func runCloudOIDCCommand(ctx common.Context, store common.CloudStore, _ PromptRu
 	provider, err := common.ResolveCloudProvider(store, alias)
 	if err != nil {
 		return err
+	}
+	if provider.Provider == common.CloudProviderCloudflare {
+		return fmt.Errorf("cloud provider alias %q is a Cloudflare alias, which does not use OIDC web-identity federation", provider.Alias)
 	}
 	if ctx.DryRun {
 		audience := strings.TrimSpace(params.Audience)
@@ -354,15 +449,15 @@ func newCloudSetCmd(store common.EnvironmentCloudAliasStore) *cobra.Command {
 }
 
 func runCloudSetCommand(ctx common.Context, store common.EnvironmentCloudAliasStore, params common.SetEnvironmentCloudAliasParams) error {
-	config, err := common.SetEnvironmentCloudProviderAlias(ctx, store, params)
-	if err != nil {
+	if _, err := common.SetEnvironmentCloudProviderAlias(ctx, store, params); err != nil {
 		return err
 	}
+	var err error
 	if ctx.DryRun {
 		_, err = fmt.Fprintln(ctx.Stdout, "Dry run: cloud provider alias update planned.")
 		return err
 	}
-	_, err = fmt.Fprintf(ctx.Stdout, "Set cloud provider alias %s for %s/%s\n", config.CloudProviderAlias, strings.TrimSpace(params.Tenant), strings.TrimSpace(params.Environment))
+	_, err = fmt.Fprintf(ctx.Stdout, "Set cloud provider alias %s for %s/%s\n", strings.TrimSpace(params.Alias), strings.TrimSpace(params.Tenant), strings.TrimSpace(params.Environment))
 	return err
 }
 

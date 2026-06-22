@@ -6,6 +6,7 @@ import {
   LoaderCircle,
   LogIn,
   LogOut,
+  RefreshCw,
   UserCircle2,
 } from 'lucide-react';
 import * as React from 'react';
@@ -16,15 +17,16 @@ import {
   logoutPrimaryCloudProvider,
 } from '@/app/cloudProviderThunks';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { primaryCloudAliasFor } from '@/components/app/Sidebar.helpers';
+import { sidebarCloudAliases } from '@/components/app/Sidebar.helpers';
 import { cloudProviderStatusTone } from '@/components/app/StatusBadge.helpers';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
-import type { UICloudProviderStatus } from '@/types';
+import { CloudProviderCloudflare, type UICloudProviderStatus } from '@/types';
 
-interface PrimaryCloudAliasView {
+interface CloudAliasRowView {
   provider: UICloudProviderStatus;
+  isCloudflare: boolean;
   active: boolean;
   busy: boolean;
   loginBusy: boolean;
@@ -32,36 +34,75 @@ interface PrimaryCloudAliasView {
   bearerBusy: boolean;
 }
 
+// PrimaryCloudAliasControl renders one cloud-status row per provider type the
+// active tenant uses (issue #630): an AWS account and a Cloudflare token each
+// get an independent login/logout/status control with its own spinner. AWS
+// rows additionally offer "Get bearer token" (OIDC web-identity); Cloudflare
+// has no OIDC, so that action is hidden and "Log in" reads "Verify token".
 export function PrimaryCloudAliasControl(): React.ReactElement | null {
   const dispatch = useAppDispatch();
   const tenants = useAppSelector((s) => s.tenants.tenants);
   const cloudProviders = useAppSelector((s) => s.tenants.cloudProviders);
   const selected = useAppSelector((s) => s.selection.selected);
   const dashboardTenant = useAppSelector((s) => s.tenantDashboard.tenant);
-  const sidebarBusy = useAppSelector((s) => s.sidebar.sidebarCloudAliasBusy);
-  const sidebarAction = useAppSelector((s) => s.sidebar.sidebarCloudAliasAction);
-  const view = primaryCloudAliasView({
-    tenants,
-    cloudProviders,
-    selected,
-    dashboardTenant,
-    sidebarBusy,
-    sidebarAction,
-  });
-  if (!view) {
+  const busyByAlias = useAppSelector((s) => s.sidebar.sidebarCloudAliasBusyByAlias);
+  const aliases = sidebarCloudAliases({ tenants, cloudProviders, selected, dashboardTenant });
+  if (aliases.length === 0) {
     return null;
   }
+  return (
+    <div className="mt-3 mr-1 grid gap-1.5">
+      {aliases.map((alias) => (
+        <CloudAliasRow
+          key={alias}
+          view={cloudAliasRowView(alias, cloudProviders, busyByAlias)}
+          dispatch={dispatch}
+        />
+      ))}
+    </div>
+  );
+}
 
+function cloudAliasRowView(
+  alias: string,
+  cloudProviders: UICloudProviderStatus[],
+  busyByAlias: Record<string, string>,
+): CloudAliasRowView {
+  const provider = cloudProviders.find((candidate) => candidate.alias === alias) ?? {
+    alias,
+    provider: '',
+    status: 'unknown',
+  };
+  const action = busyByAlias[alias] ?? '';
+  const busy = action !== '';
+  return {
+    provider,
+    isCloudflare: provider.provider.trim().toLowerCase() === CloudProviderCloudflare,
+    active: provider.status.trim() === 'active',
+    busy,
+    loginBusy: action === 'login',
+    logoutBusy: action === 'logout',
+    bearerBusy: action === 'bearer',
+  };
+}
+
+function CloudAliasRow({
+  view,
+  dispatch,
+}: {
+  view: CloudAliasRowView;
+  dispatch: ReturnType<typeof useAppDispatch>;
+}): React.ReactElement {
   const triggerTone = cloudProviderStatusTone(view.provider.status);
   return (
     <Popover>
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="mt-3 mr-1 flex min-h-10 min-w-0 items-center gap-2 rounded-md border border-sidebar-border bg-background/88 px-3 py-2 text-left text-sm text-foreground shadow-sm hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          className="flex min-h-10 min-w-0 items-center gap-2 rounded-md border border-sidebar-border bg-background/88 px-3 py-2 text-left text-sm text-foreground shadow-sm hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           aria-label={`${view.provider.alias} cloud status`}
         >
-          <CloudAliasTriggerIcon tone={triggerTone} />
+          <CloudAliasTriggerIcon tone={triggerTone} busy={view.busy} />
           <span className="min-w-0 flex-1 truncate">{cloudProviderIdentity(view.provider)}</span>
         </button>
       </PopoverTrigger>
@@ -70,40 +111,17 @@ export function PrimaryCloudAliasControl(): React.ReactElement | null {
         side="top"
         align="start"
       >
-        <PrimaryCloudAliasPopoverBody view={view} dispatch={dispatch} />
+        <CloudAliasPopoverBody view={view} dispatch={dispatch} />
       </PopoverContent>
     </Popover>
   );
 }
 
-function primaryCloudAliasView(
-  input: Parameters<typeof primaryCloudAliasFor>[0],
-): PrimaryCloudAliasView | null {
-  const alias = primaryCloudAliasFor(input);
-  if (!alias) {
-    return null;
-  }
-  const provider = input.cloudProviders.find((candidate) => candidate.alias === alias) ?? {
-    alias,
-    provider: '',
-    status: 'unknown',
-  };
-  const busy = input.sidebarBusy;
-  return {
-    provider,
-    active: provider.status.trim() === 'active',
-    busy,
-    loginBusy: busy && input.sidebarAction === 'login',
-    logoutBusy: busy && input.sidebarAction === 'logout',
-    bearerBusy: busy && input.sidebarAction === 'bearer',
-  };
-}
-
-function PrimaryCloudAliasPopoverBody({
+function CloudAliasPopoverBody({
   view,
   dispatch,
 }: {
-  view: PrimaryCloudAliasView;
+  view: CloudAliasRowView;
   dispatch: ReturnType<typeof useAppDispatch>;
 }): React.ReactElement {
   return (
@@ -117,38 +135,42 @@ function PrimaryCloudAliasPopoverBody({
       <div className="my-1 border-t border-border" />
       <CloudAliasStatus provider={view.provider} />
       {view.active ? (
-        <PrimaryCloudAliasActiveActions view={view} dispatch={dispatch} />
+        <CloudAliasActiveActions view={view} dispatch={dispatch} />
       ) : (
-        <PrimaryCloudAliasLoginAction view={view} dispatch={dispatch} />
+        <CloudAliasLoginAction view={view} dispatch={dispatch} />
       )}
     </div>
   );
 }
 
-function PrimaryCloudAliasActiveActions({
+function CloudAliasActiveActions({
   view,
   dispatch,
 }: {
-  view: PrimaryCloudAliasView;
+  view: CloudAliasRowView;
   dispatch: ReturnType<typeof useAppDispatch>;
 }): React.ReactElement {
   return (
     <>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="justify-start"
-        disabled={view.busy}
-        onClick={() => void dispatch(getPrimaryCloudProviderBearerToken(view.provider.alias))}
-      >
-        {view.bearerBusy ? (
-          <LoaderCircle className="animate-spin" aria-hidden="true" />
-        ) : (
-          <Copy aria-hidden="true" />
-        )}
-        {view.bearerBusy ? 'Copying token...' : 'Get bearer token'}
-      </Button>
+      {/* Cloudflare aliases authenticate the runtime with a scoped API token,
+          not an OIDC JWT, so "Get bearer token" is N/A and hidden for them. */}
+      {!view.isCloudflare && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="justify-start"
+          disabled={view.busy}
+          onClick={() => void dispatch(getPrimaryCloudProviderBearerToken(view.provider.alias))}
+        >
+          {view.bearerBusy ? (
+            <LoaderCircle className="animate-spin" aria-hidden="true" />
+          ) : (
+            <Copy aria-hidden="true" />
+          )}
+          {view.bearerBusy ? 'Copying token...' : 'Get bearer token'}
+        </Button>
+      )}
       <Button
         type="button"
         variant="ghost"
@@ -162,19 +184,29 @@ function PrimaryCloudAliasActiveActions({
         ) : (
           <LogOut aria-hidden="true" />
         )}
-        {view.logoutBusy ? 'Logging out...' : 'Log out'}
+        {cloudAliasLogoutLabel(view)}
       </Button>
     </>
   );
 }
 
-function PrimaryCloudAliasLoginAction({
+function cloudAliasLogoutLabel(view: CloudAliasRowView): string {
+  if (view.isCloudflare) {
+    return view.logoutBusy ? 'Removing token...' : 'Remove token';
+  }
+  return view.logoutBusy ? 'Logging out...' : 'Log out';
+}
+
+function CloudAliasLoginAction({
   view,
   dispatch,
 }: {
-  view: PrimaryCloudAliasView;
+  view: CloudAliasRowView;
   dispatch: ReturnType<typeof useAppDispatch>;
 }): React.ReactElement {
+  // Cloudflare "login" re-verifies the stored scoped token against the
+  // Cloudflare API — there is no browser SSO — so the action reads "Verify
+  // token" (match between system and the real world, Nielsen #2).
   return (
     <Button
       type="button"
@@ -186,12 +218,21 @@ function PrimaryCloudAliasLoginAction({
     >
       {view.loginBusy ? (
         <LoaderCircle className="animate-spin" aria-hidden="true" />
+      ) : view.isCloudflare ? (
+        <RefreshCw aria-hidden="true" />
       ) : (
         <LogIn aria-hidden="true" />
       )}
-      {view.loginBusy ? 'Logging in...' : 'Log in'}
+      {cloudAliasLoginLabel(view)}
     </Button>
   );
+}
+
+function cloudAliasLoginLabel(view: CloudAliasRowView): string {
+  if (view.isCloudflare) {
+    return view.loginBusy ? 'Verifying...' : 'Verify token';
+  }
+  return view.loginBusy ? 'Logging in...' : 'Log in';
 }
 
 function CloudAliasPopoverRow({
@@ -228,9 +269,19 @@ function CloudAliasStatus({ provider }: { provider: UICloudProviderStatus }): Re
 
 function CloudAliasTriggerIcon({
   tone,
+  busy,
 }: {
   tone: ReturnType<typeof cloudProviderStatusTone>;
+  busy: boolean;
 }): React.ReactElement {
+  if (busy) {
+    return (
+      <LoaderCircle
+        className="size-4 shrink-0 animate-spin text-muted-foreground"
+        aria-hidden="true"
+      />
+    );
+  }
   if (tone === 'success') {
     return (
       <CheckCircle2

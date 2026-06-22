@@ -29,10 +29,23 @@ import * as path from 'node:path';
 export const SEED_TENANT = 'pw';
 export const SEED_ENV_ALPHA = 'alpha';
 export const SEED_ENV_BETA = 'beta';
+// gamma attaches BOTH an AWS alias and a Cloudflare alias so the per-type env
+// cloud-alias selectors (issue #630) are stageable: the General tab must render
+// two independent selectors, one per provider type, each pre-selected to the
+// env's attachment.
+export const SEED_ENV_GAMMA = 'gamma';
 // One configured cloud provider alias so the Manage dialog's Cloud alias
 // select renders deterministically. The matching `aws` stub keeps its token
 // status check instant and offline.
 export const SEED_CLOUD_ALIAS = 'pw-aws';
+// One configured Cloudflare alias (issue #630). Cloudflare aliases follow the
+// "<token-label>+<account-id>@cloudflare" shape erun-common mints. No token is
+// written to the off-config secret store, so its status reads "not_configured"
+// deterministically and offline — the alias's scoped-token verify never hits
+// the network in the harness. That is the correct staged state for asserting
+// the per-type selector, the per-type sidebar row, and the "Verify token"
+// (re-verify) action without a live Cloudflare account.
+export const SEED_CLOUDFLARE_ALIAS = 'pw-token+0123456789abcdef@cloudflare';
 
 // isolatedRoot resolves the suite-owned root directory. run.sh exports
 // ERUN_PLAYWRIGHT_HOME; when the suite is launched without it (direct
@@ -173,7 +186,18 @@ export function seedBaseline(): void {
       'cloudproviders:\n' +
       `  - alias: ${SEED_CLOUD_ALIAS}\n` +
       '    provider: aws\n' +
-      `    profile: ${SEED_CLOUD_ALIAS}\n`,
+      `    profile: ${SEED_CLOUD_ALIAS}\n` +
+      // The Cloudflare alias carries its identity (account id + token label) and
+      // a token ref, but no token is written to the secret store, so its status
+      // resolves to not_configured without touching the Cloudflare API.
+      `  - alias: ${SEED_CLOUDFLARE_ALIAS}\n` +
+      '    provider: cloudflare\n' +
+      '    username: pw-token\n' +
+      '    accountid: 0123456789abcdef\n' +
+      '    cloudflare:\n' +
+      '      accountid: 0123456789abcdef\n' +
+      '      tokenname: pw-token\n' +
+      `      tokenref: cloudflare/${SEED_CLOUDFLARE_ALIAS}\n`,
   );
   fs.writeFileSync(
     path.join(root, SEED_TENANT, 'config.yaml'),
@@ -181,7 +205,8 @@ export function seedBaseline(): void {
       `name: ${SEED_TENANT}\n` +
       `defaultenvironment: ${SEED_ENV_ALPHA}\n` +
       'cloudprovideraliases:\n' +
-      `  - ${SEED_CLOUD_ALIAS}\n`,
+      `  - ${SEED_CLOUD_ALIAS}\n` +
+      `  - ${SEED_CLOUDFLARE_ALIAS}\n`,
   );
   seedEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
   // beta additionally links the seeded cloud alias so the Manage dialog's
@@ -189,6 +214,15 @@ export function seedBaseline(): void {
   // clear.spec.ts). The alias has no cloud context behind it, so it stays
   // inert.
   seedEnvironment(SEED_TENANT, SEED_ENV_BETA, `cloudprovideralias: ${SEED_CLOUD_ALIAS}\n`);
+  // gamma links both an AWS alias (legacy scalar) and a Cloudflare alias
+  // (per-type map) so the per-provider-type env selectors are stageable.
+  seedEnvironment(
+    SEED_TENANT,
+    SEED_ENV_GAMMA,
+    `cloudprovideralias: ${SEED_CLOUD_ALIAS}\n` +
+      'cloudprovideraliases:\n' +
+      `  cloudflare: ${SEED_CLOUDFLARE_ALIAS}\n`,
+  );
 }
 
 // seedEnvironment writes one inert local-agent env config. Mirrors

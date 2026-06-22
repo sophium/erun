@@ -26,7 +26,11 @@ import { trackCloudInitSession } from './slices/sessionsSlice';
 import { setSessionId } from './slices/terminalSlice';
 import { setTerminalCopyOutput, setTerminalCopyStatus } from './slices/terminalStatusSlice';
 import type { GlobalConfigDialogState } from './state';
-import { defaultCloudContextInitInput, defaultGlobalConfigDialog } from './state';
+import {
+  defaultCloudContextInitInput,
+  defaultCloudflareCloudAliasInput,
+  defaultGlobalConfigDialog,
+} from './state';
 import type { AppDispatch, AppThunk, RootState } from './store';
 import { requireController } from './thunkExtra';
 
@@ -44,6 +48,8 @@ export const openGlobalConfigDialog = (): AppThunk => (dispatch) => {
         cloudContexts: [],
       },
       cloudContextDraft: defaultCloudContextInitInput(),
+      cloudflareDraft: defaultCloudflareCloudAliasInput(),
+      cloudflareFormOpen: false,
       configLoading: true,
       busy: false,
       busyAction: '',

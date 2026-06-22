@@ -2,6 +2,7 @@ import type {
   UIAWSCloudAliasInput,
   UICloudContextInitInput,
   UICloudContextStatus,
+  UICloudflareCloudAliasInput,
   UICloudProviderBearerToken,
   UICloudProviderStatus,
 } from '@/types';
@@ -13,11 +14,13 @@ import {
   GetCloudProviderBearerToken,
   InitAWSCloudProvider,
   InitCloudContext,
+  InitCloudflareCloudProvider,
   LoadCloudContextStatuses,
   LoadCloudProviderStatuses,
   LoginCloudProvider,
   LogoutCloudProvider,
   SaveAWSCloudProviderAlias,
+  SaveCloudflareCloudProviderAlias,
   SetupCloudProviderOIDC,
   StartCloudContext,
   StopCloudContext,
@@ -122,6 +125,24 @@ export const cloudApi = wailsApi.injectEndpoints({
       ),
       invalidatesTags: ['CloudProviders'],
     }),
+    initCloudflareCloudProvider: builder.mutation<
+      UICloudProviderStatus,
+      UICloudflareCloudAliasInput
+    >({
+      queryFn: wailsQueryFn<UICloudflareCloudAliasInput, UICloudProviderStatus>((input) =>
+        InitCloudflareCloudProvider(input),
+      ),
+      invalidatesTags: ['CloudProviders'],
+    }),
+    saveCloudflareCloudProviderAlias: builder.mutation<
+      UICloudProviderStatus,
+      UICloudflareCloudAliasInput
+    >({
+      queryFn: wailsQueryFn<UICloudflareCloudAliasInput, UICloudProviderStatus>((input) =>
+        SaveCloudflareCloudProviderAlias(input),
+      ),
+      invalidatesTags: ['CloudProviders'],
+    }),
   }),
 });
 
@@ -140,4 +161,6 @@ export const {
   useSetupCloudProviderOIDCMutation,
   useInitAWSCloudProviderMutation,
   useSaveAWSCloudProviderAliasMutation,
+  useInitCloudflareCloudProviderMutation,
+  useSaveCloudflareCloudProviderAliasMutation,
 } = cloudApi;

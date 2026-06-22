@@ -3,6 +3,7 @@ import type {
   EnvironmentType,
   ManageTab,
   UICloudContextInitInput,
+  UICloudflareCloudAliasInput,
   UICloudProviderStatus,
   UIEnvironmentConfig,
   UIERunConfig,
@@ -121,6 +122,14 @@ export interface GlobalConfigDialogState {
   open: boolean;
   config: UIERunConfig;
   cloudContextDraft: UICloudContextInitInput;
+  // cloudflareDraft holds the in-progress "add Cloudflare token" form. It is
+  // only meaningful while the Cloudflare add form is open; submitting or
+  // cancelling resets it. The apiToken lives only here on the client until the
+  // submit call hands it to the backend's off-config secret store.
+  cloudflareDraft: UICloudflareCloudAliasInput;
+  // cloudflareFormOpen toggles the inline Cloudflare add form open. AWS uses a
+  // PTY session instead of a form, so it has no equivalent flag.
+  cloudflareFormOpen: boolean;
   configLoading: boolean;
   busy: boolean;
   busyAction:
@@ -129,6 +138,7 @@ export interface GlobalConfigDialogState {
     | 'cloud-context-init'
     | 'cloud-context-power'
     | 'cloud-provider-init'
+    | 'cloud-provider-cloudflare-init'
     | 'cloud-provider-login';
   busyTarget: string;
   error: string;
@@ -237,8 +247,7 @@ export interface AppState {
   terminalCopyStatus: string;
   idleStatus: UIIdleStatus | null;
   idleCloudContextBusy: boolean;
-  sidebarCloudAliasBusy: boolean;
-  sidebarCloudAliasAction: '' | 'login' | 'logout' | 'bearer';
+  sidebarCloudAliasBusyByAlias: Record<string, '' | 'login' | 'logout' | 'bearer'>;
   debugOpen: boolean;
   debugHeight: number;
   lastDoctorBySelection: Record<string, DoctorOutcome>;
@@ -309,11 +318,19 @@ export const defaultGlobalConfigDialog = (): GlobalConfigDialogState => ({
   open: false,
   config: defaultERunConfig(),
   cloudContextDraft: defaultCloudContextInitInput(),
+  cloudflareDraft: defaultCloudflareCloudAliasInput(),
+  cloudflareFormOpen: false,
   configLoading: false,
   busy: false,
   busyAction: '',
   busyTarget: '',
   error: '',
+});
+
+export const defaultCloudflareCloudAliasInput = (): UICloudflareCloudAliasInput => ({
+  accountId: '',
+  tokenName: '',
+  apiToken: '',
 });
 
 export const defaultAutoStartPrompt = (): AutoStartPromptState => ({
