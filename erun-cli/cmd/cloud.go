@@ -129,16 +129,28 @@ func newCloudInitCloudflareCmd(store common.CloudStore, promptRunner PromptRunne
 }
 
 func runCloudInitCloudflareCommand(ctx common.Context, store common.CloudStore, promptRunner PromptRunner, selectRunner SelectRunner, params common.InitCloudflareCloudProviderParams, deps common.CloudDependencies) error {
-	// Non-interactive path: a token was supplied (script/MCP) or this is a
-	// dry-run. Delegate straight to the shared init, which validates, verifies,
-	// stores, and saves — and traces the plan under --dry-run.
-	if !ctx.DryRun && strings.TrimSpace(params.APIToken) == "" {
+	switch {
+	case !ctx.DryRun && strings.TrimSpace(params.APIToken) == "":
+		// Interactive guided wizard: prompts for the token, verifies it, and
+		// resolves the account/label step by step.
 		var err error
 		params, err = runCloudflareInitWizard(ctx, promptRunner, selectRunner, params, deps)
 		if err != nil {
 			return err
 		}
+	case strings.TrimSpace(params.APIToken) != "" && strings.TrimSpace(params.AccountID) == "":
+		// Non-interactive (flags / dry-run / MCP) with the account omitted:
+		// auto-resolve it from the token, the same as the guided flow's step 3.
+		// Under --dry-run this traces the GET /accounts call without contacting
+		// Cloudflare. --token-name is still required (the shared init enforces it).
+		accountID, err := resolveCloudflareAccountNonInteractive(ctx, params.APIToken, deps)
+		if err != nil {
+			return err
+		}
+		params.AccountID = accountID
 	}
+	// The shared init validates, verifies, stores, and saves — and traces the
+	// full plan under --dry-run.
 	provider, err := common.InitCloudflareCloudProvider(ctx, store, params, deps)
 	if err != nil {
 		return err
@@ -148,6 +160,26 @@ func runCloudInitCloudflareCommand(ctx common.Context, store common.CloudStore, 
 		return err
 	}
 	return writeCloudProviderSaved(ctx, provider)
+}
+
+// resolveCloudflareAccountNonInteractive auto-resolves the account ID from the
+// token for the non-interactive path (flags / dry-run / MCP). It requires the
+// token to map to exactly one account; otherwise the caller must pass
+// --account-id. Under --dry-run the underlying lookup is traced, not executed.
+func resolveCloudflareAccountNonInteractive(ctx common.Context, token string, deps common.CloudDependencies) (string, error) {
+	accounts, err := common.ResolveCloudflareAccounts(ctx, token, deps)
+	if err != nil {
+		return "", err
+	}
+	switch len(accounts) {
+	case 0:
+		return "", fmt.Errorf("no Cloudflare account is accessible by this token; pass --account-id")
+	case 1:
+		ctx.Trace("cloud init cloudflare: resolved account " + accounts[0].ID)
+		return accounts[0].ID, nil
+	default:
+		return "", fmt.Errorf("this token can access multiple Cloudflare accounts; pass --account-id to choose")
+	}
 }
 
 // runCloudflareInitWizard is the guided, step-by-step interactive setup: it
