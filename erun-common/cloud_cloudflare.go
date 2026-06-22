@@ -194,11 +194,19 @@ func defaultVerifyCloudflareToken(ctx Context, token string) (CloudflareTokenInf
 	if ctx.DryRun {
 		return CloudflareTokenInfo{Status: "active"}, nil
 	}
+	return verifyCloudflareTokenAt(cloudflareTokenVerifyURL, token)
+}
+
+// verifyCloudflareTokenAt performs the live token verification against url. It
+// is split from defaultVerifyCloudflareToken (which owns the trace and dry-run
+// short-circuit) so the response parsing and status classification are unit
+// testable against an httptest server.
+func verifyCloudflareTokenAt(url, token string) (CloudflareTokenInfo, error) {
 	token = strings.TrimSpace(token)
 	if token == "" {
 		return CloudflareTokenInfo{}, fmt.Errorf("cloudflare api token is required")
 	}
-	req, err := http.NewRequest(http.MethodGet, cloudflareTokenVerifyURL, nil)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return CloudflareTokenInfo{}, fmt.Errorf("build cloudflare token verify request: %w", err)
 	}
