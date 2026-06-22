@@ -39,3 +39,7 @@ For the exact eligibility predicate, default thresholds, and working-hours seman
 ## Configuring
 
 You create a cloud context with [`erun context init`](/cli/context), which provisions the VM and installs k3s; ERun manages its lifecycle from there. The one-time AWS prerequisites (registering a provider alias, permissions) are covered in [Cloud setup](/deployment/cloud-setup). Once it exists, environments reference it by its kubeconfig context, and `erun cloud set` ties an environment to the provider alias.
+
+## Cloud contexts are AWS-only; Cloudflare is context-less
+
+A cloud context is always an AWS EC2 instance running k3s — that's the only kind of VM ERun provisions and manages today. [Cloudflare aliases](/deployment/cloud-setup#cloudflare-aliases-dns-and-zone-management) are a different thing entirely: they have no VM, no `start` / `stop`, and no idle-stop, because there is nothing to bill around the clock. A Cloudflare alias just hands a scoped API token to an environment's runtime pod for DNS and zone work, so it is **context-less** — you attach it to an environment with `erun cloud set`, but it never appears in `erun context list`. An environment can carry both at once: an AWS alias backing its managed cloud context, and a Cloudflare alias for DNS.

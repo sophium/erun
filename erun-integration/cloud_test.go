@@ -102,6 +102,51 @@ func TestCloud(t *testing.T) {
 		golden.Equal(t, "cloud/init_aws_help", normalize.Apply(result.Combined))
 	})
 
+	t.Run("init_cloudflare_help", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"cloud", "init", "cloudflare", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "cloud/init_cloudflare_help", normalize.Apply(result.Combined))
+	})
+
+	t.Run("init_cloudflare_dry_run_redacts_token_and_traces_alias_write", func(t *testing.T) {
+		// Exercises cloud.go runCloudInitCloudflareCommand and
+		// eruncommon.InitCloudflareCloudProvider in --dry-run: the command
+		// must trace the cloudflare init line with the api token REDACTED
+		// (never the literal value), trace the tokens/verify GET (which
+		// short-circuits in dry-run without touching the network), and trace
+		// the secret-store-ref + alias write — then print the dry-run summary
+		// without persisting anything. The redaction contract is the point of
+		// this scenario, so it is asserted directly against the un-normalized
+		// capture in addition to the snapshot.
+		setup := env.New(t)
+		args := []string{
+			"cloud", "init", "cloudflare",
+			"--account-id", "cf-acct-123",
+			"--token-name", "ci-token",
+			"--api-token", "dummy-token",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		// The literal token must never reach the trace; the command prints
+		// "api-token=<redacted>" instead. Normalization does not mask this
+		// value, so a substring guard on the raw capture is the only way to
+		// lock the redaction contract (see erun-integration/AGENTS.md
+		// § "Whole-output snapshots vs targeted substring assertions" case 1).
+		if strings.Contains(result.Combined, "dummy-token") {
+			t.Fatalf("expected the api token to be redacted, but found the literal value in output:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "api-token=<redacted>") {
+			t.Fatalf("expected redacted api-token marker in output, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "cloud/init_cloudflare_dry_run", normalize.Apply(result.Combined))
+	})
+
 	t.Run("init_aws_dry_run_traces_sso_setup_and_oidc_persistence", func(t *testing.T) {
 		// Exercises cloud.go runCloudInitAWSCommand: --dry-run must trace
 		// the aws configure sso plan, the sso login command, the sts

@@ -165,6 +165,13 @@ type HelmDeploySpec struct {
 	Version            string
 	Timeout            string
 	Verbosity          int
+	// Cloudflare* deliver a delegated Cloudflare token to the runtime pod.
+	// CloudflareEnabled gates the whole path; CloudflareTokenRef is a handle
+	// into the secret store (never the token itself), resolved at execution time.
+	CloudflareEnabled    bool
+	CloudflareAccountID  string
+	CloudflareSecretName string
+	CloudflareTokenRef   string
 	// RuntimeRegistry is the env's runtime image-ref / runtime-version
 	// registry (EnvConfig.RuntimeRegistry), distinct from ContainerRegistry
 	// (the DEPLOY-marked registry the cluster pulls from). Injected so in-pod
@@ -478,6 +485,9 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 		return fmt.Errorf("deploy %s: %w", deployInput.ReleaseName, err)
 	}
 	TraceEnsureKubernetesNamespace(ctx, deployInput.KubernetesContext, deployInput.Namespace)
+	if err := applyCloudflareCredentialsSecret(ctx, deployInput); err != nil {
+		return fmt.Errorf("deploy %s: %w", deployInput.ReleaseName, err)
+	}
 	command := deployInput.command()
 	ctx.TraceCommand(command.Dir, command.Name, command.Args...)
 	tracePodWatchAction(ctx, deployInput.ReleaseName, deployInput.Namespace, deployInput.KubernetesContext)
@@ -885,6 +895,7 @@ func configureDeployInputMetadata(store DeployStore, target OpenResult, deployIn
 	deployInput.ManagedCloud = managedCloud
 	deployInput.UseHostCredentials = target.EnvConfig.RemoteHostCredentials
 	applyCloudProviderDeployMetadata(store, target.EnvConfig, deployInput)
+	applyCloudflareDeployMetadata(store, target.EnvConfig, deployInput)
 	if managedCloud {
 		applyCloudContextStopMetadata(store, target.EnvConfig, deployInput)
 	}
@@ -1547,6 +1558,17 @@ func (d HelmDeploySpec) command() commandSpec {
 		"--set-string", "api.oidcAllowedIssuers="+escapeHelmSetValue(d.OIDCAllowedIssuers),
 		"--set", "api.postgres.reset="+formatHelmBool(d.ResetDatabase),
 	)
+	// Cloudflare credential wiring is appended only when an env attached a
+	// Cloudflare alias, so existing (AWS-only / no-cloud) deploy plans are
+	// byte-for-byte unchanged. The token is never a --set value — it is
+	// delivered out-of-band as a Secret (applyCloudflareCredentialsSecret).
+	if d.CloudflareEnabled {
+		args = append(args,
+			"--set", "cloudContext.cloudflare.enabled=true",
+			"--set-string", "cloudContext.cloudflare.accountId="+d.CloudflareAccountID,
+			"--set-string", "cloudContext.cloudflare.secretName="+d.CloudflareSecretName,
+		)
+	}
 	args = append(args, helmRegistrySetArgs(d)...)
 	// disableBuildScript is always set — a boolean projection must be able to
 	// reconcile a flip in either direction, so the chart always receives the

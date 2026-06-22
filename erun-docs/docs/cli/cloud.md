@@ -4,12 +4,13 @@ title: erun cloud
 
 # `erun cloud`
 
-Set up and manage **cloud provider aliases** — the AWS credentials and OIDC issuer that managed [cloud contexts](/cli/context) and remote environments use. A cloud alias is named `<user>+<account>@aws` and is stored in your root ERun config.
+Set up and manage **cloud provider aliases** — the cloud credentials that managed [cloud contexts](/cli/context) and remote environments use. AWS aliases carry an IAM Identity Center profile and the OIDC issuer the deployed ERun APIs trust; Cloudflare aliases carry a delegated, account-scoped API token. An AWS alias is named `<user>+<account>@aws`; a Cloudflare alias is named `<token-name>+<account>@cloudflare`. Aliases are stored in your root ERun config — except the Cloudflare token itself, which is held in a local secret store referenced from config (never written into `erun-config.yaml`).
 
 ## Synopsis
 
 ```
 erun cloud init aws [flags]
+erun cloud init cloudflare [flags]
 erun cloud login [flags]
 erun cloud oidc [flags]
 erun cloud set TENANT ENVIRONMENT --alias <alias>
@@ -32,24 +33,38 @@ Registers an AWS IAM Identity Center (SSO) profile and saves it as a cloud provi
 
 Omitted flags are prompted for interactively.
 
+### `cloud init cloudflare`
+
+Verifies a delegated, account-scoped Cloudflare API token and saves it as a cloud provider alias. The token is one you minted in the Cloudflare dashboard with **account-level `Zone:Edit` + `DNS:Edit`** scope. ERun checks the token against the Cloudflare API, stores it in a **local secret store** referenced from your config (never written into `erun-config.yaml`), and saves the alias `<token-name>+<account>@cloudflare`. There is no browser login and no OIDC issuer — Cloudflare authenticates with the token directly.
+
+| Flag | Description |
+|---|---|
+| `--account-id` | Cloudflare account ID the token belongs to. |
+| `--token-name` | Label for the scoped API token (becomes part of the alias). |
+| `--api-token` | The scoped API token value. Omit it to be prompted with a masked input; it is never echoed or written to config. |
+
+Omitted flags are prompted for interactively (the token prompt is masked).
+
 ### `cloud login`
 
-Refreshes the AWS SSO session for an alias (`aws sso login`). Only touches the local SSO token cache. `--alias` selects the alias (prompted if omitted; **required** with `--dry-run`).
+Refreshes the credential for an alias. For an AWS alias this runs `aws sso login` and only touches the local SSO token cache; for a Cloudflare alias it re-verifies the stored token against the Cloudflare API. `--alias` selects the alias (prompted if omitted; **required** with `--dry-run`).
 
 ### `cloud oidc`
 
-Re-derives and saves the OIDC issuer for an alias by minting a short-lived AWS web-identity token and reading its issuer. `--alias` selects it; `--audience` sets the token audience (default `erun-api`).
+Re-derives and saves the OIDC issuer for an **AWS** alias by minting a short-lived AWS web-identity token and reading its issuer. `--alias` selects it; `--audience` sets the token audience (default `erun-api`). Cloudflare aliases have no OIDC issuer, so this command rejects them.
 
 ### `cloud set`
 
-Assigns an alias to a specific environment (local config only, no network). `TENANT` and `ENVIRONMENT` are required; `--alias` names the alias to assign. For a remote environment this also marks it cloud-managed.
+Assigns an alias to a specific environment (local config only, no network). `TENANT` and `ENVIRONMENT` are required; `--alias` names the alias to assign. The command routes the alias by its provider type, so an environment can carry **one AWS alias and one Cloudflare alias at the same time** — assigning a Cloudflare alias does not displace an AWS one. For a remote environment this also marks it cloud-managed.
 
 ## Examples
 
 ```bash
 erun cloud init aws --dry-run     # preview the AWS calls and writes
+erun cloud init cloudflare --account-id 0a1b2c3d --token-name dns-edit --api-token <token>
 erun cloud login --alias me+123456789012@aws
 erun cloud set my-tenant prod --alias me+123456789012@aws
+erun cloud set my-tenant prod --alias dns-edit+0a1b2c3d@cloudflare   # coexists with the AWS alias
 ```
 
 ## Error behaviour
@@ -58,7 +73,10 @@ erun cloud set my-tenant prod --alias me+123456789012@aws
 |---|---|
 | Required SSO field missing (non-interactive). | Aborts before any AWS call or file write. |
 | SSO login / token mint fails. | Surfaces the AWS error; no alias is saved. |
+| Cloudflare account ID, token name, or token missing (non-interactive). | Aborts before contacting Cloudflare; no alias is saved. |
+| Cloudflare rejects the token (`init`/`login`). | Surfaces the Cloudflare error; the alias is not saved (init) and the token reads as expired (login). |
+| `cloud oidc` against a Cloudflare alias. | Errors that the alias is Cloudflare and does not use OIDC web-identity federation. |
 | Alias not configured (`login`/`oidc`/`set`). | Errors with "cloud provider alias … is not configured". |
 | `--dry-run` without `--alias` on `login`. | Errors asking for an explicit `--alias`. |
 
-Only AWS is supported today; any other provider is rejected before side effects.
+AWS and Cloudflare are supported today; any other provider is rejected before side effects.

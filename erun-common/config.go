@@ -113,8 +113,8 @@ type EnvConfig struct {
 	// carries at most one alias per provider type.
 	CloudProviderAliases map[string]string `yaml:"cloudprovideraliases,omitempty" json:"cloudProviderAliases,omitempty"`
 	ManagedCloud         bool              `yaml:"managedcloud,omitempty" json:"managedCloud,omitempty"`
-	RuntimeVersion     string `yaml:"runtimeversion,omitempty"`
-	RuntimeRegistry    string `yaml:"runtimeregistry,omitempty" json:"runtimeRegistry,omitempty"`
+	RuntimeVersion       string            `yaml:"runtimeversion,omitempty"`
+	RuntimeRegistry      string            `yaml:"runtimeregistry,omitempty" json:"runtimeRegistry,omitempty"`
 	// ContainerRegistries carries the marked registry list for environments
 	// whose project config is not on the local machine (remote-agent and
 	// runtime envs). Local-agent envs resolve their list from the project's
