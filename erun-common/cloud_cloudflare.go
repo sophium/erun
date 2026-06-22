@@ -18,9 +18,14 @@ import (
 // successful response confirms the scoped API token is valid and active.
 const cloudflareTokenVerifyURL = "https://api.cloudflare.com/client/v4/user/tokens/verify"
 
-// cloudflareAccountsURL lists the accounts a token can act on, used to
-// auto-resolve the account id during guided alias setup.
+// cloudflareAccountsURL lists the accounts a token can act on (works for tokens
+// with an account-scope permission). Used to auto-resolve the account id.
 const cloudflareAccountsURL = "https://api.cloudflare.com/client/v4/accounts"
+
+// cloudflareZonesURL lists the zones a token can act on. It is the fallback
+// account source for a Zone-scope-only token (which cannot list /accounts):
+// each zone object carries its account id+name.
+const cloudflareZonesURL = "https://api.cloudflare.com/client/v4/zones"
 
 // CloudflareCreateTokenURL is the Cloudflare dashboard page where an operator
 // mints an API token. The guided CLI flow prints it so the operator creates the
@@ -53,8 +58,9 @@ type CloudflareAccount struct {
 
 // InitCloudflareCloudProviderParams are the explicit inputs for adding a
 // Cloudflare cloud alias. The API token is a delegated, custom token the
-// operator minted in the Cloudflare dashboard with Zone:Edit + DNS:Edit across
-// the account's zones; erun stores it via the CloudSecretStore, never inline.
+// operator minted in the Cloudflare dashboard — Zone + DNS edit for delegation,
+// plus any other scopes they will use (e.g. Cloudflare Pages for static sites);
+// erun stores it via the CloudSecretStore, never inline.
 type InitCloudflareCloudProviderParams struct {
 	AccountID string
 	TokenName string
@@ -273,15 +279,92 @@ func verifyCloudflareTokenAt(url, token string) (CloudflareTokenInfo, error) {
 	return CloudflareTokenInfo{ID: payload.Result.ID, Status: payload.Result.Status}, nil
 }
 
-// defaultListCloudflareAccounts lists the accounts a token can act on, so the
-// guided setup can auto-resolve the account id. Dry-run returns a synthetic
-// account without touching the network.
+// defaultListCloudflareAccounts resolves the accounts a token can act on so the
+// guided setup can auto-resolve the account id. It tries /accounts first (works
+// for tokens carrying an account-scope permission, e.g. Cloudflare Pages); when
+// that yields nothing — the case for a least-privilege Zone-only token, which
+// has no account-read permission — it falls back to deriving the account from
+// the token's zones. Dry-run returns a synthetic account without any network.
 func defaultListCloudflareAccounts(ctx Context, token string) ([]CloudflareAccount, error) {
 	ctx.Trace("GET " + cloudflareAccountsURL)
 	if ctx.DryRun {
 		return []CloudflareAccount{{ID: "cf-account-id", Name: "Cloudflare account"}}, nil
 	}
-	return listCloudflareAccountsAt(cloudflareAccountsURL, token)
+	accounts, err := listCloudflareAccountsAt(cloudflareAccountsURL, token)
+	if err == nil && len(accounts) > 0 {
+		return accounts, nil
+	}
+	// Zone-scope-only tokens cannot list /accounts; derive from the zones the
+	// token can see — each zone object carries its account id+name.
+	ctx.Trace("GET " + cloudflareZonesURL)
+	zoneAccounts, zonesErr := resolveCloudflareAccountsViaZones(cloudflareZonesURL, token)
+	if zonesErr != nil {
+		if err != nil {
+			return nil, err
+		}
+		return nil, zonesErr
+	}
+	return zoneAccounts, nil
+}
+
+// resolveCloudflareAccountsViaZones derives the distinct account(s) a token can
+// act on from the zones it can list. A Zone-scope token can read /zones even
+// when it cannot read /accounts, so this is the robust fallback for the
+// least-privilege token. Split out for httptest-based unit testing.
+func resolveCloudflareAccountsViaZones(url, token string) ([]CloudflareAccount, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return nil, fmt.Errorf("cloudflare api token is required")
+	}
+	req, err := http.NewRequest(http.MethodGet, url+"?per_page=50", nil)
+	if err != nil {
+		return nil, fmt.Errorf("build cloudflare zones request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/json")
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("list cloudflare zones: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	var payload struct {
+		Success bool `json:"success"`
+		Errors  []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+		Result []struct {
+			Account struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"account"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("parse cloudflare zones response (status %d): %w", resp.StatusCode, err)
+	}
+	if !payload.Success {
+		message := "cloudflare rejected the zones request"
+		if len(payload.Errors) > 0 && strings.TrimSpace(payload.Errors[0].Message) != "" {
+			message = payload.Errors[0].Message
+		}
+		return nil, fmt.Errorf("list cloudflare zones: %s", message)
+	}
+	seen := make(map[string]struct{})
+	accounts := make([]CloudflareAccount, 0, 1)
+	for _, zone := range payload.Result {
+		id := strings.TrimSpace(zone.Account.ID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		accounts = append(accounts, CloudflareAccount{ID: id, Name: zone.Account.Name})
+	}
+	return accounts, nil
 }
 
 // listCloudflareAccountsAt performs the live accounts lookup against url. Split

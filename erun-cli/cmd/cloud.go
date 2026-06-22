@@ -108,7 +108,8 @@ func newCloudInitCloudflareCmd(store common.CloudStore, promptRunner PromptRunne
 		Short: "Set up a Cloudflare cloud provider alias",
 		Long: "Set up a Cloudflare cloud provider alias.\n\n" +
 			"Run with no flags for a guided setup: ERun shows you where to mint a delegated " +
-			"API token (Zone:Edit + DNS:Edit across your account's zones), then prompts for it, " +
+			"API token (Zone + DNS edit, plus any other scopes you'll use such as Cloudflare " +
+			"Pages for static sites), then prompts for it, " +
 			"verifies it against the Cloudflare API, and auto-resolves the account ID from the " +
 			"token. The token is held in a local secret store referenced from erun config — it is " +
 			"never written into erun-config.yaml. Environments that attach this alias receive the " +
@@ -123,7 +124,7 @@ func newCloudInitCloudflareCmd(store common.CloudStore, promptRunner PromptRunne
 	}
 	cmd.Flags().StringVar(&params.AccountID, "account-id", "", "Cloudflare account ID the token belongs to (auto-resolved in guided setup)")
 	cmd.Flags().StringVar(&params.TokenName, "token-name", "", "Label for the scoped API token (defaults in guided setup)")
-	cmd.Flags().StringVar(&params.APIToken, "api-token", "", "Cloudflare scoped API token value (Zone:Edit + DNS:Edit across the account's zones)")
+	cmd.Flags().StringVar(&params.APIToken, "api-token", "", "Cloudflare API token value (Zone + DNS edit, plus any other scopes you'll use such as Cloudflare Pages)")
 	addDryRunFlag(cmd)
 	return cmd
 }
@@ -189,16 +190,19 @@ func resolveCloudflareAccountNonInteractive(ctx common.Context, token string, de
 func runCloudflareInitWizard(ctx common.Context, promptRunner PromptRunner, selectRunner SelectRunner, params common.InitCloudflareCloudProviderParams, deps common.CloudDependencies) (common.InitCloudflareCloudProviderParams, error) {
 	out := ctx.Stdout
 	fmt.Fprintln(out, "\nAdd a Cloudflare cloud alias")
-	fmt.Fprintln(out, "ERun needs a delegated, account-scoped API token (Zone:Edit + DNS:Edit). It never sees your Cloudflare password.")
+	fmt.Fprintln(out, "ERun needs a delegated Cloudflare API token. It never sees your Cloudflare password.")
 	fmt.Fprintln(out, "\nStep 1 of 3 · Create the token")
 	fmt.Fprintln(out, "  Open this page (you're already logged in to Cloudflare there):")
 	fmt.Fprintln(out, "    "+common.CloudflareCreateTokenURL)
 	fmt.Fprintln(out, "  Click Create Token → Create Custom Token, give it a name, then add")
-	fmt.Fprintln(out, "  two permission rows (each row is Scope → Permission → Access; use")
-	fmt.Fprintln(out, "  \"+ Add more\" for the second):")
-	fmt.Fprintln(out, "    Zone → Zone → Edit    (create the delegated subzone)")
-	fmt.Fprintln(out, "    Zone → DNS  → Edit    (manage DNS records)")
-	fmt.Fprintln(out, "  Set Zone Resources to:  Include → All zones")
+	fmt.Fprintln(out, "  these permission rows (each row is Scope → Permission → Access; use")
+	fmt.Fprintln(out, "  \"+ Add more\" for each):")
+	fmt.Fprintln(out, "    Zone    → Zone             → Edit   (create/manage zones)")
+	fmt.Fprintln(out, "    Zone    → DNS              → Edit   (manage DNS records)")
+	fmt.Fprintln(out, "    Account → Cloudflare Pages → Edit   (deploy static sites)")
+	fmt.Fprintln(out, "  Set Zone Resources to:    Include → All zones")
+	fmt.Fprintln(out, "  Set Account Resources to: Include → your account")
+	fmt.Fprintln(out, "  Add more rows (Workers, R2, etc.) if this token will manage those too.")
 	fmt.Fprintln(out, "  Continue to summary → Create Token, then copy the token.")
 	if _, err := promptRunner(promptui.Prompt{Label: "Press Enter once you've copied the token"}); err != nil {
 		return params, err
