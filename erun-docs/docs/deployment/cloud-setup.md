@@ -81,13 +81,13 @@ ERun deploys into it exactly the same way, but doesn't manage its lifecycle — 
 
 Cloudflare support is a **separate alias type**, not a managed cloud context. There is no VM to provision and no lifecycle to manage — a Cloudflare alias simply delivers a delegated, account-scoped API token into an environment's runtime pod so in-pod tooling (such as Terraform) can manage Cloudflare DNS and zones. It is independent of the AWS path above: an environment can hold an AWS alias and a Cloudflare alias at the same time.
 
-The token is **delegated and account-scoped** — you mint it once in the Cloudflare dashboard with account-level `Zone:Edit` + `DNS:Edit`, and ERun never asks for your dashboard password or a global key. Register it as an alias:
+The token is **delegated and account-scoped** — you mint it once in the Cloudflare dashboard with account-level `Zone:Edit` + `DNS:Edit`, and ERun never asks for your dashboard password or a global key. Register it with the guided setup:
 
 ```bash
-erun cloud init cloudflare --account-id 0a1b2c3d --token-name dns-edit --api-token <token>
+erun cloud init cloudflare
 ```
 
-ERun verifies the token against the Cloudflare API, then stores it in a local secret store referenced from your config — the raw token is **never written into `erun-config.yaml`**. The alias is named `<token-name>+<account>@cloudflare`. See [`erun cloud`](/cli/cloud).
+ERun walks you through it: it shows the token page and the exact permissions, waits while you create the token, takes it masked and verifies it against the Cloudflare API, then **auto-resolves the account ID from the token** and proposes a label. In the desktop app, the **Cloudflare** button under **Settings → Cloud aliases** runs this same flow in a terminal — the same way the AWS button runs `erun cloud init aws`. The token is stored in a local secret store referenced from your config — the raw token is **never written into `erun-config.yaml`** — and the alias is named `<token-name>+<account>@cloudflare`. See [`erun cloud`](/cli/cloud).
 
 Attach it to an environment the same way you attach an AWS alias — and because aliases are routed by provider type, this **coexists with** any AWS alias the environment already carries:
 

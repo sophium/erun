@@ -35,15 +35,19 @@ Omitted flags are prompted for interactively.
 
 ### `cloud init cloudflare`
 
-Verifies a delegated, account-scoped Cloudflare API token and saves it as a cloud provider alias. The token is one you minted in the Cloudflare dashboard with **account-level `Zone:Edit` + `DNS:Edit`** scope. ERun checks the token against the Cloudflare API, stores it in a **local secret store** referenced from your config (never written into `erun-config.yaml`), and saves the alias `<token-name>+<account>@cloudflare`. There is no browser login and no OIDC issuer — Cloudflare authenticates with the token directly.
+Saves a delegated, account-scoped Cloudflare API token as a cloud provider alias. Run with **no flags** for a guided, step-by-step setup:
+
+1. **Create the token** — ERun prints the Cloudflare token page and the exact permissions to set (**account-level `Zone:Edit` + `DNS:Edit`**), then waits while you mint it in your already-logged-in browser session.
+2. **Paste the token** — entered masked and verified against the Cloudflare API; an invalid token re-prompts in place.
+3. **Confirm the account** — ERun resolves the account ID from the token automatically (a picker appears if the token sees more than one account), and proposes an editable token label.
+
+The token is stored in a **local secret store** referenced from your config (never written into `erun-config.yaml`), and the alias is named `<token-name>+<account>@cloudflare`. There is no browser login and no OIDC issuer — Cloudflare authenticates with the token directly.
 
 | Flag | Description |
 |---|---|
-| `--account-id` | Cloudflare account ID the token belongs to. |
-| `--token-name` | Label for the scoped API token (becomes part of the alias). |
-| `--api-token` | The scoped API token value. Omit it to be prompted with a masked input; it is never echoed or written to config. |
-
-Omitted flags are prompted for interactively (the token prompt is masked).
+| `--api-token` | The scoped API token value. Providing it runs non-interactively (for scripts/MCP); omit it for the guided flow above. Never echoed or written to config. |
+| `--account-id` | Cloudflare account ID. Optional in the guided flow (auto-resolved from the token); required when `--api-token` is supplied. |
+| `--token-name` | Label for the scoped API token (becomes part of the alias). Defaults in the guided flow; required when `--api-token` is supplied. |
 
 ### `cloud login`
 
@@ -61,7 +65,8 @@ Assigns an alias to a specific environment (local config only, no network). `TEN
 
 ```bash
 erun cloud init aws --dry-run     # preview the AWS calls and writes
-erun cloud init cloudflare --account-id 0a1b2c3d --token-name dns-edit --api-token <token>
+erun cloud init cloudflare        # guided: create token, paste, auto-resolve account
+erun cloud init cloudflare --account-id 0a1b2c3d --token-name dns-edit --api-token <token>   # non-interactive
 erun cloud login --alias me+123456789012@aws
 erun cloud set my-tenant prod --alias me+123456789012@aws
 erun cloud set my-tenant prod --alias dns-edit+0a1b2c3d@cloudflare   # coexists with the AWS alias
