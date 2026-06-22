@@ -392,6 +392,10 @@ func buildCloudInitAWSArgs() []string {
 	return []string{"cloud", "init", "aws"}
 }
 
+func buildCloudInitCloudflareArgs() []string {
+	return []string{"cloud", "init", "cloudflare"}
+}
+
 func resolveTerminalStartDir(preferred string) string {
 	candidates := []string{strings.TrimSpace(preferred)}
 

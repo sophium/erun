@@ -187,33 +187,6 @@ func (a *App) InitAWSCloudProvider(input uiAWSCloudAliasInput) (uiCloudProviderS
 	return cloudProviderStatusToUI(eruncommon.CloudProviderTokenStatus(provider, a.deps.cloudDeps)), nil
 }
 
-// InitCloudflareCloudProvider adds a Cloudflare cloud alias from the desktop's
-// non-interactive "add token" form. Unlike `cloud init aws` (an SSO PTY
-// session), Cloudflare init takes the account ID, a token label, and the
-// scoped API token as explicit inputs, verifies the token against the
-// Cloudflare API, stores it off-config in the CloudSecretStore, and saves the
-// alias. The raw token is never echoed back to the UI.
-func (a *App) InitCloudflareCloudProvider(input uiCloudflareCloudAliasInput) (uiCloudProviderStatus, error) {
-	provider, err := eruncommon.InitCloudflareCloudProvider(eruncommon.Context{}, a.deps.store, eruncommon.InitCloudflareCloudProviderParams{
-		AccountID: strings.TrimSpace(input.AccountID),
-		TokenName: strings.TrimSpace(input.TokenName),
-		APIToken:  input.APIToken,
-	}, a.deps.cloudDeps)
-	if err != nil {
-		return uiCloudProviderStatus{}, err
-	}
-	return cloudProviderStatusToUI(eruncommon.CloudProviderTokenStatus(provider, a.deps.cloudDeps)), nil
-}
-
-// SaveCloudflareCloudProviderAlias re-verifies a supplied Cloudflare token and
-// re-saves the alias (the Cloudflare analogue of SaveAWSCloudProviderAlias: it
-// re-runs init so a re-entered token replaces the stored credential). The flow
-// is identical to add; the alias derived from account ID + token label is
-// stable, so re-saving updates the credential in place.
-func (a *App) SaveCloudflareCloudProviderAlias(input uiCloudflareCloudAliasInput) (uiCloudProviderStatus, error) {
-	return a.InitCloudflareCloudProvider(input)
-}
-
 func (a *App) LoginCloudProvider(alias string) (uiCloudProviderStatus, error) {
 	status, err := eruncommon.LoginCloudProviderAlias(eruncommon.Context{}, a.deps.store, eruncommon.CloudLoginParams{Alias: alias}, a.deps.cloudDeps)
 	if err != nil {

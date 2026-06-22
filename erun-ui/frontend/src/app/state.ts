@@ -3,7 +3,6 @@ import type {
   EnvironmentType,
   ManageTab,
   UICloudContextInitInput,
-  UICloudflareCloudAliasInput,
   UICloudProviderStatus,
   UIEnvironmentConfig,
   UIERunConfig,
@@ -122,16 +121,12 @@ export interface GlobalConfigDialogState {
   open: boolean;
   config: UIERunConfig;
   cloudContextDraft: UICloudContextInitInput;
-  // cloudflareDraft holds the in-progress "add Cloudflare token" form. It is
-  // only meaningful while the Cloudflare add form is open; submitting or
-  // cancelling resets it. The apiToken lives only here on the client until the
-  // submit call hands it to the backend's off-config secret store.
-  cloudflareDraft: UICloudflareCloudAliasInput;
-  // cloudflareFormOpen toggles the inline Cloudflare add form open. AWS uses a
-  // PTY session instead of a form, so it has no equivalent flag.
-  cloudflareFormOpen: boolean;
   configLoading: boolean;
   busy: boolean;
+  // busyAction marks which side-effecting action is in flight so the matching
+  // control can show its own spinner. The cloud-provider add actions
+  // ('cloud-provider-init' for AWS, 'cloud-provider-cloudflare-init' for
+  // Cloudflare) each launch a guided `erun cloud init <provider>` PTY session.
   busyAction:
     | ''
     | 'save'
@@ -318,19 +313,11 @@ export const defaultGlobalConfigDialog = (): GlobalConfigDialogState => ({
   open: false,
   config: defaultERunConfig(),
   cloudContextDraft: defaultCloudContextInitInput(),
-  cloudflareDraft: defaultCloudflareCloudAliasInput(),
-  cloudflareFormOpen: false,
   configLoading: false,
   busy: false,
   busyAction: '',
   busyTarget: '',
   error: '',
-});
-
-export const defaultCloudflareCloudAliasInput = (): UICloudflareCloudAliasInput => ({
-  accountId: '',
-  tokenName: '',
-  apiToken: '',
 });
 
 export const defaultAutoStartPrompt = (): AutoStartPromptState => ({

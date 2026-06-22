@@ -6,7 +6,10 @@ import type {
   UIIdleStatus,
 } from '@/types';
 
-import { StartCloudInitAWSSession } from '../../wailsjs/go/main/App';
+import {
+  StartCloudInitAWSSession,
+  StartCloudInitCloudflareSession,
+} from '../../wailsjs/go/main/App';
 import { cloudApi } from './api/cloudApi';
 import { globalConfigApi } from './api/globalConfigApi';
 import {
@@ -26,11 +29,7 @@ import { trackCloudInitSession } from './slices/sessionsSlice';
 import { setSessionId } from './slices/terminalSlice';
 import { setTerminalCopyOutput, setTerminalCopyStatus } from './slices/terminalStatusSlice';
 import type { GlobalConfigDialogState } from './state';
-import {
-  defaultCloudContextInitInput,
-  defaultCloudflareCloudAliasInput,
-  defaultGlobalConfigDialog,
-} from './state';
+import { defaultCloudContextInitInput, defaultGlobalConfigDialog } from './state';
 import type { AppDispatch, AppThunk, RootState } from './store';
 import { requireController } from './thunkExtra';
 
@@ -48,8 +47,6 @@ export const openGlobalConfigDialog = (): AppThunk => (dispatch) => {
         cloudContexts: [],
       },
       cloudContextDraft: defaultCloudContextInitInput(),
-      cloudflareDraft: defaultCloudflareCloudAliasInput(),
-      cloudflareFormOpen: false,
       configLoading: true,
       busy: false,
       busyAction: '',
@@ -298,8 +295,18 @@ export const toggleIdleCloudContext = (): AppThunk<Promise<void>> => async (disp
   }
 };
 
-export const startAWSCloudInit =
-  (): AppThunk<Promise<void>> => async (dispatch, getState, extra) => {
+// startCloudInitSession launches a guided `erun cloud init <provider>` PTY
+// session, the way the operator would add a cloud alias from a terminal. The
+// CLI owns the whole flow (prompt, verify, resolve, persist); the desktop only
+// hands the terminal over to it. AWS and Cloudflare share this body — they
+// differ only in which Wails session launcher runs and which busyAction marks
+// the button spinner — so a single helper keeps the two add paths in lockstep.
+const startCloudInitSession =
+  (
+    busyAction: 'cloud-provider-init' | 'cloud-provider-cloudflare-init',
+    startSession: (cols: number, rows: number) => Promise<unknown>,
+  ): AppThunk<Promise<void>> =>
+  async (dispatch, getState, extra) => {
     const controller = requireController(extra);
     const dialog = getState().globalConfigDialog;
     if (dialog.busy || dialog.configLoading) {
@@ -308,7 +315,7 @@ export const startAWSCloudInit =
     dispatch(
       patchGlobalConfigDialog({
         busy: true,
-        busyAction: 'cloud-provider-init',
+        busyAction,
         busyTarget: '',
         error: '',
       }),
@@ -316,7 +323,7 @@ export const startAWSCloudInit =
     try {
       controller.fitTerminal();
       const size = controller.terminalSize();
-      const result = (await StartCloudInitAWSSession(size.cols, size.rows)) as StartSessionResult;
+      const result = (await startSession(size.cols, size.rows)) as StartSessionResult;
       dispatch(trackCloudInitSession(result.sessionId));
       dispatch(setGlobalConfigDialog(defaultGlobalConfigDialog()));
       dispatch(setSessionId(result.sessionId));
@@ -339,6 +346,16 @@ export const startAWSCloudInit =
       dispatch(showTerminalMessage(message));
     }
   };
+
+export const startAWSCloudInit = (): AppThunk<Promise<void>> =>
+  startCloudInitSession('cloud-provider-init', StartCloudInitAWSSession);
+
+// startCloudflareCloudInit mirrors startAWSCloudInit: it launches the guided
+// `erun cloud init cloudflare` PTY so the CLI prompts for the scoped token,
+// verifies it, auto-resolves the account, and defaults a label — no in-app
+// form. Add-alias is delegated to the CLI for every provider type.
+export const startCloudflareCloudInit = (): AppThunk<Promise<void>> =>
+  startCloudInitSession('cloud-provider-cloudflare-init', StartCloudInitCloudflareSession);
 
 export const loginGlobalCloudProvider =
   (alias: string): AppThunk<Promise<void>> =>

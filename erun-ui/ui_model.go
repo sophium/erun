@@ -347,17 +347,6 @@ type uiAWSCloudAliasInput struct {
 	OIDCIssuerURL string `json:"oidcIssuerUrl,omitempty"`
 }
 
-// uiCloudflareCloudAliasInput carries the explicit inputs for the
-// non-interactive Cloudflare "add token" form: the account the scoped token
-// belongs to, a human label for the token, and the secret token itself. The
-// token rides through a masked field; it is persisted to the off-config secret
-// store, never echoed back to the UI or written into erun-config.yaml.
-type uiCloudflareCloudAliasInput struct {
-	AccountID string `json:"accountId,omitempty"`
-	TokenName string `json:"tokenName,omitempty"`
-	APIToken  string `json:"apiToken,omitempty"`
-}
-
 // uiEnvironmentCloudAlias is one provider-type slot in the env's cloud-alias
 // view: the provider type ("aws", "cloudflare"), the alias currently attached
 // to the env for that type (empty when none), and the configured aliases of

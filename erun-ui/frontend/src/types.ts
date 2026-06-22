@@ -309,16 +309,6 @@ export interface UIAWSCloudAliasInput {
   oidcIssuerUrl: string;
 }
 
-// UICloudflareCloudAliasInput mirrors the Go uiCloudflareCloudAliasInput: the
-// explicit inputs for the non-interactive "add Cloudflare token" form. The
-// apiToken rides through a masked field and is never echoed back from the
-// backend.
-export interface UICloudflareCloudAliasInput {
-  accountId: string;
-  tokenName: string;
-  apiToken: string;
-}
-
 // Canonical cloud provider type strings, matching erun-common's
 // CloudProviderAWS / CloudProviderCloudflare. Used to label and group cloud
 // aliases by their provider type across the settings dialog, sidebar, and env
