@@ -204,9 +204,6 @@ func runCloudflareInitWizard(ctx common.Context, promptRunner PromptRunner, sele
 	fmt.Fprintln(out, "  Set Account Resources to: Include → your account")
 	fmt.Fprintln(out, "  Add more rows (Workers, R2, etc.) if this token will manage those too.")
 	fmt.Fprintln(out, "  Continue to summary → Create Token, then copy the token.")
-	if _, err := promptRunner(promptui.Prompt{Label: "Press Enter once you've copied the token"}); err != nil {
-		return params, err
-	}
 
 	fmt.Fprintln(out, "\nStep 2 of 3 · Paste the token")
 	token, err := verifyCloudflareTokenInteractive(ctx, promptRunner, deps)
