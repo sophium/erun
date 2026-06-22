@@ -81,7 +81,7 @@ ERun deploys into it exactly the same way, but doesn't manage its lifecycle — 
 
 Cloudflare support is a **separate alias type**, not a managed cloud context. There is no VM to provision and no lifecycle to manage — a Cloudflare alias simply delivers a delegated, account-scoped API token into an environment's runtime pod so in-pod tooling (such as Terraform) can manage Cloudflare DNS and zones. It is independent of the AWS path above: an environment can hold an AWS alias and a Cloudflare alias at the same time.
 
-The token is **delegated and account-scoped** — you mint it once in the Cloudflare dashboard with account-level `Zone:Edit` + `DNS:Edit`, and ERun never asks for your dashboard password or a global key. Register it with the guided setup:
+The token is **delegated and least-privilege** — you mint it once in the Cloudflare dashboard as a **Custom Token** with two permission rows, `Zone → Zone → Edit` (create the delegated subzone) and `Zone → DNS → Edit` (manage records), scoped to **Zone Resources: All zones**. ERun never asks for your dashboard password or your Global API Key. Register it with the guided setup:
 
 ```bash
 erun cloud init cloudflare
