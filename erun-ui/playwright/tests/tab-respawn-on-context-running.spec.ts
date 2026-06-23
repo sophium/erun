@@ -38,14 +38,21 @@ import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
 test.describe('tab respawn after cloud context returns to running', () => {
   test('non-managed env does not lose tabs across an idle poll cycle', async ({ app, page }) => {
+    // The idle poll round-trips a LoadIdleStatus RPC; wait on that event (not
+    // the wall clock) so the assertions reflect a completed poll cycle.
+    const idlePolled = page.waitForResponse(
+      (response) =>
+        response.url().includes('/__erun_invoke') &&
+        (response.request().postData() ?? '').includes('LoadIdleStatus'),
+    );
     // Open a seeded env so its tabs are initialized.
     await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
 
-    // Give the idle poll a window to run; the seeded local-agent env
-    // returns managedCloud=false and the transition detector should be a
-    // no-op. We assert the sidebar continues to render a single row
-    // for this env with no errant spinner from spurious tab spawn.
-    await page.waitForTimeout(1_500);
+    // Once the poll has reported (the seeded local-agent env returns
+    // managedCloud=false), the transition detector should have been a no-op.
+    // Assert the sidebar still renders a single row for this env with no
+    // errant spinner from a spurious tab spawn.
+    await idlePolled;
     const sidebar = page.locator('aside').first();
     await expect(sidebar.getByRole('status')).toHaveCount(0);
 

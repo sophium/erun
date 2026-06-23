@@ -28,7 +28,7 @@ test.describe('manage dialog disable-build-script toggle (#533)', () => {
     // rebuilds the image, so the running env owes a redeploy to apply it.
     await app.manageDialog.save();
     await expect.poll(() => app.manageDialog.tabHasUnsavedChanges('Runtime')).toBe(false);
-    await expect(app.manageDialog.redeployBanner()).toBeVisible({ timeout: 6_000 });
+    await expect(app.manageDialog.redeployBanner()).toBeVisible();
 
     // The saved value round-trips through the Go load/save path: reopening the
     // dialog shows it checked.

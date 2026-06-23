@@ -41,14 +41,14 @@ test.describe('sidebar env open dot', () => {
     // the matching edit button is the row this test owns.
     const sidebar = page.locator('aside').first();
     const dot = sidebar.getByRole('button', { name: `Close ${tenant} / ${environment}` });
-    await expect(dot).toBeVisible({ timeout: 6_000 });
+    await expect(dot).toBeVisible();
 
     // Clicking the dot must not also trigger the row's openSelection.
     // The selected env after the close should NOT remain on the one
     // we just closed; we assert the dot disappears, which is the
     // observable signal that tabsByEnv was cleared.
     await dot.click();
-    await expect(dot).toHaveCount(0, { timeout: 6_000 });
+    await expect(dot).toHaveCount(0);
   });
 
   // Issue #470 — the dot must reflect the env's REAL condition, not just tab
@@ -69,24 +69,24 @@ test.describe('sidebar env open dot', () => {
 
     await app.sidebar.openEnvironment(tenant, environment);
     const dot = app.sidebar.envOpenDot(tenant, environment);
-    await expect(dot).toBeVisible({ timeout: 6_000 });
+    await expect(dot).toBeVisible();
     await expect(dot).toHaveAttribute('data-env-state', 'running');
 
     await emitEnvStatus(page, tenant, environment, 'stopped');
-    await expect(dot).toHaveAttribute('data-env-state', 'stopped', { timeout: 4_000 });
+    await expect(dot).toHaveAttribute('data-env-state', 'stopped');
     await expect(dot).toHaveAccessibleName(new RegExp(`^${tenant} / ${environment} is stopped`));
 
     await emitEnvStatus(page, tenant, environment, 'failed');
-    await expect(dot).toHaveAttribute('data-env-state', 'failed', { timeout: 4_000 });
+    await expect(dot).toHaveAttribute('data-env-state', 'failed');
     await expect(dot).toHaveAccessibleName(/deploy failed/);
 
     await emitEnvStatus(page, tenant, environment, '');
-    await expect(dot).toHaveAttribute('data-env-state', 'running', { timeout: 4_000 });
+    await expect(dot).toHaveAttribute('data-env-state', 'running');
     await expect(dot).toHaveAccessibleName(`Close ${tenant} / ${environment}`);
 
     // Close the env so the singleton backend returns to its pre-test shape.
     await dot.click();
-    await expect(dot).toHaveCount(0, { timeout: 6_000 });
+    await expect(dot).toHaveCount(0);
   });
 });
 

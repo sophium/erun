@@ -67,7 +67,7 @@ test.describe('titlebar status overflow', () => {
     // does not race against the truncated-vs-full text shown in the
     // collapsed state.
     const trigger = page.getByTestId('titlebar-status-message');
-    await expect(trigger).toBeVisible({ timeout: 5_000 });
+    await expect(trigger).toBeVisible();
 
     await emitLong();
     await trigger.click();
@@ -101,7 +101,7 @@ test.describe('titlebar status overflow', () => {
       ).runtime;
       runtime.EventsEmit('app-status', { message, busy: false });
     }, SHORT);
-    await expect(page.getByText(SHORT, { exact: false })).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText(SHORT, { exact: false })).toBeVisible();
     // The popover trigger testid only renders for long messages.
     await expect(page.getByTestId('titlebar-status-message')).toHaveCount(0);
   });

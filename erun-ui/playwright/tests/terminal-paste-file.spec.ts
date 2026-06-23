@@ -107,8 +107,6 @@ test.describe('terminal paste of any file (#584)', () => {
     expect(savePayload?.data?.length ?? 0).toBeGreaterThan(0);
 
     // The remote path the copy returned is typed into the terminal.
-    await expect
-      .poll(() => sentInputs.some((input) => input.includes(REMOTE_PATH)), { timeout: 5_000 })
-      .toBe(true);
+    await expect.poll(() => sentInputs.some((input) => input.includes(REMOTE_PATH))).toBe(true);
   });
 });

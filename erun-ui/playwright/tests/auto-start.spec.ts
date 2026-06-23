@@ -57,6 +57,6 @@ test.describe('auto-start gate', () => {
     // then assert the prompt did not open. Using toBeHidden() (auto-retry)
     // rather than waitForTimeout keeps the test deterministic on slow
     // machines while still failing fast when the gate misfires.
-    await expect(app.autoStartPromptDialog.locator()).toBeHidden({ timeout: 2_000 });
+    await expect(app.autoStartPromptDialog.locator()).toBeHidden();
   });
 });

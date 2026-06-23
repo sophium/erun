@@ -54,7 +54,7 @@ test.describe('sidebar busy spinner', () => {
     // with auto-retry so the test is not racing on a precise timing.
     const sidebar = page.locator('aside').first();
     const spinners = sidebar.getByRole('status');
-    await expect(spinners).toHaveCount(0, { timeout: 5_000 });
+    await expect(spinners).toHaveCount(0);
   });
 
   test('running build/release/push entries surface a labelled spinner that clears on finish', async ({
