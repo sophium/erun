@@ -81,6 +81,7 @@ function RuntimePodFields({ dialog }: { dialog: ManageDialog }): React.ReactElem
       status={dialog.resourceStatus}
       loading={dialog.resourceStatusLoading}
       disabled={dialog.busy || dialog.configLoading}
+      capacityBlocks={false}
       onChange={(runtimePod) => {
         dispatch(updateManageConfig({ runtimePod }));
       }}

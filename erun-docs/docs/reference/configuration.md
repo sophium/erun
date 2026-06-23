@@ -86,7 +86,7 @@ One per environment. This is the most-edited file.
 | `aitool` | string | desktop AI launcher, runtime entrypoint | Which Agent is the default for this env (`claude`, `codex`, …). |
 | `localportrangestart` | int | desktop port allocator | Base port for this env's local forwards (MCP, API, SSH). |
 | `autostart` | `*bool` | desktop sidebar open | `nil` = ask, `true` = always start linked cloud context on open, `false` = never. |
-| `remotehostcredentials` | bool | helm chart (cloud credentials passthrough) | Mount the host's cloud credentials into the runtime pod (for managed cloud envs). |
+| `remotehostcredentials` | bool | — (deprecated no-op) | **Deprecated.** Host AWS credential delivery now follows AWS-alias attachment: attaching an AWS cloud alias to an env delivers its credentials into the runtime pod (the alias association *is* the opt-in — "act on my behalf here"), so no separate toggle is needed. Retained only so existing configs still parse; setting it has no effect. |
 
 The four `claude.*` rows above (`usemantle`, `usebedrock`, `models[]`, `maxoutputtokens`) are the Claude values erun manages itself. The runtime chart accepts further `claude.*` values that erun never sets — pin a model, point Bedrock at a VPC endpoint, tune prompt caching — via the env's values overlay; see [Advanced chart values](#advanced-chart-values).
 

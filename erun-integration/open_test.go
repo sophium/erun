@@ -518,19 +518,20 @@ func TestOpen(t *testing.T) {
 		golden.Equal(t, "open/remote_dry_run_traces_port_forwards", normalize.Apply(result.Combined))
 	})
 
-	t.Run("remote_dry_run_propagates_host_credentials_opt_in", func(t *testing.T) {
+	t.Run("remote_dry_run_aws_alias_propagates_host_credentials", func(t *testing.T) {
 		// Locks the deploy plumbing that ships host AWS credentials into a
-		// remote runtime: when EnvConfig.RemoteHostCredentials is true,
-		// the helm command must include
+		// remote runtime: attaching an AWS cloud alias to the env (the operator
+		// opting it into acting on their behalf) makes the helm command include
 		// `--set cloudContext.useHostCredentials=true` so the chart sets
-		// AWS_PROFILE=erun-host on the runtime container. The desktop
-		// refresher writes the matching profile into the pod's
+		// AWS_PROFILE=erun-host on the runtime container. There is no separate
+		// toggle — the alias association alone drives it (issue #641). The
+		// desktop refresher writes the matching profile into the pod's
 		// ~/.aws/credentials at runtime — that path is tested in erun-mcp.
 		setup := env.New(t)
-		fixture.SeedRemoteTenantEnvWithHostCredentials(t, setup, "team", "dev")
+		fixture.SeedRemoteTenantEnvWithAWSAlias(t, setup, "team", "dev")
 		envVars := stubKubectlNotFound(t, setup)
 		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		golden.Equal(t, "open/remote_dry_run_propagates_host_credentials_opt_in", normalize.Apply(result.Combined))
+		golden.Equal(t, "open/remote_dry_run_aws_alias_propagates_host_credentials", normalize.Apply(result.Combined))
 	})
 
 	t.Run("app_session_skip_ensure_dry_run_skips_the_deploy_preflight", func(t *testing.T) {

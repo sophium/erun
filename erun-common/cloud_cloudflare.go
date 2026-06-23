@@ -81,13 +81,8 @@ func InitCloudflareCloudProvider(ctx Context, store CloudStore, params InitCloud
 	apiToken := strings.TrimSpace(params.APIToken)
 	ctx.Trace(fmt.Sprintf("cloud init cloudflare: account-id=%s token-name=%s api-token=%s",
 		accountID, tokenName, redactSecretPresence(apiToken)))
-	switch {
-	case accountID == "":
-		return CloudProviderConfig{}, fmt.Errorf("cloudflare account id is required")
-	case tokenName == "":
-		return CloudProviderConfig{}, fmt.Errorf("cloudflare token name is required")
-	case apiToken == "":
-		return CloudProviderConfig{}, fmt.Errorf("cloudflare api token is required")
+	if err := validateCloudflareInitParams(accountID, tokenName, apiToken); err != nil {
+		return CloudProviderConfig{}, err
 	}
 	alias := CloudProviderAlias(tokenName, accountID, CloudProviderCloudflare)
 	if alias == "" {
@@ -101,8 +96,7 @@ func InitCloudflareCloudProvider(ctx Context, store CloudStore, params InitCloud
 	tokenRef := cloudflareTokenRef(alias)
 	provider := cloudflareProviderConfig(alias, accountID, tokenName, tokenRef)
 	if ctx.DryRun {
-		ctx.Trace("store cloudflare api token at ref " + tokenRef)
-		ctx.Trace("write cloud provider " + alias)
+		traceCloudflareInitDryRunPlan(ctx, deps, tokenRef, alias)
 		return provider, nil
 	}
 	if deps.CloudSecretStore == nil {
@@ -116,6 +110,33 @@ func InitCloudflareCloudProvider(ctx Context, store CloudStore, params InitCloud
 		return CloudProviderConfig{}, err
 	}
 	return saved, nil
+}
+
+// validateCloudflareInitParams checks the three inputs Cloudflare init requires
+// before any network call, returning the first missing one.
+func validateCloudflareInitParams(accountID, tokenName, apiToken string) error {
+	switch {
+	case accountID == "":
+		return fmt.Errorf("cloudflare account id is required")
+	case tokenName == "":
+		return fmt.Errorf("cloudflare token name is required")
+	case apiToken == "":
+		return fmt.Errorf("cloudflare api token is required")
+	}
+	return nil
+}
+
+// traceCloudflareInitDryRunPlan emits the side-effect-free plan for a dry-run
+// Cloudflare init: whether the token can actually be persisted (a missing secret
+// store would make the real run fail), then the store and config writes.
+func traceCloudflareInitDryRunPlan(ctx Context, deps CloudDependencies, tokenRef, alias string) {
+	if deps.CloudSecretStore == nil {
+		ctx.Trace("cloud init cloudflare: secret store is not configured (real run would fail to persist the token)")
+	} else {
+		ctx.Trace("cloud init cloudflare: secret store is configured")
+	}
+	ctx.Trace("store cloudflare api token at ref " + tokenRef)
+	ctx.Trace("write cloud provider " + alias)
 }
 
 // VerifyCloudflareAPIToken validates a scoped token using the wired (or
@@ -167,26 +188,6 @@ func cloudflareCloudProviderTokenStatus(provider CloudProviderConfig, deps Cloud
 		return CloudProviderStatus{CloudProviderConfig: provider, Status: CloudTokenStatusExpired, Message: err.Error()}
 	}
 	return CloudProviderStatus{CloudProviderConfig: provider, Status: CloudTokenStatusActive}
-}
-
-// exportCloudflareToken loads the scoped API token for a Cloudflare alias so a
-// caller (deploy, the desktop) can deliver it into a runtime environment. The
-// token value is sensitive: callers must never trace, log, or echo it.
-func exportCloudflareToken(provider CloudProviderConfig, deps CloudDependencies) (string, error) {
-	if provider.Cloudflare == nil || strings.TrimSpace(provider.Cloudflare.TokenRef) == "" {
-		return "", fmt.Errorf("cloudflare alias %q has no token reference", provider.Alias)
-	}
-	if deps.CloudSecretStore == nil {
-		return "", fmt.Errorf("cloud secret store is not configured")
-	}
-	token, err := deps.CloudSecretStore.LoadCloudSecret(provider.Cloudflare.TokenRef)
-	if err != nil {
-		return "", fmt.Errorf("load cloudflare api token for %q: %w", provider.Alias, err)
-	}
-	if strings.TrimSpace(token) == "" {
-		return "", fmt.Errorf("cloudflare api token for %q is empty", provider.Alias)
-	}
-	return token, nil
 }
 
 // deleteCloudflareToken removes the stored scoped token, the Cloudflare
@@ -251,7 +252,7 @@ func verifyCloudflareTokenAt(url, token string) (CloudflareTokenInfo, error) {
 	if err != nil {
 		return CloudflareTokenInfo{}, fmt.Errorf("verify cloudflare token: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 	var payload struct {
 		Success bool `json:"success"`
@@ -327,19 +328,14 @@ func resolveCloudflareAccountsViaZones(url, token string) ([]CloudflareAccount, 
 	if err != nil {
 		return nil, fmt.Errorf("list cloudflare zones: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	var payload struct {
 		Success bool `json:"success"`
 		Errors  []struct {
 			Message string `json:"message"`
 		} `json:"errors"`
-		Result []struct {
-			Account struct {
-				ID   string `json:"id"`
-				Name string `json:"name"`
-			} `json:"account"`
-		} `json:"result"`
+		Result []cloudflareZone `json:"result"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return nil, fmt.Errorf("parse cloudflare zones response (status %d): %w", resp.StatusCode, err)
@@ -351,9 +347,24 @@ func resolveCloudflareAccountsViaZones(url, token string) ([]CloudflareAccount, 
 		}
 		return nil, fmt.Errorf("list cloudflare zones: %s", message)
 	}
+	return distinctCloudflareZoneAccounts(payload.Result), nil
+}
+
+// cloudflareZone is the subset of a Cloudflare /zones result item erun needs:
+// each zone names the account that owns it.
+type cloudflareZone struct {
+	Account struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"account"`
+}
+
+// distinctCloudflareZoneAccounts collects the unique, non-blank accounts that
+// own the given zones, preserving first-seen order.
+func distinctCloudflareZoneAccounts(zones []cloudflareZone) []CloudflareAccount {
 	seen := make(map[string]struct{})
 	accounts := make([]CloudflareAccount, 0, 1)
-	for _, zone := range payload.Result {
+	for _, zone := range zones {
 		id := strings.TrimSpace(zone.Account.ID)
 		if id == "" {
 			continue
@@ -364,7 +375,7 @@ func resolveCloudflareAccountsViaZones(url, token string) ([]CloudflareAccount, 
 		seen[id] = struct{}{}
 		accounts = append(accounts, CloudflareAccount{ID: id, Name: zone.Account.Name})
 	}
-	return accounts, nil
+	return accounts
 }
 
 // listCloudflareAccountsAt performs the live accounts lookup against url. Split
@@ -386,7 +397,7 @@ func listCloudflareAccountsAt(url, token string) ([]CloudflareAccount, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list cloudflare accounts: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<18))
 	var payload struct {
 		Success bool `json:"success"`

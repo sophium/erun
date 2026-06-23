@@ -1,7 +1,6 @@
 import { Cog, LoaderCircle, Play, Power, Server } from 'lucide-react';
 import * as React from 'react';
 
-import { environmentTypeIsRemoteWorktree } from '@/app/environmentType';
 import { openGlobalConfigDialog } from '@/app/globalConfigThunks';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import {
@@ -16,7 +15,7 @@ import { ContainerRegistriesField } from '@/components/app/ContainerRegistriesFi
 import { uniqueSuggestions } from '@/components/app/EditableComboField.helpers';
 import { EmptyState } from '@/components/app/EmptyState';
 import { cloudProviderTypeLabel } from '@/components/app/GlobalConfigDialog.helpers';
-import { CheckboxField, ReadonlyField, StatusBadge } from '@/components/app/ManageDialog.fields';
+import { ReadonlyField, StatusBadge } from '@/components/app/ManageDialog.fields';
 import { SelectField } from '@/components/app/SelectField';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -82,17 +81,6 @@ export function GeneralTab(): React.ReactElement {
           dispatch(updateManageConfig({ type }));
         }}
       />
-      {environmentTypeIsRemoteWorktree(config.type) && (
-        <CheckboxField
-          id="environment-config-remotehostcredentials"
-          label="Use host AWS credentials inside this env"
-          checked={config.remoteHostCredentials}
-          disabled={dialog.busy}
-          onChange={(remoteHostCredentials) => {
-            dispatch(updateManageConfig({ remoteHostCredentials }));
-          }}
-        />
-      )}
     </>
   );
 }
@@ -273,6 +261,7 @@ function CloudAliasSelect({
       options={optionItems}
       placeholder="Select cloud alias"
       emptyLabel="No cloud aliases configured"
+      helper="Attaching an alias delivers its credentials into this environment, so it can act on your behalf."
       disabled={disabled}
       onChange={(next) => {
         onChange(next === CLOUD_ALIAS_NONE_VALUE ? '' : next);

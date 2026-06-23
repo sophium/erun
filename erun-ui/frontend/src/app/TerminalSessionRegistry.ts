@@ -5,7 +5,6 @@ import {
   recordExitOutput as recordExitOutputAction,
   recordExitReason as recordExitReasonAction,
   takeExitSelections as takeExitSelectionsAction,
-  trackCloudInitSession as trackCloudInitSessionAction,
   trackDoctorSession as trackDoctorSessionAction,
   trackOpenSession as trackOpenSessionAction,
   trackSSHDInitSession as trackSSHDInitSessionAction,
@@ -42,10 +41,6 @@ export class TerminalSessionRegistry {
 
   trackDoctorSession(sessionId: number, selection: UISelection): void {
     store.dispatch(trackDoctorSessionAction({ sessionId, selection }));
-  }
-
-  trackCloudInitSession(sessionId: number): void {
-    store.dispatch(trackCloudInitSessionAction(sessionId));
   }
 
   appendSessionBuffer(sessionId: number, data: Uint8Array): void {
@@ -99,7 +94,7 @@ export class TerminalSessionRegistry {
       sshdInitSelection: state.sshdInitSelections[sessionId],
       doctorSelection: state.doctorSelections[sessionId],
       openSelection,
-      cloudInit: !!state.cloudInitSessions[sessionId],
+      cloudInit: state.cloudInitSessions[sessionId] ?? null,
     };
     store.dispatch(
       takeExitSelectionsAction({

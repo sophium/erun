@@ -263,6 +263,14 @@ export class ManageDialog {
     await this.cloudAliasSlotSelect(providerType).click();
   }
 
+  // hostAwsCredentialsCheckbox targets the removed standalone "Use host AWS
+  // credentials" toggle. It must not render — attaching an AWS alias now
+  // delivers its credentials into the env (issue #641), so there is no separate
+  // toggle to reconcile against the alias selectors.
+  hostAwsCredentialsCheckbox(): Locator {
+    return this.locator().getByLabel('Use host AWS credentials inside this env');
+  }
+
   // claudeEffortSelect targets the "Effort" SelectField in the Claude section
   // of the AI tab (issues #469/#491). It always renders; with no per-env
   // override it shows "Default (ultracode)".

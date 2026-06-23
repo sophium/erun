@@ -1,3 +1,5 @@
+import type { Page } from '@playwright/test';
+
 import { expect, test } from '../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
@@ -100,6 +102,19 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
   return { promise, resolve };
 }
 
+// waitForNextIdlePoll resolves when the next LoadIdleStatus RPC round-trips.
+// The widget polls idle status ~every second, so this is a deterministic "beat"
+// tied to a real poll cycle — used instead of a fixed sleep to assert that a
+// state survives (or that nothing further fired) across a poll without relying
+// on wall-clock timing.
+async function waitForNextIdlePoll(page: Page): Promise<void> {
+  await page.waitForResponse(
+    (response) =>
+      response.url().includes('/__erun_invoke') &&
+      (response.request().postData() ?? '').includes('"LoadIdleStatus"'),
+  );
+}
+
 test.describe('idle widget stop protection', () => {
   test('unlock toggle keeps the unlocked state even if a follow-up describe would return stale', async ({
     app,
@@ -145,7 +160,7 @@ test.describe('idle widget stop protection', () => {
     const buttonWhileLocked = page.getByRole('button', {
       name: new RegExp(`^Unlock ${ctxName}`),
     });
-    await buttonWhileLocked.waitFor({ state: 'visible', timeout: 6_000 });
+    await expect(buttonWhileLocked).toBeVisible();
     await expect(buttonWhileLocked).toHaveAttribute('aria-pressed', 'true');
 
     const describesBeforeClick = describeCalls;
@@ -158,18 +173,19 @@ test.describe('idle widget stop protection', () => {
     const buttonWhileUnlocked = page.getByRole('button', {
       name: new RegExp(`^Lock ${ctxName}`),
     });
-    await buttonWhileUnlocked.waitFor({ state: 'visible', timeout: 3_000 });
+    await expect(buttonWhileUnlocked).toBeVisible();
     await expect(buttonWhileUnlocked).toHaveAttribute('aria-pressed', 'false');
 
     expect(enableCalls).toBe(1);
 
     // Critical assertion: no DescribeCloudContextApiStop call fired in
-    // response to the mutation resolving. Under the previous
-    // invalidatesTags wiring this would be `describesBeforeClick + 1`
-    // and the cache would be overwritten with the stale `locked: true`
-    // response, flipping the icon back. Allow a small grace window in
-    // case any unrelated mount-driven refetch races.
-    await page.waitForTimeout(500);
+    // response to the mutation resolving. Under the previous invalidatesTags
+    // wiring this would be `describesBeforeClick + 1` and the cache would be
+    // overwritten with the stale `locked: true` response, flipping the icon
+    // back. Wait for the next real idle poll — a full round-trip after the
+    // mutation resolved, by which any refetch would already have hit the route
+    // — then assert the describe count is unchanged.
+    await waitForNextIdlePoll(page);
     expect(describeCalls).toBe(describesBeforeClick);
   });
 
@@ -213,16 +229,17 @@ test.describe('idle widget stop protection', () => {
     await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
 
     const stopButton = page.getByRole('button', { name: new RegExp(`^Stop ${ctxName}`) });
-    await stopButton.waitFor({ state: 'visible', timeout: 6_000 });
+    await expect(stopButton).toBeVisible();
     await stopButton.click();
 
     // The transition pill replaces the idle-time pill while busy.
     const transitionPill = page.getByTestId('titlebar-idle-transition');
-    await expect(transitionPill).toBeVisible({ timeout: 2_000 });
+    await expect(transitionPill).toBeVisible();
     await expect(transitionPill).toContainText('Stopping');
     await expect(transitionPill).toContainText(ctxName);
-    // Persists across a poll cycle, not just a transient overlay.
-    await page.waitForTimeout(1_500);
+    // Persists across a real poll cycle, not just as a transient overlay: wait
+    // for the next idle poll to land, then assert the pill survived it.
+    await waitForNextIdlePoll(page);
     await expect(transitionPill).toBeVisible();
     await expect(transitionPill).toContainText('Stopping');
 
@@ -286,13 +303,13 @@ test.describe('idle widget stop protection', () => {
     // and cloudContextStatus flips out of `running` for the IDE-button
     // gate.
     const stopButton = page.getByRole('button', { name: new RegExp(`^Stop ${ctxName}`) });
-    await stopButton.waitFor({ state: 'visible', timeout: 6_000 });
+    await expect(stopButton).toBeVisible();
     await stopButton.click();
 
     // The transition pill must be visible — that confirms we are in
     // the state we want to assert against.
     const transitionPill = page.getByTestId('titlebar-idle-transition');
-    await expect(transitionPill).toBeVisible({ timeout: 2_000 });
+    await expect(transitionPill).toBeVisible();
 
     // Pure-UI affordance — stays enabled by the design choice we
     // codified in PR #411 (env-touching only). A regression here
@@ -347,7 +364,7 @@ test.describe('idle widget stop protection', () => {
     // The warning banner replaces the idle-time pill when stopPendingSince
     // is set in the idle status.
     const warning = page.getByTestId('titlebar-idle-stop-warning');
-    await expect(warning).toBeVisible({ timeout: 6_000 });
+    await expect(warning).toBeVisible();
     // 137s → "in 2m 17s" per formatGraceCountdown.
     await expect(warning).toContainText('Auto-stop in 2m 17s');
 
@@ -358,7 +375,7 @@ test.describe('idle widget stop protection', () => {
     await expect(cancelBtn).toBeVisible();
     await cancelBtn.click();
     expect(cancelCalls).toBe(1);
-    await expect(warning).toBeHidden({ timeout: 5_000 });
+    await expect(warning).toBeHidden();
   });
 
   test('Stop click does not trigger any frontend-driven restart RPC (issue #412)', async ({
@@ -433,7 +450,7 @@ test.describe('idle widget stop protection', () => {
     await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
 
     const stopButton = page.getByRole('button', { name: new RegExp(`^Stop ${ctxName}`) });
-    await stopButton.waitFor({ state: 'visible', timeout: 6_000 });
+    await expect(stopButton).toBeVisible();
 
     // Snapshot the start-call counts AFTER the env opens (the open
     // legitimately calls StartSession once) so the post-stop assertion
@@ -443,10 +460,11 @@ test.describe('idle widget stop protection', () => {
 
     await stopButton.click();
 
-    // Wait for the stop to land (StopCloudContext fired) then give the
-    // React tree a beat in case a follow-up restart RPC is on its way.
+    // Wait for the stop to land (StopCloudContext fired), then for the next
+    // idle poll to round-trip — a real beat after which any follow-up restart
+    // RPC would already have fired — and assert none did.
     await expect.poll(() => stopCloudContextCalls).toBe(1);
-    await page.waitForTimeout(1_500);
+    await waitForNextIdlePoll(page);
 
     expect(startCloudContextCalls).toBe(0);
     expect(startSessionCalls).toBe(baselineStartSession);
@@ -512,7 +530,7 @@ test.describe('idle widget stop protection', () => {
 
     await app.manageDialog.selectTab('History');
     const list = page.getByTestId('manage-history-list');
-    await expect(list).toBeVisible({ timeout: 6_000 });
+    await expect(list).toBeVisible();
 
     const rows = page.getByTestId('manage-history-row');
     await expect(rows).toHaveCount(history.length);
@@ -617,13 +635,13 @@ test.describe('idle widget stop protection', () => {
     await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
 
     const stopButton = page.getByRole('button', { name: new RegExp(`^Stop ${ctxName}`) });
-    await stopButton.waitFor({ state: 'visible', timeout: 6_000 });
+    await expect(stopButton).toBeVisible();
     await stopButton.click();
 
     // The failure reason renders where the user acted (Nielsen #1/#9):
     // the titlebar error pill names stop protection as the cause.
     const errorPill = page.getByRole('alert').filter({ hasText: 'stop protection' });
-    await expect(errorPill).toBeVisible({ timeout: 6_000 });
+    await expect(errorPill).toBeVisible();
 
     // The widget must keep reporting reality: still running, stop still
     // offered — never a silent flip to "stopped".

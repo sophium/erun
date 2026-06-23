@@ -12,43 +12,54 @@ import (
 func TestFileCloudSecretStoreRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	store := NewFileCloudSecretStore(filepath.Join(dir, "cloud-secrets"))
+	const ref = "cloudflare/ci+acct@cloudflare"
 
-	if err := store.SaveCloudSecret("cloudflare/ci+acct@cloudflare", "tok-value"); err != nil {
-		t.Fatalf("save: %v", err)
-	}
-	got, err := store.LoadCloudSecret("cloudflare/ci+acct@cloudflare")
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
+	mustNoErr(t, store.SaveCloudSecret(ref, "tok-value"), "save")
+	got, err := store.LoadCloudSecret(ref)
+	mustNoErr(t, err, "load")
 	if got != "tok-value" {
 		t.Fatalf("load = %q, want tok-value", got)
 	}
 
 	// The secret file must be 0600 so other users on the host cannot read it.
 	entries, err := os.ReadDir(filepath.Join(dir, "cloud-secrets"))
-	if err != nil {
-		t.Fatalf("readdir: %v", err)
-	}
+	mustNoErr(t, err, "readdir")
 	if len(entries) != 1 {
 		t.Fatalf("expected one secret file, got %d", len(entries))
 	}
 	info, err := entries[0].Info()
-	if err != nil {
-		t.Fatalf("stat: %v", err)
-	}
+	mustNoErr(t, err, "stat")
 	if perm := info.Mode().Perm(); perm != 0o600 {
 		t.Fatalf("secret file perm = %o, want 600", perm)
 	}
 
-	if err := store.DeleteCloudSecret("cloudflare/ci+acct@cloudflare"); err != nil {
-		t.Fatalf("delete: %v", err)
-	}
+	mustNoErr(t, store.DeleteCloudSecret(ref), "delete")
 	// Deleting a missing secret is a no-op, not an error.
-	if err := store.DeleteCloudSecret("cloudflare/ci+acct@cloudflare"); err != nil {
-		t.Fatalf("delete missing: %v", err)
-	}
-	if _, err := store.LoadCloudSecret("cloudflare/ci+acct@cloudflare"); err == nil {
+	mustNoErr(t, store.DeleteCloudSecret(ref), "delete missing")
+	if _, err := store.LoadCloudSecret(ref); err == nil {
 		t.Fatal("expected load after delete to fail")
+	}
+}
+
+// mustNoErr fails the test immediately when err is non-nil, keeping
+// round-trip tests free of repetitive `if err != nil { t.Fatalf }` blocks.
+func mustNoErr(t *testing.T, err error, what string) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("%s: %v", what, err)
+	}
+}
+
+// assertCloudflareAccounts asserts got equals want element-for-element.
+func assertCloudflareAccounts(t *testing.T, got, want []CloudflareAccount) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("accounts = %+v, want %+v", got, want)
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Fatalf("account[%d] = %+v, want %+v", i, got[i], w)
+		}
 	}
 }
 
@@ -185,13 +196,9 @@ func TestResolveCloudflareAccountsViaZones(t *testing.T) {
 		}))
 		defer srv.Close()
 		accounts, err := resolveCloudflareAccountsViaZones(srv.URL, "tok")
-		if err != nil {
-			t.Fatalf("resolve: %v", err)
-		}
+		mustNoErr(t, err, "resolve")
 		// One distinct account (a1), blank-account zone dropped.
-		if len(accounts) != 1 || accounts[0].ID != "a1" || accounts[0].Name != "Acme" {
-			t.Fatalf("accounts = %+v", accounts)
-		}
+		assertCloudflareAccounts(t, accounts, []CloudflareAccount{{ID: "a1", Name: "Acme"}})
 	})
 
 	t.Run("returns each distinct account", func(t *testing.T) {
@@ -203,12 +210,8 @@ func TestResolveCloudflareAccountsViaZones(t *testing.T) {
 		}))
 		defer srv.Close()
 		accounts, err := resolveCloudflareAccountsViaZones(srv.URL, "tok")
-		if err != nil {
-			t.Fatalf("resolve: %v", err)
-		}
-		if len(accounts) != 2 || accounts[0].ID != "a1" || accounts[1].ID != "a2" {
-			t.Fatalf("accounts = %+v", accounts)
-		}
+		mustNoErr(t, err, "resolve")
+		assertCloudflareAccounts(t, accounts, []CloudflareAccount{{ID: "a1", Name: "Acme"}, {ID: "a2", Name: "Beta"}})
 	})
 
 	t.Run("rejected", func(t *testing.T) {

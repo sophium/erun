@@ -12,7 +12,7 @@ import { showTerminalMessage } from './notificationThunks';
 import {
   runtimePodConfigToDisplay,
   runtimePodConfigToKubernetes,
-  runtimeResourceLimitMessage,
+  runtimeResourceValidation,
 } from './runtimeResources';
 import { patchManageDialog, setManageDialog } from './slices/manageDialogSlice';
 import { bumpManageDialogVersion } from './slices/requestCountersSlice';
@@ -308,12 +308,12 @@ export const submitManageConfig = (): AppThunk<Promise<void>> => async (dispatch
     dispatch(closeManageDialog());
     return;
   }
-  const resourceError = runtimeResourceLimitMessage(
+  const { blockingError } = runtimeResourceValidation(
     dialog.config.runtimePod,
     dialog.resourceStatus,
   );
-  if (resourceError) {
-    dispatch(patchManageDialog({ error: resourceError }));
+  if (blockingError) {
+    dispatch(patchManageDialog({ error: blockingError }));
     return;
   }
   dispatch(patchManageDialog({ busy: true, busyAction: 'save', busyTarget: '', error: '' }));

@@ -68,7 +68,7 @@ func resolvePublishedDevopsDeploySpec(ctx Context, target OpenResult, versionOve
 		return DeploySpec{}, err
 	}
 	deployInput.ReleaseName = RuntimeReleaseName(target.Tenant)
-	deployInput.UseHostCredentials = target.EnvConfig.RemoteHostCredentials
+	deployInput.UseHostCredentials = target.EnvConfig.HasAWSCloudAlias()
 	deployInput.ContainerRegistry = registry
 	if image := resolveRuntimeImageOverride(registry, version, target.EnvConfig.RuntimeImage); image != "" {
 		ctx.Trace("deploy: runtime image override " + image + " (imageOverrides." + DevopsComponentName + ")")

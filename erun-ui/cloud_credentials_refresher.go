@@ -43,10 +43,11 @@ func (a *App) cloudCredentialsRefresherKey(selection uiSelection) string {
 
 // startCloudCredentialsRefresherForSelection arms a background goroutine that
 // keeps the runtime pod's ~/.aws/credentials seeded with temporary credentials
-// derived from the host profile picked by the env's CloudProviderAlias. The
-// refresh is opt-in per env (EnvConfig.RemoteHostCredentials) and only
-// applies to AWS-backed remotes. Idempotent: a second call for the same
-// selection is a no-op.
+// derived from the host profile picked by the env's CloudProviderAlias. It
+// applies whenever an AWS cloud alias is attached to a remote env — attaching
+// the alias is the operator opting the env into acting on their behalf, so no
+// separate toggle gates it. Idempotent: a second call for the same selection
+// is a no-op.
 func (a *App) startCloudCredentialsRefresherForSelection(selection uiSelection) {
 	selection = normalizeSelection(selection)
 	alias, result, ok := a.resolveCloudCredentialsRefreshTarget(selection)
@@ -75,11 +76,11 @@ func (a *App) startCloudCredentialsRefresherForSelection(selection uiSelection) 
 }
 
 // resolveCloudCredentialsRefreshTarget evaluates the per-env preconditions that
-// gate the host-credential refresher: a non-empty tenant/env, the
-// RemoteHostCredentials opt-in on a remote worktree, a configured AWS-backed
-// cloud provider alias, and a resolvable open target. It returns the provider
-// alias and resolved OpenResult plus ok=true only when every precondition holds;
-// any failing check returns ok=false so the caller becomes a no-op.
+// gate the host-credential refresher: a non-empty tenant/env, a remote worktree,
+// a configured AWS-backed cloud provider alias, and a resolvable open target. It
+// returns the provider alias and resolved OpenResult plus ok=true only when every
+// precondition holds; any failing check returns ok=false so the caller becomes a
+// no-op.
 func (a *App) resolveCloudCredentialsRefreshTarget(selection uiSelection) (string, eruncommon.OpenResult, bool) {
 	if selection.Tenant == "" || selection.Environment == "" {
 		return "", eruncommon.OpenResult{}, false
@@ -88,7 +89,7 @@ func (a *App) resolveCloudCredentialsRefreshTarget(selection uiSelection) (strin
 	if err != nil {
 		return "", eruncommon.OpenResult{}, false
 	}
-	if !envConfig.RemoteHostCredentials || !envConfig.RemoteWorktree() {
+	if !envConfig.RemoteWorktree() {
 		return "", eruncommon.OpenResult{}, false
 	}
 	// CloudProviderAlias is the legacy scalar that always holds the env's AWS

@@ -31,7 +31,7 @@ The collaboration model (reviews, comments, builds, merge queue) is designed for
 
 ## Can an Agent access my AWS or GCP credentials?
 
-Only if you explicitly opt in via `EnvConfig.remotehostcredentials: true`, in which case the host credentials are mounted read-only into the runtime pod for that env. By default, the Agent has only the cluster's ServiceAccount permissions — the same RBAC scope an operator's shell would have in that pod.
+Only when you attach an AWS cloud alias to that env. An alias is a credential you already authenticated, so associating it with an env is you authorizing the env to act on your behalf — ERun then keeps the runtime pod's `~/.aws` seeded from that alias's host profile. An env with no AWS alias attached has only the cluster's ServiceAccount permissions — the same RBAC scope an operator's shell would have in that pod.
 
 ## How much does ERun cost?
 

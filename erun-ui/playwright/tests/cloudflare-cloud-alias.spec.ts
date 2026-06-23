@@ -25,6 +25,15 @@ import {
 // dialog (the session took over) and no in-app add-token form ever renders. The
 // guided prompt/verify/resolve flow itself is owned and tested by the CLI
 // (erun-common cloud_cloudflare.go + the erun-cli integration goldens).
+//
+// The provider-correct session-exit toast (issue #641 — it used to hardcode
+// "AWS" for every cloud-init session) is NOT asserted here: it fires only after
+// the full PTY spawn → exit → terminal-exit-event → render lifecycle, which is
+// too slow and load-sensitive under the shared-backend harness to assert
+// deterministically (a flaky test is worse than none — see playwright AGENTS.md
+// "No flaky tests"). The exit-reason logic is a pure function
+// (failedTerminalExitReason/successfulTerminalExitReason in terminalStatus.ts)
+// and was verified live in the desktop app.
 
 test.describe('multi-provider cloud aliases', () => {
   test('settings provider picker delegates both add flows to the CLI', async ({ app }) => {
@@ -56,7 +65,9 @@ test.describe('multi-provider cloud aliases', () => {
     await app.sidebar.openSettings();
     await app.globalConfigDialog.waitForOpen();
     await app.globalConfigDialog.clickAddAWS();
-    await app.globalConfigDialog.waitForClosed();
+    // The add delegates to the CLI and hands the terminal over, so the settings
+    // dialog closes — the same observable invariant the Cloudflare path locks.
+    await expect(app.globalConfigDialog.locator()).toBeHidden();
   });
 
   test('sidebar shows one independent login row per provider type', async ({ app }) => {
@@ -84,6 +95,11 @@ test.describe('multi-provider cloud aliases', () => {
     // pre-selected to the env's attachment for that type.
     expect(await app.manageDialog.cloudAliasSlotVisible('aws')).toBe(true);
     expect(await app.manageDialog.cloudAliasSlotVisible('cloudflare')).toBe(true);
+
+    // The standalone "Use host AWS credentials" checkbox is gone (issue #641):
+    // attaching an alias now delivers its credentials into the env, so the
+    // alias selectors are the only control — consistent across providers.
+    await expect(app.manageDialog.hostAwsCredentialsCheckbox()).toHaveCount(0);
     await expect.poll(() => app.manageDialog.cloudAliasSlotValue('aws')).toBe(SEED_CLOUD_ALIAS);
     await expect
       .poll(() => app.manageDialog.cloudAliasSlotValue('cloudflare'))

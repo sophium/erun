@@ -9,7 +9,7 @@ import {
   RUNTIME_CPU_STEP,
   RUNTIME_MEMORY_STEP,
   runtimeResourceBounds,
-  runtimeResourceLimitMessage,
+  runtimeResourceValidation,
 } from '@/app/runtimeResources';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -21,6 +21,11 @@ interface RuntimeResourceControlsProps {
   status: UIRuntimeResourceStatus | null;
   loading: boolean;
   disabled?: boolean;
+  // capacityBlocks controls how an unschedulable-but-valid request is shown:
+  // true (the create dialog) treats it as a blocking error; false (the manage
+  // dialog, where Save only persists config) shows it as a non-blocking
+  // warning. Defaults to true to preserve the create flow's stricter behavior.
+  capacityBlocks?: boolean;
   onChange: (value: UIRuntimePodConfig) => void;
 }
 
@@ -30,10 +35,11 @@ export function RuntimeResourceControls({
   status,
   loading,
   disabled,
+  capacityBlocks = true,
   onChange,
 }: RuntimeResourceControlsProps): React.ReactElement {
   const bounds = runtimeResourceBounds(status, loading);
-  const resourceError = runtimeResourceLimitMessage(value, status);
+  const { blockingError, capacityWarning } = runtimeResourceValidation(value, status);
   const controlsDisabled = disabled === true || loading || !bounds.available;
   const boundedValue = bounds.available ? clampRuntimePodConfig(value, bounds) : value;
 
@@ -106,11 +112,48 @@ export function RuntimeResourceControls({
           onChange({ ...value, memory });
         }}
       />
-      {resourceError && (
-        <div className="text-xs leading-[1.35] text-destructive" role="alert">
-          {resourceError}
-        </div>
-      )}
+      <RuntimeResourceMessages
+        blockingError={blockingError}
+        capacityWarning={capacityWarning}
+        capacityBlocks={capacityBlocks}
+      />
+    </div>
+  );
+}
+
+// RuntimeResourceMessages renders the validation feedback below the controls: a
+// blocking error always reads destructive; a capacity warning reads destructive
+// when capacityBlocks (the create dialog) or amber otherwise (the manage dialog,
+// where it does not block saving config).
+function RuntimeResourceMessages({
+  blockingError,
+  capacityWarning,
+  capacityBlocks,
+}: {
+  blockingError: string;
+  capacityWarning: string;
+  capacityBlocks: boolean;
+}): React.ReactElement | null {
+  if (blockingError) {
+    return (
+      <div className="text-xs leading-[1.35] text-destructive" role="alert">
+        {blockingError}
+      </div>
+    );
+  }
+  if (!capacityWarning) {
+    return null;
+  }
+  return (
+    <div
+      className={
+        capacityBlocks
+          ? 'text-xs leading-[1.35] text-destructive'
+          : 'text-xs leading-[1.35] text-amber-600 dark:text-amber-400'
+      }
+      role={capacityBlocks ? 'alert' : 'status'}
+    >
+      {capacityWarning}
     </div>
   );
 }
