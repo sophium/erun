@@ -171,6 +171,31 @@ func TestCloud(t *testing.T) {
 		golden.Equal(t, "cloud/init_cloudflare_dry_run_auto_account", normalize.Apply(result.Combined))
 	})
 
+	t.Run("init_cloudflare_dry_run_honors_api_base_url_seam", func(t *testing.T) {
+		// Exercises the ERUN_CLOUDFLARE_API_BASE_URL subprocess-reachable seam
+		// (issue #646): when set, every Cloudflare API call targets the override
+		// base instead of api.cloudflare.com. The seam is what lets a desktop /
+		// real-run e2e point the `erun cloud init cloudflare` subprocess at a
+		// mock. In --dry-run the GET trace fires before the network short-circuit,
+		// so the override base is observable here without any network call. The
+		// trailing slash on the override is intentional: the golden's single
+		// `/client/v4/...` (no double slash) locks the base-URL trim too.
+		setup := env.New(t)
+		args := []string{
+			"cloud", "init", "cloudflare",
+			"--account-id", "cf-acct-123",
+			"--token-name", "ci-token",
+			"--api-token", "dummy-token",
+			"--dry-run",
+		}
+		envVars := append(setup.Env(), "ERUN_CLOUDFLARE_API_BASE_URL=https://cf-mock.example/")
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "cloud/init_cloudflare_dry_run_api_base_url_seam", normalize.Apply(result.Combined))
+	})
+
 	t.Run("init_aws_dry_run_traces_sso_setup_and_oidc_persistence", func(t *testing.T) {
 		// Exercises cloud.go runCloudInitAWSCommand: --dry-run must trace
 		// the aws configure sso plan, the sso login command, the sts

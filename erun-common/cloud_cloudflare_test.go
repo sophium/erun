@@ -225,6 +225,44 @@ func TestResolveCloudflareAccountsViaZones(t *testing.T) {
 	})
 }
 
+// TestDefaultCloudflareCallsHonorBaseURLSeam proves the subprocess-reachable
+// seam: with only the env var set (no in-process CloudDependencies injection),
+// the default verifier and accounts resolver hit a mock standing in for the
+// Cloudflare API. This is the path a desktop/e2e test exercises through the
+// `erun cloud init cloudflare` subprocess (issue #646).
+func TestDefaultCloudflareCallsHonorBaseURLSeam(t *testing.T) {
+	gotPaths := make(map[string]bool)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer tok" {
+			t.Errorf("authorization header = %q", got)
+		}
+		gotPaths[r.URL.Path] = true
+		switch r.URL.Path {
+		case cloudflareTokenVerifyPath:
+			_, _ = w.Write([]byte(`{"success":true,"result":{"id":"abc","status":"active"}}`))
+		case cloudflareAccountsPath:
+			_, _ = w.Write([]byte(`{"success":true,"result":[{"id":"a1","name":"Acme"}]}`))
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv(cloudflareAPIBaseURLEnv, srv.URL)
+
+	info, err := defaultVerifyCloudflareToken(Context{}, "tok")
+	mustNoErr(t, err, "verify")
+	if info.ID != "abc" || info.Status != "active" {
+		t.Fatalf("verify info = %+v", info)
+	}
+	accounts, err := defaultListCloudflareAccounts(Context{}, "tok")
+	mustNoErr(t, err, "accounts")
+	assertCloudflareAccounts(t, accounts, []CloudflareAccount{{ID: "a1", Name: "Acme"}})
+
+	if !gotPaths[cloudflareTokenVerifyPath] || !gotPaths[cloudflareAccountsPath] {
+		t.Fatalf("mock did not receive both Cloudflare paths; got %v", gotPaths)
+	}
+}
+
 func TestResolveTenantCloudProviderIssuersSkipsCloudflare(t *testing.T) {
 	store := stubCloudContextStore{config: ERunConfig{CloudProviders: []CloudProviderConfig{
 		{Alias: "alice+123456789012@aws", Provider: CloudProviderAWS, OIDCIssuerURL: "https://issuer.example.com"},
