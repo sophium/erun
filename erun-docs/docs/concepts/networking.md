@@ -43,7 +43,7 @@ The exposed URL is HTTP today; a wildcard TLS certificate (making it `https://`)
 
 ## Inter-env communication
 
-By default, **envs cannot reach each other.** ERun's runtime chart deploys a default-deny NetworkPolicy on every env's namespace. Cross-env traffic requires an explicit opt-in NetworkPolicy on the target plus a matching label on the consumer namespace; this is rare and usually a sign you should be using one env rather than two. See [Networking spec · Cross-namespace traffic semantics](/agent-reference/networking-spec#cross-namespace-traffic-semantics) for the manifests.
+**Isolating envs from each other is opt-in.** Vanilla Kubernetes lets pods reach across namespaces, so ERun provides a default-deny NetworkPolicy as a copy-paste pattern — it does **not** auto-deploy one. Apply it to an env's namespace to block ingress from outside it; cross-env traffic then requires an explicit opt-in NetworkPolicy on the target plus a matching label on the consumer namespace. Needing this is rare and usually a sign you should be using one env rather than two. See [Networking spec · Cross-namespace traffic semantics](/agent-reference/networking-spec#cross-namespace-traffic-semantics) for the manifests.
 
 ## Per-env DNS
 
