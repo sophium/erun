@@ -30,6 +30,12 @@ export const selectSelectedIsPendingFor = (
   return !selectEnvironmentExists(state, tenant, environment);
 };
 
+// selectPendingOpenAfterDeploy returns the env queued to open once its
+// create-time deploy lands (issue #644), or null. The create→deploy→open gate
+// reads it when an `environment-deployed` signal arrives.
+export const selectPendingOpenAfterDeploy = (state: RootState): UISelection | null =>
+  state.selection.pendingOpenAfterDeploy;
+
 // selectEnvHasFailedDeploy reports whether the env currently has a failed
 // deploy in the activity queue. Reopening a dead default tab (ai/local/erun)
 // re-runs `erun open`, which re-deploys; doing that for an env whose deploy

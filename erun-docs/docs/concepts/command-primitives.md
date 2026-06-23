@@ -33,7 +33,7 @@ That's why `push` and `deploy` ask for the version explicitly — so what you de
 
 You usually don't type those three commands by hand. There are two ways they get composed — and the difference matters:
 
-- **Operator convenience switches.** At the terminal, `erun build --deploy` runs build → push → deploy in one go, `erun build --release` folds in the release flow, and `erun push --build` builds the current source then publishes the version it mints. These are shortcuts *for a human* — they compose the primitives for you and thread the version automatically.
+- **Operator convenience switches.** At the terminal, `erun build --deploy` runs build → push → deploy in one go, `erun build --release` folds in the release flow, `erun push --build` builds the current source then publishes the version it mints, and `erun open --deploy` deploys the runtime before dropping you into the shell. These are shortcuts *for a human* — they compose the primitives for you and thread the version automatically.
 - **Programmatic orchestration.** The desktop app, scripts, and Agents driving [MCP](/mcp/overview) do **not** use those switches. They run the primitives themselves — `build`, then `push`, then `deploy` — capturing the version from `erun build --output json` and threading it through. This keeps the policy ("for this environment, the operator's click means build → push → deploy") in the caller, where it belongs, instead of buried inside a command.
 
 So the desktop app's **Deploy** button isn't calling one clever command that decides everything — it's running the same plain primitives you could run yourself, in the order that fits the environment, with the version carried between them.

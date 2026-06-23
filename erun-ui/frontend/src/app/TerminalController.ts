@@ -50,6 +50,7 @@ import {
   handleAIActivity,
   handleAppNotification,
   handleAppStatus,
+  handleEnvironmentDeployed,
   handleEnvironmentInitFailed,
   handleEnvironmentInitialized,
   handleEnvStatus,
@@ -91,6 +92,7 @@ export class TerminalController {
   private reconnectLineOff: (() => void) | null = null;
   private environmentInitializedOff: (() => void) | null = null;
   private environmentInitFailedOff: (() => void) | null = null;
+  private environmentDeployedOff: (() => void) | null = null;
   private environmentsChangedOff: (() => void) | null = null;
   private aiActivityOff: (() => void) | null = null;
   private envStatusOff: (() => void) | null = null;
@@ -149,6 +151,30 @@ export class TerminalController {
     }
     this.terminalRoot.dataset.terminalCols = String(this.terminal.cols);
     this.terminalRoot.dataset.terminalRows = String(this.terminal.rows);
+  }
+
+  // subscribeEnvironmentLifecycleEvents wires the create/deploy lifecycle
+  // signals the backend emits from the activity trace handler: init success,
+  // init failure, and deploy success (the create→deploy→open gate, issue #644).
+  private subscribeEnvironmentLifecycleEvents(): void {
+    this.environmentInitializedOff = EventsOn(
+      'environment-initialized',
+      (payload: EnvironmentInitializedPayload) => {
+        void store.dispatch(handleEnvironmentInitialized(payload));
+      },
+    );
+    this.environmentInitFailedOff = EventsOn(
+      'environment-init-failed',
+      (payload: EnvironmentInitializedPayload) => {
+        store.dispatch(handleEnvironmentInitFailed(payload));
+      },
+    );
+    this.environmentDeployedOff = EventsOn(
+      'environment-deployed',
+      (payload: EnvironmentInitializedPayload) => {
+        void store.dispatch(handleEnvironmentDeployed(payload));
+      },
+    );
   }
 
   mount(elements: MountElements): () => void {
@@ -231,18 +257,7 @@ export class TerminalController {
     this.reconnectLineOff = EventsOn('mcp-reconnect-line', (line: string) => {
       store.dispatch(handleReconnectLine(line));
     });
-    this.environmentInitializedOff = EventsOn(
-      'environment-initialized',
-      (payload: EnvironmentInitializedPayload) => {
-        void store.dispatch(handleEnvironmentInitialized(payload));
-      },
-    );
-    this.environmentInitFailedOff = EventsOn(
-      'environment-init-failed',
-      (payload: EnvironmentInitializedPayload) => {
-        store.dispatch(handleEnvironmentInitFailed(payload));
-      },
-    );
+    this.subscribeEnvironmentLifecycleEvents();
     this.environmentsChangedOff = EventsOn('environments-changed', () => {
       void store.dispatch(reloadStateAfterEnvironmentChange());
     });
@@ -301,6 +316,7 @@ export class TerminalController {
       'reconnectLineOff',
       'environmentInitializedOff',
       'environmentInitFailedOff',
+      'environmentDeployedOff',
       'environmentsChangedOff',
       'aiActivityOff',
       'envStatusOff',

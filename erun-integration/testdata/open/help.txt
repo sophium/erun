@@ -1,6 +1,6 @@
 Open a shell in the tenant environment.
 
-Brings the environment up first if needed — deploying or updating the runtime and starting port-forwards — then drops you into a shell. Use --vscode or --intellij to open an IDE instead, or --no-shell to print the setup commands for your current shell.
+open is a pure primitive: it starts the port-forwards and drops you into a shell against the runtime that is already deployed. It does not deploy on its own — run `erun deploy` first, or pass --deploy to deploy before opening (the operator-convenience shortcut: builds-here envs build→push→deploy, runtime envs install the current version). Use --vscode or --intellij to open an IDE instead, or --no-shell to print the setup commands for your current shell.
 
 Usage:
   erun open [TENANT] [ENVIRONMENT] [flags]
@@ -8,9 +8,11 @@ Usage:
 Examples:
   erun open
   erun open team dev
+  erun open team dev --deploy
   erun open team dev --vscode
 
 Flags:
+      --deploy                 Deploy the runtime before opening (operator convenience: builds-here envs build→push→deploy, runtime envs install the current version)
       --dry-run                Resolve and trace mutating actions without executing them.
       --environment string     Open a specific environment
   -h, --help                   help for open

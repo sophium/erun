@@ -9,9 +9,7 @@ audit: erun open --dry-run --vscode team dev
 config: would assign localportrangestart=17000 to team/dev
 trace-log: would append the full trace to <TMP>
 open: tenant=team environment=dev kubernetes-context=test-context remote=true no-shell=false ide=vscode
-deploy: no local runtime chart; using published chart oci://registry.example/test/charts/erun-devops version <VERSION>
-kubectl --context test-context --namespace team-dev get deployment team-devops -o name
-open: dry-run: would deploy runtime for team/dev before launching VS Code; in real mode the user must run `erun sshd init team dev` or `erun open team dev` first
+open: pure primitive — not deploying (run `erun deploy` first, or pass --deploy to deploy before opening)
 sshd: dry-run: no SSH public key found; use --public-key to choose one; using placeholder key for trace
 kubectl --context test-context --namespace team-dev exec deployment/team-devops -- /bin/sh -lc '<remote-script>'
 remote-ssh-authorized-keys:
