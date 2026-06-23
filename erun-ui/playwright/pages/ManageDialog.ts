@@ -48,6 +48,29 @@ export class ManageDialog {
     return label?.includes('has unsaved changes') ?? false;
   }
 
+  // tabHasWarning reads the warning marker off a tab trigger's accessible name
+  // ("<label>, has a warning" — issue #641 runtime-capacity feedback).
+  async tabHasWarning(name: ManageTab): Promise<boolean> {
+    const label = await this.tab(name).getAttribute('aria-label');
+    return label?.includes('has a warning') ?? false;
+  }
+
+  // saveButton targets the footer Save action (to assert enabled/disabled).
+  saveButton(): Locator {
+    return this.locator().getByRole('button', { name: /^Save( |$|ing)/ });
+  }
+
+  // saveStatus targets the footer region that explains why Save is disabled, or
+  // warns that a deploy is at risk, right where the user acts (issue #641).
+  saveStatus(): Locator {
+    return this.locator().locator('#manage-save-status');
+  }
+
+  // goToRuntimeButton targets the recovery action inside the save-status region.
+  goToRuntimeButton(): Locator {
+    return this.saveStatus().getByRole('button', { name: 'Go to Runtime' });
+  }
+
   // redeployBanner targets the amber "Pending redeploy" alert raised after a
   // save that changed a pod-shaping field (issue #460).
   redeployBanner(): Locator {

@@ -12,7 +12,7 @@ import {
   submitManageDeploy,
 } from '@/app/manageEnvironmentThunks';
 import { showTerminalMessage } from '@/app/notificationThunks';
-import { runtimeResourceLimitMessage } from '@/app/runtimeResources';
+import { runtimeResourceValidation } from '@/app/runtimeResources';
 import type { AppState } from '@/app/state';
 import { useController } from '@/app/useController';
 import { deleteConfirmationValue, normalizeDialogValue } from '@/app/versionSuggestions';
@@ -34,6 +34,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { cn } from '@/lib/utils';
 import type { ManageEditTab, ManageTab } from '@/types';
 
 type ManageDialog = AppState['manageDialog'];
@@ -192,11 +193,32 @@ function DirtyAwareTabsTrigger({
   dialog: ManageDialog;
 }): React.ReactElement {
   const dirty = manageDialogTabHasUnsavedChanges(value, dialog.config, dialog.initialConfig);
+  // The Runtime tab is the only tab with field validation today; surface its
+  // state on the trigger so a disabled Save points the user to the right tab
+  // (NN #6 recognition over recall). Icon shape — not just color — distinguishes
+  // error/warning from the unsaved-changes dot (WCAG 1.4.1 use of color).
+  const { blockingError, capacityWarning } =
+    value === 'runtime'
+      ? runtimeResourceValidation(dialog.config.runtimePod, dialog.resourceStatus)
+      : { blockingError: '', capacityWarning: '' };
+  const ariaLabel = blockingError
+    ? `${label}, has an error`
+    : capacityWarning
+      ? `${label}, has a warning`
+      : dirty
+        ? `${label}, has unsaved changes`
+        : label;
   return (
-    <TabsTrigger value={value} aria-label={dirty ? `${label}, has unsaved changes` : label}>
+    <TabsTrigger value={value} aria-label={ariaLabel}>
       <span className="inline-flex items-center gap-1">
         {label}
-        {dirty && <span aria-hidden="true" className="size-1.5 rounded-full bg-primary" />}
+        {blockingError ? (
+          <AlertTriangle aria-hidden="true" className="size-3 text-destructive" />
+        ) : capacityWarning ? (
+          <AlertTriangle aria-hidden="true" className="size-3 text-amber-600 dark:text-amber-400" />
+        ) : dirty ? (
+          <span aria-hidden="true" className="size-1.5 rounded-full bg-primary" />
+        ) : null}
       </span>
     </TabsTrigger>
   );
@@ -269,88 +291,223 @@ function ManageDialogFooter({
   deleteEnabled: boolean;
 }): React.ReactElement {
   const dispatch = useAppDispatch();
-  const resourceError = runtimeResourceLimitMessage(
+  const { blockingError, capacityWarning } = runtimeResourceValidation(
     dialog.config.runtimePod,
     dialog.resourceStatus,
   );
-  const saving = dialog.busyAction === 'save';
+  const saveStatusId = 'manage-save-status';
+  const hasSaveStatus = !confirmingDelete && Boolean(blockingError || capacityWarning);
+  return (
+    <div className="grid gap-2">
+      {hasSaveStatus && (
+        <ManageSaveBlocker
+          id={saveStatusId}
+          blockingError={blockingError}
+          capacityWarning={capacityWarning}
+          showGoToRuntime={dialog.tab !== 'runtime'}
+          onGoToRuntime={() => {
+            dispatch(setManageTab('runtime'));
+          }}
+        />
+      )}
+      <DialogFooter className="sm:justify-between">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={dialog.busy}
+          onClick={() => {
+            dispatch(closeManageDialog());
+          }}
+        >
+          Cancel
+        </Button>
+        <ManageDialogFooterActions
+          dialog={dialog}
+          confirmingDelete={confirmingDelete}
+          deleteEnabled={deleteEnabled}
+          blockingError={blockingError}
+          hasSaveStatus={hasSaveStatus}
+          saveStatusId={saveStatusId}
+        />
+      </DialogFooter>
+    </div>
+  );
+}
+
+function ManageDialogFooterActions({
+  dialog,
+  confirmingDelete,
+  deleteEnabled,
+  blockingError,
+  hasSaveStatus,
+  saveStatusId,
+}: {
+  dialog: ManageDialog;
+  confirmingDelete: boolean;
+  deleteEnabled: boolean;
+  blockingError: string;
+  hasSaveStatus: boolean;
+  saveStatusId: string;
+}): React.ReactElement {
+  if (confirmingDelete) {
+    return <ConfirmDeleteActions dialog={dialog} deleteEnabled={deleteEnabled} />;
+  }
+  return (
+    <EditActions
+      dialog={dialog}
+      blockingError={blockingError}
+      hasSaveStatus={hasSaveStatus}
+      saveStatusId={saveStatusId}
+    />
+  );
+}
+
+function ConfirmDeleteActions({
+  dialog,
+  deleteEnabled,
+}: {
+  dialog: ManageDialog;
+  deleteEnabled: boolean;
+}): React.ReactElement {
+  const dispatch = useAppDispatch();
   const deleting = dialog.busyAction === 'delete';
   return (
-    <DialogFooter className="sm:justify-between">
+    <div className="flex items-center gap-2">
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        disabled={dialog.busy}
+        onClick={() => {
+          dispatch(setManageTab('general'));
+        }}
+      >
+        Back to edit
+      </Button>
+      <Button
+        type="button"
+        variant="destructive"
+        size="sm"
+        disabled={dialog.busy || !deleteEnabled}
+        onClick={() => void dispatch(submitManageDelete())}
+      >
+        {deleting ? (
+          <LoaderCircle className="animate-spin" aria-hidden="true" />
+        ) : (
+          <Trash2 aria-hidden="true" />
+        )}
+        {deleting ? 'Deleting...' : 'Confirm delete'}
+      </Button>
+    </div>
+  );
+}
+
+function EditActions({
+  dialog,
+  blockingError,
+  hasSaveStatus,
+  saveStatusId,
+}: {
+  dialog: ManageDialog;
+  blockingError: string;
+  hasSaveStatus: boolean;
+  saveStatusId: string;
+}): React.ReactElement {
+  const dispatch = useAppDispatch();
+  const saving = dialog.busyAction === 'save';
+  return (
+    <div className="flex items-center gap-2">
       <Button
         type="button"
         variant="outline"
         size="sm"
-        disabled={dialog.busy}
+        disabled={dialog.busy || dialog.configLoading}
         onClick={() => {
-          dispatch(closeManageDialog());
+          dispatch(setManageTab('delete'));
         }}
       >
-        Cancel
+        <Trash2 aria-hidden="true" />
+        Delete
       </Button>
-      <div className="flex items-center gap-2">
-        {confirmingDelete ? (
-          <>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={dialog.busy}
-              onClick={() => {
-                dispatch(setManageTab('general'));
-              }}
-            >
-              Back to edit
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              disabled={dialog.busy || !deleteEnabled}
-              onClick={() => void dispatch(submitManageDelete())}
-            >
-              {deleting ? (
-                <LoaderCircle className="animate-spin" aria-hidden="true" />
-              ) : (
-                <Trash2 aria-hidden="true" />
-              )}
-              {deleting ? 'Deleting...' : 'Confirm delete'}
-            </Button>
-          </>
+      <Button
+        type="button"
+        size="sm"
+        disabled={dialog.busy || dialog.configLoading || Boolean(blockingError)}
+        aria-describedby={hasSaveStatus ? saveStatusId : undefined}
+        onClick={() =>
+          void dispatch(submitManageConfig()).catch((error: unknown) => {
+            dispatch(showTerminalMessage(readError(error)));
+          })
+        }
+      >
+        {saving ? (
+          <LoaderCircle className="animate-spin" aria-hidden="true" />
         ) : (
-          <>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={dialog.busy || dialog.configLoading}
-              onClick={() => {
-                dispatch(setManageTab('delete'));
-              }}
-            >
-              <Trash2 aria-hidden="true" />
-              Delete
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              disabled={dialog.busy || dialog.configLoading || Boolean(resourceError)}
-              onClick={() =>
-                void dispatch(submitManageConfig()).catch((error: unknown) => {
-                  dispatch(showTerminalMessage(readError(error)));
-                })
-              }
-            >
-              {saving ? (
-                <LoaderCircle className="animate-spin" aria-hidden="true" />
-              ) : (
-                <Save aria-hidden="true" />
-              )}
-              {saving ? 'Saving...' : 'Save'}
-            </Button>
-          </>
+          <Save aria-hidden="true" />
         )}
-      </div>
-    </DialogFooter>
+        {saving ? 'Saving...' : 'Save'}
+      </Button>
+    </div>
+  );
+}
+
+// ManageSaveBlocker renders the reason a disabled Save (or an at-risk deploy) is
+// in its current state, right where the user acts (NN #1 visibility of system
+// status; #9 recovery). A blocking error styles destructive and keeps Save
+// disabled; a capacity warning styles amber and leaves Save enabled (saving only
+// persists config). The "Go to Runtime" action takes the user to where the issue
+// is fixable. It is associated with the Save button via aria-describedby and
+// announced via role/aria-live (WCAG 3.3.1, 3.3.3, 4.1.3).
+function ManageSaveBlocker({
+  id,
+  blockingError,
+  capacityWarning,
+  showGoToRuntime,
+  onGoToRuntime,
+}: {
+  id: string;
+  blockingError: string;
+  capacityWarning: string;
+  showGoToRuntime: boolean;
+  onGoToRuntime: () => void;
+}): React.ReactElement {
+  const isError = Boolean(blockingError);
+  const message = blockingError || capacityWarning;
+  return (
+    <div
+      id={id}
+      role={isError ? 'alert' : 'status'}
+      aria-live="polite"
+      className={cn(
+        'flex items-center gap-2 rounded-[var(--radius)] border border-l-[3px] px-3 py-2 text-[13px] leading-[1.35]',
+        isError
+          ? 'border-destructive/40 border-l-destructive bg-destructive/10'
+          : 'border-amber-500/40 border-l-amber-500 bg-amber-500/10',
+      )}
+    >
+      <AlertTriangle
+        className={cn(
+          'size-[18px] shrink-0',
+          isError ? 'text-destructive' : 'text-amber-600 dark:text-amber-400',
+        )}
+        aria-hidden="true"
+      />
+      <span className="min-w-0 flex-1">
+        <span className="font-semibold">{isError ? "Can't save" : 'Heads up'}</span>
+        {` — ${message}`}
+      </span>
+      {showGoToRuntime && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="shrink-0"
+          onClick={onGoToRuntime}
+        >
+          Go to Runtime
+        </Button>
+      )}
+    </div>
   );
 }
