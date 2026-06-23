@@ -96,6 +96,11 @@ test.describe('multi-provider cloud aliases', () => {
     // pre-selected to the env's attachment for that type.
     expect(await app.manageDialog.cloudAliasSlotVisible('aws')).toBe(true);
     expect(await app.manageDialog.cloudAliasSlotVisible('cloudflare')).toBe(true);
+
+    // The standalone "Use host AWS credentials" checkbox is gone (issue #641):
+    // attaching an alias now delivers its credentials into the env, so the
+    // alias selectors are the only control — consistent across providers.
+    await expect(app.manageDialog.hostAwsCredentialsCheckbox()).toHaveCount(0);
     await expect.poll(() => app.manageDialog.cloudAliasSlotValue('aws')).toBe(SEED_CLOUD_ALIAS);
     await expect
       .poll(() => app.manageDialog.cloudAliasSlotValue('cloudflare'))

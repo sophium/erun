@@ -893,7 +893,7 @@ func configureDeployInputMetadata(store DeployStore, target OpenResult, deployIn
 		return err
 	}
 	deployInput.ManagedCloud = managedCloud
-	deployInput.UseHostCredentials = target.EnvConfig.RemoteHostCredentials
+	deployInput.UseHostCredentials = target.EnvConfig.HasAWSCloudAlias()
 	applyCloudProviderDeployMetadata(store, target.EnvConfig, deployInput)
 	applyCloudflareDeployMetadata(store, target.EnvConfig, deployInput)
 	if managedCloud {

@@ -427,11 +427,14 @@ func SeedRemoteTenantEnvWithClaude(t testing.TB, setup env.Setup, tenant, enviro
 	)
 }
 
-// SeedRemoteTenantEnvWithHostCredentials writes the same tree as
-// SeedRemoteTenantEnv but flips the remotehostcredentials toggle on, so
-// scenarios can exercise the deploy plumbing that injects AWS_PROFILE into
-// the remote runtime when the env opts in to host-credential push.
-func SeedRemoteTenantEnvWithHostCredentials(t testing.TB, setup env.Setup, tenant, environment string) {
+// SeedRemoteTenantEnvWithAWSAlias writes the same tree as SeedRemoteTenantEnv
+// but attaches an AWS cloud alias to the env. Attaching an AWS alias is the
+// operator opting the env into acting on their behalf, so it drives the deploy
+// plumbing that injects host AWS credentials into the remote runtime
+// (--set cloudContext.useHostCredentials=true). The desktop refresher writes
+// the matching profile into the pod's ~/.aws/credentials at runtime — that path
+// is tested in erun-mcp.
+func SeedRemoteTenantEnvWithAWSAlias(t testing.TB, setup env.Setup, tenant, environment string) {
 	t.Helper()
 	SeedRemoteTenantEnv(t, setup, tenant, environment)
 	envDir := filepath.Join(setup.ConfigHome, "erun", tenant, environment)
@@ -442,7 +445,7 @@ func SeedRemoteTenantEnvWithHostCredentials(t testing.TB, setup env.Setup, tenan
 			"containerregistry: registry.example/test\n"+
 			"runtimeversion: 1.0.0\n"+
 			"type: remote-agent\n"+
-			"remotehostcredentials: true\n",
+			"cloudprovideralias: ops+123456789012@aws\n",
 	)
 }
 

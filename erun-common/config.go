@@ -126,16 +126,20 @@ type EnvConfig struct {
 	// name resolves against the env's registry and runtime version. Set by
 	// `erun init --runtime-image` and carried to the published chart as
 	// imageOverrides.erun-devops on every deploy.
-	RuntimeImage          string                  `yaml:"runtimeimage,omitempty" json:"runtimeImage,omitempty"`
-	RuntimePod            RuntimePodResources     `yaml:"runtimepod,omitempty"`
-	SSHD                  SSHDConfig              `yaml:"sshd,omitempty"`
-	Idle                  EnvironmentIdleConfig   `yaml:"idle,omitempty"`
-	Deploy                EnvironmentDeployConfig `yaml:"deploy,omitempty" json:"deploy,omitempty"`
-	Claude                EnvironmentClaudeConfig `yaml:"claude,omitempty" json:"claude,omitempty"`
-	AITool                string                  `yaml:"aitool,omitempty" json:"aiTool,omitempty"`
-	LocalPortRangeStart   int                     `yaml:"localportrangestart,omitempty" json:"localPortRangeStart,omitempty"`
-	AutoStart             *bool                   `yaml:"autostart,omitempty" json:"autoStart,omitempty"`
-	RemoteHostCredentials bool                    `yaml:"remotehostcredentials,omitempty" json:"remoteHostCredentials,omitempty"`
+	RuntimeImage        string                  `yaml:"runtimeimage,omitempty" json:"runtimeImage,omitempty"`
+	RuntimePod          RuntimePodResources     `yaml:"runtimepod,omitempty"`
+	SSHD                SSHDConfig              `yaml:"sshd,omitempty"`
+	Idle                EnvironmentIdleConfig   `yaml:"idle,omitempty"`
+	Deploy              EnvironmentDeployConfig `yaml:"deploy,omitempty" json:"deploy,omitempty"`
+	Claude              EnvironmentClaudeConfig `yaml:"claude,omitempty" json:"claude,omitempty"`
+	AITool              string                  `yaml:"aitool,omitempty" json:"aiTool,omitempty"`
+	LocalPortRangeStart int                     `yaml:"localportrangestart,omitempty" json:"localPortRangeStart,omitempty"`
+	AutoStart           *bool                   `yaml:"autostart,omitempty" json:"autoStart,omitempty"`
+	// Deprecated: host AWS credential delivery is now driven by whether an AWS
+	// cloud alias is attached (HasAWSCloudAlias), not by a separate toggle —
+	// attaching an alias means "act on my behalf here". The field is retained
+	// so existing configs still parse; it no longer affects behavior.
+	RemoteHostCredentials bool `yaml:"remotehostcredentials,omitempty" json:"remoteHostCredentials,omitempty"`
 	// AutoUpgrade opts this env into the "Upgrade all" set: `erun upgrade`
 	// (and the desktop's Upgrade-all action) redeploy it to the latest
 	// version for its UpgradeChannel when the current RuntimeVersion lags.
@@ -199,6 +203,15 @@ func (c EnvConfig) BuildsHere() bool {
 // unresolved is treated as not having a remote worktree.
 func (c EnvConfig) RemoteWorktree() bool {
 	return c.Type.IsValid() && c.Type != EnvironmentTypeLocalAgent
+}
+
+// HasAWSCloudAlias reports whether the env has an AWS cloud alias attached.
+// An alias is a credential the operator already authenticated, so associating
+// it with an env means "act on my behalf here" — that association alone (no
+// separate toggle) drives delivery of the host AWS credentials into the env,
+// mirroring how attaching a Cloudflare alias delivers its token.
+func (c EnvConfig) HasAWSCloudAlias() bool {
+	return strings.TrimSpace(c.ResolvedCloudAliases()[CloudProviderAWS]) != ""
 }
 
 // legacyEnvTypeFromRemoteSnapshot derives the environment type from the

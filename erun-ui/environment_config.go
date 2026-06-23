@@ -76,7 +76,7 @@ func (a *App) persistEnvironmentConfig(selection uiSelection, config uiEnvironme
 		return eruncommon.EnvConfig{}, err
 	}
 	a.reconcileWorkspaceSyncForSelection(selection, updated.SSHD.WorkspaceSync.Enabled)
-	a.reconcileCloudCredentialsRefresherForSelection(selection, updated.RemoteHostCredentials && updated.RemoteWorktree())
+	a.reconcileCloudCredentialsRefresherForSelection(selection, updated.HasAWSCloudAlias() && updated.RemoteWorktree())
 	return updated, nil
 }
 
@@ -328,11 +328,10 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 			SSHStatus:           localPortStatus(ports.SSH),
 			ContributeAppStatus: localPortStatus(ports.ContributeApp),
 		},
-		AutoStart:             copyBoolPtr(config.AutoStart),
-		RemoteHostCredentials: config.RemoteHostCredentials,
-		AutoUpgrade:           config.AutoUpgrade,
-		UpgradeChannel:        config.ResolvedUpgradeChannel(),
-		DisableBuildScript:    config.DisableBuildScript,
+		AutoStart:          copyBoolPtr(config.AutoStart),
+		AutoUpgrade:        config.AutoUpgrade,
+		UpgradeChannel:     config.ResolvedUpgradeChannel(),
+		DisableBuildScript: config.DisableBuildScript,
 	}
 	if cloudContext, ok, err := a.linkedCloudContext(config); err != nil {
 		return uiEnvironmentConfig{}, err
@@ -585,7 +584,6 @@ func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.Env
 		existing.LocalRepoPath = localRepo
 	}
 	existing.AutoStart = copyBoolPtr(config.AutoStart)
-	existing.RemoteHostCredentials = config.RemoteHostCredentials
 	existing.AutoUpgrade = config.AutoUpgrade
 	existing.DisableBuildScript = config.DisableBuildScript
 	if eruncommon.IsValidUpgradeChannel(config.UpgradeChannel) {
