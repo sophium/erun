@@ -65,7 +65,9 @@ test.describe('multi-provider cloud aliases', () => {
     await app.sidebar.openSettings();
     await app.globalConfigDialog.waitForOpen();
     await app.globalConfigDialog.clickAddAWS();
-    await app.globalConfigDialog.waitForClosed();
+    // The add delegates to the CLI and hands the terminal over, so the settings
+    // dialog closes — the same observable invariant the Cloudflare path locks.
+    await expect(app.globalConfigDialog.locator()).toBeHidden();
   });
 
   test('sidebar shows one independent login row per provider type', async ({ app }) => {
