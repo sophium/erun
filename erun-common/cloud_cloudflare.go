@@ -14,23 +14,50 @@ import (
 	"time"
 )
 
-// cloudflareTokenVerifyURL is Cloudflare's token self-verification endpoint. A
-// successful response confirms the scoped API token is valid and active.
-const cloudflareTokenVerifyURL = "https://api.cloudflare.com/client/v4/user/tokens/verify"
+// cloudflareAPIBaseURLEnv is a subprocess-reachable test seam: when set, every
+// Cloudflare API call (token verify, accounts, zones) targets this base URL
+// instead of the live api.cloudflare.com. The desktop runs the cloud-alias
+// wizard as a `erun cloud init cloudflare` PTY subprocess, so an in-process Go
+// override (the CloudDependencies func fields) is unreachable from a desktop or
+// real-run e2e test; an env var crosses the process boundary and lets a mock
+// HTTP server stand in for Cloudflare. Mirrors the ERUN_UPGRADE_VERSIONS_OVERRIDE
+// env seam (issue #646).
+const cloudflareAPIBaseURLEnv = "ERUN_CLOUDFLARE_API_BASE_URL"
 
-// cloudflareAccountsURL lists the accounts a token can act on (works for tokens
-// with an account-scope permission). Used to auto-resolve the account id.
-const cloudflareAccountsURL = "https://api.cloudflare.com/client/v4/accounts"
+// defaultCloudflareAPIBaseURL is the live Cloudflare API root used when the
+// cloudflareAPIBaseURLEnv seam is unset.
+const defaultCloudflareAPIBaseURL = "https://api.cloudflare.com"
 
-// cloudflareZonesURL lists the zones a token can act on. It is the fallback
-// account source for a Zone-scope-only token (which cannot list /accounts):
-// each zone object carries its account id+name.
-const cloudflareZonesURL = "https://api.cloudflare.com/client/v4/zones"
+// Cloudflare API paths joined onto the resolved base URL. Kept as paths (not
+// full URLs) so the cloudflareAPIBaseURLEnv seam can redirect every call.
+const (
+	// cloudflareTokenVerifyPath is the token self-verification endpoint; a
+	// successful response confirms the scoped API token is valid and active.
+	cloudflareTokenVerifyPath = "/client/v4/user/tokens/verify"
+	// cloudflareAccountsPath lists the accounts a token can act on (works for
+	// tokens with an account-scope permission). Used to auto-resolve the account id.
+	cloudflareAccountsPath = "/client/v4/accounts"
+	// cloudflareZonesPath lists the zones a token can act on. It is the fallback
+	// account source for a Zone-scope-only token (which cannot list /accounts):
+	// each zone object carries its account id+name.
+	cloudflareZonesPath = "/client/v4/zones"
+)
 
 // CloudflareCreateTokenURL is the Cloudflare dashboard page where an operator
 // mints an API token. The guided CLI flow prints it so the operator creates the
-// scoped token in their already-authenticated browser session.
+// scoped token in their already-authenticated browser session. This is a
+// browser destination, not an API call, so the API-base seam never applies.
 const CloudflareCreateTokenURL = "https://dash.cloudflare.com/profile/api-tokens"
+
+// cloudflareAPIBaseURL resolves the Cloudflare API base URL: the
+// cloudflareAPIBaseURLEnv seam when set (trailing slash trimmed so path joins
+// stay predictable), else the live default.
+func cloudflareAPIBaseURL() string {
+	if override := strings.TrimSpace(os.Getenv(cloudflareAPIBaseURLEnv)); override != "" {
+		return strings.TrimRight(override, "/")
+	}
+	return defaultCloudflareAPIBaseURL
+}
 
 // CloudSecretStore persists provider secrets (today: Cloudflare scoped API
 // tokens) outside erun-config.yaml. Implementations key on an opaque ref so
@@ -225,11 +252,12 @@ func redactSecretPresence(value string) string {
 // the supplied scoped token. In dry-run it traces the call and returns a
 // synthetic active result without touching the network.
 func defaultVerifyCloudflareToken(ctx Context, token string) (CloudflareTokenInfo, error) {
-	ctx.Trace("GET " + cloudflareTokenVerifyURL)
+	verifyURL := cloudflareAPIBaseURL() + cloudflareTokenVerifyPath
+	ctx.Trace("GET " + verifyURL)
 	if ctx.DryRun {
 		return CloudflareTokenInfo{Status: "active"}, nil
 	}
-	return verifyCloudflareTokenAt(cloudflareTokenVerifyURL, token)
+	return verifyCloudflareTokenAt(verifyURL, token)
 }
 
 // verifyCloudflareTokenAt performs the live token verification against url. It
@@ -287,18 +315,21 @@ func verifyCloudflareTokenAt(url, token string) (CloudflareTokenInfo, error) {
 // has no account-read permission — it falls back to deriving the account from
 // the token's zones. Dry-run returns a synthetic account without any network.
 func defaultListCloudflareAccounts(ctx Context, token string) ([]CloudflareAccount, error) {
-	ctx.Trace("GET " + cloudflareAccountsURL)
+	base := cloudflareAPIBaseURL()
+	accountsURL := base + cloudflareAccountsPath
+	ctx.Trace("GET " + accountsURL)
 	if ctx.DryRun {
 		return []CloudflareAccount{{ID: "cf-account-id", Name: "Cloudflare account"}}, nil
 	}
-	accounts, err := listCloudflareAccountsAt(cloudflareAccountsURL, token)
+	accounts, err := listCloudflareAccountsAt(accountsURL, token)
 	if err == nil && len(accounts) > 0 {
 		return accounts, nil
 	}
 	// Zone-scope-only tokens cannot list /accounts; derive from the zones the
 	// token can see — each zone object carries its account id+name.
-	ctx.Trace("GET " + cloudflareZonesURL)
-	zoneAccounts, zonesErr := resolveCloudflareAccountsViaZones(cloudflareZonesURL, token)
+	zonesURL := base + cloudflareZonesPath
+	ctx.Trace("GET " + zonesURL)
+	zoneAccounts, zonesErr := resolveCloudflareAccountsViaZones(zonesURL, token)
 	if zonesErr != nil {
 		if err != nil {
 			return nil, err
