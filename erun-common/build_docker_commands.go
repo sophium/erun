@@ -20,6 +20,9 @@ func DockerImageBuilder(buildInput DockerBuildSpec, stdout, stderr io.Writer) er
 }
 
 func runMultiPlatformBuild(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
+	if err := verifyDockerBuildPlatforms(buildInput.Platforms); err != nil {
+		return err
+	}
 	perPlatformTags := make([]string, 0, len(buildInput.Platforms))
 	for _, platform := range buildInput.Platforms {
 		platformTag := platformSuffixedTag(buildInput.Image.Tag, platform)
