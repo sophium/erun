@@ -1,8 +1,8 @@
-audit: erun open --app-session open-0 --dry-run --skip-ensure team dev
+audit: erun open --app-session open-0 --dry-run team dev
 config: would assign localportrangestart=17000 to team/dev
 trace-log: would append the full trace to <TMP>
 open: tenant=team environment=dev kubernetes-context=test-context remote=true no-shell=false ide=shell
-open: --skip-ensure set, skipping the runtime deploy preflight (ensured once per environment by the desktop)
+open: pure primitive — not deploying (run `erun deploy` first, or pass --deploy to deploy before opening)
 kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 17000:17000 --address <LOOPBACK>
 kubectl --context test-context --namespace team-dev get deployment erun-api -o name
 kubectl --context test-context --namespace team-dev port-forward service/erun-api 17033:17033 --address <LOOPBACK>

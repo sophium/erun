@@ -76,14 +76,15 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 	}
 	a.mu.Unlock()
 
-	// One preflight per env (re)start (issue #463): the shared ensure runs
-	// the open/build/deploy once and streams its traces into the activity
-	// queue; the tab itself skips the preflight and waits on the deployment.
+	// open is a pure primitive now (issue #644): the tab just opens the shell
+	// and binds the forwarders against the already-deployed runtime. One thin
+	// reconnect per env (re)start window (issue #463) (re)binds the shared
+	// MCP/API forwarders; deploy is the caller's job (create / Deploy button).
 	a.ensureEnvRuntimeOnce(selection)
 	openParams := startTerminalSessionParams{
 		Dir:        resolveTerminalStartDir(result.RepoPath),
 		Executable: a.deps.resolveCLIPath(),
-		Args:       append(withAppSession(buildOpenArgs(result.Tenant, result.Environment), fmt.Sprintf("open-%d", slot), false, false), "--skip-ensure"),
+		Args:       withAppSession(buildOpenArgs(result.Tenant, result.Environment), fmt.Sprintf("open-%d", slot), false, false),
 		Env:        []string{appSessionEnvVar + "=1"},
 		Cols:       cols,
 		Rows:       rows,
@@ -256,7 +257,7 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 		// resume at the env effort, issues #451/#469), once on create. Reopening
 		// reconnects to the running claude rather than typing it in again or
 		// spawning a parallel one (#478).
-		Args: append(withAppSession(buildOpenArgs(result.Tenant, result.Environment), "ai", true, false), "--skip-ensure"),
+		Args: withAppSession(buildOpenArgs(result.Tenant, result.Environment), "ai", true, false),
 		Env:  []string{appSessionEnvVar + "=1"},
 		Cols: cols,
 		Rows: rows,
@@ -1326,9 +1327,11 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	}
 
 	a.emitReconnectMarker(managed.serial, exitReason)
-	// The respawned `erun open` runs with --skip-ensure; refresh the shared
-	// ensure (TTL-deduped) so a replaced pod gets its deploy back without
-	// every tab repeating the preflight (issue #463).
+	// The respawned `erun open` is a pure primitive (issue #644); refresh the
+	// shared thin reconnect (TTL-deduped) so a replaced pod's forwarders are
+	// rebound without every tab repeating it (issue #463). If the pod is gone
+	// for good the reconnect surfaces a recoverable failure rather than
+	// silently redeploying — deploy stays the caller's explicit action.
 	if managed.kind != sessionKindLocal {
 		a.ensureEnvRuntimeOnce(managed.selection)
 	}

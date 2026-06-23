@@ -44,6 +44,26 @@ func (a *App) emitEnvironmentInitFailed(tenant, environment string) {
 	})
 }
 
+// emitEnvironmentDeployed notifies the frontend that a deploy for an env
+// finished successfully (or was skipped because the runtime was already
+// up-to-date) — i.e. the runtime is now reachable. The frontend uses it to
+// gate the create→deploy→open flow: after `erun init`, the desktop composes a
+// deploy (build→push→deploy for builds-here envs, an in-shell deploy for the
+// rest) and opens the env's tabs only once this signal arrives, so the tabs
+// never spawn against a runtime that does not exist (issue #644). Driven by the
+// same `==> Deployed`/`==> Skipping` matcher that finalizes the deploy entry.
+func (a *App) emitEnvironmentDeployed(tenant, environment string) {
+	tenant = strings.TrimSpace(tenant)
+	environment = strings.TrimSpace(environment)
+	if tenant == "" || environment == "" {
+		return
+	}
+	a.emitEvent(environmentDeployedEvent, uiEnvironmentInitializedPayload{
+		Tenant:      tenant,
+		Environment: environment,
+	})
+}
+
 // emitEnvironmentsChanged notifies the frontend that the on-disk erun
 // config changed (file watcher). The frontend reloads state but does
 // not auto-open anything because the watcher does not know which

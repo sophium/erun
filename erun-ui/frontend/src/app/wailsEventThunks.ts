@@ -16,13 +16,21 @@ import {
   showTerminalFailure,
   showTerminalMessage,
 } from './notificationThunks';
-import { selectEnvironmentExists, selectSelectedIsPendingFor } from './selectors';
-import { openSelection, selectTerminalTab } from './sessionThunks';
+import {
+  selectEnvironmentExists,
+  selectPendingOpenAfterDeploy,
+  selectSelectedIsPendingFor,
+} from './selectors';
+import { openSelection, selectTerminalTab, startDeploySelection } from './sessionThunks';
 import { setAIBusyForEnv } from './slices/aiActivitySlice';
 import { setDoctorAll } from './slices/doctorSlice';
 import { setEnvStatusForEnv } from './slices/envStatusSlice';
 import { appendReconnectLine } from './slices/reviewSlice';
-import { setSelected } from './slices/selectionSlice';
+import {
+  clearPendingOpenAfterDeploy,
+  setPendingOpenAfterDeploy,
+  setSelected,
+} from './slices/selectionSlice';
 import { recordExitOutput, recordExitReason } from './slices/sessionsSlice';
 import type { AppDispatch, AppThunk } from './store';
 import { removeTab } from './tabsThunks';
@@ -152,8 +160,14 @@ const reloadUntilEnvironmentVisible =
 // `==> Initialized <tenant>/<env>` from a piped `erun init` command, or
 // when the config-file watcher detects a new env. Reload state so the new
 // env appears in the sidebar, surface a success toast (Nielsen #1 system
-// status visibility), then open the selection so the ERun and AI tabs
-// spawn against the now-existing config. See erun-ui/AGENTS.md §
+// status visibility), then COMPOSE A DEPLOY — not an open. `erun init` does
+// not deploy a local-agent env's runtime, and `open` is a pure primitive that
+// no longer deploys (issue #644), so opening here would spawn tabs against a
+// runtime that does not exist and fail with an MCP port-forward timeout. The
+// desktop deploys (build→push→deploy for builds-here envs, an in-shell deploy
+// for the rest) via startDeploySelection, records the env as pending-open, and
+// the matching `environment-deployed` signal (handleEnvironmentDeployed) opens
+// the tabs once the runtime is actually up. See erun-ui/AGENTS.md §
 // "Command Completion And State-Refresh Wiring".
 export const handleEnvironmentInitialized =
   (payload: EnvironmentInitializedPayload): AppThunk<Promise<void>> =>
@@ -178,6 +192,39 @@ export const handleEnvironmentInitialized =
       return;
     }
     dispatch(showNotification('success', `Created ${tenant} / ${environment}.`));
+    // Queue the open for after the deploy lands, then start the deploy. The
+    // deploy streams build/push/deploy progress into the activity queue; its
+    // success fires `environment-deployed`, which opens the tabs. A failed
+    // deploy stays visible in the activity drawer with recovery actions and
+    // simply does not auto-open (the user retries the deploy, which then opens).
+    dispatch(setPendingOpenAfterDeploy({ tenant, environment }));
+    try {
+      await dispatch(startDeploySelection({ tenant, environment }));
+    } catch (error) {
+      dispatch(clearPendingOpenAfterDeploy());
+      dispatch(showTerminalMessage(readError(error)));
+    }
+  };
+
+// Fires when the backend observes a successful (or skipped — already current)
+// deploy via `==> Deployed`/`==> Skipping`. Gates the create→deploy→open flow
+// (issue #644): if this env was queued to open after its create-time deploy,
+// the runtime is now reachable, so open its tabs. For any other deploy (the
+// Deploy button, a manual redeploy) there is no pending entry, so this is a
+// no-op — the env opens only when the user created it and asked to open it.
+export const handleEnvironmentDeployed =
+  (payload: EnvironmentInitializedPayload): AppThunk<Promise<void>> =>
+  async (dispatch, getState) => {
+    const tenant = payload.tenant.trim();
+    const environment = payload.environment.trim();
+    if (!tenant || !environment) {
+      return;
+    }
+    const pending = selectPendingOpenAfterDeploy(getState());
+    if (pending?.tenant !== tenant || pending.environment !== environment) {
+      return;
+    }
+    dispatch(clearPendingOpenAfterDeploy());
     try {
       await dispatch(openSelection({ tenant, environment }));
     } catch (error) {

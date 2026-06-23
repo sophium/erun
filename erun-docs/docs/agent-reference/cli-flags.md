@@ -93,24 +93,25 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 
 ### Common flags
 
-`--tenant`, `--environment`, `--no-shell`, `--vscode`, `--intellij`.
+`--tenant`, `--environment`, `--no-shell`, `--deploy`, `--vscode`, `--intellij`.
 
 ### Advanced flags
 
 | Flag | Type | Default | Validation | Persists to |
 |---|---|---|---|---|
+| `--deploy` | bool | `false` | Operator-convenience switch. | None. |
 | `--no-alias-prompt` | bool | `false` | Only meaningful with `--no-shell`. | None (interactive choice only). |
-| `--version <version>` | string (semver) | `EnvConfig.runtimeversion` or the CLI built-in. | Same as `erun init --version`. | `EnvConfig.runtimeversion` for this run only (not persisted). |
-| `--runtime-image <ref>` | string | `EnvConfig.runtimeimage` (unset → the published image). | Same reference rules as `erun init --runtime-image`. Applies only to envs deploying the published chart (rides in as `imageOverrides.erun-devops`); envs with a repo-local chart ignore it. | Run-only override (not persisted). |
+| `--version <version>` | string (semver) | `EnvConfig.runtimeversion` or the CLI built-in. | Same as `erun init --version`. Implies `--deploy` (pinning a version is only meaningful if it rolls out). | `EnvConfig.runtimeversion` for this run only (not persisted). |
+| `--runtime-image <ref>` | string | `EnvConfig.runtimeimage` (unset → the published image). | Same reference rules as `erun init --runtime-image`. Applies only to envs deploying the published chart (rides in as `imageOverrides.erun-devops`); envs with a repo-local chart ignore it. Implies `--deploy`. | Run-only override (not persisted). |
 
-`erun open` is a pure primitive: it brings up the runtime pod for the env's recorded version (installing the published chart by reference) and attaches a shell. It does **not** build, push, or mint a version — there is no build branch on env `type`. The retired `--snapshot`/`--no-snapshot` pair has no replacement flag. Rolling out a new version is the caller's job: the desktop app composes [`build`](#erun-build) → [`push`](#erun-push) → [`deploy`](#erun-deploy) around the open, threading the version it captured from `build --output json`.
+`erun open` is a pure primitive: it port-forwards SSH + MCP to the **already-deployed** runtime and attaches a shell. By default it does **not** build, push, mint a version, or deploy — there is no build branch on env `type`, and no `helm upgrade`. The retired `--snapshot`/`--no-snapshot` pair has no replacement flag. Rolling out a version is the caller's job: the desktop app composes [`build`](#erun-build) → [`push`](#erun-push) → [`deploy`](#erun-deploy) around the open, threading the version it captured from `build --output json`. `--deploy` is the **operator-convenience switch** that deploys before opening (builds-here envs build → push → deploy; runtime/remote envs install the recorded/`--version` published chart by reference); a `--version`/`--runtime-image` override implies it. Programmatic callers never use `--deploy` — they compose the primitives themselves.
 
 ### `erun open` lifecycle algorithm
 
-1. Parse flags; resolve effective tenant + env.
-2. Load `EnvConfig` (Kubernetes context, container registry, runtime version, type). `open` installs the published chart for the recorded runtime version by reference; it never builds or pushes.
+1. Parse flags; resolve effective tenant + env. `--version`/`--runtime-image` set the effective deploy flag.
+2. Load `EnvConfig` (Kubernetes context, container registry, runtime version, type). By default `open` neither builds, pushes, nor deploys; it expects the runtime to already exist.
 3. If `EnvConfig.cloudprovideralias` is set, look up the cloud context. If `stopped`, send the provider-specific start command. Poll the cluster API every `5s` until reachable or 5 minutes elapse (then abort `CLUSTER_UNREACHABLE`).
-4. Render the runtime chart with the effective `EnvConfig` values; run `helm upgrade --install <env>-runtime <chart>` into `<tenant>-<env>`.
+4. **If `--deploy` (or an implied deploy):** deploy the runtime first — a builds-here env composes build → push → deploy; a runtime/remote env runs `helm upgrade --install <env>-runtime <chart>` into `<tenant>-<env>` for the recorded/`--version` published chart by reference (requires a resolvable version, else `RUNTIME_VERSION_REQUIRED`). Default (no `--deploy`): this step is skipped and a trace line records that `open` is a pure primitive that is not deploying.
 5. Wait for the runtime pod's SSH server to be reachable on the in-pod port (`EnvConfig.sshd.port`, default `22`). Readiness probe is a TCP connect + banner-line read, retried every `2s` with a `60s` cap.
 6. Establish local port-forwards. `erun open` starts a detached `kubectl port-forward` per channel and records it at `<UserConfigDir>/erun/portforward/{mcp,sshd,api}/<tenant>/<env>.json` with `{tenant, environment, kubernetesContext, namespace, localPort, logPath, processId}` — see [Networking spec · Port-forward state files](/agent-reference/networking-spec#port-forward-state-files).
 7. Attach a terminal (default), print kubectl/cwd switching commands (`--no-shell`), or launch the IDE (`--vscode`/`--intellij`).
@@ -124,8 +125,9 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 | `KUBE_CONTEXT_MISSING` | `EnvConfig.kubernetescontext` is absent from `~/.kube/config`. | `1` |
 | `CLUSTER_UNREACHABLE` | Cluster API does not respond after 5 minutes. | `2` |
 | `CLOUD_START_FAILED` | Cloud-provider start command returned an error or the context entered a terminal failure state. | `2` |
-| `HELM_UPGRADE_FAILED` | `helm upgrade --install` returned non-zero. The release is in helm's failure state; consult `helm history`. | `2` |
-| `SSH_READY_TIMEOUT` | SSH server did not come up within the `60s` readiness window. | `2` |
+| `RUNTIME_VERSION_REQUIRED` | `--deploy` for an env with no local chart and no resolvable runtime version (none recorded, none passed via `--version`). Run `erun deploy --version <v>` or persist a version. | `1` |
+| `HELM_UPGRADE_FAILED` | `helm upgrade --install` returned non-zero (only on the `--deploy` path). The release is in helm's failure state; consult `helm history`. | `2` |
+| `SSH_READY_TIMEOUT` | SSH server did not come up within the `60s` readiness window — most often because the runtime was never deployed (run `erun deploy` or `erun open --deploy`). | `2` |
 | `IDE_LAUNCHER_MISSING` | `--vscode` / `--intellij` requested but the launcher binary isn't on `PATH`. Falls back to printing SSH details; exit `0`. | `0` |
 
 ---

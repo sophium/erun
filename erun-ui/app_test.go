@@ -2515,10 +2515,11 @@ func TestStartSessionLeavesCloudContextStartupToErunCommand(t *testing.T) {
 	}
 
 	got := strings.Join(actions, "\n")
-	// The ERun tab runs `erun open … --app-session open-0 --skip-ensure`: a
-	// persistent, reattachable dtach session (#478) whose preflight runs once
-	// per env via the shared ensure, not per tab (#463).
-	if got != "terminal open frs prod --app-session open-0 --skip-ensure" {
+	// The ERun tab runs a pure `erun open … --app-session open-0` (#644): a
+	// persistent, reattachable dtach session (#478). open no longer deploys —
+	// the shared thin reconnect (#463) rebinds the forwarders, and deploy is
+	// the caller's job — so there is no --skip-ensure flag any more.
+	if got != "terminal open frs prod --app-session open-0" {
 		t.Fatalf("expected only terminal start action, got:\n%s", got)
 	}
 	// Cloud-context Status is no longer persisted, so we rely on the
@@ -3750,14 +3751,15 @@ func TestStartAISessionRunsErunOpenAsPersistentAITab(t *testing.T) {
 	if started.Executable != "/tmp/erun" {
 		t.Fatalf("expected erun executable, got %q", started.Executable)
 	}
-	// The AI tab runs `erun open --app-session ai --ai`: the persistent remote
-	// session launches the AI tool itself (pod-side, once on create), so a reopen
-	// reconnects to the running claude. The desktop no longer types the launch
-	// in, so there is no initial input. The AI tool + effort are resolved pod-side
-	// by `erun open --ai`; AISessionLaunchCommand is covered in erun-common. #478.
-	// --skip-ensure: the preflight runs once per env via the shared ensure,
-	// not per tab (#463).
-	wantArgs := []string{"open", "erun", "remote", "--app-session", "ai", "--ai", "--skip-ensure"}
+	// The AI tab runs a pure `erun open --app-session ai --ai`: the persistent
+	// remote session launches the AI tool itself (pod-side, once on create), so a
+	// reopen reconnects to the running claude. The desktop no longer types the
+	// launch in, so there is no initial input. The AI tool + effort are resolved
+	// pod-side by `erun open --ai`; AISessionLaunchCommand is covered in
+	// erun-common. #478. open is pure now (#644): no --skip-ensure flag — the
+	// shared thin reconnect rebinds forwarders once per env (#463), deploy is
+	// the caller's job.
+	wantArgs := []string{"open", "erun", "remote", "--app-session", "ai", "--ai"}
 	if strings.Join(started.Args, "\n") != strings.Join(wantArgs, "\n") {
 		t.Fatalf("unexpected args: got %+v want %+v", started.Args, wantArgs)
 	}

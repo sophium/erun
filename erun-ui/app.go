@@ -17,6 +17,7 @@ const (
 	mcpReconnectLineEvent       = "mcp-reconnect-line"
 	environmentInitializedEvent = "environment-initialized"
 	environmentInitFailedEvent  = "environment-init-failed"
+	environmentDeployedEvent    = "environment-deployed"
 	environmentsChangedEvent    = "environments-changed"
 	aiActivityEvent             = "ai-activity"
 	envStatusEvent              = "env-status"

@@ -356,22 +356,23 @@ func TestOpen(t *testing.T) {
 		}
 	})
 
-	t.Run("vscode_real_run_requires_deploy_errors", func(t *testing.T) {
-		// Real-run companion to the vscode_dry_run redeploy trace: when the
-		// runtime deployment is missing and the user asked for an IDE
-		// launch, deployRuntime must refuse with the actionable "run
-		// `erun sshd init` or `erun open` first" error instead of deploying
-		// behind the IDE's back. The kubectl NotFound stub is the
-		// deployment-check decision input; the run fails before any
-		// port-forward starts so no ports are needed.
+	t.Run("vscode_real_run_with_deploy_requires_shell_deploy_errors", func(t *testing.T) {
+		// open is pure (issue #644): it does not deploy. --deploy is the
+		// operator-convenience shortcut, but an IDE launch has no shell to
+		// host the deploy progress, so even `open --deploy --vscode` must
+		// refuse with the actionable "run `erun sshd init` or `erun deploy`
+		// first" error instead of deploying behind the IDE's back. (Bare
+		// `open --vscode` is pure and never reaches this guard.) The kubectl
+		// NotFound stub is the deployment-check decision input; the run fails
+		// before any port-forward starts so no ports are needed.
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnvWithSSHD(t, setup, "team", "dev")
 		envVars := append(stubKubectlNotFound(t, setup), "ERUN_HOST_OS_OVERRIDE=darwin")
-		result := erun.Run(t, []string{"open", "team", "dev", "--vscode", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"open", "team", "dev", "--vscode", "--deploy", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit when the IDE open needs a runtime deploy, got 0:\n%s", result.Combined)
 		}
-		golden.Equal(t, "open/vscode_real_run_requires_deploy_errors", normalize.Apply(result.Combined))
+		golden.Equal(t, "open/vscode_real_run_with_deploy_requires_shell_deploy_errors", normalize.Apply(result.Combined))
 	})
 
 	t.Run("alias_prompt_skipped_when_alias_configured", func(t *testing.T) {
@@ -534,17 +535,54 @@ func TestOpen(t *testing.T) {
 		golden.Equal(t, "open/remote_dry_run_aws_alias_propagates_host_credentials", normalize.Apply(result.Combined))
 	})
 
-	t.Run("app_session_skip_ensure_dry_run_skips_the_deploy_preflight", func(t *testing.T) {
-		// #463: the desktop runs the open/build/deploy preflight once per env
-		// (the shared ensure) and spawns every tab with --skip-ensure. The
-		// flag must skip the preflight with an explicit trace — and nothing
-		// else: the shell preview (the deployment wait + dtach exec) still
-		// runs, which is what holds the tab until the ensure's deploy lands.
+	t.Run("app_session_dry_run_pure_open_does_not_deploy", func(t *testing.T) {
+		// open is a pure primitive (issue #644): it does not deploy. The
+		// desktop composes build→push→deploy on create / via the Deploy
+		// button and spawns tabs that just open the shell, so the default
+		// open must trace that it is not deploying — and nothing else
+		// changes: the shell preview (the deployment wait + dtach exec) still
+		// runs, which holds the tab until the runtime is reachable.
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 		envVars := stubKubectlNotFound(t, setup)
-		result := erun.Run(t, []string{"open", "team", "dev", "--app-session", "open-0", "--skip-ensure", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		golden.Equal(t, "open/app_session_skip_ensure_dry_run_skips_the_deploy_preflight", normalize.Apply(result.Combined))
+		result := erun.Run(t, []string{"open", "team", "dev", "--app-session", "open-0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "open/app_session_dry_run_pure_open_does_not_deploy", normalize.Apply(result.Combined))
+	})
+
+	t.Run("deploy_flag_dry_run_deploys_runtime_before_opening", func(t *testing.T) {
+		// --deploy is the operator-convenience shortcut (issue #644): open
+		// deploys the runtime before opening. The kubectl NotFound stub is the
+		// deployment-check decision input so the resolver picks the deploy
+		// branch and traces the full published-chart deploy plan, then the
+		// shell preview. This locks the deploy-decision path (maybeDeployRuntime
+		// → shouldDeployRuntime → checkKubernetesDeployment → deployRuntime)
+		// that bare pure `open` no longer exercises.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		envVars := stubKubectlNotFound(t, setup)
+		result := erun.Run(t, []string{"open", "team", "dev", "--deploy", "--no-shell", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "open/deploy_flag_dry_run_deploys_runtime_before_opening", normalize.Apply(result.Combined))
+	})
+
+	t.Run("deploy_flag_dry_run_fresh_env_requires_runtime_version", func(t *testing.T) {
+		// The fresh-env coverage gap that hid the #644 regression: an env with
+		// no persisted runtimeversion and no local/published chart. With
+		// --deploy, the published-chart resolver bails with the "runtime
+		// version is required" decision trace + error instead of silently
+		// deploying nothing. The desktop must avoid this by composing deploy at
+		// a built version on create; this scenario locks the decision so the
+		// fresh-env path cannot regress unnoticed. (Bare pure `open` would not
+		// deploy at all — the version is only required on the --deploy path.)
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnvNoVersion(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"open", "team", "dev", "--deploy", "--no-shell", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when no runtime version can be resolved, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "open/deploy_flag_dry_run_fresh_env_requires_runtime_version", normalize.Apply(result.Combined))
 	})
 
 	t.Run("app_session_ai_dry_run_wraps_dtach_and_launches_claude", func(t *testing.T) {

@@ -523,6 +523,13 @@ func (a *App) finishDeployByTenantEnv(selection uiSelection, tenant, environment
 			// normally because latestDeployFailed is now false.
 			a.emitEnvStatus(uiSelection{Tenant: tenant, Environment: environment}, "")
 		}
+		if status == activityQueueStatusSucceeded || status == activityQueueStatusSkipped {
+			// The runtime is now reachable (deployed, or skipped because it was
+			// already current). Signal the create→deploy→open gate so a
+			// freshly-created env opens its tabs only after deploy lands, never
+			// against a runtime that does not exist (issue #644).
+			a.emitEnvironmentDeployed(tenant, environment)
+		}
 	}
 }
 

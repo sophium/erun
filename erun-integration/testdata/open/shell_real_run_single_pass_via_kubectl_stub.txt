@@ -1,5 +1,5 @@
 audit: erun open team dev
 trace-log: appending the full trace to <TMP>
 open: tenant=team environment=dev kubernetes-context=test-context remote=false no-shell=false ide=shell
-deploy: version <VERSION> pinned; installing the published image by reference (deploy never builds)
+open: pure primitive — not deploying (run `erun deploy` first, or pass --deploy to deploy before opening)
 open: SSH private key streamed to the runtime pod on stdin (kept off the command line)

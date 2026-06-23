@@ -350,6 +350,43 @@ func SeedRemoteTenantEnv(t testing.TB, setup env.Setup, tenant, environment stri
 	)
 }
 
+// SeedRuntimeTenantEnvNoVersion writes a runtime-type env tree with NO
+// runtimeversion (and no local/published chart), reproducing the fresh-env
+// decision path that the desktop create regression (#644) hit: with no version
+// to deploy, the published-chart resolver bails with "runtime version is
+// required". Every other fixture pins runtimeversion: 1.0.0, so this is the
+// single fixture that locks the empty-version path under `open --deploy`.
+func SeedRuntimeTenantEnvNoVersion(t testing.TB, setup env.Setup, tenant, environment string) {
+	t.Helper()
+	root := filepath.Join(setup.ConfigHome, "erun")
+	tenantDir := filepath.Join(root, tenant)
+	envDir := filepath.Join(tenantDir, environment)
+	for _, dir := range []string{root, tenantDir, envDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	repoPath := filepath.Join(setup.Home, "git", tenant)
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("mkdir repo %s: %v", repoPath, err)
+	}
+
+	mustWrite(t, filepath.Join(root, "config.yaml"), "defaulttenant: "+tenant+"\n")
+	mustWrite(t, filepath.Join(tenantDir, "config.yaml"),
+		"projectroot: "+repoPath+"\n"+
+			"name: "+tenant+"\n"+
+			"defaultenvironment: "+environment+"\n",
+	)
+	mustWrite(t, filepath.Join(envDir, "config.yaml"),
+		"name: "+environment+"\n"+
+			"repopath: "+repoPath+"\n"+
+			"kubernetescontext: test-context\n"+
+			"containerregistry: registry.example/test\n"+
+			"type: runtime\n",
+	)
+}
+
 // SeedLegacyRemoteTenantEnv writes a tenant/env tree whose env config carries
 // the retired pre-#376 `remote: true` shape with no `type` and no `snapshot`.
 // It exists to exercise EnvConfig.UnmarshalYAML's legacy migration on read:
