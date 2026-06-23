@@ -48,7 +48,7 @@ test.describe('terminal scroll on resize (#465)', () => {
     await expect.poll(() => viewportHasScrollback(page), { timeout: 10_000 }).toBe(true);
     // xterm keeps an at-bottom viewport pinned while output streams, so the
     // staging leaves the viewport at the live prompt.
-    await expect.poll(() => terminalAtBottom(page), { timeout: 5_000 }).toBe(true);
+    await expect.poll(() => terminalAtBottom(page)).toBe(true);
 
     // At-bottom resize: the review-panel toggle changes the terminal's
     // column count and rewraps the buffer; the viewport must come back to
@@ -56,16 +56,16 @@ test.describe('terminal scroll on resize (#465)', () => {
     const colsBefore = await readTerminalCols(page);
     expect(colsBefore).toBeGreaterThan(0);
     await app.titlebar.toggleReviewPanel();
-    await expect.poll(() => readTerminalCols(page), { timeout: 5_000 }).not.toBe(colsBefore);
-    await expect.poll(() => terminalAtBottom(page), { timeout: 5_000 }).toBe(true);
+    await expect.poll(() => readTerminalCols(page)).not.toBe(colsBefore);
+    await expect.poll(() => terminalAtBottom(page)).toBe(true);
 
     // Scrolled-up resize: a reader parked in history must not be yanked to
     // the bottom by the next resize.
     await setViewportScrollTop(page, 0);
-    await expect.poll(() => terminalAtBottom(page), { timeout: 5_000 }).toBe(false);
+    await expect.poll(() => terminalAtBottom(page)).toBe(false);
     const colsMid = await readTerminalCols(page);
     await app.titlebar.toggleReviewPanel(); // restores the panel to its original state
-    await expect.poll(() => readTerminalCols(page), { timeout: 5_000 }).not.toBe(colsMid);
+    await expect.poll(() => readTerminalCols(page)).not.toBe(colsMid);
     // The faulty force-scroll would fire from the post-fit write callback
     // within milliseconds of the refit; sample the viewport over a short
     // window and require that it never lands at the bottom.
@@ -75,23 +75,23 @@ test.describe('terminal scroll on resize (#465)', () => {
     // at the bottom — the viewport must come back to the prompt — then grow
     // it back while scrolled up — the reading position must survive.
     await setViewportScrollTop(page, Number.MAX_SAFE_INTEGER);
-    await expect.poll(() => terminalAtBottom(page), { timeout: 5_000 }).toBe(true);
+    await expect.poll(() => terminalAtBottom(page)).toBe(true);
     const colsWide = await readTerminalCols(page);
     await page.setViewportSize({ width: 1080, height: 860 });
-    await expect.poll(() => readTerminalCols(page), { timeout: 5_000 }).not.toBe(colsWide);
-    await expect.poll(() => terminalAtBottom(page), { timeout: 5_000 }).toBe(true);
+    await expect.poll(() => readTerminalCols(page)).not.toBe(colsWide);
+    await expect.poll(() => terminalAtBottom(page)).toBe(true);
 
     await setViewportScrollTop(page, 0);
-    await expect.poll(() => terminalAtBottom(page), { timeout: 5_000 }).toBe(false);
+    await expect.poll(() => terminalAtBottom(page)).toBe(false);
     const colsNarrow = await readTerminalCols(page);
     await page.setViewportSize({ width: 1440, height: 1200 }); // config default
-    await expect.poll(() => readTerminalCols(page), { timeout: 5_000 }).not.toBe(colsNarrow);
+    await expect.poll(() => readTerminalCols(page)).not.toBe(colsNarrow);
     expect(await viewportEverAtBottom(page, 600)).toBe(false);
 
     // Leave the viewport at the prompt so later specs in the singleton
     // backend see the usual at-bottom baseline.
     await setViewportScrollTop(page, Number.MAX_SAFE_INTEGER);
-    await expect.poll(() => terminalAtBottom(page), { timeout: 5_000 }).toBe(true);
+    await expect.poll(() => terminalAtBottom(page)).toBe(true);
   });
 });
 
@@ -120,7 +120,7 @@ function parseInvoke(req: Request): InvokeCall | null {
 // then restores the sidebar. 0 means no session is selected.
 async function discoverSelectedSessionId(app: AppShell, page: Page): Promise<number> {
   const waitForResize = page
-    .waitForRequest((req) => parseInvoke(req)?.method === 'ResizeSession', { timeout: 1500 })
+    .waitForRequest((req) => parseInvoke(req)?.method === 'ResizeSession')
     .catch(() => null);
   await app.titlebar.toggleButton().click();
   const resize = await waitForResize;

@@ -48,9 +48,7 @@ test('failed deploy card reveals captured output and offers a copyable report', 
   const card = drawer.locator('article').filter({ hasText: 'petios/rihards-develop' }).first();
 
   // The one-line summary stays first-class.
-  await expect(card.getByText('==> Deploy failed after 4s', { exact: false })).toBeVisible({
-    timeout: 5000,
-  });
+  await expect(card.getByText('==> Deploy failed after 4s', { exact: false })).toBeVisible();
 
   // Captured output is collapsed by default and revealed via the disclosure.
   // "UPGRADE FAILED" lives only in the captured output, never in the summary.

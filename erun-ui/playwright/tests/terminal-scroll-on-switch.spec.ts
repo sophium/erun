@@ -58,7 +58,7 @@ test.describe('terminal scroll on session switch', () => {
     await localTab.click();
     await extraTab.click();
 
-    await expect.poll(() => terminalAtBottom(page), { timeout: 5_000 }).toBe(true);
+    await expect.poll(() => terminalAtBottom(page)).toBe(true);
 
     // Close the spawned terminal so the extra session does not drift the
     // session set the singleton headless backend hands to later specs. The
