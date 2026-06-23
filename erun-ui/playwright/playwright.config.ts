@@ -24,7 +24,9 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
+  // No retries: a spec that only passes on a retry is flaky, and flakiness is a
+  // determinism defect to fix, never to mask (see AGENTS.md "No flaky tests").
+  retries: 0,
   reporter: [['list'], ['html', { open: 'never' }]],
   timeout: 30_000,
   expect: {
@@ -37,7 +39,9 @@ export default defineConfig({
     // be taller than a normal 900px viewport. Bump the height so footer
     // buttons stay reachable without artificial scrolling.
     viewport: { width: 1440, height: 1200 },
-    trace: 'on-first-retry',
+    // Retries are off, so capture the trace on every failure (not just on a
+    // retry that never happens) to keep failures debuggable via `yarn report`.
+    trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
   projects: [
