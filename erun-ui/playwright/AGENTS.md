@@ -78,7 +78,17 @@ There is only one supported way to run the suite. The shell script `run.sh` in t
   - "Assert nothing happened" (no extra RPC, no state flip) is the one hard case: wait for a deterministic completion signal first — a settled UI state, or the next `waitForResponse` — then assert, so the window is bounded by a real event rather than a guessed delay.
 - Treat assertion failures as bugs to investigate. A red that is a real frontend regression → fix the frontend; a red that is non-deterministic → fix the determinism per above. When a red appears, rebuild from `main` and re-run the focused spec to learn whether your change caused it — that is a diagnostic to locate the cause, **not** licence to leave a confirmed flake in place. `test.skip` is reserved only for state the headless harness genuinely cannot reach (a live cluster, a real runtime pod, a real Codex session); stage everything else (see "Isolated config root and seeded baseline").
 
+## Opt-in k3d e2e mode (issue #647)
+
+The default suite is inert and offline: it PATH-prepends stub `kubectl`/`helm`/`docker` and pins `ERUN_APP_CLI` to an inert `erun` stub, so no real deploy ever runs. That is by design (no hosted CI, #521) but it structurally cannot see the desktop's full create → build → push → deploy → open → MCP flow — the bug class #644 fixed. The **opt-in k3d mode** exercises that flow against a real local cluster.
+
+- **How to run:** `./run.sh --e2e-k3d` (sets `ERUN_E2E_K3D=1`). It builds the real `erun` CLI for the desktop tabs, registers binfmt for the mandatory multi-arch build, brings a throwaway k3d cluster + built-in registry up in `global-setup`, runs **only** `tests/e2e/`, and tears the cluster down in `global-teardown` (the `run.sh` EXIT trap is the backstop).
+- **Host preconditions:** Docker running, `k3d` installed, and binfmt registered for the foreign arch (`erun` always builds `linux/amd64` + `linux/arm64`; the #645 daemon-capability preflight fails fast otherwise). Without these the mode cannot run — it is a developer/manual gate, never part of the default `run.sh` or `make integration-test`.
+- **Gating:** the e2e specs live under `tests/e2e/` and are excluded from the default run via `playwright.config.ts` `testIgnore` (not per-spec `test.skip`), so the default suite never collects them. `ERUN_E2E_K3D=1` flips the un-stubbed `backendEnv()` branch (real tools + real `erun`, only `aws` stubbed via `ERUN_AWS_BIN`) and includes the dir. Keep both directions intact: the k3d branch must never leak into the default inert mode, and the inert specs (which assume stubs) must never run against the real-tool backend.
+- **Determinism still binding (#643):** cluster specs are the classic flake source. Wait on observable conditions (activity-queue trace lines, the rendered ERun tab, pod-Ready), never wall-clock; size per-spec `test.setTimeout` for the real build → push → deploy round-trip (minutes), which is far slower than any default spec.
+
 ## Validation
 
 - Run `./run.sh` (or `yarn test`) before pushing changes that touch any frontend component, slice, thunk, or controller method exposed to the React tree.
+- For changes to the desktop create → deploy → open flow or its deployed artifacts, also run the opt-in k3d e2e mode (`./run.sh --e2e-k3d`) on a Docker + k3d + binfmt host — it is the only signal that exercises the real runtime end-to-end.
 - After failures, run `yarn report` to open the HTML report. Traces and screenshots for failed tests live under `playwright-report/` and `test-results/`.

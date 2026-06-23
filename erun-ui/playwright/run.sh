@@ -30,11 +30,19 @@ FORCE_BUILD=0
 HEADED=0
 PORT=34123
 PLAYWRIGHT_ARGS=""
+E2E_K3D=0
 
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--build)
 			FORCE_BUILD=1
+			shift
+			;;
+		--e2e-k3d)
+			# Opt-in k3d-backed e2e mode (issue #647): run the real
+			# create -> build -> push -> deploy -> open flow against a live
+			# local k3d cluster. Requires Docker + k3d + binfmt on the host.
+			E2E_K3D=1
 			shift
 			;;
 		--skip-build)
@@ -170,6 +178,30 @@ cleanup_isolated_home() {
 	fi
 }
 trap cleanup_isolated_home EXIT
+
+# Opt-in k3d e2e mode (issue #647): un-stub the backend (real docker/kubectl/
+# helm + the real erun CLI), register binfmt for the mandatory multi-arch build,
+# and run ONLY the e2e specs (the inert specs assume stubs). global-setup brings
+# the k3d cluster up; global-teardown (and the EXIT trap) tear it down. Must be
+# exported before the playwright invocation below so playwright.config.ts /
+# backendEnv() see it at config-load and at webServer boot.
+if [ "$E2E_K3D" -eq 1 ]; then
+	export ERUN_E2E_K3D=1
+	printf '>> playwright(k3d): building the erun CLI for the desktop tabs...\n' >&2
+	ERUN_E2E_ERUN_BIN="$ERUN_UI_DIR/bin/erun"
+	( cd "$ERUN_UI_DIR/../erun-cli" && go build -o "$ERUN_E2E_ERUN_BIN" . )
+	export ERUN_E2E_ERUN_BIN
+	# erun always builds linux/amd64 + linux/arm64; register binfmt so the
+	# foreign arch builds (the production preflight from #645 fails fast
+	# otherwise). Idempotent and harmless when already registered.
+	printf '>> playwright(k3d): registering binfmt for multi-arch builds...\n' >&2
+	docker run --privileged --rm tonistiigi/binfmt --install all >/dev/null 2>&1 || true
+	# Inert specs must not run against the real-tool backend; default the target
+	# to the e2e dir when the caller did not pass an explicit one.
+	if [ -z "$PLAYWRIGHT_ARGS" ]; then
+		PLAYWRIGHT_ARGS='"tests/e2e"'
+	fi
+fi
 
 PLAYWRIGHT_FLAGS=""
 if [ "$HEADED" -eq 1 ]; then
