@@ -19,8 +19,10 @@ type DeleteInput struct {
 
 func deleteTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, DeleteInput) (*mcp.CallToolResult, CommandOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input DeleteInput) (*mcp.CallToolResult, CommandOutput, error) {
-		tenant := firstNonEmpty(input.Tenant, runtime.Context.Tenant)
-		environment := firstNonEmpty(input.Environment, runtime.Context.Environment)
+		tenant, environment, err := scopedTenantEnv(input.Tenant, input.Environment, runtime)
+		if err != nil {
+			return nil, CommandOutput{}, err
+		}
 		expected := eruncommon.DeleteEnvironmentConfirmation(tenant, environment)
 		if expected == "" {
 			return nil, CommandOutput{}, fmt.Errorf("tenant and environment are required")
