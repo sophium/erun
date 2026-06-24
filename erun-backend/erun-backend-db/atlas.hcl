@@ -7,6 +7,7 @@ env "default" {
   src = [
     "file://schema/rls/context.sql",
     "file://schema/tables/tenants.sql",
+    "file://schema/tables/tenant_quotas.sql",
     "file://schema/tables/issuers.sql",
     "file://schema/tables/tenant_issuers.sql",
     "file://schema/tables/users.sql",
@@ -48,6 +49,7 @@ env "default" {
     "file://schema/rls/audit_events.sql",
     "file://schema/rls/contexts.sql",
     "file://schema/rls/environments.sql",
+    "file://schema/rls/tenant_quotas.sql",
   ]
   url = var.database_url
   dev = "docker://postgres/18/dev?search_path=public"

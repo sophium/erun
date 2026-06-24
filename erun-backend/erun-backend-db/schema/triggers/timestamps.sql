@@ -84,3 +84,8 @@ CREATE TRIGGER environments_set_timestamps
   BEFORE INSERT OR UPDATE ON environments
   FOR EACH ROW
   EXECUTE FUNCTION erun_set_timestamps();
+
+CREATE TRIGGER tenant_quotas_set_timestamps
+  BEFORE INSERT OR UPDATE ON tenant_quotas
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();

@@ -186,6 +186,8 @@ On success the endpoint persists the row and returns it with HTTP `201`:
 }
 ```
 
+**Per-tenant environment-count quota.** After validating the body and before persisting, the endpoint enforces the tenant's environment-count cap: it compares how many environments the tenant already has against the cap and rejects the registration with HTTP `409` once the tenant is at or over it. The cap defaults to **10** and is overridden per tenant by a `tenant_quotas.max_environments` row. That override row is set **out-of-band** today — directly in the `tenant_quotas` table (a migration or operator-run statement); an operations quota-set endpoint is `(Planned.)`. Both the count and the cap are read under row-level security, so each is scoped to the caller's own tenant.
+
 **Live namespace + runtime-chart deploy is `(Planned.)`.** This endpoint registers the environment row only; it does **not** yet ensure the `<tenant>-<env>` namespace or deploy the runtime chart server-side (that runs `RunBootstrapInitWithDependencies` against a live cluster). Until that lands, a registered environment stands as registered config — the namespace creation and chart deploy from the registered row are the planned follow-up.
 
 **Error behaviour.** Today the API returns a bare HTTP status with a plain-text body (no JSON envelope):
@@ -194,6 +196,7 @@ On success the endpoint persists the row and returns it with HTTP `201`:
 |---|---|---|
 | `400` | `name` is not a DNS-1123 label (the env forms the `<tenant>-<env>` namespace), `type` is not one of `runtime`/`remote-agent`/`local-agent`, or the body is not valid JSON. | Send a DNS-1123 `name` and a valid `type`. |
 | `401` / `403` | Standard auth failures (see [Errors](#errors)). The `WriteAll` permission covers `POST /v1/environments`. | Send a valid token whose roles permit the write. |
+| `409` | The tenant is at its environment-count cap (default `10` unless a `tenant_quotas` row overrides it); the body is `environment quota reached: this tenant already has N of N environments`. | Delete an unused environment, or raise the tenant's `tenant_quotas.max_environments` cap (out-of-band today; an operations quota-set endpoint is `(Planned.)`). |
 | `500` | Persistence failed — e.g. `contextId` references a context that is not the caller's (the composite `(tenant_id, context_id)` foreign key is violated), or the request-scoped security context is missing (an internal wiring error). | Reference a context owned by the caller's tenant; if it persists with a valid context, it is a server bug. |
 
 ### `POST /v1/contexts`

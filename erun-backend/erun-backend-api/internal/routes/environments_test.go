@@ -10,13 +10,17 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 )
 
-func postCreateEnvironment(t *testing.T, environments *stubEnvironmentRepository, body string) *httptest.ResponseRecorder {
+func postCreateEnvironment(t *testing.T, environments *stubEnvironmentRepository, quotas stubTenantQuotaRepository, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/v1/environments", bytes.NewBufferString(body))
 	rec := httptest.NewRecorder()
-	EnvironmentRoutes{environments: environments}.createEnvironment(rec, req)
+	EnvironmentRoutes{environments: environments, quotas: quotas}.createEnvironment(rec, req)
 	return rec
 }
+
+// underCapQuota is a quota that always admits another environment, so tests that
+// are not exercising the guardrail itself get past the quota check.
+var underCapQuota = stubTenantQuotaRepository{maxEnvironments: 10}
 
 func TestCreateEnvironmentRejectsInvalidInput(t *testing.T) {
 	cases := map[string]string{
@@ -32,7 +36,7 @@ func TestCreateEnvironmentRejectsInvalidInput(t *testing.T) {
 	for label, body := range cases {
 		t.Run(label, func(t *testing.T) {
 			environments := &stubEnvironmentRepository{}
-			rec := postCreateEnvironment(t, environments, body)
+			rec := postCreateEnvironment(t, environments, underCapQuota, body)
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("unexpected status: %d", rec.Code)
 			}
@@ -47,7 +51,7 @@ func TestCreateEnvironmentPersistsAndReturnsRow(t *testing.T) {
 	for _, envType := range []string{"runtime", "remote-agent", "local-agent"} {
 		t.Run(envType, func(t *testing.T) {
 			environments := &stubEnvironmentRepository{created: model.Environment{EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentType(envType)}}
-			rec := postCreateEnvironment(t, environments, `{
+			rec := postCreateEnvironment(t, environments, underCapQuota, `{
 				"name": "prod",
 				"type": "`+envType+`",
 				"contextId": "ctx-1",
@@ -82,8 +86,35 @@ func TestCreateEnvironmentSurfacesRepositoryError(t *testing.T) {
 	// A context_id from another tenant violates the composite foreign key; the
 	// repository error is surfaced as a clean HTTP error, not a SQL leak.
 	environments := &stubEnvironmentRepository{err: errForeignKey{}}
-	rec := postCreateEnvironment(t, environments, `{"name":"prod","type":"runtime","contextId":"ctx-other"}`)
+	rec := postCreateEnvironment(t, environments, underCapQuota, `{"name":"prod","type":"runtime","contextId":"ctx-other"}`)
 	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("unexpected status: %d", rec.Code)
+	}
+	if environments.createCalls != 1 {
+		t.Fatalf("expected exactly one Create call, got %d", environments.createCalls)
+	}
+}
+
+// TestCreateEnvironmentRejectsAtQuota proves the environment-count guardrail:
+// once the tenant is at its cap (count == max), registration is rejected with
+// 409 and Create never runs. The input is valid, so only the quota stops it.
+func TestCreateEnvironmentRejectsAtQuota(t *testing.T) {
+	environments := &stubEnvironmentRepository{count: 10}
+	rec := postCreateEnvironment(t, environments, stubTenantQuotaRepository{maxEnvironments: 10}, `{"name":"prod","type":"runtime"}`)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("unexpected status: %d", rec.Code)
+	}
+	if environments.createCalls != 0 {
+		t.Fatalf("Create must not run when the tenant is at its quota, got %d calls", environments.createCalls)
+	}
+}
+
+// TestCreateEnvironmentAllowsUnderQuota proves that with room under the cap
+// (count < max) registration proceeds and Create runs exactly once.
+func TestCreateEnvironmentAllowsUnderQuota(t *testing.T) {
+	environments := &stubEnvironmentRepository{count: 9}
+	rec := postCreateEnvironment(t, environments, stubTenantQuotaRepository{maxEnvironments: 10}, `{"name":"prod","type":"runtime"}`)
+	if rec.Code != http.StatusCreated {
 		t.Fatalf("unexpected status: %d", rec.Code)
 	}
 	if environments.createCalls != 1 {

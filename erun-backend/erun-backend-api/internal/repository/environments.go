@@ -49,6 +49,19 @@ func (r *EnvironmentRepository) List(ctx context.Context) ([]model.Environment, 
 	return environments, err
 }
 
+// Count returns how many environments the caller's tenant has. RLS scopes the
+// count to the caller's tenant, so no tenant filter is needed here; the quota
+// guardrail compares it against the tenant's environment-count cap.
+func (r *EnvironmentRepository) Count(ctx context.Context) (int, error) {
+	var count int
+	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		var err error
+		count, err = tx.NewSelect().Model((*model.Environment)(nil)).Count(ctx)
+		return err
+	})
+	return count, err
+}
+
 func (r *EnvironmentRepository) Get(ctx context.Context, environmentID string) (model.Environment, error) {
 	var environment model.Environment
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
