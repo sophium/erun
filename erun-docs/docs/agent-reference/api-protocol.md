@@ -82,7 +82,7 @@ When no trust anchor is configured the edge stays loopback-only (legacy, unauthe
 ### Endpoints
 
 :::note Shipped vs planned
-The `(iss, org) → tenant` resolution model and first-identity bootstrap above are **shipped**, as are `GET /v1/whoami`, `GET /v1/tenant-issuers` (list), and `PATCH /v1/tenant-issuers` (rename a trusted issuer's display name). Today, issuers and their org-scoping mode are provisioned directly in the `issuers` / `tenant_issuers` tables (migrations or the bootstrap path), not via a self-service endpoint. A self-service **trust-management** API (adding/removing issuers with `audience`/`tenantClaim`/`allowedSubjects`, and the `409`/`422` codes below) is `(Planned.)`, as is the structured machine-readable error `code` field — today the API returns bare HTTP status codes with a plain-text body (see [Errors](#errors) below).
+The `(iss, org) → tenant` resolution model and first-identity bootstrap above are **shipped**, as are `GET /v1/whoami`, `GET /v1/tenant-issuers` (list), and `PATCH /v1/tenant-issuers` (rename a trusted issuer's display name). New tenants and their issuer mapping can be registered through the operations-only `POST /v1/tenants` below; for an existing tenant, additional issuers and their org-scoping mode are still provisioned directly in the `issuers` / `tenant_issuers` tables (migrations or the bootstrap path), not via a tenant-self-service endpoint. A tenant-self-service **trust-management** API (a tenant adding/removing its own issuers with `audience`/`tenantClaim`/`allowedSubjects`, and the `409`/`422` codes below) is `(Planned.)`, as is the structured machine-readable error `code` field — today the API returns bare HTTP status codes with a plain-text body (see [Errors](#errors) below).
 :::
 
 | Method | Path | Description | Required scope |
@@ -92,10 +92,12 @@ The `(iss, org) → tenant` resolution model and first-identity bootstrap above 
 | `GET` | `/v1/whoami` | Resolved identity for the calling token. Response below. | Tenant member |
 | `GET` | `/v1/config` | The console's read model over the per-tenant erun config: `{tenant, environments[], contexts[]}`. | Tenant member |
 | `GET` | `/v1/environments` | List the tenant's environments. | Tenant member |
+| `POST` | `/v1/environments` | Register an environment in the caller's tenant, bound to a referenced context. Body below. | Tenant member (write) |
 | `GET` | `/v1/environments/{environment_id}` | Fetch one environment by id. | Tenant member |
 | `GET` | `/v1/contexts` | List the tenant's cloud contexts (managed clusters). | Tenant member |
 | `POST` | `/v1/contexts` | Register a cloud context (managed cluster) for the caller's tenant and return its cluster-bootstrap plan. Body below. | Tenant member (write) |
 | `GET` | `/v1/contexts/{context_id}` | Fetch one cloud context by id. | Tenant member |
+| `POST` | `/v1/tenants` | Register a new tenant plus its OIDC issuer mapping. Operations-only. Body below. | Operations only |
 
 `GET /v1/config` is the console's read model over the per-tenant erun config — the backend DB is the system of record for the tenant's environments and cloud contexts, and this endpoint returns them denormalized as the on-disk erun config shape. All of these reads are tenant-scoped by row-level security, so a token only ever sees its own tenant's rows.
 
@@ -151,6 +153,48 @@ Returns the updated tenant-issuer record (`200`). `400` if `issuer` or `name` is
 ```
 
 `remove` matches by `issuerUrl`. Both arrays are optional; either may be empty.
+
+### `POST /v1/environments`
+
+Registers an **environment** in the caller's tenant. The tenant is resolved from the token — never from the body — so a token can only register an environment under its own tenant (row-level security scopes the write). The environment **runs in a referenced context**: `contextId` points at one of the tenant's cloud contexts, and the composite `(tenant_id, context_id)` foreign key enforces that the context belongs to the same tenant.
+
+```jsonc
+// POST /v1/environments body
+{
+  "name": "prod",              // required — the environment name (tenant-scoped)
+  "type": "runtime",           // required — one of "runtime", "remote-agent", "local-agent"
+  "contextId": "019a7fa5-…",   // optional — the cloud context (cluster) the env runs in
+  "kubernetesContext": "primary", // optional — the kube context bound to the env
+  "runtimeVersion": "1.2.3"    // optional — pinned runtime chart version
+}
+```
+
+On success the endpoint persists the row and returns it with HTTP `201`:
+
+```jsonc
+// 201 response
+{
+  "environmentId": "019a7fa5-c2c0-7c55-bc70-714873a71f30",
+  "tenantId": "019a7fa5-c2c0-7c55-bc70-714873a71f10",
+  "name": "prod",
+  "type": "runtime",
+  "kubernetesContext": "primary",
+  "contextId": "019a7fa5-c2c0-7c55-bc70-714873a71f20",
+  "runtimeVersion": "1.2.3",
+  "createdAt": "2026-06-24T10:00:00Z",
+  "updatedAt": "2026-06-24T10:00:00Z"
+}
+```
+
+**Live namespace + runtime-chart deploy is `(Planned.)`.** This endpoint registers the environment row only; it does **not** yet ensure the `<tenant>-<env>` namespace or deploy the runtime chart server-side (that runs `RunBootstrapInitWithDependencies` against a live cluster). Until that lands, a registered environment stands as registered config — the namespace creation and chart deploy from the registered row are the planned follow-up.
+
+**Error behaviour.** Today the API returns a bare HTTP status with a plain-text body (no JSON envelope):
+
+| Status | Condition | Recovery |
+|---|---|---|
+| `400` | `name` is empty/missing, `type` is not one of `runtime`/`remote-agent`/`local-agent`, or the body is not valid JSON. | Send a non-empty `name` and a valid `type`. |
+| `401` / `403` | Standard auth failures (see [Errors](#errors)). The `WriteAll` permission covers `POST /v1/environments`. | Send a valid token whose roles permit the write. |
+| `500` | Persistence failed — e.g. `contextId` references a context that is not the caller's (the composite `(tenant_id, context_id)` foreign key is violated), or the request-scoped security context is missing (an internal wiring error). | Reference a context owned by the caller's tenant; if it persists with a valid context, it is a server bug. |
 
 ### `POST /v1/contexts`
 
@@ -212,6 +256,43 @@ The k3s admin token is a **server secret** and is never part of the response or 
 | `400` | The bootstrap plan could not be resolved (e.g. an unsupported `region`, `instanceType`, or `diskSizeGb` for the BYO-cloud bootstrap). | Use a supported region/instance type/disk size. |
 | `401` / `403` | Standard auth failures (see [Errors](#errors)). The `WriteAll` permission covers `POST /v1/contexts`. | Send a valid token whose roles permit the write. |
 | `500` | Persistence failed (e.g. missing request-scoped security context — an internal wiring error, never a client fault). | Retry; if it persists, it is a server bug. |
+
+### `POST /v1/tenants`
+
+Registers a **new tenant** plus the OIDC issuer mapping that resolves its tokens. This is an **operations-only** endpoint: beyond the broad `WriteAll` permission that authorization enforces for any write, the handler adds an explicit gate — the caller's resolved tenant must be an `OPERATIONS` tenant, because `tenants`, `issuers`, and `tenant_issuers` are root resolution tables writable only by the operations role. A non-operations caller is rejected with `403` before any write is attempted.
+
+```jsonc
+// POST /v1/tenants body (operations-only)
+{
+  "name": "acme",                  // required — the tenant name (globally unique)
+  "type": "COMPANY",               // optional — "COMPANY" (default) or "OPERATIONS"
+  "issuer": "https://idp.example", // required — the OIDC issuer whose tokens map to this tenant
+  "orgFieldKey": "org_id",         // optional — org-scoped (shared) issuer: the token claim carrying the org
+  "orgFieldValue": "42",           // optional — org-scoped issuer: the org value that selects this tenant
+  "displayName": "Acme IdP"        // optional — display name for the issuer mapping (defaults to the issuer URL)
+}
+```
+
+The three identity rows — the `tenants` row, the `issuers` registry row (the globally unique issuer key with its org-scoping mode), and the `tenant_issuers` mapping row binding the issuer (and org value, when org-scoped) to the new tenant — are inserted in **one transaction**. `orgFieldKey`/`orgFieldValue` are set only for an org-scoped (shared) issuer; a single-tenant issuer leaves both empty (NULL on the registry / mapping). No first user is created here: the tenant's first admin is enrolled by the per-tenant first-user bootstrap when the tenant's first valid token arrives (see [first-identity bootstrap](#tenant-issuers)).
+
+```jsonc
+// 201 response
+{
+  "tenantId": "019a7fa5-c2c0-7c55-bc70-714873a71f50",
+  "name": "acme",
+  "type": "COMPANY",
+  "createdAt": "2026-06-24T10:00:00Z",
+  "updatedAt": "2026-06-24T10:00:00Z"
+}
+```
+
+**Error behaviour.** Today the API returns a bare HTTP status with a plain-text body (no JSON envelope):
+
+| Status | Condition | Recovery |
+|---|---|---|
+| `400` | `name` or `issuer` is empty/missing, `type` is not one of `COMPANY`/`OPERATIONS`, or the body is not valid JSON. | Send a non-empty `name` and `issuer` and a valid `type`. |
+| `403` | The caller's resolved tenant is not an `OPERATIONS` tenant (the explicit operations gate, beyond the standard auth failures in [Errors](#errors)). | Call from an operations-tenant token whose roles permit the write. |
+| `500` | Persistence failed — e.g. the tenant `name` or the `(issuer, org_field_value)` mapping already exists (a uniqueness violation), or the request-scoped security context is missing (an internal wiring error). | Use a unique tenant name and issuer mapping; if it persists with unique inputs, it is a server bug. |
 
 ### Service-account flow for Agents
 

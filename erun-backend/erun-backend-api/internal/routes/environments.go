@@ -3,6 +3,7 @@ package routes
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 )
@@ -10,15 +11,29 @@ import (
 type EnvironmentRepository interface {
 	List(ctx context.Context) ([]model.Environment, error)
 	Get(ctx context.Context, environmentID string) (model.Environment, error)
+	Create(ctx context.Context, environment model.Environment) (model.Environment, error)
 }
 
 type EnvironmentRoutes struct {
 	environments EnvironmentRepository
 }
 
+// createEnvironmentRequest is the env-registration body. The tenant is resolved
+// from the caller's token (RLS scopes the write), never from the body, so it is
+// absent here. The env references its context by contextId; the composite
+// foreign key enforces that the context belongs to the caller's tenant.
+type createEnvironmentRequest struct {
+	Name              string `json:"name"`
+	Type              string `json:"type"`
+	ContextID         string `json:"contextId"`
+	KubernetesContext string `json:"kubernetesContext"`
+	RuntimeVersion    string `json:"runtimeVersion"`
+}
+
 func RegisterEnvironmentRoutes(register ProtectedRouteRegistrar, environments EnvironmentRepository) {
 	routes := EnvironmentRoutes{environments: environments}
 	register(http.MethodGet, "/v1/environments", http.HandlerFunc(routes.listEnvironments))
+	register(http.MethodPost, "/v1/environments", http.HandlerFunc(routes.createEnvironment))
 	register(http.MethodGet, "/v1/environments/{environment_id}", http.HandlerFunc(routes.getEnvironment))
 }
 
@@ -38,4 +53,58 @@ func (r EnvironmentRoutes) getEnvironment(w http.ResponseWriter, req *http.Reque
 		return
 	}
 	writeJSON(w, http.StatusOK, environment)
+}
+
+// validEnvironmentTypes is the closed set of env types the registration API
+// accepts, matching model.EnvironmentType.
+var validEnvironmentTypes = map[model.EnvironmentType]struct{}{
+	model.EnvironmentTypeRuntime:     {},
+	model.EnvironmentTypeRemoteAgent: {},
+	model.EnvironmentTypeLocalAgent:  {},
+}
+
+// createEnvironment registers an environment in the caller's tenant (resolved
+// from the token; RLS scopes the write) and returns the persisted row. It
+// validates the operator-authored input, then persists; the env references its
+// context by contextId, and the composite foreign key enforces that the context
+// belongs to the caller's tenant.
+func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Request) {
+	var body createEnvironmentRequest
+	if err := decodeJSON(req, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	name := strings.TrimSpace(body.Name)
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	envType := model.EnvironmentType(strings.TrimSpace(body.Type))
+	if _, ok := validEnvironmentTypes[envType]; !ok {
+		writeError(w, http.StatusBadRequest, "type must be one of runtime, remote-agent, local-agent")
+		return
+	}
+
+	created, err := r.environments.Create(req.Context(), model.Environment{
+		Name:              name,
+		Type:              envType,
+		ContextID:         strings.TrimSpace(body.ContextID),
+		KubernetesContext: strings.TrimSpace(body.KubernetesContext),
+		RuntimeVersion:    strings.TrimSpace(body.RuntimeVersion),
+	})
+	if err != nil {
+		// A context_id that does not belong to the caller's tenant violates the
+		// composite (tenant_id, context_id) foreign key; surface it as the
+		// repository error (a clean 4xx/5xx) rather than leaking the SQL detail.
+		writeRepositoryError(w, err)
+		return
+	}
+
+	// TODO(#660 live): run RunBootstrapInitWithDependencies server-side to ensure
+	// the <tenant>-<env> namespace + deploy the runtime chart; requires a live
+	// cluster, not executed in this build — the row stands as registered config
+	// until then.
+
+	writeJSON(w, http.StatusCreated, created)
 }
