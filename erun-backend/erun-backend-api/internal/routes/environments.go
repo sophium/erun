@@ -2,6 +2,7 @@ package routes
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -12,10 +13,19 @@ type EnvironmentRepository interface {
 	List(ctx context.Context) ([]model.Environment, error)
 	Get(ctx context.Context, environmentID string) (model.Environment, error)
 	Create(ctx context.Context, environment model.Environment) (model.Environment, error)
+	Count(ctx context.Context) (int, error)
+}
+
+// TenantQuotaRepository reports the caller's environment-count cap. When the
+// tenant has no quota row the repository returns the default cap, so the route
+// never needs to distinguish "unconfigured" from "explicit".
+type TenantQuotaRepository interface {
+	MaxEnvironments(ctx context.Context) (int, error)
 }
 
 type EnvironmentRoutes struct {
 	environments EnvironmentRepository
+	quotas       TenantQuotaRepository
 }
 
 // createEnvironmentRequest is the env-registration body. The tenant is resolved
@@ -30,8 +40,8 @@ type createEnvironmentRequest struct {
 	RuntimeVersion    string `json:"runtimeVersion"`
 }
 
-func RegisterEnvironmentRoutes(register ProtectedRouteRegistrar, environments EnvironmentRepository) {
-	routes := EnvironmentRoutes{environments: environments}
+func RegisterEnvironmentRoutes(register ProtectedRouteRegistrar, environments EnvironmentRepository, quotas TenantQuotaRepository) {
+	routes := EnvironmentRoutes{environments: environments, quotas: quotas}
 	register(http.MethodGet, "/v1/environments", http.HandlerFunc(routes.listEnvironments))
 	register(http.MethodPost, "/v1/environments", http.HandlerFunc(routes.createEnvironment))
 	register(http.MethodGet, "/v1/environments/{environment_id}", http.HandlerFunc(routes.getEnvironment))
@@ -103,6 +113,26 @@ func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Re
 	envType := model.EnvironmentType(strings.TrimSpace(body.Type))
 	if _, ok := validEnvironmentTypes[envType]; !ok {
 		writeError(w, http.StatusBadRequest, "type must be one of runtime, remote-agent, local-agent")
+		return
+	}
+
+	// Enforce the per-tenant environment-count quota before persisting. The cap
+	// is the tenant's tenant_quotas.max_environments (default 10 when no row
+	// exists); the count is the tenant's existing environments. Both reads are
+	// RLS-scoped to the caller's tenant. At or over the cap, reject with 409 and
+	// do not run Create.
+	maxEnvironments, err := r.quotas.MaxEnvironments(req.Context())
+	if err != nil {
+		writeRepositoryError(w, err)
+		return
+	}
+	count, err := r.environments.Count(req.Context())
+	if err != nil {
+		writeRepositoryError(w, err)
+		return
+	}
+	if count >= maxEnvironments {
+		writeError(w, http.StatusConflict, fmt.Sprintf("environment quota reached: this tenant already has %d of %d environments", count, maxEnvironments))
 		return
 	}
 

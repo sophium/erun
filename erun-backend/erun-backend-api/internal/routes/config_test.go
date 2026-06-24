@@ -26,11 +26,28 @@ type stubEnvironmentRepository struct {
 	created      model.Environment
 	createCalls  int
 	createInput  model.Environment
+	count        int
+	countErr     error
 	err          error
 }
 
 func (r *stubEnvironmentRepository) List(context.Context) ([]model.Environment, error) {
 	return r.environments, r.err
+}
+
+func (r *stubEnvironmentRepository) Count(context.Context) (int, error) {
+	return r.count, r.countErr
+}
+
+// stubTenantQuotaRepository reports a fixed environment-count cap for the
+// quota guardrail; maxEnvironments is the cap the handler compares against.
+type stubTenantQuotaRepository struct {
+	maxEnvironments int
+	err             error
+}
+
+func (r stubTenantQuotaRepository) MaxEnvironments(context.Context) (int, error) {
+	return r.maxEnvironments, r.err
 }
 
 func (r *stubEnvironmentRepository) Get(context.Context, string) (model.Environment, error) {
