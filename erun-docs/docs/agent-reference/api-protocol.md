@@ -61,6 +61,20 @@ For every authenticated request:
 
 **Audit.** Each authorized API request records `external_issuer_id` (the `iss`), `external_org_id` (the org claim value for org-scoped issuers; null for single-tenant), `external_user_id` (the `sub`), and the resolved `erun_user_id` — see [the audit log spec](/agent-reference/audit-log).
 
+### Per-env MCP edge authentication {#mcp-edge}
+
+The per-environment `erun-mcp` server is exposed publicly (Traefik routes it at `mcp.<tenant>-<env>.services.<base-domain>`) and its `raw` tool can `kubectl exec`, so it is RCE-sensitive and **must always be authenticated** once a trust anchor is configured. The edge resolves the tenant from the verified token's issuer — the same `(iss) → tenant` model as the REST API, applied per URL.
+
+The runtime chart configures each edge with a set of trusted issuers mapping each issuer to the tenant it authenticates (`ERUN_MCP_TRUSTED_ISSUERS`, a JSON `{"<issuer>":"<tenant>"}` object; `ERUN_MCP_TRUSTED_ISSUER` + `ERUN_TENANT` is single-issuer sugar). A request is authorized when:
+
+1. `Authorization: Bearer <jwt>` is present — missing → `401`.
+2. The token's `iss` is a trusted issuer for this edge — untrusted → `401`; the mapped value is the resolved tenant.
+3. The signature verifies against that issuer's key, and `exp` and the audience (`aud`) match. **Unlike the REST API, the MCP edge enforces `aud`** — the per-env audience (`erun-mcp:<tenant>/<environment>`) means a token minted for one environment cannot be replayed against another, or against the REST API.
+
+**Desktop deployments** (issue #655) use a self-contained local trust anchor instead of an OIDC IdP: the desktop generates an Ed25519 key (`desktopid.key`) once, signs an EdDSA JWT whose `iss` is a `file://<path>` URL naming the public key, and injects that public key into the runtime pod on deploy (`erun deploy --mcp-auth-public-key`). The edge loads the key from that `file://` path and verifies the signature against it; `alg` is hard-locked to `EdDSA` for `file://` issuers, closing the alg-confusion class. When no trust anchor is configured the edge stays loopback-only (legacy, unauthenticated) — a desktop deploy always configures one.
+
+Trusting hosted **OIDC issuers** (the platform's Zitadel, AWS) at the same edge — JWKS verification, multiple issuers per edge — is `(Planned.)` (issue #656); per-tool authorization of the edge's RCE-capable tools is `(Planned.)` (issue #657).
+
 ### Endpoints
 
 :::note Shipped vs planned

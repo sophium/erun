@@ -68,6 +68,19 @@ emitted; type is the single source of truth.
 {{- $cloudflareEnabled := default false $cloudflare.enabled -}}
 {{- $cloudflareAccountId := default "" $cloudflare.accountId -}}
 {{- $cloudflareSecretName := default "" $cloudflare.secretName -}}
+{{- /* MCP auth edge (#655): when enabled, mount the desktop public key and
+       configure the per-env MCP server to require a bearer token signed by it.
+       Absent/disabled renders byte-for-byte unchanged (legacy loopback-only). */ -}}
+{{- $mcpAuth := default dict .Values.mcpAuth -}}
+{{- $mcpAuthEnabled := default false $mcpAuth.enabled -}}
+{{- $mcpAuthSecretName := default "" $mcpAuth.secretName -}}
+{{- $mcpAuthIssuer := default "" $mcpAuth.issuer -}}
+{{- $mcpAuthAudience := default "" $mcpAuth.audience -}}
+{{- /* Fixed in-pod convention: must equal eruncommon.DesktopMCPPublicKeyPath
+       (/etc/erun/mcp-auth/desktopid.pub), which the desktop's file:// issuer
+       references and the MCP server loads the trusted key from. */ -}}
+{{- $mcpAuthMountDir := "/etc/erun/mcp-auth" -}}
+{{- $mcpAuthKeyFile := "desktopid.pub" -}}
 {{- $claude := default dict .Values.claude -}}
 {{- $claudeUseBedrock := default "0" $claude.useBedrock -}}
 {{- $claudeUseMantle := default "0" $claude.useMantle -}}
@@ -482,6 +495,12 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            {{- if $mcpAuthEnabled }}
+            - name: ERUN_MCP_TRUSTED_ISSUER
+              value: {{ $mcpAuthIssuer | quote }}
+            - name: ERUN_MCP_AUDIENCE
+              value: {{ $mcpAuthAudience | quote }}
+            {{- end }}
           ports:
             - containerPort: {{ $mcpPort }}
               name: mcp
@@ -494,6 +513,11 @@ spec:
             {{- end }}
             - name: docker-socket
               mountPath: /var/run
+            {{- if $mcpAuthEnabled }}
+            - name: mcp-auth
+              mountPath: {{ $mcpAuthMountDir | quote }}
+              readOnly: true
+            {{- end }}
         - image: {{ $dindImage }}
           name: erun-dind
           imagePullPolicy: IfNotPresent
@@ -539,6 +563,14 @@ spec:
         {{- end }}
         - name: docker-socket
           emptyDir: {}
+        {{- if $mcpAuthEnabled }}
+        - name: mcp-auth
+          secret:
+            secretName: {{ $mcpAuthSecretName | quote }}
+            items:
+              - key: {{ $mcpAuthKeyFile | quote }}
+                path: {{ $mcpAuthKeyFile | quote }}
+        {{- end }}
         - name: docker-state
           persistentVolumeClaim:
             claimName: {{ .Release.Name }}-docker

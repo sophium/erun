@@ -145,7 +145,7 @@ func (a *App) stopCloudCredentialsRefresherForSelection(selection uiSelection) {
 	endpoint := mcpEndpointForOpenResult(result)
 	clearCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_ = clearCloudHostCredentialsViaMCP(clearCtx, endpoint)
+	_ = clearCloudHostCredentialsViaMCP(clearCtx, endpoint, a.mcpBearer(selection.Tenant, selection.Environment))
 }
 
 func (a *App) stopAllCloudCredentialsRefreshersLocked() {
@@ -182,7 +182,8 @@ func (a *App) runCloudCredentialsRefresher(ctx context.Context, selection uiSele
 			}
 			continue
 		}
-		if err := injectCloudHostCredentialsViaMCP(ctx, endpoint, creds.AccessKeyID, creds.SecretAccessKey, creds.SessionToken, creds.Expiration); err != nil {
+		bearer := a.mcpBearer(result.Tenant, result.EnvConfig.Name)
+		if err := injectCloudHostCredentialsViaMCP(ctx, endpoint, bearer, creds.AccessKeyID, creds.SecretAccessKey, creds.SessionToken, creds.Expiration); err != nil {
 			a.surfaceCredentialRefreshFailure(selection, fmt.Errorf("inject host credentials into runtime: %w", err), &notifiedFailure)
 			if !sleepWithCancel(ctx, credentialRefreshBackoff) {
 				return

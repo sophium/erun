@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
@@ -30,17 +29,11 @@ const idleStopMCPTimeout = 10 * time.Second
 // the next idle poll from any client (including the in-pod monitor's
 // next 30 s tick) re-evaluates eligibility and re-arms the warning
 // if the env is still idle.
-func cancelStopPendingViaMCP(ctx context.Context, endpoint, tenant, environment string) error {
+func cancelStopPendingViaMCP(ctx context.Context, endpoint, bearer, tenant, environment string) error {
 	ctx, cancel := context.WithTimeout(ctx, idleStopMCPTimeout)
 	defer cancel()
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
-	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
-		Endpoint: endpoint,
-		HTTPClient: &http.Client{
-			Transport: idleProbeRoundTripper{},
-		},
-		DisableStandaloneSSE: true,
-	}, nil)
+	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, false), nil)
 	if err != nil {
 		return err
 	}
@@ -68,17 +61,11 @@ func cancelStopPendingViaMCP(ctx context.Context, endpoint, tenant, environment 
 // stop-history.json from the env's shared PVC, so a desktop running
 // after a long break sees the same audit trail the in-pod monitor
 // has been appending to.
-func loadStopHistoryViaMCP(ctx context.Context, endpoint, tenant, environment string) ([]eruncommon.EnvironmentStopHistoryEntry, error) {
+func loadStopHistoryViaMCP(ctx context.Context, endpoint, bearer, tenant, environment string) ([]eruncommon.EnvironmentStopHistoryEntry, error) {
 	ctx, cancel := context.WithTimeout(ctx, idleStopMCPTimeout)
 	defer cancel()
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
-	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
-		Endpoint: endpoint,
-		HTTPClient: &http.Client{
-			Transport: idleProbeRoundTripper{},
-		},
-		DisableStandaloneSSE: true,
-	}, nil)
+	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, false), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -124,17 +111,11 @@ func loadStopHistoryViaMCP(ctx context.Context, endpoint, tenant, environment st
 // older runtime images that do not register the tool yet, the
 // caller swallows the formatted error so manual stops still
 // succeed — formatIdleStopMCPError points at the rebuild fix.
-func recordManualStopViaMCP(ctx context.Context, endpoint, tenant, environment, reason, cloudContextName string) error {
+func recordManualStopViaMCP(ctx context.Context, endpoint, bearer, tenant, environment, reason, cloudContextName string) error {
 	ctx, cancel := context.WithTimeout(ctx, idleStopMCPTimeout)
 	defer cancel()
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
-	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
-		Endpoint: endpoint,
-		HTTPClient: &http.Client{
-			Transport: idleProbeRoundTripper{},
-		},
-		DisableStandaloneSSE: true,
-	}, nil)
+	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, false), nil)
 	if err != nil {
 		return err
 	}

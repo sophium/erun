@@ -317,7 +317,7 @@ func (a *App) StartDeploySession(selection uiSelection, cols, rows int) (startSe
 	// from the Local tab and registers a deploy entry within milliseconds.
 	// The helm release poller converges onto the same record by ID once
 	// the cluster sees the pending release.
-	return a.runErunCommandInLocal(selection, cols, rows, buildDeployArgs(selection))
+	return a.runErunCommandInLocal(selection, cols, rows, a.appendMCPAuthPublicKeyFlag(buildDeployArgs(selection)))
 }
 
 // StartForceDeploySession runs `erun deploy --force` in the Local tab.
@@ -329,7 +329,7 @@ func (a *App) StartForceDeploySession(selection uiSelection, cols, rows int) (st
 	if result, ok := a.maybeStartDeployOrchestration(selection, true); ok {
 		return result, nil
 	}
-	args := append(buildDeployArgs(selection), "--force")
+	args := a.appendMCPAuthPublicKeyFlag(append(buildDeployArgs(selection), "--force"))
 	return a.runErunCommandInLocal(selection, cols, rows, args)
 }
 
@@ -772,7 +772,8 @@ func (a *App) LoadDiff(selection uiSelection, options uiDiffOptions) (eruncommon
 		return eruncommon.DiffResult{}, wrapMCPUnreachableError(fmt.Errorf("mcp port %d is not reachable", mcpPort))
 	}
 	endpoint := mcpEndpointForOpenResult(result)
-	diff, err := a.deps.loadDiff(ctx, endpoint, options)
+	bearer := a.mcpBearer(result.Tenant, result.EnvConfig.Name)
+	diff, err := a.deps.loadDiff(ctx, endpoint, bearer, options)
 	if err != nil && isMCPDialFailure(err) {
 		return eruncommon.DiffResult{}, wrapMCPUnreachableError(err)
 	}

@@ -50,6 +50,26 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_from_devops_cwd", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_with_mcp_auth_public_key", func(t *testing.T) {
+		// --mcp-auth-public-key makes the runtime deploy require the per-env MCP
+		// edge to authenticate bearer tokens signed by the desktop public key:
+		// the key is applied out-of-band as a <release>-mcp-auth Secret and the
+		// file:// issuer + per-env audience ride as mcpAuth.* helm values on the
+		// runtime (team-devops) chart only (#655).
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		keyPath := filepath.Join(t.TempDir(), "desktopid.pub")
+		if err := os.WriteFile(keyPath, []byte("-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAtestkeytestkeytestkeytestkeytestkeytestke=\n-----END PUBLIC KEY-----\n"), 0o600); err != nil {
+			t.Fatalf("write public key fixture: %v", err)
+		}
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--mcp-auth-public-key", keyPath, "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_with_mcp_auth_public_key", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_copies_images_from_to_before_deploy", func(t *testing.T) {
 		// When the project registry list marks a FROM source and a TO
 		// destination, deploy mirrors every image the cluster pulls (the

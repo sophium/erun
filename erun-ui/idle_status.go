@@ -33,7 +33,7 @@ func (a *App) LoadIdleStatus(selection uiSelection) (uiIdleStatus, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	status, err := a.deps.loadIdleStatus(ctx, mcpEndpointForOpenResult(result))
+	status, err := a.deps.loadIdleStatus(ctx, mcpEndpointForOpenResult(result), a.mcpBearer(result.Tenant, result.EnvConfig.Name))
 	if err != nil {
 		status, err := a.loadLocalIdleStatus(result)
 		if err == nil {
@@ -259,7 +259,8 @@ func (a *App) CancelPendingIdleStop(selection uiSelection) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if err := cancelStopPendingViaMCP(ctx, endpoint, selection.Tenant, selection.Environment); err != nil {
+	bearer := a.mcpBearer(selection.Tenant, selection.Environment)
+	if err := cancelStopPendingViaMCP(ctx, endpoint, bearer, selection.Tenant, selection.Environment); err != nil {
 		return err
 	}
 	a.emitAppNotification("info", fmt.Sprintf("Cancelled pending auto-stop for %s/%s.", selection.Tenant, selection.Environment))
@@ -299,7 +300,8 @@ func (a *App) recordManualStopForCloudContext(ctx context.Context, cloudContextN
 			continue
 		}
 		endpoint := mcpEndpointForOpenResult(result)
-		if err := recordManualStopViaMCP(ctx, endpoint, selection.Tenant, selection.Environment, "Manual stop via desktop", cloudContextName); err != nil {
+		bearer := a.mcpBearer(selection.Tenant, selection.Environment)
+		if err := recordManualStopViaMCP(ctx, endpoint, bearer, selection.Tenant, selection.Environment, "Manual stop via desktop", cloudContextName); err != nil {
 			a.emitAppNotification("warn", fmt.Sprintf("Could not record manual stop for %s/%s: %s", selection.Tenant, selection.Environment, err.Error()))
 		}
 	}
@@ -326,7 +328,8 @@ func (a *App) LoadStopHistory(selection uiSelection) ([]uiLastStopEvent, error) 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	entries, err := loadStopHistoryViaMCP(ctx, endpoint, selection.Tenant, selection.Environment)
+	bearer := a.mcpBearer(selection.Tenant, selection.Environment)
+	entries, err := loadStopHistoryViaMCP(ctx, endpoint, bearer, selection.Tenant, selection.Environment)
 	if err != nil {
 		return nil, err
 	}

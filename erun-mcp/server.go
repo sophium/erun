@@ -65,7 +65,10 @@ func newHTTPHandler(info eruncommon.BuildInfo, cfg HTTPConfig, runtime RuntimeCo
 	})
 
 	mux := http.NewServeMux()
-	mux.Handle(cfg.Path, activityHTTPMiddleware(runtime, handler))
+	// Auth is the outermost edge: when a trusted issuer is configured (#655),
+	// every request on the MCP path — including idle probes — must carry a valid
+	// bearer token signed by the desktop's injected key before any tool runs.
+	mux.Handle(cfg.Path, authHTTPMiddleware(mcpAuthConfigFromEnv(), activityHTTPMiddleware(runtime, handler)))
 	return mux
 }
 

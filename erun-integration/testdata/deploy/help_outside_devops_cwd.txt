@@ -13,15 +13,16 @@ Examples:
   erun deploy team prod --version <VERSION> --rollout-timeout 10m
 
 Flags:
-      --components strings       Opt-in components to include alongside the runtime chart (erun-backend-postgres, erun-backend-db, erun-backend-api, erun-powerdns)
-      --current                  Redeploy the version this environment already runs (its persisted runtime version) instead of passing --version
-      --dry-run                  Resolve and trace mutating actions without executing them.
-      --environment string       Deploy for a specific environment; requires --tenant
-      --force                    Re-run the helm upgrade even when the deployed release already matches the requested version
-  -h, --help                     help for deploy
-      --rollout-timeout string   Override the helm rollout wait for this deploy (Go duration, e.g. 8m); empty uses the env's deploy.timeout or the 5m default
-      --tenant string            Deploy for a specific tenant
-      --version erun build       Version to install by reference (produced by erun build/`erun push`); fails if that version's image is absent
+      --components strings           Opt-in components to include alongside the runtime chart (erun-backend-postgres, erun-backend-db, erun-backend-api, erun-powerdns)
+      --current                      Redeploy the version this environment already runs (its persisted runtime version) instead of passing --version
+      --dry-run                      Resolve and trace mutating actions without executing them.
+      --environment string           Deploy for a specific environment; requires --tenant
+      --force                        Re-run the helm upgrade even when the deployed release already matches the requested version
+  -h, --help                         help for deploy
+      --mcp-auth-public-key string   Require the env's MCP edge to authenticate bearer tokens signed by this PEM public key (issue #655); empty leaves the edge loopback-only
+      --rollout-timeout string       Override the helm rollout wait for this deploy (Go duration, e.g. 8m); empty uses the env's deploy.timeout or the 5m default
+      --tenant string                Deploy for a specific tenant
+      --version erun build           Version to install by reference (produced by erun build/`erun push`); fails if that version's image is absent
 
 Global Flags:
       --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")

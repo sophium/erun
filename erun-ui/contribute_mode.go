@@ -124,7 +124,7 @@ func (a *App) runEnsureErunClone(selection uiSelection) error {
 	if a.deps.cloneERun == nil {
 		return fmt.Errorf("contribute clone is not configured")
 	}
-	if err := a.deps.cloneERun(ctx, endpoint); err != nil {
+	if err := a.deps.cloneERun(ctx, endpoint, a.mcpBearer(result.Tenant, result.EnvConfig.Name)); err != nil {
 		if isMCPDialFailure(err) {
 			return wrapMCPUnreachableError(err)
 		}

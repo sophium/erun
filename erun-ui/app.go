@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log"
 	"sync"
 	"time"
 
@@ -51,32 +52,39 @@ type erunUIDeps struct {
 	reconnectMCP           func(context.Context, eruncommon.OpenResult, func(string)) error
 	ensureSSHD             func(context.Context, eruncommon.OpenResult) error
 	canConnectLocalPort    func(int) bool
-	setRemoteCloudAlias    func(context.Context, string, string, string, string) (eruncommon.EnvConfig, error)
+	setRemoteCloudAlias    func(context.Context, string, string, string, string, string) (eruncommon.EnvConfig, error)
 	startTerminal          func(startTerminalSessionParams) (terminalSession, error)
 	runIDECommand          func(context.Context, startTerminalSessionParams) (string, error)
 	savePastedFile         func(pastedFileSaveParams) (string, error)
 	listAgentOutputs       func(eruncommon.OpenResult, eruncommon.RuntimeOutputsParams) (eruncommon.RuntimeOutputsListResult, error)
 	downloadAgentOutput    func(eruncommon.OpenResult, eruncommon.RuntimeOutputDownloadParams) (eruncommon.RuntimeOutputResult, error)
-	loadDiff               func(context.Context, string, uiDiffOptions) (eruncommon.DiffResult, error)
-	loadIdleStatus         func(context.Context, string) (eruncommon.EnvironmentIdleStatus, error)
+	loadDiff               func(context.Context, string, string, uiDiffOptions) (eruncommon.DiffResult, error)
+	loadIdleStatus         func(context.Context, string, string) (eruncommon.EnvironmentIdleStatus, error)
 	loadAPILog             func(context.Context, uiTenantDashboardInput) (string, error)
 	workspaceSyncReady     func(context.Context, string) error
 	syncWorkspace          func(context.Context, workspaceSyncParams) (workspaceSyncResult, error)
 	workspaceSyncInterval  time.Duration
 	recordActivity         func(eruncommon.EnvironmentActivityParams) error
 	runWorkingIssueCommand workingIssueCommandRunner
-	loadPodBranch          func(context.Context, string) (string, error)
-	runPodRaw              func(context.Context, string, []string) (string, error)
+	loadPodBranch          func(context.Context, string, string) (string, error)
+	runPodRaw              func(context.Context, string, string, []string) (string, error)
 	stopCloudContext       func(context.Context, string) (eruncommon.CloudContextStatus, error)
 	windowStatePath        string
 	windowMaximised        func(context.Context) bool
-	cloneERun              func(context.Context, string) error
+	cloneERun              func(context.Context, string, string) error
 	contributeStatePath    string
 }
 
 type App struct {
 	ctx  context.Context
 	deps erunUIDeps
+
+	// identity is the desktop's persistent signing identity (issue #655). It
+	// mints the short-lived per-env bearer the desktop sends to each env's MCP
+	// edge and supplies the public key deploy injects so the edge verifies
+	// those tokens. nil in unit tests, where mcpBearer returns "" so non-auth
+	// envs and stubbed MCP deps keep working.
+	identity *desktopIdentity
 
 	mu                        sync.Mutex
 	nextSerial                int
@@ -174,7 +182,26 @@ func NewApp(deps erunUIDeps) *App {
 		go app.pollActivityContainerStatuses(context.Background(), entry)
 	}
 	app.contribute = newContributeStore(deps.contributeStatePath)
+	if app.identity == nil {
+		app.identity = newDesktopIdentity(defaultDesktopIdentityDir())
+	}
 	return app
+}
+
+// mcpBearer mints the short-lived per-env bearer the desktop sends to the env's
+// MCP edge (issue #655). A nil identity (unit tests) or a signing failure yields
+// "", so non-auth envs and stubbed MCP deps keep working; an auth-enabled env
+// rejects an empty bearer with 401, which is the correct outcome.
+func (a *App) mcpBearer(tenant, environment string) string {
+	if a.identity == nil {
+		return ""
+	}
+	token, err := a.identity.signToken(tenant, environment, time.Now())
+	if err != nil {
+		log.Printf("erun-app: sign MCP bearer for %s/%s: %v", tenant, environment, err)
+		return ""
+	}
+	return token
 }
 
 func withDefaultCoreDeps(deps erunUIDeps) erunUIDeps {

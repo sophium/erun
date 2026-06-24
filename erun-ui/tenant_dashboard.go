@@ -32,6 +32,7 @@ func (a *App) LoadTenantDashboard(input uiTenantDashboardInput) (uiTenantDashboa
 		ctx = context.Background()
 	}
 	if strings.TrimSpace(input.MCPURL) != "" || strings.TrimSpace(input.KubernetesContext) != "" {
+		input.mcpBearer = a.mcpBearer(tenant, strings.TrimSpace(input.Environment))
 		log, err := a.deps.loadAPILog(ctx, input)
 		if err != nil {
 			dashboard.APILogError = err.Error()
