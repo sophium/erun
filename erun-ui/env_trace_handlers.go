@@ -99,7 +99,7 @@ func (a *App) podEnvTraceTail(result eruncommon.OpenResult) (string, string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	out, err := a.deps.runPodRaw(ctx, mcpEndpointForOpenResult(result), []string{
+	out, err := a.deps.runPodRaw(ctx, mcpEndpointForOpenResult(result), a.mcpBearer(result.Tenant, result.EnvConfig.Name), []string{
 		"sh", "-c",
 		fmt.Sprintf("tail -c %d \"$HOME/.erun/%s/%s/trace.log\" 2>/dev/null || true", envTraceTailBytes, result.Tenant, result.Environment),
 	})

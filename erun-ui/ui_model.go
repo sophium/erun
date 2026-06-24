@@ -116,6 +116,12 @@ type uiTenantDashboardInput struct {
 	MCPURL             string `json:"mcpUrl,omitempty"`
 	KubernetesContext  string `json:"kubernetesContext,omitempty"`
 	CloudProviderAlias string `json:"cloudProviderAlias"`
+
+	// mcpBearer is the per-env MCP edge token (issue #655) the dashboard's
+	// MCP API-log read sends. It is set server-side by LoadTenantDashboard
+	// from the desktop identity, never by the frontend; being unexported it
+	// is excluded from generated Wails bindings and never serialized.
+	mcpBearer string
 }
 
 type uiTenantDashboard struct {

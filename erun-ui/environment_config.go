@@ -270,7 +270,8 @@ func (a *App) saveRemoteCloudAlias(selection uiSelection, existing, updated erun
 	if err := a.ensureMCPAvailable(ctx, result); err != nil {
 		return err
 	}
-	_, err = a.deps.setRemoteCloudAlias(ctx, mcpEndpointForOpenResult(result), selection.Tenant, selection.Environment, updated.CloudProviderAlias)
+	bearer := a.mcpBearer(selection.Tenant, selection.Environment)
+	_, err = a.deps.setRemoteCloudAlias(ctx, mcpEndpointForOpenResult(result), bearer, selection.Tenant, selection.Environment, updated.CloudProviderAlias)
 	return err
 }
 
