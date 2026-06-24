@@ -46,6 +46,10 @@ type mcpAuthConfig struct {
 	// its verified iss is a key here; the value is the resolved tenant.
 	trustedIssuers map[string]string
 	audience       string
+	// tenant is this env's own tenant (ERUN_TENANT). A per-env edge serves exactly
+	// one tenant, so a token that resolves to a different tenant — a misconfigured
+	// trusted-issuer map pointing an issuer at another tenant — is rejected (#657).
+	tenant string
 	// oidc verifies tokens from `https://` OIDC issuers against their JWKS. It is
 	// the same shared verifier the hosted backend API uses (erun-common). One
 	// instance is created per middleware and reused so each issuer's key set is
@@ -62,6 +66,7 @@ func mcpAuthConfigFromEnv() mcpAuthConfig {
 	cfg := mcpAuthConfig{
 		trustedIssuers: map[string]string{},
 		audience:       strings.TrimSpace(os.Getenv(envMCPAudience)),
+		tenant:         strings.TrimSpace(os.Getenv(envTenant)),
 		oidc:           eruncommon.NewOIDCVerifier(),
 	}
 	if raw := strings.TrimSpace(os.Getenv(envMCPTrustedIssuers)); raw != "" {
@@ -111,6 +116,12 @@ func authHTTPMiddleware(cfg mcpAuthConfig, next http.Handler) http.Handler {
 		tenant, trusted := cfg.trustedIssuers[issuer]
 		if !trusted {
 			writeUnauthorized(w, "token issuer is not a trusted MCP issuer")
+			return
+		}
+		// A per-env edge serves exactly one tenant; a token resolving to another
+		// tenant means the trusted-issuer map is misconfigured for this env (#657).
+		if cfg.tenant != "" && tenant != cfg.tenant {
+			writeUnauthorized(w, "token tenant does not match this environment")
 			return
 		}
 		if _, err := eruncommon.VerifyMCPToken(req.Context(), cfg.oidc, token, issuer, cfg.audience, time.Now()); err != nil {

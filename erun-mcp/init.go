@@ -47,17 +47,21 @@ func initTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 		if err != nil {
 			return nil, InitOutput{}, err
 		}
+		tenant, environment, err := scopedTenantEnv(input.Tenant, input.Environment, runtime)
+		if err != nil {
+			return nil, InitOutput{}, err
+		}
 
 		traceOutput := new(bytes.Buffer)
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, traceOutput, traceOutput)
 		ctx.KubernetesContextPreflight = eruncommon.CloudContextPreflight(runtime.Store, eruncommon.CloudContextDependencies{})
 
 		params := eruncommon.BootstrapInitParams{
-			Tenant:                   firstNonEmpty(strings.TrimSpace(input.Tenant), strings.TrimSpace(runtime.Context.Tenant)),
+			Tenant:                   tenant,
 			SelectedTenant:           strings.TrimSpace(input.SelectedTenant),
 			InitializeCurrentProject: input.InitializeCurrentProject,
 			ProjectRoot:              firstNonEmpty(strings.TrimSpace(input.ProjectRoot), strings.TrimSpace(runtime.Context.RepoPath)),
-			Environment:              firstNonEmpty(strings.TrimSpace(input.Environment), strings.TrimSpace(runtime.Context.Environment)),
+			Environment:              environment,
 			RuntimeVersion:           firstNonEmpty(strings.TrimSpace(input.Version), CurrentBuildInfo().Version),
 			RuntimePod: eruncommon.RuntimePodResources{
 				CPU:    strings.TrimSpace(input.RuntimeCPU),

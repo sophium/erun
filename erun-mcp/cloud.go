@@ -198,8 +198,10 @@ func cloudOIDCTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReq
 
 func cloudSetTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudSetInput) (*mcp.CallToolResult, CloudSetResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input CloudSetInput) (*mcp.CallToolResult, CloudSetResult, error) {
-		tenant := firstNonEmpty(strings.TrimSpace(input.Tenant), strings.TrimSpace(runtime.Context.Tenant))
-		environment := firstNonEmpty(strings.TrimSpace(input.Environment), strings.TrimSpace(runtime.Context.Environment))
+		tenant, environment, err := scopedTenantEnv(input.Tenant, input.Environment, runtime)
+		if err != nil {
+			return nil, CloudSetResult{}, err
+		}
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		config, err := eruncommon.SetEnvironmentCloudProviderAlias(ctx, runtime.Store, eruncommon.SetEnvironmentCloudAliasParams{

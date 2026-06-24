@@ -69,6 +69,7 @@ func TestAuthMiddleware(t *testing.T) {
 		{name: "valid bearer is authorized and resolves the tenant", cfg: authed, authHeader: "Bearer " + token, wantStatus: http.StatusOK, wantTenant: "acme"},
 		{name: "garbage bearer is rejected", cfg: authed, authHeader: "Bearer not-a-jwt", wantStatus: http.StatusUnauthorized},
 		{name: "untrusted issuer is rejected", cfg: authed, authHeader: "Bearer " + otherToken, wantStatus: http.StatusUnauthorized},
+		{name: "tenant mismatch is rejected (#657)", cfg: mcpAuthConfig{trustedIssuers: map[string]string{issuer: "beta"}, audience: "erun-mcp", tenant: "acme"}, authHeader: "Bearer " + token, wantStatus: http.StatusUnauthorized},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
