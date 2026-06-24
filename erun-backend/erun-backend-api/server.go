@@ -92,6 +92,7 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 		routes.RegisterContextRoutes(register, contexts)
 		routes.RegisterTenantRoutes(register, tenants)
 		routes.RegisterConfigRoute(register, tenants, environments, contexts)
+		routes.RegisterProvisionRoute(register, tenants, environments, tenantQuotas)
 	}
 	routes.RegisterWhoamiRoute(register, users)
 	return mux, nil
