@@ -74,3 +74,13 @@ CREATE TRIGGER comments_set_timestamps
   BEFORE INSERT OR UPDATE ON comments
   FOR EACH ROW
   EXECUTE FUNCTION erun_set_timestamps();
+
+CREATE TRIGGER contexts_set_timestamps
+  BEFORE INSERT OR UPDATE ON contexts
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();
+
+CREATE TRIGGER environments_set_timestamps
+  BEFORE INSERT OR UPDATE ON environments
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();

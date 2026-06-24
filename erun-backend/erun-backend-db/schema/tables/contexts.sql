@@ -1,0 +1,21 @@
+CREATE TABLE contexts (
+  context_id UUID PRIMARY KEY DEFAULT uuidv7(),
+  tenant_id UUID NOT NULL DEFAULT erun_current_tenant_id(),
+  name TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  cloud_provider_alias TEXT,
+  region TEXT,
+  instance_id TEXT,
+  public_ip TEXT,
+  instance_type TEXT,
+  disk_type TEXT,
+  disk_size_gb INT,
+  kubernetes_context TEXT,
+  created_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ,
+  FOREIGN KEY (tenant_id) REFERENCES tenants (tenant_id),
+  CONSTRAINT contexts_name_check CHECK (length(trim(name)) > 0),
+  CONSTRAINT contexts_provider_check CHECK (length(trim(provider)) > 0),
+  CONSTRAINT contexts_tenant_context_key UNIQUE (tenant_id, context_id),
+  CONSTRAINT contexts_tenant_name_key UNIQUE (tenant_id, name)
+);

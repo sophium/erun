@@ -19,6 +19,8 @@ env "default" {
     "file://schema/tables/builds.sql",
     "file://schema/tables/comments.sql",
     "file://schema/tables/audit_events.sql",
+    "file://schema/tables/contexts.sql",
+    "file://schema/tables/environments.sql",
     "file://schema/indexes/users.sql",
     "file://schema/indexes/user_external_ids.sql",
     "file://schema/indexes/role_permissions.sql",
@@ -28,6 +30,8 @@ env "default" {
     "file://schema/indexes/builds.sql",
     "file://schema/indexes/comments.sql",
     "file://schema/indexes/audit_events.sql",
+    "file://schema/indexes/contexts.sql",
+    "file://schema/indexes/environments.sql",
     "file://schema/triggers/comments.sql",
     "file://schema/triggers/timestamps.sql",
     "file://schema/fks/review_builds.sql",
@@ -42,6 +46,8 @@ env "default" {
     "file://schema/rls/builds.sql",
     "file://schema/rls/comments.sql",
     "file://schema/rls/audit_events.sql",
+    "file://schema/rls/contexts.sql",
+    "file://schema/rls/environments.sql",
   ]
   url = var.database_url
   dev = "docker://postgres/18/dev?search_path=public"

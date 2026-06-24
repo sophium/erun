@@ -90,6 +90,13 @@ The `(iss, org) → tenant` resolution model and first-identity bootstrap above 
 | `GET` | `/v1/tenant-issuers` | List all issuers trusted by the caller's tenant. | Tenant member |
 | `PATCH` | `/v1/tenant-issuers` | Rename a trusted issuer's display name. Body below. | Tenant admin |
 | `GET` | `/v1/whoami` | Resolved identity for the calling token. Response below. | Tenant member |
+| `GET` | `/v1/config` | The console's read model over the per-tenant erun config: `{tenant, environments[], contexts[]}`. | Tenant member |
+| `GET` | `/v1/environments` | List the tenant's environments. | Tenant member |
+| `GET` | `/v1/environments/{environment_id}` | Fetch one environment by id. | Tenant member |
+| `GET` | `/v1/contexts` | List the tenant's cloud contexts (managed clusters). | Tenant member |
+| `GET` | `/v1/contexts/{context_id}` | Fetch one cloud context by id. | Tenant member |
+
+`GET /v1/config` is the console's read model over the per-tenant erun config — the backend DB is the system of record for the tenant's environments and cloud contexts, and this endpoint returns them denormalized as the on-disk erun config shape. All of these reads are tenant-scoped by row-level security, so a token only ever sees its own tenant's rows.
 
 ### `GET /v1/whoami`
 
