@@ -99,6 +99,7 @@ func addDeployCommandTargetFlags(cmd *cobra.Command, target *common.DeployTarget
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Deploy for a specific environment; requires --tenant")
 	cmd.Flags().BoolVar(&target.Force, "force", false, "Re-run the helm upgrade even when the deployed release already matches the requested version")
 	cmd.Flags().StringVar(&target.RolloutTimeout, "rollout-timeout", "", "Override the helm rollout wait for this deploy (Go duration, e.g. 8m); empty uses the env's deploy.timeout or the 5m default")
+	cmd.Flags().StringVar(&target.MCPAuthPublicKeyPath, "mcp-auth-public-key", "", "Require the env's MCP edge to authenticate bearer tokens signed by this PEM public key (issue #655); empty leaves the edge loopback-only")
 	cmd.Flags().StringVar(&target.RepoPath, "repo-path", "", "Repo path override for internal tooling")
 	_ = cmd.Flags().MarkHidden("repo-path")
 }
