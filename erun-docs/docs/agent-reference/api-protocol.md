@@ -97,6 +97,7 @@ The `(iss, org) → tenant` resolution model and first-identity bootstrap above 
 | `GET` | `/v1/contexts` | List the tenant's cloud contexts (managed clusters). | Tenant member |
 | `POST` | `/v1/contexts` | Register a cloud context (managed cluster) for the caller's tenant and return its cluster-bootstrap plan. Body below. | Tenant member (write) |
 | `GET` | `/v1/contexts/{context_id}` | Fetch one cloud context by id. | Tenant member |
+| `POST` | `/v1/provision` | Return the complete, ordered **plan** to provision a hosted env (quota check → context bootstrap → namespace → env registration → runtime deploy) for the caller's tenant. Preview-only; no execution, no writes. Body below. | Tenant member (write) |
 | `POST` | `/v1/tenants` | Register a new tenant plus its OIDC issuer mapping. Operations-only. Body below. | Operations only |
 
 `GET /v1/config` is the console's read model over the per-tenant erun config — the backend DB is the system of record for the tenant's environments and cloud contexts, and this endpoint returns them denormalized as the on-disk erun config shape. All of these reads are tenant-scoped by row-level security, so a token only ever sees its own tenant's rows.
@@ -259,6 +260,75 @@ The k3s admin token is a **server secret** and is never part of the response or 
 | `400` | The bootstrap plan could not be resolved (e.g. an unsupported `region`, `instanceType`, or `diskSizeGb` for the BYO-cloud bootstrap). | Use a supported region/instance type/disk size. |
 | `401` / `403` | Standard auth failures (see [Errors](#errors)). The `WriteAll` permission covers `POST /v1/contexts`. | Send a valid token whose roles permit the write. |
 | `500` | Persistence failed (e.g. missing request-scoped security context — an internal wiring error, never a client fault). | Retry; if it persists, it is a server bug. |
+
+### `POST /v1/provision`
+
+Returns the complete, ordered **plan** to provision a hosted env for the caller's tenant — the single auditable preview a console or Operator sees before provisioning. It **composes the same dry-run primitives** the discrete endpoints expose into one ordered plan: the per-tenant environment-count quota check from [`POST /v1/environments`](#post-v1environments), the cluster-**bootstrap plan** from [`POST /v1/contexts`](#post-v1contexts), the `<tenant>-<env>` namespace creation, the environment registration, and the runtime-chart deploy. The endpoint is tenant-scoped by the token's security context — the tenant is **resolved from the token, never from the body**.
+
+This endpoint is **preview-only** in this build: it resolves and shows the concrete actions but **never executes** the plan and **never writes** to the database. The discrete `POST /v1/contexts` and `POST /v1/environments` endpoints own the config writes; this endpoint composes their plans with no side effects.
+
+```jsonc
+// POST /v1/provision body
+{
+  "environment": {                  // required
+    "name": "prod",                 // required — DNS-1123 label; forms the <tenant>-<env> namespace
+    "type": "runtime"               // required — one of runtime, remote-agent, local-agent
+  },
+  "context": {                      // optional — present when provisioning a NEW cluster
+    "name": "acme-prod",            // required when context is present — the cluster (and kube-context) name
+    "cloudProviderAlias": "acme-aws", // required when context is present — a registered AWS alias for the tenant
+    "region": "eu-west-2",          // required when context is present — AWS region
+    "instanceType": "c8gd.2xlarge", // optional
+    "diskType": "gp3",              // optional
+    "diskSizeGb": 100               // optional
+  },
+  "kubernetesContext": "acme-prod"  // optional — reference an EXISTING context instead of bootstrapping a new cluster
+}
+```
+
+Provide **either** a `context` block (provision a new cluster — its bootstrap plan is the real `InitCloudContext` dry-run argv) **or** a `kubernetesContext` (reuse an existing context). When a `context` block is present it wins and `kubernetesContext` is ignored.
+
+**The ordered `plan`.** The response is `{ "plan": [ … ], "quotaOk": <bool> }`. `plan` is the human-readable, audit-style ordered list of every action the live provision would take, in this exact order:
+
+1. **authz/tenant** — `provision: tenant <tenant> (resolved from token)`.
+2. **quota** — `quota: tenant has <count> of <cap> environments` followed by ` — within quota` or ` — WOULD EXCEED, provisioning blocked`. The cap is the tenant's `tenant_quotas.max_environments` (default `10`); both reads are row-level-security-scoped to the caller's tenant.
+3. **context** — when a `context` block was given: a `context: bootstrap cluster <name> via alias <alias>` header line followed by the full `InitCloudContext` dry-run argv (the security-group + IAM instance-profile setup, `ec2 run-instances`, the k3s install user-data, the kube-context wiring), exactly the plan [`POST /v1/contexts`](#post-v1contexts) returns. Otherwise: `context: reuse existing kubernetes context <kubernetesContext>`.
+4. **namespace** — `namespace: would create <tenant>-<env>`.
+5. **register** — `register: would persist environment <name> (<type>) in tenant <tenant> referencing context <ref>`.
+6. **deploy** — `deploy: would helm install the erun-devops runtime chart (release <tenant>-devops) into <tenant>-<env>`.
+
+**`quotaOk`.** `true` when the provision fits under the tenant's environment-count cap, `false` when it would exceed it. When `quotaOk` is `false` the endpoint **still returns the full plan** with HTTP `200` (it is a preview, not a write), and the quota line names the block — surfacing the blocking decision the way a dry-run does, rather than rejecting with a `409`. A caller gating on the quota should check `quotaOk`, not the status code.
+
+```jsonc
+// 200 response (new cluster, within quota)
+{
+  "plan": [
+    "provision: tenant acme (resolved from token)",
+    "quota: tenant has 2 of 10 environments — within quota",
+    "context: bootstrap cluster acme-prod via alias acme-aws",
+    "aws ec2 create-security-group …",
+    "aws ec2 run-instances …",
+    "kubectl config set-context acme-prod …",
+    "namespace: would create acme-prod",
+    "register: would persist environment prod (runtime) in tenant acme referencing context acme-prod",
+    "deploy: would helm install the erun-devops runtime chart (release acme-devops) into acme-prod"
+  ],
+  "quotaOk": true
+}
+```
+
+**Live orchestration is `(Planned.)`.** This endpoint only resolves and returns the plan. The live orchestration — `InitCloudContext` with `DryRun=false` → ensure the namespace → `RunBootstrapInitWithDependencies` / deploy the runtime chart → wire the env exposure and the per-env auth edge — requires a live AWS account and cluster and is **not executed** in this build. It composes the same dry-run primitives as `POST /v1/contexts` plus the registration endpoints, so the live path is the composition of their live paths.
+
+**Error behaviour.** Today the API returns a bare HTTP status with a plain-text body (no JSON envelope):
+
+| Status | Condition | Recovery |
+|---|---|---|
+| `400` | `environment.name` is not a DNS-1123 label, `environment.type` is not one of `runtime`/`remote-agent`/`local-agent`, a `context` block is present but missing `name`/`cloudProviderAlias`/`region`, or the body is not valid JSON. | Send a valid `environment` and, if provisioning a new cluster, a complete `context` block. |
+| `400` | The context bootstrap plan could not be resolved (e.g. an unsupported `region`, `instanceType`, or `diskSizeGb`). | Use a supported region/instance type/disk size. |
+| `401` / `403` | Standard auth failures (see [Errors](#errors)). The `WriteAll` permission covers `POST /v1/provision`. | Send a valid token whose roles permit the write. |
+| `500` | The tenant or quota read failed (e.g. missing request-scoped security context — an internal wiring error, never a client fault). | Retry; if it persists, it is a server bug. |
+
+Note that being **at or over quota is not an error** here — it returns `200` with `quotaOk: false` and the full plan (see `quotaOk` above), unlike `POST /v1/environments`, which rejects the actual write with `409`.
 
 ### `POST /v1/tenants`
 
