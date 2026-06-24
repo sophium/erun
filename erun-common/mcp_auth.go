@@ -239,6 +239,21 @@ func loadEd25519PublicKeyFromFileIssuer(issuer string) (ed25519.PublicKey, error
 	return parseEd25519PublicKey(data)
 }
 
+// DesktopPublicKeyPEM derives the PKIX public-key PEM from a persisted desktop
+// private key, so the private key (desktopid.key) is the single source of truth
+// the desktop persists; the public half is recomputed for injection on deploy.
+func DesktopPublicKeyPEM(privatePEM []byte) ([]byte, error) {
+	key, err := parseEd25519PrivateKey(privatePEM)
+	if err != nil {
+		return nil, err
+	}
+	publicDER, err := x509.MarshalPKIXPublicKey(key.Public())
+	if err != nil {
+		return nil, fmt.Errorf("marshal desktop public key: %w", err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: publicDER}), nil
+}
+
 func parseEd25519PrivateKey(privatePEM []byte) (ed25519.PrivateKey, error) {
 	block, _ := pem.Decode(privatePEM)
 	if block == nil {

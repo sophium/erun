@@ -34,6 +34,23 @@ func signTestToken(t *testing.T, privatePEM []byte, claims MCPTokenClaims) strin
 	return token
 }
 
+func TestDesktopPublicKeyPEMMatchesGenerated(t *testing.T) {
+	priv, pub, err := GenerateDesktopIdentity()
+	if err != nil {
+		t.Fatalf("generate identity: %v", err)
+	}
+	derived, err := DesktopPublicKeyPEM(priv)
+	if err != nil {
+		t.Fatalf("derive public key: %v", err)
+	}
+	if string(derived) != string(pub) {
+		t.Fatalf("derived public key does not match generated:\n got %q\nwant %q", derived, pub)
+	}
+	if _, err := DesktopPublicKeyPEM([]byte("not a pem")); err == nil {
+		t.Fatal("expected error deriving public key from invalid private PEM")
+	}
+}
+
 func TestDesktopMCPConventions(t *testing.T) {
 	if got := DesktopMCPPublicKeyPath(); got != "/etc/erun/mcp-auth/desktopid.pub" {
 		t.Fatalf("DesktopMCPPublicKeyPath() = %q", got)
