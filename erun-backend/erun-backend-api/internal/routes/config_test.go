@@ -37,15 +37,30 @@ func (r stubEnvironmentRepository) Get(context.Context, string) (model.Environme
 type stubContextRepository struct {
 	contexts     []model.Context
 	cloudContext model.Context
+	created      model.Context
+	createCalls  int
 	err          error
 }
 
-func (r stubContextRepository) List(context.Context) ([]model.Context, error) {
+func (r *stubContextRepository) List(context.Context) ([]model.Context, error) {
 	return r.contexts, r.err
 }
 
-func (r stubContextRepository) Get(context.Context, string) (model.Context, error) {
+func (r *stubContextRepository) Get(context.Context, string) (model.Context, error) {
 	return r.cloudContext, r.err
+}
+
+func (r *stubContextRepository) Create(_ context.Context, cloudContext model.Context) (model.Context, error) {
+	r.createCalls++
+	if r.err != nil {
+		return model.Context{}, r.err
+	}
+	created := r.created
+	if created.ContextID == "" {
+		created = cloudContext
+		created.ContextID = "ctx-created"
+	}
+	return created, nil
 }
 
 func TestConfigReturnsDenormalizedReadModel(t *testing.T) {
@@ -53,7 +68,7 @@ func TestConfigReturnsDenormalizedReadModel(t *testing.T) {
 	environments := stubEnvironmentRepository{environments: []model.Environment{
 		{EnvironmentID: "env-1", Name: "runtime", Type: model.EnvironmentTypeRuntime, ContextID: "ctx-1"},
 	}}
-	contexts := stubContextRepository{contexts: []model.Context{
+	contexts := &stubContextRepository{contexts: []model.Context{
 		{ContextID: "ctx-1", Name: "primary", Provider: "aws"},
 	}}
 
@@ -86,7 +101,7 @@ func TestConfigPropagatesRepositoryError(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/config", nil)
 	rec := httptest.NewRecorder()
 
-	ConfigRoutes{tenants: tenants, environments: stubEnvironmentRepository{}, contexts: stubContextRepository{}}.getConfig(rec, req)
+	ConfigRoutes{tenants: tenants, environments: stubEnvironmentRepository{}, contexts: &stubContextRepository{}}.getConfig(rec, req)
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("unexpected status: %d", rec.Code)
@@ -108,7 +123,7 @@ func TestGetEnvironmentNotFound(t *testing.T) {
 }
 
 func TestGetContextNotFound(t *testing.T) {
-	contexts := stubContextRepository{err: repository.ErrNotFound}
+	contexts := &stubContextRepository{err: repository.ErrNotFound}
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/contexts/missing", nil)
 	req.SetPathValue("context_id", "missing")
