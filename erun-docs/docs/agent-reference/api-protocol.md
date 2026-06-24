@@ -71,9 +71,12 @@ The runtime chart configures each edge with a set of trusted issuers mapping eac
 2. The token's `iss` is a trusted issuer for this edge — untrusted → `401`; the mapped value is the resolved tenant.
 3. The signature verifies against that issuer's key, and `exp` and the audience (`aud`) match. **Unlike the REST API, the MCP edge enforces `aud`** — the per-env audience (`erun-mcp:<tenant>/<environment>`) means a token minted for one environment cannot be replayed against another, or against the REST API.
 
-**Desktop deployments** (issue #655) use a self-contained local trust anchor instead of an OIDC IdP: the desktop generates an Ed25519 key (`desktopid.key`) once, signs an EdDSA JWT whose `iss` is a `file://<path>` URL naming the public key, and injects that public key into the runtime pod on deploy (`erun deploy --mcp-auth-public-key`). The edge loads the key from that `file://` path and verifies the signature against it; `alg` is hard-locked to `EdDSA` for `file://` issuers, closing the alg-confusion class. When no trust anchor is configured the edge stays loopback-only (legacy, unauthenticated) — a desktop deploy always configures one.
+An edge can trust **multiple issuers at once**, of two kinds, dispatched by the *configured* issuer's scheme (not the token's claimed `iss`, so the verification path can't be attacker-chosen):
 
-Trusting hosted **OIDC issuers** (the platform's Zitadel, AWS) at the same edge — JWKS verification, multiple issuers per edge — is `(Planned.)` (issue #656); per-tool authorization of the edge's RCE-capable tools is `(Planned.)` (issue #657).
+- **`https://` OIDC issuer** (the platform's Zitadel, AWS) — verified via the issuer's JWKS through provider discovery, using the same shared verifier the REST API uses (so the API and every MCP edge verify identically). Hosted/console callers present their OIDC token directly.
+- **`file://` desktop key** (issue #655) — a self-contained local trust anchor for the **desktop** case, instead of an OIDC IdP: the desktop generates an Ed25519 key (`desktopid.key`) once, signs an EdDSA JWT whose `iss` is a `file://<path>` URL naming the public key, and injects that public key into the runtime pod on deploy (`erun deploy --mcp-auth-public-key`). The edge loads the key from that `file://` path and verifies the signature against it; `alg` is hard-locked to `EdDSA` for `file://` issuers, closing the alg-confusion class.
+
+When no trust anchor is configured the edge stays loopback-only (legacy, unauthenticated) — a desktop or hosted deploy always configures one. Per-tool authorization of the edge's RCE-capable tools is `(Planned.)` (issue #657).
 
 ### Endpoints
 

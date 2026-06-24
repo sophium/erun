@@ -1,6 +1,9 @@
 package erunmcp
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -8,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	jose "github.com/go-jose/go-jose/v4"
+	"github.com/go-jose/go-jose/v4/jwt"
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
@@ -136,4 +141,147 @@ func TestMCPAuthConfigFromEnv(t *testing.T) {
 			t.Fatal("expected auth disabled when no trusted issuer is set")
 		}
 	})
+}
+
+// mockOIDCProvider is a self-contained OIDC issuer for the dispatch test: an
+// httptest server publishing a discovery doc + JWKS, plus the RSA key used to
+// mint RS256 tokens. It stands in for a real Zitadel/AWS issuer so the test can
+// prove the middleware routes https:// issuers through the shared OIDC verifier
+// without a network dependency.
+type mockOIDCProvider struct {
+	server *httptest.Server
+	key    *rsa.PrivateKey
+	keyID  string
+}
+
+func newMockOIDCProvider(t *testing.T) *mockOIDCProvider {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate rsa key: %v", err)
+	}
+	p := &mockOIDCProvider{key: key, keyID: "test-key-1"}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
+		writeOIDCJSON(w, map[string]any{
+			"issuer":                                p.issuer(),
+			"jwks_uri":                              p.issuer() + "/keys",
+			"id_token_signing_alg_values_supported": []string{"RS256"},
+		})
+	})
+	mux.HandleFunc("/keys", func(w http.ResponseWriter, _ *http.Request) {
+		writeOIDCJSON(w, jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{
+			Key:       p.key.Public(),
+			KeyID:     p.keyID,
+			Algorithm: string(jose.RS256),
+			Use:       "sig",
+		}}})
+	})
+	p.server = httptest.NewServer(mux)
+	t.Cleanup(p.server.Close)
+	return p
+}
+
+func (p *mockOIDCProvider) issuer() string { return p.server.URL }
+
+func (p *mockOIDCProvider) sign(t *testing.T, claims map[string]any) string {
+	t.Helper()
+	return signOIDCToken(t, p.key, p.keyID, claims)
+}
+
+func signOIDCToken(t *testing.T, key *rsa.PrivateKey, keyID string, claims map[string]any) string {
+	t.Helper()
+	signer, err := jose.NewSigner(
+		jose.SigningKey{Algorithm: jose.RS256, Key: key},
+		(&jose.SignerOptions{}).WithType("JWT").WithHeader("kid", keyID),
+	)
+	if err != nil {
+		t.Fatalf("new signer: %v", err)
+	}
+	token, err := jwt.Signed(signer).Claims(claims).Serialize()
+	if err != nil {
+		t.Fatalf("serialize token: %v", err)
+	}
+	return token
+}
+
+func writeOIDCJSON(w http.ResponseWriter, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(value)
+}
+
+func oidcClaims(issuer, audience string) map[string]any {
+	now := time.Now()
+	return map[string]any{
+		"iss": issuer,
+		"sub": "user-1",
+		"aud": audience,
+		"iat": now.Unix(),
+		"exp": now.Add(time.Hour).Unix(),
+	}
+}
+
+// TestAuthMiddlewareOIDCDispatch proves the #656 dispatch end-to-end through the
+// middleware: an https:// OIDC issuer in the trusted map verifies its RS256
+// token against the issuer's JWKS and resolves the tenant, while wrong issuer,
+// bad signature, and wrong audience are all rejected. The file:// path is still
+// exercised by the tests above.
+func TestAuthMiddlewareOIDCDispatch(t *testing.T) {
+	provider := newMockOIDCProvider(t)
+	const audience = "erun-mcp:acme/prod"
+	cfg := mcpAuthConfig{
+		trustedIssuers: map[string]string{provider.issuer(): "acme"},
+		audience:       audience,
+		oidc:           eruncommon.NewOIDCVerifier(),
+	}
+
+	t.Run("valid OIDC token is authorized and resolves the tenant", func(t *testing.T) {
+		token := provider.sign(t, oidcClaims(provider.issuer(), audience))
+		rec := serveAuth(t, cfg, "Bearer "+token)
+		if rec.Code != http.StatusOK || rec.Body.String() != "acme" {
+			t.Fatalf("status=%d tenant=%q, want 200 / acme", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("untrusted OIDC issuer is rejected", func(t *testing.T) {
+		other := newMockOIDCProvider(t)
+		token := other.sign(t, oidcClaims(other.issuer(), audience))
+		rec := serveAuth(t, cfg, "Bearer "+token)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status=%d, want 401", rec.Code)
+		}
+	})
+
+	t.Run("bad signature is rejected", func(t *testing.T) {
+		otherKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		if err != nil {
+			t.Fatalf("generate other key: %v", err)
+		}
+		// Signed by a key not in provider's JWKS, but iss points at the trusted
+		// provider so the middleware routes it there and the signature check fails.
+		token := signOIDCToken(t, otherKey, provider.keyID, oidcClaims(provider.issuer(), audience))
+		rec := serveAuth(t, cfg, "Bearer "+token)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status=%d, want 401", rec.Code)
+		}
+	})
+
+	t.Run("wrong audience is rejected", func(t *testing.T) {
+		token := provider.sign(t, oidcClaims(provider.issuer(), "erun-mcp:acme/dev"))
+		rec := serveAuth(t, cfg, "Bearer "+token)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status=%d, want 401", rec.Code)
+		}
+	})
+}
+
+func serveAuth(t *testing.T, cfg mcpAuthConfig, authHeader string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+	if authHeader != "" {
+		req.Header.Set("Authorization", authHeader)
+	}
+	rec := httptest.NewRecorder()
+	authHTTPMiddleware(cfg, tenantEchoHandler()).ServeHTTP(rec, req)
+	return rec
 }

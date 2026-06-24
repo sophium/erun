@@ -1,6 +1,7 @@
 package eruncommon
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/x509"
 	"encoding/base64"
@@ -13,20 +14,30 @@ import (
 	"time"
 )
 
-// MCP auth edge (issue #655). The per-env erun-mcp server is exposed publicly
-// and its `raw` tool can kubectl-exec, so it must always be authenticated. For
-// a desktop deployment the trust anchor is a self-contained Ed25519 keypair:
-// the desktop signs an EdDSA JWT bearer token with its private key
-// (desktopid.key), injects the matching public key into the runtime pod, and
-// names that public key in the token's `iss` claim as a `file://<path>` URL.
-// The MCP server is configured to trust exactly that issuer, loads the public
-// key from the path, and verifies the token's signature against it.
+// MCP auth edge (issues #655, #656). The per-env erun-mcp server is exposed
+// publicly and its `raw` tool can kubectl-exec, so it must always be
+// authenticated. A trusted issuer is one of two kinds, dispatched on its scheme:
 //
-// The format is deliberately minimal and fully controlled (this package both
-// signs and verifies): EdDSA only — `alg` is hard-checked, so the JWT
-// alg-confusion class (accepting `none`/HMAC/RS256 against a public key) cannot
-// occur — and the verifier only ever loads the public key from the issuer the
-// caller already trusts, never an arbitrary `file://` from the token.
+//   - `file://<path>` — the desktop case (#655). The trust anchor is a
+//     self-contained Ed25519 keypair: the desktop signs an EdDSA JWT with its
+//     private key (desktopid.key), injects the matching public key into the
+//     runtime pod, and names that public key in the token's `iss` claim as a
+//     `file://<path>` URL. The verifier loads the public key from that path and
+//     verifies the signature. EdDSA only — `alg` is hard-checked, so the JWT
+//     alg-confusion class (accepting `none`/HMAC/RS256 against a public key)
+//     cannot occur — and the verifier only ever loads the public key from the
+//     issuer the caller already trusts, never an arbitrary `file://` from the
+//     token.
+//
+//   - `https://…` — an OIDC issuer (#656), e.g. a Zitadel or AWS STS issuer.
+//     The signature is verified against the issuer's published JWKS via the
+//     shared *OIDCVerifier (the same verifier the hosted backend API uses), and
+//     `iss`/`exp`/audience are enforced. Standard OIDC signing algorithms apply
+//     (RS256/ES256/…), so the EdDSA alg-lock does NOT apply to this branch.
+//
+// In both branches the verifier only ever trusts the issuer the caller already
+// configured, the same per-env audience contract is enforced, and the tenant is
+// resolved from the trusted-issuer→tenant map by the caller (erun-mcp).
 
 // MCPTokenClaims is the registered-claim subset the MCP auth edge uses.
 type MCPTokenClaims struct {
@@ -129,17 +140,39 @@ func SignMCPToken(privatePEM []byte, claims MCPTokenClaims) (string, error) {
 	return signingInput + "." + base64.RawURLEncoding.EncodeToString(signature), nil
 }
 
-// VerifyMCPToken verifies an MCP bearer token. It hard-requires alg EdDSA,
-// requires the token's issuer to equal trustedIssuer (a `file://<path>` URL the
-// MCP server is configured to trust — never an arbitrary issuer from the
-// token), loads the Ed25519 public key from that path, verifies the signature,
-// checks expiry against now, and checks the audience when expectedAudience is
-// non-empty. It returns the validated claims or a descriptive error.
-func VerifyMCPToken(token, trustedIssuer, expectedAudience string, now time.Time) (MCPTokenClaims, error) {
+// VerifyMCPToken verifies an MCP bearer token against trustedIssuer (the issuer
+// the MCP server is configured to trust — never an arbitrary issuer from the
+// token), dispatching on the trusted issuer's scheme:
+//
+//   - `file://<path>` → the Ed25519 desktop path: hard-requires alg EdDSA, loads
+//     the public key from the path, verifies the signature.
+//   - otherwise (an `https://` OIDC issuer) → verifies the signature against the
+//     issuer's JWKS via oidc (must be non-nil for this branch).
+//
+// In both cases it then enforces `iss == trustedIssuer`, expiry against now, and
+// the expected audience when expectedAudience is non-empty (the same per-env
+// audience contract). It returns the validated claims or a descriptive error.
+func VerifyMCPToken(ctx context.Context, oidc *OIDCVerifier, token, trustedIssuer, expectedAudience string, now time.Time) (MCPTokenClaims, error) {
 	trustedIssuer = strings.TrimSpace(trustedIssuer)
 	if trustedIssuer == "" {
 		return MCPTokenClaims{}, fmt.Errorf("no trusted issuer configured for MCP auth")
 	}
+	if isFileIssuer(trustedIssuer) {
+		return verifyFileMCPToken(token, trustedIssuer, expectedAudience, now)
+	}
+	return verifyOIDCMCPToken(ctx, oidc, token, trustedIssuer, expectedAudience, now)
+}
+
+// isFileIssuer reports whether the trusted issuer is a `file://` desktop key
+// issuer (the #655 path) rather than an `https://` OIDC issuer (#656).
+func isFileIssuer(issuer string) bool {
+	parsed, err := url.Parse(issuer)
+	return err == nil && parsed.Scheme == "file"
+}
+
+// verifyFileMCPToken is the Ed25519 desktop-key path (#655): alg is hard-locked
+// to EdDSA, and the public key is loaded only from the trusted issuer's path.
+func verifyFileMCPToken(token, trustedIssuer, expectedAudience string, now time.Time) (MCPTokenClaims, error) {
 	signingInput, claims, signature, err := parseMCPToken(token)
 	if err != nil {
 		return MCPTokenClaims{}, err
@@ -156,10 +189,60 @@ func VerifyMCPToken(token, trustedIssuer, expectedAudience string, now time.Time
 	if !ed25519.Verify(publicKey, []byte(signingInput), signature) {
 		return MCPTokenClaims{}, fmt.Errorf("MCP token signature is not valid for the trusted public key")
 	}
-	if err := validateMCPClaims(claims, expectedAudience, now); err != nil {
+	if err := validateMCPExpiry(claims.ExpiresAt, now); err != nil {
+		return MCPTokenClaims{}, err
+	}
+	// The file:// token carries a single audience string; the per-env contract is
+	// the same membership check the OIDC path uses, with a one-element list.
+	if err := validateMCPAudience([]string{claims.Audience}, expectedAudience); err != nil {
 		return MCPTokenClaims{}, err
 	}
 	return claims, nil
+}
+
+// verifyOIDCMCPToken is the OIDC issuer path (#656): the signature is verified
+// against the trusted issuer's JWKS by the shared verifier, then the same
+// issuer / expiry / audience contract as the file:// path is enforced. The OIDC
+// verifier already checks the signature and the standard time claims, so the
+// returned claims' expiry is re-checked against `now` only for parity with the
+// file:// path (a token go-oidc accepted is not expired at its own clock).
+func verifyOIDCMCPToken(ctx context.Context, oidc *OIDCVerifier, token, trustedIssuer, expectedAudience string, now time.Time) (MCPTokenClaims, error) {
+	if oidc == nil {
+		return MCPTokenClaims{}, fmt.Errorf("no OIDC verifier configured for issuer %q", trustedIssuer)
+	}
+	verified, err := oidc.Verify(ctx, trustedIssuer, token)
+	if err != nil {
+		return MCPTokenClaims{}, err
+	}
+	if verified.Issuer != trustedIssuer {
+		return MCPTokenClaims{}, fmt.Errorf("MCP token issuer %q is not the trusted issuer", verified.Issuer)
+	}
+	claims := mcpClaimsFromOIDC(verified)
+	if err := validateMCPExpiry(claims.ExpiresAt, now); err != nil {
+		return MCPTokenClaims{}, err
+	}
+	// An OIDC `aud` may list multiple audiences; the per-env audience must be one
+	// of them — the same membership contract the file:// path enforces.
+	if err := validateMCPAudience(verified.Audience, expectedAudience); err != nil {
+		return MCPTokenClaims{}, err
+	}
+	return claims, nil
+}
+
+// mcpClaimsFromOIDC adapts the shared OIDCClaims into the MCP edge's claim view.
+// The single-string Audience field is the file:// signed shape; for an OIDC
+// token (which may carry several audiences) the audience contract is enforced
+// separately on the full list, so this carries the first audience only as a
+// human-readable hint and leaves the authoritative check to validateMCPAudience.
+func mcpClaimsFromOIDC(verified OIDCClaims) MCPTokenClaims {
+	claims := MCPTokenClaims{Issuer: verified.Issuer, Subject: verified.Subject}
+	if exp, ok := verified.Raw["exp"].(float64); ok {
+		claims.ExpiresAt = int64(exp)
+	}
+	if len(verified.Audience) > 0 {
+		claims.Audience = verified.Audience[0]
+	}
+	return claims
 }
 
 // parseMCPToken splits a JWT into its signing input, decoded claims, and raw
@@ -187,33 +270,42 @@ func parseMCPToken(token string) (signingInput string, claims MCPTokenClaims, si
 	return segments[0] + "." + segments[1], claims, signature, nil
 }
 
-// validateMCPClaims checks the time and audience constraints on already
-// signature-verified claims.
-func validateMCPClaims(claims MCPTokenClaims, expectedAudience string, now time.Time) error {
-	if claims.ExpiresAt != 0 && now.After(time.Unix(claims.ExpiresAt, 0)) {
+// validateMCPExpiry rejects a token whose exp is at or before now. An absent exp
+// (0) is not enforced, matching the original file:// behavior.
+func validateMCPExpiry(expiresAt int64, now time.Time) error {
+	if expiresAt != 0 && now.After(time.Unix(expiresAt, 0)) {
 		return fmt.Errorf("MCP token expired")
-	}
-	if expectedAudience != "" && claims.Audience != expectedAudience {
-		return fmt.Errorf("MCP token audience %q does not match %q", claims.Audience, expectedAudience)
 	}
 	return nil
 }
 
+// validateMCPAudience enforces the per-env audience contract: when
+// expectedAudience is non-empty it must appear among the token's audiences. An
+// empty expectedAudience disables the check (the chart did not pin an audience).
+func validateMCPAudience(audiences []string, expectedAudience string) error {
+	if expectedAudience == "" {
+		return nil
+	}
+	for _, audience := range audiences {
+		if audience == expectedAudience {
+			return nil
+		}
+	}
+	return fmt.Errorf("MCP token audience %v does not contain %q", audiences, expectedAudience)
+}
+
 // UnverifiedMCPTokenIssuer extracts the `iss` claim from a token WITHOUT
 // verifying its signature. The MCP server uses it — exactly as the erun api's
-// issuerFromJWT does — only to select which trusted issuer (and therefore which
-// tenant) the token claims to come from; VerifyMCPToken then re-checks the
-// issuer and verifies the signature against that issuer's key. The EdDSA-only
-// header check still runs, so a non-EdDSA token is rejected here too.
+// IssuerFromUnverifiedJWT does — only to select which trusted issuer (and
+// therefore which tenant) the token claims to come from; VerifyMCPToken then
+// re-checks the issuer and verifies the signature against that issuer's key.
+//
+// Issuer selection is alg-agnostic so an RS256/ES256 OIDC token can be routed to
+// its trusted entry: it reads `iss` from the payload without inspecting the
+// JWS header's alg. The per-issuer alg policy (EdDSA-only for file:// issuers,
+// JWKS-driven for OIDC issuers) is enforced later by VerifyMCPToken.
 func UnverifiedMCPTokenIssuer(token string) (string, error) {
-	_, claims, _, err := parseMCPToken(token)
-	if err != nil {
-		return "", err
-	}
-	if strings.TrimSpace(claims.Issuer) == "" {
-		return "", fmt.Errorf("MCP token has no issuer")
-	}
-	return claims.Issuer, nil
+	return IssuerFromUnverifiedJWT(token)
 }
 
 // loadEd25519PublicKeyFromFileIssuer parses a `file://<path>` issuer and reads

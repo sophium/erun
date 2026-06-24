@@ -1,6 +1,9 @@
 package eruncommon
 
 import (
+	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
 	"os"
@@ -79,7 +82,7 @@ func TestMCPTokenSignVerifyRoundTrip(t *testing.T) {
 		ExpiresAt: now.Add(time.Hour).Unix(),
 	})
 
-	claims, err := VerifyMCPToken(token, issuer, "erun-mcp", now)
+	claims, err := VerifyMCPToken(context.Background(), nil, token, issuer, "erun-mcp", now)
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
@@ -104,7 +107,7 @@ func TestMCPTokenVerifyRejections(t *testing.T) {
 		}
 		sig[0] ^= 0xFF
 		segments[2] = base64.RawURLEncoding.EncodeToString(sig)
-		if _, err := VerifyMCPToken(strings.Join(segments, "."), issuer, "erun-mcp", now); err == nil {
+		if _, err := VerifyMCPToken(context.Background(), nil, strings.Join(segments, "."), issuer, "erun-mcp", now); err == nil {
 			t.Fatal("expected a tampered signature to be rejected")
 		}
 	})
@@ -116,28 +119,28 @@ func TestMCPTokenVerifyRejections(t *testing.T) {
 			t.Fatalf("generate other identity: %v", err)
 		}
 		token := signTestToken(t, otherPriv, good)
-		if _, err := VerifyMCPToken(token, issuer, "erun-mcp", now); err == nil {
+		if _, err := VerifyMCPToken(context.Background(), nil, token, issuer, "erun-mcp", now); err == nil {
 			t.Fatal("expected a token signed by a different key to be rejected")
 		}
 	})
 
 	t.Run("expired", func(t *testing.T) {
 		token := signTestToken(t, priv, MCPTokenClaims{Issuer: issuer, ExpiresAt: now.Add(-time.Minute).Unix()})
-		if _, err := VerifyMCPToken(token, issuer, "", now); err == nil {
+		if _, err := VerifyMCPToken(context.Background(), nil, token, issuer, "", now); err == nil {
 			t.Fatal("expected an expired token to be rejected")
 		}
 	})
 
 	t.Run("issuer not the trusted issuer", func(t *testing.T) {
 		token := signTestToken(t, priv, MCPTokenClaims{Issuer: "file:///some/other/key.pub", ExpiresAt: now.Add(time.Hour).Unix()})
-		if _, err := VerifyMCPToken(token, issuer, "", now); err == nil {
+		if _, err := VerifyMCPToken(context.Background(), nil, token, issuer, "", now); err == nil {
 			t.Fatal("expected a token whose issuer differs from the trusted issuer to be rejected")
 		}
 	})
 
 	t.Run("wrong audience", func(t *testing.T) {
 		token := signTestToken(t, priv, good)
-		if _, err := VerifyMCPToken(token, issuer, "some-other-audience", now); err == nil {
+		if _, err := VerifyMCPToken(context.Background(), nil, token, issuer, "some-other-audience", now); err == nil {
 			t.Fatal("expected an audience mismatch to be rejected")
 		}
 	})
@@ -148,15 +151,72 @@ func TestMCPTokenVerifyRejections(t *testing.T) {
 		header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
 		payload, _ := json.Marshal(good)
 		forged := header + "." + base64.RawURLEncoding.EncodeToString(payload) + "."
-		if _, err := VerifyMCPToken(forged, issuer, "", now); err == nil {
+		if _, err := VerifyMCPToken(context.Background(), nil, forged, issuer, "", now); err == nil {
 			t.Fatal("expected an alg=none token to be rejected")
 		}
 	})
 
 	t.Run("no trusted issuer configured", func(t *testing.T) {
 		token := signTestToken(t, priv, good)
-		if _, err := VerifyMCPToken(token, "", "", now); err == nil {
+		if _, err := VerifyMCPToken(context.Background(), nil, token, "", "", now); err == nil {
 			t.Fatal("expected verification with no trusted issuer to fail closed")
+		}
+	})
+}
+
+// TestVerifyMCPTokenOIDCDispatch locks the #656 dispatch: when the trusted issuer
+// is an https:// OIDC issuer, VerifyMCPToken verifies the RS256 token against the
+// issuer's JWKS via the shared OIDC verifier and enforces the same per-env
+// audience contract, while a file:// trusted issuer keeps the Ed25519 path.
+func TestVerifyMCPTokenOIDCDispatch(t *testing.T) {
+	provider := newMockOIDCProvider(t)
+	now := time.Now()
+	verifier := NewOIDCVerifier()
+	const audience = "erun-mcp:acme/prod"
+
+	t.Run("valid OIDC token authorizes", func(t *testing.T) {
+		token := provider.sign(t, standardClaims(provider.issuer(), now))
+		claims, err := VerifyMCPToken(context.Background(), verifier, token, provider.issuer(), audience, now)
+		if err != nil {
+			t.Fatalf("verify: %v", err)
+		}
+		if claims.Issuer != provider.issuer() || claims.Subject != "user-1" {
+			t.Fatalf("claims = %+v", claims)
+		}
+	})
+
+	t.Run("OIDC token with wrong audience rejected", func(t *testing.T) {
+		token := provider.sign(t, standardClaims(provider.issuer(), now))
+		if _, err := VerifyMCPToken(context.Background(), verifier, token, provider.issuer(), "erun-mcp:acme/dev", now); err == nil {
+			t.Fatal("expected an audience mismatch to be rejected")
+		}
+	})
+
+	t.Run("OIDC token with bad signature rejected", func(t *testing.T) {
+		otherKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		if err != nil {
+			t.Fatalf("generate other key: %v", err)
+		}
+		token := signWithKey(t, otherKey, provider.keyID, standardClaims(provider.issuer(), now))
+		if _, err := VerifyMCPToken(context.Background(), verifier, token, provider.issuer(), audience, now); err == nil {
+			t.Fatal("expected a token signed by a key not in the JWKS to be rejected")
+		}
+	})
+
+	t.Run("OIDC token whose iss differs from the trusted issuer rejected", func(t *testing.T) {
+		other := newMockOIDCProvider(t)
+		token := other.sign(t, standardClaims(other.issuer(), now))
+		// Trust provider, present a token from `other`: go-oidc fetches provider's
+		// JWKS, the signature does not match, so it is rejected.
+		if _, err := VerifyMCPToken(context.Background(), verifier, token, provider.issuer(), audience, now); err == nil {
+			t.Fatal("expected a token from a different issuer to be rejected")
+		}
+	})
+
+	t.Run("OIDC issuer with no verifier configured fails closed", func(t *testing.T) {
+		token := provider.sign(t, standardClaims(provider.issuer(), now))
+		if _, err := VerifyMCPToken(context.Background(), nil, token, provider.issuer(), audience, now); err == nil {
+			t.Fatal("expected an https issuer with a nil OIDC verifier to fail closed")
 		}
 	})
 }

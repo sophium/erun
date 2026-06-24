@@ -46,6 +46,11 @@ type mcpAuthConfig struct {
 	// its verified iss is a key here; the value is the resolved tenant.
 	trustedIssuers map[string]string
 	audience       string
+	// oidc verifies tokens from `https://` OIDC issuers against their JWKS. It is
+	// the same shared verifier the hosted backend API uses (erun-common). One
+	// instance is created per middleware and reused so each issuer's key set is
+	// fetched and cached once; file:// issuers do not use it.
+	oidc *eruncommon.OIDCVerifier
 }
 
 // mcpAuthConfigFromEnv reads the auth configuration the chart wires onto the
@@ -57,6 +62,7 @@ func mcpAuthConfigFromEnv() mcpAuthConfig {
 	cfg := mcpAuthConfig{
 		trustedIssuers: map[string]string{},
 		audience:       strings.TrimSpace(os.Getenv(envMCPAudience)),
+		oidc:           eruncommon.NewOIDCVerifier(),
 	}
 	if raw := strings.TrimSpace(os.Getenv(envMCPTrustedIssuers)); raw != "" {
 		parsed := map[string]string{}
@@ -107,7 +113,7 @@ func authHTTPMiddleware(cfg mcpAuthConfig, next http.Handler) http.Handler {
 			writeUnauthorized(w, "token issuer is not a trusted MCP issuer")
 			return
 		}
-		if _, err := eruncommon.VerifyMCPToken(token, issuer, cfg.audience, time.Now()); err != nil {
+		if _, err := eruncommon.VerifyMCPToken(req.Context(), cfg.oidc, token, issuer, cfg.audience, time.Now()); err != nil {
 			writeUnauthorized(w, err.Error())
 			return
 		}

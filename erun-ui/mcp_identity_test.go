@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -56,7 +57,7 @@ func TestDesktopIdentityRoundTrip(t *testing.T) {
 		ExpiresAt: now.Add(time.Hour).Unix(),
 	})
 	mustNoErr(t, err, "sign verify token")
-	claims, err := eruncommon.VerifyMCPToken(verifyToken, localIssuer, audience, now)
+	claims, err := eruncommon.VerifyMCPToken(context.Background(), nil, verifyToken, localIssuer, audience, now)
 	mustNoErr(t, err, "VerifyMCPToken against persisted key")
 	if claims.Audience != audience {
 		t.Fatalf("verified audience = %q, want %q", claims.Audience, audience)

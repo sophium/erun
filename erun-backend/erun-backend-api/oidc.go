@@ -2,21 +2,20 @@ package backendapi
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
-	"sync"
 
-	"github.com/coreos/go-oidc/v3/oidc"
+	eruncommon "github.com/sophium/erun/erun-common"
 )
 
+// OIDCTokenVerifier authenticates hosted-API bearer tokens. It owns the
+// backend's issuer allow-list and the backend-specific claim mapping
+// (username/AWS-STS subject), and delegates signature/JWKS verification to the
+// shared eruncommon.OIDCVerifier (issue #656) so the backend API and the per-env
+// MCP edge trust OIDC issuers through one verifier.
 type OIDCTokenVerifier struct {
 	allowedIssuers map[string]struct{}
-	providers      map[string]*oidc.Provider
-	verifiers      map[string]*oidc.IDTokenVerifier
-	mu             sync.Mutex
+	verifier       *eruncommon.OIDCVerifier
 }
 
 type oidcTokenClaims struct {
@@ -50,13 +49,12 @@ func NewOIDCTokenVerifierWithOptions(options OIDCTokenVerifierOptions) *OIDCToke
 	}
 	return &OIDCTokenVerifier{
 		allowedIssuers: allowed,
-		providers:      make(map[string]*oidc.Provider),
-		verifiers:      make(map[string]*oidc.IDTokenVerifier),
+		verifier:       eruncommon.NewOIDCVerifier(),
 	}
 }
 
 func (v *OIDCTokenVerifier) VerifyBearerToken(ctx context.Context, token string) (Claims, error) {
-	issuer, err := issuerFromJWT(token)
+	issuer, err := eruncommon.IssuerFromUnverifiedJWT(token)
 	if err != nil {
 		return Claims{}, err
 	}
@@ -66,27 +64,44 @@ func (v *OIDCTokenVerifier) VerifyBearerToken(ctx context.Context, token string)
 		}
 	}
 
-	verifier, err := v.verifier(ctx, issuer)
-	if err != nil {
-		return Claims{}, err
-	}
-	idToken, err := verifier.Verify(ctx, token)
+	verified, err := v.verifier.Verify(ctx, issuer, token)
 	if err != nil {
 		return Claims{}, err
 	}
 
-	var claims oidcTokenClaims
-	if err := idToken.Claims(&claims); err != nil {
-		return Claims{}, err
+	// Decode the verified claim map into the backend's small struct for the
+	// username/AWS-STS mapping; the raw map stays so the identity resolver can
+	// read a per-issuer org claim whose name is configured in the DB, not here.
+	claims := oidcTokenClaimsFromRaw(verified.Raw)
+	return claimsFromOIDCTokenClaims(claims, verified.Raw), nil
+}
+
+// oidcTokenClaimsFromRaw reads the backend-specific claim subset out of the
+// verified raw claim map. It mirrors the shape go-oidc's idToken.Claims would
+// have produced, but sources from the already-verified map so the verifier owns
+// the single decode.
+func oidcTokenClaimsFromRaw(raw map[string]any) oidcTokenClaims {
+	claims := oidcTokenClaims{
+		Issuer:            stringClaim(raw, "iss"),
+		Subject:           stringClaim(raw, "sub"),
+		PreferredUsername: stringClaim(raw, "preferred_username"),
+		Username:          stringClaim(raw, "username"),
+		Email:             stringClaim(raw, "email"),
 	}
-	// Also capture the full claim set as a map so the identity resolver can read
-	// a per-issuer org claim (issuers.org_field_key) whose name is not known here
-	// — it is configured per issuer in the DB, not baked into the verifier.
-	var raw map[string]any
-	if err := idToken.Claims(&raw); err != nil {
-		return Claims{}, err
+	if aws, ok := raw["https://sts.amazonaws.com/"].(map[string]any); ok {
+		claims.AWS = awsSTSClaims{
+			IdentityStoreUserID: stringClaim(aws, "identity_store_user_id"),
+			SourceRegion:        stringClaim(aws, "source_region"),
+		}
 	}
-	return claimsFromOIDCTokenClaims(claims, raw), nil
+	return claims
+}
+
+func stringClaim(raw map[string]any, key string) string {
+	if value, ok := raw[key].(string); ok {
+		return value
+	}
+	return ""
 }
 
 func claimsFromOIDCTokenClaims(claims oidcTokenClaims, raw map[string]any) Claims {
@@ -107,45 +122,4 @@ func claimsFromOIDCTokenClaims(claims oidcTokenClaims, raw map[string]any) Claim
 		Username: username,
 		Raw:      raw,
 	}
-}
-
-func (v *OIDCTokenVerifier) verifier(ctx context.Context, issuer string) (*oidc.IDTokenVerifier, error) {
-	v.mu.Lock()
-	if verifier := v.verifiers[issuer]; verifier != nil {
-		v.mu.Unlock()
-		return verifier, nil
-	}
-	v.mu.Unlock()
-
-	provider, err := oidc.NewProvider(ctx, issuer)
-	if err != nil {
-		return nil, err
-	}
-	verifier := provider.Verifier(&oidc.Config{SkipClientIDCheck: true})
-
-	v.mu.Lock()
-	v.providers[issuer] = provider
-	v.verifiers[issuer] = verifier
-	v.mu.Unlock()
-	return verifier, nil
-}
-
-func issuerFromJWT(token string) (string, error) {
-	parts := strings.Split(token, ".")
-	if len(parts) < 2 {
-		return "", errors.New("token is not a jwt")
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return "", err
-	}
-	var claims oidcTokenClaims
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return "", err
-	}
-	issuer := strings.TrimSpace(claims.Issuer)
-	if issuer == "" {
-		return "", errors.New("token issuer is empty")
-	}
-	return issuer, nil
 }
