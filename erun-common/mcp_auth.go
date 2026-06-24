@@ -168,6 +168,23 @@ func validateMCPClaims(claims MCPTokenClaims, expectedAudience string, now time.
 	return nil
 }
 
+// UnverifiedMCPTokenIssuer extracts the `iss` claim from a token WITHOUT
+// verifying its signature. The MCP server uses it — exactly as the erun api's
+// issuerFromJWT does — only to select which trusted issuer (and therefore which
+// tenant) the token claims to come from; VerifyMCPToken then re-checks the
+// issuer and verifies the signature against that issuer's key. The EdDSA-only
+// header check still runs, so a non-EdDSA token is rejected here too.
+func UnverifiedMCPTokenIssuer(token string) (string, error) {
+	_, claims, _, err := parseMCPToken(token)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(claims.Issuer) == "" {
+		return "", fmt.Errorf("MCP token has no issuer")
+	}
+	return claims.Issuer, nil
+}
+
 // loadEd25519PublicKeyFromFileIssuer parses a `file://<path>` issuer and reads
 // the PEM-encoded Ed25519 public key at that path.
 func loadEd25519PublicKeyFromFileIssuer(issuer string) (ed25519.PublicKey, error) {
