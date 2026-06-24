@@ -74,6 +74,37 @@ func FileIssuer(publicKeyPath string) string {
 	return "file://" + publicKeyPath
 }
 
+const (
+	// DesktopMCPPublicKeyDir is the in-pod directory the desktop's public key is
+	// mounted into by the runtime chart.
+	DesktopMCPPublicKeyDir  = "/etc/erun/mcp-auth"
+	desktopMCPPublicKeyFile = "desktopid.pub"
+)
+
+// DesktopMCPPublicKeyPath is the in-pod path the desktop public key is mounted
+// at. It is the single location the `file://` issuer references and the MCP
+// server loads the trusted key from, so the chart mount, the desktop signer's
+// `iss` claim, and the server's trusted-issuer env all derive from it.
+func DesktopMCPPublicKeyPath() string {
+	return DesktopMCPPublicKeyDir + "/" + desktopMCPPublicKeyFile
+}
+
+// DesktopMCPIssuer is the `file://` issuer the desktop stamps in its tokens and
+// the MCP server is configured to trust for a desktop deployment.
+func DesktopMCPIssuer() string {
+	return FileIssuer(DesktopMCPPublicKeyPath())
+}
+
+// MCPTokenAudience is the stable per-environment audience a desktop or console
+// token must carry and the env's MCP edge enforces, so a token minted for one
+// environment cannot be replayed against another (issue #655). It is transport-
+// independent — the same value whether the edge is reached over the desktop's
+// local port-forward or the public Traefik route — so the signer and the
+// chart's ERUN_MCP_AUDIENCE always agree.
+func MCPTokenAudience(tenant, environment string) string {
+	return "erun-mcp:" + strings.TrimSpace(tenant) + "/" + strings.TrimSpace(environment)
+}
+
 // SignMCPToken signs an EdDSA (Ed25519) JWT for the given claims with the
 // PEM-encoded private key. The claims' Issuer must be a `file://<path>` URL
 // naming the public-key file the verifier will load.

@@ -34,6 +34,23 @@ func signTestToken(t *testing.T, privatePEM []byte, claims MCPTokenClaims) strin
 	return token
 }
 
+func TestDesktopMCPConventions(t *testing.T) {
+	if got := DesktopMCPPublicKeyPath(); got != "/etc/erun/mcp-auth/desktopid.pub" {
+		t.Fatalf("DesktopMCPPublicKeyPath() = %q", got)
+	}
+	if got := DesktopMCPIssuer(); got != "file:///etc/erun/mcp-auth/desktopid.pub" {
+		t.Fatalf("DesktopMCPIssuer() = %q", got)
+	}
+	if got := MCPTokenAudience(" acme ", " prod "); got != "erun-mcp:acme/prod" {
+		t.Fatalf("MCPTokenAudience() = %q", got)
+	}
+	// The per-env audience distinguishes environments of the same tenant, so a
+	// token minted for one env cannot satisfy another's expected audience.
+	if MCPTokenAudience("acme", "prod") == MCPTokenAudience("acme", "dev") {
+		t.Fatal("expected distinct per-env audiences")
+	}
+}
+
 func TestMCPTokenSignVerifyRoundTrip(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	priv, issuer := writeTrustedPublicKey(t)
