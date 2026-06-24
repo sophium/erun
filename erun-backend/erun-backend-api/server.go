@@ -77,6 +77,9 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 		builds := repository.NewBuildRepository(txManager)
 		comments := repository.NewCommentRepository(txManager)
 		tenantIssuers := repository.NewTenantIssuerRepository(txManager)
+		tenants := repository.NewTenantRepository(txManager)
+		environments := repository.NewEnvironmentRepository(txManager)
+		contexts := repository.NewContextRepository(txManager)
 		reviewService := service.NewReviewService(reviews, builds)
 		buildService := service.NewBuildService(builds, reviewService)
 		commentService := service.NewCommentService(comments)
@@ -84,6 +87,9 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 		routes.RegisterReviewRoutes(register, reviews, reviewService)
 		routes.RegisterBuildRoutes(register, builds, buildService)
 		routes.RegisterCommentRoutes(register, comments, commentService)
+		routes.RegisterEnvironmentRoutes(register, environments)
+		routes.RegisterContextRoutes(register, contexts)
+		routes.RegisterConfigRoute(register, tenants, environments, contexts)
 	}
 	routes.RegisterWhoamiRoute(register, users)
 	return mux, nil
