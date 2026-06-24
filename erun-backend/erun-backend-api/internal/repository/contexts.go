@@ -17,6 +17,23 @@ func NewContextRepository(txs *TxManager) *ContextRepository {
 	return &ContextRepository{txs: txs}
 }
 
+// Create inserts a new cloud context for the caller's tenant and returns the
+// persisted row. Only the operator-authored columns are written; context_id,
+// tenant_id, and the timestamps are owned by the database (the tenant_id
+// DEFAULT + RLS bind the row to the caller's tenant automatically), so they are
+// excluded from the Column list and populated by Returning("*").
+func (r *ContextRepository) Create(ctx context.Context, cloudContext model.Context) (model.Context, error) {
+	created := cloudContext
+	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		return tx.NewInsert().
+			Model(&created).
+			Column("name", "provider", "cloud_provider_alias", "region", "instance_type", "disk_type", "disk_size_gb", "kubernetes_context").
+			Returning("*").
+			Scan(ctx)
+	})
+	return created, err
+}
+
 func (r *ContextRepository) List(ctx context.Context) ([]model.Context, error) {
 	var contexts []model.Context
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {

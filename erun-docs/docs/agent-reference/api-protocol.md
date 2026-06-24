@@ -94,6 +94,7 @@ The `(iss, org) → tenant` resolution model and first-identity bootstrap above 
 | `GET` | `/v1/environments` | List the tenant's environments. | Tenant member |
 | `GET` | `/v1/environments/{environment_id}` | Fetch one environment by id. | Tenant member |
 | `GET` | `/v1/contexts` | List the tenant's cloud contexts (managed clusters). | Tenant member |
+| `POST` | `/v1/contexts` | Register a cloud context (managed cluster) for the caller's tenant and return its cluster-bootstrap plan. Body below. | Tenant member (write) |
 | `GET` | `/v1/contexts/{context_id}` | Fetch one cloud context by id. | Tenant member |
 
 `GET /v1/config` is the console's read model over the per-tenant erun config — the backend DB is the system of record for the tenant's environments and cloud contexts, and this endpoint returns them denormalized as the on-disk erun config shape. All of these reads are tenant-scoped by row-level security, so a token only ever sees its own tenant's rows.
@@ -150,6 +151,67 @@ Returns the updated tenant-issuer record (`200`). `400` if `issuer` or `name` is
 ```
 
 `remove` matches by `issuerUrl`. Both arrays are optional; either may be empty.
+
+### `POST /v1/contexts`
+
+Registers a **cloud context** (a managed cluster) for the caller's tenant and returns the cluster-**bootstrap plan**. The model is **BYO-cloud**: the context bootstraps onto the tenant's own AWS account via a registered cloud-provider alias (`cloudProviderAlias`), provisioning an EC2 instance running k3s. The endpoint is tenant-scoped by row-level security — the registered row is bound to the caller's tenant automatically.
+
+```jsonc
+// POST /v1/contexts body (BYO-cloud)
+{
+  "name": "primary",            // required — the context (cluster) name; also its kubernetes context
+  "cloudProviderAlias": "aws-acme", // required — a registered AWS cloud-provider alias for the tenant
+  "region": "eu-west-2",        // required — AWS region (must be a supported region)
+  "instanceType": "c8gd.2xlarge", // optional — defaults applied server-side when empty
+  "diskType": "gp3",            // optional
+  "diskSizeGb": 100,            // optional
+  "preview": false              // optional — when true, returns the plan only (no registration)
+}
+```
+
+**The `plan`.** Every call resolves the **bootstrap plan** — the ordered EC2/k3s commands the bootstrap would run (security-group + IAM instance-profile setup, `ec2 run-instances`, the k3s install user-data, the kube-context wiring) — by running the bootstrap in **dry-run** against the tenant's alias. It is returned as an array of trace lines so the caller can preview exactly what the live bootstrap will do.
+
+- **`preview: true`** → returns `{ "plan": [ … ] }` only. Nothing is registered.
+- **`preview: false`** (default) → registers a context row at a **pending** status (no instance id / public IP yet) and returns `{ "context": { … }, "plan": [ … ] }` with HTTP `201`.
+
+```jsonc
+// 201 response (preview=false)
+{
+  "context": {
+    "contextId": "019a7fa5-c2c0-7c55-bc70-714873a71f20",
+    "tenantId": "019a7fa5-c2c0-7c55-bc70-714873a71f10",
+    "name": "primary",
+    "provider": "aws",
+    "cloudProviderAlias": "aws-acme",
+    "region": "eu-west-2",
+    "instanceType": "c8gd.2xlarge",
+    "diskType": "gp3",
+    "diskSizeGb": 100,
+    "kubernetesContext": "primary",
+    "createdAt": "2026-06-24T10:00:00Z",
+    "updatedAt": "2026-06-24T10:00:00Z"
+  },
+  "plan": [
+    "cloud-context init: alias=aws-acme region=eu-west-2 instance-type=c8gd.2xlarge disk=100GB/gp3",
+    "aws ec2 create-security-group …",
+    "aws ec2 run-instances …",
+    "kubectl config set-cluster primary …"
+  ]
+}
+```
+
+The k3s admin token is a **server secret** and is never part of the response or the context read model.
+
+**Live bootstrap execution and token custody are `(Planned.)`.** This endpoint registers the row and returns the plan; it does **not** yet execute the real (non-dry-run) EC2 + k3s bootstrap or take server-side custody of the k3s admin token / kubeconfig. Until that lands, a registered context stays at its pending status with no instance id or public IP — provisioning the live cluster from the plan is the planned follow-up, gated on the hosted platform having a live AWS path.
+
+**Error behaviour.** Today the API returns a bare HTTP status with a plain-text body (no JSON envelope):
+
+| Status | Condition | Recovery |
+|---|---|---|
+| `400` | `name`, `cloudProviderAlias`, or `region` is empty/missing, or the body is not valid JSON. | Send all three required fields. |
+| `400` | The bootstrap plan could not be resolved (e.g. an unsupported `region`, `instanceType`, or `diskSizeGb` for the BYO-cloud bootstrap). | Use a supported region/instance type/disk size. |
+| `401` / `403` | Standard auth failures (see [Errors](#errors)). The `WriteAll` permission covers `POST /v1/contexts`. | Send a valid token whose roles permit the write. |
+| `500` | Persistence failed (e.g. missing request-scoped security context — an internal wiring error, never a client fault). | Retry; if it persists, it is a server bug. |
 
 ### Service-account flow for Agents
 
