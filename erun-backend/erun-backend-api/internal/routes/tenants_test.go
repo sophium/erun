@@ -65,10 +65,12 @@ func TestCreateTenantForbidsNonOperationsCaller(t *testing.T) {
 
 func TestCreateTenantRejectsInvalidInput(t *testing.T) {
 	cases := map[string]string{
-		"missing name":   `{"issuer":"https://idp.example"}`,
-		"missing issuer": `{"name":"acme"}`,
-		"unknown type":   `{"name":"acme","issuer":"https://idp.example","type":"PARTNER"}`,
-		"malformed json": `{`,
+		"missing name":    `{"issuer":"https://idp.example"}`,
+		"missing issuer":  `{"name":"acme"}`,
+		"unknown type":    `{"name":"acme","issuer":"https://idp.example","type":"PARTNER"}`,
+		"malformed json":  `{`,
+		"hyphenated name": `{"name":"ac-me","issuer":"https://idp.example"}`,
+		"uppercase name":  `{"name":"Acme","issuer":"https://idp.example"}`,
 	}
 	for label, body := range cases {
 		t.Run(label, func(t *testing.T) {

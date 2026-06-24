@@ -55,6 +55,22 @@ func (r EnvironmentRoutes) getEnvironment(w http.ResponseWriter, req *http.Reque
 	writeJSON(w, http.StatusOK, environment)
 }
 
+// validNamespaceLabel reports whether s is a DNS-1123 label safe to use as the
+// env component of the <tenant>-<env> runtime namespace: lowercase letters,
+// digits, and internal hyphens, not hyphen-bounded, at most 63 characters.
+func validNamespaceLabel(s string) bool {
+	if s == "" || len(s) > 63 || s[0] == '-' || s[len(s)-1] == '-' {
+		return false
+	}
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 // validEnvironmentTypes is the closed set of env types the registration API
 // accepts, matching model.EnvironmentType.
 var validEnvironmentTypes = map[model.EnvironmentType]struct{}{
@@ -76,8 +92,12 @@ func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Re
 	}
 
 	name := strings.TrimSpace(body.Name)
-	if name == "" {
-		writeError(w, http.StatusBadRequest, "name is required")
+	// The env name forms the <tenant>-<env> namespace, so it must be a DNS-1123
+	// label. The tenant is already hyphen-free (ValidateTenantName on tenant
+	// registration), so the env may itself contain internal hyphens and the
+	// first-hyphen split stays unambiguous (#605 injective-namespace guardrail).
+	if !validNamespaceLabel(name) {
+		writeError(w, http.StatusBadRequest, "name must be a DNS-1123 label: lowercase letters, digits, and internal hyphens, not starting or ending with a hyphen, at most 63 characters")
 		return
 	}
 	envType := model.EnvironmentType(strings.TrimSpace(body.Type))

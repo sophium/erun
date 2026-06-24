@@ -20,11 +20,14 @@ func postCreateEnvironment(t *testing.T, environments *stubEnvironmentRepository
 
 func TestCreateEnvironmentRejectsInvalidInput(t *testing.T) {
 	cases := map[string]string{
-		"missing name":   `{"type":"runtime"}`,
-		"missing type":   `{"name":"prod"}`,
-		"unknown type":   `{"name":"prod","type":"staging"}`,
-		"empty body":     `{}`,
-		"malformed json": `{`,
+		"missing name":        `{"type":"runtime"}`,
+		"missing type":        `{"name":"prod"}`,
+		"unknown type":        `{"name":"prod","type":"staging"}`,
+		"empty body":          `{}`,
+		"malformed json":      `{`,
+		"uppercase name":      `{"name":"Prod","type":"runtime"}`,
+		"hyphen-bounded name": `{"name":"-prod","type":"runtime"}`,
+		"space in name":       `{"name":"my env","type":"runtime"}`,
 	}
 	for label, body := range cases {
 		t.Run(label, func(t *testing.T) {

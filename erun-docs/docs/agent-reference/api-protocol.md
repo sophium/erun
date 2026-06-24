@@ -161,7 +161,7 @@ Registers an **environment** in the caller's tenant. The tenant is resolved from
 ```jsonc
 // POST /v1/environments body
 {
-  "name": "prod",              // required — the environment name (tenant-scoped)
+  "name": "prod",              // required — a DNS-1123 label (lowercase letters, digits, internal hyphens)
   "type": "runtime",           // required — one of "runtime", "remote-agent", "local-agent"
   "contextId": "019a7fa5-…",   // optional — the cloud context (cluster) the env runs in
   "kubernetesContext": "primary", // optional — the kube context bound to the env
@@ -192,7 +192,7 @@ On success the endpoint persists the row and returns it with HTTP `201`:
 
 | Status | Condition | Recovery |
 |---|---|---|
-| `400` | `name` is empty/missing, `type` is not one of `runtime`/`remote-agent`/`local-agent`, or the body is not valid JSON. | Send a non-empty `name` and a valid `type`. |
+| `400` | `name` is not a DNS-1123 label (the env forms the `<tenant>-<env>` namespace), `type` is not one of `runtime`/`remote-agent`/`local-agent`, or the body is not valid JSON. | Send a DNS-1123 `name` and a valid `type`. |
 | `401` / `403` | Standard auth failures (see [Errors](#errors)). The `WriteAll` permission covers `POST /v1/environments`. | Send a valid token whose roles permit the write. |
 | `500` | Persistence failed — e.g. `contextId` references a context that is not the caller's (the composite `(tenant_id, context_id)` foreign key is violated), or the request-scoped security context is missing (an internal wiring error). | Reference a context owned by the caller's tenant; if it persists with a valid context, it is a server bug. |
 
@@ -264,7 +264,7 @@ Registers a **new tenant** plus the OIDC issuer mapping that resolves its tokens
 ```jsonc
 // POST /v1/tenants body (operations-only)
 {
-  "name": "acme",                  // required — the tenant name (globally unique)
+  "name": "acme",                  // required — lowercase letters and digits only, NO hyphens (globally unique)
   "type": "COMPANY",               // optional — "COMPANY" (default) or "OPERATIONS"
   "issuer": "https://idp.example", // required — the OIDC issuer whose tokens map to this tenant
   "orgFieldKey": "org_id",         // optional — org-scoped (shared) issuer: the token claim carrying the org
@@ -290,7 +290,7 @@ The three identity rows — the `tenants` row, the `issuers` registry row (the g
 
 | Status | Condition | Recovery |
 |---|---|---|
-| `400` | `name` or `issuer` is empty/missing, `type` is not one of `COMPANY`/`OPERATIONS`, or the body is not valid JSON. | Send a non-empty `name` and `issuer` and a valid `type`. |
+| `400` | `name` is empty or contains anything other than lowercase letters and digits (no hyphens — so the `<tenant>-<env>` namespace stays injective), `issuer` is empty/missing, `type` is not one of `COMPANY`/`OPERATIONS`, or the body is not valid JSON. | Send a hyphen-free lowercase-alphanumeric `name`, a non-empty `issuer`, and a valid `type`. |
 | `403` | The caller's resolved tenant is not an `OPERATIONS` tenant (the explicit operations gate, beyond the standard auth failures in [Errors](#errors)). | Call from an operations-tenant token whose roles permit the write. |
 | `500` | Persistence failed — e.g. the tenant `name` or the `(issuer, org_field_value)` mapping already exists (a uniqueness violation), or the request-scoped security context is missing (an internal wiring error). | Use a unique tenant name and issuer mapping; if it persists with unique inputs, it is a server bug. |
 
