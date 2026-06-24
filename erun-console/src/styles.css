@@ -1,0 +1,94 @@
+:root {
+  --fg: #0f1320;
+  --muted: #5b6472;
+  --border: #e2e6eb;
+  --bg: #ffffff;
+  --accent: #0891b2;
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.app {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+}
+
+.tenant-header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.tenant-meta {
+  margin: 0.25rem 0 1.5rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+section {
+  margin-bottom: 2rem;
+}
+
+section h2 {
+  font-size: 1.1rem;
+  margin-bottom: 0.75rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.context-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.context-list li {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9rem;
+}
+
+.context-meta {
+  color: var(--muted);
+}
+
+.empty-state {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.message {
+  padding: 2rem 0;
+  color: var(--muted);
+}
+
+.error-detail {
+  font-size: 0.85rem;
+}
