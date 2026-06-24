@@ -23,15 +23,32 @@ func (r stubConfigTenantRepository) Current(context.Context) (model.Tenant, erro
 type stubEnvironmentRepository struct {
 	environments []model.Environment
 	environment  model.Environment
+	created      model.Environment
+	createCalls  int
+	createInput  model.Environment
 	err          error
 }
 
-func (r stubEnvironmentRepository) List(context.Context) ([]model.Environment, error) {
+func (r *stubEnvironmentRepository) List(context.Context) ([]model.Environment, error) {
 	return r.environments, r.err
 }
 
-func (r stubEnvironmentRepository) Get(context.Context, string) (model.Environment, error) {
+func (r *stubEnvironmentRepository) Get(context.Context, string) (model.Environment, error) {
 	return r.environment, r.err
+}
+
+func (r *stubEnvironmentRepository) Create(_ context.Context, environment model.Environment) (model.Environment, error) {
+	r.createCalls++
+	r.createInput = environment
+	if r.err != nil {
+		return model.Environment{}, r.err
+	}
+	created := r.created
+	if created.EnvironmentID == "" {
+		created = environment
+		created.EnvironmentID = "env-created"
+	}
+	return created, nil
 }
 
 type stubContextRepository struct {
@@ -65,7 +82,7 @@ func (r *stubContextRepository) Create(_ context.Context, cloudContext model.Con
 
 func TestConfigReturnsDenormalizedReadModel(t *testing.T) {
 	tenants := stubConfigTenantRepository{tenant: model.Tenant{TenantID: "tenant-1", Name: "acme", Type: model.TenantTypeCompany}}
-	environments := stubEnvironmentRepository{environments: []model.Environment{
+	environments := &stubEnvironmentRepository{environments: []model.Environment{
 		{EnvironmentID: "env-1", Name: "runtime", Type: model.EnvironmentTypeRuntime, ContextID: "ctx-1"},
 	}}
 	contexts := &stubContextRepository{contexts: []model.Context{
@@ -101,7 +118,7 @@ func TestConfigPropagatesRepositoryError(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/config", nil)
 	rec := httptest.NewRecorder()
 
-	ConfigRoutes{tenants: tenants, environments: stubEnvironmentRepository{}, contexts: &stubContextRepository{}}.getConfig(rec, req)
+	ConfigRoutes{tenants: tenants, environments: &stubEnvironmentRepository{}, contexts: &stubContextRepository{}}.getConfig(rec, req)
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("unexpected status: %d", rec.Code)
@@ -109,7 +126,7 @@ func TestConfigPropagatesRepositoryError(t *testing.T) {
 }
 
 func TestGetEnvironmentNotFound(t *testing.T) {
-	environments := stubEnvironmentRepository{err: repository.ErrNotFound}
+	environments := &stubEnvironmentRepository{err: repository.ErrNotFound}
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/environments/missing", nil)
 	req.SetPathValue("environment_id", "missing")

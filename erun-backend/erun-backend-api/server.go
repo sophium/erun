@@ -89,6 +89,7 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 		routes.RegisterCommentRoutes(register, comments, commentService)
 		routes.RegisterEnvironmentRoutes(register, environments)
 		routes.RegisterContextRoutes(register, contexts)
+		routes.RegisterTenantRoutes(register, tenants)
 		routes.RegisterConfigRoute(register, tenants, environments, contexts)
 	}
 	routes.RegisterWhoamiRoute(register, users)
