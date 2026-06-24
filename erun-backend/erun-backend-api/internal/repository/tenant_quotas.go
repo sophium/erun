@@ -41,3 +41,24 @@ func (r *TenantQuotaRepository) MaxEnvironments(ctx context.Context) (int, error
 	}
 	return quota.MaxEnvironments, nil
 }
+
+// Set upserts a tenant's environment-count cap and returns the stored row. It is
+// operations-only at the route layer; the operations role's RLS policy lets it
+// write any tenant's row, and tenant_id is set explicitly to the target — not
+// the erun_current_tenant_id() column default, which would be the operations
+// caller's own tenant.
+func (r *TenantQuotaRepository) Set(ctx context.Context, tenantID string, maxEnvironments int) (model.TenantQuota, error) {
+	var quota model.TenantQuota
+	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		return tx.NewRaw(`
+			INSERT INTO tenant_quotas (tenant_id, max_environments)
+			VALUES (?, ?)
+			ON CONFLICT (tenant_id) DO UPDATE SET max_environments = EXCLUDED.max_environments
+			RETURNING tenant_id, max_environments, created_at, updated_at
+		`, tenantID, maxEnvironments).Scan(ctx, &quota)
+	})
+	if err != nil {
+		return model.TenantQuota{}, err
+	}
+	return quota, nil
+}

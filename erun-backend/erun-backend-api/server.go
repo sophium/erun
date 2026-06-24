@@ -91,6 +91,7 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 		routes.RegisterEnvironmentRoutes(register, environments, tenantQuotas)
 		routes.RegisterContextRoutes(register, contexts)
 		routes.RegisterTenantRoutes(register, tenants)
+		routes.RegisterTenantQuotaRoute(register, tenantQuotas)
 		routes.RegisterConfigRoute(register, tenants, environments, contexts)
 		routes.RegisterProvisionRoute(register, tenants, environments, tenantQuotas)
 	}
