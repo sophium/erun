@@ -11,7 +11,7 @@ type ContextRepository struct {
 	txs *TxManager
 }
 
-const contextColumns = `context_id, tenant_id, name, provider, cloud_provider_alias, region, instance_id, public_ip, instance_type, disk_type, disk_size_gb, kubernetes_context, created_at, updated_at`
+const contextColumns = `context_id, tenant_id, name, provider, cloud_provider_alias, region, instance_id, public_ip, instance_type, disk_type, disk_size_gb, kubernetes_context, status, provision_error, created_at, updated_at`
 
 func NewContextRepository(txs *TxManager) *ContextRepository {
 	return &ContextRepository{txs: txs}
@@ -57,4 +57,23 @@ func (r *ContextRepository) Get(ctx context.Context, contextID string) (model.Co
 		return normalizeNoRows(err)
 	})
 	return cloudContext, err
+}
+
+// UpdateProvisioningResult records the outcome of a provisioning run (issue
+// #605/#676): on success the executor passes status="running" with the resolved
+// instance_id/public_ip and an empty error; on failure status="failed" with the
+// reason. RLS scopes the UPDATE to the caller's tenant. Empty instance/IP/error
+// values normalize to NULL so a failed run does not leave a stale instance id.
+func (r *ContextRepository) UpdateProvisioningResult(ctx context.Context, contextID, status, instanceID, publicIP, provisionError string) error {
+	return r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		_, err := tx.NewRaw(`
+			UPDATE contexts
+			   SET status = ?,
+			       instance_id = NULLIF(?, ''),
+			       public_ip = NULLIF(?, ''),
+			       provision_error = NULLIF(?, '')
+			 WHERE context_id = ?
+		`, status, instanceID, publicIP, provisionError, contextID).Exec(ctx)
+		return err
+	})
 }

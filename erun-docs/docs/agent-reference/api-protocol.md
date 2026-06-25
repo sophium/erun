@@ -97,8 +97,9 @@ The `(iss, org) → tenant` resolution model and first-identity bootstrap above 
 | `POST` | `/v1/environments` | Register an environment in the caller's tenant, bound to a referenced context. Body below. | Tenant member (write) |
 | `GET` | `/v1/environments/{environment_id}` | Fetch one environment by id. | Tenant member |
 | `GET` | `/v1/contexts` | List the tenant's cloud contexts (managed clusters). | Tenant member |
-| `POST` | `/v1/contexts` | Register a cloud context (managed cluster) for the caller's tenant and return its cluster-bootstrap plan. Body below. | Tenant member (write) |
-| `GET` | `/v1/contexts/{context_id}` | Fetch one cloud context by id. | Tenant member |
+| `POST` | `/v1/contexts` | Register a cloud context (managed cluster) and, when provisioning is configured, start its durable live bootstrap (`202`). Body below. | Tenant member (write) |
+| `GET` | `/v1/contexts/{context_id}` | Fetch one cloud context by id, including its provisioning `status`. | Tenant member |
+| `PUT` | `/v1/cloud-provider-aliases/{alias}` | Register/update the tenant's BYO-cloud credentials (encrypted at rest), resolved when provisioning a context. Body below. | Tenant member (write) |
 | `POST` | `/v1/provision` | Return the complete, ordered **plan** to provision a hosted env (quota check → context bootstrap → namespace → env registration → runtime deploy) for the caller's tenant. Preview-only; no execution, no writes. Body below. | Tenant member (write) |
 | `POST` | `/v1/tenants` | Register a new tenant plus its OIDC issuer mapping. Operations-only. Body below. | Operations only |
 
@@ -222,10 +223,10 @@ Registers a **cloud context** (a managed cluster) for the caller's tenant and re
 **The `plan`.** Every call resolves the **bootstrap plan** — the ordered EC2/k3s commands the bootstrap would run (security-group + IAM instance-profile setup, `ec2 run-instances`, the k3s install user-data, the kube-context wiring) — by running the bootstrap in **dry-run** against the tenant's alias. It is returned as an array of trace lines so the caller can preview exactly what the live bootstrap will do.
 
 - **`preview: true`** → returns `{ "plan": [ … ] }` only. Nothing is registered.
-- **`preview: false`** (default) → registers a context row at a **pending** status (no instance id / public IP yet) and returns `{ "context": { … }, "plan": [ … ] }` with HTTP `201`.
+- **`preview: false`** (default) → registers a context row at status `provisioning`, **kicks off the live bootstrap asynchronously**, and returns `{ "context": { … }, "plan": [ … ] }` with HTTP `202 Accepted`. Poll `GET /v1/contexts/{context_id}` until `status` reaches `running` (success) or `failed`.
 
 ```jsonc
-// 201 response (preview=false)
+// 202 response (preview=false): registered, and provisioning has started
 {
   "context": {
     "contextId": "019a7fa5-c2c0-7c55-bc70-714873a71f20",
@@ -234,15 +235,12 @@ Registers a **cloud context** (a managed cluster) for the caller's tenant and re
     "provider": "aws",
     "cloudProviderAlias": "aws-acme",
     "region": "eu-west-2",
-    "instanceType": "c8gd.2xlarge",
-    "diskType": "gp3",
-    "diskSizeGb": 100,
     "kubernetesContext": "primary",
+    "status": "provisioning",   // provisioning → running (success) | failed
     "createdAt": "2026-06-24T10:00:00Z",
     "updatedAt": "2026-06-24T10:00:00Z"
   },
   "plan": [
-    "cloud-context init: alias=aws-acme region=eu-west-2 instance-type=c8gd.2xlarge disk=100GB/gp3",
     "aws ec2 create-security-group …",
     "aws ec2 run-instances …",
     "kubectl config set-cluster primary …"
@@ -250,9 +248,15 @@ Registers a **cloud context** (a managed cluster) for the caller's tenant and re
 }
 ```
 
-The k3s admin token is a **server secret** and is never part of the response or the context read model.
+**Async, durable provisioning (issue #605).** The live bootstrap runs as a **durable DBOS workflow** — it survives a control-plane restart, resuming from its last completed step. It executes the real (non-dry-run) `InitCloudContext` against the tenant's BYO-cloud alias (security group + IAM instance-profile, `run-instances` with the k3s install user-data, `wait`, resolve the public IP), then takes **server-side custody of the k3s admin token** — encrypted at rest in `context_credentials`, never returned — and sets the context `status`:
 
-**Live bootstrap execution and token custody are `(Planned.)`.** This endpoint registers the row and returns the plan; it does **not** yet execute the real (non-dry-run) EC2 + k3s bootstrap or take server-side custody of the k3s admin token / kubeconfig. Until that lands, a registered context stays at its pending status with no instance id or public IP — provisioning the live cluster from the plan is the planned follow-up, gated on the hosted platform having a live AWS path.
+- `provisioning` → in flight.
+- `running` → the cluster is up; `instanceId` and `publicIp` are populated.
+- `failed` → `provisionError` carries the reason.
+
+`GET /v1/contexts/{context_id}` returns the current `status` (plus `provisionError` when failed). The k3s admin token is a **server secret** and is never part of any response or the read model.
+
+**Prerequisites.** Live provisioning requires (1) a registered cloud-provider alias holding the tenant's encrypted BYO-cloud credentials (`PUT /v1/cloud-provider-aliases/{alias}`, below), and (2) the platform configured with a DBOS system database (`DBOS_SYSTEM_DATABASE_URL`) and a secrets key (`ERUN_SECRETS_KEY`). When provisioning is **not** configured, `POST /v1/contexts` registers the row and returns `201` with the plan only (no live bootstrap) — the pre-#676 behaviour.
 
 **Error behaviour.** Today the API returns a bare HTTP status with a plain-text body (no JSON envelope):
 
@@ -262,6 +266,27 @@ The k3s admin token is a **server secret** and is never part of the response or 
 | `400` | The bootstrap plan could not be resolved (e.g. an unsupported `region`, `instanceType`, or `diskSizeGb` for the BYO-cloud bootstrap). | Use a supported region/instance type/disk size. |
 | `401` / `403` | Standard auth failures (see [Errors](#errors)). The `WriteAll` permission covers `POST /v1/contexts`. | Send a valid token whose roles permit the write. |
 | `500` | Persistence failed (e.g. missing request-scoped security context — an internal wiring error, never a client fault). | Retry; if it persists, it is a server bug. |
+
+### `PUT /v1/cloud-provider-aliases/{alias}`
+
+Registers (upserts) the caller tenant's **BYO-cloud credentials** under a named alias — the secret the provisioning executor resolves to talk to the tenant's cloud (issue #605). The credentials blob is **opaque to the API** (a provider-specific JSON the executor hands to the cloud SDK/CLI) and is **encrypted at rest**: the `credentials_encrypted` column never holds plaintext. Tenant-owned (row-level security binds the alias to the caller), so any authorized tenant manages its own aliases; no operations gate.
+
+```jsonc
+// PUT /v1/cloud-provider-aliases/{alias} body
+{
+  "provider": "aws",   // optional — defaults to aws; must be aws today
+  "credentials": "{\"accessKeyId\":\"…\",\"secretAccessKey\":\"…\"}" // required — opaque, encrypted at rest
+}
+```
+
+Returns `204 No Content`. Available only when the platform is configured with a secrets key (`ERUN_SECRETS_KEY`).
+
+**Error behaviour.**
+
+| Status | Condition | Recovery |
+|---|---|---|
+| `400` | `alias` path value empty, `credentials` empty, or `provider` is not `aws`. | Send a non-empty alias + credentials with `provider: aws`. |
+| `401` / `403` | Standard auth failures; `WriteAll` covers the `PUT`. | Send a valid token whose roles permit the write. |
 
 ### `POST /v1/provision`
 
