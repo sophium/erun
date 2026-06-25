@@ -16,6 +16,7 @@ import (
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/secrets"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	eruncommon "github.com/sophium/erun/erun-common"
 )
@@ -65,6 +66,7 @@ type Provisioner struct {
 	// awsEndpoint, when set, points every aws call at a local emulator (floci)
 	// for verification; empty means the real AWS endpoints.
 	awsEndpoint string
+	cipher      *secrets.Cipher
 	workflowFn  func(dbos.DBOSContext, ProvisionInput) (ProvisionResult, error)
 }
 
@@ -75,6 +77,7 @@ func NewProvisioner(
 	contexts *repository.ContextRepository,
 	credentials *repository.ContextCredentialRepository,
 	aliases *repository.CloudProviderAliasRepository,
+	cipher *secrets.Cipher,
 	awsEndpoint string,
 ) *Provisioner {
 	p := &Provisioner{
@@ -82,6 +85,7 @@ func NewProvisioner(
 		contexts:    contexts,
 		credentials: credentials,
 		aliases:     aliases,
+		cipher:      cipher,
 		awsEndpoint: awsEndpoint,
 	}
 	// A method value: a stable workflow name across restarts (so DBOS recovers
@@ -148,6 +152,12 @@ func (p *Provisioner) bootstrapAndCustody(c context.Context, input ProvisionInpu
 	status, err := eruncommon.InitCloudContext(ectx, store, params, eruncommon.CloudContextDependencies{
 		RunAWS:     p.awsRunner(c, alias.Credentials),
 		RunKubectl: func(eruncommon.Context, []string) error { return nil },
+		// Deterministic k3s admin token derived from the context id: a re-run
+		// (durable workflow resuming after a crash, reusing the existing tagged
+		// instance) re-derives the SAME token the instance baked, so custody is
+		// idempotent. Domain-separated from encryption; never stored in the DBOS
+		// checkpoint.
+		NewToken: func() string { return p.cipher.DeriveToken("k3s-admin-token:" + input.ContextID) },
 	})
 	if err != nil {
 		return bootstrapResult{}, fmt.Errorf("bootstrap cloud context: %w", err)

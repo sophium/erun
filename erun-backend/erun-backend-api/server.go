@@ -112,6 +112,7 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 					contexts,
 					repository.NewContextCredentialRepository(txManager, options.Cipher),
 					aliases,
+					options.Cipher,
 					options.AWSEndpoint,
 				)
 			}

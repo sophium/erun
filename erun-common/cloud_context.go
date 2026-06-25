@@ -445,11 +445,26 @@ func initCloudContextSecurityGroup(ctx Context, deps CloudContextDependencies, p
 }
 
 func runInitCloudContextInstance(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, params InitCloudContextParams, config *CloudContextConfig) (string, error) {
-	ami, err := initCloudContextAMI(ctx, deps, provider, config.Region)
+	// Idempotency (issue #605): a re-run — a durable provisioning workflow
+	// resuming after a crash, or a re-issued `erun context init` — must not
+	// launch a duplicate instance. Reuse the instance already tagged for this
+	// context, if one is still pending/running. The admin token comes from
+	// deps.NewToken(); when the caller derives it deterministically (the hosted
+	// provisioner does, from the context id), the reused instance's baked token
+	// and the re-resolved token agree.
+	existingID, err := findRunningCloudContextInstance(ctx, deps, provider, config.Region, config.Name)
 	if err != nil {
 		return "", err
 	}
 	config.AdminToken = deps.NewToken()
+	if existingID != "" {
+		ctx.Trace("cloud-context init: reusing existing instance " + existingID + " for context " + config.Name)
+		return existingID, nil
+	}
+	ami, err := initCloudContextAMI(ctx, deps, provider, config.Region)
+	if err != nil {
+		return "", err
+	}
 	userDataPath, cleanup, err := cloudContextUserDataFile(ctx, config.AdminToken)
 	if err != nil {
 		return "", err
@@ -457,6 +472,35 @@ func runInitCloudContextInstance(ctx Context, deps CloudContextDependencies, pro
 	defer cleanup()
 	args := initCloudContextRunArgs(ami, userDataPath, params, *config)
 	return runAWSWithIAMConsistencyRetry(ctx, deps, provider, config.Region, args)
+}
+
+// findRunningCloudContextInstance returns the id of an instance already tagged
+// for this context and still pending/running, or "" when none exists. It makes
+// InitCloudContext idempotent: a re-run reuses the instance instead of launching
+// a duplicate. In dry-run the traced query returns empty, so the plan proceeds
+// to the launch step unchanged (aside from the new query trace line).
+func findRunningCloudContextInstance(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region, name string) (string, error) {
+	out, err := deps.RunAWS(ctx, provider, region, []string{
+		"ec2", "describe-instances",
+		"--filters",
+		"Name=tag:erun:context,Values=" + name,
+		"Name=instance-state-name,Values=pending,running",
+		"--query", "Reservations[0].Instances[0].InstanceId",
+		"--output", "text",
+	})
+	if err != nil {
+		return "", err
+	}
+	// Dry-run models a fresh provision so the plan shows the full launch: the
+	// query is traced above for auditability, but its stubbed result is ignored.
+	if ctx.DryRun {
+		return "", nil
+	}
+	id := strings.TrimSpace(out)
+	if id == "" || strings.EqualFold(id, "none") {
+		return "", nil
+	}
+	return id, nil
 }
 
 const iamConsistencyMaxAttempts = 6

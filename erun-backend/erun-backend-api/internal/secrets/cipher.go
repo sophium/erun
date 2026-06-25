@@ -8,7 +8,9 @@ package secrets
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -18,8 +20,10 @@ import (
 // Cipher is an AES-256-GCM authenticated cipher keyed by a 32-byte key. The
 // 12-byte random nonce is prepended to each ciphertext, so the same plaintext
 // encrypts to a different value every time and tampering is detected on decrypt.
+// The key is also the source for DeriveToken's HMAC-KDF (domain-separated).
 type Cipher struct {
 	aead cipher.AEAD
+	key  []byte
 }
 
 // NewCipher builds a Cipher from a base64-encoded 32-byte (AES-256) key, the
@@ -45,7 +49,22 @@ func NewCipher(keyBase64 string) (*Cipher, error) {
 	if err != nil {
 		return nil, fmt.Errorf("new gcm: %w", err)
 	}
-	return &Cipher{aead: aead}, nil
+	return &Cipher{aead: aead, key: key}, nil
+}
+
+// DeriveToken returns a deterministic, high-entropy token for a label, via an
+// HMAC-SHA256 KDF over the secrets key with domain separation from encryption.
+// Same (key, label) → same token, so a provisioning re-run (a durable workflow
+// resuming after a crash) re-derives the SAME k3s admin token the instance
+// baked, instead of a fresh one — making custody idempotent without storing the
+// token in the workflow checkpoint. The token is never persisted in plaintext.
+func (c *Cipher) DeriveToken(label string) string {
+	extract := hmac.New(sha256.New, c.key)
+	extract.Write([]byte("erun-token-derivation-v1"))
+	prk := extract.Sum(nil)
+	expand := hmac.New(sha256.New, prk)
+	expand.Write([]byte(label))
+	return base64.RawURLEncoding.EncodeToString(expand.Sum(nil))
 }
 
 // Encrypt seals plaintext and returns nonce||ciphertext.
