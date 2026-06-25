@@ -13,12 +13,13 @@ Module-specific guidance for `erun-console`. Follow the repository root `AGENTS.
 
 This module's verifiable value-prop in its first increment is the **read view**: `GET /v1/config` → `{ tenant, environments[], contexts[] }` rendered for an Operator, proven by a component test against a **mocked** API (`src/config/ConfigView.test.tsx`).
 
-These are **deliberately not implemented** and are flagged as such in source — do not present them as working:
+**OIDC sign-in is implemented** (`src/auth/auth.ts`): the real Authorization Code + PKCE flow — `beginLogin` redirects to the issuer's authorize endpoint (discovery-resolved, S256 PKCE, state CSRF guard), `completeLogin` exchanges the callback code + verifier for the `id_token` and holds it as the bearer. It is config-driven (`VITE_OIDC_ISSUER` + `VITE_OIDC_CLIENT_ID`); unset → the `VITE_DEV_BEARER_TOKEN` dev fallback. The PKCE mechanics (callback exchange, state validation, config gating, fallback) are unit-tested in `src/auth/auth.test.ts` (mocked discovery/token endpoints); the IdP is real and **local** — Zitadel runs in Docker, not a hosted dependency (recipe below). The full browser sign-in click-through (provisioned Zitadel OIDC app + the Zitadel login UI) is driven manually / by a Playwright e2e against the local Zitadel; the API side is already proven to accept any-issuer JWTs (its `OIDCVerifier` does discovery + JWKS with `SkipClientIDCheck`).
 
-- **OIDC login.** `src/auth/auth.ts` `login()` throws and is documented `TODO(#606): OIDC Authorization Code + PKCE against the platform issuer (Zitadel)`. It needs a live IdP to verify against, so it is a placeholder. The read view is exercised with a dev token from `VITE_DEV_BEARER_TOKEN` (`devBearerToken()`), a local-dev stub only.
+Still **deliberately not implemented** (flagged in source):
+
 - **Driving each env's per-env MCP.** Reached at `mcp.<tenant>-<env>.services.<base-domain>` behind the per-env auth edge; RCE-sensitive (`raw` can `kubectl exec`). A later increment, noted in `src/auth/auth.ts`. Needs a live env to verify.
 
-When you implement either, replace the placeholder with the real flow and add the verification (a real-IdP / live-env test, not a mock) in the same PR.
+When you implement it, replace the placeholder with the real flow and add the verification (a real-IdP / live-env test, not a mock) in the same PR.
 
 ## Layout
 
@@ -65,3 +66,32 @@ VITE_API_PROXY_TARGET=http://127.0.0.1:17055 VITE_DEV_BEARER_TOKEN=<token> yarn 
 ```
 
 Unlike `yarn test` (mocked `fetch`), this renders the **real** `{ tenant, environments[], contexts[] }` the API serves from Postgres — the verification that closed the option-2 console↔API check for #606/#658.
+
+## Running the OIDC sign-in against a local Zitadel
+
+The OIDC issuer is **not** a hosted dependency — Zitadel runs locally in Docker, the same way floci (AWS) and Lima (k3s) stand in for cloud deps elsewhere. Bring it up with its own Postgres on a docker network, cold-started with `start-from-init`:
+
+```bash
+docker network create zitadel-net
+docker run -d --name zitadel-db --network zitadel-net \
+  -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=zitadel postgres:18
+docker run -d --name zitadel --network zitadel-net -p 8080:8080 \
+  -e ZITADEL_DATABASE_POSTGRES_HOST=zitadel-db -e ZITADEL_DATABASE_POSTGRES_PORT=5432 \
+  -e ZITADEL_DATABASE_POSTGRES_DATABASE=zitadel \
+  -e ZITADEL_DATABASE_POSTGRES_USER_USERNAME=postgres -e ZITADEL_DATABASE_POSTGRES_USER_PASSWORD=postgres -e ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE=disable \
+  -e ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME=postgres -e ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD=postgres -e ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE=disable \
+  -e ZITADEL_EXTERNALSECURE=false -e ZITADEL_EXTERNALDOMAIN=localhost -e ZITADEL_EXTERNALPORT=8080 -e ZITADEL_TLS_ENABLED=false \
+  ghcr.io/zitadel/zitadel:latest start-from-init --masterkey "MasterkeyNeedsToHave32Characters" --tlsMode disabled
+# OIDC discovery + JWKS come up at http://localhost:8080/.well-known/openid-configuration
+```
+
+Then, in the Zitadel console (`http://localhost:8080/ui/console`), create a Project → an **OIDC application** of type **User Agent / SPA** with **PKCE** and redirect URI `http://localhost:5173/` (the `yarn dev` origin), and note its **client id**. Point the console at it and run the API with Zitadel in its issuer allow-list (the issuer is `http://localhost:8080`):
+
+```bash
+# console
+VITE_OIDC_ISSUER=http://localhost:8080 VITE_OIDC_CLIENT_ID=<client-id> yarn dev
+# api (trusts the Zitadel issuer; empty allow-list also accepts any resolvable issuer)
+ERUN_OIDC_ALLOWED_ISSUERS=http://localhost:8080 … eapi
+```
+
+The API's `OIDCVerifier` discovers Zitadel's JWKS and verifies the `id_token` signature (`SkipClientIDCheck`, so audience is the caller's policy); on an empty database the first Zitadel sign-in bootstraps the `OPERATIONS` tenant + first user and registers the issuer. Note Zitadel's first login forces a password change + may prompt MFA enrolment, which a Playwright e2e must drive (or provision a pre-verified, change-not-required user via the management API).

@@ -1,6 +1,6 @@
 import * as React from 'react';
 
-import { devBearerToken } from './auth/auth';
+import { beginLogin, type OidcConfig, oidcConfig, resolveToken } from './auth/auth';
 import { ConfigFetchError, fetchConfig } from './config/client';
 import { ConfigView } from './config/ConfigView';
 import type { TenantConfigView } from './config/types';
@@ -14,13 +14,28 @@ type LoadState =
   | { status: 'signed-out' }
   | { status: 'error'; message: string };
 
-// The sign-in prompt the API's 401 maps to. A real Sign in button lands with
-// the OIDC flow (TODO(#606) in src/auth/auth.ts); until then it explains why
-// there is nothing to show — the read view requires a verified token.
-function SignInPrompt(): React.ReactElement {
+// The signed-out view. With OIDC configured it offers a real Sign in button
+// (Authorization Code + PKCE redirect to the issuer); without it (local dev /
+// e2e), it explains that a token is required.
+function SignInPrompt({ oidc }: { oidc: OidcConfig | undefined }): React.ReactElement {
+  if (oidc === undefined) {
+    return (
+      <div className="message" role="status">
+        <p>Sign in to view your environments.</p>
+      </div>
+    );
+  }
   return (
     <div className="message" role="status">
       <p>Sign in to view your environments.</p>
+      <button
+        type="button"
+        onClick={() => {
+          void beginLogin(oidc);
+        }}
+      >
+        Sign in
+      </button>
     </div>
   );
 }
@@ -43,15 +58,17 @@ function loadStateFromError(error: unknown): LoadState {
 }
 
 export function App(): React.ReactElement {
+  const oidc = React.useMemo(oidcConfig, []);
   const [state, setState] = React.useState<LoadState>({ status: 'loading' });
-  // The dev token is read once; it gates both the config fetch and the
-  // provisioning panel (which is only shown when a token is present). Replaced
-  // by the OIDC-derived token once login() lands (TODO(#606) in src/auth/auth.ts).
-  const token = React.useMemo(() => devBearerToken(), []);
+  // The bearer token: resolved once on mount (an OIDC callback exchange, a token
+  // held this session, or the dev-token fallback). undefined until resolved, or
+  // when the operator must sign in. It gates both the config fetch and the
+  // action panels (only shown when a token is present).
+  const [token, setToken] = React.useState<string | undefined>(undefined);
 
-  // Guards against setting state after unmount; also lets loadConfig be reused
-  // as a post-registration refresh (so a newly-registered env appears in the
-  // config view + deploy panel) without per-call cleanup handling.
+  // Guards against setting state after unmount; also lets loadConfig be reused as
+  // a post-registration refresh (so a newly-registered env appears in the config
+  // view + deploy panel) without per-call cleanup handling.
   const mountedRef = React.useRef(true);
   React.useEffect(() => {
     mountedRef.current = true;
@@ -60,9 +77,31 @@ export function App(): React.ReactElement {
     };
   }, []);
 
+  // Phase 1: resolve the bearer token (OIDC callback exchange / held token / dev
+  // token). No token resolved → signed out.
+  React.useEffect(() => {
+    resolveToken(oidc)
+      .then((resolved) => {
+        if (!mountedRef.current) {
+          return;
+        }
+        if (resolved === undefined) {
+          setState({ status: 'signed-out' });
+          return;
+        }
+        setToken(resolved);
+      })
+      .catch((error: unknown) => {
+        if (mountedRef.current) {
+          setState(loadStateFromError(error));
+        }
+      });
+  }, [oidc]);
+
+  // Phase 2: once a token is resolved, load the tenant config. Reused as the
+  // post-registration refresh.
   const loadConfig = React.useCallback(() => {
     if (token === undefined) {
-      setState({ status: 'signed-out' });
       return;
     }
     fetchConfig(token)
@@ -79,8 +118,10 @@ export function App(): React.ReactElement {
   }, [token]);
 
   React.useEffect(() => {
-    loadConfig();
-  }, [loadConfig]);
+    if (token !== undefined) {
+      loadConfig();
+    }
+  }, [token, loadConfig]);
 
   return (
     <main className="app">
@@ -89,17 +130,13 @@ export function App(): React.ReactElement {
           <p>Loading your environments…</p>
         </div>
       )}
-      {state.status === 'signed-out' && <SignInPrompt />}
+      {state.status === 'signed-out' && <SignInPrompt oidc={oidc} />}
       {state.status === 'error' && <ErrorMessage message={state.message} />}
       {state.status === 'ready' && <ConfigView config={state.config} />}
       {token !== undefined && state.status === 'ready' && (
         <>
           <ProvisionPanel token={token} />
-          <RegisterEnvPanel
-            token={token}
-            contexts={state.config.contexts}
-            onRegistered={loadConfig}
-          />
+          <RegisterEnvPanel token={token} contexts={state.config.contexts} onRegistered={loadConfig} />
           <DeployPanel token={token} environments={state.config.environments} />
         </>
       )}

@@ -5,9 +5,15 @@ interface ImportMetaEnv {
   // Defaults to a same-origin '' when unset (the SPA is served behind the
   // auth edge that fronts the API).
   readonly VITE_API_BASE?: string;
-  // TODO(#606): a real OIDC Authorization Code + PKCE flow replaces this.
-  // Until the live Zitadel issuer exists to verify against, the read view is
-  // exercised with a dev token injected here. Never a production auth path.
+  // OIDC Authorization Code + PKCE sign-in (src/auth/auth.ts). VITE_OIDC_ISSUER
+  // is the platform issuer (e.g. a Zitadel instance); VITE_OIDC_CLIENT_ID is the
+  // console's public SPA client. Both set → the console runs the real sign-in
+  // flow; unset → the dev-token fallback below applies. Per-instance config,
+  // never hardcoded.
+  readonly VITE_OIDC_ISSUER?: string;
+  readonly VITE_OIDC_CLIENT_ID?: string;
+  // Local-dev / e2e fallback when OIDC is not configured: a token the API trusts
+  // (a desktop-signed file:// token, or an OIDC JWT). Never a production auth path.
   readonly VITE_DEV_BEARER_TOKEN?: string;
 }
 
