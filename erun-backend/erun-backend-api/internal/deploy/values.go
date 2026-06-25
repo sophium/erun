@@ -14,13 +14,14 @@ import (
 // describe the managed-cloud runtime. A custom runtime image rides in as
 // imageOverrides.erun-devops only when imageOverride is non-empty.
 //
-// mcpIssuer/mcpAudience authenticate the env's erun-mcp edge against the
-// tenant's OIDC issuer (#685): when mcpIssuer is non-empty, mcpAuth.enabled +
-// issuer + audience are set so the chart exports ERUN_MCP_TRUSTED_ISSUER /
-// ERUN_MCP_AUDIENCE on the MCP container — no secret, since an OIDC issuer needs
-// no public-key file (unlike the desktop file:// path). An empty mcpIssuer
-// leaves mcpAuth unset, so the edge stays loopback-only (back-compat).
-func runtimeValues(tenant, environment string, ctxRow model.Context, registry, imageOverride, mcpIssuer, mcpAudience string) map[string]any {
+// mcpIssuer/mcpAudience/mcpSecretName authenticate the env's erun-mcp edge
+// against the backend's MCP-signing key (#686): when set, mcpAuth.enabled +
+// issuer + audience + secretName are emitted so the chart mounts the injected
+// public-key Secret and exports ERUN_MCP_TRUSTED_ISSUER / ERUN_MCP_AUDIENCE on
+// the MCP container — the file:// issuer names the in-pod path the Secret mounts
+// to. An empty mcpIssuer leaves mcpAuth unset, so the edge stays loopback-only
+// (back-compat).
+func runtimeValues(tenant, environment string, ctxRow model.Context, registry, imageOverride, mcpIssuer, mcpAudience, mcpSecretName string) map[string]any {
 	values := map[string]any{
 		"tenant":            tenant,
 		"environment":       environment,
@@ -41,9 +42,10 @@ func runtimeValues(tenant, environment string, ctxRow model.Context, registry, i
 	}
 	if mcpIssuer != "" {
 		values["mcpAuth"] = map[string]any{
-			"enabled":  true,
-			"issuer":   mcpIssuer,
-			"audience": mcpAudience,
+			"enabled":    true,
+			"issuer":     mcpIssuer,
+			"audience":   mcpAudience,
+			"secretName": mcpSecretName,
 		}
 	}
 	return values

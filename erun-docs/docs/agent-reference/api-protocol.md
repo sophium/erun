@@ -97,6 +97,7 @@ The `(iss, org) → tenant` resolution model and first-identity bootstrap above 
 | `POST` | `/v1/environments` | Register an environment in the caller's tenant, bound to a referenced context. Body below. | Tenant member (write) |
 | `GET` | `/v1/environments/{environment_id}` | Fetch one environment by id, including its deploy `deployStatus`. | Tenant member |
 | `POST` | `/v1/environments/{environment_id}/deploy` | Deploy the runtime chart into the env's provisioned context and start the durable deploy (`202`). Body below. | Tenant member (write) |
+| `POST` | `/v1/environments/{environment_id}/mcp-token` | Mint a short-lived bearer the console presents to the env's MCP edge (`200`). Body below. | Tenant member |
 | `GET` | `/v1/contexts` | List the tenant's cloud contexts (managed clusters). | Tenant member |
 | `POST` | `/v1/contexts` | Register a cloud context (managed cluster) and, when provisioning is configured, start its durable live bootstrap (`202`). Body below. | Tenant member (write) |
 | `GET` | `/v1/contexts/{context_id}` | Fetch one cloud context by id, including its provisioning `status`. | Tenant member |
@@ -222,7 +223,7 @@ The body is optional. When `version` is omitted the env's persisted `runtimeVers
 
 On success the endpoint flips the env to `deployStatus: "deploying"`, **kicks off the live deploy asynchronously**, and returns the env with HTTP `202 Accepted`. Poll [`GET /v1/environments/{environment_id}`](#endpoints) until `deployStatus` reaches `deployed` (success) or `failed`.
 
-The deploy also configures the env's [per-env MCP edge](#mcp-edge) to **trust the tenant's OIDC issuer** (issue #685): it sets the chart's `mcpAuth.{issuer,audience}` from the tenant's registered non-`file://` issuer (any `https://`/`http://` issuer in `tenant_issuers`) and the per-env audience `erun-mcp:<tenant>/<environment>`, so the chart exports `ERUN_MCP_TRUSTED_ISSUER` / `ERUN_MCP_AUDIENCE` on the MCP container. A token that issuer mints (carrying the per-env audience) then authenticates to the env's MCP. A tenant with only a `file://` desktop issuer — or none — leaves the edge loopback-only (no `mcpAuth`), exactly as before.
+The deploy also configures the env's [per-env MCP edge](#mcp-edge) to trust the **backend's MCP-signing key** (issues #685/#686): it injects the backend's public key into the env as a Secret and sets the chart's `mcpAuth.{issuer,audience,secretName}` so the edge loads that key (the `file://` issuer names the in-pod path the Secret mounts to) and enforces the per-env audience `erun-mcp:<tenant>/<environment>`. This is the hosted twin of the desktop injecting its own public key: the backend is the signer, and [`POST /v1/environments/{environment_id}/mcp-token`](#post-v1environmentsenvironment_idmcp-token) (below) hands the console a token that key verifies. When the backend has no signing key configured the edge stays loopback-only (no `mcpAuth`).
 
 ```jsonc
 // 202 response: the deploy has started
@@ -259,6 +260,31 @@ The deploy also configures the env's [per-env MCP edge](#mcp-edge) to **trust th
 | `404` | The `environment_id` is not the caller's tenant's. | Deploy an environment owned by the caller's tenant. |
 | `500` | The durable workflow failed to start (the env is rolled back out of `deploying` to `failed`), or the security context is missing (an internal wiring error). | Retry; if it persists it is a server bug. |
 | `501` | The deploy executor is not configured (no DBOS system database / secrets key). | Configure `DBOS_SYSTEM_DATABASE_URL` + `ERUN_SECRETS_KEY` on the platform. |
+
+### `POST /v1/environments/{environment_id}/mcp-token`
+
+Mints a short-lived bearer the console presents to this environment's [MCP edge](#mcp-edge) (issue #686). The console (a browser SPA) cannot hold a signing key, so the **backend signs on its behalf** — the hosted twin of the desktop signing locally. The deploy injected the backend's matching public key into the env, so the edge verifies the token the same unified way (`file://` issuer → load the in-pod public key → verify). The token has no request body.
+
+```jsonc
+// 200 response
+{
+  "token": "<eyJ…>",                  // an EdDSA JWT: iss = the in-pod file:// key path,
+                                       // sub = the ERun user, aud = the per-env audience
+  "audience": "erun-mcp:operations/prod" // the audience the edge enforces (erun-mcp:<tenant>/<env>)
+}
+```
+
+The token is scoped to the caller (its `sub` is the resolved ERun user) and to **this** environment (the per-env `aud`), so it cannot be replayed against another env's edge. It is short-lived (minutes); the console mints a fresh one per session/expiry. Present it to the edge as `Authorization: Bearer <token>`; the edge resolves the tenant from the trusted `iss`→tenant map and applies per-tool authorization (see the [MCP edge](#mcp-edge)).
+
+**Error behaviour.**
+
+| Status | Condition | Recovery |
+|---|---|---|
+| `401` / `403` | Standard auth failures (see [Errors](#errors)). | Send a valid token for the caller's tenant. |
+| `404` | The `environment_id` is not the caller's tenant's. | Request a token for an environment the caller's tenant owns. |
+| `409` | The environment is not `deployed` (its MCP edge does not exist yet); the body names its current `deployStatus`. | Deploy the environment first, then request a token. |
+| `500` | The signing failed, or the security context is missing (an internal wiring error). | Retry; if it persists it is a server bug. |
+| `501` | The backend has no MCP-signing key configured. | Configure `ERUN_API_MCP_SIGNING_KEY_PATH` on the platform. |
 
 ### `POST /v1/contexts`
 

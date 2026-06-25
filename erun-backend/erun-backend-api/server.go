@@ -115,6 +115,17 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 		comments := repository.NewCommentRepository(txManager)
 		tenantIssuers := repository.NewTenantIssuerRepository(txManager)
 		tenants := repository.NewTenantRepository(txManager)
+		// One MCP-signing identity drives both sides of #686: the deployer injects
+		// its public key into each env, and the mcp-token route signs with it.
+		// Keep nil-when-unconfigured as typed nil so the interface stays nil (a nil
+		// *Signer in a non-nil interface would pass != nil and panic on use).
+		var mcpKeys deploy.MCPKeyProvider
+		var mcpSigner routes.MCPTokenSigner
+		if keyPath := strings.TrimSpace(options.MCPSigningKeyPath); keyPath != "" {
+			signer := mcptoken.NewSigner(keyPath)
+			mcpKeys = signer
+			mcpSigner = signer
+		}
 		environments := repository.NewEnvironmentRepository(txManager)
 		contexts := repository.NewContextRepository(txManager)
 		tenantQuotas := repository.NewTenantQuotaRepository(txManager)
@@ -146,7 +157,7 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 					contexts,
 					credentials,
 					tenants,
-					tenantIssuers,
+					mcpKeys,
 					deploy.EnvDeployOptions{
 						RuntimeRegistry:   options.RuntimeRegistry,
 						ChartPathOverride: options.EnvDeployChartPath,
@@ -156,10 +167,6 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 					},
 				)
 			}
-		}
-		var mcpSigner routes.MCPTokenSigner
-		if keyPath := strings.TrimSpace(options.MCPSigningKeyPath); keyPath != "" {
-			mcpSigner = mcptoken.NewSigner(keyPath)
 		}
 		routes.RegisterEnvironmentRoutes(register, environments, tenantQuotas, contexts, environmentDeployer, mcpSigner, tenants)
 		routes.RegisterContextRoutes(register, contexts, contextProvisioner)

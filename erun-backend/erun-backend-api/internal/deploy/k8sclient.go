@@ -102,3 +102,29 @@ func ensureNamespace(ctx context.Context, cfg *rest.Config, namespace string) er
 	}
 	return nil
 }
+
+// ensureMCPAuthSecret upserts the Secret carrying the backend's MCP-signing
+// public key (issue #686), under keyFile — the filename the runtime chart mounts
+// and the file:// issuer names. The env's erun-mcp edge loads this public key to
+// verify the per-env tokens the backend mints. Upsert (create, else update) so a
+// re-deploy with a rotated key replaces the old one rather than failing.
+func ensureMCPAuthSecret(ctx context.Context, cfg *rest.Config, namespace, name, keyFile string, publicKeyPEM []byte) error {
+	clientset, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return err
+	}
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Data:       map[string][]byte{keyFile: publicKeyPEM},
+	}
+	secrets := clientset.CoreV1().Secrets(namespace)
+	if _, err := secrets.Create(ctx, secret, metav1.CreateOptions{}); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return err
+		}
+		if _, err := secrets.Update(ctx, secret, metav1.UpdateOptions{}); err != nil {
+			return err
+		}
+	}
+	return nil
+}

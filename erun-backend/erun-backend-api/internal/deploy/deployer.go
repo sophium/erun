@@ -17,12 +17,12 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"path/filepath"
 	"strings"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	"github.com/google/uuid"
 
-	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	eruncommon "github.com/sophium/erun/erun-common"
@@ -63,14 +63,25 @@ type DeployResult struct {
 	Status    string `json:"status"`
 }
 
+// MCPKeyProvider supplies the backend's MCP-signing public key (to inject into
+// the env) and the file:// issuer that names where the edge loads it (#686). The
+// backend's mcptoken.Signer satisfies it.
+type MCPKeyProvider interface {
+	PublicKeyPEM() ([]byte, error)
+	Issuer() string
+}
+
 // EnvDeployer owns the durable runtime-deploy workflow and its dependencies.
 type EnvDeployer struct {
-	dbosCtx       dbos.DBOSContext
-	environments  *repository.EnvironmentRepository
-	contexts      *repository.ContextRepository
-	credentials   *repository.ContextCredentialRepository
-	tenants       *repository.TenantRepository
-	tenantIssuers *repository.TenantIssuerRepository
+	dbosCtx      dbos.DBOSContext
+	environments *repository.EnvironmentRepository
+	contexts     *repository.ContextRepository
+	credentials  *repository.ContextCredentialRepository
+	tenants      *repository.TenantRepository
+	// mcpKeys supplies the backend's MCP-signing public key + its file:// issuer
+	// so the deploy injects that key into the env and the edge trusts the per-env
+	// tokens the backend mints (#686). Nil leaves the edge loopback-only.
+	mcpKeys MCPKeyProvider
 	// runtimeRegistry is where the published runtime chart + image live; the
 	// executor addresses oci://<runtimeRegistry>/charts/erun-devops.
 	runtimeRegistry string
@@ -122,7 +133,7 @@ func NewEnvDeployer(
 	contexts *repository.ContextRepository,
 	credentials *repository.ContextCredentialRepository,
 	tenants *repository.TenantRepository,
-	tenantIssuers *repository.TenantIssuerRepository,
+	mcpKeys MCPKeyProvider,
 	opts EnvDeployOptions,
 ) *EnvDeployer {
 	registry := strings.TrimSpace(opts.RuntimeRegistry)
@@ -135,7 +146,7 @@ func NewEnvDeployer(
 		contexts:          contexts,
 		credentials:       credentials,
 		tenants:           tenants,
-		tenantIssuers:     tenantIssuers,
+		mcpKeys:           mcpKeys,
 		runtimeRegistry:   registry,
 		chartPathOverride: strings.TrimSpace(opts.ChartPathOverride),
 		imageOverride:     strings.TrimSpace(opts.ImageOverride),
@@ -240,53 +251,30 @@ func (d *EnvDeployer) deployEnv(c context.Context, input DeployInput) (DeployRes
 	if chartRef == "" {
 		chartRef = eruncommon.PublishedDevopsChartOCIRepo(d.runtimeRegistry) + "/" + eruncommon.DevopsComponentName
 	}
-	// Authenticate the env's erun-mcp edge against the tenant's OIDC issuer (#685)
-	// so the console can later drive it with a token that issuer mints. No issuer
-	// (e.g. a file://-only tenant) leaves the edge loopback-only — back-compat.
-	mcpIssuer, err := d.resolveMCPIssuer(sc)
-	if err != nil {
-		return DeployResult{}, fmt.Errorf("resolve tenant mcp issuer: %w", err)
-	}
-	mcpAudience := ""
-	if mcpIssuer != "" {
+	// Inject the backend's MCP-signing public key into the env so its erun-mcp
+	// edge trusts the per-env tokens the backend mints (#686) — the hosted twin of
+	// the desktop injecting its own public key. No signer wired leaves the edge
+	// loopback-only (back-compat).
+	mcpIssuer, mcpAudience, mcpSecretName := "", "", ""
+	if d.mcpKeys != nil {
+		pub, err := d.mcpKeys.PublicKeyPEM()
+		if err != nil {
+			return DeployResult{}, fmt.Errorf("read mcp signing public key: %w", err)
+		}
+		mcpSecretName = release + "-mcp-auth"
+		keyFile := filepath.Base(eruncommon.DesktopMCPPublicKeyPath())
+		if err := ensureMCPAuthSecret(c, cfg, namespace, mcpSecretName, keyFile, pub); err != nil {
+			return DeployResult{}, fmt.Errorf("inject mcp auth public key: %w", err)
+		}
+		mcpIssuer = d.mcpKeys.Issuer()
 		mcpAudience = eruncommon.MCPTokenAudience(tenant.Name, env.Name)
 	}
 
-	values := runtimeValues(tenant.Name, env.Name, ctxRow, d.runtimeRegistry, d.imageOverride, mcpIssuer, mcpAudience)
+	values := runtimeValues(tenant.Name, env.Name, ctxRow, d.runtimeRegistry, d.imageOverride, mcpIssuer, mcpAudience, mcpSecretName)
 	if err := helmDeploy(c, cfg, release, namespace, chartRef, input.Version, values, d.wait, d.registryPlainHTTP); err != nil {
 		return DeployResult{}, fmt.Errorf("deploy runtime chart: %w", err)
 	}
 	return DeployResult{Namespace: namespace, Release: release, Version: input.Version, Status: statusDeployed}, nil
-}
-
-// resolveMCPIssuer returns the tenant's first OIDC issuer — any registered
-// issuer that is not a `file://` desktop-key issuer (the MCP edge dispatches
-// every non-file:// issuer to its OIDC/JWKS path, so http:// and https:// both
-// qualify). The env's erun-mcp edge is configured to trust it (#685). A tenant
-// with only a file:// issuer (or none) yields "", leaving the edge loopback-only.
-// A nil repository (older wiring) also yields "". A genuine lookup error is
-// surfaced so a deploy never silently ships a mis-trusted edge.
-func (d *EnvDeployer) resolveMCPIssuer(ctx context.Context) (string, error) {
-	if d.tenantIssuers == nil {
-		return "", nil
-	}
-	issuers, err := d.tenantIssuers.List(ctx)
-	if err != nil {
-		return "", err
-	}
-	return selectMCPIssuer(issuers), nil
-}
-
-// selectMCPIssuer returns the first registered issuer that is not a `file://`
-// desktop-key issuer — the OIDC issuer the env's MCP edge will trust. Pure (no
-// DB) so the selection rule is unit-tested directly.
-func selectMCPIssuer(issuers []model.TenantIssuer) string {
-	for _, ti := range issuers {
-		if issuer := strings.TrimSpace(ti.Issuer); issuer != "" && !strings.HasPrefix(issuer, "file://") {
-			return issuer
-		}
-	}
-	return ""
 }
 
 func (d *EnvDeployer) markDeployed(c context.Context, input DeployInput) error {
