@@ -59,13 +59,14 @@ func run(args []string) error {
 			AllowedIssuers:       splitCSV(cfg.AllowedIssuers),
 			DesktopPublicKeyPath: cfg.DesktopPublicKeyPath,
 		}),
-		IdentityCache:   backendapi.NewIdentityResolutionCache(backendapi.IdentityCacheOptions{}),
-		DB:              db,
-		DBDialect:       repository.DialectPostgres,
-		DBOSContext:     dbosCtx,
-		Cipher:          cipher,
-		AWSEndpoint:     cfg.AWSEndpoint,
-		RuntimeRegistry: cfg.RuntimeRegistry,
+		IdentityCache:     backendapi.NewIdentityResolutionCache(backendapi.IdentityCacheOptions{}),
+		DB:                db,
+		DBDialect:         repository.DialectPostgres,
+		DBOSContext:       dbosCtx,
+		Cipher:            cipher,
+		AWSEndpoint:       cfg.AWSEndpoint,
+		RuntimeRegistry:   cfg.RuntimeRegistry,
+		MCPSigningKeyPath: cfg.MCPSigningKeyPath,
 	})
 	if err != nil {
 		return err
@@ -141,6 +142,9 @@ type apiConfig struct {
 	// env-deploy executor (#680) addresses oci://<RuntimeRegistry>/charts/
 	// erun-devops. Empty defaults to ghcr.io/sophium.
 	RuntimeRegistry string
+	// MCPSigningKeyPath persists the backend's MCP-signing identity (#686); empty
+	// disables per-env MCP-token minting (the endpoint returns 501).
+	MCPSigningKeyPath string
 }
 
 func configFromEnv() apiConfig {
@@ -154,6 +158,7 @@ func configFromEnv() apiConfig {
 		DBOSDatabaseURL:      strings.TrimSpace(os.Getenv("DBOS_SYSTEM_DATABASE_URL")),
 		AWSEndpoint:          strings.TrimSpace(os.Getenv("ERUN_AWS_ENDPOINT_URL")),
 		RuntimeRegistry:      strings.TrimSpace(os.Getenv("ERUN_RUNTIME_REGISTRY")),
+		MCPSigningKeyPath:    strings.TrimSpace(os.Getenv("ERUN_API_MCP_SIGNING_KEY_PATH")),
 	}
 }
 

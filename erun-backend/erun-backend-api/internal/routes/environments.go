@@ -12,6 +12,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/deploy"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
+	eruncommon "github.com/sophium/erun/erun-common"
 )
 
 // deployStaleAfter is how long an env may sit at deploy_status="deploying"
@@ -44,11 +45,28 @@ type TenantQuotaRepository interface {
 	MaxEnvironments(ctx context.Context) (int, error)
 }
 
+// MCPTokenSigner mints a short-lived per-env bearer the console presents to an
+// environment's erun-mcp edge (issue #686). Optional: when nil, POST
+// /v1/environments/{id}/mcp-token returns 501. It is the hosted analog of the
+// desktop signing locally — the backend holds the private key and the deploy
+// injects the matching public key into the env so the edge can verify the token.
+type MCPTokenSigner interface {
+	Sign(subject, tenant, environment string, now time.Time) (string, error)
+}
+
+// TenantResolver returns the caller's resolved tenant, used here for the per-env
+// MCP audience (erun-mcp:<tenant>/<env>), which is keyed by tenant + env name.
+type TenantResolver interface {
+	Current(ctx context.Context) (model.Tenant, error)
+}
+
 type EnvironmentRoutes struct {
 	environments EnvironmentRepository
 	quotas       TenantQuotaRepository
 	contexts     ContextRepository
 	deployer     EnvironmentDeployer
+	mcpSigner    MCPTokenSigner
+	tenants      TenantResolver
 }
 
 // createEnvironmentRequest is the env-registration body. The tenant is resolved
@@ -63,12 +81,13 @@ type createEnvironmentRequest struct {
 	RuntimeVersion    string `json:"runtimeVersion"`
 }
 
-func RegisterEnvironmentRoutes(register ProtectedRouteRegistrar, environments EnvironmentRepository, quotas TenantQuotaRepository, contexts ContextRepository, deployer EnvironmentDeployer) {
-	routes := EnvironmentRoutes{environments: environments, quotas: quotas, contexts: contexts, deployer: deployer}
+func RegisterEnvironmentRoutes(register ProtectedRouteRegistrar, environments EnvironmentRepository, quotas TenantQuotaRepository, contexts ContextRepository, deployer EnvironmentDeployer, mcpSigner MCPTokenSigner, tenants TenantResolver) {
+	routes := EnvironmentRoutes{environments: environments, quotas: quotas, contexts: contexts, deployer: deployer, mcpSigner: mcpSigner, tenants: tenants}
 	register(http.MethodGet, "/v1/environments", http.HandlerFunc(routes.listEnvironments))
 	register(http.MethodPost, "/v1/environments", http.HandlerFunc(routes.createEnvironment))
 	register(http.MethodGet, "/v1/environments/{environment_id}", http.HandlerFunc(routes.getEnvironment))
 	register(http.MethodPost, "/v1/environments/{environment_id}/deploy", http.HandlerFunc(routes.deployEnvironment))
+	register(http.MethodPost, "/v1/environments/{environment_id}/mcp-token", http.HandlerFunc(routes.mintMCPToken))
 }
 
 func (r EnvironmentRoutes) listEnvironments(w http.ResponseWriter, req *http.Request) {
@@ -278,4 +297,52 @@ func (r EnvironmentRoutes) deployEnvironment(w http.ResponseWriter, req *http.Re
 	environment.DeployedVersion = ""
 	environment.DeployError = ""
 	writeJSON(w, http.StatusAccepted, environment)
+}
+
+// mcpTokenResponse is the minted per-env MCP bearer plus the audience it carries
+// (so the caller knows which env's edge it is scoped to).
+type mcpTokenResponse struct {
+	Token    string `json:"token"`
+	Audience string `json:"audience"`
+}
+
+// mintMCPToken issues a short-lived bearer the console presents to this env's
+// erun-mcp edge (issue #686). The backend is the signer (the hosted analog of
+// the desktop signing locally); the deploy injected the matching public key into
+// the env, so the edge verifies the token the same unified way (#656). The token
+// is scoped to the caller (sub = ERun user) and to this env (the per-env
+// audience), so it cannot be replayed against another environment.
+func (r EnvironmentRoutes) mintMCPToken(w http.ResponseWriter, req *http.Request) {
+	if r.mcpSigner == nil || r.tenants == nil {
+		writeError(w, http.StatusNotImplemented, "mcp token minting is not configured")
+		return
+	}
+	environment, err := r.environments.Get(req.Context(), req.PathValue("environment_id"))
+	if err != nil {
+		writeRepositoryError(w, err)
+		return
+	}
+	// Only hand out a token for an env whose MCP edge actually exists. A token for
+	// an undeployed env would be valid but unreachable; the clear 409 tells the
+	// operator to deploy first.
+	if environment.DeployStatus != "deployed" {
+		writeError(w, http.StatusConflict, fmt.Sprintf("environment is not deployed (status %q); deploy it before requesting an MCP token", environment.DeployStatus))
+		return
+	}
+	securityContext, ok := security.FromContext(req.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		return
+	}
+	tenant, err := r.tenants.Current(req.Context())
+	if err != nil {
+		writeRepositoryError(w, err)
+		return
+	}
+	token, err := r.mcpSigner.Sign(securityContext.ErunUserID, tenant.Name, environment.Name, time.Now())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to mint mcp token")
+		return
+	}
+	writeJSON(w, http.StatusOK, mcpTokenResponse{Token: token, Audience: eruncommon.MCPTokenAudience(tenant.Name, environment.Name)})
 }

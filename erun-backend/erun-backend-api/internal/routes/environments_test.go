@@ -2,11 +2,13 @@ package routes
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/deploy"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
@@ -155,6 +157,72 @@ func postDeployEnvironment(t *testing.T, environments *stubEnvironmentRepository
 	rec := httptest.NewRecorder()
 	EnvironmentRoutes{environments: environments, contexts: contexts, deployer: deployer}.deployEnvironment(rec, req)
 	return rec
+}
+
+type stubMCPSigner struct {
+	token string
+	err   error
+}
+
+func (s stubMCPSigner) Sign(_, _, _ string, _ time.Time) (string, error) { return s.token, s.err }
+
+type stubTenantResolver struct {
+	tenant model.Tenant
+	err    error
+}
+
+func (s stubTenantResolver) Current(_ context.Context) (model.Tenant, error) {
+	return s.tenant, s.err
+}
+
+func postMintMCPToken(t *testing.T, environments *stubEnvironmentRepository, signer MCPTokenSigner, tenants TenantResolver, envID string, sc *security.Context) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/v1/environments/"+envID+"/mcp-token", nil)
+	req.SetPathValue("environment_id", envID)
+	if sc != nil {
+		req = req.WithContext(security.WithContext(req.Context(), *sc))
+	}
+	rec := httptest.NewRecorder()
+	EnvironmentRoutes{environments: environments, mcpSigner: signer, tenants: tenants}.mintMCPToken(rec, req)
+	return rec
+}
+
+// TestMintMCPTokenNotConfigured: with no signer wired, minting is unavailable (501).
+func TestMintMCPTokenNotConfigured(t *testing.T) {
+	rec := postMintMCPToken(t, deployableEnv(), nil, nil, "env-1", nil)
+	if rec.Code != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want 501", rec.Code)
+	}
+}
+
+// TestMintMCPTokenRequiresDeployed: a token for an env whose MCP edge does not
+// exist yet (not deployed) is refused with a clear 409.
+func TestMintMCPTokenRequiresDeployed(t *testing.T) {
+	environments := &stubEnvironmentRepository{environment: model.Environment{EnvironmentID: "env-1", Name: "prod", DeployStatus: "registered"}}
+	rec := postMintMCPToken(t, environments, stubMCPSigner{token: "t"}, stubTenantResolver{tenant: model.Tenant{Name: "acme"}}, "env-1", &security.Context{ErunUserID: "u-1"})
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rec.Code)
+	}
+}
+
+// TestMintMCPTokenReturnsScopedToken: a deployed env yields the signed token plus
+// the per-env audience the edge enforces.
+func TestMintMCPTokenReturnsScopedToken(t *testing.T) {
+	environments := &stubEnvironmentRepository{environment: model.Environment{EnvironmentID: "env-1", Name: "prod", DeployStatus: "deployed"}}
+	rec := postMintMCPToken(t, environments, stubMCPSigner{token: "the.signed.jwt"}, stubTenantResolver{tenant: model.Tenant{Name: "acme"}}, "env-1", &security.Context{ErunUserID: "u-1"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var response mcpTokenResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if response.Token != "the.signed.jwt" {
+		t.Errorf("token = %q, want the.signed.jwt", response.Token)
+	}
+	if response.Audience != "erun-mcp:acme/prod" {
+		t.Errorf("audience = %q, want erun-mcp:acme/prod", response.Audience)
+	}
 }
 
 func runningContext() *stubContextRepository {

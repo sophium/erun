@@ -3,10 +3,12 @@ package backendapi
 import (
 	"database/sql"
 	"net/http"
+	"strings"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/deploy"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/mcptoken"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/provision"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/routes"
@@ -50,6 +52,11 @@ type HandlerOptions struct {
 	// EnvDeployRegistryPlainHTTP makes the deploy helm OCI client use plain HTTP
 	// for a local registry (verification). Zero value = production (HTTPS).
 	EnvDeployRegistryPlainHTTP bool
+	// MCPSigningKeyPath persists the backend's Ed25519 MCP-signing identity
+	// (issue #686): when set, POST /v1/environments/{id}/mcp-token mints per-env
+	// MCP bearers signed by this key (the deploy injects the matching public key
+	// into each env). Empty disables minting (the endpoint returns 501).
+	MCPSigningKeyPath string
 }
 
 func NewHandler(options HandlerOptions) (http.Handler, error) {
@@ -150,7 +157,11 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 				)
 			}
 		}
-		routes.RegisterEnvironmentRoutes(register, environments, tenantQuotas, contexts, environmentDeployer)
+		var mcpSigner routes.MCPTokenSigner
+		if keyPath := strings.TrimSpace(options.MCPSigningKeyPath); keyPath != "" {
+			mcpSigner = mcptoken.NewSigner(keyPath)
+		}
+		routes.RegisterEnvironmentRoutes(register, environments, tenantQuotas, contexts, environmentDeployer, mcpSigner, tenants)
 		routes.RegisterContextRoutes(register, contexts, contextProvisioner)
 		routes.RegisterTenantRoutes(register, tenants)
 		routes.RegisterTenantQuotaRoute(register, tenantQuotas)
