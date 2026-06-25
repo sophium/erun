@@ -330,6 +330,34 @@ export async function getEnvironment(token: string, environmentId: string): Prom
   return parseEnvironment(body);
 }
 
+// The short-lived bearer for an environment's MCP edge plus the audience it
+// carries (so the caller knows which env it is scoped to).
+export interface MCPToken {
+  token: string;
+  audience: string;
+}
+
+// Mint a per-env MCP bearer (`POST /v1/environments/{id}/mcp-token`, 200): the
+// backend signs it, and the env's MCP edge verifies it against the public key the
+// deploy injected. Present it to the edge as `Authorization: Bearer <token>`. A
+// non-2xx is a ConfigFetchError carrying the status (409 env not deployed, 404,
+// 401, 501 minting not configured).
+export async function mintMCPToken(token: string, environmentId: string): Promise<MCPToken> {
+  const response = await authedFetch(
+    `/v1/environments/${encodeURIComponent(environmentId)}/mcp-token`,
+    token,
+    { method: 'POST' },
+  );
+  if (!response.ok) {
+    throw await fetchError('mcp token request failed', response);
+  }
+  const body: unknown = await response.json();
+  if (!isRecord(body) || typeof body.token !== 'string' || typeof body.audience !== 'string') {
+    throw new ConfigFetchError('mcp token response was not in the expected shape');
+  }
+  return { token: body.token, audience: body.audience };
+}
+
 // The fields needed to register an environment. The tenant is resolved from the
 // token (row-level security scopes the write), never from the body. The env
 // references its context by contextId; the composite foreign key enforces the

@@ -6,6 +6,7 @@ import { ConfigView } from './config/ConfigView';
 import type { TenantConfigView } from './config/types';
 import { DeployPanel } from './deploy/DeployPanel';
 import { RegisterEnvPanel } from './environments/RegisterEnvPanel';
+import { MCPAccessPanel } from './mcp/MCPAccessPanel';
 import { ProvisionPanel } from './provision/ProvisionPanel';
 
 type LoadState =
@@ -138,6 +139,7 @@ export function App(): React.ReactElement {
           <ProvisionPanel token={token} />
           <RegisterEnvPanel token={token} contexts={state.config.contexts} onRegistered={loadConfig} />
           <DeployPanel token={token} environments={state.config.environments} />
+          <MCPAccessPanel token={token} environments={state.config.environments} />
         </>
       )}
     </main>
