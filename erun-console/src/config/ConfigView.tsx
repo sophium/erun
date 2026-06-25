@@ -1,6 +1,6 @@
 import type * as React from 'react';
 
-import type { CloudContext, Environment, Tenant, TenantConfigView } from './types';
+import type { CloudContext, ContextStatus, Environment, Tenant, TenantConfigView } from './types';
 
 // What an Operator sees in the console: the tenant header, the list of
 // environments (name, type, kubernetes context, runtime version), and the list
@@ -67,12 +67,39 @@ function EnvironmentsSection({
   );
 }
 
+const STATUS_LABELS: Record<ContextStatus, string> = {
+  provisioning: 'Provisioning',
+  running: 'Running',
+  failed: 'Failed',
+};
+
+// A semantic, non-color-only status badge: it always carries a text label
+// (Provisioning / Running / Failed) alongside the color, so it reads correctly
+// for color-blind users and screen readers (jsx-a11y; erun-ui/AGENTS.md
+// § Professional UX). Returns null for an absent/unknown status so a context
+// registered before provisioning existed renders no badge.
+function StatusBadge({ status }: { status: ContextStatus | undefined }): React.ReactElement | null {
+  if (status === undefined) {
+    return null;
+  }
+  return <span className={`status-badge status-badge--${status}`}>{STATUS_LABELS[status]}</span>;
+}
+
 function ContextItem({ context }: { context: CloudContext }): React.ReactElement {
   return (
     <li>
       <span className="context-name">{context.name}</span>
       <span className="context-meta">
         {context.provider} · {context.region}
+      </span>
+      <span className="context-status">
+        <StatusBadge status={context.status} />
+        {context.status === 'failed' && context.provisionError !== undefined && (
+          // The failure reason is essential information, so it is shown inline
+          // as visible text rather than hidden behind a bare `title` tooltip
+          // (jsx-a11y / module a11y rules).
+          <span className="context-error">{context.provisionError}</span>
+        )}
       </span>
     </li>
   );

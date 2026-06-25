@@ -33,6 +33,15 @@ const SAMPLE_CONFIG = {
       provider: 'aws',
       region: 'eu-west-2',
       kubernetesContext: 'primary',
+      status: 'running',
+    },
+    {
+      contextId: 'ctx-2',
+      name: 'secondary',
+      provider: 'aws',
+      region: 'us-east-1',
+      status: 'failed',
+      provisionError: 'run-instances: InsufficientInstanceCapacity',
     },
   ],
 };
@@ -93,6 +102,22 @@ describe('ConfigView via App', () => {
     const contexts = within(screen.getByRole('region', { name: 'Cloud contexts' }));
     expect(contexts.getByText('primary')).toBeInTheDocument();
     expect(contexts.getByText('aws · eu-west-2')).toBeInTheDocument();
+  });
+
+  it('renders a running badge and a failed badge with its provision error', async () => {
+    mockFetch(jsonResponse(SAMPLE_CONFIG));
+    render(<App />);
+
+    const contexts = within(await screen.findByRole('region', { name: 'Cloud contexts' }));
+
+    // The running context shows a "Running" badge (semantic text label, not
+    // color-only) and no error reason.
+    expect(contexts.getByText('Running')).toBeInTheDocument();
+
+    // The failed context shows a "Failed" badge plus the provision error inline
+    // (essential info is visible text, not hidden behind a bare title tooltip).
+    expect(contexts.getByText('Failed')).toBeInTheDocument();
+    expect(contexts.getByText('run-instances: InsufficientInstanceCapacity')).toBeInTheDocument();
   });
 
   it('renders empty states for an empty payload', async () => {
