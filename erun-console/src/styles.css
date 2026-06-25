@@ -150,7 +150,8 @@ th {
 }
 
 .provision-form input,
-.provision-form textarea {
+.provision-form textarea,
+.provision-form select {
   font: inherit;
   padding: 0.4rem 0.5rem;
   border: 1px solid var(--border);

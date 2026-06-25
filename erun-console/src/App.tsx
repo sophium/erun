@@ -5,6 +5,7 @@ import { ConfigFetchError, fetchConfig } from './config/client';
 import { ConfigView } from './config/ConfigView';
 import type { TenantConfigView } from './config/types';
 import { DeployPanel } from './deploy/DeployPanel';
+import { RegisterEnvPanel } from './environments/RegisterEnvPanel';
 import { ProvisionPanel } from './provision/ProvisionPanel';
 
 type LoadState =
@@ -48,29 +49,38 @@ export function App(): React.ReactElement {
   // by the OIDC-derived token once login() lands (TODO(#606) in src/auth/auth.ts).
   const token = React.useMemo(() => devBearerToken(), []);
 
+  // Guards against setting state after unmount; also lets loadConfig be reused
+  // as a post-registration refresh (so a newly-registered env appears in the
+  // config view + deploy panel) without per-call cleanup handling.
+  const mountedRef = React.useRef(true);
   React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const loadConfig = React.useCallback(() => {
     if (token === undefined) {
       setState({ status: 'signed-out' });
       return;
     }
-
-    let active = true;
     fetchConfig(token)
       .then((config) => {
-        if (active) {
+        if (mountedRef.current) {
           setState({ status: 'ready', config });
         }
       })
       .catch((error: unknown) => {
-        if (active) {
+        if (mountedRef.current) {
           setState(loadStateFromError(error));
         }
       });
-
-    return () => {
-      active = false;
-    };
   }, [token]);
+
+  React.useEffect(() => {
+    loadConfig();
+  }, [loadConfig]);
 
   return (
     <main className="app">
@@ -85,6 +95,11 @@ export function App(): React.ReactElement {
       {token !== undefined && state.status === 'ready' && (
         <>
           <ProvisionPanel token={token} />
+          <RegisterEnvPanel
+            token={token}
+            contexts={state.config.contexts}
+            onRegistered={loadConfig}
+          />
           <DeployPanel token={token} environments={state.config.environments} />
         </>
       )}

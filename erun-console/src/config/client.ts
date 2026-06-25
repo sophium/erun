@@ -308,3 +308,40 @@ export async function getEnvironment(token: string, environmentId: string): Prom
   }
   return parseEnvironment(body);
 }
+
+// The fields needed to register an environment. The tenant is resolved from the
+// token (row-level security scopes the write), never from the body. The env
+// references its context by contextId; the composite foreign key enforces the
+// context belongs to the caller's tenant.
+export interface CreateEnvironmentInput {
+  name: string;
+  type: string;
+  contextId?: string;
+  runtimeVersion?: string;
+}
+
+// Register an environment in the caller's tenant (`POST /v1/environments`, 201).
+// Resolves to the persisted env. A non-2xx is a ConfigFetchError carrying the
+// status (400 invalid name/type, 409 environment quota reached, 401, 500 a
+// context that is not the caller's).
+export async function createEnvironment(
+  token: string,
+  input: CreateEnvironmentInput,
+): Promise<Environment> {
+  const response = await authedFetch('/v1/environments', token, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    throw new ConfigFetchError(
+      `create environment request failed (${String(response.status)})`,
+      response.status,
+    );
+  }
+  const body: unknown = await response.json();
+  if (!isRecord(body)) {
+    throw new ConfigFetchError('create environment response was not in the expected shape');
+  }
+  return parseEnvironment(body);
+}
