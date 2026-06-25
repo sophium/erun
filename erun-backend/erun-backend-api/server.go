@@ -12,7 +12,6 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/routes"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/secrets"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
-	eruncommon "github.com/sophium/erun/erun-common"
 )
 
 type HandlerOptions struct {
@@ -39,15 +38,15 @@ type HandlerOptions struct {
 	// env-deploy executor addresses oci://<RuntimeRegistry>/charts/erun-devops
 	// and pulls the runtime image from there. Empty defaults to ghcr.io/sophium.
 	RuntimeRegistry string
-	// EnvDeployChartPath / EnvDeployImage / EnvHelmDeployer pin the env-deploy
-	// executor's chart source, image, and helm deployer at local/test values so
+	// EnvDeployChartPath / EnvDeployImage / EnvDeployNoWait pin the env-deploy
+	// executor's chart source, image, and wait behaviour at local/test values so
 	// the durable deploy workflow can be exercised against a throwaway cluster
 	// (Lima k3s) without the published OCI chart or the ~1GB runtime image
 	// (mirrors AWSEndpoint for provisioning). Zero values = production: published
-	// OCI chart, real --wait DeployHelmChart.
+	// OCI chart, chart-default images, helm waits for the rollout.
 	EnvDeployChartPath string
 	EnvDeployImage     string
-	EnvHelmDeployer    eruncommon.HelmChartDeployerFunc
+	EnvDeployNoWait    bool
 }
 
 func NewHandler(options HandlerOptions) (http.Handler, error) {
@@ -141,7 +140,7 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 						RuntimeRegistry:   options.RuntimeRegistry,
 						ChartPathOverride: options.EnvDeployChartPath,
 						ImageOverride:     options.EnvDeployImage,
-						Deployer:          options.EnvHelmDeployer,
+						NoWait:            options.EnvDeployNoWait,
 					},
 				)
 			}

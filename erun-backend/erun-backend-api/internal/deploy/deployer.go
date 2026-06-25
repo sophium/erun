@@ -1,28 +1,26 @@
 // Package deploy runs the durable runtime deploy of an environment into its
 // provisioned cloud context: it reads the env's running context + the custodied
-// k3s admin token, materializes a kube-context that addresses the cluster's
-// token-authed :6443 API server, and helm-installs the published runtime chart
-// at the env's version into the per-env namespace — all as a DBOS durable
+// k3s admin token, builds an in-memory Kubernetes REST config that addresses the
+// cluster's token-authed :6443 API server, and installs the published runtime
+// chart at the env's version into the per-env namespace — all in-process via the
+// Kubernetes and Helm Go SDKs (no kubectl/helm/aws subprocess), as a DBOS durable
 // workflow so a control-plane restart resumes from the last completed step
-// (issue #680, part of #605/#660).
+// (issue #680/#681, part of #605/#660).
 //
 // This is the orchestrator half of the primitive/orchestration split (root
-// AGENTS.md § "Command primitives vs orchestration"): it composes the pure
-// `deploy` primitive (eruncommon.RunHelmDeploy) and threads an explicit,
-// already-pushed version. It never builds or pushes; a missing version is a
-// hard error here, not a trigger to build.
+// AGENTS.md § "Command primitives vs orchestration"): it threads an explicit,
+// already-pushed version and installs it. It never builds or pushes; a missing
+// version is a hard error here, not a trigger to build.
 package deploy
 
 import (
 	"context"
 	"fmt"
-	"io"
 	"strings"
-	"sync"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
+	"github.com/google/uuid"
 
-	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	eruncommon "github.com/sophium/erun/erun-common"
@@ -70,22 +68,21 @@ type EnvDeployer struct {
 	// runtimeRegistry is where the published runtime chart + image live; the
 	// executor addresses oci://<runtimeRegistry>/charts/erun-devops.
 	runtimeRegistry string
-	// chartPathOverride / imageOverride / deployer are verification seams
-	// (mirroring the provisioner's awsEndpoint): zero values give the production
-	// path (published OCI chart, real --wait DeployHelmChart).
+	// chartPathOverride / imageOverride are verification seams (mirroring the
+	// provisioner's awsEndpoint): zero values give the production path (published
+	// OCI chart, chart-default images).
 	chartPathOverride string
 	imageOverride     string
-	deployer          eruncommon.HelmChartDeployerFunc
-	// kubeMu serializes the kubeconfig writes (set-cluster/-credentials/-context)
-	// so concurrent deploys do not race on the shared kubeconfig file the helm /
-	// kubectl subprocesses read; the long helm rollout itself runs concurrently.
-	kubeMu     sync.Mutex
+	// wait makes helm block until the rollout is healthy before marking the env
+	// deployed (production). The verification path disables it: the stand-in pod
+	// never reaches readiness (the dind probe), so waiting would always time out.
+	wait       bool
 	workflowFn func(dbos.DBOSContext, DeployInput) (DeployResult, error)
 }
 
 // EnvDeployOptions configures an EnvDeployer. The zero value is production: the
-// published OCI runtime chart at ghcr.io/sophium and the real namespace-ensure
-// wrapped DeployHelmChart (helm upgrade --install --wait).
+// published OCI runtime chart at ghcr.io/sophium, chart-default images, and a
+// helm install that waits for the rollout to be healthy.
 type EnvDeployOptions struct {
 	// RuntimeRegistry is where the published runtime chart + image live. Empty
 	// defaults to ghcr.io/sophium (eruncommon.DefaultContainerRegistry).
@@ -98,11 +95,10 @@ type EnvDeployOptions struct {
 	// ImageOverride, when set, pins imageOverrides.erun-devops to this image (a
 	// tiny stand-in for verification). Empty = chart default.
 	ImageOverride string
-	// Deployer overrides the helm deployer (default: namespace-ensure-wrapped
-	// eruncommon.DeployHelmChart). The Lima verification injects a no-wait
-	// deployer so it can assert the release + objects land without blocking on
-	// the runtime pod's dind readiness probe (the chart hardcodes --wait).
-	Deployer eruncommon.HelmChartDeployerFunc
+	// NoWait disables helm's wait-for-rollout (a verification seam): the local
+	// chart deploys a stand-in image whose pod never reaches readiness, so
+	// waiting would always time out. Zero value = production (waits).
+	NoWait bool
 }
 
 // NewEnvDeployer builds the deployer and registers its workflow with DBOS. Call
@@ -119,10 +115,6 @@ func NewEnvDeployer(
 	if registry == "" {
 		registry = eruncommon.DefaultContainerRegistry
 	}
-	deployer := opts.Deployer
-	if deployer == nil {
-		deployer = eruncommon.WrapHelmChartDeployerWithNamespaceEnsure(eruncommon.EnsureKubernetesNamespace, eruncommon.DeployHelmChart)
-	}
 	d := &EnvDeployer{
 		dbosCtx:           dbosCtx,
 		environments:      environments,
@@ -132,7 +124,7 @@ func NewEnvDeployer(
 		runtimeRegistry:   registry,
 		chartPathOverride: strings.TrimSpace(opts.ChartPathOverride),
 		imageOverride:     strings.TrimSpace(opts.ImageOverride),
-		deployer:          deployer,
+		wait:              !opts.NoWait,
 	}
 	// A method value: a stable workflow name across restarts (so DBOS recovers
 	// it) that also captures d's dependencies. Registered once here and reused by
@@ -144,12 +136,15 @@ func NewEnvDeployer(
 
 // Start kicks off the runtime deploy asynchronously. The HTTP handler returns
 // immediately; the durable workflow drives the (minutes-long) helm rollout and
-// updates the env's deploy status. The (environment, version) pair is the
-// idempotency key, so a double-submit of the same version does not start a
-// second rollout and a control-plane restart resumes the in-flight one. A
-// re-deploy at a new version is a new workflow.
+// updates the env's deploy status. Each call gets a fresh workflow ID, so a
+// re-deploy — including a retry after a failure, or recovering an env left
+// "deploying" by a control-plane crash — always starts a new run rather than
+// returning a terminal workflow's cached result. (A DBOS workflow ID is
+// terminal once it succeeds/fails, so a stable per-(env,version) ID could never
+// retry.) DBOS still recovers an in-flight run by its persisted ID after a
+// restart; the env-id/version prefix keeps the workflow list legible.
 func (d *EnvDeployer) Start(input DeployInput) error {
-	id := "envdeploy-" + input.EnvironmentID + "-" + input.Version
+	id := "envdeploy-" + input.EnvironmentID + "-" + input.Version + "-" + uuid.NewString()
 	_, err := dbos.RunWorkflow(d.dbosCtx, d.workflowFn, input, dbos.WithWorkflowID(id))
 	return err
 }
@@ -175,9 +170,10 @@ func (d *EnvDeployer) deployWorkflow(dctx dbos.DBOSContext, input DeployInput) (
 }
 
 // deployEnv resolves the env's running context, reads the custodied k3s token,
-// materializes a kube-context that addresses the cluster, and helm-installs the
-// runtime chart at the env's version into the per-env namespace. The token
-// never leaves this step (it is not part of any DBOS step-output checkpoint).
+// builds an in-memory REST config that addresses the cluster, ensures the per-env
+// namespace, and installs the runtime chart at the env's version — all via the
+// Kubernetes + Helm Go SDKs, no subprocess. The token never leaves this step
+// (it is not part of any DBOS step-output checkpoint).
 func (d *EnvDeployer) deployEnv(c context.Context, input DeployInput) (DeployResult, error) {
 	sc := d.scoped(c, input)
 	env, err := d.environments.Get(sc, input.EnvironmentID)
@@ -209,91 +205,23 @@ func (d *EnvDeployer) deployEnv(c context.Context, input DeployInput) (DeployRes
 		return DeployResult{}, fmt.Errorf("read custodied k3s admin token: %w", err)
 	}
 
-	kubeContext := strings.TrimSpace(ctxRow.KubernetesContext)
-	if kubeContext == "" {
-		kubeContext = strings.TrimSpace(ctxRow.Name)
-	}
-	if err := d.writeKubeContext(kubeContext, ctxRow.PublicIP, token); err != nil {
-		return DeployResult{}, fmt.Errorf("configure kube context %q: %w", kubeContext, err)
-	}
-
 	namespace := eruncommon.KubernetesNamespaceName(tenant.Name, env.Name)
 	release := eruncommon.RuntimeReleaseName(tenant.Name)
-	spec := d.helmDeploySpec(input.Version, tenant.Name, env.Name, ctxRow, kubeContext, namespace, release)
 
-	ectx := eruncommon.Context{
-		Logger: eruncommon.NewLoggerWithWriters(eruncommon.VerbosityInfo, io.Discard, io.Discard),
-		DryRun: false,
-		Stdout: io.Discard,
-		Stderr: io.Discard,
+	cfg := restConfig(ctxRow.PublicIP, token)
+	if err := ensureNamespace(c, cfg, namespace); err != nil {
+		return DeployResult{}, fmt.Errorf("ensure namespace %q: %w", namespace, err)
 	}
-	if err := eruncommon.RunHelmDeploy(ectx, spec, d.deployer); err != nil {
+
+	chartRef := d.chartPathOverride
+	if chartRef == "" {
+		chartRef = eruncommon.PublishedDevopsChartOCIRepo(d.runtimeRegistry) + "/" + eruncommon.DevopsComponentName
+	}
+	values := runtimeValues(tenant.Name, env.Name, ctxRow, d.runtimeRegistry, d.imageOverride)
+	if err := helmDeploy(c, cfg, release, namespace, chartRef, input.Version, values, d.wait); err != nil {
 		return DeployResult{}, fmt.Errorf("deploy runtime chart: %w", err)
 	}
 	return DeployResult{Namespace: namespace, Release: release, Version: input.Version, Status: statusDeployed}, nil
-}
-
-// helmDeploySpec assembles the runtime-chart deploy plan from the DB-sourced
-// env + context. It mirrors the published-devops-chart spec the CLI/MCP build
-// (resolvePublishedDevopsDeploySpec) without the on-disk erun config tree: the
-// chart is the published OCI ref pinned to the env's version, the release is
-// per-tenant, and the namespace is per-(tenant, env). Cloudflare/MCP-auth
-// fields stay empty so the path is the legacy no-secret deploy.
-func (d *EnvDeployer) helmDeploySpec(version, tenantName, envName string, ctxRow model.Context, kubeContext, namespace, release string) eruncommon.HelmDeploySpec {
-	chartPath := d.chartPathOverride
-	if chartPath == "" {
-		chartPath = eruncommon.PublishedDevopsChartOCIRepo(d.runtimeRegistry) + "/" + eruncommon.DevopsComponentName
-	}
-	spec := eruncommon.HelmDeploySpec{
-		ReleaseName:        release,
-		ChartPath:          chartPath,
-		Version:            version,
-		Tenant:             tenantName,
-		Environment:        envName,
-		Namespace:          namespace,
-		KubernetesContext:  kubeContext,
-		WorktreeStorage:    "none",
-		ManagedCloud:       true,
-		CloudContextName:   ctxRow.Name,
-		CloudProvider:      ctxRow.Provider,
-		CloudProviderAlias: ctxRow.CloudProviderAlias,
-		CloudRegion:        ctxRow.Region,
-		CloudInstanceID:    ctxRow.InstanceID,
-		ContainerRegistry:  d.runtimeRegistry,
-		RuntimeRegistry:    d.runtimeRegistry,
-		Timeout:            eruncommon.DefaultHelmDeploymentTimeout,
-	}
-	if d.imageOverride != "" {
-		spec.ImageOverrides = map[string]string{eruncommon.DevopsComponentName: d.imageOverride}
-	}
-	return spec
-}
-
-// writeKubeContext mirrors eruncommon.configureCloudKubeContext exactly: it
-// upserts a cluster, a bearer-token user, and a context — all named kubeContext
-// — into the kubeconfig the helm / kubectl subprocesses read (the ambient
-// $KUBECONFIG or ~/.kube/config). The server is https://<publicIp>:6443 with
-// TLS verification skipped (k3s serves a self-signed cert); auth is the k3s
-// admin bearer token. The writes are serialized so concurrent deploys do not
-// corrupt the shared kubeconfig file.
-func (d *EnvDeployer) writeKubeContext(kubeContext, publicIP, token string) error {
-	server := "https://" + publicIP + ":6443"
-	d.kubeMu.Lock()
-	defer d.kubeMu.Unlock()
-	steps := [][]string{
-		{"config", "set-cluster", kubeContext, "--server", server, "--insecure-skip-tls-verify=true"},
-		{"config", "set-credentials", kubeContext, "--token", token},
-		{"config", "set-context", kubeContext, "--cluster", kubeContext, "--user", kubeContext},
-	}
-	for _, args := range steps {
-		// CombinedOutput, not the args, is surfaced on error: args[1] carries the
-		// token for set-credentials, so the error names only the subcommand and
-		// kubectl's own message (which never echoes the token).
-		if output, err := eruncommon.Command("kubectl", args...).CombinedOutput(); err != nil {
-			return fmt.Errorf("kubectl config %s: %w: %s", args[1], err, strings.TrimSpace(string(output)))
-		}
-	}
-	return nil
 }
 
 func (d *EnvDeployer) markDeployed(c context.Context, input DeployInput) error {

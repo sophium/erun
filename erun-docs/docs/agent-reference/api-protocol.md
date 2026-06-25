@@ -237,7 +237,7 @@ On success the endpoint flips the env to `deployStatus: "deploying"`, **kicks of
 }
 ```
 
-**Async, durable deploy.** The deploy runs as a **durable DBOS workflow** keyed by `(environment, version)` — it survives a control-plane restart, resuming from its last completed step, and a double-submit of the same version does not start a second rollout. Inside one step it reads the env's running context (its current public IP) and the **server-side custodied k3s admin token** (never returned), materializes a kube-context addressing the cluster's token-authed `:6443` API server, then helm-installs the runtime chart and sets the env's deploy status:
+**Async, durable deploy.** The deploy runs as a **durable DBOS workflow** — it survives a control-plane restart, resuming from its last completed step. Inside one step it reads the env's running context (its current public IP) and the **server-side custodied k3s admin token** (never returned), builds an in-memory Kubernetes client that addresses the cluster's token-authed `:6443` API server, ensures the namespace, and installs the runtime chart — **entirely in-process via the Kubernetes and Helm Go SDKs; the control plane runs no `kubectl`/`helm` subprocess**. Each deploy request starts a fresh workflow, so a re-deploy (a retry after a failure, or a re-deploy of the same version) always re-runs rather than returning a prior run's result. It sets the env's deploy status:
 
 - `deploying` → in flight.
 - `deployed` → `deployedVersion` carries the version that landed.

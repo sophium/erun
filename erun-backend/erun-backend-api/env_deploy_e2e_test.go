@@ -8,14 +8,16 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
@@ -25,11 +27,12 @@ import (
 )
 
 // TestDeployEnvironmentEndToEnd exercises the live env-deploy executor against a
-// real cluster (issue #680): the DBOS durable workflow reads the env's running
-// context + the custodied k3s token, materializes a kube-context that addresses
-// the cluster's token-authed :6443 API server, and helm-installs the runtime
-// chart into the per-env namespace, driving the env's deploy status
-// registered -> deploying -> deployed.
+// real cluster (issue #680/#681): the DBOS durable workflow reads the env's
+// running context + the custodied k3s token, builds an in-memory REST config that
+// addresses the cluster's token-authed :6443 API server, and installs the runtime
+// chart into the per-env namespace — all IN-PROCESS via the Kubernetes + Helm Go
+// SDKs (no kubectl/helm subprocess, exactly as the API pod runs it). It drives the
+// env's deploy status registered -> deploying -> deployed.
 //
 // It is opt-in (it needs a migrated Postgres, a DBOS system database, and a k3s
 // cluster reachable at https://127.0.0.1:6443 that accepts the bearer token
@@ -37,9 +40,11 @@ import (
 // byte-for-byte erun's k3s bootstrap) and skips otherwise, mirroring the #676
 // provisioning e2e. To keep the run light it bypasses the published OCI chart +
 // the ~1GB runtime image: it points the executor at the repo's local runtime
-// chart with a tiny stand-in image and injects a no-wait helm deployer, so it
-// asserts that the release + namespace + Deployment land without blocking on the
-// runtime pod's dind readiness probe (the chart hardcodes --wait). Run it with:
+// chart with a tiny stand-in image and disables helm's wait (EnvDeployNoWait), so
+// it asserts that the release + namespace + Deployment land without blocking on
+// the runtime pod's dind readiness probe a stand-in image can never satisfy. The
+// published-OCI-pull path is NOT exercised here (the local chart short-circuits
+// chart resolution) — that registry path is a separate verification. Run it with:
 //
 //	ERUN_E2E_ENV_DEPLOY=1 \
 //	ERUN_E2E_ENV_DEPLOY_DATABASE_URL=postgres://erun:erun@127.0.0.1:5432/erun?sslmode=disable \
@@ -62,11 +67,6 @@ func TestDeployEnvironmentEndToEnd(t *testing.T) {
 	if _, statErr := os.Stat(filepath.Join(chartPath, "Chart.yaml")); statErr != nil {
 		t.Fatalf("runtime chart not found at %s: %v", chartPath, statErr)
 	}
-
-	// Isolate the kubeconfig the executor's kubectl writes + the injected helm
-	// deployer read, so the run never touches the developer's ~/.kube/config.
-	kubeconfig := filepath.Join(t.TempDir(), "kubeconfig")
-	t.Setenv("KUBECONFIG", kubeconfig)
 
 	key, err := secrets.GenerateKey()
 	mustNoErr(t, err, "generate key")
@@ -91,11 +91,11 @@ func TestDeployEnvironmentEndToEnd(t *testing.T) {
 		DBOSContext:   dbosCtx,
 		Cipher:        cipher,
 		// Verification seams: install the repo's local runtime chart with a tiny
-		// stand-in image via a no-wait deployer (the chart's --wait would block on
+		// stand-in image and disable helm's wait (the chart's wait would block on
 		// the dind readiness probe a stand-in image can never satisfy).
 		EnvDeployChartPath: chartPath,
 		EnvDeployImage:     "registry.k8s.io/pause:3.9",
-		EnvHelmDeployer:    noWaitHelmDeployer(t),
+		EnvDeployNoWait:    true,
 	})
 	mustNoErr(t, err, "new handler")
 	mustNoErr(t, dbos.Launch(dbosCtx), "dbos launch")
@@ -111,16 +111,32 @@ func TestDeployEnvironmentEndToEnd(t *testing.T) {
 	envID, namespace, release := seedRunningContextAndEnv(t, db, cipher, tenantID, tenantName)
 	t.Cleanup(func() { cleanupRelease(release, namespace) })
 
-	// Drive the deploy through the real HTTP route (validate -> flip to deploying
-	// -> start the durable workflow), then poll the env to deployed.
-	code, body := e2eRequest(t, srv.URL, http.MethodPost, "/v1/environments/"+envID+"/deploy", nil)
+	// First deploy: the helm release does not exist yet, so this exercises the
+	// in-process INSTALL branch. The env reaches deployed and the Deployment lands.
+	deployAndAwaitDeployed(t, srv.URL, envID)
+	assertReleaseLanded(t, release, namespace)
+
+	// Second deploy of the SAME version: the release now exists, so this exercises
+	// the UPGRADE branch — and proves a same-version re-deploy actually re-runs
+	// (the prior terminal per-(env,version) workflow ID would have made this a
+	// silent no-op). It must reach deployed again.
+	deployAndAwaitDeployed(t, srv.URL, envID)
+	assertReleaseLanded(t, release, namespace)
+}
+
+// deployAndAwaitDeployed drives one deploy through the real HTTP route (validate
+// -> flip to deploying -> start the durable workflow) and polls the env until it
+// reaches deployed (failing on a failed/timeout outcome).
+func deployAndAwaitDeployed(t *testing.T, baseURL, envID string) {
+	t.Helper()
+	code, body := e2eRequest(t, baseURL, http.MethodPost, "/v1/environments/"+envID+"/deploy", nil)
 	if code != http.StatusAccepted {
 		t.Fatalf("deploy env: HTTP %d (want 202): %s", code, body)
 	}
 
 	deadline := time.Now().Add(120 * time.Second)
 	for time.Now().Before(deadline) {
-		c, b := e2eRequest(t, srv.URL, http.MethodGet, "/v1/environments/"+envID, nil)
+		c, b := e2eRequest(t, baseURL, http.MethodGet, "/v1/environments/"+envID, nil)
 		if c != http.StatusOK {
 			t.Fatalf("get env: HTTP %d: %s", c, b)
 		}
@@ -135,7 +151,6 @@ func TestDeployEnvironmentEndToEnd(t *testing.T) {
 			if got.DeployedVersion != "1.2.3" {
 				t.Fatalf("deployed but version = %q, want 1.2.3: %s", got.DeployedVersion, b)
 			}
-			assertReleaseLanded(t, release, namespace)
 			return // success
 		case "failed":
 			t.Fatalf("deploy failed: %s", got.DeployError)
@@ -206,54 +221,40 @@ func seedRunningContextAndEnv(t *testing.T, db *sql.DB, cipher *secrets.Cipher, 
 	return env.EnvironmentID, namespace, release
 }
 
-// noWaitHelmDeployer is a HelmChartDeployerFunc that installs the chart the
-// executor assembled (local chart dir + stand-in image) WITHOUT helm's --wait,
-// so the deploy returns as soon as the objects are applied rather than blocking
-// on the runtime pod going Ready (the real runtime pod needs dind + the ~1GB
-// image, out of scope for this mechanism check). It threads the kube-context the
-// executor wrote into $KUBECONFIG and overrides all three pod images so they
-// schedule.
-func noWaitHelmDeployer(t *testing.T) eruncommon.HelmChartDeployerFunc {
-	return func(params eruncommon.HelmDeployParams) error {
-		args := []string{
-			"upgrade", "--install", params.ReleaseName, params.ChartPath,
-			"--namespace", params.Namespace,
-			"--create-namespace",
-			"--kube-context", params.KubernetesContext,
-			"--set", "tenant=" + params.Tenant,
-			"--set", "environment=" + params.Environment,
-			"--set", "worktreeStorage=none",
-		}
-		for _, name := range []string{"erun-devops", "erun-mcp", "erun-dind"} {
-			args = append(args, "--set-string", "imageOverrides."+name+"=registry.k8s.io/pause:3.9")
-		}
-		out, err := exec.Command("helm", args...).CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("helm upgrade %s: %w: %s", params.ReleaseName, err, strings.TrimSpace(string(out)))
-		}
-		t.Logf("helm upgrade --install %s landed in %s", params.ReleaseName, params.Namespace)
-		return nil
+// limaRestConfig addresses the Lima cluster the way the executor does — the
+// same in-memory REST config (https://127.0.0.1:6443, the static token,
+// TLS-verify skipped) — so the test-side checks talk to the cluster via
+// client-go, with no kubeconfig file and no kubectl/helm host binaries.
+func limaRestConfig() *rest.Config {
+	return &rest.Config{
+		Host:            "https://127.0.0.1:6443",
+		BearerToken:     limaK3sToken,
+		TLSClientConfig: rest.TLSClientConfig{Insecure: true},
 	}
 }
 
 // assertReleaseLanded confirms the runtime Deployment object the deploy created
 // exists on the cluster — the deploy reached a real cluster and rendered the
-// chart, not just flipped a database row.
+// chart in-process via the Helm SDK, not just flipped a database row.
 func assertReleaseLanded(t *testing.T, release, namespace string) {
 	t.Helper()
-	out, err := exec.Command("kubectl", "--context", "primary",
-		"get", "deployment", release, "-n", namespace, "-o", "name").CombinedOutput()
-	if err != nil {
-		t.Fatalf("deployment %s/%s not found after deploy: %v: %s", namespace, release, err, strings.TrimSpace(string(out)))
-	}
-	if !strings.Contains(string(out), release) {
-		t.Fatalf("unexpected deployment lookup output: %s", strings.TrimSpace(string(out)))
+	clientset, err := kubernetes.NewForConfig(limaRestConfig())
+	mustNoErr(t, err, "build kube client")
+	if _, err := clientset.AppsV1().Deployments(namespace).Get(context.Background(), release, metav1.GetOptions{}); err != nil {
+		t.Fatalf("deployment %s/%s not found after deploy: %v", namespace, release, err)
 	}
 }
 
-// cleanupRelease removes the helm release + namespace the deploy created so the
-// cluster returns to a clean state for re-runs (verification-gate hygiene).
-func cleanupRelease(release, namespace string) {
-	_, _ = exec.Command("helm", "uninstall", release, "--namespace", namespace, "--kube-context", "primary").CombinedOutput()
-	_, _ = exec.Command("kubectl", "--context", "primary", "delete", "namespace", namespace, "--ignore-not-found").CombinedOutput()
+// cleanupRelease deletes the namespace the deploy created (cascading the release
+// and its objects) so the cluster returns to a clean state for re-runs
+// (verification-gate hygiene), via client-go — no host binaries.
+func cleanupRelease(_, namespace string) {
+	clientset, err := kubernetes.NewForConfig(limaRestConfig())
+	if err != nil {
+		return
+	}
+	err = clientset.CoreV1().Namespaces().Delete(context.Background(), namespace, metav1.DeleteOptions{})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return
+	}
 }
