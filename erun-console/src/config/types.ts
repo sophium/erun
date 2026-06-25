@@ -24,6 +24,13 @@ export interface Environment {
   runtimeVersion?: string;
 }
 
+// The provisioning lifecycle a context moves through once `POST /v1/contexts`
+// kicks off the live bootstrap (issue #605/#676): `provisioning` → `running`
+// (success) | `failed`. Kept as a string union for the known states but parsed
+// leniently from the wire (see parseContext) so an unknown future state still
+// renders rather than failing the parse.
+export type ContextStatus = 'provisioning' | 'running' | 'failed';
+
 export interface CloudContext {
   contextId: string;
   name: string;
@@ -33,6 +40,11 @@ export interface CloudContext {
   kubernetesContext?: string;
   cloudProviderAlias?: string;
   instanceType?: string;
+  // Provisioning status from `GET /v1/contexts/{id}` (omitted by the read model
+  // for contexts registered before live provisioning existed).
+  status?: ContextStatus;
+  // The failure reason when `status === 'failed'`.
+  provisionError?: string;
 }
 
 // The console's read model over the per-tenant erun config.

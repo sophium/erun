@@ -4,6 +4,7 @@ import { devBearerToken } from './auth/auth';
 import { ConfigFetchError, fetchConfig } from './config/client';
 import { ConfigView } from './config/ConfigView';
 import type { TenantConfigView } from './config/types';
+import { ProvisionPanel } from './provision/ProvisionPanel';
 
 type LoadState =
   | { status: 'loading' }
@@ -41,9 +42,12 @@ function loadStateFromError(error: unknown): LoadState {
 
 export function App(): React.ReactElement {
   const [state, setState] = React.useState<LoadState>({ status: 'loading' });
+  // The dev token is read once; it gates both the config fetch and the
+  // provisioning panel (which is only shown when a token is present). Replaced
+  // by the OIDC-derived token once login() lands (TODO(#606) in src/auth/auth.ts).
+  const token = React.useMemo(() => devBearerToken(), []);
 
   React.useEffect(() => {
-    const token = devBearerToken();
     if (token === undefined) {
       setState({ status: 'signed-out' });
       return;
@@ -65,7 +69,7 @@ export function App(): React.ReactElement {
     return () => {
       active = false;
     };
-  }, []);
+  }, [token]);
 
   return (
     <main className="app">
@@ -77,6 +81,7 @@ export function App(): React.ReactElement {
       {state.status === 'signed-out' && <SignInPrompt />}
       {state.status === 'error' && <ErrorMessage message={state.message} />}
       {state.status === 'ready' && <ConfigView config={state.config} />}
+      {token !== undefined && state.status === 'ready' && <ProvisionPanel token={token} />}
     </main>
   );
 }

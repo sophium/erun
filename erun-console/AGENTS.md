@@ -22,9 +22,10 @@ When you implement either, replace the placeholder with the real flow and add th
 
 ## Layout
 
-- `src/config/` — the read model. `types.ts` mirrors the `GET /v1/config` JSON (`tenant`, `environments[]`, `contexts[]`); `client.ts` is the typed `fetchConfig(token)` + `ConfigFetchError`; `ConfigView.tsx` renders the tenant header, environments table, and contexts list with empty states.
+- `src/config/` — the read model. `types.ts` mirrors the `GET /v1/config` JSON (`tenant`, `environments[]`, `contexts[]`), including each context's provisioning `status`/`provisionError`; `client.ts` is the typed `fetchConfig(token)` + `ConfigFetchError`, plus the provisioning writes (`setCloudProviderAlias`, `createContext`, `getContext`); `ConfigView.tsx` renders the tenant header, environments table, and the contexts list with empty states and a per-context status badge.
+- `src/provision/` — the cloud-context provisioning surface (issue #605/#676): `controller.ts` is the thin request/poll controller (a `useProvisionController` hook that sequences the client calls — register a BYO-cloud alias, `POST /v1/contexts`, then poll `GET /v1/contexts/{id}` to `running`/`failed`), and `ProvisionPanel.tsx` is the render layer (alias form + create-context form + live status). This is **verifiable**, not a placeholder: `ProvisionPanel.test.tsx` exercises the alias PUT and the create→poll flow against a mocked `fetch`, the same weight as the read view's test. The live OIDC token still comes from the dev stub — only the auth flow is flagged.
 - `src/auth/` — the flagged OIDC/env-MCP placeholders (see above).
-- `src/App.tsx` — wires the token source → `fetchConfig` → `ConfigView`, with loading / signed-out (401) / error states.
+- `src/App.tsx` — wires the token source → `fetchConfig` → `ConfigView`, with loading / signed-out (401) / error states, and renders `ProvisionPanel` below the read view when a token is present.
 - `src/test/setup.ts` — Testing Library jest-dom matchers for vitest.
 
 ## Toolchain
