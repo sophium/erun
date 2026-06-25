@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
@@ -33,10 +34,20 @@ type stubEnvironmentRepository struct {
 	// UpdateDeployResult; deployUpdateErr fails those writes when set.
 	deployStatuses  []string
 	deployUpdateErr error
+	// claimDeployResult is what ClaimDeploy returns (claimed); claimDeployCalls
+	// counts the calls; claimDeployErr fails the claim when set.
+	claimDeployResult bool
+	claimDeployCalls  int
+	claimDeployErr    error
 }
 
 func (r *stubEnvironmentRepository) List(context.Context) ([]model.Environment, error) {
 	return r.environments, r.err
+}
+
+func (r *stubEnvironmentRepository) ClaimDeploy(_ context.Context, _ string, _ time.Duration) (bool, error) {
+	r.claimDeployCalls++
+	return r.claimDeployResult, r.claimDeployErr
 }
 
 func (r *stubEnvironmentRepository) UpdateDeployResult(_ context.Context, _, status, _, _ string) error {

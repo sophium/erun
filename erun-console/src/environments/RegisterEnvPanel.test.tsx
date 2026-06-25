@@ -20,6 +20,7 @@ function jsonResponse(body: unknown, status = 200): Response {
     ok: status >= 200 && status < 300,
     status,
     json: () => Promise.resolve(body),
+    text: () => Promise.resolve(typeof body === 'string' ? body : JSON.stringify(body)),
   } as unknown as Response;
 }
 
@@ -126,7 +127,9 @@ describe('RegisterEnvPanel', () => {
     });
 
     expect(
-      await screen.findByText('Could not register environment: create environment request failed (409)'),
+      await screen.findByText(
+        'Could not register environment: create environment request failed (409): environment quota reached',
+      ),
     ).toBeInTheDocument();
     expect(onRegistered).not.toHaveBeenCalled();
   });

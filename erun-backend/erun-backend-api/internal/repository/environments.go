@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/uptrace/bun"
@@ -83,6 +84,39 @@ func (r *EnvironmentRepository) Get(ctx context.Context, environmentID string) (
 // caller's tenant. Empty version/error values normalize to NULL — so a failed
 // run clears any stale error only by passing the new one, and a fresh deploy
 // run does not leave a half-written version.
+// ClaimDeploy atomically claims the environment for a deploy: it flips it to
+// deploy_status='deploying' only when it is not already an in-flight deploy, or
+// when a prior 'deploying' has gone stale past staleAfter (so a deploy stranded
+// by a control-plane crash can be re-deployed instead of being locked forever).
+// It returns whether the claim succeeded; false means a deploy is already in
+// progress. This makes 'deploying' a concurrency lock rather than a cosmetic
+// write, so a double-submit cannot launch a second helm rollout into the same
+// release (issue #681 review). RLS scopes the UPDATE to the caller's tenant; the
+// timestamp trigger refreshes updated_at, which is what staleAfter measures.
+func (r *EnvironmentRepository) ClaimDeploy(ctx context.Context, environmentID string, staleAfter time.Duration) (bool, error) {
+	claimed := false
+	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		res, execErr := tx.NewRaw(`
+			UPDATE environments
+			   SET deploy_status = 'deploying',
+			       deployed_version = NULL,
+			       deploy_error = NULL
+			 WHERE environment_id = ?
+			   AND (deploy_status <> 'deploying' OR updated_at < now() - make_interval(secs => ?))
+		`, environmentID, staleAfter.Seconds()).Exec(ctx)
+		if execErr != nil {
+			return execErr
+		}
+		affected, raErr := res.RowsAffected()
+		if raErr != nil {
+			return raErr
+		}
+		claimed = affected > 0
+		return nil
+	})
+	return claimed, err
+}
+
 func (r *EnvironmentRepository) UpdateDeployResult(ctx context.Context, environmentID, status, deployedVersion, deployError string) error {
 	return r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		_, err := tx.NewRaw(`

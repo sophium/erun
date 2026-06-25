@@ -162,12 +162,16 @@ func runningContext() *stubContextRepository {
 }
 
 func deployableEnv() *stubEnvironmentRepository {
-	return &stubEnvironmentRepository{environment: model.Environment{
-		EnvironmentID:  "env-1",
-		Name:           "prod",
-		ContextID:      "ctx-1",
-		RuntimeVersion: "1.2.3",
-	}}
+	return &stubEnvironmentRepository{
+		environment: model.Environment{
+			EnvironmentID:  "env-1",
+			Name:           "prod",
+			ContextID:      "ctx-1",
+			RuntimeVersion: "1.2.3",
+		},
+		// The deploy claim succeeds by default (no in-flight deploy).
+		claimDeployResult: true,
+	}
 }
 
 // TestDeployEnvironmentNotConfigured: with no deployer wired (no DBOS/secrets),
@@ -244,8 +248,9 @@ func TestDeployEnvironmentStartsDeploy(t *testing.T) {
 	if got := deployer.started[0]; got.EnvironmentID != "env-1" || got.TenantID != "t1" || got.Version != "1.2.3" {
 		t.Fatalf("deploy input = %+v", got)
 	}
-	if len(environments.deployStatuses) != 1 || environments.deployStatuses[0] != "deploying" {
-		t.Fatalf("deploy statuses = %v, want [deploying]", environments.deployStatuses)
+	// The deploy is gated on an atomic claim, not an unconditional flip.
+	if environments.claimDeployCalls != 1 {
+		t.Fatalf("ClaimDeploy called %d times, want 1", environments.claimDeployCalls)
 	}
 	var response model.Environment
 	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
@@ -271,7 +276,8 @@ func TestDeployEnvironmentVersionOverride(t *testing.T) {
 }
 
 // TestDeployEnvironmentRollsBackOnStartFailure: if the durable workflow fails to
-// start, the env is not left stuck in "deploying" — it is flipped to "failed".
+// start after the env was claimed, the env is not left stuck in "deploying" — it
+// is flipped to "failed".
 func TestDeployEnvironmentRollsBackOnStartFailure(t *testing.T) {
 	environments := deployableEnv()
 	deployer := &stubEnvironmentDeployer{err: errors.New("dbos down")}
@@ -279,7 +285,25 @@ func TestDeployEnvironmentRollsBackOnStartFailure(t *testing.T) {
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)
 	}
-	if len(environments.deployStatuses) != 2 || environments.deployStatuses[0] != "deploying" || environments.deployStatuses[1] != "failed" {
-		t.Fatalf("deploy statuses = %v, want [deploying failed]", environments.deployStatuses)
+	// The env was claimed (-> deploying via ClaimDeploy); the only UpdateDeployResult
+	// is the rollback to failed.
+	if len(environments.deployStatuses) != 1 || environments.deployStatuses[0] != "failed" {
+		t.Fatalf("deploy statuses = %v, want [failed]", environments.deployStatuses)
+	}
+}
+
+// TestDeployEnvironmentRejectsConcurrent: when a deploy is already in flight
+// (the claim fails), a second request is rejected with 409 and no second
+// rollout is started.
+func TestDeployEnvironmentRejectsConcurrent(t *testing.T) {
+	environments := deployableEnv()
+	environments.claimDeployResult = false // a deploy is already in progress
+	deployer := &stubEnvironmentDeployer{}
+	rec := postDeployEnvironment(t, environments, runningContext(), deployer, "env-1", "", &security.Context{TenantID: "t1"})
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d (body %s), want 409", rec.Code, rec.Body.String())
+	}
+	if len(deployer.started) != 0 {
+		t.Fatalf("a second concurrent deploy must not start, got %d", len(deployer.started))
 	}
 }

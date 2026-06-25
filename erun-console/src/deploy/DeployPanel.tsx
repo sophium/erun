@@ -12,11 +12,26 @@ import { useDeployController } from './controller';
 // here — every request goes through the controller, which calls the typed
 // client. Only `runtime` envs are shown: deploy installs the runtime chart.
 
+// persistedStatusLine renders the env's persisted deploy lifecycle (from the
+// read model) when there is no in-session deploy yet — so opening the console
+// after a prior deploy shows its outcome (especially a failure) on first paint,
+// not a bare Deploy button.
+function persistedStatusLine(environment: Environment): string {
+  switch (environment.deployStatus) {
+    case 'deployed':
+      return `${environment.name} is deployed${versionSuffix(environment)}.`;
+    case 'failed':
+      return `${environment.name} failed to deploy.`;
+    case 'deploying':
+      return `Deploying ${environment.name}…`;
+    default:
+      return '';
+  }
+}
+
 function statusLine(state: EnvDeployState | undefined, environment: Environment): string {
   if (state === undefined) {
-    return environment.deployStatus === 'deployed' && environment.deployedVersion !== undefined
-      ? `Deployed ${environment.deployedVersion}.`
-      : '';
+    return persistedStatusLine(environment);
   }
   switch (state.status) {
     case 'starting':
@@ -36,15 +51,24 @@ function versionSuffix(environment: Environment): string {
   return environment.deployedVersion !== undefined ? ` (${environment.deployedVersion})` : '';
 }
 
-function failureReason(state: EnvDeployState | undefined): string | undefined {
+// failureReason returns the deploy error to show alongside a failed line, from
+// the in-session state when present, else the env's persisted deployError so a
+// prior failure's reason survives a page reload.
+function failureReason(state: EnvDeployState | undefined, environment: Environment): string | undefined {
   if (state?.status === 'failed') {
     return state.environment.deployError;
+  }
+  if (state === undefined && environment.deployStatus === 'failed') {
+    return environment.deployError;
   }
   return undefined;
 }
 
-function feedbackRole(state: EnvDeployState | undefined): 'status' | 'alert' {
-  return state?.status === 'failed' || state?.status === 'error' ? 'alert' : 'status';
+function feedbackRole(state: EnvDeployState | undefined, environment: Environment): 'status' | 'alert' {
+  if (state === undefined) {
+    return environment.deployStatus === 'failed' ? 'alert' : 'status';
+  }
+  return state.status === 'failed' || state.status === 'error' ? 'alert' : 'status';
 }
 
 function DeployStatus({
@@ -58,9 +82,9 @@ function DeployStatus({
   if (line === '') {
     return null;
   }
-  const reason = failureReason(state);
+  const reason = failureReason(state, environment);
   return (
-    <div className="deploy-status" role={feedbackRole(state)} aria-live="polite">
+    <div className="deploy-status" role={feedbackRole(state, environment)} aria-live="polite">
       <p>{line}</p>
       {reason !== undefined && <p className="context-error">{reason}</p>}
     </div>

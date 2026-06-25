@@ -21,6 +21,7 @@ function jsonResponse(body: unknown, status = 200): Response {
     ok: status >= 200 && status < 300,
     status,
     json: () => Promise.resolve(body),
+    text: () => Promise.resolve(typeof body === 'string' ? body : JSON.stringify(body)),
   } as unknown as Response;
 }
 
@@ -149,6 +150,22 @@ describe('DeployPanel', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Deploy' }));
       await Promise.resolve();
     });
-    expect(screen.getByText('Request failed: deploy request failed (409)')).toBeInTheDocument();
+    expect(
+      screen.getByText('Request failed: deploy request failed (409): context is not provisioned'),
+    ).toBeInTheDocument();
+  });
+
+  it('surfaces a persisted failed deploy + its reason on first paint (no click)', () => {
+    mockFetch(() => jsonResponse({}));
+    const failedEnv: Environment = {
+      ...RUNTIME_ENV,
+      deployStatus: 'failed',
+      deployError: 'runtime chart 1.2.3 could not be pulled',
+    };
+    render(<DeployPanel token="dev-token" environments={[failedEnv]} />);
+    // Without any in-session deploy, the persisted failure + reason must show,
+    // not a bare Deploy button.
+    expect(screen.getByText('prod failed to deploy.')).toBeInTheDocument();
+    expect(screen.getByText('runtime chart 1.2.3 could not be pulled')).toBeInTheDocument();
   });
 });

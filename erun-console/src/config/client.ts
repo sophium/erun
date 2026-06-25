@@ -131,10 +131,7 @@ export async function fetchConfig(token: string): Promise<TenantConfigView> {
   }
 
   if (!response.ok) {
-    throw new ConfigFetchError(
-      `config request failed (${String(response.status)})`,
-      response.status,
-    );
+    throw await fetchError('config request failed', response);
   }
 
   const body: unknown = await response.json();
@@ -168,6 +165,45 @@ async function authedFetch(
   }
 }
 
+// errorReason reads a non-2xx response body so the server's explanation (e.g.
+// "environment quota reached", "context is not provisioned") reaches the
+// operator instead of only a bare HTTP status. The API writes errors as
+// text/plain (errors.go writeError), so it reads the text and only treats it as
+// JSON if it parses to a `{ error | message }` object. Returns undefined when
+// there is no usable body.
+async function errorReason(response: Response): Promise<string | undefined> {
+  let text: string;
+  try {
+    text = await response.text();
+  } catch {
+    return undefined;
+  }
+  const trimmed = text.trim();
+  if (trimmed === '') {
+    return undefined;
+  }
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (isRecord(parsed)) {
+      const message = parsed.error ?? parsed.message;
+      if (typeof message === 'string' && message.length > 0) {
+        return message;
+      }
+    }
+  } catch {
+    // Not JSON — the plain-text body is the reason.
+  }
+  return trimmed;
+}
+
+// fetchError builds a ConfigFetchError carrying the HTTP status and, when the
+// server sent one, its reason text folded into the message.
+async function fetchError(label: string, response: Response): Promise<ConfigFetchError> {
+  const reason = await errorReason(response);
+  const suffix = reason !== undefined ? `: ${reason}` : '';
+  return new ConfigFetchError(`${label} (${String(response.status)})${suffix}`, response.status);
+}
+
 // The BYO-cloud credentials an operator registers under an alias. `provider`
 // defaults to aws server-side; `credentials` is an opaque provider-specific JSON
 // string the API encrypts at rest (never returned).
@@ -195,10 +231,7 @@ export async function setCloudProviderAlias(
     },
   );
   if (!response.ok) {
-    throw new ConfigFetchError(
-      `alias request failed (${String(response.status)})`,
-      response.status,
-    );
+    throw await fetchError('alias request failed', response);
   }
 }
 
@@ -224,10 +257,7 @@ export async function createContext(
     body: JSON.stringify(input),
   });
   if (!response.ok) {
-    throw new ConfigFetchError(
-      `create context request failed (${String(response.status)})`,
-      response.status,
-    );
+    throw await fetchError('create context request failed', response);
   }
   const body: unknown = await response.json();
   if (!isRecord(body) || !isRecord(body.context)) {
@@ -242,10 +272,7 @@ export async function createContext(
 export async function getContext(token: string, contextId: string): Promise<CloudContext> {
   const response = await authedFetch(`/v1/contexts/${encodeURIComponent(contextId)}`, token);
   if (!response.ok) {
-    throw new ConfigFetchError(
-      `context request failed (${String(response.status)})`,
-      response.status,
-    );
+    throw await fetchError('context request failed', response);
   }
   const body: unknown = await response.json();
   if (!isRecord(body)) {
@@ -276,10 +303,7 @@ export async function deployEnvironment(
     },
   );
   if (!response.ok) {
-    throw new ConfigFetchError(
-      `deploy request failed (${String(response.status)})`,
-      response.status,
-    );
+    throw await fetchError('deploy request failed', response);
   }
   const body: unknown = await response.json();
   if (!isRecord(body)) {
@@ -297,10 +321,7 @@ export async function getEnvironment(token: string, environmentId: string): Prom
     token,
   );
   if (!response.ok) {
-    throw new ConfigFetchError(
-      `environment request failed (${String(response.status)})`,
-      response.status,
-    );
+    throw await fetchError('environment request failed', response);
   }
   const body: unknown = await response.json();
   if (!isRecord(body)) {
@@ -334,10 +355,7 @@ export async function createEnvironment(
     body: JSON.stringify(input),
   });
   if (!response.ok) {
-    throw new ConfigFetchError(
-      `create environment request failed (${String(response.status)})`,
-      response.status,
-    );
+    throw await fetchError('create environment request failed', response);
   }
   const body: unknown = await response.json();
   if (!isRecord(body)) {

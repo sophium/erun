@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"context"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -29,6 +30,14 @@ func restConfig(publicIP, token string) *rest.Config {
 		Host:            "https://" + publicIP + ":6443",
 		BearerToken:     token,
 		TLSClientConfig: rest.TLSClientConfig{Insecure: true},
+		// A whole-request timeout so a half-open / black-holed API server cannot
+		// stall the namespace-ensure or chart apply unbounded (client-go's dial +
+		// TLS already cap quickly, but a peer that accepts then withholds response
+		// headers would otherwise hang). QPS/Burst lift the conservative defaults
+		// so a multi-object chart applies without client-side throttling.
+		Timeout: 60 * time.Second,
+		QPS:     50,
+		Burst:   100,
 	}
 }
 

@@ -7,17 +7,25 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/deploy"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
+// deployStaleAfter is how long an env may sit at deploy_status="deploying"
+// before ClaimDeploy treats it as stranded (a control-plane crash mid-deploy)
+// and lets a re-deploy re-claim it. It is comfortably above the helm rollout
+// timeout (DefaultHelmDeploymentTimeout, 5m) so a live deploy is never re-claimed.
+const deployStaleAfter = 15 * time.Minute
+
 type EnvironmentRepository interface {
 	List(ctx context.Context) ([]model.Environment, error)
 	Get(ctx context.Context, environmentID string) (model.Environment, error)
 	Create(ctx context.Context, environment model.Environment) (model.Environment, error)
 	Count(ctx context.Context) (int, error)
+	ClaimDeploy(ctx context.Context, environmentID string, staleAfter time.Duration) (bool, error)
 	UpdateDeployResult(ctx context.Context, environmentID, status, deployedVersion, deployError string) error
 }
 
@@ -236,10 +244,19 @@ func (r EnvironmentRoutes) deployEnvironment(w http.ResponseWriter, req *http.Re
 		return
 	}
 
-	// Optimistically reflect the in-flight deploy so a poll right after the 202
-	// sees "deploying" rather than the prior status.
-	if err := r.environments.UpdateDeployResult(req.Context(), environment.EnvironmentID, "deploying", "", ""); err != nil {
+	// Atomically claim the env for this deploy: flipping to "deploying" is the
+	// concurrency lock, not a cosmetic write. A concurrent double-submit (two
+	// tabs/operators/clients) fails to claim and gets 409, so a second helm
+	// rollout never races into the same release. A "deploying" stranded by a
+	// control-plane crash is re-claimable once it goes stale past the deploy
+	// window, so this does not lock an env out permanently.
+	claimed, err := r.environments.ClaimDeploy(req.Context(), environment.EnvironmentID, deployStaleAfter)
+	if err != nil {
 		writeRepositoryError(w, err)
+		return
+	}
+	if !claimed {
+		writeError(w, http.StatusConflict, "a deploy is already in progress for this environment")
 		return
 	}
 	if err := r.deployer.Start(deploy.DeployInput{

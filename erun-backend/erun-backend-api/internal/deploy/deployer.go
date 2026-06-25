@@ -16,6 +16,7 @@ package deploy
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
@@ -31,6 +32,9 @@ const (
 	statusDeploying = "deploying"
 	statusDeployed  = "deployed"
 	statusFailed    = "failed"
+	// markStatusMaxRetries bounds the retries on the lifecycle status-write steps
+	// so a transient DB blip does not leave the env stranded at "deploying".
+	markStatusMaxRetries = 5
 )
 
 // DeployInput is the serializable workflow input DBOS checkpoints. It carries
@@ -154,17 +158,24 @@ func (d *EnvDeployer) deployWorkflow(dctx dbos.DBOSContext, input DeployInput) (
 		return d.deployEnv(c, input)
 	})
 	if err != nil {
-		// Record the failure in its own checkpointed step so the console sees it
-		// even if the workflow is not retried.
-		_, _ = dbos.RunAsStep(dctx, func(c context.Context) (string, error) {
+		// Record the failure in its own checkpointed step (with bounded retries so
+		// a transient DB blip does not strand the env at "deploying"). If even the
+		// retries fail, log it so the stranded row is diagnosable rather than silent
+		// — a stale "deploying" is re-claimable by a later re-deploy.
+		if _, markErr := dbos.RunAsStep(dctx, func(c context.Context) (string, error) {
 			return "", d.markFailed(c, input, err)
-		})
+		}, dbos.WithStepMaxRetries(markStatusMaxRetries)); markErr != nil {
+			log.Printf("erun deploy: could not record failed status for env %s: %v (deploy error: %v)", input.EnvironmentID, markErr, err)
+		}
 		return DeployResult{}, err
 	}
-	if _, err := dbos.RunAsStep(dctx, func(c context.Context) (string, error) {
+	if _, markErr := dbos.RunAsStep(dctx, func(c context.Context) (string, error) {
 		return "", d.markDeployed(c, input)
-	}); err != nil {
-		return DeployResult{}, err
+	}, dbos.WithStepMaxRetries(markStatusMaxRetries)); markErr != nil {
+		// The chart deployed but recording it failed; the env stays "deploying"
+		// until a re-deploy reconciles it (helm upgrade is idempotent). Surface it.
+		log.Printf("erun deploy: env %s deployed but recording the status failed: %v", input.EnvironmentID, markErr)
+		return DeployResult{}, markErr
 	}
 	return result, nil
 }
