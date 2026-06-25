@@ -48,3 +48,17 @@ yarn test           # vitest run — the component test
 
 - `yarn test` (vitest + `@testing-library/react`, jsdom) is the increment's real verification: it mocks `fetch` and asserts `ConfigView` renders the read model, empty states, and the 401 sign-in prompt.
 - A Playwright e2e harness like `erun-ui/playwright/` (boot the SPA, drive a seeded backend) is the **follow-up** to this component-level test — appropriate once the OIDC flow and a runnable backend stub exist. The component test is the right weight for this first increment.
+
+## Running against a real erun-backend-api (dev / e2e)
+
+The console can be driven against a **live** `erun-backend-api` with no live IdP, the same way the MCP edge is tested (issue #674): the API trusts a `file://` desktop key, so a desktop-signed token authenticates the read view end to end.
+
+- `vite.config.ts` proxies `/v1/...` to `VITE_API_PROXY_TARGET` (default `http://127.0.0.1:17033`) so `yarn dev` fetches **same-origin** — the API sets no CORS headers by design, and the dev proxy forwards server-side, so there is no browser preflight. In production the console is served same-origin behind the API edge, so no proxy is needed.
+- `VITE_DEV_BEARER_TOKEN` is the bearer token `App.tsx` presents. For a real-API run it must be a token the API trusts: either an OIDC JWT, or a desktop-signed `file://` token (EdDSA, audience `erun-api`) when the API is started with `ERUN_API_DESKTOP_PUBLIC_KEY_PATH` pointing at the matching public key. See [`api-protocol.md` § Sign-in](../erun-docs/docs/agent-reference/api-protocol.md) for the token model.
+
+```bash
+# point yarn dev at a running API on :17055 with a desktop-signed token
+VITE_API_PROXY_TARGET=http://127.0.0.1:17055 VITE_DEV_BEARER_TOKEN=<token> yarn dev
+```
+
+Unlike `yarn test` (mocked `fetch`), this renders the **real** `{ tenant, environments[], contexts[] }` the API serves from Postgres — the verification that closed the option-2 console↔API check for #606/#658.

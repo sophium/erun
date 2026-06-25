@@ -46,8 +46,10 @@ A single issuer can therefore map to **many** tenants (org-scoped), and multiple
 For every authenticated request:
 
 1. Read `Authorization: Bearer <jwt>`. Missing/malformed header → `401`.
-2. Extract `iss` from the JWT payload. If the server is configured with an allowed-issuers allow-list and `iss` is not on it → `401`.
-3. Fetch (or read from cache) the issuer's `<iss>/.well-known/openid-configuration` and its `jwks_uri` JWKS, and verify the JWT signature and registered claims (`exp`, `nbf`, `iat`). Failure → `401`. (Audience/`aud` is **not** currently enforced — the verifier skips the client-ID check; `aud` validation is `(Planned.)`)
+2. Extract `iss` from the JWT payload. The API trusts two kinds of issuer (issue #674), dispatched on scheme — the same multi-issuer model as the [MCP edge](#mcp-edge), so the API and every edge authenticate identically:
+   - **`file://` desktop key** — when `iss` equals the configured trusted `file://<path>` desktop issuer (`ERUN_API_DESKTOP_PUBLIC_KEY_PATH`): verify the EdDSA signature against the injected public key (`alg` hard-locked to `EdDSA`, closing the alg-confusion class), and enforce `exp` and the `erun-api` audience. This is the desktop / e2e path — a desktop-signed token authenticates with **no live IdP**, exactly as for the MCP edge.
+   - **`https://` OIDC issuer** — otherwise: if an allowed-issuers allow-list is configured and `iss` is not on it → `401`.
+3. (OIDC path) Fetch (or read from cache) the issuer's `<iss>/.well-known/openid-configuration` and its `jwks_uri` JWKS, and verify the JWT signature and registered claims (`exp`, `nbf`, `iat`). Failure → `401`. (For OIDC tokens, audience/`aud` is **not** currently enforced — the verifier skips the client-ID check; `aud` validation for OIDC is `(Planned.)`. The `file://` desktop path **does** enforce the `erun-api` audience, so a token minted for an MCP env — audience `erun-mcp:<tenant>/<env>` — cannot be replayed against the API.)
 4. Look up `issuers.org_field_key` for `iss`.
    - If `iss` is **not registered**: unauthorized (`401`) — **unless** the `tenants` table is empty, which triggers first-identity bootstrap (below).
    - If `org_field_key` is **NULL**: resolve `tenant_issuers` where `issuer = iss` and `org_field_value IS NULL` → tenant.
@@ -69,7 +71,7 @@ The runtime chart configures each edge with a set of trusted issuers mapping eac
 
 1. `Authorization: Bearer <jwt>` is present — missing → `401`.
 2. The token's `iss` is a trusted issuer for this edge — untrusted → `401`; the mapped value is the resolved tenant.
-3. The signature verifies against that issuer's key, and `exp` and the audience (`aud`) match. **Unlike the REST API, the MCP edge enforces `aud`** — the per-env audience (`erun-mcp:<tenant>/<environment>`) means a token minted for one environment cannot be replayed against another, or against the REST API.
+3. The signature verifies against that issuer's key, and `exp` and the audience (`aud`) match — the per-env audience (`erun-mcp:<tenant>/<environment>`) means a token minted for one environment cannot be replayed against another, or against the REST API (whose `file://` path enforces its own `erun-api` audience — issue #674). The REST API's OIDC path does not yet enforce `aud` (see the [verification algorithm](#token-verification-algorithm) above).
 4. The resolved tenant matches **this** environment's tenant (a per-env edge serves exactly one tenant) — a token resolving to another tenant → `401`. Tenant-scoped tools are likewise pinned to the edge's own environment: a `tenant`/`environment` argument that differs from the pod's identity is refused, so a caller can never drive one env's MCP to act on another (issue #657).
 
 An edge can trust **multiple issuers at once**, of two kinds, dispatched by the *configured* issuer's scheme (not the token's claimed `iss`, so the verification path can't be attacker-chosen):
