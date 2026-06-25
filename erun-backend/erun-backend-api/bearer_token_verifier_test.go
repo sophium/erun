@@ -7,11 +7,15 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	jose "github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
+
+	eruncommon "github.com/sophium/erun/erun-common"
 )
 
 // mockOIDCProvider is a self-contained OIDC issuer for the backend verifier
@@ -79,7 +83,7 @@ func writeOIDCJSON(w http.ResponseWriter, value any) {
 func TestVerifyBearerTokenDelegatesToSharedVerifier(t *testing.T) {
 	provider := newMockOIDCProvider(t)
 	now := time.Now()
-	verifier := NewOIDCTokenVerifier([]string{provider.issuer()})
+	verifier := NewBearerTokenVerifier(BearerTokenVerifierOptions{AllowedIssuers: []string{provider.issuer()}})
 
 	t.Run("valid token maps username and keeps raw claims", func(t *testing.T) {
 		token := provider.sign(t, map[string]any{
@@ -159,6 +163,112 @@ func TestVerifyBearerTokenDelegatesToSharedVerifier(t *testing.T) {
 		}
 		if _, err := verifier.VerifyBearerToken(context.Background(), token); err == nil {
 			t.Fatal("expected a token signed by a key not in the JWKS to be rejected")
+		}
+	})
+}
+
+// TestVerifyBearerTokenFileIssuer exercises the file:// desktop path (issue
+// #674): a desktop-signed EdDSA token authenticates to the API with no live IdP,
+// the same auth the MCP edge uses, with the API audience enforced.
+func TestVerifyBearerTokenFileIssuer(t *testing.T) {
+	privatePEM, publicPEM, err := eruncommon.GenerateDesktopIdentity()
+	if err != nil {
+		t.Fatalf("generate desktop identity: %v", err)
+	}
+	keyPath := filepath.Join(t.TempDir(), "desktopid.pub")
+	if err := os.WriteFile(keyPath, publicPEM, 0o600); err != nil {
+		t.Fatalf("write public key: %v", err)
+	}
+	issuer := eruncommon.FileIssuer(keyPath)
+	verifier := NewBearerTokenVerifier(BearerTokenVerifierOptions{DesktopPublicKeyPath: keyPath})
+	now := time.Now()
+
+	sign := func(t *testing.T, privateKey []byte, claims eruncommon.MCPTokenClaims) string {
+		t.Helper()
+		token, signErr := eruncommon.SignMCPToken(privateKey, claims)
+		if signErr != nil {
+			t.Fatalf("sign token: %v", signErr)
+		}
+		return token
+	}
+
+	t.Run("valid desktop token authenticates", func(t *testing.T) {
+		token := sign(t, privatePEM, eruncommon.MCPTokenClaims{
+			Issuer:    issuer,
+			Subject:   "dev-user",
+			Audience:  eruncommon.APITokenAudience,
+			ExpiresAt: now.Add(time.Hour).Unix(),
+		})
+		claims, verifyErr := verifier.VerifyBearerToken(context.Background(), token)
+		if verifyErr != nil {
+			t.Fatalf("verify: %v", verifyErr)
+		}
+		if claims.Issuer != issuer || claims.Subject != "dev-user" {
+			t.Fatalf("claims = %+v", claims)
+		}
+	})
+
+	t.Run("a token minted for an MCP env audience is rejected against the API", func(t *testing.T) {
+		token := sign(t, privatePEM, eruncommon.MCPTokenClaims{
+			Issuer:    issuer,
+			Subject:   "dev-user",
+			Audience:  eruncommon.MCPTokenAudience("acme", "prod"),
+			ExpiresAt: now.Add(time.Hour).Unix(),
+		})
+		if _, verifyErr := verifier.VerifyBearerToken(context.Background(), token); verifyErr == nil {
+			t.Fatal("expected an MCP-audience token to be rejected against the API")
+		}
+	})
+
+	t.Run("a token claiming the trusted issuer but signed by a different key is rejected", func(t *testing.T) {
+		// Sign with a DIFFERENT private key while claiming the TRUSTED issuer. The
+		// verifier loads the trusted public key (mine, at keyPath) and the EdDSA
+		// signature check must fail — proving the file:// path verifies the
+		// signature against the trusted key, not merely the issuer string.
+		attackerPrivate, _, genErr := eruncommon.GenerateDesktopIdentity()
+		if genErr != nil {
+			t.Fatalf("generate attacker identity: %v", genErr)
+		}
+		token := sign(t, attackerPrivate, eruncommon.MCPTokenClaims{
+			Issuer:    issuer,
+			Subject:   "intruder",
+			Audience:  eruncommon.APITokenAudience,
+			ExpiresAt: now.Add(time.Hour).Unix(),
+		})
+		if _, verifyErr := verifier.VerifyBearerToken(context.Background(), token); verifyErr == nil {
+			t.Fatal("expected a token signed by a key other than the trusted public key to be rejected")
+		}
+	})
+
+	t.Run("expired token is rejected", func(t *testing.T) {
+		token := sign(t, privatePEM, eruncommon.MCPTokenClaims{
+			Issuer:    issuer,
+			Subject:   "dev-user",
+			Audience:  eruncommon.APITokenAudience,
+			ExpiresAt: now.Add(-time.Minute).Unix(),
+		})
+		if _, verifyErr := verifier.VerifyBearerToken(context.Background(), token); verifyErr == nil {
+			t.Fatal("expected an expired token to be rejected")
+		}
+	})
+
+	t.Run("a desktop token from an untrusted file issuer is rejected", func(t *testing.T) {
+		otherPrivate, otherPublic, genErr := eruncommon.GenerateDesktopIdentity()
+		if genErr != nil {
+			t.Fatalf("generate other identity: %v", genErr)
+		}
+		otherPath := filepath.Join(t.TempDir(), "desktopid.pub")
+		if writeErr := os.WriteFile(otherPath, otherPublic, 0o600); writeErr != nil {
+			t.Fatalf("write other public key: %v", writeErr)
+		}
+		token := sign(t, otherPrivate, eruncommon.MCPTokenClaims{
+			Issuer:    eruncommon.FileIssuer(otherPath),
+			Subject:   "intruder",
+			Audience:  eruncommon.APITokenAudience,
+			ExpiresAt: now.Add(time.Hour).Unix(),
+		})
+		if _, verifyErr := verifier.VerifyBearerToken(context.Background(), token); verifyErr == nil {
+			t.Fatal("expected a token from a non-configured file issuer to be rejected")
 		}
 	})
 }

@@ -31,6 +31,7 @@ func run(args []string) error {
 	flags.IntVar(&cfg.Port, "port", cfg.Port, "Port to bind the backend API HTTP server to")
 	flags.StringVar(&cfg.DatabaseURL, "database-url", cfg.DatabaseURL, "Backend PostgreSQL database URL")
 	flags.StringVar(&cfg.AllowedIssuers, "oidc-allowed-issuers", cfg.AllowedIssuers, "Comma-separated OIDC issuer allow-list; empty allows any issuer resolved from a token")
+	flags.StringVar(&cfg.DesktopPublicKeyPath, "desktop-public-key-path", cfg.DesktopPublicKeyPath, "Path to the desktop Ed25519 public key; when set, the API trusts file://<path> desktop-signed tokens (issue #674), the same auth the MCP edge uses")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -42,8 +43,9 @@ func run(args []string) error {
 	defer func() { _ = db.Close() }()
 
 	handler, err := backendapi.NewHandler(backendapi.HandlerOptions{
-		TokenVerifier: backendapi.NewOIDCTokenVerifierWithOptions(backendapi.OIDCTokenVerifierOptions{
-			AllowedIssuers: splitCSV(cfg.AllowedIssuers),
+		TokenVerifier: backendapi.NewBearerTokenVerifier(backendapi.BearerTokenVerifierOptions{
+			AllowedIssuers:       splitCSV(cfg.AllowedIssuers),
+			DesktopPublicKeyPath: cfg.DesktopPublicKeyPath,
 		}),
 		IdentityCache: backendapi.NewIdentityResolutionCache(backendapi.IdentityCacheOptions{}),
 		DB:            db,
@@ -95,18 +97,20 @@ func countStatus(count int, err error) string {
 }
 
 type apiConfig struct {
-	Host           string
-	Port           int
-	DatabaseURL    string
-	AllowedIssuers string
+	Host                 string
+	Port                 int
+	DatabaseURL          string
+	AllowedIssuers       string
+	DesktopPublicKeyPath string
 }
 
 func configFromEnv() apiConfig {
 	return apiConfig{
-		Host:           envOrDefault("ERUN_API_HOST", "127.0.0.1"),
-		Port:           intEnvOrDefault("ERUN_API_PORT", 17033),
-		DatabaseURL:    strings.TrimSpace(os.Getenv("ERUN_DATABASE_URL")),
-		AllowedIssuers: strings.TrimSpace(os.Getenv("ERUN_OIDC_ALLOWED_ISSUERS")),
+		Host:                 envOrDefault("ERUN_API_HOST", "127.0.0.1"),
+		Port:                 intEnvOrDefault("ERUN_API_PORT", 17033),
+		DatabaseURL:          strings.TrimSpace(os.Getenv("ERUN_DATABASE_URL")),
+		AllowedIssuers:       strings.TrimSpace(os.Getenv("ERUN_OIDC_ALLOWED_ISSUERS")),
+		DesktopPublicKeyPath: strings.TrimSpace(os.Getenv("ERUN_API_DESKTOP_PUBLIC_KEY_PATH")),
 	}
 }
 
