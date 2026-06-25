@@ -89,3 +89,13 @@ CREATE TRIGGER tenant_quotas_set_timestamps
   BEFORE INSERT OR UPDATE ON tenant_quotas
   FOR EACH ROW
   EXECUTE FUNCTION erun_set_timestamps();
+
+CREATE TRIGGER cloud_provider_aliases_set_timestamps
+  BEFORE INSERT OR UPDATE ON cloud_provider_aliases
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();
+
+CREATE TRIGGER context_credentials_set_timestamps
+  BEFORE INSERT OR UPDATE ON context_credentials
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();

@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/provision"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
@@ -17,8 +19,17 @@ type ContextRepository interface {
 	Create(ctx context.Context, cloudContext model.Context) (model.Context, error)
 }
 
+// ContextProvisioner starts the durable live provisioning of a freshly-created
+// context (issue #605/#676). Optional: when nil, POST /v1/contexts only
+// registers the row and returns the bootstrap plan (no live cluster bootstrap),
+// the pre-#676 behaviour.
+type ContextProvisioner interface {
+	Start(provision.ProvisionInput) error
+}
+
 type ContextRoutes struct {
-	contexts ContextRepository
+	contexts    ContextRepository
+	provisioner ContextProvisioner
 }
 
 // createContextRequest is the BYO-cloud registration body: the operator-authored
@@ -43,8 +54,8 @@ type createContextResponse struct {
 	Plan    []string       `json:"plan"`
 }
 
-func RegisterContextRoutes(register ProtectedRouteRegistrar, contexts ContextRepository) {
-	routes := ContextRoutes{contexts: contexts}
+func RegisterContextRoutes(register ProtectedRouteRegistrar, contexts ContextRepository, provisioner ContextProvisioner) {
+	routes := ContextRoutes{contexts: contexts, provisioner: provisioner}
 	register(http.MethodGet, "/v1/contexts", http.HandlerFunc(routes.listContexts))
 	register(http.MethodPost, "/v1/contexts", http.HandlerFunc(routes.createContext))
 	register(http.MethodGet, "/v1/contexts/{context_id}", http.HandlerFunc(routes.getContext))
@@ -116,14 +127,38 @@ func (r ContextRoutes) createContext(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// TODO(#659 live): execute the real bootstrap (InitCloudContext with
-	// DryRun=false + RunAWS against the tenant's alias) + custody the k3s admin
-	// token/kubeconfig server-side. Requires a live AWS account + cluster; not
-	// executed in this build. The persisted row above stands at its
-	// pending-style status (no instance_id / public_ip yet) until that real
-	// bootstrap runs and writes the resolved instance identity + token custody.
+	// The row persists at status='provisioning' (the DB default). When a
+	// provisioner is wired, kick off the durable live bootstrap (InitCloudContext
+	// with DryRun=false + token custody) asynchronously — it runs for minutes, so
+	// the handler must not block — and return 202 Accepted; the caller polls
+	// GET /v1/contexts/{id} for status. Without a provisioner (no DBOS/secrets
+	// configured) the row is registered as before and returned 201.
+	if r.provisioner == nil {
+		writeJSON(w, http.StatusCreated, createContextResponse{Context: &created, Plan: plan})
+		return
+	}
 
-	writeJSON(w, http.StatusCreated, createContextResponse{Context: &created, Plan: plan})
+	securityContext, ok := security.FromContext(req.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		return
+	}
+	if err := r.provisioner.Start(provision.ProvisionInput{
+		TenantID:           securityContext.TenantID,
+		TenantType:         securityContext.TenantType,
+		ErunUserID:         securityContext.ErunUserID,
+		ContextID:          created.ContextID,
+		Name:               name,
+		CloudProviderAlias: alias,
+		Region:             region,
+		InstanceType:       strings.TrimSpace(body.InstanceType),
+		DiskType:           strings.TrimSpace(body.DiskType),
+		DiskSizeGB:         body.DiskSizeGB,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start provisioning")
+		return
+	}
+	writeJSON(w, http.StatusAccepted, createContextResponse{Context: &created, Plan: plan})
 }
 
 // buildContextBootstrapPlan runs eruncommon.InitCloudContext in dry-run mode and

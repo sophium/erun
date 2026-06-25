@@ -22,6 +22,8 @@ env "default" {
     "file://schema/tables/audit_events.sql",
     "file://schema/tables/contexts.sql",
     "file://schema/tables/environments.sql",
+    "file://schema/tables/cloud_provider_aliases.sql",
+    "file://schema/tables/context_credentials.sql",
     "file://schema/indexes/users.sql",
     "file://schema/indexes/user_external_ids.sql",
     "file://schema/indexes/role_permissions.sql",
@@ -50,6 +52,8 @@ env "default" {
     "file://schema/rls/contexts.sql",
     "file://schema/rls/environments.sql",
     "file://schema/rls/tenant_quotas.sql",
+    "file://schema/rls/cloud_provider_aliases.sql",
+    "file://schema/rls/context_credentials.sql",
   ]
   url = var.database_url
   dev = "docker://postgres/18/dev?search_path=public"

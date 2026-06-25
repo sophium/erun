@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/provision"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
 func postCreateContext(t *testing.T, contexts ContextRepository, body string) *httptest.ResponseRecorder {
@@ -100,6 +102,44 @@ func TestCreateContextPersistsAndReturnsPlan(t *testing.T) {
 	}
 	if len(response.Plan) == 0 {
 		t.Fatalf("non-preview create must still return the bootstrap plan")
+	}
+}
+
+type stubContextProvisioner struct {
+	started []provision.ProvisionInput
+}
+
+func (s *stubContextProvisioner) Start(in provision.ProvisionInput) error {
+	s.started = append(s.started, in)
+	return nil
+}
+
+// TestCreateContextStartsProvisioningWhenWired: with a provisioner wired (DBOS +
+// secrets configured), a non-preview create persists the row and kicks off the
+// durable provisioning workflow, returning 202 Accepted (issue #605/#676).
+func TestCreateContextStartsProvisioningWhenWired(t *testing.T) {
+	contexts := &stubContextRepository{created: model.Context{ContextID: "ctx-1", Name: "primary", Provider: "aws", Status: "provisioning"}}
+	prov := &stubContextProvisioner{}
+	req := httptest.NewRequest(http.MethodPost, "/v1/contexts",
+		bytes.NewBufferString(`{"name":"primary","cloudProviderAlias":"aws-acme","region":"eu-west-2","preview":false}`))
+	req = req.WithContext(security.WithContext(req.Context(), security.Context{
+		TenantID:   "t1",
+		TenantType: string(model.TenantTypeCompany),
+		ErunUserID: "u1",
+	}))
+	rec := httptest.NewRecorder()
+
+	ContextRoutes{contexts: contexts, provisioner: prov}.createContext(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d (body %s), want 202 Accepted", rec.Code, rec.Body.String())
+	}
+	if len(prov.started) != 1 {
+		t.Fatalf("Start called %d times, want 1", len(prov.started))
+	}
+	if got := prov.started[0]; got.ContextID != "ctx-1" || got.TenantID != "t1" ||
+		got.CloudProviderAlias != "aws-acme" || got.Region != "eu-west-2" {
+		t.Fatalf("provision input = %+v", got)
 	}
 }
 

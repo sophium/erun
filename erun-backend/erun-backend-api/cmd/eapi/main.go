@@ -12,8 +12,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dbos-inc/dbos-transact-golang/dbos"
+
 	backendapi "github.com/sophium/erun/erun-backend/erun-backend-api"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/secrets"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -42,6 +45,15 @@ func run(args []string) error {
 	}
 	defer func() { _ = db.Close() }()
 
+	cipher, err := optionalCipher(cfg.SecretsKey)
+	if err != nil {
+		return err
+	}
+	dbosCtx, err := optionalDBOS(cfg.DBOSDatabaseURL)
+	if err != nil {
+		return err
+	}
+
 	handler, err := backendapi.NewHandler(backendapi.HandlerOptions{
 		TokenVerifier: backendapi.NewBearerTokenVerifier(backendapi.BearerTokenVerifierOptions{
 			AllowedIssuers:       splitCSV(cfg.AllowedIssuers),
@@ -50,9 +62,23 @@ func run(args []string) error {
 		IdentityCache: backendapi.NewIdentityResolutionCache(backendapi.IdentityCacheOptions{}),
 		DB:            db,
 		DBDialect:     repository.DialectPostgres,
+		DBOSContext:   dbosCtx,
+		Cipher:        cipher,
+		AWSEndpoint:   cfg.AWSEndpoint,
 	})
 	if err != nil {
 		return err
+	}
+
+	// NewHandler registered the provisioning workflow (if DBOS+cipher are set);
+	// Launch must follow registration. Launch returns (it starts DBOS's recovery
+	// + queue workers in the background, alongside the HTTP server).
+	if dbosCtx != nil {
+		if err := dbos.Launch(dbosCtx); err != nil {
+			return err
+		}
+		defer func() { dbos.Shutdown(dbosCtx, 5*time.Second) }()
+		log.Print("erun api live provisioning enabled (DBOS durable workflows)")
 	}
 
 	server := http.Server{
@@ -102,6 +128,14 @@ type apiConfig struct {
 	DatabaseURL          string
 	AllowedIssuers       string
 	DesktopPublicKeyPath string
+	// SecretsKey + DBOSDatabaseURL enable live context provisioning (#605/#676).
+	// SecretsKey is a base64 32-byte AES key for the credential tables;
+	// DBOSDatabaseURL is the DBOS durable-workflow system database (a separate
+	// database from ERUN_DATABASE_URL). AWSEndpoint pins provisioning's aws calls
+	// at a local emulator for verification (empty = real AWS).
+	SecretsKey      string
+	DBOSDatabaseURL string
+	AWSEndpoint     string
 }
 
 func configFromEnv() apiConfig {
@@ -111,7 +145,31 @@ func configFromEnv() apiConfig {
 		DatabaseURL:          strings.TrimSpace(os.Getenv("ERUN_DATABASE_URL")),
 		AllowedIssuers:       strings.TrimSpace(os.Getenv("ERUN_OIDC_ALLOWED_ISSUERS")),
 		DesktopPublicKeyPath: strings.TrimSpace(os.Getenv("ERUN_API_DESKTOP_PUBLIC_KEY_PATH")),
+		SecretsKey:           strings.TrimSpace(os.Getenv("ERUN_SECRETS_KEY")),
+		DBOSDatabaseURL:      strings.TrimSpace(os.Getenv("DBOS_SYSTEM_DATABASE_URL")),
+		AWSEndpoint:          strings.TrimSpace(os.Getenv("ERUN_AWS_ENDPOINT_URL")),
 	}
+}
+
+// optionalCipher builds the secrets cipher when ERUN_SECRETS_KEY is set; nil
+// (provisioning disabled) when absent.
+func optionalCipher(key string) (*secrets.Cipher, error) {
+	if key == "" {
+		return nil, nil
+	}
+	return secrets.NewCipher(key)
+}
+
+// optionalDBOS builds the DBOS durable-workflow context when
+// DBOS_SYSTEM_DATABASE_URL is set; nil (provisioning disabled) when absent.
+func optionalDBOS(databaseURL string) (dbos.DBOSContext, error) {
+	if databaseURL == "" {
+		return nil, nil
+	}
+	return dbos.NewDBOSContext(context.Background(), dbos.Config{
+		AppName:     "erun-api",
+		DatabaseURL: databaseURL,
+	})
 }
 
 func openDatabase(databaseURL string) (*sql.DB, error) {
