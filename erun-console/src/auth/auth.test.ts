@@ -3,10 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { completeLogin, devBearerToken, isAuthCallback, oidcConfig, resolveToken, storedToken } from './auth';
 
 // Unit coverage for the OIDC Authorization Code + PKCE mechanics with the
-// discovery + token endpoints mocked. The full browser sign-in against a live
-// Zitadel issuer is exercised separately (see the console AGENTS.md "Running
-// against a real IdP" recipe); this locks the callback exchange, state
-// validation, config gating, and the dev-token fallback.
+// discovery + token endpoints mocked. The full browser sign-in against a real
+// Zitadel v4 is exercised separately by the Playwright suite in ../../playwright
+// (issue #684); this locks the callback exchange, state validation, config
+// gating, and the dev-token fallback.
 
 const DISCOVERY = {
   authorization_endpoint: 'http://localhost:8080/oauth/v2/authorize',

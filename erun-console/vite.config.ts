@@ -27,5 +27,9 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
     css: false,
+    // Scope vitest to the app's own tests. The `playwright/` package holds the
+    // OIDC e2e (`*.spec.ts`), which is a Playwright test, not a vitest one — its
+    // default glob would otherwise try to collect it.
+    include: ['src/**/*.{test,spec}.{ts,tsx}'],
   },
 });

@@ -13,7 +13,7 @@ Module-specific guidance for `erun-console`. Follow the repository root `AGENTS.
 
 This module's verifiable value-prop in its first increment is the **read view**: `GET /v1/config` → `{ tenant, environments[], contexts[] }` rendered for an Operator, proven by a component test against a **mocked** API (`src/config/ConfigView.test.tsx`).
 
-**OIDC sign-in is implemented** (`src/auth/auth.ts`): the real Authorization Code + PKCE flow — `beginLogin` redirects to the issuer's authorize endpoint (discovery-resolved, S256 PKCE, state CSRF guard), `completeLogin` exchanges the callback code + verifier for the `id_token` and holds it as the bearer. It is config-driven (`VITE_OIDC_ISSUER` + `VITE_OIDC_CLIENT_ID`); unset → the `VITE_DEV_BEARER_TOKEN` dev fallback. The PKCE mechanics (callback exchange, state validation, config gating, fallback) are unit-tested in `src/auth/auth.test.ts` (mocked discovery/token endpoints); the IdP is real and **local** — Zitadel runs in Docker, not a hosted dependency (recipe below). The full browser sign-in click-through (provisioned Zitadel OIDC app + the Zitadel login UI) is driven manually / by a Playwright e2e against the local Zitadel; the API side is already proven to accept any-issuer JWTs (its `OIDCVerifier` does discovery + JWKS with `SkipClientIDCheck`).
+**OIDC sign-in is implemented** (`src/auth/auth.ts`): the real Authorization Code + PKCE flow — `beginLogin` redirects to the issuer's authorize endpoint (discovery-resolved, S256 PKCE, state CSRF guard), `completeLogin` exchanges the callback code + verifier for the `id_token` and holds it as the bearer. It is config-driven (`VITE_OIDC_ISSUER` + `VITE_OIDC_CLIENT_ID`); unset → the `VITE_DEV_BEARER_TOKEN` dev fallback. The PKCE mechanics (callback exchange, state validation, config gating, fallback) are unit-tested in `src/auth/auth.test.ts` (mocked discovery/token endpoints). The **full browser sign-in is verified end to end** by the Playwright suite in `playwright/` (issue #684): it stands up a real **Zitadel v4** (core + Login V2 container + proxy), provisions the OIDC SPA app headlessly, and drives the browser through the redirect → Login V2 → PKCE exchange → the API's JWKS signature verification → first-sign-in OPERATIONS-tenant bootstrap → rendered config. The IdP is real and **local** — Zitadel runs in Docker, not a hosted dependency. See `playwright/AGENTS.md` (it documents why the full v4 topology is required: v4 has no login UI in the core container).
 
 Still **deliberately not implemented** (flagged in source):
 
@@ -27,7 +27,8 @@ When you implement it, replace the placeholder with the real flow and add the ve
 - `src/provision/` — the cloud-context provisioning surface (issue #605/#676): `controller.ts` is the thin request/poll controller (a `useProvisionController` hook that sequences the client calls — register a BYO-cloud alias, `POST /v1/contexts`, then poll `GET /v1/contexts/{id}` to `running`/`failed`), and `ProvisionPanel.tsx` is the render layer (alias form + create-context form + live status). This is **verifiable**, not a placeholder: `ProvisionPanel.test.tsx` exercises the alias PUT and the create→poll flow against a mocked `fetch`, the same weight as the read view's test. The live OIDC token still comes from the dev stub — only the auth flow is flagged.
 - `src/environments/` — the env-registration surface (issue #606): `controller.ts` is the thin create-request controller (`useRegisterEnvController`, calls `createEnvironment` = `POST /v1/environments`, then invokes `onRegistered` so the parent refreshes the read model), and `RegisterEnvPanel.tsx` is the render layer (name + type + cloud-context picker + optional runtime version). `RegisterEnvPanel.test.tsx` exercises the POST + the 409 quota error against a mocked `fetch`. This closes the alias → context → register env → deploy loop inside the console.
 - `src/deploy/` — the runtime-deploy surface (issue #680): `controller.ts` is the per-env trigger/poll controller (`useDeployController`, calls `deployEnvironment` = `POST /v1/environments/{id}/deploy`, then polls `getEnvironment` to `deployed`/`failed`), and `DeployPanel.tsx` is the render layer (per runtime env: Deploy + optional version + live status). `DeployPanel.test.tsx` exercises the deploy→poll flow against a mocked `fetch`.
-- `src/auth/` — the flagged OIDC/env-MCP placeholders (see above).
+- `src/auth/` — the OIDC sign-in (`auth.ts`, `auth.test.ts`) + the flagged env-MCP placeholder (see above).
+- `playwright/` — the **real-Zitadel-v4 OIDC sign-in e2e** (issue #684): a separate yarn package (own `package.json`/`tsconfig`/eslint, ignored by the app's tooling) that stands up the full Zitadel v4 topology + a migrated API + the console and drives the browser sign-in. See `playwright/AGENTS.md`.
 - `src/App.tsx` — wires the token source → `fetchConfig` → `ConfigView`, with loading / signed-out (401) / error states, and renders `ProvisionPanel`, `RegisterEnvPanel`, and `DeployPanel` below the read view when a token is present; a successful registration re-runs `fetchConfig` so the new env appears in the config view + deploy panel.
 - `src/test/setup.ts` — Testing Library jest-dom matchers for vitest.
 
@@ -51,7 +52,7 @@ yarn test           # vitest run — the component test
 ```
 
 - `yarn test` (vitest + `@testing-library/react`, jsdom) is the increment's real verification: it mocks `fetch` and asserts `ConfigView` renders the read model, empty states, and the 401 sign-in prompt.
-- A Playwright e2e harness like `erun-ui/playwright/` (boot the SPA, drive a seeded backend) is the **follow-up** to this component-level test — appropriate once the OIDC flow and a runnable backend stub exist. The component test is the right weight for this first increment.
+- The Playwright e2e in `playwright/` (real Zitadel v4 + migrated API + the SPA) is the follow-up that locks the full OIDC sign-in. The component test is still the right weight for the read-view contract; the two are complementary.
 
 ## Running against a real erun-backend-api (dev / e2e)
 
@@ -69,29 +70,15 @@ Unlike `yarn test` (mocked `fetch`), this renders the **real** `{ tenant, enviro
 
 ## Running the OIDC sign-in against a local Zitadel
 
-The OIDC issuer is **not** a hosted dependency — Zitadel runs locally in Docker, the same way floci (AWS) and Lima (k3s) stand in for cloud deps elsewhere. Bring it up with its own Postgres on a docker network, cold-started with `start-from-init`:
+The OIDC issuer is **not** a hosted dependency — Zitadel runs locally in Docker, the same way floci (AWS) and Lima (k3s) stand in for cloud deps elsewhere. **Don't hand-roll a single-container Zitadel for this** — Zitadel v4 has no login UI in the core container (the interactive login is the separate `zitadel-login` "Login V2" container), so `start-from-init` alone gives you discovery + JWKS but no page for `authorize` to render. The correct, working topology — core + Login V2 + proxy, with the OIDC app provisioned headlessly — is captured once in `playwright/zitadel/` (compose + `provision.sh`) and orchestrated by `playwright/run.sh`. To exercise the sign-in, use that:
 
 ```bash
-docker network create zitadel-net
-docker run -d --name zitadel-db --network zitadel-net \
-  -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=zitadel postgres:18
-docker run -d --name zitadel --network zitadel-net -p 8080:8080 \
-  -e ZITADEL_DATABASE_POSTGRES_HOST=zitadel-db -e ZITADEL_DATABASE_POSTGRES_PORT=5432 \
-  -e ZITADEL_DATABASE_POSTGRES_DATABASE=zitadel \
-  -e ZITADEL_DATABASE_POSTGRES_USER_USERNAME=postgres -e ZITADEL_DATABASE_POSTGRES_USER_PASSWORD=postgres -e ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE=disable \
-  -e ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME=postgres -e ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD=postgres -e ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE=disable \
-  -e ZITADEL_EXTERNALSECURE=false -e ZITADEL_EXTERNALDOMAIN=localhost -e ZITADEL_EXTERNALPORT=8080 -e ZITADEL_TLS_ENABLED=false \
-  ghcr.io/zitadel/zitadel:latest start-from-init --masterkey "MasterkeyNeedsToHave32Characters" --tlsMode disabled
-# OIDC discovery + JWKS come up at http://localhost:8080/.well-known/openid-configuration
+cd playwright
+yarn install && yarn install-browsers   # once
+yarn test                                # full stack up, sign-in driven, torn down
+yarn test --headed                       # watch the browser
 ```
 
-Then, in the Zitadel console (`http://localhost:8080/ui/console`), create a Project → an **OIDC application** of type **User Agent / SPA** with **PKCE** and redirect URI `http://localhost:5173/` (the `yarn dev` origin), and note its **client id**. Point the console at it and run the API with Zitadel in its issuer allow-list (the issuer is `http://localhost:8080`):
+`run.sh` brings up Zitadel (issuer `http://localhost:8080`), a migrated `erun-backend-api` (started with `ERUN_OIDC_ALLOWED_ISSUERS=http://localhost:8080`), and the console (`VITE_OIDC_ISSUER`/`VITE_OIDC_CLIENT_ID` from the provisioned app). The API's `OIDCVerifier` discovers Zitadel's JWKS and verifies the `id_token` signature (`SkipClientIDCheck`, so audience is the caller's policy); on an empty database the first sign-in bootstraps the `OPERATIONS` tenant + first user and registers the issuer. See `playwright/AGENTS.md` for why the full v4 topology is required and how the machine-user PATs are minted at init.
 
-```bash
-# console
-VITE_OIDC_ISSUER=http://localhost:8080 VITE_OIDC_CLIENT_ID=<client-id> yarn dev
-# api (trusts the Zitadel issuer; empty allow-list also accepts any resolvable issuer)
-ERUN_OIDC_ALLOWED_ISSUERS=http://localhost:8080 … eapi
-```
-
-The API's `OIDCVerifier` discovers Zitadel's JWKS and verifies the `id_token` signature (`SkipClientIDCheck`, so audience is the caller's policy); on an empty database the first Zitadel sign-in bootstraps the `OPERATIONS` tenant + first user and registers the issuer. Note Zitadel's first login forces a password change + may prompt MFA enrolment, which a Playwright e2e must drive (or provision a pre-verified, change-not-required user via the management API).
+To drive the **read view** against a live API with **no** IdP (faster inner loop), use the desktop-signed `file://` token path above (`VITE_DEV_BEARER_TOKEN`) instead.

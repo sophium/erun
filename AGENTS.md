@@ -24,7 +24,7 @@ Each module owns its own `AGENTS.md` with the details for working in it; read th
 - `erun-backend` — backend service area containing the API and database migration modules. See `erun-backend/AGENTS.md` (plus `erun-backend/erun-backend-api/AGENTS.md` and `erun-backend/erun-backend-db/AGENTS.md`).
 - `erun-devops` — runtime Docker images, Linux packaging, and Kubernetes chart assets used by build, open, deploy, and release flows. See `erun-devops/AGENTS.md`.
 - `erun-ui` — desktop app built with Wails (Go backend + TypeScript/Yarn frontend). See `erun-ui/AGENTS.md` (plus `erun-ui/playwright/AGENTS.md`).
-- `erun-console` — hosted web console SPA (Vite + React + TypeScript/Yarn); separate from the desktop `erun-ui`, talks to `erun-backend-api` directly over HTTP. See `erun-console/AGENTS.md`.
+- `erun-console` — hosted web console SPA (Vite + React + TypeScript/Yarn); separate from the desktop `erun-ui`, talks to `erun-backend-api` directly over HTTP. See `erun-console/AGENTS.md` (plus `erun-console/playwright/AGENTS.md` for the real-Zitadel OIDC sign-in e2e).
 - `erun-docs` — public product documentation site (Docusaurus 3.x), published to Cloudflare Pages via a k8s Job under `erun-devops/k8s/erun-docs/`. See `erun-docs/AGENTS.md`.
 - `erun-integration` — cross-module integration test harness; runs the compiled `erun` binary with `--dry-run` against per-command goldens and gates merged coverage. See `erun-integration/AGENTS.md`.
 - `erun-skills` — canonical source for Claude Code / Codex SKILL.md files and the Claude Code plugin manifest; consumed by both the runtime image (in-pod install) and the marketplace at the repo root (laptop install). See `erun-skills/AGENTS.md`.

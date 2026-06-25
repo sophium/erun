@@ -14,7 +14,10 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['dist', 'node_modules', '*.config.{js,mjs,ts}'],
+    // `playwright/` is a separate yarn package (the OIDC e2e) with its own
+    // eslint/tsconfig — like erun-ui/frontend vs erun-ui/playwright — so the
+    // app's type-aware lint must not try to parse it against the app tsconfig.
+    ignores: ['dist', 'node_modules', 'playwright', '*.config.{js,mjs,ts}'],
   },
   ...tseslint.configs.strictTypeChecked,
   ...tseslint.configs.stylisticTypeChecked,
