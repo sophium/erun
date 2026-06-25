@@ -303,7 +303,7 @@ Registers a **cloud context** (a managed cluster) for the caller's tenant and re
 }
 ```
 
-**Async, durable provisioning (issue #605).** The live bootstrap runs as a **durable DBOS workflow** — it survives a control-plane restart, resuming from its last completed step. It executes the real (non-dry-run) `InitCloudContext` against the tenant's BYO-cloud alias (security group + IAM instance-profile, `run-instances` with the k3s install user-data, `wait`, resolve the public IP), then takes **server-side custody of the k3s admin token** — encrypted at rest in `context_credentials`, never returned — and sets the context `status`:
+**Async, durable provisioning (issue #605).** The live bootstrap runs as a **durable DBOS workflow** — it survives a control-plane restart, resuming from its last completed step. It executes the real (non-dry-run) bootstrap against the tenant's BYO-cloud alias (security group + IAM instance-profile, `run-instances` with the k3s install user-data, wait for running, resolve the public IP) **in-process via `aws-sdk-go-v2` — the control plane runs no `aws` CLI subprocess** — then takes **server-side custody of the k3s admin token** — encrypted at rest in `context_credentials`, never returned — and sets the context `status`:
 
 - `provisioning` → in flight.
 - `running` → the cluster is up; `instanceId` and `publicIp` are populated.

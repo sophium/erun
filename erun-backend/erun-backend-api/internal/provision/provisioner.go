@@ -10,8 +10,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 
@@ -186,23 +184,17 @@ func (p *Provisioner) scoped(c context.Context, input ProvisionInput) context.Co
 	})
 }
 
-// awsRunner returns a CloudContextDependencies.RunAWS that shells the aws CLI
-// with the tenant's decrypted credentials, optionally pinned at a local emulator
-// endpoint (floci) for verification.
+// awsRunner returns a CloudContextDependencies.RunAWS that drives AWS through
+// aws-sdk-go-v2 (no `aws` CLI subprocess — issue #682) with the tenant's
+// decrypted credentials, optionally pinned at a local emulator endpoint (floci)
+// for verification. It adapts the SDK dispatcher (awssdk.go) to the eruncommon
+// RunAWS signature, threading the step's context for cancellation.
 func (p *Provisioner) awsRunner(ctx context.Context, credentialsJSON string) func(eruncommon.Context, eruncommon.CloudProviderConfig, string, []string) (string, error) {
-	return func(_ eruncommon.Context, _ eruncommon.CloudProviderConfig, region string, args []string) (string, error) {
-		argv := []string{"--region", region}
-		if p.awsEndpoint != "" {
-			argv = append(argv, "--endpoint-url", p.awsEndpoint)
-		}
-		argv = append(argv, args...)
-		cmd := exec.CommandContext(ctx, "aws", argv...)
-		cmd.Env = awsEnv(credentialsJSON)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			return string(out), fmt.Errorf("aws %v: %w: %s", args, err, string(out))
-		}
-		return string(out), nil
+	var creds awsCredentials
+	_ = json.Unmarshal([]byte(credentialsJSON), &creds)
+	runner := awsSDKRunner{creds: creds, endpoint: p.awsEndpoint}
+	return func(_ eruncommon.Context, provider eruncommon.CloudProviderConfig, region string, args []string) (string, error) {
+		return runner.run(ctx, provider, region, args)
 	}
 }
 
@@ -210,24 +202,6 @@ type awsCredentials struct {
 	AccessKeyID     string `json:"accessKeyId"`
 	SecretAccessKey string `json:"secretAccessKey"`
 	SessionToken    string `json:"sessionToken,omitempty"`
-}
-
-func awsEnv(credentialsJSON string) []string {
-	env := os.Environ()
-	var creds awsCredentials
-	if err := json.Unmarshal([]byte(credentialsJSON), &creds); err != nil {
-		return env
-	}
-	if creds.AccessKeyID != "" {
-		env = append(env, "AWS_ACCESS_KEY_ID="+creds.AccessKeyID)
-	}
-	if creds.SecretAccessKey != "" {
-		env = append(env, "AWS_SECRET_ACCESS_KEY="+creds.SecretAccessKey)
-	}
-	if creds.SessionToken != "" {
-		env = append(env, "AWS_SESSION_TOKEN="+creds.SessionToken)
-	}
-	return env
 }
 
 // aliasStore is the minimal eruncommon.CloudContextStore InitCloudContext needs
