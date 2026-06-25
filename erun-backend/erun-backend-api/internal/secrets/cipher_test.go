@@ -65,3 +65,29 @@ func TestNewCipherRejectsBadKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestDeriveTokenStableAndDistinct(t *testing.T) {
+	key, _ := GenerateKey()
+	c, _ := NewCipher(key)
+
+	// Deterministic: the same (key, label) re-derives the same token — the
+	// property that makes provisioning re-runs custody the same k3s token.
+	a := c.DeriveToken("k3s-admin-token:ctx-1")
+	if a == "" || a != c.DeriveToken("k3s-admin-token:ctx-1") {
+		t.Fatalf("DeriveToken must be deterministic + non-empty, got %q", a)
+	}
+	// Distinct per label.
+	if a == c.DeriveToken("k3s-admin-token:ctx-2") {
+		t.Fatal("different labels must derive different tokens")
+	}
+	// Distinct per key.
+	other, _ := GenerateKey()
+	c2, _ := NewCipher(other)
+	if a == c2.DeriveToken("k3s-admin-token:ctx-1") {
+		t.Fatal("different keys must derive different tokens")
+	}
+	// Not the plaintext label.
+	if a == "k3s-admin-token:ctx-1" {
+		t.Fatal("token must not equal the label")
+	}
+}
