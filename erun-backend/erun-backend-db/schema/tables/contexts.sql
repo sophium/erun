@@ -11,11 +11,14 @@ CREATE TABLE contexts (
   disk_type TEXT,
   disk_size_gb INT,
   kubernetes_context TEXT,
+  status TEXT NOT NULL DEFAULT 'provisioning',
+  provision_error TEXT,
   created_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ,
   FOREIGN KEY (tenant_id) REFERENCES tenants (tenant_id),
   CONSTRAINT contexts_name_check CHECK (length(trim(name)) > 0),
   CONSTRAINT contexts_provider_check CHECK (length(trim(provider)) > 0),
+  CONSTRAINT contexts_status_check CHECK (status IN ('provisioning', 'running', 'failed')),
   CONSTRAINT contexts_tenant_context_key UNIQUE (tenant_id, context_id),
   CONSTRAINT contexts_tenant_name_key UNIQUE (tenant_id, name)
 );
