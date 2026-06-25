@@ -22,6 +22,7 @@ import (
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	"github.com/google/uuid"
 
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	eruncommon "github.com/sophium/erun/erun-common"
@@ -64,11 +65,12 @@ type DeployResult struct {
 
 // EnvDeployer owns the durable runtime-deploy workflow and its dependencies.
 type EnvDeployer struct {
-	dbosCtx      dbos.DBOSContext
-	environments *repository.EnvironmentRepository
-	contexts     *repository.ContextRepository
-	credentials  *repository.ContextCredentialRepository
-	tenants      *repository.TenantRepository
+	dbosCtx       dbos.DBOSContext
+	environments  *repository.EnvironmentRepository
+	contexts      *repository.ContextRepository
+	credentials   *repository.ContextCredentialRepository
+	tenants       *repository.TenantRepository
+	tenantIssuers *repository.TenantIssuerRepository
 	// runtimeRegistry is where the published runtime chart + image live; the
 	// executor addresses oci://<runtimeRegistry>/charts/erun-devops.
 	runtimeRegistry string
@@ -120,6 +122,7 @@ func NewEnvDeployer(
 	contexts *repository.ContextRepository,
 	credentials *repository.ContextCredentialRepository,
 	tenants *repository.TenantRepository,
+	tenantIssuers *repository.TenantIssuerRepository,
 	opts EnvDeployOptions,
 ) *EnvDeployer {
 	registry := strings.TrimSpace(opts.RuntimeRegistry)
@@ -132,6 +135,7 @@ func NewEnvDeployer(
 		contexts:          contexts,
 		credentials:       credentials,
 		tenants:           tenants,
+		tenantIssuers:     tenantIssuers,
 		runtimeRegistry:   registry,
 		chartPathOverride: strings.TrimSpace(opts.ChartPathOverride),
 		imageOverride:     strings.TrimSpace(opts.ImageOverride),
@@ -236,11 +240,53 @@ func (d *EnvDeployer) deployEnv(c context.Context, input DeployInput) (DeployRes
 	if chartRef == "" {
 		chartRef = eruncommon.PublishedDevopsChartOCIRepo(d.runtimeRegistry) + "/" + eruncommon.DevopsComponentName
 	}
-	values := runtimeValues(tenant.Name, env.Name, ctxRow, d.runtimeRegistry, d.imageOverride)
+	// Authenticate the env's erun-mcp edge against the tenant's OIDC issuer (#685)
+	// so the console can later drive it with a token that issuer mints. No issuer
+	// (e.g. a file://-only tenant) leaves the edge loopback-only — back-compat.
+	mcpIssuer, err := d.resolveMCPIssuer(sc)
+	if err != nil {
+		return DeployResult{}, fmt.Errorf("resolve tenant mcp issuer: %w", err)
+	}
+	mcpAudience := ""
+	if mcpIssuer != "" {
+		mcpAudience = eruncommon.MCPTokenAudience(tenant.Name, env.Name)
+	}
+
+	values := runtimeValues(tenant.Name, env.Name, ctxRow, d.runtimeRegistry, d.imageOverride, mcpIssuer, mcpAudience)
 	if err := helmDeploy(c, cfg, release, namespace, chartRef, input.Version, values, d.wait, d.registryPlainHTTP); err != nil {
 		return DeployResult{}, fmt.Errorf("deploy runtime chart: %w", err)
 	}
 	return DeployResult{Namespace: namespace, Release: release, Version: input.Version, Status: statusDeployed}, nil
+}
+
+// resolveMCPIssuer returns the tenant's first OIDC issuer — any registered
+// issuer that is not a `file://` desktop-key issuer (the MCP edge dispatches
+// every non-file:// issuer to its OIDC/JWKS path, so http:// and https:// both
+// qualify). The env's erun-mcp edge is configured to trust it (#685). A tenant
+// with only a file:// issuer (or none) yields "", leaving the edge loopback-only.
+// A nil repository (older wiring) also yields "". A genuine lookup error is
+// surfaced so a deploy never silently ships a mis-trusted edge.
+func (d *EnvDeployer) resolveMCPIssuer(ctx context.Context) (string, error) {
+	if d.tenantIssuers == nil {
+		return "", nil
+	}
+	issuers, err := d.tenantIssuers.List(ctx)
+	if err != nil {
+		return "", err
+	}
+	return selectMCPIssuer(issuers), nil
+}
+
+// selectMCPIssuer returns the first registered issuer that is not a `file://`
+// desktop-key issuer — the OIDC issuer the env's MCP edge will trust. Pure (no
+// DB) so the selection rule is unit-tested directly.
+func selectMCPIssuer(issuers []model.TenantIssuer) string {
+	for _, ti := range issuers {
+		if issuer := strings.TrimSpace(ti.Issuer); issuer != "" && !strings.HasPrefix(issuer, "file://") {
+			return issuer
+		}
+	}
+	return ""
 }
 
 func (d *EnvDeployer) markDeployed(c context.Context, input DeployInput) error {

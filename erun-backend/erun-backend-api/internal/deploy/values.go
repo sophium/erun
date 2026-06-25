@@ -11,10 +11,16 @@ import (
 // uses lowercase `instanceId`); a mistyped key would be silently ignored.
 //
 // `tenant` and `environment` are required for the chart to render; the rest
-// describe the managed-cloud runtime. Cloudflare / MCP-auth values are left
-// unset so this is the plain no-secret deploy. A custom runtime image rides in
-// as imageOverrides.erun-devops only when imageOverride is non-empty.
-func runtimeValues(tenant, environment string, ctxRow model.Context, registry, imageOverride string) map[string]any {
+// describe the managed-cloud runtime. A custom runtime image rides in as
+// imageOverrides.erun-devops only when imageOverride is non-empty.
+//
+// mcpIssuer/mcpAudience authenticate the env's erun-mcp edge against the
+// tenant's OIDC issuer (#685): when mcpIssuer is non-empty, mcpAuth.enabled +
+// issuer + audience are set so the chart exports ERUN_MCP_TRUSTED_ISSUER /
+// ERUN_MCP_AUDIENCE on the MCP container — no secret, since an OIDC issuer needs
+// no public-key file (unlike the desktop file:// path). An empty mcpIssuer
+// leaves mcpAuth unset, so the edge stays loopback-only (back-compat).
+func runtimeValues(tenant, environment string, ctxRow model.Context, registry, imageOverride, mcpIssuer, mcpAudience string) map[string]any {
 	values := map[string]any{
 		"tenant":            tenant,
 		"environment":       environment,
@@ -32,6 +38,13 @@ func runtimeValues(tenant, environment string, ctxRow model.Context, registry, i
 	}
 	if imageOverride != "" {
 		values["imageOverrides"] = map[string]any{"erun-devops": imageOverride}
+	}
+	if mcpIssuer != "" {
+		values["mcpAuth"] = map[string]any{
+			"enabled":  true,
+			"issuer":   mcpIssuer,
+			"audience": mcpAudience,
+		}
 	}
 	return values
 }

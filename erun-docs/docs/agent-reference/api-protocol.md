@@ -222,6 +222,8 @@ The body is optional. When `version` is omitted the env's persisted `runtimeVers
 
 On success the endpoint flips the env to `deployStatus: "deploying"`, **kicks off the live deploy asynchronously**, and returns the env with HTTP `202 Accepted`. Poll [`GET /v1/environments/{environment_id}`](#endpoints) until `deployStatus` reaches `deployed` (success) or `failed`.
 
+The deploy also configures the env's [per-env MCP edge](#mcp-edge) to **trust the tenant's OIDC issuer** (issue #685): it sets the chart's `mcpAuth.{issuer,audience}` from the tenant's registered non-`file://` issuer (any `https://`/`http://` issuer in `tenant_issuers`) and the per-env audience `erun-mcp:<tenant>/<environment>`, so the chart exports `ERUN_MCP_TRUSTED_ISSUER` / `ERUN_MCP_AUDIENCE` on the MCP container. A token that issuer mints (carrying the per-env audience) then authenticates to the env's MCP. A tenant with only a `file://` desktop issuer — or none — leaves the edge loopback-only (no `mcpAuth`), exactly as before.
+
 ```jsonc
 // 202 response: the deploy has started
 {

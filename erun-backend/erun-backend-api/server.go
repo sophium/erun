@@ -139,6 +139,7 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 					contexts,
 					credentials,
 					tenants,
+					tenantIssuers,
 					deploy.EnvDeployOptions{
 						RuntimeRegistry:   options.RuntimeRegistry,
 						ChartPathOverride: options.EnvDeployChartPath,

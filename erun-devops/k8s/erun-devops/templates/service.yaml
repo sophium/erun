@@ -76,6 +76,11 @@ emitted; type is the single source of truth.
 {{- $mcpAuthSecretName := default "" $mcpAuth.secretName -}}
 {{- $mcpAuthIssuer := default "" $mcpAuth.issuer -}}
 {{- $mcpAuthAudience := default "" $mcpAuth.audience -}}
+{{- /* The desktop public-key Secret is mounted only when a secretName is given
+       (the file:// issuer case). A hosted OIDC issuer (https://) needs no key
+       file — it sets the trusted-issuer/audience env but mounts no Secret — so
+       gate the volume + mount on the secretName, not on mcpAuthEnabled. */ -}}
+{{- $mcpAuthMountKey := and $mcpAuthEnabled (ne $mcpAuthSecretName "") -}}
 {{- /* Fixed in-pod convention: must equal eruncommon.DesktopMCPPublicKeyPath
        (/etc/erun/mcp-auth/desktopid.pub), which the desktop's file:// issuer
        references and the MCP server loads the trusted key from. */ -}}
@@ -513,7 +518,7 @@ spec:
             {{- end }}
             - name: docker-socket
               mountPath: /var/run
-            {{- if $mcpAuthEnabled }}
+            {{- if $mcpAuthMountKey }}
             - name: mcp-auth
               mountPath: {{ $mcpAuthMountDir | quote }}
               readOnly: true
@@ -563,7 +568,7 @@ spec:
         {{- end }}
         - name: docker-socket
           emptyDir: {}
-        {{- if $mcpAuthEnabled }}
+        {{- if $mcpAuthMountKey }}
         - name: mcp-auth
           secret:
             secretName: {{ $mcpAuthSecretName | quote }}
