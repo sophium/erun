@@ -80,8 +80,12 @@ type EnvDeployer struct {
 	// wait makes helm block until the rollout is healthy before marking the env
 	// deployed (production). The verification path disables it: the stand-in pod
 	// never reaches readiness (the dind probe), so waiting would always time out.
-	wait       bool
-	workflowFn func(dbos.DBOSContext, DeployInput) (DeployResult, error)
+	wait bool
+	// registryPlainHTTP makes the helm OCI registry client use plain HTTP — a
+	// verification seam for a local registry (registry:2). Production pulls the
+	// published chart from ghcr over HTTPS, so this stays false there.
+	registryPlainHTTP bool
+	workflowFn        func(dbos.DBOSContext, DeployInput) (DeployResult, error)
 }
 
 // EnvDeployOptions configures an EnvDeployer. The zero value is production: the
@@ -103,6 +107,9 @@ type EnvDeployOptions struct {
 	// chart deploys a stand-in image whose pod never reaches readiness, so
 	// waiting would always time out. Zero value = production (waits).
 	NoWait bool
+	// RegistryPlainHTTP makes the helm OCI registry client use plain HTTP — a
+	// verification seam for a local registry. Zero value = production (HTTPS).
+	RegistryPlainHTTP bool
 }
 
 // NewEnvDeployer builds the deployer and registers its workflow with DBOS. Call
@@ -129,6 +136,7 @@ func NewEnvDeployer(
 		chartPathOverride: strings.TrimSpace(opts.ChartPathOverride),
 		imageOverride:     strings.TrimSpace(opts.ImageOverride),
 		wait:              !opts.NoWait,
+		registryPlainHTTP: opts.RegistryPlainHTTP,
 	}
 	// A method value: a stable workflow name across restarts (so DBOS recovers
 	// it) that also captures d's dependencies. Registered once here and reused by
@@ -229,7 +237,7 @@ func (d *EnvDeployer) deployEnv(c context.Context, input DeployInput) (DeployRes
 		chartRef = eruncommon.PublishedDevopsChartOCIRepo(d.runtimeRegistry) + "/" + eruncommon.DevopsComponentName
 	}
 	values := runtimeValues(tenant.Name, env.Name, ctxRow, d.runtimeRegistry, d.imageOverride)
-	if err := helmDeploy(c, cfg, release, namespace, chartRef, input.Version, values, d.wait); err != nil {
+	if err := helmDeploy(c, cfg, release, namespace, chartRef, input.Version, values, d.wait, d.registryPlainHTTP); err != nil {
 		return DeployResult{}, fmt.Errorf("deploy runtime chart: %w", err)
 	}
 	return DeployResult{Namespace: namespace, Release: release, Version: input.Version, Status: statusDeployed}, nil

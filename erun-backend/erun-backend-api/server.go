@@ -47,6 +47,9 @@ type HandlerOptions struct {
 	EnvDeployChartPath string
 	EnvDeployImage     string
 	EnvDeployNoWait    bool
+	// EnvDeployRegistryPlainHTTP makes the deploy helm OCI client use plain HTTP
+	// for a local registry (verification). Zero value = production (HTTPS).
+	EnvDeployRegistryPlainHTTP bool
 }
 
 func NewHandler(options HandlerOptions) (http.Handler, error) {
@@ -141,6 +144,7 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 						ChartPathOverride: options.EnvDeployChartPath,
 						ImageOverride:     options.EnvDeployImage,
 						NoWait:            options.EnvDeployNoWait,
+						RegistryPlainHTTP: options.EnvDeployRegistryPlainHTTP,
 					},
 				)
 			}

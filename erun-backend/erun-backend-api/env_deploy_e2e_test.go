@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -158,6 +160,139 @@ func deployAndAwaitDeployed(t *testing.T, baseURL, envID string) {
 		time.Sleep(2 * time.Second)
 	}
 	t.Fatal("timed out waiting for deploy to reach deployed")
+}
+
+// TestDeployEnvironmentFromPublishedOCIChart verifies the PRODUCTION chart
+// resolution the Lima happy-path test skips: the executor pulling the published
+// runtime chart from an OCI registry via the Helm SDK registry client (not a
+// local chart dir). It packages + pushes the runtime chart to a local registry
+// (registry:2 on plain HTTP), points the executor at it (no ChartPathOverride,
+// RegistryPlainHTTP=true), and asserts the SDK pulls + installs it. It then
+// deploys a version that was never pushed and asserts the actionable
+// chart-not-found error reaches deploy_error. Opt-in, additionally gated on a
+// reachable local registry; run with:
+//
+//	ERUN_E2E_ENV_DEPLOY=1 ERUN_E2E_OCI_REGISTRY=localhost:5001 \
+//	ERUN_E2E_ENV_DEPLOY_DATABASE_URL=… DBOS_SYSTEM_DATABASE_URL=… \
+//	  go test ./... -run TestDeployEnvironmentFromPublishedOCIChart
+func TestDeployEnvironmentFromPublishedOCIChart(t *testing.T) {
+	if os.Getenv("ERUN_E2E_ENV_DEPLOY") != "1" {
+		t.Skip("opt-in: set ERUN_E2E_ENV_DEPLOY=1 (+ Postgres, DBOS, Lima k3s, and a local OCI registry)")
+	}
+	registry := os.Getenv("ERUN_E2E_OCI_REGISTRY")
+	if registry == "" {
+		t.Skip("set ERUN_E2E_OCI_REGISTRY=host:port to a plain-HTTP OCI registry (e.g. registry:2)")
+	}
+	databaseURL := os.Getenv("ERUN_E2E_ENV_DEPLOY_DATABASE_URL")
+	dbosURL := os.Getenv("DBOS_SYSTEM_DATABASE_URL")
+	if databaseURL == "" || dbosURL == "" {
+		t.Skip("ERUN_E2E_ENV_DEPLOY_DATABASE_URL and DBOS_SYSTEM_DATABASE_URL are required")
+	}
+
+	chartPath, err := filepath.Abs(filepath.Join("..", "..", "erun-devops", "k8s", "erun-devops"))
+	mustNoErr(t, err, "resolve chart path")
+	// Setup (not the code under test): publish the chart to the local registry at
+	// the version the seeded env pins, via the host helm CLI.
+	helmPushChart(t, chartPath, "1.2.3", registry)
+
+	key, err := secrets.GenerateKey()
+	mustNoErr(t, err, "generate key")
+	cipher, err := secrets.NewCipher(key)
+	mustNoErr(t, err, "new cipher")
+	dbosCtx, err := dbos.NewDBOSContext(context.Background(), dbos.Config{AppName: "erun-env-deploy-oci-e2e", DatabaseURL: dbosURL})
+	mustNoErr(t, err, "dbos context")
+	db, err := sql.Open("pgx", databaseURL)
+	mustNoErr(t, err, "open db")
+	t.Cleanup(func() { _ = db.Close() })
+
+	handler, err := NewHandler(HandlerOptions{
+		TokenVerifier: TokenVerifierFunc(func(_ context.Context, token string) (Claims, error) {
+			if token != e2eDevToken {
+				return Claims{}, fmt.Errorf("invalid dev token")
+			}
+			return Claims{Issuer: "https://dev.local", Subject: "dev-user", Username: "dev"}, nil
+		}),
+		IdentityCache: NewIdentityResolutionCache(IdentityCacheOptions{}),
+		DB:            db,
+		DBDialect:     repository.DialectPostgres,
+		DBOSContext:   dbosCtx,
+		Cipher:        cipher,
+		// Production chart resolution: pull the published OCI chart from the local
+		// registry (plain HTTP) — NO ChartPathOverride. Stand-in image + no wait
+		// keep the run light.
+		RuntimeRegistry:            registry,
+		EnvDeployRegistryPlainHTTP: true,
+		EnvDeployImage:             "registry.k8s.io/pause:3.9",
+		EnvDeployNoWait:            true,
+	})
+	mustNoErr(t, err, "new handler")
+	mustNoErr(t, dbos.Launch(dbosCtx), "dbos launch")
+	t.Cleanup(func() { dbos.Shutdown(dbosCtx, 5*time.Second) })
+
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+
+	tenantID, tenantName := bootstrapTenant(t, srv.URL)
+	envID, namespace, release := seedRunningContextAndEnv(t, db, cipher, tenantID, tenantName)
+	t.Cleanup(func() { cleanupRelease(release, namespace) })
+
+	// Pull the published chart at 1.2.3 from the registry via the Helm SDK and
+	// install it — the production chart-resolution path.
+	deployAndAwaitDeployed(t, srv.URL, envID)
+	assertReleaseLanded(t, release, namespace)
+
+	// A version that was never pushed must fail with the actionable error (not a
+	// bare helm message), recorded in deploy_error.
+	deployAndAwaitFailed(t, srv.URL, envID, "9.9.9", "erun push")
+}
+
+// helmPushChart packages the chart at version and pushes it to a plain-HTTP OCI
+// registry via the host helm CLI. This is test setup — it primes the registry
+// the executor's in-process SDK then pulls from; it is not the code under test.
+func helmPushChart(t *testing.T, chartDir, version, registry string) {
+	t.Helper()
+	dest := t.TempDir()
+	if out, err := exec.Command("helm", "package", chartDir, "--version", version, "--app-version", version, "--destination", dest).CombinedOutput(); err != nil {
+		t.Fatalf("helm package: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	tgz := filepath.Join(dest, "erun-devops-"+version+".tgz")
+	if out, err := exec.Command("helm", "push", tgz, "oci://"+registry+"/charts", "--plain-http").CombinedOutput(); err != nil {
+		t.Fatalf("helm push: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+}
+
+// deployAndAwaitFailed drives a deploy at versionOverride and polls the env until
+// it reaches failed, asserting the recorded deploy_error contains wantReason.
+func deployAndAwaitFailed(t *testing.T, baseURL, envID, versionOverride, wantReason string) {
+	t.Helper()
+	code, body := e2eRequest(t, baseURL, http.MethodPost, "/v1/environments/"+envID+"/deploy",
+		map[string]any{"version": versionOverride})
+	if code != http.StatusAccepted {
+		t.Fatalf("deploy env: HTTP %d (want 202): %s", code, body)
+	}
+	deadline := time.Now().Add(120 * time.Second)
+	for time.Now().Before(deadline) {
+		c, b := e2eRequest(t, baseURL, http.MethodGet, "/v1/environments/"+envID, nil)
+		if c != http.StatusOK {
+			t.Fatalf("get env: HTTP %d: %s", c, b)
+		}
+		var got struct {
+			DeployStatus string `json:"deployStatus"`
+			DeployError  string `json:"deployError"`
+		}
+		mustNoErr(t, json.Unmarshal([]byte(b), &got), "parse get env")
+		switch got.DeployStatus {
+		case "failed":
+			if !strings.Contains(got.DeployError, wantReason) {
+				t.Fatalf("deploy_error = %q, want it to contain %q", got.DeployError, wantReason)
+			}
+			return
+		case "deployed":
+			t.Fatalf("expected the unpushed version %q to fail, but it deployed", versionOverride)
+		}
+		time.Sleep(2 * time.Second)
+	}
+	t.Fatal("timed out waiting for the unpushed-version deploy to reach failed")
 }
 
 // bootstrapTenant issues one authenticated request (which bootstraps the

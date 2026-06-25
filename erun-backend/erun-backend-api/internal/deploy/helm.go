@@ -24,8 +24,15 @@ import (
 // directory (the verification seam). It is idempotent: a release that does not
 // exist yet is installed, an existing one is upgraded — the in-process
 // equivalent of `helm upgrade --install`.
-func helmDeploy(ctx context.Context, cfg *rest.Config, releaseName, namespace, chartRef, version string, values map[string]any, wait bool) error {
-	registryClient, err := registry.NewClient(registry.ClientOptEnableCache(true), registry.ClientOptWriter(io.Discard))
+func helmDeploy(ctx context.Context, cfg *rest.Config, releaseName, namespace, chartRef, version string, values map[string]any, wait, plainHTTP bool) error {
+	registryOpts := []registry.ClientOption{registry.ClientOptEnableCache(true), registry.ClientOptWriter(io.Discard)}
+	if plainHTTP {
+		// Verification seam: a local OCI registry (e.g. registry:2) serves plain
+		// HTTP. Production pulls the published chart from ghcr over HTTPS, so this
+		// stays false there.
+		registryOpts = append(registryOpts, registry.ClientOptPlainHTTP())
+	}
+	registryClient, err := registry.NewClient(registryOpts...)
 	if err != nil {
 		return fmt.Errorf("helm registry client: %w", err)
 	}
@@ -110,6 +117,14 @@ func helmUpgrade(ctx context.Context, actionConfig *action.Configuration, settin
 func loadChart(opts *action.ChartPathOptions, settings *cli.EnvSettings, chartRef string) (*chart.Chart, error) {
 	path, err := opts.LocateChart(chartRef, settings)
 	if err != nil {
+		if eruncommon.IsOCIChartReference(chartRef) {
+			// The published chart is pinned by --version; the usual cause of a pull
+			// failure is a version whose chart was never published (a version is
+			// deployable only after `erun push` publishes its image + chart
+			// together). Surface that actionably instead of a bare helm error,
+			// mirroring eruncommon.PublishedChartNotFoundError on the CLI path.
+			return nil, fmt.Errorf("runtime chart %s version %s could not be pulled — a version is deployable only after `erun push` publishes its chart: %w", chartRef, opts.Version, err)
+		}
 		return nil, fmt.Errorf("locate chart %q: %w", chartRef, err)
 	}
 	loaded, err := loader.Load(path)
