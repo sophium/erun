@@ -189,3 +189,83 @@ th {
 .provision-feedback--error {
   color: #b91c1c;
 }
+
+/* Env deploy lifecycle (issue #680): the deploy analogue of the context status
+   badges, reusing the same pill shape with deploy-specific colors. */
+.status-badge--deploy-registered {
+  color: var(--muted);
+}
+
+.status-badge--deploy-deploying {
+  color: #92740a;
+}
+
+.status-badge--deploy-deployed {
+  color: #15803d;
+}
+
+.status-badge--deploy-failed {
+  color: #b91c1c;
+}
+
+.deploy-panel {
+  border-top: 1px solid var(--border);
+  padding-top: 1.5rem;
+}
+
+.deploy-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.deploy-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.deploy-env-name {
+  font-weight: 600;
+  min-width: 8rem;
+}
+
+.deploy-row label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.deploy-row input {
+  font: inherit;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.deploy-row button {
+  padding: 0.35rem 0.9rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--bg);
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.deploy-row button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.deploy-status {
+  flex-basis: 100%;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 0;
+}

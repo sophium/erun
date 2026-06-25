@@ -27,6 +27,14 @@ type Environment struct {
 	KubernetesContext string          `json:"kubernetesContext,omitempty" bun:"kubernetes_context,nullzero"`
 	ContextID         string          `json:"contextId,omitempty" bun:"context_id,nullzero"`
 	RuntimeVersion    string          `json:"runtimeVersion,omitempty" bun:"runtime_version,nullzero"`
-	CreatedAt         time.Time       `json:"createdAt" bun:"created_at,scanonly"`
-	UpdatedAt         time.Time       `json:"updatedAt" bun:"updated_at,scanonly"`
+	// DeployStatus is the runtime-deploy lifecycle (issue #680): registered |
+	// deploying | deployed | failed. DeployError carries the failure reason when
+	// failed; DeployedVersion records the runtime version of the last successful
+	// deploy. All three are DB-owned (the deploy executor writes them), so they
+	// are read-only scan-only fields, never persisted from a caller-supplied body.
+	DeployStatus    string    `json:"deployStatus" bun:"deploy_status,scanonly"`
+	DeployError     string    `json:"deployError,omitempty" bun:"deploy_error,nullzero,scanonly"`
+	DeployedVersion string    `json:"deployedVersion,omitempty" bun:"deployed_version,nullzero,scanonly"`
+	CreatedAt       time.Time `json:"createdAt" bun:"created_at,scanonly"`
+	UpdatedAt       time.Time `json:"updatedAt" bun:"updated_at,scanonly"`
 }

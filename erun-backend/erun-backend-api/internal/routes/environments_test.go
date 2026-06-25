@@ -3,11 +3,14 @@ package routes
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/deploy"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
 func postCreateEnvironment(t *testing.T, environments *stubEnvironmentRepository, quotas stubTenantQuotaRepository, body string) *httptest.ResponseRecorder {
@@ -127,3 +130,156 @@ func TestCreateEnvironmentAllowsUnderQuota(t *testing.T) {
 type errForeignKey struct{}
 
 func (errForeignKey) Error() string { return "foreign key violation" }
+
+type stubEnvironmentDeployer struct {
+	started []deploy.DeployInput
+	err     error
+}
+
+func (s *stubEnvironmentDeployer) Start(in deploy.DeployInput) error {
+	s.started = append(s.started, in)
+	return s.err
+}
+
+// postDeployEnvironment drives the deploy action directly against the handler.
+// A nil securityContext exercises the pre-auth-context paths (501/400/409); the
+// running-context paths need one because the handler threads tenant identity
+// into the deploy input.
+func postDeployEnvironment(t *testing.T, environments *stubEnvironmentRepository, contexts ContextRepository, deployer EnvironmentDeployer, envID, body string, securityContext *security.Context) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/v1/environments/"+envID+"/deploy", bytes.NewBufferString(body))
+	req.SetPathValue("environment_id", envID)
+	if securityContext != nil {
+		req = req.WithContext(security.WithContext(req.Context(), *securityContext))
+	}
+	rec := httptest.NewRecorder()
+	EnvironmentRoutes{environments: environments, contexts: contexts, deployer: deployer}.deployEnvironment(rec, req)
+	return rec
+}
+
+func runningContext() *stubContextRepository {
+	return &stubContextRepository{cloudContext: model.Context{ContextID: "ctx-1", Name: "primary", Status: "running"}}
+}
+
+func deployableEnv() *stubEnvironmentRepository {
+	return &stubEnvironmentRepository{environment: model.Environment{
+		EnvironmentID:  "env-1",
+		Name:           "prod",
+		ContextID:      "ctx-1",
+		RuntimeVersion: "1.2.3",
+	}}
+}
+
+// TestDeployEnvironmentNotConfigured: with no deployer wired (no DBOS/secrets),
+// the deploy action is unavailable and returns 501.
+func TestDeployEnvironmentNotConfigured(t *testing.T) {
+	rec := postDeployEnvironment(t, deployableEnv(), runningContext(), nil, "env-1", "", nil)
+	if rec.Code != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want 501", rec.Code)
+	}
+}
+
+// TestDeployEnvironmentRequiresVersion: an env with no persisted runtimeVersion
+// and no body override cannot be deployed (deploy never mints a version), so the
+// request is rejected and the deploy never starts.
+func TestDeployEnvironmentRequiresVersion(t *testing.T) {
+	environments := &stubEnvironmentRepository{environment: model.Environment{EnvironmentID: "env-1", Name: "prod", ContextID: "ctx-1"}}
+	deployer := &stubEnvironmentDeployer{}
+	rec := postDeployEnvironment(t, environments, runningContext(), deployer, "env-1", "", nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	if len(deployer.started) != 0 || len(environments.deployStatuses) != 0 {
+		t.Fatalf("deploy must not start without a version: started=%d statuses=%v", len(deployer.started), environments.deployStatuses)
+	}
+}
+
+// TestDeployEnvironmentRequiresContext: an env with a version but no linked
+// context has nothing to deploy into, so the request is rejected.
+func TestDeployEnvironmentRequiresContext(t *testing.T) {
+	environments := &stubEnvironmentRepository{environment: model.Environment{EnvironmentID: "env-1", Name: "prod", RuntimeVersion: "1.2.3"}}
+	deployer := &stubEnvironmentDeployer{}
+	rec := postDeployEnvironment(t, environments, runningContext(), deployer, "env-1", "", nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	if len(deployer.started) != 0 {
+		t.Fatalf("deploy must not start without a context")
+	}
+}
+
+// TestDeployEnvironmentRejectsUnprovisionedContext: deploying into a context
+// that is not yet running fails fast with 409, and the env is not flipped to
+// deploying.
+func TestDeployEnvironmentRejectsUnprovisionedContext(t *testing.T) {
+	environments := deployableEnv()
+	contexts := &stubContextRepository{cloudContext: model.Context{ContextID: "ctx-1", Status: "provisioning"}}
+	deployer := &stubEnvironmentDeployer{}
+	rec := postDeployEnvironment(t, environments, contexts, deployer, "env-1", "", nil)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rec.Code)
+	}
+	if len(deployer.started) != 0 || len(environments.deployStatuses) != 0 {
+		t.Fatalf("deploy must not start against an unprovisioned context")
+	}
+}
+
+// TestDeployEnvironmentStartsDeploy: a deployable env with a running context
+// flips to deploying, starts the durable deploy with the threaded identity +
+// version, and returns 202.
+func TestDeployEnvironmentStartsDeploy(t *testing.T) {
+	environments := deployableEnv()
+	deployer := &stubEnvironmentDeployer{}
+	rec := postDeployEnvironment(t, environments, runningContext(), deployer, "env-1", "", &security.Context{
+		TenantID:   "t1",
+		TenantType: string(model.TenantTypeCompany),
+		ErunUserID: "u1",
+	})
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d (body %s), want 202", rec.Code, rec.Body.String())
+	}
+	if len(deployer.started) != 1 {
+		t.Fatalf("Start called %d times, want 1", len(deployer.started))
+	}
+	if got := deployer.started[0]; got.EnvironmentID != "env-1" || got.TenantID != "t1" || got.Version != "1.2.3" {
+		t.Fatalf("deploy input = %+v", got)
+	}
+	if len(environments.deployStatuses) != 1 || environments.deployStatuses[0] != "deploying" {
+		t.Fatalf("deploy statuses = %v, want [deploying]", environments.deployStatuses)
+	}
+	var response model.Environment
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.DeployStatus != "deploying" {
+		t.Fatalf("response deploy status = %q, want deploying", response.DeployStatus)
+	}
+}
+
+// TestDeployEnvironmentVersionOverride: an explicit body version is threaded to
+// the deploy in preference to the env's persisted runtimeVersion.
+func TestDeployEnvironmentVersionOverride(t *testing.T) {
+	environments := deployableEnv()
+	deployer := &stubEnvironmentDeployer{}
+	rec := postDeployEnvironment(t, environments, runningContext(), deployer, "env-1", `{"version":"2.0.0"}`, &security.Context{TenantID: "t1"})
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", rec.Code)
+	}
+	if got := deployer.started[0].Version; got != "2.0.0" {
+		t.Fatalf("deploy version = %q, want 2.0.0 (body override)", got)
+	}
+}
+
+// TestDeployEnvironmentRollsBackOnStartFailure: if the durable workflow fails to
+// start, the env is not left stuck in "deploying" — it is flipped to "failed".
+func TestDeployEnvironmentRollsBackOnStartFailure(t *testing.T) {
+	environments := deployableEnv()
+	deployer := &stubEnvironmentDeployer{err: errors.New("dbos down")}
+	rec := postDeployEnvironment(t, environments, runningContext(), deployer, "env-1", "", &security.Context{TenantID: "t1"})
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	if len(environments.deployStatuses) != 2 || environments.deployStatuses[0] != "deploying" || environments.deployStatuses[1] != "failed" {
+		t.Fatalf("deploy statuses = %v, want [deploying failed]", environments.deployStatuses)
+	}
+}

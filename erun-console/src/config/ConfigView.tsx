@@ -1,6 +1,13 @@
 import type * as React from 'react';
 
-import type { CloudContext, ContextStatus, Environment, Tenant, TenantConfigView } from './types';
+import type {
+  CloudContext,
+  ContextStatus,
+  DeployStatus,
+  Environment,
+  Tenant,
+  TenantConfigView,
+} from './types';
 
 // What an Operator sees in the console: the tenant header, the list of
 // environments (name, type, kubernetes context, runtime version), and the list
@@ -25,6 +32,32 @@ function TenantHeader({ tenant }: { tenant: Tenant }): React.ReactElement {
   );
 }
 
+const DEPLOY_STATUS_LABELS: Record<DeployStatus, string> = {
+  registered: 'Registered',
+  deploying: 'Deploying',
+  deployed: 'Deployed',
+  failed: 'Failed',
+};
+
+// The env's deploy lifecycle badge (issue #680), the deploy analogue of the
+// context StatusBadge: a text label alongside the color so it reads correctly
+// for color-blind users and screen readers. Returns null for an absent/unknown
+// status so an env from before the deploy lifecycle renders no badge.
+function DeployStatusBadge({
+  status,
+}: {
+  status: DeployStatus | undefined;
+}): React.ReactElement | null {
+  if (status === undefined) {
+    return null;
+  }
+  return (
+    <span className={`status-badge status-badge--deploy-${status}`}>
+      {DEPLOY_STATUS_LABELS[status]}
+    </span>
+  );
+}
+
 function EnvironmentRow({ env }: { env: Environment }): React.ReactElement {
   return (
     <tr>
@@ -32,6 +65,9 @@ function EnvironmentRow({ env }: { env: Environment }): React.ReactElement {
       <td>{env.type}</td>
       <td>{placeholder(env.kubernetesContext)}</td>
       <td>{placeholder(env.runtimeVersion)}</td>
+      <td>
+        <DeployStatusBadge status={env.deployStatus} />
+      </td>
     </tr>
   );
 }
@@ -54,6 +90,7 @@ function EnvironmentsSection({
               <th scope="col">Type</th>
               <th scope="col">Kubernetes context</th>
               <th scope="col">Runtime version</th>
+              <th scope="col">Deploy status</th>
             </tr>
           </thead>
           <tbody>

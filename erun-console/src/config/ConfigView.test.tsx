@@ -19,6 +19,8 @@ const SAMPLE_CONFIG = {
       kubernetesContext: 'primary',
       contextId: 'ctx-1',
       runtimeVersion: '1.2.3',
+      deployStatus: 'deployed',
+      deployedVersion: '1.2.3',
     },
     {
       environmentId: 'env-2',
@@ -118,6 +120,16 @@ describe('ConfigView via App', () => {
     // (essential info is visible text, not hidden behind a bare title tooltip).
     expect(contexts.getByText('Failed')).toBeInTheDocument();
     expect(contexts.getByText('run-instances: InsufficientInstanceCapacity')).toBeInTheDocument();
+  });
+
+  it('renders the env deploy-status badge in the environments table', async () => {
+    mockFetch(jsonResponse(SAMPLE_CONFIG));
+    render(<App />);
+
+    // The deployed env shows a "Deployed" badge in the environments table
+    // (scoped to that region: the DeployPanel below also reports the deploy).
+    const environments = within(await screen.findByRole('region', { name: 'Environments' }));
+    expect(environments.getByText('Deployed')).toBeInTheDocument();
   });
 
   it('renders empty states for an empty payload', async () => {

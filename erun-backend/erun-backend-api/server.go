@@ -6,11 +6,13 @@ import (
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/deploy"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/provision"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/routes"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/secrets"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
+	eruncommon "github.com/sophium/erun/erun-common"
 )
 
 type HandlerOptions struct {
@@ -33,6 +35,19 @@ type HandlerOptions struct {
 	// AWSEndpoint pins provisioning's aws calls at a local emulator (floci) for
 	// verification; empty means real AWS.
 	AWSEndpoint string
+	// RuntimeRegistry is where the published runtime chart + image live; the
+	// env-deploy executor addresses oci://<RuntimeRegistry>/charts/erun-devops
+	// and pulls the runtime image from there. Empty defaults to ghcr.io/sophium.
+	RuntimeRegistry string
+	// EnvDeployChartPath / EnvDeployImage / EnvHelmDeployer pin the env-deploy
+	// executor's chart source, image, and helm deployer at local/test values so
+	// the durable deploy workflow can be exercised against a throwaway cluster
+	// (Lima k3s) without the published OCI chart or the ~1GB runtime image
+	// (mirrors AWSEndpoint for provisioning). Zero values = production: published
+	// OCI chart, real --wait DeployHelmChart.
+	EnvDeployChartPath string
+	EnvDeployImage     string
+	EnvHelmDeployer    eruncommon.HelmChartDeployerFunc
 }
 
 func NewHandler(options HandlerOptions) (http.Handler, error) {
@@ -101,22 +116,37 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 		routes.RegisterReviewRoutes(register, reviews, reviewService)
 		routes.RegisterBuildRoutes(register, builds, buildService)
 		routes.RegisterCommentRoutes(register, comments, commentService)
-		routes.RegisterEnvironmentRoutes(register, environments, tenantQuotas)
 		var contextProvisioner routes.ContextProvisioner
+		var environmentDeployer routes.EnvironmentDeployer
 		if options.Cipher != nil {
 			aliases := repository.NewCloudProviderAliasRepository(txManager, options.Cipher)
 			routes.RegisterCloudProviderAliasRoutes(register, aliases)
 			if options.DBOSContext != nil {
+				credentials := repository.NewContextCredentialRepository(txManager, options.Cipher)
 				contextProvisioner = provision.NewProvisioner(
 					options.DBOSContext,
 					contexts,
-					repository.NewContextCredentialRepository(txManager, options.Cipher),
+					credentials,
 					aliases,
 					options.Cipher,
 					options.AWSEndpoint,
 				)
+				environmentDeployer = deploy.NewEnvDeployer(
+					options.DBOSContext,
+					environments,
+					contexts,
+					credentials,
+					tenants,
+					deploy.EnvDeployOptions{
+						RuntimeRegistry:   options.RuntimeRegistry,
+						ChartPathOverride: options.EnvDeployChartPath,
+						ImageOverride:     options.EnvDeployImage,
+						Deployer:          options.EnvHelmDeployer,
+					},
+				)
 			}
 		}
+		routes.RegisterEnvironmentRoutes(register, environments, tenantQuotas, contexts, environmentDeployer)
 		routes.RegisterContextRoutes(register, contexts, contextProvisioner)
 		routes.RegisterTenantRoutes(register, tenants)
 		routes.RegisterTenantQuotaRoute(register, tenantQuotas)

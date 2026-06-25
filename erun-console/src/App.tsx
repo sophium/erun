@@ -4,6 +4,7 @@ import { devBearerToken } from './auth/auth';
 import { ConfigFetchError, fetchConfig } from './config/client';
 import { ConfigView } from './config/ConfigView';
 import type { TenantConfigView } from './config/types';
+import { DeployPanel } from './deploy/DeployPanel';
 import { ProvisionPanel } from './provision/ProvisionPanel';
 
 type LoadState =
@@ -81,7 +82,12 @@ export function App(): React.ReactElement {
       {state.status === 'signed-out' && <SignInPrompt />}
       {state.status === 'error' && <ErrorMessage message={state.message} />}
       {state.status === 'ready' && <ConfigView config={state.config} />}
-      {token !== undefined && state.status === 'ready' && <ProvisionPanel token={token} />}
+      {token !== undefined && state.status === 'ready' && (
+        <>
+          <ProvisionPanel token={token} />
+          <DeployPanel token={token} environments={state.config.environments} />
+        </>
+      )}
     </main>
   );
 }

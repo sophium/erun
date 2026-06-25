@@ -22,7 +22,21 @@ export interface Environment {
   kubernetesContext?: string;
   contextId?: string;
   runtimeVersion?: string;
+  // Deploy lifecycle (issue #680). deployStatus is always present from the API
+  // (it defaults to `registered`); deployedVersion is the runtime version of the
+  // last successful deploy; deployError is the reason when `deployStatus` is
+  // `failed`. Parsed leniently (see parseEnvironment) so an unknown future state
+  // renders rather than failing the parse.
+  deployStatus?: DeployStatus;
+  deployedVersion?: string;
+  deployError?: string;
 }
+
+// The deploy lifecycle an environment moves through once
+// `POST /v1/environments/{id}/deploy` kicks off the live runtime deploy (issue
+// #680): `registered` (config persisted, never deployed) → `deploying` →
+// `deployed` (success) | `failed`.
+export type DeployStatus = 'registered' | 'deploying' | 'deployed' | 'failed';
 
 // The provisioning lifecycle a context moves through once `POST /v1/contexts`
 // kicks off the live bootstrap (issue #605/#676): `provisioning` → `running`

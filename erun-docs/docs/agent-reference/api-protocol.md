@@ -95,7 +95,8 @@ The `(iss, org) → tenant` resolution model and first-identity bootstrap above 
 | `GET` | `/v1/config` | The console's read model over the per-tenant erun config: `{tenant, environments[], contexts[]}`. | Tenant member |
 | `GET` | `/v1/environments` | List the tenant's environments. | Tenant member |
 | `POST` | `/v1/environments` | Register an environment in the caller's tenant, bound to a referenced context. Body below. | Tenant member (write) |
-| `GET` | `/v1/environments/{environment_id}` | Fetch one environment by id. | Tenant member |
+| `GET` | `/v1/environments/{environment_id}` | Fetch one environment by id, including its deploy `deployStatus`. | Tenant member |
+| `POST` | `/v1/environments/{environment_id}/deploy` | Deploy the runtime chart into the env's provisioned context and start the durable deploy (`202`). Body below. | Tenant member (write) |
 | `GET` | `/v1/contexts` | List the tenant's cloud contexts (managed clusters). | Tenant member |
 | `POST` | `/v1/contexts` | Register a cloud context (managed cluster) and, when provisioning is configured, start its durable live bootstrap (`202`). Body below. | Tenant member (write) |
 | `GET` | `/v1/contexts/{context_id}` | Fetch one cloud context by id, including its provisioning `status`. | Tenant member |
@@ -185,14 +186,17 @@ On success the endpoint persists the row and returns it with HTTP `201`:
   "kubernetesContext": "primary",
   "contextId": "019a7fa5-c2c0-7c55-bc70-714873a71f20",
   "runtimeVersion": "1.2.3",
+  "deployStatus": "registered", // registered → deploying → deployed | failed
   "createdAt": "2026-06-24T10:00:00Z",
   "updatedAt": "2026-06-24T10:00:00Z"
 }
 ```
 
+A freshly-registered environment starts at `deployStatus: "registered"` — config only, nothing deployed yet. [`POST /v1/environments/{environment_id}/deploy`](#post-v1environmentsenvironment_iddeploy) (below) runs the live runtime deploy that moves it through `deploying` → `deployed`/`failed`. `deployedVersion` (the version of the last successful deploy) and `deployError` (the failure reason) are omitted until set.
+
 **Per-tenant environment-count quota.** After validating the body and before persisting, the endpoint enforces the tenant's environment-count cap: it compares how many environments the tenant already has against the cap and rejects the registration with HTTP `409` once the tenant is at or over it. The cap defaults to **10** and is overridden per tenant by a `tenant_quotas.max_environments` row. That override row is set by the operations-only [`PUT /v1/tenants/{tenant_id}/quota`](#put-v1tenantstenant_idquota) endpoint (below). Both the count and the cap are read under row-level security, so each is scoped to the caller's own tenant.
 
-**Live namespace + runtime-chart deploy is `(Planned.)`.** This endpoint registers the environment row only; it does **not** yet ensure the `<tenant>-<env>` namespace or deploy the runtime chart server-side (that runs `RunBootstrapInitWithDependencies` against a live cluster). Until that lands, a registered environment stands as registered config — the namespace creation and chart deploy from the registered row are the planned follow-up.
+**Registration is config-only; deploy is a separate step.** This endpoint registers the environment row; it does not deploy anything. The live runtime deploy — ensuring the `<tenant>-<env>` namespace and helm-installing the runtime chart into the env's provisioned context — is the discrete [`POST /v1/environments/{environment_id}/deploy`](#post-v1environmentsenvironment_iddeploy) action below.
 
 **Error behaviour.** Today the API returns a bare HTTP status with a plain-text body (no JSON envelope):
 
@@ -202,6 +206,57 @@ On success the endpoint persists the row and returns it with HTTP `201`:
 | `401` / `403` | Standard auth failures (see [Errors](#errors)). The `WriteAll` permission covers `POST /v1/environments`. | Send a valid token whose roles permit the write. |
 | `409` | The tenant is at its environment-count cap (default `10` unless a `tenant_quotas` row overrides it); the body is `environment quota reached: this tenant already has N of N environments`. | Delete an unused environment, or raise the tenant's cap via [`PUT /v1/tenants/{tenant_id}/quota`](#put-v1tenantstenant_idquota) (operations-only). |
 | `500` | Persistence failed — e.g. `contextId` references a context that is not the caller's (the composite `(tenant_id, context_id)` foreign key is violated), or the request-scoped security context is missing (an internal wiring error). | Reference a context owned by the caller's tenant; if it persists with a valid context, it is a server bug. |
+
+### `POST /v1/environments/{environment_id}/deploy`
+
+Deploys the **runtime chart** into the environment's provisioned context and starts the durable deploy (issue #680). The environment must reference a context whose provisioning has reached `running` (see [`POST /v1/contexts`](#post-v1contexts)); the deploy installs the published runtime chart at an explicit, already-pushed version into the per-env namespace `<tenant>-<env>` as release `<tenant>-devops`. The endpoint is tenant-scoped by the token — a token can only deploy its own tenant's environments.
+
+```jsonc
+// POST /v1/environments/{environment_id}/deploy body (optional)
+{
+  "version": "1.2.3"   // optional — overrides the env's persisted runtimeVersion
+}
+```
+
+The body is optional. When `version` is omitted the env's persisted `runtimeVersion` is used. **The version is always an explicit input — deploy never mints one.** It is a content identity produced by `build` and published by `push`; deploy only installs an already-published version (see the [command-primitives split](/concepts/conventions)). A version whose chart/image was never pushed fails the rollout, not the request.
+
+On success the endpoint flips the env to `deployStatus: "deploying"`, **kicks off the live deploy asynchronously**, and returns the env with HTTP `202 Accepted`. Poll [`GET /v1/environments/{environment_id}`](#endpoints) until `deployStatus` reaches `deployed` (success) or `failed`.
+
+```jsonc
+// 202 response: the deploy has started
+{
+  "environmentId": "019a7fa5-c2c0-7c55-bc70-714873a71f30",
+  "tenantId": "019a7fa5-c2c0-7c55-bc70-714873a71f10",
+  "name": "prod",
+  "type": "runtime",
+  "contextId": "019a7fa5-c2c0-7c55-bc70-714873a71f20",
+  "runtimeVersion": "1.2.3",
+  "deployStatus": "deploying",   // deploying → deployed (success) | failed
+  "createdAt": "2026-06-24T10:00:00Z",
+  "updatedAt": "2026-06-24T10:00:00Z"
+}
+```
+
+**Async, durable deploy.** The deploy runs as a **durable DBOS workflow** keyed by `(environment, version)` — it survives a control-plane restart, resuming from its last completed step, and a double-submit of the same version does not start a second rollout. Inside one step it reads the env's running context (its current public IP) and the **server-side custodied k3s admin token** (never returned), materializes a kube-context addressing the cluster's token-authed `:6443` API server, then helm-installs the runtime chart and sets the env's deploy status:
+
+- `deploying` → in flight.
+- `deployed` → `deployedVersion` carries the version that landed.
+- `failed` → `deployError` carries the reason (e.g. the version's chart was never pushed).
+
+`GET /v1/environments/{environment_id}` returns the current `deployStatus` (plus `deployedVersion`/`deployError`). This executor is the **orchestrator** that composes the pure `deploy` primitive; it never builds or pushes.
+
+**Prerequisites.** A live deploy requires (1) the env's context provisioned to `running` with its custodied k3s token, (2) the platform configured with a DBOS system database (`DBOS_SYSTEM_DATABASE_URL`) and a secrets key (`ERUN_SECRETS_KEY`), and (3) the runtime chart + image **already pushed** at the requested version to the runtime registry (`ERUN_RUNTIME_REGISTRY`, default `ghcr.io/sophium`). When the deploy executor is **not** configured (no DBOS/secrets), the endpoint returns `501`.
+
+**Error behaviour.** Today the API returns a bare HTTP status with a plain-text body (no JSON envelope):
+
+| Status | Condition | Recovery |
+|---|---|---|
+| `400` | No version resolvable (the env has no `runtimeVersion` and the body sent none), the env has no `contextId`, or the body is not valid JSON. | Pass `version` (or set the env's `runtimeVersion`) and ensure the env references a context. |
+| `401` / `403` | Standard auth failures (see [Errors](#errors)). The `WriteAll` permission covers the deploy action. | Send a valid token whose roles permit the write. |
+| `409` | The env's context is not provisioned (its `status` is not `running`); the body names the context's current status. | Wait for / re-run provisioning until the context reaches `running`, then retry. |
+| `404` | The `environment_id` is not the caller's tenant's. | Deploy an environment owned by the caller's tenant. |
+| `500` | The durable workflow failed to start (the env is rolled back out of `deploying` to `failed`), or the security context is missing (an internal wiring error). | Retry; if it persists it is a server bug. |
+| `501` | The deploy executor is not configured (no DBOS system database / secrets key). | Configure `DBOS_SYSTEM_DATABASE_URL` + `ERUN_SECRETS_KEY` on the platform. |
 
 ### `POST /v1/contexts`
 

@@ -29,10 +29,19 @@ type stubEnvironmentRepository struct {
 	count        int
 	countErr     error
 	err          error
+	// deployStatuses records, in order, the deploy_status values passed to
+	// UpdateDeployResult; deployUpdateErr fails those writes when set.
+	deployStatuses  []string
+	deployUpdateErr error
 }
 
 func (r *stubEnvironmentRepository) List(context.Context) ([]model.Environment, error) {
 	return r.environments, r.err
+}
+
+func (r *stubEnvironmentRepository) UpdateDeployResult(_ context.Context, _, status, _, _ string) error {
+	r.deployStatuses = append(r.deployStatuses, status)
+	return r.deployUpdateErr
 }
 
 func (r *stubEnvironmentRepository) Count(context.Context) (int, error) {

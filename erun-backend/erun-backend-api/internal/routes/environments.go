@@ -2,11 +2,15 @@ package routes
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/deploy"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
 type EnvironmentRepository interface {
@@ -14,6 +18,15 @@ type EnvironmentRepository interface {
 	Get(ctx context.Context, environmentID string) (model.Environment, error)
 	Create(ctx context.Context, environment model.Environment) (model.Environment, error)
 	Count(ctx context.Context) (int, error)
+	UpdateDeployResult(ctx context.Context, environmentID, status, deployedVersion, deployError string) error
+}
+
+// EnvironmentDeployer starts the durable runtime deploy of an environment into
+// its provisioned context (issue #680). Optional: when nil, POST
+// /v1/environments/{id}/deploy returns 501 — the row stands as registered
+// config with no live deploy (the pre-#680 behaviour).
+type EnvironmentDeployer interface {
+	Start(deploy.DeployInput) error
 }
 
 // TenantQuotaRepository reports the caller's environment-count cap. When the
@@ -26,6 +39,8 @@ type TenantQuotaRepository interface {
 type EnvironmentRoutes struct {
 	environments EnvironmentRepository
 	quotas       TenantQuotaRepository
+	contexts     ContextRepository
+	deployer     EnvironmentDeployer
 }
 
 // createEnvironmentRequest is the env-registration body. The tenant is resolved
@@ -40,11 +55,12 @@ type createEnvironmentRequest struct {
 	RuntimeVersion    string `json:"runtimeVersion"`
 }
 
-func RegisterEnvironmentRoutes(register ProtectedRouteRegistrar, environments EnvironmentRepository, quotas TenantQuotaRepository) {
-	routes := EnvironmentRoutes{environments: environments, quotas: quotas}
+func RegisterEnvironmentRoutes(register ProtectedRouteRegistrar, environments EnvironmentRepository, quotas TenantQuotaRepository, contexts ContextRepository, deployer EnvironmentDeployer) {
+	routes := EnvironmentRoutes{environments: environments, quotas: quotas, contexts: contexts, deployer: deployer}
 	register(http.MethodGet, "/v1/environments", http.HandlerFunc(routes.listEnvironments))
 	register(http.MethodPost, "/v1/environments", http.HandlerFunc(routes.createEnvironment))
 	register(http.MethodGet, "/v1/environments/{environment_id}", http.HandlerFunc(routes.getEnvironment))
+	register(http.MethodPost, "/v1/environments/{environment_id}/deploy", http.HandlerFunc(routes.deployEnvironment))
 }
 
 func (r EnvironmentRoutes) listEnvironments(w http.ResponseWriter, req *http.Request) {
@@ -151,10 +167,98 @@ func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Re
 		return
 	}
 
-	// TODO(#660 live): run RunBootstrapInitWithDependencies server-side to ensure
-	// the <tenant>-<env> namespace + deploy the runtime chart; requires a live
-	// cluster, not executed in this build — the row stands as registered config
-	// until then.
-
 	writeJSON(w, http.StatusCreated, created)
+}
+
+// deployEnvironmentRequest is the deploy-action body. version is optional: when
+// absent the env's persisted runtimeVersion is used. The version is an explicit
+// input, never minted here — deploy installs an already-pushed version (root
+// AGENTS.md § "Command primitives vs orchestration").
+type deployEnvironmentRequest struct {
+	Version string `json:"version"`
+}
+
+// deployEnvironment starts the durable runtime deploy of an environment into its
+// provisioned context (issue #680). It validates that the env has a running
+// context and a resolvable version, optimistically flips the env to
+// deploy_status="deploying" so the console reflects it immediately, then kicks
+// off the durable DBOS workflow asynchronously (it runs for minutes, so the
+// handler must not block) and returns 202 Accepted; the caller polls GET
+// /v1/environments/{id} for deploy status. The executor composes the pure
+// deploy primitive and threads the explicit version; it never builds or pushes.
+func (r EnvironmentRoutes) deployEnvironment(w http.ResponseWriter, req *http.Request) {
+	if r.deployer == nil {
+		writeError(w, http.StatusNotImplemented, "live deploy is not configured")
+		return
+	}
+
+	environment, err := r.environments.Get(req.Context(), req.PathValue("environment_id"))
+	if err != nil {
+		writeRepositoryError(w, err)
+		return
+	}
+
+	// The deploy body is optional; an empty body means "use the env's version".
+	var body deployEnvironmentRequest
+	if err := decodeJSON(req, &body); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	version := strings.TrimSpace(body.Version)
+	if version == "" {
+		version = strings.TrimSpace(environment.RuntimeVersion)
+	}
+	if version == "" {
+		writeError(w, http.StatusBadRequest, "runtime version is required: set the environment's runtimeVersion or pass version in the body")
+		return
+	}
+	if strings.TrimSpace(environment.ContextID) == "" {
+		writeError(w, http.StatusBadRequest, "environment has no context to deploy into")
+		return
+	}
+
+	// Fast precondition check: the context must be provisioned (running). The
+	// executor re-checks this inside its step against the current row, but failing
+	// here gives the operator a clear 409 instead of a deploying -> failed flicker.
+	cloudContext, err := r.contexts.Get(req.Context(), environment.ContextID)
+	if err != nil {
+		writeRepositoryError(w, err)
+		return
+	}
+	if cloudContext.Status != "running" {
+		writeError(w, http.StatusConflict, fmt.Sprintf("context is not provisioned (status %q)", cloudContext.Status))
+		return
+	}
+
+	securityContext, ok := security.FromContext(req.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		return
+	}
+
+	// Optimistically reflect the in-flight deploy so a poll right after the 202
+	// sees "deploying" rather than the prior status.
+	if err := r.environments.UpdateDeployResult(req.Context(), environment.EnvironmentID, "deploying", "", ""); err != nil {
+		writeRepositoryError(w, err)
+		return
+	}
+	if err := r.deployer.Start(deploy.DeployInput{
+		TenantID:      securityContext.TenantID,
+		TenantType:    securityContext.TenantType,
+		ErunUserID:    securityContext.ErunUserID,
+		EnvironmentID: environment.EnvironmentID,
+		Version:       version,
+	}); err != nil {
+		// Do not leave the env stuck in "deploying" if the workflow never started.
+		_ = r.environments.UpdateDeployResult(req.Context(), environment.EnvironmentID, "failed", "", "failed to start deploy")
+		writeError(w, http.StatusInternalServerError, "failed to start deploy")
+		return
+	}
+
+	// Return the env reflecting the in-flight deploy (UpdateDeployResult cleared
+	// any prior deployed_version / error).
+	environment.DeployStatus = "deploying"
+	environment.DeployedVersion = ""
+	environment.DeployError = ""
+	writeJSON(w, http.StatusAccepted, environment)
 }

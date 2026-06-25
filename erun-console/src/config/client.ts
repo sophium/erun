@@ -1,4 +1,11 @@
-import type { CloudContext, ContextStatus, Environment, Tenant, TenantConfigView } from './types';
+import type {
+  CloudContext,
+  ContextStatus,
+  DeployStatus,
+  Environment,
+  Tenant,
+  TenantConfigView,
+} from './types';
 
 // Base URL of the erun-backend-api. The console calls the API directly — there
 // is no separate BFF service in this increment (the API already carries the
@@ -36,6 +43,18 @@ function asContextStatus(value: unknown): ContextStatus | undefined {
   return value === 'provisioning' || value === 'running' || value === 'failed' ? value : undefined;
 }
 
+// Parse the environment deploy status. Only the four known states are surfaced;
+// anything else (including an absent field) is undefined so the UI renders no
+// badge rather than a misleading one.
+function asDeployStatus(value: unknown): DeployStatus | undefined {
+  return value === 'registered' ||
+    value === 'deploying' ||
+    value === 'deployed' ||
+    value === 'failed'
+    ? value
+    : undefined;
+}
+
 function parseTenant(raw: Record<string, unknown>): Tenant {
   return {
     tenantId: asString(raw.tenantId),
@@ -52,6 +71,9 @@ function parseEnvironment(raw: Record<string, unknown>): Environment {
     kubernetesContext: asOptionalString(raw.kubernetesContext),
     contextId: asOptionalString(raw.contextId),
     runtimeVersion: asOptionalString(raw.runtimeVersion),
+    deployStatus: asDeployStatus(raw.deployStatus),
+    deployedVersion: asOptionalString(raw.deployedVersion),
+    deployError: asOptionalString(raw.deployError),
   };
 }
 
@@ -230,4 +252,59 @@ export async function getContext(token: string, contextId: string): Promise<Clou
     throw new ConfigFetchError('context response was not in the expected shape');
   }
   return parseContext(body);
+}
+
+// Start the durable runtime deploy of an environment into its provisioned
+// context (`POST /v1/environments/{id}/deploy`, 202). `version` is optional —
+// omitted, the env's persisted runtimeVersion is used; deploy never mints one.
+// Resolves to the env reflecting the in-flight deploy (deployStatus
+// `deploying`); poll getEnvironment to follow it to `deployed`/`failed`. A
+// non-2xx is a ConfigFetchError carrying the status (400 no version / no
+// context, 409 context not provisioned, 401, 501 deploy not configured).
+export async function deployEnvironment(
+  token: string,
+  environmentId: string,
+  version?: string,
+): Promise<Environment> {
+  const response = await authedFetch(
+    `/v1/environments/${encodeURIComponent(environmentId)}/deploy`,
+    token,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(version !== undefined && version.length > 0 ? { version } : {}),
+    },
+  );
+  if (!response.ok) {
+    throw new ConfigFetchError(
+      `deploy request failed (${String(response.status)})`,
+      response.status,
+    );
+  }
+  const body: unknown = await response.json();
+  if (!isRecord(body)) {
+    throw new ConfigFetchError('deploy response was not in the expected shape');
+  }
+  return parseEnvironment(body);
+}
+
+// Fetch one environment by id, including its deploy `deployStatus`
+// (`GET /v1/environments/{environment_id}`). The console polls this after
+// deployEnvironment until status reaches `deployed`/`failed`.
+export async function getEnvironment(token: string, environmentId: string): Promise<Environment> {
+  const response = await authedFetch(
+    `/v1/environments/${encodeURIComponent(environmentId)}`,
+    token,
+  );
+  if (!response.ok) {
+    throw new ConfigFetchError(
+      `environment request failed (${String(response.status)})`,
+      response.status,
+    );
+  }
+  const body: unknown = await response.json();
+  if (!isRecord(body)) {
+    throw new ConfigFetchError('environment response was not in the expected shape');
+  }
+  return parseEnvironment(body);
 }

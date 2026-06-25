@@ -59,12 +59,13 @@ func run(args []string) error {
 			AllowedIssuers:       splitCSV(cfg.AllowedIssuers),
 			DesktopPublicKeyPath: cfg.DesktopPublicKeyPath,
 		}),
-		IdentityCache: backendapi.NewIdentityResolutionCache(backendapi.IdentityCacheOptions{}),
-		DB:            db,
-		DBDialect:     repository.DialectPostgres,
-		DBOSContext:   dbosCtx,
-		Cipher:        cipher,
-		AWSEndpoint:   cfg.AWSEndpoint,
+		IdentityCache:   backendapi.NewIdentityResolutionCache(backendapi.IdentityCacheOptions{}),
+		DB:              db,
+		DBDialect:       repository.DialectPostgres,
+		DBOSContext:     dbosCtx,
+		Cipher:          cipher,
+		AWSEndpoint:     cfg.AWSEndpoint,
+		RuntimeRegistry: cfg.RuntimeRegistry,
 	})
 	if err != nil {
 		return err
@@ -136,6 +137,10 @@ type apiConfig struct {
 	SecretsKey      string
 	DBOSDatabaseURL string
 	AWSEndpoint     string
+	// RuntimeRegistry is where the published runtime chart + image live; the
+	// env-deploy executor (#680) addresses oci://<RuntimeRegistry>/charts/
+	// erun-devops. Empty defaults to ghcr.io/sophium.
+	RuntimeRegistry string
 }
 
 func configFromEnv() apiConfig {
@@ -148,6 +153,7 @@ func configFromEnv() apiConfig {
 		SecretsKey:           strings.TrimSpace(os.Getenv("ERUN_SECRETS_KEY")),
 		DBOSDatabaseURL:      strings.TrimSpace(os.Getenv("DBOS_SYSTEM_DATABASE_URL")),
 		AWSEndpoint:          strings.TrimSpace(os.Getenv("ERUN_AWS_ENDPOINT_URL")),
+		RuntimeRegistry:      strings.TrimSpace(os.Getenv("ERUN_RUNTIME_REGISTRY")),
 	}
 }
 

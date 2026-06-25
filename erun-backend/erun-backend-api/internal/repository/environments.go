@@ -11,7 +11,7 @@ type EnvironmentRepository struct {
 	txs *TxManager
 }
 
-const environmentColumns = `environment_id, tenant_id, name, type, kubernetes_context, context_id, runtime_version, created_at, updated_at`
+const environmentColumns = `environment_id, tenant_id, name, type, kubernetes_context, context_id, runtime_version, deploy_status, deploy_error, deployed_version, created_at, updated_at`
 
 func NewEnvironmentRepository(txs *TxManager) *EnvironmentRepository {
 	return &EnvironmentRepository{txs: txs}
@@ -73,4 +73,25 @@ func (r *EnvironmentRepository) Get(ctx context.Context, environmentID string) (
 		return normalizeNoRows(err)
 	})
 	return environment, err
+}
+
+// UpdateDeployResult records the outcome of a runtime-deploy run (issue #680):
+// the route flips the env to status="deploying" (empty version/error) when it
+// kicks off the durable deploy; on success the executor passes
+// status="deployed" with the deployed runtime version and an empty error; on
+// failure status="failed" with the reason. RLS scopes the UPDATE to the
+// caller's tenant. Empty version/error values normalize to NULL — so a failed
+// run clears any stale error only by passing the new one, and a fresh deploy
+// run does not leave a half-written version.
+func (r *EnvironmentRepository) UpdateDeployResult(ctx context.Context, environmentID, status, deployedVersion, deployError string) error {
+	return r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		_, err := tx.NewRaw(`
+			UPDATE environments
+			   SET deploy_status = ?,
+			       deployed_version = NULLIF(?, ''),
+			       deploy_error = NULLIF(?, '')
+			 WHERE environment_id = ?
+		`, status, deployedVersion, deployError, environmentID).Exec(ctx)
+		return err
+	})
 }
