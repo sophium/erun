@@ -30,14 +30,23 @@ zone. It's idempotent — re-running reconciles.
 
 ## Apply
 
-Get the module (it lives in the erun repo) and apply it. The Cloudflare token is
-passed through `TF_VAR_cloudflare_api_token` — never on the command line, so it
-stays out of shell history and process args.
+The module ships **baked into the runtime image** at `/etc/erun/terraform-erun`
+(so erun-prod applies it with no repo clone and no manual operator step); on a
+laptop it falls back to a shallow clone. Copy it to a writable dir first —
+terraform writes its state and `.terraform/` next to the module, and the baked
+copy is read-only. The Cloudflare token is passed through
+`TF_VAR_cloudflare_api_token` — never on the command line, so it stays out of
+shell history and process args.
 
 ```sh
 workdir=$(mktemp -d)
-git clone --depth 1 https://github.com/sophium/erun "$workdir/erun"
-cd "$workdir/erun/erun-devops/terraform-erun/modules/terraform-erun-cluster-edge"
+if [ -d /etc/erun/terraform-erun ]; then
+    cp -r /etc/erun/terraform-erun "$workdir/terraform-erun"      # baked into the image
+else
+    git clone --depth 1 https://github.com/sophium/erun "$workdir/erun"
+    cp -r "$workdir/erun/erun-devops/terraform-erun" "$workdir/terraform-erun"
+fi
+cd "$workdir/terraform-erun/modules/terraform-erun-cluster-edge"
 
 export TF_VAR_cloudflare_api_token="$CLOUDFLARE_API_TOKEN"
 terraform init -input=false
