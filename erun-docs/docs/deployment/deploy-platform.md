@@ -8,7 +8,7 @@ How an operator stands up a hosted erun platform (for example `erunpaas.com`). Y
 
 ## Two environments
 
-- **`<tenant>-local`** — your dev workbench, **created first** (`erun init`). Here a blueprint skill scaffolds the platform's **Helm charts** (into `k8s/`) and **Terraform modules** (into the `<tenant>-terraform` module), you set the platform **deploy parameters**, and `erun-build-env` + `erun build --release` produce the custom image that carries them (plus the deploy skills). **No Cloudflare token here.** Later, once the platform is up, you set up this env's own DNS zone + TLS through the running erun API.
+- **`<tenant>-local`** — your dev workbench, **created first** (`erun init`). Here a blueprint skill scaffolds thin, version-pinned wrappers that **reference erun's published artifacts** — Helm charts in `k8s/` whose `dependencies` point at erun's **OCI** charts, and Terraform roots in `<tenant>-terraform/` whose `module` source references erun's **GitHub** modules — you set the platform **deploy parameters** + your values/vars, and `erun-build-env` + `erun build --release` produce the custom image that carries this wiring (plus the deploy skills). The reusable charts/modules stay erun's; you own only the thin wrappers. **No Cloudflare token here.** Later, once the platform is up, you set up this env's own DNS zone + TLS through the running erun API.
 - **`<tenant>-prod`** — a runtime-only environment **created from the built image**. Here you **supply the Cloudflare token** and bootstrap: deploy the erun API + components, then the skills apply the k8s + Terraform to **bootstrap the Cloudflare hosts** (DNS zones + wildcard TLS), pinned to the running version.
 
 ## Order
@@ -18,8 +18,8 @@ How an operator stands up a hosted erun platform (for example `erunpaas.com`). Y
 | # | Where | Invoke | What it does | Status |
 |---|---|---|---|---|
 | 1 | laptop / desktop | `erun init` | Create the **`<tenant>-local`** dev workbench. | Ready |
-| 2 | `<tenant>-local` | skill **`erun-blueprint-platform`** | Scaffold the platform's Helm charts into `k8s/` and its Terraform modules into the `<tenant>-terraform` module. | **Planned — the missing skill** |
-| 3 | `<tenant>-local` | Set the platform **deploy parameters** ([`platform:`](/reference/configuration#platform-block)) | `basedomain` (e.g. `erunpaas.com`), `acmeemail`, `authoritativeip`, `env: <tenant>-prod`. erun threads these into the PowerDNS helm values, the edge Terraform vars, and `expose`. No Cloudflare token. | Ready |
+| 2 | `<tenant>-local` | skill **`erun-blueprint-platform`** | Scaffold wrapper Helm charts in `k8s/` (deps → erun's OCI charts), Terraform roots in `<tenant>-terraform/` (source → erun's GitHub modules), and per-env `values.<env>.yaml`. | **Planned — the missing skill** |
+| 3 | `<tenant>-local` | Fill `values.<env>.yaml` (+ the Terraform vars) | The **env-specific deploy values**: `basedomain` (e.g. `erunpaas.com`), `acmeemail`, `authoritativeip`, etc. No Cloudflare token here. | Ready |
 | 4 | `<tenant>-local` | skill **`erun-build-env`** → `erun build --release` → `erun push <version>` | Set up the custom `<tenant>-devops` Dockerfile and build/publish the image — it carries the scaffolded charts/Terraform + the deploy skills (charts → OCI, Terraform modules referenced from GitHub). | Ready |
 | 5 | laptop / desktop | `erun init` (runtime env, pinned to `<version>`) | Create **`<tenant>-prod`** from the built image. | Ready |
 | 6 | `<tenant>-prod` | `erun deploy <version>` | Deploy the platform components: the **erun API**, Postgres, DB migrations, PowerDNS, and the docs publish. | Ready (API + edge land with PRs #681/#688) |
@@ -35,7 +35,7 @@ Alongside these, stand up the **OIDC issuer** (Zitadel) at `auth.<base-domain>` 
 
 | Skill | Environment | Purpose | Status |
 |---|---|---|---|
-| `erun-blueprint-platform` | `<tenant>-local` | Scaffold the platform's Helm charts into `k8s/` + Terraform modules into the `<tenant>-terraform` module. | **Planned — missing** |
+| `erun-blueprint-platform` | `<tenant>-local` | Scaffold wrapper charts (`k8s/`, deps → erun's OCI charts), Terraform roots (`<tenant>-terraform/`, source → erun's GitHub modules), and per-env `values.<env>.yaml`. | **Planned — missing** |
 | `erun-build-env` | `<tenant>-local` | Set up the custom `<tenant>-devops` Dockerfile + build the image (carrying the scaffolded charts/Terraform + deploy skills). | Ready |
 | `erun-enable-hosting-edge` | `<tenant>-prod` | Bootstrap the Cloudflare hosts: ingress + cert-manager + DNS-01 wildcard TLS for the services zone. | Ready |
 | `erun-deploy-platform` | `<tenant>-prod` | End-to-end prod bootstrap (orchestrates deploy → edge → expose). | Planned |
