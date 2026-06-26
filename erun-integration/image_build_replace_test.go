@@ -16,7 +16,15 @@ import (
 // invariant: every erun-devops image Dockerfile that builds an erun-common-replacing
 // module must COPY erun-common before its first `go mod download`.
 func TestImageDockerfilesCopyLocalReplaceTarget(t *testing.T) {
-	root := repoRoot(t)
+	// The integration suite also runs inside the erun-devops image build, whose
+	// context copies only the Go modules (erun-cli/common/mcp/integration) — not
+	// erun-backend/ or erun-devops/docker/. This static Dockerfile guard needs the
+	// full source tree, so it no-ops in that partial context and runs on a full
+	// checkout (where a developer/CI runs the gate before a release).
+	root, ok := findFullCheckoutRoot()
+	if !ok {
+		t.Skip("full source tree not present (partial in-build build context); this Dockerfile-content guard runs on a full checkout")
+	}
 
 	cases := []struct {
 		name       string
@@ -88,22 +96,23 @@ func mustReadRepoFile(t *testing.T, root, rel string) string {
 	return string(b)
 }
 
-// repoRoot walks up from the test's working directory to the repository root
-// (the directory that holds erun-devops), so the test reads source files no
-// matter where `go test` is invoked.
-func repoRoot(t *testing.T) string {
-	t.Helper()
+// findFullCheckoutRoot walks up from the working directory looking for the
+// erun-backend-api image Dockerfile — a file present only in a full checkout,
+// not in the partial erun-devops in-build context. Returns (root, true) when
+// found, ("", false) otherwise so callers can skip.
+func findFullCheckoutRoot() (string, bool) {
 	dir, err := os.Getwd()
 	if err != nil {
-		t.Fatalf("getwd: %v", err)
+		return "", false
 	}
+	const sentinel = "erun-devops/docker/erun-backend-api/Dockerfile"
 	for {
-		if st, err := os.Stat(filepath.Join(dir, "erun-devops")); err == nil && st.IsDir() {
-			return dir
+		if _, err := os.Stat(filepath.Join(dir, sentinel)); err == nil {
+			return dir, true
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			t.Fatal("could not locate repo root (no erun-devops dir found walking up)")
+			return "", false
 		}
 		dir = parent
 	}
