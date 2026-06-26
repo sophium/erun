@@ -51,9 +51,9 @@ fi
 ref="v${erun_version}"          # Terraform module ref + Helm chart version
 ```
 
-The container registry defaults to `ghcr.io/sophium`; if the env config carries
-a `containerregistry` (the DEPLOY-marked registry) use that. Call it
-`<registry>` below.
+The container registry defaults to `ghcr.io/sophium`; if the env records a
+`runtimeregistry`, or marks a DEPLOY registry in `containerregistries`, use that
+instead. Call it `<registry>` below.
 
 ## Step 2 — the Terraform tree
 
@@ -109,17 +109,19 @@ variable "cloudflare_api_token" {
   type      = string
   sensitive = true
 }
-variable "acme_email"    { type = string }
+variable "acme_email" { type = string }
 variable "services_zone" { type = string }
-variable "base_domain"   { type = string }
 ```
 
 **`terraform-frs/modules/terraform-frs-cluster-edge/main.tf`** — the tenant
 module that wraps erun's published module, pinned to `<ref>`:
 
 ```hcl
-variable "cloudflare_api_token" { type = string, sensitive = true }
-variable "acme_email"    { type = string }
+variable "cloudflare_api_token" {
+  type      = string
+  sensitive = true
+}
+variable "acme_email" { type = string }
 variable "services_zone" { type = string }
 
 module "edge" {
@@ -152,7 +154,6 @@ module "cluster_edge" {
 **`terraform-frs/prod/prod.tfvars`** — env-specific values (no secrets):
 
 ```hcl
-base_domain   = "erunpaas.com"
 services_zone = "services.erunpaas.com"
 acme_email    = "ops@erunpaas.com"
 ```
@@ -168,7 +169,7 @@ ln -s ../variables.tf terraform-frs/prod/variables.tf
 
 ## Step 3 — the Helm side
 
-`erun deploy <version> --components=…` deploys erun's **published** charts
+`erun deploy --version <version> --components=…` deploys erun's **published** charts
 directly (referenced from OCI, pinned to the version), so the per-env
 customization surface is the **values overlay** erun deploy already reads at
 `~/.config/erun/<tenant>/<environment>/values.yaml`. Scaffold that as the
@@ -211,7 +212,7 @@ or `kubectl`:
   confirm step prompts the operator to **type the environment name** before
   applying, so changes can't land in the wrong env. Preview with
   `erun terraform apply --dry-run`.
-- **Helm:** `erun deploy <version> --components=…` (with the `values.<env>.yaml`
+- **Helm:** `erun deploy --version <version> --components=…` (with the `values.<env>.yaml`
   overlay), then the `erun-enable-hosting-edge` skill / `erun terraform apply`
   for the edge.
 

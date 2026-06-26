@@ -45,7 +45,7 @@ When the env has a Cloudflare alias, its `CLOUDFLARE_API_TOKEN` is forwarded to 
 | No `terraform-<tenant>/<env>/` folder | Aborts: `no Terraform root at … — scaffold it with the erun-blueprint-platform skill …`; exit 1. | Scaffold the per-env root with [`erun-blueprint-platform`](/agent-reference/skills-spec#erun-blueprint-platform), or create `terraform-<tenant>/<env>/` with its `main.tf` and `<env>.tfvars`. |
 | Environment not configured | Surfaces the config load error; exit 1. | Create the env (`erun init`) or fix the tenant/env name. |
 | No default tenant/environment and none passed | Aborts: default tenant/environment not configured; exit 1. | Pass `TENANT ENVIRONMENT` (or set a default scope). |
-| Confirmation doesn't match the env name | Aborts before apply: `confirmation "…" does not match environment "…"; aborting apply`; exit 1. `init`/`fmt`/`plan` have already run (read-only/idempotent); the apply is gated. | Re-run and type the exact environment name (or pass `--confirm-environment <env>`). |
+| Confirmation doesn't match the env name | Aborts before the apply step: `confirmation "…" does not match environment "…"; aborting <operation>`; exit 1. The earlier read-only steps (`init`, `plan`, plus `fmt` for `apply`) have already run; only the apply is gated. | Re-run and type the exact environment name (or pass `--confirm-environment <env>`). |
 | A `terraform` step fails (live run) | Surfaces the underlying `terraform` error and stops at that step; exit 1. | Fix the reported Terraform/cloud issue and re-run — `init`/`plan`/`apply` are safe to repeat. |
 
 ## See also
