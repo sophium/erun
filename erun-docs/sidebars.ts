@@ -161,6 +161,7 @@ const sidebars: SidebarsConfig = {
       label: 'Admin',
       link: { type: 'generated-index' },
       items: [
+        'deployment/deploy-platform',
         'deployment/release-flow',
         'deployment/cloud-setup',
       ],
