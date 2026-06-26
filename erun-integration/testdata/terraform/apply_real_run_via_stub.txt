@@ -1,0 +1,5 @@
+terraform apply complete in <TMP>
+audit: erun terraform apply --confirm-environment dev team dev
+terraform: apply in <TMP> (env team/dev, namespace team-dev)
+terraform: var file dev.tfvars
+terraform: apply requires typing the environment name (dev) to confirm before apply

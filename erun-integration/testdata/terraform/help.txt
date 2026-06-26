@@ -1,0 +1,21 @@
+Run Terraform against a hosted platform's per-environment root (terraform-<tenant>/<environment>/) without hand-running terraform or cd-ing into the folder.
+
+erun resolves the env's folder from the current scope, picks up the symlinked common.tf, and runs that env's main.tf with its <environment>.tfvars. Use a subcommand: `apply`, `plan`, or `destroy`.
+
+Usage:
+  erun terraform [command]
+
+Available Commands:
+  apply       Plan and apply the env's Terraform (prompts for the environment name)
+  destroy     Plan and apply a destroy of the env's Terraform (prompts for the environment name)
+  plan        Show the env's Terraform plan without applying
+
+Flags:
+  -h, --help   help for terraform
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.
+
+Use "erun terraform [command] --help" for more information about a command.

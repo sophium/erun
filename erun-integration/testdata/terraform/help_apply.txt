@@ -1,0 +1,22 @@
+Plan and apply the env's Terraform root.
+
+Resolves terraform-<tenant>/<environment>/, runs init -> fmt -> plan, then prompts you to type the environment name before applying — a guard against applying to the wrong env. It mutates real cloud and cluster state (DNS, TLS, ingress, workloads). Pass --confirm-environment <env> for non-interactive use, or --dry-run to preview the resolved terraform commands.
+
+Usage:
+  erun terraform apply [TENANT] [ENVIRONMENT] [flags]
+
+Examples:
+  erun terraform apply frs prod
+  erun terraform apply frs prod --dry-run
+
+Flags:
+      --confirm-environment string   Confirm by restating the environment name, bypassing the interactive prompt (non-interactive use)
+      --dry-run                      Resolve and trace mutating actions without executing them.
+      --environment string           Target a specific environment (defaults to the tenant's default)
+  -h, --help                         help for apply
+      --tenant string                Target a specific tenant (defaults to the current scope)
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

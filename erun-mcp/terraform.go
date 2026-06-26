@@ -1,0 +1,56 @@
+package erunmcp
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+	eruncommon "github.com/sophium/erun/erun-common"
+)
+
+type TerraformInput struct {
+	Operation   string   `json:"operation" jsonschema:"required terraform operation: apply (init/fmt/plan/apply), plan (read-only), or destroy"`
+	Tenant      string   `json:"tenant,omitempty" jsonschema:"tenant name; defaults to the MCP runtime context tenant"`
+	Environment string   `json:"environment,omitempty" jsonschema:"environment name; defaults to the MCP runtime context environment"`
+	ProjectRoot string   `json:"projectRoot,omitempty" jsonschema:"project root holding terraform-<tenant>/; defaults to the runtime repo path"`
+	Confirm     string   `json:"confirm,omitempty" jsonschema:"for apply/destroy: restate the environment name to confirm the mutation; required to apply, ignored for plan and preview"`
+	ExtraArgs   []string `json:"extraArgs,omitempty" jsonschema:"extra args passed through to terraform plan"`
+	Preview     bool     `json:"preview,omitempty" jsonschema:"when true, resolve and print the terraform commands without executing them"`
+	Verbosity   int      `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+}
+
+func terraformTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, TerraformInput) (*mcp.CallToolResult, CommandOutput, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input TerraformInput) (*mcp.CallToolResult, CommandOutput, error) {
+		tenant := firstNonEmpty(strings.TrimSpace(input.Tenant), strings.TrimSpace(runtime.Context.Tenant))
+		environment := firstNonEmpty(strings.TrimSpace(input.Environment), strings.TrimSpace(runtime.Context.Environment))
+		projectRoot := firstNonEmpty(strings.TrimSpace(input.ProjectRoot), strings.TrimSpace(runtime.Context.RepoPath))
+
+		terraformStore, ok := any(runtime.Store).(eruncommon.TerraformStore)
+		if !ok {
+			terraformStore = eruncommon.ConfigStore{}
+		}
+
+		operation := eruncommon.TerraformOperation(strings.TrimSpace(input.Operation))
+		// MCP is non-interactive: the confirmation is the explicit Confirm input,
+		// which must equal the environment name to apply/destroy.
+		confirm := func(_ eruncommon.Context, env string) error {
+			if strings.TrimSpace(input.Confirm) != env {
+				return fmt.Errorf("confirm must equal the environment name %q to %s (got %q)", env, operation, input.Confirm)
+			}
+			return nil
+		}
+
+		output, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, func(runCtx eruncommon.Context, _ string) error {
+			_, err := eruncommon.RunTerraform(runCtx, eruncommon.TerraformParams{
+				Tenant:      tenant,
+				Environment: environment,
+				Operation:   operation,
+				ProjectRoot: projectRoot,
+				ExtraArgs:   input.ExtraArgs,
+			}, terraformStore, confirm)
+			return err
+		})
+		return nil, output, err
+	}
+}

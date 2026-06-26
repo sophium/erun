@@ -1,0 +1,153 @@
+package integration
+
+import (
+	"os"
+	"testing"
+
+	"github.com/sophium/erun/erun-integration/internal/env"
+	"github.com/sophium/erun/erun-integration/internal/erun"
+	"github.com/sophium/erun/erun-integration/internal/fixture"
+	"github.com/sophium/erun/erun-integration/internal/golden"
+	"github.com/sophium/erun/erun-integration/internal/normalize"
+)
+
+func TestTerraform(t *testing.T) {
+	t.Run("help", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"terraform", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "terraform/help", normalize.Apply(result.Combined))
+	})
+
+	t.Run("help_apply", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"terraform", "apply", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "terraform/help_apply", normalize.Apply(result.Combined))
+	})
+
+	t.Run("apply_dry_run", func(t *testing.T) {
+		// With the env configured and its per-env Terraform root present, apply
+		// resolves terraform-team/dev/, finds dev.tfvars, and traces the full
+		// sequence: init -> fmt -recursive .. -> plan -var-file -out -> the
+		// type-the-env-name confirm gate -> apply the saved plan. No side effects.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTerraformEnvRoot(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"terraform", "apply", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "terraform/apply_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("apply_dry_run_default_scope", func(t *testing.T) {
+		// No tenant/environment args: the command resolves the configured default
+		// scope (team/dev) and runs against terraform-team/dev/ — the "run in the
+		// relevant folder automatically" path.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTerraformEnvRoot(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"terraform", "apply", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "terraform/apply_dry_run_default_scope", normalize.Apply(result.Combined))
+	})
+
+	t.Run("apply_dry_run_no_tfvars", func(t *testing.T) {
+		// A per-env root without <environment>.tfvars: the plan runs without
+		// -var-file and the trace says so, rather than passing a missing file.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTerraformEnvRoot(t, setup, "team", "dev")
+		if err := os.Remove(setup.Cwd + "/terraform-team/dev/dev.tfvars"); err != nil {
+			t.Fatalf("remove tfvars: %v", err)
+		}
+		result := erun.Run(t, []string{"terraform", "apply", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "terraform/apply_dry_run_no_tfvars", normalize.Apply(result.Combined))
+	})
+
+	t.Run("apply_dry_run_with_cloudflare_token", func(t *testing.T) {
+		// When the env injects CLOUDFLARE_API_TOKEN (a Cloudflare alias), the plan
+		// traces that it forwards it as TF_VAR_cloudflare_api_token — the value
+		// itself never appears (it rides in the environment, not argv).
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTerraformEnvRoot(t, setup, "team", "dev")
+		envVars := append(setup.Env(), "CLOUDFLARE_API_TOKEN=cf-secret-token")
+		result := erun.Run(t, []string{"terraform", "apply", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "terraform/apply_dry_run_with_cloudflare_token", normalize.Apply(result.Combined))
+	})
+
+	t.Run("plan_dry_run", func(t *testing.T) {
+		// plan is read-only: init -> plan. No fmt mutation, no -out, no confirm gate.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTerraformEnvRoot(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"terraform", "plan", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "terraform/plan_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("destroy_dry_run", func(t *testing.T) {
+		// destroy plans a -destroy then applies the saved plan, behind the same
+		// type-the-env-name confirm gate as apply.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTerraformEnvRoot(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"terraform", "destroy", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "terraform/destroy_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("missing_root", func(t *testing.T) {
+		// The env is configured but has no terraform-team/dev/ root: fail with an
+		// actionable error pointing at the blueprint skill, not an opaque stat error.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		result := erun.Run(t, []string{"terraform", "apply", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit without a terraform root, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "terraform/missing_root", normalize.Apply(result.Combined))
+	})
+
+	t.Run("apply_real_run_via_stub", func(t *testing.T) {
+		// Real run (no --dry-run): stub terraform so init/fmt/plan/apply all
+		// succeed, and confirm via --confirm-environment (no interactive prompt).
+		// Locks the execution path + the confirm gate + the success line.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTerraformEnvRoot(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "terraform", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "terraform")...)
+		result := erun.Run(t, []string{"terraform", "apply", "team", "dev", "--confirm-environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "terraform/apply_real_run_via_stub", normalize.Apply(result.Combined))
+	})
+
+	t.Run("apply_confirm_mismatch", func(t *testing.T) {
+		// A --confirm-environment that doesn't match the target env aborts before
+		// apply (init/fmt/plan still ran against the stub; the apply is gated).
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTerraformEnvRoot(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "terraform", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "terraform")...)
+		result := erun.Run(t, []string{"terraform", "apply", "team", "dev", "--confirm-environment", "wrong"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit on confirmation mismatch, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "terraform/apply_confirm_mismatch", normalize.Apply(result.Combined))
+	})
+}

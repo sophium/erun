@@ -146,7 +146,7 @@ The dry-run trace prints both `kubectl` commands verbatim (including the TTL) pl
 
 **Records, not the HTTP API.** Writes go through `pdnsutil` against the gpgsql backend (the PowerDNS pod reads its connection — including the postgres password — from a generated `--config-dir` config, so no secret appears in the exec argv). The PowerDNS HTTP API is bound to loopback only and is not used by `expose`.
 
-**TLS.** The applied Ingress is HTTP-only (no `tls:`, no cert-manager annotation). The CLI prints `http://<hostname>`. A wildcard TLS certificate is `(Planned.)` — it arrives with the DNS-01 broker, at which point the hostname serves `https://`.
+**TLS.** The applied Ingress is HTTP-only (no `tls:`, no cert-manager annotation), and the CLI prints `http://<hostname>`. The wildcard-TLS **issuer** now ships: the `terraform-erun-cluster-edge` module (applied by the `erun-enable-hosting-edge` skill) installs cert-manager + a Cloudflare **DNS-01 `ClusterIssuer`** (`erun-cloudflare`) that issues a `*.<services-zone>` certificate — the "DNS-01 broker" this spec anticipated. Wiring `expose`'s rendered Ingress to that issuer (adding `tls:` + the `cert-manager.io/cluster-issuer: erun-cloudflare` annotation + `ingressClassName`) so the hostname serves `https://` is the remaining step `(Planned.)`.
 
 **Idempotency / errors.** `replace-rrset` and `apply` are both idempotent; re-running converges. The wildcard record is written before the Ingress, so a failure applying the Ingress can leave the DNS record in place — re-run after resolving the cluster issue. Pre-flight validation (missing/malformed `platform:` block, missing `--ip`, non-DNS-1035 service name) fails before any write; see [`erun expose` · Error behaviour](/cli/expose#error-behaviour).
 

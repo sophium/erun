@@ -1,0 +1,18 @@
+{{- /* Compare against "true": the value arrives from Terraform's helm `set` as a
+       string, and Go templates treat any non-empty string as truthy. */ -}}
+{{- if eq (toString .Values.wildcardCertificateEnabled) "true" }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ required "wildcardCertName is required" .Values.wildcardCertName }}
+  namespace: {{ required "certNamespace is required" .Values.certNamespace }}
+spec:
+  secretName: {{ required "wildcardSecretName is required" .Values.wildcardSecretName }}
+  issuerRef:
+    name: {{ required "issuerName is required" .Values.issuerName }}
+    kind: ClusterIssuer
+  commonName: {{ printf "*.%s" .Values.servicesZone | quote }}
+  dnsNames:
+    - {{ printf "*.%s" .Values.servicesZone | quote }}
+    - {{ .Values.servicesZone | quote }}
+{{- end }}
