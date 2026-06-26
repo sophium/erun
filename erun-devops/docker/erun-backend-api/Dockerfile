@@ -5,6 +5,10 @@ FROM golang:1.26.0 AS builder
 WORKDIR /src
 
 COPY erun-backend/erun-backend-api/go.mod erun-backend/erun-backend-api/go.sum /src/erun-backend/erun-backend-api/
+# erun-backend-api's go.mod has `replace … => ../../erun-common`, so the replace
+# target must be in the build context. go mod download needs erun-common's go.mod
+# to resolve its (transitive) requires; the full source is copied before go build.
+COPY erun-common/go.mod /src/erun-common/go.mod
 
 WORKDIR /src/erun-backend/erun-backend-api
 
@@ -15,6 +19,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     go mod download
 
+COPY erun-common /src/erun-common
 COPY erun-backend/erun-backend-api /src/erun-backend/erun-backend-api
 
 RUN --mount=type=cache,target=/go/pkg/mod \
