@@ -753,6 +753,25 @@ func SeedProjectK8sConfig(t testing.TB, setup env.Setup, body string) {
 	mustWrite(t, filepath.Join(dir, "config.yaml"), body)
 }
 
+// SeedTerraformEnvRoot materializes a platform's per-env Terraform root
+// (terraform-<tenant>/<environment>/) so `erun terraform` resolves a folder to
+// run in: a canonical common.tf + variables.tf at the tree root, and the env's
+// own main.tf + <environment>.tfvars in its folder. Mirrors the layout the
+// erun-blueprint-platform skill scaffolds (the per-env common.tf is a symlink to
+// the root in real trees; the command only needs the folder + tfvars to resolve).
+func SeedTerraformEnvRoot(t testing.TB, setup env.Setup, tenant, environment string) {
+	t.Helper()
+	root := filepath.Join(setup.Cwd, "terraform-"+tenant)
+	envDir := filepath.Join(root, environment)
+	if err := os.MkdirAll(envDir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", envDir, err)
+	}
+	mustWrite(t, filepath.Join(root, "common.tf"), "terraform {\n  required_version = \">= 1.3\"\n}\n")
+	mustWrite(t, filepath.Join(root, "variables.tf"), "variable \"base_domain\" {\n  type = string\n}\n")
+	mustWrite(t, filepath.Join(envDir, "main.tf"), "# "+environment+" services\n")
+	mustWrite(t, filepath.Join(envDir, environment+".tfvars"), "base_domain = \"erunpaas.com\"\n")
+}
+
 // SeedDevopsBackendCharts seeds the three opt-in backend charts
 // (erun-backend-postgres, erun-backend-db, erun-backend-api) alongside the
 // runtime chart created by SeedDevopsRepo. Each chart gets a Chart.yaml plus a

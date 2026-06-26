@@ -280,6 +280,10 @@ func registerDeliveryTools(server *mcp.Server, runtime RuntimeConfig) {
 		Name:        "expose",
 		Description: "Expose an in-namespace Service at a stable public hostname under the platform's services zone (requires a platform block in .erun/config.yaml): ensure the per-environment wildcard DNS record points at the env's ingress IP and apply a Host-routing Ingress. Supports preview.",
 	}, exposeTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "terraform",
+		Description: "Run a hosted platform's per-environment Terraform from terraform-<tenant>/<environment>/ for the resolved tenant/environment: resolve the env folder, pick up the symlinked common.tf, and run its main.tf with <environment>.tfvars. operation is apply (init → fmt → plan → apply), plan (read-only), or destroy. apply/destroy mutate real cloud and cluster state and require confirm to equal the environment name. Injects TF_VAR_cloudflare_api_token from CLOUDFLARE_API_TOKEN when present. Set preview to resolve and return the terraform commands without executing them.",
+	}, terraformTool(runtime))
 }
 
 // registerInspectionTools registers the repo-state and source-contribution

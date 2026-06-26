@@ -49,6 +49,8 @@ Skills come in two kinds: *Blueprint* (ERun's accumulated best practices for ind
 | `erun-blueprint-rls-db` | Blueprint | Build a multi-tenant PostgreSQL schema with row-level security, modelled on `erun-backend-db`. |
 | `erun-blueprint-api` | Blueprint | Build a multi-tenant Go HTTP API service modelled on `erun-backend-api`. |
 | `erun-blueprint-docs` | Blueprint | Scaffold a Docusaurus docs site that publishes to Cloudflare Pages, modelled on `erun-docs`. |
+| `erun-blueprint-platform` | Blueprint | Lay down the per-env Terraform tree and Helm value overlays that reference erun's published modules and charts, for standing up a hosted erun platform ([spec](/agent-reference/skills-spec#erun-blueprint-platform)). |
+| `erun-enable-hosting-edge` | Workflow | Stand up the public hosting edge — Traefik, cert-manager, and a Cloudflare DNS-01 wildcard-TLS issuer — by applying erun's published Terraform module ([spec](/agent-reference/skills-spec#erun-enable-hosting-edge)). |
 | `erun-file-issue` | Workflow | File a bug or feature against ERun on GitHub (`sophium/erun`). |
 | `erun-contribute` | Workflow | Create a new issue against `sophium/erun`, then drive the full clone → branch → implement → PR motion to share your improvement back. |
 | `erun-build-env` | Workflow | Extend ERun's published runtime image with your project's own toolchain and point the environment at the custom image ([spec](/agent-reference/skills-spec#erun-build-env)). |
