@@ -1,6 +1,13 @@
 terraform {
   required_version = ">= 1.3"
 
+  # Pure module: no `provider` blocks here. The caller (the root config the
+  # erun-enable-hosting-edge skill generates, or any root that uses this module)
+  # configures the helm + kubernetes providers — in-cluster service account in a
+  # pod, KUBECONFIG on a laptop. This keeps the module usable via
+  # `module { source = "git::…/terraform-erun-cluster-edge?ref=v<version>" }`,
+  # referenced from erun's GitHub the same way `deploy` references the published
+  # Helm chart from OCI.
   required_providers {
     helm = {
       source  = "hashicorp/helm"
@@ -10,19 +17,5 @@ terraform {
       source  = "hashicorp/kubernetes"
       version = "~> 2.30"
     }
-  }
-}
-
-# Both providers target the cluster the module runs against. config_path is empty
-# by default so they use the standard loading rules: the in-cluster service
-# account when applied from inside a pod (the production path — erun injects the
-# Cloudflare token there), or KUBECONFIG / ~/.kube/config on a laptop / CI.
-provider "kubernetes" {
-  config_path = var.kubeconfig_path != "" ? pathexpand(var.kubeconfig_path) : null
-}
-
-provider "helm" {
-  kubernetes {
-    config_path = var.kubeconfig_path != "" ? pathexpand(var.kubeconfig_path) : null
   }
 }

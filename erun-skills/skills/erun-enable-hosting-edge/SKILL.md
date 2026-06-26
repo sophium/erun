@@ -30,23 +30,47 @@ zone. It's idempotent — re-running reconciles.
 
 ## Apply
 
-The module ships **baked into the runtime image** at `/etc/erun/terraform-erun`
-(so erun-prod applies it with no repo clone and no manual operator step); on a
-laptop it falls back to a shallow clone. Copy it to a writable dir first —
-terraform writes its state and `.terraform/` next to the module, and the baked
-copy is read-only. The Cloudflare token is passed through
-`TF_VAR_cloudflare_api_token` — never on the command line, so it stays out of
-shell history and process args.
+The module is **referenced from erun's GitHub** by Terraform's native module
+addressing — not baked into the image, not cloned — pinned to the erun version
+this env runs so the edge matches the deployed platform (the same way `deploy`
+references the published Helm chart from OCI). Write a tiny root that declares
+the providers and calls the module; `terraform init` fetches it. The Cloudflare
+token rides in `TF_VAR_cloudflare_api_token`, never on the command line.
 
 ```sh
-workdir=$(mktemp -d)
-if [ -d /etc/erun/terraform-erun ]; then
-    cp -r /etc/erun/terraform-erun "$workdir/terraform-erun"      # baked into the image
-else
-    git clone --depth 1 https://github.com/sophium/erun "$workdir/erun"
-    cp -r "$workdir/erun/erun-devops/terraform-erun" "$workdir/terraform-erun"
-fi
-cd "$workdir/terraform-erun/modules/terraform-erun-cluster-edge"
+# Pin to the running erun version; off-pod, fall back to main.
+version=$(erun version 2>/dev/null | head -n1 | tr -d '[:space:]' | sed 's/^v//')
+ref="v${version:-main}"; [ "$ref" = "vmain" ] && ref="main"
+
+workdir=$(mktemp -d); cd "$workdir"
+cat > main.tf <<EOF
+terraform {
+  required_providers {
+    helm       = { source = "hashicorp/helm", version = "~> 2.17" }
+    kubernetes = { source = "hashicorp/kubernetes", version = "~> 2.30" }
+  }
+}
+# In a pod these use the in-cluster service account; on a laptop, KUBECONFIG.
+provider "kubernetes" {}
+provider "helm" {
+  kubernetes {}
+}
+
+variable "cloudflare_api_token" {
+  type      = string
+  sensitive = true
+}
+variable "services_zone" { type = string }
+variable "acme_email"    { type = string }
+
+module "edge" {
+  source = "git::https://github.com/sophium/erun.git//erun-devops/terraform-erun/modules/terraform-erun-cluster-edge?ref=${ref}"
+
+  cloudflare_api_token = var.cloudflare_api_token
+  services_zone        = var.services_zone
+  acme_email           = var.acme_email
+}
+EOF
 
 export TF_VAR_cloudflare_api_token="$CLOUDFLARE_API_TOKEN"
 terraform init -input=false

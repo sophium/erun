@@ -82,9 +82,3 @@ variable "traefik_chart_version" {
   type        = string
   default     = "33.2.1"
 }
-
-variable "kubeconfig_path" {
-  description = "Path to a kubeconfig for the target cluster. Empty uses the default loading rules (in-cluster service account in a pod, else KUBECONFIG / ~/.kube/config)."
-  type        = string
-  default     = ""
-}

@@ -202,12 +202,6 @@ COPY --chmod=0644 erun-devops/docker/erun-devops/bash_prompt.sh /etc/erun/bash_p
 # ~/.codex/skills (re-chmodding the destination files to 0644). 0644 here would
 # leave the dirs un-searchable and the install would silently copy nothing.
 COPY --chmod=0755 erun-skills/skills /etc/erun/skills
-# Bake the erun terraform modules into the image (issue #687), the same
-# "ships with the image" model as skills: a runtime pod / erun-prod runs the
-# custom image and its baked skills (erun-enable-hosting-edge) apply these
-# modules from /etc/erun/terraform-erun — no repo clone, no manual operator step.
-# 0755 so the unprivileged erun user can enter the module directories.
-COPY --chmod=0755 erun-devops/terraform-erun /etc/erun/terraform-erun
 
 RUN /usr/local/bin/erun completion bash > /etc/bash_completion.d/erun && \
     chmod 0644 /etc/bash_completion.d/erun
