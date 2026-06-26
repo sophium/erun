@@ -18,6 +18,7 @@ export {
   submitManageConfig,
   toggleManageVersionChoices,
   updateManageClaudeConfig,
+  updateManageCloudAliasSlot,
   updateManageConfig,
   updateManageDialog,
   updateManageSSHDConfig,

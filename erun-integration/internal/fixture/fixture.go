@@ -350,6 +350,43 @@ func SeedRemoteTenantEnv(t testing.TB, setup env.Setup, tenant, environment stri
 	)
 }
 
+// SeedRuntimeTenantEnvNoVersion writes a runtime-type env tree with NO
+// runtimeversion (and no local/published chart), reproducing the fresh-env
+// decision path that the desktop create regression (#644) hit: with no version
+// to deploy, the published-chart resolver bails with "runtime version is
+// required". Every other fixture pins runtimeversion: 1.0.0, so this is the
+// single fixture that locks the empty-version path under `open --deploy`.
+func SeedRuntimeTenantEnvNoVersion(t testing.TB, setup env.Setup, tenant, environment string) {
+	t.Helper()
+	root := filepath.Join(setup.ConfigHome, "erun")
+	tenantDir := filepath.Join(root, tenant)
+	envDir := filepath.Join(tenantDir, environment)
+	for _, dir := range []string{root, tenantDir, envDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	repoPath := filepath.Join(setup.Home, "git", tenant)
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("mkdir repo %s: %v", repoPath, err)
+	}
+
+	mustWrite(t, filepath.Join(root, "config.yaml"), "defaulttenant: "+tenant+"\n")
+	mustWrite(t, filepath.Join(tenantDir, "config.yaml"),
+		"projectroot: "+repoPath+"\n"+
+			"name: "+tenant+"\n"+
+			"defaultenvironment: "+environment+"\n",
+	)
+	mustWrite(t, filepath.Join(envDir, "config.yaml"),
+		"name: "+environment+"\n"+
+			"repopath: "+repoPath+"\n"+
+			"kubernetescontext: test-context\n"+
+			"containerregistry: registry.example/test\n"+
+			"type: runtime\n",
+	)
+}
+
 // SeedLegacyRemoteTenantEnv writes a tenant/env tree whose env config carries
 // the retired pre-#376 `remote: true` shape with no `type` and no `snapshot`.
 // It exists to exercise EnvConfig.UnmarshalYAML's legacy migration on read:
@@ -427,11 +464,14 @@ func SeedRemoteTenantEnvWithClaude(t testing.TB, setup env.Setup, tenant, enviro
 	)
 }
 
-// SeedRemoteTenantEnvWithHostCredentials writes the same tree as
-// SeedRemoteTenantEnv but flips the remotehostcredentials toggle on, so
-// scenarios can exercise the deploy plumbing that injects AWS_PROFILE into
-// the remote runtime when the env opts in to host-credential push.
-func SeedRemoteTenantEnvWithHostCredentials(t testing.TB, setup env.Setup, tenant, environment string) {
+// SeedRemoteTenantEnvWithAWSAlias writes the same tree as SeedRemoteTenantEnv
+// but attaches an AWS cloud alias to the env. Attaching an AWS alias is the
+// operator opting the env into acting on their behalf, so it drives the deploy
+// plumbing that injects host AWS credentials into the remote runtime
+// (--set cloudContext.useHostCredentials=true). The desktop refresher writes
+// the matching profile into the pod's ~/.aws/credentials at runtime — that path
+// is tested in erun-mcp.
+func SeedRemoteTenantEnvWithAWSAlias(t testing.TB, setup env.Setup, tenant, environment string) {
 	t.Helper()
 	SeedRemoteTenantEnv(t, setup, tenant, environment)
 	envDir := filepath.Join(setup.ConfigHome, "erun", tenant, environment)
@@ -442,7 +482,7 @@ func SeedRemoteTenantEnvWithHostCredentials(t testing.TB, setup env.Setup, tenan
 			"containerregistry: registry.example/test\n"+
 			"runtimeversion: 1.0.0\n"+
 			"type: remote-agent\n"+
-			"remotehostcredentials: true\n",
+			"cloudprovideralias: ops+123456789012@aws\n",
 	)
 }
 
@@ -711,6 +751,25 @@ func SeedProjectK8sConfig(t testing.TB, setup env.Setup, body string) {
 		t.Fatalf("mkdir %s: %v", dir, err)
 	}
 	mustWrite(t, filepath.Join(dir, "config.yaml"), body)
+}
+
+// SeedTerraformEnvRoot materializes a platform's per-env Terraform root
+// (terraform-<tenant>/<environment>/) so `erun terraform` resolves a folder to
+// run in: a canonical common.tf + variables.tf at the tree root, and the env's
+// own main.tf + <environment>.tfvars in its folder. Mirrors the layout the
+// erun-blueprint-platform skill scaffolds (the per-env common.tf is a symlink to
+// the root in real trees; the command only needs the folder + tfvars to resolve).
+func SeedTerraformEnvRoot(t testing.TB, setup env.Setup, tenant, environment string) {
+	t.Helper()
+	root := filepath.Join(setup.Cwd, "terraform-"+tenant)
+	envDir := filepath.Join(root, environment)
+	if err := os.MkdirAll(envDir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", envDir, err)
+	}
+	mustWrite(t, filepath.Join(root, "common.tf"), "terraform {\n  required_version = \">= 1.3\"\n}\n")
+	mustWrite(t, filepath.Join(root, "variables.tf"), "variable \"base_domain\" {\n  type = string\n}\n")
+	mustWrite(t, filepath.Join(envDir, "main.tf"), "# "+environment+" services\n")
+	mustWrite(t, filepath.Join(envDir, environment+".tfvars"), "base_domain = \"erunpaas.com\"\n")
 }
 
 // SeedDevopsBackendCharts seeds the three opt-in backend charts

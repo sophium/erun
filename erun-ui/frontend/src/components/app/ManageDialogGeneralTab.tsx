@@ -1,24 +1,29 @@
 import { Cog, LoaderCircle, Play, Power, Server } from 'lucide-react';
 import * as React from 'react';
 
-import { environmentTypeIsRemoteWorktree } from '@/app/environmentType';
 import { openGlobalConfigDialog } from '@/app/globalConfigThunks';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import {
   closeManageDialog,
   startManageCloudContext,
   stopManageCloudContext,
+  updateManageCloudAliasSlot,
   updateManageConfig,
 } from '@/app/manageEnvironmentThunks';
 import { loadSavedPastContainerRegistries } from '@/app/storage';
 import { ContainerRegistriesField } from '@/components/app/ContainerRegistriesField';
 import { uniqueSuggestions } from '@/components/app/EditableComboField.helpers';
 import { EmptyState } from '@/components/app/EmptyState';
-import { CheckboxField, ReadonlyField, StatusBadge } from '@/components/app/ManageDialog.fields';
+import { cloudProviderTypeLabel } from '@/components/app/GlobalConfigDialog.helpers';
+import { ReadonlyField, StatusBadge } from '@/components/app/ManageDialog.fields';
 import { SelectField } from '@/components/app/SelectField';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { EnvironmentTypeValues, type UICloudContextStatus } from '@/types';
+import {
+  EnvironmentTypeValues,
+  type UICloudContextStatus,
+  type UIEnvironmentCloudAlias,
+} from '@/types';
 
 // Sentinel for the clear ("— None —") option in the cloud-alias dropdown.
 // Radix Select rejects an empty-string item value, so the option carries this
@@ -57,15 +62,7 @@ export function GeneralTab(): React.ReactElement {
           dispatch(updateManageConfig({ containerRegistries }));
         }}
       />
-      <CloudAliasSelect
-        id="environment-config-cloudprovideralias"
-        value={config.cloudProviderAlias}
-        options={config.cloudProviderAliases ?? []}
-        disabled={dialog.busy}
-        onChange={(cloudProviderAlias) => {
-          dispatch(updateManageConfig({ cloudProviderAlias }));
-        }}
-      />
+      <CloudAliasSlots config={config} disabled={dialog.busy} />
       <CloudContextField
         context={config.cloudContext}
         cloudProviderAlias={config.cloudProviderAlias}
@@ -84,17 +81,6 @@ export function GeneralTab(): React.ReactElement {
           dispatch(updateManageConfig({ type }));
         }}
       />
-      {environmentTypeIsRemoteWorktree(config.type) && (
-        <CheckboxField
-          id="environment-config-remotehostcredentials"
-          label="Use host AWS credentials inside this env"
-          checked={config.remoteHostCredentials}
-          disabled={dialog.busy}
-          onChange={(remoteHostCredentials) => {
-            dispatch(updateManageConfig({ remoteHostCredentials }));
-          }}
-        />
-      )}
     </>
   );
 }
@@ -146,14 +132,79 @@ function EnvironmentTypeField({
   );
 }
 
+// CloudAliasSlots renders one cloud-alias selector per provider type the env
+// can attach (issue #630): an AWS account AND a Cloudflare token can be linked
+// independently, each with its own "— None —" clear option. The per-type slots
+// come from the backend (EnvConfig.ResolvedCloudAliases grouped by type). When
+// the backend predates slots, a single AWS selector renders as a fallback so
+// the control never disappears.
+function CloudAliasSlots({
+  config,
+  disabled,
+}: {
+  config: {
+    cloudAliasSlots?: UIEnvironmentCloudAlias[];
+    cloudProviderAlias: string;
+    cloudProviderAliases?: string[];
+  };
+  disabled?: boolean;
+}): React.ReactElement {
+  const dispatch = useAppDispatch();
+  const slots = config.cloudAliasSlots ?? [];
+  if (slots.length === 0) {
+    return (
+      <CloudAliasSelect
+        id="environment-config-cloudprovideralias"
+        label="Cloud alias"
+        value={config.cloudProviderAlias}
+        options={config.cloudProviderAliases ?? []}
+        disabled={disabled}
+        onChange={(alias) => {
+          dispatch(updateManageConfig({ cloudProviderAlias: alias }));
+        }}
+      />
+    );
+  }
+  return (
+    <>
+      {slots.map((slot) => (
+        <CloudAliasSelect
+          key={slot.provider}
+          id={cloudAliasSlotFieldId(slot.provider)}
+          label={cloudProviderTypeLabel(slot.provider)}
+          value={slot.alias}
+          options={slot.options}
+          disabled={disabled}
+          onChange={(alias) => {
+            dispatch(updateManageCloudAliasSlot(slot.provider, alias));
+          }}
+        />
+      ))}
+    </>
+  );
+}
+
+// cloudAliasSlotFieldId keeps the AWS slot on the historical id
+// (#environment-config-cloudprovideralias) so the long-standing AWS selector
+// contract — and the specs that target it — stay stable, while every other
+// provider type gets a suffixed id so the per-type selectors are addressable.
+function cloudAliasSlotFieldId(provider: string): string {
+  const type = provider.trim().toLowerCase();
+  return type === '' || type === 'aws'
+    ? 'environment-config-cloudprovideralias'
+    : `environment-config-cloudprovideralias-${type}`;
+}
+
 function CloudAliasSelect({
   id,
+  label,
   value,
   options,
   disabled,
   onChange,
 }: {
   id: string;
+  label: string;
   value: string;
   options: string[];
   disabled?: boolean;
@@ -169,11 +220,11 @@ function CloudAliasSelect({
   if (selectOptions.length === 0) {
     return (
       <div className="grid gap-2">
-        <Label htmlFor={id}>Cloud alias</Label>
+        <Label htmlFor={id}>{label}</Label>
         <EmptyState
           icon={<Server />}
           heading="No cloud aliases configured"
-          body="Cloud aliases are how ERun connects to your AWS account. Add one in ERun settings to link this environment to a cloud context."
+          body="Cloud aliases are how ERun connects to your cloud accounts. Add one in ERun settings to link this environment."
           action={
             <Button
               type="button"
@@ -205,11 +256,12 @@ function CloudAliasSelect({
   return (
     <SelectField
       id={id}
-      label="Cloud alias"
+      label={label}
       value={normalizedValue}
       options={optionItems}
       placeholder="Select cloud alias"
       emptyLabel="No cloud aliases configured"
+      helper="Attaching an alias delivers its credentials into this environment, so it can act on your behalf."
       disabled={disabled}
       onChange={(next) => {
         onChange(next === CLOUD_ALIAS_NONE_VALUE ? '' : next);

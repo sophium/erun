@@ -144,16 +144,22 @@ export class ManageDialog {
     return this.locator().getByRole('button', { name: `Remove registry ${String(index + 1)}` });
   }
 
-  // envTypeFieldValue reads the "Environment type" readonly field on the
-  // General tab so specs can pick a remote env without a backend round-trip.
-  // ReadonlyField puts the human label on the element with the field id and
-  // labels the value sibling with aria-labelledby, so the value lives on
-  // [aria-labelledby="<id>"], not on the id'd node itself.
+  // envTypeFieldValue reads the "Environment type" field on the General tab so
+  // specs can read the env's resolved type without a backend round-trip.
+  //
+  // The type field used to be a ReadonlyField (value carried on a sibling
+  // labelled [aria-labelledby="environment-config-type"]), but #617 turned it
+  // into the correctable EnvironmentTypeField SelectField whose value text
+  // lives on the trigger itself (id="environment-config-type"). The old
+  // aria-labelledby selector matches nothing now, which silently read every
+  // type as "" — caught here and fixed alongside the #630 cloud-alias work.
+  // Read the SelectField trigger's text content (its selected-value label).
   async envTypeFieldValue(): Promise<string> {
-    const field = this.locator().locator('[aria-labelledby="environment-config-type"]');
-    if (!(await field.isVisible().catch(() => false))) {
+    const field = this.environmentTypeSelect();
+    if ((await field.count()) === 0) {
       return '';
     }
+    await field.scrollIntoViewIfNeeded().catch(() => undefined);
     return (await field.textContent())?.trim() ?? '';
   }
 
@@ -225,6 +231,44 @@ export class ManageDialog {
   async chooseCloudAliasNone(): Promise<void> {
     await this.openCloudAliasOptions();
     await this.cloudAliasNoneOption().click();
+  }
+
+  // --- Per-provider-type cloud-alias selectors (issue #630) ---
+
+  // cloudAliasSlotSelect targets the per-provider-type cloud-alias selector on
+  // the General tab. The AWS slot keeps the historical id
+  // (#environment-config-cloudprovideralias); every other provider type
+  // ("cloudflare") uses a suffixed id, so an env attaching both aliases renders
+  // two addressable selectors.
+  cloudAliasSlotSelect(providerType: string): Locator {
+    const type = providerType.trim().toLowerCase();
+    const id =
+      type === '' || type === 'aws'
+        ? 'environment-config-cloudprovideralias'
+        : `environment-config-cloudprovideralias-${type}`;
+    return this.locator().locator(`#${id}`);
+  }
+
+  async cloudAliasSlotVisible(providerType: string): Promise<boolean> {
+    return this.cloudAliasSlotSelect(providerType)
+      .isVisible()
+      .catch(() => false);
+  }
+
+  async cloudAliasSlotValue(providerType: string): Promise<string> {
+    return (await this.cloudAliasSlotSelect(providerType).textContent())?.trim() ?? '';
+  }
+
+  async openCloudAliasSlotOptions(providerType: string): Promise<void> {
+    await this.cloudAliasSlotSelect(providerType).click();
+  }
+
+  // hostAwsCredentialsCheckbox targets the removed standalone "Use host AWS
+  // credentials" toggle. It must not render — attaching an AWS alias now
+  // delivers its credentials into the env (issue #641), so there is no separate
+  // toggle to reconcile against the alias selectors.
+  hostAwsCredentialsCheckbox(): Locator {
+    return this.locator().getByLabel('Use host AWS credentials inside this env');
   }
 
   // claudeEffortSelect targets the "Effort" SelectField in the Claude section

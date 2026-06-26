@@ -18,7 +18,7 @@ test.describe('sidebar env hover card', () => {
     await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
 
     const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
-    await expect(card).toBeVisible({ timeout: 6_000 });
+    await expect(card).toBeVisible();
 
     // All three sections are present.
     await expect(card.getByText('Version', { exact: true })).toBeVisible();
@@ -51,10 +51,10 @@ test.describe('sidebar env hover card', () => {
 
     await app.sidebar.hoverEnvironmentRow(tenant, environment);
     const card = app.sidebar.envHoverCard(tenant, environment);
-    await expect(card).toBeVisible({ timeout: 6_000 });
+    await expect(card).toBeVisible();
 
     const activity = card.locator('dd').nth(2);
-    await expect(activity).toHaveText('Not open', { timeout: 6_000 });
+    await expect(activity).toHaveText('Not open');
 
     const workingOn = card.locator('dd').nth(1);
     await expect.poll(async () => (await workingOn.textContent())?.trim() ?? '').not.toBe('');
@@ -74,14 +74,14 @@ test.describe('sidebar env hover card', () => {
 
     await app.sidebar.openEnvironment(tenant, environment);
     const dot = app.sidebar.envOpenDot(tenant, environment);
-    await expect(dot).toBeVisible({ timeout: 6_000 });
+    await expect(dot).toBeVisible();
 
     // The open click left the pointer on the row, so hovering it again would
     // be a no-op (no fresh mouseenter) — park the pointer elsewhere first.
     await page.mouse.move(0, 0);
     await app.sidebar.hoverEnvironmentRow(tenant, environment);
     const card = app.sidebar.envHoverCard(tenant, environment);
-    await expect(card).toBeVisible({ timeout: 6_000 });
+    await expect(card).toBeVisible();
 
     // Let the open settle first: the in-flight open's busy label outranks
     // the stopped state by design, and the spawn path itself emits a
@@ -96,14 +96,14 @@ test.describe('sidebar env hover card', () => {
     });
 
     await emitEnvStatusEvent(page, tenant, environment, 'stopped');
-    await expect(dot).toHaveAttribute('data-env-state', 'stopped', { timeout: 4_000 });
-    await expect(activity).toContainText('Stopped', { timeout: 4_000 });
+    await expect(dot).toHaveAttribute('data-env-state', 'stopped');
+    await expect(activity).toContainText('Stopped');
 
     // Restore the row's healthy state and close the env for later specs.
     await emitEnvStatusEvent(page, tenant, environment, '');
-    await expect(dot).toHaveAttribute('data-env-state', 'running', { timeout: 4_000 });
+    await expect(dot).toHaveAttribute('data-env-state', 'running');
     await dot.click();
-    await expect(dot).toHaveCount(0, { timeout: 6_000 });
+    await expect(dot).toHaveCount(0);
   });
 });
 

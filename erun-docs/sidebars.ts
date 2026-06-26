@@ -39,6 +39,7 @@ const sidebars: SidebarsConfig = {
         'cli/push',
         'cli/deploy',
         'cli/expose',
+        'cli/terraform',
         'cli/upgrade',
         'cli/cloud',
         'cli/context',
@@ -161,6 +162,7 @@ const sidebars: SidebarsConfig = {
       label: 'Admin',
       link: { type: 'generated-index' },
       items: [
+        'deployment/deploy-platform',
         'deployment/release-flow',
         'deployment/cloud-setup',
       ],

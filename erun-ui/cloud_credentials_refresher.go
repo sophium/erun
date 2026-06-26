@@ -43,10 +43,11 @@ func (a *App) cloudCredentialsRefresherKey(selection uiSelection) string {
 
 // startCloudCredentialsRefresherForSelection arms a background goroutine that
 // keeps the runtime pod's ~/.aws/credentials seeded with temporary credentials
-// derived from the host profile picked by the env's CloudProviderAlias. The
-// refresh is opt-in per env (EnvConfig.RemoteHostCredentials) and only
-// applies to AWS-backed remotes. Idempotent: a second call for the same
-// selection is a no-op.
+// derived from the host profile picked by the env's CloudProviderAlias. It
+// applies whenever an AWS cloud alias is attached to a remote env — attaching
+// the alias is the operator opting the env into acting on their behalf, so no
+// separate toggle gates it. Idempotent: a second call for the same selection
+// is a no-op.
 func (a *App) startCloudCredentialsRefresherForSelection(selection uiSelection) {
 	selection = normalizeSelection(selection)
 	alias, result, ok := a.resolveCloudCredentialsRefreshTarget(selection)
@@ -75,11 +76,11 @@ func (a *App) startCloudCredentialsRefresherForSelection(selection uiSelection) 
 }
 
 // resolveCloudCredentialsRefreshTarget evaluates the per-env preconditions that
-// gate the host-credential refresher: a non-empty tenant/env, the
-// RemoteHostCredentials opt-in on a remote worktree, a configured AWS-backed
-// cloud provider alias, and a resolvable open target. It returns the provider
-// alias and resolved OpenResult plus ok=true only when every precondition holds;
-// any failing check returns ok=false so the caller becomes a no-op.
+// gate the host-credential refresher: a non-empty tenant/env, a remote worktree,
+// a configured AWS-backed cloud provider alias, and a resolvable open target. It
+// returns the provider alias and resolved OpenResult plus ok=true only when every
+// precondition holds; any failing check returns ok=false so the caller becomes a
+// no-op.
 func (a *App) resolveCloudCredentialsRefreshTarget(selection uiSelection) (string, eruncommon.OpenResult, bool) {
 	if selection.Tenant == "" || selection.Environment == "" {
 		return "", eruncommon.OpenResult{}, false
@@ -88,12 +89,21 @@ func (a *App) resolveCloudCredentialsRefreshTarget(selection uiSelection) (strin
 	if err != nil {
 		return "", eruncommon.OpenResult{}, false
 	}
-	if !envConfig.RemoteHostCredentials || !envConfig.RemoteWorktree() {
+	if !envConfig.RemoteWorktree() {
 		return "", eruncommon.OpenResult{}, false
 	}
+	// CloudProviderAlias is the legacy scalar that always holds the env's AWS
+	// alias; non-AWS aliases (Cloudflare) live in EnvConfig.CloudProviderAliases
+	// and never reach this scalar. So a Cloudflare-attached env that carries no
+	// AWS alias reads as "" here and the refresher no-ops — exactly the desired
+	// behavior. Cloudflare credentials are delivered at deploy time via a chart
+	// Secret minted by the erun binary, not pushed by this host-credential timer.
 	if strings.TrimSpace(envConfig.CloudProviderAlias) == "" {
 		return "", eruncommon.OpenResult{}, false
 	}
+	// Defense in depth: even if a Cloudflare alias somehow landed in the scalar,
+	// the strict provider-type gate keeps the AWS-only credential push from
+	// trying to export temporary credentials from a token-based provider.
 	provider, err := eruncommon.ResolveCloudProvider(a.deps.store, envConfig.CloudProviderAlias)
 	if err != nil || provider.Provider != eruncommon.CloudProviderAWS {
 		return "", eruncommon.OpenResult{}, false
@@ -135,7 +145,7 @@ func (a *App) stopCloudCredentialsRefresherForSelection(selection uiSelection) {
 	endpoint := mcpEndpointForOpenResult(result)
 	clearCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_ = clearCloudHostCredentialsViaMCP(clearCtx, endpoint)
+	_ = clearCloudHostCredentialsViaMCP(clearCtx, endpoint, a.mcpBearer(selection.Tenant, selection.Environment))
 }
 
 func (a *App) stopAllCloudCredentialsRefreshersLocked() {
@@ -172,7 +182,8 @@ func (a *App) runCloudCredentialsRefresher(ctx context.Context, selection uiSele
 			}
 			continue
 		}
-		if err := injectCloudHostCredentialsViaMCP(ctx, endpoint, creds.AccessKeyID, creds.SecretAccessKey, creds.SessionToken, creds.Expiration); err != nil {
+		bearer := a.mcpBearer(result.Tenant, result.EnvConfig.Name)
+		if err := injectCloudHostCredentialsViaMCP(ctx, endpoint, bearer, creds.AccessKeyID, creds.SecretAccessKey, creds.SessionToken, creds.Expiration); err != nil {
 			a.surfaceCredentialRefreshFailure(selection, fmt.Errorf("inject host credentials into runtime: %w", err), &notifiedFailure)
 			if !sleepWithCancel(ctx, credentialRefreshBackoff) {
 				return

@@ -451,7 +451,7 @@ func TestLoadDiffUsesSelectedMCPPort(t *testing.T) {
 			ensureCalls++
 			return nil
 		},
-		loadDiff: func(_ context.Context, endpoint string, options uiDiffOptions) (eruncommon.DiffResult, error) {
+		loadDiff: func(_ context.Context, endpoint, _ string, options uiDiffOptions) (eruncommon.DiffResult, error) {
 			gotEndpoint = endpoint
 			if options.Scope != "commit" || options.SelectedCommit != "abc123" {
 				t.Fatalf("unexpected diff options: %+v", options)
@@ -503,7 +503,7 @@ func TestLoadDiffReturnsUnreachableWhenPortClosed(t *testing.T) {
 			ensureCalls++
 			return nil
 		},
-		loadDiff: func(_ context.Context, _ string, _ uiDiffOptions) (eruncommon.DiffResult, error) {
+		loadDiff: func(_ context.Context, _, _ string, _ uiDiffOptions) (eruncommon.DiffResult, error) {
 			loadCalls++
 			return eruncommon.DiffResult{}, nil
 		},
@@ -548,7 +548,7 @@ func TestLoadDiffWrapsDialFailureAsUnreachable(t *testing.T) {
 			ensureCalls++
 			return nil
 		},
-		loadDiff: func(_ context.Context, _ string, _ uiDiffOptions) (eruncommon.DiffResult, error) {
+		loadDiff: func(_ context.Context, _, _ string, _ uiDiffOptions) (eruncommon.DiffResult, error) {
 			return eruncommon.DiffResult{}, errors.New("EOF")
 		},
 	})
@@ -1058,6 +1058,11 @@ func TestStartDeploySessionPipesCommandToLocal(t *testing.T) {
 			return s, nil
 		},
 	})
+	// No desktop identity: the in-shell deploy stays unauthenticated, so this
+	// test asserts the bare `erun deploy ...` command without the
+	// --mcp-auth-public-key flag (issue #655). The auth-injecting path is
+	// covered by its own test below.
+	app.identity = nil
 	defer app.shutdown(context.Background())
 
 	result, err := app.StartDeploySession(uiSelection{Tenant: " erun ", Environment: " remote ", Version: " 1.0.19 "}, 80, 24)
@@ -1070,6 +1075,55 @@ func TestStartDeploySessionPipesCommandToLocal(t *testing.T) {
 	written := sessions[0].WrittenString()
 	if !strings.Contains(written, "/tmp/erun deploy erun remote --version 1.0.19\n") {
 		t.Fatalf("expected deploy command in Local pty, got %q", written)
+	}
+}
+
+// TestStartDeploySessionInjectsMCPAuthPublicKey covers the auth-injecting half
+// of the deploy path (issue #655): when the desktop has a signing identity, the
+// in-shell `erun deploy` carries `--mcp-auth-public-key <path>` so the deployed
+// env requires the same desktop-signed bearer the desktop sends to its MCP
+// edge. The identity is pinned to a temp dir so the test never touches the
+// developer's real config and the public key lands at a deterministic path.
+func TestStartDeploySessionInjectsMCPAuthPublicKey(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {Name: "erun", DefaultEnvironment: "remote"},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
+		},
+	}
+
+	var sessions []*stubTerminalSession
+	app := NewApp(erunUIDeps{
+		store:           store,
+		findProjectRoot: func() (string, string, error) { return "erun", projectRoot, nil },
+		resolveCLIPath:  func() string { return "/tmp/erun" },
+		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+			s := newStubTerminalSession()
+			sessions = append(sessions, s)
+			return s, nil
+		},
+	})
+	identityDir := t.TempDir()
+	app.identity = newDesktopIdentity(identityDir)
+	defer app.shutdown(context.Background())
+
+	if _, err := app.StartDeploySession(uiSelection{Tenant: "erun", Environment: "remote", Version: "1.0.19"}, 80, 24); err != nil {
+		t.Fatalf("StartDeploySession failed: %v", err)
+	}
+	wantPath := filepath.Join(identityDir, desktopIdentityPubFile)
+	written := sessions[0].WrittenString()
+	// The path is shell-quoted by buildLocalErunCommand only when it needs it
+	// (e.g. spaces in the temp dir), so assert against the same quoting helper
+	// rather than a fixed literal.
+	wantFlag := "--mcp-auth-public-key " + shellQuoteIfNeeded(wantPath)
+	if !strings.Contains(written, "deploy erun remote --version 1.0.19 "+wantFlag+"\n") {
+		t.Fatalf("expected deploy command to carry %q, got %q", wantFlag, written)
+	}
+	if _, err := os.Stat(wantPath); err != nil {
+		t.Fatalf("expected desktop public key written to %q: %v", wantPath, err)
 	}
 }
 
@@ -2440,7 +2494,7 @@ func TestSaveRemoteEnvironmentConfigSetsCloudAliasViaMCP(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store:               store,
 		canConnectLocalPort: func(int) bool { return true },
-		setRemoteCloudAlias: func(_ context.Context, endpoint, tenant, environment, alias string) (eruncommon.EnvConfig, error) {
+		setRemoteCloudAlias: func(_ context.Context, endpoint, _, tenant, environment, alias string) (eruncommon.EnvConfig, error) {
 			remoteEndpoint = endpoint
 			remoteTenant = tenant
 			remoteEnvironment = environment
@@ -2515,10 +2569,11 @@ func TestStartSessionLeavesCloudContextStartupToErunCommand(t *testing.T) {
 	}
 
 	got := strings.Join(actions, "\n")
-	// The ERun tab runs `erun open … --app-session open-0 --skip-ensure`: a
-	// persistent, reattachable dtach session (#478) whose preflight runs once
-	// per env via the shared ensure, not per tab (#463).
-	if got != "terminal open frs prod --app-session open-0 --skip-ensure" {
+	// The ERun tab runs a pure `erun open … --app-session open-0` (#644): a
+	// persistent, reattachable dtach session (#478). open no longer deploys —
+	// the shared thin reconnect (#463) rebinds the forwarders, and deploy is
+	// the caller's job — so there is no --skip-ensure flag any more.
+	if got != "terminal open frs prod --app-session open-0" {
 		t.Fatalf("expected only terminal start action, got:\n%s", got)
 	}
 	// Cloud-context Status is no longer persisted, so we rely on the
@@ -3063,7 +3118,7 @@ func TestLoadIdleStatusDoesNotStopWhileEnvironmentCommandRunning(t *testing.T) {
 			return newStubTerminalSession(), nil
 		},
 		canConnectLocalPort: func(int) bool { return true },
-		loadIdleStatus: func(context.Context, string) (eruncommon.EnvironmentIdleStatus, error) {
+		loadIdleStatus: func(context.Context, string, string) (eruncommon.EnvironmentIdleStatus, error) {
 			return eruncommon.EnvironmentIdleStatus{
 				ManagedCloud: true,
 				StopEligible: true,
@@ -3750,14 +3805,15 @@ func TestStartAISessionRunsErunOpenAsPersistentAITab(t *testing.T) {
 	if started.Executable != "/tmp/erun" {
 		t.Fatalf("expected erun executable, got %q", started.Executable)
 	}
-	// The AI tab runs `erun open --app-session ai --ai`: the persistent remote
-	// session launches the AI tool itself (pod-side, once on create), so a reopen
-	// reconnects to the running claude. The desktop no longer types the launch
-	// in, so there is no initial input. The AI tool + effort are resolved pod-side
-	// by `erun open --ai`; AISessionLaunchCommand is covered in erun-common. #478.
-	// --skip-ensure: the preflight runs once per env via the shared ensure,
-	// not per tab (#463).
-	wantArgs := []string{"open", "erun", "remote", "--app-session", "ai", "--ai", "--skip-ensure"}
+	// The AI tab runs a pure `erun open --app-session ai --ai`: the persistent
+	// remote session launches the AI tool itself (pod-side, once on create), so a
+	// reopen reconnects to the running claude. The desktop no longer types the
+	// launch in, so there is no initial input. The AI tool + effort are resolved
+	// pod-side by `erun open --ai`; AISessionLaunchCommand is covered in
+	// erun-common. #478. open is pure now (#644): no --skip-ensure flag — the
+	// shared thin reconnect rebinds forwarders once per env (#463), deploy is
+	// the caller's job.
+	wantArgs := []string{"open", "erun", "remote", "--app-session", "ai", "--ai"}
 	if strings.Join(started.Args, "\n") != strings.Join(wantArgs, "\n") {
 		t.Fatalf("unexpected args: got %+v want %+v", started.Args, wantArgs)
 	}
@@ -4097,7 +4153,7 @@ func TestMaybeStopIdleClearsStaleIdleStopWhenContextIsRunningAgain(t *testing.T)
 	app := NewApp(erunUIDeps{
 		store:               store,
 		canConnectLocalPort: func(int) bool { return false },
-		loadIdleStatus: func(context.Context, string) (eruncommon.EnvironmentIdleStatus, error) {
+		loadIdleStatus: func(context.Context, string, string) (eruncommon.EnvironmentIdleStatus, error) {
 			return eruncommon.EnvironmentIdleStatus{}, fmt.Errorf("mcp unreachable")
 		},
 		stopCloudContext: func(context.Context, string) (eruncommon.CloudContextStatus, error) {

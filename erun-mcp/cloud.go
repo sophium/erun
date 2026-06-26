@@ -24,6 +24,14 @@ type CloudInitAWSInput struct {
 	Verbosity     int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
 
+type CloudInitCloudflareInput struct {
+	AccountID string `json:"accountId" jsonschema:"Cloudflare account ID the scoped API token belongs to"`
+	TokenName string `json:"tokenName" jsonschema:"label for the scoped API token"`
+	APIToken  string `json:"apiToken" jsonschema:"Cloudflare API token value (Zone + DNS edit, plus any other scopes you'll use such as Cloudflare Pages); held in the local secret store, never written to erun-config.yaml"`
+	Preview   bool   `json:"preview,omitempty" jsonschema:"when true, return the planned operation without verifying the token or saving config"`
+	Verbosity int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+}
+
 type CloudLoginInput struct {
 	Alias     string `json:"alias" jsonschema:"configured cloud provider alias to login"`
 	Preview   bool   `json:"preview,omitempty" jsonschema:"when true, return the planned operation without executing login"`
@@ -67,7 +75,7 @@ type CloudSetResult struct {
 
 func cloudListTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudListInput) (*mcp.CallToolResult, CloudListResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input CloudListInput) (*mcp.CallToolResult, CloudListResult, error) {
-		statuses, err := eruncommon.ListCloudProviderStatuses(runtime.Store, eruncommon.CloudDependencies{})
+		statuses, err := eruncommon.ListCloudProviderStatuses(runtime.Store, cloudDependencies())
 		if err != nil {
 			return nil, CloudListResult{}, err
 		}
@@ -111,6 +119,32 @@ func cloudInitAWSTool(runtime RuntimeConfig) func(context.Context, *mcp.CallTool
 	}
 }
 
+func cloudInitCloudflareTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudInitCloudflareInput) (*mcp.CallToolResult, CloudActionResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input CloudInitCloudflareInput) (*mcp.CallToolResult, CloudActionResult, error) {
+		traceOutput := strings.Builder{}
+		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		params := eruncommon.InitCloudflareCloudProviderParams{
+			AccountID: input.AccountID,
+			TokenName: input.TokenName,
+			APIToken:  input.APIToken,
+		}
+		if input.Preview {
+			plan := []string{
+				"GET https://api.cloudflare.com/client/v4/user/tokens/verify (verify scoped API token)",
+				"store cloudflare api token in the local secret store",
+				"save cloud provider alias <token-name>+<account-id>@cloudflare",
+			}
+			return nil, CloudActionResult{Preview: true, Plan: plan}, nil
+		}
+		provider, err := eruncommon.InitCloudflareCloudProvider(ctx, runtime.Store, params, cloudDependencies())
+		if err != nil {
+			return nil, CloudActionResult{}, err
+		}
+		status := eruncommon.CloudProviderTokenStatus(provider, cloudDependencies())
+		return nil, CloudActionResult{Alias: provider.Alias, Provider: status, Trace: normalizeTraceLines(traceOutput.String())}, nil
+	}
+}
+
 func cloudLoginTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudLoginInput) (*mcp.CallToolResult, CloudActionResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input CloudLoginInput) (*mcp.CallToolResult, CloudActionResult, error) {
 		alias := strings.TrimSpace(input.Alias)
@@ -122,7 +156,7 @@ func cloudLoginTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRe
 		if input.Preview {
 			return nil, CloudActionResult{Preview: true, Alias: alias, Plan: []string{"check cloud provider token status", "run provider login if token is expired"}}, nil
 		}
-		status, err := eruncommon.LoginCloudProviderAlias(ctx, runtime.Store, eruncommon.CloudLoginParams{Alias: alias}, eruncommon.CloudDependencies{})
+		status, err := eruncommon.LoginCloudProviderAlias(ctx, runtime.Store, eruncommon.CloudLoginParams{Alias: alias}, cloudDependencies())
 		if err != nil {
 			return nil, CloudActionResult{}, err
 		}
@@ -164,8 +198,10 @@ func cloudOIDCTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReq
 
 func cloudSetTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudSetInput) (*mcp.CallToolResult, CloudSetResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input CloudSetInput) (*mcp.CallToolResult, CloudSetResult, error) {
-		tenant := firstNonEmpty(strings.TrimSpace(input.Tenant), strings.TrimSpace(runtime.Context.Tenant))
-		environment := firstNonEmpty(strings.TrimSpace(input.Environment), strings.TrimSpace(runtime.Context.Environment))
+		tenant, environment, err := scopedTenantEnv(input.Tenant, input.Environment, runtime)
+		if err != nil {
+			return nil, CloudSetResult{}, err
+		}
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		config, err := eruncommon.SetEnvironmentCloudProviderAlias(ctx, runtime.Store, eruncommon.SetEnvironmentCloudAliasParams{
@@ -184,6 +220,18 @@ func cloudSetTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequ
 			Trace:       normalizeTraceLines(traceOutput.String()),
 		}, nil
 	}
+}
+
+// cloudDependencies builds the shared cloud dependency bag with the default
+// file-backed secret store wired in, so Cloudflare token operations can persist
+// and read the scoped token. AWS runners default inside erun-common. A missing
+// config dir leaves the store nil; Cloudflare operations then fail clearly.
+func cloudDependencies() eruncommon.CloudDependencies {
+	deps := eruncommon.CloudDependencies{}
+	if store, err := eruncommon.DefaultCloudSecretStore(); err == nil {
+		deps.CloudSecretStore = store
+	}
+	return deps
 }
 
 func cloudAudienceForPlan(audience string) string {

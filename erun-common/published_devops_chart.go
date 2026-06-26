@@ -52,6 +52,11 @@ func resolvePublishedDevopsDeploySpec(ctx Context, target OpenResult, versionOve
 		version = strings.TrimSpace(target.EnvConfig.RuntimeVersion)
 	}
 	if version == "" {
+		// Bailout trace (dry-run contract): name the decision that stops the
+		// plan before returning. This is the fresh-env path — no local chart
+		// and no persisted/overridden runtime version — that a desktop create
+		// must avoid by composing deploy at a built version (issue #644).
+		ctx.Trace("deploy: no local runtime chart and no runtime version resolved; cannot deploy the published " + DevopsComponentName + " chart")
 		return DeploySpec{}, fmt.Errorf("runtime version is required to deploy the published %s chart: pass --version or persist runtimeversion in the env config", DevopsComponentName)
 	}
 
@@ -68,7 +73,7 @@ func resolvePublishedDevopsDeploySpec(ctx Context, target OpenResult, versionOve
 		return DeploySpec{}, err
 	}
 	deployInput.ReleaseName = RuntimeReleaseName(target.Tenant)
-	deployInput.UseHostCredentials = target.EnvConfig.RemoteHostCredentials
+	deployInput.UseHostCredentials = target.EnvConfig.HasAWSCloudAlias()
 	deployInput.ContainerRegistry = registry
 	if image := resolveRuntimeImageOverride(registry, version, target.EnvConfig.RuntimeImage); image != "" {
 		ctx.Trace("deploy: runtime image override " + image + " (imageOverrides." + DevopsComponentName + ")")

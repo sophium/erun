@@ -24,7 +24,7 @@ Global defaults that apply across all tenants.
 | Field | Type | Used by | Effect |
 |---|---|---|---|
 | `default_tenant` | string | `erun` (no args), `erun open`, `erun list` | Tenant used when no tenant argument is supplied. |
-| `cloudproviders[]` | list | `erun init`, `erun open`, `erun cloud` | Known cloud provider identities (alias, provider, account, profile, SSO/OIDC settings). Each cloud-bound env references one by alias. |
+| `cloudproviders[]` | list | `erun init`, `erun open`, `erun cloud` | Known cloud provider identities (alias, provider, account, profile, SSO/OIDC settings). `provider` is `aws` or `cloudflare`. AWS entries carry the SSO profile and OIDC issuer; Cloudflare entries carry an account ID and a token reference into the local secret store (the scoped API token itself is never stored in this file). Each cloud-bound env references entries by alias. |
 | `cloudcontexts[]` | list | `erun open`, `erun deploy`, `erun cloud` | Known managed cloud clusters. Each binds a cluster to a provider, region, and instance type/size. |
 | `runtimeregistry.namespace` | string | `erun version`, runtime image pulls | Overrides where ERun looks for `erun-devops` and related runtime images. Useful for internal mirrors (Harbor, ECR, Artifactory). |
 | `runtimeregistry.repository` | string | same as above | Overrides the repository name in the namespace. |
@@ -55,7 +55,8 @@ One per environment. This is the most-edited file.
 | `repopath` | string | (legacy, read-only) | Removed struct field. A `repopath:` in an older config is migrated into `localRepoPath` on read and dropped on the next save; new configs only carry `localRepoPath`. ([Migration done.](#planned-changes)) |
 | `kubernetescontext` | string | `erun open`, `erun deploy`, `erun list` | Kubernetes context to deploy/open against. Special value `in-cluster` is set inside the runtime pod. |
 | `containerregistries` | list | `erun build`, `erun push`, `erun deploy`, build image tag resolution | Per-env marked registry list, set for `remote-agent`/`runtime` envs whose project config is not on the local machine (`local-agent` envs resolve the list from the project's `.erun/config.yaml` instead). Each entry is `{registry, roles}` where roles ⊆ `build`/`from`/`to`/`deploy`. See [Container registries](#container-registries). |
-| `cloudprovideralias` | string | `erun open`, `erun deploy`, idle-stop, audit labels | Which cloud provider identity backs this env. Resolves to the `cloudproviders[]` entry. |
+| `cloudprovideralias` | string | `erun open`, `erun deploy`, idle-stop, audit labels | Which AWS cloud provider identity backs this env. Resolves to a `cloudproviders[]` entry. |
+| `cloudprovideraliases` | map (provider → alias) | `erun open`, `erun deploy` | Additional cloud aliases attached to this env, keyed by provider type (e.g. `cloudflare`). AWS stays in the scalar `cloudprovideralias` above for backward compatibility; non-AWS providers live here. An env holds at most one alias per provider type, so a runtime pod can receive both an AWS identity and a Cloudflare token at once. A Cloudflare alias injects `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` for in-pod tooling. |
 | `managedcloud` | bool | helm chart (`ERUN_CLOUD_ENVIRONMENT`) | When true, marks the env as running on a managed cloud context (enables idle-stop, cloud-credential refresh, etc.). |
 | `runtimeversion` | string | `erun open`, `erun deploy`, chart appVersion | Pins the version of the runtime image used by this env. |
 | `runtimeregistry` | string | `erun open`, `erun deploy` | Overrides the registry the runtime image is pulled from (per-env). |
@@ -85,7 +86,7 @@ One per environment. This is the most-edited file.
 | `aitool` | string | desktop AI launcher, runtime entrypoint | Which Agent is the default for this env (`claude`, `codex`, …). |
 | `localportrangestart` | int | desktop port allocator | Base port for this env's local forwards (MCP, API, SSH). |
 | `autostart` | `*bool` | desktop sidebar open | `nil` = ask, `true` = always start linked cloud context on open, `false` = never. |
-| `remotehostcredentials` | bool | helm chart (cloud credentials passthrough) | Mount the host's cloud credentials into the runtime pod (for managed cloud envs). |
+| `remotehostcredentials` | bool | — (deprecated no-op) | **Deprecated.** Host AWS credential delivery now follows AWS-alias attachment: attaching an AWS cloud alias to an env delivers its credentials into the runtime pod (the alias association *is* the opt-in — "act on my behalf here"), so no separate toggle is needed. Retained only so existing configs still parse; setting it has no effect. |
 
 The four `claude.*` rows above (`usemantle`, `usebedrock`, `models[]`, `maxoutputtokens`) are the Claude values erun manages itself. The runtime chart accepts further `claude.*` values that erun never sets — pin a model, point Bedrock at a VPC endpoint, tune prompt caching — via the env's values overlay; see [Advanced chart values](#advanced-chart-values).
 

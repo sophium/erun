@@ -279,6 +279,18 @@ Key contract: the skill **explicitly reads** the cloned repo's `AGENTS.md` and e
 | Outputs | `<module>/` Docusaurus site (`docusaurus.config.ts` with `onBrokenLinks: throw`, `sidebars.ts`, `docs/`, `src/css`, `static/img`, `package.json`, `tsconfig.json`); `erun-devops/docker/<module>/{Dockerfile,entrypoint.sh}` (two-stage build → pinned wrangler); `erun-devops/k8s/<module>/{Chart.yaml,values.prod.yaml,templates/docs.yaml}` (ServiceAccount + `post-install,post-upgrade` hook Job that runs `wrangler pages deploy`). |
 | Error behaviour | Target dir already has `<module>/docusaurus.config.ts` → stop. `yarn build` fails on a broken link → fix the link, do not disable `onBrokenLinks`. `npx create-docusaurus` offline → fall back to bundled `templates/`. Cloudflare Pages project / `cf-creds` Secret missing → scaffold still succeeds; surface that the first `erun deploy` Job fails until the Direct-Upload project, custom domain, token, and Secret exist. User asks for a Git-connected Pages project → stop (Direct Upload only; a Git connection double-deploys). |
 
+### `erun-blueprint-platform`
+
+| Field | Value |
+|---|---|
+| Kind | Blueprint — packages ERun's accumulated best practices for hosted-platform deploy wiring. |
+| Source | `erun-skills/skills/erun-blueprint-platform/SKILL.md` |
+| Description | "Blueprint the deploy artifacts for a hosted erun platform — a per-env Terraform tree (terraform-\<tenant\>/) whose modules wrap erun's published Terraform modules, and the per-env Helm values overlays plus thin umbrella charts that reference erun's published OCI charts — all version-pinned to the erun release the environment runs." |
+| Triggers | "blueprint the platform", "scaffold the platform terraform", "set up the platform helm charts and terraform", "create the terraform-\<tenant\> structure", "blueprint erun platform deploy", "set up platform deploy artifacts" |
+| Inputs | The env's tenant + short env name; the erun version to pin to (`erun version` in-pod, or the env's `runtimeversion`); the platform values (`base_domain`, `services_zone`, `acme_email`); the container registry (env `containerregistry`, default `ghcr.io/sophium`). |
+| Outputs | `terraform-<tenant>/{common.tf, variables.tf, .gitignore}` (canonical providers + shared vars), `terraform-<tenant>/modules/terraform-<tenant>-cluster-edge/` (wraps erun's `terraform-erun-cluster-edge` by `?ref=v<version>`), and per env a `terraform-<tenant>/<env>/` folder whose `common.tf`/`variables.tf` are **symlinks** to the root and that adds the env's services via its own `main.tf` + `<env>.tfvars`; plus `<tenant>-devops/k8s/values.<env>.yaml` (the overlay `erun deploy` reads) and optional thin umbrella `Chart.yaml` wrappers depending on erun's published OCI charts. No `run.tf`, no per-env shell scripts — [`erun terraform apply`](/cli/terraform) owns the apply workflow. |
+| Error behaviour | `terraform-<tenant>/` already exists → stop, offer to add a new `<env>/` folder. erun version unresolvable → stop and ask (never default to `main` for production wiring). `?ref=v<version>` doesn't resolve on `terraform init` → pin to a released `vX.Y.Z`. `helm dependency build` 404s → that version's chart isn't published; pin to a pushed version. Operator asks to put the Cloudflare token in `<env>.tfvars` → refuse; it is injected as `TF_VAR_cloudflare_api_token` at apply time. |
+
 ### `erun-build-env`
 
 | Field | Value |
@@ -291,6 +303,31 @@ Key contract: the skill **explicitly reads** the cloned repo's `AGENTS.md` and e
 | Inputs | The tooling to add (packages, toolchains, CLIs); the target tenant + environment. The module and image names are fixed by convention: `<tenant>-devops` for both (see Outputs). |
 | Outputs | A `<tenant>-devops` module (outer directory name **must end in `-devops`** — `erun build` discovers the runtime build module by that suffix) containing a starter Dockerfile at `<tenant>-devops/docker/<tenant>-devops/Dockerfile` (inner directory name becomes the image name) with `FROM <registry>/erun-devops:<runtime-version>` (version read from `erun version` in-pod, or the env's `runtimeversion` / `erun list` on a laptop); a `VERSION` file at the module root (`<tenant>-devops/VERSION`, e.g. `1.0.0`) — `erun build` mints the image version from it; an `erun build` run that builds both architectures and pushes to the env's registry; the env's [`runtimeimage`](/reference/configuration#envconfig) field set to `<tenant>-devops` via `erun init --runtime-image <ref>` or a direct config edit. On the next deploy/open the image rides into the published chart as `imageOverrides.erun-devops` ([Advanced chart values](/reference/configuration#advanced-chart-values)). |
 | Error behaviour | Runtime version unresolvable (no `runtimeversion` in the env config and not inside a pod) → asks the Operator before writing the Dockerfile. Dockerfile target path already exists → stops and asks before overwriting. Module directory not ending in `-devops`, or no `VERSION` file at the module root → `erun build` fails (`dockerfile not found in current directory` / `version file not found for current module`); the skill's Steps 2–3 produce the layout that avoids both. `erun build` fails (e.g. `BINFMT_MISSING`, registry push rejected) → surfaces the build error and does not touch the env config. Base image other than `erun-devops` requested → refuses; the entrypoint, the Agent tooling, and the in-pod `erun` live in that image. |
+
+### `erun-browser-session-rest`
+
+| Field | Value |
+|---|---|
+| Kind | Workflow — authenticated REST against a host that blocks API tokens, via a reused browser session. |
+| Source | `erun-skills/skills/erun-browser-session-rest/SKILL.md` + `save-session.mjs` + `request.mjs` |
+| Description | "Make authenticated REST calls to a host whose org blocks API tokens and admin-gates OAuth, by reusing a saved browser login session (Playwright storageState)." |
+| Triggers | "authenticated REST via a browser session", "call an API that blocks API tokens", "reuse my browser login for API calls", "hit the `<host>` API without a token" |
+| Inputs | Host base URL (`ERUN_REST_BASE_URL` / `--base`); login URL (`ERUN_REST_LOGIN_URL` / `--login`); session-file path (`ERUN_REST_SESSION` / `--session`, default `./session.json`); per call: HTTP method, path, optional JSON body. No host, credentials, or IdP are baked in. |
+| Outputs | `save-session.mjs` opens a real browser for manual login (SSO + MFA) and writes a Playwright `storageState` session file (cookies only — never a password). `request.mjs` makes the authenticated call, prints the response body to stdout, and rolls the session forward (re-saves it) so refreshed cookies persist. |
+| Error behaviour | Missing base/login URL → usage error, exit 2. Session file missing/unreadable → "run save-session.mjs first", exit 2. HTTP error status → response body to stdout, status to stderr, exit 1. Expired session (401 / login redirect) → re-run `save-session.mjs`. Requires Node 18+ and Playwright (`npx playwright install chromium`). |
+| Security | The session file holds live session cookies — treat it as a secret, keep it out of git, keep it short-lived. The login is intentionally manual; the skill never stores a plaintext password. This is a fallback — prefer an API token or an approved OAuth app whenever the host allows one. |
+
+### `erun-enable-hosting-edge`
+
+| Field | Value |
+|---|---|
+| Kind | Workflow — applies the public hosting edge to a cluster through ERun's published Terraform module. |
+| Source | `erun-skills/skills/erun-enable-hosting-edge/SKILL.md` |
+| Description | "Stand up the public hosting edge for an erun cluster — a Traefik ingress controller, cert-manager, and a Cloudflare DNS-01 ClusterIssuer that issues wildcard TLS for the services zone — by applying the terraform-erun-cluster-edge module." |
+| Triggers | "enable the hosting edge", "enable public hosting", "set up TLS ingress for erun", "apply the cluster edge", "set up cert-manager and traefik", "issue wildcard TLS for the services zone" |
+| Inputs | The env's `CLOUDFLARE_API_TOKEN` (injected by a Cloudflare alias) passed as `TF_VAR_cloudflare_api_token`; the services zone (`platform.serviceszone`) and ACME email (`platform.acmeemail`); the erun version the module `?ref` pins to (`erun version`, else `main` off-pod). |
+| Outputs | A Terraform root (in a temp dir) that references `terraform-erun-cluster-edge` from erun's GitHub by `?ref=v<version>` and applies it: a Traefik ingress controller, cert-manager + CRDs, a Cloudflare DNS-01 `ClusterIssuer` (`erun-cloudflare`), and a wildcard `Certificate` for `*.<services-zone>`. Idempotent — re-running reconciles. |
+| Error behaviour | No `CLOUDFLARE_API_TOKEN` → stops, points at `erun cloud init cloudflare` + `erun cloud set … --alias <name>@cloudflare`. `terraform`/`kubectl` missing, or `kubectl` not pointed at a reachable cluster → stops. ClusterIssuer/Certificate stalls → `kubectl describe` the ACME order/challenge; usual causes are a token missing `Zone:Read`+`DNS:Edit` or the services zone not yet delegated to Cloudflare. While validating a fresh zone, `-var acme_server=<staging>` avoids Let's Encrypt production rate limits. |
 
 ### Catalogue evolution
 

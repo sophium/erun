@@ -24,11 +24,18 @@ export function CloudAliasAction({
   busy,
   loading,
   onLogin,
+  loginLabel,
+  loadingLabel,
 }: {
   status: string;
   busy: boolean;
   loading: boolean;
   onLogin: () => void;
+  // loginLabel / loadingLabel let a provider type relabel the action without a
+  // second component: Cloudflare re-verifies a stored token rather than running
+  // a browser SSO, so its button reads "Verify token" / "Verifying...".
+  loginLabel?: string;
+  loadingLabel?: string;
 }): React.ReactElement {
   if (status.trim() === 'active') {
     return (
@@ -41,6 +48,8 @@ export function CloudAliasAction({
       </div>
     );
   }
+  const idleLabel = loginLabel ?? 'Login';
+  const busyLabel = loadingLabel ?? 'Logging in...';
   return (
     <Button type="button" variant="outline" size="sm" disabled={busy} onClick={onLogin}>
       {loading ? (
@@ -48,7 +57,7 @@ export function CloudAliasAction({
       ) : (
         <LogIn aria-hidden="true" />
       )}
-      {loading ? 'Logging in...' : 'Login'}
+      {loading ? busyLabel : idleLabel}
     </Button>
   );
 }

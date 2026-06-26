@@ -5,6 +5,7 @@ Usage:
 
 Available Commands:
   aws         Set up an AWS cloud provider alias
+  cloudflare  Set up a Cloudflare cloud provider alias
 
 Flags:
   -h, --help   help for init

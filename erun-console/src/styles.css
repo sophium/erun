@@ -1,0 +1,191 @@
+:root {
+  --fg: #0f1320;
+  --muted: #5b6472;
+  --border: #e2e6eb;
+  --bg: #ffffff;
+  --accent: #0891b2;
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.app {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+}
+
+.tenant-header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.tenant-meta {
+  margin: 0.25rem 0 1.5rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+section {
+  margin-bottom: 2rem;
+}
+
+section h2 {
+  font-size: 1.1rem;
+  margin-bottom: 0.75rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.context-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.context-list li {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9rem;
+}
+
+.context-meta {
+  color: var(--muted);
+}
+
+.empty-state {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.message {
+  padding: 2rem 0;
+  color: var(--muted);
+}
+
+.error-detail {
+  font-size: 0.85rem;
+}
+
+.context-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border: 1px solid currentColor;
+}
+
+.status-badge--provisioning {
+  color: #92740a;
+}
+
+.status-badge--running {
+  color: #15803d;
+}
+
+.status-badge--failed {
+  color: #b91c1c;
+}
+
+.context-error {
+  color: #b91c1c;
+  font-size: 0.8rem;
+}
+
+.provision-panel {
+  border-top: 1px solid var(--border);
+  padding-top: 1.5rem;
+}
+
+.provision-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 1.5rem;
+  max-width: 480px;
+}
+
+.provision-form h3 {
+  font-size: 0.95rem;
+  margin: 0 0 0.25rem;
+}
+
+.provision-form label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.provision-form input,
+.provision-form textarea {
+  font: inherit;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.provision-form button {
+  align-self: flex-start;
+  margin-top: 0.5rem;
+  padding: 0.4rem 0.9rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--bg);
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.provision-form button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.provision-feedback,
+.provision-status {
+  font-size: 0.85rem;
+  margin: 0.25rem 0 0;
+}
+
+.provision-feedback--ok,
+.provision-status {
+  color: var(--muted);
+}
+
+.provision-feedback--error {
+  color: #b91c1c;
+}

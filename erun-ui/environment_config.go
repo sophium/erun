@@ -76,7 +76,7 @@ func (a *App) persistEnvironmentConfig(selection uiSelection, config uiEnvironme
 		return eruncommon.EnvConfig{}, err
 	}
 	a.reconcileWorkspaceSyncForSelection(selection, updated.SSHD.WorkspaceSync.Enabled)
-	a.reconcileCloudCredentialsRefresherForSelection(selection, updated.RemoteHostCredentials && updated.RemoteWorktree())
+	a.reconcileCloudCredentialsRefresherForSelection(selection, updated.HasAWSCloudAlias() && updated.RemoteWorktree())
 	return updated, nil
 }
 
@@ -270,7 +270,8 @@ func (a *App) saveRemoteCloudAlias(selection uiSelection, existing, updated erun
 	if err := a.ensureMCPAvailable(ctx, result); err != nil {
 		return err
 	}
-	_, err = a.deps.setRemoteCloudAlias(ctx, mcpEndpointForOpenResult(result), selection.Tenant, selection.Environment, updated.CloudProviderAlias)
+	bearer := a.mcpBearer(selection.Tenant, selection.Environment)
+	_, err = a.deps.setRemoteCloudAlias(ctx, mcpEndpointForOpenResult(result), bearer, selection.Tenant, selection.Environment, updated.CloudProviderAlias)
 	return err
 }
 
@@ -296,6 +297,7 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 		ContainerRegistries:  registries,
 		CloudProviderAlias:   strings.TrimSpace(config.CloudProviderAlias),
 		CloudProviderAliases: environmentCloudProviderAliases(a.deps.store, config.CloudProviderAlias),
+		CloudAliasSlots:      environmentCloudAliasSlots(a.deps.store, config),
 		RuntimeVersion:       strings.TrimSpace(config.RuntimeVersion),
 		RuntimePod:           runtimePodConfigToUI(config.RuntimePod),
 		SSHD: uiSSHDConfig{
@@ -327,11 +329,10 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 			SSHStatus:           localPortStatus(ports.SSH),
 			ContributeAppStatus: localPortStatus(ports.ContributeApp),
 		},
-		AutoStart:             copyBoolPtr(config.AutoStart),
-		RemoteHostCredentials: config.RemoteHostCredentials,
-		AutoUpgrade:           config.AutoUpgrade,
-		UpgradeChannel:        config.ResolvedUpgradeChannel(),
-		DisableBuildScript:    config.DisableBuildScript,
+		AutoStart:          copyBoolPtr(config.AutoStart),
+		AutoUpgrade:        config.AutoUpgrade,
+		UpgradeChannel:     config.ResolvedUpgradeChannel(),
+		DisableBuildScript: config.DisableBuildScript,
 	}
 	if cloudContext, ok, err := a.linkedCloudContext(config); err != nil {
 		return uiEnvironmentConfig{}, err
@@ -443,6 +444,75 @@ func environmentName(fallbackName string, config eruncommon.EnvConfig) string {
 	return strings.TrimSpace(fallbackName)
 }
 
+// environmentCloudProviderTypes is the order cloud-alias slots render in: AWS
+// first (the legacy primary), then Cloudflare. Adding a provider type to the
+// list gives it its own env selector and sidebar login row.
+var environmentCloudProviderTypes = []string{
+	eruncommon.CloudProviderAWS,
+	eruncommon.CloudProviderCloudflare,
+}
+
+// environmentCloudAliasSlots builds the per-provider-type cloud-alias view for
+// one env: for each known provider type, the alias currently attached to the
+// env for that type (from EnvConfig.ResolvedCloudAliases) plus the configured
+// aliases of that type the operator can pick from. A type with no configured
+// aliases and nothing attached is omitted so the env settings don't show an
+// empty Cloudflare selector before any Cloudflare token exists. A currently
+// attached alias whose provider config was deleted is still listed as an option
+// so the operator can see and clear it (recognition over recall).
+func environmentCloudAliasSlots(store eruncommon.CloudReadStore, config eruncommon.EnvConfig) []uiEnvironmentCloudAlias {
+	optionsByType := configuredCloudAliasesByType(store)
+	attached := config.ResolvedCloudAliases()
+	slots := make([]uiEnvironmentCloudAlias, 0, len(environmentCloudProviderTypes))
+	for _, providerType := range environmentCloudProviderTypes {
+		options := append([]string(nil), optionsByType[providerType]...)
+		current := strings.TrimSpace(attached[providerType])
+		if current != "" && !cloudAliasListContains(options, current) {
+			options = append([]string{current}, options...)
+		}
+		if current == "" && len(options) == 0 {
+			continue
+		}
+		slots = append(slots, uiEnvironmentCloudAlias{
+			Provider: providerType,
+			Alias:    current,
+			Options:  options,
+		})
+	}
+	return slots
+}
+
+// configuredCloudAliasesByType groups every configured cloud provider alias by
+// its provider type so each env slot can offer only the aliases that match.
+func configuredCloudAliasesByType(store eruncommon.CloudReadStore) map[string][]string {
+	grouped := make(map[string][]string)
+	providers, err := eruncommon.ListCloudProviders(store)
+	if err != nil {
+		return grouped
+	}
+	for _, provider := range providers {
+		alias := strings.TrimSpace(provider.Alias)
+		providerType := strings.ToLower(strings.TrimSpace(provider.Provider))
+		if alias == "" || providerType == "" {
+			continue
+		}
+		if cloudAliasListContains(grouped[providerType], alias) {
+			continue
+		}
+		grouped[providerType] = append(grouped[providerType], alias)
+	}
+	return grouped
+}
+
+func cloudAliasListContains(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
 func environmentCloudProviderAliases(store eruncommon.CloudReadStore, current string) []string {
 	providers, err := eruncommon.ListCloudProviders(store)
 	if err != nil {
@@ -494,7 +564,7 @@ func canConnectLocalTCP(port int) bool {
 
 func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.EnvConfig) eruncommon.EnvConfig {
 	existing.Name = strings.TrimSpace(config.Name)
-	existing.CloudProviderAlias = strings.TrimSpace(config.CloudProviderAlias)
+	applyEnvironmentCloudAliasSlots(&existing, config)
 	// ContainerRegistries are written by SaveEnvironmentConfig, which routes the
 	// marked list to project config (.erun/config.yaml) for local-agent envs and
 	// to the env config for remote/runtime envs.
@@ -515,13 +585,45 @@ func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.Env
 		existing.LocalRepoPath = localRepo
 	}
 	existing.AutoStart = copyBoolPtr(config.AutoStart)
-	existing.RemoteHostCredentials = config.RemoteHostCredentials
 	existing.AutoUpgrade = config.AutoUpgrade
 	existing.DisableBuildScript = config.DisableBuildScript
 	if eruncommon.IsValidUpgradeChannel(config.UpgradeChannel) {
 		existing.UpgradeChannel = config.UpgradeChannel
 	}
 	return existing
+}
+
+// applyEnvironmentCloudAliasSlots writes the edited per-provider-type cloud
+// aliases back onto the env config. Each slot routes by its provider type with
+// the same semantics as erun-common's SetEnvironmentCloudProviderAlias: the AWS
+// alias stays in the legacy CloudProviderAlias scalar (so every existing AWS
+// reader — saveRemoteCloudAlias, linkedCloudContext, the credential refresher —
+// is byte-for-byte unchanged), and every other type lives in the per-type
+// CloudProviderAliases map. An empty slot value clears that type's attachment
+// (the "— None —" option). When the UI sends no slots (older callers, the
+// AWS-only single-selector path), the legacy scalar is applied directly so
+// behavior is preserved.
+func applyEnvironmentCloudAliasSlots(existing *eruncommon.EnvConfig, config uiEnvironmentConfig) {
+	if len(config.CloudAliasSlots) == 0 {
+		existing.CloudProviderAlias = strings.TrimSpace(config.CloudProviderAlias)
+		return
+	}
+	for _, slot := range config.CloudAliasSlots {
+		providerType := strings.ToLower(strings.TrimSpace(slot.Provider))
+		alias := strings.TrimSpace(slot.Alias)
+		if providerType == "" || providerType == eruncommon.CloudProviderAWS {
+			existing.CloudProviderAlias = alias
+			continue
+		}
+		if alias == "" {
+			delete(existing.CloudProviderAliases, providerType)
+			continue
+		}
+		if existing.CloudProviderAliases == nil {
+			existing.CloudProviderAliases = make(map[string]string)
+		}
+		existing.CloudProviderAliases[providerType] = alias
+	}
 }
 
 func claudeConfigToUI(config eruncommon.EnvironmentClaudeConfig) uiClaudeConfig {

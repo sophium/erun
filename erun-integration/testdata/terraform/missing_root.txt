@@ -1,0 +1,2 @@
+audit: erun terraform apply --dry-run team dev
+no Terraform root at <TMP> for team/dev — scaffold it with the erun-blueprint-platform skill, or create terraform-team/dev/ with its main.tf and dev.tfvars

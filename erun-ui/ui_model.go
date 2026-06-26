@@ -116,6 +116,12 @@ type uiTenantDashboardInput struct {
 	MCPURL             string `json:"mcpUrl,omitempty"`
 	KubernetesContext  string `json:"kubernetesContext,omitempty"`
 	CloudProviderAlias string `json:"cloudProviderAlias"`
+
+	// mcpBearer is the per-env MCP edge token (issue #655) the dashboard's
+	// MCP API-log read sends. It is set server-side by LoadTenantDashboard
+	// from the desktop identity, never by the frontend; being unexported it
+	// is excluded from generated Wails bindings and never serialized.
+	mcpBearer string
 }
 
 type uiTenantDashboard struct {
@@ -223,6 +229,7 @@ type uiEnvironmentConfig struct {
 	ContainerRegistries   []uiContainerRegistryEntry `json:"containerRegistries"`
 	CloudProviderAlias    string                     `json:"cloudProviderAlias"`
 	CloudProviderAliases  []string                   `json:"cloudProviderAliases,omitempty"`
+	CloudAliasSlots       []uiEnvironmentCloudAlias  `json:"cloudAliasSlots,omitempty"`
 	CloudContext          *uiCloudContextStatus      `json:"cloudContext,omitempty"`
 	RuntimeVersion        string                     `json:"runtimeVersion"`
 	RuntimePod            uiRuntimePodConfig         `json:"runtimePod"`
@@ -344,6 +351,17 @@ type uiAWSCloudAliasInput struct {
 	SSORegion     string `json:"ssoRegion,omitempty"`
 	SSOStartURL   string `json:"ssoStartUrl,omitempty"`
 	OIDCIssuerURL string `json:"oidcIssuerUrl,omitempty"`
+}
+
+// uiEnvironmentCloudAlias is one provider-type slot in the env's cloud-alias
+// view: the provider type ("aws", "cloudflare"), the alias currently attached
+// to the env for that type (empty when none), and the configured aliases of
+// that type the operator can choose from. The frontend renders one selector
+// per slot so an env can attach an AWS alias AND a Cloudflare alias at once.
+type uiEnvironmentCloudAlias struct {
+	Provider string   `json:"provider"`
+	Alias    string   `json:"alias"`
+	Options  []string `json:"options"`
 }
 
 type uiCloudContextInitInput struct {

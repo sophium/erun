@@ -27,7 +27,7 @@ func envTraceApp(t *testing.T, env eruncommon.EnvConfig, reachable bool, podOut 
 		store:               store,
 		findProjectRoot:     func() (string, string, error) { return "acme", "/tmp/acme", nil },
 		canConnectLocalPort: func(int) bool { return reachable },
-		runPodRaw: func(context.Context, string, []string) (string, error) {
+		runPodRaw: func(context.Context, string, string, []string) (string, error) {
 			return podOut, podErr
 		},
 	})

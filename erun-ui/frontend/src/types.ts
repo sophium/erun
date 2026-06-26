@@ -309,6 +309,23 @@ export interface UIAWSCloudAliasInput {
   oidcIssuerUrl: string;
 }
 
+// Canonical cloud provider type strings, matching erun-common's
+// CloudProviderAWS / CloudProviderCloudflare. Used to label and group cloud
+// aliases by their provider type across the settings dialog, sidebar, and env
+// manage tab.
+export const CloudProviderAWS = 'aws';
+export const CloudProviderCloudflare = 'cloudflare';
+
+// UIEnvironmentCloudAlias is one provider-type slot in the env's cloud-alias
+// view: the provider type, the alias currently attached for that type (empty
+// when none), and the configured aliases of that type the operator can choose
+// from.
+export interface UIEnvironmentCloudAlias {
+  provider: string;
+  alias: string;
+  options: string[];
+}
+
 export interface UICloudContextStatus {
   name: string;
   provider: string;
@@ -386,6 +403,11 @@ export interface UIEnvironmentConfig {
   containerRegistries: UIContainerRegistryEntry[];
   cloudProviderAlias: string;
   cloudProviderAliases?: string[];
+  // cloudAliasSlots is the per-provider-type cloud-alias view: one entry per
+  // provider type (aws, cloudflare) that has a configured alias or a current
+  // attachment, each carrying the env's chosen alias for that type plus the
+  // selectable options. The frontend renders one selector per slot.
+  cloudAliasSlots?: UIEnvironmentCloudAlias[];
   cloudContext?: UICloudContextStatus;
   runtimeVersion: string;
   runtimePod: UIRuntimePodConfig;
@@ -405,11 +427,10 @@ export interface UIEnvironmentConfig {
   // means "always auto-start", false means "never auto-start; render the
   // titlebar Play button so the user can start manually".
   autoStart?: boolean;
-  // RemoteHostCredentials toggles the per-env credential refresher: when on,
-  // the desktop exports temporary AWS credentials from the cloud alias's host
-  // profile and pushes them into the runtime pod's ~/.aws/credentials under
-  // the erun-host profile, so SDK calls inside the pod act as the host
-  // identity. Only meaningful for remote AWS-backed envs.
+  // Deprecated: host AWS credential delivery is now driven by whether an AWS
+  // cloud alias is attached to the env (attaching an alias means "act on my
+  // behalf here"), not by this toggle. The field is retained only to stay
+  // assignable to the generated Go binding; nothing reads it anymore.
   remoteHostCredentials: boolean;
   // AutoUpgrade opts this env into the "Upgrade all" set; upgradeChannel
   // selects which release channel an upgrade targets ("stable" | "snapshot").

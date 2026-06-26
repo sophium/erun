@@ -30,7 +30,7 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 	var versionOverride string
 	var runtimeImage string
 	var appSession string
-	var skipEnsure bool
+	var deployRuntime bool
 	var aiTab bool
 	var contributeTab bool
 	target := common.OpenParams{}
@@ -39,10 +39,13 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 		Use:   "open [TENANT] [ENVIRONMENT]",
 		Short: "Open a shell in the tenant environment",
 		Long: "Open a shell in the tenant environment.\n\n" +
-			"Brings the environment up first if needed — deploying or updating the runtime and " +
-			"starting port-forwards — then drops you into a shell. Use --vscode or --intellij to " +
-			"open an IDE instead, or --no-shell to print the setup commands for your current shell.",
-		Example:      "  erun open\n  erun open team dev\n  erun open team dev --vscode",
+			"open is a pure primitive: it starts the port-forwards and drops you into a shell " +
+			"against the runtime that is already deployed. It does not deploy on its own — run " +
+			"`erun deploy` first, or pass --deploy to deploy before opening (the operator-convenience " +
+			"shortcut: builds-here envs build→push→deploy, runtime envs install the current version). " +
+			"Use --vscode or --intellij to open an IDE instead, or --no-shell to print the setup " +
+			"commands for your current shell.",
+		Example:      "  erun open\n  erun open team dev\n  erun open team dev --deploy\n  erun open team dev --vscode",
 		Args:         cobra.MaximumNArgs(2),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -81,7 +84,10 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 				AppSession:       strings.TrimSpace(appSession),
 				AI:               aiTab,
 				Contribute:       contributeTab,
-				SkipEnsure:       skipEnsure,
+				// open is pure by default. --deploy is the operator-convenience
+				// shortcut; a --version / --runtime-image override also implies a
+				// deploy, since pinning a version is only meaningful if it rolls out.
+				Deploy: deployRuntime || strings.TrimSpace(versionOverride) != "" || strings.TrimSpace(runtimeImage) != "",
 			}, promptRunner, openShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart, activateMCP, activateAPI, activateSSHD, launchVSCode, launchIntelliJ)
 		},
 	}
@@ -102,11 +108,10 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 	cmd.Flags().StringVar(&appSession, "app-session", "", "Reattach to a persistent terminal session with this id")
 	cmd.Flags().BoolVar(&aiTab, "ai", false, "Launch the configured AI tool as the persistent session's program")
 	cmd.Flags().BoolVar(&contributeTab, "contribute", false, "Start the persistent session in the contribute clone")
-	cmd.Flags().BoolVar(&skipEnsure, "skip-ensure", false, "Skip the runtime deploy preflight; the desktop ensures the environment once before spawning its tabs")
+	cmd.Flags().BoolVar(&deployRuntime, "deploy", false, "Deploy the runtime before opening (operator convenience: builds-here envs build→push→deploy, runtime envs install the current version)")
 	_ = cmd.Flags().MarkHidden("app-session")
 	_ = cmd.Flags().MarkHidden("ai")
 	_ = cmd.Flags().MarkHidden("contribute")
-	_ = cmd.Flags().MarkHidden("skip-ensure")
 	return cmd
 }
 
@@ -121,7 +126,7 @@ type openOptions struct {
 	SaveEnvConfig    func(string, common.EnvConfig) error
 	AppSession       string
 	AI               bool
-	SkipEnsure       bool
+	Deploy           bool
 	Contribute       bool
 }
 
@@ -308,15 +313,19 @@ func (r *resolvedOpenRunner) run() error {
 	shellReq.AppSession = r.options.AppSession
 	shellReq.AI = r.options.AI
 	shellReq.Contribute = r.options.Contribute
-	if r.options.SkipEnsure {
-		// One ensure per environment (re)start (issue #463): the desktop
-		// runs the open/build/deploy preflight once via `open --no-shell`
-		// and spawns every tab with --skip-ensure; the shell runner's
-		// WaitForShellDeployment below still holds each tab until that
-		// ensure's deploy is available.
-		r.ctx.Trace("open: --skip-ensure set, skipping the runtime deploy preflight (ensured once per environment by the desktop)")
-	} else if err := r.maybeDeployRuntime(shellReq); err != nil {
-		return err
+	if r.options.Deploy {
+		// --deploy is the operator-convenience shortcut (root AGENTS.md §
+		// "Command primitives vs orchestration"): deploy the runtime before
+		// opening. Programmatic callers (the desktop) must NOT use it — they
+		// compose build→push→deploy themselves and open the pure shell.
+		if err := r.maybeDeployRuntime(shellReq); err != nil {
+			return err
+		}
+	} else {
+		// open is a pure primitive: it does not deploy. The runtime must
+		// already be deployed (by `erun deploy`, or by the desktop's composed
+		// build→push→deploy on create); the forwarders below bind to it.
+		r.ctx.Trace("open: pure primitive — not deploying (run `erun deploy` first, or pass --deploy to deploy before opening)")
 	}
 	if err := r.activateForwarders(); err != nil {
 		return err
@@ -448,10 +457,10 @@ func (r *resolvedOpenRunner) shouldDeployRuntime(shellReq common.ShellLaunchPara
 func (r *resolvedOpenRunner) deployRuntime(execution common.DeploySpec) error {
 	if r.options.VSCode || r.options.IntelliJ {
 		if r.ctx.DryRun {
-			r.ctx.Trace(fmt.Sprintf("open: dry-run: would deploy runtime for %s/%s before launching %s; in real mode the user must run `erun sshd init %s %s` or `erun open %s %s` first", r.result.Tenant, r.result.Environment, ideOpenLabel(r.options), r.result.Tenant, r.result.Environment, r.result.Tenant, r.result.Environment))
+			r.ctx.Trace(fmt.Sprintf("open: dry-run: would deploy runtime for %s/%s before launching %s; in real mode the user must run `erun sshd init %s %s` or `erun deploy %s %s` first", r.result.Tenant, r.result.Environment, ideOpenLabel(r.options), r.result.Tenant, r.result.Environment, r.result.Tenant, r.result.Environment))
 			return nil
 		}
-		return fmt.Errorf("opening %s requires updating the runtime deployment for %s/%s; run `erun sshd init %s %s` or `erun open %s %s` first, then retry", ideOpenLabel(r.options), r.result.Tenant, r.result.Environment, r.result.Tenant, r.result.Environment, r.result.Tenant, r.result.Environment)
+		return fmt.Errorf("opening %s requires updating the runtime deployment for %s/%s; run `erun sshd init %s %s` or `erun deploy %s %s` first, then retry", ideOpenLabel(r.options), r.result.Tenant, r.result.Environment, r.result.Tenant, r.result.Environment, r.result.Tenant, r.result.Environment)
 	}
 	if r.result.EnvConfig.SSHD.Enabled {
 		execution.Deploy.SSHDEnabled = true

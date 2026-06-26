@@ -1,0 +1,10 @@
+Dry run: Cloudflare cloud provider initialization planned.
+audit: erun cloud init cloudflare --api-token <redacted> --dry-run --token-name <redacted>
+GET https://api.cloudflare.com/client/v4/accounts
+cloud init cloudflare: resolved account cf-account-id
+cloud init cloudflare: account-id=cf-account-id token-name=ci-token api-token=<redacted>
+cloud init cloudflare: verifying scoped api token
+GET https://api.cloudflare.com/client/v4/user/tokens/verify
+cloud init cloudflare: secret store is configured
+store cloudflare api token at ref cloudflare/ci-token+cf-account-id@cloudflare
+write cloud provider ci-token+cf-account-id@cloudflare

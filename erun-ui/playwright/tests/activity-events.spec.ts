@@ -24,5 +24,5 @@ test('activity:state events populate the queue drawer', async ({ app }) => {
 
   await expect(
     app.activityDrawer.locator().getByText('open petios/rihards-review', { exact: false }),
-  ).toBeVisible({ timeout: 5000 });
+  ).toBeVisible();
 });

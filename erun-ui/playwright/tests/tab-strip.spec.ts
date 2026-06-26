@@ -44,7 +44,7 @@ test.describe('terminal tab strip', () => {
     // would see a yellow busy pill with this text. toBeHidden with a
     // generous window catches both immediate and delayed misfires while
     // staying fast on a healthy build.
-    await expect(page.getByText(/Reopening Local shell/i)).toBeHidden({ timeout: 2_000 });
+    await expect(page.getByText(/Reopening Local shell/i)).toBeHidden();
     await expect(page.getByText(/Reopening AI session/i)).toBeHidden();
     await expect(page.getByText(/Reopening ERun session/i)).toBeHidden();
   });

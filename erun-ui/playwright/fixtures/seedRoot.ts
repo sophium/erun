@@ -29,10 +29,23 @@ import * as path from 'node:path';
 export const SEED_TENANT = 'pw';
 export const SEED_ENV_ALPHA = 'alpha';
 export const SEED_ENV_BETA = 'beta';
+// gamma attaches BOTH an AWS alias and a Cloudflare alias so the per-type env
+// cloud-alias selectors (issue #630) are stageable: the General tab must render
+// two independent selectors, one per provider type, each pre-selected to the
+// env's attachment.
+export const SEED_ENV_GAMMA = 'gamma';
 // One configured cloud provider alias so the Manage dialog's Cloud alias
 // select renders deterministically. The matching `aws` stub keeps its token
 // status check instant and offline.
 export const SEED_CLOUD_ALIAS = 'pw-aws';
+// One configured Cloudflare alias (issue #630). Cloudflare aliases follow the
+// "<token-label>+<account-id>@cloudflare" shape erun-common mints. No token is
+// written to the off-config secret store, so its status reads "not_configured"
+// deterministically and offline — the alias's scoped-token verify never hits
+// the network in the harness. That is the correct staged state for asserting
+// the per-type selector, the per-type sidebar row, and the "Verify token"
+// (re-verify) action without a live Cloudflare account.
+export const SEED_CLOUDFLARE_ALIAS = 'pw-token+0123456789abcdef@cloudflare';
 
 // isolatedRoot resolves the suite-owned root directory. run.sh exports
 // ERUN_PLAYWRIGHT_HOME; when the suite is launched without it (direct
@@ -64,6 +77,23 @@ function erunConfigDir(): string {
   return path.join(isolatedHomeDir(), '.config', 'erun');
 }
 
+// e2eK3dEnabled reports whether the opt-in, k3d-backed real-cluster mode is on
+// (issue #647). It gates every real-cluster branch below; when false the suite
+// is the default inert/offline harness (stubs prepended, ERUN_APP_CLI pinned).
+// Set ERUN_E2E_K3D=1 only on a host with Docker + k3d + binfmt — never in the
+// default `run.sh` or `make integration-test`.
+export function e2eK3dEnabled(): boolean {
+  return process.env.ERUN_E2E_K3D === '1';
+}
+
+// kubeconfigPath is the fixed kubeconfig location for the k3d mode. backendEnv()
+// pins KUBECONFIG here at config-load time; global-setup writes the live
+// cluster's kubeconfig into it before the backend boots, so the backend and the
+// specs share one isolated kubeconfig and never read the developer's ~/.kube.
+export function kubeconfigPath(): string {
+  return path.join(isolatedHomeDir(), '.kube', 'config');
+}
+
 // backendEnv returns the environment overrides for the `erun-app --headless`
 // webServer process. HOME + XDG_* redirect both config roots (xdg.ConfigHome
 // + "erun" and os.UserHomeDir() + ".erun") into the isolated root; the PATH
@@ -72,11 +102,33 @@ function erunConfigDir(): string {
 // cloud, or docker daemon is ever touched.
 export function backendEnv(): Record<string, string> {
   const home = isolatedHomeDir();
-  return {
+  const base: Record<string, string> = {
     HOME: home,
     XDG_CONFIG_HOME: path.join(home, '.config'),
     XDG_CACHE_HOME: path.join(home, '.cache'),
     XDG_DATA_HOME: path.join(home, '.local', 'share'),
+  };
+  if (e2eK3dEnabled()) {
+    // k3d mode (issue #647): use the REAL docker/kubectl/helm and the real built
+    // `erun` binary — only `aws` stays stubbed (no cloud account in CI; the
+    // cloud-context lifecycle is driven via the ERUN_AWS_BIN argv-stub seam).
+    // The runtime kubeconfig is the isolated one global-setup writes. This
+    // branch must never run in the default inert mode.
+    return {
+      ...base,
+      PATH: `${stubsDir()}${path.delimiter}${process.env.PATH ?? ''}`,
+      KUBECONFIG: kubeconfigPath(),
+      // The aws stub lives in stubsDir() (createIsolatedLayout writes only it in
+      // k3d mode); ERUN_AWS_BIN routes erun-common's aws calls to it explicitly,
+      // independent of PATH order.
+      ERUN_AWS_BIN: path.join(stubsDir(), 'aws'),
+      // The desktop tabs run the real CLI. ERUN_E2E_ERUN_BIN is the built
+      // erun-cli binary run.sh wires; fall back to PATH resolution otherwise.
+      ERUN_APP_CLI: process.env.ERUN_E2E_ERUN_BIN ?? 'erun',
+    };
+  }
+  return {
+    ...base,
     PATH: `${stubsDir()}${path.delimiter}${process.env.PATH ?? ''}`,
     // Force the desktop's ERun/AI tabs to run the inert `erun` stub. The PATH
     // prepend alone is not enough: resolveCLIExecutable resolves a real
@@ -105,9 +157,37 @@ export function createIsolatedLayout(): void {
   ]) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  for (const name of ['kubectl', 'helm', 'docker', 'aws', 'erun']) {
+  // k3d mode uses real docker/kubectl/helm/erun against a live cluster; only
+  // `aws` stays stubbed (no cloud account). The default mode stubs everything.
+  const stubs = e2eK3dEnabled() ? ['aws'] : ['kubectl', 'helm', 'docker', 'aws', 'erun'];
+  for (const name of stubs) {
     writeStubBinary(name);
   }
+}
+
+// seedEnvironmentForK3d writes a fresh local-agent env pointed at the live k3d
+// cluster (issue #647): the real kube context k3d created and the cluster's
+// built-in registry, and — critically — NO runtimeversion, so the desktop's
+// create flow must build → push → deploy a fresh version (the path #644 fixed)
+// rather than installing a pre-pinned one. The repo is the suite's seeded repo
+// (which carries a buildable devops module on the k3d-mode host).
+export function seedEnvironmentForK3d(
+  tenant: string,
+  environment: string,
+  context: string,
+  registry: string,
+): void {
+  const envDir = path.join(erunConfigDir(), tenant, environment);
+  fs.mkdirSync(envDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(envDir, 'config.yaml'),
+    `name: ${environment}\n` +
+      `repopath: ${repoDir()}\n` +
+      `kubernetescontext: ${context}\n` +
+      `containerregistry: ${registry}\n` +
+      'type: local-agent\n' +
+      'aitool: sh\n',
+  );
 }
 
 // writeStubBinary writes an inert POSIX stub.
@@ -173,7 +253,18 @@ export function seedBaseline(): void {
       'cloudproviders:\n' +
       `  - alias: ${SEED_CLOUD_ALIAS}\n` +
       '    provider: aws\n' +
-      `    profile: ${SEED_CLOUD_ALIAS}\n`,
+      `    profile: ${SEED_CLOUD_ALIAS}\n` +
+      // The Cloudflare alias carries its identity (account id + token label) and
+      // a token ref, but no token is written to the secret store, so its status
+      // resolves to not_configured without touching the Cloudflare API.
+      `  - alias: ${SEED_CLOUDFLARE_ALIAS}\n` +
+      '    provider: cloudflare\n' +
+      '    username: pw-token\n' +
+      '    accountid: 0123456789abcdef\n' +
+      '    cloudflare:\n' +
+      '      accountid: 0123456789abcdef\n' +
+      '      tokenname: pw-token\n' +
+      `      tokenref: cloudflare/${SEED_CLOUDFLARE_ALIAS}\n`,
   );
   fs.writeFileSync(
     path.join(root, SEED_TENANT, 'config.yaml'),
@@ -181,7 +272,8 @@ export function seedBaseline(): void {
       `name: ${SEED_TENANT}\n` +
       `defaultenvironment: ${SEED_ENV_ALPHA}\n` +
       'cloudprovideraliases:\n' +
-      `  - ${SEED_CLOUD_ALIAS}\n`,
+      `  - ${SEED_CLOUD_ALIAS}\n` +
+      `  - ${SEED_CLOUDFLARE_ALIAS}\n`,
   );
   seedEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
   // beta additionally links the seeded cloud alias so the Manage dialog's
@@ -189,6 +281,30 @@ export function seedBaseline(): void {
   // clear.spec.ts). The alias has no cloud context behind it, so it stays
   // inert.
   seedEnvironment(SEED_TENANT, SEED_ENV_BETA, `cloudprovideralias: ${SEED_CLOUD_ALIAS}\n`);
+  // gamma links both an AWS alias (legacy scalar) and a Cloudflare alias
+  // (per-type map) so the per-provider-type env selectors are stageable.
+  seedEnvironment(
+    SEED_TENANT,
+    SEED_ENV_GAMMA,
+    `cloudprovideralias: ${SEED_CLOUD_ALIAS}\n` +
+      'cloudprovideraliases:\n' +
+      `  cloudflare: ${SEED_CLOUDFLARE_ALIAS}\n`,
+  );
+}
+
+// seedBaselineForK3d writes the minimal config tree for the k3d e2e mode
+// (issue #647): the root config (default tenant, no cloud providers) and the
+// pw tenant, but NO environments. The e2e spec seeds its own env at the live
+// cluster via seedEnvironmentForK3d, so the inert `test-context` baseline envs
+// (which would fail real kubectl status checks) are never written.
+export function seedBaselineForK3d(): void {
+  const root = erunConfigDir();
+  fs.mkdirSync(path.join(root, SEED_TENANT), { recursive: true });
+  fs.writeFileSync(path.join(root, 'config.yaml'), `defaulttenant: ${SEED_TENANT}\n`);
+  fs.writeFileSync(
+    path.join(root, SEED_TENANT, 'config.yaml'),
+    `projectroot: ${repoDir()}\n` + `name: ${SEED_TENANT}\n`,
+  );
 }
 
 // seedEnvironment writes one inert local-agent env config. Mirrors

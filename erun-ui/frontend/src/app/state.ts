@@ -123,12 +123,17 @@ export interface GlobalConfigDialogState {
   cloudContextDraft: UICloudContextInitInput;
   configLoading: boolean;
   busy: boolean;
+  // busyAction marks which side-effecting action is in flight so the matching
+  // control can show its own spinner. The cloud-provider add actions
+  // ('cloud-provider-init' for AWS, 'cloud-provider-cloudflare-init' for
+  // Cloudflare) each launch a guided `erun cloud init <provider>` PTY session.
   busyAction:
     | ''
     | 'save'
     | 'cloud-context-init'
     | 'cloud-context-power'
     | 'cloud-provider-init'
+    | 'cloud-provider-cloudflare-init'
     | 'cloud-provider-login';
   busyTarget: string;
   error: string;
@@ -237,8 +242,7 @@ export interface AppState {
   terminalCopyStatus: string;
   idleStatus: UIIdleStatus | null;
   idleCloudContextBusy: boolean;
-  sidebarCloudAliasBusy: boolean;
-  sidebarCloudAliasAction: '' | 'login' | 'logout' | 'bearer';
+  sidebarCloudAliasBusyByAlias: Record<string, '' | 'login' | 'logout' | 'bearer'>;
   debugOpen: boolean;
   debugHeight: number;
   lastDoctorBySelection: Record<string, DoctorOutcome>;

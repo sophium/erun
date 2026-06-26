@@ -65,7 +65,10 @@ func newHTTPHandler(info eruncommon.BuildInfo, cfg HTTPConfig, runtime RuntimeCo
 	})
 
 	mux := http.NewServeMux()
-	mux.Handle(cfg.Path, activityHTTPMiddleware(runtime, handler))
+	// Auth is the outermost edge: when a trusted issuer is configured (#655),
+	// every request on the MCP path — including idle probes — must carry a valid
+	// bearer token signed by the desktop's injected key before any tool runs.
+	mux.Handle(cfg.Path, authHTTPMiddleware(mcpAuthConfigFromEnv(), activityHTTPMiddleware(runtime, handler)))
 	return mux
 }
 
@@ -197,6 +200,10 @@ func registerCloudTools(server *mcp.Server, runtime RuntimeConfig) {
 		Description: "Initialize an AWS SSO cloud provider alias in root ERun config, with preview support",
 	}, cloudInitAWSTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "cloud_init_cloudflare",
+		Description: "Initialize a Cloudflare cloud provider alias from a delegated API token (Zone + DNS edit, plus any other scopes the operator will use such as Cloudflare Pages for static sites). The token is verified against the Cloudflare API and held in a local secret store referenced from erun config, never written into erun-config.yaml; environments that attach the alias receive it as CLOUDFLARE_API_TOKEN. Supports preview.",
+	}, cloudInitCloudflareTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "cloud_login",
 		Description: "Login to a configured cloud provider alias, with preview support",
 	}, cloudLoginTool(runtime))
@@ -273,6 +280,10 @@ func registerDeliveryTools(server *mcp.Server, runtime RuntimeConfig) {
 		Name:        "expose",
 		Description: "Expose an in-namespace Service at a stable public hostname under the platform's services zone (requires a platform block in .erun/config.yaml): ensure the per-environment wildcard DNS record points at the env's ingress IP and apply a Host-routing Ingress. Supports preview.",
 	}, exposeTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "terraform",
+		Description: "Run a hosted platform's per-environment Terraform from terraform-<tenant>/<environment>/ for the resolved tenant/environment: resolve the env folder, pick up the symlinked common.tf, and run its main.tf with <environment>.tfvars. operation is apply (init → fmt → plan → apply), plan (read-only), or destroy. apply/destroy mutate real cloud and cluster state and require confirm to equal the environment name. Injects TF_VAR_cloudflare_api_token from CLOUDFLARE_API_TOKEN when present. Set preview to resolve and return the terraform commands without executing them.",
+	}, terraformTool(runtime))
 }
 
 // registerInspectionTools registers the repo-state and source-contribution

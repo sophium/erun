@@ -176,6 +176,16 @@ func TestBuild(t *testing.T) {
 			`      *) exit 0 ;;`,
 			`    esac`,
 			`    ;;`,
+			// The multi-arch daemon-capability preflight (issue #645) runs
+			// `docker buildx inspect` before building; report both required
+			// platforms so it passes. The trailing `*` on the node default is
+			// realistic buildx output and exercises the marker-stripping parse.
+			`  buildx)`,
+			`    case "$2" in`,
+			`      inspect) echo "Platforms: linux/arm64*, linux/amd64" ;;`,
+			`      *) exit 0 ;;`,
+			`    esac`,
+			`    ;;`,
 			`  *) exit 0 ;;`,
 			`esac`,
 		}, "\n"))
@@ -185,6 +195,37 @@ func TestBuild(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "build/real_run_via_docker_stub_drives_multi_platform_build", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_fails_when_daemon_cannot_build_required_platform", func(t *testing.T) {
+		// Exercises the multi-arch daemon-capability preflight
+		// (verifyDockerBuildPlatforms in build_platform_preflight.go, issue
+		// #645). erun always builds linux/amd64 + linux/arm64, so before
+		// shelling `docker build` per platform it runs `docker buildx inspect`
+		// and fails fast with a direct, actionable error when the daemon has
+		// no emulator for a required platform — instead of the opaque
+		// per-platform `docker build` failure. The stub reports only
+		// linux/amd64, so linux/arm64 is unbuildable regardless of host arch
+		// (the stub controls the platform list). This is a real-run scenario
+		// because the preflight guards the real executor, not the dry-run plan.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  image)`,
+			`    case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			`  buildx)`,
+			`    case "$2" in inspect) echo "Platforms: linux/amd64" ;; *) exit 0 ;; esac ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		result := erun.Run(t, []string{"build", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected build to fail when the daemon cannot build a required platform; got exit 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/real_run_fails_when_daemon_cannot_build_required_platform", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_no_incremental_skips_fingerprint_short_circuit", func(t *testing.T) {
@@ -436,6 +477,10 @@ func TestBuild(t *testing.T) {
 			`case "$1" in`,
 			`  image)`,
 			`    case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			// Multi-arch capability preflight (issue #645): report both required
+			// platforms so `docker buildx inspect` passes.
+			`  buildx)`,
+			`    case "$2" in inspect) echo "Platforms: linux/amd64, linux/arm64" ;; *) exit 0 ;; esac ;;`,
 			`  *) exit 0 ;;`,
 			`esac`,
 		}, "\n"))

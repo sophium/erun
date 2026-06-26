@@ -165,6 +165,13 @@ type HelmDeploySpec struct {
 	Version            string
 	Timeout            string
 	Verbosity          int
+	// Cloudflare* deliver a delegated Cloudflare token to the runtime pod.
+	// CloudflareEnabled gates the whole path; CloudflareTokenRef is a handle
+	// into the secret store (never the token itself), resolved at execution time.
+	CloudflareEnabled    bool
+	CloudflareAccountID  string
+	CloudflareSecretName string
+	CloudflareTokenRef   string
 	// RuntimeRegistry is the env's runtime image-ref / runtime-version
 	// registry (EnvConfig.RuntimeRegistry), distinct from ContainerRegistry
 	// (the DEPLOY-marked registry the cluster pulls from). Injected so in-pod
@@ -182,6 +189,18 @@ type HelmDeploySpec struct {
 	// projects; when set, deploy threads it to every chart as platform.*
 	// values so the PowerDNS singleton can bootstrap its authoritative zone.
 	Platform PlatformConfig
+	// MCPAuth* require the per-env erun-mcp edge to authenticate bearer tokens
+	// against a trusted public key (issue #655). MCPAuthEnabled gates the whole
+	// path; MCPAuthPublicKeyPEM is the (non-secret) key delivered out-of-band as
+	// a Secret like the Cloudflare token; MCPAuthIssuer is the file:// issuer the
+	// token's iss claim names and the server loads the key from; MCPAuthAudience
+	// is the per-env audience. Empty leaves the edge in legacy loopback-only
+	// pass-through, so non-desktop deploys are byte-for-byte unchanged.
+	MCPAuthEnabled      bool
+	MCPAuthPublicKeyPEM string
+	MCPAuthIssuer       string
+	MCPAuthAudience     string
+	MCPAuthSecretName   string
 }
 
 type HelmReleaseRecoveryParams struct {
@@ -230,6 +249,13 @@ type DeployTarget struct {
 	// leaves the resolved per-env/default value untouched. Set by the CLI
 	// `--rollout-timeout` flag and the MCP `timeout` input.
 	RolloutTimeout string
+	// MCPAuthPublicKeyPath, when set, points at a PEM public key the runtime
+	// chart trusts so the per-env erun-mcp edge requires a bearer token signed
+	// by it (issue #655). Empty leaves the edge in legacy loopback-only mode, so
+	// non-desktop deploys are unchanged. The desktop sets it to its persisted
+	// public key on both its deploy paths; the CLI exposes it as
+	// `--mcp-auth-public-key`.
+	MCPAuthPublicKeyPath string
 }
 
 // DeploySpec is a pure helm-install plan: it installs the image and chart
@@ -478,6 +504,12 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 		return fmt.Errorf("deploy %s: %w", deployInput.ReleaseName, err)
 	}
 	TraceEnsureKubernetesNamespace(ctx, deployInput.KubernetesContext, deployInput.Namespace)
+	if err := applyCloudflareCredentialsSecret(ctx, deployInput); err != nil {
+		return fmt.Errorf("deploy %s: %w", deployInput.ReleaseName, err)
+	}
+	if err := applyMCPAuthSecret(ctx, deployInput); err != nil {
+		return fmt.Errorf("deploy %s: %w", deployInput.ReleaseName, err)
+	}
 	command := deployInput.command()
 	ctx.TraceCommand(command.Dir, command.Name, command.Args...)
 	tracePodWatchAction(ctx, deployInput.ReleaseName, deployInput.Namespace, deployInput.KubernetesContext)
@@ -587,6 +619,9 @@ func ResolveDeploySpec(ctx Context, store DeployStore, findProjectRoot ProjectFi
 	if ok {
 		spec.Deploy.Timeout = override
 	}
+	if err := applyMCPAuthToRuntimeSpec(target, &spec); err != nil {
+		return DeploySpec{}, err
+	}
 	return spec, nil
 }
 
@@ -604,6 +639,11 @@ func ResolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 	if ok {
 		for i := range specs {
 			specs[i].Deploy.Timeout = override
+		}
+	}
+	for i := range specs {
+		if err := applyMCPAuthToRuntimeSpec(target, &specs[i]); err != nil {
+			return nil, err
 		}
 	}
 	return specs, nil
@@ -883,8 +923,9 @@ func configureDeployInputMetadata(store DeployStore, target OpenResult, deployIn
 		return err
 	}
 	deployInput.ManagedCloud = managedCloud
-	deployInput.UseHostCredentials = target.EnvConfig.RemoteHostCredentials
+	deployInput.UseHostCredentials = target.EnvConfig.HasAWSCloudAlias()
 	applyCloudProviderDeployMetadata(store, target.EnvConfig, deployInput)
+	applyCloudflareDeployMetadata(store, target.EnvConfig, deployInput)
 	if managedCloud {
 		applyCloudContextStopMetadata(store, target.EnvConfig, deployInput)
 	}
@@ -1547,6 +1588,29 @@ func (d HelmDeploySpec) command() commandSpec {
 		"--set-string", "api.oidcAllowedIssuers="+escapeHelmSetValue(d.OIDCAllowedIssuers),
 		"--set", "api.postgres.reset="+formatHelmBool(d.ResetDatabase),
 	)
+	// Cloudflare credential wiring is appended only when an env attached a
+	// Cloudflare alias, so existing (AWS-only / no-cloud) deploy plans are
+	// byte-for-byte unchanged. The token is never a --set value — it is
+	// delivered out-of-band as a Secret (applyCloudflareCredentialsSecret).
+	if d.CloudflareEnabled {
+		args = append(args,
+			"--set", "cloudContext.cloudflare.enabled=true",
+			"--set-string", "cloudContext.cloudflare.accountId="+d.CloudflareAccountID,
+			"--set-string", "cloudContext.cloudflare.secretName="+d.CloudflareSecretName,
+		)
+	}
+	// MCP auth is appended only when a trusted key is injected (desktop deploy),
+	// so existing deploy plans are byte-for-byte unchanged. The public key rides
+	// out-of-band as a Secret (applyMCPAuthSecret); only its name + the issuer
+	// and per-env audience are helm values.
+	if d.MCPAuthEnabled {
+		args = append(args,
+			"--set", "mcpAuth.enabled=true",
+			"--set-string", "mcpAuth.secretName="+d.MCPAuthSecretName,
+			"--set-string", "mcpAuth.issuer="+escapeHelmSetValue(d.MCPAuthIssuer),
+			"--set-string", "mcpAuth.audience="+escapeHelmSetValue(d.MCPAuthAudience),
+		)
+	}
 	args = append(args, helmRegistrySetArgs(d)...)
 	// disableBuildScript is always set — a boolean projection must be able to
 	// reconcile a flip in either direction, so the chart always receives the

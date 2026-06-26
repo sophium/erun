@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log"
 	"sync"
 	"time"
 
@@ -17,6 +18,7 @@ const (
 	mcpReconnectLineEvent       = "mcp-reconnect-line"
 	environmentInitializedEvent = "environment-initialized"
 	environmentInitFailedEvent  = "environment-init-failed"
+	environmentDeployedEvent    = "environment-deployed"
 	environmentsChangedEvent    = "environments-changed"
 	aiActivityEvent             = "ai-activity"
 	envStatusEvent              = "env-status"
@@ -50,32 +52,39 @@ type erunUIDeps struct {
 	reconnectMCP           func(context.Context, eruncommon.OpenResult, func(string)) error
 	ensureSSHD             func(context.Context, eruncommon.OpenResult) error
 	canConnectLocalPort    func(int) bool
-	setRemoteCloudAlias    func(context.Context, string, string, string, string) (eruncommon.EnvConfig, error)
+	setRemoteCloudAlias    func(context.Context, string, string, string, string, string) (eruncommon.EnvConfig, error)
 	startTerminal          func(startTerminalSessionParams) (terminalSession, error)
 	runIDECommand          func(context.Context, startTerminalSessionParams) (string, error)
 	savePastedFile         func(pastedFileSaveParams) (string, error)
 	listAgentOutputs       func(eruncommon.OpenResult, eruncommon.RuntimeOutputsParams) (eruncommon.RuntimeOutputsListResult, error)
 	downloadAgentOutput    func(eruncommon.OpenResult, eruncommon.RuntimeOutputDownloadParams) (eruncommon.RuntimeOutputResult, error)
-	loadDiff               func(context.Context, string, uiDiffOptions) (eruncommon.DiffResult, error)
-	loadIdleStatus         func(context.Context, string) (eruncommon.EnvironmentIdleStatus, error)
+	loadDiff               func(context.Context, string, string, uiDiffOptions) (eruncommon.DiffResult, error)
+	loadIdleStatus         func(context.Context, string, string) (eruncommon.EnvironmentIdleStatus, error)
 	loadAPILog             func(context.Context, uiTenantDashboardInput) (string, error)
 	workspaceSyncReady     func(context.Context, string) error
 	syncWorkspace          func(context.Context, workspaceSyncParams) (workspaceSyncResult, error)
 	workspaceSyncInterval  time.Duration
 	recordActivity         func(eruncommon.EnvironmentActivityParams) error
 	runWorkingIssueCommand workingIssueCommandRunner
-	loadPodBranch          func(context.Context, string) (string, error)
-	runPodRaw              func(context.Context, string, []string) (string, error)
+	loadPodBranch          func(context.Context, string, string) (string, error)
+	runPodRaw              func(context.Context, string, string, []string) (string, error)
 	stopCloudContext       func(context.Context, string) (eruncommon.CloudContextStatus, error)
 	windowStatePath        string
 	windowMaximised        func(context.Context) bool
-	cloneERun              func(context.Context, string) error
+	cloneERun              func(context.Context, string, string) error
 	contributeStatePath    string
 }
 
 type App struct {
 	ctx  context.Context
 	deps erunUIDeps
+
+	// identity is the desktop's persistent signing identity (issue #655). It
+	// mints the short-lived per-env bearer the desktop sends to each env's MCP
+	// edge and supplies the public key deploy injects so the edge verifies
+	// those tokens. nil in unit tests, where mcpBearer returns "" so non-auth
+	// envs and stubbed MCP deps keep working.
+	identity *desktopIdentity
 
 	mu                        sync.Mutex
 	nextSerial                int
@@ -150,6 +159,7 @@ func (a *App) emit(name string, args ...any) {
 
 func NewApp(deps erunUIDeps) *App {
 	deps = withDefaultCoreDeps(deps)
+	deps = withDefaultCloudDeps(deps)
 	deps = withDefaultRuntimeDeps(deps)
 	deps = withDefaultUIDeps(deps)
 	app := &App{
@@ -172,7 +182,26 @@ func NewApp(deps erunUIDeps) *App {
 		go app.pollActivityContainerStatuses(context.Background(), entry)
 	}
 	app.contribute = newContributeStore(deps.contributeStatePath)
+	if app.identity == nil {
+		app.identity = newDesktopIdentity(defaultDesktopIdentityDir())
+	}
 	return app
+}
+
+// mcpBearer mints the short-lived per-env bearer the desktop sends to the env's
+// MCP edge (issue #655). A nil identity (unit tests) or a signing failure yields
+// "", so non-auth envs and stubbed MCP deps keep working; an auth-enabled env
+// rejects an empty bearer with 401, which is the correct outcome.
+func (a *App) mcpBearer(tenant, environment string) string {
+	if a.identity == nil {
+		return ""
+	}
+	token, err := a.identity.signToken(tenant, environment, time.Now())
+	if err != nil {
+		log.Printf("erun-app: sign MCP bearer for %s/%s: %v", tenant, environment, err)
+		return ""
+	}
+	return token
 }
 
 func withDefaultCoreDeps(deps erunUIDeps) erunUIDeps {
@@ -195,6 +224,25 @@ func withDefaultCoreDeps(deps erunUIDeps) erunUIDeps {
 	}
 	if deps.deleteNamespace == nil {
 		deps.deleteNamespace = eruncommon.DeleteKubernetesNamespace
+	}
+	return deps
+}
+
+// withDefaultCloudDeps wires the cloud-provider dependency defaults the
+// desktop needs for cloud-alias operations. erun-common fills the AWS hooks
+// and VerifyCloudflareToken itself via normalizeCloudDependencies, but the
+// off-config CloudSecretStore that Cloudflare init/status/export require has
+// no usable zero value — it must be backed by a real directory. Wire the
+// file-backed default rooted beside erun-config.yaml so Cloudflare token
+// persistence works (today the desktop passes empty deps, so Cloudflare ops
+// would fail with "cloud secret store is not configured"). A resolution
+// failure leaves the store nil; erun-common then surfaces a clear error on
+// the Cloudflare path rather than touching AWS-only flows.
+func withDefaultCloudDeps(deps erunUIDeps) erunUIDeps {
+	if deps.cloudDeps.CloudSecretStore == nil {
+		if store, err := eruncommon.DefaultCloudSecretStore(); err == nil {
+			deps.cloudDeps.CloudSecretStore = store
+		}
 	}
 	return deps
 }

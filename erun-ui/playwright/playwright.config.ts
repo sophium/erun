@@ -1,5 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
-import { backendEnv, isolatedRoot } from './fixtures/seedRoot.js';
+import { backendEnv, e2eK3dEnabled, isolatedRoot } from './fixtures/seedRoot.js';
 
 // Single shared erun-app --headless instance backs every spec. The headless
 // backend is a singleton (one process, one set of session state), so tests
@@ -19,12 +19,21 @@ isolatedRoot();
 
 export default defineConfig({
   testDir: './tests',
+  // The opt-in k3d e2e specs (tests/e2e/, issue #647) need a real Docker + k3d
+  // cluster and use the un-stubbed backend, so they must never run in the
+  // default inert mode. Excluding them here (rather than per-spec test.skip)
+  // keeps the default suite clean — they are not collected at all — while
+  // ERUN_E2E_K3D=1 includes them; `run.sh --e2e-k3d` then targets tests/e2e so
+  // the inert specs (which assume stubs) don't run against the real backend.
+  testIgnore: e2eK3dEnabled() ? [] : ['**/tests/e2e/**'],
   globalSetup: './global-setup',
   globalTeardown: './global-teardown',
   fullyParallel: false,
   workers: 1,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
+  // No retries: a spec that only passes on a retry is flaky, and flakiness is a
+  // determinism defect to fix, never to mask (see AGENTS.md "No flaky tests").
+  retries: 0,
   reporter: [['list'], ['html', { open: 'never' }]],
   timeout: 30_000,
   expect: {
@@ -37,7 +46,9 @@ export default defineConfig({
     // be taller than a normal 900px viewport. Bump the height so footer
     // buttons stay reachable without artificial scrolling.
     viewport: { width: 1440, height: 1200 },
-    trace: 'on-first-retry',
+    // Retries are off, so capture the trace on every failure (not just on a
+    // retry that never happens) to keep failures debuggable via `yarn report`.
+    trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
   projects: [

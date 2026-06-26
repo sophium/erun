@@ -123,7 +123,7 @@ async function emitTerminalOutput(page: Page, sessionId: number, raw: string): P
 // machine-independent.
 async function discoverSelectedSessionId(app: AppShell, page: Page): Promise<number> {
   const waitForResize = page
-    .waitForRequest((req) => parseInvoke(req)?.method === 'ResizeSession', { timeout: 1500 })
+    .waitForRequest((req) => parseInvoke(req)?.method === 'ResizeSession')
     .catch(() => null);
   await app.titlebar.toggleButton().click();
   const resize = await waitForResize;
@@ -143,15 +143,12 @@ test.describe('terminal query responses (#347)', () => {
 
     // The reply must be addressed to the session that produced the query.
     await expect
-      .poll(
-        () => {
-          const reply = invokes.find(
-            (call) => call.method === 'SendSessionInput' && isCprReply(call.args[1]),
-          );
-          return reply?.args[0];
-        },
-        { timeout: 5_000 },
-      )
+      .poll(() => {
+        const reply = invokes.find(
+          (call) => call.method === 'SendSessionInput' && isCprReply(call.args[1]),
+        );
+        return reply?.args[0];
+      })
       .toBe(selectedId);
   });
 
@@ -169,15 +166,13 @@ test.describe('terminal query responses (#347)', () => {
     await emitTerminalOutput(page, selectedId, CPR_QUERY);
 
     await expect
-      .poll(
-        () =>
-          invokes.some(
-            (call) =>
-              call.method === 'SendSessionInput' &&
-              isCprReply(call.args[1]) &&
-              call.args[0] === selectedId,
-          ),
-        { timeout: 5_000 },
+      .poll(() =>
+        invokes.some(
+          (call) =>
+            call.method === 'SendSessionInput' &&
+            isCprReply(call.args[1]) &&
+            call.args[0] === selectedId,
+        ),
       )
       .toBe(true);
 
@@ -224,7 +219,7 @@ test.describe('terminal query responses (#347)', () => {
     //    the session's saved buffer (the `?` prefix dodges the display strip,
     //    exactly like production queries split across PTY chunks do).
     await emitTerminalOutput(page, extraId, CPR_QUERY);
-    await expect.poll(() => cprRepliesTo(invokes, extraId).length, { timeout: 5_000 }).toBe(1);
+    await expect.poll(() => cprRepliesTo(invokes, extraId).length).toBe(1);
 
     // 2. Switch away and back. The middleware rebuilds and replays the extra
     //    session's display buffer — stale query included — into xterm.
@@ -239,9 +234,7 @@ test.describe('terminal query responses (#347)', () => {
     await emitTerminalOutput(page, extraId, '\x1b[');
     await emitTerminalOutput(page, extraId, '6n');
     await expect
-      .poll(() => cprRepliesTo(invokes, extraId).filter((r) => !r.startsWith('\x1b[?')).length, {
-        timeout: 5_000,
-      })
+      .poll(() => cprRepliesTo(invokes, extraId).filter((r) => !r.startsWith('\x1b[?')).length)
       .toBe(1);
 
     // The replay parse is provably complete and must have contributed

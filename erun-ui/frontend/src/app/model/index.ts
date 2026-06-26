@@ -2,6 +2,7 @@ export type { AIActivityPayload } from './aiActivityPayload';
 export type { AppNotificationPayload } from './appNotificationPayload';
 export type { AppStatusPayload } from './appStatusPayload';
 export type { ClassifiedTerminalFailure } from './classifiedTerminalFailure';
+export type { CloudInitProvider } from './cloudInitProvider';
 export type { EnvironmentInitializedPayload } from './environmentInitializedPayload';
 export type { EnvStatusPayload } from './envStatusPayload';
 export type { HiddenSessionMode } from './hiddenSessionMode';

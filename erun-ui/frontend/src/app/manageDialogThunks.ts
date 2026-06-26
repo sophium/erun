@@ -12,7 +12,7 @@ import { showTerminalMessage } from './notificationThunks';
 import {
   runtimePodConfigToDisplay,
   runtimePodConfigToKubernetes,
-  runtimeResourceLimitMessage,
+  runtimeResourceValidation,
 } from './runtimeResources';
 import { patchManageDialog, setManageDialog } from './slices/manageDialogSlice';
 import { bumpManageDialogVersion } from './slices/requestCountersSlice';
@@ -134,6 +134,31 @@ export const updateManageConfig =
     }
     const config = { ...dialog.config, ...values };
     if (values.cloudProviderAlias !== undefined) {
+      config.cloudContext = undefined;
+    }
+    dispatch(patchManageDialog({ config, error: '' }));
+  };
+
+// updateManageCloudAliasSlot updates one provider-type cloud-alias slot in the
+// draft (issue #630). It rewrites the matching entry in cloudAliasSlots and, for
+// the AWS slot, also mirrors the alias into the legacy cloudProviderAlias scalar
+// so the cloud-context linkage UI keeps working. Like updateManageConfig's
+// alias branch, changing the AWS alias clears the resolved cloud context so the
+// field re-resolves on the next load rather than showing a stale link.
+export const updateManageCloudAliasSlot =
+  (provider: string, alias: string): AppThunk =>
+  (dispatch, getState) => {
+    const dialog = getState().manageDialog;
+    if (dialog.busy || dialog.configLoading) {
+      return;
+    }
+    const providerType = provider.trim().toLowerCase();
+    const slots = (dialog.config.cloudAliasSlots ?? []).map((slot) =>
+      slot.provider.trim().toLowerCase() === providerType ? { ...slot, alias } : slot,
+    );
+    const config = { ...dialog.config, cloudAliasSlots: slots };
+    if (providerType === '' || providerType === 'aws') {
+      config.cloudProviderAlias = alias;
       config.cloudContext = undefined;
     }
     dispatch(patchManageDialog({ config, error: '' }));
@@ -283,12 +308,12 @@ export const submitManageConfig = (): AppThunk<Promise<void>> => async (dispatch
     dispatch(closeManageDialog());
     return;
   }
-  const resourceError = runtimeResourceLimitMessage(
+  const { blockingError } = runtimeResourceValidation(
     dialog.config.runtimePod,
     dialog.resourceStatus,
   );
-  if (resourceError) {
-    dispatch(patchManageDialog({ error: resourceError }));
+  if (blockingError) {
+    dispatch(patchManageDialog({ error: blockingError }));
     return;
   }
   dispatch(patchManageDialog({ busy: true, busyAction: 'save', busyTarget: '', error: '' }));

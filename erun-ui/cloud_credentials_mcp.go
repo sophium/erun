@@ -3,21 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func injectCloudHostCredentialsViaMCP(ctx context.Context, endpoint string, accessKeyID, secretAccessKey, sessionToken string, expiration time.Time) error {
+func injectCloudHostCredentialsViaMCP(ctx context.Context, endpoint, bearer string, accessKeyID, secretAccessKey, sessionToken string, expiration time.Time) error {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
-	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
-		Endpoint: endpoint,
-		HTTPClient: &http.Client{
-			Transport: idleProbeRoundTripper{},
-		},
-		DisableStandaloneSSE: true,
-	}, nil)
+	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, false), nil)
 	if err != nil {
 		return err
 	}
@@ -43,15 +36,9 @@ func injectCloudHostCredentialsViaMCP(ctx context.Context, endpoint string, acce
 	return nil
 }
 
-func clearCloudHostCredentialsViaMCP(ctx context.Context, endpoint string) error {
+func clearCloudHostCredentialsViaMCP(ctx context.Context, endpoint, bearer string) error {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
-	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
-		Endpoint: endpoint,
-		HTTPClient: &http.Client{
-			Transport: idleProbeRoundTripper{},
-		},
-		DisableStandaloneSSE: true,
-	}, nil)
+	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, false), nil)
 	if err != nil {
 		return err
 	}

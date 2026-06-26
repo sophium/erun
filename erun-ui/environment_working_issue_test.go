@@ -51,7 +51,7 @@ func workingIssueApp(t *testing.T, env eruncommon.EnvConfig, run workingIssueCom
 		findProjectRoot:        func() (string, string, error) { return "acme", "/tmp/acme", nil },
 		runWorkingIssueCommand: run,
 		canConnectLocalPort:    func(int) bool { return false },
-		loadPodBranch: func(context.Context, string) (string, error) {
+		loadPodBranch: func(context.Context, string, string) (string, error) {
 			t.Fatal("loadPodBranch must not run through the legacy working-issue helper")
 			return "", nil
 		},
@@ -135,7 +135,7 @@ func TestEnvironmentWorkingIssueUnavailableForRemoteWorktree(t *testing.T) {
 // remoteWorkingIssueApp builds an App for the pod-backed resolution paths
 // (issue #462): a remote-agent env with a port range, an injectable
 // reachability answer, and an injectable in-pod branch loader.
-func remoteWorkingIssueApp(t *testing.T, reachable bool, loadPodBranch func(context.Context, string) (string, error), run workingIssueCommandRunner) *App {
+func remoteWorkingIssueApp(t *testing.T, reachable bool, loadPodBranch func(context.Context, string, string) (string, error), run workingIssueCommandRunner) *App {
 	t.Helper()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
@@ -164,7 +164,7 @@ func remoteWorkingIssueApp(t *testing.T, reachable bool, loadPodBranch func(cont
 
 func TestEnvironmentWorkingIssueRemoteNotReachable(t *testing.T) {
 	app := remoteWorkingIssueApp(t, false,
-		func(context.Context, string) (string, error) {
+		func(context.Context, string, string) (string, error) {
 			t.Fatal("loadPodBranch must not run while the env is not reachable")
 			return "", nil
 		},
@@ -189,7 +189,7 @@ func TestEnvironmentWorkingIssueRemoteNotReachable(t *testing.T) {
 func TestEnvironmentWorkingIssueRemoteReadsPodBranch(t *testing.T) {
 	var ghDirs []string
 	app := remoteWorkingIssueApp(t, true,
-		func(context.Context, string) (string, error) {
+		func(context.Context, string, string) (string, error) {
 			return "bug/470-sidebar-status", nil
 		},
 		func(_ context.Context, dir, name string, _ ...string) (string, error) {
@@ -216,7 +216,7 @@ func TestEnvironmentWorkingIssueRemoteReadsPodBranch(t *testing.T) {
 func TestEnvironmentWorkingIssueRemotePodErrorNotCached(t *testing.T) {
 	var loads int
 	app := remoteWorkingIssueApp(t, true,
-		func(context.Context, string) (string, error) {
+		func(context.Context, string, string) (string, error) {
 			loads++
 			return "", context.DeadlineExceeded
 		},

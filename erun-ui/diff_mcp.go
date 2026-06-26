@@ -24,15 +24,48 @@ func (t idleProbeRoundTripper) RoundTrip(req *http.Request) (*http.Response, err
 	return base.RoundTrip(req)
 }
 
-func loadDiffFromMCP(ctx context.Context, endpoint string, options uiDiffOptions) (eruncommon.DiffResult, error) {
-	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
-	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
+// mcpAuthRoundTripper stamps the per-env bearer onto every MCP request so an
+// auth-enabled env edge (issue #655) accepts the call. An empty token is a
+// no-op, so non-auth envs and unit tests (which sign no token) keep working;
+// an auth-enabled env rejects the empty bearer with 401, which is correct.
+type mcpAuthRoundTripper struct {
+	token string
+	base  http.RoundTripper
+}
+
+func (t mcpAuthRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = req.Clone(req.Context())
+	if t.token != "" {
+		req.Header.Set("Authorization", "Bearer "+t.token)
+	}
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return base.RoundTrip(req)
+}
+
+// mcpClientTransport builds the shared StreamableClientTransport every desktop
+// MCP call uses: it always carries the per-env bearer (mcpAuthRoundTripper) and,
+// for diagnostic reads, wraps the idle-probe header round-tripper underneath so
+// the call does not register as activity and hold an idle env awake.
+func mcpClientTransport(endpoint, bearer string, idleProbe bool) *mcp.StreamableClientTransport {
+	var base http.RoundTripper
+	if idleProbe {
+		base = idleProbeRoundTripper{}
+	}
+	return &mcp.StreamableClientTransport{
 		Endpoint: endpoint,
 		HTTPClient: &http.Client{
-			Transport: idleProbeRoundTripper{},
+			Transport: mcpAuthRoundTripper{token: bearer, base: base},
 		},
 		DisableStandaloneSSE: true,
-	}, nil)
+	}
+}
+
+func loadDiffFromMCP(ctx context.Context, endpoint, bearer string, options uiDiffOptions) (eruncommon.DiffResult, error) {
+	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
+	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, true), nil)
 	if err != nil {
 		return eruncommon.DiffResult{}, err
 	}
@@ -63,12 +96,9 @@ func loadDiffFromMCP(ctx context.Context, endpoint string, options uiDiffOptions
 	return diff, nil
 }
 
-func setEnvironmentCloudAliasViaMCP(ctx context.Context, endpoint, tenant, environment, alias string) (eruncommon.EnvConfig, error) {
+func setEnvironmentCloudAliasViaMCP(ctx context.Context, endpoint, bearer, tenant, environment, alias string) (eruncommon.EnvConfig, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
-	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
-		Endpoint:             endpoint,
-		DisableStandaloneSSE: true,
-	}, nil)
+	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, false), nil)
 	if err != nil {
 		return eruncommon.EnvConfig{}, err
 	}
@@ -105,15 +135,9 @@ func setEnvironmentCloudAliasViaMCP(ctx context.Context, endpoint, tenant, envir
 // endpoint's raw tool and returns its stdout. The idle-probe header keeps
 // these diagnostic reads from registering as activity, so a hover or an
 // open Diagnostics console never holds an idle env awake.
-func runPodRawFromMCP(ctx context.Context, endpoint string, argv []string) (string, error) {
+func runPodRawFromMCP(ctx context.Context, endpoint, bearer string, argv []string) (string, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
-	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
-		Endpoint: endpoint,
-		HTTPClient: &http.Client{
-			Transport: idleProbeRoundTripper{},
-		},
-		DisableStandaloneSSE: true,
-	}, nil)
+	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, true), nil)
 	if err != nil {
 		return "", err
 	}
@@ -147,23 +171,17 @@ func runPodRawFromMCP(ctx context.Context, endpoint string, argv []string) (stri
 // loadPodBranchFromMCP reads the env worktree's current git branch from
 // inside the runtime pod via the per-env MCP endpoint's raw tool — the
 // sidebar hover card's "Working on" source for remote envs (issue #462).
-func loadPodBranchFromMCP(ctx context.Context, endpoint string) (string, error) {
-	out, err := runPodRawFromMCP(ctx, endpoint, []string{"git", "rev-parse", "--abbrev-ref", "HEAD"})
+func loadPodBranchFromMCP(ctx context.Context, endpoint, bearer string) (string, error) {
+	out, err := runPodRawFromMCP(ctx, endpoint, bearer, []string{"git", "rev-parse", "--abbrev-ref", "HEAD"})
 	if err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(out), nil
 }
 
-func loadIdleStatusFromMCP(ctx context.Context, endpoint string) (eruncommon.EnvironmentIdleStatus, error) {
+func loadIdleStatusFromMCP(ctx context.Context, endpoint, bearer string) (eruncommon.EnvironmentIdleStatus, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
-	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
-		Endpoint: endpoint,
-		HTTPClient: &http.Client{
-			Transport: idleProbeRoundTripper{},
-		},
-		DisableStandaloneSSE: true,
-	}, nil)
+	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, true), nil)
 	if err != nil {
 		return eruncommon.EnvironmentIdleStatus{}, err
 	}
@@ -187,12 +205,9 @@ func loadIdleStatusFromMCP(ctx context.Context, endpoint string) (eruncommon.Env
 	return status, nil
 }
 
-func loadAPILogFromMCP(ctx context.Context, endpoint string) (string, error) {
+func loadAPILogFromMCP(ctx context.Context, endpoint, bearer string) (string, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
-	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
-		Endpoint:             endpoint,
-		DisableStandaloneSSE: true,
-	}, nil)
+	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, false), nil)
 	if err != nil {
 		return "", err
 	}

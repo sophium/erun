@@ -1,0 +1,6 @@
+audit: erun open --deploy --dry-run --no-shell team dev
+config: would assign localportrangestart=17000 to team/dev
+trace-log: would append the full trace to <TMP>
+open: tenant=team environment=dev kubernetes-context=test-context remote=true no-shell=true ide=shell
+deploy: no local runtime chart and no runtime version resolved; cannot deploy the published erun-devops chart
+runtime version is required to deploy the published erun-devops chart: pass --version or persist runtimeversion in the env config

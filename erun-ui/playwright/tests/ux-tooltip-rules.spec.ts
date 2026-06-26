@@ -80,7 +80,7 @@ test.describe('UX tooltip rules', () => {
     const clearAll = app.activityDrawer
       .locator()
       .getByRole('button', { name: /Force dismiss all/ });
-    await expect(clearAll).toBeVisible({ timeout: 5_000 });
+    await expect(clearAll).toBeVisible();
     // The new ClearAllButton drops the native title attribute and routes
     // the hint through Tooltip + aria-label, so the title is absent and
     // aria-label carries the explanatory hint.
@@ -120,7 +120,7 @@ test.describe('UX tooltip rules', () => {
       .locator()
       .getByRole('button', { name: 'Dismiss', exact: true })
       .first();
-    await expect(dismissButton).toBeVisible({ timeout: 5_000 });
+    await expect(dismissButton).toBeVisible();
     await expect(dismissButton).not.toHaveAttribute('title', /.*/);
   });
 });

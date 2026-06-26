@@ -130,7 +130,7 @@ func (a *App) resolvePodWorkingIssue(result eruncommon.OpenResult) uiWorkingIssu
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	branch, err := a.deps.loadPodBranch(ctx, mcpEndpointForOpenResult(result))
+	branch, err := a.deps.loadPodBranch(ctx, mcpEndpointForOpenResult(result), a.mcpBearer(result.Tenant, result.EnvConfig.Name))
 	if err != nil {
 		return uiWorkingIssue{Available: false, Reason: "in-pod work is not reachable right now"}
 	}

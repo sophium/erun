@@ -1,0 +1,8 @@
+audit: erun terraform apply --dry-run team dev
+terraform: apply in <TMP> (env team/dev, namespace team-dev)
+terraform: no dev.tfvars found; planning without -var-file
+cd <TMP> && terraform init -input=false
+cd <TMP> && terraform fmt -recursive ..
+cd <TMP> && terraform plan -input=false -out apply.tfplan
+terraform: apply requires typing the environment name (dev) to confirm before apply
+cd <TMP> && terraform apply -input=false apply.tfplan

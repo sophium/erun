@@ -7,6 +7,7 @@ env "default" {
   src = [
     "file://schema/rls/context.sql",
     "file://schema/tables/tenants.sql",
+    "file://schema/tables/tenant_quotas.sql",
     "file://schema/tables/issuers.sql",
     "file://schema/tables/tenant_issuers.sql",
     "file://schema/tables/users.sql",
@@ -19,6 +20,10 @@ env "default" {
     "file://schema/tables/builds.sql",
     "file://schema/tables/comments.sql",
     "file://schema/tables/audit_events.sql",
+    "file://schema/tables/contexts.sql",
+    "file://schema/tables/environments.sql",
+    "file://schema/tables/cloud_provider_aliases.sql",
+    "file://schema/tables/context_credentials.sql",
     "file://schema/indexes/users.sql",
     "file://schema/indexes/user_external_ids.sql",
     "file://schema/indexes/role_permissions.sql",
@@ -28,6 +33,8 @@ env "default" {
     "file://schema/indexes/builds.sql",
     "file://schema/indexes/comments.sql",
     "file://schema/indexes/audit_events.sql",
+    "file://schema/indexes/contexts.sql",
+    "file://schema/indexes/environments.sql",
     "file://schema/triggers/comments.sql",
     "file://schema/triggers/timestamps.sql",
     "file://schema/fks/review_builds.sql",
@@ -42,6 +49,11 @@ env "default" {
     "file://schema/rls/builds.sql",
     "file://schema/rls/comments.sql",
     "file://schema/rls/audit_events.sql",
+    "file://schema/rls/contexts.sql",
+    "file://schema/rls/environments.sql",
+    "file://schema/rls/tenant_quotas.sql",
+    "file://schema/rls/cloud_provider_aliases.sql",
+    "file://schema/rls/context_credentials.sql",
   ]
   url = var.database_url
   dev = "docker://postgres/18/dev?search_path=public"

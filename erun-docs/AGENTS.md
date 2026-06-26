@@ -22,7 +22,7 @@ Module-specific guidance for `erun-docs`. Follow the repository root `AGENTS.md`
 These must exist before the first deploy succeeds. They are external to this repository:
 
 1. **Cloudflare Pages project** named `erun-docs` (Direct Upload type — do **not** connect a Git source, the Job uploads directly).
-2. **Custom domain** `docs.erunpaas.com` attached to the Pages project.
+2. **Custom domain** `docs.erunpaas.com` attached to the Pages project. **(Planned.)** The DNS record is not cut over yet, so `https://docs.erunpaas.com` is not live; until it is, the site is reachable only at its Cloudflare Pages preview URL. Treat the custom-domain URL as aspirational wherever it appears above.
 3. **Cloudflare API token** with `Pages:Edit` scope, plus the Cloudflare account id.
 4. **Kubernetes Secret** named `cf-creds` (configurable via `docs.credentialsSecretName`) in the target tenant/env namespace, with keys:
    - `CLOUDFLARE_API_TOKEN`

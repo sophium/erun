@@ -76,3 +76,27 @@ erun init my-tenant rihards-dev --type=remote-agent --kubernetes-context my-exis
 ```
 
 ERun deploys into it exactly the same way, but doesn't manage its lifecycle — there's no `erun context start` / `stop` / idle-stop for a cluster ERun didn't provision.
+
+## Cloudflare aliases (DNS and zone management)
+
+Cloudflare support is a **separate alias type**, not a managed cloud context. There is no VM to provision and no lifecycle to manage — a Cloudflare alias simply delivers a delegated, account-scoped API token into an environment's runtime pod so in-pod tooling (such as Terraform) can manage Cloudflare DNS and zones. It is independent of the AWS path above: an environment can hold an AWS alias and a Cloudflare alias at the same time.
+
+The token is **delegated** — you mint it once in the Cloudflare dashboard as a **Custom Token** scoped to what you'll do with it. For DNS and zone delegation that's two rows, `Zone → Zone → Edit` (create the delegated subzone) and `Zone → DNS → Edit` (manage records), with **Zone Resources: Include → All zones**. If you'll also deploy static sites with the same token, add `Account → Cloudflare Pages → Edit` (an Account-scope row, so also set **Account Resources: Include → your account**); add more rows (Workers, R2, …) for anything else the token will manage. ERun never asks for your dashboard password or your Global API Key. Register it with the guided setup:
+
+```bash
+erun cloud init cloudflare
+```
+
+ERun walks you through it: it shows the token page and the exact permissions, waits while you create the token, takes it masked and verifies it against the Cloudflare API, then **auto-resolves the account ID from the token** and proposes a label. In the desktop app, the **Cloudflare** button under **Settings → Cloud aliases** runs this same flow in a terminal — the same way the AWS button runs `erun cloud init aws`. The token is stored in a local secret store referenced from your config — the raw token is **never written into `erun-config.yaml`** — and the alias is named `<token-name>+<account>@cloudflare`. See [`erun cloud`](/cli/cloud).
+
+Attach it to an environment the same way you attach an AWS alias — and because aliases are routed by provider type, this **coexists with** any AWS alias the environment already carries:
+
+```bash
+erun cloud set my-tenant rihards-dev --alias dns-edit+0a1b2c3d@cloudflare
+```
+
+When that environment's runtime pod comes up, ERun injects the token as `CLOUDFLARE_API_TOKEN` and the account as `CLOUDFLARE_ACCOUNT_ID`. The in-pod Terraform Cloudflare provider reads both natively, so an Agent can manage DNS without ever handling the credential itself.
+
+### Enabling the public hosting edge
+
+The injected token is what the **`terraform-erun-cluster-edge`** module (in `erun-devops/terraform-erun/modules/`) applies to stand up the public HTTPS edge: it installs a Traefik ingress controller and cert-manager, and creates a **Cloudflare DNS-01 `ClusterIssuer`** (using the token + the platform config's `acmeemail`) that issues a wildcard certificate for `*.<services-zone>`. The `erun-enable-hosting-edge` skill drives it end to end (apply + verify the issuer and wildcard cert). Wiring `erun expose`'s Ingress to that issuer and hosting the console behind the edge are the remaining follow-ups.

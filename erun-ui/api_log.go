@@ -17,7 +17,7 @@ func loadAPILog(ctx context.Context, input uiTenantDashboardInput) (string, erro
 		return loadAPILogFromKubernetes(ctx, kubernetesContext, tenant, environment)
 	}
 	if mcpURL := strings.TrimSpace(input.MCPURL); mcpURL != "" {
-		return loadAPILogFromMCP(ctx, mcpURL)
+		return loadAPILogFromMCP(ctx, mcpURL, input.mcpBearer)
 	}
 	return "", fmt.Errorf("tenant dashboard needs a Kubernetes context or MCP URL to load API logs")
 }

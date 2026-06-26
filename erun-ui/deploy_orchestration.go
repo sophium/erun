@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -51,6 +52,7 @@ func (a *App) runDeployOrchestration(ctx context.Context, selection uiSelection,
 		if force {
 			deployArgs = append(deployArgs, "--force")
 		}
+		deployArgs = a.appendMCPAuthPublicKeyFlag(deployArgs)
 		_, err = runErunCaptured(ctx, cli, dir, onLine, deployArgs...)
 		return err
 	}
@@ -64,8 +66,32 @@ func (a *App) runDeployOrchestration(ctx context.Context, selection uiSelection,
 	if force {
 		args = append(args, "--force")
 	}
+	args = a.appendMCPAuthPublicKeyFlag(args)
 	_, err := runErunCaptured(ctx, cli, dir, onLine, args...)
 	return err
+}
+
+// appendMCPAuthPublicKeyFlag appends `--mcp-auth-public-key <path>` so the
+// deployed env requires the same desktop-signed bearer the desktop sends to its
+// MCP edge (issue #655). The public key is written beside the desktop's private
+// identity; ensurePublicKeyPath generates it on first use. A nil identity (unit
+// tests) or an unset identity dir yields no flag, leaving the env
+// unauthenticated. A generation error logs and proceeds without the flag rather
+// than failing the deploy — an unauthenticated env is recoverable; a blocked
+// deploy is not.
+func (a *App) appendMCPAuthPublicKeyFlag(args []string) []string {
+	if a.identity == nil {
+		return args
+	}
+	path, err := a.identity.ensurePublicKeyPath()
+	if err != nil {
+		log.Printf("erun-app: resolve MCP auth public key for deploy: %v", err)
+		return args
+	}
+	if path == "" {
+		return args
+	}
+	return append(args, "--mcp-auth-public-key", path)
 }
 
 // deployNeedsBuildOrchestration is the desktop's per-env-type deploy policy

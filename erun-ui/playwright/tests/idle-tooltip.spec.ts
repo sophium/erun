@@ -18,13 +18,18 @@ test.describe('idle tooltip', () => {
     app,
     page,
   }) => {
-    await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
-
     // The widget only mounts after a LoadIdleStatus poll reports a managed
     // cloud context. The seeded env has none, so the badge must not appear.
-    // Give the first poll a window to land before asserting — toBeHidden
-    // alone would pass instantly and prove nothing about the poll result.
-    await page.waitForTimeout(2_000);
+    // Wait on the poll RPC (not the wall clock) so the assertion reflects a
+    // completed poll, not a poll that simply hasn't run yet — toBeHidden alone
+    // would pass instantly and prove nothing about the poll result.
+    const idlePolled = page.waitForResponse(
+      (response) =>
+        response.url().includes('/__erun_invoke') &&
+        (response.request().postData() ?? '').includes('LoadIdleStatus'),
+    );
+    await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
+    await idlePolled;
     const badge = app.titlebar.idleStatusBadge();
     await expect(badge).toBeHidden();
   });

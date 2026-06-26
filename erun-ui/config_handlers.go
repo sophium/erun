@@ -14,7 +14,7 @@ func (a *App) LoadERunConfig() (uiERunConfig, error) {
 	if err != nil {
 		return uiERunConfig{}, err
 	}
-	ui := erunConfigToUI(config)
+	ui := a.erunConfigToUI(config)
 	statuses, err := eruncommon.RefreshCloudContextStatuses(eruncommon.Context{}, a.deps.store, a.deps.cloudContextDeps)
 	if err != nil {
 		return uiERunConfig{}, err
@@ -39,7 +39,7 @@ func (a *App) SaveERunConfig(config uiERunConfig) (uiERunConfig, error) {
 	if err := a.deps.store.SaveERunConfig(updated); err != nil {
 		return uiERunConfig{}, err
 	}
-	return erunConfigToUI(updated), nil
+	return a.erunConfigToUI(updated), nil
 }
 
 func (a *App) LoadCloudProviderStatuses() ([]uiCloudProviderStatus, error) {
@@ -261,10 +261,10 @@ func (a *App) SaveTenantConfig(config uiTenantConfig) (uiTenantConfig, error) {
 	return a.tenantConfigToUI(updated, tenant), nil
 }
 
-func erunConfigToUI(config eruncommon.ERunConfig) uiERunConfig {
+func (a *App) erunConfigToUI(config eruncommon.ERunConfig) uiERunConfig {
 	return uiERunConfig{
 		DefaultTenant:  strings.TrimSpace(config.DefaultTenant),
-		CloudProviders: cloudProviderStatusesToUI(statusesForCloudProviders(config.CloudProviders)),
+		CloudProviders: cloudProviderStatusesToUI(a.statusesForCloudProviders(config.CloudProviders)),
 		CloudContexts:  cloudContextStatusesToUI(statusesForCloudContexts(config.CloudContexts)),
 	}
 }
@@ -293,10 +293,10 @@ func tenantConfigFromUI(config uiTenantConfig, existing eruncommon.TenantConfig)
 	return eruncommon.NormalizeTenantConfig(existing)
 }
 
-func statusesForCloudProviders(providers []eruncommon.CloudProviderConfig) []eruncommon.CloudProviderStatus {
+func (a *App) statusesForCloudProviders(providers []eruncommon.CloudProviderConfig) []eruncommon.CloudProviderStatus {
 	statuses := make([]eruncommon.CloudProviderStatus, 0, len(providers))
 	for _, provider := range providers {
-		statuses = append(statuses, eruncommon.CloudProviderTokenStatus(provider, eruncommon.CloudDependencies{}))
+		statuses = append(statuses, eruncommon.CloudProviderTokenStatus(provider, a.deps.cloudDeps))
 	}
 	return statuses
 }

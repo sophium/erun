@@ -76,14 +76,15 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 	}
 	a.mu.Unlock()
 
-	// One preflight per env (re)start (issue #463): the shared ensure runs
-	// the open/build/deploy once and streams its traces into the activity
-	// queue; the tab itself skips the preflight and waits on the deployment.
+	// open is a pure primitive now (issue #644): the tab just opens the shell
+	// and binds the forwarders against the already-deployed runtime. One thin
+	// reconnect per env (re)start window (issue #463) (re)binds the shared
+	// MCP/API forwarders; deploy is the caller's job (create / Deploy button).
 	a.ensureEnvRuntimeOnce(selection)
 	openParams := startTerminalSessionParams{
 		Dir:        resolveTerminalStartDir(result.RepoPath),
 		Executable: a.deps.resolveCLIPath(),
-		Args:       append(withAppSession(buildOpenArgs(result.Tenant, result.Environment), fmt.Sprintf("open-%d", slot), false, false), "--skip-ensure"),
+		Args:       withAppSession(buildOpenArgs(result.Tenant, result.Environment), fmt.Sprintf("open-%d", slot), false, false),
 		Env:        []string{appSessionEnvVar + "=1"},
 		Cols:       cols,
 		Rows:       rows,
@@ -256,7 +257,7 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 		// resume at the env effort, issues #451/#469), once on create. Reopening
 		// reconnects to the running claude rather than typing it in again or
 		// spawning a parallel one (#478).
-		Args: append(withAppSession(buildOpenArgs(result.Tenant, result.Environment), "ai", true, false), "--skip-ensure"),
+		Args: withAppSession(buildOpenArgs(result.Tenant, result.Environment), "ai", true, false),
 		Env:  []string{appSessionEnvVar + "=1"},
 		Cols: cols,
 		Rows: rows,
@@ -316,7 +317,7 @@ func (a *App) StartDeploySession(selection uiSelection, cols, rows int) (startSe
 	// from the Local tab and registers a deploy entry within milliseconds.
 	// The helm release poller converges onto the same record by ID once
 	// the cluster sees the pending release.
-	return a.runErunCommandInLocal(selection, cols, rows, buildDeployArgs(selection))
+	return a.runErunCommandInLocal(selection, cols, rows, a.appendMCPAuthPublicKeyFlag(buildDeployArgs(selection)))
 }
 
 // StartForceDeploySession runs `erun deploy --force` in the Local tab.
@@ -328,7 +329,7 @@ func (a *App) StartForceDeploySession(selection uiSelection, cols, rows int) (st
 	if result, ok := a.maybeStartDeployOrchestration(selection, true); ok {
 		return result, nil
 	}
-	args := append(buildDeployArgs(selection), "--force")
+	args := a.appendMCPAuthPublicKeyFlag(append(buildDeployArgs(selection), "--force"))
 	return a.runErunCommandInLocal(selection, cols, rows, args)
 }
 
@@ -559,6 +560,55 @@ func (a *App) StartCloudInitAWSSession(cols, rows int) (startSessionResult, erro
 	return startSessionResult{SessionID: serial}, nil
 }
 
+// StartCloudInitCloudflareSession opens an interactive PTY running
+// `erun cloud init cloudflare`, mirroring StartCloudInitAWSSession. The CLI
+// owns Cloudflare alias creation end-to-end: it prompts for the scoped token,
+// verifies it against the Cloudflare API, auto-resolves the account, and
+// defaults a label. The desktop only launches the guided flow and hands the
+// terminal over to it; there is no in-app form.
+func (a *App) StartCloudInitCloudflareSession(cols, rows int) (startSessionResult, error) {
+	cols, rows = clampTerminalSize(cols, rows)
+	key := "cloud/init/cloudflare"
+
+	a.mu.Lock()
+	if existing := a.sessions[key]; existing != nil && !existing.closed && existing.session != nil {
+		a.mu.Unlock()
+		return startSessionResult{
+			SessionID: existing.serial,
+			Selection: existing.selection,
+		}, nil
+	}
+	a.mu.Unlock()
+
+	session, err := a.deps.startTerminal(startTerminalSessionParams{
+		Dir:        resolveTerminalStartDir(""),
+		Executable: a.deps.resolveCLIPath(),
+		Args:       buildCloudInitCloudflareArgs(),
+		Env:        []string{appSessionEnvVar + "=1"},
+		Cols:       cols,
+		Rows:       rows,
+	})
+	if err != nil {
+		return startSessionResult{}, err
+	}
+
+	a.mu.Lock()
+	a.nextSerial++
+	serial := a.nextSerial
+	managed := &managedTerminal{
+		session:   session,
+		key:       key,
+		serial:    serial,
+		startedAt: time.Now(),
+	}
+	a.sessions[key] = managed
+	a.mu.Unlock()
+
+	go a.streamSession(managed)
+
+	return startSessionResult{SessionID: serial}, nil
+}
+
 func (a *App) DeleteEnvironment(selection uiSelection, confirmation string) (deleteEnvironmentResult, error) {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
@@ -722,7 +772,8 @@ func (a *App) LoadDiff(selection uiSelection, options uiDiffOptions) (eruncommon
 		return eruncommon.DiffResult{}, wrapMCPUnreachableError(fmt.Errorf("mcp port %d is not reachable", mcpPort))
 	}
 	endpoint := mcpEndpointForOpenResult(result)
-	diff, err := a.deps.loadDiff(ctx, endpoint, options)
+	bearer := a.mcpBearer(result.Tenant, result.EnvConfig.Name)
+	diff, err := a.deps.loadDiff(ctx, endpoint, bearer, options)
 	if err != nil && isMCPDialFailure(err) {
 		return eruncommon.DiffResult{}, wrapMCPUnreachableError(err)
 	}
@@ -1277,9 +1328,11 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	}
 
 	a.emitReconnectMarker(managed.serial, exitReason)
-	// The respawned `erun open` runs with --skip-ensure; refresh the shared
-	// ensure (TTL-deduped) so a replaced pod gets its deploy back without
-	// every tab repeating the preflight (issue #463).
+	// The respawned `erun open` is a pure primitive (issue #644); refresh the
+	// shared thin reconnect (TTL-deduped) so a replaced pod's forwarders are
+	// rebound without every tab repeating it (issue #463). If the pod is gone
+	// for good the reconnect surfaces a recoverable failure rather than
+	// silently redeploying — deploy stays the caller's explicit action.
 	if managed.kind != sessionKindLocal {
 		a.ensureEnvRuntimeOnce(managed.selection)
 	}

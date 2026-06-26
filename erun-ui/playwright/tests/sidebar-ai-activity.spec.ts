@@ -57,7 +57,7 @@ test.describe('sidebar AI activity spinner', () => {
     );
 
     const spinner = sidebar.getByRole('status').first();
-    await expect(spinner).toBeVisible({ timeout: 5_000 });
+    await expect(spinner).toBeVisible();
     await expect(spinner).toHaveAttribute('aria-label', new RegExp(`${env}`));
 
     // Emit busy=false; the spinner must disappear.
@@ -77,7 +77,7 @@ test.describe('sidebar AI activity spinner', () => {
       },
       { tenant, env },
     );
-    await expect(sidebar.getByRole('status')).toHaveCount(0, { timeout: 5_000 });
+    await expect(sidebar.getByRole('status')).toHaveCount(0);
   });
 
   test('ai-activity payloads with empty tenant or environment are ignored', async ({

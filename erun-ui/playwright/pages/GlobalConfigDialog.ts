@@ -47,7 +47,47 @@ export class GlobalConfigDialog {
   }
 
   cloudAliasRow(alias: string): Locator {
-    return this.locator().locator(`text=${alias}`).first();
+    return this.locator().locator(`[data-cloud-alias="${alias}"]`).first();
+  }
+
+  // cloudAliasGroupHeading targets the labelled group heading for a provider
+  // type (issue #630). data-cloud-alias-group carries the provider type token.
+  cloudAliasGroupHeading(providerType: string): Locator {
+    return this.locator().locator(`[data-cloud-alias-group="${providerType}"]`);
+  }
+
+  // --- Add-provider picker (issue #630, #632) ---
+  //
+  // Both providers delegate alias creation to the CLI's guided `erun cloud init
+  // <provider>` flow over a PTY session; neither hosts an in-app add form. The
+  // add buttons launch the session and close the settings dialog, handing the
+  // terminal over to the CLI.
+
+  // addAWSButton targets the "AWS" add button in the provider picker.
+  addAWSButton(): Locator {
+    return this.locator().getByRole('button', { name: 'AWS', exact: true });
+  }
+
+  // addCloudflareButton targets the "Cloudflare" add button in the provider
+  // picker.
+  addCloudflareButton(): Locator {
+    return this.locator().getByRole('button', { name: 'Cloudflare', exact: true });
+  }
+
+  async clickAddAWS(): Promise<void> {
+    await this.addAWSButton().click();
+  }
+
+  async clickAddCloudflare(): Promise<void> {
+    await this.addCloudflareButton().click();
+  }
+
+  // cloudflareForm targets the removed in-app "add Cloudflare token" form
+  // (issue #632 deleted it in favour of the guided CLI flow). Specs assert this
+  // resolves to zero matches — the negative invariant that no bespoke add form
+  // is hosted in the desktop.
+  cloudflareForm(): Locator {
+    return this.page.locator('form[aria-label="Add Cloudflare token"]');
   }
 
   async refreshCloudProviders(): Promise<void> {
@@ -59,7 +99,7 @@ export class GlobalConfigDialog {
   }
 
   async cancel(): Promise<void> {
-    const button = this.locator().getByRole('button', { name: 'Cancel' });
+    const button = this.locator().getByRole('button', { name: 'Cancel', exact: true });
     await button.scrollIntoViewIfNeeded();
     await button.click();
   }

@@ -14,7 +14,7 @@ test.describe('sidebar Upgrade all', () => {
     await app.sidebar.openUpgradeAll();
 
     const dialog = app.sidebar.upgradeAllDialog();
-    await expect(dialog).toBeVisible({ timeout: 6_000 });
+    await expect(dialog).toBeVisible();
 
     // The body resolves to one of the two terminal states (never stuck on the
     // loading spinner): a plan table, or the opted-in empty state.
@@ -105,7 +105,7 @@ test.describe('sidebar Upgrade all', () => {
 
     await app.sidebar.openUpgradeAll();
     const dialog = app.sidebar.upgradeAllDialog();
-    await expect(dialog).toBeVisible({ timeout: 6_000 });
+    await expect(dialog).toBeVisible();
     await expect(dialog.getByRole('table', { name: 'Upgrade plan' })).toBeVisible();
 
     // Lagging env → "will upgrade", showing current → target.
@@ -247,12 +247,12 @@ test.describe('sidebar Upgrade all', () => {
 
     await app.sidebar.openUpgradeAll();
     const dialog = app.sidebar.upgradeAllDialog();
-    await expect(dialog).toBeVisible({ timeout: 6_000 });
+    await expect(dialog).toBeVisible();
     await dialog.getByRole('button', { name: 'Upgrade 2' }).click();
 
     // One scoped run per lagging member, each in its own env — never the
     // up-to-date member, never a single global run.
-    await expect.poll(() => upgradeRuns.length, { timeout: 6_000 }).toBe(2);
+    await expect.poll(() => upgradeRuns.length).toBe(2);
     const ran = upgradeRuns
       .map((selection) => `${selection.tenant ?? ''}/${selection.environment ?? ''}`)
       .sort();
@@ -334,7 +334,7 @@ test.describe('sidebar Upgrade all', () => {
 
     await app.sidebar.openUpgradeAll();
     const dialog = app.sidebar.upgradeAllDialog();
-    await expect(dialog).toBeVisible({ timeout: 6_000 });
+    await expect(dialog).toBeVisible();
 
     // Until a version is picked the env asks for one and is not in the count;
     // Upgrade stays disabled (nothing to redeploy yet).
@@ -356,7 +356,7 @@ test.describe('sidebar Upgrade all', () => {
 
     // The confirmed run carries the picked version so `erun upgrade` deploys
     // exactly what the operator chose (issue #527).
-    await expect.poll(() => upgradeRuns.length, { timeout: 6_000 }).toBe(1);
+    await expect.poll(() => upgradeRuns.length).toBe(1);
     expect(upgradeRuns[0]?.environment).toBe('pick-env');
     expect(upgradeRuns[0]?.version).toBe(newer);
     await expect(dialog).toBeHidden();

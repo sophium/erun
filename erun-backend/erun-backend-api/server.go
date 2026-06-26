@@ -4,8 +4,12 @@ import (
 	"database/sql"
 	"net/http"
 
+	"github.com/dbos-inc/dbos-transact-golang/dbos"
+
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/provision"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/routes"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/secrets"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
 )
 
@@ -20,6 +24,15 @@ type HandlerOptions struct {
 	Authorizer       Authorizer
 	DB               *sql.DB
 	DBDialect        repository.Dialect
+	// DBOSContext + Cipher enable live context provisioning (issue #605/#676):
+	// when both are set (alongside DB), POST /v1/contexts starts a durable DBOS
+	// workflow that runs the real bootstrap and custodies the k3s token. When
+	// absent, context creation only registers the row (no live bootstrap).
+	DBOSContext dbos.DBOSContext
+	Cipher      *secrets.Cipher
+	// AWSEndpoint pins provisioning's aws calls at a local emulator (floci) for
+	// verification; empty means real AWS.
+	AWSEndpoint string
 }
 
 func NewHandler(options HandlerOptions) (http.Handler, error) {
@@ -77,6 +90,10 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 		builds := repository.NewBuildRepository(txManager)
 		comments := repository.NewCommentRepository(txManager)
 		tenantIssuers := repository.NewTenantIssuerRepository(txManager)
+		tenants := repository.NewTenantRepository(txManager)
+		environments := repository.NewEnvironmentRepository(txManager)
+		contexts := repository.NewContextRepository(txManager)
+		tenantQuotas := repository.NewTenantQuotaRepository(txManager)
 		reviewService := service.NewReviewService(reviews, builds)
 		buildService := service.NewBuildService(builds, reviewService)
 		commentService := service.NewCommentService(comments)
@@ -84,6 +101,27 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 		routes.RegisterReviewRoutes(register, reviews, reviewService)
 		routes.RegisterBuildRoutes(register, builds, buildService)
 		routes.RegisterCommentRoutes(register, comments, commentService)
+		routes.RegisterEnvironmentRoutes(register, environments, tenantQuotas)
+		var contextProvisioner routes.ContextProvisioner
+		if options.Cipher != nil {
+			aliases := repository.NewCloudProviderAliasRepository(txManager, options.Cipher)
+			routes.RegisterCloudProviderAliasRoutes(register, aliases)
+			if options.DBOSContext != nil {
+				contextProvisioner = provision.NewProvisioner(
+					options.DBOSContext,
+					contexts,
+					repository.NewContextCredentialRepository(txManager, options.Cipher),
+					aliases,
+					options.Cipher,
+					options.AWSEndpoint,
+				)
+			}
+		}
+		routes.RegisterContextRoutes(register, contexts, contextProvisioner)
+		routes.RegisterTenantRoutes(register, tenants)
+		routes.RegisterTenantQuotaRoute(register, tenantQuotas)
+		routes.RegisterConfigRoute(register, tenants, environments, contexts)
+		routes.RegisterProvisionRoute(register, tenants, environments, tenantQuotas)
 	}
 	routes.RegisterWhoamiRoute(register, users)
 	return mux, nil

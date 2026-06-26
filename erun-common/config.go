@@ -105,9 +105,16 @@ type EnvConfig struct {
 	LocalRepoPath      string          `yaml:"localrepopath,omitempty" json:"localRepoPath,omitempty"`
 	KubernetesContext  string
 	CloudProviderAlias string `yaml:"cloudprovideralias,omitempty"`
-	ManagedCloud       bool   `yaml:"managedcloud,omitempty" json:"managedCloud,omitempty"`
-	RuntimeVersion     string `yaml:"runtimeversion,omitempty"`
-	RuntimeRegistry    string `yaml:"runtimeregistry,omitempty" json:"runtimeRegistry,omitempty"`
+	// CloudProviderAliases attaches additional cloud aliases to this env, one
+	// per provider type (keyed by provider type, e.g. "cloudflare"). The legacy
+	// CloudProviderAlias scalar above stays the AWS slot for backward
+	// compatibility — pre-existing configs keep working untouched —
+	// while ResolvedCloudAliases folds both into one per-type view. Each env
+	// carries at most one alias per provider type.
+	CloudProviderAliases map[string]string `yaml:"cloudprovideraliases,omitempty" json:"cloudProviderAliases,omitempty"`
+	ManagedCloud         bool              `yaml:"managedcloud,omitempty" json:"managedCloud,omitempty"`
+	RuntimeVersion       string            `yaml:"runtimeversion,omitempty"`
+	RuntimeRegistry      string            `yaml:"runtimeregistry,omitempty" json:"runtimeRegistry,omitempty"`
 	// ContainerRegistries carries the marked registry list for environments
 	// whose project config is not on the local machine (remote-agent and
 	// runtime envs). Local-agent envs resolve their list from the project's
@@ -119,16 +126,20 @@ type EnvConfig struct {
 	// name resolves against the env's registry and runtime version. Set by
 	// `erun init --runtime-image` and carried to the published chart as
 	// imageOverrides.erun-devops on every deploy.
-	RuntimeImage          string                  `yaml:"runtimeimage,omitempty" json:"runtimeImage,omitempty"`
-	RuntimePod            RuntimePodResources     `yaml:"runtimepod,omitempty"`
-	SSHD                  SSHDConfig              `yaml:"sshd,omitempty"`
-	Idle                  EnvironmentIdleConfig   `yaml:"idle,omitempty"`
-	Deploy                EnvironmentDeployConfig `yaml:"deploy,omitempty" json:"deploy,omitempty"`
-	Claude                EnvironmentClaudeConfig `yaml:"claude,omitempty" json:"claude,omitempty"`
-	AITool                string                  `yaml:"aitool,omitempty" json:"aiTool,omitempty"`
-	LocalPortRangeStart   int                     `yaml:"localportrangestart,omitempty" json:"localPortRangeStart,omitempty"`
-	AutoStart             *bool                   `yaml:"autostart,omitempty" json:"autoStart,omitempty"`
-	RemoteHostCredentials bool                    `yaml:"remotehostcredentials,omitempty" json:"remoteHostCredentials,omitempty"`
+	RuntimeImage        string                  `yaml:"runtimeimage,omitempty" json:"runtimeImage,omitempty"`
+	RuntimePod          RuntimePodResources     `yaml:"runtimepod,omitempty"`
+	SSHD                SSHDConfig              `yaml:"sshd,omitempty"`
+	Idle                EnvironmentIdleConfig   `yaml:"idle,omitempty"`
+	Deploy              EnvironmentDeployConfig `yaml:"deploy,omitempty" json:"deploy,omitempty"`
+	Claude              EnvironmentClaudeConfig `yaml:"claude,omitempty" json:"claude,omitempty"`
+	AITool              string                  `yaml:"aitool,omitempty" json:"aiTool,omitempty"`
+	LocalPortRangeStart int                     `yaml:"localportrangestart,omitempty" json:"localPortRangeStart,omitempty"`
+	AutoStart           *bool                   `yaml:"autostart,omitempty" json:"autoStart,omitempty"`
+	// Deprecated: host AWS credential delivery is now driven by whether an AWS
+	// cloud alias is attached (HasAWSCloudAlias), not by a separate toggle —
+	// attaching an alias means "act on my behalf here". The field is retained
+	// so existing configs still parse; it no longer affects behavior.
+	RemoteHostCredentials bool `yaml:"remotehostcredentials,omitempty" json:"remoteHostCredentials,omitempty"`
 	// AutoUpgrade opts this env into the "Upgrade all" set: `erun upgrade`
 	// (and the desktop's Upgrade-all action) redeploy it to the latest
 	// version for its UpgradeChannel when the current RuntimeVersion lags.
@@ -144,6 +155,28 @@ type EnvConfig struct {
 	// with no buildable context if none exist. Default false preserves today's
 	// build.sh-shadows-docker behaviour.
 	DisableBuildScript bool `yaml:"disablebuildscript,omitempty" json:"disableBuildScript,omitempty"`
+}
+
+// ResolvedCloudAliases returns the env's attached cloud aliases keyed by
+// provider type. The legacy CloudProviderAlias scalar is folded in under its
+// own provider type (AWS for every pre-existing config), and explicit
+// CloudProviderAliases entries are layered on top. An env holds at most one
+// alias per provider type, so the runtime can be seeded with, e.g., both an
+// AWS identity and a Cloudflare token at once.
+func (c EnvConfig) ResolvedCloudAliases() map[string]string {
+	resolved := make(map[string]string)
+	if alias := strings.TrimSpace(c.CloudProviderAlias); alias != "" {
+		resolved[cloudProviderTypeFromAlias(alias)] = alias
+	}
+	for providerType, alias := range c.CloudProviderAliases {
+		providerType = strings.ToLower(strings.TrimSpace(providerType))
+		alias = strings.TrimSpace(alias)
+		if providerType == "" || alias == "" {
+			continue
+		}
+		resolved[providerType] = alias
+	}
+	return resolved
 }
 
 // ResolvedType returns the env's type, or "" when unresolved. Pre-#376 configs
@@ -170,6 +203,15 @@ func (c EnvConfig) BuildsHere() bool {
 // unresolved is treated as not having a remote worktree.
 func (c EnvConfig) RemoteWorktree() bool {
 	return c.Type.IsValid() && c.Type != EnvironmentTypeLocalAgent
+}
+
+// HasAWSCloudAlias reports whether the env has an AWS cloud alias attached.
+// An alias is a credential the operator already authenticated, so associating
+// it with an env means "act on my behalf here" — that association alone (no
+// separate toggle) drives delivery of the host AWS credentials into the env,
+// mirroring how attaching a Cloudflare alias delivers its token.
+func (c EnvConfig) HasAWSCloudAlias() bool {
+	return strings.TrimSpace(c.ResolvedCloudAliases()[CloudProviderAWS]) != ""
 }
 
 // legacyEnvTypeFromRemoteSnapshot derives the environment type from the

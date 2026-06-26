@@ -59,7 +59,7 @@ metadata:
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt
 spec:
-  ingressClassName: nginx
+  ingressClassName: <ingress-class>   # your controller's class: nginx, traefik, istio, alb, …
   rules:
     - host: <service>.{{ .Release.Namespace }}.<environment>.<domain>
       http:
@@ -146,13 +146,13 @@ The dry-run trace prints both `kubectl` commands verbatim (including the TTL) pl
 
 **Records, not the HTTP API.** Writes go through `pdnsutil` against the gpgsql backend (the PowerDNS pod reads its connection — including the postgres password — from a generated `--config-dir` config, so no secret appears in the exec argv). The PowerDNS HTTP API is bound to loopback only and is not used by `expose`.
 
-**TLS.** The applied Ingress is HTTP-only (no `tls:`, no cert-manager annotation). The CLI prints `http://<hostname>`. A wildcard TLS certificate is `(Planned.)` — it arrives with the DNS-01 broker, at which point the hostname serves `https://`.
+**TLS.** The applied Ingress is HTTP-only (no `tls:`, no cert-manager annotation), and the CLI prints `http://<hostname>`. The wildcard-TLS **issuer** now ships: the `terraform-erun-cluster-edge` module (applied by the `erun-enable-hosting-edge` skill) installs cert-manager + a Cloudflare **DNS-01 `ClusterIssuer`** (`erun-cloudflare`) that issues a `*.<services-zone>` certificate — the "DNS-01 broker" this spec anticipated. Wiring `expose`'s rendered Ingress to that issuer (adding `tls:` + the `cert-manager.io/cluster-issuer: erun-cloudflare` annotation + `ingressClassName`) so the hostname serves `https://` is the remaining step `(Planned.)`.
 
 **Idempotency / errors.** `replace-rrset` and `apply` are both idempotent; re-running converges. The wildcard record is written before the Ingress, so a failure applying the Ingress can leave the DNS record in place — re-run after resolving the cluster issue. Pre-flight validation (missing/malformed `platform:` block, missing `--ip`, non-DNS-1035 service name) fails before any write; see [`erun expose` · Error behaviour](/cli/expose#error-behaviour).
 
 ## Cross-namespace traffic semantics
 
-ERun's runtime chart deploys a default-deny `NetworkPolicy` per env that blocks ingress from outside the namespace. The shape:
+Vanilla Kubernetes lets pods reach across namespaces, so ERun provides a default-deny `NetworkPolicy` as a **copy-paste pattern you apply per env** — the runtime chart does **not** auto-deploy one (no `NetworkPolicy` template ships in it). Apply this manifest to an env's namespace to block ingress from outside it. The shape:
 
 ```yaml
 apiVersion: networking.k8s.io/v1

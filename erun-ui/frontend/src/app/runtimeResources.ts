@@ -87,24 +87,51 @@ function parsedRuntimeErrorMessage(error: string, status: UIRuntimeResourceStatu
   return error;
 }
 
-export function runtimeResourceLimitMessage(
+// RuntimeResourceValidation splits a runtime-pod request into two distinct
+// outcomes so the UI can treat them differently (Nielsen heuristics #5 error
+// prevention, #9 help users recover):
+//   - blockingError: the request is invalid (unparseable or below the floor)
+//     and must not be persisted. Save/Create stay disabled until it is fixed.
+//   - capacityWarning: the request is valid but no node can currently schedule
+//     it. That is a deploy-time concern, not a config-validity one, so it must
+//     not block saving the config — a deploy simply stays pending until
+//     capacity frees up or the request is lowered.
+export interface RuntimeResourceValidation {
+  blockingError: string;
+  capacityWarning: string;
+}
+
+export function runtimeResourceValidation(
   config: UIRuntimePodConfig,
   status: UIRuntimeResourceStatus | null,
-): string {
+): RuntimeResourceValidation {
   const parsed = parseRuntimePodConfig(config);
   if (parsed.error) {
-    return parsedRuntimeErrorMessage(parsed.error, status);
+    return { blockingError: parsedRuntimeErrorMessage(parsed.error, status), capacityWarning: '' };
   }
   if (!status?.available) {
-    return '';
+    return { blockingError: '', capacityWarning: '' };
   }
   const matchingNode = (status.nodes ?? []).find(
     (node) => parsed.cpuCores <= node.cpu.free && parsed.memoryGiB <= node.memory.free,
   );
   if (status.nodes && status.nodes.length > 0 && !matchingNode) {
-    return `No node has both ${formatNumber(parsed.cpuCores)} CPU and ${formatNumber(parsed.memoryGiB)} GiB memory available.`;
+    return {
+      blockingError: '',
+      capacityWarning: `No node currently has ${formatNumber(parsed.cpuCores)} CPU and ${formatNumber(parsed.memoryGiB)} GiB free — the configuration saves, but a deploy stays pending until capacity frees up or you lower the request.`,
+    };
   }
-  return '';
+  return { blockingError: '', capacityWarning: '' };
+}
+
+// runtimeResourceLimitMessage returns the single most relevant message for
+// callers that treat any resource problem as blocking (the create/init dialog).
+export function runtimeResourceLimitMessage(
+  config: UIRuntimePodConfig,
+  status: UIRuntimeResourceStatus | null,
+): string {
+  const validation = runtimeResourceValidation(config, status);
+  return validation.blockingError || validation.capacityWarning;
 }
 
 export function clampRuntimePodConfig(

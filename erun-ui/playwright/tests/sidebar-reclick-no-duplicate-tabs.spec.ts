@@ -50,7 +50,7 @@ test.describe('sidebar env re-click with alive default tabs', () => {
     // Generous window so a delayed misfire of ensureLiveDefaultTab on
     // a healthy session still trips this assertion. The headless backend
     // is a singleton with workers: 1, so 2 s is cheap.
-    await expect(page.getByText(/Reopening Local shell/i)).toBeHidden({ timeout: 2_000 });
+    await expect(page.getByText(/Reopening Local shell/i)).toBeHidden();
     await expect(page.getByText(/Reopening AI session/i)).toBeHidden();
     await expect(page.getByText(/Reopening ERun session/i)).toBeHidden();
 

@@ -5,15 +5,7 @@ audit: erun open --dry-run --no-alias-prompt --no-shell team dev
 config: would assign localportrangestart=17000 to team/dev
 trace-log: would append the full trace to <TMP>
 open: tenant=team environment=dev kubernetes-context=test-context remote=false no-shell=true ide=shell
-deploy: no local runtime chart; using published chart oci://registry.example/test/charts/erun-devops version <VERSION>
-kubectl --context test-context --namespace team-dev get deployment team-devops -o name
-deploying the devops runtime before opening the shell
-kubectl --context test-context get namespace team-dev -o name
-kubectl --context test-context create namespace team-dev
-helm upgrade --install --wait --wait-for-jobs --timeout 5m0s --namespace team-dev --debug --kube-context test-context --set-string tenant=team --set-string environment=dev --set-string worktreeStorage=host --set-string worktreeRepoName=cwd --set-string worktreeHostPath=<TMP> --set sshdEnabled=false --set mcpPort=17000 --set apiPort=17033 --set sshPort=17022 --set managedCloud=false --set-string cloudContext.name= --set-string cloudContext.provider= --set-string cloudContext.providerAlias= --set-string cloudContext.region= --set-string cloudContext.instanceId= --set cloudContext.useHostCredentials=false --set-string api.oidcAllowedIssuers= --set api.postgres.reset=false --set-string containerRegistry=registry.example/test --set-json 'containerRegistries=[{"registry":"registry.example/test","roles":["build","deploy"]}]' --set disableBuildScript=false --set-string idle.timeout=5m0s --set-string idle.workingHours=08:00-20:00 --set-string idle.timezone= --set idle.trafficBytes=0 --set-string runtime.resources.limits.cpu=4 --set-string runtime.resources.limits.memory=8916Mi --set-string claude.useMantle=0 --set-string claude.useBedrock=0 team-devops oci://registry.example/test/charts/erun-devops --version <VERSION>
-deploy: watching pods in team-dev on context test-context for early container failure (release team-devops)
-kubectl --context test-context --namespace team-dev get pods -o json
-dedup: ready (release=test-context-team-dev-team-devops, hash=<HASH>)
+open: pure primitive — not deploying (run `erun deploy` first, or pass --deploy to deploy before opening)
 kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 17000:17000 --address <LOOPBACK>
 mcp: would refuse to bind <LOOPBACK>:17000 — held by PID 88888: /usr/local/bin/some-foreign-process --bind <LOOPBACK>:17000
 kubectl --context test-context --namespace team-dev get deployment erun-api -o name

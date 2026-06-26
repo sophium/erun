@@ -102,6 +102,100 @@ func TestCloud(t *testing.T) {
 		golden.Equal(t, "cloud/init_aws_help", normalize.Apply(result.Combined))
 	})
 
+	t.Run("init_cloudflare_help", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"cloud", "init", "cloudflare", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "cloud/init_cloudflare_help", normalize.Apply(result.Combined))
+	})
+
+	t.Run("init_cloudflare_dry_run_redacts_token_and_traces_alias_write", func(t *testing.T) {
+		// Exercises cloud.go runCloudInitCloudflareCommand and
+		// eruncommon.InitCloudflareCloudProvider in --dry-run: the command
+		// must trace the cloudflare init line with the api token REDACTED
+		// (never the literal value), trace the tokens/verify GET (which
+		// short-circuits in dry-run without touching the network), and trace
+		// the secret-store-ref + alias write — then print the dry-run summary
+		// without persisting anything. The redaction contract is the point of
+		// this scenario, so it is asserted directly against the un-normalized
+		// capture in addition to the snapshot.
+		setup := env.New(t)
+		args := []string{
+			"cloud", "init", "cloudflare",
+			"--account-id", "cf-acct-123",
+			"--token-name", "ci-token",
+			"--api-token", "dummy-token",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		// The literal token must never reach the trace; the command prints
+		// "api-token=<redacted>" instead. Normalization does not mask this
+		// value, so a substring guard on the raw capture is the only way to
+		// lock the redaction contract (see erun-integration/AGENTS.md
+		// § "Whole-output snapshots vs targeted substring assertions" case 1).
+		if strings.Contains(result.Combined, "dummy-token") {
+			t.Fatalf("expected the api token to be redacted, but found the literal value in output:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "api-token=<redacted>") {
+			t.Fatalf("expected redacted api-token marker in output, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "cloud/init_cloudflare_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("init_cloudflare_dry_run_auto_resolves_account", func(t *testing.T) {
+		// Same guided setup, but the operator answers only the token and label
+		// (no --account-id). The command runs the wizard's account step
+		// non-interactively: it traces the GET /accounts lookup (short-circuited
+		// in dry-run, no network), resolves the single synthetic account, and
+		// threads it into the alias write. Locks the "options answer the wizard
+		// questions" dry-run contract for the auto-resolve path.
+		setup := env.New(t)
+		args := []string{
+			"cloud", "init", "cloudflare",
+			"--token-name", "ci-token",
+			"--api-token", "dummy-token",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "dummy-token") {
+			t.Fatalf("expected the api token to be redacted, but found the literal value in output:\n%s", result.Combined)
+		}
+		golden.Equal(t, "cloud/init_cloudflare_dry_run_auto_account", normalize.Apply(result.Combined))
+	})
+
+	t.Run("init_cloudflare_dry_run_honors_api_base_url_seam", func(t *testing.T) {
+		// Exercises the ERUN_CLOUDFLARE_API_BASE_URL subprocess-reachable seam
+		// (issue #646): when set, every Cloudflare API call targets the override
+		// base instead of api.cloudflare.com. The seam is what lets a desktop /
+		// real-run e2e point the `erun cloud init cloudflare` subprocess at a
+		// mock. In --dry-run the GET trace fires before the network short-circuit,
+		// so the override base is observable here without any network call. The
+		// trailing slash on the override is intentional: the golden's single
+		// `/client/v4/...` (no double slash) locks the base-URL trim too.
+		setup := env.New(t)
+		args := []string{
+			"cloud", "init", "cloudflare",
+			"--account-id", "cf-acct-123",
+			"--token-name", "ci-token",
+			"--api-token", "dummy-token",
+			"--dry-run",
+		}
+		envVars := append(setup.Env(), "ERUN_CLOUDFLARE_API_BASE_URL=https://cf-mock.example/")
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "cloud/init_cloudflare_dry_run_api_base_url_seam", normalize.Apply(result.Combined))
+	})
+
 	t.Run("init_aws_dry_run_traces_sso_setup_and_oidc_persistence", func(t *testing.T) {
 		// Exercises cloud.go runCloudInitAWSCommand: --dry-run must trace
 		// the aws configure sso plan, the sso login command, the sts

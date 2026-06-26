@@ -2,36 +2,34 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// envEnsureTTL bounds how long one completed ensure stands in for the next
+// envEnsureTTL bounds how long one completed reconnect stands in for the next
 // tab spawn or respawn of the same env. Long enough to cover the burst an
 // env (re)start produces (the ERun + AI spawns and any pod-replace respawns
 // land within seconds of each other), short enough that a genuinely later
-// reopen re-checks the deployment.
+// reopen re-checks reachability.
 const envEnsureTTL = 30 * time.Second
 
-// ensureEnvRuntimeOnce runs the env's open/build/deploy preflight at most
-// once per (re)start window, across every tab and respawn (issue #463).
-// Before this, each tab's own `erun open` ran the full preflight — spec
-// resolution, per-arch docker cache walks, and, when stale, the whole
-// multi-arch rebuild + helm deploy — once per tab, with the rebuild
-// streaming into whichever tab won the per-env queue (the reported "docker
-// build inside the AI tab"). Now the desktop runs one `erun open --no-shell`
-// per window, streams its deploy traces into the activity queue (the same
-// `==> Deploying` parser the PTY channel feeds), and every tab launches with
-// --skip-ensure, relying on the shell runner's deployment wait to hold the
-// tab until this ensure's deploy is available.
+// ensureEnvRuntimeOnce reconnects the env's MCP/API port-forwards at most once
+// per (re)start window, across every tab and respawn (issue #463). Since `open`
+// became a pure primitive (issue #644) this is a thin idempotent reconnect: it
+// runs `erun open --no-shell` only to (re)bind the forwarders against the
+// already-deployed runtime — it does NOT deploy. Deploy is the caller's job:
+// the desktop composes build→push→deploy on create and via the Deploy button,
+// so the runtime is expected to already exist by the time tabs open.
 //
-// Fire-and-forget by design: callers never block on the ensure, and a
-// concurrent or recent ensure is simply not repeated. A failed ensure still
-// stamps the window (the TTL stops a failing env from being hammered once
-// per tab); its failure surfaces through the activity queue's deploy-failed
-// entry and the tabs' own deployment-wait errors, which feed the existing
-// reconnect-refusal machinery.
+// Fire-and-forget by design: callers never block on the reconnect, and a
+// concurrent or recent successful reconnect is not repeated. A FAILED reconnect
+// (usually because the runtime is not deployed) is surfaced — not swallowed —
+// and does NOT stamp the success window, so the next tab open retries instead
+// of being suppressed for the whole TTL while the user stares at a dead env
+// (issue #644 proposed change 3).
 func (a *App) ensureEnvRuntimeOnce(selection uiSelection) {
 	// a.ctx is set by startup() in both desktop and headless modes and stays
 	// nil in unit tests: the ensure must never fall back from a test app to
@@ -59,10 +57,15 @@ func (a *App) ensureEnvRuntimeOnce(selection uiSelection) {
 	a.envEnsureMu.Unlock()
 
 	go func() {
+		var ensureErr error
 		defer func() {
 			a.envEnsureMu.Lock()
 			delete(a.envEnsureInflight, key)
-			a.envEnsureDone[key] = time.Now()
+			// Stamp the dedup window only on success: a failed reconnect must
+			// not suppress the next tab's retry for the whole TTL (#644).
+			if ensureErr == nil {
+				a.envEnsureDone[key] = time.Now()
+			}
 			a.envEnsureMu.Unlock()
 		}()
 		result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
@@ -70,9 +73,26 @@ func (a *App) ensureEnvRuntimeOnce(selection uiSelection) {
 			Environment: selection.Environment,
 		})
 		if err != nil {
+			ensureErr = err
+			a.surfaceEnvRuntimeEnsureFailure(selection, err)
 			return
 		}
 		onLine := newActivityTraceLineHandler(a, selection, sessionKindOpen)
-		_ = a.deps.reconnectMCP(context.Background(), result, onLine)
+		if ensureErr = a.deps.reconnectMCP(context.Background(), result, onLine); ensureErr != nil {
+			a.surfaceEnvRuntimeEnsureFailure(selection, ensureErr)
+		}
 	}()
+}
+
+// surfaceEnvRuntimeEnsureFailure makes a failed runtime reconnect visible and
+// recoverable instead of discarding it (Nielsen #1/#9, issue #644): it flags
+// the env's sidebar row as failed and posts an actionable notification. The
+// reconnect usually fails because the runtime is not deployed — which `open`
+// no longer fixes on its own — so the recovery is an explicit deploy.
+func (a *App) surfaceEnvRuntimeEnsureFailure(selection uiSelection, err error) {
+	a.emitEnvStatus(selection, envStatusFailed)
+	a.emitAppNotification("warn", fmt.Sprintf(
+		"Could not reach the runtime for %s/%s: %s. Deploy the environment to bring it up.",
+		selection.Tenant, selection.Environment, strings.TrimSpace(err.Error()),
+	))
 }

@@ -62,7 +62,7 @@ ERun uses Kubernetes' native `Secret` primitive — there is no ERun-specific se
 |---|---|
 | Namespace `Secret` objects | Application services |
 | OIDC service-account credentials | Agents calling the erun API |
-| Host cloud credentials (opt-in via `EnvConfig.remotehostcredentials`) | Managed cloud envs |
+| Host AWS credentials (delivered when an AWS cloud alias is attached to the env) | Managed cloud envs |
 | SSH key | IDE attach |
 | Registry auth | `docker push` from the pod |
 

@@ -67,7 +67,7 @@ test.describe('manage dialog redeploy banner scoping (#460)', () => {
     const original = await idle.inputValue();
     await idle.fill(original === '7m' ? '9m' : '7m');
     await app.manageDialog.save();
-    await expect(app.manageDialog.redeployBanner()).toBeVisible({ timeout: 6_000 });
+    await expect(app.manageDialog.redeployBanner()).toBeVisible();
 
     // A later metadata-only save must not clear a redeploy the user still
     // owes the pod: toggle autoUpgrade back and save again — banner stays.

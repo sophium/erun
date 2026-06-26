@@ -28,13 +28,21 @@ import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
 test.describe('remote session tab detection', () => {
   test('opening an env yields only known tab kinds with no duplicates', async ({ app, page }) => {
+    // The fire-and-forget remote-session detection pass round-trips a
+    // ListRemoteAppSessions RPC; wait on that event (not the wall clock) so the
+    // assertions reflect a completed detection pass.
+    const detected = page.waitForResponse(
+      (response) =>
+        response.url().includes('/__erun_invoke') &&
+        (response.request().postData() ?? '').includes('ListRemoteAppSessions'),
+    );
     await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
 
     const strip = page.getByRole('tablist', { name: 'Open terminals' });
     await expect(strip).toBeVisible();
-    // Give the fire-and-forget detection pass a window to run; it must not
-    // surface an error overlay or mutate the strip into unknown entries.
-    await page.waitForTimeout(1_000);
+    // The detection pass must not surface an error overlay or mutate the strip
+    // into unknown entries.
+    await detected;
 
     const labels = await strip.getByRole('tab').allInnerTexts();
     expect(labels.length).toBeGreaterThan(0);
