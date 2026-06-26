@@ -96,3 +96,7 @@ erun cloud set my-tenant rihards-dev --alias dns-edit+0a1b2c3d@cloudflare
 ```
 
 When that environment's runtime pod comes up, ERun injects the token as `CLOUDFLARE_API_TOKEN` and the account as `CLOUDFLARE_ACCOUNT_ID`. The in-pod Terraform Cloudflare provider reads both natively, so an Agent can manage DNS without ever handling the credential itself.
+
+### Enabling the public hosting edge
+
+The injected token is what the **`terraform-erun-cluster-edge`** module (in `erun-devops/terraform-erun/modules/`) applies to stand up the public HTTPS edge: it installs a Traefik ingress controller and cert-manager, and creates a **Cloudflare DNS-01 `ClusterIssuer`** (using the token + the platform config's `acmeemail`) that issues a wildcard certificate for `*.<services-zone>`. The `erun-enable-hosting-edge` skill drives it end to end (apply + verify the issuer and wildcard cert). Wiring `erun expose`'s Ingress to that issuer and hosting the console behind the edge are the remaining follow-ups.

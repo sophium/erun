@@ -1,0 +1,14 @@
+# Defaults; the terraform-erun-cluster-edge module overrides every field via
+# helm `set`. Listed here so the chart renders standalone (e.g. `helm template`).
+issuerName: erun-cloudflare
+acmeEmail: ""
+acmeServer: https://acme-v02.api.letsencrypt.org/directory
+servicesZone: ""
+cloudflareTokenSecret: erun-cloudflare-cloudflare-token
+certNamespace: cert-manager
+# Pass-through as a string ("true"/"false"): the Terraform helm provider's
+# `set.value` is always a string, and Go templates treat any non-empty string
+# (including "false") as truthy, so the template compares against "true".
+wildcardCertificateEnabled: "true"
+wildcardCertName: erun-cloudflare-wildcard
+wildcardSecretName: erun-cloudflare-wildcard-tls
