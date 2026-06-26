@@ -3,3 +3,7 @@ dist/
 .vite/
 *.local
 .DS_Store
+
+# Playwright run output (regenerated; never committed)
+test-results/
+playwright-report/
