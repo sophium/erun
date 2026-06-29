@@ -170,17 +170,23 @@ func resolveHelmChartPublishSpec(chartPath, version, containerRegistry string) (
 	}, nil
 }
 
-// publishChartForPushedImage publishes the Helm chart that ships with a pushed
-// image, in lockstep with the image, whenever push sends that image to a
-// registry — so every pushed component (release or snapshot) is deployable by
-// envs and by platform wrapper charts that consume the published charts, not
+// publishComponentChart publishes the Helm chart that ships with a component
+// image at chartVersion — so every component (release or snapshot) is deployable
+// by envs and by platform wrapper charts that consume the published charts, not
 // just the runtime erun-devops chart. The chart lives in the same module as the
 // image build context (<module>/k8s/<image-name>) and publishes under
-// <registry>/charts (separate from the image repo); registry and version come
-// from the pushed image. It is a no-op for an image that ships no chart (e.g. a
-// tenant's custom <tenant>-devops image that overrides into the published
-// erun-devops chart, or an infra image like dind).
-func publishChartForPushedImage(ctx Context, image DockerImageReference) error {
+// <registry>/charts (separate from the image repo).
+//
+// chartVersion is the push/release version, which is intentionally decoupled
+// from image.Version: version-pinned bases (e.g. erun-powerdns at upstream
+// 4.9.3, erun-backend-postgres at 18.3) keep their image at the upstream pin and
+// are not re-pushed at the release version, but their chart must still publish
+// at the release version so platform deploys resolve it. For non-pinned
+// components image.Version equals chartVersion. When chartVersion is empty
+// (single-image push paths) it falls back to image.Version. It is a no-op for an
+// image that ships no chart (e.g. a tenant's custom <tenant>-devops image that
+// overrides into the published erun-devops chart, or an infra image like dind).
+func publishComponentChart(ctx Context, image DockerImageReference, chartVersion string) error {
 	imageName := strings.TrimSpace(image.ImageName)
 	projectRoot := strings.TrimSpace(image.ProjectRoot)
 	if imageName == "" || projectRoot == "" {
@@ -191,7 +197,11 @@ func publishChartForPushedImage(ctx Context, image DockerImageReference) error {
 		// No chart ships with this image; nothing to publish.
 		return nil
 	}
-	publish, err := resolveHelmChartPublishSpec(chartPath, image.Version, image.Registry)
+	version := strings.TrimSpace(chartVersion)
+	if version == "" {
+		version = strings.TrimSpace(image.Version)
+	}
+	publish, err := resolveHelmChartPublishSpec(chartPath, version, image.Registry)
 	if err != nil {
 		return err
 	}

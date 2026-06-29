@@ -17,6 +17,20 @@ import (
 
 var apiFingerprintRE = regexp.MustCompile(`ghcr\.io/sophium/api:fp-([0-9a-f]{16})-amd64`)
 
+// chartPackageVersion extracts the version a chart is published at from the
+// `helm package <chart> --version <version>` trace line in out. Used to assert
+// the published version when output normalization would otherwise collapse
+// distinct versions to <VERSION> (#701).
+func chartPackageVersion(t testing.TB, out, chart string) string {
+	t.Helper()
+	re := regexp.MustCompile(`helm package ` + regexp.QuoteMeta(chart) + ` --version (\S+)`)
+	m := re.FindStringSubmatch(out)
+	if m == nil {
+		t.Fatalf("no `helm package %s --version` line in output:\n%s", chart, out)
+	}
+	return m[1]
+}
+
 func TestBuild(t *testing.T) {
 	t.Run("help", func(t *testing.T) {
 		setup := env.New(t)
@@ -136,6 +150,20 @@ func TestBuild(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "build/dry_run_release_publishes_runtime_chart", normalize.Apply(result.Combined))
+		// #701: the version-pinned base (docker/base/VERSION=9.9.9) keeps its
+		// image at the upstream pin, but its co-located chart must publish at the
+		// release version — the same version the built `api` chart publishes at,
+		// NOT 9.9.9. Output normalization collapses both 1.4.2-pr.<sha> and 9.9.9
+		// to <VERSION>, so the golden can't tell them apart; assert the raw
+		// versions directly.
+		baseChartVer := chartPackageVersion(t, result.Combined, "base")
+		apiChartVer := chartPackageVersion(t, result.Combined, "api")
+		if baseChartVer != apiChartVer {
+			t.Fatalf("base chart published at %q, want the release version %q (same as api)", baseChartVer, apiChartVer)
+		}
+		if strings.Contains(baseChartVer, "9.9.9") {
+			t.Fatalf("base chart published at the pinned image version %q; want the release version", baseChartVer)
+		}
 	})
 
 	t.Run("dry_run_configured_fingerprint_traces_pull_and_tag", func(t *testing.T) {
