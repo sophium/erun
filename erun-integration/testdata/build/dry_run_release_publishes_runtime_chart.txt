@@ -28,10 +28,15 @@ write <TMP>
 write <TMP>
   apiVersion: v2
   appVersion: <VERSION>
+  name: base
+  version: <VERSION>
+write <TMP>
+  apiVersion: v2
+  appVersion: <VERSION>
   description: ERun DevOps
   name: erun-devops
   version: <VERSION>
-cd <TMP> && git add erun-devops/k8s/api/Chart.yaml erun-devops/k8s/erun-devops/Chart.yaml
+cd <TMP> && git add erun-devops/k8s/api/Chart.yaml erun-devops/k8s/base/Chart.yaml erun-devops/k8s/erun-devops/Chart.yaml
 cd <TMP> && git commit -m '[skip ci] release <VERSION>'
 git -C <TMP> rev-parse '<VERSION>^{}'
 cd <TMP> && git tag -a <VERSION> -m 'Release candidate <VERSION>'
@@ -75,6 +80,9 @@ cd <TMP> && docker manifest push ghcr.io/sophium/erun-devops:<VERSION>
 cd <TMP> && helm package api --version <VERSION> --app-version <VERSION>
 cd <TMP> && helm push api-<VERSION> oci://ghcr.io/sophium/charts
 helm pull oci://ghcr.io/sophium/charts/api --version <VERSION> --destination <TMP>
+cd <TMP> && helm package base --version <VERSION> --app-version <VERSION>
+cd <TMP> && helm push base-<VERSION> oci://ghcr.io/sophium/charts
+helm pull oci://ghcr.io/sophium/charts/base --version <VERSION> --destination <TMP>
 cd <TMP> && helm package erun-devops --version <VERSION> --app-version <VERSION>
 cd <TMP> && helm push erun-devops-<VERSION> oci://ghcr.io/sophium/charts
 helm pull oci://ghcr.io/sophium/charts/erun-devops --version <VERSION> --destination <TMP>

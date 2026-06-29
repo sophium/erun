@@ -24,7 +24,12 @@ write <TMP>
   appVersion: <VERSION>
   name: api
   version: <VERSION>
-cd <TMP> && git add erun-devops/k8s/api/Chart.yaml
+write <TMP>
+  apiVersion: v2
+  appVersion: <VERSION>
+  name: base
+  version: <VERSION>
+cd <TMP> && git add erun-devops/k8s/api/Chart.yaml erun-devops/k8s/base/Chart.yaml
 cd <TMP> && git commit -m '[skip ci] release <VERSION>'
 git -C <TMP> rev-parse '<VERSION>^{}'
 cd <TMP> && git tag -a <VERSION> -m 'Release candidate <VERSION>'
@@ -55,4 +60,7 @@ cd <TMP> && docker tag ghcr.io/sophium/base:<VERSION> ghcr.io/sophium/base:fp-<H
 cd <TMP> && helm package api --version <VERSION> --app-version <VERSION>
 cd <TMP> && helm push api-<VERSION> oci://ghcr.io/sophium/charts
 helm pull oci://ghcr.io/sophium/charts/api --version <VERSION> --destination <TMP>
+cd <TMP> && helm package base --version <VERSION> --app-version <VERSION>
+cd <TMP> && helm push base-<VERSION> oci://ghcr.io/sophium/charts
+helm pull oci://ghcr.io/sophium/charts/base --version <VERSION> --destination <TMP>
 release version: <VERSION>

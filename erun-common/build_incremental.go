@@ -197,10 +197,12 @@ func hashComponentChartInto(w io.Writer, buildInput DockerBuildSpec) error {
 	// chart, by contrast, is version-bumped to the release version every cycle.
 	// Folding the chart into the IMAGE fingerprint would churn a stable image's
 	// fingerprint every release and force a needless rebuild, so skip it; the
-	// base then promotes from the registry instead of rebuilding. The chart is
-	// still published in lockstep — promotion re-tags and re-pushes the image at
-	// the release version, and publishChartForPushedImage publishes the chart
-	// alongside it; that publish does not depend on this fingerprint.
+	// base then promotes from the registry instead of rebuilding (its image stays
+	// at the upstream pin and is not re-pushed at the release version). The chart
+	// is still published at the release version regardless: the push step calls
+	// publishComponentChart for every component build at the push version, not
+	// only for images it re-pushes; that publish does not depend on this
+	// fingerprint.
 	if buildInput.Image.VersionFromBuildDir {
 		return nil
 	}

@@ -279,8 +279,9 @@ func RunDockerPushSpec(ctx Context, pushInput DockerPushSpec, buildInput *Docker
 			return err
 		}
 		if buildInput.Push {
-			// The multi-arch build already pushed the image; publish its chart.
-			return publishChartForPushedImage(ctx, buildInput.Image)
+			// The multi-arch build already pushed the image; publish its chart at
+			// the image's own version (single-image push: image and chart match).
+			return publishComponentChart(ctx, buildInput.Image, buildInput.Image.Version)
 		}
 	}
 	if push == nil {
@@ -291,21 +292,25 @@ func RunDockerPushSpec(ctx Context, pushInput DockerPushSpec, buildInput *Docker
 	if err := push(ctx, pushInput); err != nil {
 		return err
 	}
-	return publishChartForPushedImage(ctx, pushInput.Image)
+	return publishComponentChart(ctx, pushInput.Image, pushInput.Image.Version)
 }
 
 func RunDockerPushExecution(ctx Context, execution DockerPushExecutionSpec, build DockerImageBuilderFunc, push DockerPushFunc) error {
 	if err := RunDockerBuilds(ctx, execution.builds, build); err != nil {
 		return err
 	}
+	// Every component chart publishes at the push/release version, decoupled from
+	// whether its image was re-pushed: version-pinned bases (erun-powerdns,
+	// erun-backend-postgres) keep their image at the upstream pin and are not
+	// re-pushed here, but their chart must still publish at the release version so
+	// platform deploys and wrapper charts resolve it.
+	chartVersion := componentChartPublishVersion(execution.builds)
 	builtAndPushedTags := make(map[string]struct{}, len(execution.builds))
 	for _, buildInput := range execution.builds {
-		if !buildInput.Push {
-			continue
+		if buildInput.Push {
+			builtAndPushedTags[buildInput.Image.Tag] = struct{}{}
 		}
-		builtAndPushedTags[buildInput.Image.Tag] = struct{}{}
-		// The multi-arch build pushed this image; publish its chart in lockstep.
-		if err := publishChartForPushedImage(ctx, buildInput.Image); err != nil {
+		if err := publishComponentChart(ctx, buildInput.Image, chartVersion); err != nil {
 			return err
 		}
 	}
@@ -318,4 +323,24 @@ func RunDockerPushExecution(ctx Context, execution DockerPushExecutionSpec, buil
 		}
 	}
 	return nil
+}
+
+// componentChartPublishVersion returns the version every component chart in the
+// execution publishes at: the push/release version. It is the Version of the
+// first build that is not a version-pinned base — those (erun-powerdns,
+// erun-backend-postgres) carry their upstream pin in Image.Version (e.g. 4.9.3),
+// while the runtime and built components carry the release version. The runtime
+// (erun-devops) is always present and non-pinned, so a release/push always finds
+// it; an empty result (no non-pinned build) leaves each chart to fall back to
+// its image's own version.
+func componentChartPublishVersion(builds []DockerBuildSpec) string {
+	for _, buildInput := range builds {
+		if buildInput.Image.VersionFromBuildDir {
+			continue
+		}
+		if version := strings.TrimSpace(buildInput.Image.Version); version != "" {
+			return version
+		}
+	}
+	return ""
 }

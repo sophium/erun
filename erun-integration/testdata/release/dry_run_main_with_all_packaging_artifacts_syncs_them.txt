@@ -31,6 +31,11 @@ write <TMP>
   name: api
   version: <VERSION>
 write <TMP>
+  apiVersion: v2
+  appVersion: <VERSION>
+  name: base
+  version: <VERSION>
+write <TMP>
   class Erun < Formula
     desc "erun developer toolkit"
     homepage "https://github.com/sophium/erun"
@@ -70,7 +75,7 @@ write <TMP>
       "erun-app.exe"
     ]
   }
-cd <TMP> && git add erun-devops/k8s/api/Chart.yaml Formula/erun.rb bucket/erun.json
+cd <TMP> && git add erun-devops/k8s/api/Chart.yaml erun-devops/k8s/base/Chart.yaml Formula/erun.rb bucket/erun.json
 cd <TMP> && git commit -m '[skip ci] release <VERSION>'
 git -C <TMP> rev-parse '<VERSION>^{}'
 cd <TMP> && git tag -a <VERSION> -m 'Release <VERSION>'
