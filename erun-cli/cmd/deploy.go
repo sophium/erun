@@ -20,12 +20,14 @@ func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 			"at a version, by reference. It never builds or pushes — produce a version with `erun build` " +
 			"and `erun push` (or `erun build --deploy` to chain them) first. Pass the version with " +
 			"--version; use --current to redeploy the version this environment already runs. " +
+			"Pass --runtime-image to install the canonical ERun base image (or any image) via the " +
+			"published runtime chart — useful to bootstrap an environment before its own image is built. " +
 			"Defaults to the current scope; pass TENANT and ENVIRONMENT (or --tenant/--environment) to target another.\n\n" +
 			"deploy waits for the rollout to become ready — default 5m, or the env's `deploy.timeout`, " +
 			"or --rollout-timeout — and watches the new pods: it keeps waiting while an image is still " +
 			"pulling and aborts early on a real container failure (crash, config error, or a permanent " +
 			"image-pull rejection) instead of waiting out the timeout.",
-		Example:       "  erun deploy team prod --version 1.2.3\n  erun deploy team dev --current\n  erun deploy team prod --version 1.2.3 --rollout-timeout 10m",
+		Example:       "  erun deploy team prod --version 1.2.3\n  erun deploy team dev --current\n  erun deploy team dev --version 1.2.3 --runtime-image ghcr.io/sophium/erun-devops\n  erun deploy team prod --version 1.2.3 --rollout-timeout 10m",
 		Args:          cobra.MaximumNArgs(2),
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -63,6 +65,7 @@ func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 	}
 	addDryRunFlag(cmd)
 	addDeployCommandTargetFlags(cmd, &target)
+	cmd.Flags().StringVar(&target.RuntimeImageOverride, "runtime-image", "", "Install the runtime running this image via the published erun-devops chart (imageOverrides.erun-devops), pinned to --version, even when the env has a repo-local runtime chart; mirrors `erun open --runtime-image`")
 	cmd.Flags().BoolVar(&useCurrent, "current", false, "Redeploy the version this environment already runs (its persisted runtime version) instead of passing --version")
 	cmd.Flags().StringSliceVar(&components, "components", nil, fmt.Sprintf("Opt-in components to include alongside the runtime chart (%s)", strings.Join(common.OptInDeployComponentNames(), ", ")))
 	return cmd

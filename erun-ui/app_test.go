@@ -742,6 +742,40 @@ func TestBuildInitArgsRuntimeTypeOmitsProjectRoot(t *testing.T) {
 func TestBuildDeployArgsRunsDeploy(t *testing.T) {
 	got := buildDeployArgs(uiSelection{Tenant: " erun ", Environment: " remote ", Version: " 1.0.19 "})
 	want := []string{"deploy", "erun", "remote", "--version", "1.0.19"}
+	assertArgsEqual(t, got, want)
+}
+
+// TestBuildDeployArgsThreadsRuntimeImageOverride covers #697: picking the
+// canonical ERun base image in the runtime dialog must thread --runtime-image so
+// deploy installs the published erun-devops chart with that image, letting the
+// operator bootstrap an env before its own image is built.
+func TestBuildDeployArgsThreadsRuntimeImageOverride(t *testing.T) {
+	got := buildDeployArgs(uiSelection{
+		Tenant:       "frs",
+		Environment:  "local",
+		Version:      "1.0.102",
+		RuntimeImage: "ghcr.io/sophium/erun-devops",
+	})
+	want := []string{"deploy", "frs", "local", "--version", "1.0.102", "--runtime-image", "ghcr.io/sophium/erun-devops"}
+	assertArgsEqual(t, got, want)
+}
+
+// TestBuildDeployArgsOmitsOwnTenantImage covers the other family: picking the
+// env's own <tenant>-devops image is not an override — deploy installs the env's
+// own chart as before, with no --runtime-image flag.
+func TestBuildDeployArgsOmitsOwnTenantImage(t *testing.T) {
+	got := buildDeployArgs(uiSelection{
+		Tenant:       "frs",
+		Environment:  "local",
+		Version:      "1.0.102",
+		RuntimeImage: "ghcr.io/sophium/frs-devops",
+	})
+	want := []string{"deploy", "frs", "local", "--version", "1.0.102"}
+	assertArgsEqual(t, got, want)
+}
+
+func assertArgsEqual(t *testing.T, got, want []string) {
+	t.Helper()
 	if len(got) != len(want) {
 		t.Fatalf("unexpected args length: got %+v want %+v", got, want)
 	}

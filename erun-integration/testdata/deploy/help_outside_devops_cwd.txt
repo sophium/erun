@@ -1,6 +1,6 @@
 Install a published version into an environment with helm.
 
-deploy is a pure consume operation: it installs the image and chart already published at a version, by reference. It never builds or pushes — produce a version with `erun build` and `erun push` (or `erun build --deploy` to chain them) first. Pass the version with --version; use --current to redeploy the version this environment already runs. Defaults to the current scope; pass TENANT and ENVIRONMENT (or --tenant/--environment) to target another.
+deploy is a pure consume operation: it installs the image and chart already published at a version, by reference. It never builds or pushes — produce a version with `erun build` and `erun push` (or `erun build --deploy` to chain them) first. Pass the version with --version; use --current to redeploy the version this environment already runs. Pass --runtime-image to install the canonical ERun base image (or any image) via the published runtime chart — useful to bootstrap an environment before its own image is built. Defaults to the current scope; pass TENANT and ENVIRONMENT (or --tenant/--environment) to target another.
 
 deploy waits for the rollout to become ready — default 5m, or the env's `deploy.timeout`, or --rollout-timeout — and watches the new pods: it keeps waiting while an image is still pulling and aborts early on a real container failure (crash, config error, or a permanent image-pull rejection) instead of waiting out the timeout.
 
@@ -10,19 +10,21 @@ Usage:
 Examples:
   erun deploy team prod --version <VERSION>
   erun deploy team dev --current
+  erun deploy team dev --version <VERSION> --runtime-image ghcr.io/sophium/erun-devops
   erun deploy team prod --version <VERSION> --rollout-timeout 10m
 
 Flags:
-      --components strings           Opt-in components to include alongside the runtime chart (erun-backend-postgres, erun-backend-db, erun-backend-api, erun-powerdns)
-      --current                      Redeploy the version this environment already runs (its persisted runtime version) instead of passing --version
-      --dry-run                      Resolve and trace mutating actions without executing them.
-      --environment string           Deploy for a specific environment; requires --tenant
-      --force                        Re-run the helm upgrade even when the deployed release already matches the requested version
-  -h, --help                         help for deploy
-      --mcp-auth-public-key string   Require the env's MCP edge to authenticate bearer tokens signed by this PEM public key (issue #655); empty leaves the edge loopback-only
-      --rollout-timeout string       Override the helm rollout wait for this deploy (Go duration, e.g. 8m); empty uses the env's deploy.timeout or the 5m default
-      --tenant string                Deploy for a specific tenant
-      --version erun build           Version to install by reference (produced by erun build/`erun push`); fails if that version's image is absent
+      --components strings                        Opt-in components to include alongside the runtime chart (erun-backend-postgres, erun-backend-db, erun-backend-api, erun-powerdns)
+      --current                                   Redeploy the version this environment already runs (its persisted runtime version) instead of passing --version
+      --dry-run                                   Resolve and trace mutating actions without executing them.
+      --environment string                        Deploy for a specific environment; requires --tenant
+      --force                                     Re-run the helm upgrade even when the deployed release already matches the requested version
+  -h, --help                                      help for deploy
+      --mcp-auth-public-key string                Require the env's MCP edge to authenticate bearer tokens signed by this PEM public key (issue #655); empty leaves the edge loopback-only
+      --rollout-timeout string                    Override the helm rollout wait for this deploy (Go duration, e.g. 8m); empty uses the env's deploy.timeout or the 5m default
+      --runtime-image erun open --runtime-image   Install the runtime running this image via the published erun-devops chart (imageOverrides.erun-devops), pinned to --version, even when the env has a repo-local runtime chart; mirrors erun open --runtime-image
+      --tenant string                             Deploy for a specific tenant
+      --version erun build                        Version to install by reference (produced by erun build/`erun push`); fails if that version's image is absent
 
 Global Flags:
       --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
