@@ -46,6 +46,14 @@ func ResolvePublishedDevopsDeploySpec(ctx Context, target OpenResult, versionOve
 // scaffold per tenant — the copy had already drifted from the canonical
 // chart (#510); the published chart is the single contract (#505).
 func resolvePublishedDevopsDeploySpec(ctx Context, target OpenResult, versionOverride string) (DeploySpec, error) {
+	// "no local runtime chart" is the reason the published chart is used on the
+	// usual callers (remote envs, envs with no <tenant>-devops chart). The
+	// runtime-image override caller passes its own reason, since the env there
+	// does have a local chart it is deliberately bypassing (#697).
+	return resolvePublishedDevopsDeploySpecWithReason(ctx, target, versionOverride, "no local runtime chart")
+}
+
+func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, versionOverride, reason string) (DeploySpec, error) {
 	registry := publishedDevopsChartRegistry(target)
 	version := strings.TrimSpace(versionOverride)
 	if version == "" {
@@ -56,12 +64,12 @@ func resolvePublishedDevopsDeploySpec(ctx Context, target OpenResult, versionOve
 		// plan before returning. This is the fresh-env path — no local chart
 		// and no persisted/overridden runtime version — that a desktop create
 		// must avoid by composing deploy at a built version (issue #644).
-		ctx.Trace("deploy: no local runtime chart and no runtime version resolved; cannot deploy the published " + DevopsComponentName + " chart")
+		ctx.Trace("deploy: " + reason + " and no runtime version resolved; cannot deploy the published " + DevopsComponentName + " chart")
 		return DeploySpec{}, fmt.Errorf("runtime version is required to deploy the published %s chart: pass --version or persist runtimeversion in the env config", DevopsComponentName)
 	}
 
 	chartReference := publishedDevopsChartReference(registry)
-	ctx.Trace("deploy: no local runtime chart; using published chart " + chartReference + " version " + version)
+	ctx.Trace("deploy: " + reason + "; using published chart " + chartReference + " version " + version)
 
 	deployContext := KubernetesDeployContext{
 		ComponentName: DevopsComponentName,

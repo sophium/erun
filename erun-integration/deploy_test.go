@@ -623,6 +623,26 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_remote_env_runtime_image_without_tag", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_runtime_image_override_uses_published_chart", func(t *testing.T) {
+		// #697: `--runtime-image` installs the canonical published erun-devops
+		// chart with the chosen image as imageOverrides.erun-devops, pinned to
+		// --version, EVEN when the env carries a repo-local runtime chart
+		// (SeedDevopsRepo materializes team-devops/k8s/team-devops). The trace
+		// names the override decision and reroutes to the published chart
+		// instead of installing the local team-devops chart by reference, so an
+		// operator can bootstrap an env on the ERun base image before its own
+		// <tenant>-devops image is built. The tagless override is pinned to the
+		// deploy version (not :latest).
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--runtime-image", "ghcr.io/sophium/erun-devops", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_runtime_image_override_uses_published_chart", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_remote_env_values_overlay", func(t *testing.T) {
 		// A published-chart deploy has no chart directory to host the
 		// operator's values.<env>.yaml overlay; the env config dir's

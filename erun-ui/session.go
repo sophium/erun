@@ -372,7 +372,36 @@ func buildDeployArgs(selection uiSelection) []string {
 		// install the persisted version via --current rather than erroring.
 		args = append(args, "--current")
 	}
+	if image := deployRuntimeImageOverride(selection); image != "" {
+		args = append(args, "--runtime-image", image)
+	}
 	return args
+}
+
+// deployRuntimeImageOverride returns the picked runtime image to pass as
+// `deploy --runtime-image` (#697), or "" to leave the deploy on the env's own
+// runtime chart. The version picker offers two families: the env's own tenant
+// image (<tenant>-devops) and the canonical ERun base image (erun-devops). A
+// pick of the env's own image deploys the env's own chart as before; only a
+// different image (the ERun base, or any external image) is an override that
+// deploy must install via the published runtime chart, so the operator can
+// bootstrap the env on the canonical image before its own image exists.
+func deployRuntimeImageOverride(selection uiSelection) string {
+	image := strings.TrimSpace(selection.RuntimeImage)
+	if image == "" {
+		return ""
+	}
+	repo := image
+	if idx := strings.LastIndex(repo, "/"); idx >= 0 {
+		repo = repo[idx+1:]
+	}
+	if idx := strings.IndexAny(repo, ":@"); idx >= 0 {
+		repo = repo[:idx]
+	}
+	if repo == eruncommon.RuntimeReleaseName(strings.TrimSpace(selection.Tenant)) {
+		return ""
+	}
+	return image
 }
 
 // buildUpgradeArgs builds the per-environment `erun upgrade` invocation:

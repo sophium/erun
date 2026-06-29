@@ -33,35 +33,51 @@ func (a *App) runDeployOrchestration(ctx context.Context, selection uiSelection,
 	onLine := newActivityTraceLineHandler(a, selection, sessionKindLocal)
 
 	if result.EnvConfig.BuildsHere() && !result.RemoteRepo() {
-		buildArgs := []string{"build", "--output", "json"}
-		if force {
-			buildArgs = append(buildArgs, "--no-incremental")
-		}
-		out, err := runErunCaptured(ctx, cli, dir, onLine, buildArgs...)
-		if err != nil {
-			return err
-		}
-		version := parseBuildResultVersion(out)
-		if version == "" {
-			return fmt.Errorf("build did not report a version to deploy")
-		}
-		if _, err := runErunCaptured(ctx, cli, dir, onLine, "push", "--version", version); err != nil {
-			return err
-		}
-		deployArgs := []string{"deploy", selection.Tenant, selection.Environment, "--version", version}
-		if force {
-			deployArgs = append(deployArgs, "--force")
-		}
-		deployArgs = a.appendMCPAuthPublicKeyFlag(deployArgs)
-		_, err = runErunCaptured(ctx, cli, dir, onLine, deployArgs...)
+		return a.runBuildPushDeployOrchestration(ctx, cli, dir, onLine, selection, force)
+	}
+	return a.runInstallByReferenceDeploy(ctx, cli, dir, onLine, selection, force)
+}
+
+// runBuildPushDeployOrchestration is the builds-here path: build the working
+// tree, push the minted version, then deploy it by reference, threading the
+// version `build` reported so what deploys is exactly what was built.
+func (a *App) runBuildPushDeployOrchestration(ctx context.Context, cli, dir string, onLine func(string), selection uiSelection, force bool) error {
+	buildArgs := []string{"build", "--output", "json"}
+	if force {
+		buildArgs = append(buildArgs, "--no-incremental")
+	}
+	out, err := runErunCaptured(ctx, cli, dir, onLine, buildArgs...)
+	if err != nil {
 		return err
 	}
+	version := parseBuildResultVersion(out)
+	if version == "" {
+		return fmt.Errorf("build did not report a version to deploy")
+	}
+	if _, err := runErunCaptured(ctx, cli, dir, onLine, "push", "--version", version); err != nil {
+		return err
+	}
+	deployArgs := []string{"deploy", selection.Tenant, selection.Environment, "--version", version}
+	if force {
+		deployArgs = append(deployArgs, "--force")
+	}
+	deployArgs = a.appendMCPAuthPublicKeyFlag(deployArgs)
+	_, err = runErunCaptured(ctx, cli, dir, onLine, deployArgs...)
+	return err
+}
 
+// runInstallByReferenceDeploy is the runtime/remote path: install the selected
+// version (or --current) by reference, threading the picked runtime-image
+// override so a bootstrap on the ERun base image rolls out (#697).
+func (a *App) runInstallByReferenceDeploy(ctx context.Context, cli, dir string, onLine func(string), selection uiSelection, force bool) error {
 	args := []string{"deploy", selection.Tenant, selection.Environment}
 	if version := strings.TrimSpace(selection.Version); version != "" {
 		args = append(args, "--version", version)
 	} else {
 		args = append(args, "--current")
+	}
+	if image := deployRuntimeImageOverride(selection); image != "" {
+		args = append(args, "--runtime-image", image)
 	}
 	if force {
 		args = append(args, "--force")
