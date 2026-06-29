@@ -187,8 +187,22 @@ func hashFingerprintFiles(hasher io.Writer, contextDir string, files []string) e
 // edit move the fingerprint, so the component rebuilds, republishes its chart,
 // and redeploys — keeping image and chart one versioned contract. Best-effort:
 // a component with no chart (erun-ubuntu, erun-dind, …) contributes nothing,
-// matching the prior image-only fingerprint.
+// matching the prior image-only fingerprint, and a version-pinned base image
+// (its own VERSION file — erun-backend-postgres, erun-powerdns) is skipped too
+// (see the guard below).
 func hashComponentChartInto(w io.Writer, buildInput DockerBuildSpec) error {
+	// A version-pinned base image carries its own VERSION file in its build dir
+	// (erun-backend-postgres:18.3, erun-powerdns:4.9.3); its content identity is
+	// that pinned upstream version, independent of any release. Its co-located
+	// chart, by contrast, is version-bumped to the release version every cycle
+	// and is NOT published in lockstep with the image — only the runtime devops
+	// chart is (publishRuntimeChartForPushedImage gates on DevopsComponentName).
+	// Folding such a chart in would churn a stable image's fingerprint every
+	// release and force a needless rebuild with no publish benefit, so skip it;
+	// these bases then promote from the registry instead of rebuilding.
+	if buildInput.Image.VersionFromBuildDir {
+		return nil
+	}
 	chartDir := componentChartDirForBuild(buildInput)
 	if chartDir == "" {
 		return nil
