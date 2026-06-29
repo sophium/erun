@@ -30,12 +30,23 @@ helm upgrade --install <tenant>-devops oci://<registry>/charts/erun-devops --ver
 
 The chart and runtime image are one contract — published together to the same registry at the same version. [`erun push`](/cli/push) publishes both at once, so whatever version `deploy` is handed already has a matching chart waiting; `deploy` only pulls and installs it, never publishes. Because push publishes the chart for *every* version it pushes — snapshot or release — any pushed version is deployable, with no chart-versus-image gap (see [Release flow](/deployment/release-flow)). The cluster pulls from the `deploy`-marked registry in the env's [registry list](/deployment/registries) (the env's recorded runtime registry wins as provenance); when the list marks a `from` and a `to`, ERun copies the image there first. The dry-run trace names the decision: `deploy: no local runtime chart; using published chart <ref> version <v>`. To customise a published-chart deploy, use the env's values overlay and the `runtimeimage` field — see [Configuration · Advanced chart values](/reference/configuration#advanced-chart-values).
 
+### Bootstrapping from the ERun base image {#runtime-image-bootstrap}
+
+A brand-new tenant environment has no `<tenant>-devops` image of its own yet — nothing to install by reference. `--runtime-image` lets you get it running on the canonical ERun base image first:
+
+```bash
+erun deploy team dev --version 1.2.3 --runtime-image ghcr.io/sophium/erun-devops
+```
+
+This installs the published `erun-devops` chart with `ghcr.io/sophium/erun-devops:1.2.3` as the runtime image, **bypassing any repo-local `<tenant>-devops` chart**. The chosen image is recorded as the env's runtime image, so a later `open` or `deploy --current` reuses it. Once you have built and pushed the env's own image, deploy that version without the flag (or pick the tenant image in the desktop runtime dialog) to switch over. The desktop's version picker offers both the ERun base image and the env's own image and threads this flag for you when you pick the base.
+
 ## Flags
 
 | Flag | Description |
 |---|---|
 | `--version <version>` | The published version to install, by reference. Required unless `--current` is given. The version's image and chart must already exist (locally or in the registry) or the deploy errors — `deploy` never builds them. |
 | `--current` | Redeploy the version the environment is already recorded as running (its persisted runtime version). Use it to re-roll the same version, or after a `--force`-style retry, without retyping the number. Required unless `--version` is given. |
+| `--runtime-image <ref>` | Install the runtime running this image via the published `erun-devops` chart (`imageOverrides.erun-devops`), pinned to `--version`, **even when the env has a repo-local runtime chart** (which it bypasses). Use it to [bootstrap an env on the canonical ERun base image](#runtime-image-bootstrap) before its own image is built; mirrors [`erun open --runtime-image`](/cli/open). |
 | `--components <name,name,...>` | Opt-in components to include alongside the runtime chart. The accepted values are a fixed set — `erun-backend-postgres`, `erun-backend-db`, `erun-backend-api`, `erun-powerdns` — and an unknown name is rejected with `unknown deploy component`. See [Agent reference · `--components`](/agent-reference/cli-flags#components-value-set). |
 | `--force` | Re-run helm upgrade even when the resolved version is unchanged and nothing needs rolling. |
 | `--rollout-timeout <dur>` | How long to wait for the rollout before giving up (e.g. `10m`). Defaults to the env's setting, or 5 minutes. Raise it for the first deploy of a large image on a slow connection; see [rollout wait and monitoring](/agent-reference/cli-flags#rollout-wait-and-pod-monitoring). |
@@ -82,6 +93,12 @@ Redeploy the version the environment already runs:
 
 ```bash
 erun deploy --current
+```
+
+Bootstrap a new environment on the canonical ERun base image (before its own image is built):
+
+```bash
+erun deploy team dev --version 1.2.3 --runtime-image ghcr.io/sophium/erun-devops
 ```
 
 Install a version plus the backend stack:

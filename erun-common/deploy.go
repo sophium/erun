@@ -256,6 +256,16 @@ type DeployTarget struct {
 	// public key on both its deploy paths; the CLI exposes it as
 	// `--mcp-auth-public-key`.
 	MCPAuthPublicKeyPath string
+	// RuntimeImageOverride, when set, installs the runtime via the canonical
+	// published erun-devops chart with this image as imageOverrides.erun-devops,
+	// pinned to the deploy version — even when the env has a repo-local runtime
+	// chart. It lets an operator bootstrap an env on the canonical ERun image (or
+	// any external image) before the env's own <tenant>-devops image exists, then
+	// switch to the tenant image once it is built. The CLI exposes it as
+	// `--runtime-image`, mirroring `erun open --runtime-image`; the raw value is
+	// recorded as EnvConfig.RuntimeImage so a later open/redeploy addresses the
+	// same image. Empty leaves runtime-chart resolution untouched (#697).
+	RuntimeImageOverride string
 }
 
 // DeploySpec is a pure helm-install plan: it installs the image and chart
@@ -685,6 +695,17 @@ func resolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 		return nil, err
 	}
 
+	runtimeImageOverride := strings.TrimSpace(target.RuntimeImageOverride)
+	if runtimeImageOverride != "" {
+		// The operator chose the runtime image explicitly (the desktop picker's
+		// ERun-base entry, or `--runtime-image`). Record it on the env so the
+		// remote/published-chart paths honour it as imageOverrides.erun-devops and
+		// a later open/redeploy addresses the same image; the local-chart branch
+		// reroutes through the published chart so the override wins even when a
+		// repo-local runtime chart exists (#697).
+		resolvedTarget.EnvConfig.RuntimeImage = runtimeImageOverride
+	}
+
 	if resolvedTarget.RemoteRepo() {
 		return resolveRemoteRepoDeploySpecs(ctx, store, resolvedTarget, target.VersionOverride)
 	}
@@ -708,7 +729,7 @@ func resolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 
 	specs := make([]DeploySpec, 0, len(deployContexts))
 	for _, deployContext := range deployContexts {
-		spec, err := resolveDeploySpecForContext(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, resolvedTarget, deployContext, target.VersionOverride, currentBuild)
+		spec, err := resolveDeploySpecForContext(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, resolvedTarget, deployContext, target.VersionOverride, currentBuild, runtimeImageOverride)
 		if err != nil {
 			return nil, err
 		}
@@ -761,10 +782,10 @@ func resolveDeploySpecForOpenResult(ctx Context, store DeployStore, findProjectR
 		return DeploySpec{}, err
 	}
 
-	return resolveDeploySpecForContext(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, deployContext, versionOverride, currentBuild)
+	return resolveDeploySpecForContext(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, deployContext, versionOverride, currentBuild, "")
 }
 
-func resolveDeploySpecForContext(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, deployContext KubernetesDeployContext, versionOverride string, currentBuild *DockerBuildSpec) (DeploySpec, error) {
+func resolveDeploySpecForContext(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, deployContext KubernetesDeployContext, versionOverride string, currentBuild *DockerBuildSpec, runtimeImageOverride string) (DeploySpec, error) {
 	// A pure deploy installs by reference; only the store is consulted (for
 	// cloud/tenant metadata and image verification). findProjectRoot,
 	// resolveDockerBuildContext, resolveKubernetesDeployContext, and now are
@@ -798,6 +819,14 @@ func resolveDeploySpecForContext(ctx Context, store DeployStore, findProjectRoot
 	}
 	if version == "" {
 		return DeploySpec{}, fmt.Errorf("deploy: a version is required — pass a version produced by `erun build`/`erun push`, or `--current` to redeploy the version this environment already runs")
+	}
+	// An explicit runtime-image override installs the canonical published
+	// erun-devops chart with the chosen image (imageOverrides.erun-devops),
+	// bypassing the repo-local runtime chart so the operator can bootstrap the
+	// env on the ERun base image before its own <tenant>-devops image exists
+	// (#697). target.EnvConfig.RuntimeImage already carries the override.
+	if runtimeImageOverride != "" && deployContextOwnsRuntimeChart(deployContext, target.Tenant) {
+		return resolvePublishedDevopsDeploySpecWithReason(ctx, target, version, "bypassing the repo-local runtime chart for the runtime image override "+runtimeImageOverride)
 	}
 	return resolveInstallExistingVersionDeploySpec(ctx, store, target, deployContext, version, versionFromPersist)
 }

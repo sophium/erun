@@ -248,7 +248,7 @@ gh auth token -u <owner> -h github.com | docker login ghcr.io -u <owner> --passw
 
 ### Common flags
 
-`--version`, `--current`, `--components`, `--force`, `--rollout-timeout`, `--dry-run`, `--output`. Subcommand: `erun deploy <component>`.
+`--version`, `--runtime-image`, `--current`, `--components`, `--force`, `--rollout-timeout`, `--dry-run`, `--output`. Subcommand: `erun deploy <component>`.
 
 ### Version selection — `--version` / `--current` (required)
 
@@ -268,6 +268,16 @@ Once the version is resolved, `deploy`:
 3. Errors during resolution, before `helm upgrade`, when an image at the version is absent both locally and in the registry: `deploy --version <v>: image <ref> is not present locally or in the registry; deploy installs an existing version and does not build it — run erun build/push to create it first`.
 
 The dry-run trace names the decision per spec: `deploy: version <v> pinned; installing the published image, no local build`. Every env installs by reference from the published `oci://…/charts/erun-devops` chart (or the repo-local chart when the project carries one).
+
+### Runtime image override — `--runtime-image` {#deploy-runtime-image}
+
+`--runtime-image <ref>` installs the runtime running the given image via the canonical published `erun-devops` chart (the image rides in as `imageOverrides.erun-devops`), pinned to `--version` — **even when the env carries a repo-local `<tenant>-devops` chart**, which the override deliberately bypasses. This lets an operator bootstrap an environment on the canonical ERun base image (or any external image) before the env's own `<tenant>-devops` image has been built and pushed, then switch to the tenant image once it exists. It mirrors [`erun open --runtime-image`](#erun-open) but on the pure `deploy` primitive (it does not imply anything beyond the deploy).
+
+| Flag | Type | Default | Validation | Persists to |
+|---|---|---|---|---|
+| `--runtime-image <ref>` | string (OCI image ref) | unset → the env's resolved runtime image (repo-local chart, or `EnvConfig.runtimeimage`). | Same reference rules as [`erun init --runtime-image`](#erun-init): a full reference (registry path and/or tag present) is used verbatim; a bare/tagless reference is qualified against the env's registry and pinned to `<version>` (never `:latest`). | `EnvConfig.runtimeimage`, so a later `open`/redeploy addresses the same image. |
+
+The dry-run trace names the decision: `deploy: bypassing the repo-local runtime chart for the runtime image override <ref>; using published chart <chart> version <v>`, followed by `deploy: runtime image override <ref>:<v> (imageOverrides.erun-devops)`. The desktop runtime dialog threads this flag automatically when the operator picks the ERun-base entry in the version picker (#697); picking the env's own `<tenant>-devops` image deploys the env's own chart with no override.
 
 ### `--components` value set {#components-value-set}
 

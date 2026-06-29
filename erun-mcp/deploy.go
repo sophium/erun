@@ -15,13 +15,14 @@ import (
 var errMissingDeployVersion = errors.New("deploy requires a version: it installs a published version by reference (produced by `build` then `push`) and never builds — set the version input")
 
 type DeployInput struct {
-	Component  string   `json:"component,omitempty" jsonschema:"component name for the devops k8s deploy COMPONENT command"`
-	Components []string `json:"components,omitempty" jsonschema:"opt-in components to include alongside the runtime chart (erun-backend-postgres, erun-backend-db, erun-backend-api, erun-powerdns); ignored when component is set"`
-	Version    string   `json:"version" jsonschema:"required published version to install by reference (produced by build then push); deploy installs by reference and never builds"`
-	Force      bool     `json:"force,omitempty" jsonschema:"when true, re-run the helm upgrade even when the deployed release already matches the requested version"`
-	Timeout    string   `json:"timeout,omitempty" jsonschema:"override the helm rollout wait for this deploy as a Go duration (e.g. 8m); empty uses the env's deploy.timeout or the 5m default. The deploy keeps waiting while an image is still pulling and aborts early on a real container failure"`
-	Preview    bool     `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
-	Verbosity  int      `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+	Component    string   `json:"component,omitempty" jsonschema:"component name for the devops k8s deploy COMPONENT command"`
+	Components   []string `json:"components,omitempty" jsonschema:"opt-in components to include alongside the runtime chart (erun-backend-postgres, erun-backend-db, erun-backend-api, erun-powerdns); ignored when component is set"`
+	Version      string   `json:"version" jsonschema:"required published version to install by reference (produced by build then push); deploy installs by reference and never builds"`
+	RuntimeImage string   `json:"runtime_image,omitempty" jsonschema:"install the runtime running this image via the published erun-devops chart (imageOverrides.erun-devops), pinned to version, even when the env has a repo-local runtime chart; use it to bootstrap an env on the canonical ERun base image before its own image is built"`
+	Force        bool     `json:"force,omitempty" jsonschema:"when true, re-run the helm upgrade even when the deployed release already matches the requested version"`
+	Timeout      string   `json:"timeout,omitempty" jsonschema:"override the helm rollout wait for this deploy as a Go duration (e.g. 8m); empty uses the env's deploy.timeout or the 5m default. The deploy keeps waiting while an image is still pulling and aborts early on a real container failure"`
+	Preview      bool     `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
+	Verbosity    int      `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
 
 func deployTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, DeployInput) (*mcp.CallToolResult, CommandOutput, error) {
@@ -44,13 +45,14 @@ func deployTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 			}
 
 			target := eruncommon.DeployTarget{
-				Tenant:          strings.TrimSpace(runtime.Context.Tenant),
-				Environment:     strings.TrimSpace(runtime.Context.Environment),
-				RepoPath:        workDir,
-				VersionOverride: strings.TrimSpace(input.Version),
-				Components:      input.Components,
-				Force:           input.Force,
-				RolloutTimeout:  strings.TrimSpace(input.Timeout),
+				Tenant:               strings.TrimSpace(runtime.Context.Tenant),
+				Environment:          strings.TrimSpace(runtime.Context.Environment),
+				RepoPath:             workDir,
+				VersionOverride:      strings.TrimSpace(input.Version),
+				RuntimeImageOverride: strings.TrimSpace(input.RuntimeImage),
+				Components:           input.Components,
+				Force:                input.Force,
+				RolloutTimeout:       strings.TrimSpace(input.Timeout),
 			}
 
 			component := strings.TrimSpace(input.Component)
