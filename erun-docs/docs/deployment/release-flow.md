@@ -20,7 +20,7 @@ Base images (`erun-ubuntu`, `erun-dind`, `erun-ubuntu`-derived) publish first; d
 
 ## Published runtime chart
 
-Chart publishing belongs to [`erun push`](/cli/push), not to a release-only step: push publishes the runtime image **and** the canonical `erun-devops` helm chart together at the same version. It runs `helm package` + `helm push` to `oci://<registry>/charts`, so the chart is addressable as `oci://<registry>/charts/erun-devops:<version>` (default registry `ghcr.io/sophium`), then verifies the artifact with a `helm pull` round-trip before the push is considered complete. The chart's `version` and `appVersion` equal the pushed version — image and chart are one contract.
+Chart publishing belongs to [`erun push`](/cli/push), not to a release-only step: push publishes each component image **and** its co-located helm chart together at the same version. It runs `helm package` + `helm push` to `oci://<registry>/charts`, so a chart is addressable as `oci://<registry>/charts/<component>:<version>` (e.g. `erun-devops`, `erun-powerdns`, `erun-backend-*`, `erun-docs`; default registry `ghcr.io/sophium`) — kept separate from the same-named image repo so a chart never collides with its image at the same ref — then verifies each artifact with a `helm pull` round-trip before the push is considered complete. Each chart's `version` and `appVersion` equal the pushed version — image and chart are one contract.
 
 Because push does this for **every** version — snapshot or release — there is no chart-versus-image gap: any pushed version is deployable, not just released ones. `erun release` gets its chart published for free by reusing push; a snapshot pushed during iteration is just as deployable as a release.
 

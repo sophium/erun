@@ -194,12 +194,13 @@ func hashComponentChartInto(w io.Writer, buildInput DockerBuildSpec) error {
 	// A version-pinned base image carries its own VERSION file in its build dir
 	// (erun-backend-postgres:18.3, erun-powerdns:4.9.3); its content identity is
 	// that pinned upstream version, independent of any release. Its co-located
-	// chart, by contrast, is version-bumped to the release version every cycle
-	// and is NOT published in lockstep with the image — only the runtime devops
-	// chart is (publishRuntimeChartForPushedImage gates on DevopsComponentName).
-	// Folding such a chart in would churn a stable image's fingerprint every
-	// release and force a needless rebuild with no publish benefit, so skip it;
-	// these bases then promote from the registry instead of rebuilding.
+	// chart, by contrast, is version-bumped to the release version every cycle.
+	// Folding the chart into the IMAGE fingerprint would churn a stable image's
+	// fingerprint every release and force a needless rebuild, so skip it; the
+	// base then promotes from the registry instead of rebuilding. The chart is
+	// still published in lockstep — promotion re-tags and re-pushes the image at
+	// the release version, and publishChartForPushedImage publishes the chart
+	// alongside it; that publish does not depend on this fingerprint.
 	if buildInput.Image.VersionFromBuildDir {
 		return nil
 	}

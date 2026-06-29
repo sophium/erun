@@ -76,7 +76,8 @@ func TestPush(t *testing.T) {
 			`  *) exit 0 ;;`,
 			`esac`,
 		}, "\n"))
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		fixture.StubBinary(t, stubs, "helm", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
 		envVars = append(envVars, "ERUN_AUTO_LOGIN_ON_PUSH=1")
 		// push builds from source, so the build's image push drives the retry
 		// via runDockerBuildWithRetry: the first push fails auth,
@@ -288,7 +289,8 @@ func TestPush(t *testing.T) {
 		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 		stubs := setup.Cwd + "/stubs"
 		fixture.StubBinaryAdvanced(t, stubs, "docker", fixture.StubBinarySpec{ExitCode: 0})
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		fixture.StubBinary(t, stubs, "helm", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
 		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -326,7 +328,8 @@ func TestPush(t *testing.T) {
 			`  *) exit 0 ;;`,
 			`esac`,
 		}, "\n"))
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		fixture.StubBinary(t, stubs, "helm", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
 		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v"}, erun.RunOptions{
 			Cwd:   setup.Cwd,
 			Env:   envVars,
@@ -427,7 +430,8 @@ func TestPush(t *testing.T) {
 			`  *) exit 0 ;;`,
 			`esac`,
 		}, "\n"))
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "gh")...)
+		fixture.StubBinary(t, stubs, "helm", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "gh", "helm")...)
 		envVars = append(envVars, "PATH="+stubs+":"+os.Getenv("PATH"))
 		envVars = append(envVars, "ERUN_AUTO_LOGIN_ON_PUSH=1", "ERUN_FORCE_TTY=1")
 		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})

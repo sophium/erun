@@ -4,7 +4,7 @@ title: erun push
 
 # `erun push`
 
-Publish a version's outputs to the configured container registry: the multi-arch image manifest **and** the runtime helm chart. `erun push --version <version>` is the publish step of the [delivery pipeline](/pipeline) — it takes a version [`erun build`](/cli/build) minted and makes it deployable.
+Publish a version's outputs to the configured container registry: the multi-arch image manifests **and** their helm charts. `erun push --version <version>` is the publish step of the [delivery pipeline](/pipeline) — it takes a version [`erun build`](/cli/build) minted and makes it deployable.
 
 ## Synopsis
 
@@ -20,9 +20,9 @@ For the given version, `erun push`:
 
 1. **Builds each image from its source context.** It resolves the current build context and builds per-arch images, promoting unchanged images straight from the [fingerprint cache](/agent-reference/conventions-spec#fingerprint-cache) (a clean clone publishes without rebuilding). It does **not** push a prebuilt bare tag — it always builds from source so what lands is reproducible.
 2. **Pushes per-arch tags and assembles the multi-arch manifest list**, so `<registry>/<image>:<version>` resolves to either architecture automatically.
-3. **Publishes the runtime helm chart** — `helm package` + `helm push` to `oci://<registry>/charts`, then a `helm pull` round-trip to verify the artifact landed. The chart's `version` and `appVersion` equal `<version>`, so image and chart are one contract at the same version.
+3. **Publishes each component's helm chart** — for every image it pushes that ships a co-located chart (`erun-devops`, plus the platform components `erun-powerdns`, `erun-backend-postgres`, `erun-backend-db`, `erun-backend-api`, `erun-docs`), `helm package` + `helm push` to `oci://<registry>/charts`, then a `helm pull` round-trip to verify the artifact landed. Charts publish under `/charts` — kept separate from the same-named image repo (`<registry>/<component>`) so a chart never collides with its image at the same ref. Each chart's `version` and `appVersion` equal `<version>`, so image and chart are one contract at the same version.
 
-Because push publishes the chart for every version — snapshot or release — any pushed version is deployable. There is no longer a gap where a snapshot image existed without a matching chart. [`erun release`](/cli/release) reuses `push` for all of this publishing; [`erun deploy`](/cli/deploy) only consumes what push produced.
+Because push publishes the charts for every version — snapshot or release — any pushed version is deployable, and platform wrapper charts that depend on `oci://<registry>/charts/<component>` resolve. There is no longer a gap where an image existed without a matching chart. [`erun release`](/cli/release) reuses `push` for all of this publishing; [`erun deploy`](/cli/deploy) only consumes what push produced.
 
 ## Flags
 
