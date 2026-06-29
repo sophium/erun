@@ -280,7 +280,7 @@ func RunDockerPushSpec(ctx Context, pushInput DockerPushSpec, buildInput *Docker
 		}
 		if buildInput.Push {
 			// The multi-arch build already pushed the image; publish its chart.
-			return publishRuntimeChartForPushedImage(ctx, buildInput.Image)
+			return publishChartForPushedImage(ctx, buildInput.Image)
 		}
 	}
 	if push == nil {
@@ -291,7 +291,7 @@ func RunDockerPushSpec(ctx Context, pushInput DockerPushSpec, buildInput *Docker
 	if err := push(ctx, pushInput); err != nil {
 		return err
 	}
-	return publishRuntimeChartForPushedImage(ctx, pushInput.Image)
+	return publishChartForPushedImage(ctx, pushInput.Image)
 }
 
 func RunDockerPushExecution(ctx Context, execution DockerPushExecutionSpec, build DockerImageBuilderFunc, push DockerPushFunc) error {
@@ -305,7 +305,7 @@ func RunDockerPushExecution(ctx Context, execution DockerPushExecutionSpec, buil
 		}
 		builtAndPushedTags[buildInput.Image.Tag] = struct{}{}
 		// The multi-arch build pushed this image; publish its chart in lockstep.
-		if err := publishRuntimeChartForPushedImage(ctx, buildInput.Image); err != nil {
+		if err := publishChartForPushedImage(ctx, buildInput.Image); err != nil {
 			return err
 		}
 	}

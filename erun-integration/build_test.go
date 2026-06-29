@@ -108,11 +108,12 @@ func TestBuild(t *testing.T) {
 	})
 
 	t.Run("dry_run_release_publishes_runtime_chart", func(t *testing.T) {
-		// A release build whose release root carries the canonical
-		// erun-devops chart must publish it as a release artifact right
-		// after the image pushes (helm package + helm push to
-		// oci://<registry>/charts) and then verify the pushed chart is
-		// fetchable (helm pull) — image and chart are one contract (#505).
+		// A release build publishes each component's chart as a release
+		// artifact right after its image pushes (helm package + helm push to
+		// oci://<registry>/charts) and verifies it is fetchable (helm pull) —
+		// image and chart are one contract (#505, #699). The release root here
+		// carries the canonical erun-devops chart plus the seeded api component,
+		// so the golden shows both publishing to /charts, not just the runtime.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 		chartDir := filepath.Join(setup.Cwd, "erun-devops", "k8s", "erun-devops")
@@ -492,7 +493,8 @@ func TestBuild(t *testing.T) {
 		// only for erun's release operations: the production code resolves
 		// `git` via common.Command which honors ERUN_GIT_BIN. The repo
 		// already exists via the seed.
-		envVars = append(envVars, fixture.StubEnv(stubs, "git")...)
+		fixture.StubBinary(t, stubs, "helm", "")
+		envVars = append(envVars, fixture.StubEnv(stubs, "git", "helm")...)
 		result := erun.Run(t, []string{"build", "--release", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -769,7 +771,7 @@ func TestBuild(t *testing.T) {
 		for _, want := range []string{
 			"--build-arg ERUN_VERSION=1.4.2-snapshot-amd64", // wrapper's amd64 build resolves the amd64 base
 			"--build-arg ERUN_VERSION=1.4.2-snapshot-arm64", // wrapper's arm64 build resolves the arm64 base
-			"ghcr.io/sophium/api:1.4.2-snapshot-amd64",       // base publishes per-arch stable tag
+			"ghcr.io/sophium/api:1.4.2-snapshot-amd64",      // base publishes per-arch stable tag
 			"ghcr.io/sophium/api:1.4.2-snapshot-arm64",
 		} {
 			if !strings.Contains(result.Combined, want) {
@@ -850,7 +852,8 @@ func TestBuild(t *testing.T) {
 		// Release operations (tag, push) go through the git stub so the
 		// release stage succeeds without a real remote.
 		fixture.StubBinary(t, stubs, "git", "")
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "gh", "git")...)
+		fixture.StubBinary(t, stubs, "helm", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "gh", "git", "helm")...)
 		// tryGHCRLoginViaGH gates on exec.LookPath("gh"), which reads PATH
 		// rather than the ERUN_<NAME>_BIN override.
 		envVars = append(envVars, "PATH="+stubs+":"+os.Getenv("PATH"))
