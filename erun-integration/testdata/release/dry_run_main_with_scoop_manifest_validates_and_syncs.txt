@@ -31,6 +31,11 @@ write <TMP>
   name: api
   version: <VERSION>
 write <TMP>
+  apiVersion: v2
+  appVersion: <VERSION>
+  name: base
+  version: <VERSION>
+write <TMP>
   {
     "version": "<VERSION>",
     "description": "erun developer toolkit",
@@ -58,7 +63,7 @@ write <TMP>
       "erun-app.exe"
     ]
   }
-cd <TMP> && git add erun-devops/k8s/api/Chart.yaml bucket/erun.json
+cd <TMP> && git add erun-devops/k8s/api/Chart.yaml erun-devops/k8s/base/Chart.yaml bucket/erun.json
 cd <TMP> && git commit -m '[skip ci] release <VERSION>'
 git -C <TMP> rev-parse '<VERSION>^{}'
 cd <TMP> && git tag -a <VERSION> -m 'Release <VERSION>'

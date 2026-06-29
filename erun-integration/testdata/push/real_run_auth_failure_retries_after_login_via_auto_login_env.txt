@@ -7,4 +7,8 @@ unauthorized: authentication required: denied: requested access to the resource 
 fingerprint image not found locally: ghcr.io/sophium/base:fp-<HEX16>-amd64
 fingerprint image not found locally: ghcr.io/sophium/base:fp-<HEX16>-arm64
 rebuilding ghcr.io/sophium/base:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
+==> Publishing api <VERSION> to oci://ghcr.io/sophium/charts
+==> Verified published chart api <VERSION>
+==> Publishing base <VERSION> to oci://ghcr.io/sophium/charts
+==> Verified published chart base <VERSION>
 ==> Pushed in <ELAPSED>

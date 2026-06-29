@@ -191,13 +191,15 @@ name: frs-backend-api
 version: 0.1.0
 dependencies:
   - name: erun-backend-api
-    version: "1.0.0"            # the erun release version from Step 1
-    repository: "oci://ghcr.io/sophium"
+    version: "1.0.0"                  # the erun release version from Step 1
+    repository: "oci://ghcr.io/sophium/charts"
 ```
 
-The runtime `erun-devops` chart publishes under the registry's `/charts` path,
-so its dependency `repository` is `oci://<registry>/charts`; every other
-component publishes under the registry root (`oci://<registry>`). Pin every
+**Every** erun chart — the runtime `erun-devops` chart *and* every component
+chart (`erun-powerdns`, `erun-backend-*`, `erun-docs`) — publishes under the
+registry's `/charts` path, kept separate from the same-named image repo
+(`<registry>/<component>`) so a chart never collides with its image at the same
+ref. So every dependency `repository` is `oci://<registry>/charts`. Pin every
 dependency `version` to the erun release from Step 1. Put env-specific values in
 the umbrella's own `values.<env>.yaml`.
 

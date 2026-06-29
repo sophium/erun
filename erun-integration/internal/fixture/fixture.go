@@ -529,6 +529,7 @@ func SeedReleaseRepo(t testing.TB, dir, branch string) string {
 	releaseRoot := filepath.Join(dir, "erun-devops")
 	for _, sub := range []string{
 		filepath.Join(releaseRoot, "k8s", "api"),
+		filepath.Join(releaseRoot, "k8s", "base"),
 		filepath.Join(releaseRoot, "docker", "api"),
 		filepath.Join(releaseRoot, "docker", "base"),
 	} {
@@ -538,6 +539,10 @@ func SeedReleaseRepo(t testing.TB, dir, branch string) string {
 	}
 	mustWrite(t, filepath.Join(releaseRoot, "VERSION"), "1.4.2\n")
 	mustWrite(t, filepath.Join(releaseRoot, "k8s", "api", "Chart.yaml"), "apiVersion: v2\nname: api\nversion: 0.1.0\nappVersion: 0.1.0\n")
+	// base is a version-pinned base: its image carries its own VERSION (9.9.9)
+	// and is not re-pushed at the release version, but its co-located chart must
+	// still publish at the release version so platform deploys resolve it (#701).
+	mustWrite(t, filepath.Join(releaseRoot, "k8s", "base", "Chart.yaml"), "apiVersion: v2\nname: base\nversion: 0.1.0\nappVersion: 0.1.0\n")
 	mustWrite(t, filepath.Join(releaseRoot, "docker", "api", "Dockerfile"), "FROM alpine:3.22\n")
 	mustWrite(t, filepath.Join(releaseRoot, "docker", "base", "Dockerfile"), "FROM alpine:3.22\n")
 	mustWrite(t, filepath.Join(releaseRoot, "docker", "base", "VERSION"), "9.9.9\n")

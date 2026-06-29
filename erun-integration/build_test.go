@@ -17,6 +17,20 @@ import (
 
 var apiFingerprintRE = regexp.MustCompile(`ghcr\.io/sophium/api:fp-([0-9a-f]{16})-amd64`)
 
+// chartPackageVersion extracts the version a chart is published at from the
+// `helm package <chart> --version <version>` trace line in out. Used to assert
+// the published version when output normalization would otherwise collapse
+// distinct versions to <VERSION> (#701).
+func chartPackageVersion(t testing.TB, out, chart string) string {
+	t.Helper()
+	re := regexp.MustCompile(`helm package ` + regexp.QuoteMeta(chart) + ` --version (\S+)`)
+	m := re.FindStringSubmatch(out)
+	if m == nil {
+		t.Fatalf("no `helm package %s --version` line in output:\n%s", chart, out)
+	}
+	return m[1]
+}
+
 func TestBuild(t *testing.T) {
 	t.Run("help", func(t *testing.T) {
 		setup := env.New(t)
@@ -108,11 +122,12 @@ func TestBuild(t *testing.T) {
 	})
 
 	t.Run("dry_run_release_publishes_runtime_chart", func(t *testing.T) {
-		// A release build whose release root carries the canonical
-		// erun-devops chart must publish it as a release artifact right
-		// after the image pushes (helm package + helm push to
-		// oci://<registry>/charts) and then verify the pushed chart is
-		// fetchable (helm pull) — image and chart are one contract (#505).
+		// A release build publishes each component's chart as a release
+		// artifact right after its image pushes (helm package + helm push to
+		// oci://<registry>/charts) and verifies it is fetchable (helm pull) —
+		// image and chart are one contract (#505, #699). The release root here
+		// carries the canonical erun-devops chart plus the seeded api component,
+		// so the golden shows both publishing to /charts, not just the runtime.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 		chartDir := filepath.Join(setup.Cwd, "erun-devops", "k8s", "erun-devops")
@@ -135,6 +150,20 @@ func TestBuild(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "build/dry_run_release_publishes_runtime_chart", normalize.Apply(result.Combined))
+		// #701: the version-pinned base (docker/base/VERSION=9.9.9) keeps its
+		// image at the upstream pin, but its co-located chart must publish at the
+		// release version — the same version the built `api` chart publishes at,
+		// NOT 9.9.9. Output normalization collapses both 1.4.2-pr.<sha> and 9.9.9
+		// to <VERSION>, so the golden can't tell them apart; assert the raw
+		// versions directly.
+		baseChartVer := chartPackageVersion(t, result.Combined, "base")
+		apiChartVer := chartPackageVersion(t, result.Combined, "api")
+		if baseChartVer != apiChartVer {
+			t.Fatalf("base chart published at %q, want the release version %q (same as api)", baseChartVer, apiChartVer)
+		}
+		if strings.Contains(baseChartVer, "9.9.9") {
+			t.Fatalf("base chart published at the pinned image version %q; want the release version", baseChartVer)
+		}
 	})
 
 	t.Run("dry_run_configured_fingerprint_traces_pull_and_tag", func(t *testing.T) {
@@ -492,7 +521,8 @@ func TestBuild(t *testing.T) {
 		// only for erun's release operations: the production code resolves
 		// `git` via common.Command which honors ERUN_GIT_BIN. The repo
 		// already exists via the seed.
-		envVars = append(envVars, fixture.StubEnv(stubs, "git")...)
+		fixture.StubBinary(t, stubs, "helm", "")
+		envVars = append(envVars, fixture.StubEnv(stubs, "git", "helm")...)
 		result := erun.Run(t, []string{"build", "--release", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -769,7 +799,7 @@ func TestBuild(t *testing.T) {
 		for _, want := range []string{
 			"--build-arg ERUN_VERSION=1.4.2-snapshot-amd64", // wrapper's amd64 build resolves the amd64 base
 			"--build-arg ERUN_VERSION=1.4.2-snapshot-arm64", // wrapper's arm64 build resolves the arm64 base
-			"ghcr.io/sophium/api:1.4.2-snapshot-amd64",       // base publishes per-arch stable tag
+			"ghcr.io/sophium/api:1.4.2-snapshot-amd64",      // base publishes per-arch stable tag
 			"ghcr.io/sophium/api:1.4.2-snapshot-arm64",
 		} {
 			if !strings.Contains(result.Combined, want) {
@@ -850,7 +880,8 @@ func TestBuild(t *testing.T) {
 		// Release operations (tag, push) go through the git stub so the
 		// release stage succeeds without a real remote.
 		fixture.StubBinary(t, stubs, "git", "")
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "gh", "git")...)
+		fixture.StubBinary(t, stubs, "helm", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "gh", "git", "helm")...)
 		// tryGHCRLoginViaGH gates on exec.LookPath("gh"), which reads PATH
 		// rather than the ERUN_<NAME>_BIN override.
 		envVars = append(envVars, "PATH="+stubs+":"+os.Getenv("PATH"))

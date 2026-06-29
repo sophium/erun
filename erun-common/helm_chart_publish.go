@@ -143,10 +143,11 @@ func loadHelmChartName(chartPath string) (string, error) {
 }
 
 // resolveHelmChartPublishSpec builds a HelmChartPublishSpec for a chart at a
-// version + registry. The runtime devops chart publishes under the registry's
-// /charts path (PublishedDevopsChartOCIRepo) — separate from the image repo of
-// the same name — so a pushed version is deployable by envs that consume the
-// published chart; other charts publish under the registry root.
+// version + registry. Every erun chart publishes under the registry's /charts
+// path (PublishedDevopsChartOCIRepo) — separate from the image repo of the same
+// name (<registry>/<component>) — so a chart never collides with its
+// component's image at the same ref, and a pushed version is deployable by envs
+// and by platform wrapper charts that consume the published charts.
 func resolveHelmChartPublishSpec(chartPath, version, containerRegistry string) (HelmChartPublishSpec, error) {
 	chartName, err := loadHelmChartName(chartPath)
 	if err != nil {
@@ -160,10 +161,7 @@ func resolveHelmChartPublishSpec(chartPath, version, containerRegistry string) (
 	if resolvedVersion == "" {
 		return HelmChartPublishSpec{}, fmt.Errorf("publish %s: chart version is required", chartName)
 	}
-	ociRepo := "oci://" + registry
-	if chartName == DevopsComponentName {
-		ociRepo = PublishedDevopsChartOCIRepo(registry)
-	}
+	ociRepo := PublishedDevopsChartOCIRepo(registry)
 	return HelmChartPublishSpec{
 		ChartPath: chartPath,
 		ChartName: chartName,
@@ -172,27 +170,38 @@ func resolveHelmChartPublishSpec(chartPath, version, containerRegistry string) (
 	}, nil
 }
 
-// publishRuntimeChartForPushedImage publishes the runtime devops chart in
-// lockstep with the runtime image whenever push sends that image to a registry
-// — so a pushed version (release or snapshot) is always deployable by envs
-// that consume the published chart. It is a no-op for any other image. The
-// chart lives in the same module as the image build context
-// (<module>/k8s/erun-devops); registry and version come from the pushed image.
-func publishRuntimeChartForPushedImage(ctx Context, image DockerImageReference) error {
-	if strings.TrimSpace(image.ImageName) != DevopsComponentName {
-		return nil
-	}
+// publishComponentChart publishes the Helm chart that ships with a component
+// image at chartVersion — so every component (release or snapshot) is deployable
+// by envs and by platform wrapper charts that consume the published charts, not
+// just the runtime erun-devops chart. The chart lives in the same module as the
+// image build context (<module>/k8s/<image-name>) and publishes under
+// <registry>/charts (separate from the image repo).
+//
+// chartVersion is the push/release version, which is intentionally decoupled
+// from image.Version: version-pinned bases (e.g. erun-powerdns at upstream
+// 4.9.3, erun-backend-postgres at 18.3) keep their image at the upstream pin and
+// are not re-pushed at the release version, but their chart must still publish
+// at the release version so platform deploys resolve it. For non-pinned
+// components image.Version equals chartVersion. When chartVersion is empty
+// (single-image push paths) it falls back to image.Version. It is a no-op for an
+// image that ships no chart (e.g. a tenant's custom <tenant>-devops image that
+// overrides into the published erun-devops chart, or an infra image like dind).
+func publishComponentChart(ctx Context, image DockerImageReference, chartVersion string) error {
+	imageName := strings.TrimSpace(image.ImageName)
 	projectRoot := strings.TrimSpace(image.ProjectRoot)
-	if projectRoot == "" {
+	if imageName == "" || projectRoot == "" {
 		return nil
 	}
-	chartPath, err := findComponentHelmChartPath(projectRoot, DevopsComponentName)
+	chartPath, err := findComponentHelmChartPath(projectRoot, imageName)
 	if err != nil {
-		// No local chart to publish (e.g. pushing a prebuilt image outside a
-		// project); nothing to do.
+		// No chart ships with this image; nothing to publish.
 		return nil
 	}
-	publish, err := resolveHelmChartPublishSpec(chartPath, image.Version, image.Registry)
+	version := strings.TrimSpace(chartVersion)
+	if version == "" {
+		version = strings.TrimSpace(image.Version)
+	}
+	publish, err := resolveHelmChartPublishSpec(chartPath, version, image.Registry)
 	if err != nil {
 		return err
 	}
