@@ -10,7 +10,7 @@
     "yarn"
   ],
   "url": "https://github.com/sophium/erun/archive/refs/tags/v1.0.105.zip",
-  "hash": "b9623cb3299a3c7bdcdaec8f0b59b7d4c4904449b8596b6749e2d273e56a95c3",
+  "hash": "1c47556b23d1b57f70119d016e7787e86f3bc02e80716c14ebb9b09a96a910bb",
   "extract_dir": "erun-1.0.105",
   "installer": {
     "script": [
