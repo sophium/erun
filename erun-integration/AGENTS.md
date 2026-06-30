@@ -142,6 +142,18 @@ Rules:
 - Document the override in the test comment so a future reader does not delete it. Without the override the scenario would silently re-shape the golden to whatever host ran `UPDATE_GOLDEN=1` last.
 - The override is a deliberate test seam, not a production knob. If you find yourself wanting to set it from a CLI command or MCP tool, that is a sign the production code should be detecting differently — fix the detection.
 
+### Linux-only scenarios skip on macOS — regenerate their goldens in Linux
+
+A few scenarios gate on a real Linux capability the override can't fake — notably `TestRelease/dry_run_includes_linux_release_scripts`, which needs both `runtime.GOOS == "linux"` **and** `dpkg-deb` on PATH (linux package builds), so it `t.Skip`s on macOS. `ERUN_HOST_OS_OVERRIDE` only fakes `DetectHost`; it does not conjure `dpkg-deb`, so these goldens can only be regenerated where the capability actually exists.
+
+The trap: `UPDATE_GOLDEN=1` on macOS silently **skips** these scenarios, so a change to a **shared fixture** (e.g. `SeedReleaseRepo`) that alters their output leaves their goldens stale — green locally on macOS, red in the Linux image-build gate (`make check` inside the `erun-devops` Dockerfile), which is where it actually bites. When you touch a shared fixture, regenerate the linux-only goldens in Linux and run the full suite there before pushing:
+
+```sh
+docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -e GOCACHE=/tmp/gc -e GOMODCACHE=/tmp/gm \
+  -v "$PWD":/src -w /src/erun-integration golang:1.26 sh -c \
+  'git config --global --add safe.directory "*"; UPDATE_GOLDEN=1 go test ./... && go test ./...'
+```
+
 ## TTY-dependent branches: force via `ERUN_FORCE_TTY`
 
 The alias-setup flow in `erun open --no-shell` only prompts when stdout is a
