@@ -72,6 +72,9 @@ export function nextPendingRedeploy(
 // not raise the pending-redeploy banner (issue #460).
 function deployRelevantSignature(config: UIEnvironmentConfig): string {
   return JSON.stringify({
+    // A local-agent env's worktree hostPath is its LocalRepoPath, so retargeting
+    // it changes what the next deploy mounts — deploy-relevant (#709).
+    localRepoPath: config.localRepoPath,
     containerRegistries: config.containerRegistries,
     disableBuildScript: config.disableBuildScript,
     cloudProviderAlias: config.cloudProviderAlias,
@@ -103,6 +106,7 @@ export function manageDialogTabHasUnsavedChanges(
   switch (tab) {
     case 'general':
       return compare(
+        'localRepoPath',
         'containerRegistries',
         'cloudProviderAlias',
         'cloudAliasSlots',

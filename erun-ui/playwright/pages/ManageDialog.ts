@@ -310,6 +310,30 @@ export class ManageDialog {
     await this.page.getByRole('option', { name: label, exact: true }).click();
   }
 
+  // repositoryPathInput targets the "Repository path" field on the General tab.
+  // For a local-agent env it is an editable Input the operator can retarget
+  // (#709); for remote-agent/runtime it is a ReadonlyField whose value lives on
+  // a sibling labelled [aria-labelledby="environment-config-repopath"].
+  repositoryPathInput(): Locator {
+    // Tag-qualified: only the editable local-agent Input is an <input> with this
+    // id; the read-only ReadonlyField puts the id on a <div> label.
+    return this.locator().locator('input#environment-config-repopath');
+  }
+
+  repositoryPathValue(): Promise<string> {
+    return this.repositoryPathInput().inputValue();
+  }
+
+  async setRepositoryPath(value: string): Promise<void> {
+    await this.repositoryPathInput().fill(value);
+  }
+
+  // repositoryPathReadonlyValue reads the read-only Repository path shown for
+  // non-local-agent envs (the value sibling of the labelled field).
+  repositoryPathReadonlyValue(): Locator {
+    return this.locator().locator('[aria-labelledby="environment-config-repopath"]');
+  }
+
   // claudeModelCheckbox targets one "Available models" checkbox in the Claude
   // section of the AI tab. The id suffix is the model token itself.
   claudeModelCheckbox(model: string): Locator {

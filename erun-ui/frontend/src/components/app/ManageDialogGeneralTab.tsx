@@ -15,6 +15,7 @@ import { ContainerRegistriesField } from '@/components/app/ContainerRegistriesFi
 import { uniqueSuggestions } from '@/components/app/EditableComboField.helpers';
 import { EmptyState } from '@/components/app/EmptyState';
 import { cloudProviderTypeLabel } from '@/components/app/GlobalConfigDialog.helpers';
+import { LocalRepoPathInput } from '@/components/app/LocalRepoPathInput';
 import { ReadonlyField, StatusBadge } from '@/components/app/ManageDialog.fields';
 import { SelectField } from '@/components/app/SelectField';
 import { Button } from '@/components/ui/button';
@@ -42,13 +43,36 @@ export function GeneralTab(): React.ReactElement {
       ]),
     [config.containerRegistries],
   );
+  // Show the raw LocalRepoPath when set; fall back to the effective path so the
+  // field is never blank for an env whose path is derived. Editing sets
+  // localRepoPath, which SaveEnvironmentConfig persists.
+  const repoPathValue = config.localRepoPath?.trim() ? config.localRepoPath : config.repoPath;
   return (
     <>
-      <ReadonlyField
-        id="environment-config-repopath"
-        label="Repository path"
-        value={config.repoPath}
-      />
+      {config.type === 'local-agent' ? (
+        // A local-agent env mounts its worktree from this host path
+        // (EnvConfig.LocalRepoPath); make it correctable here so an operator can
+        // repoint a moved repo without hand-editing config.yaml. Free-text +
+        // Browse (recognition over recall). Remote-agent (PVC worktree) and
+        // runtime (no worktree) keep the read-only field — their repo is not a
+        // local host path. Persisted on Save; takes effect on the next deploy.
+        <LocalRepoPathInput
+          id="environment-config-repopath"
+          label="Repository path"
+          helper="Absolute path on this machine, mounted into the agent pod as the worktree. Applied on Save; takes effect on the next deploy."
+          value={repoPathValue}
+          disabled={dialog.busy || dialog.configLoading}
+          onChange={(localRepoPath) => {
+            dispatch(updateManageConfig({ localRepoPath }));
+          }}
+        />
+      ) : (
+        <ReadonlyField
+          id="environment-config-repopath"
+          label="Repository path"
+          value={config.repoPath}
+        />
+      )}
       <ReadonlyField
         id="environment-config-kubernetescontext"
         label="Kubernetes context"
