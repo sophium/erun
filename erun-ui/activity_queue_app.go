@@ -165,6 +165,12 @@ func (a *App) lockTerminalsForActivity(entry activityQueueEntry) {
 	for _, ev := range events {
 		a.emitEvent(activityQueueLockEvent, ev)
 	}
+	if len(events) > 0 {
+		// A deploy just started for this env (only deploys lock terminals). The
+		// runtime-unreachable warning that told the operator to "Deploy the
+		// environment" is now being acted on — clear it (#713).
+		a.emitClearEnvNotification(entry.Tenant, entry.Environment, notificationSourceRuntimeUnreachable)
+	}
 }
 
 // lockTerminalForActivity locks a single session by its serial ID. Used when
@@ -198,6 +204,9 @@ func (a *App) lockTerminalForActivity(sessionID int, entry activityQueueEntry) {
 	a.mu.Unlock()
 	if event != nil {
 		a.emitEvent(activityQueueLockEvent, *event)
+		// A late-joining session locked onto an in-flight deploy — the runtime
+		// is being (re)deployed, so clear any runtime-unreachable warning (#713).
+		a.emitClearEnvNotification(entry.Tenant, entry.Environment, notificationSourceRuntimeUnreachable)
 	}
 }
 

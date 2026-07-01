@@ -142,6 +142,13 @@ export interface GlobalConfigDialogState {
 export interface AppNotification {
   kind: 'success' | 'warning' | 'error' | 'info';
   message: string;
+  // Optional env tag so a notification can be cleared later by the state it
+  // describes (issue #713). The runtime-unreachable warning carries the env it
+  // targets and a stable `source`; the deploy lifecycle dismisses it by matching
+  // all three (see dismissNotificationForEnv).
+  tenant?: string;
+  environment?: string;
+  source?: string;
 }
 
 export type TerminalStatusKind = 'info' | 'warning' | 'error';

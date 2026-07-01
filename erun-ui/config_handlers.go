@@ -390,6 +390,40 @@ func (a *App) emitAppNotification(kind, message string) {
 	a.emit(appNotificationEvent, appNotificationPayload{Kind: kind, Message: message})
 }
 
+// notificationSourceRuntimeUnreachable tags the "Could not reach the runtime …"
+// warning (issue #711/#713) so the deploy lifecycle can clear it. Must match the
+// string the frontend compares in dismissNotificationForEnv.
+const notificationSourceRuntimeUnreachable = "runtime-unreachable"
+
+// emitEnvNotification posts a notification tagged with the env it describes and
+// a stable source, so a later emitClearEnvNotification for the same
+// (source, tenant, environment) can dismiss it. Use it for env-scoped, state-
+// backed notifications (not one-shot toasts).
+func (a *App) emitEnvNotification(kind, tenant, environment, source, message string) {
+	if strings.TrimSpace(message) == "" {
+		return
+	}
+	a.emit(appNotificationEvent, appNotificationPayload{
+		Kind:        kind,
+		Message:     message,
+		Tenant:      tenant,
+		Environment: environment,
+		Source:      source,
+	})
+}
+
+// emitClearEnvNotification asks the frontend to dismiss a notification posted by
+// emitEnvNotification, but only when its source/tenant/environment all match.
+// Fired when the state a notification described has moved on (issue #713): a
+// deploy for the env starts, or the runtime becomes reachable again.
+func (a *App) emitClearEnvNotification(tenant, environment, source string) {
+	a.emit(appNotificationClearEvent, appNotificationClearPayload{
+		Tenant:      tenant,
+		Environment: environment,
+		Source:      source,
+	})
+}
+
 func cloudContextDisplayName(status eruncommon.CloudContextStatus) string {
 	if name := strings.TrimSpace(status.KubernetesContext); name != "" {
 		return name

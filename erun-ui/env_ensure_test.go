@@ -202,3 +202,111 @@ func waitForFailEpisodeCleared(t *testing.T, app *App, key string, timeout time.
 	}
 	t.Fatal("successful ensure did not clear the failure episode")
 }
+
+// capturedEnsureApp builds an ensure-capable App wired to a captured emitter so
+// tests can assert the exact events a reconnect produces. reconnect drives the
+// success/failure path.
+func capturedEnsureApp(
+	t *testing.T,
+	reconnect func(context.Context, eruncommon.OpenResult, func(string)) error,
+) (*App, *capturedEmits) {
+	t.Helper()
+	emits := newCapturedEmits()
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {Name: "erun", DefaultEnvironment: "remote"},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
+		},
+	}
+	app := NewApp(erunUIDeps{
+		store:           store,
+		findProjectRoot: func() (string, string, error) { return "erun", projectRoot, nil },
+		resolveCLIPath:  func() string { return "/tmp/erun" },
+		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+			return newStubTerminalSession(), nil
+		},
+		reconnectMCP: reconnect,
+	})
+	app.ctx = context.Background()
+	app.SetEmitter(emits.fn())
+	t.Cleanup(func() { app.shutdown(context.Background()) })
+	return app, emits
+}
+
+// TestSurfaceEnsureFailureSuppressedWhileDeployInFlight locks the #713 fix: a
+// deploy for the env being in flight IS the recovery the runtime-unreachable
+// banner would recommend ("Deploy the environment …"), and the deploy-progress
+// overlay already communicates it. Surfacing a contradictory failed status +
+// banner on top of the running deploy is the confusion this fixes, so the
+// failure must stay quiet while a deploy locks the env's terminals.
+func TestSurfaceEnsureFailureSuppressedWhileDeployInFlight(t *testing.T) {
+	app, emits := capturedEnsureApp(t, func(context.Context, eruncommon.OpenResult, func(string)) error {
+		return nil
+	})
+	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+
+	// A deploy is locking this env's terminal — the recovery is already underway.
+	app.mu.Lock()
+	app.sessions["s1"] = &managedTerminal{
+		selection:        selection,
+		key:              "s1",
+		serial:           1,
+		kind:             sessionKindOpen,
+		lockedByActivity: "dep-1",
+	}
+	app.mu.Unlock()
+
+	app.surfaceEnvRuntimeEnsureFailure(selection, errors.New("timed out waiting for API port-forward"))
+
+	if got := len(emits.events(appNotificationEvent)); got != 0 {
+		t.Fatalf("banner emitted %d times during an in-flight deploy, want 0", got)
+	}
+	if got := len(emits.events(envStatusEvent)); got != 0 {
+		t.Fatalf("failed status emitted %d times during an in-flight deploy, want 0", got)
+	}
+
+	// With no deploy locking the env, the failure surfaces normally.
+	app.mu.Lock()
+	app.sessions["s1"].lockedByActivity = ""
+	app.mu.Unlock()
+	app.surfaceEnvRuntimeEnsureFailure(selection, errors.New("timed out waiting for API port-forward"))
+	if got := len(emits.events(appNotificationEvent)); got != 1 {
+		t.Fatalf("banner emitted %d times once the deploy cleared, want 1", got)
+	}
+}
+
+// TestEnsureSuccessClearsRuntimeUnreachableNotification locks the #713 fix: once
+// the runtime is reachable again, the "Could not reach the runtime …" banner is
+// stale, so a successful ensure clears it (tagged by env + source so an
+// unrelated toast is left alone).
+func TestEnsureSuccessClearsRuntimeUnreachableNotification(t *testing.T) {
+	app, emits := capturedEnsureApp(t, func(context.Context, eruncommon.OpenResult, func(string)) error {
+		return nil
+	})
+	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+
+	app.ensureEnvRuntimeOnce(selection)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(emits.events(appNotificationClearEvent)) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	events := emits.events(appNotificationClearEvent)
+	if len(events) == 0 {
+		t.Fatal("a successful ensure did not clear the runtime-unreachable banner")
+	}
+	payload, ok := events[0].(appNotificationClearPayload)
+	if !ok {
+		t.Fatalf("clear payload has unexpected type %T", events[0])
+	}
+	if payload.Tenant != "erun" || payload.Environment != "remote" ||
+		payload.Source != notificationSourceRuntimeUnreachable {
+		t.Fatalf("clear payload = %+v, want erun/remote %q", payload, notificationSourceRuntimeUnreachable)
+	}
+}

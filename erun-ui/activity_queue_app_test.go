@@ -55,6 +55,64 @@ func TestLockTerminalsForActivityLocksMatchingSessions(t *testing.T) {
 	}
 }
 
+// TestLockTerminalsForActivityClearsRuntimeUnreachableNotification locks the
+// #713 fix: when a deploy starts locking an env's terminals, the runtime-
+// unreachable banner that told the operator to "Deploy the environment" is now
+// being acted on, so a matching app-notification-clear fires for that env.
+func TestLockTerminalsForActivityClearsRuntimeUnreachableNotification(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	emits := newCapturedEmits()
+	app.SetEmitter(emits.fn())
+	selection := uiSelection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
+	envSession := &managedTerminal{selection: selection, key: "env\x00team\x00dev", serial: 1, kind: sessionKindOpen}
+	app.sessions[envSession.key] = envSession
+
+	entry, _ := app.activityQueue.start(activityQueueEntry{
+		Command:     "deploy",
+		Tenant:      "team",
+		Environment: "dev",
+		Version:     "1.0.0",
+		Release:     "team-devops",
+	})
+	app.lockTerminalsForActivity(entry)
+
+	events := emits.events(appNotificationClearEvent)
+	if len(events) != 1 {
+		t.Fatalf("clear emitted %d times, want exactly 1", len(events))
+	}
+	payload, ok := events[0].(appNotificationClearPayload)
+	if !ok {
+		t.Fatalf("clear payload has unexpected type %T", events[0])
+	}
+	if payload.Tenant != "team" || payload.Environment != "dev" ||
+		payload.Source != notificationSourceRuntimeUnreachable {
+		t.Fatalf("clear payload = %+v, want team/dev %q", payload, notificationSourceRuntimeUnreachable)
+	}
+}
+
+// TestLockTerminalsForActivityWithoutMatchClearsNothing guards the gate: a
+// deploy that locks no local sessions (nothing to act on for this desktop) must
+// not fire a stray notification-clear (issue #713).
+func TestLockTerminalsForActivityWithoutMatchClearsNothing(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	emits := newCapturedEmits()
+	app.SetEmitter(emits.fn())
+	other := &managedTerminal{
+		selection: uiSelection{Tenant: "other", Environment: "dev"},
+		key:       "env\x00other\x00dev", serial: 1, kind: sessionKindOpen,
+	}
+	app.sessions[other.key] = other
+
+	entry, _ := app.activityQueue.start(activityQueueEntry{
+		Command: "deploy", Tenant: "team", Environment: "dev", Version: "1.0.0", Release: "team-devops",
+	})
+	app.lockTerminalsForActivity(entry)
+
+	if got := len(emits.events(appNotificationClearEvent)); got != 0 {
+		t.Fatalf("clear emitted %d times with no matching session, want 0", got)
+	}
+}
+
 // TestLockTerminalEventsAlwaysCarryReason pins the contract documented in
 // erun-ui/AGENTS.md "Professional UX": the ActivityLockOverlay relies on
 // the backend always populating Reason on Locked=true events. The
