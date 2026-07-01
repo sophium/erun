@@ -707,11 +707,21 @@ func resolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 	}
 
 	if resolvedTarget.RemoteRepo() {
-		return resolveRemoteRepoDeploySpecs(ctx, store, resolvedTarget, target.VersionOverride)
+		return resolvePublishedDevopsDeploySpecs(ctx, store, resolvedTarget, target.VersionOverride)
 	}
 
 	deployContexts, err := resolveCurrentLocalDeployContexts(findProjectRoot, resolveKubernetesDeployContext, resolvedTarget, target.Components)
 	if err != nil {
+		// A local env with an explicit --runtime-image override but no repo-local
+		// runtime chart (the <tenant>-devops/k8s tree is absent) bootstraps on the
+		// published erun-devops chart by reference — the same install-by-reference
+		// path a remote-repo target uses — so the env can come up on the ERun base
+		// image before its own chart exists (#707). Without the override there is
+		// no chart to install, so the missing-tree error stands.
+		if runtimeImageOverride != "" && errors.Is(err, fs.ErrNotExist) {
+			ctx.Trace("deploy: no repo-local runtime chart; installing the published erun-devops chart for runtime image override " + runtimeImageOverride)
+			return resolvePublishedDevopsDeploySpecs(ctx, store, resolvedTarget, target.VersionOverride)
+		}
 		return nil, err
 	}
 
@@ -727,22 +737,28 @@ func resolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 		}
 	}
 
+	return resolveDeploySpecsForContexts(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, resolvedTarget, deployContexts, target.VersionOverride, currentBuild, runtimeImageOverride)
+}
+
+// resolveDeploySpecsForContexts resolves a deploy spec for each local k8s deploy
+// context, preserving order.
+func resolveDeploySpecsForContexts(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, deployContexts []KubernetesDeployContext, versionOverride string, currentBuild *DockerBuildSpec, runtimeImageOverride string) ([]DeploySpec, error) {
 	specs := make([]DeploySpec, 0, len(deployContexts))
 	for _, deployContext := range deployContexts {
-		spec, err := resolveDeploySpecForContext(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, resolvedTarget, deployContext, target.VersionOverride, currentBuild, runtimeImageOverride)
+		spec, err := resolveDeploySpecForContext(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, deployContext, versionOverride, currentBuild, runtimeImageOverride)
 		if err != nil {
 			return nil, err
 		}
 		specs = append(specs, spec)
 	}
-
 	return specs, nil
 }
 
-// resolveRemoteRepoDeploySpecs resolves the single published-devops deploy spec
-// for a remote-repo target (no local k8s tree), attaching cloud/tenant metadata
-// to the helm input.
-func resolveRemoteRepoDeploySpecs(ctx Context, store DeployStore, resolvedTarget OpenResult, versionOverride string) ([]DeploySpec, error) {
+// resolvePublishedDevopsDeploySpecs resolves the single published-devops deploy
+// spec for a target with no local k8s tree to install — a remote-repo target, or
+// a local env bootstrapping on `--runtime-image` before its own <tenant>-devops
+// chart exists — attaching cloud/tenant metadata to the helm input.
+func resolvePublishedDevopsDeploySpecs(ctx Context, store DeployStore, resolvedTarget OpenResult, versionOverride string) ([]DeploySpec, error) {
 	spec, err := resolvePublishedDevopsDeploySpec(ctx, resolvedTarget, versionOverride)
 	if err != nil {
 		return nil, err
