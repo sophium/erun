@@ -169,20 +169,30 @@ ln -s ../variables.tf terraform-frs/prod/variables.tf
 
 ## Step 3 — the Helm side
 
-`erun deploy --version <version> --components=…` deploys erun's **published** charts
-directly (referenced from OCI, pinned to the version), so the per-env
-customization surface is the **values overlay** erun deploy already reads at
-`~/.config/erun/<tenant>/<environment>/values.yaml`. Scaffold that as the
-canonical, version-controlled source and copy/symlink it into place:
+Each platform component is a thin umbrella chart under
+`<tenant>-devops/k8s/<component>/` that **depends on** erun's published OCI chart
+(never a copy), with its **per-env values** beside it. `erun deploy` discovers
+these local chart dirs as its deploy contexts; `--components=…` filters which.
 
-**`<tenant>-devops/k8s/values.prod.yaml`** — env-specific Helm values for the
-platform components (`erun-backend-api`, `erun-backend-postgres`,
-`erun-backend-db`, `erun-powerdns`, `erun-docs`). Keep it to genuinely
-env-specific overrides; the published charts carry the defaults.
+**The values-file contract (this is what fails if you skip it).** For every env
+it deploys, `erun deploy <tenant> <env>` reads `values.<env>.yaml` from **each**
+chart directory — it is **required, per-chart, with no fallback** to a base
+`values.yaml` and no config-dir overlay. A chart dir with a `Chart.yaml` but no
+`values.<env>.yaml` fails the whole deploy at spec resolution:
+`values file not found for environment "<env>": …/<component>/values.<env>.yaml`.
+So every umbrella chart needs a `values.<env>.yaml` for **every** env it will be
+deployed to.
 
-For teams that want a single Helm-managed umbrella instead of `erun deploy`'s
-component list, also scaffold a thin umbrella `Chart.yaml` per component that
-**depends on** erun's published OCI chart — never a copy:
+**That includes the agent env.** `<tenant>-local` is not only the authoring
+workbench — the desktop composes build→push→deploy for it (on create and via the
+Deploy button), so deploying it resolves these same charts. Scaffold
+`values.local.yaml` **and** `values.<runtime-env>.yaml` (e.g. `values.prod.yaml`)
+for every component, or `erun deploy <tenant> local` fails on the first missing
+one. (If a component genuinely should not run in an env, exclude it from that
+deploy via `--components`; it still needs a values file for the envs it does run
+in.)
+
+So each component gets three files:
 
 ```yaml
 # <tenant>-devops/k8s/erun-backend-api/Chart.yaml
@@ -195,13 +205,54 @@ dependencies:
     repository: "oci://ghcr.io/sophium/charts"
 ```
 
+```yaml
+# <tenant>-devops/k8s/erun-backend-api/values.local.yaml
+# Subchart values nest under the dependency name. Forward tenant + environment
+# (see note below); the published chart carries every other default.
+erun-backend-api:
+  tenant: <tenant>          # e.g. frs
+  environment: <env>        # the short env name, e.g. local
+```
+
+```yaml
+# <tenant>-devops/k8s/erun-backend-api/values.prod.yaml
+erun-backend-api:
+  tenant: <tenant>
+  environment: <env>        # e.g. prod
+  # add genuinely prod-specific overrides here
+```
+
+Do this for **every** component you deploy (`erun-backend-api`,
+`erun-backend-postgres`, `erun-backend-db`, `erun-powerdns`, `erun-docs`, …).
+Keep each values file to genuinely env-specific overrides; the published charts
+carry the defaults.
+
+**Forward `tenant`/`environment` into each subchart.** `erun deploy` passes
+`tenant`/`environment` (and the runtime `--set`s) at the **top level**, which
+reaches a chart deployed directly but **not** a wrapped subchart — a subchart
+reads them in its own scope. Components that `{{ required }}` them
+(`erun-backend-api`, `erun-docs`) fail at helm time with `tenant is required`
+unless the umbrella forwards them nested, as above. Components that don't require
+them (`erun-backend-postgres`, `erun-backend-db`, `erun-powerdns`) can use `{}` —
+but forward them anyway if the component reads them for labels/config. A
+comment-only file is still valid for the latter; the file just has to exist so
+`helm -f` resolves.
+
+**Deploy only env-appropriate components.** `--components` selects per env, so a
+component that can't run in an env should be left out of that env's deploy — not
+forced. Two real cases: `erun-powerdns` binds `:53` via `hostNetwork` and uses a
+private base image (`erun-powerdns:<pin>`), so it belongs in the runtime env with
+a ghcr pull secret, not a local agent env (orbstack has neither); `erun-docs`
+with `docs.enabled: false` is a no-op locally. Deploy the backend trio
+(`erun-backend-postgres,erun-backend-db,erun-backend-api`) for a local platform;
+add `erun-powerdns` only where `:53` + the pull secret exist.
+
 **Every** erun chart — the runtime `erun-devops` chart *and* every component
 chart (`erun-powerdns`, `erun-backend-*`, `erun-docs`) — publishes under the
 registry's `/charts` path, kept separate from the same-named image repo
 (`<registry>/<component>`) so a chart never collides with its image at the same
-ref. So every dependency `repository` is `oci://<registry>/charts`. Pin every
-dependency `version` to the erun release from Step 1. Put env-specific values in
-the umbrella's own `values.<env>.yaml`.
+ref. So every dependency `repository` is `oci://<registry>/charts`, and every
+dependency `version` is pinned to the erun release from Step 1.
 
 ## Step 4 — how it gets applied (not in this skill)
 
@@ -229,9 +280,14 @@ terraform -chdir=terraform-frs/prod validate || true   # validate after `init` r
 readlink terraform-frs/prod/common.tf      # -> ../common.tf
 readlink terraform-frs/prod/variables.tf   # -> ../variables.tf
 
-# Helm umbrellas (if scaffolded): dependencies resolve from OCI.
+# Helm umbrellas: dependencies resolve from OCI, and every chart has a values
+# file for every env it deploys to (missing one fails erun deploy — see below).
 for c in <tenant>-devops/k8s/*/; do
-  [ -f "$c/Chart.yaml" ] && helm dependency build "$c"
+  [ -f "$c/Chart.yaml" ] || continue
+  helm dependency build "$c"
+  for env in local prod; do   # every env this platform deploys to
+    [ -f "$c/values.$env.yaml" ] || echo "MISSING: $c/values.$env.yaml"
+  done
 done
 ```
 
@@ -246,6 +302,7 @@ not deliverables — they belong in the git worktree, not `${ERUN_OUTPUTS_DIR}`.
 | The erun version can't be resolved (no `erun version`, no `runtimeversion`) | Stop and ask which erun version to pin to. Never default to `main` for production wiring — the edge and charts must match the deployed platform. |
 | `terraform-erun-cluster-edge?ref=v<ver>` doesn't resolve on `terraform init` | The version has no matching git tag yet. Confirm the erun release exists; pin to the latest released `vX.Y.Z`. |
 | `helm dependency build` 404s on the OCI chart | That version's chart isn't published. `erun push`/`erun release` publishes image + chart together — pin to a version that has been pushed. |
+| `erun deploy` fails: `values file not found for environment "<env>": …/<component>/values.<env>.yaml` | That umbrella chart has no per-env values file for the env being deployed. Create `<component>/values.<env>.yaml` (an empty/comment-only file is valid). Remember the agent env: `values.local.yaml` is required too, since the desktop deploys `<tenant>-local`. |
 | Operator asks to put the Cloudflare token in `<env>.tfvars` | Refuse. The token is a secret injected as `TF_VAR_cloudflare_api_token` from `CLOUDFLARE_API_TOKEN` at apply time — it must not be committed. |
 
 ## Important
@@ -259,6 +316,10 @@ not deliverables — they belong in the git worktree, not `${ERUN_OUTPUTS_DIR}`.
   Env-specific resources go in the env folder's own `main.tf`.
 - **No `run.tf`, no per-env shell scripts.** `erun terraform apply` owns the
   apply workflow.
+- **Every umbrella chart needs a `values.<env>.yaml` for every env it deploys
+  to — including `local`.** erun deploy requires it per-chart with no fallback,
+  and the desktop deploys the `<tenant>-local` agent env. A missing one fails the
+  whole deploy at spec resolution.
 - **Pin one erun version across both sides.** The Terraform `?ref`, the Helm
   chart `version`, and the env's `runtimeversion` move together; bump them
   together after an `erun upgrade`.

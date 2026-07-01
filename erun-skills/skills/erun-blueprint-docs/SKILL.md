@@ -70,6 +70,7 @@ Ask once, then proceed. Do not invent these.
     │   └── entrypoint.sh                   # wrangler pages deploy $SITE_DIR
     └── k8s/<module-name>/
         ├── Chart.yaml
+        ├── values.local.yaml               # agent-env overlay (docs.enabled: false)
         ├── values.prod.yaml                # docs.enabled, project, branch, secret
         └── templates/docs.yaml             # ServiceAccount + hook Job
 
@@ -162,8 +163,15 @@ Copy and substitute placeholders:
 - `templates/Dockerfile` → `erun-devops/docker/<module-name>/Dockerfile`
 - `templates/entrypoint.sh` → `erun-devops/docker/<module-name>/entrypoint.sh` (mode 0755)
 - `templates/chart/Chart.yaml` → `erun-devops/k8s/<module-name>/Chart.yaml`
+- `templates/chart/values.local.yaml` → `erun-devops/k8s/<module-name>/values.local.yaml`
 - `templates/chart/values.prod.yaml` → `erun-devops/k8s/<module-name>/values.prod.yaml`
 - `templates/chart/templates/docs.yaml` → `erun-devops/k8s/<module-name>/templates/docs.yaml`
+
+Copy a `values.<env>.yaml` for **every** env this chart will be deployed to.
+`erun deploy <tenant> <env>` requires a per-chart `values.<env>.yaml` with no
+fallback, and the desktop deploys the `<tenant>-local` agent env — so
+`values.local.yaml` is required, not optional. Omitting it fails the deploy at
+spec resolution: `values file not found for environment "local"`.
 
 ### Step 4 — prove the build locally
 
@@ -202,6 +210,7 @@ its **audience**, not its topic.
 | `yarn build` fails on a broken link | Fix the link or page id; do not disable `onBrokenLinks`. The throw is the link checker working. |
 | `npx create-docusaurus` unavailable (offline) | Fall back to the `templates/` scaffold; the produced files are valid without the generator. |
 | Cloudflare Pages project / Secret missing | Scaffold still succeeds; surface that the first `erun deploy` Job will fail until the Direct-Upload project, custom domain, token, and Secret exist. |
+| `erun deploy` fails: `values file not found for environment "<env>"` | The chart is missing `values.<env>.yaml`. erun requires one per chart per env with no fallback; the agent env (`<module>`'s `<tenant>-local`) needs `values.local.yaml` too. Create the missing file (an empty/comment-only file is valid). |
 | User asks for a Git-connected Pages project | Stop. The Job uploads directly (`wrangler pages deploy`); a Git-connected project double-deploys. Use Direct Upload. |
 | PostgreSQL/other backend coupling requested | Out of scope — this skill is the static docs site only. Point at `erun-blueprint-api` / `erun-blueprint-rls-db` for backend modules. |
 

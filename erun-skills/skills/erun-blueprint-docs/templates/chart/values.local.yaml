@@ -1,0 +1,10 @@
+# Local overlay for the agent env. erun deploy requires a values.<env>.yaml per
+# chart with no fallback, and the desktop deploys the <tenant>-local agent env,
+# so this file must exist or `erun deploy <tenant> local` fails spec resolution.
+# Publishing is off by default so a local deploy never pushes to the live
+# Cloudflare Pages project; flip docs.enabled=true per-developer to test uploads.
+docs:
+  enabled: false
+  project: __PROJECT__
+  branch: preview
+  credentialsSecretName: cf-creds
