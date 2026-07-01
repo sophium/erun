@@ -105,6 +105,7 @@ type App struct {
 	envEnsureMu               sync.Mutex
 	envEnsureInflight         map[string]struct{}
 	envEnsureDone             map[string]time.Time
+	envEnsureFailNotified     map[string]struct{}
 	configWatcher             *configWatcher
 	contribute                *contributeStore
 	contributeApps            *contributeAppForwards
