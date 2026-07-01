@@ -38,6 +38,32 @@ test.describe('failed deploys surface in the toolbar (#713)', () => {
     await emitClear(page, { tenant: 'frs', environment: 'prod', source: '' });
     await expect(banner(page)).toBeHidden();
   });
+
+  test('the deploy-failed error can be copied to the clipboard', async ({ app }) => {
+    const { page } = app;
+    await emitDeployFailed(page, message);
+    await expect(banner(page)).toBeVisible();
+
+    // Error notifications carry long paths the operator needs to copy into a bug
+    // report, so they get a copy button like terminal-status errors do (#713).
+    const copy = page.getByRole('button', { name: 'Copy', exact: true });
+    await expect(copy).toBeVisible();
+
+    // Clicking it writes the message to the clipboard — the headless shim routes
+    // ClipboardSetText to a POST /__erun_clipboard {action:"set", text}.
+    const clipboardWrite = page.waitForRequest(
+      (req) =>
+        req.method() === 'POST' &&
+        req.url().endsWith('/__erun_clipboard') &&
+        (req.postData() ?? '').includes('"action":"set"'),
+    );
+    await copy.click();
+    const req = await clipboardWrite;
+    expect(req.postData() ?? '').toContain('Deploy of frs/prod failed');
+
+    // And it confirms the copy in place.
+    await expect(page.getByRole('button', { name: 'Copied', exact: true })).toBeVisible();
+  });
 });
 
 interface RuntimeShim {
