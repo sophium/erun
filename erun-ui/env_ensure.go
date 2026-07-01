@@ -44,6 +44,7 @@ func (a *App) ensureEnvRuntimeOnce(selection uiSelection) {
 	if a.envEnsureInflight == nil {
 		a.envEnsureInflight = make(map[string]struct{})
 		a.envEnsureDone = make(map[string]time.Time)
+		a.envEnsureFailNotified = make(map[string]struct{})
 	}
 	if _, inflight := a.envEnsureInflight[key]; inflight {
 		a.envEnsureMu.Unlock()
@@ -65,6 +66,9 @@ func (a *App) ensureEnvRuntimeOnce(selection uiSelection) {
 			// not suppress the next tab's retry for the whole TTL (#644).
 			if ensureErr == nil {
 				a.envEnsureDone[key] = time.Now()
+				// Reached again — end this failure episode so a later failure
+				// re-surfaces its notification (#711).
+				delete(a.envEnsureFailNotified, key)
 			}
 			a.envEnsureMu.Unlock()
 		}()
@@ -90,7 +94,24 @@ func (a *App) ensureEnvRuntimeOnce(selection uiSelection) {
 // reconnect usually fails because the runtime is not deployed — which `open`
 // no longer fixes on its own — so the recovery is an explicit deploy.
 func (a *App) surfaceEnvRuntimeEnsureFailure(selection uiSelection, err error) {
+	// The sidebar row's failed status is the persistent signal and is updated on
+	// every attempt. The notification is transient and posts only once per
+	// failure episode: the ensure retries on every tab open/respawn (it does not
+	// stamp the success TTL on failure, #644), so re-posting on each retry made
+	// the banner re-appear the instant the user dismissed it (#711). The dedup is
+	// cleared when the env is reached again, so a later failure surfaces afresh.
 	a.emitEnvStatus(selection, envStatusFailed)
+	key := selectionKey(normalizeSelection(selection))
+	a.envEnsureMu.Lock()
+	if a.envEnsureFailNotified == nil {
+		a.envEnsureFailNotified = make(map[string]struct{})
+	}
+	_, alreadyNotified := a.envEnsureFailNotified[key]
+	a.envEnsureFailNotified[key] = struct{}{}
+	a.envEnsureMu.Unlock()
+	if alreadyNotified {
+		return
+	}
 	a.emitAppNotification("warn", fmt.Sprintf(
 		"Could not reach the runtime for %s/%s: %s. Deploy the environment to bring it up.",
 		selection.Tenant, selection.Environment, strings.TrimSpace(err.Error()),

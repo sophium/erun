@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -114,4 +115,90 @@ func TestEnsureEnvRuntimeOnceRunsAgainAfterTheWindow(t *testing.T) {
 
 	app.ensureEnvRuntimeOnce(selection)
 	waitForEnsureCount(t, &ensures, &ensuresMu, 2, 2*time.Second)
+}
+
+// TestEnsureFailureNotificationDedupesPerEpisode locks the #711 fix: a runtime
+// that stays unreachable must surface its "Could not reach the runtime"
+// notification once per failure episode, not on every ensure retry — otherwise
+// the banner re-appears the instant the user dismisses it. The sidebar row is
+// still flagged failed on every attempt, and reaching the env again ends the
+// episode so a later failure surfaces afresh.
+func TestEnsureFailureNotificationDedupesPerEpisode(t *testing.T) {
+	emits := newCapturedEmits()
+	var ensures int32
+	var ensuresMu sync.Mutex
+	var reconnectMu sync.Mutex
+	reconnectErr := error(errors.New("timed out waiting for API port-forward"))
+
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {Name: "erun", DefaultEnvironment: "remote"},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
+		},
+	}
+	app := NewApp(erunUIDeps{
+		store:           store,
+		findProjectRoot: func() (string, string, error) { return "erun", projectRoot, nil },
+		resolveCLIPath:  func() string { return "/tmp/erun" },
+		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+			return newStubTerminalSession(), nil
+		},
+		reconnectMCP: func(context.Context, eruncommon.OpenResult, func(string)) error {
+			ensuresMu.Lock()
+			ensures++
+			ensuresMu.Unlock()
+			reconnectMu.Lock()
+			defer reconnectMu.Unlock()
+			return reconnectErr
+		},
+	})
+	app.ctx = context.Background()
+	app.SetEmitter(emits.fn())
+	t.Cleanup(func() { app.shutdown(context.Background()) })
+
+	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	key := selectionKey(normalizeSelection(selection))
+
+	// Two failures in one episode surface the banner once (so a dismiss sticks),
+	// but flag the sidebar row failed each time.
+	app.surfaceEnvRuntimeEnsureFailure(selection, errors.New("boom"))
+	app.surfaceEnvRuntimeEnsureFailure(selection, errors.New("boom"))
+	if got := len(emits.events(appNotificationEvent)); got != 1 {
+		t.Fatalf("notification emitted %d times in one failure episode, want 1", got)
+	}
+	if got := len(emits.events(envStatusEvent)); got != 2 {
+		t.Fatalf("env-status emitted %d times, want 2 (flagged on each attempt)", got)
+	}
+
+	// Reaching the env again ends the episode: a successful reconnect clears the
+	// dedup, so a later failure surfaces afresh.
+	reconnectMu.Lock()
+	reconnectErr = nil
+	reconnectMu.Unlock()
+	app.ensureEnvRuntimeOnce(selection)
+	waitForEnsureCount(t, &ensures, &ensuresMu, 1, 2*time.Second)
+	waitForFailEpisodeCleared(t, app, key, 2*time.Second)
+
+	app.surfaceEnvRuntimeEnsureFailure(selection, errors.New("boom again"))
+	if got := len(emits.events(appNotificationEvent)); got != 2 {
+		t.Fatalf("notification emitted %d times after recovery, want 2", got)
+	}
+}
+
+func waitForFailEpisodeCleared(t *testing.T, app *App, key string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		app.envEnsureMu.Lock()
+		_, still := app.envEnsureFailNotified[key]
+		app.envEnsureMu.Unlock()
+		if !still {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("successful ensure did not clear the failure episode")
 }

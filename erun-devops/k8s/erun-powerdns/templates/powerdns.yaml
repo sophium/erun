@@ -57,6 +57,14 @@
 {{- $platform := default dict .Values.platform -}}
 {{- $servicesZone := default "" $platform.servicesZone -}}
 {{- $nameservers := default (list) $platform.nameservers -}}
+{{- /* pdns listen address. Under hostNetwork a 0.0.0.0:53 bind collides with
+       systemd-resolved's 127.0.0.53:53 stub on nodes that run it, and the public
+       authoritative IP is typically a NAT'd address that is not a local
+       interface (so it can't be bound directly). Set powerdns.localAddress to
+       the node's own interface IP (the one the public IP NATs to) to bind a
+       specific local address and coexist with the node resolver. Defaults to
+       0.0.0.0 for nodes where :53 is already free. */ -}}
+{{- $localAddress := default "0.0.0.0" $powerdns.localAddress -}}
 {{- $configDir := "/etc/pdns-shared" -}}
 apiVersion: v1
 kind: Secret
@@ -120,7 +128,7 @@ spec:
               gpgsql-dbname={{ $powerdnsDatabase }}
               gpgsql-user={{ $postgresUser }}
               gpgsql-password=$PDNS_GPGSQL_PASSWORD
-              local-address=0.0.0.0
+              local-address={{ $localAddress }}
               local-port=53
               api=yes
               api-key=$PDNS_API_KEY
@@ -208,7 +216,12 @@ spec:
           image: {{ $powerdnsImage }}
           imagePullPolicy: IfNotPresent
           securityContext:
-            # Non-root pdns user binding privileged :53 under hostNetwork.
+            # Bind privileged :53 under hostNetwork. k8s adds capabilities to the
+            # bounding set, not the ambient set, so a non-root process cannot use
+            # NET_BIND_SERVICE on k3s/containerd — run as root to bind :53. (A
+            # cleaner alternative is to setcap cap_net_bind_service on the wrapper
+            # image's pdns_server and keep non-root; that needs an image rebuild.)
+            runAsUser: 0
             capabilities:
               add: ["NET_BIND_SERVICE"]
           command:

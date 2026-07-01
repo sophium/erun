@@ -1,15 +1,10 @@
 import * as React from 'react';
 
-import { useChooseLocalRepoPathMutation } from '@/app/api/environmentApi';
 import { updateEnvironmentDialog } from '@/app/environmentDialogThunks';
-import { readError } from '@/app/errors';
 import { useAppDispatch } from '@/app/hooks';
-import { showTerminalMessage } from '@/app/notificationThunks';
 import type { AppState } from '@/app/state';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 
+import { LocalRepoPathInput } from './LocalRepoPathInput';
 import { SelectField } from './SelectField';
 
 type EnvironmentDialog = AppState['environmentDialog'];
@@ -70,50 +65,16 @@ function environmentTypeHelper(envType: EnvironmentDialog['envType']): string {
 // not have to type absolute paths by hand.
 export function LocalRepoPathField({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
-  const [chooseLocalRepoPath, { isLoading: choosing }] = useChooseLocalRepoPathMutation();
-  const helperId = 'environment-local-repo-path-helper';
-  const onBrowse = async (): Promise<void> => {
-    try {
-      const picked = await chooseLocalRepoPath(dialog.localRepoPath).unwrap();
-      if (picked.trim()) {
-        dispatch(updateEnvironmentDialog({ localRepoPath: picked }));
-      }
-    } catch (error) {
-      dispatch(showTerminalMessage(readError(error)));
-    }
-  };
   return (
-    <div className="grid gap-2">
-      <Label htmlFor="environment-local-repo-path">Local repo path</Label>
-      <div className="flex items-stretch gap-2">
-        <Input
-          id="environment-local-repo-path"
-          value={dialog.localRepoPath}
-          type="text"
-          autoComplete="off"
-          spellCheck={false}
-          placeholder="/Users/you/code/your-project"
-          aria-describedby={helperId}
-          disabled={dialog.busy}
-          onChange={(event) => {
-            dispatch(updateEnvironmentDialog({ localRepoPath: event.target.value }));
-          }}
-          className="flex-1"
-        />
-        <Button
-          type="button"
-          variant="outline"
-          disabled={dialog.busy || choosing}
-          onClick={() => {
-            void onBrowse();
-          }}
-        >
-          Browse…
-        </Button>
-      </div>
-      <p id={helperId} className="text-[12px] leading-[1.4] text-muted-foreground">
-        Absolute path on this machine. Mounted into the agent pod as the worktree.
-      </p>
-    </div>
+    <LocalRepoPathInput
+      id="environment-local-repo-path"
+      label="Local repo path"
+      helper="Absolute path on this machine. Mounted into the agent pod as the worktree."
+      value={dialog.localRepoPath}
+      disabled={dialog.busy}
+      onChange={(value) => {
+        dispatch(updateEnvironmentDialog({ localRepoPath: value }));
+      }}
+    />
   );
 }
