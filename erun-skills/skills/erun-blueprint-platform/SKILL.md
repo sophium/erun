@@ -207,21 +207,45 @@ dependencies:
 
 ```yaml
 # <tenant>-devops/k8s/erun-backend-api/values.local.yaml
-# Env-specific overrides for the agent env; the published chart carries the
-# defaults. Subchart values nest under the dependency name. An empty/comment-only
-# file is valid (no overrides) — the file just has to exist so `helm -f` resolves.
-erun-backend-api: {}
+# Subchart values nest under the dependency name. Forward tenant + environment
+# (see note below); the published chart carries every other default.
+erun-backend-api:
+  tenant: <tenant>          # e.g. frs
+  environment: <env>        # the short env name, e.g. local
 ```
 
 ```yaml
 # <tenant>-devops/k8s/erun-backend-api/values.prod.yaml
-erun-backend-api: {}                  # add genuinely prod-specific overrides here
+erun-backend-api:
+  tenant: <tenant>
+  environment: <env>        # e.g. prod
+  # add genuinely prod-specific overrides here
 ```
 
 Do this for **every** component you deploy (`erun-backend-api`,
 `erun-backend-postgres`, `erun-backend-db`, `erun-powerdns`, `erun-docs`, …).
 Keep each values file to genuinely env-specific overrides; the published charts
 carry the defaults.
+
+**Forward `tenant`/`environment` into each subchart.** `erun deploy` passes
+`tenant`/`environment` (and the runtime `--set`s) at the **top level**, which
+reaches a chart deployed directly but **not** a wrapped subchart — a subchart
+reads them in its own scope. Components that `{{ required }}` them
+(`erun-backend-api`, `erun-docs`) fail at helm time with `tenant is required`
+unless the umbrella forwards them nested, as above. Components that don't require
+them (`erun-backend-postgres`, `erun-backend-db`, `erun-powerdns`) can use `{}` —
+but forward them anyway if the component reads them for labels/config. A
+comment-only file is still valid for the latter; the file just has to exist so
+`helm -f` resolves.
+
+**Deploy only env-appropriate components.** `--components` selects per env, so a
+component that can't run in an env should be left out of that env's deploy — not
+forced. Two real cases: `erun-powerdns` binds `:53` via `hostNetwork` and uses a
+private base image (`erun-powerdns:<pin>`), so it belongs in the runtime env with
+a ghcr pull secret, not a local agent env (orbstack has neither); `erun-docs`
+with `docs.enabled: false` is a no-op locally. Deploy the backend trio
+(`erun-backend-postgres,erun-backend-db,erun-backend-api`) for a local platform;
+add `erun-powerdns` only where `:53` + the pull secret exist.
 
 **Every** erun chart — the runtime `erun-devops` chart *and* every component
 chart (`erun-powerdns`, `erun-backend-*`, `erun-docs`) — publishes under the
