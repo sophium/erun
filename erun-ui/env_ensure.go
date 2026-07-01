@@ -72,11 +72,12 @@ func (a *App) ensureEnvRuntimeOnce(selection uiSelection) {
 				delete(a.envEnsureFailNotified, key)
 			}
 			a.envEnsureMu.Unlock()
-			// Runtime reached — the "Could not reach the runtime …" warning, if
-			// one is still up, is now stale; clear it (#713). Emitted outside
-			// the mutex; the frontend only clears a matching notification.
+			// Runtime reached — any env-scoped warning (a "Could not reach the
+			// runtime …" banner, or a prior deploy-failed error) is now stale;
+			// clear it (#713). Emitted outside the mutex; the frontend only clears
+			// a notification that targets this env.
 			if reached {
-				a.emitClearEnvNotification(selection.Tenant, selection.Environment, notificationSourceRuntimeUnreachable)
+				a.emitClearEnvNotification(selection.Tenant, selection.Environment, "")
 			}
 		}()
 		result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{

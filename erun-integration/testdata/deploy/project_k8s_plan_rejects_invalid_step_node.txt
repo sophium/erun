@@ -2,4 +2,5 @@ audit: erun deploy --dry-run --version <VERSION> team dev
 trace-log: would append the full trace to <TMP>
 deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=false current=false
 deploy: spec resolution failed: config file cannot be unmarshaled: k8s.deployments item must be a component name or a list of component names
+==> Deploy failed team/dev: config file cannot be unmarshaled: k8s.deployments item must be a component name or a list of component names
 config file cannot be unmarshaled: k8s.deployments item must be a component name or a list of component names

@@ -2,4 +2,5 @@ audit: erun deploy --dry-run --version <VERSION> missing missing
 trace-log: would append the full trace to <TMP>
 deploy: tenant=missing environment=missing version-override=<VERSION> components=[] force=false current=false
 deploy: spec resolution failed: no such tenant exists: missing
+==> Deploy failed missing/missing: no such tenant exists: missing
 no such tenant exists: missing

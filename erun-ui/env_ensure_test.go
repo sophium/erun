@@ -305,8 +305,7 @@ func TestEnsureSuccessClearsRuntimeUnreachableNotification(t *testing.T) {
 	if !ok {
 		t.Fatalf("clear payload has unexpected type %T", events[0])
 	}
-	if payload.Tenant != "erun" || payload.Environment != "remote" ||
-		payload.Source != notificationSourceRuntimeUnreachable {
-		t.Fatalf("clear payload = %+v, want erun/remote %q", payload, notificationSourceRuntimeUnreachable)
+	if payload.Tenant != "erun" || payload.Environment != "remote" || payload.Source != "" {
+		t.Fatalf("clear payload = %+v, want erun/remote with empty (any) source", payload)
 	}
 }

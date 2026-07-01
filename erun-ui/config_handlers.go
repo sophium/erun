@@ -395,6 +395,11 @@ func (a *App) emitAppNotification(kind, message string) {
 // string the frontend compares in dismissNotificationForEnv.
 const notificationSourceRuntimeUnreachable = "runtime-unreachable"
 
+// notificationSourceDeployFailed tags the "Deploy of …/… failed" error (issue
+// #713) so the same lifecycle clear retires it once a new deploy for the env
+// starts or the runtime becomes reachable.
+const notificationSourceDeployFailed = "deploy-failed"
+
 // emitEnvNotification posts a notification tagged with the env it describes and
 // a stable source, so a later emitClearEnvNotification for the same
 // (source, tenant, environment) can dismiss it. Use it for env-scoped, state-

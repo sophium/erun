@@ -51,16 +51,16 @@ func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 			ctx.Trace(fmt.Sprintf("deploy: tenant=%s environment=%s version-override=%s components=%v force=%v current=%v",
 				deployTarget.Tenant, deployTarget.Environment, deployTarget.VersionOverride,
 				components, deployTarget.Force, useCurrent))
-			deploySpecs, err := common.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
-			if err != nil {
-				ctx.Trace("deploy: spec resolution failed: " + err.Error())
+			if err := runDeploy(ctx, store, saveEnvConfig, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployHelmChart, deployTarget); err != nil {
+				// Emit a structured, env-tagged terminal failure so any transport
+				// watching the trace stream (the desktop's activity queue / toolbar)
+				// registers a failed deploy even when it fails *before* rollout —
+				// e.g. spec resolution. Without this the desktop, which reacts only
+				// to `==> ...` lines, sees no signal and surfaces nothing (#713).
+				ctx.Trace(fmt.Sprintf("==> Deploy failed %s/%s: %s", deployTarget.Tenant, deployTarget.Environment, err.Error()))
 				return err
 			}
-			ctx.Trace(fmt.Sprintf("deploy: resolved %d spec(s)", len(deploySpecs)))
-			if err := common.RunDeploySpecs(ctx, deploySpecs, deployHelmChart); err != nil {
-				return err
-			}
-			return common.PersistRuntimeVersionFromDeploySpecs(ctx, deploySpecs, saveEnvConfig, common.ResolveDeployedHelmReleaseVersion)
+			return nil
 		},
 	}
 	addDryRunFlag(cmd)
@@ -69,6 +69,23 @@ func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 	cmd.Flags().BoolVar(&useCurrent, "current", false, "Redeploy the version this environment already runs (its persisted runtime version) instead of passing --version")
 	cmd.Flags().StringSliceVar(&components, "components", nil, fmt.Sprintf("Opt-in components to include alongside the runtime chart (%s)", strings.Join(common.OptInDeployComponentNames(), ", ")))
 	return cmd
+}
+
+// runDeploy resolves the deploy specs for the target and installs them, then
+// persists the runtime version. Kept as a named function so the RunE closure
+// stays thin (erun-cli/AGENTS.md) and every failure path funnels through one
+// return the caller tags with the structured `==> Deploy failed` trace.
+func runDeploy(ctx common.Context, store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, deployHelmChart common.HelmChartDeployerFunc, deployTarget common.DeployTarget) error {
+	deploySpecs, err := common.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
+	if err != nil {
+		ctx.Trace("deploy: spec resolution failed: " + err.Error())
+		return err
+	}
+	ctx.Trace(fmt.Sprintf("deploy: resolved %d spec(s)", len(deploySpecs)))
+	if err := common.RunDeploySpecs(ctx, deploySpecs, deployHelmChart); err != nil {
+		return err
+	}
+	return common.PersistRuntimeVersionFromDeploySpecs(ctx, deploySpecs, saveEnvConfig, common.ResolveDeployedHelmReleaseVersion)
 }
 
 func newK8sDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {

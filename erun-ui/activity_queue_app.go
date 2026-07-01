@@ -166,10 +166,11 @@ func (a *App) lockTerminalsForActivity(entry activityQueueEntry) {
 		a.emitEvent(activityQueueLockEvent, ev)
 	}
 	if len(events) > 0 {
-		// A deploy just started for this env (only deploys lock terminals). The
-		// runtime-unreachable warning that told the operator to "Deploy the
-		// environment" is now being acted on — clear it (#713).
-		a.emitClearEnvNotification(entry.Tenant, entry.Environment, notificationSourceRuntimeUnreachable)
+		// A deploy just started for this env (only deploys lock terminals). Retire
+		// any env-scoped warning that told the operator to act — the
+		// runtime-unreachable banner, or a prior deploy-failed error — since the
+		// deploy is now underway (#713).
+		a.emitClearEnvNotification(entry.Tenant, entry.Environment, "")
 	}
 }
 
@@ -204,9 +205,9 @@ func (a *App) lockTerminalForActivity(sessionID int, entry activityQueueEntry) {
 	a.mu.Unlock()
 	if event != nil {
 		a.emitEvent(activityQueueLockEvent, *event)
-		// A late-joining session locked onto an in-flight deploy — the runtime
-		// is being (re)deployed, so clear any runtime-unreachable warning (#713).
-		a.emitClearEnvNotification(entry.Tenant, entry.Environment, notificationSourceRuntimeUnreachable)
+		// A late-joining session locked onto an in-flight deploy — the runtime is
+		// being (re)deployed, so clear any env-scoped warning for it (#713).
+		a.emitClearEnvNotification(entry.Tenant, entry.Environment, "")
 	}
 }
 
@@ -311,6 +312,13 @@ var activityDeployedLineRe = regexp.MustCompile(`^==> Deployed ([^/\s]+)/([^/\s]
 // dedup decides this caller is a duplicate. Captures: tenant,
 // environment.
 var activitySkippingLineRe = regexp.MustCompile(`^==> Skipping ([^/\s]+)/([^/\s]+)\b`)
+
+// activityDeployFailedLineRe matches the `==> Deploy failed tenant/env: reason`
+// trace `erun deploy` emits on any failure — including a pre-rollout failure
+// like spec resolution, which fails before `==> Deploying` and so left the
+// desktop with no signal to surface (issue #713). Captures: tenant,
+// environment, optional reason.
+var activityDeployFailedLineRe = regexp.MustCompile(`^==> Deploy failed ([^/\s]+)/([^/\s]+)(?::\s*(.*))?$`)
 
 // activityInitializingLineRe matches the umbrella `==> Initializing
 // tenant/env` trace emitted by RunBootstrapInit once tenant + env are
@@ -431,7 +439,36 @@ func (a *App) handleDeployTraceLine(selection uiSelection, line string) bool {
 		a.finishDeployByTenantEnv(selection, match[1], match[2], activityQueueStatusSkipped, line)
 		return true
 	}
+	if match := activityDeployFailedLineRe.FindStringSubmatch(line); match != nil {
+		reason := strings.TrimSpace(match[3])
+		// Finalize the drawer entry if one was started, and — the #713 fix —
+		// surface the failure in the toolbar so a failed deploy is visible where
+		// the operator is looking, not only in the activity queue (and not at
+		// all when the failure came before any `==> Deploying` started an entry).
+		a.finishDeployByTenantEnv(selection, match[1], match[2], activityQueueStatusFailed, reason)
+		a.surfaceDeployFailure(match[1], match[2], reason)
+		return true
+	}
 	return false
+}
+
+// surfaceDeployFailure makes a failed deploy visible in the toolbar (Nielsen #1),
+// not just as a red terminal line or a drawer entry: it flags the env's sidebar
+// row failed and posts an env-tagged error notification. The notification is
+// tagged so the deploy lifecycle retires it once the state moves on — the next
+// deploy for the env starts, or the runtime becomes reachable (issue #713).
+func (a *App) surfaceDeployFailure(tenant, environment, reason string) {
+	tenant = strings.TrimSpace(tenant)
+	environment = strings.TrimSpace(environment)
+	if tenant == "" || environment == "" {
+		return
+	}
+	a.emitEnvStatus(uiSelection{Tenant: tenant, Environment: environment}, envStatusFailed)
+	message := fmt.Sprintf("Deploy of %s/%s failed.", tenant, environment)
+	if reason != "" {
+		message = fmt.Sprintf("Deploy of %s/%s failed: %s", tenant, environment, reason)
+	}
+	a.emitEnvNotification("error", tenant, environment, notificationSourceDeployFailed, message)
 }
 
 // handleInitTraceLine dispatches the init lifecycle trace lines
