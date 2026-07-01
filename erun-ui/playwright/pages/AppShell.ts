@@ -43,6 +43,19 @@ export class AppShell {
       .waitFor({ state: 'visible' });
   }
 
+  // reloadEnvironments forces the frontend to re-fetch tenant/env state from
+  // disk by emitting the same `environments-changed` event the backend's config
+  // watcher fires. Used to surface a freshly-seeded env deterministically
+  // instead of waiting on fsnotify, which can race the watcher's readiness right
+  // after boot (see the seededEnv fixture).
+  async reloadEnvironments(): Promise<void> {
+    await this.page.evaluate(() => {
+      (window as unknown as { runtime: { EventsEmit: (name: string) => void } }).runtime.EventsEmit(
+        'environments-changed',
+      );
+    });
+  }
+
   get sidebar(): Sidebar {
     return new Sidebar(this.page);
   }

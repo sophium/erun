@@ -130,8 +130,10 @@ func (a *App) surfaceEnvRuntimeEnsureFailure(selection uiSelection, err error) {
 		return
 	}
 	// Tag the notification with the env + a stable source so the deploy
-	// lifecycle can clear it once the state it describes moves on (#713).
-	a.emitEnvNotification("warn", selection.Tenant, selection.Environment, notificationSourceRuntimeUnreachable, fmt.Sprintf(
+	// lifecycle can clear it once the state it describes moves on (#713). Kind
+	// "warning" (not "warn") is the contract the frontend maps to the
+	// attention icon; an unrecognized kind renders as a neutral info ⓘ (#713).
+	a.emitEnvNotification("warning", selection.Tenant, selection.Environment, notificationSourceRuntimeUnreachable, fmt.Sprintf(
 		"Could not reach the runtime for %s/%s: %s. Deploy the environment to bring it up.",
 		selection.Tenant, selection.Environment, strings.TrimSpace(err.Error()),
 	))

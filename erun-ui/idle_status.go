@@ -288,7 +288,7 @@ func (a *App) recordManualStopForCloudContext(ctx context.Context, cloudContextN
 			Environment: selection.Environment,
 		})
 		if err != nil {
-			a.emitAppNotification("warn", fmt.Sprintf("Could not record manual stop for %s/%s: %s", selection.Tenant, selection.Environment, err.Error()))
+			a.emitAppNotification("warning", fmt.Sprintf("Could not record manual stop for %s/%s: %s", selection.Tenant, selection.Environment, err.Error()))
 			continue
 		}
 		mcpPort := eruncommon.MCPPortForResult(result)
@@ -302,7 +302,7 @@ func (a *App) recordManualStopForCloudContext(ctx context.Context, cloudContextN
 		endpoint := mcpEndpointForOpenResult(result)
 		bearer := a.mcpBearer(selection.Tenant, selection.Environment)
 		if err := recordManualStopViaMCP(ctx, endpoint, bearer, selection.Tenant, selection.Environment, "Manual stop via desktop", cloudContextName); err != nil {
-			a.emitAppNotification("warn", fmt.Sprintf("Could not record manual stop for %s/%s: %s", selection.Tenant, selection.Environment, err.Error()))
+			a.emitAppNotification("warning", fmt.Sprintf("Could not record manual stop for %s/%s: %s", selection.Tenant, selection.Environment, err.Error()))
 		}
 	}
 }

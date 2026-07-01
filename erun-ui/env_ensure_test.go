@@ -273,8 +273,18 @@ func TestSurfaceEnsureFailureSuppressedWhileDeployInFlight(t *testing.T) {
 	app.sessions["s1"].lockedByActivity = ""
 	app.mu.Unlock()
 	app.surfaceEnvRuntimeEnsureFailure(selection, errors.New("timed out waiting for API port-forward"))
-	if got := len(emits.events(appNotificationEvent)); got != 1 {
-		t.Fatalf("banner emitted %d times once the deploy cleared, want 1", got)
+	notes := emits.events(appNotificationEvent)
+	if len(notes) != 1 {
+		t.Fatalf("banner emitted %d times once the deploy cleared, want 1", len(notes))
+	}
+	note, ok := notes[0].(appNotificationPayload)
+	if !ok {
+		t.Fatalf("notification payload has unexpected type %T", notes[0])
+	}
+	// Kind "warning" (not "warn") is the contract the frontend maps to the
+	// attention icon; an unrecognized kind renders as a neutral info ⓘ (#713).
+	if note.Kind != "warning" || note.Source != notificationSourceRuntimeUnreachable {
+		t.Fatalf("notification = %+v, want kind=warning source=%q", note, notificationSourceRuntimeUnreachable)
 	}
 }
 

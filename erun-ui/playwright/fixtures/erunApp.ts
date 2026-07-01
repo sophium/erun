@@ -35,12 +35,17 @@ export const test = base.extend<{ app: AppShell; seededEnv: SeededEnvironment }>
   seededEnv: async ({ app }, use, testInfo) => {
     const environment = uniqueEnvironmentName(testInfo.title);
     seedEnvironment(SEED_TENANT, environment);
-    // The config watcher debounces ~250 ms before emitting
-    // environments-changed; wait for the row so specs start from a
-    // mounted, clickable env.
+    // The backend's fsnotify config watcher normally surfaces the new row, but
+    // the very first env created right after boot can race the watcher's
+    // readiness — the create/write events are missed and the row never appears
+    // within the wait (a flake, ~40% when this fixture is the first env change
+    // after boot). The config file is already on disk (synchronous write), and
+    // the backend reads config fresh on each state refetch, so a forced reload
+    // surfaces the row deterministically, independent of fsnotify timing.
+    await app.reloadEnvironments();
     await app.sidebar
       .envRowButton(SEED_TENANT, environment)
-      .waitFor({ state: 'visible', timeout: 10_000 });
+      .waitFor({ state: 'visible', timeout: 15_000 });
     await use({ tenant: SEED_TENANT, environment });
     removeEnvironment(SEED_TENANT, environment);
   },

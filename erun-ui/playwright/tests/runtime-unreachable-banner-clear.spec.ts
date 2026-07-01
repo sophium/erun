@@ -26,6 +26,11 @@ test.describe('runtime-unreachable banner clears with the deploy lifecycle (#713
     await emitRuntimeUnreachable(page, message);
     await expect(banner(page)).toBeVisible();
 
+    // The warning renders with the attention icon (lucide circle-alert), not the
+    // neutral info ⓘ — the Go side must emit kind "warning", not an unrecognized
+    // "warn" that falls through to the info icon (#713).
+    expect(await bannerIconKind(page)).toBe('alert');
+
     // A clear for a different env must NOT dismiss this warning. Sample over a
     // window (mirrors terminal-scroll-on-resize's negative check) so a buggy
     // "clear everything" would be caught once its SSE round-trip lands.
@@ -45,6 +50,41 @@ test.describe('runtime-unreachable banner clears with the deploy lifecycle (#713
     });
     await expect(banner(page)).toBeHidden();
   });
+
+  test('a long message stays within the bar and the dismiss button is reachable', async ({
+    app,
+  }) => {
+    const { page } = app;
+    // A real runtime-unreachable message includes the port-forward log path and
+    // is far longer than the pill — it used to stretch the header past the
+    // viewport, so nothing truncated and the dismiss X was pushed off-screen,
+    // leaving the banner un-dismissable (#713).
+    const longMessage =
+      'Could not reach the runtime for frs/prod: activate MCP port-forward: exit status 1: ' +
+      'timed out waiting for API port-forward on 127.0.0.1:17333; see ' +
+      '/Users/example/Library/Application Support/erun/portforward/api/frs/prod.log. ' +
+      'Deploy the environment to bring it up.';
+    await emitRuntimeUnreachable(page, longMessage);
+    await expect(banner(page)).toBeVisible();
+
+    // The header must not overflow the viewport, and the dismiss button must sit
+    // fully inside it (the bug pushed it hundreds of px off the right edge).
+    const viewportWidth = page.viewportSize()?.width ?? 0;
+    const headerRight = await page.evaluate(
+      () =>
+        document.querySelector('header')?.getBoundingClientRect().right ?? Number.POSITIVE_INFINITY,
+    );
+    expect(headerRight).toBeLessThanOrEqual(viewportWidth + 1);
+
+    const dismiss = page.getByRole('button', { name: 'Dismiss status' });
+    const box = await dismiss.boundingBox();
+    expect(box).not.toBeNull();
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(viewportWidth);
+
+    // And it actually dismisses — the whole point.
+    await dismiss.click();
+    await expect(banner(page)).toBeHidden();
+  });
 });
 
 interface RuntimeShim {
@@ -54,7 +94,7 @@ interface RuntimeShim {
 async function emitRuntimeUnreachable(page: Page, message: string): Promise<void> {
   await page.evaluate((msg) => {
     (window as unknown as RuntimeShim).runtime.EventsEmit('app-notification', {
-      kind: 'warn',
+      kind: 'warning',
       message: msg,
       tenant: 'frs',
       environment: 'prod',
@@ -70,6 +110,26 @@ async function emitNotificationClear(
   await page.evaluate((t) => {
     (window as unknown as RuntimeShim).runtime.EventsEmit('app-notification-clear', t);
   }, target);
+}
+
+// bannerIconKind reads the icon lucide renders inside the runtime-unreachable
+// banner: 'alert' for the attention icon (circle-alert, warning/error), 'info'
+// for the neutral ⓘ, or 'other'. Locks that the warning gets the attention icon.
+async function bannerIconKind(page: Page): Promise<'alert' | 'info' | 'other'> {
+  return await page.evaluate(() => {
+    const banners = Array.from(document.querySelectorAll('[role="status"],[role="alert"]'));
+    const banner = banners.find((b) =>
+      (b.textContent ?? '').includes('Could not reach the runtime for frs/prod'),
+    );
+    const cls = banner?.querySelector('svg')?.getAttribute('class') ?? '';
+    if (cls.includes('lucide-circle-alert')) {
+      return 'alert';
+    }
+    if (cls.includes('lucide-info')) {
+      return 'info';
+    }
+    return 'other';
+  });
 }
 
 // bannerHiddenWithin samples the banner's presence for `ms` and reports whether
