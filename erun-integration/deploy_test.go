@@ -643,6 +643,30 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_runtime_image_override_uses_published_chart", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_runtime_image_override_no_k8s_tree_uses_published_chart", func(t *testing.T) {
+		// #707: `--runtime-image` on a local env whose <tenant>-devops module has
+		// no k8s chart tree (os.ReadDir(.../k8s) → fs.ErrNotExist) must bootstrap
+		// on the published erun-devops chart by reference instead of failing spec
+		// resolution ("open .../k8s: no such file or directory"). The desktop's
+		// ERun-base picker deploys a bare tenant this way before its own
+		// <tenant>-devops chart exists. Contrast dry_run_no_devops_module_errors
+		// (no override → errors) and dry_run_runtime_image_override_uses_published_chart
+		// (chart present → reroutes). The module exists (docker + VERSION) but has
+		// no k8s tree, mirroring validation-agent-devops.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsRuntimeDockerfile(t, setup, "team")
+		if err := os.RemoveAll(filepath.Join(setup.Cwd, "team-devops", "k8s")); err != nil {
+			t.Fatalf("remove k8s tree: %v", err)
+		}
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--runtime-image", "ghcr.io/sophium/erun-devops", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_runtime_image_override_no_k8s_tree_uses_published_chart", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_remote_env_values_overlay", func(t *testing.T) {
 		// A published-chart deploy has no chart directory to host the
 		// operator's values.<env>.yaml overlay; the env config dir's
