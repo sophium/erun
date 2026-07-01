@@ -55,10 +55,18 @@ export function TerminalPane({
   return (
     <div
       className={cn(
-        'grid min-h-0 min-w-0 grid-cols-[minmax(360px,1fr)] overflow-hidden',
+        // The terminal column tracks the visible width (min 0). A hard min
+        // (e.g. minmax(360px,1fr)) forces the pane wider than the available
+        // area when the sidebar is wide or the window is narrow, so the
+        // `overflow-hidden` parent clips its right edge — and drags the
+        // right-anchored ActivityLockOverlay off-screen with it (issue #713).
+        // At any width where the terminal already fits, `minmax(0,1fr)` is
+        // pixel-identical to a hard min; it only differs when starved, where
+        // letting xterm reflow narrower beats clipping content off the right.
+        'grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] overflow-hidden',
         hidden && 'hidden',
         reviewOpen &&
-          'grid-cols-[minmax(360px,1fr)_10px_minmax(420px,var(--review-width))] max-[980px]:grid-cols-[minmax(260px,1fr)_10px_minmax(360px,min(var(--review-width),58vw))]',
+          'grid-cols-[minmax(0,1fr)_10px_minmax(420px,var(--review-width))] max-[980px]:grid-cols-[minmax(0,1fr)_10px_minmax(360px,min(var(--review-width),58vw))]',
       )}
     >
       <div className="grid h-full min-h-0 min-w-0 grid-rows-[32px_minmax(0,1fr)] overflow-hidden">

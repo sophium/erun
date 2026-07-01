@@ -4,4 +4,5 @@ deploy: tenant=team environment=dev version-override=<VERSION> components=[] for
 deploy: version <VERSION> pinned; installing the published image by reference (deploy never builds)
 deploy: resolved 1 spec(s)
 deploy: watching pods in team-dev on context test-context for early container failure (release team-devops)
+==> Deploy failed team/dev: another erun deploy is in progress for team/dev <VERSION> (release "team-devops", namespace "team-dev", context "test-context", pid=<PID>, started <TS>); refusing to run a conflicting helm upgrade
 another erun deploy is in progress for team/dev <VERSION> (release "team-devops", namespace "team-dev", context "test-context", pid=<PID>, started <TS>); refusing to run a conflicting helm upgrade

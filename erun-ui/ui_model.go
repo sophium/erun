@@ -428,6 +428,23 @@ type appStatusPayload struct {
 type appNotificationPayload struct {
 	Kind    string `json:"kind"`
 	Message string `json:"message"`
+	// Tenant/Environment/Source tag a notification so it can be cleared later
+	// by the state it describes. The runtime-unreachable warning (issue #713)
+	// carries the env it targets and a stable source, so the deploy lifecycle
+	// (a deploy starting for that env, or the runtime becoming reachable) can
+	// dismiss it without touching an unrelated toast.
+	Tenant      string `json:"tenant,omitempty"`
+	Environment string `json:"environment,omitempty"`
+	Source      string `json:"source,omitempty"`
+}
+
+// appNotificationClearPayload dismisses an env-tagged notification (see
+// appNotificationClearEvent). The frontend clears the current notification
+// only when its source/tenant/environment all match.
+type appNotificationClearPayload struct {
+	Tenant      string `json:"tenant"`
+	Environment string `json:"environment"`
+	Source      string `json:"source"`
 }
 
 type pastedFilePayload struct {

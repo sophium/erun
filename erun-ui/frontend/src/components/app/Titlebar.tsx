@@ -21,9 +21,17 @@ import { TitlebarStatus } from '@/components/app/Titlebar.Status';
 // stack above it without needing explicit z-index on every button.
 export function Titlebar(): React.ReactElement {
   const dispatch = useAppDispatch();
+  // min-w-0 on the header: it is a grid item (row 1 of the app grid) whose
+  // default min-width:auto lets it grow to its content width. A long status
+  // message then stretched the header past the viewport, so the pill's
+  // `max-w-full` resolved to that oversized width — the message never truncated
+  // and the dismiss button was pushed off-screen, leaving the banner
+  // un-dismissable (#713). min-w-0 caps the header at the grid track (viewport),
+  // restoring the truncate chain so the message ellipsizes and the dismiss X
+  // stays reachable.
   return (
     <header
-      className="relative box-border flex h-full items-center gap-3 border-b bg-[color-mix(in_oklch,var(--background)_94%,transparent)] px-3 select-none [--wails-draggable:drag]"
+      className="relative box-border flex h-full min-w-0 items-center gap-3 border-b bg-[color-mix(in_oklch,var(--background)_94%,transparent)] px-3 select-none [--wails-draggable:drag]"
       data-wails-drag
       onDoubleClick={(event) => {
         dispatch(titlebarDoubleClick(event));

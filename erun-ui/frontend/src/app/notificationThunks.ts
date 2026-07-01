@@ -105,14 +105,26 @@ export const dismissTerminalStatus = (): AppThunk => (dispatch, getState) => {
 };
 
 export const showNotification =
-  (kind: AppNotification['kind'], message: string): AppThunk =>
+  (
+    kind: AppNotification['kind'],
+    message: string,
+    meta?: { tenant?: string; environment?: string; source?: string },
+  ): AppThunk =>
   (dispatch) => {
     const trimmed = message.trim();
     if (!trimmed) {
       return;
     }
     window.clearTimeout(notificationTimer);
-    dispatch(showNotificationAction({ kind, message: trimmed }));
+    dispatch(
+      showNotificationAction({
+        kind,
+        message: trimmed,
+        tenant: meta?.tenant,
+        environment: meta?.environment,
+        source: meta?.source,
+      }),
+    );
     if (kind === 'success' || kind === 'info') {
       notificationTimer = window.setTimeout(() => {
         dispatch(dismissNotification());
