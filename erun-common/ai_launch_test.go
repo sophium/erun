@@ -58,16 +58,20 @@ func TestAISessionLaunchCommand(t *testing.T) {
 	})
 }
 
-// assertDefaultClaudeGuardAtEffort pins that a default claude launch wraps in
-// the cwd guard with the env's effort level injected into both the resume and
-// the fresh branch.
+// assertDefaultClaudeGuardAtEffort checks a default claude launch wraps in the
+// cwd guard at the env effort in both branches and, with no model chosen,
+// starts on the first available model rather than the agent's own default.
 func assertDefaultClaudeGuardAtEffort(t *testing.T, config EnvironmentClaudeConfig) {
 	t.Helper()
 	got := AISessionLaunchCommand("", config)
-	if strings.Count(got, "--effort high") != 2 {
-		t.Fatalf("expected --effort high in both guard branches, got %q", got)
+	if strings.Count(got, "--effort high --model opus") != 2 {
+		t.Fatalf("expected --effort high --model opus in both guard branches, got %q", got)
 	}
-	if !strings.Contains(got, "claude --continue --effort high") || !strings.Contains(got, "else claude --effort high") {
+	if strings.Count(got, "CLAUDE_CODE_SUBAGENT_MODEL=opus claude") != 2 {
+		t.Fatalf("expected the opus subagent-model prefix in both guard branches, got %q", got)
+	}
+	if !strings.Contains(got, "CLAUDE_CODE_SUBAGENT_MODEL=opus claude --continue --effort high --model opus") ||
+		!strings.Contains(got, "else CLAUDE_CODE_SUBAGENT_MODEL=opus claude --effort high --model opus") {
 		t.Fatalf("guard missing the resume/fresh branches: %q", got)
 	}
 }
@@ -121,10 +125,12 @@ func TestAISessionLaunchCommandModelAndDebugFlags(t *testing.T) {
 		}
 	})
 
-	t.Run("verbose debug alone injects without a model", func(t *testing.T) {
+	t.Run("verbose debug composes with the resolved default model", func(t *testing.T) {
+		// No model chosen: the launch starts on the first available model,
+		// with verbose+debug after it.
 		got := AISessionLaunchCommand("", EnvironmentClaudeConfig{VerboseDebug: true})
-		if strings.Contains(got, "--model") || strings.Count(got, "--verbose --debug") != 2 {
-			t.Fatalf("expected only --verbose --debug in both branches, got %q", got)
+		if strings.Count(got, "--model opus --verbose --debug") != 2 {
+			t.Fatalf("expected --model opus --verbose --debug in both branches, got %q", got)
 		}
 	})
 }
@@ -152,10 +158,12 @@ func TestAISessionLaunchSubagentModelPrefix(t *testing.T) {
 		}
 	})
 
-	t.Run("no prefix when no model resolves", func(t *testing.T) {
-		got := AISessionLaunchCommand("", EnvironmentClaudeConfig{VerboseDebug: true})
-		if strings.Contains(got, "CLAUDE_CODE_SUBAGENT_MODEL") {
-			t.Fatalf("expected no subagent-model prefix without a resolved model, got %q", got)
+	t.Run("no prefix when no available model is a safe token", func(t *testing.T) {
+		// A launch carries no model only when every available model is
+		// unusable; nothing unusable is ever started.
+		got := AISessionLaunchCommand("", EnvironmentClaudeConfig{Models: []string{"a b; rm"}})
+		if strings.Contains(got, "CLAUDE_CODE_SUBAGENT_MODEL") || strings.Contains(got, "--model") {
+			t.Fatalf("expected no subagent-model prefix or --model without a safe model, got %q", got)
 		}
 	})
 
@@ -183,31 +191,32 @@ func TestAISessionLaunchSubagentModelPrefix(t *testing.T) {
 	})
 }
 
-// TestResolveClaudeDefaultModel covers the per-env default-model resolution
-// (issue #482): the model launches only while it is one of the env's available
-// models — the explicit models list, or the default available set when the env
-// declares none — and only when it is a plain argv token. Everything else
-// resolves to "" so no stale, foreign, or unsafe --model reaches the shell.
-func TestResolveClaudeDefaultModel(t *testing.T) {
+// TestResolveClaudeLaunchModel covers launch-model resolution: a chosen default
+// wins while it is available and usable, else the launch falls back to the
+// first available model — never the agent's own default, and fable only when
+// the env both lists and selects it. An all-unusable set resolves to none.
+func TestResolveClaudeLaunchModel(t *testing.T) {
 	model := func(v string) *string { return &v }
 	cases := []struct {
 		name   string
 		config EnvironmentClaudeConfig
 		want   string
 	}{
-		{"unset", EnvironmentClaudeConfig{}, ""},
-		{"in explicit models", EnvironmentClaudeConfig{Models: []string{"opus", "fable"}, DefaultModel: model("fable")}, "fable"},
-		{"not in explicit models", EnvironmentClaudeConfig{Models: []string{"opus"}, DefaultModel: model("fable")}, ""},
-		{"in default available set when models unset", EnvironmentClaudeConfig{DefaultModel: model("sonnet")}, "sonnet"},
-		{"fable is opt-in, not in the default available set", EnvironmentClaudeConfig{DefaultModel: model("fable")}, ""},
-		{"trimmed", EnvironmentClaudeConfig{Models: []string{"opus"}, DefaultModel: model("  opus  ")}, "opus"},
-		{"blank", EnvironmentClaudeConfig{DefaultModel: model("  ")}, ""},
-		{"unsafe token never reaches the shell", EnvironmentClaudeConfig{Models: []string{"a b; rm"}, DefaultModel: model("a b; rm")}, ""},
+		{"unset falls back to the first default-available model", EnvironmentClaudeConfig{}, "opus"},
+		{"explicit model in explicit models", EnvironmentClaudeConfig{Models: []string{"opus", "fable"}, DefaultModel: model("fable")}, "fable"},
+		{"explicit model not in explicit models falls back to first available", EnvironmentClaudeConfig{Models: []string{"opus"}, DefaultModel: model("fable")}, "opus"},
+		{"explicit model in default available set when models unset", EnvironmentClaudeConfig{DefaultModel: model("sonnet")}, "sonnet"},
+		{"fable is opt-in: not auto-selected from the default available set", EnvironmentClaudeConfig{DefaultModel: model("fable")}, "opus"},
+		{"first-available honours the env's narrowed set", EnvironmentClaudeConfig{Models: []string{"sonnet", "haiku"}}, "sonnet"},
+		{"trimmed explicit model", EnvironmentClaudeConfig{Models: []string{"opus"}, DefaultModel: model("  opus  ")}, "opus"},
+		{"blank explicit model falls back to first available", EnvironmentClaudeConfig{DefaultModel: model("  ")}, "opus"},
+		{"unsafe explicit model falls back to first available", EnvironmentClaudeConfig{Models: []string{"opus"}, DefaultModel: model("a b; rm")}, "opus"},
+		{"no safe token in the available set resolves to empty", EnvironmentClaudeConfig{Models: []string{"a b; rm"}, DefaultModel: model("a b; rm")}, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := resolveClaudeDefaultModel(tc.config); got != tc.want {
-				t.Fatalf("resolveClaudeDefaultModel(%+v) = %q, want %q", tc.config, got, tc.want)
+			if got := resolveClaudeLaunchModel(tc.config); got != tc.want {
+				t.Fatalf("resolveClaudeLaunchModel(%+v) = %q, want %q", tc.config, got, tc.want)
 			}
 		})
 	}
@@ -263,10 +272,10 @@ func TestAISessionLaunchLines(t *testing.T) {
 				t.Fatalf("wrapper missing %q:\n%s", want, script)
 			}
 		}
-		// The resume command goes through shellQuote as a printf argument —
-		// it carries single quotes itself (the ultracode --settings JSON),
-		// which would break the printf format if inlined.
-		if !strings.Contains(script, `'claude --continue --settings '"'"'{"ultracode":true}'"'"''`) {
+		// The resume is shell-quoted because it carries single quotes itself
+		// (the ultracode settings JSON); with a model now chosen it also carries
+		// the subagent-model prefix and the model flag.
+		if !strings.Contains(script, `'CLAUDE_CODE_SUBAGENT_MODEL=opus claude --continue --settings '"'"'{"ultracode":true}'"'"' --model opus'`) {
 			t.Fatalf("resume command not safely shell-quoted:\n%s", script)
 		}
 	})
@@ -286,7 +295,7 @@ func TestAISessionLaunchLines(t *testing.T) {
 		if !strings.Contains(text, "Claude was killed (exit 137)") {
 			t.Fatalf("expected the OOM marker, got:\n%s", text)
 		}
-		if !strings.Contains(text, `resume with: claude --continue --settings '{"ultracode":true}'`) {
+		if !strings.Contains(text, `resume with: CLAUDE_CODE_SUBAGENT_MODEL=opus claude --continue --settings '{"ultracode":true}' --model opus`) {
 			t.Fatalf("expected the resume command with its quotes intact, got:\n%s", text)
 		}
 	})

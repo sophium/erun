@@ -591,6 +591,8 @@ func TestOpen(t *testing.T) {
 		// block locks that the remote program is wrapped in a persistent dtach
 		// session (so reopening reconnects instead of stranding a parallel claude)
 		// and that the cwd-guarded claude is that session's create-time program.
+		// With no model pinned, the session starts on the first available
+		// model rather than the agent's own default.
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 		envVars := stubKubectlNotFound(t, setup)
@@ -617,11 +619,10 @@ func TestOpen(t *testing.T) {
 		golden.Equal(t, "open/app_session_ai_dry_run_launches_claude_with_model_and_verbose_debug", normalize.Apply(result.Combined))
 	})
 
-	t.Run("app_session_ai_dry_run_drops_default_model_not_in_available", func(t *testing.T) {
-		// #482: a persisted defaultmodel that is no longer among the env's
-		// available models must not reach the launch — the guard falls back to
-		// no --model flag rather than launching Claude on a model the env does
-		// not expose.
+	t.Run("app_session_ai_dry_run_falls_back_to_available_when_default_dropped", func(t *testing.T) {
+		// A chosen default no longer among the env's available models is
+		// dropped; the session falls back to the first available model rather
+		// than starting on none.
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnvWithClaude(t, setup, "team", "dev",
 			"claude:\n"+
@@ -629,7 +630,7 @@ func TestOpen(t *testing.T) {
 				"  defaultmodel: fable\n")
 		envVars := stubKubectlNotFound(t, setup)
 		result := erun.Run(t, []string{"open", "team", "dev", "--app-session", "ai", "--ai", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		golden.Equal(t, "open/app_session_ai_dry_run_drops_default_model_not_in_available", normalize.Apply(result.Combined))
+		golden.Equal(t, "open/app_session_ai_dry_run_falls_back_to_available_when_default_dropped", normalize.Apply(result.Combined))
 	})
 
 	t.Run("app_session_shell_dry_run_wraps_dtach", func(t *testing.T) {
