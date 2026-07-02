@@ -239,6 +239,22 @@ dir per wrapped erun chart (`erun-backend-api`, `erun-backend-postgres`,
 wrapping `erun-backend-api`. Keep each values file to genuinely env-specific
 overrides; the published charts carry the defaults.
 
+**Track `Chart.lock`, ignore the built `charts/`.** Resolving an umbrella's
+dependency produces two things: `Chart.lock` (the pinned, reproducible
+resolution — **commit it**) and `charts/<subchart>-<version>.tgz` (the
+downloaded subchart — a build artifact). `erun deploy` runs `helm dependency
+build` for any umbrella chart before it installs, so `charts/` is rebuilt from
+`Chart.lock` on every deploy and never needs to be committed. Add the artifact
+to the repo's `.gitignore` so it doesn't land as an untracked file:
+
+```gitignore
+# Helm dependency build artifacts — rebuilt from Chart.lock by `erun deploy`.
+**/charts/*.tgz
+```
+
+Commit the tgz (vendor it) only for an air-gapped install where the OCI registry
+is unreachable at deploy time.
+
 **Forward `tenant`/`environment` into each subchart.** `erun deploy` passes
 `tenant`/`environment` (and the runtime `--set`s) at the **top level**, which
 reaches a chart deployed directly but **not** a wrapped subchart — a subchart

@@ -520,6 +520,52 @@ func runDeployStep(ctx Context, stepIndex int, specs []DeploySpec, deploy HelmCh
 	return errors.Join(errs...)
 }
 
+// chartDependencyBuildPlan traces the `helm dependency build` a local umbrella
+// chart needs before install and returns the command to run at rollout, or nil
+// when none is needed.
+//
+// A chart that declares dependencies vendors its published subcharts into
+// charts/; helm upgrade --install fails ("found in Chart.yaml, but missing in
+// charts/ directory") when they are absent, and erun deploy is the only step
+// that installs the chart — so it builds them first. This keeps deploy a pure
+// consume/by-reference primitive: the build pulls the already-published
+// dependency charts pinned in Chart.lock (it mints nothing), and it branches on
+// the chart artifact (does it declare deps) — never on env type or name.
+// Published OCI charts (the runtime) have no local charts/ dir, so they are
+// skipped. The build runs against the original chart dir; prepareHelmChartForDeploy
+// then copies the populated charts/ into the version-stamped temp copy helm installs.
+func chartDependencyBuildPlan(ctx Context, deployInput HelmDeploySpec) (*commandSpec, error) {
+	chartPath := strings.TrimSpace(deployInput.ChartPath)
+	if chartPath == "" || isOCIChartReference(chartPath) {
+		return nil, nil
+	}
+	declares, err := helmChartDeclaresDependencies(chartPath)
+	if err != nil {
+		return nil, err
+	}
+	if !declares {
+		return nil, nil
+	}
+	build := commandSpec{Name: "helm", Args: []string{"dependency", "build", chartPath}}
+	ctx.TraceCommand(build.Dir, build.Name, build.Args...)
+	return &build, nil
+}
+
+// runChartDependencyBuild executes the planned dependency build on a real run;
+// it is a no-op when chartDependencyBuildPlan found nothing to build. Called
+// after the single-flight acquire so a deduped or parallel deploy never races
+// on the shared charts/ dir.
+func runChartDependencyBuild(ctx Context, deployInput HelmDeploySpec, build *commandSpec, target string) error {
+	if build == nil {
+		return nil
+	}
+	ctx.Info("==> Building chart dependencies for " + target)
+	if err := runHelmCommand(ctx, *build); err != nil {
+		return fmt.Errorf("deploy %s: helm dependency build: %w", deployInput.ReleaseName, err)
+	}
+	return nil
+}
+
 func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDeployerFunc) error {
 	if deploy == nil {
 		return fmt.Errorf("helm deployer is required")
@@ -533,6 +579,14 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 		return fmt.Errorf("deploy %s: %w", deployInput.ReleaseName, err)
 	}
 	if err := applyMCPAuthSecret(ctx, deployInput); err != nil {
+		return fmt.Errorf("deploy %s: %w", deployInput.ReleaseName, err)
+	}
+	// An umbrella chart's published subcharts must be present in charts/ before
+	// helm upgrade --install; trace the build so it shows in the dry-run plan,
+	// and run it (real run) after the single-flight acquire below so a deduped
+	// or parallel deploy never races on the shared charts/ dir.
+	depBuild, err := chartDependencyBuildPlan(ctx, deployInput)
+	if err != nil {
 		return fmt.Errorf("deploy %s: %w", deployInput.ReleaseName, err)
 	}
 	command := deployInput.command()
@@ -552,6 +606,9 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 
 	if ctx.DryRun {
 		return nil
+	}
+	if err := runChartDependencyBuild(ctx, deployInput, depBuild, target); err != nil {
+		return err
 	}
 	return runHelmDeployRollout(ctx, deployInput, deploy, target)
 }

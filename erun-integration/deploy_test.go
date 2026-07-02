@@ -717,6 +717,29 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/components_includes_backend_in_deploy_order", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_umbrella_component_builds_helm_dependencies", func(t *testing.T) {
+		// #723: a local umbrella chart (team-backend-api) declares an OCI
+		// dependency on the published erun-backend-api chart. deploy must
+		// `helm dependency build` it before helm upgrade --install, or helm
+		// fails on the subchart missing from charts/. The dry-run plan traces
+		// the build immediately before the upgrade for that chart. Leaf charts
+		// with no dependencies get no such line (see
+		// components_includes_backend_in_deploy_order, whose backend leaf charts
+		// trace no dependency build), and the published-OCI runtime is skipped
+		// outright (no local charts/).
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsUmbrellaChart(t, setup, "team", "dev", "team-backend-api", "erun-backend-api")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.0",
+			"--components", "team-backend-api",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "deploy/dry_run_umbrella_component_builds_helm_dependencies", normalize.Apply(result.Combined))
+	})
+
 	t.Run("project_k8s_plan_groups_parallel_step", func(t *testing.T) {
 		// When .erun/config.yaml declares a k8s.deployments plan with a
 		// parallel-group step (a list as the item), deploy must group those

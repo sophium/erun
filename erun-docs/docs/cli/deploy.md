@@ -52,7 +52,7 @@ This installs the published `erun-devops` chart with `ghcr.io/sophium/erun-devop
 | `--components <name,name,...>` | The exact charts to deploy this run — chart directory names under `<tenant>-devops/k8s/`, plus the runtime release name `<tenant>-devops`. Overrides the env's saved selection and the deployment plan for this run; an unknown name (matching no chart and no runtime alias) is rejected with `unknown deploy component`. See [Agent reference · `--components`](/agent-reference/cli-flags#components-value-set). |
 | `--force` | Re-run helm upgrade even when the resolved version is unchanged and nothing needs rolling. |
 | `--rollout-timeout <dur>` | How long to wait for the rollout before giving up (e.g. `10m`). Defaults to the env's setting, or 5 minutes. Raise it for the first deploy of a large image on a slow connection; see [rollout wait and monitoring](/agent-reference/cli-flags#rollout-wait-and-pod-monitoring). |
-| `--dry-run` | Resolve and print every `helm upgrade --install` command (and any image-copy step) without executing. |
+| `--dry-run` | Resolve and print every command it would run — `helm dependency build` for umbrella charts, then `helm upgrade --install` (and any image-copy step) — without executing. |
 
 Subcommand:
 
@@ -62,7 +62,7 @@ Subcommand:
 
 ## What deploy installs {#what-deploy-installs}
 
-`erun deploy` *consumes* an already-published version — it never produces one. A version is a content identity, not a label, so ERun addresses the published image and chart by reference: it does **not** build your working tree, and it does **not** push (so it can never overwrite the published `<v>`). Before the rollout it checks that the version's image and chart exist; if they don't, the deploy errors instead of building or publishing them. `erun upgrade` rolls a fleet forward by calling deploy this same way.
+`erun deploy` *consumes* an already-published version — it never produces one. A version is a content identity, not a label, so ERun addresses the published image and chart by reference: it does **not** build your working tree, and it does **not** push (so it can never overwrite the published `<v>`). Before the rollout it checks that the version's image and chart exist; if they don't, the deploy errors instead of building or publishing them. When a selected chart is an umbrella that wraps published subcharts (the [platform blueprint](/concepts/skills) pattern, where `<tenant>-<component>` depends on the published `erun-<component>` chart), deploy runs `helm dependency build` first so the subcharts are present before install — it pulls the already-published dependency charts pinned in `Chart.lock`, still never building them. `erun upgrade` rolls a fleet forward by calling deploy this same way.
 
 You always say *which* version:
 

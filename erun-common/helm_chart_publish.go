@@ -142,6 +142,29 @@ func loadHelmChartName(chartPath string) (string, error) {
 	return name, nil
 }
 
+// helmChartDeclaresDependencies reports whether a local chart's Chart.yaml
+// declares a non-empty dependencies list — an umbrella chart that vendors its
+// published subcharts into charts/ (the erun-blueprint-platform pattern, where
+// a <tenant>-<component> umbrella depends on the published erun-<component>
+// chart). deploy must `helm dependency build` such a chart before install,
+// since helm upgrade --install fails when the declared subcharts are missing
+// from charts/.
+func helmChartDeclaresDependencies(chartPath string) (bool, error) {
+	data, err := os.ReadFile(filepath.Join(chartPath, "Chart.yaml"))
+	if err != nil {
+		return false, fmt.Errorf("read Chart.yaml at %s: %w", chartPath, err)
+	}
+	var chart struct {
+		Dependencies []struct {
+			Name string `yaml:"name"`
+		} `yaml:"dependencies"`
+	}
+	if err := yaml.Unmarshal(data, &chart); err != nil {
+		return false, fmt.Errorf("parse Chart.yaml at %s: %w", chartPath, err)
+	}
+	return len(chart.Dependencies) > 0, nil
+}
+
 // resolveHelmChartPublishSpec builds a HelmChartPublishSpec for a chart at a
 // version + registry. Every erun chart publishes under the registry's /charts
 // path (PublishedDevopsChartOCIRepo) — separate from the image repo of the same
