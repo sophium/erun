@@ -62,15 +62,23 @@ func (a *App) ensureEnvRuntimeOnce(selection uiSelection) {
 		defer func() {
 			a.envEnsureMu.Lock()
 			delete(a.envEnsureInflight, key)
+			reached := ensureErr == nil
 			// Stamp the dedup window only on success: a failed reconnect must
 			// not suppress the next tab's retry for the whole TTL (#644).
-			if ensureErr == nil {
+			if reached {
 				a.envEnsureDone[key] = time.Now()
 				// Reached again — end this failure episode so a later failure
 				// re-surfaces its notification (#711).
 				delete(a.envEnsureFailNotified, key)
 			}
 			a.envEnsureMu.Unlock()
+			// Runtime reached — any env-scoped warning (a "Could not reach the
+			// runtime …" banner, or a prior deploy-failed error) is now stale;
+			// clear it (#713). Emitted outside the mutex; the frontend only clears
+			// a notification that targets this env.
+			if reached {
+				a.emitClearEnvNotification(selection.Tenant, selection.Environment, "")
+			}
 		}()
 		result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 			Tenant:      selection.Tenant,
@@ -94,6 +102,15 @@ func (a *App) ensureEnvRuntimeOnce(selection uiSelection) {
 // reconnect usually fails because the runtime is not deployed — which `open`
 // no longer fixes on its own — so the recovery is an explicit deploy.
 func (a *App) surfaceEnvRuntimeEnsureFailure(selection uiSelection, err error) {
+	selection = normalizeSelection(selection)
+	// A deploy for this env being in flight IS the recovery this failure would
+	// recommend ("Deploy the environment …"), and the deploy-progress overlay
+	// already communicates it. Surfacing a contradictory failed status + banner
+	// on top of the running deploy is the #713 confusion, so stay quiet while the
+	// deploy owns the env's state; a genuine post-deploy failure surfaces afresh.
+	if a.deployInFlightForEnv(selection) {
+		return
+	}
 	// The sidebar row's failed status is the persistent signal and is updated on
 	// every attempt. The notification is transient and posts only once per
 	// failure episode: the ensure retries on every tab open/respawn (it does not
@@ -101,7 +118,7 @@ func (a *App) surfaceEnvRuntimeEnsureFailure(selection uiSelection, err error) {
 	// the banner re-appear the instant the user dismissed it (#711). The dedup is
 	// cleared when the env is reached again, so a later failure surfaces afresh.
 	a.emitEnvStatus(selection, envStatusFailed)
-	key := selectionKey(normalizeSelection(selection))
+	key := selectionKey(selection)
 	a.envEnsureMu.Lock()
 	if a.envEnsureFailNotified == nil {
 		a.envEnsureFailNotified = make(map[string]struct{})
@@ -112,8 +129,31 @@ func (a *App) surfaceEnvRuntimeEnsureFailure(selection uiSelection, err error) {
 	if alreadyNotified {
 		return
 	}
-	a.emitAppNotification("warn", fmt.Sprintf(
+	// Tag the notification with the env + a stable source so the deploy
+	// lifecycle can clear it once the state it describes moves on (#713). Kind
+	// "warning" (not "warn") is the contract the frontend maps to the
+	// attention icon; an unrecognized kind renders as a neutral info ⓘ (#713).
+	a.emitEnvNotification("warning", selection.Tenant, selection.Environment, notificationSourceRuntimeUnreachable, fmt.Sprintf(
 		"Could not reach the runtime for %s/%s: %s. Deploy the environment to bring it up.",
 		selection.Tenant, selection.Environment, strings.TrimSpace(err.Error()),
 	))
+}
+
+// deployInFlightForEnv reports whether a deploy that locks terminals is
+// currently in flight for the env: any of its open sessions is locked by an
+// activity (only deploys lock sibling terminals — see sessionMatchesActivity).
+func (a *App) deployInFlightForEnv(selection uiSelection) bool {
+	selection = normalizeSelection(selection)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, managed := range a.sessions {
+		if managed == nil || managed.closed || managed.lockedByActivity == "" {
+			continue
+		}
+		if strings.TrimSpace(managed.selection.Tenant) == selection.Tenant &&
+			strings.TrimSpace(managed.selection.Environment) == selection.Environment {
+			return true
+		}
+	}
+	return false
 }

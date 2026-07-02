@@ -1,5 +1,5 @@
 export type { AIActivityPayload } from './aiActivityPayload';
-export type { AppNotificationPayload } from './appNotificationPayload';
+export type { AppNotificationClearPayload, AppNotificationPayload } from './appNotificationPayload';
 export type { AppStatusPayload } from './appStatusPayload';
 export type { ClassifiedTerminalFailure } from './classifiedTerminalFailure';
 export type { CloudInitProvider } from './cloudInitProvider';

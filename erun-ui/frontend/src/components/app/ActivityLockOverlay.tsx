@@ -27,7 +27,10 @@ export function ActivityLockOverlay({
 }: ActivityLockOverlayProps): React.ReactElement {
   return (
     <div
-      className="pointer-events-none absolute top-3 right-3 z-10 flex max-w-[360px] flex-col items-end gap-1"
+      // Cap the card at the pane width (minus the 12px inset on each side) so a
+      // narrow/starved terminal pane shrinks it to fit instead of clipping its
+      // right edge behind the pane's own overflow-hidden (issue #713).
+      className="pointer-events-none absolute top-3 right-3 z-10 flex max-w-[min(360px,calc(100%_-_1.5rem))] flex-col items-end gap-1"
       role="status"
       aria-live="polite"
     >

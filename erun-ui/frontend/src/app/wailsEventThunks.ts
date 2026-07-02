@@ -115,7 +115,13 @@ export const handleAppNotification =
       return;
     }
     const kind = payload.kind ?? 'info';
-    dispatch(showNotification(kind, message));
+    dispatch(
+      showNotification(kind, message, {
+        tenant: payload.tenant,
+        environment: payload.environment,
+        source: payload.source,
+      }),
+    );
   };
 
 // Bounded retry budget for surfacing a just-initialized env. The

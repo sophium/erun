@@ -55,6 +55,99 @@ func TestLockTerminalsForActivityLocksMatchingSessions(t *testing.T) {
 	}
 }
 
+// TestLockTerminalsForActivityClearsEnvNotifications locks the #713 fix: when a
+// deploy starts locking an env's terminals, any env-scoped warning that told the
+// operator to act (the runtime-unreachable banner, or a prior deploy-failed
+// error) is now being acted on, so an env-wide app-notification-clear fires
+// (empty source = clear any env-scoped notification for the env).
+func TestLockTerminalsForActivityClearsEnvNotifications(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	emits := newCapturedEmits()
+	app.SetEmitter(emits.fn())
+	selection := uiSelection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
+	envSession := &managedTerminal{selection: selection, key: "env\x00team\x00dev", serial: 1, kind: sessionKindOpen}
+	app.sessions[envSession.key] = envSession
+
+	entry, _ := app.activityQueue.start(activityQueueEntry{
+		Command:     "deploy",
+		Tenant:      "team",
+		Environment: "dev",
+		Version:     "1.0.0",
+		Release:     "team-devops",
+	})
+	app.lockTerminalsForActivity(entry)
+
+	events := emits.events(appNotificationClearEvent)
+	if len(events) != 1 {
+		t.Fatalf("clear emitted %d times, want exactly 1", len(events))
+	}
+	payload, ok := events[0].(appNotificationClearPayload)
+	if !ok {
+		t.Fatalf("clear payload has unexpected type %T", events[0])
+	}
+	if payload.Tenant != "team" || payload.Environment != "dev" || payload.Source != "" {
+		t.Fatalf("clear payload = %+v, want team/dev with empty (any) source", payload)
+	}
+}
+
+// TestDeployFailedTraceSurfacesToToolbar locks the #713 fix: a `==> Deploy
+// failed tenant/env: reason` trace (emitted by `erun deploy` on any failure,
+// including a pre-rollout spec-resolution failure) surfaces the failure in the
+// toolbar — an env-tagged error notification plus a failed sidebar status — so a
+// failed deploy is not silent.
+func TestDeployFailedTraceSurfacesToToolbar(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	emits := newCapturedEmits()
+	app.SetEmitter(emits.fn())
+	selection := uiSelection{Tenant: "frs", Environment: "local"}
+	onLine := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+
+	onLine(`==> Deploy failed frs/local: values file not found for environment "local"`)
+
+	notes := emits.events(appNotificationEvent)
+	if len(notes) != 1 {
+		t.Fatalf("deploy failure emitted %d toolbar notifications, want 1", len(notes))
+	}
+	note, ok := notes[0].(appNotificationPayload)
+	if !ok {
+		t.Fatalf("notification payload has unexpected type %T", notes[0])
+	}
+	if note.Kind != "error" || note.Tenant != "frs" || note.Environment != "local" ||
+		note.Source != notificationSourceDeployFailed {
+		t.Fatalf("notification = %+v, want error frs/local %q", note, notificationSourceDeployFailed)
+	}
+	if !strings.Contains(note.Message, "Deploy of frs/local failed") ||
+		!strings.Contains(note.Message, "values file not found") {
+		t.Fatalf("notification message = %q, want the failed target + reason", note.Message)
+	}
+	if got := len(emits.events(envStatusEvent)); got != 1 {
+		t.Fatalf("failed sidebar status emitted %d times, want 1", got)
+	}
+}
+
+// TestLockTerminalsForActivityWithoutMatchClearsNothing guards the gate: a
+// deploy that locks no local sessions (nothing to act on for this desktop) must
+// not fire a stray notification-clear (issue #713).
+func TestLockTerminalsForActivityWithoutMatchClearsNothing(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	emits := newCapturedEmits()
+	app.SetEmitter(emits.fn())
+	other := &managedTerminal{
+		selection: uiSelection{Tenant: "other", Environment: "dev"},
+		key:       "env\x00other\x00dev", serial: 1, kind: sessionKindOpen,
+	}
+	app.sessions[other.key] = other
+
+	entry, _ := app.activityQueue.start(activityQueueEntry{
+		Command: "deploy", Tenant: "team", Environment: "dev", Version: "1.0.0", Release: "team-devops",
+	})
+	app.lockTerminalsForActivity(entry)
+
+	if got := len(emits.events(appNotificationClearEvent)); got != 0 {
+		t.Fatalf("clear emitted %d times with no matching session, want 0", got)
+	}
+}
+
 // TestLockTerminalEventsAlwaysCarryReason pins the contract documented in
 // erun-ui/AGENTS.md "Professional UX": the ActivityLockOverlay relies on
 // the backend always populating Reason on Locked=true events. The
