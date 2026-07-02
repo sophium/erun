@@ -8,8 +8,8 @@ import (
 )
 
 // postgresComponentName is the chart that owns the environment's Postgres
-// instance. Deploy treats it specially: a pending database reset forces its
-// helm step even when every image was promoted from the fingerprint cache.
+// instance; it deploys before the charts that depend on it (db migrations,
+// PowerDNS) in the default deploy order.
 const postgresComponentName = "erun-backend-postgres"
 
 // powerdnsComponentName is the platform PowerDNS authoritative nameserver
@@ -17,28 +17,10 @@ const postgresComponentName = "erun-backend-postgres"
 // erun-backend-postgres instance, so it must deploy after postgres.
 const powerdnsComponentName = "erun-powerdns"
 
-// optInDeployComponents lists charts that are not deployed by default and must
-// be explicitly included via DeployTarget.Components or the deploy --components
-// flag. Other charts (notably the per-tenant runtime chart) are always
-// deployed when present.
-var optInDeployComponents = []string{
-	postgresComponentName,
-	"erun-backend-db",
-	"erun-backend-api",
-	powerdnsComponentName,
-}
-
-// OptInDeployComponentNames returns the opt-in component names a caller may
-// pass to deploy --components, in canonical order. Exposed so transport help
-// text stays in sync with the validation list rather than drifting from it.
-func OptInDeployComponentNames() []string {
-	return slices.Clone(optInDeployComponents)
-}
-
 // defaultDeployComponentOrder is the fallback rank used when the project
-// config has no k8s.deployments plan. Postgres → db → api; other components
-// (e.g. the runtime chart) sort to the end so backend dependencies come up
-// first.
+// config has no k8s.deployments plan. Postgres → db → api → powerdns; other
+// components (e.g. the runtime chart) sort to the end so backend dependencies
+// come up first. It governs ordering only — not which components deploy.
 var defaultDeployComponentOrder = []string{
 	postgresComponentName,
 	"erun-backend-db",
@@ -46,67 +28,254 @@ var defaultDeployComponentOrder = []string{
 	powerdnsComponentName,
 }
 
-// filterDeployContextsByComponents drops charts whose ComponentName is in the
-// opt-in set unless that name is explicitly included — either by the
-// --components flag or by being named in the project's k8s.deployments plan.
-// Listing a chart in the plan is an implicit opt-in: a user who configures
-// `environments.<env>.k8s.deployments: [..., erun-backend-api]` should get
-// that chart deployed without also having to pass --components on every run.
-// Unknown component names (not in the opt-in set) are rejected with an error
-// so typos surface early instead of silently deploying nothing extra.
-func filterDeployContextsByComponents(contexts []KubernetesDeployContext, components []string, plan ProjectK8sConfig) ([]KubernetesDeployContext, error) {
-	requested, err := normalizeRequestedComponents(components)
-	if err != nil {
-		return nil, err
+// Sources reported by resolveSelectedDeployComponents so the dry-run trace
+// names which precedence tier decided the selection.
+const (
+	deploySelectionSourceFlag    = "--components flag"
+	deploySelectionSourceSaved   = "saved deploy.components"
+	deploySelectionSourcePlan    = "k8s.deployments plan"
+	deploySelectionSourceDefault = "default (runtime only)"
+)
+
+// resolveSelectedDeployComponents applies the strict-precedence tiers that
+// decide which components deploy: the explicit --components flag wins; then the
+// per-machine saved set (EnvConfig.deploy.components); then the repo
+// k8s.deployments plan. Tiers do not merge — the highest non-empty tier fully
+// determines the selection, matching "opt in for exactly that". An empty result
+// (no flag, no saved set, no plan) means "no explicit selection"; the caller
+// then defaults to the runtime chart alone (bootstrap/heal). The second return
+// value names the tier for the dry-run trace.
+func resolveSelectedDeployComponents(flagComponents, savedComponents []string, plan ProjectK8sConfig) ([]string, string) {
+	if names := normalizeComponentNames(flagComponents); len(names) > 0 {
+		return names, deploySelectionSourceFlag
 	}
-	planned := planComponentNames(plan)
-	out := make([]KubernetesDeployContext, 0, len(contexts))
-	for _, deployContext := range contexts {
-		name := strings.TrimSpace(deployContext.ComponentName)
-		if isOptInDeployComponent(name) {
-			if _, byFlag := requested[name]; byFlag {
-				// included via --components
-			} else if _, byPlan := planned[name]; byPlan {
-				// included via project k8s.deployments
-			} else {
-				continue
-			}
-		}
-		out = append(out, deployContext)
+	if names := normalizeComponentNames(savedComponents); len(names) > 0 {
+		return names, deploySelectionSourceSaved
 	}
-	return out, nil
+	if names := planComponentNameList(plan); len(names) > 0 {
+		return names, deploySelectionSourcePlan
+	}
+	return nil, deploySelectionSourceDefault
 }
 
-func planComponentNames(plan ProjectK8sConfig) map[string]struct{} {
-	if len(plan.Deployments) == 0 {
-		return nil
-	}
-	out := make(map[string]struct{})
-	for _, step := range plan.Deployments {
-		for _, name := range step.Components {
-			out[strings.TrimSpace(name)] = struct{}{}
-		}
-	}
-	return out
-}
-
-func isOptInDeployComponent(name string) bool {
-	return slices.Contains(optInDeployComponents, name)
-}
-
-func normalizeRequestedComponents(components []string) (map[string]struct{}, error) {
-	out := make(map[string]struct{}, len(components))
+// normalizeComponentNames trims, drops blanks, and de-duplicates a component
+// name list, preserving first-seen order.
+func normalizeComponentNames(components []string) []string {
+	out := make([]string, 0, len(components))
+	seen := make(map[string]struct{}, len(components))
 	for _, raw := range components {
 		name := strings.TrimSpace(raw)
 		if name == "" {
 			continue
 		}
-		if !isOptInDeployComponent(name) {
-			return nil, fmt.Errorf("unknown deploy component %q; valid opt-in components are: %s", name, strings.Join(optInDeployComponents, ", "))
+		if _, dup := seen[name]; dup {
+			continue
 		}
-		out[name] = struct{}{}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	return out
+}
+
+// planComponentNameList flattens the project k8s plan steps into an ordered,
+// de-duplicated component name list (plan step order, names within a step in
+// declaration order).
+func planComponentNameList(plan ProjectK8sConfig) []string {
+	names := make([]string, 0)
+	for _, step := range plan.Deployments {
+		names = append(names, step.Components...)
+	}
+	return normalizeComponentNames(names)
+}
+
+// filterDeployContextsBySelection keeps the discovered local chart contexts the
+// operator selected — opt-in-only: a chart deploys iff its name is in the
+// selection. The runtime chart is kept when it is named (by its <tenant>-devops
+// release name or the erun-devops alias) or when the selection is empty (the
+// bootstrap/heal default deploys the runtime alone). Selection names that match
+// no discovered chart and no runtime alias are rejected so a typo or a stale
+// saved entry fails loudly instead of silently deploying nothing.
+func filterDeployContextsBySelection(contexts []KubernetesDeployContext, selected []string, tenant string) ([]KubernetesDeployContext, error) {
+	if err := validateSelectedDeployComponents(selected, contexts, tenant); err != nil {
+		return nil, err
+	}
+	runtimeSelected := deploySelectionIncludesRuntime(selected, tenant)
+	out := make([]KubernetesDeployContext, 0, len(contexts))
+	for _, deployContext := range contexts {
+		if deployContextOwnsRuntimeChart(deployContext, tenant) {
+			if runtimeSelected {
+				out = append(out, deployContext)
+			}
+			continue
+		}
+		if slices.Contains(selected, strings.TrimSpace(deployContext.ComponentName)) {
+			out = append(out, deployContext)
+		}
 	}
 	return out, nil
+}
+
+// deploySelectionIncludesRuntime reports whether the runtime chart is part of a
+// selection. An empty selection defaults to the runtime alone; a non-empty
+// selection includes the runtime only when it names a runtime alias
+// (<tenant>-devops or erun-devops).
+func deploySelectionIncludesRuntime(selected []string, tenant string) bool {
+	if len(selected) == 0 {
+		return true
+	}
+	for _, alias := range runtimeComponentNames(tenant) {
+		if slices.Contains(selected, alias) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsRuntimeContext reports whether any of the resolved local contexts is
+// the runtime chart, so the caller knows a repo-local runtime chart backs the
+// deploy (and no published fallback is needed).
+func containsRuntimeContext(contexts []KubernetesDeployContext, tenant string) bool {
+	for _, deployContext := range contexts {
+		if deployContextOwnsRuntimeChart(deployContext, tenant) {
+			return true
+		}
+	}
+	return false
+}
+
+// validateSelectedDeployComponents fails when a selected name matches neither a
+// discovered local chart nor a runtime alias. Runtime aliases are always valid
+// (even with no local runtime chart) because they resolve to the published
+// erun-devops chart.
+func validateSelectedDeployComponents(selected []string, contexts []KubernetesDeployContext, tenant string) error {
+	if len(selected) == 0 {
+		return nil
+	}
+	valid := deployableComponentNameSet(contexts, tenant)
+	for _, name := range selected {
+		if _, ok := valid[name]; !ok {
+			return fmt.Errorf("unknown deploy component %q; valid components for this environment are: %s", name, strings.Join(sortedNameSet(valid), ", "))
+		}
+	}
+	return nil
+}
+
+// deployableComponentNameSet returns the names that may be selected for an
+// environment: every discovered local chart directory name plus the runtime
+// aliases (<tenant>-devops and erun-devops).
+func deployableComponentNameSet(contexts []KubernetesDeployContext, tenant string) map[string]struct{} {
+	valid := make(map[string]struct{}, len(contexts)+2)
+	for _, deployContext := range contexts {
+		if name := strings.TrimSpace(deployContext.ComponentName); name != "" {
+			valid[name] = struct{}{}
+		}
+	}
+	for _, alias := range runtimeComponentNames(tenant) {
+		valid[alias] = struct{}{}
+	}
+	return valid
+}
+
+func sortedNameSet(set map[string]struct{}) []string {
+	names := make([]string, 0, len(set))
+	for name := range set {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// DeployableComponent describes one selectable deploy target for an
+// environment. Transports that let the operator choose what `erun deploy` rolls
+// out (the desktop "Components to deploy" checklist) render a list of these.
+type DeployableComponent struct {
+	// Name is the canonical selector: a chart directory name under
+	// <tenant>-devops/k8s/, or the runtime release name for the runtime item.
+	Name string `json:"name"`
+	// Runtime marks the environment's runtime chart item.
+	Runtime bool `json:"runtime"`
+	// Source is "local-chart" when a repo-local chart backs the component, or
+	// "published-chart" for the runtime when only the published erun-devops
+	// chart is available (no local <tenant>-devops/erun-devops chart).
+	Source string `json:"source"`
+	// Selected reports whether the component is in the env's current resolved
+	// default selection (saved deploy.components, else the repo plan, else —
+	// when both are empty — the runtime alone).
+	Selected bool `json:"selected"`
+}
+
+const (
+	deployComponentSourceLocal     = "local-chart"
+	deployComponentSourcePublished = "published-chart"
+)
+
+// ResolveDeployableComponents lists the deployable components for an
+// environment: the local component charts discovered under <tenant>-devops/k8s
+// plus the runtime item (a local <tenant>-devops/erun-devops chart if present,
+// otherwise the published erun-devops chart). Selected reflects the env's
+// current resolved default selection, so a transport can render the checklist
+// pre-populated exactly as an equivalent `erun deploy` (with no --components)
+// would resolve. It reads only — it never builds, pushes, or requires a
+// version — and is the single source both CLI help and the desktop consume.
+func ResolveDeployableComponents(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DeployTarget) ([]DeployableComponent, error) {
+	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
+	now = freezeNow(now)
+
+	resolvedTarget, err := resolveDeployTarget(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
+	if err != nil {
+		return nil, err
+	}
+	tenant := resolvedTarget.Tenant
+	runtimeName := RuntimeReleaseName(tenant)
+
+	var contexts []KubernetesDeployContext
+	if !resolvedTarget.RemoteRepo() {
+		contexts, err = ResolveCurrentKubernetesDeployContexts(findProjectRoot, resolveKubernetesDeployContext, resolvedTarget.RepoPath)
+		if err != nil && !isNoLocalDeployChartsError(err) {
+			return nil, err
+		}
+	}
+
+	plan, err := loadProjectK8sPlanForRepo(resolvedTarget.RepoPath, resolvedTarget.Environment)
+	if err != nil {
+		return nil, err
+	}
+	selected, _ := resolveSelectedDeployComponents(target.Components, resolvedTarget.EnvConfig.Deploy.Components, plan)
+	sortDeployContextsByDeployOrder(contexts, plan)
+	runtimeSelected := deploySelectionIncludesRuntime(selected, tenant)
+
+	components := make([]DeployableComponent, 0, len(contexts)+1)
+	hasLocalRuntime := false
+	for _, deployContext := range contexts {
+		if deployContextOwnsRuntimeChart(deployContext, tenant) {
+			hasLocalRuntime = true
+			components = append(components, DeployableComponent{
+				Name:     runtimeName,
+				Runtime:  true,
+				Source:   deployComponentSourceLocal,
+				Selected: runtimeSelected,
+			})
+			continue
+		}
+		name := strings.TrimSpace(deployContext.ComponentName)
+		components = append(components, DeployableComponent{
+			Name:     name,
+			Source:   deployComponentSourceLocal,
+			Selected: slices.Contains(selected, name),
+		})
+	}
+	if !hasLocalRuntime {
+		// No repo-local runtime chart: the runtime deploys via the published
+		// erun-devops chart. Offer it as the runtime item so the operator can
+		// bootstrap/heal the env from the checklist.
+		components = append(components, DeployableComponent{
+			Name:     runtimeName,
+			Runtime:  true,
+			Source:   deployComponentSourcePublished,
+			Selected: runtimeSelected,
+		})
+	}
+	return components, nil
 }
 
 // sortDeployContextsByDeployOrder reorders contexts according to the given

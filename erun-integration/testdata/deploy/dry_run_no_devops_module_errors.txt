@@ -1,6 +1,0 @@
-audit: erun deploy --dry-run --version <VERSION> team dev
-trace-log: would append the full trace to <TMP>
-deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=false current=false
-deploy: spec resolution failed: helm chart not found in current directory
-==> Deploy failed team/dev: helm chart not found in current directory
-helm chart not found in current directory

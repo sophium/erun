@@ -194,17 +194,20 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_multiple_devops_modules_errors", normalize.Apply(result.Combined))
 	})
 
-	t.Run("dry_run_no_devops_module_errors", func(t *testing.T) {
-		// Exercises the no-candidates end of chart discovery: a local env
-		// whose project root has no *-devops module anywhere must fail with
-		// "helm chart not found in current directory".
+	t.Run("dry_run_no_devops_module_bootstraps_published_runtime", func(t *testing.T) {
+		// Opt-in-only resolution (#718): a local env whose project root has no
+		// *-devops module has no local charts, so an empty selection defaults to
+		// the runtime and — finding no repo-local runtime chart — bootstraps the
+		// env on the published erun-devops chart by reference. This replaces the
+		// old "no devops module errors" contract: a configured env can always
+		// heal its runtime from the published chart, exit 0.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
-		if result.ExitCode == 0 {
-			t.Fatalf("expected non-zero exit when no devops module exists, got 0:\n%s", result.Combined)
+		if result.ExitCode != 0 {
+			t.Fatalf("expected exit 0 bootstrapping the published runtime, got %d:\n%s", result.ExitCode, result.Combined)
 		}
-		golden.Equal(t, "deploy/dry_run_no_devops_module_errors", normalize.Apply(result.Combined))
+		golden.Equal(t, "deploy/dry_run_no_devops_module_bootstraps_published_runtime", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_unconfigured_alias_derives_provider_and_region", func(t *testing.T) {
@@ -683,11 +686,11 @@ func TestDeploy(t *testing.T) {
 	})
 
 	t.Run("default_skips_optin_backend_charts", func(t *testing.T) {
-		// Regression for issue #271: when a tenant repo contains the runtime
-		// chart and the three opt-in backend charts, `erun deploy` without
-		// --components must deploy only the runtime chart. The backend
-		// charts ship as separate Helm releases and are gated behind the
-		// --components flag.
+		// Opt-in-only resolution (#718, originally #271): when a tenant repo
+		// contains the runtime chart and the three backend charts, `erun deploy`
+		// with no selection deploys only the runtime chart. Nothing else rides
+		// along — the backend charts ship only when explicitly selected via
+		// --components, a saved deploy.components set, or the k8s.deployments plan.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -697,9 +700,10 @@ func TestDeploy(t *testing.T) {
 	})
 
 	t.Run("components_includes_backend_in_deploy_order", func(t *testing.T) {
-		// With --components, the opt-in backend charts must deploy in the
-		// fixed dependency order (postgres -> db -> api -> runtime),
-		// regardless of the order they appear on the command line.
+		// Opt-in-only: --components deploys exactly the named charts, so the
+		// runtime does NOT deploy here (it was not selected). The three backend
+		// charts must still deploy in the fixed dependency order (postgres -> db
+		// -> api), regardless of the order they appear on the command line.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -713,12 +717,37 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/components_includes_backend_in_deploy_order", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_umbrella_component_builds_helm_dependencies", func(t *testing.T) {
+		// #723: a local umbrella chart (team-backend-api) declares an OCI
+		// dependency on the published erun-backend-api chart. deploy must
+		// `helm dependency build` it before helm upgrade --install, or helm
+		// fails on the subchart missing from charts/. The dry-run plan traces
+		// the build immediately before the upgrade for that chart. Leaf charts
+		// with no dependencies get no such line (see
+		// components_includes_backend_in_deploy_order, whose backend leaf charts
+		// trace no dependency build), and the published-OCI runtime is skipped
+		// outright (no local charts/).
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsUmbrellaChart(t, setup, "team", "dev", "team-backend-api", "erun-backend-api")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.0",
+			"--components", "team-backend-api",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "deploy/dry_run_umbrella_component_builds_helm_dependencies", normalize.Apply(result.Combined))
+	})
+
 	t.Run("project_k8s_plan_groups_parallel_step", func(t *testing.T) {
 		// When .erun/config.yaml declares a k8s.deployments plan with a
 		// parallel-group step (a list as the item), deploy must group those
 		// charts into one step and emit a single "step N (parallel): ..."
 		// trace line. Other steps stay serial. Order across steps matches
-		// the config, not the alphabetical chart-discovery order.
+		// the config, not the alphabetical chart-discovery order. The runtime
+		// (team-devops) is selected explicitly so the parallel step's two members
+		// both deploy (opt-in-only: an unselected runtime would not).
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -727,18 +756,19 @@ func TestDeploy(t *testing.T) {
 		result := erun.Run(t, []string{
 			"deploy", "team", "dev",
 			"--version", "1.0.0",
-			"--components", "erun-backend-postgres,erun-backend-db,erun-backend-api",
+			"--components", "team-devops,erun-backend-postgres,erun-backend-db,erun-backend-api",
 			"--dry-run",
 		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		golden.Equal(t, "deploy/project_k8s_plan_groups_parallel_step", normalize.Apply(result.Combined))
 	})
 
 	t.Run("project_k8s_plan_includes_listed_charts_without_components_flag", func(t *testing.T) {
-		// Listing a chart under environments.<env>.k8s.deployments must
-		// imply --components for it: a user who has configured the plan
-		// should not also have to pass --components=erun-backend-... on
-		// every deploy. Without this, the opt-in filter would silently
-		// strip the backend charts even though the plan named them.
+		// The k8s.deployments plan is a selection tier (#718): with no
+		// --components and no saved deploy.components, the plan's charts are the
+		// selection, so a user who configured the plan need not pass
+		// --components on every deploy. Here the plan names the runtime
+		// (team-devops) and the three backends, so all four deploy — grouped and
+		// ordered by the plan (team-devops+postgres parallel, then db, then api).
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -812,6 +842,52 @@ func TestDeploy(t *testing.T) {
 			t.Fatalf("expected non-zero exit for unknown component, got 0:\n%s", result.Combined)
 		}
 		golden.Equal(t, "deploy/components_rejects_unknown_name", normalize.Apply(result.Combined))
+	})
+
+	t.Run("default_deploys_runtime_only_not_stray_non_optin_chart", func(t *testing.T) {
+		// Opt-in-only (#718): a non-opt-in, non-runtime chart (here team-docs)
+		// present in the tree must NOT deploy by default — only the runtime does.
+		// Locks the stray-default fix: before #718 any chart outside the
+		// hardcoded opt-in set deployed by elimination (e.g. a disabled docs
+		// chart shipped on every deploy).
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsComponentChart(t, setup, "team", "dev", "team-docs")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "deploy/default_deploys_runtime_only_not_stray_non_optin_chart", normalize.Apply(result.Combined))
+	})
+
+	t.Run("component_only_tree_bootstraps_published_runtime", func(t *testing.T) {
+		// A component-only tenant tree (component charts under <tenant>-devops/k8s
+		// but no <tenant>-devops runtime chart — the frs platform shape). With no
+		// selection, deploy defaults to the runtime and, finding no local runtime
+		// chart, installs the published erun-devops chart by reference; the
+		// present component charts are NOT deployed (not selected). This is the
+		// dual-lookup + published fallback now available to deploy as it is to
+		// open (#718).
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsBackendCharts(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("expected exit 0 bootstrapping the published runtime, got %d:\n%s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/component_only_tree_bootstraps_published_runtime", normalize.Apply(result.Combined))
+	})
+
+	t.Run("saved_deploy_components_drive_selection_without_flag", func(t *testing.T) {
+		// The per-machine saved set (EnvConfig.deploy.components) is the selection
+		// tier below --components (#718): with no --components, deploy resolves to
+		// exactly the saved charts. Here the saved set is the postgres backend
+		// only, so deploy rolls out postgres alone — the runtime is NOT added (a
+		// non-empty saved selection that does not name it).
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithDeployComponents(t, setup, "team", "dev", []string{"erun-backend-postgres"})
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsBackendCharts(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "deploy/saved_deploy_components_drive_selection_without_flag", normalize.Apply(result.Combined))
 	})
 
 	t.Run("real_run_via_stubs", func(t *testing.T) {

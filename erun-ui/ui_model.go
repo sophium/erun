@@ -74,6 +74,12 @@ type uiSelection struct {
 	LocalRepoPath     string `json:"localRepoPath,omitempty"`
 	NoGit             bool   `json:"noGit,omitempty"`
 	SetDefaultTenant  bool   `json:"setDefaultTenant,omitempty"`
+	// Components is the explicit one-shot deploy selection from the Runtime
+	// tab's "Components to deploy" checklist. When set, the desktop threads it
+	// into `deploy --components` so exactly these charts roll out; empty leaves
+	// deploy to resolve the env's saved default. Chart directory names (plus the
+	// runtime release name) — never the wrapped erun-* dependency names.
+	Components []string `json:"components,omitempty"`
 }
 
 type uiDiffOptions struct {
@@ -244,6 +250,13 @@ type uiEnvironmentConfig struct {
 	AutoUpgrade           bool                       `json:"autoUpgrade"`
 	UpgradeChannel        string                     `json:"upgradeChannel,omitempty"`
 	DisableBuildScript    bool                       `json:"disableBuildScript"`
+	// DeployComponents is the per-machine saved deploy selection (EnvConfig
+	// deploy.components): the charts `erun deploy` rolls out for this env by
+	// default. Empty means "no saved selection" — deploy falls back to the repo
+	// plan, then the runtime chart alone. The Runtime tab's checklist edits it;
+	// saving it raises the pending-redeploy banner (it changes what a redeploy
+	// rolls out).
+	DeployComponents []string `json:"deployComponents,omitempty"`
 }
 
 type uiClaudeConfig struct {

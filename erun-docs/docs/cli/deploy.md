@@ -16,9 +16,11 @@ If `TENANT` and/or `ENVIRONMENT` are omitted, they resolve from defaults (same w
 
 A version is **required**: pass `--version <v>` to install a specific published version, or `--current` to redeploy the version the environment already runs. Running `erun deploy` with neither errors — `deploy` does not mint a version, so there is nothing for it to install. Versions are minted only by [`erun build`](/cli/build); to produce a new one, build and push it first (or let the desktop app, which composes those steps for you).
 
-## Deployment plan
+## What gets deployed
 
-Each environment declares its deployment plan in `.erun/config.yaml`. Steps run in order; a list within a step is deployed in parallel. When the plan is absent, `erun deploy` falls back to chart-dependency-based ordering. For the full YAML schema and resolution rules, see [Configuration · `environments.<env>.k8s.deployments[]`](/reference/configuration#per-project-config) and [Agent reference · CLI flag spec · `erun deploy`](/agent-reference/cli-flags#erun-deploy).
+`erun deploy` is **opt-in**: it rolls out exactly the charts you select and nothing else. The selection resolves by precedence — the `--components` flag first, then the environment's saved default (set in the desktop app's Runtime tab), then the `.erun/config.yaml` deployment plan. When none of those name anything, deploy rolls out the environment's runtime chart alone, which bootstraps or heals it.
+
+The deployment plan also sets ordering: steps run in order, and a list within a step deploys in parallel; when the plan is absent, deploy falls back to chart-dependency-based ordering. For the full precedence rules and the plan's YAML schema, see [Configuration · `environments.<env>.k8s.deployments[]`](/reference/configuration#per-project-config) and [Agent reference · CLI flag spec · `erun deploy`](/agent-reference/cli-flags#erun-deploy).
 
 ## Where the runtime chart comes from
 
@@ -47,10 +49,10 @@ This installs the published `erun-devops` chart with `ghcr.io/sophium/erun-devop
 | `--version <version>` | The published version to install, by reference. Required unless `--current` is given. The version's image and chart must already exist (locally or in the registry) or the deploy errors — `deploy` never builds them. |
 | `--current` | Redeploy the version the environment is already recorded as running (its persisted runtime version). Use it to re-roll the same version, or after a `--force`-style retry, without retyping the number. Required unless `--version` is given. |
 | `--runtime-image <ref>` | Install the runtime running this image via the published `erun-devops` chart (`imageOverrides.erun-devops`), pinned to `--version`, **even when the env has a repo-local runtime chart** (which it bypasses). Use it to [bootstrap an env on the canonical ERun base image](#runtime-image-bootstrap) before its own image is built; mirrors [`erun open --runtime-image`](/cli/open). |
-| `--components <name,name,...>` | Opt-in components to include alongside the runtime chart. The accepted values are a fixed set — `erun-backend-postgres`, `erun-backend-db`, `erun-backend-api`, `erun-powerdns` — and an unknown name is rejected with `unknown deploy component`. See [Agent reference · `--components`](/agent-reference/cli-flags#components-value-set). |
+| `--components <name,name,...>` | The exact charts to deploy this run — chart directory names under `<tenant>-devops/k8s/`, plus the runtime release name `<tenant>-devops`. Overrides the env's saved selection and the deployment plan for this run; an unknown name (matching no chart and no runtime alias) is rejected with `unknown deploy component`. See [Agent reference · `--components`](/agent-reference/cli-flags#components-value-set). |
 | `--force` | Re-run helm upgrade even when the resolved version is unchanged and nothing needs rolling. |
 | `--rollout-timeout <dur>` | How long to wait for the rollout before giving up (e.g. `10m`). Defaults to the env's setting, or 5 minutes. Raise it for the first deploy of a large image on a slow connection; see [rollout wait and monitoring](/agent-reference/cli-flags#rollout-wait-and-pod-monitoring). |
-| `--dry-run` | Resolve and print every `helm upgrade --install` command (and any image-copy step) without executing. |
+| `--dry-run` | Resolve and print every command it would run — `helm dependency build` for umbrella charts, then `helm upgrade --install` (and any image-copy step) — without executing. |
 
 Subcommand:
 
@@ -60,7 +62,7 @@ Subcommand:
 
 ## What deploy installs {#what-deploy-installs}
 
-`erun deploy` *consumes* an already-published version — it never produces one. A version is a content identity, not a label, so ERun addresses the published image and chart by reference: it does **not** build your working tree, and it does **not** push (so it can never overwrite the published `<v>`). Before the rollout it checks that the version's image and chart exist; if they don't, the deploy errors instead of building or publishing them. `erun upgrade` rolls a fleet forward by calling deploy this same way.
+`erun deploy` *consumes* an already-published version — it never produces one. A version is a content identity, not a label, so ERun addresses the published image and chart by reference: it does **not** build your working tree, and it does **not** push (so it can never overwrite the published `<v>`). Before the rollout it checks that the version's image and chart exist; if they don't, the deploy errors instead of building or publishing them. When a selected chart is an umbrella that wraps published subcharts (the [platform blueprint](/concepts/skills) pattern, where `<tenant>-<component>` depends on the published `erun-<component>` chart), deploy runs `helm dependency build` first so the subcharts are present before install — it pulls the already-published dependency charts pinned in `Chart.lock`, still never building them. `erun upgrade` rolls a fleet forward by calling deploy this same way.
 
 You always say *which* version:
 

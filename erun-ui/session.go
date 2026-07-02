@@ -375,7 +375,26 @@ func buildDeployArgs(selection uiSelection) []string {
 	if image := deployRuntimeImageOverride(selection); image != "" {
 		args = append(args, "--runtime-image", image)
 	}
+	args = appendDeployComponentsFlag(args, selection)
 	return args
+}
+
+// appendDeployComponentsFlag threads the operator's explicit component selection
+// (the Runtime tab's "Components to deploy" checklist) into the pure deploy
+// primitive as `--components a,b,c`. The desktop composes primitives and threads
+// the exact selection — it never uses a convenience switch (erun-ui/AGENTS.md).
+// An empty selection appends nothing, so deploy resolves the env's saved default.
+func appendDeployComponentsFlag(args []string, selection uiSelection) []string {
+	names := make([]string, 0, len(selection.Components))
+	for _, raw := range selection.Components {
+		if name := strings.TrimSpace(raw); name != "" {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return args
+	}
+	return append(args, "--components", strings.Join(names, ","))
 }
 
 // deployRuntimeImageOverride returns the picked runtime image to pass as

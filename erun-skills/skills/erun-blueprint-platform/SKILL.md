@@ -170,9 +170,20 @@ ln -s ../variables.tf terraform-frs/prod/variables.tf
 ## Step 3 — the Helm side
 
 Each platform component is a thin umbrella chart under
-`<tenant>-devops/k8s/<component>/` that **depends on** erun's published OCI chart
-(never a copy), with its **per-env values** beside it. `erun deploy` discovers
-these local chart dirs as its deploy contexts; `--components=…` filters which.
+`<tenant>-devops/k8s/<tenant>-<component>/` — the directory name, the `Chart.yaml`
+`name:`, and the Helm release are all `<tenant>-<component>` (e.g. `frs-docs`,
+`frs-backend-api`) — that **depends on** erun's published OCI chart
+`erun-<component>` (never a copy), with its **per-env values** beside it. Name the
+directory for the tenant, not for the erun chart it wraps: `erun deploy` keys the
+component name off the directory, so `frs-docs/` deploys as `frs-docs` (wrapping
+`erun-docs`), not as `erun-docs`.
+
+Component selection is **opt-in**: `erun deploy` rolls out exactly the charts you
+name via `--components` (or a saved default selection persisted in the env's
+`deploy.components`), and with no selection deploys the environment's runtime
+chart alone (bootstrapping/healing it). It never deploys a component just because
+its chart directory is present — so a chart that should not run yet simply stays
+unselected.
 
 **The values-file contract (this is what fails if you skip it).** For every env
 it deploys, `erun deploy <tenant> <env>` reads `values.<env>.yaml` from **each**
@@ -195,7 +206,7 @@ in.)
 So each component gets three files:
 
 ```yaml
-# <tenant>-devops/k8s/erun-backend-api/Chart.yaml
+# <tenant>-devops/k8s/frs-backend-api/Chart.yaml   (dir name == chart name == <tenant>-<component>)
 apiVersion: v2
 name: frs-backend-api
 version: 0.1.0
@@ -206,7 +217,7 @@ dependencies:
 ```
 
 ```yaml
-# <tenant>-devops/k8s/erun-backend-api/values.local.yaml
+# <tenant>-devops/k8s/frs-backend-api/values.local.yaml
 # Subchart values nest under the dependency name. Forward tenant + environment
 # (see note below); the published chart carries every other default.
 erun-backend-api:
@@ -215,17 +226,34 @@ erun-backend-api:
 ```
 
 ```yaml
-# <tenant>-devops/k8s/erun-backend-api/values.prod.yaml
+# <tenant>-devops/k8s/frs-backend-api/values.prod.yaml
 erun-backend-api:
   tenant: <tenant>
   environment: <env>        # e.g. prod
   # add genuinely prod-specific overrides here
 ```
 
-Do this for **every** component you deploy (`erun-backend-api`,
-`erun-backend-postgres`, `erun-backend-db`, `erun-powerdns`, `erun-docs`, …).
-Keep each values file to genuinely env-specific overrides; the published charts
-carry the defaults.
+Do this for **every** component you deploy — one `<tenant>-<component>` umbrella
+dir per wrapped erun chart (`erun-backend-api`, `erun-backend-postgres`,
+`erun-backend-db`, `erun-powerdns`, `erun-docs`, …), e.g. `frs-backend-api/`
+wrapping `erun-backend-api`. Keep each values file to genuinely env-specific
+overrides; the published charts carry the defaults.
+
+**Track `Chart.lock`, ignore the built `charts/`.** Resolving an umbrella's
+dependency produces two things: `Chart.lock` (the pinned, reproducible
+resolution — **commit it**) and `charts/<subchart>-<version>.tgz` (the
+downloaded subchart — a build artifact). `erun deploy` runs `helm dependency
+build` for any umbrella chart before it installs, so `charts/` is rebuilt from
+`Chart.lock` on every deploy and never needs to be committed. Add the artifact
+to the repo's `.gitignore` so it doesn't land as an untracked file:
+
+```gitignore
+# Helm dependency build artifacts — rebuilt from Chart.lock by `erun deploy`.
+**/charts/*.tgz
+```
+
+Commit the tgz (vendor it) only for an air-gapped install where the OCI registry
+is unreachable at deploy time.
 
 **Forward `tenant`/`environment` into each subchart.** `erun deploy` passes
 `tenant`/`environment` (and the runtime `--set`s) at the **top level**, which
@@ -238,14 +266,17 @@ but forward them anyway if the component reads them for labels/config. A
 comment-only file is still valid for the latter; the file just has to exist so
 `helm -f` resolves.
 
-**Deploy only env-appropriate components.** `--components` selects per env, so a
-component that can't run in an env should be left out of that env's deploy — not
-forced. Two real cases: `erun-powerdns` binds `:53` via `hostNetwork` and uses a
-private base image (`erun-powerdns:<pin>`), so it belongs in the runtime env with
-a ghcr pull secret, not a local agent env (orbstack has neither); `erun-docs`
-with `docs.enabled: false` is a no-op locally. Deploy the backend trio
-(`erun-backend-postgres,erun-backend-db,erun-backend-api`) for a local platform;
-add `erun-powerdns` only where `:53` + the pull secret exist.
+**Deploy only env-appropriate components.** Selection is opt-in and per env, so a
+component that can't run in an env is simply left unselected — never forced. Use
+the umbrella (directory) names, `<tenant>-<component>`, in `--components` or the
+saved `deploy.components`. Two real cases: `<tenant>-powerdns` binds `:53` via
+`hostNetwork` and uses a private base image (`erun-powerdns:<pin>`), so it belongs
+in the runtime env with a ghcr pull secret, not a local agent env (orbstack has
+neither); `<tenant>-docs` is a no-op locally. For a local platform, select the
+backend trio (`--components <tenant>-backend-postgres,<tenant>-backend-db,<tenant>-backend-api`);
+add `<tenant>-powerdns` only where `:53` + the pull secret exist. The runtime
+chart deploys on its own with an empty selection, so a bare `erun deploy <tenant>
+<env>` bootstraps or heals the runtime without touching the components.
 
 **Every** erun chart — the runtime `erun-devops` chart *and* every component
 chart (`erun-powerdns`, `erun-backend-*`, `erun-docs`) — publishes under the

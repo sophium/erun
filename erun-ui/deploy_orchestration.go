@@ -61,6 +61,7 @@ func (a *App) runBuildPushDeployOrchestration(ctx context.Context, cli, dir stri
 	if force {
 		deployArgs = append(deployArgs, "--force")
 	}
+	deployArgs = appendDeployComponentsFlag(deployArgs, selection)
 	deployArgs = a.appendMCPAuthPublicKeyFlag(deployArgs)
 	_, err = runErunCaptured(ctx, cli, dir, onLine, deployArgs...)
 	return err
@@ -82,6 +83,7 @@ func (a *App) runInstallByReferenceDeploy(ctx context.Context, cli, dir string, 
 	if force {
 		args = append(args, "--force")
 	}
+	args = appendDeployComponentsFlag(args, selection)
 	args = a.appendMCPAuthPublicKeyFlag(args)
 	_, err := runErunCaptured(ctx, cli, dir, onLine, args...)
 	return err

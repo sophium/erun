@@ -122,6 +122,42 @@ func SeedTenantEnvWithDeployTimeout(t testing.TB, setup env.Setup, tenant, envir
 	)
 }
 
+// SeedTenantEnvWithDeployComponents writes the same minimal config tree as
+// SeedTenantEnv plus a per-machine saved deploy selection (deploy.components),
+// so deploy scenarios can exercise the saved-set precedence tier: a deploy with
+// no --components must resolve to exactly the saved charts (and, because the
+// selection is non-empty, the runtime deploys only if it too is saved).
+func SeedTenantEnvWithDeployComponents(t testing.TB, setup env.Setup, tenant, environment string, components []string) {
+	t.Helper()
+	root := filepath.Join(setup.ConfigHome, "erun")
+	tenantDir := filepath.Join(root, tenant)
+	envDir := filepath.Join(tenantDir, environment)
+	for _, dir := range []string{root, tenantDir, envDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	mustWrite(t, filepath.Join(root, "config.yaml"), "defaulttenant: "+tenant+"\n")
+	mustWrite(t, filepath.Join(tenantDir, "config.yaml"),
+		"projectroot: "+setup.Cwd+"\n"+
+			"name: "+tenant+"\n"+
+			"defaultenvironment: "+environment+"\n",
+	)
+	body := "name: " + environment + "\n" +
+		"repopath: " + setup.Cwd + "\n" +
+		"kubernetescontext: test-context\n" +
+		"containerregistry: registry.example/test\n" +
+		"runtimeversion: 1.0.0\n" +
+		"type: local-agent\n" +
+		"deploy:\n" +
+		"  components:\n"
+	for _, component := range components {
+		body += "    - " + component + "\n"
+	}
+	mustWrite(t, filepath.Join(envDir, "config.yaml"), body)
+}
+
 // SeedTenantEnvNoRegistry writes the same minimal config tree as SeedTenantEnv
 // but omits the per-env container registry, so the env's registry list resolves
 // entirely from the project's .erun/config.yaml (seed it with
@@ -796,6 +832,50 @@ func SeedDevopsBackendCharts(t testing.TB, setup env.Setup, tenant, environment 
 		mustWrite(t, filepath.Join(chart, "values.yaml"), "tenant: "+tenant+"\n")
 		mustWrite(t, filepath.Join(chart, "values."+envSlug+".yaml"), "environment: "+environment+"\n")
 	}
+}
+
+// SeedDevopsComponentChart seeds a single extra component chart under
+// <tenant>-devops/k8s/<chartName>/ (Chart.yaml + values.<env>.yaml). Use it for
+// a non-opt-in, non-runtime chart (e.g. a docs chart) to prove opt-in-only
+// resolution does not auto-deploy it. Callable with or without SeedDevopsRepo:
+// with it the tree also has the runtime chart; without it the tree is
+// component-only (the runtime deploys via the published erun-devops chart).
+func SeedDevopsComponentChart(t testing.TB, setup env.Setup, tenant, environment, chartName string) {
+	t.Helper()
+	envSlug := strings.ToLower(strings.TrimSpace(environment))
+	chart := filepath.Join(setup.Cwd, tenant+"-devops", "k8s", chartName)
+	if err := os.MkdirAll(chart, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", chart, err)
+	}
+	mustWrite(t, filepath.Join(chart, "Chart.yaml"), "apiVersion: v2\nname: "+chartName+"\nversion: 0.0.1\n")
+	mustWrite(t, filepath.Join(chart, "values.yaml"), "tenant: "+tenant+"\n")
+	mustWrite(t, filepath.Join(chart, "values."+envSlug+".yaml"), "environment: "+environment+"\n")
+}
+
+// SeedDevopsUmbrellaChart seeds an umbrella component chart under
+// <tenant>-devops/k8s/<chartName>/ whose Chart.yaml declares an OCI dependency
+// on a published erun-* subchart (the erun-blueprint-platform pattern, e.g.
+// team-backend-api wrapping erun-backend-api). deploy must `helm dependency
+// build` such a chart before install, so use it to prove the dependency-build
+// step is traced. dependencyName is the published subchart it wraps.
+func SeedDevopsUmbrellaChart(t testing.TB, setup env.Setup, tenant, environment, chartName, dependencyName string) {
+	t.Helper()
+	envSlug := strings.ToLower(strings.TrimSpace(environment))
+	chart := filepath.Join(setup.Cwd, tenant+"-devops", "k8s", chartName)
+	if err := os.MkdirAll(chart, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", chart, err)
+	}
+	mustWrite(t, filepath.Join(chart, "Chart.yaml"),
+		"apiVersion: v2\nname: "+chartName+"\nversion: 0.1.0\n"+
+			"dependencies:\n"+
+			"  - name: "+dependencyName+"\n"+
+			"    version: \"1.0.0\"\n"+
+			"    repository: \"oci://ghcr.io/sophium/charts\"\n",
+	)
+	mustWrite(t, filepath.Join(chart, "values.yaml"), "tenant: "+tenant+"\n")
+	mustWrite(t, filepath.Join(chart, "values."+envSlug+".yaml"),
+		dependencyName+":\n  tenant: "+tenant+"\n  environment: "+environment+"\n",
+	)
 }
 
 // StubBinary writes a small POSIX shell script that the production runners

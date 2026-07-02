@@ -1,6 +1,7 @@
 audit: erun deploy --dry-run --version <VERSION> team dev
 trace-log: would append the full trace to <TMP>
 deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=false current=false
+deploy: component selection source default (runtime only); deploying the runtime chart alone
 deploy: spec resolution failed: invalid environment deploy timeout "nonsense"
 ==> Deploy failed team/dev: invalid environment deploy timeout "nonsense"
 invalid environment deploy timeout "nonsense"
