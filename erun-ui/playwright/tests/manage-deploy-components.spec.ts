@@ -29,6 +29,15 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     await expect(runtime).toBeChecked();
     await expect(saveDefault).toBeDisabled();
 
+    // The headless baseline vendors no local runtime chart, so the item is the
+    // published erun-devops chart. Its label must name that real chart and show
+    // <tenant>-devops only as the release name — not present the release name as
+    // a published chart (#721). This keeps the checklist consistent with the
+    // erun-devops versions the "Version to deploy" picker offers.
+    await expect(runtime).toHaveAccessibleName(
+      `Runtime — published erun-devops chart (released as ${runtimeName})`,
+    );
+
     // Unchecking is a real change → "Set as default" becomes actionable.
     await runtime.click();
     await expect(runtime).not.toBeChecked();
