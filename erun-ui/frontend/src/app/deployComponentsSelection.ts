@@ -52,13 +52,34 @@ export function deployComponentSelectionChanged(
   return baseline.some((name) => !selected.has(name));
 }
 
+// PUBLISHED_RUNTIME_CHART_NAME is the canonical runtime chart every
+// published-chart environment installs, regardless of tenant: the deploy path
+// hardcodes oci://<registry>/charts/erun-devops (erun-common's
+// DevopsComponentName, consumed by resolvePublishedDevopsDeploySpec). It is NOT
+// the release name — that is <tenant>-devops. Mirrors the backend constant; if
+// published charts ever become tenant-aware, update both together.
+const PUBLISHED_RUNTIME_CHART_NAME = 'erun-devops';
+
 // deployComponentLabel renders a user-facing label: the runtime item names its
-// role and source (the operator does not manage the raw chart), while component
-// charts show their chart name directly.
+// role, chart, and release (the operator does not manage the raw chart), while
+// component charts show their chart name directly.
+//
+// The published-runtime case names the real chart (erun-devops) and the release
+// name separately, because component.name there is only the Helm release name
+// (<tenant>-devops): no per-tenant chart is published, so "<tenant>-devops
+// (published)" wrongly implied a published <tenant>-devops chart and contradicted
+// the erun-devops versions the picker offers (#721). The local-chart case is
+// left as-is — there component.name is a real repo-local chart directory the
+// operator does manage.
 export function deployComponentLabel(component: UIDeployableComponent): string {
   if (component.runtime) {
-    const published = component.source === 'published-chart' ? ' (published)' : '';
-    return `Runtime — ${component.name}${published}`;
+    if (component.source === 'published-chart') {
+      if (component.name === PUBLISHED_RUNTIME_CHART_NAME) {
+        return `Runtime — published ${PUBLISHED_RUNTIME_CHART_NAME} chart`;
+      }
+      return `Runtime — published ${PUBLISHED_RUNTIME_CHART_NAME} chart (released as ${component.name})`;
+    }
+    return `Runtime — ${component.name}`;
   }
   return component.name;
 }
