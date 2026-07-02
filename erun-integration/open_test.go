@@ -306,7 +306,7 @@ func TestOpen(t *testing.T) {
 	t.Run("no_shell_real_run_deploys_published_chart_and_persists_version", func(t *testing.T) {
 		// Real-run open against a local env whose runtime deployment does
 		// not exist and whose tenant repo has no devops chart. With the
-		// scaffold retired (#505) there is no chart-creation prompt: the
+		// scaffold retired there is no chart-creation prompt: the
 		// runtime spec resolves to the published erun-devops OCI chart.
 		// Covers, in one pass, the branches dry-run cannot reach:
 		//   - deployRuntime's real helm deploy of the published chart (helm
@@ -357,7 +357,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("vscode_real_run_with_deploy_requires_shell_deploy_errors", func(t *testing.T) {
-		// open is pure (issue #644): it does not deploy. --deploy is the
+		// open is pure: it does not deploy. --deploy is the
 		// operator-convenience shortcut, but an IDE launch has no shell to
 		// host the deploy progress, so even `open --deploy --vscode` must
 		// refuse with the actionable "run `erun sshd init` or `erun deploy`
@@ -525,7 +525,7 @@ func TestOpen(t *testing.T) {
 		// opting it into acting on their behalf) makes the helm command include
 		// `--set cloudContext.useHostCredentials=true` so the chart sets
 		// AWS_PROFILE=erun-host on the runtime container. There is no separate
-		// toggle — the alias association alone drives it (issue #641). The
+		// toggle — the alias association alone drives it. The
 		// desktop refresher writes the matching profile into the pod's
 		// ~/.aws/credentials at runtime — that path is tested in erun-mcp.
 		setup := env.New(t)
@@ -536,7 +536,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("app_session_dry_run_pure_open_does_not_deploy", func(t *testing.T) {
-		// open is a pure primitive (issue #644): it does not deploy. The
+		// open is a pure primitive: it does not deploy. The
 		// desktop composes build→push→deploy on create / via the Deploy
 		// button and spawns tabs that just open the shell, so the default
 		// open must trace that it is not deploying — and nothing else
@@ -550,7 +550,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("deploy_flag_dry_run_deploys_runtime_before_opening", func(t *testing.T) {
-		// --deploy is the operator-convenience shortcut (issue #644): open
+		// --deploy is the operator-convenience shortcut: open
 		// deploys the runtime before opening. The kubectl NotFound stub is the
 		// deployment-check decision input so the resolver picks the deploy
 		// branch and traces the full published-chart deploy plan, then the
@@ -568,7 +568,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("deploy_flag_dry_run_fresh_env_requires_runtime_version", func(t *testing.T) {
-		// The fresh-env coverage gap that hid the #644 regression: an env with
+		// The fresh-env coverage gap that hid the regression: an env with
 		// no persisted runtimeversion and no local/published chart. With
 		// --deploy, the published-chart resolver bails with the "runtime
 		// version is required" decision trace + error instead of silently
@@ -586,7 +586,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("app_session_ai_dry_run_wraps_dtach_and_launches_claude", func(t *testing.T) {
-		// #478: the desktop AI tab runs `erun open --app-session ai --ai`. Without
+		// The desktop AI tab runs `erun open --app-session ai --ai`. Without
 		// --no-shell the dry-run reaches traceShellPreview, so the bootstrap-script
 		// block locks that the remote program is wrapped in a persistent dtach
 		// session (so reopening reconnects instead of stranding a parallel claude)
@@ -601,7 +601,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("app_session_ai_dry_run_launches_claude_with_model_and_verbose_debug", func(t *testing.T) {
-		// #482/#477: when the env config sets a default Claude model that is in
+		// When the env config sets a default Claude model that is in
 		// the env's available models, and opts in to verbose+debug, the AI
 		// session's create-time program must carry `--model <m> --verbose
 		// --debug` after the env effort, in both branches of the cwd-guarded
@@ -633,6 +633,22 @@ func TestOpen(t *testing.T) {
 		golden.Equal(t, "open/app_session_ai_dry_run_falls_back_to_available_when_default_dropped", normalize.Apply(result.Combined))
 	})
 
+	t.Run("app_session_ai_dry_run_gateway_auth_disables_remote_control", func(t *testing.T) {
+		// The managed AI session enables Claude Code Remote Control by default
+		// (named <tenant>/<env>) so it is drivable from the Claude iOS app — but
+		// Remote Control pairs through the claude.ai account relay, which the
+		// Bedrock/Mantle inference gateways cannot authenticate. When the env
+		// routes Claude through a gateway the launch must omit --remote-control
+		// entirely; this golden locks that gate.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithClaude(t, setup, "team", "dev",
+			"claude:\n"+
+				"  usemantle: true\n")
+		envVars := stubKubectlNotFound(t, setup)
+		result := erun.Run(t, []string{"open", "team", "dev", "--app-session", "ai", "--ai", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "open/app_session_ai_dry_run_gateway_auth_disables_remote_control", normalize.Apply(result.Combined))
+	})
+
 	t.Run("app_session_shell_dry_run_wraps_dtach", func(t *testing.T) {
 		// The ERun and custom "Terminal N" tabs run `erun open --app-session open-N`:
 		// the same persistent dtach session but running a plain interactive shell —
@@ -645,7 +661,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("app_session_contribute_ai_dry_run_preludes_clone", func(t *testing.T) {
-		// #478: the contribute-AI tab runs `erun open --app-session contribute-ai
+		// The contribute-AI tab runs `erun open --app-session contribute-ai
 		// --contribute --ai`. The persistent dtach launcher must prepend the
 		// contribute prelude (contribute toolchain on PATH, ERUN_SKIP_LINT, cd into
 		// the cloned repo) before launching the cwd-guarded claude, all inside the
@@ -1401,7 +1417,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("shell_real_run_session_taken_over_exits_with_notice", func(t *testing.T) {
-		// #478 takeover handover, end to end: the persistent session's exec
+		// Takeover handover, end to end: the persistent session's exec
 		// wrapper exits 76 when another ERun window re-attaches the session.
 		// ExecShell must map that to ErrShellSessionTakenOver and
 		// runShellLoop must end cleanly — exit 0, no relaunch — after

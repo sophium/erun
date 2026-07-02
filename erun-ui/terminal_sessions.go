@@ -76,9 +76,9 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 	}
 	a.mu.Unlock()
 
-	// open is a pure primitive now (issue #644): the tab just opens the shell
+	// open is a pure primitive now: the tab just opens the shell
 	// and binds the forwarders against the already-deployed runtime. One thin
-	// reconnect per env (re)start window (issue #463) (re)binds the shared
+	// reconnect per env (re)start window (re)binds the shared
 	// MCP/API forwarders; deploy is the caller's job (create / Deploy button).
 	a.ensureEnvRuntimeOnce(selection)
 	openParams := startTerminalSessionParams{
@@ -247,16 +247,16 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 	}
 	a.mu.Unlock()
 
-	// Shared per-env ensure (issue #463) — see StartSession.
+	// Shared per-env ensure — see StartSession.
 	a.ensureEnvRuntimeOnce(selection)
 	params := startTerminalSessionParams{
 		Dir:        resolveTerminalStartDir(result.RepoPath),
 		Executable: a.deps.resolveCLIPath(),
 		// The AI tab runs `erun open --app-session ai --ai`: the persistent
 		// remote session launches the AI tool itself (the cwd-guarded claude
-		// resume at the env effort, issues #451/#469), once on create. Reopening
-		// reconnects to the running claude rather than typing it in again or
-		// spawning a parallel one (#478).
+		// resume at the env effort), once on create. Reopening reconnects to the
+		// running claude rather than typing it in again or spawning a parallel
+		// one.
 		Args: withAppSession(buildOpenArgs(result.Tenant, result.Environment), "ai", true, false),
 		Env:  []string{appSessionEnvVar + "=1"},
 		Cols: cols,
@@ -337,7 +337,7 @@ func (a *App) StartForceDeploySession(selection uiSelection, cols, rows int) (st
 // --environment <e>` in that environment's own Local shell, so each
 // Upgrade-all member upgrades in its respective env — output, activity
 // entry, and any failure land on the env they belong to, and members run in
-// parallel across envs (issue #497). The deploy emits the same
+// parallel across envs. The deploy emits the same
 // `==> Deploying tenant/env` traces the activity-queue parser turns into
 // entries, exactly like StartDeploySession.
 func (a *App) StartUpgradeEnvironmentSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
@@ -942,8 +942,8 @@ func closeManagedTerminals(targets []*managedTerminal) ([]int, error) {
 // EndAISessions permanently ends the env's AI sessions — the env AI tab and
 // the contribute AI tab, desktop side and pod side — so the next
 // StartAISession / StartContributeAISession launches Claude with the env's
-// current launch flags (--effort / --model / --verbose --debug, issues
-// #477/#482). A launch flag only takes effect when the persistent session's
+// current launch flags (--effort / --model / --verbose --debug). A launch
+// flag only takes effect when the persistent session's
 // create-time program runs: `dtach -A` reattaches to the running claude, so
 // without ending the pod session a changed flag could never apply. The pod
 // sessions are ended even when no desktop tab is attached — a detached claude
@@ -963,7 +963,7 @@ func (a *App) EndAISessions(selection uiSelection) (bool, error) {
 		return false, fmt.Errorf("tenant and environment are required")
 	}
 	if envConfig, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment); err == nil {
-		launch := eruncommon.AISessionLaunchCommand(envConfig.AITool, envConfig.Claude)
+		launch := eruncommon.AISessionLaunchCommand(envConfig.AITool, envConfig.Claude, selection.Tenant, selection.Environment)
 		if launch == strings.TrimSpace(envConfig.AITool) {
 			return false, nil
 		}
@@ -1142,8 +1142,8 @@ func isAITabKind(managed *managedTerminal) bool {
 // attach marker first appears in the output. dtach hands a reattached client a
 // cleared screen and signals the program to redraw, but Claude is a main-screen
 // TUI (Ink) that only does a full repaint on an actual geometry change — a
-// same-size reattach raises no effective WINCH, so the tab renders blank
-// (#618). The nudge below forces that geometry change once Claude is attached.
+// same-size reattach raises no effective WINCH, so the tab renders
+// blank. The nudge below forces that geometry change once Claude is attached.
 func (a *App) maybeNudgeAIRepaint(managed *managedTerminal, chunk []byte) {
 	if !isAITabKind(managed) || !bytes.Contains(chunk, aiAttachMarker) {
 		return
@@ -1260,7 +1260,7 @@ func (a *App) reconnectRefused(managed *managedTerminal) bool {
 	// surfaces in the terminal as repeated IncorrectInstanceState
 	// errors. End the loop cleanly here; the titlebar Play button is
 	// the recovery affordance (same shape as the autoStart=never
-	// empty state from #331).
+	// empty state).
 	if !a.shouldRespawnForCloudContext(managed) {
 		a.emitStoppedContextMarker(managed.serial)
 		a.emitEnvStatus(managed.selection, envStatusStopped)
@@ -1304,7 +1304,7 @@ func (a *App) reconnectRefused(managed *managedTerminal) bool {
 	// exits. The user sees N stacked "Deploy failed after Ns" entries
 	// in the activity drawer and a wall of "── reconnecting ──"
 	// markers in the terminal. Stop after the cap and surface a
-	// single explicit retry affordance. See issue #361.
+	// single explicit retry affordance.
 	if a.trackExitForLoopGuard(managed) {
 		a.emitReconnectLoopMarker(managed.serial)
 		a.emitEnvStatus(managed.selection, envStatusFailed)
@@ -1328,9 +1328,9 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	}
 
 	a.emitReconnectMarker(managed.serial, exitReason)
-	// The respawned `erun open` is a pure primitive (issue #644); refresh the
+	// The respawned `erun open` is a pure primitive; refresh the
 	// shared thin reconnect (TTL-deduped) so a replaced pod's forwarders are
-	// rebound without every tab repeating it (issue #463). If the pod is gone
+	// rebound without every tab repeating it. If the pod is gone
 	// for good the reconnect surfaces a recoverable failure rather than
 	// silently redeploying — deploy stays the caller's explicit action.
 	if managed.kind != sessionKindLocal {
@@ -1352,7 +1352,7 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	managed.awaitingPostRespawnInput = true
 	// A reconnect is a fresh attach to the (possibly same) pod session, so
 	// re-arm the AI repaint nudge: the new client gets a cleared screen and
-	// Claude needs the geometry-change WINCH again to repaint (#618).
+	// Claude needs the geometry-change WINCH again to repaint.
 	managed.repaintNudged = false
 	a.mu.Unlock()
 	// The respawn went through — whatever stopped/failed condition the row
@@ -1455,7 +1455,7 @@ func (a *App) emitReconnectMarker(sessionID int, exitReason string) {
 // instead. The numbers are picked to absorb a couple of legitimate
 // transient blips (an `erun open` retrying past a momentary AWS
 // describe-instances error, for example) without leaving the user
-// staring at a terminal of stacked reconnect noise. See issue #361.
+// staring at a terminal of stacked reconnect noise.
 const (
 	reconnectLoopWindow     = 30 * time.Second
 	reconnectLoopMaxExits   = 2
@@ -1714,8 +1714,8 @@ func (a *App) emitAIActivity(sessionID int, selection uiSelection, busy bool) {
 	})
 }
 
-// emitEnvStatus publishes the env's real condition for the sidebar row
-// (issue #470). Status "" clears; envStatusStopped / envStatusFailed flag
+// emitEnvStatus publishes the env's real condition for the sidebar row.
+// Status "" clears; envStatusStopped / envStatusFailed flag
 // the row while its tabs are alive but the env is not actually running.
 func (a *App) emitEnvStatus(selection uiSelection, status string) {
 	a.emitEvent(envStatusEvent, envStatusPayload{
@@ -1827,7 +1827,7 @@ type managedTerminal struct {
 	// an unhealthy cluster, or a helm rollout that times out. Entries
 	// older than reconnectLoopWindow are pruned on each tryReconnect
 	// call, so a long-running successful session followed by a single
-	// exit never trips the cap. See issue #361.
+	// exit never trips the cap.
 	recentExits []time.Time
 
 	// takenOver is set when the session's output carries the CLI's
