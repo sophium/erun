@@ -279,13 +279,22 @@ The dry-run trace names the decision per spec: `deploy: version <v> pinned; inst
 
 The dry-run trace names the decision: `deploy: bypassing the repo-local runtime chart for the runtime image override <ref>; using published chart <chart> version <v>`, followed by `deploy: runtime image override <ref>:<v> (imageOverrides.erun-devops)`. The desktop runtime dialog threads this flag automatically when the operator picks the ERun-base entry in the version picker (#697); picking the env's own `<tenant>-devops` image deploys the env's own chart with no override.
 
-### `--components` value set {#components-value-set}
+### `--components` value set and selection precedence {#components-value-set}
 
-The `--components` flag accepts a **fixed opt-in set** defined in code (`erun-common/deploy_components.go`, `OptInDeployComponentNames`), not values discovered from chart files. The set is `{erun-backend-postgres, erun-backend-db, erun-backend-api, erun-powerdns}`. These charts are never deployed by default — they ship only when explicitly named via `--components` or listed in the env's `k8s.deployments` plan (listing a chart in the plan is an implicit opt-in). An unrecognised name is rejected before any deploy runs with `unknown deploy component "<name>"; valid opt-in components are: erun-backend-postgres, erun-backend-db, erun-backend-api, erun-powerdns`, so typos surface immediately. `erun-powerdns` is the platform's authoritative DNS singleton; it runs the gpgsql backend against `erun-backend-postgres`, so it must be sequenced after it in the plan.
+`erun deploy` is **opt-in only**: it deploys exactly the resolved selection and nothing else — no chart deploys "by default" beyond that selection. The selectable universe for an environment is every chart directory discovered under `<tenant>-devops/k8s/` **plus** the runtime aliases `<tenant>-devops` and `erun-devops` (the runtime resolves to a repo-local `<tenant>-devops`/`erun-devops` chart, or the published `erun-devops` chart when neither exists — the same dual-lookup [`erun open`](#erun-open) uses). `--components` names members of that universe; a name matching no discovered chart and no runtime alias is rejected before any deploy runs with `unknown deploy component "<name>"; valid components for this environment are: <sorted universe>`, so typos and stale saved entries surface immediately.
+
+The selection resolves by **precedence** — the first non-empty tier wins entirely; tiers do not merge:
+
+1. `--components <a,b,…>` — the explicit one-shot selection for this run.
+2. `EnvConfig.deploy.components` — the environment's saved per-machine default (the desktop app's Runtime-tab checklist writes it; see [Configuration · `deploy.components`](/reference/configuration#envconfig)).
+3. `ProjectConfig.environments.<env>.k8s.deployments[]` — the repo deployment plan.
+4. Empty (none of the above name anything) → the runtime chart alone, which bootstraps or heals the environment.
+
+A chart deploys **iff** its component name is in the resolved selection. The runtime deploys only when the selection names a runtime alias, or when the selection is empty (tier 4) — an explicit selection that omits the runtime deploys the named components without it. `erun-powerdns` is the platform's authoritative DNS singleton; it runs the gpgsql backend against `erun-backend-postgres`, so sequence it after postgres in the plan. The dry-run trace names the tier: `deploy: component selection source <tier>; deploying the runtime chart alone` (empty selection) or `deploy: component selection source <tier>; components <a, b, …>`.
 
 ### Deploy-plan resolution
 
-The deploy plan comes from `ProjectConfig.environments.<env>.k8s.deployments[]` (see [Configuration · `environments.<env>.k8s.deployments[]`](/reference/configuration#per-project-config)). When the field is absent, `erun deploy` falls back to ordering by chart dependency declarations; on a tie, alphabetical by component name.
+The deploy plan comes from `ProjectConfig.environments.<env>.k8s.deployments[]` (see [Configuration · `environments.<env>.k8s.deployments[]`](/reference/configuration#per-project-config)). It serves two roles: **selection tier 3** above — its charts are the deploy selection when no `--components` and no saved `deploy.components` apply — and the **ordering** source: steps deploy in listed order, and a list within a step deploys in parallel. When the field is absent, `erun deploy` falls back to ordering by chart dependency declarations; on a tie, alphabetical by component name.
 
 ### Skip-helm semantics
 

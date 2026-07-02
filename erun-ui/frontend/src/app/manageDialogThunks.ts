@@ -1,6 +1,12 @@
 import type { ManageTab, UIEnvironmentConfig, UISelection, UIVersionSuggestion } from '@/types';
 
+import { LoadDeployComponents } from '../../wailsjs/go/main/App';
 import { environmentApi } from './api/environmentApi';
+import {
+  deployComponentDefaultNames,
+  normalizeDeployComponents,
+  toggleDeployComponentName,
+} from './deployComponentsSelection';
 import { readError } from './errors';
 import {
   aiSessionLaunchSignature,
@@ -46,10 +52,14 @@ export const openManageDialog =
         choicesOpen: false,
         error: '',
         pendingRedeploy: false,
+        deployComponents: [],
+        deployComponentSelection: [],
+        deployComponentsLoading: true,
       }),
     );
     void dispatch(refreshManageVersionSuggestions(false));
     void dispatch(loadManageConfig());
+    void dispatch(refreshManageDeployComponents());
   };
 
 export const closeManageDialog = (): AppThunk => (dispatch, getState, extra) => {
@@ -396,5 +406,123 @@ const refreshManageVersionSuggestions =
       (currentVersion && !suggestions.some((suggestion) => suggestion.version === currentVersion))
     ) {
       dispatch(selectManageVersionSuggestion(suggestions[0]));
+    }
+  };
+
+// refreshManageDeployComponents loads the env's deployable charts (the
+// "Components to deploy" checklist) from the read model and seeds the working
+// selection from the current resolved default. Guards against a stale response
+// writing after the dialog reopened for another env.
+const refreshManageDeployComponents = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
+  const selection = getState().manageDialog.selection;
+  if (!selection) {
+    return;
+  }
+  dispatch(patchManageDialog({ deployComponentsLoading: true }));
+  try {
+    const raw = await LoadDeployComponents(selection);
+    const current = getState().manageDialog.selection;
+    if (!getState().manageDialog.open || !current) {
+      return;
+    }
+    if (current.tenant !== selection.tenant || current.environment !== selection.environment) {
+      return;
+    }
+    const options = normalizeDeployComponents(raw);
+    dispatch(
+      patchManageDialog({
+        deployComponents: options,
+        deployComponentSelection: deployComponentDefaultNames(options),
+        deployComponentsLoading: false,
+      }),
+    );
+  } catch (error) {
+    if (!getState().manageDialog.open) {
+      return;
+    }
+    dispatch(patchManageDialog({ deployComponentsLoading: false, error: readError(error) }));
+  }
+};
+
+// toggleManageDeployComponent adds or removes a chart from the working checklist
+// selection. It is a draft edit only — persisted via saveManageDeployComponents
+// or threaded one-shot by submitManageDeploy.
+export const toggleManageDeployComponent =
+  (name: string, checked: boolean): AppThunk =>
+  (dispatch, getState) => {
+    const dialog = getState().manageDialog;
+    if (dialog.busy) {
+      return;
+    }
+    dispatch(
+      patchManageDialog({
+        deployComponentSelection: toggleDeployComponentName(
+          dialog.deployComponents,
+          dialog.deployComponentSelection,
+          name,
+          checked,
+        ),
+      }),
+    );
+  };
+
+// saveManageDeployComponents persists the checklist selection as the env's
+// per-machine default (EnvConfig deploy.components). It saves against the loaded
+// config so only deploy.components changes on disk (scoped save), keeps the
+// operator's other unsaved edits, and raises the pending-redeploy banner because
+// a component-selection change alters what a redeploy rolls out.
+export const saveManageDeployComponents =
+  (): AppThunk<Promise<void>> => async (dispatch, getState) => {
+    const dialog = getState().manageDialog;
+    const selection = dialog.selection;
+    const base = dialog.initialConfig;
+    if (dialog.busy || dialog.configLoading || !selection || !base) {
+      return;
+    }
+    const componentSelection = [...dialog.deployComponentSelection];
+    dispatch(
+      patchManageDialog({
+        busy: true,
+        busyAction: 'save',
+        busyTarget: 'deploy-components',
+        error: '',
+      }),
+    );
+    try {
+      const saveConfig = {
+        ...base,
+        runtimePod: runtimePodConfigToKubernetes(base.runtimePod),
+        deployComponents: componentSelection,
+      };
+      const result = await dispatch(
+        environmentApi.endpoints.saveEnvironmentConfig.initiate({ selection, config: saveConfig }),
+      ).unwrap();
+      if (!getState().manageDialog.open) {
+        return;
+      }
+      const savedSelection = result.deployComponents ?? [];
+      const latest = getState().manageDialog;
+      dispatch(
+        patchManageDialog({
+          config: { ...latest.config, deployComponents: savedSelection },
+          initialConfig: latest.initialConfig
+            ? { ...latest.initialConfig, deployComponents: savedSelection }
+            : latest.initialConfig,
+          deployComponents: latest.deployComponents.map((option) => ({
+            ...option,
+            selected: savedSelection.includes(option.name),
+          })),
+          deployComponentSelection: savedSelection,
+          busy: false,
+          busyAction: '',
+          busyTarget: '',
+          error: '',
+          pendingRedeploy: true,
+        }),
+      );
+    } catch (error) {
+      const message = readError(error);
+      dispatch(patchManageDialog({ busy: false, busyAction: '', busyTarget: '', error: message }));
+      dispatch(showTerminalMessage(message));
     }
   };

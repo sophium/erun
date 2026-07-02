@@ -1,4 +1,5 @@
 audit: erun build --deploy --dry-run --version <VERSION>
+deploy: component selection source default (runtime only); deploying the runtime chart alone
 docker image inspect ghcr.io/sophium/team-devops:fp-<HEX16>-amd64
 fingerprint image not found locally: ghcr.io/sophium/team-devops:fp-<HEX16>-amd64
 docker image inspect ghcr.io/sophium/team-devops:fp-<HEX16>-arm64

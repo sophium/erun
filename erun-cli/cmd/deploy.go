@@ -20,6 +20,10 @@ func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 			"at a version, by reference. It never builds or pushes — produce a version with `erun build` " +
 			"and `erun push` (or `erun build --deploy` to chain them) first. Pass the version with " +
 			"--version; use --current to redeploy the version this environment already runs. " +
+			"Component selection is opt-in: deploy rolls out exactly the charts you select and nothing else. " +
+			"With no selection it deploys the environment's runtime chart alone (bootstrapping or healing it); " +
+			"use --components to deploy specific charts this run, or save a default selection " +
+			"(the desktop Runtime tab writes it to the env's deploy.components). " +
 			"Pass --runtime-image to install the canonical ERun base image (or any image) via the " +
 			"published runtime chart — useful to bootstrap an environment before its own image is built. " +
 			"Defaults to the current scope; pass TENANT and ENVIRONMENT (or --tenant/--environment) to target another.\n\n" +
@@ -67,7 +71,7 @@ func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 	addDeployCommandTargetFlags(cmd, &target)
 	cmd.Flags().StringVar(&target.RuntimeImageOverride, "runtime-image", "", "Install the runtime running this image via the published erun-devops chart (imageOverrides.erun-devops), pinned to --version, even when the env has a repo-local runtime chart; mirrors `erun open --runtime-image`")
 	cmd.Flags().BoolVar(&useCurrent, "current", false, "Redeploy the version this environment already runs (its persisted runtime version) instead of passing --version")
-	cmd.Flags().StringSliceVar(&components, "components", nil, fmt.Sprintf("Opt-in components to include alongside the runtime chart (%s)", strings.Join(common.OptInDeployComponentNames(), ", ")))
+	cmd.Flags().StringSliceVar(&components, "components", nil, "Deploy exactly these charts this run — chart directory names under <tenant>-devops/k8s/, or the runtime release name (<tenant>-devops); overrides the env's saved selection and the k8s.deployments plan. Empty falls back to the saved selection, then the plan, then the runtime chart alone")
 	return cmd
 }
 

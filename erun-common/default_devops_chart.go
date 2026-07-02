@@ -80,7 +80,7 @@ func resolveOpenRuntimeDeploySpec(ctx Context, store DeployStore, findProjectRoo
 		return resolvePublishedDevopsDeploySpec(ctx, target, "")
 	}
 
-	for _, componentName := range openRuntimeComponentNames(target.Tenant) {
+	for _, componentName := range runtimeComponentNames(target.Tenant) {
 		spec, err := resolveDeploySpecForOpenResult(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, componentName, "", nil)
 		if err == nil {
 			spec.Deploy.ReleaseName = RuntimeReleaseName(target.Tenant)
@@ -94,7 +94,14 @@ func resolveOpenRuntimeDeploySpec(ctx Context, store DeployStore, findProjectRoo
 	return resolvePublishedDevopsDeploySpec(ctx, target, "")
 }
 
-func openRuntimeComponentNames(tenant string) []string {
+// runtimeComponentNames returns the chart directory names that identify an
+// environment's runtime chart, most-specific first: the tenant-prefixed
+// <tenant>-devops, then the canonical erun-devops. Both `erun open` (local
+// runtime chart discovery) and `erun deploy` (runtime selection + published
+// fallback) resolve the runtime against this dual-lookup so a tenant tree that
+// vendors the chart under either name — or under neither, deferring to the
+// published erun-devops chart — resolves the same way.
+func runtimeComponentNames(tenant string) []string {
 	names := []string{DevopsComponentName}
 	tenant = strings.TrimSpace(tenant)
 	if tenant == "" {

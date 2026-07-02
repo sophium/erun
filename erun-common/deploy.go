@@ -41,6 +41,16 @@ type EnvironmentDeployConfig struct {
 	// rollouts, as a Go duration string (e.g. "5m0s"). Empty falls back to
 	// DefaultHelmDeploymentTimeout.
 	Timeout string `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+	// Components is the per-machine saved deploy selection: the chart names
+	// (directory names under <tenant>-devops/k8s/, plus the runtime release name
+	// <tenant>-devops / erun-devops) that `erun deploy` rolls out for this env
+	// when no --components flag is passed. It is the operator's saved default for
+	// this env on this machine, written by the desktop "Save as default" action.
+	// Empty means "no saved selection": deploy falls back to the repo
+	// k8s.deployments plan, then to the runtime chart alone. Selection is
+	// opt-in-only — only the named charts (plus the runtime when named or when
+	// the whole selection is empty) deploy; nothing else rides along.
+	Components []string `yaml:"components,omitempty" json:"components,omitempty"`
 }
 
 // Resolve validates the configured rollout timeout and returns the canonical
@@ -236,9 +246,14 @@ type DeployTarget struct {
 	Environment     string
 	RepoPath        string
 	VersionOverride string
-	// Components lists optional opt-in charts to include alongside the
-	// always-on charts (e.g. the per-tenant runtime). Names must come from
-	// optInDeployComponents; unknown names produce an error during resolve.
+	// Components is the explicit, one-shot deploy selection for this run. When
+	// non-empty it fully determines what deploys (opt-in-only), overriding the
+	// env's saved deploy.components and the repo k8s.deployments plan; the
+	// runtime deploys only if named. Names are chart directory names under
+	// <tenant>-devops/k8s/ or the runtime release name (<tenant>-devops /
+	// erun-devops); a name matching no discovered chart and no runtime alias is
+	// an error during resolve. Empty means "no explicit selection": deploy falls
+	// back to the saved set, then the plan, then the runtime chart alone.
 	Components []string
 	// Force re-runs the helm upgrade even when the deployed release already
 	// matches the requested version (no-op rollouts are otherwise skipped).
@@ -710,20 +725,35 @@ func resolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 		return resolvePublishedDevopsDeploySpecs(ctx, store, resolvedTarget, target.VersionOverride)
 	}
 
-	deployContexts, err := resolveCurrentLocalDeployContexts(findProjectRoot, resolveKubernetesDeployContext, resolvedTarget, target.Components)
+	// Opt-in-only selection lives in resolveSelectedLocalDeploySpecs: deploy
+	// exactly the selected charts (precedence --components > saved
+	// deploy.components > the repo plan; empty => the runtime chart alone), with
+	// the published-runtime fallback when the runtime is selected but not vendored
+	// locally.
+	return resolveSelectedLocalDeploySpecs(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, resolvedTarget, target, buildOrchestration, runtimeImageOverride)
+}
+
+// resolveSelectedLocalDeploySpecs resolves the opt-in-only deploy set for a
+// local-repo target. It deploys exactly the selected charts — precedence:
+// --components > the env's saved deploy.components > the repo k8s.deployments
+// plan; an empty selection defaults to the runtime chart alone (bootstrap/heal).
+// When the runtime is selected but the tenant vendors no repo-local runtime
+// chart, the published erun-devops chart is appended so a plain deploy can
+// bootstrap or heal the runtime.
+func resolveSelectedLocalDeploySpecs(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, resolvedTarget OpenResult, target DeployTarget, buildOrchestration bool, runtimeImageOverride string) ([]DeploySpec, error) {
+	plan, err := loadProjectK8sPlanForRepo(resolvedTarget.RepoPath, resolvedTarget.Environment)
 	if err != nil {
-		// A local env with an explicit --runtime-image override but no repo-local
-		// runtime chart (the <tenant>-devops/k8s tree is absent) bootstraps on the
-		// published erun-devops chart by reference — the same install-by-reference
-		// path a remote-repo target uses — so the env can come up on the ERun base
-		// image before its own chart exists (#707). Without the override there is
-		// no chart to install, so the missing-tree error stands.
-		if runtimeImageOverride != "" && errors.Is(err, fs.ErrNotExist) {
-			ctx.Trace("deploy: no repo-local runtime chart; installing the published erun-devops chart for runtime image override " + runtimeImageOverride)
-			return resolvePublishedDevopsDeploySpecs(ctx, store, resolvedTarget, target.VersionOverride)
-		}
 		return nil, err
 	}
+	selected, selectionSource := resolveSelectedDeployComponents(target.Components, resolvedTarget.EnvConfig.Deploy.Components, plan)
+	traceDeployComponentSelection(ctx, selected, selectionSource)
+
+	deployContexts, err := resolveCurrentLocalDeployContexts(findProjectRoot, resolveKubernetesDeployContext, resolvedTarget, selected, plan)
+	if err != nil {
+		return nil, err
+	}
+	runtimeSelected := deploySelectionIncludesRuntime(selected, resolvedTarget.Tenant)
+	hasLocalRuntime := containsRuntimeContext(deployContexts, resolvedTarget.Tenant)
 
 	var currentBuild *DockerBuildSpec
 	if buildOrchestration && resolvedTarget.EnvConfig.BuildsHere() {
@@ -737,7 +767,45 @@ func resolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 		}
 	}
 
-	return resolveDeploySpecsForContexts(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, resolvedTarget, deployContexts, target.VersionOverride, currentBuild, runtimeImageOverride)
+	specs, err := resolveDeploySpecsForContexts(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, resolvedTarget, deployContexts, target.VersionOverride, currentBuild, runtimeImageOverride)
+	if err != nil {
+		return nil, err
+	}
+	specs, err = appendRuntimeFallbackSpecs(ctx, store, resolvedTarget, target.VersionOverride, specs, runtimeSelected, hasLocalRuntime)
+	if err != nil {
+		return nil, err
+	}
+	if len(specs) == 0 {
+		return nil, fmt.Errorf("deploy: no components selected for %s/%s — pass --components with a chart name, save a default selection, or select the runtime to bootstrap the environment", resolvedTarget.Tenant, resolvedTarget.Environment)
+	}
+	return specs, nil
+}
+
+// traceDeployComponentSelection emits the dry-run decision line naming which
+// precedence tier chose the deploy selection and what it resolved to.
+func traceDeployComponentSelection(ctx Context, selected []string, source string) {
+	if len(selected) == 0 {
+		ctx.Trace("deploy: component selection source " + source + "; deploying the runtime chart alone")
+		return
+	}
+	ctx.Trace("deploy: component selection source " + source + "; components " + strings.Join(selected, ", "))
+}
+
+// appendRuntimeFallbackSpecs appends the published erun-devops runtime spec when
+// the runtime is selected but the tenant has no repo-local runtime chart — the
+// deploy counterpart of erun open's published fallback (#697/#707), letting a
+// plain deploy bootstrap or heal the runtime from the published ERun image. A
+// --runtime-image override rides in as imageOverrides.erun-devops.
+func appendRuntimeFallbackSpecs(ctx Context, store DeployStore, resolvedTarget OpenResult, versionOverride string, specs []DeploySpec, runtimeSelected, hasLocalRuntime bool) ([]DeploySpec, error) {
+	if !runtimeSelected || hasLocalRuntime {
+		return specs, nil
+	}
+	ctx.Trace("deploy: runtime selected with no repo-local runtime chart; installing the published " + DevopsComponentName + " chart")
+	publishedSpecs, err := resolvePublishedDevopsDeploySpecs(ctx, store, resolvedTarget, versionOverride)
+	if err != nil {
+		return nil, err
+	}
+	return append(specs, publishedSpecs...), nil
 }
 
 // resolveDeploySpecsForContexts resolves a deploy spec for each local k8s deploy
@@ -770,23 +838,42 @@ func resolvePublishedDevopsDeploySpecs(ctx Context, store DeployStore, resolvedT
 }
 
 // resolveCurrentLocalDeployContexts discovers the local k8s deploy contexts for
-// the target's repo, filters them to the requested components, and sorts them
-// into the project's configured deploy order.
-func resolveCurrentLocalDeployContexts(findProjectRoot ProjectFinderFunc, resolveKubernetesDeployContext DeployContextResolverFunc, resolvedTarget OpenResult, components []string) ([]KubernetesDeployContext, error) {
+// the target's repo, filters them to the opt-in-only selection, and sorts them
+// into the project's configured deploy order. A missing or empty
+// <tenant>-devops/k8s tree is not an error: it yields an empty context set, and
+// the caller stands the runtime up via the published erun-devops chart when the
+// runtime is selected. Any other discovery error (a malformed chart) still
+// propagates.
+func resolveCurrentLocalDeployContexts(findProjectRoot ProjectFinderFunc, resolveKubernetesDeployContext DeployContextResolverFunc, resolvedTarget OpenResult, selected []string, plan ProjectK8sConfig) ([]KubernetesDeployContext, error) {
 	deployContexts, err := ResolveCurrentKubernetesDeployContexts(findProjectRoot, resolveKubernetesDeployContext, resolvedTarget.RepoPath)
 	if err != nil {
-		return nil, err
+		if !isNoLocalDeployChartsError(err) {
+			return nil, err
+		}
+		deployContexts = nil
 	}
-	projectK8s, err := loadProjectK8sPlanForRepo(resolvedTarget.RepoPath, resolvedTarget.Environment)
+	deployContexts, err = filterDeployContextsBySelection(deployContexts, selected, resolvedTarget.Tenant)
 	if err != nil {
 		return nil, err
 	}
-	deployContexts, err = filterDeployContextsByComponents(deployContexts, components, projectK8s)
-	if err != nil {
-		return nil, err
-	}
-	sortDeployContextsByDeployOrder(deployContexts, projectK8s)
+	sortDeployContextsByDeployOrder(deployContexts, plan)
 	return deployContexts, nil
+}
+
+// isNoLocalDeployChartsError reports whether a discovery error means "this repo
+// has no local deploy charts to install" — either the <tenant>-devops/k8s tree
+// is absent (fs.ErrNotExist) or present but empty of charts (the "helm chart
+// not found in current directory" sentinel ResolveCurrentKubernetesDeployContexts
+// returns). Both are tolerated so the runtime can still deploy via the published
+// erun-devops chart; a malformed-chart error is not this class and propagates.
+func isNoLocalDeployChartsError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		return true
+	}
+	return err.Error() == "helm chart not found in current directory"
 }
 
 func resolveDeploySpecForOpenResult(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, componentName, versionOverride string, currentBuild *DockerBuildSpec) (DeploySpec, error) {
@@ -1029,11 +1116,14 @@ func resolveCurrentDockerComponentBuildForDeploy(store DockerStore, findProjectR
 }
 
 func deployContextOwnsRuntimeChart(deployContext KubernetesDeployContext, tenant string) bool {
-	tenant = strings.TrimSpace(tenant)
-	if tenant == "" {
+	name := strings.TrimSpace(deployContext.ComponentName)
+	if name == "" {
 		return false
 	}
-	return strings.TrimSpace(deployContext.ComponentName) == RuntimeReleaseName(tenant)
+	// Match either runtime alias (<tenant>-devops or the canonical erun-devops)
+	// so a tenant tree that vendors the runtime chart under either name resolves
+	// — the same dual-lookup erun open uses (runtimeComponentNames).
+	return slices.Contains(runtimeComponentNames(tenant), name)
 }
 
 func deployContextOwnsDockerBuild(deployContext KubernetesDeployContext, build DockerBuildSpec) bool {
