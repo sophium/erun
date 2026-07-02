@@ -1,13 +1,19 @@
 import { Check, ChevronsUpDown, Rocket } from 'lucide-react';
 import * as React from 'react';
 
+import {
+  deployComponentLabel,
+  deployComponentSelectionChanged,
+} from '@/app/deployComponentsSelection';
 import { environmentTypeIsRemoteWorktree } from '@/app/environmentType';
 import { readError } from '@/app/errors';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import {
+  saveManageDeployComponents,
   selectManageVersionSuggestion,
   setManageVersionChoicesOpen,
   submitManageDeploy,
+  toggleManageDeployComponent,
   updateManageConfig,
   updateManageDialog,
 } from '@/app/manageEnvironmentThunks';
@@ -65,9 +71,72 @@ export function RuntimeTab(): React.ReactElement {
           })
         }
       />
+      <DeployComponentsField dialog={dialog} />
       <RuntimePodFields dialog={dialog} />
       <IdleStopFields dialog={dialog} />
     </>
+  );
+}
+
+// DeployComponentsField renders the "Components to deploy" checklist: what
+// `erun deploy` rolls out for this env, opt-in-only. The runtime item is
+// pre-checked when nothing is saved (bootstrap/heal default). Toggling edits the
+// one-shot selection the Deploy button threads; "Save as default" persists it as
+// the env's per-machine default (deploy.components). Constrained option set →
+// checkboxes (recognition over recall; no typo'd chart names).
+function DeployComponentsField({ dialog }: { dialog: ManageDialog }): React.ReactElement {
+  const dispatch = useAppDispatch();
+  const { deployComponents, deployComponentSelection, deployComponentsLoading } = dialog;
+  const selectionSet = new Set(deployComponentSelection);
+  const changed = deployComponentSelectionChanged(deployComponents, deployComponentSelection);
+  return (
+    <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">
+          Components to deploy
+        </div>
+        <Button
+          id="environment-config-save-deploy-components"
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={dialog.busy || dialog.configLoading || deployComponentsLoading || !changed}
+          onClick={() =>
+            void dispatch(saveManageDeployComponents()).catch((error: unknown) => {
+              dispatch(showTerminalMessage(readError(error)));
+            })
+          }
+        >
+          Set as default
+        </Button>
+      </div>
+      <p className="text-xs leading-[1.35] text-muted-foreground">
+        Deploy rolls out exactly the checked charts. The runtime is checked by default; set them as
+        the default for this environment on this machine.
+      </p>
+      {deployComponentsLoading ? (
+        <div className="text-sm leading-[1.35] text-muted-foreground">Loading components…</div>
+      ) : deployComponents.length === 0 ? (
+        <div className="text-sm leading-[1.35] text-muted-foreground">
+          No deployable components found for this environment.
+        </div>
+      ) : (
+        <div className="grid gap-2">
+          {deployComponents.map((component) => (
+            <CheckboxField
+              key={component.name}
+              id={`environment-config-deploy-component-${component.name}`}
+              label={deployComponentLabel(component)}
+              checked={selectionSet.has(component.name)}
+              disabled={dialog.busy || dialog.configLoading}
+              onChange={(checked) => {
+                dispatch(toggleManageDeployComponent(component.name, checked));
+              }}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

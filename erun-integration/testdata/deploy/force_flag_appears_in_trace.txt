@@ -1,6 +1,7 @@
 audit: erun deploy --dry-run --force --version <VERSION> team dev
 trace-log: would append the full trace to <TMP>
 deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=true current=false
+deploy: component selection source default (runtime only); deploying the runtime chart alone
 deploy: version <VERSION> pinned; installing the published image by reference (deploy never builds)
 deploy: resolved 1 spec(s)
 kubectl --context test-context get namespace team-dev -o name

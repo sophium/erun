@@ -1409,7 +1409,8 @@ func (a *App) logSpawnedCommandToLocal(selection uiSelection, dedupKey, line str
 		if m == nil || m.closed || m.kind != sessionKindLocal {
 			continue
 		}
-		if normalizeSelection(m.selection) != selection {
+		if strings.TrimSpace(m.selection.Tenant) != selection.Tenant ||
+			strings.TrimSpace(m.selection.Environment) != selection.Environment {
 			continue
 		}
 		local = m

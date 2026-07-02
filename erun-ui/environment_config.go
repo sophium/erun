@@ -333,6 +333,7 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 		AutoUpgrade:        config.AutoUpgrade,
 		UpgradeChannel:     config.ResolvedUpgradeChannel(),
 		DisableBuildScript: config.DisableBuildScript,
+		DeployComponents:   append([]string(nil), config.Deploy.Components...),
 	}
 	if cloudContext, ok, err := a.linkedCloudContext(config); err != nil {
 		return uiEnvironmentConfig{}, err
@@ -587,10 +588,29 @@ func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.Env
 	existing.AutoStart = copyBoolPtr(config.AutoStart)
 	existing.AutoUpgrade = config.AutoUpgrade
 	existing.DisableBuildScript = config.DisableBuildScript
+	// Preserve the sibling deploy.timeout; only the saved component selection is
+	// edited here. An empty slice clears the saved default (omitempty), reverting
+	// the env to the repo plan / runtime-only default.
+	existing.Deploy.Components = trimmedComponentNames(config.DeployComponents)
 	if eruncommon.IsValidUpgradeChannel(config.UpgradeChannel) {
 		existing.UpgradeChannel = config.UpgradeChannel
 	}
 	return existing
+}
+
+// trimmedComponentNames trims blanks and drops empty entries from a saved deploy
+// component list so the persisted config carries only real chart names.
+func trimmedComponentNames(names []string) []string {
+	out := make([]string, 0, len(names))
+	for _, raw := range names {
+		if name := strings.TrimSpace(raw); name != "" {
+			out = append(out, name)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // applyEnvironmentCloudAliasSlots writes the edited per-provider-type cloud

@@ -334,5 +334,6 @@ func normalizeSelection(selection uiSelection) uiSelection {
 		LocalRepoPath:     strings.TrimSpace(selection.LocalRepoPath),
 		NoGit:             selection.NoGit,
 		SetDefaultTenant:  selection.SetDefaultTenant,
+		Components:        trimmedComponentNames(selection.Components),
 	}
 }

@@ -100,6 +100,25 @@ export interface UISelection {
   localRepoPath?: string;
   noGit?: boolean;
   setDefaultTenant?: boolean;
+  // components is the explicit one-shot deploy selection threaded into
+  // `deploy --components` when the operator deploys from the Runtime tab's
+  // checklist. Chart directory names (plus the runtime release name).
+  components?: string[];
+}
+
+// UIDeployableComponent describes one selectable deploy target for an
+// environment (the Runtime tab's "Components to deploy" checklist). Mirrors
+// erun-common's DeployableComponent.
+export interface UIDeployableComponent {
+  name: string;
+  runtime: boolean;
+  // source is 'local-chart' when a repo-local chart backs the component, or
+  // 'published-chart' for the runtime when only the published erun-devops chart
+  // is available.
+  source: string;
+  // selected reflects the env's current resolved default selection (saved
+  // deploy.components, else the repo plan, else the runtime alone).
+  selected: boolean;
 }
 
 export interface UIBuildDetails {
@@ -442,6 +461,10 @@ export interface UIEnvironmentConfig {
   // env and resolve Docker/release builds directly. It changes how a redeploy
   // rebuilds the runtime image, so saving it raises the pending-redeploy banner.
   disableBuildScript: boolean;
+  // deployComponents is the per-machine saved deploy selection (EnvConfig
+  // deploy.components). Empty means "no saved selection". The Runtime tab's
+  // "Save as default" writes the checklist selection here.
+  deployComponents?: string[];
 }
 
 export interface UIEnvironmentClaudeConfig {

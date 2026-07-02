@@ -4,6 +4,7 @@ import type {
   ManageTab,
   UICloudContextInitInput,
   UICloudProviderStatus,
+  UIDeployableComponent,
   UIEnvironmentConfig,
   UIERunConfig,
   UIIdleStatus,
@@ -94,6 +95,13 @@ export interface ManageDialogState {
   choicesOpen: boolean;
   error: string;
   pendingRedeploy: boolean;
+  // deployComponents lists the env's deployable charts (the "Components to
+  // deploy" checklist), loaded from the read model. deployComponentSelection is
+  // the working checked set the operator edits; deployComponentsLoading gates
+  // the checklist while the read model resolves.
+  deployComponents: UIDeployableComponent[];
+  deployComponentSelection: string[];
+  deployComponentsLoading: boolean;
 }
 
 export interface TenantDialogState {
@@ -295,6 +303,9 @@ export const defaultManageDialog = (): ManageDialogState => ({
   choicesOpen: false,
   error: '',
   pendingRedeploy: false,
+  deployComponents: [],
+  deployComponentSelection: [],
+  deployComponentsLoading: false,
 });
 
 export const defaultTenantDialog = (): TenantDialogState => ({

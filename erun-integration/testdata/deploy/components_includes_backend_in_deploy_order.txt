@@ -1,11 +1,11 @@
 audit: erun deploy --components [erun-backend-api,erun-backend-db,erun-backend-postgres] --dry-run --version <VERSION> team dev
 trace-log: would append the full trace to <TMP>
 deploy: tenant=team environment=dev version-override=<VERSION> components=[erun-backend-api erun-backend-db erun-backend-postgres] force=false current=false
+deploy: component selection source --components flag; components erun-backend-api, erun-backend-db, erun-backend-postgres
 deploy: version <VERSION> pinned; installing the published image by reference (deploy never builds)
 deploy: version <VERSION> pinned; installing the published image by reference (deploy never builds)
 deploy: version <VERSION> pinned; installing the published image by reference (deploy never builds)
-deploy: version <VERSION> pinned; installing the published image by reference (deploy never builds)
-deploy: resolved 4 spec(s)
+deploy: resolved 3 spec(s)
 kubectl --context test-context get namespace team-dev -o name
 kubectl --context test-context create namespace team-dev
 cd <TMP> && helm upgrade --install --wait --wait-for-jobs --timeout 5m0s --namespace team-dev --debug --kube-context test-context -f <TMP> --set-string tenant=team --set-string environment=dev --set-string worktreeStorage=host --set-string worktreeRepoName=cwd --set-string worktreeHostPath=<TMP> --set sshdEnabled=false --set mcpPort=17000 --set apiPort=17033 --set sshPort=17022 --set managedCloud=false --set-string cloudContext.name= --set-string cloudContext.provider= --set-string cloudContext.providerAlias= --set-string cloudContext.region= --set-string cloudContext.instanceId= --set cloudContext.useHostCredentials=false --set-string api.oidcAllowedIssuers= --set api.postgres.reset=true --set-json 'containerRegistries=[{"registry":"registry.example/test","roles":["build","deploy"]}]' --set disableBuildScript=false --set-string idle.timeout=5m0s --set-string idle.workingHours=08:00-20:00 --set-string idle.timezone= --set idle.trafficBytes=0 --set-string runtime.resources.limits.cpu=4 --set-string runtime.resources.limits.memory=8916Mi --set-string claude.useMantle=0 --set-string claude.useBedrock=0 erun-backend-postgres <TMP>
@@ -24,9 +24,3 @@ cd <TMP> && helm upgrade --install --wait --wait-for-jobs --timeout 5m0s --names
 deploy: watching pods in team-dev on context test-context for early container failure (release erun-backend-api)
 kubectl --context test-context --namespace team-dev get pods -o json
 dedup: ready (release=test-context-team-dev-erun-backend-api, hash=<HASH>)
-kubectl --context test-context get namespace team-dev -o name
-kubectl --context test-context create namespace team-dev
-cd <TMP> && helm upgrade --install --wait --wait-for-jobs --timeout 5m0s --namespace team-dev --debug --kube-context test-context -f <TMP> --set-string tenant=team --set-string environment=dev --set-string worktreeStorage=host --set-string worktreeRepoName=cwd --set-string worktreeHostPath=<TMP> --set sshdEnabled=false --set mcpPort=17000 --set apiPort=17033 --set sshPort=17022 --set managedCloud=false --set-string cloudContext.name= --set-string cloudContext.provider= --set-string cloudContext.providerAlias= --set-string cloudContext.region= --set-string cloudContext.instanceId= --set cloudContext.useHostCredentials=false --set-string api.oidcAllowedIssuers= --set api.postgres.reset=true --set-json 'containerRegistries=[{"registry":"registry.example/test","roles":["build","deploy"]}]' --set disableBuildScript=false --set-string idle.timeout=5m0s --set-string idle.workingHours=08:00-20:00 --set-string idle.timezone= --set idle.trafficBytes=0 --set-string runtime.resources.limits.cpu=4 --set-string runtime.resources.limits.memory=8916Mi --set-string claude.useMantle=0 --set-string claude.useBedrock=0 team-devops <TMP>
-deploy: watching pods in team-dev on context test-context for early container failure (release team-devops)
-kubectl --context test-context --namespace team-dev get pods -o json
-dedup: ready (release=test-context-team-dev-team-devops, hash=<HASH>)

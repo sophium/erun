@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -1956,6 +1957,89 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 	assertSavedEnvironmentConfig(t, saved, projectRoot)
 	stored := store.envs["frs/prod"]
 	assertStoredEnvironmentConfig(t, stored, projectRoot)
+}
+
+// TestSaveAndLoadDeployComponentsRoundTrip covers the per-machine saved deploy
+// selection (EnvConfig.deploy.components, #718): a save trims blanks and
+// persists the selection, and a load reflects it. Exercises the non-empty
+// selection path the Playwright checklist cannot reach (the headless baseline
+// vendors no local component charts to select).
+func TestSaveAndLoadDeployComponentsRoundTrip(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		config:  &eruncommon.ERunConfig{},
+		tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs"}},
+		envs: map[string]eruncommon.EnvConfig{
+			"frs/prod": {
+				Name:           "prod",
+				LocalRepoPath:  projectRoot,
+				RuntimeVersion: "1.0.0",
+				Type:           eruncommon.EnvironmentTypeLocalAgent,
+			},
+		},
+	}
+	app := NewApp(erunUIDeps{store: store})
+
+	saved, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "prod"}, uiEnvironmentConfig{
+		Name:             "prod",
+		RepoPath:         projectRoot,
+		DeployComponents: []string{"frs-backend-postgres", " ", "frs-backend-api"},
+	})
+	if err != nil {
+		t.Fatalf("SaveEnvironmentConfig failed: %v", err)
+	}
+	want := []string{"frs-backend-postgres", "frs-backend-api"}
+	if !reflect.DeepEqual(saved.DeployComponents, want) {
+		t.Fatalf("saved DeployComponents = %v, want %v (trimmed)", saved.DeployComponents, want)
+	}
+	if got := store.envs["frs/prod"].Deploy.Components; !reflect.DeepEqual(got, want) {
+		t.Fatalf("persisted deploy.components = %v, want %v", got, want)
+	}
+	loaded, err := app.LoadEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "prod"})
+	if err != nil {
+		t.Fatalf("LoadEnvironmentConfig failed: %v", err)
+	}
+	if !reflect.DeepEqual(loaded.DeployComponents, want) {
+		t.Fatalf("loaded DeployComponents = %v, want %v", loaded.DeployComponents, want)
+	}
+}
+
+// TestLoadDeployComponentsRuntimeOnlyWhenNoLocalCharts covers the read model
+// (#718) for a component-only/inert env: with no repo-local charts it offers the
+// runtime item alone, sourced from the published erun-devops chart and
+// pre-selected (the bootstrap/heal default). A saved selection is reflected in
+// the item's Selected flag.
+func TestLoadDeployComponentsRuntimeOnlyWhenNoLocalCharts(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		config:  &eruncommon.ERunConfig{},
+		tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs"}},
+		envs: map[string]eruncommon.EnvConfig{
+			"frs/prod": {
+				Name:              "prod",
+				LocalRepoPath:     projectRoot,
+				KubernetesContext: "test-context",
+				RuntimeVersion:    "1.0.0",
+				Type:              eruncommon.EnvironmentTypeLocalAgent,
+			},
+		},
+	}
+	app := NewApp(erunUIDeps{store: store})
+
+	components, err := app.LoadDeployComponents(uiSelection{Tenant: "frs", Environment: "prod"})
+	if err != nil {
+		t.Fatalf("LoadDeployComponents failed: %v", err)
+	}
+	if len(components) != 1 {
+		t.Fatalf("expected the runtime item alone, got %d: %+v", len(components), components)
+	}
+	runtime := components[0]
+	if runtime.Name != "frs-devops" || !runtime.Runtime || !runtime.Selected {
+		t.Fatalf("runtime item = %+v, want {frs-devops runtime selected}", runtime)
+	}
+	if runtime.Source != "published-chart" {
+		t.Fatalf("runtime source = %q, want published-chart (no local chart)", runtime.Source)
+	}
 }
 
 func assertLoadedEnvironmentConfig(t *testing.T, loaded uiEnvironmentConfig, projectRoot string) {

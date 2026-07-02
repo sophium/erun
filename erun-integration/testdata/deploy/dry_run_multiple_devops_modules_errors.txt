@@ -1,6 +1,7 @@
 audit: erun deploy --dry-run --version <VERSION> team dev
 trace-log: would append the full trace to <TMP>
 deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=false current=false
+deploy: component selection source default (runtime only); deploying the runtime chart alone
 deploy: spec resolution failed: multiple devops k8s directories found under project root
 ==> Deploy failed team/dev: multiple devops k8s directories found under project root
 multiple devops k8s directories found under project root

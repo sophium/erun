@@ -90,6 +90,21 @@ export class ManageDialog {
     await button.click();
   }
 
+  // deployComponentCheckbox targets one row of the Runtime tab's "Components to
+  // deploy" checklist. `name` is the component's canonical name (a chart dir
+  // name, or the runtime release name <tenant>-devops for the runtime item).
+  deployComponentCheckbox(name: string): Locator {
+    return this.locator().locator(`#environment-config-deploy-component-${name}`);
+  }
+
+  // saveDeployComponentsButton targets the checklist's "Set as default" action,
+  // which persists the selection to the env's deploy.components. It is enabled
+  // only when the selection differs from the saved default. Matched by id (not
+  // by name) so it never collides with the dialog footer's general Save.
+  saveDeployComponentsButton(): Locator {
+    return this.locator().locator('#environment-config-save-deploy-components');
+  }
+
   async selectTab(name: ManageTab): Promise<void> {
     await this.tab(name).click();
   }
