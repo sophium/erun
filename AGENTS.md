@@ -100,6 +100,13 @@ Internal ownership and per-module conventions live in each module's `AGENTS.md`.
 - When delegating analysis to sub-agents, use a capable model — not a lightweight locator model — for substantive reasoning.
 - Once the user authorizes a body of work (e.g. "do it all" / "carry on"), carry it through to completion across commits and PRs without re-asking permission between increments; surface only genuine blockers. This does not license unrequested expansion — still get plan sign-off before multi-module or public-surface diffs the user did not ask for.
 
+## Code Comments
+
+- Keep comments terse and abstract: explain the application behavior and intent behind the code — the "why" — not the mechanics a reader can see in the code itself.
+- Comment only non-obvious logic. Do not narrate routine or self-evident changes, and do not add a comment for every edit.
+- Do not put issue IDs (`#123`) in comments — provenance lives in the git history (`git blame`), not the source.
+- Prune stale comments as you touch the code; a comment that no longer matches what the code does is worse than none.
+
 ## End-to-End Verification Gate (Mandatory)
 
 When a user reports a bug they observed, or when a change touches behaviour that ships in a deployed artifact, the agent verifies the fix end-to-end in the live target — itself, not by handing steps back to the user. Test suites (unit, integration, UI-harness) give code-level confidence; they do not replace running the originally failing flow against the deployed artifact and watching it succeed.

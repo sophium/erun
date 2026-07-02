@@ -163,8 +163,14 @@ function ClaudeDefaultModelField({
   // stored model that fell out of that set stays visible as a flagged
   // option (visibility of system status) and is dropped at launch.
   const available = (claude.models?.length ?? 0) > 0 ? (claude.models ?? []) : defaults.models;
+  // "Default" starts on the first available model rather than the agent's own
+  // default, so name it "Default (<model>)" to show which model that is.
+  const defaultLaunchModel = available[0] ?? '';
   const options = [
-    { value: 'default', label: 'Default (Claude decides)' },
+    {
+      value: 'default',
+      label: defaultLaunchModel ? `Default (${defaultLaunchModel})` : 'Default',
+    },
     ...available.map((model) => ({ value: model, label: model })),
   ];
   if (claude.defaultModel && !available.includes(claude.defaultModel)) {
@@ -179,7 +185,7 @@ function ClaudeDefaultModelField({
       label="Default model"
       value={claude.defaultModel ?? 'default'}
       options={options}
-      helper="Model the AI tab preselects (claude --model). Options are this environment's available models — tick a model above to make it selectable here. Default lets Claude pick. Saving a change reopens open AI tabs; the Claude session resumes."
+      helper="Model the AI tab preselects (claude --model). Options are this environment's available models — tick a model above to make it selectable here. Default launches the first available model (never fable, which stays opt-in). Saving a change reopens open AI tabs; the Claude session resumes."
       disabled={disabled}
       onChange={(next) => {
         onChange(next === 'default' ? undefined : next);

@@ -40,28 +40,28 @@ func resolveClaudeEffort(config EnvironmentClaudeConfig) string {
 	return defaultClaudeEffort
 }
 
-// resolveClaudeDefaultModel returns the env's configured default Claude model
-// when it is one of the env's available models (the explicit models list, or
-// the default available set when the env declares none) and a safe shell
-// token; otherwise "" so the session never launches with a --model the env
-// does not expose (issue #482). Models are opaque tokens to erun — resolving
-// a name like "fable" to a concrete model is Claude Code's / the env's
-// provider-config concern.
-func resolveClaudeDefaultModel(config EnvironmentClaudeConfig) string {
-	if config.DefaultModel == nil {
-		return ""
-	}
-	model := strings.TrimSpace(*config.DefaultModel)
-	if !claudeModelTokenPattern.MatchString(model) {
-		return ""
-	}
+// resolveClaudeLaunchModel picks the model the managed AI session starts on:
+// the env's chosen default while it is one of the env's available models, else
+// the first available model. A session never falls back to the agent's own
+// default, which the environment may not be able to serve; an unusable chosen
+// or available value is ignored rather than started.
+func resolveClaudeLaunchModel(config EnvironmentClaudeConfig) string {
 	available := config.NormalizedModels()
 	if len(available) == 0 {
 		available = DefaultClaudeAvailableModels()
 	}
+	if config.DefaultModel != nil {
+		if model := strings.TrimSpace(*config.DefaultModel); claudeModelTokenPattern.MatchString(model) {
+			for _, candidate := range available {
+				if candidate == model {
+					return model
+				}
+			}
+		}
+	}
 	for _, candidate := range available {
-		if candidate == model {
-			return model
+		if claudeModelTokenPattern.MatchString(candidate) {
+			return candidate
 		}
 	}
 	return ""
@@ -123,7 +123,7 @@ func AISessionLaunchLines(aiTool string, claude EnvironmentClaudeConfig) []strin
 // (issue #482), and --verbose --debug (issue #477).
 func claudeLaunchFlags(claude EnvironmentClaudeConfig) string {
 	flags := claudeEffortFlags(resolveClaudeEffort(claude))
-	if model := resolveClaudeDefaultModel(claude); model != "" {
+	if model := resolveClaudeLaunchModel(claude); model != "" {
 		flags += " --model " + model
 	}
 	if claude.VerboseDebug {
@@ -140,11 +140,12 @@ func claudeLaunchFlags(claude EnvironmentClaudeConfig) string {
 // remote-agent envs the guard executes `claude` inside the pod via kubectl
 // exec; only an in-string assignment crosses into the pod, exactly like
 // --effort/--model (issue #528). The token is already constrained to
-// claudeModelTokenPattern by resolveClaudeDefaultModel, so it needs no quoting
-// and composes with the single-quoted ultracode --settings JSON. Empty when no
-// model resolves, leaving Claude Code's own subagent default in place.
+// claudeModelTokenPattern by resolveClaudeLaunchModel, so it needs no quoting
+// and composes with the single-quoted ultracode --settings JSON. Empty only
+// when no available model is a safe token, leaving Claude Code's own subagent
+// default in place.
 func claudeLaunchEnvPrefix(claude EnvironmentClaudeConfig) string {
-	if model := resolveClaudeDefaultModel(claude); model != "" {
+	if model := resolveClaudeLaunchModel(claude); model != "" {
 		return "CLAUDE_CODE_SUBAGENT_MODEL=" + model + " "
 	}
 	return ""
