@@ -91,6 +91,8 @@ One per environment. This is the most-edited file.
 
 The four `claude.*` rows above (`usemantle`, `usebedrock`, `models[]`, `maxoutputtokens`) are the Claude values erun manages itself. The runtime chart accepts further `claude.*` values that erun never sets — pin a model, point Bedrock at a VPC endpoint, tune prompt caching — via the env's values overlay; see [Advanced chart values](#advanced-chart-values).
 
+The env's Claude AI tab also launches with **Remote Control** enabled by default: the managed launch appends `--remote-control <tenant>/<env>` after the effort/model/verbose flags, so the session is drivable from the Claude iOS app under that name. It is omitted when `claude.usemantle` or `claude.usebedrock` is set — Remote Control pairs through the claude.ai account relay, which those gateway auth modes can't authenticate — and follows the same verbatim-launch carve-out as `claude.effort` (a non-`claude` `aitool`, or a Claude launch written with explicit flags, is left untouched). An environment name that isn't a plain token (alphanumerics, `.`, `-`, `_`, starting with an alphanumeric) falls back to the unnamed `--remote-control`, leaving Claude Code to name the session from the pod hostname. For the Operator view, see [Desktop app](/desktop/overview).
+
 ---
 
 ## Per-project config

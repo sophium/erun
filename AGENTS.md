@@ -104,7 +104,8 @@ Internal ownership and per-module conventions live in each module's `AGENTS.md`.
 
 - Keep comments terse and abstract: explain the application behavior and intent behind the code — the "why" — not the mechanics a reader can see in the code itself.
 - Comment only non-obvious logic. Do not narrate routine or self-evident changes, and do not add a comment for every edit.
-- Do not put issue IDs (`#123`) in comments — provenance lives in the git history (`git blame`), not the source.
+- Do not put issue IDs (`#123`, `issue #123`, `See #123`) in comments — provenance lives in the git history (`git blame`), not the source. This rule overrides matching the surrounding comment style: much of the existing codebase (for example `erun-common/ai_launch.go` and the `open` integration scenarios) still carries issue IDs in comments, but those are known pre-existing violations, not precedent. Never add an issue ID because neighbouring comments have one, and strip the ID (keeping any explanatory text) from comments you edit.
+- The comment rules above apply to new and edited comments regardless of how the surrounding code is written. When the local style contradicts this guidance, the guidance wins; a pervasive in-repo pattern is not a licence to extend it.
 - Prune stale comments as you touch the code; a comment that no longer matches what the code does is worse than none.
 
 ## End-to-End Verification Gate (Mandatory)
