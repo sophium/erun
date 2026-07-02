@@ -18,7 +18,7 @@ import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 // seeded env's AI tool is an inert shell, and saving would churn the shared
 // baseline config mid-suite. The
 // launch-string composition is locked by TestAISessionLaunchCommand and
-// TestResolveClaudeDefaultModel in erun-common plus the `erun open
+// TestResolveClaudeLaunchModel in erun-common plus the `erun open
 // --app-session ai --ai --dry-run` integration goldens; the end+respawn flow
 // is locked by TestEndAISessionsClosesAITabsAndEndsPodSessions and
 // TestEndAISessionsSkipsVerbatimAITool in erun-ui.
@@ -80,10 +80,12 @@ test.describe('manage dialog claude launch flags', () => {
     });
 
     // Resetting the Default model returns the draft to the default option.
-    await app.manageDialog.chooseClaudeDefaultModel('Default (Claude decides)');
+    // "Default" names the first available model the session starts on (opus
+    // for the seeded default set), not the agent's own default.
+    await app.manageDialog.chooseClaudeDefaultModel('Default (opus)');
     await expect
       .poll(() => app.manageDialog.claudeDefaultModelSelectedValue())
-      .toBe('Default (Claude decides)');
+      .toBe('Default (opus)');
 
     // Cancel without saving so the dev's persisted config is not mutated and
     // no live AI session is reopened.

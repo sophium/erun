@@ -355,9 +355,9 @@ export class ManageDialog {
     return this.locator().locator(`#environment-config-claude-models-${model}`);
   }
 
-  // claudeDefaultModelSelect targets the "Default model" SelectField (issue
-  // #482). It always renders; with no per-env override it shows
-  // "Default (Claude decides)".
+  // claudeDefaultModelSelect targets the "Default model" SelectField. It always
+  // renders; with no per-env override it shows "Default (<first available
+  // model>)", e.g. "Default (opus)".
   claudeDefaultModelSelect(): Locator {
     return this.locator().locator('#environment-config-claude-default-model');
   }

@@ -118,7 +118,7 @@ type ShellLaunchParams struct {
 	// kind + slot). Closing/reopening a tab — or a transient kubectl-exec drop —
 	// then reconnects to the still-running shell (and the AI tab's claude keeps
 	// working in the pod) instead of spawning a parallel one. Empty (the bare
-	// `erun open` CLI path) keeps the previous ephemeral behaviour. See #478.
+	// `erun open` CLI path) keeps the previous ephemeral behaviour.
 	AppSession string
 	// AI / Contribute select the persistent session's create-time program:
 	// Contribute cds into the contribute clone with its env; AI launches the AI
@@ -762,7 +762,7 @@ func remoteShellBaseScriptLines(req ShellLaunchParams, config remoteShellConfig,
 // byte. With AppSession (a desktop tab) it runs the shell inside a persistent,
 // reattachable dtach session keyed by the id, so a disconnect detaches (the
 // session — and the AI tab's claude — keeps running in the pod) and the next
-// kubectl exec re-attaches rather than spawning a parallel chain. See #478.
+// kubectl exec re-attaches rather than spawning a parallel chain.
 func remoteShellLaunchLines(req ShellLaunchParams, bashrcPath, markerDir string) []string {
 	if strings.TrimSpace(req.AppSession) == "" {
 		return []string{fmt.Sprintf("/bin/bash --rcfile \"%s\" -i || shell_status=$?", bashrcPath)}
@@ -796,9 +796,9 @@ func remoteShellLaunchLines(req ShellLaunchParams, bashrcPath, markerDir string)
 	//     nudge its exit/confirm footer). It only re-renders on a real SIGWINCH,
 	//     so the AI session uses -r winch: dtach raises WINCH on attach, forcing
 	//     a full repaint even when the reattached pane is the same size and the
-	//     pty would otherwise emit no WINCH of its own (issue #613). Switching
-	//     bash to ^L in #481 silently regressed the AI tab once ultracode/opus
-	//     became the default (#494) and changed Claude's idle key handling.
+	//     pty would otherwise emit no WINCH of its own. Switching bash to ^L
+	//     silently regressed the AI tab once ultracode/opus became the default
+	//     and changed Claude's idle key handling.
 	redraw := "ctrl_l"
 	if req.AI {
 		redraw = "winch"
@@ -854,7 +854,7 @@ func RemoteAppSessionEndScript(tenant, environment, id string) string {
 func remoteSessionLauncherBody(req ShellLaunchParams, bashrcPath string) []string {
 	var body []string
 	if req.Contribute {
-		// Match the desktop's former contribute prelude (issue #469): the
+		// Match the desktop's former contribute prelude: the
 		// contribute clone's built binary on PATH, fast incremental rebuilds,
 		// and the clone as the working directory.
 		body = append(body,
@@ -864,7 +864,7 @@ func remoteSessionLauncherBody(req ShellLaunchParams, bashrcPath string) []strin
 		)
 	}
 	if req.AI {
-		body = append(body, AISessionLaunchLines(req.AITool, req.Claude)...)
+		body = append(body, AISessionLaunchLines(req.AITool, req.Claude, req.Tenant, req.Environment)...)
 	}
 	return append(body, fmt.Sprintf("exec /bin/bash --rcfile \"%s\" -i", bashrcPath))
 }

@@ -36,12 +36,11 @@ type EnvironmentClaudeConfig struct {
 	// AI-tab launch; this shared field exists so the value round-trips
 	// through the same env config the UI reads and writes.
 	Effort *string `yaml:"effort,omitempty" json:"effort,omitempty"`
-	// DefaultModel is the per-env Claude model preselected as `claude --model`
-	// when the AI tab's session launches. Unset means no --model is passed
-	// (Claude's own default). It only takes effect while it is one of the
-	// env's available models — see resolveClaudeDefaultModel. Named
+	// DefaultModel is the model the env's AI session starts on, while it is one
+	// of the env's available models; unset or no longer available falls back to
+	// the first available model rather than the agent's own default. Named
 	// DefaultModel to stay distinct from the chart's claude.model pod slot,
-	// which this field intentionally does not touch (issue #482).
+	// which this field does not touch.
 	DefaultModel *string `yaml:"defaultmodel,omitempty" json:"defaultModel,omitempty"`
 	// VerboseDebug launches the AI tab's Claude with `--verbose --debug` so
 	// Claude's own diagnostics stream into the tab (issue #477). A plain bool,
