@@ -26,12 +26,10 @@ export const notificationSlice = createSlice({
     dismissNotification(state) {
       state.notification = null;
     },
-    // dismissNotificationForEnv clears the current notification when it targets
-    // this env, so the deploy lifecycle can retire the warning it raised without
-    // touching an unrelated toast (issue #713). An empty `source` matches any
-    // env-scoped notification (a deploy starting retires both the
-    // runtime-unreachable warning and a prior deploy-failed error); a non-empty
-    // `source` clears only that kind.
+    // Lets the deploy lifecycle retire the warning it raised without clobbering
+    // an unrelated toast. Empty `source` is a wildcard so a deploy start can
+    // retire both the runtime-unreachable warning and a prior deploy-failed
+    // error at once.
     dismissNotificationForEnv(state, action: PayloadAction<NotificationEnvMatch>) {
       const current = state.notification;
       if (!current) {

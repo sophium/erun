@@ -9,18 +9,14 @@ import (
 
 const contributeStateFileName = "contribute-state.json"
 
-// contributeState is the on-disk shape of the user's per-env contribute
-// toggle: keys are "<tenant>/<env>" and values are true when the env is
-// currently in contribute mode. Persisted independently of the canonical
-// env config.yaml because this is a desktop-UI preference, not env
-// semantics.
+// contributeState persists the per-env contribute toggle as a desktop-UI
+// preference, kept out of env config.yaml because it is not env semantics.
 type contributeState struct {
 	Flags map[string]bool `json:"flags,omitempty"`
 }
 
-// contributeStore is an in-memory cache backed by a JSON file. Safe for
-// concurrent use; mutations are serialized so a toggle click never races
-// with the initial load.
+// contributeStore serializes mutations so a toggle click never races with the
+// initial disk load.
 type contributeStore struct {
 	path string
 	mu   sync.Mutex

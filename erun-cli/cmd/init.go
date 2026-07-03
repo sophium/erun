@@ -81,9 +81,6 @@ func initRunParams(cmd *cobra.Command, args []string, params common.BootstrapIni
 	return runParams, nil
 }
 
-// applyInitTypeFlag resolves the --type flag (if set), validates that it does
-// not conflict with --remote, and updates runParams.Type plus the legacy
-// Remote bool so downstream bootstrap logic sees a consistent shape.
 func applyInitTypeFlag(cmd *cobra.Command, runParams *common.BootstrapInitParams, envType string) error {
 	envType = strings.TrimSpace(envType)
 	if envType == "" {

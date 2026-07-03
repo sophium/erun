@@ -1,8 +1,5 @@
-// AIActivityPayload mirrors the Go-side aiActivityPayload emitted by
-// streamSession's debounced AI-output tracker. The desktop sidebar uses
-// it to render a "working" spinner on the env row when its AI tab is
-// actively producing output, even when the user has navigated to a
-// different env. See erun-ui/terminal_sessions.go: recordAIActivity.
+// AIActivityPayload drives a "working" spinner on an env's sidebar row while its AI
+// tab produces output, including when the user has navigated away to a different env.
 export interface AIActivityPayload {
   sessionId: number;
   tenant: string;

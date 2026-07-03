@@ -35,11 +35,8 @@ export function DiffList(): React.ReactElement {
   if (allFiles.length === 0) {
     return <ReviewStatus>No changes</ReviewStatus>;
   }
-  // Render the same subset the changed-files tree shows — honouring the active
-  // filter and collapsed directories — in the tree's order (diff.files is
-  // already ordered to match the tree, #435). Without this the diff panel
-  // showed every file while the tree showed a filtered/collapsed subset, which
-  // read as an order mismatch (#547).
+  // Keep the diff panel's files and their order matching the changed-files
+  // tree's visible subset; diff.files is already ordered to match the tree.
   const visiblePaths = visibleDiffFilePaths(
     review.diff?.tree ?? [],
     review.diffFilter,

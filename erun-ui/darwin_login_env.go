@@ -10,36 +10,24 @@ import (
 	"sync"
 )
 
-// loginEnvOnce gates the one-shot login-shell environment import. Wails
-// apps launched from Finder or Dock start under launchd with a minimal
-// environment (PATH=/usr/bin:/bin:/usr/sbin:/sbin, KUBECONFIG unset,
-// AWS_* unset, etc), so subprocess calls like `kubectl config
-// get-contexts` either fail to find their binaries or read the wrong
-// kubeconfig.
+// Wails apps launched from Finder or Dock start under launchd with a
+// minimal environment (PATH=/usr/bin:/bin:/usr/sbin:/sbin, KUBECONFIG
+// and AWS_* unset), so subprocess calls like `kubectl config
+// get-contexts` fail to find their binaries or read the wrong kubeconfig.
 var loginEnvOnce sync.Once
 
-// importLoginShellEnv runs the user's login shell with -lc to capture
-// the env it exports (PATH, KUBECONFIG, AWS_PROFILE, ...) and merges a
-// short allowlist of variables into the current process. macOS only;
-// Linux desktop GUIs typically inherit the user session's env so the
-// import is unnecessary there, and Windows uses its own PATH machinery.
-//
-// Allowlist rather than blanket merge so we do not stomp on Wails or
-// Go runtime variables (LANG, HOME, etc) the caller may have curated.
-//
-// Idempotent via sync.Once so calling it from both startup and
-// individual command sites is safe.
+// importLoginShellEnv uses an allowlist rather than a blanket merge so it
+// does not stomp Wails or Go runtime variables (LANG, HOME, ...) the
+// caller may have curated. macOS only: Linux desktop GUIs inherit the
+// user session env and Windows uses its own PATH machinery.
 func importLoginShellEnv() {
 	loginEnvOnce.Do(func() {
 		shell := strings.TrimSpace(os.Getenv("SHELL"))
 		if shell == "" {
 			shell = "/bin/sh"
 		}
-		// `-ilc` runs the shell as both interactive and login, which on
-		// zsh sources ~/.zshenv + ~/.zprofile + ~/.zshrc + ~/.zlogin
-		// and on bash sources the login-mode profile chain plus
-		// ~/.bashrc. Most macOS users export KUBECONFIG and PATH in
-		// ~/.zshrc, which `-lc` alone would skip.
+		// Interactive+login (`-ilc`) so zsh sources ~/.zshrc, where most
+		// macOS users export PATH and KUBECONFIG; `-lc` alone would skip it.
 		output, err := exec.Command(shell, "-ilc", "/usr/bin/env").Output()
 		if err != nil {
 			return
@@ -65,10 +53,8 @@ func importLoginShellEnv() {
 	})
 }
 
-// loginEnvKeyAllowed names environment variables that subprocess calls
-// from the desktop process need but launchd-style starts do not
-// provide. Keep the allowlist short and predictable; do not blanket-
-// import everything from the login shell.
+// loginEnvKeyAllowed keeps the imported set to a short, predictable
+// allowlist rather than blanket-importing the whole login-shell environment.
 func loginEnvKeyAllowed(key string) bool {
 	switch key {
 	case "PATH",

@@ -1,24 +1,13 @@
 import { expect, test } from '../fixtures/erunApp.js';
 
-// sidebar-ai-activity covers the new "AI tab is working" signal that
-// drives the sidebar env-row busy badge while a Claude/Codex
-// generation is in flight on a tab the user has navigated away from.
+// Covers the "AI tab is working" signal that surfaces a busy spinner on a
+// sidebar env row while a Claude/Codex generation runs on a tab the user has
+// navigated away from.
 //
-// The signal is the debounced `ai-activity` Wails event emitted by
-// recordAIActivity in erun-ui/terminal_sessions.go (busy=true after
-// >=5 s of sustained AI-PTY output, busy=false after >=3 s of silence
-// or on session close). The frontend slice aiActivitySlice maps
-// payloads to `aiBusyByEnv[selectionKey(...)]`; Sidebar.helpers.ts
-// factors that into the deriveEnvironmentRow busy bit so an env row
-// surfaces a spinner without requiring the user to be looking at that
-// env's tabs.
-//
-// The Go-side debounce timing is not reachable from the headless
-// harness (it requires a live PTY producing output for 5+ seconds).
-// This spec drives the same code path the production event ends up
-// using — emit the Wails event directly and verify the sidebar
-// reflects it — and covers both the on and off transitions. The Go
-// debounce logic itself is covered by the erun-ui app_test.go suite.
+// The Go-side debounce that emits the real ai-activity event needs a live PTY
+// producing output for 5+ seconds, which the headless harness cannot drive, so
+// this spec emits the Wails event directly and asserts both the on and off
+// transitions. The debounce timing itself is covered by erun-ui app_test.go.
 
 test.describe('sidebar AI activity spinner', () => {
   test('ai-activity busy=true surfaces a spinner on the env row, busy=false clears it', async ({
@@ -32,13 +21,9 @@ test.describe('sidebar AI activity spinner', () => {
     expect(envs.length).toBeGreaterThan(0);
     const env = envs[0]!;
 
-    // Baseline: no spinner on quiet rows.
     const sidebar = page.locator('aside').first();
     await expect(sidebar.getByRole('status')).toHaveCount(0);
 
-    // Emit busy=true via the Wails ai-activity event. The handler in
-    // wailsEventThunks.ts builds the selectionKey from {tenant, env}
-    // and the env-row selector matches the same key.
     await page.evaluate(
       ({ tenant, env }) => {
         const runtime = (
@@ -60,7 +45,6 @@ test.describe('sidebar AI activity spinner', () => {
     await expect(spinner).toBeVisible();
     await expect(spinner).toHaveAttribute('aria-label', new RegExp(`${env}`));
 
-    // Emit busy=false; the spinner must disappear.
     await page.evaluate(
       ({ tenant, env }) => {
         const runtime = (
@@ -98,7 +82,6 @@ test.describe('sidebar AI activity spinner', () => {
         busy: true,
       });
     });
-    // No env row matches an empty selectionKey, so no spinner appears.
     await expect(sidebar.getByRole('status')).toHaveCount(0);
   });
 });

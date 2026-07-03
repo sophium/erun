@@ -18,8 +18,7 @@ func postProvision(t *testing.T, tenants ConfigTenantRepository, environments *s
 	return rec
 }
 
-// acmeTenant is the caller's resolved tenant for provision tests; its Name is
-// what forms the <tenant>-<env> namespace and runtime release name.
+// The tenant Name (not ID) forms the <tenant>-<env> namespace and runtime release name asserted below.
 var acmeTenant = stubConfigTenantRepository{tenant: model.Tenant{TenantID: "tenant-1", Name: "acme", Type: model.TenantTypeCompany}}
 
 func TestProvisionRejectsInvalidEnvironment(t *testing.T) {
@@ -41,8 +40,7 @@ func TestProvisionRejectsInvalidEnvironment(t *testing.T) {
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("unexpected status: %d", rec.Code)
 			}
-			// Provision is preview-only: no env row is ever created, even on the
-			// happy path, so it must never run on the invalid-input path either.
+			// Provision is preview-only — it must never create an env row.
 			if environments.createCalls != 0 {
 				t.Fatalf("provision must never call Create, got %d calls", environments.createCalls)
 			}
@@ -50,10 +48,7 @@ func TestProvisionRejectsInvalidEnvironment(t *testing.T) {
 	}
 }
 
-// TestProvisionWithNewClusterComposesFullPlan proves the ordered plan for a NEW
-// cluster: it pulls the quota line, the real InitCloudContext dry-run argv (the
-// ec2 run-instances command), the <tenant>-<env> namespace line, the register
-// line, and the deploy line — all without persisting anything.
+// TestProvisionWithNewClusterComposesFullPlan proves a new-cluster provision previews the full ordered plan — including cloud bootstrap — without persisting.
 func TestProvisionWithNewClusterComposesFullPlan(t *testing.T) {
 	environments := &stubEnvironmentRepository{count: 2}
 	rec := postProvision(t, acmeTenant, environments, stubTenantQuotaRepository{maxEnvironments: 10}, `{
@@ -83,37 +78,30 @@ func TestProvisionWithNewClusterComposesFullPlan(t *testing.T) {
 		t.Fatalf("expected quotaOk=true under the cap, got false: %v", response.Plan)
 	}
 
-	// authz/tenant line, resolved from the token.
 	if !planContains(response.Plan, "provision: tenant acme (resolved from token)") {
 		t.Fatalf("plan missing the authz/tenant line: %v", response.Plan)
 	}
-	// quota line: 2 of 10, within quota.
 	if !planContains(response.Plan, "quota: tenant has 2 of 10 environments — within quota") {
 		t.Fatalf("plan missing the within-quota line: %v", response.Plan)
 	}
-	// context bootstrap header + the real InitCloudContext dry-run argv.
 	if !planContains(response.Plan, "context: bootstrap cluster acme-prod via alias acme-aws") {
 		t.Fatalf("plan missing the context bootstrap header: %v", response.Plan)
 	}
 	if !planContains(response.Plan, "ec2 run-instances") {
 		t.Fatalf("plan missing the EC2 run-instances step from the InitCloudContext dry-run: %v", response.Plan)
 	}
-	// namespace: <tenant>-<env>.
 	if !planContains(response.Plan, "namespace: would create acme-prod") {
 		t.Fatalf("plan missing the <tenant>-<env> namespace line: %v", response.Plan)
 	}
-	// register line, referencing the new cluster's context.
 	if !planContains(response.Plan, "register: would persist environment prod (runtime) in tenant acme referencing context acme-prod") {
 		t.Fatalf("plan missing the register line: %v", response.Plan)
 	}
-	// deploy line: the runtime chart at the tenant's release name into the namespace.
 	if !planContains(response.Plan, "deploy: would helm install the erun-devops runtime chart (release acme-devops) into acme-prod") {
 		t.Fatalf("plan missing the deploy line: %v", response.Plan)
 	}
 }
 
-// TestProvisionReusesExistingContext proves the existing-context path: no
-// bootstrap argv, just the reuse line plus the rest of the plan.
+// TestProvisionReusesExistingContext proves the existing-context path emits no cloud bootstrap argv.
 func TestProvisionReusesExistingContext(t *testing.T) {
 	environments := &stubEnvironmentRepository{count: 0}
 	rec := postProvision(t, acmeTenant, environments, stubTenantQuotaRepository{maxEnvironments: 10}, `{
@@ -146,9 +134,7 @@ func TestProvisionReusesExistingContext(t *testing.T) {
 	}
 }
 
-// TestProvisionOverCapReturnsPlanWithQuotaBlocked proves that at/over the cap
-// the full plan is still returned (it is a preview, not a 4xx), but quotaOk is
-// false and the quota line names the block. No Create runs.
+// TestProvisionOverCapReturnsPlanWithQuotaBlocked proves over-cap provisioning still returns a 200 preview with quotaOk=false, not a 4xx.
 func TestProvisionOverCapReturnsPlanWithQuotaBlocked(t *testing.T) {
 	environments := &stubEnvironmentRepository{count: 10}
 	rec := postProvision(t, acmeTenant, environments, stubTenantQuotaRepository{maxEnvironments: 10}, `{

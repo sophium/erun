@@ -8,12 +8,10 @@ import (
 )
 
 // TestCloudContextPowerErrorClassification pins the actionable-error contract
-// for stop/start failures (issue #456: a failed Stop surfaced as a bare
-// "exit status 1" while the instance kept running). These branches only fire
-// on real AWS error responses, which the dry-run integration harness cannot
-// produce — the same structural gap erun-integration/AGENTS.md records for
-// the AWS error helpers — so a white-box test with an injected RunAWS owns
-// the contract, mirroring deploy_persist_runtime_version_test.go.
+// for stop/start failures — a failed Stop once surfaced as a bare "exit
+// status 1" while the instance kept running. The dry-run integration harness
+// cannot produce the real AWS error responses these branches key on, so the
+// contract lives here as a white-box test.
 func TestCloudContextPowerErrorClassification(t *testing.T) {
 	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, io.Discard, io.Discard)}
 	params := CloudContextParams{Name: "petios-ctx"}
@@ -85,8 +83,6 @@ func TestCloudContextPowerErrorClassification(t *testing.T) {
 	})
 }
 
-// assertErrorMentions fails when err is nil (reporting expectMsg) or when its
-// message is missing any of the wanted substrings.
 func assertErrorMentions(t *testing.T, err error, expectMsg string, wants ...string) {
 	t.Helper()
 	if err == nil {
@@ -99,9 +95,6 @@ func assertErrorMentions(t *testing.T, err error, expectMsg string, wants ...str
 	}
 }
 
-// alreadyStoppingRunAWS fails stop-instances with IncorrectInstanceState (the
-// instance is already stopping) and succeeds the stopped-wait, flipping waited
-// so the caller can assert the wait absorbed the race.
 func alreadyStoppingRunAWS(waited *bool) func(Context, CloudProviderConfig, string, []string) (string, error) {
 	return func(_ Context, _ CloudProviderConfig, _ string, args []string) (string, error) {
 		joined := strings.Join(args, " ")
@@ -116,8 +109,6 @@ func alreadyStoppingRunAWS(waited *bool) func(Context, CloudProviderConfig, stri
 	}
 }
 
-// failingStopWaitRunAWS fails the stopped-wait waiter and lets every other AWS
-// call succeed, modelling a stop that was issued but never observed stopped.
 func failingStopWaitRunAWS() func(Context, CloudProviderConfig, string, []string) (string, error) {
 	return func(_ Context, _ CloudProviderConfig, _ string, args []string) (string, error) {
 		if strings.Contains(strings.Join(args, " "), "wait instance-stopped") {
@@ -127,8 +118,6 @@ func failingStopWaitRunAWS() func(Context, CloudProviderConfig, string, []string
 	}
 }
 
-// powerErrorTestStore returns the minimal store for the power-state paths:
-// one provider alias and one managed context bound to it.
 func powerErrorTestStore() CloudContextStore {
 	return stubCloudContextStore{config: ERunConfig{
 		CloudProviders: []CloudProviderConfig{{Alias: "dev-aws", Provider: CloudProviderAWS, Profile: "dev-profile"}},
@@ -147,8 +136,6 @@ type stubCloudContextStore struct{ config ERunConfig }
 func (s stubCloudContextStore) LoadERunConfig() (ERunConfig, string, error) { return s.config, "", nil }
 func (s stubCloudContextStore) SaveERunConfig(ERunConfig) error             { return nil }
 
-// failingRunAWS fails the named ec2 action with the given message and lets
-// every other AWS call (waiters, association lookups) succeed.
 func failingRunAWS(action, message string) func(Context, CloudProviderConfig, string, []string) (string, error) {
 	return func(_ Context, _ CloudProviderConfig, _ string, args []string) (string, error) {
 		if strings.Contains(strings.Join(args, " "), action) {

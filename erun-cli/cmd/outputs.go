@@ -12,8 +12,6 @@ import (
 )
 
 // OpenResolver resolves an env's runtime target from tenant/environment scope.
-// It mirrors rootDependencies.resolveOpen so the outputs commands stay testable
-// and decoupled from the store internals.
 type OpenResolver func(common.OpenParams) (common.OpenResult, error)
 
 func newOutputsCmd(resolveOpen OpenResolver) *cobra.Command {
@@ -138,8 +136,6 @@ func writeOutputsListText(ctx common.Context, list common.RuntimeOutputsListResu
 	return nil
 }
 
-// outputsDownloadCLIResult is the JSON result of `outputs download`: the saved
-// entry plus the local path it landed at.
 type outputsDownloadCLIResult struct {
 	Name          string `json:"name"`
 	Dest          string `json:"dest"`
@@ -181,10 +177,8 @@ func runOutputsDownloadCommand(ctx common.Context, resolveOpen OpenResolver, par
 	return nil
 }
 
-// resolveOutputsDest computes the local path a download lands at: an empty dest
-// means the current directory; a dest naming an existing directory means a file
-// inside it; otherwise dest is the full destination path. The pod-side name is
-// reduced to its base so it can never escape the chosen directory.
+// resolveOutputsDest reduces the pod-side name to its base so a download can never
+// escape the chosen local directory.
 func resolveOutputsDest(dest, name string) string {
 	name = filepath.Base(filepath.FromSlash(name))
 	dest = strings.TrimSpace(dest)

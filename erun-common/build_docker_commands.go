@@ -88,22 +88,12 @@ func tagFingerprintAfterBuild(buildInput DockerBuildSpec, platform string, stdou
 	return runDockerTag(sourceTag, target, stdout, stderr)
 }
 
-// tagStableBaseVersionAfterBuild re-tags the platform-suffixed snapshot image
-// under the stable BaseVersion tags that `FROM image:${ERUN_VERSION}` wrappers
-// resolve from the local daemon (the snapshot tag is never pushed). It writes
-// two tags per platform:
-//
-//   - a per-arch tag, e.g. erun-devops:1.0.90-snapshot-amd64 — what a wrapper
-//     resolves for that platform (see dockerBuildArgs), so a multi-platform
-//     wrapper build always finds the matching architecture locally.
-//   - the arch-less tag, e.g. erun-devops:1.0.90-snapshot, kept for any
-//     consumer that references the bare BaseVersion. It is overwritten per
-//     platform (last arch wins) and is therefore single-arch, which is exactly
-//     why wrappers must use the per-arch tag instead.
-//
-// Returns nil when BaseVersion is empty (release builds, whose Version equals
-// the stable tag — those resolve the base from its pushed multi-arch manifest,
-// not from a local tag).
+// tagStableBaseVersionAfterBuild makes a snapshot base resolvable by wrappers
+// whose `FROM image:${ERUN_VERSION}` reads it from the local daemon (the
+// snapshot tag is never pushed). The per-arch tag is what a multi-platform
+// wrapper build must resolve, because the arch-less tag is last-arch-wins and
+// therefore single-arch. No-op for release builds, whose base resolves from its
+// pushed multi-arch manifest rather than a local tag.
 func tagStableBaseVersionAfterBuild(buildInput DockerBuildSpec, platform string, stdout, stderr io.Writer) error {
 	target := stableBaseVersionTag(buildInput.Image)
 	if target == "" {
@@ -121,10 +111,8 @@ func tagStableBaseVersionAfterBuild(buildInput DockerBuildSpec, platform string,
 	return runDockerTag(sourceTag, target, stdout, stderr)
 }
 
-// stableBaseVersionTag returns the unsuffixed local tag wrappers reference
-// from `FROM image:${ERUN_VERSION}`. Empty when the image has no separate
-// BaseVersion (release builds where Version itself is stable) or when the
-// computed tag equals the timestamped Tag.
+// stableBaseVersionTag returns the unsuffixed local tag a wrapper resolves from
+// `FROM image:${ERUN_VERSION}`.
 func stableBaseVersionTag(image DockerImageReference) string {
 	baseVersion := strings.TrimSpace(image.BaseVersion)
 	if baseVersion == "" {
@@ -201,11 +189,9 @@ func runDockerSimpleCommand(args []string, stdout, stderr io.Writer) error {
 	return cmd.Run()
 }
 
-// runDockerSimpleCommandWithVerbosity invokes a docker subcommand that has no
-// native `--quiet` flag (manifest create/push, tag) and applies the verbosity
-// suppression policy: at VerbosityDebug or higher the subprocess streams to
-// stdout/stderr; at VerbosityInfo the output is captured silently and only
-// replayed on error so failures stay debuggable.
+// runDockerSimpleCommandWithVerbosity emulates --quiet for docker subcommands
+// (manifest create/push, tag) that lack the native flag, replaying captured
+// output only on error.
 func runDockerSimpleCommandWithVerbosity(args []string, verbosity int, stdout, stderr io.Writer) error {
 	if verbosity >= VerbosityDebug {
 		return runDockerSimpleCommand(args, stdout, stderr)
@@ -226,21 +212,16 @@ func runDockerTag(source, target string, stdout, stderr io.Writer) error {
 	} else if !dockerTagAlreadyExistsRace(err) {
 		return err
 	}
-	// Workaround for the daemon-side race where the target tag is
-	// claimed by a stale manifest list (from a previous push, or the
-	// previous platform's tag in this same multi-arch run). The
-	// daemon reports it as "AlreadyExists: image ... already exists
-	// after deleting the existing one". `docker image rm -f` and
-	// `docker manifest rm` clear both possible holders; we ignore
-	// their errors because the target may legitimately not exist as
-	// either kind. Then the retry of `docker tag` succeeds.
+	// Recover from the daemon race where the target tag is held by a stale
+	// manifest list (a previous push, or the previous platform in this same
+	// multi-arch run), surfacing as "AlreadyExists ... after deleting the
+	// existing one". Clearing both possible holders may fail harmlessly when the
+	// target exists as neither kind, so their errors are ignored.
 	_ = runDockerSimpleCommand([]string{"manifest", "rm", target}, io.Discard, io.Discard)
 	_ = runDockerSimpleCommand([]string{"image", "rm", "-f", target}, io.Discard, io.Discard)
 	return tryDockerTag(source, target, stdout, stderr)
 }
 
-// tryDockerTag runs `docker tag` and captures stderr so the caller can
-// pattern-match the daemon error without re-reading the pipe.
 func tryDockerTag(source, target string, stdout, stderr io.Writer) error {
 	capture := new(bytes.Buffer)
 	cmd := Command("docker", "tag", source, target)
@@ -345,27 +326,21 @@ func dockerCommandOutputWriter(primary io.Writer, capture io.Writer) io.Writer {
 
 func dockerBuildArgs(buildInput DockerBuildSpec, platform string) []string {
 	tag := platformSuffixedTag(strings.TrimSpace(buildInput.Image.Tag), platform)
-	// BuildKit's default exporter wraps each per-platform image in an OCI
-	// index alongside a provenance attestation manifest, which makes the
-	// resulting tag a manifest list. `docker manifest create` rejects
-	// manifest-list inputs ("<tag> is a manifest list"), so provenance stays
-	// off and each per-arch tag is a plain image manifest the assembly step
-	// can consume.
+	// --provenance=false: BuildKit's default provenance attestation turns each
+	// per-arch tag into a manifest list, which `docker manifest create` rejects
+	// ("<tag> is a manifest list"). Off, each tag stays a plain image manifest
+	// the assembly step can consume.
 	args := []string{"build", "--platform", platform, "--provenance=false"}
 	args = append(args, dockerVerbosityBuildFlags(buildInput.Verbosity)...)
 	args = append(args, "-t", tag)
 	buildArgVersion := dockerImageTagVersion(strings.TrimSpace(buildInput.Image.Tag))
 	if buildInput.Image.BaseVersion != "" {
 		buildArgVersion = buildInput.Image.BaseVersion
-		// A wrapper that resolves its base via ${ERUN_VERSION} must point at the
-		// base's per-arch stable tag (e.g. erun-devops:1.0.90-snapshot-amd64).
-		// The arch-less stable tag names only the last arch built, so a
-		// multi-platform wrapper build would otherwise resolve the wrong arch
-		// (and, on a strict image store, fail "not found"). The base publishes
-		// the matching <BaseVersion>-<arch> tag in tagStableBaseVersionAfterBuild.
-		// Only the snapshot path needs this — a release wrapper resolves its base
-		// from the base's pushed multi-arch manifest, so BaseVersion is empty and
-		// this branch is skipped.
+		// A ${ERUN_VERSION} wrapper must resolve the base's per-arch stable tag:
+		// the arch-less tag names only the last arch built, so a multi-platform
+		// build would otherwise pull the wrong arch (or fail "not found" on a
+		// strict image store). Release wrappers skip this — BaseVersion is empty
+		// because they resolve the base from its pushed multi-arch manifest.
 		if dockerfileHasVersionedFrom(buildInput.DockerfilePath) {
 			buildArgVersion = buildArgVersion + "-" + platformShortSuffix(platform)
 		}
@@ -521,32 +496,17 @@ func captureGHCommand(args ...string) (string, error) {
 	return string(output), nil
 }
 
-// RefreshGHCRPackageScopes widens the gh-stored token's scopes to include
-// write:packages,read:packages and then re-runs TryGHCRNamespaceLogin so
-// docker is authed with the freshly-scoped token.
+// RefreshGHCRPackageScopes widens the gh-stored token to write:packages so a
+// push denied for lacking that scope can succeed. Call it only after
+// TryGHCRNamespaceLogin + retry still fails scope-denied: that means the token
+// itself lacks the scope and must be re-minted.
 //
-// `gh auth refresh` operates on the currently active gh account and does
-// not accept a `-u` flag, so this helper first runs `gh auth switch -u
-// <namespace>` best-effort to make the namespace owner active. If switch
-// fails (single-account install, account not logged in), the refresh runs
-// against whichever account is active.
-//
-// The refresh flow is interactive (browser device-code), so stdin must be
-// a real terminal. Returns (true, nil) when the refresh completed and
-// docker login was redone, (false, nil) when prerequisites are missing
-// (gh not installed, non-ghcr tag, missing namespace), and (false, err)
-// for gh or docker errors.
-//
-// When the context cannot complete an interactive browser login — a
-// chart-injected runtime pod (headless, no browser) or any non-interactive
-// stdin (MCP, CI, pipes) — it does not launch gh and returns (false, err)
-// with the actionable recovery error from newNonInteractiveGHCRScopeRefreshError,
-// so the caller fails clearly with the manual recovery commands instead of
-// stranding the operator on a device-code prompt that can never advance (#587).
-//
-// Use this only after TryGHCRNamespaceLogin + retry fails with a
-// scope-denied error: that signals the gh-stored token itself lacks the
-// scope, and the only remedy is replacing the token.
+// `gh auth refresh` has no `-u` flag and acts on the active account, so this
+// switches to the namespace owner first (best-effort; else runs against the
+// active account). The refresh drives gh's interactive browser device-code
+// flow, so it bails with an actionable recovery error rather than launching gh
+// in a headless pod or any non-interactive context (MCP, CI, pipes) where the
+// prompt could never advance.
 func RefreshGHCRPackageScopes(tag string, stdin io.Reader, stdout, stderr io.Writer) (bool, error) {
 	if !isGHCRRegistry(dockerRegistryFromImageTag(tag)) {
 		return false, nil
@@ -559,12 +519,9 @@ func RefreshGHCRPackageScopes(tag string, stdin io.Reader, stdout, stderr io.Wri
 		return false, nil
 	}
 
-	// gh auth switch/refresh/login below all drive (or depend on) gh's
-	// interactive browser device-code flow. In a headless runtime pod there is
-	// no browser, and in any non-interactive context (MCP, CI, pipes) there is
-	// no operator at the prompt — launching the flow there hangs forever. Bail
-	// out before mutating any gh state and tell the operator exactly how to
-	// widen the scope from a host shell with a browser.
+	// Bail before mutating any gh state: the switch/refresh/login below all drive
+	// gh's interactive browser flow, which hangs forever in a headless pod or any
+	// non-interactive context with no operator at the prompt.
 	if !interactiveGHAuthAllowed(stdin) {
 		return false, newNonInteractiveGHCRScopeRefreshError(tag, namespace)
 	}
@@ -576,12 +533,8 @@ func RefreshGHCRPackageScopes(tag string, stdin io.Reader, stdout, stderr io.Wri
 
 	var ghCmd *exec.Cmd
 	if switchErr == nil {
-		// Namespace owner is already logged in and is now the active
-		// account; widen its scopes.
 		ghCmd = Command("gh", "auth", "refresh", "-h", "github.com", "-s", "write:packages,read:packages")
 	} else {
-		// Namespace owner is not logged in. Add it via the interactive
-		// browser flow, requesting the package scopes up front.
 		ghCmd = Command("gh", "auth", "login", "-h", "github.com", "-s", "write:packages,read:packages", "-w", "--git-protocol", "https")
 	}
 	ghCmd.Stdin = stdin
@@ -594,16 +547,12 @@ func RefreshGHCRPackageScopes(tag string, stdin io.Reader, stdout, stderr io.Wri
 	return TryGHCRNamespaceLogin(tag, stdout, stderr)
 }
 
-// interactiveGHAuthAllowed reports whether RefreshGHCRPackageScopes may launch
-// gh's interactive browser device-code flow. It is false in a chart-injected
-// runtime pod (headless — even the desktop terminal is a pod shell with a PTY,
-// but there is no browser to complete the device flow) and in any context
-// where stdin is not a real terminal (MCP, CI, pipes). The in-pod check comes
-// first so the PTY-backed pod shell is still treated as headless.
-//
-// ERUN_FORCE_TTY=1 is the same deliberate test seam the CLI uses
-// (writerIsTerminal) so the integration harness, whose stdin is always a pipe,
-// can still exercise the interactive success path.
+// interactiveGHAuthAllowed reports whether gh's interactive browser device-code
+// flow can complete here. The in-pod check comes first because a runtime pod
+// shell is PTY-backed and would pass the terminal test, yet has no browser to
+// finish the device flow; otherwise stdin must be a real terminal (not MCP, CI,
+// or a pipe). ERUN_FORCE_TTY=1 is the CLI's test seam so the integration
+// harness, whose stdin is always a pipe, can still exercise the interactive path.
 func interactiveGHAuthAllowed(stdin io.Reader) bool {
 	if inInjectedRuntimePod() {
 		return false
@@ -619,20 +568,14 @@ func interactiveGHAuthAllowed(stdin io.Reader) bool {
 	return err == nil && (info.Mode()&os.ModeCharDevice) != 0
 }
 
-// inInjectedRuntimePod reports whether the process is running inside the
-// chart-injected runtime pod, detected the same way ResolveInjectedRuntimeConfig
-// does: the entrypoint sets both ERUN_TENANT and ERUN_ENVIRONMENT for every
-// runtime pod, and nothing else does.
+// inInjectedRuntimePod detects the chart-injected runtime pod: the entrypoint
+// sets both ERUN_TENANT and ERUN_ENVIRONMENT for every runtime pod and nothing
+// else does.
 func inInjectedRuntimePod() bool {
 	return strings.TrimSpace(os.Getenv("ERUN_TENANT")) != "" &&
 		strings.TrimSpace(os.Getenv("ERUN_ENVIRONMENT")) != ""
 }
 
-// newNonInteractiveGHCRScopeRefreshError builds the actionable error returned
-// when the scope-refresh escalation cannot run its interactive gh flow. It
-// names the missing write:packages scope and the exact commands to run from a
-// host shell with a browser, so the operator has a clear path forward instead
-// of a hung prompt (#587).
 func newNonInteractiveGHCRScopeRefreshError(tag, namespace string) error {
 	registry := dockerRegistryFromImageTag(tag)
 	if registry == "" {
@@ -652,14 +595,10 @@ func newNonInteractiveGHCRScopeRefreshError(tag, namespace string) error {
 	return errors.New(sb.String())
 }
 
-// TryGHCRNamespaceLogin re-authenticates docker to ghcr.io as the GitHub user
-// that owns the target namespace, when that user is also configured in the
-// local gh CLI. Returns (true, nil) on a successful login, (false, nil) when
-// the namespace cannot be impersonated (gh missing, account not logged in,
-// non-ghcr.io tag), and (false, err) when the eventual docker login fails.
-//
-// Use this after a push failure with IsDockerCreatePackageDenied to attempt
-// an automatic auth switch before falling back to an interactive prompt.
+// TryGHCRNamespaceLogin re-authenticates docker to ghcr.io as the gh-configured
+// user that owns the target namespace. Call it after a push fails with
+// IsDockerCreatePackageDenied, to try an automatic auth switch before falling
+// back to an interactive prompt.
 func TryGHCRNamespaceLogin(tag string, stdout, stderr io.Writer) (bool, error) {
 	if !isGHCRRegistry(dockerRegistryFromImageTag(tag)) {
 		return false, nil

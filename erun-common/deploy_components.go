@@ -7,20 +7,14 @@ import (
 	"strings"
 )
 
-// postgresComponentName is the chart that owns the environment's Postgres
-// instance; it deploys before the charts that depend on it (db migrations,
-// PowerDNS) in the default deploy order.
 const postgresComponentName = "erun-backend-postgres"
 
-// powerdnsComponentName is the platform PowerDNS authoritative nameserver
-// singleton. It runs the gpgsql backend against the shared
-// erun-backend-postgres instance, so it must deploy after postgres.
+// powerdnsComponentName must deploy after postgres: PowerDNS uses the shared
+// erun-backend-postgres instance as its backend store.
 const powerdnsComponentName = "erun-powerdns"
 
-// defaultDeployComponentOrder is the fallback rank used when the project
-// config has no k8s.deployments plan. Postgres → db → api → powerdns; other
-// components (e.g. the runtime chart) sort to the end so backend dependencies
-// come up first. It governs ordering only — not which components deploy.
+// defaultDeployComponentOrder orders backend charts before their dependents;
+// it governs ordering only, not which components deploy.
 var defaultDeployComponentOrder = []string{
 	postgresComponentName,
 	"erun-backend-db",
@@ -28,8 +22,6 @@ var defaultDeployComponentOrder = []string{
 	powerdnsComponentName,
 }
 
-// Sources reported by resolveSelectedDeployComponents so the dry-run trace
-// names which precedence tier decided the selection.
 const (
 	deploySelectionSourceFlag    = "--components flag"
 	deploySelectionSourceSaved   = "saved deploy.components"
@@ -37,14 +29,10 @@ const (
 	deploySelectionSourceDefault = "default (runtime only)"
 )
 
-// resolveSelectedDeployComponents applies the strict-precedence tiers that
-// decide which components deploy: the explicit --components flag wins; then the
-// per-machine saved set (EnvConfig.deploy.components); then the repo
-// k8s.deployments plan. Tiers do not merge — the highest non-empty tier fully
-// determines the selection, matching "opt in for exactly that". An empty result
-// (no flag, no saved set, no plan) means "no explicit selection"; the caller
-// then defaults to the runtime chart alone (bootstrap/heal). The second return
-// value names the tier for the dry-run trace.
+// resolveSelectedDeployComponents takes the selection from the highest non-empty
+// precedence tier (flag, then saved set, then repo plan); tiers never merge. An
+// empty result means no explicit selection, which the caller treats as the runtime
+// chart alone (bootstrap/heal).
 func resolveSelectedDeployComponents(flagComponents, savedComponents []string, plan ProjectK8sConfig) ([]string, string) {
 	if names := normalizeComponentNames(flagComponents); len(names) > 0 {
 		return names, deploySelectionSourceFlag
@@ -58,8 +46,6 @@ func resolveSelectedDeployComponents(flagComponents, savedComponents []string, p
 	return nil, deploySelectionSourceDefault
 }
 
-// normalizeComponentNames trims, drops blanks, and de-duplicates a component
-// name list, preserving first-seen order.
 func normalizeComponentNames(components []string) []string {
 	out := make([]string, 0, len(components))
 	seen := make(map[string]struct{}, len(components))
@@ -77,9 +63,6 @@ func normalizeComponentNames(components []string) []string {
 	return out
 }
 
-// planComponentNameList flattens the project k8s plan steps into an ordered,
-// de-duplicated component name list (plan step order, names within a step in
-// declaration order).
 func planComponentNameList(plan ProjectK8sConfig) []string {
 	names := make([]string, 0)
 	for _, step := range plan.Deployments {
@@ -88,13 +71,9 @@ func planComponentNameList(plan ProjectK8sConfig) []string {
 	return normalizeComponentNames(names)
 }
 
-// filterDeployContextsBySelection keeps the discovered local chart contexts the
-// operator selected — opt-in-only: a chart deploys iff its name is in the
-// selection. The runtime chart is kept when it is named (by its <tenant>-devops
-// release name or the erun-devops alias) or when the selection is empty (the
-// bootstrap/heal default deploys the runtime alone). Selection names that match
-// no discovered chart and no runtime alias are rejected so a typo or a stale
-// saved entry fails loudly instead of silently deploying nothing.
+// filterDeployContextsBySelection is opt-in-only: a chart deploys iff its name is
+// in the selection, and an empty selection deploys the runtime alone
+// (bootstrap/heal).
 func filterDeployContextsBySelection(contexts []KubernetesDeployContext, selected []string, tenant string) ([]KubernetesDeployContext, error) {
 	if err := validateSelectedDeployComponents(selected, contexts, tenant); err != nil {
 		return nil, err
@@ -115,10 +94,6 @@ func filterDeployContextsBySelection(contexts []KubernetesDeployContext, selecte
 	return out, nil
 }
 
-// deploySelectionIncludesRuntime reports whether the runtime chart is part of a
-// selection. An empty selection defaults to the runtime alone; a non-empty
-// selection includes the runtime only when it names a runtime alias
-// (<tenant>-devops or erun-devops).
 func deploySelectionIncludesRuntime(selected []string, tenant string) bool {
 	if len(selected) == 0 {
 		return true
@@ -131,9 +106,8 @@ func deploySelectionIncludesRuntime(selected []string, tenant string) bool {
 	return false
 }
 
-// containsRuntimeContext reports whether any of the resolved local contexts is
-// the runtime chart, so the caller knows a repo-local runtime chart backs the
-// deploy (and no published fallback is needed).
+// containsRuntimeContext tells the caller whether a repo-local runtime chart backs
+// the deploy, or whether the published erun-devops fallback is needed.
 func containsRuntimeContext(contexts []KubernetesDeployContext, tenant string) bool {
 	for _, deployContext := range contexts {
 		if deployContextOwnsRuntimeChart(deployContext, tenant) {
@@ -143,9 +117,8 @@ func containsRuntimeContext(contexts []KubernetesDeployContext, tenant string) b
 	return false
 }
 
-// validateSelectedDeployComponents fails when a selected name matches neither a
-// discovered local chart nor a runtime alias. Runtime aliases are always valid
-// (even with no local runtime chart) because they resolve to the published
+// validateSelectedDeployComponents rejects unknown component names. Runtime aliases
+// stay valid even with no local runtime chart because they resolve to the published
 // erun-devops chart.
 func validateSelectedDeployComponents(selected []string, contexts []KubernetesDeployContext, tenant string) error {
 	if len(selected) == 0 {
@@ -160,9 +133,6 @@ func validateSelectedDeployComponents(selected []string, contexts []KubernetesDe
 	return nil
 }
 
-// deployableComponentNameSet returns the names that may be selected for an
-// environment: every discovered local chart directory name plus the runtime
-// aliases (<tenant>-devops and erun-devops).
 func deployableComponentNameSet(contexts []KubernetesDeployContext, tenant string) map[string]struct{} {
 	valid := make(map[string]struct{}, len(contexts)+2)
 	for _, deployContext := range contexts {
@@ -209,14 +179,10 @@ const (
 	deployComponentSourcePublished = "published-chart"
 )
 
-// ResolveDeployableComponents lists the deployable components for an
-// environment: the local component charts discovered under <tenant>-devops/k8s
-// plus the runtime item (a local <tenant>-devops/erun-devops chart if present,
-// otherwise the published erun-devops chart). Selected reflects the env's
-// current resolved default selection, so a transport can render the checklist
-// pre-populated exactly as an equivalent `erun deploy` (with no --components)
-// would resolve. It reads only — it never builds, pushes, or requires a
-// version — and is the single source both CLI help and the desktop consume.
+// ResolveDeployableComponents lists an environment's deployable components with
+// Selected reflecting what a plain `erun deploy` would roll out, so a transport can
+// render the checklist pre-populated. It reads only: it never builds, pushes, or
+// requires a version, and is the single source both CLI help and the desktop consume.
 func ResolveDeployableComponents(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DeployTarget) ([]DeployableComponent, error) {
 	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	now = freezeNow(now)
@@ -265,9 +231,8 @@ func ResolveDeployableComponents(store DeployStore, findProjectRoot ProjectFinde
 		})
 	}
 	if !hasLocalRuntime {
-		// No repo-local runtime chart: the runtime deploys via the published
-		// erun-devops chart. Offer it as the runtime item so the operator can
-		// bootstrap/heal the env from the checklist.
+		// No repo-local runtime chart: offer the published erun-devops chart as the
+		// runtime item so the operator can still bootstrap/heal the env.
 		components = append(components, DeployableComponent{
 			Name:     runtimeName,
 			Runtime:  true,
@@ -278,10 +243,9 @@ func ResolveDeployableComponents(store DeployStore, findProjectRoot ProjectFinde
 	return components, nil
 }
 
-// sortDeployContextsByDeployOrder reorders contexts according to the given
-// project k8s plan (or the hardcoded fallback if the plan is empty). The sort
-// is stable so contexts not mentioned in the plan keep their relative input
-// order at the end of the list.
+// sortDeployContextsByDeployOrder ranks contexts by the k8s plan (hardcoded fallback
+// when the plan is empty); the sort must stay stable so plan-less contexts keep their
+// input order at the end.
 func sortDeployContextsByDeployOrder(contexts []KubernetesDeployContext, plan ProjectK8sConfig) {
 	rank := componentRankByPlan(plan)
 	sort.SliceStable(contexts, func(i, j int) bool {
@@ -289,9 +253,6 @@ func sortDeployContextsByDeployOrder(contexts []KubernetesDeployContext, plan Pr
 	})
 }
 
-// componentRankByPlan returns the rank function used for ordering. When the
-// plan declares steps, components in step i have rank i; components not in
-// any step rank at the end.
 func componentRankByPlan(plan ProjectK8sConfig) func(name string) int {
 	if len(plan.Deployments) == 0 {
 		rank := make(map[string]int, len(defaultDeployComponentOrder))
@@ -321,11 +282,6 @@ func componentRankByPlan(plan ProjectK8sConfig) func(name string) int {
 	}
 }
 
-// groupDeploySpecsByPlan slots each resolved spec into a step. Specs whose
-// component is mentioned in the same plan step end up in the same group;
-// specs not mentioned in the plan each get their own trailing group,
-// preserving input order. With an empty plan, each spec is its own step
-// (strictly serial deploys, matching the pre-config behavior).
 func groupDeploySpecsByPlan(specs []DeploySpec, plan ProjectK8sConfig) [][]DeploySpec {
 	if len(specs) == 0 {
 		return nil
@@ -352,8 +308,6 @@ func groupDeploySpecsByPlan(specs []DeploySpec, plan ProjectK8sConfig) [][]Deplo
 	return out
 }
 
-// serialDeploySpecGroups puts each spec in its own step, preserving input
-// order — the empty-plan grouping (strictly serial deploys).
 func serialDeploySpecGroups(specs []DeploySpec) [][]DeploySpec {
 	groups := make([][]DeploySpec, 0, len(specs))
 	for _, spec := range specs {
@@ -362,10 +316,6 @@ func serialDeploySpecGroups(specs []DeploySpec) [][]DeploySpec {
 	return groups
 }
 
-// partitionDeploySpecsByPlan splits the specs into those whose component is
-// named in the plan (keyed by component name) and those that are not (the
-// trailing specs, in input order). It relies on the plan having at least one
-// deployment step.
 func partitionDeploySpecsByPlan(specs []DeploySpec, plan ProjectK8sConfig) (map[string]DeploySpec, []DeploySpec) {
 	stepIndex := make(map[string]int)
 	for i, step := range plan.Deployments {

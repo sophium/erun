@@ -28,9 +28,8 @@ type User = model.User
 type Identity struct {
 	Tenant Tenant
 	User   User
-	// Org is the resolved org claim value for an org-scoped issuer (empty for
-	// single-tenant issuers). It is part of the identity cache key and is recorded
-	// on audit events as external_org_id.
+	// Org is the resolved org claim value for an org-scoped issuer; empty for
+	// single-tenant issuers.
 	Org string
 }
 
@@ -44,11 +43,10 @@ func (f IdentityResolverFunc) ResolveIdentity(ctx context.Context, claims Claims
 	return f(ctx, claims)
 }
 
-// OrgResolver derives the org claim value that, together with the issuer,
-// resolves the tenant for an org-scoped (shared) issuer. It returns "" for
-// single-tenant or unregistered issuers. The middleware uses it to compute the
-// identity cache key's org dimension before resolution, so a shared issuer
-// cannot collide different orgs onto one cached tenant.
+// OrgResolver derives the org claim value that, with the issuer, resolves the
+// tenant for a shared (org-scoped) issuer; it returns "" for single-tenant or
+// unregistered issuers. The org belongs in the identity cache key so a shared
+// issuer cannot collide different orgs onto one cached tenant.
 type OrgResolver interface {
 	ResolveOrg(ctx context.Context, claims Claims) (string, error)
 }
@@ -70,9 +68,8 @@ func (f TokenVerifierFunc) VerifyBearerToken(ctx context.Context, token string) 
 }
 
 type TenantResolver interface {
-	// ResolveTenantByIssuer maps a verified token to its tenant. It takes the
-	// full Claims (not just the issuer) so it can read a per-issuer org claim
-	// for (iss, org) -> tenant resolution; single-tenant issuers ignore the org.
+	// ResolveTenantByIssuer maps a verified token to its tenant by (issuer, org);
+	// single-tenant issuers ignore the org.
 	ResolveTenantByIssuer(ctx context.Context, claims Claims) (Tenant, error)
 }
 
@@ -243,19 +240,15 @@ func (m *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 }
 
 func (m *AuthMiddleware) resolveIdentity(ctx context.Context, claims Claims) (Identity, error) {
-	// Derive the org claim value first so it is part of the cache key: a shared
-	// org-scoped issuer maps the same (issuer, subject) to different tenants per
-	// org, so (issuer, subject) alone would leak one tenant's RLS context to
-	// another.
+	// Derive the org first so it is part of the cache key: a shared org-scoped
+	// issuer maps the same (issuer, subject) to different tenants per org, so
+	// (issuer, subject) alone would leak one tenant's RLS context to another.
 	//
-	// If derivation FAILS (e.g. a transient read of the issuer's org-scoping
-	// mode), the org dimension is unknown: caching under org="" would conflate a
-	// failed derivation with a single-tenant success or a different org and
-	// reintroduce that cross-tenant collision. So a derivation failure bypasses
-	// the identity cache entirely for this request — no Get, no SetSuccess, no
-	// SetFailure — and falls through to full resolution, which re-derives the org
-	// from the token itself. org="" is then reserved strictly for issuers that
-	// resolveOrg positively determined are single-tenant or unregistered.
+	// A failed derivation leaves the org unknown; caching under org="" would
+	// conflate it with a single-tenant success or a different org and reintroduce
+	// that cross-tenant collision, so it bypasses the cache and falls through to
+	// full resolution. org="" is reserved strictly for issuers positively known
+	// to be single-tenant or unregistered.
 	org, orgErr := m.resolveOrg(ctx, claims)
 	cache := m.cache
 	if orgErr != nil {
@@ -312,11 +305,6 @@ func (m *AuthMiddleware) resolveIdentity(ctx context.Context, claims Claims) (Id
 	return identity, nil
 }
 
-// resolveOrg derives the org claim value used in the identity cache key. A nil
-// resolver (e.g. non-DB test wiring) or a single-tenant/unregistered issuer
-// yields ("", nil), preserving (issuer, subject) keying. A lookup error is
-// propagated so the caller can bypass the cache for that request rather than
-// poisoning the org="" keyspace with a failed derivation.
 func (m *AuthMiddleware) resolveOrg(ctx context.Context, claims Claims) (string, error) {
 	if m.orgResolver == nil {
 		return "", nil
@@ -324,14 +312,11 @@ func (m *AuthMiddleware) resolveOrg(ctx context.Context, claims Claims) (string,
 	return m.orgResolver.ResolveOrg(ctx, claims)
 }
 
-// resolvedOrg returns the org to record on a successfully resolved identity
-// (AuthContext.Org and the audit external_org_id). On the normal path the org
-// derived for the cache key is authoritative. When the initial derivation failed
-// (orgErr != nil) the request bypassed the cache and full resolution re-read the
-// issuer's org-scoping mode — warming its cache — so re-derive the org now for an
-// accurate audit record. A still-failing derivation leaves it empty rather than
-// failing an already-resolved request; the value resolution actually used is
-// derived from the same memoized issuer mode, so the re-derivation is consistent.
+// resolvedOrg returns the org to record on a successfully resolved identity. On
+// the normal path the org derived for the cache key stands. When the initial
+// derivation failed, full resolution has since warmed the issuer's org-scoping
+// mode, so re-derive now for an accurate audit record; a still-failing
+// derivation leaves it empty rather than failing an already-resolved request.
 func (m *AuthMiddleware) resolvedOrg(ctx context.Context, claims Claims, org string, orgErr error) string {
 	if orgErr == nil {
 		return org

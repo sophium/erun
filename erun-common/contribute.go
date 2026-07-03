@@ -14,10 +14,8 @@ const (
 )
 
 // ContributeClonePath returns the canonical clone target for ERun
-// contribute mode inside the current environment: $HOME/git/erun.
-//
-// The path is resolved inside the env (host for local-agent, pod for
-// remote-agent). When homeDir is empty the caller's $HOME is read.
+// contribute mode ($HOME/git/erun), resolved inside the current env —
+// the host for local-agent, the pod for remote-agent.
 func ContributeClonePath(homeDir string) (string, error) {
 	resolved, err := resolveContributeHomeDir(homeDir)
 	if err != nil {
@@ -137,8 +135,7 @@ func normalizeContributeRemote(remote string) string {
 }
 
 // ContributeCloneIO bundles the filesystem seams used by
-// RunContributeCloneWithIO so tests can swap them out without touching
-// the real filesystem.
+// RunContributeCloneWithIO.
 type ContributeCloneIO struct {
 	Stat      StatFunc
 	MkdirAll  MkdirAllFunc
@@ -150,29 +147,17 @@ type ContributeCloneIO struct {
 // WriteFileFunc is the test seam for writing a file with a permission mode.
 type WriteFileFunc func(path string, data []byte, perm os.FileMode) error
 
-// RunContributeClone resolves the target, traces the planned actions,
-// and (when not in dry-run) clones the ERun repository into the env's
-// $HOME/git/erun. It also installs a small `erun` shim at
-// $HOME/.erun/contribute/bin/erun pointing at the clone's erun-cli/run.sh
-// so contribute tabs can prepend that directory to PATH and have every
-// `erun` invocation in the contribute shell — including those spawned
-// by an AI agent as child processes — run the local build script.
+// RunContributeClone clones the ERun repository into the env and installs
+// an `erun` shim so every `erun` invocation in the contribute shell —
+// including those an AI agent spawns as child processes — runs the local
+// build script rather than the system-wide binary.
 //
-// The shim is a wrapper script (not a symlink). run.sh resolves
-// SCRIPT_DIR from its $0, and a symlink-invoked $0 would point at
-// $HOME/.erun/contribute/bin/erun rather than at erun-cli/, so the
-// rebuild step would chdir into the shim dir and fail with "go.mod
-// not found".
+// The shim is a wrapper script, not a symlink: run.sh derives its source
+// dir from $0, so a symlink-invoked $0 would resolve to the shim dir
+// instead of erun-cli/ and the rebuild would fail with "go.mod not found".
 //
-// Trace contract (lines locked in integration goldens):
-//   - audit:   "==> Cloning ERun for contribute mode"
-//   - cmd:     "mkdir -p <clone-parent>"                 (clone needed)
-//   - cmd:     "git clone <url> <target>"                (clone needed)
-//   - audit:   "==> Cloned ERun for contribute mode at <target>" OR
-//   - audit:   "==> ERun contribute clone already present at <target>"
-//   - cmd:     "mkdir -p <shim-dir>"                     (always)
-//   - cmd:     "write-script <shim>"                     (always)
-//   - audit:   "==> Installed contribute shim at <shim>"
+// The audit and command trace lines it emits are locked by integration
+// goldens.
 func RunContributeClone(ctx Context, homeDir string, runGit GitCommandRunnerFunc) error {
 	return RunContributeCloneWithIO(ctx, homeDir, runGit, ContributeCloneIO{})
 }
@@ -238,9 +223,9 @@ func installContributeShim(ctx Context, homeDir string, io ContributeCloneIO) er
 	}
 	ctx.TraceCommand("", "write-script", shimPath)
 	if !ctx.DryRun {
-		// Remove any existing entry (symlink left over from an earlier
-		// shim version, stale file, …) so WriteFile can replace it
-		// cleanly. Ignore errors when the path simply doesn't exist.
+		// Clear any leftover entry (e.g. a symlink from an earlier shim
+		// version) so WriteFile writes a fresh file instead of following
+		// an old link.
 		_ = io.Remove(shimPath)
 		if err := io.WriteFile(shimPath, []byte(contributeShimScript(target)), 0o755); err != nil {
 			return fmt.Errorf("write shim %s: %w", shimPath, err)
@@ -250,13 +235,11 @@ func installContributeShim(ctx Context, homeDir string, io ContributeCloneIO) er
 	return nil
 }
 
-// contributeShimScript returns the wrapper-script body that forwards
-// `erun` invocations to the local clone's run.sh. The script does NOT
-// embed an absolute path that pins the homedir at install time; it
-// reads $HOME at exec time so the same shim survives a pod restart that
-// remounts a different home volume.
+// contributeShimScript reads $HOME at exec time rather than baking in an
+// absolute path, so the shim survives a pod restart that remounts a
+// different home volume.
 func contributeShimScript(target string) string {
-	_ = target // documented in the audit trace; resolved at runtime via $HOME
+	_ = target // intentionally unused: the script resolves $HOME at runtime
 	return "#!/usr/bin/env bash\n" +
 		"exec \"$HOME/git/erun/erun-cli/run.sh\" \"$@\"\n"
 }
@@ -280,8 +263,6 @@ func defaultContributeCloneIO(io ContributeCloneIO) ContributeCloneIO {
 	return io
 }
 
-// asWriter bridges *strings.Builder to io.Writer for callers that read
-// the captured text afterwards.
 func asWriter(b *strings.Builder) io.Writer {
 	return b
 }

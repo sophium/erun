@@ -6,11 +6,8 @@ import { ActivityQueueDrawer } from '@/components/app/ActivityQueueDrawer';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
-// ActivityQueueLauncher renders a floating action button that opens the
-// deploy-queue drawer. It deliberately mounts the drawer so its subscription
-// to deploy:state events is always live — even when the drawer is closed —
-// so the badge count reflects active deploys without the user having opened
-// the drawer first.
+// The drawer stays mounted even while closed so its open/close CSS
+// transition can slide it in and out.
 export function ActivityQueueLauncher({
   open,
   onOpen,

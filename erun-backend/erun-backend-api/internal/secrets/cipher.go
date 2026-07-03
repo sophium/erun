@@ -1,8 +1,5 @@
-// Package secrets provides authenticated encryption for tenant secrets stored at
-// rest in the database (the k3s admin token in context_credentials, the
-// BYO-cloud credentials in cloud_provider_aliases — issues #605/#676). The
-// ciphertext columns are bytea; repositories encrypt before INSERT and decrypt
-// after SELECT so the database never holds a plaintext secret.
+// Package secrets provides authenticated encryption for tenant secrets (k3s admin
+// tokens, BYO-cloud credentials) so the database never holds them in plaintext.
 package secrets
 
 import (
@@ -17,18 +14,15 @@ import (
 	"strings"
 )
 
-// Cipher is an AES-256-GCM authenticated cipher keyed by a 32-byte key. The
-// 12-byte random nonce is prepended to each ciphertext, so the same plaintext
-// encrypts to a different value every time and tampering is detected on decrypt.
-// The key is also the source for DeriveToken's HMAC-KDF (domain-separated).
+// Cipher is an AES-256-GCM cipher whose key also seeds DeriveToken's HMAC-KDF,
+// domain-separated so reusing one key for encryption and token derivation is safe.
 type Cipher struct {
 	aead cipher.AEAD
 	key  []byte
 }
 
-// NewCipher builds a Cipher from a base64-encoded 32-byte (AES-256) key, the
-// value the deployment supplies via ERUN_SECRETS_KEY. An absent or wrong-length
-// key is a configuration error — there is no plaintext fallback.
+// NewCipher builds a Cipher from the deployment's base64-encoded 32-byte key;
+// there is no plaintext fallback, so a missing or invalid key is fatal.
 func NewCipher(keyBase64 string) (*Cipher, error) {
 	keyBase64 = strings.TrimSpace(keyBase64)
 	if keyBase64 == "" {
@@ -52,12 +46,10 @@ func NewCipher(keyBase64 string) (*Cipher, error) {
 	return &Cipher{aead: aead, key: key}, nil
 }
 
-// DeriveToken returns a deterministic, high-entropy token for a label, via an
-// HMAC-SHA256 KDF over the secrets key with domain separation from encryption.
-// Same (key, label) → same token, so a provisioning re-run (a durable workflow
-// resuming after a crash) re-derives the SAME k3s admin token the instance
-// baked, instead of a fresh one — making custody idempotent without storing the
-// token in the workflow checkpoint. The token is never persisted in plaintext.
+// DeriveToken returns a deterministic, high-entropy token for a label: the same
+// (key, label) always yields the same token, so a provisioning workflow resuming
+// after a crash re-derives the SAME k3s admin token instead of minting a fresh
+// one — making credential custody idempotent without checkpointing the secret.
 func (c *Cipher) DeriveToken(label string) string {
 	extract := hmac.New(sha256.New, c.key)
 	extract.Write([]byte("erun-token-derivation-v1"))
@@ -76,8 +68,8 @@ func (c *Cipher) Encrypt(plaintext []byte) ([]byte, error) {
 	return c.aead.Seal(nonce, nonce, plaintext, nil), nil
 }
 
-// Decrypt opens a nonce||ciphertext value produced by Encrypt. It fails on a
-// truncated value or a failed authentication tag (tampering / wrong key).
+// Decrypt is the inverse of Encrypt; it fails on a truncated value or a bad
+// authentication tag (tampering or wrong key).
 func (c *Cipher) Decrypt(sealed []byte) ([]byte, error) {
 	nonceSize := c.aead.NonceSize()
 	if len(sealed) < nonceSize {
@@ -91,8 +83,7 @@ func (c *Cipher) Decrypt(sealed []byte) ([]byte, error) {
 	return plaintext, nil
 }
 
-// GenerateKey returns a fresh base64-encoded 32-byte key, for provisioning a
-// deployment's ERUN_SECRETS_KEY.
+// GenerateKey mints a base64-encoded 32-byte key for a deployment's ERUN_SECRETS_KEY.
 func GenerateKey() (string, error) {
 	key := make([]byte, 32)
 	if _, err := io.ReadFull(rand.Reader, key); err != nil {

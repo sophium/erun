@@ -4,11 +4,9 @@ export type SidebarCloudAliasAction = '' | 'login' | 'logout' | 'bearer';
 
 export interface SidebarState {
   collapsedTenants: string[];
-  // sidebarCloudAliasBusyByAlias maps an alias to its current in-flight action.
   // Absence means idle. Keyed by alias so per-provider-type rows (AWS,
-  // Cloudflare) show independent spinners: an AWS login and a Cloudflare token
-  // re-verify can run at once without one disabling the other's control
-  // (visibility of system status, Nielsen #1).
+  // Cloudflare) get independent spinners — one alias's in-flight action must
+  // not disable another alias's control.
   sidebarCloudAliasBusyByAlias: Record<string, SidebarCloudAliasAction>;
 }
 
@@ -42,8 +40,6 @@ export const sidebarSlice = createSlice({
         state.sidebarCloudAliasBusyByAlias[alias] = action.payload.action;
         return;
       }
-      // Drop the alias's entry without a dynamic delete: rebuild the map
-      // omitting it. Absence means idle.
       const next: Record<string, SidebarCloudAliasAction> = {};
       for (const [key, value] of Object.entries(state.sidebarCloudAliasBusyByAlias)) {
         if (key !== alias) {

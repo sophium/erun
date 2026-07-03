@@ -8,16 +8,8 @@ import (
 	"strings"
 )
 
-// Command returns *exec.Cmd for the named external binary, honoring an
-// optional ERUN_<NAME>_BIN environment override. Tests use the override to
-// route real subprocess execution to a stub script so non-dry-run code paths
-// can be exercised without depending on the developer's local toolchain or a
-// live cloud account. Names containing hyphens are normalized to underscores
-// for the env var lookup (e.g., golangci-lint -> ERUN_GOLANGCI_LINT_BIN).
-//
-// Absolute paths and names that already point at a specific binary (anything
-// containing a path separator) pass through untouched so existing call sites
-// that compute their own paths still work.
+// Command wraps exec.Command, honoring an ERUN_<NAME>_BIN override so tests
+// can redirect a named binary to a stub without a live toolchain or account.
 func Command(name string, args ...string) *exec.Cmd {
 	if strings.ContainsAny(name, "/\\") {
 		return exec.Command(name, args...)

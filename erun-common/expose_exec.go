@@ -6,17 +6,13 @@ import (
 	"strings"
 )
 
-// powerDNSConfigDir is where the erun-powerdns chart writes the generated
-// gpgsql backend config (see erun-devops/k8s/erun-powerdns). pdnsutil in the
-// PowerDNS pod reads the backend (and the postgres password) from there via
-// --config-dir, so the exec carries no --gpgsql-* flags and no password.
+// powerDNSConfigDir holds the PowerDNS backend config and DB password, so the
+// pdnsutil exec carries no connection flags and interpolates no secret.
 const powerDNSConfigDir = "/etc/pdns-shared"
 
-// powerDNSUpsertArgs builds the kubectl argv that replaces one record's rrset by
-// exec'ing pdnsutil in the platform's PowerDNS pod. The pdnsutil tokens are
-// passed as direct argv (no `sh -c`), so the wildcard name needs no shell
-// quoting and no secret is interpolated. Shared by the dry-run trace and the
-// live exec so they are identical.
+// powerDNSUpsertArgs is shared by the dry-run trace and the live exec so they stay
+// identical. Tokens pass as direct argv (no `sh -c`), so the wildcard name needs no
+// shell quoting.
 func powerDNSUpsertArgs(params DNSRecordUpsertParams) []string {
 	relName := strings.TrimSuffix(params.Name, "."+params.Zone)
 	args := []string{}
@@ -29,9 +25,9 @@ func powerDNSUpsertArgs(params DNSRecordUpsertParams) []string {
 	return args
 }
 
-// ingressApplyArgs builds the kubectl argv that applies the Host-routing Ingress
-// into the target env's namespace, reading the manifest from stdin (`-f -`) so
-// the command is deterministic (no temp-file path). Shared by trace and exec.
+// ingressApplyArgs is shared by the dry-run trace and the live exec. Reading the
+// manifest from stdin (`-f -`) keeps a temp-file path out of the argv, so the trace
+// stays deterministic.
 func ingressApplyArgs(params IngressApplyParams) []string {
 	args := []string{}
 	if ctxName := strings.TrimSpace(params.KubernetesContext); ctxName != "" {
@@ -41,10 +37,7 @@ func ingressApplyArgs(params IngressApplyParams) []string {
 	return args
 }
 
-// upsertPowerDNSRecord replaces the rrset for one record in the platform's
-// services zone by exec'ing pdnsutil inside the PowerDNS pod, which reads the
-// gpgsql backend (and password) from its generated --config-dir config.
-// Live-only: never runs under a dry-run.
+// upsertPowerDNSRecord is live-only: it must never run under a dry-run.
 func upsertPowerDNSRecord(params DNSRecordUpsertParams) error {
 	if out, err := Command("kubectl", powerDNSUpsertArgs(params)...).CombinedOutput(); err != nil {
 		return fmt.Errorf("kubectl exec pdnsutil replace-rrset: %w: %s", err, strings.TrimSpace(string(out)))
@@ -52,11 +45,8 @@ func upsertPowerDNSRecord(params DNSRecordUpsertParams) error {
 	return nil
 }
 
-// applyHostRoutingIngress renders and applies a networking.k8s.io/v1 Ingress
-// that Host-routes the exposed hostname to the in-namespace Service, piping the
-// manifest to `kubectl apply -f -`. Live-only: it shells out to kubectl against
-// the env's cluster, so it never runs under a dry-run (RunExposeService
-// short-circuits before calling it).
+// applyHostRoutingIngress is live-only: RunExposeService short-circuits before
+// calling it, so it never runs under a dry-run.
 func applyHostRoutingIngress(params IngressApplyParams) error {
 	cmd := Command("kubectl", ingressApplyArgs(params)...)
 	cmd.Stdin = strings.NewReader(renderHostRoutingIngress(params))

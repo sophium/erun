@@ -51,9 +51,8 @@ func runExposeCommand(ctx common.Context, store common.ExposeStore, findProjectR
 		return err
 	}
 	if !ctx.DryRun {
-		// The applied Ingress is HTTP-only today (no TLS/cert-manager); the
-		// wildcard TLS certificate lands with the DNS-01 broker (Phase B), at
-		// which point this becomes https. Don't claim a scheme we don't serve.
+		// HTTP-only until the wildcard TLS certificate ships; don't advertise
+		// a scheme we don't serve yet.
 		_, _ = fmt.Fprintf(ctx.Stdout, "exposed %s/%s service %s at http://%s\n", result.Tenant, result.Environment, result.Service, result.Hostname)
 	}
 	return nil

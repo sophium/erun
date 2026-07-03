@@ -7,20 +7,14 @@ import (
 	"testing"
 )
 
-// TestImageDockerfilesCopyLocalReplaceTarget guards the regression in #691: a
-// module whose go.mod locally replaces erun-common (`replace … => ../../erun-common`)
-// can only build when the replace target is present in the Docker build context.
-// erun-backend-api's image Dockerfile copied only the module's own go.mod/go.sum,
-// so a cold (fingerprint-cache-miss) build failed at `go mod download` reading the
-// missing ../../erun-common — surfacing only on a fresh release version. The
-// invariant: every erun-devops image Dockerfile that builds an erun-common-replacing
-// module must COPY erun-common before its first `go mod download`.
+// TestImageDockerfilesCopyLocalReplaceTarget enforces the invariant that every
+// erun-devops image Dockerfile building a module that locally replaces
+// erun-common COPYs erun-common before its first `go mod download` — a cold
+// (cache-miss) build otherwise fails resolving the missing local replace target.
 func TestImageDockerfilesCopyLocalReplaceTarget(t *testing.T) {
 	// The integration suite also runs inside the erun-devops image build, whose
-	// context copies only the Go modules (erun-cli/common/mcp/integration) — not
-	// erun-backend/ or erun-devops/docker/. This static Dockerfile guard needs the
-	// full source tree, so it no-ops in that partial context and runs on a full
-	// checkout (where a developer/CI runs the gate before a release).
+	// context copies only the Go modules, not the full source tree; this full-tree
+	// guard no-ops there and runs on a full checkout.
 	root, ok := findFullCheckoutRoot()
 	if !ok {
 		t.Skip("full source tree not present (partial in-build build context); this Dockerfile-content guard runs on a full checkout")
@@ -28,8 +22,8 @@ func TestImageDockerfilesCopyLocalReplaceTarget(t *testing.T) {
 
 	cases := []struct {
 		name       string
-		goMod      string // module whose go.mod is checked for the local replace
-		dockerfile string // image Dockerfile that builds it
+		goMod      string
+		dockerfile string
 	}{
 		{"erun-backend-api", "erun-backend/erun-backend-api/go.mod", "erun-devops/docker/erun-backend-api/Dockerfile"},
 		{"erun-devops (erun + emcp)", "erun-cli/go.mod", "erun-devops/docker/erun-devops/Dockerfile"},
@@ -58,9 +52,8 @@ func TestImageDockerfilesCopyLocalReplaceTarget(t *testing.T) {
 	}
 }
 
-// indexOfCommandLine returns the byte offset of the first non-comment line
-// containing substr (so a comment that merely mentions `go mod download` is not
-// mistaken for the build step itself), or -1 if absent.
+// Matches only non-comment lines so a Dockerfile comment mentioning substr is
+// not taken for the actual build step.
 func indexOfCommandLine(dockerfile, substr string) int {
 	offset := 0
 	for _, line := range strings.SplitAfter(dockerfile, "\n") {
@@ -73,9 +66,6 @@ func indexOfCommandLine(dockerfile, substr string) int {
 	return -1
 }
 
-// indexOfCopyErunCommon returns the byte offset of the first `COPY erun-common…`
-// line (matching both `COPY erun-common/go.mod …` and `COPY erun-common /dest`),
-// or -1 if absent.
 func indexOfCopyErunCommon(dockerfile string) int {
 	offset := 0
 	for _, line := range strings.SplitAfter(dockerfile, "\n") {
@@ -96,10 +86,8 @@ func mustReadRepoFile(t *testing.T, root, rel string) string {
 	return string(b)
 }
 
-// findFullCheckoutRoot walks up from the working directory looking for the
-// erun-backend-api image Dockerfile — a file present only in a full checkout,
-// not in the partial erun-devops in-build context. Returns (root, true) when
-// found, ("", false) otherwise so callers can skip.
+// The sentinel Dockerfile is absent from the partial erun-devops in-build
+// context, so its presence marks a full checkout.
 func findFullCheckoutRoot() (string, bool) {
 	dir, err := os.Getwd()
 	if err != nil {

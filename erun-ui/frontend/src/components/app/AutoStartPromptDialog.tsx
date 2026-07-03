@@ -13,21 +13,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 
-// AutoStartPromptDialog asks the user once per remote environment whether
-// the desktop should start the linked cloud context (and the underlying
-// EC2 instance) automatically when they click the env in the sidebar. The
-// answer is persisted via SetEnvironmentAutoStart so the dialog does not
-// reappear until the user resets the policy from the manage-env dialog.
-//
-// The two primary actions persist + proceed:
-//   - Auto-start  → saves AutoStart=true and re-fires openSelection so the
-//                   ERun tab spawns (and erun open's preflight starts EC2).
-//   - Don't auto-start → saves AutoStart=false and re-fires openSelection;
-//                   navigation still happens, the Local tab still spawns,
-//                   but the ERun tab is left out and the titlebar Play
-//                   button remains the recovery affordance.
-// Cancel just closes the dialog without persisting; nothing else happens,
-// matching the no-op state the user could have reached by not clicking.
+// Asks once per remote environment whether opening it should auto-start its
+// stopped EC2 instance, and persists the answer so the prompt does not
+// reappear until the operator resets it.
 export function AutoStartPromptDialog(): React.ReactElement {
   const dispatch = useAppDispatch();
   const prompt = useAppSelector((state) => state.autoStartPrompt);
@@ -35,10 +23,9 @@ export function AutoStartPromptDialog(): React.ReactElement {
   const environmentName = prompt.selection?.environment ?? '';
   const saving = prompt.saving;
   const open = prompt.open;
-  // pendingChoice tracks which button the user clicked so the spinner
-  // renders on the right one. Without this, both buttons just go disabled
-  // when saving=true and the user can't tell which choice is in flight
-  // (Nielsen #1: visibility of system status).
+  // Tracks which button was clicked so the spinner renders only on that
+  // one; otherwise both merely disable and the user can't tell which
+  // choice is in flight.
   const [pendingChoice, setPendingChoice] = React.useState<'always' | 'never' | null>(null);
   React.useEffect(() => {
     if (!saving) {

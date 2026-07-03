@@ -15,10 +15,9 @@ import (
 
 func TestPush(t *testing.T) {
 	t.Run("help", func(t *testing.T) {
-		// Seed a Dockerfile in the test cwd so the root `erun push`
-		// shorthand registers — without it, `push --help` falls through
-		// to the root help and the push-specific flags (notably --force)
-		// are not visible in the golden.
+		// The root `erun push` shorthand only registers when a Dockerfile is
+		// present in cwd; without the seed, `push --help` falls through to root
+		// help and the push-specific flags never appear in the golden.
 		setup := env.New(t)
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
 		fixture.SeedProjectDockerfile(t, setup)
@@ -32,10 +31,9 @@ func TestPush(t *testing.T) {
 	t.Run("missing_version_errors", func(t *testing.T) {
 		// push is a pure primitive: it publishes the version `erun build`
 		// minted and never mints one, so a bare `erun push` with no version
-		// argument must fail fast (root AGENTS.md § "Command primitives vs
-		// orchestration"), mirroring deploy's version-required gate. The gate
-		// fires before any docker call, so no stub is needed — and that is
-		// exactly what keeps a bare push from shelling out to docker.
+		// must fail fast (root AGENTS.md § "Command primitives vs
+		// orchestration"). The gate fires before any docker call, so no stub
+		// is needed.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -48,13 +46,9 @@ func TestPush(t *testing.T) {
 	})
 
 	t.Run("real_run_auth_failure_retries_after_login_via_auto_login_env", func(t *testing.T) {
-		// Exercises runDockerPushWithRetry + promptDockerLoginRetry +
-		// the docker-login retry path: a stubbed `docker push` exits
-		// with an "access denied" auth-error message on the first call,
-		// then succeeds on the retry. The new ERUN_AUTO_LOGIN_ON_PUSH
-		// env var bypasses the interactive prompt so a non-TTY harness
-		// can drive the retry. Asserts the final exit code is 0 and the
-		// trace mentions the docker login that gates the retry.
+		// push builds from source, so the build's image push is what hits the
+		// auth failure. ERUN_AUTO_LOGIN_ON_PUSH bypasses the interactive login
+		// prompt so this non-TTY harness can drive the failure-then-retry path.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 		stubs := setup.Cwd + "/stubs"
@@ -79,10 +73,6 @@ func TestPush(t *testing.T) {
 		fixture.StubBinary(t, stubs, "helm", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
 		envVars = append(envVars, "ERUN_AUTO_LOGIN_ON_PUSH=1")
-		// push builds from source, so the build's image push drives the retry
-		// via runDockerBuildWithRetry: the first push fails auth,
-		// ERUN_AUTO_LOGIN_ON_PUSH bypasses the prompt, and login + retry land it
-		// (final exit 0). The auth failure is visible in the trace.
 		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -91,11 +81,6 @@ func TestPush(t *testing.T) {
 	})
 
 	t.Run("devops_container_push_real_run_resolves_single_image_spec", func(t *testing.T) {
-		// Exercises eruncommon.ResolveDockerPushSpec via the
-		// `devops container push` nested command. With a Dockerfile in
-		// the current directory and seeded devops chart context, the
-		// command resolves a single-image push spec, runs the build,
-		// and pushes the resolved image tag.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -120,19 +105,13 @@ func TestPush(t *testing.T) {
 	})
 
 	t.Run("dry_run_single_image_from_dockerfile_cwd", func(t *testing.T) {
-		// Exercises the root `erun push` shorthand's single-image branch in
-		// dry-run: with a Dockerfile in the cwd, ResolveDockerPushSpec
-		// resolves one push spec and the dry-run trace must show the
-		// would-run docker build/push commands without executing them.
-		//
-		// push builds from source, so even in dry-run the incremental
-		// fingerprint check inspects the local image store (`docker image
-		// inspect`) to decide promote-vs-rebuild — a sanctioned dry-run
-		// decision input (erun-integration/AGENTS.md § "stubs as dry-run
-		// decision input"). Stub docker so the inspect is deterministic and
-		// needs no real daemon (the erun-devops image test stage runs this
-		// gate with no docker on PATH); `inspect` exits 1 so no fp-tag is
-		// present and the plan traces the rebuild path.
+		// Even in dry-run, push's incremental fingerprint check inspects the
+		// local image store (`docker image inspect`) to decide
+		// promote-vs-rebuild — a sanctioned dry-run decision input
+		// (erun-integration/AGENTS.md § "stubs as dry-run decision input").
+		// Stub docker for determinism and so no real daemon is needed (the
+		// erun-devops image test stage runs this gate with no docker on PATH);
+		// `inspect` exits 1 so nothing is cached and the plan traces rebuild.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -157,12 +136,9 @@ func TestPush(t *testing.T) {
 	})
 
 	t.Run("dry_run_build_shortcut_builds_then_pushes_minted_version", func(t *testing.T) {
-		// #585: `erun push --build` is the operator shortcut that builds the
-		// current source first (minting a snapshot version) and then pushes
-		// that exact version — no --version needed. The dry-run trace must
-		// show the build actions (==> would not appear in dry-run, but the
-		// docker build commands do) followed by the push actions, with the
-		// minted version threaded into the push lines.
+		// `erun push --build` is the operator shortcut that builds the current
+		// source first (minting a snapshot version) and pushes that exact
+		// version, no --version needed.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -187,10 +163,8 @@ func TestPush(t *testing.T) {
 	})
 
 	t.Run("dry_run_build_shortcut_force_rebuilds", func(t *testing.T) {
-		// #585: --force must propagate to the --build step, so the build
-		// rebuilds every image instead of promoting from the fingerprint
-		// cache. The dry-run trace differs from the plain --build run (no
-		// fingerprint-promote decision lines) which is what this golden locks.
+		// --force must propagate to the --build step so the build rebuilds
+		// every image instead of promoting from the fingerprint cache.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -215,7 +189,7 @@ func TestPush(t *testing.T) {
 	})
 
 	t.Run("build_shortcut_with_explicit_version_errors", func(t *testing.T) {
-		// #585: --build mints the version itself, so combining it with an
+		// --build mints the version itself, so combining it with an
 		// explicit --version is contradictory and must fail clearly before any
 		// build or push work.
 		setup := env.New(t)
@@ -230,11 +204,8 @@ func TestPush(t *testing.T) {
 	})
 
 	t.Run("real_run_single_image_from_dockerfile_cwd", func(t *testing.T) {
-		// Exercises the root `erun push` single-image branch for real:
-		// ResolveDockerPushSpec resolves the cwd Dockerfile into one build+push
-		// pair, RunDockerPushSpec builds both platforms and pushes the tag. The
-		// docker stub reports no cached fingerprint images (image inspect exit 1)
-		// so the build path runs.
+		// The docker stub reports no cached fingerprint images (image inspect
+		// exit 1) so the real build+push path runs instead of promoting.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -259,15 +230,11 @@ func TestPush(t *testing.T) {
 	})
 
 	t.Run("dry_run_local_push_assembles_per_arch_manifest", func(t *testing.T) {
-		// Locks per-arch manifest assembly for a multi-image `erun push`.
-		// From the project root with no cwd Dockerfile, push resolves multiple
-		// docker contexts (ResolveDockerPushExecution). A locally-built multi-arch
-		// image only exists under per-arch tags, so push must push those and
-		// assemble a manifest list — the same multi-platform push release uses —
-		// not `docker push` the arch-less version tag (which would fail
-		// "tag does not exist"). The stub answers every fp inspect present, so
-		// images promote (mirroring the real failure); the plan must show, per
-		// image, the per-arch `docker push` + `docker manifest create`/`push`.
+		// A locally-built multi-arch image only exists under per-arch tags, so
+		// a multi-image push must push those and assemble a manifest list, not
+		// `docker push` the arch-less version tag (which would fail "tag does
+		// not exist"). The stub answers every fingerprint inspect as present so
+		// images promote, mirroring the real failure this locks.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 		stubs := setup.Cwd + "/stubs"
@@ -281,10 +248,9 @@ func TestPush(t *testing.T) {
 	})
 
 	t.Run("real_run_local_push_assembles_per_arch_manifest", func(t *testing.T) {
-		// Companion to the dry-run scenario: drives RunDockerPushExecution +
-		// pushMultiPlatformImage for real against the stub (promote, per-arch
-		// docker push, docker manifest create/push). Previously this path failed
-		// "tag does not exist" on the arch-less push; it must now complete.
+		// Companion real-run to the dry-run manifest scenario: this path
+		// previously failed "tag does not exist" on the arch-less push and must
+		// now complete.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 		stubs := setup.Cwd + "/stubs"
@@ -299,13 +265,10 @@ func TestPush(t *testing.T) {
 	})
 
 	t.Run("real_run_auth_failure_prompts_login_and_retries", func(t *testing.T) {
-		// Exercises promptDockerLoginRetry's interactive Select (the
-		// non-ERUN_AUTO_LOGIN_ON_PUSH path) plus runDockerBuildWithRetry's
-		// docker-login leg (push builds from source): the first image push
-		// fails with a generic auth error,
-		// "\r" confirms the highlighted "Login and retry push" option, the
-		// stubbed `docker login` succeeds, and the retried push lands. The
-		// Select is the run's single interactive prompt.
+		// The interactive login-retry path (no ERUN_AUTO_LOGIN_ON_PUSH): the
+		// first push fails auth, "\r" confirms the "Login and retry push"
+		// select, and the retried push lands. That select is the run's single
+		// interactive prompt.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 		stubs := setup.Cwd + "/stubs"
@@ -342,14 +305,9 @@ func TestPush(t *testing.T) {
 	})
 
 	t.Run("real_run_create_package_denied_emits_guidance", func(t *testing.T) {
-		// Exercises handleNamespaceAuthError + retryAfterNamespaceLogin
-		// + printCreatePackageGuidance + namespacePath + isGHCR for the
-		// GHCR-specific "create_package" denial path. With `gh` absent
-		// from PATH (the integration harness's PATH does not include the
-		// dev's gh install at the stub-level), TryGHCRNamespaceLogin
-		// returns false, the retry returns the auth error, and the user
-		// gets the create-a-new-package guidance text. Asserts the
-		// guidance markers appear and the command exits non-zero.
+		// GHCR "create_package" denial: when the namespace login cannot grant
+		// access, the user gets the create-a-new-package guidance and a
+		// non-zero exit.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 		stubs := setup.Cwd + "/stubs"
@@ -363,8 +321,8 @@ func TestPush(t *testing.T) {
 			`  *) exit 0 ;;`,
 			`esac`,
 		}, "\n"))
-		// Stub `gh` to "exist but fail" so TryGHCRNamespaceLogin's
-		// LookPath finds it, runs it, and falls through gracefully.
+		// Stub gh to "exist but fail" so LookPath finds it, runs it, and falls
+		// through gracefully instead of taking the gh-absent branch.
 		fixture.StubBinaryAdvanced(t, stubs, "gh", fixture.StubBinarySpec{ExitCode: 1})
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "gh")...)
 		// Force PATH so `exec.LookPath("gh")` finds our stub (production
@@ -379,20 +337,14 @@ func TestPush(t *testing.T) {
 	})
 
 	t.Run("real_run_scope_denied_attempts_scope_refresh", func(t *testing.T) {
-		// Exercises retryAfterScopeRefresh + RefreshGHCRPackageScopes
-		// + scopeStillDenied: the docker push first fails with a
-		// "does not match expected scopes" error (matches IsDockerScopeDenied
-		// but NOT IsDockerCreatePackageDenied), the namespace login is
-		// not applicable, then handleNamespaceAuthError calls
-		// retryAfterScopeRefresh which runs `gh auth refresh`. The
-		// stubbed gh exits 0 so RefreshGHCRPackageScopes returns true,
-		// and the retry push succeeds on the second invocation.
+		// The scope-denied path (distinct from create_package: the error
+		// matches IsDockerScopeDenied, not IsDockerCreatePackageDenied): scope
+		// refresh via `gh auth refresh` succeeds and the retry push lands.
 		//
-		// ERUN_FORCE_TTY=1 is the deliberate seam that lets the gate added
-		// in #587 treat this piped-stdin harness run as interactive, so the
-		// interactive scope-refresh success path stays covered. The two
-		// scenarios below assert the non-interactive and in-pod paths fail
-		// clearly instead of launching gh.
+		// ERUN_FORCE_TTY=1 is the deliberate seam that makes this piped-stdin
+		// run count as interactive so the interactive scope-refresh success
+		// path stays covered; the two scenarios below assert the
+		// non-interactive and in-pod paths fail clearly instead of launching gh.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 		stubs := setup.Cwd + "/stubs"
@@ -442,12 +394,10 @@ func TestPush(t *testing.T) {
 	})
 
 	t.Run("real_run_scope_denied_non_interactive_fails_clearly", func(t *testing.T) {
-		// #587: with no interactive terminal (the harness pipes stdin and
-		// ERUN_FORCE_TTY is unset), RefreshGHCRPackageScopes must NOT launch
-		// gh's interactive device-code flow — which would hang forever — and
-		// must instead return the actionable write:packages-scope error. The
-		// gh stub records any auth switch/refresh/login call to a marker file;
-		// the assertion below proves that flow was never launched.
+		// With no interactive terminal (piped stdin, ERUN_FORCE_TTY unset),
+		// RefreshGHCRPackageScopes must NOT launch gh's interactive device-code
+		// flow — which would hang forever — and must instead return the
+		// actionable write:packages-scope error.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 		stubs := setup.Cwd + "/stubs"
@@ -487,7 +437,7 @@ func TestPush(t *testing.T) {
 	})
 
 	t.Run("real_run_scope_denied_in_pod_fails_clearly", func(t *testing.T) {
-		// #587: inside a chart-injected runtime pod (ERUN_TENANT/
+		// inside a chart-injected runtime pod (ERUN_TENANT/
 		// ERUN_ENVIRONMENT set) the desktop terminal is a PTY-backed pod
 		// shell, so ERUN_FORCE_TTY=1 is set to prove the in-pod check wins
 		// over the TTY seam: even with a "terminal", there is no browser, so

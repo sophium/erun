@@ -15,10 +15,8 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// validScoopManifest satisfies every invariant the release-time Scoop
-// validation enforces: a mingw dependency, the MinGW/Wails CGO prerequisite
-// wording (and no stale Fyne wording), a non-empty installer script, and all
-// four shipped executables in bin.
+// validScoopManifest is the fixture that passes every release-time Scoop
+// validation invariant.
 const validScoopManifest = `{
   "version": "1.0.0",
   "description": "erun developer toolkit",
@@ -38,9 +36,8 @@ const validScoopManifest = `{
 }
 `
 
-// scoopManifestMissingMingwAndBin violates four invariants at once: no mingw
-// dependency, stale Fyne wording instead of the MinGW/Wails prerequisite, and a
-// missing erun-app.exe in bin.
+// scoopManifestMissingMingwAndBin trips several Scoop validation invariants:
+// no mingw dependency, stale Fyne wording, and a missing erun-app.exe.
 const scoopManifestMissingMingwAndBin = `{
   "version": "1.0.0",
   "description": "erun developer toolkit",
@@ -59,9 +56,8 @@ const scoopManifestMissingMingwAndBin = `{
 }
 `
 
-// scoopManifestEmptyScript keeps depends and bin valid but empties the
-// installer script, tripping both the non-empty-script and MinGW-wording
-// invariants.
+// scoopManifestEmptyScript empties the installer script to trip the
+// non-empty-script and MinGW-wording invariants.
 const scoopManifestEmptyScript = `{
   "version": "1.0.0",
   "description": "erun developer toolkit",
@@ -96,10 +92,8 @@ func TestRelease(t *testing.T) {
 	})
 
 	t.Run("dry_run_develop_emits_candidate_plan", func(t *testing.T) {
-		// Exercises release.go on the develop branch: --dry-run must emit a
-		// `mode=candidate` plan with sync-remote / push stages, the
-		// resolved docker image reference, and the rc.<count> version
-		// suffix on stdout.
+		// On the develop branch, release resolves a candidate (rc) plan, not
+		// a stable one.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -110,9 +104,8 @@ func TestRelease(t *testing.T) {
 	})
 
 	t.Run("dry_run_main_with_develop_emits_stable_plan", func(t *testing.T) {
-		// Exercises release.go stable path on main when develop also
-		// exists: --dry-run must include both sync-remote (main) and
-		// sync-develop stages, and push to both branches.
+		// On main with a develop branch present, a stable release syncs and
+		// pushes both main and develop.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
 		fixture.RunGit(t, setup.Cwd, "branch", "develop")
@@ -124,9 +117,8 @@ func TestRelease(t *testing.T) {
 	})
 
 	t.Run("dry_run_main_without_develop_pushes_only_main", func(t *testing.T) {
-		// Exercises release.go stable path on main when develop does not
-		// exist: --dry-run must not include sync-develop or develop in
-		// the push target.
+		// Without a develop branch, a stable release syncs and pushes only
+		// main.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
 		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -137,15 +129,11 @@ func TestRelease(t *testing.T) {
 	})
 
 	t.Run("dry_run_includes_linux_release_scripts", func(t *testing.T) {
-		// Exercises release.go linux package release path: --dry-run must
-		// trace the per-component release script invocation with
-		// ERUN_BUILD_VERSION when the host supports Linux package builds.
-		// LinuxPackageBuildsSupported requires GOOS=linux and dpkg-deb in
-		// PATH, so skip on hosts that cannot reach the support branch
-		// (notably macOS dev machines). A second component carrying only a
-		// build.sh (no release.sh) drives discoverReleaseLinuxScripts'
-		// skip-component branch: it is a valid linux package context but
-		// contributes no release script, so the trace shows only erun-cli's.
+		// Linux release scripts run only where package builds are actually
+		// supported (GOOS=linux + dpkg-deb on PATH), so this skips on other
+		// hosts. The build-only second component (build.sh, no release.sh) is
+		// a valid linux context that contributes no release script, exercising
+		// the skip-component branch.
 		if runtime.GOOS != "linux" {
 			t.Skip("linux release scripts only run on Linux hosts")
 		}
@@ -179,13 +167,11 @@ func TestRelease(t *testing.T) {
 	})
 
 	t.Run("dry_run_darwin_host_skips_linux_release_scripts", func(t *testing.T) {
-		// A project shipping linux package release scripts, resolved on a
-		// host that cannot build them: discoverSupportedReleaseLinuxScripts
-		// must drop the scripts and runReleaseSpec must trace the
-		// "skipping linux package scripts" decision instead of silently
-		// omitting them. ERUN_HOST_OS_OVERRIDE=darwin pins the unsupported
-		// branch so the golden is deterministic on every host, including
-		// the Linux CI machines where the support check would pass.
+		// On a host that cannot build linux packages, release must trace the
+		// skip decision rather than silently omit the scripts.
+		// ERUN_HOST_OS_OVERRIDE=darwin pins the unsupported branch so the
+		// golden is deterministic on every host, including the Linux build gate
+		// where the support check would otherwise pass.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 		linuxComponentDir := filepath.Join(setup.Cwd, "erun-devops", "linux", "erun-cli")
@@ -207,12 +193,9 @@ func TestRelease(t *testing.T) {
 	})
 
 	t.Run("dry_run_main_with_marketplace_emits_sha_sync", func(t *testing.T) {
-		// Exercises release.go marketplace.json bump path: when the project
-		// contains a .claude-plugin/marketplace.json, the sync-packaging-checksums
-		// stage must trace `git rev-parse v<VERSION>^{}` (to resolve the release
-		// commit) and include the marketplace.json path in the git-add list.
-		// The bump itself is gated on !DryRun so the trace alone proves the path
-		// is wired correctly.
+		// When the project ships a .claude-plugin/marketplace.json, release
+		// must trace the packaging-checksum sync for it. The bump is gated on
+		// !DryRun, so in dry-run the trace alone proves the wiring.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
 		fixture.SeedMarketplaceJSON(t, setup.Cwd)
@@ -244,14 +227,9 @@ func TestRelease(t *testing.T) {
 	})
 
 	t.Run("dry_run_main_with_all_packaging_artifacts_syncs_them", func(t *testing.T) {
-		// A stable release in a project shipping all three packaging
-		// artifacts — Homebrew formula, Scoop manifest, marketplace.json.
-		// The release stage must rewrite the formula's release-archive URL
-		// (updateHomebrewFormulaReleaseVersion) alongside the scoop version
-		// fields, and the sync-packaging-checksums stage must trace the
-		// formula's curl/shasum (.tar.gz), the scoop curl/shasum (.zip),
-		// and the marketplace `git rev-parse v<VERSION>^{}`, then git-add
-		// all three files. The checksum downloads themselves are gated on
+		// A stable release in a project shipping all three packaging artifacts
+		// — Homebrew formula, Scoop manifest, marketplace.json — must sync the
+		// version and checksum for each. The checksum downloads are gated on
 		// !DryRun, so the trace alone locks the wiring.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
@@ -268,11 +246,9 @@ func TestRelease(t *testing.T) {
 	})
 
 	t.Run("dry_run_main_with_invalid_scoop_manifest_fails", func(t *testing.T) {
-		// A malformed bucket/erun.json (no mingw dependency, stale Fyne
-		// wording instead of the MinGW/Wails prerequisite, missing
-		// erun-app.exe) must fail the release during resolution — before any
-		// git mutation — naming every violated invariant. Locks the guard that
-		// keeps a broken Windows install recipe from being published.
+		// An invalid Scoop manifest must fail the release during resolution,
+		// before any git mutation, naming every violated invariant — the guard
+		// that keeps a broken Windows install recipe from being published.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
 		fixture.SeedScoopManifest(t, setup.Cwd, scoopManifestMissingMingwAndBin)
@@ -286,8 +262,7 @@ func TestRelease(t *testing.T) {
 	})
 
 	t.Run("dry_run_main_with_empty_scoop_script_fails", func(t *testing.T) {
-		// An empty installer.script trips both the non-empty-script and the
-		// MinGW-wording invariants, covering the remaining validation branches.
+		// Covers the remaining Scoop validation branches.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
 		fixture.SeedScoopManifest(t, setup.Cwd, scoopManifestEmptyScript)
@@ -301,10 +276,8 @@ func TestRelease(t *testing.T) {
 	})
 
 	t.Run("dry_run_main_with_malformed_scoop_manifest_fails", func(t *testing.T) {
-		// A bucket/erun.json that is not valid JSON must fail the release
-		// during the Scoop invariant validation (the unmarshal error branch
-		// of checkScoopManifestInvariants), before any git mutation, naming
-		// the manifest path and the parse failure.
+		// Non-JSON manifest content must fail during Scoop validation, before
+		// any git mutation.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
 		fixture.SeedScoopManifest(t, setup.Cwd, "{\n  \"version\": \"1.0.0\",\n")
@@ -318,11 +291,8 @@ func TestRelease(t *testing.T) {
 	})
 
 	t.Run("dry_run_release_tag_at_head_skips_tag_creation", func(t *testing.T) {
-		// Re-running a release whose tag already points at HEAD must not
-		// recreate the tag: canSkipExistingReleaseTag resolves v<VERSION>^{}
-		// and HEAD to the same commit and the run traces "release tag
-		// already exists at HEAD; skipping" instead of the `git tag`
-		// command. Locks the re-run idempotency contract.
+		// Re-running a release whose tag already points at HEAD must skip tag
+		// creation rather than recreate it — the re-run idempotency contract.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
 		fixture.RunGit(t, setup.Cwd, "tag", "-a", "v1.4.2", "-m", "Release 1.4.2")
@@ -334,14 +304,12 @@ func TestRelease(t *testing.T) {
 	})
 
 	t.Run("dry_run_stale_release_tag_without_force_fails", func(t *testing.T) {
-		// The release tag exists on a commit other than HEAD and --force was
-		// not passed: canSkipExistingReleaseTag must fail the release with
-		// the tag/HEAD commit mismatch instead of silently retagging or
-		// skipping. The --force variant above is the recovery path.
+		// A stale release tag (on a commit other than HEAD) without --force
+		// must fail on the tag/HEAD mismatch rather than silently retag or
+		// skip; the --force variant above is the recovery path.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
 		fixture.RunGit(t, setup.Cwd, "tag", "-a", "v1.4.2", "-m", "Release 1.4.2")
-		// Advance HEAD past the tagged commit.
 		fixture.RunGit(t, setup.Cwd, "commit", "--allow-empty", "-m", "advance head")
 
 		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -352,10 +320,9 @@ func TestRelease(t *testing.T) {
 	})
 
 	t.Run("dry_run_version_file_at_project_root", func(t *testing.T) {
-		// A project whose VERSION file sits at the project root (no nested
-		// erun-devops module): resolveReleaseModuleRoot must use the project
-		// root itself as the release root, and the docker-image discovery
-		// must tolerate the missing docker/ directory (no images traced).
+		// When the VERSION file sits at the project root (no nested devops
+		// module), the project root itself is the release root, and a missing
+		// docker/ directory is tolerated (no images traced).
 		setup := env.New(t)
 		fixture.SeedGitRepo(t, setup.Cwd)
 		mustWriteFile(t, filepath.Join(setup.Cwd, "VERSION"), "2.5.0\n")
@@ -370,11 +337,9 @@ func TestRelease(t *testing.T) {
 
 	t.Run("dry_run_multiple_release_roots_fails", func(t *testing.T) {
 		// Two nested modules with VERSION files make the release root
-		// ambiguous: resolution must fail with "multiple release roots
-		// found" and the dry-run trace must show the failed step. A third
-		// VERSION under an assets/ subtree must NOT count as a candidate
-		// (ignoredNestedReleaseRoot drops assets dirs), so the failure
-		// names exactly the two real modules' ambiguity.
+		// ambiguous and must fail; a third VERSION under an assets/ subtree
+		// must not count (assets dirs are excluded), so the failure names
+		// exactly the two real modules.
 		setup := env.New(t)
 		fixture.SeedGitRepo(t, setup.Cwd)
 		for _, dir := range []string{
@@ -399,9 +364,9 @@ func TestRelease(t *testing.T) {
 	})
 
 	t.Run("dry_run_force_includes_tag_deletion_for_stale_release_tag", func(t *testing.T) {
-		// Exercises release.go --force path: when the release tag already
-		// exists remotely on a commit other than HEAD, --dry-run must
-		// trace tag deletion (local + origin) before recreating the tag.
+		// With --force and a release tag that already exists remotely on a
+		// commit other than HEAD, the plan must trace deleting the tag (local
+		// + origin) before recreating it.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
 		remoteRoot := filepath.Join(setup.Home, "origin.git")
@@ -410,7 +375,6 @@ func TestRelease(t *testing.T) {
 		fixture.RunGit(t, setup.Cwd, "push", "-u", "origin", "main")
 		fixture.RunGit(t, setup.Cwd, "tag", "-a", "v1.4.2", "-m", "Release 1.4.2")
 		fixture.RunGit(t, setup.Cwd, "push", "origin", "v1.4.2")
-		// Advance HEAD past the tagged commit.
 		fixture.RunGit(t, setup.Cwd, "commit", "--allow-empty", "-m", "advance head")
 		fixture.RunGit(t, setup.Cwd, "push", "origin", "main")
 
@@ -422,7 +386,7 @@ func TestRelease(t *testing.T) {
 	})
 
 	t.Run("dry_run_skips_release_roots_in_gitignored_trees", func(t *testing.T) {
-		// Regression for #398. The release-root walker used to descend
+		// Regression. The release-root walker used to descend
 		// into third-party trees and treat every VERSION file as a
 		// candidate. In a contribute clone where `yarn install` ran in
 		// `erun-docs/`, `erun-docs/node_modules/lunr/VERSION` was
@@ -449,7 +413,7 @@ func TestRelease(t *testing.T) {
 	})
 
 	t.Run("dry_run_with_untracked_file_reports_worktree_clean", func(t *testing.T) {
-		// Regression for #400. release used to call
+		// Regression. release used to call
 		// `git status --porcelain` with no flags and treat any output as
 		// dirty, so an untracked .idea/ (or any other unignored
 		// IDE/generator droppings) blocked release in a real run.
@@ -472,18 +436,13 @@ func TestRelease(t *testing.T) {
 	})
 
 	t.Run("real_run_emits_release_lifecycle_traces", func(t *testing.T) {
-		// Real-run (no --dry-run) candidate release. Exercises the
-		// `==> Releasing` / `==> Released ... in <ELAPSED>` umbrella
-		// traces RunReleaseSpec emits via Info — the desktop activity
-		// queue keys off them to light the sidebar spinner for a
-		// standalone `erun release`. These lines are emitted only on a
-		// real run, so dry-run goldens cannot cover them (mirrors
-		// deploy_test.go's real_run_via_stubs and the build real-run
-		// goldens). git is stubbed: resolution queries return canned
-		// branch/commit, the tag-existence probe reports "not found" so
-		// the tag is not skipped, and every mutation (fetch/rebase/
-		// commit/tag/push) is a silent no-op — keeping the captured
-		// output deterministic without a real remote or network.
+		// Real-run (no --dry-run) candidate release. The `==> Releasing` /
+		// `==> Released ... in <ELAPSED>` umbrella traces are emitted only on
+		// a real run, so dry-run goldens cannot cover them; the desktop
+		// activity queue keys off them to light the sidebar spinner for a
+		// standalone `erun release`. git is stubbed so the tag is not skipped
+		// and every mutation is a no-op, keeping output deterministic without
+		// a real remote.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 		stubs := setup.Cwd + "/stubs"
@@ -505,19 +464,15 @@ esac
 	t.Run("real_run_force_stable_syncs_marketplace_and_bumps_version", func(t *testing.T) {
 		// Real-run (no --dry-run) stable release with --force and a
 		// marketplace.json. Three behaviors only a real run can prove:
-		//   1. --force tag replacement actually executes the local
-		//      `git tag -d` and remote `git push --delete` (both gated on
-		//      !DryRun) when the tag exists locally and on origin;
-		//   2. the sync-packaging-checksums stage resolves the release
-		//      commit via `git rev-parse v<VERSION>^{}` and rewrites
-		//      .claude-plugin/marketplace.json's source.sha on disk;
-		//   3. the release/bump stage file updates really land: the chart
-		//      gets the release version and VERSION gets the next patch.
-		// git is stubbed (fixture.StubReleaseGit): resolution queries return
-		// the canned main/abc1234, the tag probes report the stale tag at a
-		// fixed commit, and every mutation is a silent no-op — keeping the
-		// captured output deterministic without a real remote or network.
-		// The on-disk file rewrites are asserted directly because they are
+		//   1. --force tag replacement runs the local `git tag -d` and remote
+		//      `git push --delete` when the tag exists locally and on origin;
+		//   2. the checksum-sync stage resolves the release commit and
+		//      rewrites marketplace.json's source.sha on disk;
+		//   3. the bump-stage file updates land: the chart gets the release
+		//      version and VERSION gets the next patch.
+		// git is stubbed so the tag probes report a stale tag and every
+		// mutation is a no-op, keeping output deterministic without a real
+		// remote. The on-disk rewrites are asserted directly because they are
 		// side effects outside the captured streams.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "main")

@@ -10,10 +10,6 @@ interface ResizeHandleProps {
   onMouseDown: (event: React.MouseEvent<HTMLButtonElement>) => void;
 }
 
-// ResizeHandle renders a focusable resize handle as a real button so the
-// jsx-a11y interactive rules are satisfied without an inline disable.
-// The orientation is exposed via data-orientation for styling and for
-// assistive-tech testing hooks; keyboard resizing is a follow-up.
 export function ResizeHandle({
   className,
   orientation,

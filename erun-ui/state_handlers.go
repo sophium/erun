@@ -59,16 +59,9 @@ func (a *App) resolveRuntimeRegistryVersionsForTenant(namespace, tenant string) 
 	return versions
 }
 
-// runtimeRegistryNamespace returns the container-registry namespace where the
-// given environment's runtime image was last published, so the "Version to
-// deploy" picker queries the same place `erun deploy` pushed to instead of the
-// hardcoded default. It mirrors the deploy provenance recorded by
-// PersistRuntimeVersionFromDeploySpecs (issue #363): the env's persisted
-// RuntimeRegistry. When no specific environment is given (the tenant-wide
-// initial state and the Upgrade-all plan) the first env of the tenant that
-// recorded a registry stands in for the tenant. Returns "" when nothing is
-// recorded — a never-deployed env, or one predating the provenance — so the
-// caller falls back to DefaultContainerRegistry. See issue #475.
+// runtimeRegistryNamespace resolves the registry an env's runtime image was
+// last published to, so the version picker offers versions from where
+// `erun deploy` actually pushed rather than the hardcoded default.
 func (a *App) runtimeRegistryNamespace(tenant, environment string) string {
 	tenant = strings.TrimSpace(tenant)
 	if tenant == "" {
@@ -107,20 +100,17 @@ func (a *App) runtimeVersionSuggestions(info eruncommon.BuildInfo, tenant, envir
 		image := strings.TrimRight(strings.TrimSpace(registry), "/") + "/" + tenantImage
 		suggestions = append(suggestions, labelRuntimeVersionSuggestions(tenant, image, eruncommon.RuntimeDeployVersionSuggestions(info, versions))...)
 	}
-	// #501: tenant images are thin wrappers rebuilt from the canonical ERun
-	// image, so the canonical channel-latest is part of the env's real target
-	// universe. Skipped when the tenant image is the canonical image itself.
+	// Tenant images are thin wrappers rebuilt from the canonical ERun image, so
+	// its channel-latest is also a valid deploy target for the env.
 	if tenantImage != eruncommon.DefaultRuntimeImageName {
 		suggestions = append(suggestions, labelRuntimeVersionSuggestions("ERun", eruncommon.DefaultContainerRegistry+"/"+eruncommon.DefaultRuntimeImageName, eruncommon.RuntimeDeployVersionSuggestions(info, a.resolveRuntimeRegistryVersionsForTenant("", "")))...)
 	}
 	return suggestions
 }
 
-// environmentDiscoveryRegistries returns the registries the version picker
-// queries for an environment: the registry the env was last deployed from
-// (provenance, #475) plus every registry in the env's marked list, so an
-// offered version can come from any listed registry and carry its source.
-// Falls back to the canonical registry when nothing is configured.
+// environmentDiscoveryRegistries lists the registries the version picker offers
+// versions from, so a suggestion can come from any registry the env could pull
+// from and carry its source.
 func (a *App) environmentDiscoveryRegistries(tenant, environment string) []string {
 	registries := make([]string, 0, 4)
 	seen := make(map[string]struct{}, 4)
@@ -271,11 +261,9 @@ func listKubernetesContexts() ([]string, error) {
 	return contexts, nil
 }
 
-// wrapKubectlError returns an error whose message includes kubectl's stderr
-// (when available) so the dialog can show the actual reason for the
-// failure — e.g. "stat /Users/x/.kube/config: no such file or directory"
-// or "executable file not found in $PATH" — instead of the bare exit-code
-// message that exec.Cmd.Output() yields by default.
+// wrapKubectlError surfaces kubectl's stderr in the error so the dialog shows
+// the real failure reason instead of the bare "exit status 1" that
+// exec.Cmd.Output() yields by default.
 func wrapKubectlError(err error) error {
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {

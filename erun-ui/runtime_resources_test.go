@@ -39,9 +39,8 @@ func TestRuntimeResourceStatusExcludesCurrentRuntimePodAllocation(t *testing.T) 
 	var runtimePod kubernetesPod
 	runtimePod.Metadata.Namespace = "team-dev"
 	runtimePod.Spec.NodeName = "node-a"
-	// The runtime container is named "erun-devops" (DevopsComponentName) for
-	// every tenant, not the release; tenant "team" here is a non-erun tenant,
-	// so this also guards the matcher against the release-name regression.
+	// The runtime container name is fixed regardless of tenant, so pairing it
+	// with a non-erun tenant guards the matcher against a release-name regression.
 	runtimePod.Spec.Containers = []kubernetesContainer{{Name: "erun-devops"}}
 	runtimePod.Spec.Containers[0].Resources.Limits.CPU = "4"
 	runtimePod.Spec.Containers[0].Resources.Limits.Memory = "8Gi"
@@ -72,9 +71,8 @@ func TestRuntimeResourceStatusKeepsCurrentRuntimeAllocationAsMinimumCapacity(t *
 	var runtimePod kubernetesPod
 	runtimePod.Metadata.Namespace = "team-dev"
 	runtimePod.Spec.NodeName = "node-a"
-	// The runtime container is named "erun-devops" (DevopsComponentName) for
-	// every tenant, not the release; tenant "team" here is a non-erun tenant,
-	// so this also guards the matcher against the release-name regression.
+	// The runtime container name is fixed regardless of tenant, so pairing it
+	// with a non-erun tenant guards the matcher against a release-name regression.
 	runtimePod.Spec.Containers = []kubernetesContainer{{Name: "erun-devops"}}
 	runtimePod.Spec.Containers[0].Resources.Limits.CPU = "4"
 	runtimePod.Spec.Containers[0].Resources.Limits.Memory = "8Gi"

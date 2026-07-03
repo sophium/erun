@@ -8,12 +8,8 @@ import (
 	"time"
 )
 
-// RecoverCloudContextParams carries the inputs the recovery flow
-// cannot derive from the orphan record on its own. The CloudContext
-// alias is required because describe-instances must run under a
-// concrete cloud provider; the region is required for the EC2
-// regional endpoint; admin-token recovery is optional and falls back
-// to ~/.kube/config when left blank.
+// RecoverCloudContextParams carries the inputs the recovery flow cannot
+// derive from the orphan record on its own.
 type RecoverCloudContextParams struct {
 	KubernetesContext  string
 	CloudProviderAlias string
@@ -21,9 +17,8 @@ type RecoverCloudContextParams struct {
 	AdminToken         string
 }
 
-// RecoverCloudContextResult records what the recovery flow saved so
-// the caller can surface the values back to the user (and so MCP
-// callers can inspect them without re-reading the config).
+// RecoverCloudContextResult records what the recovery flow saved so the
+// caller can surface the values back to the user.
 type RecoverCloudContextResult struct {
 	Saved     CloudContextConfig
 	Source    string // "aws-describe-instances"
@@ -62,21 +57,12 @@ type awsDescribeVolumeJSON struct {
 	} `json:"Volumes"`
 }
 
-// RecoverCloudContextFromAWS rebuilds a CloudContextConfig for a
-// missing context name by describing the matching EC2 instance,
-// pulling the EBS volume's size + type, sourcing the bearer token
-// from the supplied params or the local kubeconfig, and saving the
-// result via the supplied store. Returns an error when the instance
-// is missing, terminated, or ambiguous (multiple matches) — the
-// caller surfaces those distinctly so the user can react.
+// RecoverCloudContextFromAWS rebuilds a CloudContextConfig whose local
+// record was lost, from the EC2 instance that still exists in the account.
 //
-// The function intentionally does not call IAM describe-instance-profile
-// to populate InstanceProfileName / RoleName: those are only needed
-// when re-init re-attaches a profile to the instance, and the
-// already-running instance the recovery touches already has them in
-// place. Leaving them blank in the restored config keeps the
-// recovery scope tight while still producing a fully-usable
-// CloudContextConfig for kubectl + start/stop.
+// It deliberately leaves InstanceProfileName / RoleName blank: those matter
+// only when re-init re-attaches a profile, and the recovered instance already
+// has one, so populating them would only widen the recovery's scope.
 func RecoverCloudContextFromAWS(ctx Context, store CloudContextStore, params RecoverCloudContextParams, deps CloudContextDependencies) (RecoverCloudContextResult, error) {
 	params.KubernetesContext = strings.TrimSpace(params.KubernetesContext)
 	params.CloudProviderAlias = strings.TrimSpace(params.CloudProviderAlias)
@@ -102,9 +88,7 @@ func RecoverCloudContextFromAWS(ctx Context, store CloudContextStore, params Rec
 	disk, err := describeCloudContextVolume(ctx, deps, provider, params.Region, instance.volumeID)
 	if err != nil {
 		ctx.Trace("cloud-context recover: volume describe failed: " + err.Error())
-		// Volume detail is best-effort. The caller can still save a
-		// usable context with disk fields empty; treat the failure
-		// as non-fatal trace + continue.
+		// Volume detail is best-effort; a context with empty disk fields is still usable, so the failure is non-fatal.
 	}
 	token, tokenFrom := resolveRecoverAdminToken(params)
 

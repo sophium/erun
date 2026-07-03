@@ -21,10 +21,8 @@ interface RuntimeResourceControlsProps {
   status: UIRuntimeResourceStatus | null;
   loading: boolean;
   disabled?: boolean;
-  // capacityBlocks controls how an unschedulable-but-valid request is shown:
-  // true (the create dialog) treats it as a blocking error; false (the manage
-  // dialog, where Save only persists config) shows it as a non-blocking
-  // warning. Defaults to true to preserve the create flow's stricter behavior.
+  // The create dialog blocks on an over-capacity request; the manage dialog,
+  // where Save only persists config, surfaces it as a non-blocking warning.
   capacityBlocks?: boolean;
   onChange: (value: UIRuntimePodConfig) => void;
 }
@@ -43,9 +41,8 @@ export function RuntimeResourceControls({
   const controlsDisabled = disabled === true || loading || !bounds.available;
   const boundedValue = bounds.available ? clampRuntimePodConfig(value, bounds) : value;
 
-  // Stash the latest onChange, value, and bounds in refs so the clamp effect
-  // can fire on actual primitive changes without listing the parent objects
-  // (which the parent re-creates each render) as deps.
+  // The parent re-creates value and bounds every render, so the clamp effect
+  // keys on primitive changes rather than the object identities.
   const onChangeRef = React.useRef(onChange);
   const valueRef = React.useRef(value);
   const boundsRef = React.useRef(bounds);
@@ -121,10 +118,6 @@ export function RuntimeResourceControls({
   );
 }
 
-// RuntimeResourceMessages renders the validation feedback below the controls: a
-// blocking error always reads destructive; a capacity warning reads destructive
-// when capacityBlocks (the create dialog) or amber otherwise (the manage dialog,
-// where it does not block saving config).
 function RuntimeResourceMessages({
   blockingError,
   capacityWarning,

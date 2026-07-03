@@ -4,11 +4,10 @@ import { LoadEnvironmentConfig } from '../../wailsjs/go/main/App';
 import { environmentTypeIsRemoteWorktree } from './environmentType';
 import type { RootState } from './store';
 
-// autoStartGate decides whether openSelection should let the ERun tab
-// spawn (and therefore let erun open's CloudContextPreflight start EC2).
-// The gate only triggers a Wails round-trip in the cases where the answer
-// is not already known from state.tenants, so the common autoStart=true
-// path stays click-to-spawn with no extra latency.
+// The gate decides whether opening an env may spawn the ERun tab — which is what
+// lets erun open start a stopped EC2 host — so the desktop can prompt before
+// incurring a cloud start. It skips the backend round-trip whenever local state
+// already answers, keeping the common path instant.
 
 export type AutoStartGateVerdict = 'proceed' | 'skip-erun' | 'prompt';
 
@@ -39,19 +38,12 @@ async function wouldClickStartCloudContext(selection: UISelection): Promise<bool
     const status = config.cloudContext?.status ?? '';
     return status !== '' && wouldAutoStartCloudContext(status);
   } catch {
-    // Best-effort: if the env config read fails the gate cannot tell
-    // whether opening would start EC2. Treat as "not starting" so the
-    // normal open path runs and the underlying error surfaces in the
-    // terminal area instead of being swallowed by a silent skip.
+    // On read failure, fall back to the normal open path so the real error
+    // surfaces to the user instead of being hidden behind a silent skip.
     return false;
   }
 }
 
-// wouldAutoStartCloudContext returns true when the linked cloud context is
-// in a state that would cause erun open's CloudContextPreflight to issue an
-// EC2 start. "running" and "starting" already imply a hot or starting host,
-// so the desktop has nothing to prompt about; everything else (stopped,
-// stopping, unknown) is treated as "starting will happen, ask the user".
 function wouldAutoStartCloudContext(status: string): boolean {
   const normalized = status.trim().toLowerCase();
   return normalized !== 'running' && normalized !== 'starting';

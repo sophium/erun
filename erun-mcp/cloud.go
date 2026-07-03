@@ -222,10 +222,9 @@ func cloudSetTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequ
 	}
 }
 
-// cloudDependencies builds the shared cloud dependency bag with the default
-// file-backed secret store wired in, so Cloudflare token operations can persist
-// and read the scoped token. AWS runners default inside erun-common. A missing
-// config dir leaves the store nil; Cloudflare operations then fail clearly.
+// AWS runners default inside erun-common, so only Cloudflare's secret store is
+// wired here; a missing config dir intentionally leaves it nil so Cloudflare
+// operations fail clearly downstream rather than here.
 func cloudDependencies() eruncommon.CloudDependencies {
 	deps := eruncommon.CloudDependencies{}
 	if store, err := eruncommon.DefaultCloudSecretStore(); err == nil {

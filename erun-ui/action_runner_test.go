@@ -8,10 +8,6 @@ import (
 	"time"
 )
 
-// newRunnerTestApp builds the minimum App scaffold the runner needs:
-// activity queue + the per-env queue maps. No background pollers or
-// helm/shell observers — the runner is the only side-effecting thing
-// under test.
 func newRunnerTestApp(t *testing.T) *App {
 	t.Helper()
 	app := &App{
@@ -38,7 +34,7 @@ func TestRunnerSerializesSameEnv(t *testing.T) {
 				sequence = append(sequence, i)
 				mu.Unlock()
 				if i == 0 {
-					<-gate // Hold first action until released so we can prove the others wait.
+					<-gate
 				}
 				return nil
 			},
@@ -48,7 +44,6 @@ func TestRunnerSerializesSameEnv(t *testing.T) {
 		}
 	}
 
-	// Wait for first action to start. It should run, but not finish.
 	if !waitFor(t, 2*time.Second, func() bool {
 		mu.Lock()
 		defer mu.Unlock()

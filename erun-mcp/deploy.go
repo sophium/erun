@@ -9,9 +9,6 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// errMissingDeployVersion is returned when the deploy tool is called without a
-// version. deploy is a pure consume operation: an MCP caller (an orchestrator)
-// must supply the version build/push produced; deploy never mints one.
 var errMissingDeployVersion = errors.New("deploy requires a version: it installs a published version by reference (produced by `build` then `push`) and never builds — set the version input")
 
 type DeployInput struct {
@@ -27,9 +24,6 @@ type DeployInput struct {
 
 func deployTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, DeployInput) (*mcp.CallToolResult, CommandOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input DeployInput) (*mcp.CallToolResult, CommandOutput, error) {
-		// deploy is a pure consume operation; an orchestrator (this caller)
-		// supplies the version build/push produced. MCP receives required input
-		// explicitly and fails clearly when it is missing.
 		if strings.TrimSpace(input.Version) == "" {
 			return nil, CommandOutput{}, errMissingDeployVersion
 		}

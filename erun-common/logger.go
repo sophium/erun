@@ -25,10 +25,9 @@ type Logger struct {
 	verbosity int
 	stdout    io.Writer
 	stderr    io.Writer
-	// traceSink, when set, receives every line the logger could print at
-	// VerbosityTrace — independent of the terminal verbosity and always
-	// uncolored — so the per-env trace log captures the full trace
-	// even for plain invocations (issue #466).
+	// traceSink captures every loggable line regardless of terminal
+	// verbosity, so the per-env trace log stays complete even for plain
+	// invocations that print little or nothing.
 	traceSink io.Writer
 }
 
@@ -47,9 +46,9 @@ func NewLoggerWithWriters(verbosity int, stdout, stderr io.Writer) Logger {
 func (l Logger) Verbosity() int { return l.verbosity }
 
 // WithTraceSink returns a copy of the logger that mirrors every loggable
-// line (at any level, including lines the terminal verbosity suppresses)
-// into w. The sink is write-only telemetry: failures to write are ignored
-// so a full disk or rotated file can never break the command.
+// line into w, including lines terminal verbosity would suppress. Write
+// failures are ignored so a full or rotated trace file can never break the
+// command.
 func (l Logger) WithTraceSink(w io.Writer) Logger {
 	l.traceSink = w
 	return l

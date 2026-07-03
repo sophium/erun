@@ -51,9 +51,8 @@ export function EnvironmentDialogView(): React.ReactElement {
   const tenantRef = React.useRef<HTMLInputElement>(null);
   const environmentRef = React.useRef<HTMLInputElement>(null);
 
-  // tenantRefValue mirrors dialog.tenant via a separate effect so the
-  // focus-on-open effect below stays scoped to dialog.open. Re-running on
-  // every dialog.tenant change would yank focus while the user is typing.
+  // The focus-on-open effect below reads the tenant through this ref so it stays
+  // scoped to dialog.open; adding dialog.tenant to its deps would yank focus while the user types.
   const tenantValueRef = React.useRef(dialog.tenant);
   React.useEffect(() => {
     tenantValueRef.current = dialog.tenant;
@@ -265,9 +264,7 @@ function RuntimePodFields({ dialog }: { dialog: EnvironmentDialog }): React.Reac
 
 function EnvironmentCreateChecks({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
-  // "Initialize without Git checkout" only changes behavior on the
-  // remote-worktree init path (ensureRemoteRepository in
-  // erun-common/init.go); it's a no-op for local-agent. Hide it then.
+  // "Initialize without Git checkout" is a no-op for local-agent envs, so hide it there.
   const isLocalAgent = dialog.envType === 'local-agent';
   return (
     <div className="grid gap-3">
@@ -349,11 +346,8 @@ interface EnvironmentSubmitGate {
   reason: string;
 }
 
-// environmentDialogSubmitGate resolves the create preconditions. The
-// returned reason is rendered next to the disabled submit button to
-// satisfy Nielsen #5 (error prevention) — users see why submit is
-// blocked instead of guessing. Preconditions are checked in order and
-// the first match wins.
+// The returned reason is rendered next to the disabled submit button so users see
+// why submit is blocked instead of guessing (Nielsen #5, error prevention).
 function environmentDialogSubmitGate(dialog: EnvironmentDialog): EnvironmentSubmitGate {
   if (dialog.busy) {
     return { disabled: true, reason: '' };

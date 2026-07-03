@@ -6,12 +6,8 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// TenantQuota mirrors the tenant_quotas table — the per-tenant guardrail row
-// (one row per tenant) carrying the operator-set caps. MaxEnvironments caps how
-// many environments the tenant may register; when no row exists the API applies
-// repository.DefaultMaxEnvironments. tenant_id and the timestamps are owned by
-// the database (tenant_id DEFAULT + RLS bind the row to the caller's tenant; the
-// timestamp trigger populates created_at/updated_at), so they are scan-only.
+// TenantQuota is the per-tenant guardrail row carrying operator-set caps;
+// absent a row, the tenant falls back to the default environment cap.
 type TenantQuota struct {
 	bun.BaseModel   `bun:"table:tenant_quotas,alias:tq"`
 	TenantID        string    `json:"tenantId" bun:"tenant_id,pk,scanonly"`

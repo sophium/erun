@@ -30,52 +30,20 @@ export function rebuildTerminalDisplayBuffer(
   sessions.replaceDisplayBuffer(sessionId, displayBuffer);
 }
 
-// Strip xterm CSI query *responses* that leak into the displayed output.
-// A tool inside the PTY sends a query (e.g. CPR `\x1b[6n`); xterm answers
-// via onData; the answer lands in the PTY's stdin, the shell echoes it
-// as if the user typed it, and the echo comes back through the output
-// stream as visible gibberish like `^[[51;1R`. Stripping the response
-// patterns at the display boundary keeps the visible buffer clean
-// without changing what the tools see. OSC 10/11/12 are not in this
-// list because terminalQueryResponses no longer answers those queries
-// (see the comment in that file).
-//
-// Each DA pattern covers both the full ESC-prefixed response *and* the
-// bare `<n>;<n>c` tail that survives when bash's readline consumes the
-// leading `\x1b[` and `\x1b[?` as an unknown function-key sequence,
-// leaving just the digits + semicolons + trailing `c` echoed to screen
-// as plain text. The tail pattern is anchored on a `c` that is
-// immediately preceded by a digit so legitimate prompt content
-// containing a `c` is not mangled (a bash prompt ending in `git:(main)
-// $` is safe; a string like `2c` after a number is not).
+// Strip terminal query *responses* that leak into the displayed output as
+// gibberish: a tool inside the PTY sends a query (e.g. a cursor-position
+// report), xterm answers on the PTY's stdin, and the shell echoes the answer
+// back through the output stream. Stripping at the display boundary keeps the
+// visible buffer clean without changing what the tools see. The bare-tail
+// variants match what survives when readline eats the leading unprintable
+// prefix and echoes the rest as plain text; tails anchor on a non-alphanumeric
+// boundary so real prompt content (a `c` or `R` after a digit) is not mangled.
 const TERMINAL_RESPONSE_PATTERNS: RegExp[] = [
-  // CSI Cursor Position Report response: ESC [ row ; col R
   /\x1B\[\d+;\d+R/g,
-  // CSI Device Status Report response: ESC [ <n> n  (e.g. 0n)
   /\x1B\[\d+n/g,
-  // Primary Device Attributes / Secondary Device Attributes responses
-  // (CSI ? <params> c, CSI > <params> c, CSI <params> c)
   /\x1B\[[?>]?[\d;]+c/g,
-  // Bare DA tail (`1;2c`, `0;276;0c`, …) — the digit/semicolon prefix
-  // that survives readline stripping the unprintable `\x1b[?`. Required
-  // because the prefix-stripped tail no longer matches the patterns
-  // above; without this the user sees the literal text at the prompt
-  // even when terminalQueryResponses no longer answers the query.
   /(?:^|[^A-Za-z0-9])\d+(?:;\d+)+c(?![A-Za-z0-9])/g,
-  // Bare CPR tail run (`1;64R`, `1;64R1;69R1;1R`, …) — same readline
-  // stripping, for cursor-position reports that landed on a shell prompt.
-  // terminalQueryResponses no longer answers queries re-parsed from a
-  // replayed buffer (#484), so this is a backstop that cleans buffers
-  // already polluted before that fix. Echoed reports concatenate (each
-  // report is typed input, so the next lands right after it), hence the
-  // run grouping; the anchoring mirrors the DA tail above.
   /(?:^|[^A-Za-z0-9])(?:\d+(?:;\d+)+R)+(?![A-Za-z0-9])/g,
-  // DECRQSS status-string response: DCS [01] $ r <payload> ST
-  // (e.g. `\x1bP1$r0"q\x1b\\`). terminalQueryResponses no longer answers
-  // DECRQSS, so this is a backstop for a response that reaches the buffer
-  // another way (a pre-fix replayed buffer, or a tool that answers its own
-  // probe). The `(?:\x1bP)?` makes it also catch the bare `1$r0"q␛\` tail
-  // bash leaves after readline eats the leading `\x1bP`.
   /(?:\x1BP)?[01]\$r[^\x1B]*\x1B\\/g,
 ];
 
@@ -92,15 +60,12 @@ function stripTerminalResponses(input: Uint8Array): Uint8Array {
   return new TextEncoder().encode(cleaned);
 }
 
-// Track DECTCEM (cursor visibility, `?25`) and alternate-screen
-// (`?47` / `?1047` / `?1049`) state across written bytes. The desktop
-// terminal is meant for shell interaction; a stuck `?25l` outside the
-// alt-screen (e.g. an unmatched hide leaked by a spinner inside
-// `erun open`, helm, kubectl, git over SSH, or the deploy pipeline)
-// surfaces as a missing cursor at the bash prompt. The replay path
-// uses scanCursorVisibility to detect that state and append a
-// well-formed `?25h` so the user sees a cursor again; live TUIs are
-// untouched because they sit inside the alternate screen.
+// A spinner inside a subprocess (helm, kubectl, git over SSH, the deploy
+// pipeline) can leak an unmatched cursor-hide outside the alternate screen,
+// leaving the bash prompt with no visible cursor. The replay path tracks
+// cursor-visibility and alt-screen state so it can re-emit a cursor-show at
+// the prompt while leaving live TUIs (which sit in the alternate screen)
+// untouched.
 export interface CursorVisibilityState {
   altScreen: boolean;
   cursorHidden: boolean;

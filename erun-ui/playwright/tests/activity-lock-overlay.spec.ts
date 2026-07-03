@@ -2,20 +2,10 @@ import { test, expect } from '../fixtures/erunApp.js';
 import type { Page, Request } from '@playwright/test';
 import type { AppShell } from '../pages/index.js';
 
-// Issue #713 — the deploy-progress overlay (ActivityLockOverlay) is anchored to
-// the top-right of the terminal pane. The pane used to carry a hard 360px
-// grid-column minimum, so when the pane's available width dropped below that
-// (wide sidebar and/or narrow window) the pane overflowed its overflow-hidden
-// parent and dragged the right-anchored overlay off-screen — its text was cut
-// off at the window edge. The fix lets the terminal column track the visible
-// width (minmax(0,1fr)) so the pane never overflows, and caps the overlay to the
-// pane so it shrinks instead of clipping. This spec starves the pane below the
-// old floor and asserts the overlay stays fully inside the viewport.
-//
-// The overlay renders over the active terminal session while a deploy locks it;
-// the lock is staged by injecting the `activity:lock` event the Go side emits
-// (same EventsEmit seam terminal-scroll-on-resize.spec.ts uses), so no cluster
-// or real deploy is needed.
+// The top-right-anchored ActivityLockOverlay used to be dragged off-screen and
+// clipped when the terminal pane was starved of width (wide sidebar and/or
+// narrow window). This spec reproduces that starvation and asserts the overlay
+// stays fully inside the viewport.
 test.describe('deploy-progress overlay stays on-screen (#713)', () => {
   test('the activity-lock overlay is not clipped when the terminal pane is starved', async ({
     app,
@@ -23,8 +13,8 @@ test.describe('deploy-progress overlay stays on-screen (#713)', () => {
     seededEnv,
   }) => {
     await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
-    // The ERun tab is the env's default terminal; make sure it is the active
-    // session the overlay will render over.
+    // The overlay renders over whichever terminal session is active, so pin the
+    // ERun tab (the env default) active first.
     const erunTab = page.getByRole('tab', { name: 'ERun', exact: true });
     await erunTab.waitFor({ state: 'visible', timeout: 15_000 });
     await erunTab.click();
@@ -36,15 +26,12 @@ test.describe('deploy-progress overlay stays on-screen (#713)', () => {
     // 360px column minimum needed ~708px of width, so 640px forced the overflow.
     await page.setViewportSize({ width: 640, height: 900 });
 
-    // Stage an in-flight deploy lock for the active session — this renders the
-    // overlay (Reason + deployTarget mirror what lockTerminalsForActivity emits).
     await emitActivityLock(page, sessionId);
 
     const overlay = page.getByRole('status').filter({ hasText: 'frs/prod 1.0.106' });
     await expect(overlay).toBeVisible();
     await expect(overlay).toContainText('Waiting for deploy to complete');
 
-    // The overlay must sit fully within the viewport — no right-edge clip.
     const viewportWidth = page.viewportSize()?.width ?? 0;
     const box = await overlay.boundingBox();
     expect(box).not.toBeNull();
@@ -71,8 +58,6 @@ interface InvokeCall {
   args: unknown[];
 }
 
-// parseInvoke decodes a /__erun_invoke POST body into {method, args}, or null
-// when the request is not an invoke (or carries no JSON body).
 function parseInvoke(req: Request): InvokeCall | null {
   if (req.method() !== 'POST' || !req.url().endsWith('/__erun_invoke')) {
     return null;
@@ -86,9 +71,8 @@ function parseInvoke(req: Request): InvokeCall | null {
   return body?.method ? { method: body.method, args: body.args ?? [] } : null;
 }
 
-// discoverSelectedSessionId finds the session the terminal is rendering by
-// provoking a resize (sidebar toggle) and sniffing the ResizeSession invoke,
-// then restores the sidebar. 0 means no session is selected.
+// The selected session id isn't exposed to the frontend, so provoke a resize
+// (sidebar toggle) and sniff it off the ResizeSession invoke.
 async function discoverSelectedSessionId(app: AppShell, page: Page): Promise<number> {
   const waitForResize = page
     .waitForRequest((req) => parseInvoke(req)?.method === 'ResizeSession')
@@ -100,8 +84,8 @@ async function discoverSelectedSessionId(app: AppShell, page: Page): Promise<num
   return typeof id === 'number' ? id : 0;
 }
 
-// emitActivityLock stages an in-flight deploy lock for sessionId, mirroring the
-// activity:lock event lockTerminalsForActivity emits on the Go side.
+// Mirrors the activity:lock event the Go-side lockTerminalsForActivity emits;
+// keep the staged payload in sync with that emitter.
 async function emitActivityLock(page: Page, sessionId: number): Promise<void> {
   await page.evaluate((sid) => {
     const runtime = (

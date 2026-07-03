@@ -18,11 +18,9 @@ type terminalSession interface {
 	io.ReadWriteCloser
 	Resize(cols, rows int) error
 	Wait() error
-	// Pid returns the OS process id of the underlying shell when one is
-	// known, or 0 when the implementation does not back the session
-	// with a real process. The stale-shell detector consults this to
-	// decide whether a session whose Wait hasn't returned is still
-	// alive.
+	// Pid returns 0 when no real process backs the session; the stale-shell
+	// detector uses it to decide whether a session whose Wait hasn't returned
+	// is still alive.
 	Pid() int
 }
 
@@ -37,13 +35,10 @@ type startTerminalSessionParams struct {
 }
 
 func resolveCLIExecutable() string {
-	// ERUN_APP_CLI is a deliberate test seam (mirrors ERUN_HOST_OS_OVERRIDE /
-	// ERUN_FORCE_TTY): when set, the desktop runs exactly this `erun` and skips
-	// the build-relative + PATH resolution below. The Playwright harness points
-	// it at its inert `erun` stub so the ERun/AI tabs run the stub regardless of
-	// whether a real erun-cli/bin/erun build artifact happens to sit next to the
-	// app binary — otherwise that artifact is resolved here, the real `erun open`
-	// hits the stubbed cluster, and the env-open specs loop red (#525).
+	// ERUN_APP_CLI is a test seam: the Playwright harness points it at an inert
+	// `erun` stub so the ERun/AI tabs never resolve a real build artifact sitting
+	// next to the app binary and drive `erun open` against the stubbed cluster,
+	// which would loop the env-open specs red.
 	if override := strings.TrimSpace(os.Getenv("ERUN_APP_CLI")); override != "" {
 		return override
 	}
@@ -106,13 +101,10 @@ func buildOpenArgs(tenant, environment string) []string {
 	return []string{"open", strings.TrimSpace(tenant), strings.TrimSpace(environment)}
 }
 
-// withAppSession appends the desktop persistent-session flags to an `erun open`
-// argv so the remote shell runs as a reattachable dtach session: closing or
-// reopening the tab (or a transient kubectl-exec drop) reconnects to the running
-// shell instead of spawning a parallel one, and the AI tab's claude keeps
-// working in the pod meanwhile. sessionID is stable per (tab kind, slot) so the
-// reattach lands on the same session; the AI/contribute launch now happens
-// pod-side (no typed prelude). See issue #478.
+// withAppSession makes the `erun open` a reattachable dtach session so closing
+// or reopening a tab (or a transient kubectl-exec drop) reconnects to the running
+// shell instead of spawning a parallel one, and the AI tab's work keeps running
+// in the pod meanwhile.
 func withAppSession(args []string, sessionID string, ai, contribute bool) []string {
 	args = append(args, "--app-session", sessionID)
 	if contribute {
@@ -237,12 +229,10 @@ func ensureMCPViaOpenCommand(ctx context.Context, cliPath string, result eruncom
 	return fmt.Errorf("activate MCP port-forward: %w: %s", err, detail)
 }
 
-// runOpenForReconnect runs the same `erun open --no-shell --no-alias-prompt`
-// child process as ensureMCPViaOpenCommand, but streams stdout/stderr lines
-// via onLine so the desktop UI can show progress while the open (and any
-// runtime deploy it triggers) is in flight. The trailing buffered output is
-// included verbatim in the returned error so the user still sees the
-// actionable detail when the command exits non-zero.
+// runOpenForReconnect streams the `erun open` child's output through onLine so
+// the desktop shows progress while a possibly-slow open (which may trigger a
+// runtime deploy) is in flight, and folds the trailing stderr into the returned
+// error so the user still sees the actionable detail on failure.
 func runOpenForReconnect(ctx context.Context, cliPath string, result eruncommon.OpenResult, onLine func(string)) error {
 	args := buildOpenNoShellArgs(result.Tenant, result.Environment)
 	cmd := exec.CommandContext(ctx, cliPath, args...)
@@ -277,12 +267,6 @@ func runOpenForReconnect(ctx context.Context, cliPath string, result eruncommon.
 	return nil
 }
 
-// scanReconnectOutput streams one of runOpenForReconnect's child-process pipes
-// line by line: it forwards non-blank lines to onLine and, when captureErr is
-// set, accumulates every line into lastErr (newline-joined) so the trailing
-// stderr can be folded into the returned error. Extracted from the inline
-// closure so runOpenForReconnect stays under the cyclomatic limit; the
-// per-line behavior is unchanged.
 func scanReconnectOutput(reader io.Reader, captureErr bool, onLine func(string), lastErr *strings.Builder) {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -342,10 +326,6 @@ func buildInitArgs(selection uiSelection) []string {
 	return args
 }
 
-// appendInitOptionalFlags appends the optional `--flag value` pairs that
-// buildInitArgs threads through, in their established order, skipping any whose
-// trimmed value is empty. Extracted so buildInitArgs stays under the cyclomatic
-// limit; the produced argument order and spellings are unchanged.
 func appendInitOptionalFlags(args []string, selection uiSelection) []string {
 	for _, pair := range []struct{ flag, value string }{
 		{"--version", strings.TrimSpace(selection.Version)},
@@ -379,11 +359,10 @@ func buildDeployArgs(selection uiSelection) []string {
 	return args
 }
 
-// appendDeployComponentsFlag threads the operator's explicit component selection
-// (the Runtime tab's "Components to deploy" checklist) into the pure deploy
-// primitive as `--components a,b,c`. The desktop composes primitives and threads
-// the exact selection — it never uses a convenience switch (erun-ui/AGENTS.md).
-// An empty selection appends nothing, so deploy resolves the env's saved default.
+// appendDeployComponentsFlag threads the operator's exact component selection
+// into the pure deploy primitive rather than reaching for a convenience switch
+// (erun-ui/AGENTS.md); an empty selection appends nothing so deploy falls back to
+// the env's saved default.
 func appendDeployComponentsFlag(args []string, selection uiSelection) []string {
 	names := make([]string, 0, len(selection.Components))
 	for _, raw := range selection.Components {
@@ -397,14 +376,10 @@ func appendDeployComponentsFlag(args []string, selection uiSelection) []string {
 	return append(args, "--components", strings.Join(names, ","))
 }
 
-// deployRuntimeImageOverride returns the picked runtime image to pass as
-// `deploy --runtime-image` (#697), or "" to leave the deploy on the env's own
-// runtime chart. The version picker offers two families: the env's own tenant
-// image (<tenant>-devops) and the canonical ERun base image (erun-devops). A
-// pick of the env's own image deploys the env's own chart as before; only a
-// different image (the ERun base, or any external image) is an override that
-// deploy must install via the published runtime chart, so the operator can
-// bootstrap the env on the canonical image before its own image exists.
+// deployRuntimeImageOverride returns the runtime image to force via
+// `deploy --runtime-image`, or "" when the pick is the env's own image and needs
+// no override. An override lets an operator bootstrap a new env on the shared
+// ERun base image before the tenant's own <tenant>-devops image exists.
 func deployRuntimeImageOverride(selection uiSelection) string {
 	image := strings.TrimSpace(selection.RuntimeImage)
 	if image == "" {
@@ -423,11 +398,9 @@ func deployRuntimeImageOverride(selection uiSelection) string {
 	return image
 }
 
-// buildUpgradeArgs builds the per-environment `erun upgrade` invocation:
-// scoped to the selection's tenant + environment so each Upgrade-all member
-// upgrades in its own env, in parallel with the others (issue #497). A
-// selection Version pins the exact target — used when the operator picked one
-// of several newer versions an env's registries offered (issue #527).
+// buildUpgradeArgs scopes `erun upgrade` to one env so the Upgrade-all flow can
+// upgrade each member in parallel; a selection Version pins the exact target the
+// operator picked from the versions an env's registries offered.
 func buildUpgradeArgs(selection uiSelection) []string {
 	args := []string{"upgrade", "--tenant", selection.Tenant, "--environment", selection.Environment}
 	if version := strings.TrimSpace(selection.Version); version != "" {
@@ -494,22 +467,14 @@ func resolveLocalShellCommand(goos string) (string, []string) {
 	}
 }
 
-// claudeEffortLevels enumerates the selectable Claude effort levels, in
-// ascending order. The first five mirror `claude --effort` from
-// `claude --help`; ultracode sits above max as "everything on" (xhigh effort
-// plus standing workflow orchestration, launched via --settings — see
-// erun-common/ai_launch.go, which owns the launch command). Must stay in
-// lockstep with erun-common's claudeEffortLevels and the frontend fallback in
-// state.ts.
+// claudeEffortLevels enumerates the selectable Claude effort levels in ascending
+// order. The first five mirror `claude --effort`; ultracode sits above max as
+// "everything on". Must stay in lockstep with erun-common's claudeEffortLevels
+// and the frontend fallback in state.ts.
 var claudeEffortLevels = []string{"low", "medium", "high", "xhigh", "max", "ultracode"}
 
-// defaultClaudeEffort is the effort level the desktop applies to a Claude AI
-// tab when the env has no explicit Effort configured, or has an invalid one
-// (issues #469/#491). Ultracode is the default: everything on.
 const defaultClaudeEffort = "ultracode"
 
-// claudeEffortLevelOptions returns the valid effort levels for transport to the
-// frontend selector.
 func claudeEffortLevelOptions() []string {
 	out := make([]string, len(claudeEffortLevels))
 	copy(out, claudeEffortLevels)

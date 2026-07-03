@@ -46,9 +46,8 @@ type CommandOutput struct {
 	Stdout           string                  `json:"stdout,omitempty"`
 	Stderr           string                  `json:"stderr,omitempty"`
 	RootConfig       *DoctorRootConfigReport `json:"rootConfig,omitempty"`
-	// Build carries the minted version and per-image tags from the `build`
-	// tool, so an Agent can capture the version and thread it into `push` /
-	// `deploy` (erun-mcp/AGENTS.md — MCP composes the pure primitives itself).
+	// Build lets an Agent capture the minted version and thread it into `push`
+	// / `deploy`, since MCP composes the pure primitives itself.
 	Build *eruncommon.BuildResult `json:"build,omitempty"`
 }
 
@@ -147,12 +146,10 @@ func runRuntimeCommand(runtime RuntimeConfig, preview bool, verbosity int, run f
 	traceOutput := new(bytes.Buffer)
 	ctx := runtimeCallContext(preview, verbosity, nil, traceOutput, traceOutput)
 	ctx.KubernetesContextPreflight = eruncommon.CloudContextPreflight(runtime.Store, eruncommon.CloudContextDependencies{})
-	// Per-env trace capture (issues #466/#508): every action-tool invocation
-	// appends its full trace to the pod-side ~/.erun/<tenant>/<env>/trace.log
-	// — the same contract the CLI honors, so the desktop's Diagnostics
-	// console shows agent-driven operations too. Always on; read-only tools
-	// (idle, raw, list, version) bypass runRuntimeCommand and are not
-	// captured, so probe polls cannot flood the log.
+	// Surfaces agent-driven operations in the desktop's Diagnostics console,
+	// matching the CLI's trace contract. Read-only tools (idle, raw, list,
+	// version) deliberately bypass runRuntimeCommand so probe polls cannot
+	// flood the trace log.
 	ctx, closeEnvTrace := eruncommon.ActivateEnvTrace(ctx, runtime.Context.Tenant, runtime.Context.Environment)
 	defer closeEnvTrace()
 

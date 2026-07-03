@@ -8,8 +8,6 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// newTestAppForActivityQueue builds a minimal App with an in-memory queue
-// and no background pollers.
 func newTestAppForActivityQueue(t *testing.T) *App {
 	t.Helper()
 	app := &App{
@@ -55,11 +53,9 @@ func TestLockTerminalsForActivityLocksMatchingSessions(t *testing.T) {
 	}
 }
 
-// TestLockTerminalsForActivityClearsEnvNotifications locks the #713 fix: when a
-// deploy starts locking an env's terminals, any env-scoped warning that told the
-// operator to act (the runtime-unreachable banner, or a prior deploy-failed
-// error) is now being acted on, so an env-wide app-notification-clear fires
-// (empty source = clear any env-scoped notification for the env).
+// TestLockTerminalsForActivityClearsEnvNotifications: starting a deploy is the
+// operator acting on any outstanding env-scoped warning (runtime-unreachable,
+// prior deploy-failed), so locking that env's terminals clears its notifications.
 func TestLockTerminalsForActivityClearsEnvNotifications(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	emits := newCapturedEmits()
@@ -90,11 +86,9 @@ func TestLockTerminalsForActivityClearsEnvNotifications(t *testing.T) {
 	}
 }
 
-// TestDeployFailedTraceSurfacesToToolbar locks the #713 fix: a `==> Deploy
-// failed tenant/env: reason` trace (emitted by `erun deploy` on any failure,
-// including a pre-rollout spec-resolution failure) surfaces the failure in the
-// toolbar — an env-tagged error notification plus a failed sidebar status — so a
-// failed deploy is not silent.
+// TestDeployFailedTraceSurfacesToToolbar: a `==> Deploy failed` trace (emitted on
+// any deploy failure, including a pre-rollout spec-resolution failure) must
+// surface in the toolbar so a failed deploy is never silent.
 func TestDeployFailedTraceSurfacesToToolbar(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	emits := newCapturedEmits()
@@ -125,9 +119,9 @@ func TestDeployFailedTraceSurfacesToToolbar(t *testing.T) {
 	}
 }
 
-// TestLockTerminalsForActivityWithoutMatchClearsNothing guards the gate: a
-// deploy that locks no local sessions (nothing to act on for this desktop) must
-// not fire a stray notification-clear (issue #713).
+// TestLockTerminalsForActivityWithoutMatchClearsNothing: a deploy that locks no
+// local sessions has nothing to act on, so it must not fire a stray
+// notification-clear.
 func TestLockTerminalsForActivityWithoutMatchClearsNothing(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	emits := newCapturedEmits()
@@ -148,13 +142,9 @@ func TestLockTerminalsForActivityWithoutMatchClearsNothing(t *testing.T) {
 	}
 }
 
-// TestLockTerminalEventsAlwaysCarryReason pins the contract documented in
-// erun-ui/AGENTS.md "Professional UX": the ActivityLockOverlay relies on
-// the backend always populating Reason on Locked=true events. The
-// frontend no longer carries a generic fallback string, so a missing
-// reason would render a blank overlay header. This test guards both
-// emit paths (lockTerminalsForActivity bulk + lockTerminalForActivity
-// per-session).
+// TestLockTerminalEventsAlwaysCarryReason: the ActivityLockOverlay carries no
+// fallback string, so every Locked=true event must populate Reason or the
+// overlay header renders blank.
 func TestLockTerminalEventsAlwaysCarryReason(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	selection := uiSelection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
@@ -251,9 +241,9 @@ func TestActivityTraceLineHandlerFinalizesOnDeployedAndFailed(t *testing.T) {
 }
 
 func TestActivityTraceLineHandlerFinalizesOnReleaseNamedFailure(t *testing.T) {
-	// #559 changed the failure line to "==> Deploy of <rel> failed after
-	// <elapsed>"; the desktop matcher must still finalize the entry as
-	// failed. The matcher was silently broken between #559 and #531.
+	// This matcher is coupled to the runtime CLI's failure-line wording; a
+	// wording change silently stops finalizing the entry unless the matcher is
+	// updated with it.
 	app := newTestAppForActivityQueue(t)
 	selection := uiSelection{Tenant: "team", Environment: "dev"}
 	app.activityQueue.start(activityQueueEntry{Command: "deploy", Tenant: "team", Environment: "dev"})
@@ -267,7 +257,7 @@ func TestActivityTraceLineHandlerFinalizesOnReleaseNamedFailure(t *testing.T) {
 }
 
 func TestSessionReadyFailedMatchesReleaseNamedFailure(t *testing.T) {
-	// The session-ready gate matcher must track the same #559 wording so a
+	// The session-ready gate matcher must track the same wording so a
 	// failed deploy still releases the action runner.
 	if !sessionReadyFailedRe.MatchString("==> Deploy of team-devops failed after 2m0s") {
 		t.Fatal("sessionReadyFailedRe must match the release-named failure line")
@@ -278,10 +268,8 @@ func TestSessionReadyFailedMatchesReleaseNamedFailure(t *testing.T) {
 }
 
 func TestActivityTraceLineHandlerLabelsComponentDeployByRelease(t *testing.T) {
-	// A non-runtime component names the release after a ` · ` separator
-	// ("erun/local · erun-backend-postgres 18.3"). The entry must be labeled
-	// by component so the drawer does not read like a full-env redeploy, and
-	// the version is the component's own (#531).
+	// A component deploy must be labeled by its own release and version so the
+	// drawer does not read like a full-env redeploy.
 	app := newTestAppForActivityQueue(t)
 	selection := uiSelection{Tenant: "erun", Environment: "local"}
 	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
@@ -302,9 +290,6 @@ func TestActivityTraceLineHandlerLabelsComponentDeployByRelease(t *testing.T) {
 }
 
 func TestActivityTraceLineHandlerRuntimeDeployFallsBackToRuntimeRelease(t *testing.T) {
-	// The runtime chart's ==> Deploying line carries no release token; the
-	// entry falls back to the runtime release name and is not
-	// component-labeled (the runtime line shape is unchanged by #531).
 	app := newTestAppForActivityQueue(t)
 	selection := uiSelection{Tenant: "erun", Environment: "local"}
 	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
@@ -325,13 +310,10 @@ func TestActivityTraceLineHandlerRuntimeDeployFallsBackToRuntimeRelease(t *testi
 }
 
 func TestActivityTraceLineHandlerFinalizesUsingTenantEnvFromLine(t *testing.T) {
-	// Regression: the trace handler used to look up the active deploy
-	// entry by the *session selection's* tenant/env when ==> Deployed
-	// arrived. If the trace appeared in a tab whose selection was empty
-	// (a generic Local shell where the user invoked `erun open foo bar`
-	// manually), the lookup failed and the entry stayed running forever.
-	// The fix parses tenant/env directly out of the ==> Deployed line so
-	// finalization works regardless of which tab observed it.
+	// Regression: an entry stayed running forever when `==> Deployed` landed in
+	// a selection-less tab (a generic Local shell running `erun open ...` by
+	// hand). Finalization must key off tenant/env parsed from the line, not the
+	// session selection.
 	app := newTestAppForActivityQueue(t)
 	app.activityQueue.start(activityQueueEntry{
 		Command:     "deploy",
@@ -353,10 +335,9 @@ func TestActivityTraceLineHandlerFinalizesUsingTenantEnvFromLine(t *testing.T) {
 }
 
 func TestActivityTraceLineHandlerFinalizesSkippingFromLine(t *testing.T) {
-	// `==> Skipping <tenant>/<env> ...` is the dedup-skip outcome from
-	// the deploy singleflight. Same finalization shape as ==> Deployed:
-	// parse tenant/env from the line so a tab with no selection still
-	// closes out the queue entry.
+	// `==> Skipping` is the deploy singleflight's dedup-skip outcome; like
+	// `==> Deployed`, it must finalize from tenant/env parsed off the line so a
+	// selection-less tab still closes the entry.
 	app := newTestAppForActivityQueue(t)
 	app.activityQueue.start(activityQueueEntry{
 		Command:     "deploy",
@@ -373,11 +354,9 @@ func TestActivityTraceLineHandlerFinalizesSkippingFromLine(t *testing.T) {
 }
 
 func TestActivityTraceLineHandlerStartsAndFinishesBuild(t *testing.T) {
-	// `erun build` umbrella traces don't carry tenant/env (build has no
-	// deploy target), so the handler must key off the session selection.
-	// Without this wiring the sidebar shows no busy spinner during a
-	// build that the user explicitly invoked in a tenant/env-bound
-	// terminal — that gap is the regression this scenario locks down.
+	// `erun build` traces carry no tenant/env (build has no deploy target), so
+	// the handler keys off the session selection — otherwise the sidebar shows
+	// no busy spinner for a build the user kicked off in a bound terminal.
 	app := newTestAppForActivityQueue(t)
 	selection := uiSelection{Tenant: "erun", Environment: "local"}
 	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
@@ -432,10 +411,9 @@ func TestActivityTraceLineHandlerSkipsBuildWithoutSelection(t *testing.T) {
 }
 
 func TestStartCommandFromTraceDoesNotLockTerminal(t *testing.T) {
-	// Build/release/push run IN the user's terminal, so locking the
-	// session would freeze the very tab they are reading output in.
-	// Verify the path skips the lock that deploy uses to prevent
-	// concurrent helm runs, for every command keyed off the selection.
+	// Build/release/push run IN the user's terminal, so locking the session
+	// would freeze the very tab they are reading output in — unlike deploy, they
+	// must not take the concurrency lock.
 	for _, command := range []string{"build", "release", "push"} {
 		app := newTestAppForActivityQueue(t)
 		selection := uiSelection{Tenant: "erun", Environment: "local"}
@@ -449,11 +427,9 @@ func TestStartCommandFromTraceDoesNotLockTerminal(t *testing.T) {
 }
 
 func TestActivityTraceLineHandlerStartsAndFinishesRelease(t *testing.T) {
-	// `erun release` (standalone) emits `==> Releasing`/`==> Released`
-	// with no tenant/env, so the handler keys the activity off the
-	// session selection — the same contract as build. Without this the
-	// sidebar shows no spinner while a release the user kicked off in a
-	// tenant/env-bound terminal runs.
+	// `erun release` traces carry no tenant/env (same as build), so the handler
+	// keys off the session selection — otherwise no spinner while a release runs
+	// in a bound terminal.
 	app := newTestAppForActivityQueue(t)
 	selection := uiSelection{Tenant: "erun", Environment: "local"}
 	handler := newActivityTraceLineHandler(app, selection, sessionKindOpen)
@@ -495,8 +471,6 @@ func TestActivityTraceLineHandlerFinalizesReleaseOnFailure(t *testing.T) {
 }
 
 func TestActivityTraceLineHandlerStartsAndFinishesPush(t *testing.T) {
-	// `erun push` (standalone) emits `==> Pushing`/`==> Pushed`, keyed
-	// off the session selection like build/release.
 	app := newTestAppForActivityQueue(t)
 	selection := uiSelection{Tenant: "erun", Environment: "local"}
 	handler := newActivityTraceLineHandler(app, selection, sessionKindOpen)
@@ -534,14 +508,10 @@ func TestActivityTraceLineHandlerFinalizesPushOnFailure(t *testing.T) {
 }
 
 func TestResolveActivityKubeContextFallsBackToEnvConfig(t *testing.T) {
-	// startDeployFromTrace registers entries with a kube context drawn
-	// first from the session selection, falling back to the env config
-	// on file. Without this fallback, generic Local tabs (selection
-	// empty) emit entries with an empty KubernetesContext, and the
-	// container-status poller's kubectl invocation hits whatever the
-	// host's `current-context` happens to be — orbstack on a developer
-	// machine — instead of the env's real cluster, so the deploy card
-	// renders without container pills.
+	// Without the env-config fallback, a selection-less Local tab emits an empty
+	// KubernetesContext and the container-status poller's kubectl hits the host's
+	// `current-context` (orbstack on a dev machine), not the env's cluster — so
+	// the deploy card renders with no container pills.
 	app := newTestAppForActivityQueue(t)
 	app.deps.store = stubUIStore{
 		envs: map[string]eruncommon.EnvConfig{
@@ -583,12 +553,10 @@ func TestActivityTraceLineHandlerRegistersForAllSessionKinds(t *testing.T) {
 	}
 }
 
-// TestApplyHelmReleaseSnapshotIgnoresStaleVersionOnDeployed guards the
-// race the user observed: at deploy start the previous release still
-// shows status="deployed" for a brief window before helm flips it to
-// pending-upgrade. The helm poller must not finalize on that stale
-// snapshot — its AppVersion is still the prior deploy's, not the
-// version this entry is rolling out.
+// TestApplyHelmReleaseSnapshotIgnoresStaleVersionOnDeployed guards a race: at
+// deploy start the previous release still reads status="deployed" (with the
+// prior AppVersion) before helm flips it to pending-upgrade, so the poller must
+// not finalize on that stale snapshot.
 func TestApplyHelmReleaseSnapshotIgnoresStaleVersionOnDeployed(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	app.activityQueue.start(activityQueueEntry{
@@ -618,12 +586,10 @@ func TestApplyHelmReleaseSnapshotIgnoresStaleVersionOnDeployed(t *testing.T) {
 	}
 }
 
-// TestApplyHelmReleaseSnapshotIgnoresStaleTimestampOnDeployed covers
-// the same-version redeploy case (common in snapshot workflows):
-// AppVersion alone cannot distinguish the prior "deployed" snapshot
-// from the new one when both carry the identical version string.
-// The Updated freshness check rejects snapshots whose Updated is
-// older than entry.StartedAt by more than the skew tolerance.
+// TestApplyHelmReleaseSnapshotIgnoresStaleTimestampOnDeployed covers same-version
+// redeploys (common in snapshot workflows): AppVersion alone can't tell the prior
+// "deployed" snapshot from the new one, so the Updated freshness check must
+// reject snapshots older than the entry's start.
 func TestApplyHelmReleaseSnapshotIgnoresStaleTimestampOnDeployed(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	now := time.Now()
@@ -656,9 +622,8 @@ func TestApplyHelmReleaseSnapshotIgnoresStaleTimestampOnDeployed(t *testing.T) {
 	}
 }
 
-// TestApplyHelmReleaseSnapshotFinalizesOnFreshDeployedMatch verifies
-// the happy path: AppVersion matches the entry's Version and Updated
-// is fresh, so the snapshot describes the entry's own deploy.
+// TestApplyHelmReleaseSnapshotFinalizesOnFreshDeployedMatch verifies the happy
+// path: a fresh snapshot whose AppVersion matches the entry finalizes it.
 func TestApplyHelmReleaseSnapshotFinalizesOnFreshDeployedMatch(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	app.activityQueue.start(activityQueueEntry{
@@ -688,11 +653,10 @@ func TestApplyHelmReleaseSnapshotFinalizesOnFreshDeployedMatch(t *testing.T) {
 	}
 }
 
-// TestApplyHelmReleaseSnapshotFinalizesOnFailedRegardlessOfVersion
-// pins the failure path: the gating only applies to "deployed". A
-// "failed" status must still finalize even when AppVersion doesn't
-// match — if the PTY dies mid-deploy the trace handler can't fire
-// `==> Deploy failed`, and we don't want entries stuck running.
+// TestApplyHelmReleaseSnapshotFinalizesOnFailedRegardlessOfVersion: the version
+// gate applies only to "deployed" — a "failed" status finalizes even on a
+// version mismatch, so a PTY that dies before the `==> Deploy failed` trace
+// can't leave the entry stuck running.
 func TestApplyHelmReleaseSnapshotFinalizesOnFailedRegardlessOfVersion(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	app.activityQueue.start(activityQueueEntry{
@@ -744,11 +708,9 @@ func TestParseHelmUpdatedAcceptsHelmFormats(t *testing.T) {
 	}
 }
 
-// TestHelmListArgsAvoidsDeprecatedAllFlag pins the arguments we pass to
-// `helm list`. helm v4 removed the `--all` umbrella flag; if it slips
-// back in, every poll errors out, the whole reconcile channel goes
-// silent, and entries get stuck running in the activity panel without
-// any visible failure mode.
+// TestHelmListArgsAvoidsDeprecatedAllFlag: helm v4 removed the `--all` flag — if
+// it slips back in, every poll errors, the reconcile channel goes silent, and
+// entries stick at running with no visible failure mode.
 func TestHelmListArgsAvoidsDeprecatedAllFlag(t *testing.T) {
 	args := helmListTenantDevopsArgs("erun")
 	for _, a := range args {
@@ -788,8 +750,6 @@ func containsPair(args []string, flag, value string) bool {
 	return false
 }
 
-// helmUpdatedNow returns the current time formatted in helm's default
-// `helm list -o json` Updated layout, for use in test snapshots.
 func helmUpdatedNow(t *testing.T) string {
 	t.Helper()
 	return time.Now().Format("2006-01-02 15:04:05.999999999 -0700 MST")
@@ -824,14 +784,10 @@ func TestReleaseNameForTenant(t *testing.T) {
 }
 
 // TestPollActivityContainerStatusesDoesNotFinalizeOnReadyPods pins the
-// display-only contract for the pod-status poller. It must not mark an
-// entry succeeded just because every container is currently Ready —
-// pod readiness can flip a few seconds before helm's `--wait` returns,
-// so finalizing here would beat the trace handler's `==> Deployed` and
-// the activity panel would show "done" while the user's terminal still
-// shows the deploy spinning. Completion is owned by the trace handler
-// and the helm poller's version+freshness check, both of which match
-// the runtime CLI's actual return.
+// display-only contract: pod readiness can flip seconds before helm's `--wait`
+// returns, so finalizing on Ready pods would show "done" while the terminal
+// still spins. Completion is owned by the trace handler and the helm
+// version+freshness check.
 func TestPollActivityContainerStatusesDoesNotFinalizeOnReadyPods(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	entry, _ := app.activityQueue.start(activityQueueEntry{
@@ -877,20 +833,17 @@ func TestForceDismissActivityRemovesActiveEntry(t *testing.T) {
 	}
 }
 
-// TestFeedActivityTraceCapturesFailureDetail pins the end-to-end wiring: PTY
-// output fed through feedActivityTraceFromTerminal is buffered against the
-// active entry and snapshotted into entry.Detail when the "==> Deploy failed"
-// trace line finalizes the entry. This locks the record-before-finalize
-// ordering — the failing output must already be buffered when finish() runs.
+// TestFeedActivityTraceCapturesFailureDetail locks the record-before-finalize
+// ordering: the failing PTY output must already be buffered when the
+// "==> Deploy failed" line finalizes the entry, so it lands in entry.Detail.
 func TestFeedActivityTraceCapturesFailureDetail(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	selection := uiSelection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
 	managed := &managedTerminal{selection: selection, kind: sessionKindLocal, key: "local\x00team\x00dev", serial: 1}
 	app.sessions[managed.key] = managed
 
-	// Seed the active entry the trace handler would otherwise create on the
-	// "==> Deploying" line; this test isolates the capture path from the
-	// trace-driven start (which needs env config on disk).
+	// Seed the entry directly rather than via the `==> Deploying` trace, whose
+	// start path needs env config on disk this test does not stage.
 	app.activityQueue.start(activityQueueEntry{
 		Command:     "deploy",
 		Tenant:      "team",

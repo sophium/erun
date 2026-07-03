@@ -12,20 +12,10 @@ import {
 import { patchTenantEnvironmentAutoStart } from './slices/tenantsSlice';
 import type { AppThunk } from './store';
 
-// autoStartThunks own the first-time auto-start prompt flow:
-//
-//   - openAutoStartPrompt(selection) is fired by openSelection when the env
-//     it was asked to navigate to is remote, has a stopped cloud context,
-//     and has no AutoStart override on file yet (state.tenants[].autoStart
-//     === undefined).
-//   - confirmAutoStartPrompt(mode) persists the user's answer via
-//     SetEnvironmentAutoStart, mirrors the tenants slice so subsequent
-//     navigation no longer prompts, closes the dialog, and re-fires
-//     openSelection so the just-saved policy is applied immediately (no
-//     "click again to take effect" footgun, Nielsen #1/#3).
-//   - cancelAutoStartPrompt closes the dialog without persisting; nothing
-//     is spawned and the env is left untouched, matching what would have
-//     happened if the user had not clicked the env in the first place.
+// The first-time auto-start prompt: openSelection raises it when a remote env
+// with a stopped cloud context has no saved AutoStart choice yet. Confirming a
+// choice re-runs openSelection so it takes effect immediately, without making
+// the operator click the env a second time.
 
 export type AutoStartChoice = 'always' | 'never';
 
@@ -65,9 +55,6 @@ export const confirmAutoStartPrompt =
         }),
       );
       dispatch(resetAutoStartPrompt());
-      // openSelection is re-entered with the override already in place, so
-      // the decision tree falls straight through to the matching branch
-      // (always → spawn ERun, never → spawn Local only).
       await dispatch(openSelection(selection));
     } catch (error: unknown) {
       const message = readError(error);

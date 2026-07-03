@@ -8,14 +8,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
-// LocalRepoPathInput is the shared "text input + native Browse picker" control
-// for a local-agent env's host worktree path (EnvConfig.LocalRepoPath). Both the
-// init dialog (EnvironmentTypeFields) and the env-settings General tab render it
-// so the two stay in lockstep. Free-text is the correct control for a path the
-// user genuinely authors; the Browse button opens the native OpenDirectoryDialog
-// (via ChooseLocalRepoPath) so they need not type an absolute path by hand.
-// Thunk-agnostic: the caller supplies value + onChange so init and settings can
-// wire their own dialog state.
+// LocalRepoPathInput is the shared host-worktree-path field for the init dialog
+// and the env-settings General tab, so both edit the path identically. Free-text
+// is deliberate: a repo path is a value the user genuinely authors, not a fixed
+// option set.
 export function LocalRepoPathInput({
   id,
   label,

@@ -2,10 +2,7 @@
 
 package cmd
 
-// findLocalPortHolder is a unix-only feature; on Windows we return "no
-// holder identified" and let the caller fall through to the legacy
-// "already in use" error path. Adoption of foreign port-forwards is not
-// implemented for Windows.
+// findLocalPortHolder has no Windows implementation: adopting foreign port-forwards is a unix-only feature.
 func findLocalPortHolder(int) (int, []string, bool) {
 	return 0, nil, false
 }

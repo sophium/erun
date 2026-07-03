@@ -5,17 +5,9 @@ import type { UISelection, UIWorkingIssue } from '@/types';
 
 import { EnvironmentWorkingIssue } from '../../../wailsjs/go/main/App';
 
-// EnvHoverCard wraps a sidebar environment row and shows a richer hover card
-// (issue #437): the env's runtime version, the issue it's working on (current
-// branch + linked issue title), and its current activity. It replaces the
-// plain tenant/env tooltip — a multi-field card belongs in a Popover, not a
-// tooltip (erun-ui/AGENTS.md). The card opens on hover or keyboard focus of
-// the row and is positioned beside it via PopoverAnchor, so the row's own
-// click handler (open env) and edit button stay intact.
-//
-// The working-issue section is resolved lazily on first open via the
-// EnvironmentWorkingIssue binding (git + gh, cached backend-side) so the
-// branch/title lookup never runs until the user actually hovers.
+// EnvHoverCard shows an env row's details in a Popover rather than a tooltip
+// (a multi-field card doesn't belong in a tooltip; see erun-ui/AGENTS.md),
+// without swallowing the row's own click-to-open and edit affordances.
 export function EnvHoverCard({
   className,
   tenantName,
@@ -47,8 +39,7 @@ export function EnvHoverCard({
   }, []);
   const closeSoon = React.useCallback(() => {
     window.clearTimeout(closeTimer.current);
-    // Small grace so moving the pointer from the row onto the card doesn't
-    // close it (the card has the same enter/leave handlers).
+    // Small grace so moving the pointer from the row onto the card doesn't close it.
     closeTimer.current = window.setTimeout(() => {
       setOpen(false);
     }, 120);
@@ -141,10 +132,8 @@ function Muted({ children }: { children: React.ReactNode }): React.ReactElement 
   return <span className="text-muted-foreground">{children}</span>;
 }
 
-// ActivityState renders the card's Activity row from the env's real state
-// (issue #462): a desktop in-flight operation wins, then the env-status flag
-// (stopped / failed), then open-and-quiet ("Idle"), and a never-opened env
-// says so instead of claiming "Idle" — there is no pod to be idle.
+// ActivityState distinguishes a never-opened env ("Not open") from an
+// open-but-quiet one ("Idle") — a never-opened env has no pod to be idle.
 function ActivityState({
   activityLabel,
   isOpen,
@@ -202,20 +191,16 @@ type WorkingIssueState =
   | { status: 'loaded'; value: UIWorkingIssue }
   | { status: 'error' };
 
-// useWorkingIssue resolves the env's working issue lazily, on each card
-// open. Re-resolving per open (instead of once per row lifetime) is what
-// lets a remote env's answer flip from "open this environment to see its
-// in-pod work" to the actual in-pod branch as soon as the env opens (issue
-// #462); the backend caches resolved work for a short TTL, so repeat hovers
-// stay cheap. While a refetch is in flight the previous value keeps
-// rendering — no "Resolving…" flash over known data.
+// useWorkingIssue re-resolves per card open (not once per row lifetime) so a
+// remote env's "open it to see its in-pod work" answer flips to the real
+// branch the moment the env opens; the prior value keeps rendering during a
+// refetch to avoid a "Resolving…" flash over known data.
 //
-// The fetch is guarded by an in-flight ref rather than the state status:
-// putting the status in the effect deps would re-run the effect when
-// setState('loading') lands, whose cleanup cancels the just-started fetch —
-// leaving the card stuck on "Resolving…". The selection is read through a
-// ref so its per-render identity churn doesn't retrigger the effect; only
-// the open flag and env keys are deps.
+// The fetch is guarded by an in-flight ref, not the state status: adding the
+// status to the effect deps would re-run on setState('loading'), whose
+// cleanup cancels the just-started fetch and strands the card on "Resolving…".
+// Selection is read through a ref so its per-render identity churn doesn't
+// retrigger the effect.
 function useWorkingIssue(selection: UISelection, open: boolean): WorkingIssueState {
   const [state, setState] = React.useState<WorkingIssueState>({ status: 'idle' });
   const selectionRef = React.useRef(selection);

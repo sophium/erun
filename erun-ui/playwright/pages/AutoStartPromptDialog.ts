@@ -1,10 +1,8 @@
 import type { Locator, Page } from '@playwright/test';
 
-// AutoStartPromptDialog POM. The dialog opens from openSelection when the
-// clicked env is remote, has a stopped cloud context, and has no AutoStart
-// override on file yet (state.tenants[].autoStart === undefined). It is the
-// only dialog whose title starts with "Auto-start ", so the role match is
-// unambiguous even if other dialogs are mounted.
+// The Auto-start prompt appears only for a remote env with a stopped cloud
+// context and no recorded auto-start preference yet. Its title prefix is
+// unique across dialogs, so the anchored role match stays unambiguous.
 export class AutoStartPromptDialog {
   constructor(public readonly page: Page) {}
 

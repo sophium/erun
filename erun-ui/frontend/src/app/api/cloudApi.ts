@@ -75,14 +75,9 @@ export const cloudApi = wailsApi.injectEndpoints({
       queryFn: wailsQueryFn<string, UICloudContextStatus>((name) =>
         DisableCloudContextApiStop(name),
       ),
-      // The mutation already returns the authoritative post-modify
-      // state. An invalidatesTags refetch here would call
-      // describe-instance-attribute inside AWS's eventual-consistency
-      // window for the just-issued modify-instance-attribute and could
-      // return the pre-modify value, flipping the lock icon back to
-      // its previous state right after the success toast fired. Push
-      // the mutation result into the cache directly instead; the
-      // widget's refetchOnMountOrArgChange picks up any later drift.
+      // Avoid an invalidatesTags refetch: AWS's eventual-consistency window can
+      // return the pre-modify value and flip the lock icon back right after the
+      // success toast. The mutation result is authoritative, so cache it directly.
       onQueryStarted: pushApiStopMutationIntoCache,
     }),
     enableCloudContextApiStop: builder.mutation<UICloudContextStatus, string>({

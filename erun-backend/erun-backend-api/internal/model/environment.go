@@ -14,10 +14,9 @@ const (
 	EnvironmentTypeRuntime     EnvironmentType = "runtime"
 )
 
-// Environment mirrors the environments table — the per-tenant system of record
-// for an erun environment, the DB-backed shape of eruncommon.EnvConfig. The
-// env-to-context link is a real tenant-scoped foreign key (ContextID), not a
-// kubernetes-context string match.
+// Environment is the per-tenant system of record for an erun environment, the
+// DB-backed shape of eruncommon.EnvConfig. Its link to a context is a real
+// tenant-scoped foreign key (ContextID), not a kubernetes-context string match.
 type Environment struct {
 	bun.BaseModel     `bun:"table:environments,alias:e"`
 	EnvironmentID     string          `json:"environmentId" bun:"environment_id,pk,scanonly"`

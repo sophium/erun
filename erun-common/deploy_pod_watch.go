@@ -11,11 +11,9 @@ import (
 	"time"
 )
 
-// HelmReleaseContainerFailureError is returned when the pod watcher observes
-// a terminal container failure for a pod that belongs to the in-flight helm
-// release. DeployHelmChart raises this error after killing the helm process,
-// so the caller can surface the underlying pod/container/reason instead of
-// helm's generic timeout text.
+// HelmReleaseContainerFailureError surfaces the real pod/container failure
+// behind an aborted helm release, so callers report the underlying reason
+// instead of helm's generic timeout text.
 type HelmReleaseContainerFailureError struct {
 	ReleaseName string
 	Namespace   string
@@ -23,9 +21,8 @@ type HelmReleaseContainerFailureError struct {
 	Container   string
 	Reason      string
 	Message     string
-	// Err is the helm process error captured after the watcher killed the
-	// upgrade, if any. It is wrapped so errors.As/Is on helm-side error
-	// types still works for callers that care.
+	// Err wraps the underlying helm process error so errors.As/Is still
+	// reaches helm-side error types.
 	Err error
 }
 
@@ -49,10 +46,6 @@ func (e *HelmReleaseContainerFailureError) Unwrap() error {
 	return e.Err
 }
 
-// podWatchParams configures the pod watcher started alongside a helm upgrade.
-// StatusOut receives the per-pod summary lines the watcher prints as the
-// release rolls out; in production it is the same writer ctx.Info uses
-// (typically stdout) so the lines align with the surrounding deploy block.
 type podWatchParams struct {
 	ReleaseName       string
 	Namespace         string
@@ -67,9 +60,8 @@ type podWatchOutcome struct {
 	Failure *HelmReleaseContainerFailureError
 }
 
-// podStatusList is the parsed shape of `kubectl get pods -o json` we care
-// about. The parser is tolerant of unknown fields so kubectl version drift
-// does not break the watcher.
+// podStatusList is a deliberately partial parse of `kubectl get pods -o json`:
+// unknown fields are ignored so kubectl version drift does not break the watcher.
 type podStatusList struct {
 	Items []podStatusItem `json:"items"`
 }
@@ -165,8 +157,6 @@ var permanentImagePullFailureSubstrings = []string{
 	"no such image",
 }
 
-// permanentImagePullFailure reports whether an image-pull error message
-// indicates a failure that will not recover by waiting.
 func permanentImagePullFailure(message string) bool {
 	lower := strings.ToLower(message)
 	for _, frag := range permanentImagePullFailureSubstrings {
@@ -177,15 +167,10 @@ func permanentImagePullFailure(message string) bool {
 	return false
 }
 
-// crashLoopRestartThreshold is the number of restarts a CrashLoopBackOff
-// container must accumulate before the watcher treats it as terminal. Single
-// transient crashes during init can be normal; repeated ones are not.
+// crashLoopRestartThreshold guards against transient init crashes: a single
+// crash can be normal, so only repeated restarts mark a container terminal.
 const crashLoopRestartThreshold = 2
 
-// podWatchPollInterval and podWatchKubectlTimeout govern the kubectl poll
-// loop. They are tunable via env vars so the integration suite can drive a
-// faster cadence than production. ERUN_DEPLOY_POD_WATCH_INTERVAL accepts any
-// time.ParseDuration value; values below 100ms are clamped to 100ms.
 const (
 	defaultPodWatchPollInterval   = 2 * time.Second
 	defaultPodWatchKubectlTimeout = 10 * time.Second
@@ -207,12 +192,9 @@ func resolvePodWatchPollInterval() time.Duration {
 	return d
 }
 
-// watchReleasePods polls kubectl until the parent context is canceled or a
-// terminal container failure is observed. It writes a fresh status line to
-// stderr each time the per-pod summary changes so the user sees progress.
-// The poller itself is best-effort: transient kubectl errors are ignored
-// (a flaky `get pods` call should not abort a deploy that helm would
-// otherwise drive to success).
+// watchReleasePods is best-effort: transient kubectl errors are ignored so a
+// flaky `get pods` never aborts a deploy that helm would otherwise drive to
+// success.
 func watchReleasePods(ctx context.Context, params podWatchParams) podWatchOutcome {
 	if strings.TrimSpace(params.ReleaseName) == "" || strings.TrimSpace(params.Namespace) == "" {
 		return podWatchOutcome{}
@@ -251,11 +233,9 @@ func pollOnce(ctx context.Context, params podWatchParams) (*HelmReleaseContainer
 	return failure, summarizePods(releasePods)
 }
 
-// runKubectlGetPods runs `kubectl get pods -n <ns> -o json`. The parent
-// context cancels when helm finishes; an additional kubectlTimeout bounds a
-// hung apiserver. Both paths kill the subprocess only after Start() has
-// actually set cmd.Process so a missing kubectl binary surfaces as the
-// underlying exec error rather than a nil-pointer panic.
+// runKubectlGetPods bounds a hung apiserver with its own timeout beyond the
+// parent context, and kills the subprocess only once cmd.Process is set so a
+// missing kubectl binary surfaces as the exec error rather than a nil panic.
 func runKubectlGetPods(parent context.Context, params podWatchParams) ([]byte, error) {
 	args := []string{}
 	if c := strings.TrimSpace(params.KubernetesContext); c != "" {
@@ -353,15 +333,9 @@ func containerTerminalFailure(c containerStatusEntry) (reason, message string, o
 	return "", "", false
 }
 
-// containerWaitingTerminalFailure classifies a waiting container as a terminal
-// failure: either a reason in terminalWaitingReasons, or a CrashLoopBackOff
-// that has restarted past the threshold (in which case the last terminated
-// message is preferred when present).
 func containerWaitingTerminalFailure(c containerStatusEntry) (reason, message string, ok bool) {
 	w := c.State.Waiting
 	if _, isPull := imagePullWaitingReasons[w.Reason]; isPull {
-		// Still fetching the image: keep waiting up to the rollout timeout
-		// unless the registry has permanently rejected the reference.
 		if permanentImagePullFailure(w.Message) {
 			return w.Reason, w.Message, true
 		}
@@ -380,9 +354,6 @@ func containerWaitingTerminalFailure(c containerStatusEntry) (reason, message st
 	return "", "", false
 }
 
-// podSummary is one printable line per pod: short pod name plus a list of
-// container states. Ordered deterministically so renderPodSummaries can
-// dedupe by string equality.
 type podSummary struct {
 	PodName string
 	Line    string
@@ -454,9 +425,8 @@ func formatContainerStatus(c containerStatusEntry) string {
 	return fmt.Sprintf("%s %s", c.Name, "Unknown")
 }
 
-// renderPodSummaries writes a status line for every pod whose summary
-// changed since the last poll. Output goes to stderr and is prefixed with
-// four spaces to align with the existing "    namespace ..." block.
+// renderPodSummaries prefixes each line with four spaces to align with the
+// existing "    namespace ..." status block.
 func renderPodSummaries(out io.Writer, summaries []podSummary, last map[string]string) {
 	if out == nil {
 		return

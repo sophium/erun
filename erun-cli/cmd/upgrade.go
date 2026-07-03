@@ -46,9 +46,6 @@ func newUpgradeCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver
 	return cmd
 }
 
-// upgradeTargetFromArgs folds positional TENANT/ENVIRONMENT args over the
-// --tenant/--environment flags (positionals win) and enforces that an
-// environment scope requires a tenant.
 func upgradeTargetFromArgs(args []string, tenant, environment, versionOverride string, force bool) (common.UpgradeTarget, error) {
 	if len(args) >= 1 {
 		tenant = args[0]
@@ -67,8 +64,6 @@ func upgradeTargetFromArgs(args []string, tenant, environment, versionOverride s
 	}, nil
 }
 
-// runUpgrade resolves the upgrade plan for target, prints it, redeploys the
-// lagging members via deploy, and reports any per-environment failures.
 func runUpgrade(ctx common.Context, store common.DeployStore, target common.UpgradeTarget, deploy common.UpgradeItemDeployer) error {
 	// A scoped run (the desktop's per-env Upgrade-all fan-out) captures into
 	// that env's trace log; the cross-tenant global run has no single env to
@@ -110,9 +105,6 @@ func runUpgrade(ctx common.Context, store common.DeployStore, target common.Upgr
 	return nil
 }
 
-// newUpgradeDeployer composes the per-environment deployer used by an upgrade
-// run: it deploys each lagging member to its resolved target version and
-// persists the new version, reusing the shared deploy flow.
 func newUpgradeDeployer(store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc, force bool) common.UpgradeItemDeployer {
 	return func(ctx common.Context, item common.UpgradePlanItem) error {
 		deployTarget := common.DeployTarget{

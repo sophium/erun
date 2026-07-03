@@ -12,11 +12,6 @@ import (
 	"strings"
 )
 
-// dockerfileCopySources returns the source paths referenced by COPY instructions
-// in dockerfilePath, plus the Dockerfile path itself, all resolved relative to
-// contextDir. Paths are returned in the order COPY instructions appear, with
-// duplicates removed. COPY --from=<stage> instructions reference earlier build
-// stages rather than the build context, so they are skipped.
 func dockerfileCopySources(dockerfilePath, contextDir string) ([]string, error) {
 	data, err := os.ReadFile(dockerfilePath)
 	if err != nil {
@@ -63,10 +58,6 @@ func dockerfileRelativePath(dockerfilePath, contextDir string) (string, error) {
 
 var dockerfileCopyPattern = regexp.MustCompile(`(?im)^\s*COPY\s+(.+?)\s*$`)
 
-// parseDockerfileCopyInstructions extracts the source argument list from each
-// COPY instruction in a Dockerfile. The destination (last argument) is omitted.
-// COPY --from=<stage> directives are skipped since they reference build stages
-// rather than the host filesystem.
 func parseDockerfileCopyInstructions(dockerfile string) [][]string {
 	matches := dockerfileCopyPattern.FindAllStringSubmatch(dockerfile, -1)
 	results := make([][]string, 0, len(matches))
@@ -85,18 +76,15 @@ func parseDockerfileCopyInstructions(dockerfile string) [][]string {
 		if len(filtered) < 2 {
 			continue
 		}
-		// Drop the destination argument (last positional).
 		sources := filtered[:len(filtered)-1]
 		results = append(results, sources)
 	}
 	return results
 }
 
-// filterDockerfileCopyArgs strips COPY flags from a single instruction's
-// argument list, returning the remaining positional arguments (sources plus
-// destination) and whether a --from=<stage> flag was present. A --from
-// instruction references a build stage rather than the host filesystem, so the
-// caller skips it entirely.
+// filterDockerfileCopyArgs reports fromStage when a COPY --from=<stage> is seen:
+// such a COPY references a build stage, not a host path, so its sources are not
+// fingerprint inputs and the caller skips the instruction entirely.
 func filterDockerfileCopyArgs(args []string) (filtered []string, fromStage bool) {
 	filtered = make([]string, 0, len(args))
 	for _, arg := range args {
@@ -112,12 +100,10 @@ func filterDockerfileCopyArgs(args []string) (filtered []string, fromStage bool)
 	return filtered, fromStage
 }
 
-// computeBuildFingerprint hashes the contents of the Dockerfile and every COPY
-// source path resolved relative to contextDir. Files matching .dockerignore
-// or .gitignore patterns are skipped so generated artifacts and untracked
-// state do not perturb the result. The output is a hex-encoded SHA-256
-// truncated to 16 characters — short enough to fit in a Docker tag, long
-// enough to make collisions vanishingly unlikely for this use case.
+// computeBuildFingerprint derives a content identity for a build. Ignored files
+// (.dockerignore/.gitignore) are excluded so generated artifacts and untracked
+// state do not churn the result, and the digest is truncated to 16 chars to fit
+// in a Docker tag.
 func computeBuildFingerprint(buildInput DockerBuildSpec) (string, error) {
 	contextDir := strings.TrimSpace(buildInput.ContextDir)
 	if contextDir == "" {
@@ -150,10 +136,9 @@ func computeBuildFingerprint(buildInput DockerBuildSpec) (string, error) {
 	return digest[:16], nil
 }
 
-// hashFingerprintFiles folds each file's context-relative path and contents
-// into the hasher, separating entries with a NUL byte so distinct file lists
-// can never produce the same digest. Paths are slash-normalized so the result
-// is stable across host filesystems.
+// hashFingerprintFiles separates entries with a NUL byte so distinct file lists
+// can never collide into the same digest, and slash-normalizes paths so the
+// result is stable across host filesystems.
 func hashFingerprintFiles(hasher io.Writer, contextDir string, files []string) error {
 	for _, path := range files {
 		rel, err := filepath.Rel(contextDir, path)
@@ -177,32 +162,18 @@ func hashFingerprintFiles(hasher io.Writer, contextDir string, files []string) e
 	return nil
 }
 
-// hashComponentChartInto folds the component's deployed Helm chart into the
-// build fingerprint. The chart is a released artifact published in lockstep
-// with the image at the same version (oci://<registry>/charts/<component>),
-// but it lives outside the image build context — so a chart-only edit would
-// otherwise leave the fingerprint unchanged, the image would promote from
-// cache, and resolveDeploySkipHelm would silently drop the chart change
-// ("all images cached, no rebuild"). Hashing the chart here makes a chart
-// edit move the fingerprint, so the component rebuilds, republishes its chart,
-// and redeploys — keeping image and chart one versioned contract. Best-effort:
-// a component with no chart (erun-ubuntu, erun-dind, …) contributes nothing,
-// matching the prior image-only fingerprint, and a version-pinned base image
-// (its own VERSION file — erun-backend-postgres, erun-powerdns) is skipped too
-// (see the guard below).
+// hashComponentChartInto folds the component's Helm chart into the build
+// fingerprint. The chart ships at the same version as the image but lives
+// outside the image build context, so without this a chart-only edit would
+// leave the fingerprint unchanged, the image would promote from cache, and the
+// chart change would be silently dropped. Hashing it keeps image and chart one
+// versioned contract. A component with no chart contributes nothing.
 func hashComponentChartInto(w io.Writer, buildInput DockerBuildSpec) error {
-	// A version-pinned base image carries its own VERSION file in its build dir
-	// (erun-backend-postgres:18.3, erun-powerdns:4.9.3); its content identity is
-	// that pinned upstream version, independent of any release. Its co-located
-	// chart, by contrast, is version-bumped to the release version every cycle.
-	// Folding the chart into the IMAGE fingerprint would churn a stable image's
-	// fingerprint every release and force a needless rebuild, so skip it; the
-	// base then promotes from the registry instead of rebuilding (its image stays
-	// at the upstream pin and is not re-pushed at the release version). The chart
-	// is still published at the release version regardless: the push step calls
-	// publishComponentChart for every component build at the push version, not
-	// only for images it re-pushes; that publish does not depend on this
-	// fingerprint.
+	// A version-pinned base image takes its identity from its upstream pin, not
+	// the release, but its chart is bumped to the release version every cycle.
+	// Folding that chart in would churn a stable image's fingerprint every
+	// release and force a needless rebuild, so skip it; the chart still publishes
+	// at the release version through push regardless.
 	if buildInput.Image.VersionFromBuildDir {
 		return nil
 	}
@@ -232,13 +203,10 @@ func hashComponentChartInto(w io.Writer, buildInput DockerBuildSpec) error {
 	})
 }
 
-// componentChartDirForBuild returns the component's Helm chart directory from
-// the build's known layout, without walking the repo: a charted component's
-// build dir is <module>/docker/<component> and its chart is the sibling
-// <module>/k8s/<component>, so the chart is derivable directly from the build's
-// Dockerfile path. Identical whether computed during `erun build` or
-// `erun deploy` (same DockerfilePath). Returns "" when the Dockerfile isn't in
-// the conventional docker/<component> location or the component has no chart.
+// componentChartDirForBuild derives the component's chart dir from the repo
+// convention that a charted component's Dockerfile at <module>/docker/<component>
+// has its chart at the sibling <module>/k8s/<component>. Returns "" when the
+// Dockerfile is outside that layout or the component has no chart.
 func componentChartDirForBuild(buildInput DockerBuildSpec) string {
 	dockerfilePath := strings.TrimSpace(buildInput.DockerfilePath)
 	if dockerfilePath == "" {
@@ -247,7 +215,7 @@ func componentChartDirForBuild(buildInput DockerBuildSpec) string {
 	if !filepath.IsAbs(dockerfilePath) {
 		dockerfilePath = filepath.Join(strings.TrimSpace(buildInput.ContextDir), dockerfilePath)
 	}
-	dockerDir := filepath.Dir(dockerfilePath) // <module>/docker/<component>
+	dockerDir := filepath.Dir(dockerfilePath)
 	if filepath.Base(filepath.Dir(dockerDir)) != "docker" {
 		return ""
 	}
@@ -291,8 +259,6 @@ func collectFingerprintFiles(contextDir string, sources []string, ignored *ignor
 	return files, nil
 }
 
-// collectFingerprintFile records a single non-directory source unless it is
-// excluded by the ignore set.
 func collectFingerprintFile(contextDir, full string, ignored *ignoreSet, add func(string)) error {
 	rel, err := filepath.Rel(contextDir, full)
 	if err != nil {
@@ -305,8 +271,6 @@ func collectFingerprintFile(contextDir, full string, ignored *ignoreSet, add fun
 	return nil
 }
 
-// collectFingerprintDir walks a directory source, recording every file that
-// survives the ignore set and pruning ignored subtrees so they are not visited.
 func collectFingerprintDir(contextDir, full string, ignored *ignoreSet, add func(string)) error {
 	return filepath.WalkDir(full, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -346,11 +310,9 @@ type ignorePattern struct {
 	anchored bool
 	dirOnly  bool
 	negate   bool
-	// base is the directory containing the .gitignore the pattern came
-	// from, relative to contextDir and slash-normalized (empty for the
-	// root .dockerignore / .gitignore). The matcher uses it to scope a
-	// pattern to its own subtree, matching git's own behaviour where a
-	// nested .gitignore only governs files beneath it.
+	// base scopes the pattern to the subtree of the nested .gitignore it came
+	// from (empty for the root files), mirroring git, where a nested .gitignore
+	// only governs files beneath it.
 	base string
 }
 
@@ -358,14 +320,9 @@ type ignoreSet struct {
 	patterns []ignorePattern
 }
 
-// loadContextIgnoreSet builds the ignore matcher applied during fingerprint
-// computation. The root .dockerignore and .gitignore apply to every file in
-// the context. .gitignore files nested under the COPY sources are also
-// honoured, with each nested file's patterns scoped to its own directory
-// subtree — mirroring how git itself reads .gitignore files. Missing files
-// are not an error: callers receive whatever set could be parsed. Patterns
-// are appended in load order so a later negation can override an earlier
-// exclusion.
+// loadContextIgnoreSet builds the ignore matcher for fingerprint computation.
+// Patterns are appended in load order (root files, then nested .gitignores) so
+// a later negation can override an earlier exclusion.
 func loadContextIgnoreSet(contextDir string, sources []string) (*ignoreSet, error) {
 	combined := &ignoreSet{}
 	for _, name := range []string{".dockerignore", ".gitignore"} {
@@ -381,11 +338,9 @@ func loadContextIgnoreSet(contextDir string, sources []string) (*ignoreSet, erro
 	return combined, nil
 }
 
-// loadNestedGitignores walks under each directory source and appends the
-// patterns from every .gitignore it finds. Nested .dockerignore files are
-// intentionally not honoured because Docker itself only reads the root
-// one — keeping the fingerprint algorithm consistent with the actual build
-// context.
+// loadNestedGitignores honours nested .gitignore files but intentionally not
+// nested .dockerignore files: Docker reads only the root .dockerignore, so
+// honouring nested ones would diverge from the real build context.
 func loadNestedGitignores(contextDir string, sources []string, combined *ignoreSet) error {
 	visited := make(map[string]struct{}, len(sources))
 	for _, src := range sources {
@@ -407,11 +362,6 @@ func loadNestedGitignores(contextDir string, sources []string, combined *ignoreS
 	return nil
 }
 
-// walkNestedGitignores walks one directory source, appending the patterns from
-// every nested .gitignore it encounters to combined. visited dedupes
-// directories so overlapping sources are not walked twice. Each nested file's
-// patterns are scoped to its own directory subtree; the root file is skipped
-// here because loadContextIgnoreSet already loaded it.
 func walkNestedGitignores(contextDir, full string, visited map[string]struct{}, combined *ignoreSet) error {
 	return filepath.WalkDir(full, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -468,10 +418,6 @@ func parseIgnoreData(data []byte, base string) *ignoreSet {
 	return set
 }
 
-// parseIgnoreLine parses a single .gitignore/.dockerignore line into an
-// ignorePattern scoped to base. It returns ok=false for blank lines, comments,
-// and patterns that reduce to empty after stripping the negation, anchor, and
-// dir-only markers.
 func parseIgnoreLine(raw, base string) (ignorePattern, bool) {
 	line := strings.TrimRight(raw, "\r")
 	line = strings.TrimSpace(line)
@@ -536,10 +482,8 @@ func patternMatchesPath(p ignorePattern, rel string) bool {
 	if p.raw == "" || p.raw == "." {
 		return false
 	}
-	// Patterns loaded from a nested .gitignore only govern files under
-	// that .gitignore's own directory. Strip the base prefix so the rest
-	// of the matcher (anchoring, globbing, dir-only handling) works on a
-	// path relative to where the pattern was declared.
+	// Strip the nested .gitignore's base prefix so anchoring and globbing run
+	// on a path relative to where the pattern was declared.
 	if p.base != "" {
 		if rel == p.base || !strings.HasPrefix(rel, p.base+"/") {
 			return false
@@ -558,10 +502,8 @@ func patternMatchesPath(p ignorePattern, rel string) bool {
 	return false
 }
 
-// anchoredPatternMatches reports whether an anchored gitignore glob matches rel
-// or any of rel's ancestor prefixes. Matching a prefix lets the walker
-// short-circuit an ignored directory before visiting the directory entry
-// itself.
+// anchoredPatternMatches also matches rel's ancestor prefixes so the walker can
+// prune an ignored directory before descending into it.
 func anchoredPatternMatches(raw, rel string) bool {
 	if globMatch(raw, rel) {
 		return true
@@ -576,10 +518,8 @@ func anchoredPatternMatches(raw, rel string) bool {
 	return false
 }
 
-// globMatch evaluates a gitignore-style glob against a single path segment or
-// full path. It extends filepath.Match with `**`, which matches any sequence
-// of characters including separators (e.g. `a/**/b` matches `a/b` and
-// `a/x/y/b`).
+// globMatch extends filepath.Match with `**`, which (unlike `*`) matches across
+// path separators (e.g. `a/**/b` matches both `a/b` and `a/x/y/b`).
 func globMatch(pattern, name string) bool {
 	if !strings.Contains(pattern, "**") {
 		ok, err := filepath.Match(pattern, name)
@@ -603,11 +543,6 @@ func globToRegex(pattern string) string {
 	return b.String()
 }
 
-// writeGlobToken translates the glob token starting at index i in pattern into
-// its regex equivalent, writes it to b, and returns the index of the next
-// unconsumed character. `**` becomes `.*` (consuming a following `/` so
-// `a/**/b` matches `a/b`), `*` and `?` stay segment-local, and regex
-// metacharacters are escaped.
 func writeGlobToken(b *strings.Builder, pattern string, i int) int {
 	switch {
 	case i+1 < len(pattern) && pattern[i] == '*' && pattern[i+1] == '*':
@@ -634,16 +569,14 @@ func writeGlobToken(b *strings.Builder, pattern string, i int) int {
 	}
 }
 
-// LocalDockerImageInspector reports whether an image with the given tag exists
-// in the local Docker daemon. Used to detect fp-tagged images for incremental
-// promotion. It is a thin wrapper over `docker image inspect` so tests can
-// substitute it.
+// LocalDockerImageInspector reports whether an image tag exists in the local
+// Docker daemon, used to detect fp-tagged images eligible for incremental
+// promotion.
 type LocalDockerImageInspector func(tag string) (bool, error)
 
-// ApplyIncrementalToBuildExecution returns a copy of the execution with
-// fingerprint-based incremental promotion applied to its docker builds. When
-// noIncremental is true it returns execution unchanged. Errors during fingerprint
-// computation propagate so callers can decide how to surface them.
+// ApplyIncrementalToBuildExecution applies fingerprint-based incremental
+// promotion to the execution's docker builds, returning a copy (unchanged when
+// noIncremental is true).
 func ApplyIncrementalToBuildExecution(ctx Context, execution BuildExecutionSpec, noIncremental bool) (BuildExecutionSpec, error) {
 	updated, err := ApplyIncrementalToDockerBuilds(ctx, execution.dockerBuilds, noIncremental)
 	if err != nil {
@@ -654,18 +587,13 @@ func ApplyIncrementalToBuildExecution(ctx Context, execution BuildExecutionSpec,
 }
 
 // ApplyIncrementalToDockerBuilds applies fingerprint-based incremental
-// promotion to a slice of docker builds. When noIncremental is true the slice
-// is returned unchanged. This is the single entry point every command should
-// use so deploy, push, and runtime deploy paths share the same skip logic as
-// erun build.
-//
-// Builds whose image name is listed in the project's docker.fingerprints
-// config get a pre-step: <image>:<VERSION> is pulled from the registry and
-// tagged locally as <image>:fp-<configured>-<arch>. The downstream
-// applyIncrementalPromotion then finds the tagged image and promotes the
-// build. In dry-run, the pull+tag commands are traced but not executed; a
-// composed inspector treats those would-be tags as present so the trace
-// reflects the would-be promote path.
+// promotion to a slice of docker builds (unchanged when noIncremental is true).
+// This is the single entry point every command uses, so deploy, push, and
+// runtime deploy share the same skip logic as erun build. Images listed in the
+// project's docker.fingerprints config are first pulled and tagged locally under
+// their configured fingerprint so a matching build promotes instead of
+// rebuilding; in dry-run those would-be tags are treated as present so the trace
+// still reflects the promote path.
 func ApplyIncrementalToDockerBuilds(ctx Context, builds []DockerBuildSpec, noIncremental bool) ([]DockerBuildSpec, error) {
 	if noIncremental || len(builds) == 0 {
 		return builds, nil
@@ -686,12 +614,10 @@ func ApplyIncrementalToDockerBuilds(ctx Context, builds []DockerBuildSpec, noInc
 	return applyIncrementalPromotion(builds, inspect)
 }
 
-// applyIncrementalPromotion computes a fingerprint for each build and, when an
-// image with the matching fingerprint tag already exists locally, marks the
-// build for promotion (re-tag + push) instead of rebuild. Builds whose
-// fingerprint cannot be computed, or whose fp-tagged image is missing, are left
-// to rebuild as normal. A rebuilt local-base image cascades: any dependent that
-// FROMs it must also rebuild, even if its own fingerprint matches.
+// applyIncrementalPromotion marks each build whose fp-tagged image already
+// exists locally for promotion (re-tag + push) instead of rebuild. Cascade: a
+// rebuilt local-base image forces every dependent that FROMs it to rebuild too,
+// even when the dependent's own fingerprint matches.
 func applyIncrementalPromotion(builds []DockerBuildSpec, inspect LocalDockerImageInspector) ([]DockerBuildSpec, error) {
 	if len(builds) == 0 {
 		return builds, nil
@@ -729,10 +655,6 @@ func applyIncrementalPromotion(builds []DockerBuildSpec, inspect LocalDockerImag
 	return out, nil
 }
 
-// inspectFingerprintTags returns the list of platforms whose fp-tag is
-// absent from the local Docker store. An empty slice means every expected
-// fp-tag was found and the build is eligible for promotion. The platform
-// list mirrors build.Platforms.
 func inspectFingerprintTags(build DockerBuildSpec, inspect LocalDockerImageInspector) ([]string, error) {
 	if build.Fingerprint == "" {
 		return nil, nil

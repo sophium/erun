@@ -33,11 +33,6 @@ func TestSSHD(t *testing.T) {
 	})
 
 	t.Run("init_real_run_writes_local_ssh_config", func(t *testing.T) {
-		// Exercises the non-dry-run sshd init flow: stub kubectl/helm so
-		// the deploy succeeds, the remote-exec for syncing authorized_keys
-		// succeeds, and writeLocalSSHConfig writes a real entry to
-		// $HOME/.ssh/config via internal/sshconfig.UpsertDefaultConfig.
-		// Asserts that the resulting file contains the expected host alias.
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 		publicKey := filepath.Join(setup.Home, "id_ed25519.pub")
@@ -72,10 +67,6 @@ func TestSSHD(t *testing.T) {
 	})
 
 	t.Run("init_dry_run_traces_full_flow", func(t *testing.T) {
-		// Exercises sshd.go runSSHDInitCommand: --dry-run must trace the
-		// env-config save (write-yaml), the helm deploy that flips
-		// SSHDEnabled, the remote authorized_keys exec, and the local SSH
-		// config write — without performing any side effect.
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 		publicKey := filepath.Join(setup.Home, "id_ed25519.pub")
@@ -91,11 +82,6 @@ func TestSSHD(t *testing.T) {
 	})
 
 	t.Run("init_dry_run_workspace_sync_resolves_project_root", func(t *testing.T) {
-		// Exercises resolveSSHDWorkspaceSyncLocalPath: with
-		// sshd.workspacesync.enabled persisted on the env and the command
-		// running from inside a git project, init must resolve the sync
-		// local path to the project root and trace the workspace-sync
-		// enable (saveSSHDEnvConfig's dry-run sync arm).
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 		envCfg := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
@@ -125,14 +111,9 @@ func TestSSHD(t *testing.T) {
 	})
 
 	t.Run("init_real_run_remote_exec_failure_surfaces_stderr", func(t *testing.T) {
-		// Exercises syncRemoteSSHDKey's non-retryable failure arm: the
-		// kubectl exec that syncs authorized_keys fails with a stderr that
-		// does not match sshdRemoteExecNeedsDeploymentRetry's pod-churn
-		// tokens, so the command must fail immediately (no retry loop) and
-		// the error must carry the remote stderr via
-		// formatRemoteCommandStderr. The argv-branching kubectl stub fails
-		// only the exec; namespace/wait/helm calls succeed so the flow
-		// reaches the sync step.
+		// Non-retryable failure arm: the exec stderr is deliberately not one
+		// of the pod-churn tokens that trigger a retry, so init must fail
+		// immediately and surface the remote stderr.
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 		publicKey := filepath.Join(setup.Home, "id_ed25519.pub")
@@ -160,14 +141,10 @@ func TestSSHD(t *testing.T) {
 	})
 
 	t.Run("init_real_run_retries_after_pod_not_found", func(t *testing.T) {
-		// Exercises syncRemoteSSHDKey's retry loop: the first authorized_keys
-		// exec fails with "pod not found" (a pod-churn token
-		// sshdRemoteExecNeedsDeploymentRetry treats as retryable), the
-		// command waits for the deployment (kubectl wait via the stub) and
-		// the second exec succeeds. The stateful stub flips on a marker
-		// file after the first exec call. The scenario pays one real
-		// 5-second retry delay (sshdRemoteExecRetryDelay), which is why
-		// there is exactly one failing attempt.
+		// Retry loop: the first exec fails with a retryable pod-churn token,
+		// so init waits for the deployment and the second exec succeeds.
+		// Limited to a single failing attempt because each retry costs a real
+		// 5-second delay.
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 		publicKey := filepath.Join(setup.Home, "id_ed25519.pub")

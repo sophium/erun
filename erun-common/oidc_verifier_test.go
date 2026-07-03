@@ -14,11 +14,8 @@ import (
 	"github.com/go-jose/go-jose/v4/jwt"
 )
 
-// mockOIDCProvider is a self-contained OIDC issuer for tests: an httptest server
-// that publishes a discovery document and a JWKS, plus the RSA signing key used
-// to mint tokens. It is the shared harness for both the erun-common verifier
-// tests and (mirrored) the erun-mcp dispatch tests, standing in for a real
-// Zitadel/AWS issuer without a network dependency.
+// mockOIDCProvider stands in for a real Zitadel/AWS issuer without a network
+// dependency. Mirrored by the erun-mcp dispatch tests.
 type mockOIDCProvider struct {
 	server *httptest.Server
 	key    *rsa.PrivateKey
@@ -56,14 +53,13 @@ func newMockOIDCProvider(t *testing.T) *mockOIDCProvider {
 
 func (p *mockOIDCProvider) issuer() string { return p.server.URL }
 
-// sign mints an RS256 JWT for the given claims, signed by this provider's key.
 func (p *mockOIDCProvider) sign(t *testing.T, claims map[string]any) string {
 	t.Helper()
 	return signWithKey(t, p.key, p.keyID, claims)
 }
 
-// signWithKey signs claims with an arbitrary RSA key + kid, so a test can forge a
-// token whose signature does NOT match the provider's published JWKS.
+// signWithKey lets a test forge a token whose signature does NOT match the
+// provider's published JWKS.
 func signWithKey(t *testing.T, key *rsa.PrivateKey, keyID string, claims map[string]any) string {
 	t.Helper()
 	signer, err := jose.NewSigner(
@@ -85,7 +81,6 @@ func writeJSON(w http.ResponseWriter, value any) {
 	_ = json.NewEncoder(w).Encode(value)
 }
 
-// standardClaims builds a claim map valid at the given time for the issuer.
 func standardClaims(issuer string, now time.Time) map[string]any {
 	return map[string]any{
 		"iss": issuer,
@@ -122,8 +117,6 @@ func TestOIDCVerifierVerifiesSignedToken(t *testing.T) {
 
 func TestOIDCVerifierRejectsWrongIssuer(t *testing.T) {
 	provider := newMockOIDCProvider(t)
-	// The token's iss is a different value than the issuer we ask go-oidc to
-	// verify against, so verification must fail (go-oidc checks iss).
 	token := provider.sign(t, standardClaims("https://attacker.example", time.Now()))
 
 	verifier := NewOIDCVerifier()
@@ -134,7 +127,6 @@ func TestOIDCVerifierRejectsWrongIssuer(t *testing.T) {
 
 func TestOIDCVerifierRejectsBadSignature(t *testing.T) {
 	provider := newMockOIDCProvider(t)
-	// Sign with a different key than the provider publishes in its JWKS.
 	otherKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("generate other key: %v", err)

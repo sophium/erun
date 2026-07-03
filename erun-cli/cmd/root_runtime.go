@@ -192,9 +192,8 @@ func hasOptionalPushCmd(findProjectRoot common.ProjectFinderFunc, resolveBuildCo
 	return false
 }
 
-// buildShortTarget resolves the per-env build toggle that shapes the build
-// command's short help (DisableBuildScript), so optionalBuildCmdShort advertises
-// docker builds rather than a build script when the env opts out of build.sh.
+// buildShortTarget honours an env's build.sh opt-out so the build command's short
+// help advertises docker builds instead of a build script.
 func buildShortTarget(store common.DockerStore, findProjectRoot common.ProjectFinderFunc) common.DockerCommandTarget {
 	target := common.DockerCommandTarget{}
 	if env := common.ResolveDockerBuildEnvConfig(store, findProjectRoot, target); env != nil && env.DisableBuildScript {

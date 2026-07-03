@@ -39,13 +39,9 @@ func DetectHost() HostInfo {
 	}
 }
 
-// resolveDetectedHostOS classifies the host OS for runtime decisions. When
-// ERUN_HOST_OS_OVERRIDE is set to a recognized OS (darwin/linux/windows), it
-// wins over the actual GOOS. The override is a deliberate test seam — the
-// integration suite uses it to pin platform-dependent dry-run goldens (most
-// notably the IDE launcher scenarios under erun-integration/testdata/open/)
-// so the suite stays green on any developer or CI host. Production callers
-// should never set it.
+// resolveDetectedHostOS honors ERUN_HOST_OS_OVERRIDE as a test seam so the
+// integration suite can pin platform-dependent goldens on any host; production
+// must never set it.
 func resolveDetectedHostOS() HostOS {
 	if override := strings.ToLower(strings.TrimSpace(hostOSOverEnv())); override != "" {
 		if classified := classifyHostOS(override); classified != HostOSUnknown {

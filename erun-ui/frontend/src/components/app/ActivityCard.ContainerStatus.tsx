@@ -70,8 +70,7 @@ function ContainerStatusRow({
 }): React.ReactElement {
   const failing = containerIsFailing(container);
   const [expanded, setExpanded] = React.useState<boolean>(failing);
-  // Failing containers default to expanded so the user sees the cause
-  // without an extra click; user can still collapse and re-expand.
+  // Failing containers default to expanded so the user sees the cause without a click.
   React.useEffect(() => {
     setExpanded(failing);
   }, [failing]);
@@ -204,13 +203,8 @@ interface RecoveryAction {
   action: () => Promise<void>;
 }
 
-// recoveryActionForContainer returns a one-click recovery affordance when
-// the container's failure mode has a known mitigation. The most common
-// case is a registry miss: the kubelet message contains "not found"
-// against an image tag the chart references, which usually means the
-// chart bumped the tag without publishing it. `erun deploy --force`
-// rebuilds every image bypassing the fingerprint cache and pushes them
-// to the registry, so the missing tag becomes available.
+// The common recoverable failure is a registry miss: the chart bumped an image
+// tag without publishing it, so a force rebuild-and-push makes the tag available.
 function recoveryActionForContainer(
   container: ActivityQueueContainerStatus,
   deploy: ActivityQueueEntry,

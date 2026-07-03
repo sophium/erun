@@ -7,23 +7,12 @@ import type { AppDispatch, RootState } from '../store';
 import { thunkExtra } from '../thunkExtra';
 import { selectionKey } from '../versionSuggestions';
 
-// selectionSyncMiddleware reconciles state.terminal.sessionId with the
-// currently selected env every time state.selection.selected changes.
-//
-// Without this, paths that dispatch setSelected without going through
-// openSelection (boot persistence rehydrate, startInitSelection,
-// startDeploySelection, manageHiddenSessionThunks, error rollbacks, the
-// "click-the-already-selected-env" no-op in prepareOpenSelection) leave
-// the terminal pointing at whatever session was previously visible —
-// which can be a completely different env's PTY. The sidebar then shows
-// env A as selected while the terminal renders env B's prompt and
-// content, and input typed by the user is sent to the wrong PTY.
-//
-// The reconcile follows the same rule the explicit surfaceEnvSession
-// helper in sessionThunks uses on the spawn path: if the current session
-// already belongs to the new env's tab list, leave it alone; otherwise
-// pick the remembered tab if it still exists, else any Local tab, else 0
-// (the display middleware translates that into resetTerminal()).
+// Re-attaches the terminal to the selected env's session. setSelected paths
+// that bypass openSelection would otherwise leave the terminal on the
+// previously-visible session — possibly another env's PTY — so the sidebar
+// shows one env while the terminal renders and takes input for another.
+// Keep the reconcile rule in sync with surfaceEnvSession in sessionThunks;
+// returning 0 tells the display middleware to resetTerminal().
 export const selectionSyncMiddleware = createListenerMiddleware();
 
 const startListening = selectionSyncMiddleware.startListening.withTypes<RootState, AppDispatch>();
@@ -36,11 +25,9 @@ startListening({
     if (next !== state.terminal.sessionId) {
       listenerApi.dispatch(setSessionId(next));
     }
-    // Fire an immediate idle-status refresh so the titlebar Play button
-    // (and any other UI gated on idleStatus) reflects the new env within
-    // ~50 ms instead of waiting up to the next 1 s polling tick. Without
-    // this, clicking a stopped remote env left the user with no visible
-    // Start affordance for almost a full second.
+    // Refresh idle status now so the titlebar Play button reflects the new
+    // env immediately, not after the next poll leaves the user without a
+    // visible Start affordance.
     if (thunkExtra.controller) {
       void listenerApi.dispatch(refreshIdleStatus());
     }

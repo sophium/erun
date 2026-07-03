@@ -10,7 +10,7 @@ import (
 )
 
 // TenantQuotaWriter sets a tenant's environment-count cap (the per-tenant
-// override the #605 quota guardrail enforces on env registration).
+// override the quota guardrail enforces on env registration).
 type TenantQuotaWriter interface {
 	Set(ctx context.Context, tenantID string, maxEnvironments int) (model.TenantQuota, error)
 }
@@ -28,9 +28,8 @@ func RegisterTenantQuotaRoute(register ProtectedRouteRegistrar, quotas TenantQuo
 	register(http.MethodPut, "/v1/tenants/{tenant_id}/quota", http.HandlerFunc(routes.setQuota))
 }
 
-// setQuota sets a tenant's environment-count cap. Operations-only: like tenant
-// registration, the caller must be an OPERATIONS tenant, because it writes
-// another tenant's quota row (the operations role's RLS policy permits it).
+// Operations-only: setting another tenant's quota is a cross-tenant write that
+// only the operations role's RLS policy permits.
 func (r TenantQuotaRoutes) setQuota(w http.ResponseWriter, req *http.Request) {
 	securityContext, ok := security.FromContext(req.Context())
 	if !ok {

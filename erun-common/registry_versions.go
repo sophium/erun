@@ -35,8 +35,7 @@ const (
 	defaultGHCRRegistryBaseURL      = "https://ghcr.io"
 )
 
-// Resolved fills in the documented defaults for any unset field, so callers
-// can rely on a fully-specified spec without scattering defaulting logic.
+// Resolved returns a fully-specified config, applying registry defaults to any unset field.
 func (c RuntimeRegistryConfig) Resolved() RuntimeRegistryConfig {
 	resolved := RuntimeRegistryConfig{
 		Namespace:  strings.TrimSpace(c.Namespace),
@@ -77,10 +76,7 @@ func ResolveConfiguredRuntimeRegistryVersions(ctx context.Context, cfg RuntimeRe
 	return resolveDockerHubRuntimeRegistryVersionsAt(ctx, client, resolved.Namespace, resolved.Repository, resolved.BaseURL)
 }
 
-// ResolveRuntimeImageRegistryVersions is preserved for existing callers that
-// pass an explicit namespace/repository pair. Defaults still apply for the
-// HTTP endpoints; use ResolveConfiguredRuntimeRegistryVersions to override
-// them.
+// ResolveRuntimeImageRegistryVersions is a compatibility overload for callers that pass an explicit namespace/repository pair.
 func ResolveRuntimeImageRegistryVersions(ctx context.Context, namespace, repository string) (RuntimeRegistryVersions, error) {
 	return ResolveConfiguredRuntimeRegistryVersions(ctx, RuntimeRegistryConfig{
 		Namespace:  namespace,
@@ -176,8 +172,6 @@ func resolveGHCRRuntimeRegistryVersionsAt(ctx context.Context, client *http.Clie
 	return versions, nil
 }
 
-// normalizeGHCRBaseURL trims a GHCR base/token URL and falls back to the
-// default registry endpoint when it is empty.
 func normalizeGHCRBaseURL(rawURL string) string {
 	trimmed := strings.TrimRight(strings.TrimSpace(rawURL), "/")
 	if trimmed == "" {
@@ -186,8 +180,6 @@ func normalizeGHCRBaseURL(rawURL string) string {
 	return trimmed
 }
 
-// collectGHCRTags walks the GHCR tag listing across all pages, returning every
-// non-empty tag name in encounter order.
 func collectGHCRTags(ctx context.Context, client *http.Client, endpoint, token string) ([]string, error) {
 	tags := make([]string, 0, 128)
 	for endpoint != "" {
@@ -292,9 +284,6 @@ func nextLinkFromHeader(resp *http.Response, baseEndpoint string) string {
 	return ""
 }
 
-// nextLinkTargetFromSegment extracts the `<...>` target from a single Link
-// header segment, returning "" when the angle-bracket reference is missing or
-// empty.
 func nextLinkTargetFromSegment(segment string) string {
 	start := strings.Index(segment, "<")
 	end := strings.Index(segment, ">")
@@ -304,9 +293,6 @@ func nextLinkTargetFromSegment(segment string) string {
 	return strings.TrimSpace(segment[start+1 : end])
 }
 
-// resolveNextLinkTarget resolves a root-relative pagination target against the
-// base endpoint; absolute targets (or anything that fails to parse) are
-// returned unchanged.
 func resolveNextLinkTarget(target, baseEndpoint string) string {
 	if strings.HasPrefix(target, "/") {
 		base, err := url.Parse(baseEndpoint)

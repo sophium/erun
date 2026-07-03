@@ -8,15 +8,9 @@ import (
 	"syscall"
 )
 
-// errMCPUnreachable is the sentinel error category returned by Wails methods
-// that talk to the in-cluster MCP server when the local port-forward cannot
-// be reached. The frontend uses errors.Is — via the leading marker on the
-// surfaced error string — to decide whether to render the unreachable state
-// with an explicit Reconnect action.
-//
-// Side-effecting recovery (running `erun open`, which can redeploy the
-// runtime) is gated on that explicit user action; LoadDiff and other MCP
-// readers no longer recover implicitly.
+// errMCPUnreachable signals the frontend to render an unreachable state with a
+// Reconnect action. Side-effecting recovery — which can redeploy the runtime —
+// is gated on that explicit user action; MCP readers never recover implicitly.
 var errMCPUnreachable = errors.New("mcp unreachable")
 
 // mcpUnreachableMarker is prefixed onto every surfaced error message so the
@@ -45,10 +39,6 @@ func isMCPDialFailure(err error) bool {
 	return mcpDialFailureMessage(err.Error())
 }
 
-// mcpDialFailureMessage reports whether a surfaced error string matches one of
-// the substrings that indicate the MCP port-forward could not be dialed. Split
-// from isMCPDialFailure so the errno/net.OpError checks and the message scan
-// stay independently simple.
 func mcpDialFailureMessage(msg string) bool {
 	return strings.Contains(msg, "connection refused") ||
 		strings.Contains(msg, "EOF") ||

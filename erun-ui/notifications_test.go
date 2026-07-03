@@ -4,10 +4,8 @@ import (
 	"testing"
 )
 
-// TestEmitAppNotificationDropsEmptyMessage locks the contract that the
-// helper does not push transparent toasts at the frontend. An empty
-// message would still pop a notification slot if it slipped through;
-// the early return keeps the channel quiet.
+// TestEmitAppNotificationDropsEmptyMessage locks the contract that a
+// blank or whitespace-only message never surfaces a toast to the frontend.
 func TestEmitAppNotificationDropsEmptyMessage(t *testing.T) {
 	emits := newCapturedEmits()
 	app := &App{emitFn: emits.fn()}
@@ -19,10 +17,8 @@ func TestEmitAppNotificationDropsEmptyMessage(t *testing.T) {
 	}
 }
 
-// TestEmitAppNotificationCarriesKindAndMessage exercises the happy
-// path: kind + trimmed-style message reach the wire intact so the
-// frontend can route the payload through showNotification with the
-// matching AppNotification['kind'].
+// TestEmitAppNotificationCarriesKindAndMessage verifies a non-empty
+// notification reaches the frontend with its kind and message intact.
 func TestEmitAppNotificationCarriesKindAndMessage(t *testing.T) {
 	emits := newCapturedEmits()
 	app := &App{emitFn: emits.fn()}
@@ -42,15 +38,3 @@ func TestEmitAppNotificationCarriesKindAndMessage(t *testing.T) {
 		t.Fatalf("unexpected message: %q", payload.Message)
 	}
 }
-
-// Note: TestMaybeStopIdleEmitsSuccessAsNotificationNotPill used to
-// verify that the desktop emitted a "Stopped idle cloud context X."
-// notification (and not a persistent pill) when it fired the
-// auto-stop itself. The auto-stop firing moved to the in-pod monitor
-// in PR #411's "Unify auto-stop grace period across desktop and
-// in-pod monitor" commit, so the desktop no longer emits this
-// notification on its own. The post-fire UX is exercised at the
-// transport boundary by the integration suite (which verifies
-// `erun activity record-stop` writes the history entry) and by the
-// Playwright spec (which mocks the MCP response and renders the
-// History tab).

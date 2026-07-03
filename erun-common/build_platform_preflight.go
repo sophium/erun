@@ -6,27 +6,16 @@ import (
 	"strings"
 )
 
-// verifyDockerBuildPlatforms checks the local Docker daemon can emit every
-// required build platform before the multi-arch build shells `docker build
-// --platform` once per architecture. erun always builds linux/amd64 +
-// linux/arm64, so on a host that has not registered binfmt/QEMU for the foreign
-// architecture the per-platform `docker build` otherwise fails with an opaque,
-// low-level error. This preflight fails fast instead, with a direct, actionable
-// message naming the unbuildable platform(s) and the binfmt remediation — the
-// same `tonistiigi/binfmt --install all` step the runtime pod's init container
-// uses. (Root AGENTS.md § "Release Rules": multi-architecture builds must
-// verify daemon capability explicitly; issue #645.)
+// verifyDockerBuildPlatforms fails fast when the host lacks binfmt/QEMU for a
+// required architecture, so the multi-arch build surfaces an actionable message
+// instead of the opaque error a per-platform `docker build` would otherwise emit.
 func verifyDockerBuildPlatforms(required []string) error {
 	available, err := dockerBuildxPlatforms()
 	if err != nil {
 		return err
 	}
-	// If the probe reported no parseable platform list, we cannot prove any
-	// platform is unsupported, so don't block the build. The missing-binfmt
-	// case this preflight targets surfaces as a populated list that omits the
-	// foreign arch (caught below); an empty or unrecognized inspect output
-	// (an unusual builder, a future format change) degrades gracefully to the
-	// prior behavior rather than failing a build that would have succeeded.
+	// An empty/unparseable platform list cannot prove anything is unsupported, so
+	// degrade to the prior behavior rather than block a build that would succeed.
 	if len(available) == 0 {
 		return nil
 	}
@@ -37,12 +26,9 @@ func verifyDockerBuildPlatforms(required []string) error {
 	return newUnsupportedBuildPlatformError(missing)
 }
 
-// dockerBuildxPlatforms probes the current Docker builder for the platforms it
-// can build for. The platform list reflects the kernel's registered binfmt
-// handlers, so it is a faithful answer to "can `docker build --platform X`
-// emulate X here". A failure to run the probe (no buildx, daemon down) is
-// surfaced directly rather than letting the build fail later with a confusing
-// per-platform error.
+// dockerBuildxPlatforms probes the current builder; its platform list reflects
+// the kernel's registered binfmt handlers, so it faithfully answers whether
+// `docker build --platform X` can emulate X here.
 func dockerBuildxPlatforms() (map[string]bool, error) {
 	cmd := Command("docker", "buildx", "inspect")
 	out := new(bytes.Buffer)
@@ -58,14 +44,9 @@ func dockerBuildxPlatforms() (map[string]bool, error) {
 	return parseBuildxPlatforms(out.String()), nil
 }
 
-// parseBuildxPlatforms extracts the platform set from `docker buildx inspect`
-// output. The relevant line looks like:
-//
-//	Platforms: linux/arm64*, linux/amd64, linux/amd64/v2, linux/arm/v7
-//
-// buildx marks the node's default platform with a trailing `*`, which is
-// stripped. Multiple `Platforms:` lines (one per builder node) are unioned so a
-// multi-node builder reports the full reachable set.
+// parseBuildxPlatforms unions the platforms across every `Platforms:` line (one
+// per builder node) so a multi-node builder reports its full reachable set, and
+// strips the trailing `*` buildx uses to mark a node's default platform.
 func parseBuildxPlatforms(inspectOutput string) map[string]bool {
 	platforms := make(map[string]bool)
 	for _, line := range strings.Split(inspectOutput, "\n") {
@@ -84,8 +65,8 @@ func parseBuildxPlatforms(inspectOutput string) map[string]bool {
 	return platforms
 }
 
-// missingBuildPlatforms returns the required platforms the daemon cannot build,
-// preserving the required-list order so the error message is deterministic.
+// missingBuildPlatforms preserves the required-list order so the resulting error
+// message is deterministic.
 func missingBuildPlatforms(required []string, available map[string]bool) []string {
 	var missing []string
 	for _, platform := range required {
@@ -96,9 +77,6 @@ func missingBuildPlatforms(required []string, available map[string]bool) []strin
 	return missing
 }
 
-// newUnsupportedBuildPlatformError builds the actionable error returned when the
-// daemon cannot produce a required platform. It names the missing platform(s),
-// states the full set erun builds, and gives the exact binfmt-install command.
 func newUnsupportedBuildPlatformError(missing []string) error {
 	return fmt.Errorf(
 		"the local Docker daemon cannot build %s: no emulator is registered for the foreign architecture. "+

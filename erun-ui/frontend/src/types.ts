@@ -1,10 +1,8 @@
 export type EnvironmentType = 'local-agent' | 'remote-agent' | 'runtime' | '';
 
-// EnvironmentTypeValues lists the dropdown options. The model type for the
-// `type` field below is widened to `string` because the Wails-generated
-// binding (frontend/wailsjs/go/models.ts) widens the Go EnvironmentType
-// alias to a bare `string` at the boundary — narrowing the field here would
-// fail the LoadEnvironmentConfig/SaveEnvironmentConfig assignability check.
+// EnvironmentTypeValues are the narrowed dropdown options; the `type` field
+// below must stay bare `string` because the Wails binding widens the Go
+// EnvironmentType alias, so narrowing it would break assignability.
 export const EnvironmentTypeValues: readonly EnvironmentType[] = [
   'local-agent',
   'remote-agent',
@@ -23,10 +21,9 @@ export interface UIEnvironment {
   autoStart?: boolean;
 }
 
-// UIWorkingIssue mirrors the Go uiWorkingIssue read model returned by the
-// EnvironmentWorkingIssue binding: the env worktree's current branch and, when
-// the branch names an issue, its resolved title. `available` is false for
-// remote-worktree envs whose branch can't be read from the host.
+// UIWorkingIssue is the env worktree's current branch and, when the branch
+// names an issue, its resolved title. `available` is false for remote-worktree
+// envs whose branch can't be read from the host.
 export interface UIWorkingIssue {
   available: boolean;
   branch?: string;
@@ -35,8 +32,7 @@ export interface UIWorkingIssue {
   reason?: string;
 }
 
-// UIEnvTrace mirrors the Go uiEnvTrace from the LoadEnvTrace binding: the
-// Diagnostics console's erun-trace read model (issues #466/#508).
+// UIEnvTrace is the Diagnostics console's erun-trace read model.
 export interface UIEnvTrace {
   available: boolean;
   content?: string;
@@ -45,17 +41,15 @@ export interface UIEnvTrace {
   notice?: string;
 }
 
-// UIUpgradeVersionCandidate mirrors the Go UpgradeVersionCandidate: one newer
-// version an env's registries offered, tagged with the registry it came from
-// (issue #527).
+// UIUpgradeVersionCandidate is one newer version an env's registries offered,
+// tagged with the registry it came from.
 export interface UIUpgradeVersionCandidate {
   version: string;
   registry?: string;
 }
 
-// UIUpgradePlanItem mirrors the Go UpgradePlanItem from the ResolveUpgradePlan
-// binding: one opted-in env's channel, current version, the latest version for
-// that channel, and whether it lags (will be redeployed by Upgrade all).
+// UIUpgradePlanItem is one opted-in env's upgrade state: its channel, current
+// and latest versions, and whether it lags (and so is redeployed by Upgrade all).
 export interface UIUpgradePlanItem {
   tenant: string;
   environment: string;
@@ -63,13 +57,11 @@ export interface UIUpgradePlanItem {
   current: string;
   target: string;
   lagging: boolean;
-  // The distinct newer versions discovered across the env's listed registries,
-  // each with its source registry. One entry when a single target resolved;
-  // more than one when the operator must pick (issue #527).
+  // One entry when a single target resolved; more than one when the operator
+  // must pick between registries.
   candidates?: UIUpgradeVersionCandidate[];
-  // Why target is empty (registry lookup failed, no published version for the
-  // channel, or multiple newer candidates await a pick) — rendered under
-  // "latest unknown" / the picker (issues #497, #527).
+  // Why target is empty: registry lookup failed, no published version for the
+  // channel, or multiple newer candidates await a pick.
   unresolvedReason?: string;
 }
 
@@ -93,31 +85,28 @@ export interface UISelection {
   runtimeMemory?: string;
   kubernetesContext?: string;
   containerRegistry?: string;
-  // type stays as bare string to match the Wails binding, which widens
-  // the Go EnvironmentType alias at the boundary. Use the
-  // EnvironmentType union for narrowed dropdown values.
+  // Bare string to match the Wails binding, which widens the Go EnvironmentType
+  // alias; use the EnvironmentType union for narrowed dropdown values.
   type?: string;
   localRepoPath?: string;
   noGit?: boolean;
   setDefaultTenant?: boolean;
-  // components is the explicit one-shot deploy selection threaded into
-  // `deploy --components` when the operator deploys from the Runtime tab's
-  // checklist. Chart directory names (plus the runtime release name).
+  // The operator's one-shot deploy selection from the Runtime tab checklist:
+  // chart directory names plus the runtime release name.
   components?: string[];
 }
 
-// UIDeployableComponent describes one selectable deploy target for an
-// environment (the Runtime tab's "Components to deploy" checklist). Mirrors
-// erun-common's DeployableComponent.
+// UIDeployableComponent is one selectable deploy target for an environment
+// (the Runtime tab's "Components to deploy" checklist).
 export interface UIDeployableComponent {
   name: string;
   runtime: boolean;
-  // source is 'local-chart' when a repo-local chart backs the component, or
+  // 'local-chart' when a repo-local chart backs the component, or
   // 'published-chart' for the runtime when only the published erun-devops chart
   // is available.
   source: string;
-  // selected reflects the env's current resolved default selection (saved
-  // deploy.components, else the repo plan, else the runtime alone).
+  // The env's current resolved default selection: saved deploy.components, else
+  // the repo plan, else the runtime alone.
   selected: boolean;
 }
 
@@ -216,31 +205,22 @@ export interface UIIdleStatus {
   cloudContextStatus?: string;
   cloudContextLabel?: string;
   markers?: UIIdleMarker[];
-  // stopPendingSince is the RFC3339 timestamp at which the desktop
-  // first saw stopEligible=true for this env. While set, the
-  // auto-stop is "armed" — the real ec2:StopInstances will fire
-  // after secondsUntilForcedStop more seconds unless cancelled or
-  // activity resumes. Empty when no auto-stop is pending.
+  // RFC3339 timestamp when the desktop first saw stopEligible=true. While set,
+  // the auto-stop is "armed": ec2:StopInstances fires after
+  // secondsUntilForcedStop more seconds unless cancelled or activity resumes.
+  // Empty when no auto-stop is pending.
   stopPendingSince?: string;
   secondsUntilForcedStop?: number;
   gracePeriodSeconds?: number;
 }
 
-// UILastStopEvent describes one stop in the env's audit history.
-// Loaded from the in-pod `idle_stop_history` MCP tool, which reads
-// stop-history.json off the shared home PVC so the desktop sees
-// both the in-pod monitor's auto-stops and the desktop's own
-// manual stops. Surfaced in the env-config Manage dialog's History
-// tab so the user can answer "why did my env stop?" without
-// trawling logs.
+// UILastStopEvent is one stop in the env's audit history, merging the in-pod
+// monitor's auto-stops with the desktop's own manual stops so the user can
+// answer "why did my env stop?".
 //
-// Source distinguishes auto-stops fired by the in-pod idle monitor
-// from manual stops fired by the desktop's Stop button; the row
-// renders a badge from this field. ArmedAt is the moment the grace
-// window began — set on pod-monitor entries, empty on host-manual
-// entries without prior armed grace. Policy is the resolved idle
-// policy snapshot at fire time; older entries on disk that pre-date
-// the snapshot leave it unset.
+// source distinguishes auto-stops from manual stops. armedAt is empty on
+// host-manual entries without prior armed grace. policy is the idle-policy
+// snapshot at fire time; entries that pre-date the snapshot leave it unset.
 export interface UILastStopEvent {
   stoppedAt: string;
   armedAt?: string;
@@ -259,9 +239,9 @@ export interface UILastStopMarker {
   secondsIdleFor?: number;
 }
 
-// UIIdlePolicy mirrors the History-tab snapshot of the resolved
-// idle policy from the Go side. TimeoutSeconds is rendered rather
-// than a Go duration string so the frontend never parses "10m0s".
+// UIIdlePolicy is the History-tab snapshot of the resolved idle policy.
+// timeoutSeconds is a number, not a Go duration string, so the frontend never
+// parses "10m0s".
 export interface UIIdlePolicy {
   timeoutSeconds: number;
   workingHours?: string;
@@ -277,10 +257,8 @@ export interface UIIdleMarker {
   clients?: UIIdleMarkerClient[];
 }
 
-// UIIdleMarkerClient is the per-IP detail row attached to a marker
-// (currently only SSH). The desktop tooltip renders one of these
-// under the marker line; CLI consumers of `activity status --json`
-// see the same shape.
+// UIIdleMarkerClient is the per-IP detail row attached to a marker (currently
+// only SSH); the same shape backs the CLI's `activity status --json`.
 export interface UIIdleMarkerClient {
   address: string;
   bytes?: number;
@@ -328,17 +306,14 @@ export interface UIAWSCloudAliasInput {
   oidcIssuerUrl: string;
 }
 
-// Canonical cloud provider type strings, matching erun-common's
-// CloudProviderAWS / CloudProviderCloudflare. Used to label and group cloud
-// aliases by their provider type across the settings dialog, sidebar, and env
-// manage tab.
+// Canonical cloud provider type strings; must match erun-common's
+// CloudProviderAWS / CloudProviderCloudflare.
 export const CloudProviderAWS = 'aws';
 export const CloudProviderCloudflare = 'cloudflare';
 
 // UIEnvironmentCloudAlias is one provider-type slot in the env's cloud-alias
-// view: the provider type, the alias currently attached for that type (empty
-// when none), and the configured aliases of that type the operator can choose
-// from.
+// view: the alias attached for that type (empty when none) and the aliases the
+// operator can choose from.
 export interface UIEnvironmentCloudAlias {
   provider: string;
   alias: string;
@@ -408,8 +383,8 @@ export interface UIPortStatus {
   status: string;
 }
 
-// UIContainerRegistryEntry mirrors the Go uiContainerRegistryEntry: one
-// registry host plus the roles it carries (any of build/from/to/deploy).
+// UIContainerRegistryEntry is one registry host plus the roles it carries (any
+// of build/from/to/deploy).
 export interface UIContainerRegistryEntry {
   registry: string;
   roles: string[];
@@ -422,10 +397,8 @@ export interface UIEnvironmentConfig {
   containerRegistries: UIContainerRegistryEntry[];
   cloudProviderAlias: string;
   cloudProviderAliases?: string[];
-  // cloudAliasSlots is the per-provider-type cloud-alias view: one entry per
-  // provider type (aws, cloudflare) that has a configured alias or a current
-  // attachment, each carrying the env's chosen alias for that type plus the
-  // selectable options. The frontend renders one selector per slot.
+  // One entry per provider type (aws, cloudflare) that has a configured alias
+  // or a current attachment.
   cloudAliasSlots?: UIEnvironmentCloudAlias[];
   cloudContext?: UICloudContextStatus;
   runtimeVersion: string;
@@ -441,29 +414,24 @@ export interface UIEnvironmentConfig {
   localPorts: UIEnvironmentLocalPorts;
   type?: string;
   localRepoPath?: string;
-  // AutoStart is the desktop-only auto-start policy for the linked cloud
-  // context: undefined means "ask the user once" (first-time prompt), true
-  // means "always auto-start", false means "never auto-start; render the
-  // titlebar Play button so the user can start manually".
+  // Desktop-only auto-start policy for the linked cloud context: undefined means
+  // "ask the user once", true "always auto-start", false "never auto-start; show
+  // the titlebar Play button for manual start".
   autoStart?: boolean;
-  // Deprecated: host AWS credential delivery is now driven by whether an AWS
-  // cloud alias is attached to the env (attaching an alias means "act on my
-  // behalf here"), not by this toggle. The field is retained only to stay
-  // assignable to the generated Go binding; nothing reads it anymore.
+  // Deprecated: host AWS credential delivery now follows whether an AWS cloud
+  // alias is attached, not this toggle. Retained only to stay assignable to the
+  // generated Go binding; nothing reads it.
   remoteHostCredentials: boolean;
-  // AutoUpgrade opts this env into the "Upgrade all" set; upgradeChannel
-  // selects which release channel an upgrade targets ("stable" | "snapshot").
-  // The Go side resolves an empty channel from the env type, so the loaded
-  // value is always one of the two.
+  // autoUpgrade opts this env into the "Upgrade all" set. upgradeChannel is the
+  // targeted release channel ("stable" | "snapshot"); the Go side resolves an
+  // empty channel from the env type, so a loaded value is always one of the two.
   autoUpgrade: boolean;
   upgradeChannel?: string;
-  // DisableBuildScript makes `erun build` ignore any project build.sh for this
-  // env and resolve Docker/release builds directly. It changes how a redeploy
-  // rebuilds the runtime image, so saving it raises the pending-redeploy banner.
+  // Makes `erun build` ignore the project build.sh and build Docker/release
+  // images directly. Changes how a redeploy rebuilds the runtime image, so
+  // saving it raises the pending-redeploy banner.
   disableBuildScript: boolean;
-  // deployComponents is the per-machine saved deploy selection (EnvConfig
-  // deploy.components). Empty means "no saved selection". The Runtime tab's
-  // "Save as default" writes the checklist selection here.
+  // The per-machine saved deploy selection; empty means "no saved selection".
   deployComponents?: string[];
 }
 
@@ -523,9 +491,9 @@ export interface StartSessionResult {
   slot?: number;
   kind?: string;
   // True when the call started a background command orchestration (e.g. an
-  // agent-env deploy composing build -> push -> deploy) instead of a
-  // foreground PTY session. There is no Local tab to activate; progress and
-  // completion surface through the activity queue.
+  // agent-env build→push→deploy) instead of a foreground PTY session: there is
+  // no Local tab to activate, so progress and completion surface through the
+  // activity queue.
   orchestrated?: boolean;
 }
 
@@ -543,9 +511,8 @@ export interface PastedFileResult {
   path: string;
 }
 
-// AgentOutputEntry mirrors the Go OutputEntry from the ListAgentOutputs
-// binding: one file or folder an agent produced in the runtime pod's outputs
-// directory.
+// AgentOutputEntry is one file or folder an agent produced in the runtime pod's
+// outputs directory.
 export interface AgentOutputEntry {
   name: string;
   path: string;
@@ -554,8 +521,7 @@ export interface AgentOutputEntry {
   isDir: boolean;
 }
 
-// AgentOutputsList mirrors the Go RuntimeOutputsListResult: the entries in the
-// pod's outputs directory, newest-first.
+// AgentOutputsList is the entries in the pod's outputs directory, newest-first.
 export interface AgentOutputsList {
   dir: string;
   entries: AgentOutputEntry[];

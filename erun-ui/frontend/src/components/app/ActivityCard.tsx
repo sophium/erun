@@ -42,11 +42,8 @@ export interface ActivityCardProps {
   onKillSession?: (sessionId: number) => Promise<boolean>;
 }
 
-// useTickingNow provides a per-component ticking timestamp without
-// surfacing it as a prop. Parent re-renders no longer cascade into every
-// card every second; only this card re-renders when its own elapsed
-// label crosses a second boundary. Active entries tick once a second;
-// finished entries are static.
+// Per-card ticking clock so a running card re-renders once a second on its own,
+// rather than a parent tick cascading a re-render into every card each second.
 function useTickingNow(active: boolean): number {
   const [now, setNow] = React.useState(() => Date.now());
   React.useEffect(() => {
@@ -143,16 +140,8 @@ export const ActivityCard = React.memo(function ActivityCard({
   );
 });
 
-// FailureDetails renders the failure-evidence surface for a failed card: an
-// expandable section showing the captured command output (the real
-// helm/kubectl/docker error behind the one-line summary) and a "Copy failure
-// report" button that copies a complete, paste-ready report for handing to
-// developers/admins. The report is always available even when no output was
-// captured (a fast failure), because it includes the structured context the
-// user would otherwise have to retype. Diagnostic state belongs inline where
-// the user is looking (erun-ui/AGENTS.md "Professional UX"), not behind a
-// native tooltip; the disclosure mirrors the container-status row pattern and
-// the copy button mirrors the existing copy affordances.
+// The copy-report button stays available even on a fast failure that captured
+// no output, because the report carries context the user would otherwise retype.
 function FailureDetails({ entry }: { entry: ActivityQueueEntry }): React.ReactElement {
   const [expanded, setExpanded] = React.useState<boolean>(false);
   const [copied, setCopied] = React.useState<boolean>(false);
@@ -223,15 +212,8 @@ function FailureDetails({ entry }: { entry: ActivityQueueEntry }): React.ReactEl
   );
 }
 
-// FailedDeployActions renders the "select a fix" recovery row on a failed
-// deploy/open card: launch the deploy-aware `erun doctor` to troubleshoot,
-// force a clean rebuild + redeploy, or clear a stuck pending helm release.
-// These mirror the recovery affordances already offered for running deploys
-// (RecoveryActionRow) and container failures (ContainerStatus) — Nielsen #4
-// consistency — surfaced where the user sees the failure (Nielsen #1,
-// recognition over recall). All three are explicit, side-effecting buttons,
-// never auto-run; "Run doctor" leads because troubleshooting is the safe
-// first step before the heavier rebuild/redeploy.
+// "Run doctor" is the primary action because troubleshooting is the safe first
+// step before the heavier rebuild/redeploy; all three are explicit, never auto-run.
 function FailedDeployActions({
   entry,
   onRecoverPendingHelm,
@@ -241,9 +223,8 @@ function FailedDeployActions({
 }): React.ReactElement | null {
   const dispatch = useAppDispatch();
   const [running, setRunning] = React.useState<boolean>(false);
-  // Guard against re-fire: each action runs `erun …` in the shared Local
-  // shell, so without a guard (and with the Local tab now focused for
-  // feedback) repeated clicks could pile commands into that shell (#445).
+  // Each action pipes `erun …` into the shared Local shell; without this guard
+  // repeated clicks would pile commands into that one shell.
   const runAction = React.useCallback(
     (action: () => Promise<unknown>) => {
       if (running) return;
@@ -302,10 +283,6 @@ function FailedDeployActions({
   );
 }
 
-// RecoveryActionRow renders the per-card recovery affordances. Helm-source
-// deploys get a "Clear pending helm release" button; shell-source entries
-// get a destructive "Kill shell" button. The row collapses to nothing
-// when no recovery applies.
 function RecoveryActionRow({
   entry,
   onRecoverPendingHelm,

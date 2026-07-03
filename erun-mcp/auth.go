@@ -11,57 +11,29 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// MCP auth edge (issue #655). The per-env erun-mcp server is exposed publicly
-// (Traefik routes it at mcp.<tenant>-<env>.services.<base-domain>) and its `raw`
-// tool can kubectl-exec, so it must always be authenticated once a trust anchor
-// is configured.
-//
-// Auth mirrors the erun api's model (erun-backend-api): a key/value map of
-// trusted issuer → tenant. A bearer token is accepted only when its verified
-// `iss` is a configured trusted issuer; the mapped value is the tenant the
-// token authenticates, so the tenant is identified per URL exactly as the api
-// resolves it from the issuer. An issuer is either a `file://<path>` desktop
-// public key (verified by erun-common's Ed25519 verifier) — the desktop case —
-// or, later, an OIDC issuer URL. The crypto verification lives in erun-common
-// so the desktop signer and this verifier share one contract.
+// The per-env erun-mcp server is exposed publicly and its `raw` tool can
+// kubectl-exec, so once a trust anchor is configured every request must be
+// authenticated. Auth mirrors the erun api's issuer→tenant model, and the
+// crypto verification lives in erun-common so the desktop signer and this
+// verifier share one contract.
 const (
-	// envMCPTrustedIssuers is a JSON object mapping each trusted issuer to the
-	// tenant it authenticates: {"file:///etc/erun/mcp-auth/desktopid.pub":"acme"}.
 	envMCPTrustedIssuers = "ERUN_MCP_TRUSTED_ISSUERS"
-	// envMCPTrustedIssuer is single-issuer sugar: the one trusted issuer, mapped
-	// to the env's own tenant (ERUN_TENANT). Convenient for the common
-	// one-tenant-per-server case; ERUN_MCP_TRUSTED_ISSUERS wins when both are set.
-	envMCPTrustedIssuer = "ERUN_MCP_TRUSTED_ISSUER"
-	// envMCPAudience optionally pins the expected token audience.
-	envMCPAudience = "ERUN_MCP_AUDIENCE"
-	// envTenant is the env's own tenant, used as the value for the single-issuer
-	// sugar form.
-	envTenant = "ERUN_TENANT"
+	envMCPTrustedIssuer  = "ERUN_MCP_TRUSTED_ISSUER"
+	envMCPAudience       = "ERUN_MCP_AUDIENCE"
+	envTenant            = "ERUN_TENANT"
 )
 
 type mcpAuthConfig struct {
-	// trustedIssuers maps each trusted token issuer (the key — a file:// public
-	// key path or an OIDC issuer URL) to the tenant it authenticates (the value),
-	// mirroring the erun api's issuer→tenant model. A token is accepted only when
-	// its verified iss is a key here; the value is the resolved tenant.
 	trustedIssuers map[string]string
 	audience       string
-	// tenant is this env's own tenant (ERUN_TENANT). A per-env edge serves exactly
-	// one tenant, so a token that resolves to a different tenant — a misconfigured
-	// trusted-issuer map pointing an issuer at another tenant — is rejected (#657).
-	tenant string
-	// oidc verifies tokens from `https://` OIDC issuers against their JWKS. It is
-	// the same shared verifier the hosted backend API uses (erun-common). One
-	// instance is created per middleware and reused so each issuer's key set is
-	// fetched and cached once; file:// issuers do not use it.
-	oidc *eruncommon.OIDCVerifier
+	tenant         string
+	oidc           *eruncommon.OIDCVerifier
 }
 
-// mcpAuthConfigFromEnv reads the auth configuration the chart wires onto the
-// erun-mcp container. An empty map means no auth is configured — the legacy
-// loopback-only behavior — so existing deployments that have not yet injected a
-// desktop key keep working; a desktop deployment always sets it, so its MCP
-// edge is always authenticated.
+// mcpAuthConfigFromEnv builds the auth config from the environment. An empty
+// result leaves auth unconfigured — the legacy loopback-only behavior — so
+// deployments that predate desktop-key injection keep working; a desktop
+// deployment always sets a trust anchor, so its edge stays authenticated.
 func mcpAuthConfigFromEnv() mcpAuthConfig {
 	cfg := mcpAuthConfig{
 		trustedIssuers: map[string]string{},
@@ -81,7 +53,6 @@ func mcpAuthConfigFromEnv() mcpAuthConfig {
 			}
 		}
 	}
-	// Single-issuer sugar: maps the one trusted issuer to the env's own tenant.
 	if single := strings.TrimSpace(os.Getenv(envMCPTrustedIssuer)); single != "" {
 		if _, ok := cfg.trustedIssuers[single]; !ok {
 			cfg.trustedIssuers[single] = strings.TrimSpace(os.Getenv(envTenant))
@@ -94,10 +65,6 @@ func (c mcpAuthConfig) enabled() bool {
 	return len(c.trustedIssuers) > 0
 }
 
-// authHTTPMiddleware rejects unauthenticated requests with 401 when auth is
-// configured. It reads the (unverified) issuer to select the trusted entry,
-// verifies the bearer JWT against that issuer's key, and resolves the tenant
-// from the map. When auth is not configured it passes through unchanged.
 func authHTTPMiddleware(cfg mcpAuthConfig, next http.Handler) http.Handler {
 	if !cfg.enabled() {
 		return next
@@ -119,7 +86,7 @@ func authHTTPMiddleware(cfg mcpAuthConfig, next http.Handler) http.Handler {
 			return
 		}
 		// A per-env edge serves exactly one tenant; a token resolving to another
-		// tenant means the trusted-issuer map is misconfigured for this env (#657).
+		// tenant means the trusted-issuer map is misconfigured for this env.
 		if cfg.tenant != "" && tenant != cfg.tenant {
 			writeUnauthorized(w, "token tenant does not match this environment")
 			return
@@ -128,14 +95,10 @@ func authHTTPMiddleware(cfg mcpAuthConfig, next http.Handler) http.Handler {
 			writeUnauthorized(w, err.Error())
 			return
 		}
-		// Tenant identified per URL from the issuer→tenant map (mirrors the erun
-		// api). Carry it on the request so tools/audit can read the authenticated
-		// tenant.
 		next.ServeHTTP(w, requestWithAuthTenant(req, tenant))
 	})
 }
 
-// authTenantHeader carries the tenant the auth edge resolved for the request.
 const authTenantHeader = "X-Erun-Auth-Tenant"
 
 func requestWithAuthTenant(req *http.Request, tenant string) *http.Request {
@@ -146,8 +109,7 @@ func requestWithAuthTenant(req *http.Request, tenant string) *http.Request {
 	return req
 }
 
-// bearerToken extracts the token from an `Authorization: Bearer <token>` header
-// (the scheme match is case-insensitive per RFC 7235).
+// bearerToken matches the auth scheme case-insensitively per RFC 7235.
 func bearerToken(req *http.Request) string {
 	header := strings.TrimSpace(req.Header.Get("Authorization"))
 	const prefix = "bearer "

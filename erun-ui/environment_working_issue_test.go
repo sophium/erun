@@ -27,15 +27,11 @@ func TestParseIssueNumberFromBranch(t *testing.T) {
 	}
 }
 
-// workingIssueApp builds an App whose store resolves one env and whose
-// working-issue command runner is stubbed, so the resolver runs without a real
-// repo or gh. The pod-path deps are pinned hermetic (issue #492): a remote
-// env resolved through this helper must never probe the developer machine's
-// real local ports — ResolveOpen allocates a port range even when none is
-// persisted, and a live desktop/headless erun can be listening there, turning
-// the default reachability probe + MCP call into real network traffic. Tests
-// that exercise the pod-backed path inject their own deps via
-// remoteWorkingIssueApp.
+// workingIssueApp builds an App with one resolved env and a stubbed command
+// runner. The local-port dep is pinned unreachable on purpose: without it a
+// remote env resolved here would probe the developer machine's real ports,
+// where a live erun could be listening, turning the reachability check into
+// real network traffic.
 func workingIssueApp(t *testing.T, env eruncommon.EnvConfig, run workingIssueCommandRunner) *App {
 	t.Helper()
 	store := stubUIStore{
@@ -88,7 +84,6 @@ func TestEnvironmentWorkingIssueResolvesBranchAndTitle(t *testing.T) {
 		t.Fatalf("expected git + gh (2 calls), got %d: %v", len(calls), calls)
 	}
 
-	// Second call within the TTL is served from cache (no extra git/gh).
 	if _, err := app.EnvironmentWorkingIssue(uiSelection{Tenant: "acme", Environment: "dev"}); err != nil {
 		t.Fatalf("second EnvironmentWorkingIssue: %v", err)
 	}
@@ -132,9 +127,6 @@ func TestEnvironmentWorkingIssueUnavailableForRemoteWorktree(t *testing.T) {
 	}
 }
 
-// remoteWorkingIssueApp builds an App for the pod-backed resolution paths
-// (issue #462): a remote-agent env with a port range, an injectable
-// reachability answer, and an injectable in-pod branch loader.
 func remoteWorkingIssueApp(t *testing.T, reachable bool, loadPodBranch func(context.Context, string, string) (string, error), run workingIssueCommandRunner) *App {
 	t.Helper()
 	store := stubUIStore{

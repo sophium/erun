@@ -21,11 +21,6 @@ import { CloudProviderAWS, CloudProviderCloudflare, type UICloudProviderStatus }
 
 type GlobalConfigDialog = AppState['globalConfigDialog'];
 
-// providerGroupOrder fixes the render order of the grouped alias list: AWS
-// first (the legacy primary), then Cloudflare, then any other configured
-// provider type alphabetically. Recognition over recall: aliases stay grouped
-// under a labelled heading so an operator with both an AWS account and a
-// Cloudflare token can tell which is which at a glance (Nielsen #6).
 const providerGroupOrder = [CloudProviderAWS, CloudProviderCloudflare];
 
 export function CloudAliasesSection({
@@ -62,13 +57,8 @@ export function CloudAliasesSection({
   );
 }
 
-// AddProviderButtons is the provider picker: one explicit button per provider
-// type. Both delegate alias creation to the CLI's guided `erun cloud init
-// <provider>` flow over a PTY session — AWS runs an SSO browser login,
-// Cloudflare prompts for and verifies a scoped token — so the desktop never
-// hosts a bespoke add form. Two named buttons beat a generic "Add" + a hidden
-// type chooser — the operator sees both supported providers up front
-// (recognition over recall, Nielsen #6).
+// Alias creation is delegated to the CLI's guided `erun cloud init` flow, so
+// the desktop never hosts its own add-provider form.
 function AddProviderButtons({ dialog }: { dialog: GlobalConfigDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
   return (
@@ -148,10 +138,6 @@ function CloudAliasesEmptyState({ dialog }: { dialog: GlobalConfigDialog }): Rea
   );
 }
 
-// GroupedCloudAliasList renders the configured aliases under a labelled heading
-// per provider type so AWS accounts and Cloudflare tokens are visually
-// distinct. Each row independently logs in (or, for Cloudflare, re-verifies
-// the stored token) and shows its own status and spinner.
 function GroupedCloudAliasList({
   dialog,
   providers,
@@ -239,10 +225,8 @@ function CloudAliasRow({
         loading={
           dialog.busyAction === 'cloud-provider-login' && dialog.busyTarget === provider.alias
         }
-        // Cloudflare "login" re-verifies the stored scoped token against the
-        // Cloudflare API — there is no browser SSO — so the action reads
-        // "Verify token" rather than "Login" (match between system and the
-        // real world, Nielsen #2).
+        // Cloudflare has no browser SSO — its "login" re-verifies the stored
+        // token — so the action reads "Verify token" rather than "Login".
         loginLabel={isCloudflare ? 'Verify token' : undefined}
         loadingLabel={isCloudflare ? 'Verifying...' : undefined}
         onLogin={() => void dispatch(loginGlobalCloudProvider(provider.alias))}

@@ -149,12 +149,9 @@ export const updateManageConfig =
     dispatch(patchManageDialog({ config, error: '' }));
   };
 
-// updateManageCloudAliasSlot updates one provider-type cloud-alias slot in the
-// draft (issue #630). It rewrites the matching entry in cloudAliasSlots and, for
-// the AWS slot, also mirrors the alias into the legacy cloudProviderAlias scalar
-// so the cloud-context linkage UI keeps working. Like updateManageConfig's
-// alias branch, changing the AWS alias clears the resolved cloud context so the
-// field re-resolves on the next load rather than showing a stale link.
+// The AWS alias is also written to the legacy cloudProviderAlias scalar the
+// cloud-context linkage UI still reads, and its resolved cloud context is
+// cleared so a stale link cannot outlive the alias change.
 export const updateManageCloudAliasSlot =
   (provider: string, alias: string): AppThunk =>
   (dispatch, getState) => {
@@ -351,15 +348,15 @@ export const submitManageConfig = (): AppThunk<Promise<void>> => async (dispatch
         busyTarget: '',
         error: '',
         // The banner means "the running pod is behind the saved config", so
-        // raise it only when this save changed a pod-shaping field (issue
-        // #460: saving autoUpgrade/autoStart must not prompt a pod roll).
+        // raise it only when this save changed a pod-shaping field (saving
+        // autoUpgrade/autoStart must not prompt a pod roll).
         pendingRedeploy: nextPendingRedeploy(dialog.pendingRedeploy, priorConfig, displayConfig),
       }),
     );
     // A changed Claude launch flag only applies when the AI session's
     // create-time program runs, so reopen the env's open AI tabs now rather
-    // than leaving a live claude on the stale flags (issues #477/#482). A
-    // save that did not change the launch signature must not churn tabs.
+    // than leaving a live claude on the stale flags. A save that did not
+    // change the launch signature must not churn tabs.
     if (
       priorConfig &&
       aiSessionLaunchSignature(priorConfig) !== aiSessionLaunchSignature(displayConfig)
@@ -409,10 +406,6 @@ const refreshManageVersionSuggestions =
     }
   };
 
-// refreshManageDeployComponents loads the env's deployable charts (the
-// "Components to deploy" checklist) from the read model and seeds the working
-// selection from the current resolved default. Guards against a stale response
-// writing after the dialog reopened for another env.
 const refreshManageDeployComponents = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
   const selection = getState().manageDialog.selection;
   if (!selection) {
@@ -444,9 +437,8 @@ const refreshManageDeployComponents = (): AppThunk<Promise<void>> => async (disp
   }
 };
 
-// toggleManageDeployComponent adds or removes a chart from the working checklist
-// selection. It is a draft edit only — persisted via saveManageDeployComponents
-// or threaded one-shot by submitManageDeploy.
+// A draft-only edit: the selection is persisted separately via
+// saveManageDeployComponents, or threaded one-shot through submitManageDeploy.
 export const toggleManageDeployComponent =
   (name: string, checked: boolean): AppThunk =>
   (dispatch, getState) => {
@@ -466,11 +458,10 @@ export const toggleManageDeployComponent =
     );
   };
 
-// saveManageDeployComponents persists the checklist selection as the env's
-// per-machine default (EnvConfig deploy.components). It saves against the loaded
-// config so only deploy.components changes on disk (scoped save), keeps the
-// operator's other unsaved edits, and raises the pending-redeploy banner because
-// a component-selection change alters what a redeploy rolls out.
+// Saves against the loaded config, not the working draft, so only the component
+// selection is written and the operator's other unsaved edits are preserved.
+// Raises the pending-redeploy banner because the selection changes what a
+// redeploy rolls out.
 export const saveManageDeployComponents =
   (): AppThunk<Promise<void>> => async (dispatch, getState) => {
     const dialog = getState().manageDialog;

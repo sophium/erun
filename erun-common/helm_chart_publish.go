@@ -10,14 +10,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// HelmChartPublishSpec describes a single chart-publish step: package the
-// chart at ChartPath, then push the resulting tgz to OCIRepo as an OCI Helm
-// artifact. The published reference is `<OCIRepo trimmed of oci://>/<ChartName>:<Version>`.
-//
-// The publish step packages into the chart's parent directory rather than a
-// temp dir so the dry-run trace shows the actual `helm package` and
-// `helm push` argv the real run would execute, including the working
-// directory. The tgz is cleaned up after push.
+// HelmChartPublishSpec describes a chart package-then-push step. It packages
+// into the chart's parent directory rather than a temp dir so the dry-run trace
+// shows the real helm argv and working directory.
 type HelmChartPublishSpec struct {
 	ChartPath string
 	ChartName string
@@ -51,11 +46,7 @@ func (p HelmChartPublishSpec) pushCommand() commandSpec {
 	}
 }
 
-// RunHelmChartPublish traces and executes the package + push pair. In
-// dry-run the trace lines are emitted and execution short-circuits before
-// any filesystem or network side effects occur. Real-run packages into the
-// chart's parent directory and removes the tgz once push completes (or
-// fails), regardless of the push outcome.
+// RunHelmChartPublish traces and executes the chart package-then-push pair.
 func RunHelmChartPublish(ctx Context, spec HelmChartPublishSpec) error {
 	if strings.TrimSpace(spec.ChartName) == "" {
 		return errors.New("publish: chart name is required")
@@ -87,10 +78,9 @@ func RunHelmChartPublish(ctx Context, spec HelmChartPublishSpec) error {
 	return nil
 }
 
-// VerifyPublishedHelmChart pulls the just-pushed chart back from the OCI
-// registry into a temp directory, proving the artifact later steps (and
-// every env consuming the published chart) depend on is actually fetchable.
-// Release Rules: do not assume remote state after pushing — check it.
+// VerifyPublishedHelmChart re-pulls the just-pushed chart so a release never
+// assumes remote state: the artifact later steps and consuming envs depend on
+// must be provably fetchable.
 func VerifyPublishedHelmChart(ctx Context, ociRepo, chartName, version string) error {
 	destination := filepath.Join(os.TempDir(), "erun-chart-verify")
 	args := []string{
@@ -122,8 +112,6 @@ func runHelmCommand(ctx Context, spec commandSpec) error {
 	return cmd.Run()
 }
 
-// loadHelmChartName reads the `name` field from <chartPath>/Chart.yaml so the
-// publish step knows the tgz filename `helm package` produces.
 func loadHelmChartName(chartPath string) (string, error) {
 	data, err := os.ReadFile(filepath.Join(chartPath, "Chart.yaml"))
 	if err != nil {
@@ -142,13 +130,10 @@ func loadHelmChartName(chartPath string) (string, error) {
 	return name, nil
 }
 
-// helmChartDeclaresDependencies reports whether a local chart's Chart.yaml
-// declares a non-empty dependencies list — an umbrella chart that vendors its
-// published subcharts into charts/ (the erun-blueprint-platform pattern, where
-// a <tenant>-<component> umbrella depends on the published erun-<component>
-// chart). deploy must `helm dependency build` such a chart before install,
-// since helm upgrade --install fails when the declared subcharts are missing
-// from charts/.
+// helmChartDeclaresDependencies flags an umbrella chart that vendors published
+// subcharts into charts/ (the erun-blueprint-platform pattern): deploy must run
+// `helm dependency build` on it first, since helm upgrade --install fails when
+// the declared subcharts are missing from charts/.
 func helmChartDeclaresDependencies(chartPath string) (bool, error) {
 	data, err := os.ReadFile(filepath.Join(chartPath, "Chart.yaml"))
 	if err != nil {
@@ -165,12 +150,9 @@ func helmChartDeclaresDependencies(chartPath string) (bool, error) {
 	return len(chart.Dependencies) > 0, nil
 }
 
-// resolveHelmChartPublishSpec builds a HelmChartPublishSpec for a chart at a
-// version + registry. Every erun chart publishes under the registry's /charts
-// path (PublishedDevopsChartOCIRepo) — separate from the image repo of the same
-// name (<registry>/<component>) — so a chart never collides with its
-// component's image at the same ref, and a pushed version is deployable by envs
-// and by platform wrapper charts that consume the published charts.
+// resolveHelmChartPublishSpec keeps every erun chart under the registry's
+// /charts path so a chart never collides with its component's same-named image
+// repo at the same ref.
 func resolveHelmChartPublishSpec(chartPath, version, containerRegistry string) (HelmChartPublishSpec, error) {
 	chartName, err := loadHelmChartName(chartPath)
 	if err != nil {
@@ -194,21 +176,14 @@ func resolveHelmChartPublishSpec(chartPath, version, containerRegistry string) (
 }
 
 // publishComponentChart publishes the Helm chart that ships with a component
-// image at chartVersion — so every component (release or snapshot) is deployable
-// by envs and by platform wrapper charts that consume the published charts, not
-// just the runtime erun-devops chart. The chart lives in the same module as the
-// image build context (<module>/k8s/<image-name>) and publishes under
-// <registry>/charts (separate from the image repo).
+// image so every component is deployable by envs and platform wrapper charts,
+// not just the runtime erun-devops chart.
 //
-// chartVersion is the push/release version, which is intentionally decoupled
-// from image.Version: version-pinned bases (e.g. erun-powerdns at upstream
-// 4.9.3, erun-backend-postgres at 18.3) keep their image at the upstream pin and
-// are not re-pushed at the release version, but their chart must still publish
-// at the release version so platform deploys resolve it. For non-pinned
-// components image.Version equals chartVersion. When chartVersion is empty
-// (single-image push paths) it falls back to image.Version. It is a no-op for an
-// image that ships no chart (e.g. a tenant's custom <tenant>-devops image that
-// overrides into the published erun-devops chart, or an infra image like dind).
+// chartVersion is intentionally decoupled from image.Version: version-pinned
+// bases (e.g. erun-powerdns at upstream 4.9.3, erun-backend-postgres at 18.3)
+// keep their image at the upstream pin but must still publish their chart at the
+// release version so platform deploys resolve it. It is a no-op for an image
+// that ships no chart (a tenant's <tenant>-devops override, or infra like dind).
 func publishComponentChart(ctx Context, image DockerImageReference, chartVersion string) error {
 	imageName := strings.TrimSpace(image.ImageName)
 	projectRoot := strings.TrimSpace(image.ProjectRoot)

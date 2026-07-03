@@ -14,12 +14,8 @@ const (
 	sessionKindContributeAI   sessionKind = "contribute-ai"
 )
 
-// StartContributeSession spawns the contribute ERun tab: an `erun open`
-// PTY against the env, then pipes a prelude that prepends the contribute
-// shim directory to PATH, aliases `erun` to the local build script for
-// the interactive shell, and cds into ~/git/erun. Subsequent `erun`
-// invocations (whether typed at the prompt or spawned as child
-// processes) resolve to the locally-built CLI.
+// StartContributeSession spawns the contribute ERun tab: a shell in the
+// operator's local erun clone where `erun` runs the locally-built CLI.
 func (a *App) StartContributeSession(selection uiSelection, slot, cols, rows int) (startSessionResult, error) {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
@@ -30,10 +26,8 @@ func (a *App) StartContributeSession(selection uiSelection, slot, cols, rows int
 	})
 }
 
-// StartContributeAISession spawns the contribute AI tab: same as
-// StartContributeSession but additionally pipes the env's configured AI
-// tool command after the contribute prelude so the AI assistant boots
-// inside the contribute clone.
+// StartContributeAISession spawns the contribute AI tab: like the contribute
+// ERun tab, but boots the env's AI assistant inside the clone.
 func (a *App) StartContributeAISession(selection uiSelection, slot, cols, rows int) (startSessionResult, error) {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
@@ -73,12 +67,9 @@ func (a *App) runContributeSession(ctx context.Context, selection uiSelection, s
 		return reused, managed, nil
 	}
 
-	// The contribute tab runs `erun open --app-session contribute-… --contribute
-	// [--ai]`: the persistent remote session cds into the contribute clone with
-	// its env (and launches the AI tool for the AI variant) as its create-time
-	// program, once, so reopening reconnects instead of re-running the prelude or
-	// spawning a parallel session (#478). What used to be typed in (issue #469)
-	// now happens pod-side in `erun open`.
+	// Setup runs as the remote session's create-time program exactly once, so
+	// reopening the tab reconnects to the live session instead of re-running
+	// setup or spawning a parallel one.
 	appSessionID := "contribute-erun"
 	if withAI {
 		appSessionID = "contribute-ai"
@@ -139,11 +130,6 @@ func (a *App) runContributeSession(ctx context.Context, selection uiSelection, s
 	}, managed, nil
 }
 
-// reuseExistingContributeSession reconnects to an already-live contribute
-// session for key when one exists, signalling it ready and returning its
-// start result. The third return value reports whether a reusable session was
-// found; when false the caller spawns a fresh session. The session map is
-// inspected under a.mu, matching the locking the spawn path uses.
 func (a *App) reuseExistingContributeSession(key string, slot int, kind sessionKind) (startSessionResult, *managedTerminal, bool) {
 	a.mu.Lock()
 	existing := a.sessions[key]
@@ -169,8 +155,8 @@ func contributeSessionKey(selection uiSelection, slot int, withAI bool) string {
 	return prefix + "\x00" + selectionKey(selection) + "\x00" + fmt.Sprintf("%d", slot)
 }
 
-// closeContributeSessionsForSelection terminates any active contribute
-// tabs for the env. Called when the user toggles contribute mode off.
+// closeContributeSessionsForSelection runs when the operator toggles
+// contribute mode off for the env.
 func (a *App) closeContributeSessionsForSelection(selection uiSelection) {
 	selection = normalizeSelection(selection)
 	prefixes := []string{

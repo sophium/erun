@@ -9,23 +9,16 @@ import (
 	common "github.com/sophium/erun/erun-common"
 )
 
-// previewAdoptOrConflict surfaces in dry-run what the live path would do
+// previewAdoptOrConflict mirrors in dry-run what the live path would do
 // when the local port is already held: adopt the existing kubectl
-// port-forward (when argv matches expected) or refuse with a holder
-// description. Returns previewed=true when a holder was identified and a
-// trace was emitted, in which case the caller should short-circuit and
-// return that port. previewed=false means no holder was identified and
-// the caller should fall back to the normal "trace kubectl args" path.
-//
-// The probe is gated on lsof being available (findLocalPortHolder
-// returns false otherwise), so platforms without lsof keep today's
-// behaviour: a kubectl trace line and an assumed-fresh-start plan.
+// port-forward or refuse. previewed=true means a holder was found and the
+// caller should short-circuit on the returned port; previewed=false means
+// fall back to the normal kubectl-args trace. Without lsof no holder is
+// ever found, so those platforms keep the old assumed-fresh-start plan.
 func previewAdoptOrConflict(ctx common.Context, kind string, localPort int, expectedArgs []string) (bool, int) {
-	// We deliberately do not gate on canConnectLocalPort here: lsof is
-	// the source of truth for "is there a TCP listener", and gating on a
-	// separate Dial would make the probe sensitive to transient connect
-	// races. When nothing is listening lsof exits non-zero, so the probe
-	// stays silent without any extra check.
+	// Don't add a canConnectLocalPort/Dial gate here: lsof alone is
+	// authoritative for "is anything listening", and a separate Dial would
+	// make the probe sensitive to transient connect races.
 	pid, argv, ok := findLocalPortHolder(localPort)
 	if !ok {
 		return false, 0
@@ -40,14 +33,10 @@ func previewAdoptOrConflict(ctx common.Context, kind string, localPort int, expe
 }
 
 // kubectlPortForwardArgv is a parsed view of a `kubectl ... port-forward ...`
-// invocation. We only carry the fields that participate in adopt-or-conflict
-// identity decisions: namespace, the target spec (e.g.
-// `deployment/erun-devops` or `service/erun-api`), the local:remote port
-// mapping, and the optional bind address. context is kept for richer error
-// messages but is not part of the strict identity comparison — the
-// kubernetes context lives on the calling host and we want adoption to
-// succeed even if a user invoked kubectl with a different `--context`
-// alias that happens to resolve to the same cluster.
+// invocation, carrying only the fields used for adopt-or-conflict identity.
+// Context is deliberately excluded from that comparison: a different
+// `--context` alias can resolve to the same cluster, and adoption should
+// still succeed.
 type kubectlPortForwardArgv struct {
 	Binary    string
 	Context   string
@@ -57,11 +46,10 @@ type kubectlPortForwardArgv struct {
 	Address   string
 }
 
-// parseKubectlPortForwardArgv tries to interpret an argv slice as a
-// `kubectl port-forward` invocation. Returns the parsed form and true when
-// the argv matches that shape. The binary token is allowed to be any path
-// whose basename starts with "kubectl" so that version-managed launchers
-// (`kuberlr`'s `kubectl1.32.0`, `kubectx`'s wrappers, etc.) still adopt.
+// parseKubectlPortForwardArgv interprets an argv slice as a
+// `kubectl port-forward` invocation. The binary token matches any path
+// whose basename starts with "kubectl" so version-managed launchers
+// (`kuberlr`'s `kubectl1.32.0`, `kubectx` wrappers) still adopt.
 func parseKubectlPortForwardArgv(argv []string) (kubectlPortForwardArgv, bool) {
 	if len(argv) == 0 || !strings.HasPrefix(filepath.Base(argv[0]), "kubectl") {
 		return kubectlPortForwardArgv{}, false
@@ -91,11 +79,6 @@ func parseKubectlPortForwardArgv(argv []string) (kubectlPortForwardArgv, bool) {
 	return out, true
 }
 
-// consumeKubectlPortForwardFlag matches one of the kubectl flags whose
-// value participates in identity comparison (--context, --namespace/-n,
-// --address) at argv[*i]. On a match the parsed value is written into
-// out, *i is advanced past the consumed token(s), and consumed=true is
-// returned. Tokens we don't recognise leave *i untouched.
 func consumeKubectlPortForwardFlag(argv []string, i *int, out *kubectlPortForwardArgv) bool {
 	for _, flag := range kubectlPortForwardIdentityFlags {
 		value, advance, matched := matchKubectlFlag(argv, *i, flag.names)
@@ -122,11 +105,6 @@ var kubectlPortForwardIdentityFlags = []kubectlPortForwardIdentityFlag{
 	{names: []string{"--address"}, assign: func(o *kubectlPortForwardArgv, v string) { o.Address = v }},
 }
 
-// matchKubectlFlag reports whether argv[i] is one of the given flag names,
-// returning the parsed value. advance is the number of argv tokens
-// consumed: 1 for `--flag=value`, 2 for `--flag value`, 0 when the flag
-// matched but is missing its value (caller treats this as a malformed
-// flag we skip).
 func matchKubectlFlag(argv []string, i int, names []string) (value string, advance int, matched bool) {
 	token := argv[i]
 	for _, name := range names {
@@ -144,12 +122,10 @@ func matchKubectlFlag(argv []string, i int, names []string) (value string, advan
 }
 
 // argvMatchesExpectedKubectlPortForward decides whether a foreign
-// `kubectl port-forward` invocation describes the same target erun would
-// start itself. Mismatch on namespace, target, or port pair is a hard "do
-// not adopt" — those are the fields whose drift indicates a different
-// tenant, environment, or service. Context and address are intentionally
-// not part of the equality check; see kubectlPortForwardArgv.Context for
-// the rationale.
+// `kubectl port-forward` describes the same target erun would start itself.
+// Namespace, target, or port-pair drift means a different tenant,
+// environment, or service, so it is a hard "do not adopt". Context and
+// address are intentionally excluded; see kubectlPortForwardArgv.Context.
 func argvMatchesExpectedKubectlPortForward(actual []string, expected []string) bool {
 	a, ok := parseKubectlPortForwardArgv(actual)
 	if !ok {
@@ -162,9 +138,8 @@ func argvMatchesExpectedKubectlPortForward(actual []string, expected []string) b
 	return a.Namespace == e.Namespace && a.Target == e.Target && a.PortPair == e.PortPair
 }
 
-// formatHolderForError produces a short, human-readable description of the
-// process currently holding a port erun wanted to bind. Used to enrich the
-// "already in use" error so the user sees what they need to kill instead
+// formatHolderForError describes the process holding a port erun wanted to
+// bind, so the "already in use" error tells the user what to kill instead
 // of a bare port number.
 func formatHolderForError(pid int, argv []string) string {
 	command := strings.Join(argv, " ")

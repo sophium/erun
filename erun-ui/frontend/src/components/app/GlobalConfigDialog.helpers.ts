@@ -26,9 +26,7 @@ export function cloudRegionLabel(region: string): string {
   return name ? `${region} (${name})` : region;
 }
 
-// cloudProviderTypeLabel turns a provider type token into a user-facing group
-// heading. Keep these in user language (not the CLI token) per the Professional
-// UX rules; unknown types fall back to an upper-cased token.
+// Labels stay in user language, not the CLI token, per the Professional UX rules.
 export function cloudProviderTypeLabel(provider: string): string {
   switch (provider.trim().toLowerCase()) {
     case 'aws':

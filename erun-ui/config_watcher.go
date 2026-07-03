@@ -11,11 +11,8 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// configWatcherDebounce coalesces a burst of filesystem events into a
-// single environments-changed emission. erun init writes several files
-// in quick succession (tool config, tenant config, env config); a
-// single emit at the trailing edge of the burst is enough to drive a
-// state reload.
+// configWatcherDebounce coalesces the burst of files erun init writes in
+// quick succession (tool, tenant, env config) into one state reload.
 const configWatcherDebounce = 250 * time.Millisecond
 
 // configWatcher observes the on-disk erun config tree and notifies the
@@ -31,9 +28,6 @@ type configWatcher struct {
 	done    chan struct{}
 }
 
-// startConfigWatcher launches the fsnotify-backed config watcher. Safe
-// to call multiple times: returns the existing watcher when one is
-// already running.
 func (a *App) startConfigWatcher() {
 	a.mu.Lock()
 	if a.configWatcher != nil {
@@ -125,10 +119,8 @@ func (a *App) runConfigWatcher(ctx context.Context, cw *configWatcher, root stri
 	}
 }
 
-// handleConfigWatchEvent reacts to a single fsnotify event: newly-created
-// directories are added to the watch set so deeper config writes are observed,
-// and any create/write/remove/rename queues a debounced environments-changed
-// emission via queueEmit.
+// handleConfigWatchEvent adds newly-created config subdirs to the watch set
+// because fsnotify is not recursive and would otherwise miss writes inside them.
 func handleConfigWatchEvent(watcher *fsnotify.Watcher, event fsnotify.Event, queueEmit func()) {
 	if event.Has(fsnotify.Create) {
 		if info, err := os.Stat(event.Name); err == nil && info.IsDir() {

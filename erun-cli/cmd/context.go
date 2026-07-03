@@ -36,10 +36,8 @@ func newContextListCmd(store common.CloudContextStore, deps common.CloudContextD
 }
 
 func runContextListCommand(ctx common.Context, store common.CloudContextStore, deps common.CloudContextDependencies) error {
-	// Refresh from AWS so the displayed Status is the authoritative
-	// observation, not whatever the last ERun start/stop happened to
-	// record. CloudContextConfig no longer persists Status, so the
-	// non-refresh path would always return empty.
+	// Status isn't persisted, so it must be refreshed from AWS to show the
+	// live authoritative state rather than an empty value.
 	contexts, err := common.RefreshCloudContextStatuses(ctx, store, deps)
 	if err != nil {
 		return err
@@ -136,12 +134,9 @@ func newContextEnableAPIStopCmd(store common.CloudContextStore, deps common.Clou
 	)
 }
 
-// newContextStopProtectionCmd builds the disable-api-stop / enable-api-stop
-// pair. The flip is intentionally global at the AWS layer: while locked,
-// the in-pod idle monitor, the desktop Stop button, and any external
-// kubectl/aws caller all hit OperationNotPermitted, so this is the lever
-// to keep an unhealthy env up for the duration of a repair. Unlocking
-// restores the normal auto-stop / manual-stop behaviour.
+// The stop-protection flip is global at the AWS layer, so while locked even
+// the automatic idle monitor can't stop the env — the lever to hold an
+// unhealthy env up for the duration of a repair.
 func newContextStopProtectionCmd(use, short string, enabled bool, store common.CloudContextStore, deps common.CloudContextDependencies) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:          use + " CONTEXT",

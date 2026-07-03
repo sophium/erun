@@ -9,10 +9,8 @@ import (
 	common "github.com/sophium/erun/erun-common"
 )
 
-// rootConfigSkipsInspection returns true when nothing about the root
-// config inspection should fire: the file is healthy AND no explicit
-// repair flag was set. Used to keep `erun doctor` silent on the
-// common case where the user is invoking it for runtime cleanup.
+// Keeps erun doctor silent about the root config on the common path
+// where the user ran it for runtime cleanup rather than config repair.
 func rootConfigSkipsInspection(inspection common.RootConfigInspection, options doctorOptions) bool {
 	if !inspection.Complete() {
 		return false
@@ -23,13 +21,6 @@ func rootConfigSkipsInspection(inspection common.RootConfigInspection, options d
 	return strings.TrimSpace(options.restoreConfigFromBackup) == ""
 }
 
-// runRootConfigDoctor inspects the root config, prints a summary, and
-// dispatches into repair flows when problems are found OR the user
-// explicitly asked for one of the repair flags. The returned bool is
-// retained so future callers can branch on "any work attempted," but
-// today the caller short-circuits on doctorOnlyRepairConfig(options)
-// regardless of outcome — that matches the user's mental model of
-// "I asked for config repair, do not also run tenant/env cleanup."
 func runRootConfigDoctor(ctx common.Context, configStore common.ConfigStore, cloudDeps common.CloudDependencies, cloudContextDeps common.CloudContextDependencies, promptRunner PromptRunner, options doctorOptions) (bool, error) {
 	inspection, err := common.InspectRootConfig(configStore)
 	if err != nil {
@@ -59,10 +50,6 @@ func runRootConfigDoctor(ctx common.Context, configStore common.ConfigStore, clo
 	return handled || repaired, err
 }
 
-// runRootConfigRestoreSelector handles the --restore-config-from-backup
-// path when that flag is set. When it actually restored something it
-// re-runs the inspection and prints the refreshed report before
-// returning the new inspection plus handled=true.
 func runRootConfigRestoreSelector(ctx common.Context, configStore common.ConfigStore, inspection common.RootConfigInspection, options doctorOptions) (common.RootConfigInspection, bool, error) {
 	selector := strings.TrimSpace(options.restoreConfigFromBackup)
 	if selector == "" {
@@ -85,11 +72,6 @@ func runRootConfigRestoreSelector(ctx common.Context, configStore common.ConfigS
 	return refreshed, true, nil
 }
 
-// writeRootConfigInspectionReport renders the inspection as a small
-// human-readable block on ctx.Stdout. Errors are accumulated through
-// a lineWriter so each individual write does not add a branch to the
-// cyclomatic count; the function reads as a sequence of statements
-// even though it produces several lines of output.
 func writeRootConfigInspectionReport(ctx common.Context, inspection common.RootConfigInspection) error {
 	w := newLineWriter(ctx.Stdout)
 	w.Linef("Root config: %s (status=%s)", emptyIfBlank(inspection.ConfigPath), inspection.ConfigStatus)
@@ -185,14 +167,10 @@ func formatOrphanedContexts(refs []common.OrphanedAliasContextRef) string {
 	return strings.Join(names, ", ")
 }
 
-// shouldOfferRootConfigRepair gates whether to enter the repair flow.
-// On an interactive terminal we enter the repair flow whenever there
-// is something to fix, even without --repair-config — the per-alias
-// prompt below is the only confirmation the user has to answer, so
-// the experience is "inspect, see the problem, confirm the fix" in
-// a single step. Dry-run and non-interactive runs cannot prompt, so
-// they print the suggestion line and exit the root-config flow; the
-// explicit --repair-config flag is what the suggestion points at.
+// On an interactive terminal we auto-enter repair whenever there is
+// something to fix, even without --repair-config: the per-alias prompt
+// is the only confirmation the user answers, so the flow is "inspect,
+// see the problem, confirm the fix" in one step.
 func shouldOfferRootConfigRepair(ctx common.Context, promptRunner PromptRunner, inspection common.RootConfigInspection, options doctorOptions) (bool, error) {
 	if inspection.Complete() {
 		return false, nil
@@ -207,10 +185,6 @@ func shouldOfferRootConfigRepair(ctx common.Context, promptRunner PromptRunner, 
 	return true, nil
 }
 
-// runRootConfigRepair walks the user through restoring from a backup
-// (when one is available), re-initializing every orphaned cloud
-// provider alias, and recovering every orphaned cloud-context
-// reference from AWS.
 func runRootConfigRepair(ctx common.Context, configStore common.ConfigStore, cloudDeps common.CloudDependencies, cloudContextDeps common.CloudContextDependencies, promptRunner PromptRunner, inspection common.RootConfigInspection) (bool, error) {
 	inspection, restored, err := runRootConfigRepairRestore(ctx, configStore, promptRunner, inspection)
 	if err != nil {
@@ -285,11 +259,6 @@ func runRootConfigRepairContexts(ctx common.Context, configStore common.ConfigSt
 	return handled, nil
 }
 
-// offerOrphanedCloudContextRecovery walks one orphaned cloud-context
-// reference through the recovery decision tree. The recovery itself
-// (AWS describe-instances + reconstruction + save) runs inside
-// common.RecoverCloudContextFromAWS; this function only handles the
-// CLI-side prompts and dry-run trace.
 func offerOrphanedCloudContextRecovery(ctx common.Context, configStore common.ConfigStore, cloudContextDeps common.CloudContextDependencies, promptRunner PromptRunner, orphan common.OrphanedCloudContext) (bool, error) {
 	if reason, blocked := contextRecoveryBlockedReason(orphan); blocked {
 		_, err := fmt.Fprintln(ctx.Stdout, reason)
@@ -408,10 +377,6 @@ func runRootConfigRestore(ctx common.Context, livePath string, backup common.Con
 	return true, err
 }
 
-// offerOrphanedAliasRepair walks a single orphan through the repair
-// decision tree. It is intentionally only allowed to bail out early
-// via guard helpers (orphanRepairBlocked, runOrphanRepairDryRun) so
-// the function body stays linear and short.
 func offerOrphanedAliasRepair(ctx common.Context, configStore common.ConfigStore, cloudDeps common.CloudDependencies, promptRunner PromptRunner, orphan common.OrphanedAlias) (bool, error) {
 	if reason, blocked := orphanRepairBlockedReason(orphan); blocked {
 		_, err := fmt.Fprintln(ctx.Stdout, reason)
@@ -441,13 +406,9 @@ func orphanRepairBlockedReason(orphan common.OrphanedAlias) (string, bool) {
 	return "", false
 }
 
-// runOrphanRepairDryRun emits the trace + summary line the repair
-// flow would produce for one orphan in --dry-run mode. The cloud
-// init flow expects to prompt for SSO start URL / region; reaching
-// for that prompt under --dry-run would block on stdin or emit
-// non-deterministic prompt UI in the trace. Trace the intent and
-// let the user run the same step interactively when they actually
-// want to repair.
+// Under --dry-run we only trace the intent instead of entering the real
+// cloud-init flow, which prompts for the SSO start URL / region and would
+// otherwise block on stdin or emit non-deterministic prompt UI in the trace.
 func runOrphanRepairDryRun(ctx common.Context, orphan common.OrphanedAlias) (bool, error) {
 	region := preferredRegionForOrphan(orphan)
 	ctx.Trace(fmt.Sprintf("doctor repair-config: would re-init aws cloud provider alias=%s account=%s user=%s region=%s", orphan.Alias, orphan.AccountID, orphan.Username, region))
@@ -469,18 +430,11 @@ func runOrphanRepair(ctx common.Context, configStore common.ConfigStore, cloudDe
 	return true, nil
 }
 
-// buildOrphanRepairParams seeds InitAWSCloudProviderParams from the
-// orphan plus whatever ~/.aws/config already knows about the same
-// account. The discovery is a UX optimization: the user usually has
-// an SSO profile registered for the orphaned account already (the
-// previous erun-sso-* profile that wrote the now-missing root
-// config), and that profile carries the SSO start URL + SSO region
-// erun cannot derive from the alias string alone.
-//
-// On a miss the user is pointed at the canonical lookup steps so
-// they can find the SSO start URL without leaving the prompt — the
-// help text is the value-add even when discovery itself produces
-// nothing.
+// Pre-fills the AWS re-init from an existing SSO profile for the same
+// account when one exists: that profile carries the SSO start URL + SSO
+// region erun cannot derive from the alias string alone. On a miss we
+// point the user at the canonical lookup steps so they can find the
+// start URL without leaving the prompt.
 func buildOrphanRepairParams(ctx common.Context, orphan common.OrphanedAlias) (common.InitAWSCloudProviderParams, error) {
 	w := newLineWriter(ctx.Stdout)
 	params := common.InitAWSCloudProviderParams{
@@ -526,11 +480,8 @@ func applyOrphanRepairProfile(w *lineWriter, params *common.InitAWSCloudProvider
 	}
 }
 
-// writeSSOLookupHelp prints a short, copy-pasteable cheat sheet so a
-// user who does not know their SSO portal URL can recover without
-// abandoning the prompt. The block is deliberately terse — three
-// pointers, one example shape — to stay readable beside the prompt
-// itself.
+// A copy-pasteable cheat sheet so a user who does not know their SSO
+// portal URL can recover it without abandoning the repair prompt.
 func writeSSOLookupHelp(w *lineWriter, orphan common.OrphanedAlias) {
 	w.Linef("Where to find your AWS SSO start URL:")
 	w.Linef("  1. `grep -E 'sso_start_url|sso_region' ~/.aws/config` — fastest if you have ever run `aws sso login`.")
@@ -560,10 +511,9 @@ func emptyIfBlank(value string) string {
 	return value
 }
 
-// lineWriter accumulates the first write error so call sites that
-// emit a fixed sequence of lines do not need a branch per write.
-// Cyclomatic complexity goes down without sacrificing the contract
-// that the first error halts the rest of the output.
+// lineWriter makes the first write error sticky — later Linef calls are
+// no-ops once one fails — so call sites can emit a sequence of lines
+// without checking each write.
 type lineWriter struct {
 	out io.Writer
 	err error

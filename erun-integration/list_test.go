@@ -39,10 +39,7 @@ func TestList(t *testing.T) {
 	})
 
 	t.Run("corrupted_env_config_errors", func(t *testing.T) {
-		// Exercises LoadEnvConfig's corruption guard through ListEnvConfigs:
-		// an env config.yaml that fails YAML parsing must fail the list
-		// command with the corruption error instead of silently skipping
-		// the environment.
+		// A corrupted env config.yaml must fail list outright, not be silently skipped.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		mustWrite(t, filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml"), "{{{ not yaml")
@@ -54,9 +51,6 @@ func TestList(t *testing.T) {
 	})
 
 	t.Run("corrupted_tenant_config_errors", func(t *testing.T) {
-		// Exercises LoadTenantConfig's corruption guard through
-		// ListTenantConfigs: a tenant config.yaml that fails YAML parsing
-		// must fail the list command with the corruption error.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		mustWrite(t, filepath.Join(setup.ConfigHome, "erun", "team", "config.yaml"), "{{{ not yaml")
@@ -68,10 +62,7 @@ func TestList(t *testing.T) {
 	})
 
 	t.Run("tenant_api_url_and_envless_tenant", func(t *testing.T) {
-		// Exercises two writeTenantEntry residues: a tenant whose config
-		// carries api_url must print the "api url" line, and a tenant with a
-		// config but no environment subdirectories must print
-		// "environments: none" instead of an empty list.
+		// A tenant with a config but no env subdirectories shows "environments: none", not an empty list.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		tenantCfg := filepath.Join(setup.ConfigHome, "erun", "team", "config.yaml")
@@ -93,9 +84,7 @@ func TestList(t *testing.T) {
 	})
 
 	t.Run("explicit_runtime_type", func(t *testing.T) {
-		// Seed an env whose YAML carries `type: runtime` directly. Verifies
-		// that list output surfaces the new field and that the resolver
-		// honors the explicit value over any legacy fallback.
+		// An explicit `type:` must win over the legacy fallback in the resolver.
 		setup := env.New(t)
 		seedExplicitTypeEnv(t, setup, "team", "prod", "runtime")
 		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -106,12 +95,9 @@ func TestList(t *testing.T) {
 	})
 
 	t.Run("legacy_remote_yaml_migrates_to_runtime", func(t *testing.T) {
-		// Seed an env with the legacy remote=true shape and no snapshot field.
-		// With the remote/snapshot pair retired, EnvConfig.UnmarshalYAML
-		// migrates it to a concrete Type on read: a remote env with no
-		// build-here signal maps to runtime, preserving the old
-		// RemoteWorktree()=true / BuildsHere()=false semantics that the dropped
-		// fields used to provide. list surfaces "type: runtime".
+		// A legacy remote=true env with no build-here signal migrates to Type=runtime on
+		// read, preserving the old remote-worktree / no-local-build semantics the retired
+		// remote/snapshot fields used to provide.
 		setup := env.New(t)
 		fixture.SeedLegacyRemoteTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -122,9 +108,7 @@ func TestList(t *testing.T) {
 	})
 
 	t.Run("multi_tenant_with_multiple_envs", func(t *testing.T) {
-		// Exercises cmd/list.go and erun-common/list.go: with two tenants
-		// (each with multiple envs), the listing must show every tenant,
-		// every env, and assign distinct port ranges by tenant index.
+		// Distinct port ranges are assigned per tenant by tenant index.
 		setup := env.New(t)
 		seedListMultiTenant(t, setup)
 		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -135,15 +119,10 @@ func TestList(t *testing.T) {
 	})
 
 	t.Run("cwd_overrides_default_tenant", func(t *testing.T) {
-		// Exercises cmd/list.go writeListCurrentDirectorySection: when the
-		// current working directory sits under a non-default tenant's
-		// project root, the listing must show that tenant as `effective`
-		// even though tenant-a remains the configured default.
+		// cwd under a non-default tenant's project root marks that tenant `effective`, overriding the configured default.
 		setup := env.New(t)
 		seedListMultiTenant(t, setup)
-		// SeedListMultiTenant places tenant-b's project root at
-		// $HOME/git/tenant-b. Make it a real git repo so cwd-resolution
-		// finds it.
+		// cwd resolution walks up to a git root, so tenant-b's project root must be a real git repo.
 		tenantBPath := filepath.Join(setup.Home, "git", "tenant-b")
 		fixture.SeedGitRepo(t, tenantBPath)
 		nested := filepath.Join(tenantBPath, "nested")
@@ -158,9 +137,6 @@ func TestList(t *testing.T) {
 	})
 
 	t.Run("sshd_configured", func(t *testing.T) {
-		// Exercises cmd/list.go writeEffectiveOpenSSH and
-		// environmentSSHFields: a tenant with sshd.enabled=true must surface
-		// the SSH host/user/workspace lines and the per-env ssh fields.
 		setup := env.New(t)
 		seedListSSHDTenant(t, setup)
 		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -171,15 +147,8 @@ func TestList(t *testing.T) {
 	})
 
 	t.Run("with_cloud_providers_and_runtime_details", func(t *testing.T) {
-		// Exercises cmd/list.go's enriched branches in one fixture:
-		// writeCloudProviders' provider loop (alias/provider/account/status/
-		// message fields), writeEffectiveTargetIdentity's "cloud provider"
-		// line, environmentHeaderLine's cloud= suffix, runtimePodLabel's
-		// cpu/memory form, and idleLabel's populated form. The aws stub
-		// fails `sts get-caller-identity` with "could not be found" so
-		// defaultCheckAWSStatus deterministically classifies the provider
-		// as not_configured with a message — without the stub the
-		// developer's real aws CLI would shape the status line.
+		// The aws stub fails `sts get-caller-identity` deterministically; without it the
+		// developer's real aws CLI would shape the status line and drift the golden between machines.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		root := filepath.Join(setup.ConfigHome, "erun")
@@ -222,10 +191,6 @@ func TestList(t *testing.T) {
 	})
 
 	t.Run("with_claude_config", func(t *testing.T) {
-		// Exercises cmd/list.go claudeLabel + optionalBoolLabel and
-		// erun-common claude helpers (EnvironmentClaudeConfig.IsZero,
-		// NormalizedModels) via an env config with a populated claude:
-		// block.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		envCfg := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
@@ -249,9 +214,7 @@ func TestList(t *testing.T) {
 	})
 }
 
-// seedExplicitTypeEnv writes a tenant/env tree whose env.yaml carries an
-// explicit `type:` value plus a populated localRepoPath. Used by list and
-// delete scenarios that assert the resolver honors Type when set.
+// seedExplicitTypeEnv is shared by list and delete scenarios that assert the resolver honors an explicit `type:`.
 func seedExplicitTypeEnv(t testing.TB, setup env.Setup, tenant, environment, envType string) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")

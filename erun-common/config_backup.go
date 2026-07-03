@@ -13,55 +13,24 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// configBackupSuffix is the trailing extension used for every dated
-// backup file. The full backup name follows the shape
-// "<live-basename>.<YYYY-MM-DD>.bak", written into the same directory
-// as the live config so the atomic rename guarantee inside
-// writeFileAtomic still applies to backup creation.
 const configBackupSuffix = ".bak"
 
-// configBackupKeep is the cap on retained backups per config file. The
-// policy is purely count-based: when a new daily backup pushes the file
-// count past this number, the oldest existing backup is evicted. Backups
-// are never pruned by age, so a pre-existing 10-day-old file is kept
-// until 5 newer dailies push it out. The same cap applies to the root
-// config and to each per-environment config (each env directory keeps
-// its own independent rotation).
+// configBackupKeep caps retained backups per config file; eviction is purely by count, never by age.
 const configBackupKeep = 5
 
-// timeNow is the package-level clock used by every time-sensitive
-// helper in this file (backup naming, rotation, listing). Tests swap
-// it with a fixed clock; production keeps the default time.Now.
-// Defined here so the backup code is the only consumer that needs to
-// know about clock injection.
 var timeNow = time.Now
 
-// ConfigBackup describes one dated backup file on disk. The Date field
-// is parsed from the filename (not the filesystem mtime) so rotation
-// order stays correct even on platforms with imprecise file
-// timestamps. The same descriptor covers the root config and per-env
-// config backups; they differ only in which directory they live in.
+// ConfigBackup describes one dated backup file on disk. Date is parsed from
+// the filename, not the filesystem mtime, so rotation order stays correct
+// even where file timestamps are imprecise.
 type ConfigBackup struct {
 	Path string
 	Date time.Time
 }
 
-// writeConfigBackupIfDue snapshots the *current* contents of livePath
-// under "<livePath>.<YYYY-MM-DD>.bak" using the supplied clock for the
-// date stamp, keeping at most keep dailies. It is intentionally a
-// best-effort operation:
-//
-//   - When the live file does not exist yet (true first-write), there
-//     is nothing to back up; returns nil.
-//   - When today's dated backup already exists, the function is a
-//     no-op so multiple saves in the same UTC date do not rewrite the
-//     same snapshot or evict newer rotation slots.
-//   - After a successful write it calls pruneOldConfigBackups to
-//     enforce the count-based retention policy.
-//
-// The "if due" wording is deliberate: the only signal for "back up
-// now" is "today's slot is empty." There is no I/O dependency on
-// timers, mtimes, or external state.
+// writeConfigBackupIfDue is best-effort and snapshots the live config at most
+// once per UTC day: the sole "back up now" signal is an empty slot for today's
+// date, with no dependency on timers, mtimes, or external state.
 func writeConfigBackupIfDue(livePath string, keep int, now func() time.Time) error {
 	if strings.TrimSpace(livePath) == "" {
 		return errors.New("live path is required")
@@ -90,11 +59,6 @@ func writeConfigBackupIfDue(livePath string, keep int, now func() time.Time) err
 	return pruneOldConfigBackups(dir, base, keep)
 }
 
-// listConfigBackups enumerates every dated backup found next to the
-// supplied live config path, newest first. Filenames that fail to parse
-// as a valid YYYY-MM-DD stamp are skipped silently — the rotation
-// policy never created them, so they are out-of-band and stay where
-// they are.
 func listConfigBackups(livePath string) ([]ConfigBackup, error) {
 	if strings.TrimSpace(livePath) == "" {
 		return nil, errors.New("live path is required")
@@ -104,9 +68,6 @@ func listConfigBackups(livePath string) ([]ConfigBackup, error) {
 	return listManagedConfigBackups(dir, base)
 }
 
-// findConfigBackupByDate returns the backup whose dated suffix matches
-// the supplied YYYY-MM-DD string. Used by the restore flows to resolve
-// a user-supplied date without doing the full enumeration twice.
 func findConfigBackupByDate(livePath, date string) (ConfigBackup, bool, error) {
 	date = strings.TrimSpace(date)
 	if date == "" {
@@ -128,13 +89,8 @@ func findConfigBackupByDate(livePath, date string) (ConfigBackup, bool, error) {
 	return ConfigBackup{}, false, nil
 }
 
-// restoreConfigFromBackup copies the bytes of the supplied backup file
-// over the live config path, after validating that the bytes
-// deserialize cleanly via validate. The validation is the whole point
-// of routing the restore through this helper instead of a plain cp: a
-// corrupted backup must not replace a (possibly less corrupted) live
-// file. Restores via the atomic-write helper so a crash mid-restore
-// cannot itself produce a partial file.
+// restoreConfigFromBackup validates that a backup deserializes cleanly before
+// overwriting the live config, so a corrupted backup can never replace a good one.
 func restoreConfigFromBackup(backupPath, livePath string, validate func(backupPath string, data []byte) error) error {
 	if strings.TrimSpace(backupPath) == "" || strings.TrimSpace(livePath) == "" {
 		return errors.New("backup and live paths are required")
@@ -158,11 +114,8 @@ func restoreConfigFromBackup(backupPath, livePath string, validate func(backupPa
 	return nil
 }
 
-// pruneOldConfigBackups enforces the count-based retention policy.
-// Backups whose filenames do not parse as YYYY-MM-DD are considered
-// out-of-band and are not counted toward the retention budget; they are
-// also not removed. This is intentional: the policy is "evict by count
-// among files we wrote" rather than "delete any .bak in this directory."
+// pruneOldConfigBackups only counts and evicts backups it wrote (parseable
+// YYYY-MM-DD names); foreign .bak files in the directory are left untouched.
 func pruneOldConfigBackups(dir, base string, keep int) error {
 	if keep <= 0 {
 		return nil
@@ -232,9 +185,6 @@ func parseConfigBackupName(base, name string) (time.Time, bool) {
 
 // ---- Root config backup API ------------------------------------------------
 
-// writeRootConfigBackupIfDue snapshots the live root config before an
-// overwrite. Thin wrapper over the shared core; preserved as a named
-// entrypoint because the root save path reads more clearly with it.
 func writeRootConfigBackupIfDue(livePath string, now func() time.Time) error {
 	return writeConfigBackupIfDue(livePath, configBackupKeep, now)
 }
@@ -265,10 +215,6 @@ func RestoreRootConfigFromBackup(backupPath, livePath string) error {
 
 // ---- Environment config backup API -----------------------------------------
 
-// writeEnvConfigBackupIfDue snapshots a live per-environment config
-// before an overwrite. Thin wrapper over the shared core; the env save
-// path and the in-pod config sync both call it so a changed env config
-// (e.g. a flipped type) leaves a recoverable trail.
 func writeEnvConfigBackupIfDue(livePath string, now func() time.Time) error {
 	return writeConfigBackupIfDue(livePath, configBackupKeep, now)
 }
@@ -313,10 +259,7 @@ func RestoreEnvConfigFromBackup(backupPath, tenant, environment string) error {
 	})
 }
 
-// EnvConfigPath resolves the on-disk path of one environment's
-// config.yaml, mirroring the layout SaveEnvConfig/LoadEnvConfig use.
-// Exported so the doctor restore flow can trace the destination of a
-// per-env restore in --dry-run.
+// EnvConfigPath resolves the on-disk path of one environment's config file.
 func EnvConfigPath(tenant, environment string) (string, error) {
 	path, err := xdg.ConfigFile(filepath.Join(configRoot, tenant, environment, configFile))
 	if err != nil {

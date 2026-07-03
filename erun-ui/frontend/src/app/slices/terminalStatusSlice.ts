@@ -13,9 +13,8 @@ export interface TerminalStatusState {
   terminalCopyOutput: string;
   terminalCopyStatus: string;
   retrySelection: UISelection | null;
-  // Per-session dismissals of the activity-lock overlay. Stored as a
-  // Record<number, true> so the state stays serializable; the original
-  // useState held a Set<number>.
+  // Per-session dismissals of the activity-lock overlay. A plain object
+  // (not a Set) keeps the Redux state serializable.
   hiddenLockSessions: Record<number, true>;
 }
 

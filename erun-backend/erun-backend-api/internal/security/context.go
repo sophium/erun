@@ -11,9 +11,8 @@ type Claims struct {
 	Issuer   string
 	Subject  string
 	Username string
-	// Raw is the full set of token claims, kept so the identity resolver can
-	// read a per-issuer org claim (issuers.org_field_key) for (iss, org) -> tenant
-	// resolution. The claim's name is configured per issuer, not known at verify time.
+	// Raw keeps the full token claims because the org claim used for
+	// (issuer, org) -> tenant resolution is named per-issuer and unknown at verify time.
 	Raw map[string]any
 }
 

@@ -65,21 +65,15 @@ func ResolveBuildExecution(ctx Context, store DockerStore, findProjectRoot Proje
 	return ApplyIncrementalToBuildExecution(ctx, execution, target.NoIncremental)
 }
 
-// buildEnvDisablesBuildScript reports whether the env a build resolves to has
-// its DisableBuildScript toggle set, so the caller can suppress build-script
-// discovery for that env.
 func buildEnvDisablesBuildScript(store DockerStore, findProjectRoot ProjectFinderFunc, target DockerCommandTarget) bool {
 	env := ResolveDockerBuildEnvConfig(store, findProjectRoot, target)
 	return env != nil && env.DisableBuildScript
 }
 
-// recommendBuildEnvIfMissing emits a one-line advisory pointing at the
-// erun-build-env skill when the project has no <tenant>-devops build
-// environment. Plain build, --release, --deploy, and the MCP build tool all
-// flow through ResolveBuildExecution, so a project without a runtime build
-// module is always nudged toward creating one — even when the build itself
-// succeeds against a Dockerfile in the current directory. Best-effort: a
-// detection failure never blocks the build.
+// recommendBuildEnvIfMissing nudges a project that has no <tenant>-devops build
+// environment toward creating one. Every build path funnels through
+// ResolveBuildExecution, so the advisory fires even when a bare Dockerfile build
+// would otherwise succeed. Best-effort: a detection failure never blocks the build.
 func recommendBuildEnvIfMissing(ctx Context, findProjectRoot ProjectFinderFunc, target DockerCommandTarget) {
 	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil || strings.TrimSpace(projectRoot) == "" {
@@ -249,9 +243,8 @@ func ResolveDockerBuildTarget(findProjectRoot ProjectFinderFunc, target DockerCo
 		return DockerCommandTarget{}, nil, fmt.Errorf("release build cannot be combined with explicit version override")
 	}
 
-	// Build callers don't currently surface a Context; passing the zero value
-	// is safe — Logger zero-value silently drops traces, so behavior matches
-	// what release planning produced before traces were added.
+	// Build callers don't surface a Context; the zero value is safe here because
+	// a zero-value Logger silently drops traces.
 	releaseSpec, err := ResolveReleaseSpec(Context{}, findProjectRoot, ReleaseParams{ProjectRoot: target.ProjectRoot, Force: target.Force})
 	if err != nil {
 		return DockerCommandTarget{}, nil, err

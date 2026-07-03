@@ -10,12 +10,10 @@ import (
 	"time"
 )
 
-// TestCloseReapsWholeProcessGroup pins the #478 orphan fix: Close() must kill
-// the session's entire process group, not only the direct child. The session
-// runs a shell that spawns a grandchild (standing in for the kubectl exec that
-// `erun open` spawns) — after Close() the grandchild must be dead, not left
-// holding a remote exec stream open. Only the session's own group is signalled,
-// so sessions of other tabs or other app instances are untouched.
+// TestCloseReapsWholeProcessGroup pins the orphan fix: Close() must reap the
+// session's whole process group, so the kubectl exec grandchild that `erun open`
+// spawns cannot outlive it holding a remote exec stream open. Only the session's
+// own group is signalled, leaving other tabs and app instances untouched.
 func TestCloseReapsWholeProcessGroup(t *testing.T) {
 	session, err := startTerminalSession(startTerminalSessionParams{
 		Executable: "/bin/sh",
@@ -37,7 +35,7 @@ func TestCloseReapsWholeProcessGroup(t *testing.T) {
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		if syscall.Kill(childPid, 0) != nil {
-			return // whole group reaped
+			return
 		}
 		time.Sleep(50 * time.Millisecond)
 	}

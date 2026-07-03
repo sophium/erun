@@ -18,11 +18,6 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// mockOIDCProvider is a self-contained OIDC issuer for the backend verifier
-// tests: an httptest server publishing discovery + JWKS, plus the RSA key used
-// to mint RS256 tokens. It proves VerifyBearerToken now delegates signature/JWKS
-// verification to the shared eruncommon verifier (issue #656) while keeping the
-// backend's allow-list and username/AWS-STS mapping.
 type mockOIDCProvider struct {
 	server *httptest.Server
 	key    *rsa.PrivateKey
@@ -167,8 +162,8 @@ func TestVerifyBearerTokenDelegatesToSharedVerifier(t *testing.T) {
 	})
 }
 
-// TestVerifyBearerTokenFileIssuer exercises the file:// desktop path (issue
-// #674): a desktop-signed EdDSA token authenticates to the API with no live IdP,
+// TestVerifyBearerTokenFileIssuer exercises the file:// desktop path: a
+// desktop-signed EdDSA token authenticates to the API with no live IdP,
 // the same auth the MCP edge uses, with the API audience enforced.
 func TestVerifyBearerTokenFileIssuer(t *testing.T) {
 	privatePEM, publicPEM, err := eruncommon.GenerateDesktopIdentity()
@@ -221,10 +216,6 @@ func TestVerifyBearerTokenFileIssuer(t *testing.T) {
 	})
 
 	t.Run("a token claiming the trusted issuer but signed by a different key is rejected", func(t *testing.T) {
-		// Sign with a DIFFERENT private key while claiming the TRUSTED issuer. The
-		// verifier loads the trusted public key (mine, at keyPath) and the EdDSA
-		// signature check must fail — proving the file:// path verifies the
-		// signature against the trusted key, not merely the issuer string.
 		attackerPrivate, _, genErr := eruncommon.GenerateDesktopIdentity()
 		if genErr != nil {
 			t.Fatalf("generate attacker identity: %v", genErr)

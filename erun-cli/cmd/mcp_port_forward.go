@@ -78,14 +78,9 @@ func ensureMCPPortForward(ctx common.Context, result common.OpenResult) (int, er
 	return startMCPPortForward(statePath, expectedState, args, localPort)
 }
 
-// adoptForeignMCPPortForward inspects the process currently holding
-// localPort and, if its argv matches the kubectl port-forward erun would
-// start itself, writes a fresh state file claiming that PID so subsequent
-// opens reuse it instead of fighting over the port. Returns adopted=true
-// when the PID was claimed, adopted=false when we could not identify the
-// holder (e.g. lsof missing). A non-nil error is returned only when the
-// holder is identified but is *not* a matching kubectl port-forward, so
-// the caller can surface a precise "port held by X" error.
+// adoptForeignMCPPortForward reuses a pre-existing kubectl port-forward already
+// targeting this env so repeated opens share one forward; a port held by any
+// other process is a hard error rather than an adoption.
 func adoptForeignMCPPortForward(ctx common.Context, statePath string, expected mcpPortForwardState, expectedArgs []string, localPort int) (bool, error) {
 	pid, argv, ok := findLocalPortHolder(localPort)
 	if !ok {

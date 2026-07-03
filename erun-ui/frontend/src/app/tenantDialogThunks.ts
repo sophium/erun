@@ -15,10 +15,6 @@ import { defaultTenantDialog, type TenantDashboardTab, type TenantDialogState } 
 import type { AppThunk } from './store';
 import { requireController } from './thunkExtra';
 
-// tenantDialogThunks own the tenant settings modal and the tenant dashboard
-// view (users, queue, builds, audit-log tabs). State mutations dispatch slice
-// actions directly.
-
 export const openTenantDialog =
   (tenant: string): AppThunk =>
   (dispatch) => {
@@ -237,8 +233,6 @@ function applySavedTenantConfig(
     dispatch(setCloudProviders(config.cloudProviders));
   }
 }
-
-// Tenant dashboard ============================================================
 
 export const openTenantDashboard =
   (tenant: string): AppThunk =>

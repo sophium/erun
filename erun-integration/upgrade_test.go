@@ -13,7 +13,6 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// seedUpgradeTenant writes the tenant + global config for the upgrade tests.
 func seedUpgradeTenant(t testing.TB, setup env.Setup, tenant, defaultEnv string) string {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -27,8 +26,6 @@ func seedUpgradeTenant(t testing.TB, setup env.Setup, tenant, defaultEnv string)
 	return tenantDir
 }
 
-// seedUpgradeEnv writes one env config with explicit upgrade fields. body is
-// the env config.yaml contents minus the name (added here).
 func seedUpgradeEnv(t testing.TB, setup env.Setup, tenant, environment, body string) {
 	t.Helper()
 	envDir := filepath.Join(setup.ConfigHome, "erun", tenant, environment)
@@ -89,7 +86,7 @@ func TestUpgrade(t *testing.T) {
 		// supplied here via the ERUN_UPGRADE_VERSIONS_OVERRIDE test seam so the
 		// registry-resolution path is deterministic without network. The
 		// snapshot stream's base (2.1.0) outranks the stable (2.0.0), so the
-		// snapshot stays the snapshot channel's target (issue #524). Both envs
+		// snapshot stays the snapshot channel's target. Both envs
 		// are seeded already at their channel target, so the plan shows the
 		// resolved channels + targets with no deploy.
 		setup := env.New(t)
@@ -107,7 +104,7 @@ func TestUpgrade(t *testing.T) {
 		// A snapshot-channel env at the latest snapshot while a stable release
 		// with the same base version exists: the snapshot is a pre-release of
 		// that stable, so the stable supersedes it and becomes the snapshot
-		// channel's target (issue #524) — the supersede decision is traced and
+		// channel's target — the supersede decision is traced and
 		// the member upgrades to the stable, with the deploy dry-run traced.
 		setup := env.New(t)
 		seedUpgradeTenant(t, setup, "team", "dev")
@@ -128,7 +125,7 @@ func TestUpgrade(t *testing.T) {
 	t.Run("dry_run_snapshot_channel_converged_on_stable", func(t *testing.T) {
 		// A snapshot-channel env that already adopted the superseding stable
 		// must stay up to date — the channel target remains the stable, so the
-		// member never flaps back to the older snapshot tag (issue #524).
+		// member never flaps back to the older snapshot tag.
 		setup := env.New(t)
 		seedUpgradeTenant(t, setup, "team", "agent")
 		seedUpgradeEnv(t, setup, "team", "agent",
@@ -146,7 +143,7 @@ func TestUpgrade(t *testing.T) {
 
 	t.Run("dry_run_target_unresolved_reports_reason", func(t *testing.T) {
 		// An opted-in env whose tenant's registry resolution fails (staged via
-		// the seam's error= form) is never treated as up to date (issue #497):
+		// the seam's error= form) is never treated as up to date:
 		// the plan line carries "(target unresolved: <reason>)", the run skips
 		// it with the same reason, and the completion accounting counts it as
 		// unresolved — distinct from upgraded / up to date / failed.
@@ -254,8 +251,8 @@ func TestUpgrade(t *testing.T) {
 
 	t.Run("dry_run_scoped_flags_lagging", func(t *testing.T) {
 		// The --tenant/--environment flag form scopes the run to one env —
-		// the shape the desktop's per-env Upgrade-all fan-out uses (issue
-		// #497), equivalent to the positional form.
+		// the shape the desktop's per-env Upgrade-all fan-out uses,
+		// equivalent to the positional form.
 		setup := env.New(t)
 		seedUpgradeTenant(t, setup, "team", "dev")
 		seedUpgradeEnv(t, setup, "team", "dev",

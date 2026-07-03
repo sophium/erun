@@ -25,13 +25,8 @@ func osExecCommand(name string, args []string, dir string) *osexec.Cmd {
 	return cmd
 }
 
-// SeedTenantEnv writes a minimal config tree:
-//
-//	$XDG_CONFIG_HOME/erun/config.yaml          (default tenant)
-//	$XDG_CONFIG_HOME/erun/<tenant>/config.yaml (tenant)
-//	$XDG_CONFIG_HOME/erun/<tenant>/<env>/config.yaml (env)
-//
-// Callers pass in the env Setup so we know the right XDG root.
+// SeedTenantEnv writes the minimum erun config tree so commands resolve a
+// tenant/environment without prompting.
 func SeedTenantEnv(t testing.TB, setup env.Setup, tenant, environment string) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -59,10 +54,9 @@ func SeedTenantEnv(t testing.TB, setup env.Setup, tenant, environment string) {
 	)
 }
 
-// SeedTenantEnvWithContext writes the same minimal config tree as SeedTenantEnv
-// but with a caller-chosen kubernetes context, so a scenario can place a second
-// environment on a distinct cluster (e.g. the platform env that owns PowerDNS
-// vs. a target env on another cluster, for expose's cross-cluster DNS routing).
+// SeedTenantEnvWithContext puts an env on a caller-chosen kubernetes context so
+// a scenario can place a second environment on a distinct cluster (e.g. expose's
+// cross-cluster DNS routing between a PowerDNS platform env and a target env).
 func SeedTenantEnvWithContext(t testing.TB, setup env.Setup, tenant, environment, kubernetesContext string) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -89,10 +83,8 @@ func SeedTenantEnvWithContext(t testing.TB, setup env.Setup, tenant, environment
 	)
 }
 
-// SeedTenantEnvWithDeployTimeout writes the same minimal config tree as
-// SeedTenantEnv plus a per-env `deploy.timeout`, so deploy scenarios can
-// exercise the configurable helm rollout timeout (the value flows into the
-// helm `upgrade --timeout` arg).
+// SeedTenantEnvWithDeployTimeout persists a per-env deploy.timeout so deploy
+// scenarios can exercise the configurable helm rollout timeout.
 func SeedTenantEnvWithDeployTimeout(t testing.TB, setup env.Setup, tenant, environment, timeout string) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -122,11 +114,10 @@ func SeedTenantEnvWithDeployTimeout(t testing.TB, setup env.Setup, tenant, envir
 	)
 }
 
-// SeedTenantEnvWithDeployComponents writes the same minimal config tree as
-// SeedTenantEnv plus a per-machine saved deploy selection (deploy.components),
-// so deploy scenarios can exercise the saved-set precedence tier: a deploy with
-// no --components must resolve to exactly the saved charts (and, because the
-// selection is non-empty, the runtime deploys only if it too is saved).
+// SeedTenantEnvWithDeployComponents persists a saved deploy selection so deploy
+// scenarios can exercise the saved-set precedence tier: a deploy with no
+// --components resolves to exactly the saved charts, and the runtime deploys
+// only if it too is saved.
 func SeedTenantEnvWithDeployComponents(t testing.TB, setup env.Setup, tenant, environment string, components []string) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -158,10 +149,9 @@ func SeedTenantEnvWithDeployComponents(t testing.TB, setup env.Setup, tenant, en
 	mustWrite(t, filepath.Join(envDir, "config.yaml"), body)
 }
 
-// SeedTenantEnvNoRegistry writes the same minimal config tree as SeedTenantEnv
-// but omits the per-env container registry, so the env's registry list resolves
-// entirely from the project's .erun/config.yaml (seed it with
-// SeedProjectK8sConfig). Use this for marked-registry-list scenarios where the
+// SeedTenantEnvNoRegistry omits the per-env container registry so the registry
+// list resolves entirely from the project's .erun/config.yaml (seed it with
+// SeedProjectK8sConfig). Use it for marked-registry-list scenarios where the
 // project config — not a migrated env-config scalar — must drive BUILD/FROM/
 // TO/DEPLOY resolution.
 func SeedTenantEnvNoRegistry(t testing.TB, setup env.Setup, tenant, environment string) {
@@ -190,10 +180,8 @@ func SeedTenantEnvNoRegistry(t testing.TB, setup env.Setup, tenant, environment 
 	)
 }
 
-// SeedTenantEnvWithLocalPortRangeStart writes the same minimal config tree
-// as SeedTenantEnv but persists a fixed localportrangestart on the env
-// config so commands that key off EnvConfig.LocalPortRangeStart (notably
-// `erun open`) exercise the persisted-range branch instead of the resolver's
+// SeedTenantEnvWithLocalPortRangeStart persists a fixed localportrangestart so
+// open exercises the persisted-range branch instead of the resolver's
 // alphabetical walker.
 func SeedTenantEnvWithLocalPortRangeStart(t testing.TB, setup env.Setup, tenant, environment string, rangeStart int) {
 	t.Helper()
@@ -223,11 +211,9 @@ func SeedTenantEnvWithLocalPortRangeStart(t testing.TB, setup env.Setup, tenant,
 	)
 }
 
-// SeedSecondaryTenantEnv writes a second tenant/env into an already-seeded
-// XDG tree so resolver scenarios can exercise cross-tenant interactions
-// (walker skip, overlap detection) without overwriting the primary tenant.
-// Callers may set rangeStart > 0 to persist localportrangestart on the
-// secondary env; pass 0 to leave it unpersisted.
+// SeedSecondaryTenantEnv writes a second tenant/env into an already-seeded XDG
+// tree so resolver scenarios can exercise cross-tenant interactions (walker
+// skip, overlap detection) without overwriting the primary tenant.
 func SeedSecondaryTenantEnv(t testing.TB, setup env.Setup, tenant, environment string, rangeStart int) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -256,11 +242,9 @@ func SeedSecondaryTenantEnv(t testing.TB, setup env.Setup, tenant, environment s
 	mustWrite(t, filepath.Join(envDir, "config.yaml"), envContents)
 }
 
-// SeedTenantEnvWithSnapshot writes the same minimal config tree as
-// SeedTenantEnv but persists snapshot=<enabled> on the env config so
-// commands that key off EnvConfig.SnapshotEnabled() (notably `erun open`)
-// exercise the persisted-preference branch instead of relying on the user
-// passing --snapshot every time.
+// SeedTenantEnvWithSnapshot persists the env's snapshot preference so open
+// exercises the persisted-preference branch instead of the user passing
+// --snapshot every time.
 func SeedTenantEnvWithSnapshot(t testing.TB, setup env.Setup, tenant, environment string, enabled bool) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -292,21 +276,17 @@ func SeedTenantEnvWithSnapshot(t testing.TB, setup env.Setup, tenant, environmen
 	)
 }
 
-// SeedRemoteTenantEnvWithSSHD writes the same tree as SeedRemoteTenantEnv
-// and additionally marks SSHD as enabled, so commands that gate on the
-// SSHD-enabled remote environment (notably `erun open --vscode` and
-// `--intellij`) reach past the validateIDEOptions guard.
+// SeedRemoteTenantEnvWithSSHD marks SSHD enabled on a remote env so
+// open --vscode / --intellij reach past the validateIDEOptions guard.
 func SeedRemoteTenantEnvWithSSHD(t testing.TB, setup env.Setup, tenant, environment string) {
 	t.Helper()
 	seedRemoteTenantEnvWithSSHD(t, setup, tenant, environment, 0)
 }
 
-// SeedRemoteTenantEnvWithSSHDPortRange writes the same tree as
-// SeedRemoteTenantEnvWithSSHD and additionally persists localportrangestart
-// on the env config. Real-run open scenarios pin a high range (e.g. 26100)
-// so their port-forward simulators never collide with a developer's live
-// erun session sitting on the default 17000 range; without the pin those
-// scenarios silently skip on busy hosts and their coverage evaporates.
+// SeedRemoteTenantEnvWithSSHDPortRange pins a high localportrangestart (e.g.
+// 26100) so a real-run open scenario's port-forward simulators never collide
+// with a developer's live erun session on the default 17000 range; without the
+// pin those scenarios silently skip on busy hosts and their coverage evaporates.
 func SeedRemoteTenantEnvWithSSHDPortRange(t testing.TB, setup env.Setup, tenant, environment string, rangeStart int) {
 	t.Helper()
 	seedRemoteTenantEnvWithSSHD(t, setup, tenant, environment, rangeStart)
@@ -349,11 +329,10 @@ func seedRemoteTenantEnvWithSSHD(t testing.TB, setup env.Setup, tenant, environm
 	mustWrite(t, filepath.Join(envDir, "config.yaml"), envContents)
 }
 
-// SeedRemoteTenantEnv writes the same minimal config tree as SeedTenantEnv
-// but marks the environment as remote so commands like `open`, `api`, and
-// `mcp` exercise the kubectl port-forward and remote-runtime traces. The
-// tenant's project root is rooted under setup.Home/git/<tenant> so cwd
-// resolution still works when the scenario chdirs into it.
+// SeedRemoteTenantEnv marks the env remote so commands like open, api, and mcp
+// exercise the kubectl port-forward and remote-runtime traces. Its project root
+// lives under a real on-disk repo dir so cwd resolution still works when the
+// scenario chdirs into it.
 func SeedRemoteTenantEnv(t testing.TB, setup env.Setup, tenant, environment string) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -388,7 +367,7 @@ func SeedRemoteTenantEnv(t testing.TB, setup env.Setup, tenant, environment stri
 
 // SeedRuntimeTenantEnvNoVersion writes a runtime-type env tree with NO
 // runtimeversion (and no local/published chart), reproducing the fresh-env
-// decision path that the desktop create regression (#644) hit: with no version
+// decision path that the desktop create regression hit: with no version
 // to deploy, the published-chart resolver bails with "runtime version is
 // required". Every other fixture pins runtimeversion: 1.0.0, so this is the
 // single fixture that locks the empty-version path under `open --deploy`.
@@ -424,7 +403,7 @@ func SeedRuntimeTenantEnvNoVersion(t testing.TB, setup env.Setup, tenant, enviro
 }
 
 // SeedLegacyRemoteTenantEnv writes a tenant/env tree whose env config carries
-// the retired pre-#376 `remote: true` shape with no `type` and no `snapshot`.
+// the retired `remote: true` shape with no `type` and no `snapshot`.
 // It exists to exercise EnvConfig.UnmarshalYAML's legacy migration on read:
 // remote with no build-here signal resolves to runtime. All other fixtures use
 // the modern `type:` field; this one is the single deliberate legacy shape.
@@ -460,12 +439,11 @@ func SeedLegacyRemoteTenantEnv(t testing.TB, setup env.Setup, tenant, environmen
 	)
 }
 
-// SeedRemoteTenantEnvWithPortRange writes the same tree as
-// SeedRemoteTenantEnv (remote env, no sshd) and persists localportrangestart
-// on the env config. Real-run shell scenarios pin a high range (e.g. 26100)
-// so their port-forward simulators never collide with a developer's live
-// erun session on the default 17000 range; without the pin those scenarios
-// would silently skip on busy hosts and their coverage would evaporate.
+// SeedRemoteTenantEnvWithPortRange pins a high localportrangestart (e.g. 26100)
+// on a remote env (no sshd) so a real-run shell scenario's port-forward
+// simulators never collide with a developer's live erun session on the default
+// 17000 range; without the pin those scenarios would silently skip on busy
+// hosts and their coverage would evaporate.
 func SeedRemoteTenantEnvWithPortRange(t testing.TB, setup env.Setup, tenant, environment string, rangeStart int) {
 	t.Helper()
 	SeedRemoteTenantEnv(t, setup, tenant, environment)
@@ -481,10 +459,9 @@ func SeedRemoteTenantEnvWithPortRange(t testing.TB, setup env.Setup, tenant, env
 	)
 }
 
-// SeedRemoteTenantEnvWithClaude writes the same tree as SeedRemoteTenantEnv
-// plus the given claude: YAML block, so scenarios can exercise the per-env
-// Claude launch flags (--effort / --model / --verbose --debug) that the AI
-// tab's persistent session resolves from env config (issues #477/#482).
+// SeedRemoteTenantEnvWithClaude attaches a claude: config block so scenarios can
+// exercise the per-env Claude launch flags (--effort / --model / --verbose
+// --debug) that the AI tab's persistent session resolves from env config.
 func SeedRemoteTenantEnvWithClaude(t testing.TB, setup env.Setup, tenant, environment, claudeBlock string) {
 	t.Helper()
 	SeedRemoteTenantEnv(t, setup, tenant, environment)
@@ -500,13 +477,9 @@ func SeedRemoteTenantEnvWithClaude(t testing.TB, setup env.Setup, tenant, enviro
 	)
 }
 
-// SeedRemoteTenantEnvWithAWSAlias writes the same tree as SeedRemoteTenantEnv
-// but attaches an AWS cloud alias to the env. Attaching an AWS alias is the
-// operator opting the env into acting on their behalf, so it drives the deploy
-// plumbing that injects host AWS credentials into the remote runtime
-// (--set cloudContext.useHostCredentials=true). The desktop refresher writes
-// the matching profile into the pod's ~/.aws/credentials at runtime — that path
-// is tested in erun-mcp.
+// SeedRemoteTenantEnvWithAWSAlias attaches an AWS cloud alias — the operator
+// opting the env into acting on their behalf — so it drives the deploy plumbing
+// that injects host AWS credentials into the remote runtime.
 func SeedRemoteTenantEnvWithAWSAlias(t testing.TB, setup env.Setup, tenant, environment string) {
 	t.Helper()
 	SeedRemoteTenantEnv(t, setup, tenant, environment)
@@ -522,12 +495,11 @@ func SeedRemoteTenantEnvWithAWSAlias(t testing.TB, setup env.Setup, tenant, envi
 	)
 }
 
-// SeedRemoteRepoPathTenantEnv writes a tenant/env tree where the env's
-// repopath points to a path that does not exist locally and the env is
-// flagged remote: true. The tenant projectroot still points at setup.Cwd so
-// chart resolution finds the local <tenant>-devops module via cwd-based
-// detection. Use this for regression scenarios where deploy must not
-// readdir() the env's remote-host path.
+// SeedRemoteRepoPathTenantEnv points the env's repopath at a nonexistent
+// remote-host path while keeping the tenant projectroot at setup.Cwd (so chart
+// resolution still finds the local <tenant>-devops module). Use it for
+// regression scenarios where deploy must not readdir() the env's remote-host
+// path.
 func SeedRemoteRepoPathTenantEnv(t testing.TB, setup env.Setup, tenant, environment, remoteRepoPath string) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -555,11 +527,8 @@ func SeedRemoteRepoPathTenantEnv(t testing.TB, setup env.Setup, tenant, environm
 	)
 }
 
-// SeedReleaseRepo materializes a minimal erun-devops layout (chart, two
-// dockerfiles, VERSION file) inside dir, runs `git init -b <branch>`, and
-// produces one initial commit. Use this for `release` scenarios that need
-// a project root with the layout the release command expects to find.
-// Returns the project root path (== dir).
+// SeedReleaseRepo materializes the minimal erun-devops layout and a git repo
+// that release scenarios need as a project root.
 func SeedReleaseRepo(t testing.TB, dir, branch string) string {
 	t.Helper()
 	releaseRoot := filepath.Join(dir, "erun-devops")
@@ -577,7 +546,7 @@ func SeedReleaseRepo(t testing.TB, dir, branch string) string {
 	mustWrite(t, filepath.Join(releaseRoot, "k8s", "api", "Chart.yaml"), "apiVersion: v2\nname: api\nversion: 0.1.0\nappVersion: 0.1.0\n")
 	// base is a version-pinned base: its image carries its own VERSION (9.9.9)
 	// and is not re-pushed at the release version, but its co-located chart must
-	// still publish at the release version so platform deploys resolve it (#701).
+	// still publish at the release version so platform deploys resolve it.
 	mustWrite(t, filepath.Join(releaseRoot, "k8s", "base", "Chart.yaml"), "apiVersion: v2\nname: base\nversion: 0.1.0\nappVersion: 0.1.0\n")
 	mustWrite(t, filepath.Join(releaseRoot, "docker", "api", "Dockerfile"), "FROM alpine:3.22\n")
 	mustWrite(t, filepath.Join(releaseRoot, "docker", "base", "Dockerfile"), "FROM alpine:3.22\n")
@@ -601,11 +570,8 @@ func SeedReleaseRepo(t testing.TB, dir, branch string) string {
 	return dir
 }
 
-// SeedMarketplaceJSON writes a placeholder .claude-plugin/marketplace.json
-// inside dir so release scenarios can exercise the marketplace.json
-// source.sha bump path. The placeholder pins one plugin at a known SHA;
-// the release flow's syncMarketplaceReleaseSHA rewrites that SHA to the
-// resolved release tag commit during the sync-packaging-checksums stage.
+// SeedMarketplaceJSON writes a placeholder .claude-plugin/marketplace.json so
+// release scenarios can exercise the marketplace.json source.sha bump path.
 func SeedMarketplaceJSON(t testing.TB, dir string) {
 	t.Helper()
 	dst := filepath.Join(dir, ".claude-plugin")
@@ -630,10 +596,10 @@ func SeedMarketplaceJSON(t testing.TB, dir string) {
 `)
 }
 
-// SeedScoopManifest writes bucket/erun.json inside dir with the given content
-// so stable `release` scenarios exercise the Scoop manifest validation and the
-// version/checksum sync paths. Pass a valid manifest to reach the happy path,
-// or a deliberately malformed one to drive the validation-failure branch.
+// SeedScoopManifest writes bucket/erun.json with the given content so stable
+// release scenarios exercise the Scoop manifest validation and version/checksum
+// sync paths; a valid manifest reaches the happy path, a malformed one drives
+// the validation-failure branch.
 func SeedScoopManifest(t testing.TB, dir, content string) {
 	t.Helper()
 	dst := filepath.Join(dir, "bucket")
@@ -643,12 +609,10 @@ func SeedScoopManifest(t testing.TB, dir, content string) {
 	mustWrite(t, filepath.Join(dst, "erun.json"), content)
 }
 
-// SeedHomebrewFormula writes Formula/erun.rb inside dir so stable `release`
-// scenarios exercise the Homebrew packaging path: the release stage rewrites
-// the formula's release-archive URL to the new version, and the
-// sync-packaging-checksums stage traces the curl/shasum checksum refresh.
-// The url/sha256 lines use the exact two-space indentation the production
-// regexes (updateHomebrewFormulaReleaseVersion / ...ReleaseChecksum) anchor on.
+// SeedHomebrewFormula writes Formula/erun.rb so stable release scenarios
+// exercise the Homebrew packaging path. The url/sha256 lines use the exact
+// two-space indentation the production regexes anchor on — reformatting them
+// breaks the match.
 func SeedHomebrewFormula(t testing.TB, dir string) {
 	t.Helper()
 	dst := filepath.Join(dir, "Formula")
@@ -669,12 +633,9 @@ end
 `)
 }
 
-// ReleaseGitStubSpec configures StubReleaseGit, the argv-branching git stub
-// for real-run `release` scenarios. The resolution queries return the canned
-// branch/commit, the tag probes report the tag at TagSHA (or absent when
-// TagSHA is empty), and every mutation (fetch/rebase/add/commit/tag/push) is
-// a silent no-op so the captured output stays deterministic without a real
-// remote or network.
+// ReleaseGitStubSpec configures StubReleaseGit, the argv-branching git stub for
+// real-run release scenarios: every mutation is a silent no-op so the captured
+// output stays deterministic without a real remote or network.
 type ReleaseGitStubSpec struct {
 	// Branch is returned for `rev-parse --abbrev-ref HEAD`.
 	Branch string
@@ -691,10 +652,10 @@ type ReleaseGitStubSpec struct {
 	RemoteTag string
 }
 
-// StubReleaseGit writes a git stub at <stubsDir>/git implementing spec and
-// returns the ERUN_GIT_BIN env pair routing production git invocations to it.
-// `show-ref --verify --quiet` always exits 1 (no develop branch) so stable
-// releases skip the sync-develop stage and push only the main branch.
+// StubReleaseGit writes a git stub implementing spec and returns its
+// ERUN_GIT_BIN routing pair. show-ref --verify --quiet always exits 1 (no
+// develop branch) so stable releases skip the sync-develop stage and push only
+// the main branch.
 func StubReleaseGit(t testing.TB, stubsDir string, spec ReleaseGitStubSpec) []string {
 	t.Helper()
 	tagProbe := `exit 1`
@@ -721,8 +682,8 @@ exit 0
 	return StubEnv(stubsDir, "git")
 }
 
-// RunGit runs `git <args...>` inside dir. Useful for scenarios that need
-// to set up branches, tags, or remotes after SeedReleaseRepo.
+// RunGit runs git in dir so scenarios can set up branches, tags, or remotes
+// after SeedReleaseRepo.
 func RunGit(t testing.TB, dir string, args ...string) {
 	t.Helper()
 	if err := exec("git", args, dir); err != nil {
@@ -730,11 +691,9 @@ func RunGit(t testing.TB, dir string, args ...string) {
 	}
 }
 
-// SeedDevopsRepo creates a minimal <tenant>-devops chart layout under
-// setup.Cwd so commands that look for a kubernetes deploy context find one.
-// Writes a values.<environment>.yaml so deploy --dry-run can resolve the
-// per-environment values file. Returns the path to the chart directory in case
-// tests want to assert on it.
+// SeedDevopsRepo creates a minimal <tenant>-devops chart layout (including a
+// per-environment values file) so deploy/build commands resolve a kubernetes
+// deploy context.
 func SeedDevopsRepo(t testing.TB, setup env.Setup, tenant, environment string) string {
 	t.Helper()
 	return SeedDevopsRepoAt(t, setup.Cwd, tenant, environment)
@@ -761,10 +720,9 @@ func SeedDevopsRepoAt(t testing.TB, root, tenant, environment string) string {
 	return chart
 }
 
-// SeedDevopsRuntimeDockerfile writes a Dockerfile at the canonical location
-// <setup.Cwd>/<tenant>-devops/docker/<tenant>-devops/Dockerfile so commands
-// that resolve runtime-image builds (notably `erun open --snapshot` for the
-// local environment) reach the docker-build branch in dry-run.
+// SeedDevopsRuntimeDockerfile writes the runtime-image Dockerfile so commands
+// that resolve runtime-image builds (notably open --snapshot for the local
+// environment) reach the docker-build branch in dry-run.
 func SeedDevopsRuntimeDockerfile(t testing.TB, setup env.Setup, tenant string) {
 	t.Helper()
 	dir := filepath.Join(setup.Cwd, tenant+"-devops", "docker", tenant+"-devops")
@@ -782,9 +740,9 @@ func SeedProjectDockerfile(t testing.TB, setup env.Setup) {
 	mustWrite(t, filepath.Join(setup.Cwd, "Dockerfile"), "FROM alpine\n")
 }
 
-// SeedProjectK8sConfig writes setup.Cwd/.erun/config.yaml with a k8s
-// section so deploy commands pick up the configured deployment plan
-// (ordering + parallel grouping) instead of the hardcoded fallback.
+// SeedProjectK8sConfig writes the project .erun/config.yaml so deploy commands
+// pick up the configured deployment plan (ordering + parallel grouping) instead
+// of the hardcoded fallback.
 func SeedProjectK8sConfig(t testing.TB, setup env.Setup, body string) {
 	t.Helper()
 	dir := filepath.Join(setup.Cwd, ".erun")
@@ -794,12 +752,11 @@ func SeedProjectK8sConfig(t testing.TB, setup env.Setup, body string) {
 	mustWrite(t, filepath.Join(dir, "config.yaml"), body)
 }
 
-// SeedTerraformEnvRoot materializes a platform's per-env Terraform root
-// (terraform-<tenant>/<environment>/) so `erun terraform` resolves a folder to
-// run in: a canonical common.tf + variables.tf at the tree root, and the env's
-// own main.tf + <environment>.tfvars in its folder. Mirrors the layout the
-// erun-blueprint-platform skill scaffolds (the per-env common.tf is a symlink to
-// the root in real trees; the command only needs the folder + tfvars to resolve).
+// SeedTerraformEnvRoot materializes a platform's per-env Terraform root so erun
+// terraform resolves a folder to run in, mirroring the layout the
+// erun-blueprint-platform skill scaffolds. The per-env common.tf is a real
+// symlink in production trees; the command only needs the folder + tfvars to
+// resolve, so the fixture writes plain files.
 func SeedTerraformEnvRoot(t testing.TB, setup env.Setup, tenant, environment string) {
 	t.Helper()
 	root := filepath.Join(setup.Cwd, "terraform-"+tenant)
@@ -814,9 +771,8 @@ func SeedTerraformEnvRoot(t testing.TB, setup env.Setup, tenant, environment str
 }
 
 // SeedDevopsBackendCharts seeds the three opt-in backend charts
-// (erun-backend-postgres, erun-backend-db, erun-backend-api) alongside the
-// runtime chart created by SeedDevopsRepo. Each chart gets a Chart.yaml plus a
-// values.<environment>.yaml so deploy --dry-run can resolve them.
+// (erun-backend-postgres, erun-backend-db, erun-backend-api) alongside
+// SeedDevopsRepo's runtime chart so deploy --dry-run can resolve them.
 func SeedDevopsBackendCharts(t testing.TB, setup env.Setup, tenant, environment string) {
 	t.Helper()
 	envSlug := strings.ToLower(strings.TrimSpace(environment))
@@ -834,12 +790,10 @@ func SeedDevopsBackendCharts(t testing.TB, setup env.Setup, tenant, environment 
 	}
 }
 
-// SeedDevopsComponentChart seeds a single extra component chart under
-// <tenant>-devops/k8s/<chartName>/ (Chart.yaml + values.<env>.yaml). Use it for
-// a non-opt-in, non-runtime chart (e.g. a docs chart) to prove opt-in-only
-// resolution does not auto-deploy it. Callable with or without SeedDevopsRepo:
-// with it the tree also has the runtime chart; without it the tree is
-// component-only (the runtime deploys via the published erun-devops chart).
+// SeedDevopsComponentChart seeds a single non-opt-in, non-runtime component
+// chart (e.g. a docs chart) to prove opt-in-only resolution does not auto-deploy
+// it. Usable with or without SeedDevopsRepo: without it the tree is
+// component-only and the runtime deploys via the published erun-devops chart.
 func SeedDevopsComponentChart(t testing.TB, setup env.Setup, tenant, environment, chartName string) {
 	t.Helper()
 	envSlug := strings.ToLower(strings.TrimSpace(environment))
@@ -852,12 +806,11 @@ func SeedDevopsComponentChart(t testing.TB, setup env.Setup, tenant, environment
 	mustWrite(t, filepath.Join(chart, "values."+envSlug+".yaml"), "environment: "+environment+"\n")
 }
 
-// SeedDevopsUmbrellaChart seeds an umbrella component chart under
-// <tenant>-devops/k8s/<chartName>/ whose Chart.yaml declares an OCI dependency
-// on a published erun-* subchart (the erun-blueprint-platform pattern, e.g.
-// team-backend-api wrapping erun-backend-api). deploy must `helm dependency
-// build` such a chart before install, so use it to prove the dependency-build
-// step is traced. dependencyName is the published subchart it wraps.
+// SeedDevopsUmbrellaChart seeds a component chart with an OCI dependency on a
+// published erun-* subchart (the erun-blueprint-platform pattern, e.g.
+// team-backend-api wrapping erun-backend-api). deploy must helm dependency build
+// such a chart before install, so use it to prove the dependency-build step is
+// traced.
 func SeedDevopsUmbrellaChart(t testing.TB, setup env.Setup, tenant, environment, chartName, dependencyName string) {
 	t.Helper()
 	envSlug := strings.ToLower(strings.TrimSpace(environment))
@@ -878,18 +831,14 @@ func SeedDevopsUmbrellaChart(t testing.TB, setup env.Setup, tenant, environment,
 	)
 }
 
-// StubBinary writes a small POSIX shell script that the production runners
-// pick up via the ERUN_<NAME>_BIN environment variable. The script prints
-// stdout and exits 0. Tests use this to drive non-dry-run code paths without
-// needing the real `aws`/`kubectl`/`helm`/`docker` binaries on PATH.
+// StubBinary writes a POSIX-shell stub (routed via ERUN_<NAME>_BIN) that prints
+// stdout and exits 0, to drive non-dry-run code paths without the real
+// aws/kubectl/helm/docker binaries on PATH.
 //
 // For dry-run scenarios that need the stub to produce decision-input output
-// (e.g. kubectl reporting "deployment exists" vs "not found" so the open
-// runner can pick its branch), prefer StubBinaryAdvanced which also lets
-// callers set stderr and exit code.
-//
-// Returns the absolute path to the stub. Set ERUN_<NAME>_BIN to that path in
-// the subprocess env to route invocations through the stub.
+// (e.g. kubectl reporting "deployment exists" vs "not found" so the open runner
+// can pick its branch), prefer StubBinaryAdvanced, which also sets stderr and
+// exit code.
 func StubBinary(t testing.TB, dir, name, stdout string) string {
 	return StubBinaryAdvanced(t, dir, name, StubBinarySpec{Stdout: stdout})
 }
@@ -905,9 +854,8 @@ type StubBinarySpec struct {
 	ExitCode int
 }
 
-// StubBinaryAdvanced writes a POSIX shell stub that emits the given stdout
-// and stderr and exits with the given code. See StubBinary for the env-var
-// routing contract.
+// StubBinaryAdvanced is StubBinary with explicit stderr and exit code. See
+// StubBinary for the env-var routing contract.
 func StubBinaryAdvanced(t testing.TB, dir, name string, spec StubBinarySpec) string {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -1065,14 +1013,13 @@ func PortSimBinary(t testing.TB) string {
 	return portSimPath
 }
 
-// KubectlDeployedStubSpec describes the deployment shape the stubbed
-// `kubectl get deployment ... -o json` should report so production code's
-// deployment-match check (eruncommon/deploy.go::deploymentMatchesExpectedSettings)
+// KubectlDeployedStubSpec describes the deployment shape the stubbed kubectl get
+// deployment -o json should report so production's deployment-match check
 // returns true and the open flow proceeds past the redeploy gate.
 //
-// The optional fields below extend the stub for real-run shell scenarios.
-// Every zero value preserves the original behavior (silent exit 0) so
-// existing callers are unaffected.
+// The optional fields below extend the stub for real-run shell scenarios. Every
+// zero value preserves the original silent-exit-0 behavior, so existing callers
+// are unaffected.
 type KubectlDeployedStubSpec struct {
 	DeploymentName string
 	ContainerName  string
@@ -1115,18 +1062,14 @@ type KubectlDeployedStubSpec struct {
 	DeploymentNotFound bool
 }
 
-// StubKubectlDeployed writes a kubectl stub at <stubsDir>/kubectl that
-// reports the named deployment as present and matching the spec for
-// deployment-check JSON queries, runs the port-forward simulator for any
-// `port-forward` invocation, and exits 0 silently for everything else.
+// StubKubectlDeployed writes a kubectl stub that reports the named deployment as
+// present-and-matching and runs the port-forward simulator for any port-forward
+// invocation.
 //
-// The simulator processes are tracked via a PID file inside stubsDir so
-// the t.Cleanup hook can reap them after the test; otherwise leftover
-// listeners would hold the production ports across runs and break the
-// next scenario with "local SSH port already in use".
-//
-// The returned env-var slice routes production kubectl invocations through
-// the stub via ERUN_KUBECTL_BIN.
+// The simulator processes are tracked via a PID file inside stubsDir so the
+// t.Cleanup hook can reap them after the test; otherwise leftover listeners
+// would hold the production ports across runs and break the next scenario with
+// "local SSH port already in use".
 func StubKubectlDeployed(t testing.TB, stubsDir string, spec KubectlDeployedStubSpec) []string {
 	t.Helper()
 	if err := os.MkdirAll(stubsDir, 0o755); err != nil {
@@ -1137,9 +1080,9 @@ func StubKubectlDeployed(t testing.TB, stubsDir string, spec KubectlDeployedStub
 	deploymentJSON := fmt.Sprintf(`{"spec":{"template":{"spec":{"containers":[{"name":%q,"env":[{"name":"ERUN_REPO_PATH","value":%q},{"name":"ERUN_SSHD_ENABLED","value":%q},{"name":"ERUN_MCP_PORT","value":"%d"},{"name":"ERUN_SSHD_PORT","value":"%d"}],"resources":{"limits":{}}}]}}}}`,
 		spec.ContainerName, spec.RepoPath, formatStubBool(spec.SSHDEnabled), spec.MCPPort, spec.SSHPort)
 	script := strings.Join([]string{
-		// Find the local port in `port-forward ... LOCAL:REMOTE [...]` argv.
-		// Production passes the mapping as a single positional after the
-		// resource reference (e.g. "deployment/team-devops 17000:17000").
+		// Production passes the port-forward mapping as a single positional
+		// after the resource reference (e.g. "deployment/team-devops
+		// 17000:17000").
 		`is_port_forward=0`,
 		`local_port=""`,
 		`for arg in "$@"; do`,
@@ -1230,12 +1173,9 @@ func StubKubectlDeployed(t testing.TB, stubsDir string, spec KubectlDeployedStub
 	return StubEnv(stubsDir, "kubectl")
 }
 
-// kubectlDeployedOptionalArms renders the optional `case "$*"` arms of the
-// StubKubectlDeployed script for the real-run shell fields of
-// KubectlDeployedStubSpec. It returns "" when no optional field is set, so
-// the generated script is unchanged for existing callers. Arms are emitted
-// most-specific-first; the interactive `exec -it` arm leads so the bootstrap
-// script passed as the exec's last argv can never fall through into the
+// kubectlDeployedOptionalArms emits the optional stub case arms
+// most-specific-first: the interactive exec -it arm leads so the bootstrap
+// script passed as its last argv can never fall through into the
 // pods/events/wait arms by substring accident.
 func kubectlDeployedOptionalArms(t testing.TB, stubsDir string, spec KubectlDeployedStubSpec) string {
 	t.Helper()
@@ -1282,10 +1222,9 @@ func kubectlDeployedOptionalArms(t testing.TB, stubsDir string, spec KubectlDepl
 	return arms.String()
 }
 
-// waitForPortClosed blocks until nothing accepts a TCP connection on
-// 127.0.0.1:port, or the timeout elapses. Used by StubKubectlDeployed's
-// teardown so a killed port-forward simulator's listener is fully gone before
-// the next scenario probes the same fixed port.
+// waitForPortClosed lets StubKubectlDeployed's teardown block until a killed
+// port-forward simulator's listener is fully gone before the next scenario
+// probes the same fixed port.
 func waitForPortClosed(port int, timeout time.Duration) {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -1308,12 +1247,9 @@ func formatStubBool(value bool) string {
 // SeedDeployInflightMarker writes an in-flight deploy marker into the test's
 // XDG config dir so erun deploy --dry-run exercises the dedup branches
 // (skip on identical hash, conflict on different hash, reclaim on dead PID).
-// The marker filename mirrors the format produced by erun-common's
-// helmDeployReleaseKey: `<context>-<namespace>-<release>.json`. Tests pass
-// the desired pid and params hash directly; pid=0 means "use a definitely-not-
-// running pid" (1 is always init, but for a probe via signal-0 we want a
-// known-dead pid; tests use 1 to mean alive-init or pass an explicit dead
-// pid). The intent is captured per scenario in the calling test.
+// The marker filename mirrors erun-common's helmDeployReleaseKey format
+// (<context>-<namespace>-<release>.json), so the sanitize logic here must track
+// production's.
 func SeedDeployInflightMarker(t testing.TB, setup env.Setup, kubernetesContext, namespace, releaseName string, record DeployInflightRecord) string {
 	t.Helper()
 	if record.StartedAt == "" {

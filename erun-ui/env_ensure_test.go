@@ -10,12 +10,8 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// These tests lock the per-env ensure dedupe (issue #463): opening an env
-// with its default tabs — and respawning them — must run the open/build/
-// deploy preflight once per (re)start window, not once per tab. The tabs'
-// own `erun open` processes launch with --skip-ensure (locked by the
-// StartSession/StartAISession arg assertions in app_test.go) and the shared
-// ensure is the only preflight runner.
+// These tests lock the per-env ensure dedupe: opening an env and respawning
+// its tabs must run the shared ensure once per (re)start window, not once per tab.
 
 func envEnsureTestApp(t *testing.T, ensures *int32, ensuresMu *sync.Mutex) *App {
 	t.Helper()
@@ -42,11 +38,9 @@ func envEnsureTestApp(t *testing.T, ensures *int32, ensuresMu *sync.Mutex) *App 
 			return nil
 		},
 	})
-	// The ensure no-ops while a.ctx is nil (the unit-test hermeticity gate);
-	// these tests inject every dep it reaches, so flipping the gate is safe.
-	// The emitter must be stubbed alongside it: with a non-nil ctx, emits
-	// would otherwise reach the real Wails runtime, which fatals outside a
-	// lifecycle context.
+	// A non-nil ctx un-gates the ensure (it no-ops while ctx is nil); the emitter
+	// must be stubbed alongside it, or emits reach the real Wails runtime and fatal
+	// outside a lifecycle context.
 	app.ctx = context.Background()
 	app.SetEmitter(func(string, ...any) {})
 	t.Cleanup(func() { app.shutdown(context.Background()) })
@@ -83,7 +77,6 @@ func TestEnsureEnvRuntimeOnceDedupesAcrossTabs(t *testing.T) {
 	if _, err := app.StartAISession(selection, 0, 80, 24); err != nil {
 		t.Fatalf("StartAISession failed: %v", err)
 	}
-	// Both tab spawns share one preflight.
 	waitForEnsureCount(t, &ensures, &ensuresMu, 1, 2*time.Second)
 
 	// Still one after a settling beat — the AI spawn must not have queued a
@@ -106,8 +99,7 @@ func TestEnsureEnvRuntimeOnceRunsAgainAfterTheWindow(t *testing.T) {
 	app.ensureEnvRuntimeOnce(selection)
 	waitForEnsureCount(t, &ensures, &ensuresMu, 1, 2*time.Second)
 
-	// Age the completed window out (white-box: the TTL constant is the
-	// contract; sleeping it out would slow the suite for nothing).
+	// Age the completed window out by hand instead of sleeping out the TTL.
 	key := selectionKey(normalizeSelection(selection))
 	app.envEnsureMu.Lock()
 	app.envEnsureDone[key] = time.Now().Add(-envEnsureTTL)
@@ -117,7 +109,7 @@ func TestEnsureEnvRuntimeOnceRunsAgainAfterTheWindow(t *testing.T) {
 	waitForEnsureCount(t, &ensures, &ensuresMu, 2, 2*time.Second)
 }
 
-// TestEnsureFailureNotificationDedupesPerEpisode locks the #711 fix: a runtime
+// TestEnsureFailureNotificationDedupesPerEpisode locks the fix: a runtime
 // that stays unreachable must surface its "Could not reach the runtime"
 // notification once per failure episode, not on every ensure retry — otherwise
 // the banner re-appears the instant the user dismisses it. The sidebar row is
@@ -162,8 +154,6 @@ func TestEnsureFailureNotificationDedupesPerEpisode(t *testing.T) {
 	selection := uiSelection{Tenant: "erun", Environment: "remote"}
 	key := selectionKey(normalizeSelection(selection))
 
-	// Two failures in one episode surface the banner once (so a dismiss sticks),
-	// but flag the sidebar row failed each time.
 	app.surfaceEnvRuntimeEnsureFailure(selection, errors.New("boom"))
 	app.surfaceEnvRuntimeEnsureFailure(selection, errors.New("boom"))
 	if got := len(emits.events(appNotificationEvent)); got != 1 {
@@ -173,8 +163,6 @@ func TestEnsureFailureNotificationDedupesPerEpisode(t *testing.T) {
 		t.Fatalf("env-status emitted %d times, want 2 (flagged on each attempt)", got)
 	}
 
-	// Reaching the env again ends the episode: a successful reconnect clears the
-	// dedup, so a later failure surfaces afresh.
 	reconnectMu.Lock()
 	reconnectErr = nil
 	reconnectMu.Unlock()
@@ -203,9 +191,6 @@ func waitForFailEpisodeCleared(t *testing.T, app *App, key string, timeout time.
 	t.Fatal("successful ensure did not clear the failure episode")
 }
 
-// capturedEnsureApp builds an ensure-capable App wired to a captured emitter so
-// tests can assert the exact events a reconnect produces. reconnect drives the
-// success/failure path.
 func capturedEnsureApp(
 	t *testing.T,
 	reconnect func(context.Context, eruncommon.OpenResult, func(string)) error,
@@ -236,7 +221,7 @@ func capturedEnsureApp(
 	return app, emits
 }
 
-// TestSurfaceEnsureFailureSuppressedWhileDeployInFlight locks the #713 fix: a
+// TestSurfaceEnsureFailureSuppressedWhileDeployInFlight locks the fix: a
 // deploy for the env being in flight IS the recovery the runtime-unreachable
 // banner would recommend ("Deploy the environment …"), and the deploy-progress
 // overlay already communicates it. Surfacing a contradictory failed status +
@@ -248,7 +233,6 @@ func TestSurfaceEnsureFailureSuppressedWhileDeployInFlight(t *testing.T) {
 	})
 	selection := uiSelection{Tenant: "erun", Environment: "remote"}
 
-	// A deploy is locking this env's terminal — the recovery is already underway.
 	app.mu.Lock()
 	app.sessions["s1"] = &managedTerminal{
 		selection:        selection,
@@ -268,7 +252,6 @@ func TestSurfaceEnsureFailureSuppressedWhileDeployInFlight(t *testing.T) {
 		t.Fatalf("failed status emitted %d times during an in-flight deploy, want 0", got)
 	}
 
-	// With no deploy locking the env, the failure surfaces normally.
 	app.mu.Lock()
 	app.sessions["s1"].lockedByActivity = ""
 	app.mu.Unlock()
@@ -282,13 +265,13 @@ func TestSurfaceEnsureFailureSuppressedWhileDeployInFlight(t *testing.T) {
 		t.Fatalf("notification payload has unexpected type %T", notes[0])
 	}
 	// Kind "warning" (not "warn") is the contract the frontend maps to the
-	// attention icon; an unrecognized kind renders as a neutral info ⓘ (#713).
+	// attention icon; an unrecognized kind renders as a neutral info ⓘ.
 	if note.Kind != "warning" || note.Source != notificationSourceRuntimeUnreachable {
 		t.Fatalf("notification = %+v, want kind=warning source=%q", note, notificationSourceRuntimeUnreachable)
 	}
 }
 
-// TestEnsureSuccessClearsRuntimeUnreachableNotification locks the #713 fix: once
+// TestEnsureSuccessClearsRuntimeUnreachableNotification locks the fix: once
 // the runtime is reachable again, the "Could not reach the runtime …" banner is
 // stale, so a successful ensure clears it (tagged by env + source so an
 // unrelated toast is left alone).

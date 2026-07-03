@@ -26,24 +26,17 @@ type ERunConfig struct {
 	RuntimeRegistry RuntimeRegistryConfig `yaml:"runtimeregistry,omitempty"`
 }
 
-// RuntimeRegistryConfig overrides where `erun version` checks for available
-// runtime images. Operators running internal mirrors of `erun-devops`
-// (Harbor, ECR, Artifactory, a self-hosted GHCR) point Namespace and
-// BaseURL at their mirror so the version check stops talking to the
-// public registries baked into the binary.
-//
-// All fields are optional. When unset, defaults are
-// `ghcr.io/sophium/erun-devops` with the standard ghcr.io endpoints, which
-// matches the previous hardcoded behavior.
+// RuntimeRegistryConfig lets operators running an internal mirror of `erun-devops`
+// (Harbor, ECR, Artifactory, self-hosted GHCR) keep `erun version`'s image check
+// off the public registries baked into the binary. All fields are optional; unset
+// defaults to `ghcr.io/sophium/erun-devops` on the standard ghcr.io endpoints.
 type RuntimeRegistryConfig struct {
 	Namespace  string `yaml:"namespace,omitempty"`
 	Repository string `yaml:"repository,omitempty"`
-	// BaseURL overrides the registry HTTP endpoint. Default depends on the
-	// resolved namespace prefix: `https://hub.docker.com` for Docker Hub
-	// namespaces, `https://ghcr.io` for `ghcr.io/...` namespaces.
+	// BaseURL default depends on the namespace: hub.docker.com for Docker Hub,
+	// ghcr.io for ghcr.io namespaces.
 	BaseURL string `yaml:"baseurl,omitempty"`
-	// TokenURL overrides the GHCR token endpoint. Default `https://ghcr.io`.
-	// Only consulted on the GHCR flow.
+	// TokenURL is consulted only on the GHCR flow; defaults to https://ghcr.io.
 	TokenURL string `yaml:"tokenurl,omitempty"`
 }
 
@@ -105,12 +98,9 @@ type EnvConfig struct {
 	LocalRepoPath      string          `yaml:"localrepopath,omitempty" json:"localRepoPath,omitempty"`
 	KubernetesContext  string
 	CloudProviderAlias string `yaml:"cloudprovideralias,omitempty"`
-	// CloudProviderAliases attaches additional cloud aliases to this env, one
-	// per provider type (keyed by provider type, e.g. "cloudflare"). The legacy
-	// CloudProviderAlias scalar above stays the AWS slot for backward
-	// compatibility — pre-existing configs keep working untouched —
-	// while ResolvedCloudAliases folds both into one per-type view. Each env
-	// carries at most one alias per provider type.
+	// CloudProviderAliases attaches one cloud alias per provider type. The legacy
+	// CloudProviderAlias scalar remains the AWS slot so pre-existing configs keep
+	// working; an env carries at most one alias per provider type.
 	CloudProviderAliases map[string]string `yaml:"cloudprovideraliases,omitempty" json:"cloudProviderAliases,omitempty"`
 	ManagedCloud         bool              `yaml:"managedcloud,omitempty" json:"managedCloud,omitempty"`
 	RuntimeVersion       string            `yaml:"runtimeversion,omitempty"`
@@ -120,12 +110,9 @@ type EnvConfig struct {
 	// runtime envs). Local-agent envs resolve their list from the project's
 	// .erun/config.yaml instead; this field stays empty for them.
 	ContainerRegistries ContainerRegistries `yaml:"containerregistries,omitempty" json:"containerRegistries,omitempty"`
-	// RuntimeImage points the env's runtime pod at a custom image instead
-	// of the published <registry>/erun-devops:<version> default. A full
-	// reference ("ghcr.io/acme/my-devops:1.2.3") is used verbatim; a bare
-	// name resolves against the env's registry and runtime version. Set by
-	// `erun init --runtime-image` and carried to the published chart as
-	// imageOverrides.erun-devops on every deploy.
+	// RuntimeImage points the env's runtime pod at a custom image instead of the
+	// published <registry>/erun-devops:<version> default. A full reference is used
+	// verbatim; a bare name resolves against the env's registry and runtime version.
 	RuntimeImage        string                  `yaml:"runtimeimage,omitempty" json:"runtimeImage,omitempty"`
 	RuntimePod          RuntimePodResources     `yaml:"runtimepod,omitempty"`
 	SSHD                SSHDConfig              `yaml:"sshd,omitempty"`
@@ -140,29 +127,22 @@ type EnvConfig struct {
 	// attaching an alias means "act on my behalf here". The field is retained
 	// so existing configs still parse; it no longer affects behavior.
 	RemoteHostCredentials bool `yaml:"remotehostcredentials,omitempty" json:"remoteHostCredentials,omitempty"`
-	// AutoUpgrade opts this env into the "Upgrade all" set: `erun upgrade`
-	// (and the desktop's Upgrade-all action) redeploy it to the latest
-	// version for its UpgradeChannel when the current RuntimeVersion lags.
+	// AutoUpgrade opts this env into the "Upgrade all" set, redeploying it to the
+	// latest version for its UpgradeChannel when its RuntimeVersion lags.
 	AutoUpgrade bool `yaml:"autoupgrade,omitempty" json:"autoUpgrade,omitempty"`
-	// UpgradeChannel selects which release channel an upgrade targets:
-	// "stable" (semver tags) or "snapshot" (*-snapshot-<timestamp> tags).
-	// It is orthogonal to Type (build location); empty resolves via
-	// ResolvedUpgradeChannel from Type.
+	// UpgradeChannel selects which release channel an upgrade targets: "stable"
+	// (semver tags) or "snapshot" (*-snapshot-<timestamp> tags). Orthogonal to
+	// Type; empty resolves from Type.
 	UpgradeChannel string `yaml:"upgradechannel,omitempty" json:"upgradeChannel,omitempty"`
-	// DisableBuildScript makes erun ignore any project build.sh for this env:
-	// erun build (and the build it runs for --deploy) skips root and nested
-	// build.sh discovery and resolves docker/release builds directly, erroring
-	// with no buildable context if none exist. Default false preserves today's
-	// build.sh-shadows-docker behaviour.
+	// DisableBuildScript makes erun ignore any project build.sh for this env and
+	// build docker/release directly. Default false keeps build.sh shadowing docker.
 	DisableBuildScript bool `yaml:"disablebuildscript,omitempty" json:"disableBuildScript,omitempty"`
 }
 
-// ResolvedCloudAliases returns the env's attached cloud aliases keyed by
-// provider type. The legacy CloudProviderAlias scalar is folded in under its
-// own provider type (AWS for every pre-existing config), and explicit
-// CloudProviderAliases entries are layered on top. An env holds at most one
-// alias per provider type, so the runtime can be seeded with, e.g., both an
-// AWS identity and a Cloudflare token at once.
+// ResolvedCloudAliases returns the env's attached cloud aliases keyed by provider
+// type, with the legacy AWS-slot scalar folded in. An env holds at most one alias
+// per provider type, so the runtime can carry, e.g., an AWS identity and a
+// Cloudflare token at once.
 func (c EnvConfig) ResolvedCloudAliases() map[string]string {
 	resolved := make(map[string]string)
 	if alias := strings.TrimSpace(c.CloudProviderAlias); alias != "" {
@@ -179,7 +159,7 @@ func (c EnvConfig) ResolvedCloudAliases() map[string]string {
 	return resolved
 }
 
-// ResolvedType returns the env's type, or "" when unresolved. Pre-#376 configs
+// ResolvedType returns the env's type, or "" when unresolved. Older configs
 // that carried only the legacy remote+snapshot pair are migrated to a concrete
 // Type during YAML decode (see EnvConfig.UnmarshalYAML), so Type is the single
 // source of truth here.
@@ -214,15 +194,11 @@ func (c EnvConfig) HasAWSCloudAlias() bool {
 	return strings.TrimSpace(c.ResolvedCloudAliases()[CloudProviderAWS]) != ""
 }
 
-// legacyEnvTypeFromRemoteSnapshot derives the environment type from the
-// pre-#376 remote+snapshot pair, for configs written before the `type` field
-// existed. It reproduces the old fallback deciders exactly: RemoteWorktree()
-// fell back to the remote flag, and BuildsHere() fell back to SnapshotEnabled()
-// (snapshot != nil && *snapshot), so a missing snapshot key meant "does not
-// build here", identical to snapshot=false. Returns "" only for the one combo
-// with no concrete type — a non-remote env that does not build here — so its
-// deciders stay false on both axes as before. Used only by
-// EnvConfig.UnmarshalYAML to migrate legacy configs on read.
+// legacyEnvTypeFromRemoteSnapshot migrates configs written before the `type`
+// field existed, mapping the old remote+snapshot pair to a concrete type. It must
+// reproduce the old deciders exactly: a missing snapshot key meant "does not build
+// here", and the one non-remote/non-building combo has no concrete type so its
+// deciders stay false on both axes as before.
 func legacyEnvTypeFromRemoteSnapshot(remote bool, snapshot *bool) EnvironmentType {
 	buildsHere := snapshot != nil && *snapshot
 	if remote {
@@ -237,7 +213,6 @@ func legacyEnvTypeFromRemoteSnapshot(remote bool, snapshot *bool) EnvironmentTyp
 	return ""
 }
 
-// UpgradeChannel values for EnvConfig.UpgradeChannel / ResolvedUpgradeChannel.
 const (
 	UpgradeChannelStable   = "stable"
 	UpgradeChannelSnapshot = "snapshot"
@@ -271,10 +246,8 @@ func (c EnvConfig) ResolvedUpgradeChannel() string {
 }
 
 // EffectiveLocalRepoPath returns the env's host-machine repo path. The legacy
-// `repopath` key folds into LocalRepoPath on read (EnvConfig.UnmarshalYAML), so
-// this is now just the trimmed LocalRepoPath. Callers that need the path on the
-// host machine (chart worktreeHostPath, cwd→tenant matcher) should use this
-// helper instead of reading the field directly.
+// `repopath` key folds into LocalRepoPath on read, so callers wanting the host
+// path should use this helper rather than reading the field directly.
 func (c EnvConfig) EffectiveLocalRepoPath() string {
 	return strings.TrimSpace(c.LocalRepoPath)
 }
@@ -286,14 +259,10 @@ type ProjectEnvironmentConfig struct {
 }
 
 // ProjectDockerConfig holds project-level docker settings per environment.
-// Fingerprints maps an image name (the build-context dir name, e.g.
-// "erun-ubuntu") to its canonical content fingerprint as published by release
-// CI. When set, the incremental build flow pulls <image>:<VERSION> from the
-// registry and tags it locally as <image>:fp-<configured>-<arch> before
-// running fingerprint promotion. This lets fresh dev clones promote pinned
-// bases without rebuilding them, while local Dockerfile edits still trigger a
-// rebuild because the locally-computed fingerprint diverges from the tagged
-// hash.
+// Fingerprints maps an image name to its canonical content fingerprint as
+// published by release CI, so fresh dev clones can promote pinned base images
+// without rebuilding them while local Dockerfile edits still force a rebuild
+// (the locally computed fingerprint diverges from the tagged hash).
 type ProjectDockerConfig struct {
 	Fingerprints map[string]string `yaml:"fingerprints,omitempty"`
 }
@@ -311,16 +280,13 @@ type ProjectConfig struct {
 	ContainerRegistries ContainerRegistries                 `yaml:"containerregistries,omitempty"`
 	Environments        map[string]ProjectEnvironmentConfig `yaml:"environments,omitempty"`
 	Release             ReleaseConfig                       `yaml:"release,omitempty"`
-	// Platform is the per-instance erunpaas platform configuration (base
-	// domain, delegated services zone, authoritative nameserver, platform
-	// env). Empty for projects that do not run a platform deployment.
+	// Platform holds the per-instance erunpaas platform configuration; empty for
+	// projects that do not run a platform deployment.
 	Platform PlatformConfig `yaml:"platform,omitempty"`
 }
 
 // K8sForEnvironment returns the k8s deploy plan declared for the given
-// environment in this project config, or an empty plan when none exists.
-// Mirrors ContainerRegistriesForEnvironment in shape so callers can resolve a
-// plan by environment without reaching into the Environments map.
+// environment, or an empty plan when none exists.
 func (c ProjectConfig) K8sForEnvironment(environment string) ProjectK8sConfig {
 	environment = strings.TrimSpace(environment)
 	if environment == "" || c.Environments == nil {
@@ -395,12 +361,10 @@ func (s ProjectK8sDeploymentStep) MarshalYAML() (any, error) {
 	return s.Components, nil
 }
 
-// DockerFingerprintsForEnvironment returns the configured image-name →
-// fingerprint map for the given environment, or nil when none is set. Empty
-// keys and values are dropped. Hash values are validated lazily by the
-// materialization step rather than at load time, so a malformed entry
-// surfaces in the build trace instead of breaking unrelated commands that
-// just want to read other parts of the config.
+// DockerFingerprintsForEnvironment returns the image-name → fingerprint map for
+// the given environment, or nil when none is set. Hash values are validated lazily
+// at materialization, not load time, so a malformed entry surfaces in the build
+// trace instead of breaking unrelated commands that read other config sections.
 func (c ProjectConfig) DockerFingerprintsForEnvironment(environment string) map[string]string {
 	environment = strings.TrimSpace(environment)
 	if environment == "" || c.Environments == nil {
@@ -525,12 +489,10 @@ func SaveERunConfig(config ERunConfig) error {
 		return ErrFailedToSaveConfig
 	}
 
-	// Capture today's snapshot of the previous live file before we
-	// overwrite it. Best-effort: a backup failure must not block the
-	// save (the bug we are guarding against is data loss, and refusing
-	// to save when the backup directory is full would itself cause
-	// data loss). The implementation is idempotent on repeated saves
-	// within one local day.
+	// Best-effort backup of the previous live file before overwrite: a backup
+	// failure must not block the save, because the bug we guard against is data
+	// loss and refusing to save when the backup dir is full would itself lose data.
+	// Idempotent across repeated saves within one local day.
 	_ = writeRootConfigBackupIfDue(configFilePath, timeNow)
 
 	if err := writeFileAtomic(configFilePath, data, 0o644); err != nil {
@@ -690,13 +652,12 @@ func SaveEnvConfig(tenant string, config EnvConfig) error {
 		return ErrFailedToSaveConfig
 	}
 
-	// Snapshot the previous live env config before overwriting it, the
-	// same way SaveERunConfig guards the root config. Best-effort and
-	// idempotent within one local day: it protects against a wrong value
-	// (e.g. a type silently resolved to "runtime" on a remote-agent env)
-	// being persisted with no way back. A backup failure must not block
-	// the save — the bug being guarded against is data loss, so refusing
-	// to save when the backup directory is unwritable would be worse.
+	// Best-effort backup of the previous live env config before overwrite, like
+	// SaveERunConfig. Idempotent within one local day; it guards against a wrong
+	// value (e.g. a type silently resolved to "runtime" on a remote-agent env)
+	// being persisted with no way back. A backup failure must not block the save,
+	// since the bug guarded against is data loss and refusing to save when the
+	// backup dir is unwritable would be worse.
 	_ = writeEnvConfigBackupIfDue(configFilePath, timeNow)
 
 	if err := writeFileAtomic(configFilePath, data, 0o644); err != nil {
@@ -858,15 +819,10 @@ func projectConfigPath(projectRoot string) (string, error) {
 	return filepath.Join(filepath.Clean(projectRoot), projectConfigDir, configFile), nil
 }
 
-// writeFileAtomic writes data to a sibling temp file in the same
-// directory as path, fsyncs the contents, then renames it over the
-// destination. The rename is atomic on POSIX filesystems when source
-// and destination share a filesystem, which is guaranteed here because
-// the temp file is created in filepath.Dir(path). A crash or process
-// kill between the create and the rename leaves either the previous
-// contents intact or no change at all — never a 0-byte or partially
-// written file. Replaces the previous os.WriteFile (O_TRUNC|O_WRONLY)
-// path which produced exactly that hazard on interruption.
+// writeFileAtomic writes via a sibling temp file, fsync, then rename so a crash
+// or kill mid-write leaves either the previous contents or no change at all —
+// never a 0-byte or partially written file. The rename is atomic because the temp
+// file shares the destination's directory, and thus its filesystem.
 func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")

@@ -24,12 +24,6 @@ import type { AppThunk } from './store';
 import { requireController } from './thunkExtra';
 import { normalizeDialogValue, normalizeVersionSuggestions } from './versionSuggestions';
 
-// environmentDialogThunks own the open/edit/submit lifecycle for the
-// "create environment" modal. The version-suggestion debounce
-// handle stays module-local — it is a setTimeout cancellation token, not
-// state. The request counters used to ignore stale responses now live in
-// the requestCounters slice.
-
 let versionSuggestionTimer = 0;
 
 export const openInitializeDialog = (): AppThunk => (dispatch, getState) => {
@@ -176,10 +170,8 @@ function environmentDialogSelection(
   if (!validEnvironmentDialogValues(values)) {
     return null;
   }
-  // noGit only changes behavior on the remote-worktree init path
-  // (ensureRemoteRepository in erun-common/init.go). For local-agent
-  // init there is no remote repo, so suppress NoGit regardless of any
-  // stale dialog state from a previous type selection.
+  // noGit only affects the remote-worktree init path; local-agent has no
+  // remote repo, so ignore any stale noGit left by a previous type selection.
   const noGit = dialog.envType === 'local-agent' ? false : dialog.noGit;
   return {
     tenant: values.tenant,

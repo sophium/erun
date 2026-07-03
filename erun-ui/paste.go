@@ -11,15 +11,12 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// pastedFileDir is the in-pod staging directory pasted files are copied into.
-// The value is a generic attachments dir (it predates this feature accepting
-// non-image files), and the agent home the desktop pastes into.
+// pastedFileDir reuses the generic Codex attachments dir; it predates this
+// feature accepting non-image files.
 const pastedFileDir = "/home/erun/.codex/attachments"
 
-// maxPastedFileBytes caps a single pasted file. The copy streams the whole
-// base64 payload over one `kubectl exec` stdin and buffers it in memory, so an
-// unbounded paste could hang or exhaust memory; reject oversized files with a
-// clear error instead.
+// maxPastedFileBytes caps a paste because the copy buffers the entire base64
+// payload in memory; an unbounded paste could exhaust it.
 const maxPastedFileBytes = 100 * 1024 * 1024
 
 type pastedFileSaveParams struct {
@@ -84,11 +81,8 @@ func pastedFileRemoteDir() string {
 	return pastedFileDir
 }
 
-// pastedFileFilename derives the in-pod filename for a pasted file. When the
-// clipboard provides a name, it is preserved (sanitized) so an agent sees the
-// real name (report.pdf, not paste-….bin); the timestamp prefix keeps names
-// collision-proof. When there is no usable name, it falls back to a MIME-derived
-// extension for known types and .bin otherwise.
+// pastedFileFilename preserves the sanitized clipboard name so an agent sees the
+// real name, not paste-….bin; the timestamp prefix keeps names collision-proof.
 func pastedFileFilename(now time.Time, mimeType, name string) string {
 	stamp := now.Format("20060102-150405.000000000")
 	if sanitized := sanitizePastedFileName(name); sanitized != "" {
@@ -97,10 +91,8 @@ func pastedFileFilename(now time.Time, mimeType, name string) string {
 	return "paste-" + stamp + pastedFileExtension(mimeType)
 }
 
-// sanitizePastedFileName reduces a clipboard-provided name to a safe single
-// path segment: directory components (POSIX or Windows) are stripped, control
-// characters are removed, and "."/".."/empty are rejected. The result can never
-// contain a path separator, so path.Join with it cannot escape the staging dir.
+// sanitizePastedFileName reduces a clipboard name to one path segment so
+// path.Join with it cannot escape the staging dir.
 func sanitizePastedFileName(name string) string {
 	name = strings.TrimSpace(name)
 	if i := strings.LastIndexAny(name, "/\\"); i >= 0 {

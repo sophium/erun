@@ -14,25 +14,19 @@ import (
 const (
 	desktopIdentityKeyFile = "desktopid.key"
 	desktopIdentityPubFile = "desktopid.pub"
-	// desktopMCPTokenTTL keeps the per-env bearer short-lived so a leaked token
-	// has a small window; the desktop signs a fresh one per MCP call.
+	// Kept short-lived so a leaked bearer has a small exploit window.
 	desktopMCPTokenTTL = 5 * time.Minute
 )
 
-// desktopIdentity is the desktop's persistent Ed25519 identity (issue #655). It
-// signs the per-env bearer tokens the desktop sends to each env's MCP edge and
-// supplies the public key the deploy injects into the pod so the edge can
-// verify them. The private key is the single source of truth, persisted once
-// under the user config dir; the public key is written beside it so deploy can
-// pass its path to `erun deploy --mcp-auth-public-key`.
+// desktopIdentity is the desktop's persistent Ed25519 identity: it signs the
+// per-env MCP bearer tokens each env's edge verifies, and supplies the public
+// key the deploy injects into the pod so that edge can trust them.
 type desktopIdentity struct {
 	dir        string
 	mu         sync.Mutex
 	privatePEM []byte
 }
 
-// defaultDesktopIdentityDir is the per-user directory the desktop keeps its
-// identity in, matching the contribute-state convention (UserConfigDir/ERun).
 func defaultDesktopIdentityDir() string {
 	configDir, err := os.UserConfigDir()
 	if err != nil {
@@ -48,9 +42,6 @@ func newDesktopIdentity(dir string) *desktopIdentity {
 func (d *desktopIdentity) keyPath() string       { return filepath.Join(d.dir, desktopIdentityKeyFile) }
 func (d *desktopIdentity) publicKeyPath() string { return filepath.Join(d.dir, desktopIdentityPubFile) }
 
-// ensure loads the persisted private key, generating and persisting a fresh
-// keypair (and writing the public key beside it) on first use. Safe for
-// concurrent callers.
 func (d *desktopIdentity) ensure() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -84,8 +75,6 @@ func (d *desktopIdentity) ensure() error {
 	return d.writePublicKeyLocked()
 }
 
-// writePublicKeyLocked writes the derived public key beside the private key so
-// deploy can reference it by path. The caller holds d.mu.
 func (d *desktopIdentity) writePublicKeyLocked() error {
 	pub, err := eruncommon.DesktopPublicKeyPEM(d.privatePEM)
 	if err != nil {
@@ -97,10 +86,8 @@ func (d *desktopIdentity) writePublicKeyLocked() error {
 	return nil
 }
 
-// ensurePublicKeyPath ensures the identity exists and returns the public-key
-// file path for the deploy `--mcp-auth-public-key` input. It returns "" with no
-// error when no identity dir is configured, so a deploy from such a desktop
-// stays unauthenticated rather than failing.
+// Returns "" with no error when no identity dir is configured, so a deploy from
+// such a desktop stays unauthenticated rather than failing.
 func (d *desktopIdentity) ensurePublicKeyPath() (string, error) {
 	if d == nil || strings.TrimSpace(d.dir) == "" {
 		return "", nil
@@ -111,9 +98,8 @@ func (d *desktopIdentity) ensurePublicKeyPath() (string, error) {
 	return d.publicKeyPath(), nil
 }
 
-// signToken signs a short-lived bearer for the given env's MCP edge, stamped
-// with the file:// issuer the edge trusts and the per-env audience it enforces,
-// so a token for one env cannot be replayed against another.
+// The per-env audience prevents a token minted for one env from being replayed
+// against another.
 func (d *desktopIdentity) signToken(tenant, environment string, now time.Time) (string, error) {
 	if d == nil {
 		return "", fmt.Errorf("desktop identity is not configured")

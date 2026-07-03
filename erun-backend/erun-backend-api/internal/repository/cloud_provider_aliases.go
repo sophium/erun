@@ -7,10 +7,8 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// CloudProviderAliasRepository stores a tenant's BYO-cloud credentials, the
-// secret the provisioning executor resolves to talk to the tenant's cloud
-// (issue #605/#676). Credentials are encrypted at rest; the bytea column never
-// holds plaintext.
+// CloudProviderAliasRepository stores a tenant's BYO-cloud credentials that the
+// provisioning executor resolves to reach the tenant's cloud; they are encrypted at rest.
 type CloudProviderAliasRepository struct {
 	txs    *TxManager
 	cipher *secrets.Cipher
@@ -20,16 +18,14 @@ func NewCloudProviderAliasRepository(txs *TxManager, cipher *secrets.Cipher) *Cl
 	return &CloudProviderAliasRepository{txs: txs, cipher: cipher}
 }
 
-// ResolvedCloudProviderAlias is a decrypted alias: the provider plus the
-// plaintext credentials blob the executor hands to the cloud SDK/CLI.
+// ResolvedCloudProviderAlias is a decrypted alias holding the plaintext credentials the provisioning executor uses to reach the tenant's cloud.
 type ResolvedCloudProviderAlias struct {
 	Alias       string
 	Provider    string
 	Credentials string
 }
 
-// Set upserts the tenant's alias, encrypting credentials before they touch the
-// database. tenant_id is owned by the RLS default, so it is omitted.
+// Set upserts the tenant's alias. tenant_id is supplied by the RLS default, so it is omitted from the write.
 func (r *CloudProviderAliasRepository) Set(ctx context.Context, alias, provider, credentials string) error {
 	encrypted, err := r.cipher.Encrypt([]byte(credentials))
 	if err != nil {
@@ -47,8 +43,7 @@ func (r *CloudProviderAliasRepository) Set(ctx context.Context, alias, provider,
 	})
 }
 
-// Get resolves a tenant's alias and decrypts its credentials. RLS scopes the
-// read to the caller's tenant; an unknown alias returns ErrNotFound.
+// Get resolves a tenant's alias, returning ErrNotFound for an unknown alias. RLS scopes the read to the caller's tenant.
 func (r *CloudProviderAliasRepository) Get(ctx context.Context, alias string) (ResolvedCloudProviderAlias, error) {
 	var row struct {
 		Provider             string `bun:"provider"`

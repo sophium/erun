@@ -80,11 +80,9 @@ type App struct {
 	ctx  context.Context
 	deps erunUIDeps
 
-	// identity is the desktop's persistent signing identity (issue #655). It
-	// mints the short-lived per-env bearer the desktop sends to each env's MCP
-	// edge and supplies the public key deploy injects so the edge verifies
-	// those tokens. nil in unit tests, where mcpBearer returns "" so non-auth
-	// envs and stubbed MCP deps keep working.
+	// identity is the desktop's persistent signing identity: it mints the per-env
+	// MCP bearer and supplies the public key deploy injects so each env's edge can
+	// verify those tokens. nil in unit tests.
 	identity *desktopIdentity
 
 	mu                        sync.Mutex
@@ -111,41 +109,28 @@ type App struct {
 	contribute                *contributeStore
 	contributeApps            *contributeAppForwards
 
-	// cloudContextStatuses caches the live AWS-observed power state for
-	// each cloud context, keyed by context name. Populated by the
-	// background poller and by handlers that already call Refresh
-	// (settings dialog, Init/Start/Stop). The persisted config no longer
-	// carries Status (it is operational state, not configuration), so
-	// any code path that needs "is this context running right now?" must
-	// consult this map.
+	// cloudContextStatuses caches the live AWS-observed power state per cloud
+	// context. The persisted config no longer carries Status (it is operational
+	// state, not configuration), so any code path that needs "is this context
+	// running right now?" must consult this map.
 	cloudContextStatusesMu sync.RWMutex
 	cloudContextStatuses   map[string]string
 	cloudContextPollerStop chan struct{}
 
-	// workingIssueCache memoizes the resolved working issue (branch +
-	// linked issue title) per env so the sidebar hover card doesn't re-run
-	// git + gh on every hover. Entries expire after workingIssueCacheTTL.
+	// workingIssueCache memoizes the resolved working issue per env so the sidebar
+	// hover card doesn't re-run git + gh on every hover.
 	workingIssueMu    sync.Mutex
 	workingIssueCache map[string]workingIssueCacheEntry
 
-	// emitFn dispatches Wails-style events to the frontend. In normal Wails
-	// mode this calls runtime.EventsEmit; in headless mode it fans out to
-	// the SSE subscribers in headlessserver. When unset it defaults to the
-	// Wails runtime path during startup.
 	emitFn func(name string, args ...any)
 }
 
-// SetEmitter overrides how the App emits frontend events. The headless server
-// uses this to redirect EventsEmit calls to SSE subscribers instead of the
-// Wails runtime.
+// SetEmitter overrides how the App emits frontend events; the headless server
+// uses it to redirect events to SSE subscribers instead of the Wails runtime.
 func (a *App) SetEmitter(emit func(name string, args ...any)) {
 	a.emitFn = emit
 }
 
-// emit dispatches the named event with optional payload args to whatever
-// transport is currently wired up. Safe to call before startup; events emitted
-// without a context or emitter configured are dropped silently, matching the
-// pre-refactor behavior of runtime.EventsEmit with a nil context.
 func (a *App) emit(name string, args ...any) {
 	if a.emitFn != nil {
 		a.emitFn(name, args...)
@@ -190,10 +175,8 @@ func NewApp(deps erunUIDeps) *App {
 	return app
 }
 
-// mcpBearer mints the short-lived per-env bearer the desktop sends to the env's
-// MCP edge (issue #655). A nil identity (unit tests) or a signing failure yields
-// "", so non-auth envs and stubbed MCP deps keep working; an auth-enabled env
-// rejects an empty bearer with 401, which is the correct outcome.
+// mcpBearer returns "" on a nil identity (unit tests) or a signing failure; an
+// auth-enabled env then rejects the empty bearer with 401, which is correct.
 func (a *App) mcpBearer(tenant, environment string) string {
 	if a.identity == nil {
 		return ""
@@ -230,16 +213,9 @@ func withDefaultCoreDeps(deps erunUIDeps) erunUIDeps {
 	return deps
 }
 
-// withDefaultCloudDeps wires the cloud-provider dependency defaults the
-// desktop needs for cloud-alias operations. erun-common fills the AWS hooks
-// and VerifyCloudflareToken itself via normalizeCloudDependencies, but the
-// off-config CloudSecretStore that Cloudflare init/status/export require has
-// no usable zero value — it must be backed by a real directory. Wire the
-// file-backed default rooted beside erun-config.yaml so Cloudflare token
-// persistence works (today the desktop passes empty deps, so Cloudflare ops
-// would fail with "cloud secret store is not configured"). A resolution
-// failure leaves the store nil; erun-common then surfaces a clear error on
-// the Cloudflare path rather than touching AWS-only flows.
+// withDefaultCloudDeps supplies the one cloud default erun-common cannot fill
+// itself: CloudSecretStore has no usable zero value (it needs a real backing
+// directory), so Cloudflare token operations fail unless it is wired here.
 func withDefaultCloudDeps(deps erunUIDeps) erunUIDeps {
 	if deps.cloudDeps.CloudSecretStore == nil {
 		if store, err := eruncommon.DefaultCloudSecretStore(); err == nil {
@@ -293,9 +269,6 @@ func withDefaultUIDeps(deps erunUIDeps) erunUIDeps {
 	return deps
 }
 
-// withDefaultWorkspaceDeps wires the read-model and workspace-sync defaults:
-// pasted-image save, diff/idle/API-log loaders, and the workspace sync
-// readiness check, runner, and interval.
 func withDefaultWorkspaceDeps(deps erunUIDeps) erunUIDeps {
 	if deps.savePastedFile == nil {
 		deps.savePastedFile = savePastedFileToRuntime
@@ -327,9 +300,6 @@ func withDefaultWorkspaceDeps(deps erunUIDeps) erunUIDeps {
 	return deps
 }
 
-// withDefaultPodDeps wires the pod-facing defaults: working-issue command
-// runner, pod branch and raw-command loaders, activity recording, and the
-// cloud-context stop adapter.
 func withDefaultPodDeps(deps erunUIDeps) erunUIDeps {
 	if deps.runWorkingIssueCommand == nil {
 		deps.runWorkingIssueCommand = execWorkingIssueCommand
@@ -351,9 +321,6 @@ func withDefaultPodDeps(deps erunUIDeps) erunUIDeps {
 	return deps
 }
 
-// withDefaultWindowAndContributeDeps wires the window-state and contribute
-// defaults: window state path, maximised probe, ERun clone runner, and
-// contribute state path.
 func withDefaultWindowAndContributeDeps(deps erunUIDeps) erunUIDeps {
 	if deps.windowStatePath == "" {
 		deps.windowStatePath = defaultAppWindowStatePath()
@@ -372,12 +339,10 @@ func withDefaultWindowAndContributeDeps(deps erunUIDeps) erunUIDeps {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	// macOS GUI launches (Finder/Dock) start with launchd's minimal env
-	// — no Homebrew PATH, no KUBECONFIG, no AWS_*. Inherit a short
-	// allowlist from the user's login shell so subprocess calls like
-	// kubectl config get-contexts read the same state the user sees in
-	// their terminal. No-op on other platforms. Runs before any other
-	// startup task that shells out so the first call is already correct.
+	// macOS GUI launches (Finder/Dock) inherit launchd's minimal env — no
+	// Homebrew PATH, no KUBECONFIG, no AWS_* — so pull a short allowlist from the
+	// user's login shell, and do it first so every later shell-out sees the same
+	// state the user's terminal does.
 	importLoginShellEnv()
 	configureAppIdentity("ERun")
 	a.startActivityPollers()

@@ -10,61 +10,42 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/env"
 )
 
-// AWSStubError injects a deterministic AWS CLI failure for one argv family
-// of the StubAWSCloudContext stub. Stderr is what the real AWS CLI would
-// print (the classifiers in erun-common/cloud_context.go substring-match
-// against it); ExitCode defaults to 254, the AWS CLI's client-error code.
-// Once makes the failure fire only on the family's first invocation — the
-// stub drops a marker file in the stubs dir and answers success afterwards —
-// so retry/recovery loops in production can be driven to their success arm.
+// AWSStubError injects a deterministic AWS CLI failure for one argv family.
+// Stderr must read like the real AWS CLI's, because the classifiers in
+// erun-common/cloud_context.go substring-match against it; ExitCode defaults
+// to 254, the AWS CLI's client-error code. Once fires the failure only on the
+// family's first invocation, so production retry/recovery loops can be driven
+// to their success arm.
 type AWSStubError struct {
 	Stderr   string
 	ExitCode int
 	Once     bool
 }
 
-// AWSCloudContextStubSpec configures the argv-branching `aws` stub used by
-// the real-run `erun context ...` scenarios. The success-output fields feed
-// the decision inputs production code parses from AWS CLI stdout; the
-// *Error fields flip one argv family to a canned failure so the error
-// classifiers and recovery branches in erun-common/cloud_context.go become
-// reachable. Zero values fall back to the defaults applied in
-// StubAWSCloudContext, chosen so the happy-path flows complete.
+// AWSCloudContextStubSpec configures the argv-branching `aws` stub for the
+// real-run `erun context ...` scenarios. Success-output fields feed the
+// decision inputs production parses from AWS CLI stdout; the *Error fields
+// make the error classifiers and recovery branches in
+// erun-common/cloud_context.go reachable. Zero values fall back to defaults
+// chosen so the happy path completes.
 type AWSCloudContextStubSpec struct {
-	// RoleName is printed by `iam get-role` / `iam create-role`
-	// (production ignores the value; only the exit code matters).
+	// RoleName's value is ignored by production; only the call's exit code matters.
 	RoleName string
-	// InstanceProfileARN answers both `iam get-instance-profile
-	// --query InstanceProfile.Arn` and `iam create-instance-profile`.
 	InstanceProfileARN string
-	// ProfileRoleName answers `iam get-instance-profile --query
-	// InstanceProfile.Roles[0].RoleName`. "None" (the AWS text-output
-	// null) means the profile carries no role yet.
+	// ProfileRoleName of "None" (the AWS text-output null) means the profile
+	// carries no role yet.
 	ProfileRoleName string
-	// ActiveAssociationID / ActiveAssociationARN answer the
-	// describe-iam-instance-profile-associations queries filtered on
-	// state=associated. "None" means no active association.
+	// ActiveAssociationID / ActiveAssociationARN of "None" mean no active
+	// association.
 	ActiveAssociationID  string
 	ActiveAssociationARN string
-	// PendingAssociationID answers the same query filtered on
-	// state=associating,disassociating.
 	PendingAssociationID string
-	// PublicIP answers `ec2 describe-instances --query
-	// Reservations[0].Instances[0].PublicIpAddress`.
 	PublicIP string
-	// InstanceStates answers the bulk status-refresh query
-	// (`ec2 describe-instances --query
-	// Reservations[*].Instances[*].[InstanceId,State.Name] --output text`)
-	// issued by RefreshCloudContextStatuses. Multi-line "id<TAB>state"
-	// text, exactly what the AWS CLI prints. Empty answers the query with
-	// no output (every instance reads as "not found in AWS").
+	// InstanceStates is multi-line "id<TAB>state" text as the AWS CLI prints
+	// it; empty makes every instance read as "not found in AWS".
 	InstanceStates string
-	// SecurityGroupID answers `ec2 create-security-group` and
-	// `ec2 describe-security-groups`.
 	SecurityGroupID string
-	// ImageID answers the `ssm get-parameter` AMI lookup.
 	ImageID string
-	// InstanceID answers `ec2 run-instances`.
 	InstanceID string
 
 	// Per-argv-family error injection. Nil means the call succeeds.
@@ -81,13 +62,9 @@ type AWSCloudContextStubSpec struct {
 	DescribeInstanceStatesError   *AWSStubError
 }
 
-// StubAWSCloudContext writes an argv-branching `aws` stub at
-// <stubsDir>/aws covering every AWS CLI call the cloud-context
-// start/stop/init flows issue (see erun-common/cloud_context.go:
-// ensureCloudContextInstanceProfile, ensureCloudContextInstanceProfile-
-// Association, createCloudContextSecurityGroup, changeCloudContextPower-
-// State, finalizeInitCloudContext). The returned env-var slice routes
-// production `aws` invocations through the stub via ERUN_AWS_BIN.
+// StubAWSCloudContext writes an argv-branching `aws` stub covering every AWS
+// CLI call the cloud-context start/stop/init flows issue, and returns the env
+// vars that route production `aws` invocations through it.
 //
 // Arm order matters: the `Roles[0].RoleName` query must match before the
 // generic `iam get-instance-profile` arm, and the association queries are
@@ -156,12 +133,6 @@ func withAWSCloudContextDefaults(spec AWSCloudContextStubSpec) AWSCloudContextSt
 	return spec
 }
 
-// awsCloudContextStubArm renders one `case` arm: an injected failure prints
-// its stderr and exits non-zero, a success prints the canned stdout (when
-// any) and exits 0. A failure with Once=true fires only on the family's
-// first invocation: the arm drops a marker file derived from the pattern
-// into stubsDir and answers the success response on every later call, so
-// production retry loops can be driven through failure and into recovery.
 func awsCloudContextStubArm(stubsDir, pattern string, failure *AWSStubError, stdout string) string {
 	successLines := []string{"exit 0 ;;"}
 	if stdout != "" {
@@ -198,8 +169,6 @@ func awsCloudContextStubArm(stubsDir, pattern string, failure *AWSStubError, std
 	return renderStubArmLines(lines)
 }
 
-// renderStubArmLines joins one arm's lines with the two-space base indent the
-// surrounding `case "$*" in` body uses.
 func renderStubArmLines(lines []string) string {
 	var b strings.Builder
 	for _, line := range lines {
@@ -210,12 +179,10 @@ func renderStubArmLines(lines []string) string {
 	return b.String()
 }
 
-// SeedAWSSharedConfig writes <home>/.aws/config with one SSO profile for
-// the given account, using the modern sso_session indirection so the
-// parser's session-index path (erun-common/aws_sso_config.go) is exercised:
-// the profile carries sso_account_id + sso_role_name + region and points
-// at an [sso-session] block that owns sso_start_url + sso_region. Returns
-// the SSO start URL it wrote so tests can assert it flowed through.
+// SeedAWSSharedConfig writes <home>/.aws/config with one SSO profile, using
+// the modern sso_session indirection so the parser's session-index path
+// (erun-common/aws_sso_config.go) is exercised. Returns the SSO start URL it
+// wrote so tests can assert it flowed through.
 func SeedAWSSharedConfig(t testing.TB, setup env.Setup, accountID, profileName string) string {
 	t.Helper()
 	startURL := "https://corp.awsapps.com/start"

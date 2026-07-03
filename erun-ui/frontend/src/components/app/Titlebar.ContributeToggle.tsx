@@ -18,20 +18,10 @@ const titlebarButtonClassName =
 const activeTitlebarButtonClassName =
   'bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground';
 
-// ContributeToggle renders the per-env Contribute switch + companion
-// launcher in the titlebar. Visible only for non-erun envs whose
-// configured type is local-agent or remote-agent. Toggling on clones
-// ERun inside the env and spawns the two contribute tabs; toggling off
-// closes them. While on, an adjacent ExternalLink button boots the
-// headless `erun app` inside the contribute terminal, brings up a
-// kubectl port-forward, and opens the locally-built desktop app in
-// the user's default browser.
-//
-// envRunning gates both buttons: contribute clones ERun *inside the
-// running pod*, and the launcher rebuilds + serves the headless app
-// from the same pod. Neither operation is meaningful while the cloud
-// env is starting/stopping/stopped, so the buttons stay rendered (to
-// preserve layout) but disabled.
+// Contribute mode clones ERun into an agent env so an operator can work on
+// ERun itself from inside the running pod; the launcher then serves that
+// in-pod app to the browser. Both need the pod up, so while the cloud env is
+// down the buttons stay rendered — to preserve titlebar layout — but disabled.
 export function ContributeToggle({
   envRunning,
 }: {
@@ -129,12 +119,9 @@ function ContributeAppLauncher({
         onClick={() => {
           if (disabled) return;
           setBusy(true);
-          // Show an immediate "building" notification so the user
-          // knows the long-running rebuild is in flight; without it
-          // the launcher button just disables for ~3 minutes on the
-          // first build. The Go side opens the URL in the user's
-          // default browser via Wails BrowserOpenURL after the
-          // headless server is actually serving HTTP.
+          // Surface progress immediately: the first build can take ~3
+          // minutes, and without feedback the button just sits disabled
+          // with no sign of life.
           dispatch(
             showNotification(
               'info',

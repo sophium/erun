@@ -1,10 +1,7 @@
 import { createSlice } from '@reduxjs/toolkit';
 
-// requestCounters is a monotonic counter per async flow that needs
-// "ignore stale responses". Thunks dispatch the matching bump action, read
-// the new value, perform their async work, then compare to the current
-// counter when committing. The counters are pure machinery — they do not
-// render — but living in Redux means a single observable source of truth.
+// Per-flow monotonic counters for ignoring stale async responses: a thunk bumps
+// its counter before its async work and commits the result only if it is still current.
 
 export interface RequestCountersState {
   reviewDiff: number;

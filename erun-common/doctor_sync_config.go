@@ -11,7 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// In-pod config reconciliation (`erun doctor --sync-config`, #548).
+// In-pod config reconciliation (`erun doctor --sync-config`).
 //
 // The runtime pod's on-disk erun config is a projection of the env's
 // EnvConfig, written by the entrypoint from the ERUN_* env vars the chart
@@ -34,7 +34,7 @@ const (
 	ConfigDriftMissing ConfigDriftKind = "missing"
 	// ConfigDriftWrong: both carry the key but the values differ.
 	ConfigDriftWrong ConfigDriftKind = "wrong"
-	// ConfigDriftLegacyKey: the on-disk config still carries a pre-#376 legacy
+	// ConfigDriftLegacyKey: the on-disk config still carries a legacy
 	// key (e.g. `remote:`) that the canonical projection replaces.
 	ConfigDriftLegacyKey ConfigDriftKind = "legacy"
 )
@@ -76,11 +76,8 @@ func (c ConfigSyncInspection) InSync() bool {
 }
 
 // ResolveInjectedRuntimeConfig builds the canonical config from the chart's
-// ERUN_* env vars. It returns ok=false when ERUN_TENANT/ERUN_ENVIRONMENT are
-// unset (the entrypoint's own guard), so the caller can report "nothing to
-// reconcile". It maps ERUN_ENV_TYPE straight to the canonical EnvConfig.Type
-// (never emitting the legacy `remote:` key) and parses the cloud-provider alias
-// with ParseCloudProviderAlias instead of the entrypoint's shell heuristic.
+// ERUN_* env vars. It returns ok=false when tenant or environment are unset
+// (the entrypoint's own guard) so the caller can report "nothing to reconcile".
 func ResolveInjectedRuntimeConfig(env func(string) string) (InjectedRuntimeConfig, bool) {
 	if env == nil {
 		env = os.Getenv
@@ -128,8 +125,6 @@ func ResolveInjectedRuntimeConfig(env func(string) string) (InjectedRuntimeConfi
 	return injected, true
 }
 
-// injectedCloudConfig builds the root cloud provider/context the env's cloud
-// ERUN_* vars describe (empty when the env carries no cloud provider/alias).
 func injectedCloudConfig(provider, alias, region, instanceID, contextName, kubernetesContext string) ([]CloudProviderConfig, []CloudContextConfig) {
 	if provider == "" || alias == "" {
 		return nil, nil
@@ -150,9 +145,8 @@ func injectedCloudConfig(provider, alias, region, instanceID, contextName, kuber
 	return providers, contexts
 }
 
-// injectedManagedCloud mirrors the entrypoint's managedcloud computation: the
-// explicit ERUN_CLOUD_ENVIRONMENT flag, or a remote env with a fully-resolved
-// cloud provider/alias/region.
+// injectedManagedCloud mirrors the entrypoint's managedcloud computation and
+// must stay in sync with it.
 func injectedManagedCloud(get func(string) string, provider, alias, region string) bool {
 	if strings.EqualFold(get("ERUN_CLOUD_ENVIRONMENT"), "true") {
 		return true
@@ -196,10 +190,6 @@ func parseInjectedContainerRegistries(value string) ContainerRegistries {
 	return registries
 }
 
-// runtimeConfigPaths resolves the in-pod env and root config file paths under
-// the given config home (XDG_CONFIG_HOME or $HOME/.config) without going
-// through the xdg global, so the inspection and writer are testable in
-// isolation.
 func runtimeEnvConfigPath(configHome, tenant, environment string) string {
 	return filepath.Join(configHome, configRoot, tenant, environment, configFile)
 }
@@ -398,12 +388,9 @@ func formatBool(value bool) string {
 }
 
 // RunRuntimeConfigSync rewrites the in-pod env and root config files so the
-// env-derived projection matches the injected env, while preserving every key
-// the injection does not carry. The write is load-overlay-save: it loads the
-// on-disk struct (keeping unprojected keys), overlays only the projected
-// fields, and marshals canonically — so a second run round-trips to InSync()
-// with no perpetual-drift loop. Each file write is traced for the --dry-run
-// contract and gated on !ctx.DryRun.
+// env-derived projection matches the injected env, preserving every key the
+// injection does not carry. Overlaying only the projected fields lets a second
+// run round-trip to InSync() with no perpetual-drift loop.
 func RunRuntimeConfigSync(ctx Context, inspection ConfigSyncInspection) error {
 	if !inspection.HasInjected || inspection.InSync() {
 		return nil
@@ -415,10 +402,8 @@ func RunRuntimeConfigSync(ctx Context, inspection ConfigSyncInspection) error {
 	if err != nil {
 		return err
 	}
-	// Snapshot the env config before the overlay rewrites it (in
-	// particular Type, which the injected ERUN_ENV_TYPE drives) so an
-	// in-pod sync that resolves the wrong value stays recoverable, the
-	// same guard reconcileRuntimeRootConfig applies to the root config.
+	// Back up before the overlay rewrites the file so an in-pod sync that
+	// resolves a wrong value stays recoverable.
 	if !ctx.DryRun {
 		_ = writeEnvConfigBackupIfDue(envPath, timeNow)
 	}
@@ -428,8 +413,6 @@ func RunRuntimeConfigSync(ctx Context, inspection ConfigSyncInspection) error {
 	return reconcileRuntimeRootConfig(ctx, inspection.ConfigHome, injected)
 }
 
-// reconcileRuntimeRootConfig upserts the injected cloud provider/context into
-// the root config (preserving any other entries) when the env carries them.
 func reconcileRuntimeRootConfig(ctx Context, configHome string, injected InjectedRuntimeConfig) error {
 	if len(injected.Providers) == 0 && len(injected.Contexts) == 0 {
 		return nil
@@ -454,9 +437,6 @@ func reconcileRuntimeRootConfig(ctx Context, configHome string, injected Injecte
 	return writeRuntimeYAML(ctx, rootPath, rootConfig)
 }
 
-// overlayInjectedEnvConfig replaces only the env-projected fields on the
-// on-disk config; all other fields (sshd, claude, aitool, runtimeversion,
-// localRepoPath, …) are preserved as loaded.
 func overlayInjectedEnvConfig(onDisk, injected EnvConfig) EnvConfig {
 	onDisk.Name = injected.Name
 	onDisk.Type = injected.Type

@@ -18,10 +18,9 @@ type (
 	APILauncher              func(io.Reader, io.Writer, io.Writer, []string) error
 )
 
-// runPrompt and runSelect keep promptui's interactive rendering for real
-// terminals and fall back to plain line-based prompts when stdout is a pipe.
-// promptui repaints from its own goroutines, so piped output otherwise carries
-// cursor-control frames whose final flush races process exit (#520).
+// A piped stdout falls back to plain prompts because promptui repaints from its
+// own goroutines, so its cursor-control frames' final flush would otherwise race
+// process exit.
 func runPrompt(prompt promptui.Prompt) (string, error) {
 	if writerIsTerminal(os.Stdout) {
 		return prompt.Run()
@@ -216,18 +215,13 @@ func (d rootDependencies) optionalPushCommand() *cobra.Command {
 	return pushCmd
 }
 
-// deployCommand returns the always-registered deploy subcommand. The desktop
-// Redeploy button invokes "erun deploy --version X" from the app's cwd, which
-// may not contain a kubernetes deploy context. The command must always be
-// present so Cobra recognizes its flags; ResolveCurrentDeploySpecs surfaces a
-// clear error when invoked outside a deploy context.
+// Registered unconditionally: the desktop Redeploy button invokes "erun deploy
+// --version X" from a cwd that may lack a kubernetes deploy context, so the
+// command must exist even where no context resolves.
 func (d rootDependencies) deployCommand() *cobra.Command {
 	return newDeployCmd(d.store, d.store.SaveEnvConfig, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.DockerImageBuilder, d.push, d.recoveringDeployHelmChart)
 }
 
-// upgradeCommand returns the always-registered upgrade subcommand. It composes
-// the same deploy flow as deployCommand for each lagging opted-in env, so it
-// shares deployCommand's dependency wiring.
 func (d rootDependencies) upgradeCommand() *cobra.Command {
 	return newUpgradeCmd(d.store, d.store.SaveEnvConfig, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.DockerImageBuilder, d.push, d.recoveringDeployHelmChart)
 }

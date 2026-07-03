@@ -106,11 +106,10 @@ func (r ContainerRegistries) ToRegistries() []string {
 	return out
 }
 
-// Validate enforces the marker invariants: at most one BUILD, at most one
-// FROM, at least one DEPLOY; FROM and TO are set together and never name the
-// same registry. A DEPLOY registry need not carry BUILD or TO — the image it
-// serves may be published there externally (e.g. a runtime env pulling a
-// released image), which erun cannot police at config time.
+// Validate enforces the marker invariants. A DEPLOY registry need not carry
+// BUILD or TO — the image it serves may be published there externally (e.g. a
+// runtime env pulling a released image), which erun cannot police at config
+// time.
 func (r ContainerRegistries) Validate() error {
 	if r.IsZero() {
 		return errors.New("registry list is empty")
@@ -139,8 +138,6 @@ func (r ContainerRegistries) Validate() error {
 	return nil
 }
 
-// registryRoleTally accumulates the role counts and to/from registries needed
-// to enforce the marker invariants in Validate.
 type registryRoleTally struct {
 	build        int
 	from         int
@@ -149,9 +146,6 @@ type registryRoleTally struct {
 	toRegistries map[string]struct{}
 }
 
-// tallyRoles walks the list once, counting role markers and recording the from
-// and to registries. It errors on the first entry missing a registry, matching
-// Validate's original per-entry guard.
 func (r ContainerRegistries) tallyRoles() (registryRoleTally, error) {
 	tally := registryRoleTally{toRegistries: make(map[string]struct{}, len(r))}
 	for _, entry := range r {
@@ -212,9 +206,8 @@ func (r ContainerRegistries) Clone() ContainerRegistries {
 	return out
 }
 
-// DefaultContainerRegistries is the seed a fresh project starts with: the
-// canonical erun registry marked build+deploy — build and pull from the same
-// host, no copy. Matches the single-registry behaviour that predated markers.
+// DefaultContainerRegistries is the seed a fresh project starts with: build and
+// pull from the same host, no copy.
 func DefaultContainerRegistries() ContainerRegistries {
 	return ContainerRegistries{{
 		Registry: DefaultContainerRegistry,
@@ -222,9 +215,8 @@ func DefaultContainerRegistries() ContainerRegistries {
 	}}
 }
 
-// SingleContainerRegistries builds a one-entry list for the given registry
-// marked build+deploy. Init uses it to seed the project from the single
-// `--container-registry` value.
+// SingleContainerRegistries builds the one-entry list that seeds a project from
+// a single `--container-registry` value.
 func SingleContainerRegistries(registry string) ContainerRegistries {
 	registry = strings.TrimSpace(registry)
 	if registry == "" {
@@ -236,9 +228,9 @@ func SingleContainerRegistries(registry string) ContainerRegistries {
 	}}
 }
 
-// migrateLegacyContainerRegistry folds a legacy single `containerregistry`
-// scalar into a one-entry build+deploy list when no marked list is present.
-// The legacy key is dropped on the next save, so the migration is one-way.
+// migrateLegacyContainerRegistry folds a legacy `containerregistry` scalar into
+// the marked list. The key is dropped on the next save, so the migration is
+// one-way.
 func migrateLegacyContainerRegistry(existing ContainerRegistries, legacy string) ContainerRegistries {
 	if !existing.IsZero() {
 		return existing
@@ -246,9 +238,9 @@ func migrateLegacyContainerRegistry(existing ContainerRegistries, legacy string)
 	return SingleContainerRegistries(legacy)
 }
 
-// UnmarshalYAML reads the marked list and migrates a legacy single
-// `containerregistry` scalar into it. The scalar field is gone from the
-// struct; this keeps already-initialized projects building and deploying.
+// UnmarshalYAML migrates the legacy `containerregistry` scalar into the marked
+// list so already-initialized projects keep working after the field was
+// removed from the struct.
 func (c *ProjectConfig) UnmarshalYAML(value *yaml.Node) error {
 	type plain ProjectConfig
 	aux := struct {
@@ -263,10 +255,8 @@ func (c *ProjectConfig) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
-// UnmarshalYAML migrates an env's pre-#376 legacy fields on read so configs
-// written by older binaries keep working after the fields were removed from the
-// struct: the single `containerregistry` scalar folds into the marked list, and
-// the `remote`+`snapshot` pair derives the env `type` when `type` is unset.
+// UnmarshalYAML migrates an env's legacy fields on read so configs written by
+// older binaries keep working after those fields were removed from the struct.
 func (c *EnvConfig) UnmarshalYAML(value *yaml.Node) error {
 	type plain EnvConfig
 	aux := struct {
@@ -284,13 +274,11 @@ func (c *EnvConfig) UnmarshalYAML(value *yaml.Node) error {
 	if !c.Type.IsValid() {
 		c.Type = legacyEnvTypeFromRemoteSnapshot(aux.LegacyRemote, aux.LegacySnapshot)
 	}
-	// Fold the pre-#376 `repopath` into `localRepoPath` (dropped struct field;
-	// migrated on read, dropped on next save — same envelope as
-	// `containerregistry`/`remote`/`snapshot`). Unconditional across all env
-	// types: EffectiveLocalRepoPath already resolved `repopath` for every type
-	// via its fallback, so the effective value is unchanged; only the stored
-	// field name moves. This intentionally broadens the old local-agent-only
-	// NormalizeEnvConfig backfill, which was inconsistent with that fallback.
+	// The legacy `repopath` fold is unconditional across all env types:
+	// EffectiveLocalRepoPath already resolved `repopath` for every type via its
+	// fallback, so only the stored field name moves. This intentionally broadens
+	// the old local-agent-only NormalizeEnvConfig backfill, which was
+	// inconsistent with that fallback.
 	if strings.TrimSpace(c.LocalRepoPath) == "" {
 		c.LocalRepoPath = strings.TrimSpace(aux.LegacyRepoPath)
 	}
@@ -330,7 +318,7 @@ func (c ProjectConfig) ContainerRegistriesForEnvironment(environment string) Con
 // SetContainerRegistriesForEnvironment stores the marked list for an
 // environment. An empty environment sets the project default; an empty list
 // clears the per-env override; a per-env list equal to the project default is
-// collapsed rather than stored, mirroring the scalar setter it replaces.
+// collapsed rather than stored.
 func (c *ProjectConfig) SetContainerRegistriesForEnvironment(environment string, list ContainerRegistries) {
 	environment = strings.TrimSpace(environment)
 	if environment == "" {
@@ -361,9 +349,8 @@ func (c *ProjectConfig) SetContainerRegistriesForEnvironment(environment string,
 	c.Environments[environment] = envConfig
 }
 
-// isEmpty reports whether a per-env project entry carries nothing worth
-// persisting, so a registry-only entry collapses away while an entry with
-// docker fingerprints or a k8s plan is preserved.
+// isEmpty reports whether a per-env entry carries nothing worth persisting, so
+// a registry-only entry collapses away rather than being stored.
 func (c ProjectEnvironmentConfig) isEmpty() bool {
 	return c.ContainerRegistries.IsZero() && c.Docker.IsZero() && c.K8s.IsZero()
 }
@@ -409,10 +396,8 @@ func ResolveEnvironmentContainerRegistries(env EnvConfig) ContainerRegistries {
 }
 
 // deployTargetContainerRegistries resolves the marked list for a deploy target,
-// mirroring publishedDevopsChartRegistry's source order: the per-env list
-// carried on the env config (remote and runtime envs) wins, otherwise the
-// project's configured list. The result is validated so the copy/pull
-// resolution surfaces marker errors at deploy time.
+// mirroring publishedDevopsChartRegistry's source order, and validates it so
+// marker errors surface at deploy time.
 func deployTargetContainerRegistries(target OpenResult) (ContainerRegistries, error) {
 	if !target.EnvConfig.ContainerRegistries.IsZero() {
 		list := target.EnvConfig.ContainerRegistries
@@ -424,10 +409,9 @@ func deployTargetContainerRegistries(target OpenResult) (ContainerRegistries, er
 	return effectiveContainerRegistries(target.RepoPath, target.Environment)
 }
 
-// effectiveContainerRegistries resolves and validates the marked list for an
-// environment, applying the default seed when nothing is configured. Build and
-// deploy both resolve through here so the marker invariants are enforced at
-// the point of use and surface as actionable errors.
+// effectiveContainerRegistries applies the default seed when nothing is
+// configured. Build and deploy both resolve through here so marker invariants
+// are enforced at the point of use.
 func effectiveContainerRegistries(projectRoot, environment string) (ContainerRegistries, error) {
 	list := DefaultContainerRegistries()
 	if strings.TrimSpace(projectRoot) != "" {
