@@ -51,11 +51,9 @@ type EnvironmentActivityParams struct {
 	Now           time.Time
 }
 
-// EnvironmentActivityClientUpdate carries a per-remote-address delta to be
-// merged into the kind's snapshot. The SSH-activity proxy emits one entry
-// per client IP that contributed bytes since the last save, so the desktop
-// tooltip can show which peer is keeping the marker active rather than
-// just a total.
+// EnvironmentActivityClientUpdate carries a per-client byte delta so the
+// desktop tooltip can attribute activity to the peer keeping the marker
+// active, not just report a total.
 type EnvironmentActivityClientUpdate struct {
 	Address string
 	Bytes   int64
@@ -67,10 +65,8 @@ type EnvironmentIdleStore interface {
 }
 
 // EnvironmentActivitySnapshot is the on-disk record for one activity kind.
-// Clients is bounded by environmentActivityClientCap; entries are evicted
-// LRU-by-LastActivity when the cap is reached so a long-lived runtime
-// cannot grow the file without bound under churn (e.g., per-connection
-// ephemeral source ports on a NAT'd peer).
+// Clients is bounded so a long-lived runtime cannot grow the file without
+// bound under churn (e.g. ephemeral source ports on a NAT'd peer).
 type EnvironmentActivitySnapshot struct {
 	LastActivity time.Time                            `json:"lastActivity,omitempty"`
 	LastSeen     time.Time                            `json:"lastSeen,omitempty"`
@@ -93,10 +89,9 @@ type EnvironmentIdleMarker struct {
 	Clients          []EnvironmentIdleMarkerClient `json:"clients,omitempty"`
 }
 
-// EnvironmentIdleMarkerClient is the view that the marker exposes to the
-// desktop tooltip and the CLI --json output. SecondsAgo is a pre-computed
-// convenience so renderers do not need to recompute "N seconds ago" off
-// LastActivity per frame.
+// EnvironmentIdleMarkerClient is the marker's view for the desktop tooltip
+// and the CLI --json output. SecondsAgo is precomputed so renderers need
+// not recompute it off LastActivity every frame.
 type EnvironmentIdleMarkerClient struct {
 	Address      string    `json:"address"`
 	Bytes        int64     `json:"bytes,omitempty"`
@@ -116,12 +111,10 @@ type EnvironmentIdleStatus struct {
 	SecondsUntilStop    int64                                  `json:"secondsUntilStop,omitempty"`
 	Markers             []EnvironmentIdleMarker                `json:"markers"`
 	Activity            map[string]EnvironmentActivitySnapshot `json:"activity,omitempty"`
-	// StopPendingSince is the RFC3339 time at which the auto-stop
-	// grace period was first armed (i.e. the first poll that saw
-	// StopEligible=true with no prior pending entry on disk). While
-	// set, the in-pod monitor and the desktop both treat the env as
-	// "warning, not yet ready to fire" — `MaybeArmOrFireIdleStop`
-	// only returns "fire" once `now - since >= grace`.
+	// StopPendingSince is the RFC3339 time the auto-stop grace period was
+	// first armed. While set, the in-pod monitor and the desktop treat the
+	// env as "warning, not yet ready to fire"; MaybeArmOrFireIdleStop fires
+	// only once now - since >= grace.
 	StopPendingSince       string `json:"stopPendingSince,omitempty"`
 	SecondsUntilForcedStop int64  `json:"secondsUntilForcedStop,omitempty"`
 	GracePeriodSeconds     int64  `json:"gracePeriodSeconds,omitempty"`
@@ -277,19 +270,14 @@ func ResolveStoredEnvironmentIdleStatus(store EnvironmentIdleStore, tenant, envi
 	return status, nil
 }
 
-// overlayStopPending reads <home>/.erun/<tenant>/<env>/stop-pending.json
-// (when present) and fills the StopPendingSince /
-// SecondsUntilForcedStop / GracePeriodSeconds fields on the status.
-// Callers that drive `MaybeArmOrFireIdleStop` write to this same
-// file, so any consumer of the resolved status sees the grace
-// window — the in-pod monitor inside the EC2, the desktop through
-// the MCP `idle` tool, and any future external client.
+// overlayStopPending surfaces the auto-stop grace window on the resolved
+// status so every consumer sees it — the in-pod monitor, the desktop via
+// the MCP `idle` tool, and future external clients — even though only
+// callers driving MaybeArmOrFireIdleStop write the pending state.
 func overlayStopPending(status EnvironmentIdleStatus, tenant, environment string, now time.Time) EnvironmentIdleStatus {
 	if !status.ManagedCloud || !status.StopEligible {
-		// Eligibility lapsed — the next MaybeArmOrFireIdleStop call
-		// will clear the pending file. We avoid surfacing a stale
-		// pending entry to readers that don't drive the decision
-		// function (the MCP `idle` tool, etc.).
+		// Eligibility lapsed: don't surface a stale pending entry to
+		// read-only consumers; the next MaybeArmOrFireIdleStop clears it.
 		return status
 	}
 	pending, ok, err := LoadEnvironmentStopPending(tenant, environment)
@@ -338,11 +326,9 @@ func loadEnvironmentIdleStopError(tenant, environment string) string {
 	return value[len(value)-maxStopErrorLength:]
 }
 
-// environmentIdleStopLogPath returns the per-tenant/per-environment
-// idle-stop log path under homeDir. The runtime entrypoint writes the
-// shutdown attempt's stderr here so a later doctor/activity read can
-// attribute the failure to the right environment when one $HOME hosts
-// multiple tenants.
+// environmentIdleStopLogPath keys the idle-stop log by tenant and env so a
+// later doctor/activity read can attribute a shutdown failure to the right
+// environment when one $HOME hosts multiple tenants.
 func environmentIdleStopLogPath(homeDir, tenant, environment string) string {
 	return filepath.Join(homeDir, ".erun", tenant, environment, "idle-stop.log")
 }
@@ -429,10 +415,6 @@ func mergeEnvironmentActivityClients(snapshot *EnvironmentActivitySnapshot, upda
 	evictOldestEnvironmentActivityClients(snapshot.Clients, environmentActivityClientCap)
 }
 
-// evictOldestEnvironmentActivityClients keeps the snapshot bounded by
-// dropping entries with the oldest LastActivity until at most cap remain.
-// A zero LastActivity sorts oldest by definition, so entries that never
-// recorded bytes are evicted first.
 func evictOldestEnvironmentActivityClients(clients map[string]EnvironmentActivityClient, cap int) {
 	if cap <= 0 || len(clients) <= cap {
 		return
@@ -516,10 +498,9 @@ func activityIdleMarker(kind string, snapshot EnvironmentActivitySnapshot, polic
 	return marker
 }
 
-// environmentIdleMarkerClients projects the snapshot's per-client map into
-// the marker's slice form, sorted by most-recent activity. The slice is
-// nil (not empty) when no clients have been recorded so JSON omitempty
-// keeps the marker payload terse for kinds that never populate it.
+// environmentIdleMarkerClients returns nil (not an empty slice) when no
+// clients were recorded so JSON omitempty keeps the payload terse for
+// kinds that never populate it.
 func environmentIdleMarkerClients(clients map[string]EnvironmentActivityClient, now time.Time) []EnvironmentIdleMarkerClient {
 	if len(clients) == 0 {
 		return nil

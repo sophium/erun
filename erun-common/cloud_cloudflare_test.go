@@ -41,8 +41,6 @@ func TestFileCloudSecretStoreRoundTrip(t *testing.T) {
 	}
 }
 
-// mustNoErr fails the test immediately when err is non-nil, keeping
-// round-trip tests free of repetitive `if err != nil { t.Fatalf }` blocks.
 func mustNoErr(t *testing.T, err error, what string) {
 	t.Helper()
 	if err != nil {
@@ -50,7 +48,6 @@ func mustNoErr(t *testing.T, err error, what string) {
 	}
 }
 
-// assertCloudflareAccounts asserts got equals want element-for-element.
 func assertCloudflareAccounts(t *testing.T, got, want []CloudflareAccount) {
 	t.Helper()
 	if len(got) != len(want) {
@@ -225,11 +222,9 @@ func TestResolveCloudflareAccountsViaZones(t *testing.T) {
 	})
 }
 
-// TestDefaultCloudflareCallsHonorBaseURLSeam proves the subprocess-reachable
-// seam: with only the env var set (no in-process CloudDependencies injection),
-// the default verifier and accounts resolver hit a mock standing in for the
-// Cloudflare API. This is the path a desktop/e2e test exercises through the
-// `erun cloud init cloudflare` subprocess.
+// TestDefaultCloudflareCallsHonorBaseURLSeam proves the env-var seam works from a
+// subprocess, without in-process dependency injection — the path a desktop/e2e test
+// drives through the `erun cloud init cloudflare` subprocess.
 func TestDefaultCloudflareCallsHonorBaseURLSeam(t *testing.T) {
 	gotPaths := make(map[string]bool)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

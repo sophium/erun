@@ -16,19 +16,14 @@ import (
 // reopen re-checks reachability.
 const envEnsureTTL = 30 * time.Second
 
-// ensureEnvRuntimeOnce reconnects the env's MCP/API port-forwards at most once
-// per (re)start window, across every tab and respawn. Since `open`
-// became a pure primitive this is a thin idempotent reconnect: it
-// runs `erun open --no-shell` only to (re)bind the forwarders against the
-// already-deployed runtime — it does NOT deploy. Deploy is the caller's job:
-// the desktop composes build→push→deploy on create and via the Deploy button,
-// so the runtime is expected to already exist by the time tabs open.
+// ensureEnvRuntimeOnce rebinds the env's MCP/API forwarders against the
+// already-deployed runtime, at most once per (re)start window across every tab
+// and respawn. It does NOT deploy — deploy is the caller's job — so an
+// undeployed env stays down here rather than being brought up.
 //
-// Fire-and-forget by design: callers never block on the reconnect, and a
-// concurrent or recent successful reconnect is not repeated. A FAILED reconnect
-// (usually because the runtime is not deployed) is surfaced — not swallowed —
-// and does NOT stamp the success window, so the next tab open retries instead
-// of being suppressed for the whole TTL while the user stares at a dead env.
+// Fire-and-forget: a failed reconnect is surfaced, not swallowed, and does not
+// stamp the success window, so the next tab open retries instead of being
+// suppressed for the whole TTL while the user stares at a dead env.
 func (a *App) ensureEnvRuntimeOnce(selection uiSelection) {
 	// a.ctx is set by startup() in both desktop and headless modes and stays
 	// nil in unit tests: the ensure must never fall back from a test app to
@@ -71,10 +66,8 @@ func (a *App) ensureEnvRuntimeOnce(selection uiSelection) {
 				delete(a.envEnsureFailNotified, key)
 			}
 			a.envEnsureMu.Unlock()
-			// Runtime reached — any env-scoped warning (a "Could not reach the
-			// runtime …" banner, or a prior deploy-failed error) is now stale;
-			// clear it. Emitted outside the mutex; the frontend only clears
-			// a notification that targets this env.
+			// Runtime reached — any prior "could not reach the runtime" or
+			// deploy-failed warning for this env is now stale; clear it.
 			if reached {
 				a.emitClearEnvNotification(selection.Tenant, selection.Environment, "")
 			}
@@ -96,10 +89,9 @@ func (a *App) ensureEnvRuntimeOnce(selection uiSelection) {
 }
 
 // surfaceEnvRuntimeEnsureFailure makes a failed runtime reconnect visible and
-// recoverable instead of discarding it (Nielsen #1/#9): it flags
-// the env's sidebar row as failed and posts an actionable notification. The
-// reconnect usually fails because the runtime is not deployed — which `open`
-// no longer fixes on its own — so the recovery is an explicit deploy.
+// recoverable instead of discarding it (Nielsen #1/#9). The reconnect usually
+// fails because the runtime is not deployed — which `open` no longer fixes on
+// its own — so the recovery it points to is an explicit deploy.
 func (a *App) surfaceEnvRuntimeEnsureFailure(selection uiSelection, err error) {
 	selection = normalizeSelection(selection)
 	// A deploy for this env being in flight IS the recovery this failure would
@@ -138,9 +130,9 @@ func (a *App) surfaceEnvRuntimeEnsureFailure(selection uiSelection, err error) {
 	))
 }
 
-// deployInFlightForEnv reports whether a deploy that locks terminals is
-// currently in flight for the env: any of its open sessions is locked by an
-// activity (only deploys lock sibling terminals — see sessionMatchesActivity).
+// deployInFlightForEnv reports whether a terminal-locking deploy is currently
+// in flight for the env. Only deploys lock sibling terminals (see
+// sessionMatchesActivity), so a locked open session for this env is the signal.
 func (a *App) deployInFlightForEnv(selection uiSelection) bool {
 	selection = normalizeSelection(selection)
 	a.mu.Lock()

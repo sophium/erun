@@ -2,11 +2,9 @@ import type { UIBuildDetails, UIEnvironment, UIEnvTrace, UISelection } from '@/t
 
 import { formatUITrace, type UITraceEntry } from './uiTraceBuffer';
 
-// formatDiagnosticsReport renders the Diagnostics console's one-click bug
-// report: everything a reader needs in a single paste-ready
-// block — app build, env identity and state, the erun trace tail (or its
-// empty-state reason: "unreachable" is itself evidence), and the UI action
-// history. Mirrors the Activities drawer's "Copy failure report" pattern.
+// The Diagnostics console's one-click, paste-ready bug report. An unavailable
+// trace keeps its reason line — "unreachable" is itself evidence. Mirrors the
+// Activities drawer's "Copy failure report".
 export interface DiagnosticsReportInput {
   generatedAt: string;
   build: UIBuildDetails | null;

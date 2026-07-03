@@ -2,16 +2,10 @@ import type { Page } from '@playwright/test';
 
 import { test, expect } from '../fixtures/erunApp.js';
 
-// Two related review-panel guarantees.
-//   Part 2 — the diff panel renders the same files as the changed-files tree,
-//   in the same order, honouring the active filter and collapsed directories.
-//   Part 1 — the tree scrolls to keep the file currently in the diff viewport
-//   visible as the diff is scrolled.
-//
-// The diff payload is stubbed via the LoadDiff RPC over /__erun_invoke (the
-// same technique sidebar-upgrade-all.spec.ts uses), so no live cluster is
-// needed. ParseGitDiff already orders diff.files to match the tree;
-// these specs lock that the rendered panels agree.
+// ParseGitDiff already orders the diff files to match the changed-files tree;
+// these specs lock that the desktop panels agree — same files, same order,
+// under an active filter and collapsed directories — and that the tree
+// auto-scrolls to keep the file in the diff viewport visible.
 
 interface DiffLineStub {
   kind: string;
@@ -90,8 +84,7 @@ async function stubDiff(page: Page, diff: unknown): Promise<void> {
   });
 }
 
-// Small two-directory tree for the order / filter / collapse cases. diff.files
-// is in tree pre-order (the contract the desktop relies on).
+// diff.files is in tree pre-order — the ordering contract the desktop relies on.
 const SMALL_FILES = [diffFile('src/a.ts', 2), diffFile('src/b.ts', 2), diffFile('docs/c.md', 2)];
 const SMALL_TREE = [
   dirNode('src', 'src', 0),
@@ -170,15 +163,14 @@ test.describe('review diff/tree consistency', () => {
       .poll(() => review.diffSectionPaths().then((paths) => paths.length), { timeout: 10_000 })
       .toBe(30);
 
-    // Scroll the diff to its last section; the scrollspy selects a late file
-    // and the tree must scroll to keep that node visible.
+    // Scrolling the diff drives the scrollspy to a late file; the tree must
+    // follow to keep that node visible.
     await page.locator('.diff-file[data-path]').last().scrollIntoViewIfNeeded();
 
     const node = review.currentTreeNode();
     await expect(node).toBeVisible();
-    // The active node must lie within the tree container's visible rect — the
-    // auto-scroll guarantee. Without it the node would sit below the container
-    // after scrolling the diff to the bottom.
+    // The auto-scroll guarantee: without it the active node would sit below the
+    // tree container once the diff scrolls to the bottom.
     await expect
       .poll(
         async () => {

@@ -13,25 +13,21 @@ import (
 )
 
 const (
-	// activityQueueStateEvent is emitted whenever a deploy entry changes state.
-	// Frontend subscribes to this to refresh the queue drawer and per-card
-	// container statuses without polling.
+	// activityQueueStateEvent lets the frontend refresh the queue drawer and
+	// per-card container statuses reactively instead of polling.
 	activityQueueStateEvent = "activity:state"
 
-	// activityQueueLockEvent is emitted whenever a terminal session's locked
-	// status changes. Frontend uses it to render or hide the lock overlay
-	// on the affected terminal.
+	// activityQueueLockEvent drives the frontend's per-terminal lock overlay.
 	activityQueueLockEvent = "activity:lock"
 
-	// activityQueuePollInterval governs how often the desktop polls kubectl
-	// for container statuses while a deploy is running. Short enough that
-	// the user sees pods transition; long enough that polling load is
-	// negligible against modest cluster sizes.
+	// activityQueuePollInterval trades responsiveness against poll load: short
+	// enough that the user sees pods transition, long enough to stay negligible
+	// against modest clusters.
 	activityQueuePollInterval = 2 * time.Second
 )
 
-// activityLockEvent describes a terminal lock transition driven by the deploy
-// queue. The frontend keys overlays by SessionID.
+// activityLockEvent carries a terminal lock transition; the frontend keys its
+// overlays by SessionID.
 type activityLockEvent struct {
 	SessionID    int    `json:"sessionId"`
 	Tenant       string `json:"tenant"`
@@ -107,9 +103,6 @@ func (a *App) FindActiveDeployForSelection(selection uiSelection) activityQueueE
 	return activityQueueEntry{}
 }
 
-// finishActivityTracking moves the active deploy for this selection to a
-// terminal status. Idempotent: a no-op when no active entry exists for the
-// selection.
 func (a *App) finishActivityTracking(selection uiSelection, status activityQueueStatus, errMsg string) {
 	if a.activityQueue == nil {
 		return
@@ -123,16 +116,13 @@ func (a *App) finishActivityTracking(selection uiSelection, status activityQueue
 	}
 }
 
-// emitActivityState is the persist/notify hook the store uses to tell the
-// frontend a deploy entry changed.
 func (a *App) emitActivityState(entry activityQueueEntry) {
 	a.emitEvent(activityQueueStateEvent, entry)
 }
 
-// lockTerminalsForActivity marks every terminal session belonging to the
-// deploy's selection as locked and emits a lock event the frontend renders
-// as an overlay. Sessions joined later for the same selection will be locked
-// by lockTerminalForActivity on a per-session basis.
+// lockTerminalsForActivity locks the terminals that exist now for the deploy's
+// selection; sessions that join later are locked individually by
+// lockTerminalForActivity.
 func (a *App) lockTerminalsForActivity(entry activityQueueEntry) {
 	if entry.ID == "" {
 		return
@@ -166,17 +156,14 @@ func (a *App) lockTerminalsForActivity(entry activityQueueEntry) {
 		a.emitEvent(activityQueueLockEvent, ev)
 	}
 	if len(events) > 0 {
-		// A deploy just started for this env (only deploys lock terminals). Retire
-		// any env-scoped warning that told the operator to act — the
-		// runtime-unreachable banner, or a prior deploy-failed error — since the
-		// deploy is now underway.
+		// A deploy just started, so retire any env-scoped warning that told the
+		// operator to act — that guidance is now stale.
 		a.emitClearEnvNotification(entry.Tenant, entry.Environment, "")
 	}
 }
 
-// lockTerminalForActivity locks a single session by its serial ID. Used when
-// the user joins an in-flight deploy from a session that was created after
-// the deploy started.
+// lockTerminalForActivity locks a session that joined an in-flight deploy after
+// it had already started.
 func (a *App) lockTerminalForActivity(sessionID int, entry activityQueueEntry) {
 	if entry.ID == "" || sessionID <= 0 {
 		return
@@ -211,8 +198,6 @@ func (a *App) lockTerminalForActivity(sessionID int, entry activityQueueEntry) {
 	}
 }
 
-// unlockTerminalsForActivity clears the lock on every session whose
-// lockedByActivity matches the supplied entry. Idempotent.
 func (a *App) unlockTerminalsForActivity(entry activityQueueEntry) {
 	if entry.ID == "" {
 		return
@@ -241,13 +226,10 @@ func (a *App) unlockTerminalsForActivity(entry activityQueueEntry) {
 	}
 }
 
-// sessionMatchesActivity reports whether a managed terminal targets the
-// same (tenant, environment) as the activity entry AND the activity is one
-// that warrants locking sibling terminals. Only deploys lock terminals —
-// they roll out the runtime that hosts the env/AI sessions, so the shell
-// becomes meaningless until the deploy finishes. Builds, releases, and
-// other activities don't disturb the running runtime, so their cards
-// appear in the queue without locking any terminals.
+// sessionMatchesActivity gates which activities lock sibling terminals. Only a
+// deploy does: it rolls out the runtime hosting the env/AI shells, so those
+// shells are meaningless until it finishes. Builds, releases, and other
+// activities leave the running runtime intact, so they never lock.
 func sessionMatchesActivity(managed *managedTerminal, entry activityQueueEntry) bool {
 	if managed == nil {
 		return false
@@ -266,9 +248,8 @@ func sessionMatchesActivity(managed *managedTerminal, entry activityQueueEntry) 
 	}
 }
 
-// releaseNameForTenant matches the helm release naming used by the runtime
-// chart: `<tenant>-devops`. Kept local so the desktop can compute it without
-// rebuilding a full DeploySpec.
+// releaseNameForTenant must match the runtime chart's helm release name,
+// `<tenant>-devops`.
 func releaseNameForTenant(tenant string) string {
 	tenant = strings.TrimSpace(tenant)
 	if tenant == "" {
@@ -277,9 +258,8 @@ func releaseNameForTenant(tenant string) string {
 	return tenant + "-devops"
 }
 
-// namespaceForTenantEnv mirrors the deploy resolver's per-tenant namespace
-// pattern: `<tenant>-<environment>`. If either part is empty, returns
-// whichever is non-empty.
+// namespaceForTenantEnv must mirror the deploy resolver's per-tenant namespace
+// pattern, `<tenant>-<environment>`.
 func namespaceForTenantEnv(tenant, environment string) string {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
@@ -296,50 +276,39 @@ func namespaceForTenantEnv(tenant, environment string) string {
 }
 
 // activityDeployingLineRe matches the `==> Deploying tenant/env [· release]
-// [version]` trace emitted by RunHelmDeploy at deploy start. A non-runtime
-// component carries the release after a ` · ` separator (e.g. `erun/local ·
-// erun-backend-postgres 18.3`); the runtime chart omits it (`erun/local
-// 18.3`). Captures: tenant, environment, optional release, optional version.
+// [version]` trace emitted at deploy start. A non-runtime component names
+// itself after a ` · ` separator (e.g. `erun/local · erun-backend-postgres`);
+// the runtime chart omits it, which is how an empty release is read as the
+// runtime deploy downstream.
 var activityDeployingLineRe = regexp.MustCompile(`^==> Deploying ([^/\s]+)/([^/\s]+)(?: · (\S+))?(?:\s+(\S+))?\s*$`)
 
-// activityDeployedLineRe matches the `==> Deployed tenant/env [version]
-// in <elapsed>` trace emitted at successful completion. Captures:
-// tenant, environment.
+// activityDeployedLineRe matches the `==> Deployed tenant/env [version] in
+// <elapsed>` trace emitted on successful completion.
 var activityDeployedLineRe = regexp.MustCompile(`^==> Deployed ([^/\s]+)/([^/\s]+)\b`)
 
-// activitySkippingLineRe matches the `==> Skipping tenant/env [version]
-// (identical deploy already in progress)` trace emitted when the
-// dedup decides this caller is a duplicate. Captures: tenant,
-// environment.
+// activitySkippingLineRe matches the `==> Skipping tenant/env` trace emitted
+// when dedup decides this caller duplicates an in-progress deploy.
 var activitySkippingLineRe = regexp.MustCompile(`^==> Skipping ([^/\s]+)/([^/\s]+)\b`)
 
 // activityDeployFailedLineRe matches the `==> Deploy failed tenant/env: reason`
-// trace `erun deploy` emits on any failure — including a pre-rollout failure
-// like spec resolution, which fails before `==> Deploying` and so left the
-// desktop with no signal to surface. Captures: tenant,
-// environment, optional reason.
+// trace emitted on any failure — including a pre-rollout failure like spec
+// resolution that fails before `==> Deploying`, which would otherwise leave the
+// desktop with no signal to surface.
 var activityDeployFailedLineRe = regexp.MustCompile(`^==> Deploy failed ([^/\s]+)/([^/\s]+)(?::\s*(.*))?$`)
 
-// activityInitializingLineRe matches the umbrella `==> Initializing
-// tenant/env` trace emitted by RunBootstrapInit once tenant + env are
-// resolved and config writes are about to start. Captures: tenant,
-// environment. The matched entry parallels deploy: the user sees an
-// init activity in the drawer while bootstrap runs (which itself
-// fires a separate deploy entry from `==> Deploying`).
+// activityInitializingLineRe matches the umbrella `==> Initializing tenant/env`
+// trace. Its entry covers the whole bootstrap; the `==> Deploying` line inside
+// init still registers its own deploy entry, finalized independently.
 var activityInitializingLineRe = regexp.MustCompile(`^==> Initializing ([^/\s]+)/([^/\s]+)\b`)
 
-// activityInitializedLineRe matches the `==> Initialized tenant/env`
-// trace emitted by RunBootstrapInit at successful completion.
-// Captures: tenant, environment. See erun-ui/AGENTS.md § "Command
-// Completion And State-Refresh Wiring" for why this trace line is the
-// completion signal instead of PTY exit: `erun init` runs piped into
-// the shared Local shell PTY (via runErunCommandInLocal), so the PTY
-// does not exit when init finishes.
+// activityInitializedLineRe matches the `==> Initialized tenant/env` trace.
+// This line, not PTY exit, is init's completion signal: `erun init` runs piped
+// into the shared Local shell, which does not exit when init finishes (see
+// erun-ui/AGENTS.md § "Command Completion And State-Refresh Wiring").
 var activityInitializedLineRe = regexp.MustCompile(`^==> Initialized ([^/\s]+)/([^/\s]+)\b`)
 
-// activityInitFailedLineRe matches the umbrella `==> Initialization
-// failed tenant/env` trace emitted by RunBootstrapInit when a step
-// after Initializing returns an error. Captures: tenant, environment.
+// activityInitFailedLineRe matches the umbrella `==> Initialization failed
+// tenant/env` trace emitted when a step after Initializing errors.
 var activityInitFailedLineRe = regexp.MustCompile(`^==> Initialization failed ([^/\s]+)/([^/\s]+)\b`)
 
 // activityBuildingLineRe matches the umbrella `==> Building` trace
@@ -422,10 +391,9 @@ func newActivityTraceLineHandler(app *App, selection uiSelection, kind sessionKi
 	}
 }
 
-// handleDeployTraceLine dispatches the deploy lifecycle trace lines
-// (`==> Deploying` / `==> Deployed` / `==> Skipping`). Returns true when
-// the line matched one of them so the caller stops dispatching. The match
-// order is part of the trace-line contract and is preserved verbatim.
+// handleDeployTraceLine dispatches the deploy lifecycle trace lines, returning
+// true on a match so the caller stops. The match order is part of the
+// trace-line contract — preserve it.
 func (a *App) handleDeployTraceLine(selection uiSelection, line string) bool {
 	if match := activityDeployingLineRe.FindStringSubmatch(line); match != nil {
 		a.startDeployFromTrace(selection, match[1], match[2], match[3], match[4])
@@ -441,10 +409,9 @@ func (a *App) handleDeployTraceLine(selection uiSelection, line string) bool {
 	}
 	if match := activityDeployFailedLineRe.FindStringSubmatch(line); match != nil {
 		reason := strings.TrimSpace(match[3])
-		// Finalize the drawer entry if one was started, and surface the failure
-		// in the toolbar so a failed deploy is visible where the operator is
-		// looking, not only in the activity queue (and not at all when the
-		// failure came before any `==> Deploying` started an entry).
+		// Surface the failure in the toolbar so it is visible where the operator
+		// is looking — not only in the drawer, and not lost entirely when the
+		// failure came before any `==> Deploying` started an entry.
 		a.finishDeployByTenantEnv(selection, match[1], match[2], activityQueueStatusFailed, reason)
 		a.surfaceDeployFailure(match[1], match[2], reason)
 		return true
@@ -452,11 +419,10 @@ func (a *App) handleDeployTraceLine(selection uiSelection, line string) bool {
 	return false
 }
 
-// surfaceDeployFailure makes a failed deploy visible in the toolbar (Nielsen #1),
-// not just as a red terminal line or a drawer entry: it flags the env's sidebar
-// row failed and posts an env-tagged error notification. The notification is
-// tagged so the deploy lifecycle retires it once the state moves on — the next
-// deploy for the env starts, or the runtime becomes reachable.
+// surfaceDeployFailure makes a failed deploy visible where the operator is
+// looking (Nielsen #1), not just as a red terminal line. The notification is
+// env-tagged so the deploy lifecycle retires it once the state moves on — the
+// next deploy starts or the runtime becomes reachable.
 func (a *App) surfaceDeployFailure(tenant, environment, reason string) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
@@ -471,10 +437,6 @@ func (a *App) surfaceDeployFailure(tenant, environment, reason string) {
 	a.emitEnvNotification("error", tenant, environment, notificationSourceDeployFailed, message)
 }
 
-// handleInitTraceLine dispatches the init lifecycle trace lines
-// (`==> Initializing` / `==> Initialized` / `==> Initialization failed`).
-// Returns true when the line matched. The terminal lines also fire the
-// init Wails events the frontend listens for.
 func (a *App) handleInitTraceLine(selection uiSelection, line string) bool {
 	if match := activityInitializingLineRe.FindStringSubmatch(line); match != nil {
 		a.startInitFromTrace(selection, match[1], match[2])
@@ -494,9 +456,8 @@ func (a *App) handleInitTraceLine(selection uiSelection, line string) bool {
 }
 
 // handleCommandTraceLine dispatches the build/release/push umbrella trace
-// lines. These carry no tenant/env, so the activity is keyed off the
-// session selection. Returns true when the line matched. The match order
-// is part of the trace-line contract and is preserved verbatim.
+// lines. These carry no tenant/env, so the activity is keyed off the session
+// selection. The match order is part of the trace-line contract — preserve it.
 func (a *App) handleCommandTraceLine(selection uiSelection, line string) bool {
 	if activityBuildingLineRe.MatchString(line) {
 		a.startCommandFromTrace(selection, "build")
@@ -563,10 +524,9 @@ func (a *App) finishDeployByTenantEnv(selection uiSelection, tenant, environment
 	if final, finished := a.activityQueue.finish(entry.ID, status, errMsg); finished {
 		a.unlockTerminalsForActivity(final)
 		if status == activityQueueStatusSucceeded {
-			// A successful deploy supersedes any stale 'failed' flag on the
-			// row: the env-status clear keeps the sidebar dot
-			// and hover card truthful, and the next session exit respawns
-			// normally because latestDeployFailed is now false.
+			// A successful deploy supersedes any stale 'failed' flag on the row:
+			// clearing keeps the sidebar dot and hover card truthful and lets the
+			// next session exit respawn normally.
 			a.emitEnvStatus(uiSelection{Tenant: tenant, Environment: environment}, "")
 		}
 		if status == activityQueueStatusSucceeded || status == activityQueueStatusSkipped {
@@ -579,13 +539,9 @@ func (a *App) finishDeployByTenantEnv(selection uiSelection, tenant, environment
 	}
 }
 
-// startInitFromTrace registers an umbrella init entry from a
-// `==> Initializing tenant/env` trace observed in any session's PTY.
-// Parallels startDeployFromTrace: the init entry covers the whole
-// bootstrap (config writes + devops assets + embedded deploy); the
-// `==> Deploying` line still registers a separate deploy entry for
-// the helm step within init, which is finalized independently by
-// `==> Deployed`.
+// startInitFromTrace registers the umbrella init entry covering the whole
+// bootstrap. The `==> Deploying` line for the helm step within init still
+// registers its own deploy entry, finalized independently.
 func (a *App) startInitFromTrace(selection uiSelection, tenant, environment string) {
 	if a.activityQueue == nil {
 		return
@@ -614,10 +570,8 @@ func (a *App) startInitFromTrace(selection uiSelection, tenant, environment stri
 	a.lockTerminalsForActivity(entry)
 }
 
-// finishInitByTenantEnv finalizes the umbrella init entry on
-// `==> Initialized` (succeeded) or `==> Initialization failed`
-// (failed). Looks up the entry by parsed tenant/env so the trace
-// observed in any session's PTY converges on the same record.
+// finishInitByTenantEnv looks the entry up by parsed tenant/env so the trace,
+// wherever it is observed, converges on the same init record.
 func (a *App) finishInitByTenantEnv(tenant, environment string, status activityQueueStatus, errMsg string) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
@@ -636,9 +590,8 @@ func (a *App) finishInitByTenantEnv(tenant, environment string, status activityQ
 	}
 }
 
-// startDeployFromTrace registers a deploy entry from a `==> Deploying`
-// trace observed in any session's PTY. No-op when an active entry
-// already exists for the selection so the helm poller and trace
+// startDeployFromTrace registers a deploy entry from a `==> Deploying` trace.
+// No-op when an active entry already exists, so the helm poller and trace
 // handler converge on the same record.
 func (a *App) startDeployFromTrace(selection uiSelection, tenant, environment, release, version string) {
 	if a.activityQueue == nil {
@@ -730,12 +683,10 @@ func (a *App) startCommandFromTrace(selection uiSelection, command string) {
 	a.rememberKubeContextForActivity(kubeContext)
 }
 
-// finishCommandBySelection finalizes the build/release/push entry
-// registered by startCommandFromTrace. Keyed off the session selection
-// because the `==> Built` / `==> Released` / `==> Pushed` (and failed)
-// lines carry no tenant/env — see startCommandFromTrace for the
-// identity rationale. Idempotent unlock in case a previous code path
-// latched a lock that this entry did not.
+// finishCommandBySelection is keyed off the session selection because the
+// build/release/push completion lines carry no tenant/env — see
+// startCommandFromTrace. The unlock is idempotent in case an earlier code path
+// latched a lock this entry did not.
 func (a *App) finishCommandBySelection(selection uiSelection, command string, status activityQueueStatus, errMsg string) {
 	if a.activityQueue == nil {
 		return
@@ -788,29 +739,21 @@ func (a *App) captureActivityErrorIfRunning(selection uiSelection, line string) 
 		return
 	}
 	entry.Error = line
-	// updateContainers preserves Containers; we don't have a generic
-	// update-fields method to avoid widening the API. Use a no-op
-	// container slice patch with the existing slice so the persisted entry
-	// captures the new error.
+	// No generic update-fields method exists (the store API is kept narrow), so
+	// persist the new error by re-patching the existing container slice.
 	a.activityQueue.updateContainers(entry.ID, entry.Containers)
 }
 
-// pollActivityContainerStatuses runs an ad-hoc kubectl poll loop while
-// the supplied deploy entry is active. Each tick parses pod JSON for the
-// helm release's pods and pushes a snapshot into the queue so the
-// frontend can render per-container Ready pills.
+// pollActivityContainerStatuses feeds the queue per-container Ready snapshots
+// so the frontend can render Ready pills while a deploy runs.
 //
-// The loop is intentionally display-only: it does NOT finalize entries.
-// Pod readiness can flip to Ready a few seconds before helm's `--wait`
-// returns (Deployment.status.readyReplicas trails container readiness
-// while controllers reconcile), so finalizing here would mark the
-// activity done while the user's terminal still shows the deploy
-// running. Completion is owned by the trace handler's `==> Deployed`
-// line (authoritative for trace-source entries — it matches the
-// terminal exactly) and by the helm poller's version+freshness check
-// (for helm-source entries and as a backstop if the PTY dies).
-//
-// The loop exits when the entry is no longer active or ctx is cancelled.
+// The loop is intentionally display-only: it does NOT finalize entries. Pod
+// readiness can flip to Ready seconds before helm's `--wait` returns
+// (readyReplicas trails container readiness while controllers reconcile), so
+// finalizing here would mark the activity done while the terminal still shows
+// the deploy running. Completion is owned by the trace handler's `==> Deployed`
+// line and by the helm poller's version+freshness check (a backstop if the PTY
+// dies).
 func (a *App) pollActivityContainerStatuses(ctx context.Context, entry activityQueueEntry) {
 	if a.activityQueue == nil {
 		return
@@ -843,11 +786,9 @@ func (a *App) pollActivityContainerStatuses(ctx context.Context, entry activityQ
 	}
 }
 
-// fetchActivityContainerStatuses runs `kubectl get pods -l app=<release> -o json`
-// and parses the result into the queue's container shape. Errors are
-// returned to the caller so transient kubectl outages don't blank the
-// previous snapshot — the frontend keeps showing the last-known state until
-// the next successful poll.
+// fetchActivityContainerStatuses returns an error rather than an empty snapshot
+// on a transient kubectl outage, so the frontend keeps showing the last-known
+// state until the next successful poll.
 func (a *App) fetchActivityContainerStatuses(ctx context.Context, entry activityQueueEntry) ([]activityQueueContainerStatus, error) {
 	args := []string{"get", "pods", "-l", "app=" + entry.Release, "-o", "json"}
 	if strings.TrimSpace(entry.KubernetesContext) != "" {
@@ -864,10 +805,8 @@ func (a *App) fetchActivityContainerStatuses(ctx context.Context, entry activity
 	return parseActivityContainerStatuses(out)
 }
 
-// kubectlPodList is the subset of `kubectl get pods -o json` the activity
-// container-status poller decodes. Named (rather than an anonymous struct
-// literal) so the per-container conversion can be split into a focused
-// helper without restating the anonymous type at each boundary.
+// kubectlPodList is the subset of `kubectl get pods -o json` the container-status
+// poller decodes.
 type kubectlPodList struct {
 	Items []kubectlPodItem `json:"items"`
 }
@@ -930,11 +869,6 @@ func parseActivityContainerStatuses(raw []byte) ([]activityQueueContainerStatus,
 	return out, nil
 }
 
-// convertActivityContainerStatus maps one decoded container status into the
-// queue's display shape, resolving the image from the spec fallback and
-// classifying the phase. Extracted from parseActivityContainerStatuses so
-// the parse loop stays under the cyclomatic-complexity limit; behavior is
-// identical to the inline body it replaced.
 func convertActivityContainerStatus(cs kubectlContainerStatus, imageByName map[string]string) activityQueueContainerStatus {
 	image := strings.TrimSpace(cs.Image)
 	if image == "" {
@@ -966,8 +900,6 @@ func convertActivityContainerStatus(cs kubectlContainerStatus, imageByName map[s
 	return status
 }
 
-// activityTargetForRuntime returns the human-readable "tenant/env [version]"
-// string used in info lines and lock-overlay messages.
 func activityTargetForRuntime(entry activityQueueEntry) string {
 	target := strings.TrimSpace(entry.Tenant) + "/" + strings.TrimSpace(entry.Environment)
 	if version := strings.TrimSpace(entry.Version); version != "" {
@@ -976,13 +908,10 @@ func activityTargetForRuntime(entry activityQueueEntry) string {
 	return target
 }
 
-// feedActivityTraceFromTerminal accumulates PTY output for any tab that hosts
-// a running erun process (Local from the Deploy button, ERun from a manual
-// `erun deploy`, AI from claude calling deploy inside the pod), splits on
-// newlines, and dispatches each complete line through the deploy trace
-// handler. The trace handler is the source-of-truth for deploy lifecycle:
-// it auto-registers an entry on `==> Deploying` and finishes it on
-// Deployed/failed/Skipping. Selections without a tenant/env are ignored.
+// feedActivityTraceFromTerminal drives the activity queue from any tab that
+// hosts a running erun process (Local from the Deploy button, ERun from a
+// manual `erun deploy`, AI from Claude deploying inside the pod), dispatching
+// each complete line through the trace handler that owns deploy lifecycle.
 func (a *App) feedActivityTraceFromTerminal(managed *managedTerminal, chunk []byte) {
 	if managed == nil || a.activityQueue == nil {
 		return
@@ -1022,12 +951,9 @@ func (a *App) feedActivityTraceFromTerminal(managed *managedTerminal, chunk []by
 	}
 }
 
-// drainActivityTraceLines consumes every complete `\n`-terminated line from
-// the managed terminal's activity trace buffer, returning the cleaned lines
-// and leaving any trailing partial line buffered for the next chunk. The
-// caller must hold a.mu. Extracted from feedActivityTraceFromTerminal so the
-// feed stays under the cyclomatic-complexity limit; the line cleaning is
-// identical to the inline loop it replaced.
+// drainActivityTraceLines returns every complete `\n`-terminated line, leaving
+// any trailing partial line buffered for the next chunk. The caller must hold
+// a.mu.
 func drainActivityTraceLines(managed *managedTerminal) []string {
 	lines := []string{}
 	for {
@@ -1036,16 +962,11 @@ func drainActivityTraceLines(managed *managedTerminal) []string {
 			break
 		}
 		raw := managed.activityTraceBuffer[:idx]
-		// PTY output ends lines with `\r\n`, so strip a trailing `\r`
-		// before considering carriage returns. Then, if the line still
-		// contains a `\r` in the middle (spinner-style overwrite —
-		// e.g. `\rprogress\rprogress\rfinal\n`), keep only the
-		// content after the LAST `\r` so the rendered text matches
-		// what the user actually sees on the terminal. The previous
-		// implementation took content after the FIRST `\r`, which on
-		// the common `text\r\n` case left an empty string and broke
-		// every downstream matcher (deploy trace, session-ready
-		// detection).
+		// Strip the trailing `\r` of the PTY's `\r\n`, then on a spinner-style
+		// overwrite (`\rprogress\rprogress\rfinal`) keep only the content after
+		// the LAST `\r` so the text matches what the user sees. Taking the first
+		// `\r` instead would blank the common `text\r\n` case and break every
+		// downstream matcher.
 		line := strings.TrimRight(raw, "\r")
 		if r := strings.LastIndexByte(line, '\r'); r >= 0 {
 			line = line[r+1:]

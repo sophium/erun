@@ -1,63 +1,40 @@
 import { expect, test } from '../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
-// tab-respawn-on-context-running covers the recovery path where an env's
-// linked cloud context dies mid-session (the AI/ERun PTY exits with code
-// 143, tryReconnect refuses respawn against a non-running context, and
-// dropExitedSessionFromTabs clears the tab), and the context later
-// returns to Running through any route — titlebar Play button, manage
-// dialog Start, or background poll observing the instance flipping back.
-// Before the fix, ensureDefaultEnvTabs only ran from finishOpenSession
-// and activateLocalAfterCommand, so a context that became Running via
-// the idle poll left the dropped AI tab gone for the rest of the env's
-// life.
+// Guards the regression where an env's cloud context returns to Running via
+// the background idle poll (not an explicit Play/Start) and the AI tab that was
+// dropped when the context died stayed gone for the rest of the env's life.
 //
-// The fix exports ensureDefaultEnvTabs and adds restoreEnvTabsAfterContextRunning,
-// which idleThunks.refreshIdleStatus dispatches when the cloud-context
-// status transitions from non-running to running for the currently-
-// selected env.
+// The real happy path is unreachable headless: the isolated root's envs carry
+// no managed cloud context, so idle status reports managedCloud=false and the
+// non-running→running transition never fires — a real transition needs a live
+// cloud host. Faking the idle-status event would couple this spec to the API
+// mock surface instead of the production path.
 //
-// The end-to-end happy path is not reachable from the headless harness:
-//   - The isolated root's envs carry no managed cloud contexts, so
-//     IdleApi returns a managedCloud=false status and the transition
-//     detector never fires; a real transition needs a live cloud host.
-//   - Forcing the transition by emitting a fake idle-status event is
-//     possible in principle but would couple this spec to the
-//     transient API mock surface rather than the production code path.
-//
-// Negative invariant we CAN lock down: an env with no managed cloud
-// context (i.e. nothing for the idle-poll detector to observe a
-// transition on) does not lose tabs or spuriously spawn duplicate
-// tabs across an idle poll cycle. This catches the regression where
-// the transition detector misclassifies non-managed envs.
-//
-// The full debounce + transition logic is covered by the Go unit test
-// for restoreEnvTabsAfterContextRunning in erun-ui/app_test.go and by
-// the integration goldens for erun open + StartCloudContext in
-// erun-integration/.
+// So we lock the negative invariant the harness CAN reach: a non-managed env
+// (nothing for the detector to observe) neither loses tabs nor spawns duplicate
+// tabs across an idle poll cycle, catching a detector that misclassifies
+// non-managed envs. The full transition logic is covered by the Go unit test
+// for restoreEnvTabsAfterContextRunning in erun-ui/app_test.go and the
+// integration goldens for erun open + StartCloudContext in erun-integration/.
 
 test.describe('tab respawn after cloud context returns to running', () => {
   test('non-managed env does not lose tabs across an idle poll cycle', async ({ app, page }) => {
-    // The idle poll round-trips a LoadIdleStatus RPC; wait on that event (not
-    // the wall clock) so the assertions reflect a completed poll cycle.
+    // Gate the assertions on a completed idle-poll cycle, not the wall clock.
     const idlePolled = page.waitForResponse(
       (response) =>
         response.url().includes('/__erun_invoke') &&
         (response.request().postData() ?? '').includes('LoadIdleStatus'),
     );
-    // Open a seeded env so its tabs are initialized.
     await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
 
-    // Once the poll has reported (the seeded local-agent env returns
-    // managedCloud=false), the transition detector should have been a no-op.
-    // Assert the sidebar still renders a single row for this env with no
-    // errant spinner from a spurious tab spawn.
+    // With no managed cloud context the transition detector is a no-op, so
+    // there must be no spinner from a spurious tab spawn.
     await idlePolled;
     const sidebar = page.locator('aside').first();
     await expect(sidebar.getByRole('status')).toHaveCount(0);
 
-    // The clicked env stays selected — restoreEnvTabsAfterContextRunning
-    // must not fire setSelected(null) or otherwise perturb selection.
+    // The no-op path must not perturb the current selection.
     const selectedRow = page.locator(
       `button[aria-label^="${SEED_TENANT} / ${SEED_ENV_ALPHA}"][aria-current="page"]`,
     );

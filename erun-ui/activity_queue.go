@@ -8,9 +8,7 @@ import (
 	"time"
 )
 
-// activityQueueStatus is the lifecycle phase of a tracked deploy. The desktop
-// surfaces these states distinctly so the user can tell waiting/running/done
-// apart at a glance.
+// activityQueueStatus is the lifecycle phase of a tracked deploy.
 type activityQueueStatus string
 
 const (
@@ -36,7 +34,7 @@ func activityQueueStatusIsTerminal(s activityQueueStatus) bool {
 }
 
 // activityQueueContainerStatus is one container's last observed state under the
-// deploy's release. The frontend renders these as per-container pills.
+// deploy's release.
 type activityQueueContainerStatus struct {
 	Name     string `json:"name"`
 	Image    string `json:"image"`
@@ -68,12 +66,9 @@ type activityQueueEntry struct {
 	LastUpdated       time.Time                      `json:"lastUpdated"`
 	Containers        []activityQueueContainerStatus `json:"containers,omitempty"`
 	Error             string                         `json:"error,omitempty"`
-	// Detail holds the captured command output (helm/kubectl/docker, etc.)
-	// behind a failed entry, so the user can see why a deploy failed instead
-	// of only the one-line "==> Deploy failed after Ns" summary in Error, and
-	// can copy a complete failure report to hand to developers/admins.
-	// Populated by finish() from the per-entry output buffer only when the
-	// entry finishes as failed; empty for running and non-failed entries.
+	// Detail holds the captured command output behind a failed entry, so the
+	// user can see why a deploy failed and copy a complete failure report.
+	// Populated only when the entry finishes as failed; empty otherwise.
 	Detail string `json:"detail,omitempty"`
 	// Source identifies the real-world object that produced this entry,
 	// such as "helm" for helm-release-derived deploys, "shell" for live
@@ -103,20 +98,15 @@ type activityQueueEntry struct {
 	StartedRunningAt *time.Time `json:"startedRunningAt,omitempty"`
 }
 
-// activityQueueStore keeps active and recent deploy entries. Callers
-// mutate state through start/update/finish/dismiss; reads return cloned
-// snapshots so callers can pass them to Wails event emitters without
-// races. There is no persistence — state is reconstructed each desktop
-// launch from real cluster/host objects (helm releases, live PTY
-// sessions); see activity_helm_poller.go and activity_stale_sessions.go.
+// activityQueueStore keeps active and recent deploy entries. Reads return
+// cloned snapshots so callers can hand them to Wails event emitters without
+// races. There is no persistence — state is reconstructed each desktop launch
+// from real cluster/host objects (helm releases, live PTY sessions).
 //
-// Notifications: state-change events are forwarded through notifyCh to
-// a single drain goroutine that calls notify(...) in arrival order.
-// The previous design used `go notify(...)` per event, which let two
-// independently-scheduled goroutines deliver `waiting` and `running`
-// out of order — causing the frontend to settle on the older state.
-// Serializing through one goroutine guarantees the frontend sees
-// transitions in the order the store applied them.
+// Notifications are serialized through a single drain goroutine so the frontend
+// sees transitions in the order the store applied them. The previous per-event
+// `go notify(...)` let independently-scheduled goroutines deliver `waiting` and
+// `running` out of order, so the frontend settled on the older state.
 type activityQueueStore struct {
 	mu       sync.Mutex
 	active   map[string]*activityQueueEntry
@@ -167,9 +157,8 @@ func newActivityQueueStore(notify func(activityQueueEntry), now func() time.Time
 	return s
 }
 
-// runNotifyLoop drains notifyCh in order, calling notify per snapshot,
-// for the lifetime of the store. A nil notify drains silently so unit
-// tests that don't wire a notifier don't accumulate snapshots in the
+// runNotifyLoop drains notifyCh for the store's lifetime. A nil notify still
+// drains so unit tests without a notifier don't accumulate snapshots in the
 // buffer.
 func (s *activityQueueStore) runNotifyLoop() {
 	for snapshot := range s.notifyCh {
@@ -179,16 +168,12 @@ func (s *activityQueueStore) runNotifyLoop() {
 	}
 }
 
-// list returns a chronological snapshot (newest first) of every tracked
-// deploy across active + history.
 func (s *activityQueueStore) list() []activityQueueEntry {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.snapshotLocked()
 }
 
-// findActive returns the first active entry matching (tenant, environment).
-// Used by lock-on-deploy logic that targets all activities for a selection.
 func (s *activityQueueStore) findActive(tenant, environment string) (activityQueueEntry, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -200,9 +185,8 @@ func (s *activityQueueStore) findActive(tenant, environment string) (activityQue
 	return activityQueueEntry{}, false
 }
 
-// findActiveByCommand returns the active entry for (command, tenant,
-// environment). Used by the deploy-button gate so a same-version deploy
-// can be detected independently of an unrelated build for the same env.
+// findActiveByCommand keys on command too, so the deploy-button gate can detect
+// a same-version deploy independently of an unrelated build for the same env.
 func (s *activityQueueStore) findActiveByCommand(command, tenant, environment string) (activityQueueEntry, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -214,15 +198,11 @@ func (s *activityQueueStore) findActiveByCommand(command, tenant, environment st
 	return activityQueueEntry{}, false
 }
 
-// latestDeployFailed reports whether the most recent deploy for the env ended
-// in failure. It looks at the newest deploy entry across active + history (the
-// snapshot is sorted newest-first): if that entry is failed, the env's runtime
-// release is currently broken. A later succeeded/running deploy — e.g. after
-// the user recovers via doctor or Rebuild & redeploy — flips this back to
-// false. Reconnect uses it to stop hammering a broken env with `erun open`
-// retries whose pod will never come ready (MCP port-forward timeout, SSH sync
-// not-ready), independent of whether this particular open emitted the
-// `==> Deploy failed` ready-error that reconnectBlockedByDeployFailure keys on.
+// latestDeployFailed reports whether the env's most recent deploy ended in
+// failure — its runtime release is broken until a later deploy succeeds.
+// Reconnect uses it to stop hammering a broken env with `erun open` retries
+// whose pod will never come ready, independent of the `==> Deploy failed`
+// ready-error that reconnectBlockedByDeployFailure keys on.
 func (s *activityQueueStore) latestDeployFailed(tenant, environment string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -235,11 +215,9 @@ func (s *activityQueueStore) latestDeployFailed(tenant, environment string) bool
 	return false
 }
 
-// promoteToRunning moves a waiting entry into the running state and
-// records StartedRunningAt. Returns the snapshot and true when the
-// entry existed and was waiting; false when missing or already running
-// (the latter is harmless — the runner's per-env worker pops one at a
-// time, so promoting twice cannot happen normally).
+// promoteToRunning moves a waiting entry into the running state. Returning false
+// for an already-running entry is harmless: the runner's per-env worker pops one
+// at a time, so a double promotion cannot happen normally.
 func (s *activityQueueStore) promoteToRunning(id string) (activityQueueEntry, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -287,8 +265,6 @@ func (s *activityQueueStore) start(seed activityQueueEntry) (activityQueueEntry,
 	return snapshot, true
 }
 
-// updateContainers merges a new container-status snapshot into the entry. No
-// effect if the entry has already finished.
 func (s *activityQueueStore) updateContainers(id string, containers []activityQueueContainerStatus) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -302,14 +278,10 @@ func (s *activityQueueStore) updateContainers(id string, containers []activityQu
 	s.notifyLocked(snapshot)
 }
 
-// recordOutputLine appends a line of command output to the buffer for the
-// active entry matching (tenant, environment). The buffer feeds entry.Detail
-// when the entry finishes as failed, giving the user the real command output
-// (the helm/kubectl/docker error) behind a one-line "==> Deploy failed"
-// summary. A no-op when no active entry matches — output produced before the
-// entry registers (e.g. before "==> Deploying") or after it finishes is not
-// failure context. Lines are clipped and the buffer is capped to the most
-// recent N lines so a runaway command cannot grow it without bound.
+// recordOutputLine buffers command output for the active entry matching
+// (tenant, environment), feeding entry.Detail if that entry later fails. A
+// no-op when nothing matches: output before the entry registers (e.g. before
+// "==> Deploying") or after it finishes is not failure context.
 func (s *activityQueueStore) recordOutputLine(tenant, environment, line string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -333,9 +305,9 @@ func (s *activityQueueStore) recordOutputLine(tenant, environment, line string) 
 	s.outputByID[id] = buf
 }
 
-// finish moves an active entry into history with the given terminal status.
-// Returns false if the entry was already finished (idempotent in the face of
-// duplicate ==> Deploy failed / ==> Deployed lines from the PTY tail).
+// finish moves an active entry into history. It is idempotent — returning false
+// for an already-finished entry — to absorb duplicate "==> Deploy failed" /
+// "==> Deployed" lines from the PTY tail.
 func (s *activityQueueStore) finish(id string, status activityQueueStatus, errMsg string) (activityQueueEntry, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -366,9 +338,8 @@ func (s *activityQueueStore) finish(id string, status activityQueueStatus, errMs
 	return snapshot, true
 }
 
-// dismiss removes a finished entry from history. Active entries are never
-// dismissed through this path — see forceDismiss for the user-driven
-// override that handles stuck active entries.
+// dismiss removes a finished entry from history only; stuck active entries go
+// through forceDismiss, the user-driven override.
 func (s *activityQueueStore) dismiss(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -381,11 +352,9 @@ func (s *activityQueueStore) dismiss(id string) bool {
 	return false
 }
 
-// forceDismiss removes an entry from active or history regardless of
-// status. The returned entry lets the caller decide on follow-up
-// actions (e.g. killing a live PTY shell or running a helm
-// clear-pending recovery). The removedFromActive boolean is true when
-// the entry was active at the time of the call.
+// forceDismiss removes an entry from active or history regardless of status,
+// returning it so the caller can follow up — e.g. kill a live PTY shell or run
+// a helm clear-pending recovery.
 func (s *activityQueueStore) forceDismiss(id string) (entry activityQueueEntry, removedFromActive bool, ok bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -419,12 +388,10 @@ func (s *activityQueueStore) snapshotLocked() []activityQueueEntry {
 	return out
 }
 
-// notifyLocked enqueues the snapshot for in-order delivery. Caller must
-// hold s.mu (the channel send is non-blocking, so the lock is held only
-// briefly). On a full buffer the snapshot is dropped — frontend
-// resilience is provided by the runner's belt-and-braces re-emit and
-// by the pollers' periodic re-snapshots, so a single dropped event is
-// recoverable.
+// notifyLocked enqueues the snapshot for in-order delivery; the caller must hold
+// s.mu. On a full buffer the snapshot is dropped, which is safe because the
+// runner's re-emit and the pollers' periodic re-snapshots recover a single
+// dropped event.
 func (s *activityQueueStore) notifyLocked(snapshot activityQueueEntry) {
 	if s.notify == nil {
 		return

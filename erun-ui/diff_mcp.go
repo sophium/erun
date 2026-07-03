@@ -24,10 +24,9 @@ func (t idleProbeRoundTripper) RoundTrip(req *http.Request) (*http.Response, err
 	return base.RoundTrip(req)
 }
 
-// mcpAuthRoundTripper stamps the per-env bearer onto every MCP request so an
-// auth-enabled env edge accepts the call. An empty token is a
-// no-op, so non-auth envs and unit tests (which sign no token) keep working;
-// an auth-enabled env rejects the empty bearer with 401, which is correct.
+// mcpAuthRoundTripper carries the per-env bearer so an auth-enabled env edge accepts the call.
+// An empty token is a deliberate no-op: non-auth envs and unit tests keep working, and an
+// auth-enabled env's 401 on the empty bearer is the intended outcome, not a bug.
 type mcpAuthRoundTripper struct {
 	token string
 	base  http.RoundTripper
@@ -45,10 +44,8 @@ func (t mcpAuthRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 	return base.RoundTrip(req)
 }
 
-// mcpClientTransport builds the shared StreamableClientTransport every desktop
-// MCP call uses: it always carries the per-env bearer (mcpAuthRoundTripper) and,
-// for diagnostic reads, wraps the idle-probe header round-tripper underneath so
-// the call does not register as activity and hold an idle env awake.
+// mcpClientTransport wraps the idle-probe round-tripper for diagnostic reads so the call does
+// not register as activity and hold an idle env awake.
 func mcpClientTransport(endpoint, bearer string, idleProbe bool) *mcp.StreamableClientTransport {
 	var base http.RoundTripper
 	if idleProbe {
@@ -131,10 +128,8 @@ func setEnvironmentCloudAliasViaMCP(ctx context.Context, endpoint, bearer, tenan
 	return output.EnvConfig, nil
 }
 
-// runPodRawFromMCP runs an argv inside the runtime pod via the per-env MCP
-// endpoint's raw tool and returns its stdout. The idle-probe header keeps
-// these diagnostic reads from registering as activity, so a hover or an
-// open Diagnostics console never holds an idle env awake.
+// runPodRawFromMCP issues idle-probe reads so a hover or an open Diagnostics console never
+// holds an idle env awake.
 func runPodRawFromMCP(ctx context.Context, endpoint, bearer string, argv []string) (string, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
 	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, true), nil)
@@ -168,9 +163,7 @@ func runPodRawFromMCP(ctx context.Context, endpoint, bearer string, argv []strin
 	return output.Stdout, nil
 }
 
-// loadPodBranchFromMCP reads the env worktree's current git branch from
-// inside the runtime pod via the per-env MCP endpoint's raw tool — the
-// sidebar hover card's "Working on" source for remote envs.
+// loadPodBranchFromMCP is the sidebar hover card's "Working on" source for remote envs.
 func loadPodBranchFromMCP(ctx context.Context, endpoint, bearer string) (string, error) {
 	out, err := runPodRawFromMCP(ctx, endpoint, bearer, []string{"git", "rev-parse", "--abbrev-ref", "HEAD"})
 	if err != nil {

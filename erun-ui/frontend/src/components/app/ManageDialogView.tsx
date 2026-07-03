@@ -452,13 +452,9 @@ function EditActions({
   );
 }
 
-// ManageSaveBlocker renders the reason a disabled Save (or an at-risk deploy) is
-// in its current state, right where the user acts (NN #1 visibility of system
-// status; #9 recovery). A blocking error styles destructive and keeps Save
-// disabled; a capacity warning styles amber and leaves Save enabled (saving only
-// persists config). The "Go to Runtime" action takes the user to where the issue
-// is fixable. It is associated with the Save button via aria-describedby and
-// announced via role/aria-live (WCAG 3.3.1, 3.3.3, 4.1.3).
+// Surfaces why Save is disabled (or a deploy is at risk) right where the user
+// acts. A capacity warning still leaves Save enabled because saving only
+// persists config; it never deploys.
 function ManageSaveBlocker({
   id,
   blockingError,

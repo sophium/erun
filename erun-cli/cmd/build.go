@@ -18,15 +18,8 @@ const (
 
 var errVersionFileNotFound = common.ErrVersionFileNotFound
 
-// errPushVersionRequired is returned when `erun push` is run without an
-// explicit version. push is a pure primitive: it publishes the content
-// identity `erun build` minted, it never mints one (root AGENTS.md §
-// "Command primitives vs orchestration").
 var errPushVersionRequired = fmt.Errorf("push requires a version: pass --version <version> produced by `erun build`. push publishes a built version's images and chart; it does not mint a version")
 
-// errPushBuildVersionConflict is returned when `erun push --build` is combined
-// with an explicit --version. With --build the version is whatever the build
-// step mints, so an explicit version is contradictory.
 var errPushBuildVersionConflict = fmt.Errorf("push --build builds and pushes the version it mints; do not also pass --version")
 
 func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
@@ -133,10 +126,6 @@ func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFu
 	return cmd
 }
 
-// pushBuildWithRetry wraps the docker builder with the login-retry flow push
-// shares with build: an auth failure during the image push triggers a docker
-// login (interactive, or ERUN_AUTO_LOGIN_ON_PUSH in CI) and one retry. push
-// builds from source, so the push goes through the builder, not a bare tag.
 func pushBuildWithRetry(ctx common.Context, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner) common.DockerImageBuilderFunc {
 	return func(buildInput common.DockerBuildSpec, stdout, stderr io.Writer) error {
 		return runDockerBuildWithRetry(
@@ -156,16 +145,9 @@ func pushBuildWithRetry(ctx common.Context, buildDockerImage common.DockerImageB
 	}
 }
 
-// newRootPushCmd is the top-level "erun push" shorthand. It supports both
-// single-image push (when a Dockerfile exists in the current directory) and
-// multi-image push (when run from the project root with multiple docker
-// contexts). The nested "devops container push" command uses newPushCmd which
-// is single-image only.
-//
-// --build is an operator-convenience shortcut: it builds the current source
-// first (minting a snapshot version), then pushes that minted version. The
-// orchestration lives here in the CLI caller, exactly like `build --deploy` —
-// push itself stays a pure primitive that publishes an explicit version.
+// newRootPushCmd is the top-level `erun push`. --build is an operator shortcut
+// that builds first; that build→push orchestration deliberately lives in this
+// caller so push itself stays a pure primitive publishing an explicit version.
 func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc) *cobra.Command {
 	target := common.DockerCommandTarget{}
 	var force bool
@@ -192,10 +174,6 @@ func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFind
 			}
 			ctx := commandContext(cmd)
 			if target.Build {
-				// Operator shortcut: build the current source (which mints a
-				// snapshot version), then push that exact version. --version is
-				// redundant here — the version is whatever build mints — so
-				// reject the combination for a single clear contract.
 				if strings.TrimSpace(target.VersionOverride) != "" {
 					return errPushBuildVersionConflict
 				}
@@ -203,8 +181,6 @@ func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFind
 					return err
 				}
 			} else if strings.TrimSpace(target.VersionOverride) == "" {
-				// Version is required: push publishes a content identity that
-				// `erun build` minted, it does not mint one.
 				return errPushVersionRequired
 			}
 			buildWithRetry := pushBuildWithRetry(ctx, buildDockerImage, loginToDockerRegistry, selectRunner)
@@ -235,11 +211,6 @@ func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFind
 	return cmd
 }
 
-// runPushBuildStep runs the pure build (the same resolve+run `erun build`
-// performs) so it mints a snapshot version, then sets that minted version on
-// target so the push path that follows publishes exactly what was just built.
-// The orchestration — and the version threading — lives here in the CLI caller,
-// not in the push primitive.
 func runPushBuildStep(ctx common.Context, store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, target *common.DockerCommandTarget, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc) error {
 	execution, err := common.ResolveBuildExecution(ctx, store, findProjectRoot, resolveBuildContext, now, *target)
 	if err != nil {
@@ -329,9 +300,6 @@ func runDockerBuildWithRetry(ctx common.Context, buildInput common.DockerBuildSp
 
 func addBuildCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommandTarget) {
 	addPushCommandTargetFlags(cmd, target)
-	// build accepts --version to override the version it would otherwise mint;
-	// push (the other addPushCommandTargetFlags caller) takes its version
-	// positionally instead, so the flag lives here, not in the shared helper.
 	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Override the version build would mint")
 	cmd.Flags().BoolVar(&target.Deploy, "deploy", false, "Deploy the built version after the build completes")
 	cmd.Flags().BoolVar(&target.Release, "release", false, "Run release first and publish the release-tagged images")
@@ -346,21 +314,11 @@ func addPushCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommandT
 	_ = cmd.Flags().MarkHidden("environment")
 }
 
-// handleNamespaceAuthError handles the create_package and scope-denied auth
-// errors by switching docker auth to the namespace owner via the gh CLI and
-// retrying. Returns (handled=true, finalErr=...) when the error matched one
-// of those cases — finalErr is nil on a successful retry, or the latest
-// error otherwise. Returns (false, nil) when the error did not match, in
-// which case the caller should fall through to the prompt-login path.
-//
-// On scope denial the helper escalates: if the first auto-relogin retry
-// still fails with a scope error (the stored gh token itself lacks the
-// scope), it runs `gh auth refresh -s write:packages,read:packages`
-// interactively and retries once more. The user only types a one-time
-// device code; the rest is automated. In a headless runtime pod or any
-// non-interactive context that escalation cannot complete, so
-// RefreshGHCRPackageScopes returns an actionable error instead of launching
-// the flow and that error surfaces here as finalErr.
+// handleNamespaceAuthError recovers a GHCR create-package or scope-denied push
+// by re-authenticating as the namespace owner, escalating to an interactive
+// `gh auth refresh` when the stored token still lacks the scope. That
+// escalation needs a one-time device code, so in a headless runtime pod it
+// cannot complete and surfaces an actionable error instead.
 func handleNamespaceAuthError(authErr common.DockerRegistryAuthError, retry func() error, stdin io.Reader, stdout, stderr io.Writer) (bool, error) {
 	if !common.IsDockerCreatePackageDenied(authErr.Message) && !common.IsDockerScopeDenied(authErr.Message) {
 		return false, nil
@@ -382,9 +340,6 @@ func handleNamespaceAuthError(authErr common.DockerRegistryAuthError, retry func
 	return true, finalErr
 }
 
-// retryAfterNamespaceLogin runs TryGHCRNamespaceLogin and retries once.
-// Returns nil on retry success, the original auth error when the namespace
-// switch is not applicable, or the retry error otherwise.
 func retryAfterNamespaceLogin(authErr common.DockerRegistryAuthError, retry func() error, stdout, stderr io.Writer) error {
 	ok, _ := common.TryGHCRNamespaceLogin(authErr.Tag, stdout, stderr)
 	if !ok {
@@ -396,9 +351,6 @@ func retryAfterNamespaceLogin(authErr common.DockerRegistryAuthError, retry func
 	return nil
 }
 
-// retryAfterScopeRefresh escalates by running `gh auth refresh` to widen the
-// stored token's scopes, then retries. Returns nil on retry success or the
-// refresh / retry error.
 func retryAfterScopeRefresh(authErr common.DockerRegistryAuthError, retry func() error, stdin io.Reader, stdout, stderr io.Writer) error {
 	ok, refreshErr := common.RefreshGHCRPackageScopes(authErr.Tag, stdin, stdout, stderr)
 	if refreshErr != nil {
@@ -472,10 +424,6 @@ func isGHCR(registry string) bool {
 }
 
 func promptDockerLoginRetry(run SelectRunner, registry string) (bool, error) {
-	// CI / non-interactive callers can opt in to "yes, log in and retry"
-	// by setting ERUN_AUTO_LOGIN_ON_PUSH=1, mirroring the loginAndRetry
-	// option without a TTY. The actual `docker login` step still has to
-	// be wired by the caller; this just unblocks the prompt.
 	if isTrueishEnv("ERUN_AUTO_LOGIN_ON_PUSH") {
 		return true, nil
 	}

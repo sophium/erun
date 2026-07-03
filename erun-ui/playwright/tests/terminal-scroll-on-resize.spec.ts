@@ -2,31 +2,22 @@ import { test, expect } from '../fixtures/erunApp.js';
 import type { Page, Request } from '@playwright/test';
 import type { AppShell } from '../pages/index.js';
 
-// Regression: resizing the terminal (OS window resize, layout
-// panel toggles, debug-pane drag) refit xterm but never re-anchored the
-// viewport, so a user sitting at the live prompt was left scrolled up
-// mid-history after the reflow. runTerminalResize now captures whether the
-// viewport was at the bottom before fit() and scrolls back to the bottom
-// afterwards — and only then, so a user reading scrollback is not yanked
-// down (Nielsen #3, user control).
+// Regression: a terminal resize refit xterm but never re-anchored the
+// viewport, leaving a user at the live prompt stranded mid-history. The fix
+// re-anchors only a viewport that was already at the bottom, so a reader
+// parked in scrollback is not yanked down.
 //
-// The harness-reachable resize trigger is a layout panel toggle
-// (flushTerminalResize → runTerminalResize). A real OS window resize funnels
-// into the same runTerminalResize via the window-resize/ResizeObserver
-// debounce (queueTerminalResize), so the toggle invariant locks the shared
-// re-anchor path; the OS gesture itself is not reachable headless. The
-// scrollback is staged deterministically by injecting `terminal-output`
-// events for the selected session, mirroring what the Go PTY stream emits
-// (same pattern as terminal-query-response.spec.ts).
+// A real OS window resize is not reachable headless, so a layout-panel toggle
+// drives the same shared re-anchor path; scrollback is staged by injecting
+// terminal-output events for the selected session.
 test.describe('terminal scroll on resize (#465)', () => {
   test('panel toggle re-anchors an at-bottom viewport and preserves a scrolled-up one', async ({
     app,
     page,
     seededEnv,
   }) => {
-    // Use a per-test seeded env so the scrollback this spec stages never
-    // leaks into the shared baseline rows. The Local tab gives a real
-    // selected session to inject into.
+    // A per-test seeded env keeps the scrollback this spec stages from leaking
+    // into the shared baseline rows.
     const { tenant, environment } = seededEnv;
 
     await app.sidebar.openEnvironment(tenant, environment);
@@ -50,9 +41,7 @@ test.describe('terminal scroll on resize (#465)', () => {
     // staging leaves the viewport at the live prompt.
     await expect.poll(() => terminalAtBottom(page)).toBe(true);
 
-    // At-bottom resize: the review-panel toggle changes the terminal's
-    // column count and rewraps the buffer; the viewport must come back to
-    // the prompt after the reflow.
+    // At-bottom resize: after the reflow the viewport must come back to the prompt.
     const colsBefore = await readTerminalCols(page);
     expect(colsBefore).toBeGreaterThan(0);
     await app.titlebar.toggleReviewPanel();
@@ -64,16 +53,14 @@ test.describe('terminal scroll on resize (#465)', () => {
     await setViewportScrollTop(page, 0);
     await expect.poll(() => terminalAtBottom(page)).toBe(false);
     const colsMid = await readTerminalCols(page);
-    await app.titlebar.toggleReviewPanel(); // restores the panel to its original state
+    await app.titlebar.toggleReviewPanel();
     await expect.poll(() => readTerminalCols(page)).not.toBe(colsMid);
-    // The faulty force-scroll would fire from the post-fit write callback
-    // within milliseconds of the refit; sample the viewport over a short
-    // window and require that it never lands at the bottom.
+    // The faulty force-scroll would fire asynchronously within milliseconds of
+    // the refit, so sample over a short window rather than checking once.
     expect(await viewportEverAtBottom(page, 600)).toBe(false);
 
-    // Window resize (the gesture from the report): shrink the window while
-    // at the bottom — the viewport must come back to the prompt — then grow
-    // it back while scrolled up — the reading position must survive.
+    // Window resize (the gesture from the report): at the bottom, shrinking must
+    // re-anchor to the prompt; scrolled up, growing must preserve the reading position.
     await setViewportScrollTop(page, Number.MAX_SAFE_INTEGER);
     await expect.poll(() => terminalAtBottom(page)).toBe(true);
     const colsWide = await readTerminalCols(page);
@@ -100,8 +87,6 @@ interface InvokeCall {
   args: unknown[];
 }
 
-// parseInvoke decodes a /__erun_invoke POST body into {method, args}, or null
-// when the request is not an invoke (or carries no JSON body).
 function parseInvoke(req: Request): InvokeCall | null {
   if (req.method() !== 'POST' || !req.url().endsWith('/__erun_invoke')) {
     return null;
@@ -115,9 +100,6 @@ function parseInvoke(req: Request): InvokeCall | null {
   return body?.method ? { method: body.method, args: body.args ?? [] } : null;
 }
 
-// discoverSelectedSessionId finds the session the terminal is rendering by
-// provoking a resize (sidebar toggle) and sniffing the ResizeSession invoke,
-// then restores the sidebar. 0 means no session is selected.
 async function discoverSelectedSessionId(app: AppShell, page: Page): Promise<number> {
   const waitForResize = page
     .waitForRequest((req) => parseInvoke(req)?.method === 'ResizeSession')
@@ -129,9 +111,8 @@ async function discoverSelectedSessionId(app: AppShell, page: Page): Promise<num
   return typeof id === 'number' ? id : 0;
 }
 
-// emitTerminalOutput injects a `terminal-output` event for sessionId carrying
-// raw bytes, mirroring what the Go PTY stream emits. data is base64 like the
-// real payload; btoa is safe because every byte here is < 256.
+// Mirrors what the Go PTY stream emits so the test drives the real output path.
+// btoa is safe here only because every staged byte is < 256.
 async function emitTerminalOutput(page: Page, sessionId: number, raw: string): Promise<void> {
   await page.evaluate(
     (payload) => {
@@ -149,9 +130,6 @@ async function emitTerminalOutput(page: Page, sessionId: number, raw: string): P
   );
 }
 
-// terminalAtBottom reads the active xterm viewport's scroll position from the
-// DOM renderer. The viewport is "at the bottom" when scrollTop has reached its
-// maximum (scrollHeight - clientHeight), within a small rounding tolerance.
 async function terminalAtBottom(page: Page): Promise<boolean> {
   return await page.evaluate(() => {
     const viewport = document.querySelector<HTMLElement>('.xterm-viewport');
@@ -163,8 +141,6 @@ async function terminalAtBottom(page: Page): Promise<boolean> {
   });
 }
 
-// viewportHasScrollback reports whether the buffer outgrew the viewport, i.e.
-// there is real history to scroll through.
 async function viewportHasScrollback(page: Page): Promise<boolean> {
   return await page.evaluate(() => {
     const viewport = document.querySelector<HTMLElement>('.xterm-viewport');
@@ -172,9 +148,8 @@ async function viewportHasScrollback(page: Page): Promise<boolean> {
   });
 }
 
-// viewportEverAtBottom samples the viewport for `duration` ms and reports
-// whether it ever reached the bottom — used to prove a scrolled-up viewport
-// stays put across the asynchronous post-resize scroll window.
+// Proves a scrolled-up viewport stays put across the asynchronous post-resize
+// scroll window.
 async function viewportEverAtBottom(page: Page, duration: number): Promise<boolean> {
   return await page.evaluate(async (ms) => {
     const viewport = document.querySelector<HTMLElement>('.xterm-viewport');
@@ -204,8 +179,7 @@ async function setViewportScrollTop(page: Page, top: number): Promise<void> {
   }, top);
 }
 
-// readTerminalCols reads the column count runTerminalResize publishes onto
-// the terminal root — changing cols is the proof a refit ran.
+// A changed column count is the observable proof that a refit ran.
 async function readTerminalCols(page: Page): Promise<number> {
   return await page.evaluate(() => {
     const el = document.querySelector<HTMLElement>('.terminal');

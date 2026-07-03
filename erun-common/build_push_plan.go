@@ -20,12 +20,9 @@ func ResolveDockerPushExecution(ctx Context, store DockerStore, findProjectRoot 
 	builds := make([]DockerBuildSpec, 0, len(buildContexts))
 	pushes := make([]DockerPushSpec, 0, len(buildContexts))
 	for _, buildContext := range buildContexts {
-		// push builds each image from its source context and pushes the
-		// multi-platform manifest (per-arch tags + assembled manifest list),
-		// the same path release uses. A multi-arch image only exists under
-		// per-arch tags, so the bare version tag has no arch-less image to
-		// docker push; RunDockerPushExecution skips the pushes entry once the
-		// build is marked pushed.
+		// A multi-arch image has no arch-less version tag to `docker push`, so the
+		// build itself publishes the per-arch manifest list; the separate push
+		// entry is skipped once the build is marked pushed.
 		build, err := resolveDockerBuildSpec(store, findProjectRoot, resolveBuildContext, now, buildContext, target)
 		if err != nil {
 			return DockerPushExecutionSpec{}, err
@@ -54,10 +51,9 @@ func ResolveDockerPushSpec(ctx Context, store DockerStore, findProjectRoot Proje
 		return DockerPushSpec{}, nil, fmt.Errorf("dockerfile not found in current directory")
 	}
 
-	// push builds the image from its source context and pushes the multi-arch
-	// manifest (per-arch + manifest list), not the bare version tag — a
-	// multi-arch image has no arch-less tag to `docker push`. RunDockerPushSpec
-	// returns after the build once Push is set, skipping the single-tag push.
+	// A multi-arch image has no arch-less version tag to `docker push`, so the
+	// build itself publishes the manifest; the single-tag push is skipped once
+	// Push is set.
 	resolvedBuild, err := resolveDockerBuildSpec(store, findProjectRoot, resolveBuildContext, now, buildContext, target)
 	if err != nil {
 		return DockerPushSpec{}, nil, err

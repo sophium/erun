@@ -5,18 +5,16 @@ import (
 	"testing"
 )
 
-// TestRemoteShellLaunchPersistentSession pins the reconnect mechanism: a
-// desktop tab (AppSession set) runs the remote shell inside a persistent dtach
-// session keyed by the id, with the per-tab prelude (contribute cd, AI launch)
-// as the session's create-time program; the bare `erun open` CLI path is left
-// byte-for-byte unchanged.
+// TestRemoteShellLaunchPersistentSession pins the reconnect contract: a desktop
+// tab persists in a dtach session so another window can reattach, while the bare
+// `erun open` CLI path stays unchanged.
 func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 	base := ShellLaunchParams{
 		Tenant:      "erun",
 		Environment: "local",
 		Title:       "erun/local",
 		Namespace:   "erun-local",
-		RemoteRepo:  true, // skip the git-seed lines; focus on the launch path
+		RemoteRepo:  true,
 	}
 	const bashrc = `/bin/bash --rcfile "$HOME/.erun/erun/local/bashrc" -i`
 
@@ -47,11 +45,6 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 	})
 
 	t.Run("attach takes the session over from other windows", func(t *testing.T) {
-		// screen-style detach-elsewhere-and-reattach-here: the attach claims
-		// an owner id, detaches other viewers by killing their dtach clients
-		// (never the master, which owns the running shell/claude — and no one
-		// when the master cannot be identified), and a kicked wrapper sees the
-		// foreign owner id and exits 76 so its window reports the handover.
 		req := base
 		req.AppSession = "open-0"
 		script := preview(t, req)
@@ -64,12 +57,6 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 	})
 
 	t.Run("each terminal slot owns its own session", func(t *testing.T) {
-		// One env carries exactly one session per id: custom "Terminal N" tabs
-		// get distinct slot ids, and a second ERun window passing the same id
-		// attaches to the same socket — taking the session over rather than
-		// spawning a parallel one. The socket key is tenant+env+id only, never
-		// anything app-instance-specific, and a takeover for one id must not
-		// touch any other slot's session.
 		req := base
 		req.AppSession = "open-1"
 		script := preview(t, req)
@@ -82,15 +69,14 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 		req.AppSession = "ai"
 		req.AI = true
 		script := preview(t, req)
-		// AI tab repaints on reattach via -r winch, not -r ctrl_l: Claude's
-		// main-screen TUI ignores a bare ^L (and can mis-consume it as a
-		// keystroke), so only a SIGWINCH redraws it. Bash tabs keep -r ctrl_l
-		// (asserted above). Regression guard.
+		// AI tabs reattach with -r winch, not -r ctrl_l: Claude's main-screen TUI
+		// ignores a bare ^L (and can mis-consume it as a keystroke), so only a
+		// SIGWINCH redraws it.
 		assertScriptHas(t, script, `dtach -A "/tmp/erun-app/erun-local-ai.dtach" -r winch`, "AI tab must reattach with -r winch so Claude repaints")
 		assertScriptLacks(t, script, `erun-local-ai.dtach" -r ctrl_l`, "AI tab must not use -r ctrl_l (Claude ignores the bare ^L)")
 		assertScriptHas(t, script, `claude --continue --settings '{"ultracode":true}'`, "AI tab must launch the claude guard at the default effort (ultracode)")
-		// Claude's exit must not silently fall through to the shell: the
-		// wrapper names the exit and the resume command first.
+		// Claude's exit must surface to the user, not silently fall through to
+		// the shell.
 		if !strings.Contains(script, "fi || ai_status=$?") || !strings.Contains(script, "resume with: %s") {
 			t.Fatalf("AI launcher missing the exit wrapper:\n%s", script)
 		}
@@ -112,8 +98,6 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 	})
 }
 
-// assertScriptHas fails the test when script does not contain want, reporting
-// msg followed by the full script.
 func assertScriptHas(t *testing.T, script, want, msg string) {
 	t.Helper()
 	if !strings.Contains(script, want) {
@@ -121,8 +105,6 @@ func assertScriptHas(t *testing.T, script, want, msg string) {
 	}
 }
 
-// assertScriptLacks fails the test when script contains unwanted, reporting
-// msg followed by the full script.
 func assertScriptLacks(t *testing.T, script, unwanted, msg string) {
 	t.Helper()
 	if strings.Contains(script, unwanted) {
@@ -130,10 +112,9 @@ func assertScriptLacks(t *testing.T, script, unwanted, msg string) {
 	}
 }
 
-// TestParseRemoteAppSessionIDs pins the detection contract: a pod's
-// /tmp/erun-app listing yields exactly this env's session ids — dtach sockets
-// only, owner files and other envs' sockets ignored — so a fresh ERun window
-// can rebuild tabs for sessions another window created.
+// TestParseRemoteAppSessionIDs pins the detection contract: parsing a pod's
+// /tmp/erun-app listing yields only this env's dtach-socket session ids, so a
+// fresh ERun window can rebuild tabs another window created.
 func TestParseRemoteAppSessionIDs(t *testing.T) {
 	lsOutput := strings.Join([]string{
 		"erun-local-open-0.dtach",
@@ -158,11 +139,9 @@ func TestParseRemoteAppSessionIDs(t *testing.T) {
 }
 
 // TestRemoteAppSessionEndScript pins the explicit-close contract: ending a
-// custom terminal kills the session master (the program follows via SIGHUP)
-// and removes the socket and owner file, so detection cannot rebuild the tab.
-// The master scan is the same /proc child scan the attach uses; an
-// unidentifiable master means nothing is killed (fail open) but the socket
-// still goes away.
+// custom terminal tears down its session so detection cannot rebuild the tab,
+// and fails open — an unidentifiable master kills nothing but still drops the
+// socket.
 func TestRemoteAppSessionEndScript(t *testing.T) {
 	script := RemoteAppSessionEndScript("erun", "local", "open-2")
 	for _, want := range []string{
@@ -179,11 +158,10 @@ func TestRemoteAppSessionEndScript(t *testing.T) {
 	}
 }
 
-// TestRemoteShellGitSeedKeepsPrivateKeyOffArgv pins the security fix: the
-// inline bootstrap script seeds only the public known_hosts + ssh config and
-// clones the repo; it never writes the private key. The key reaches the pod
-// only via the separate seed exec's stdin, so it can never land in a kubectl
-// exec argv (laptop `ps`, the pod's /proc/<pid>/cmdline, or exec audit logs).
+// TestRemoteShellGitSeedKeepsPrivateKeyOffArgv pins the security contract: the
+// private key never lands in a kubectl exec argv (visible via laptop `ps`, the
+// pod's /proc/<pid>/cmdline, or exec audit logs) — it reaches the pod only on
+// the separate seed exec's stdin.
 func TestRemoteShellGitSeedKeepsPrivateKeyOffArgv(t *testing.T) {
 	lines := remoteShellGitSeedScriptLines(
 		`"$HOME/git/erun"`, "github.com", shellQuote("sophium"), shellQuote("erun"),
@@ -191,10 +169,9 @@ func TestRemoteShellGitSeedKeepsPrivateKeyOffArgv(t *testing.T) {
 	)
 	script := strings.Join(lines, "\n")
 
-	// The script must not WRITE / rm / chmod ~/.ssh/keys ($HOME form). The ssh
-	// config still *references* the key file via `~/.ssh/keys` (tilde) — that is
-	// a pointer, not the key material — so assert on the $HOME form the
-	// write/rm/chmod used.
+	// The ssh config legitimately references the key via the tilde form
+	// (`~/.ssh/keys`, a pointer, not key material), so the leak check must assert
+	// on the $HOME form that the write/rm/chmod actually use.
 	if strings.Contains(script, `"$HOME/.ssh/keys"`) {
 		t.Fatalf("inline script must not write/rm/chmod the private key file:\n%s", script)
 	}
@@ -213,9 +190,9 @@ func TestRemoteShellGitSeedKeepsPrivateKeyOffArgv(t *testing.T) {
 	}
 }
 
-// TestRemoteSSHKeySeedArgsStreamOnStdin pins that the key-seed exec is a
-// non-interactive `kubectl exec -i` whose program reads the key from stdin
-// (`cat > ~/.ssh/keys`) — so the key bytes never appear in the argv.
+// TestRemoteSSHKeySeedArgsStreamOnStdin pins that the key-seed exec streams the
+// key on stdin, not in the argv, so the key bytes never appear in a process
+// listing.
 func TestRemoteSSHKeySeedArgsStreamOnStdin(t *testing.T) {
 	args := remoteSSHKeySeedArgs(ShellLaunchParams{Tenant: "erun", KubernetesContext: "ctx", Namespace: "erun-local"})
 

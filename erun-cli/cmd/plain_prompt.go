@@ -15,18 +15,14 @@ import (
 	"github.com/manifoldco/promptui"
 )
 
-// plainPromptInput is the shared line reader for plain-mode prompts. A single
-// reader is deliberate: each bufio.Reader buffers ahead, so constructing one
-// per prompt would drop the piped input lines a later prompt in the same run
-// needs — the same read-ahead that limits piped promptui runs to one prompt
-// per process.
+// A single shared reader is deliberate: each bufio.Reader buffers ahead, so
+// constructing one per prompt would drop the piped input lines a later prompt
+// in the same run needs — the same read-ahead that limits piped promptui runs
+// to one prompt per process.
 var plainPromptInput = sync.OnceValue(func() *bufio.Reader {
 	return bufio.NewReader(os.Stdin)
 })
 
-// writerIsTerminal reports whether the writer is a real character device.
-// ERUN_FORCE_TTY=1 is a deliberate test seam (mirroring ERUN_HOST_OS_OVERRIDE)
-// so non-TTY harnesses can opt into the terminal branch.
 func writerIsTerminal(w io.Writer) bool {
 	if os.Getenv("ERUN_FORCE_TTY") == "1" {
 		return true
@@ -39,13 +35,9 @@ func writerIsTerminal(w io.Writer) bool {
 	return err == nil && (info.Mode()&os.ModeCharDevice) != 0
 }
 
-// runPlainPrompt is the non-TTY fallback for promptui.Prompt: a plain
-// fmt-rendered label plus a buffered line read, no cursor-control escapes.
-// Pipes get one deterministic line per prompt, which keeps scripted use and
-// the integration goldens stable. Semantics mirror promptui: an empty
-// line submits the default, Validate re-prompts, and IsConfirm returns
-// promptui.ErrAbort unless the answer (or a "y" default met by an empty line)
-// confirms.
+// runPlainPrompt is the non-TTY fallback for promptui.Prompt, mirroring its
+// semantics. One deterministic line per pipe keeps scripted use and the
+// integration goldens stable.
 func runPlainPrompt(prompt promptui.Prompt) (string, error) {
 	reader := plainPromptInput()
 	for {
@@ -71,9 +63,6 @@ func runPlainPrompt(prompt promptui.Prompt) (string, error) {
 	}
 }
 
-// plainConfirmAccepted mirrors promptui's IsConfirm rule: confirmed when the
-// answer is "y" (any case), or when the default is "y" and the answer is
-// empty.
 func plainConfirmAccepted(input, defaultValue string) bool {
 	if strings.EqualFold(input, "y") {
 		return true
@@ -99,12 +88,10 @@ func plainPromptLabel(prompt promptui.Prompt) string {
 	return label + ": "
 }
 
-// renderPlainPromptTemplate renders a custom prompt template with promptui's
-// style functions stripped to identity, so a templated prompt (e.g. the
-// init confirm's "? <label>? [Y/n] ") keeps its wording in plain mode without
-// emitting any escape sequences. Returns ok=false when there is no custom
-// template or it does not render, letting the caller fall back to the default
-// plain label.
+// renderPlainPromptTemplate strips promptui's style functions to identity so a
+// templated prompt keeps its wording in plain mode without emitting escape
+// sequences. Returns ok=false when there is no usable custom template, so the
+// caller falls back to the default plain label.
 func renderPlainPromptTemplate(prompt promptui.Prompt) (string, bool) {
 	if prompt.Templates == nil || strings.TrimSpace(prompt.Templates.Prompt) == "" {
 		return "", false
@@ -127,11 +114,9 @@ func renderPlainPromptTemplate(prompt promptui.Prompt) (string, bool) {
 	return rendered.String(), true
 }
 
-// runPlainSelect is the non-TTY fallback for promptui.Select: the label, a
-// numbered option list, and a buffered line read. An empty line picks the
-// cursor's starting option (the first, matching a piped "\r" confirm against
-// promptui); a number or an exact option text picks that option; anything
-// else re-prompts.
+// runPlainSelect is the non-TTY fallback for promptui.Select. An empty line
+// picks the cursor's starting option, matching a piped "\r" confirm against
+// promptui.
 func runPlainSelect(prompt promptui.Select) (int, string, error) {
 	items := plainSelectItems(prompt)
 	if len(items) == 0 {
@@ -163,9 +148,6 @@ func runPlainSelect(prompt promptui.Select) (int, string, error) {
 	}
 }
 
-// plainSelectChoice resolves one input line against the option list: a number
-// within range picks that option, an exact option text picks it, anything
-// else does not resolve.
 func plainSelectChoice(input string, items []string) (int, bool) {
 	if number, err := strconv.Atoi(input); err == nil && number >= 1 && number <= len(items) {
 		return number - 1, true
@@ -190,11 +172,10 @@ func plainSelectItems(prompt promptui.Select) []string {
 	return items
 }
 
-// readPlainPromptLine reads one line, tolerating a final unterminated line
-// (piped input often ends without a trailing newline, or with a bare "\r"
-// written for promptui's enter key). A clean EOF with no content maps to
-// promptui.ErrEOF so callers keep one error vocabulary across both prompt
-// modes.
+// readPlainPromptLine tolerates a final unterminated line — piped input often
+// ends without a trailing newline, or with a bare "\r" written for promptui's
+// enter key. A clean EOF with no content maps to promptui.ErrEOF so callers
+// keep one error vocabulary across both prompt modes.
 func readPlainPromptLine(reader *bufio.Reader) (string, error) {
 	line, err := reader.ReadString('\n')
 	if err != nil {

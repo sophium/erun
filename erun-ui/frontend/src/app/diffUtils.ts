@@ -37,13 +37,9 @@ export function visibleDiffTreeNodes(
   });
 }
 
-// visibleDiffFilePaths returns the set of file paths the changed-files tree is
-// currently showing — after the active filter and the collapsed directories.
-// The diff panel uses it to render the same subset the tree shows (in the
-// tree's pre-order, since ParseGitDiff already ordered diff.files to match the
-// tree), so an active filter or a collapsed directory can't make the two
-// panels disagree. An empty tree (no filter, nothing collapsed) yields
-// every file, so the unfiltered diff is unchanged.
+// visibleDiffFilePaths is the subset the changed-files tree and the diff panel
+// must both honour, so an active filter or collapsed directory can never make
+// the two panels disagree.
 export function visibleDiffFilePaths(
   tree: DiffTreeNode[],
   filter: string,

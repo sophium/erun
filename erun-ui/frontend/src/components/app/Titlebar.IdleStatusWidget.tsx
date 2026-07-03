@@ -34,8 +34,6 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
-// useIdleWidgetState derives the titlebar's render-time view from the
-// redux idle state, returning null when the widget should render nothing.
 function useIdleWidgetState(): {
   idleStatus: IdleStatus | null;
   idleBadge: { label: string; className: string } | null;
@@ -54,9 +52,6 @@ function useIdleWidgetState(): {
   return { idleStatus, idleBadge, idleAction, cloudContextName };
 }
 
-// renderIdleLeadingBadge chooses the leading pill for the current
-// state: the warning pill when auto-stop is armed, the transition pill
-// during a stop/start, the idle-status pill otherwise, or nothing.
 function renderIdleLeadingBadge(
   busy: boolean,
   idleAction: ReturnType<typeof idleCloudAction>,
@@ -83,9 +78,6 @@ function renderIdleLeadingBadge(
   return null;
 }
 
-// pickEnvDisplayName chooses the first non-empty display string for
-// the env, preferring the human-friendly kube context label over the
-// raw context name.
 function pickEnvDisplayName(idleStatus: IdleStatus, fallback: string): string {
   const label = (idleStatus.cloudContextLabel ?? '').trim();
   if (label) return label;
@@ -94,10 +86,8 @@ function pickEnvDisplayName(idleStatus: IdleStatus, fallback: string): string {
   return fallback;
 }
 
-// IdleStopWarningBadge is the amber "auto-stop is armed" pill that
-// replaces the idle-time pill once `stopPendingSince` is set. It
-// surfaces the countdown to forced stop and a Cancel button that
-// dismisses the grace window without touching AWS state.
+// The Cancel button dismisses the pending-stop grace window locally; it does
+// not touch AWS state.
 function IdleStopWarningBadge({
   idleStatus,
   cloudContextName,
@@ -159,8 +149,6 @@ function IdleStopWarningBadge({
   );
 }
 
-// idleWidgetContainerClass returns the container's tailwind classes
-// for the current busy/pending/idle widget state.
 function idleWidgetContainerClass(
   busy: boolean,
   pending: boolean,
@@ -264,9 +252,6 @@ function IdleStatusBadge({
   );
 }
 
-// idleStatusActionShape returns the icon plus the rounding/border that
-// depend on whether the action button has a badge to its left and/or
-// another button to its right.
 function idleStatusActionShape(
   busy: boolean,
   action: 'start' | 'stop',
@@ -322,16 +307,10 @@ function IdleStatusAction({
   );
 }
 
-// useStopProtectionState centralises the redux-toolkit-query plumbing
-// and returns the view StopProtectionToggle renders against.
-//
-// Click is deliberately NOT gated on the in-flight describe call.
-// Before this, an AWS describe-instance-attribute call that hung
-// (idle-stopped instance, expired SSO token) kept the button
-// `disabled` forever, so the user saw an icon that did nothing on
-// click. The button stays interactive while we don't know the state;
-// the user picks a direction and the mutation reports its own
-// outcome.
+// Click is deliberately NOT gated on the in-flight describe call: a hung
+// describe (idle-stopped instance, expired SSO token) would otherwise leave
+// the button disabled forever. It stays interactive while the state is
+// unknown, and the mutation reports its own outcome.
 function useStopProtectionState(contextName: string): {
   Icon: typeof LoaderCircle;
   label: string;
@@ -359,11 +338,6 @@ function useStopProtectionState(contextName: string): {
   return { Icon, label, amber: known && locked, pressed: known && locked, busy, locked };
 }
 
-// useStopProtectionMutators isolates the Wails-bound RPC and toast
-// feedback. Each outcome dispatches a notification: success toasts
-// confirm the AWS attribute is now what the user asked for; errors
-// surface the raw AWS message verbatim so a missing SSO token or
-// instance-profile permission stays actionable.
 function useStopProtectionMutators(contextName: string): {
   disable: () => Promise<void>;
   enable: () => Promise<void>;
@@ -400,10 +374,8 @@ function useStopProtectionMutators(contextName: string): {
   };
 }
 
-// StopProtectionConfirmDialog asks the user to confirm the lock
-// transition (the destructive direction — it also breaks the user's
-// own manual Stop until reversed). Unlocking is one-click and does
-// not route through this dialog.
+// Only the lock direction is confirmed: it is destructive because it also
+// blocks the user's own manual Stop until reversed. Unlocking is one-click.
 function StopProtectionConfirmDialog({
   open,
   contextName,
@@ -454,15 +426,10 @@ function StopProtectionConfirmDialog({
   );
 }
 
-// StopProtectionToggle renders the lock/unlock icon that flips the AWS
-// DisableApiStop attribute for the selected cloud context. Locking is
-// the recovery lever the user reaches for when the in-pod idle monitor
-// is racing against a repair (e.g. erun-mcp is in ImagePullBackOff so
-// every activity marker is idle and the monitor decides to stop the
-// instance every 10 min). While locked, every ec2:StopInstances call
-// returns OperationNotPermitted — including the user's own desktop
-// Stop button — so the lock icon also blocks the adjacent Power
-// button's effect until the user clears it.
+// Locking is the recovery lever for when the in-pod idle monitor races a
+// repair (e.g. erun-mcp stuck in ImagePullBackOff reads as idle, so the
+// monitor keeps stopping the instance). While locked, AWS rejects every stop
+// — including the user's own adjacent Power button — until the user clears it.
 function StopProtectionToggle({ contextName }: { contextName: string }): React.ReactElement {
   const { Icon, label, amber, pressed, busy, locked } = useStopProtectionState(contextName);
   const { disable, enable } = useStopProtectionMutators(contextName);
@@ -512,11 +479,8 @@ function StopProtectionToggle({ contextName }: { contextName: string }): React.R
   );
 }
 
-// tooltipLineClassName mirrors the leading-space convention used by
-// idleStatusTooltipLines: "- " is a top-level entry (Active markers, etc.),
-// "  - " is a nested per-client detail line under its marker. HTML collapses
-// the leading spaces in the rendered output, so we encode the nesting as a
-// Tailwind padding class instead.
+// idleStatusTooltipLines encodes nesting depth as leading spaces, but HTML
+// collapses that whitespace, so re-encode the "- "/"  - " depth as padding.
 function tooltipLineClassName(line: string): string | undefined {
   if (line.startsWith('  - ')) {
     return 'pl-6';

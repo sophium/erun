@@ -75,9 +75,8 @@ export const store = configureStore({
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({
       thunk: { extraArgument: thunkExtra },
-      // Slices intentionally store serializable shapes; the legacy AppState
-      // selector reassembles Set instances at the consumer boundary, so we
-      // do not need redux-toolkit's serializable check to whitelist Set.
+      // State stays serializable; Sets are rebuilt only at consumer
+      // boundaries, so the default serializable check needs no Set whitelist.
     })
       .concat(wailsApi.middleware)
       .concat(persistenceMiddleware.middleware)

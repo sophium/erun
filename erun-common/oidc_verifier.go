@@ -11,20 +11,15 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 )
 
-// Shared OIDC verifier. This is the single signature/JWKS verifier
-// used by both the hosted backend API and the per-env MCP edge to trust OIDC
-// issuers (e.g. a Zitadel or AWS STS `https://` issuer). It is transport- and
-// policy-agnostic: it verifies the JWT signature against the issuer's published
-// JWKS and the standard time claims (exp/iat/nbf), and returns the decoded
-// claims. It does NOT decide whether an issuer is allowed or whether an audience
-// is acceptable — those are caller policy (the backend keeps its issuer
-// allow-list and username/AWS-STS mapping; the MCP edge enforces its per-env
-// audience). Audience is therefore not checked here.
+// Shared OIDC verifier used by both the hosted backend API and the per-env MCP
+// edge. It is policy-agnostic: it does not decide whether an issuer is allowed
+// or an audience is acceptable — those are caller policy, so audience is
+// deliberately not checked here.
 
 // OIDCClaims is the decoded, signature-verified claim set the shared verifier
-// returns. Raw carries the full claim map so callers can read claims the small
-// struct does not name (a per-issuer org claim, AWS STS fields, etc.) without
-// the verifier baking in any backend- or transport-specific knowledge.
+// returns. Raw carries the full claim map so callers can read claims the struct
+// does not name without the verifier baking in backend- or transport-specific
+// knowledge.
 type OIDCClaims struct {
 	Issuer   string
 	Subject  string
@@ -32,27 +27,21 @@ type OIDCClaims struct {
 	Raw      map[string]any
 }
 
-// OIDCVerifier verifies OIDC ID/access tokens against their issuer's JWKS. It
-// caches one *oidc.Provider per issuer (the provider holds the JWKS key set and
-// refreshes it as keys rotate), discovering the issuer lazily on first use. It
-// is safe for concurrent use.
+// OIDCVerifier verifies OIDC ID/access tokens against their issuer's JWKS. It is
+// safe for concurrent use.
 type OIDCVerifier struct {
 	mu        sync.Mutex
 	providers map[string]*oidc.Provider
 }
 
-// NewOIDCVerifier returns a verifier with an empty provider cache. Providers are
-// discovered lazily on first Verify for each issuer.
+// NewOIDCVerifier returns a ready-to-use verifier.
 func NewOIDCVerifier() *OIDCVerifier {
 	return &OIDCVerifier{providers: make(map[string]*oidc.Provider)}
 }
 
-// Verify verifies token against issuer: it fetches (and caches) the issuer's
-// OIDC discovery + JWKS, checks the signature and the standard time claims
-// (exp/iat/nbf), and confirms the token's `iss` matches issuer. The client-id
-// (audience) check is intentionally skipped here — audience policy belongs to
-// the caller — so callers that need audience enforcement read OIDCClaims.Audience
-// themselves. It returns the decoded claims or a descriptive error.
+// Verify verifies token against issuer and returns its decoded claims. The
+// audience check is intentionally skipped — audience policy belongs to the
+// caller, which reads OIDCClaims.Audience itself.
 func (v *OIDCVerifier) Verify(ctx context.Context, issuer, token string) (OIDCClaims, error) {
 	issuer = strings.TrimSpace(issuer)
 	if issuer == "" {
@@ -62,9 +51,7 @@ func (v *OIDCVerifier) Verify(ctx context.Context, issuer, token string) (OIDCCl
 	if err != nil {
 		return OIDCClaims{}, err
 	}
-	// SkipClientIDCheck: the audience is the caller's policy, not this verifier's.
-	// go-oidc still verifies the signature against the issuer's JWKS and the
-	// exp/iat/nbf time claims.
+	// SkipClientIDCheck skips only the audience; signature and exp/iat/nbf are still verified.
 	idToken, err := provider.Verifier(&oidc.Config{SkipClientIDCheck: true}).Verify(ctx, token)
 	if err != nil {
 		return OIDCClaims{}, err
@@ -81,10 +68,8 @@ func (v *OIDCVerifier) Verify(ctx context.Context, issuer, token string) (OIDCCl
 	}, nil
 }
 
-// provider returns the cached *oidc.Provider for issuer, discovering it lazily
-// on first use. Discovery (the network fetch of the issuer's
-// .well-known/openid-configuration) happens outside the lock so a slow issuer
-// cannot block verification for other issuers.
+// provider discovers each issuer's provider lazily and caches it. Discovery runs
+// outside the lock so a slow issuer cannot block verification for others.
 func (v *OIDCVerifier) provider(ctx context.Context, issuer string) (*oidc.Provider, error) {
 	v.mu.Lock()
 	if provider := v.providers[issuer]; provider != nil {
@@ -110,13 +95,11 @@ func (v *OIDCVerifier) provider(ctx context.Context, issuer string) (*oidc.Provi
 	return provider, nil
 }
 
-// IssuerFromUnverifiedJWT extracts the `iss` claim from a JWT WITHOUT verifying
-// its signature, alg-agnostically: it splits the JWT, base64url-decodes the
-// payload, and reads `iss`. It is used only to SELECT which trusted issuer a
-// token claims to come from (and therefore which key set to verify against);
-// the signature is then verified against that issuer's JWKS. Because it does not
-// look at the JWS header's `alg`, it works for any signing algorithm (RS256,
-// ES256, EdDSA, …) — unlike an alg-locked parser.
+// IssuerFromUnverifiedJWT reads the `iss` claim from a JWT WITHOUT verifying its
+// signature. It is used only to SELECT which trusted issuer a token claims to
+// come from; the signature is then verified against that issuer's JWKS. It stays
+// alg-agnostic (never inspecting the JWS `alg` header) so issuer selection works
+// for any signing algorithm.
 func IssuerFromUnverifiedJWT(token string) (string, error) {
 	parts := strings.Split(strings.TrimSpace(token), ".")
 	if len(parts) < 2 {

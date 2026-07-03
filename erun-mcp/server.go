@@ -65,9 +65,8 @@ func newHTTPHandler(info eruncommon.BuildInfo, cfg HTTPConfig, runtime RuntimeCo
 	})
 
 	mux := http.NewServeMux()
-	// Auth is the outermost edge: when a trusted issuer is configured,
-	// every request on the MCP path — including idle probes — must carry a valid
-	// bearer token signed by the desktop's injected key before any tool runs.
+	// Auth is the outermost layer, so even idle probes must carry a valid token
+	// before any tool runs.
 	mux.Handle(cfg.Path, authHTTPMiddleware(mcpAuthConfigFromEnv(), activityHTTPMiddleware(runtime, handler)))
 	return mux
 }
@@ -155,8 +154,6 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig) *mcp.Server {
 	return server
 }
 
-// registerReadModelTools registers the read-only build/config introspection
-// tools.
 func registerReadModelTools(server *mcp.Server, info eruncommon.BuildInfo, runtime RuntimeConfig) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "version",
@@ -168,7 +165,6 @@ func registerReadModelTools(server *mcp.Server, info eruncommon.BuildInfo, runti
 	}, listTool(runtime))
 }
 
-// registerIdleStopTools registers the idle status and auto-stop audit tools.
 func registerIdleStopTools(server *mcp.Server, runtime RuntimeConfig) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "idle",
@@ -188,8 +184,6 @@ func registerIdleStopTools(server *mcp.Server, runtime RuntimeConfig) {
 	}, idleStopRecordTool(runtime))
 }
 
-// registerCloudTools registers the cloud-provider-alias and AWS-credential
-// tools.
 func registerCloudTools(server *mcp.Server, runtime RuntimeConfig) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "cloud_list",
@@ -225,7 +219,6 @@ func registerCloudTools(server *mcp.Server, runtime RuntimeConfig) {
 	}, cloudClearAWSCredentialsTool())
 }
 
-// registerContextTools registers the managed-cloud Kubernetes context tools.
 func registerContextTools(server *mcp.Server, runtime RuntimeConfig) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "context_list",
@@ -245,8 +238,6 @@ func registerContextTools(server *mcp.Server, runtime RuntimeConfig) {
 	}, contextStartTool(runtime))
 }
 
-// registerDeliveryTools registers the init → build → push → deploy lifecycle
-// tools plus upgrade, doctor, delete, expose, and terraform.
 func registerDeliveryTools(server *mcp.Server, runtime RuntimeConfig) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "init",
@@ -286,8 +277,6 @@ func registerDeliveryTools(server *mcp.Server, runtime RuntimeConfig) {
 	}, terraformTool(runtime))
 }
 
-// registerInspectionTools registers the repo-state and source-contribution
-// tools that operate from the runtime repo root.
 func registerInspectionTools(server *mcp.Server, runtime RuntimeConfig) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "diff",

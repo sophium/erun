@@ -15,12 +15,8 @@ import {
 } from '@/components/ui/dialog';
 import type { AgentOutputEntry } from '@/types';
 
-// OutputsDialog lists the files an agent produced in the selected env's runtime
-// pod outputs directory and lets the operator pull each onto their machine. It
-// is the result counterpart to the activity queue (which tracks operations):
-// a dedicated surface for the deliverables an agent left behind. Per-row
-// Download opens a native Save dialog; the footer reports the outcome
-// (Nielsen #1 visibility of status, #9 recovery from errors).
+// OutputsDialog is the deliverables counterpart to the activity queue (which
+// tracks operations): the surface for the output files an agent left behind.
 export function OutputsDialog(): React.ReactElement {
   const dispatch = useAppDispatch();
   const { open, loading, error, dir, entries, downloadingName, status, statusError } =

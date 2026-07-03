@@ -8,11 +8,8 @@ import { setTerminalCopyOutput, setTerminalCopyStatus } from './slices/terminalS
 import type { AppThunk } from './store';
 import { requireController } from './thunkExtra';
 
-// runLocalRecoverySelection runs an `erun …` recovery command for the given env
-// in the shared Local shell and focuses the Local tab so the user sees it.
-// Without activateLocalAfterCommand the command runs in a background shell with
-// no visible feedback, which led users to click repeatedly and flood the shell.
-// Mirrors startDeploySelection in sessionThunks.
+// A recovery command must surface in the Local tab; run invisibly in a
+// background shell, and users re-click and flood it.
 const runLocalRecoverySelection =
   (
     selection: UISelection,
@@ -32,8 +29,7 @@ const runLocalRecoverySelection =
     await dispatch(activateLocalAfterCommand(selection, result));
   };
 
-// startDoctorSelection runs `erun doctor` for the env behind a failed deploy
-// card's "Run doctor" button.
+// Backs the "Run doctor" button on a failed deploy card.
 export const startDoctorSelection = (selection: UISelection): AppThunk<Promise<void>> =>
   runLocalRecoverySelection(
     selection,
@@ -41,8 +37,7 @@ export const startDoctorSelection = (selection: UISelection): AppThunk<Promise<v
     StartDoctorSession,
   );
 
-// startForceDeploySelection runs `erun deploy --force` for the env behind a
-// failed deploy card's (or a failing container's) "Rebuild & redeploy" button.
+// Backs the "Rebuild & redeploy" button on a failed deploy card or failing container.
 export const startForceDeploySelection = (selection: UISelection): AppThunk<Promise<void>> =>
   runLocalRecoverySelection(
     selection,

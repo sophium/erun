@@ -8,14 +8,10 @@ import (
 	"strings"
 )
 
-// ResolveCurrentLinuxBuildScripts returns linux package build.sh scripts, but
-// only when the caller is explicitly inside a linux package directory
-// (linux/<component>) or the linux/ parent. It intentionally skips the
-// project-root and <tenant>-devops auto-discovery: nothing outside the release
-// flow consumes the .deb, so rebuilding it on every `erun build` / `erun deploy`
-// from the project root is wasted work. Release publishing has its own resolver
-// (release.go:discoverReleaseLinuxScripts) that walks the release root, so
-// `erun build --release` and `erun release` still produce the .deb.
+// ResolveCurrentLinuxBuildScripts resolves linux package build scripts only when the
+// operator is explicitly working in a packaging directory. The .deb is consumed only by
+// the release flow, so this skips project-root auto-discovery to avoid rebuilding it
+// needlessly on every build/deploy; release publishing has its own resolver.
 func ResolveCurrentLinuxBuildScripts(findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, target DockerCommandTarget, version string) ([]scriptSpec, error) {
 	contexts, err := resolveExplicitLinuxPackageContexts(resolveBuildContext)
 	if err != nil {
@@ -35,12 +31,6 @@ func ResolveCurrentLinuxBuildScripts(findProjectRoot ProjectFinderFunc, resolveB
 	return scripts, nil
 }
 
-// resolveExplicitLinuxPackageContexts mirrors the first two steps of
-// ResolveCurrentLinuxPackageContexts (current dir is linux/<component>, or
-// current dir is the linux/ parent), but omits the auto-discovery walk into
-// <tenant>-devops/linux/ that ResolveCurrentLinuxPackageContexts performs for
-// command-registration purposes. Callers that should only fire when the user
-// is intentionally working on packaging use this.
 func resolveExplicitLinuxPackageContexts(resolveBuildContext BuildContextResolverFunc) ([]LinuxPackageContext, error) {
 	if resolveBuildContext == nil {
 		resolveBuildContext = ResolveDockerBuildContext

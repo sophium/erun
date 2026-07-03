@@ -1,6 +1,5 @@
 // Package golden compares actual integration output against a stored
-// expectation file. Set UPDATE_GOLDEN=1 in the environment to overwrite the
-// file with the actual output instead of failing the test.
+// expectation file.
 package golden
 
 import (
@@ -41,17 +40,13 @@ func Equal(t *testing.T, name, actual string) {
 	}
 }
 
-// pathFor resolves the testdata path for the running test. It uses the
-// caller's source-file directory so each command's tests can keep their
-// goldens beside them under testdata/<command>/<name>.txt.
+// pathFor keeps each command's goldens beside its own tests under
+// testdata/<command>/<name>.txt.
 func pathFor(t *testing.T, name string) string {
 	t.Helper()
-	// Allow callers to omit the .txt suffix.
 	if !strings.HasSuffix(name, ".txt") {
 		name += ".txt"
 	}
-	// The first stack frame outside this package lives next to the testdata
-	// directory we want.
 	for i := 1; i < 16; i++ {
 		_, file, _, ok := runtime.Caller(i)
 		if !ok {

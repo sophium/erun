@@ -19,16 +19,10 @@ import { recordTab } from './tabsThunks';
 import { requireController } from './thunkExtra';
 import { selectionKey } from './versionSuggestions';
 
-// tabRespawnThunks own the click-driven recovery flow for the
-// default-spawned terminal tabs (ai, local, erun). When a session's PTY
-// has already exited — typically because the linked cloud context
-// auto-stopped while a Claude/codex AI session was attached and
-// `tryReconnect` refused to fight the stop — the tab still sits in
-// `tabsByEnv` pointing at a dead `sessionId`. Without this flow, clicking
-// it would re-show the stale "exit status N" pill on top of the frozen
-// TUI output. Here we instead spawn a fresh session and reuse the tab
-// entry, letting `terminalDisplayMiddleware` reset xterm onto the empty
-// buffer that arrives with the new sessionId.
+// Click-driven recovery for the default terminal tabs (ai, local, erun):
+// a tab can point at a dead PTY (e.g. the cloud context auto-stopped
+// under an attached AI session), and clicking it should spawn a fresh
+// session rather than re-show the stale "exit status N" output.
 
 const respawnableDefaultKinds: ReadonlySet<TerminalTabKind> = new Set(['ai', 'local', 'erun']);
 
@@ -54,20 +48,13 @@ export const maybeRespawnDeadDefaultTab =
     if (!tab || !respawnableDefaultKinds.has(tab.kind)) {
       return false;
     }
-    // Refuse the respawn when the env's deploy failed: reopening would re-run
-    // `erun open` and re-deploy the broken env, the same re-deploy storm that
-    // auto-reconnect stops. Returning false lets selectTerminalTab show the
-    // dead session's captured failure output and the deploy-failed marker
-    // instead, with recovery left to the failed-deploy card (Run doctor /
-    // Rebuild & redeploy).
+    // Refuse respawn when the env's deploy failed: reopening re-runs `erun open`,
+    // which would re-deploy the broken env — the same re-deploy storm
+    // auto-reconnect exists to stop. Recovery is left to the failed-deploy card.
     if (selectEnvHasFailedDeploy(state, selection.tenant, selection.environment)) {
       return false;
     }
     if (sessionId !== state.terminal.sessionId) {
-      // Highlight the clicked tab and let terminalDisplayMiddleware wipe
-      // any prior tab's content from xterm. The stale display buffer
-      // briefly replays under the busy overlay, then gets reset again
-      // when the new sessionId lands.
       dispatch(setSessionId(sessionId));
     }
     dispatch(setTerminalCopyOutput(''));
@@ -149,15 +136,10 @@ function isAITabKind(tab: TerminalTab): boolean {
 }
 
 // relaunchAISessionsForLaunchChange applies a saved Claude launch-flag change
-// (--effort / --model / --verbose --debug) to the env's AI
-// sessions. The launch command runs once when the persistent pod session is
-// created — reattaches never re-run it — so the backend first ends the env's
-// AI sessions (desktop and pod side); the AI tabs open in this window are
-// then respawned, and the relaunched guard resumes the Claude conversation
-// via --continue. Local/ERun tabs are untouched: their launch command does
-// not change. With no open AI tab the end alone is enough — the next open
-// creates a fresh session with the new flags. The backend reports false for
-// envs whose AI tool launches verbatim (non-claude); nothing is reopened.
+// to the env's AI sessions. Launch flags are read only when a pod session is
+// created — reattaches never re-run the launch command — so applying them
+// means ending the AI sessions and respawning them. The backend returns false
+// when nothing needs reopening (a non-claude tool that launches verbatim).
 export const relaunchAISessionsForLaunchChange =
   (selection: UISelection): AppThunk<Promise<void>> =>
   async (dispatch, getState, extra) => {
@@ -191,9 +173,6 @@ export const relaunchAISessionsForLaunchChange =
     }
   };
 
-// respawnRelaunchedAITab spawns the fresh AI session for one reopened tab and
-// re-points the tab strip — and, when the dying session was the one on
-// screen, the active terminal — at the new session id.
 const respawnRelaunchedAITab =
   (
     runSelection: UISelection,

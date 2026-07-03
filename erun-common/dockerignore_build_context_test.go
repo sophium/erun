@@ -7,10 +7,9 @@ import (
 	"testing"
 )
 
-// repoRootForDockerignoreTest resolves the repository root from this test
-// file's own location. erun-common is a direct child of the repo root, so the
-// grandparent of this file is the root regardless of the working directory the
-// test runs from.
+// repoRootForDockerignoreTest returns the repo root. erun-common sits directly
+// under the root, so the grandparent of this file is the root regardless of the
+// test's working directory.
 func repoRootForDockerignoreTest(t *testing.T) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
@@ -44,8 +43,7 @@ func TestRootDockerignoreExcludesDocsBuildArtifacts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read root .dockerignore: %v", err)
 	}
-	// base "" mirrors how docker (and loadContextIgnoreSet for the root file)
-	// treats the context-root .dockerignore.
+	// An empty base anchors the root .dockerignore the same way real docker does.
 	set := parseIgnoreData(data, "")
 
 	excludedDirs := []string{
@@ -63,7 +61,6 @@ func TestRootDockerignoreExcludesDocsBuildArtifacts(t *testing.T) {
 		}
 	}
 
-	// The sources the erun-docs Dockerfile actually copies must survive.
 	kept := []string{
 		"erun-docs/package.json",
 		"erun-docs/yarn.lock",

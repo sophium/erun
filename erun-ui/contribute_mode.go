@@ -10,16 +10,12 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-// uiContributeState is the JSON-facing read model the frontend uses to
-// drive the per-env Contribute toggle.
 type uiContributeState struct {
 	Tenant      string `json:"tenant"`
 	Environment string `json:"environment"`
 	Enabled     bool   `json:"enabled"`
 }
 
-// uiContributeAppLaunch carries the URL the frontend should open in a
-// browser tab so the user can use their locally-built ERun desktop app.
 type uiContributeAppLaunch struct {
 	URL  string `json:"url"`
 	Port int    `json:"port"`
@@ -33,9 +29,7 @@ const contributeChangedEvent = "contribute:changed"
 // self-referential and confusing, so the toggle is hidden there.
 const reservedContributeTenant = "erun"
 
-// IsContributeEligible reports whether the toggle is allowed for the
-// given env. Exported through Wails so the frontend can hide the control
-// for envs where contribute mode would not make sense.
+// IsContributeEligible reports whether contribute mode is allowed for the given env.
 func (a *App) IsContributeEligible(selection uiSelection) bool {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
@@ -56,8 +50,7 @@ func (a *App) IsContributeEligible(selection uiSelection) bool {
 	}
 }
 
-// GetContributeMode returns whether the env is currently flagged in
-// contribute mode. Returns false for envs that don't have a stored flag.
+// GetContributeMode reports whether the env is currently flagged in contribute mode.
 func (a *App) GetContributeMode(selection uiSelection) bool {
 	if a.contribute == nil {
 		return false
@@ -65,14 +58,11 @@ func (a *App) GetContributeMode(selection uiSelection) bool {
 	return a.contribute.get(selection)
 }
 
-// SetContributeMode toggles contribute mode for the env. When turning
-// ON, validates eligibility and ensures the ERun clone exists inside
-// the env via the contribute_clone MCP tool. Persists the flag to the
-// UI state file and fires a contribute:changed event so the frontend
-// can update tab strip + diff source accordingly.
+// SetContributeMode toggles contribute mode for the env; enabling it
+// requires an eligible env and clones ERun into it first.
 //
-// Caller (the frontend thunk) is responsible for spawning or closing
-// the two contribute tabs after this call returns.
+// The caller (the frontend thunk) spawns or closes the contribute tabs
+// after this returns; this method does not touch them.
 func (a *App) SetContributeMode(selection uiSelection, on bool) (uiContributeState, error) {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
@@ -133,10 +123,6 @@ func (a *App) runEnsureErunClone(selection uiSelection) error {
 	return nil
 }
 
-// resolveContributeAppPort validates that the selection is in contribute mode
-// and resolves the env's allocated contribute-app port. It returns an error
-// describing the first failing precondition (missing tenant/env, contribute
-// mode off, environment resolution failure, or an unallocated port).
 func (a *App) resolveContributeAppPort(selection uiSelection) (int, error) {
 	if selection.Tenant == "" || selection.Environment == "" {
 		return 0, fmt.Errorf("tenant and environment are required")
@@ -158,12 +144,9 @@ func (a *App) resolveContributeAppPort(selection uiSelection) (int, error) {
 	return port, nil
 }
 
-// StartContributeApp is the Wails-exposed entrypoint for the "Open
-// contribute app" affordance. It boots `erun app --headless --port N`
-// inside the env's ERun (contribute) tab, brings up a kubectl
-// port-forward for the contribute-app port, waits for the headless
-// server to accept connections, and returns the http URL the frontend
-// should open in the user's browser.
+// StartContributeApp backs the "Open contribute app" affordance: it runs
+// the headless ERun app in the env's contribute tab and returns the URL
+// the frontend opens in the browser.
 func (a *App) StartContributeApp(selection uiSelection) (uiContributeAppLaunch, error) {
 	selection = normalizeSelection(selection)
 	port, err := a.resolveContributeAppPort(selection)
@@ -171,12 +154,10 @@ func (a *App) StartContributeApp(selection uiSelection) (uiContributeAppLaunch, 
 		return uiContributeAppLaunch{}, err
 	}
 
-	// Send the headless start command into the contribute ERun tab so
-	// the user can see the build progress and so the running process
-	// is visible (and Ctrl-Cable) in the contribute terminal they
-	// already have open. Best-effort: if the tab is missing we still
-	// try the port-forward so a manually-launched headless on the same
-	// port still becomes reachable from host.
+	// Run the headless server inside the contribute tab (not silently) so
+	// the user sees build progress and can Ctrl-C it in the terminal they
+	// already have open. Best-effort: if that tab is gone, the port-forward
+	// below still reaches a manually-launched headless on the same port.
 	a.sendCommandToContributeERunSession(selection, fmt.Sprintf("erun app --headless --port %d\n", port))
 
 	if a.contributeApps == nil {
@@ -198,10 +179,9 @@ func (a *App) StartContributeApp(selection uiSelection) (uiContributeAppLaunch, 
 		return uiContributeAppLaunch{}, err
 	}
 	url := fmt.Sprintf("http://127.0.0.1:%d/", localPort)
-	// Open the URL in the user's *default* browser via the Wails runtime.
-	// window.open from the React side runs inside the WKWebView and
-	// does not escape to an external browser, so the launcher button
-	// felt broken until the user manually copy-pasted the URL.
+	// window.open from the React side stays inside the WKWebView and never
+	// reaches an external browser, so open the URL through the Wails runtime
+	// instead — otherwise the launcher button feels broken.
 	if a.ctx != nil {
 		runtime.BrowserOpenURL(a.ctx, url)
 	}
@@ -211,9 +191,6 @@ func (a *App) StartContributeApp(selection uiSelection) (uiContributeAppLaunch, 
 	}, nil
 }
 
-// stopContributeAppForward tears down the kubectl port-forward and
-// best-effort sends Ctrl-C to the contribute ERun tab so the headless
-// process exits too. Safe to call when nothing is running.
 func (a *App) stopContributeAppForward(selection uiSelection) {
 	selection = normalizeSelection(selection)
 	if a.contributeApps != nil {
@@ -221,18 +198,11 @@ func (a *App) stopContributeAppForward(selection uiSelection) {
 			forward.stop()
 		}
 	}
-	// 0x03 = Ctrl-C. The contribute ERun tab is a normal interactive
-	// shell, so writing the ETX byte interrupts the foreground
-	// process (the headless erun app, if it's still running) without
-	// killing the shell. If the tab is gone or the shell is at a
-	// prompt this is a no-op.
+	// 0x03 (Ctrl-C) interrupts the foreground headless process in the
+	// interactive contribute shell without killing the shell itself.
 	a.sendCommandToContributeERunSession(selection, "\x03")
 }
 
-// sendCommandToContributeERunSession looks up the contribute ERun PTY
-// for the env and writes the given bytes to its stdin. Best-effort: if
-// the tab does not exist (toggle was off, session was closed, etc.) the
-// call returns without error.
 func (a *App) sendCommandToContributeERunSession(selection uiSelection, command string) {
 	prefix := "contribute-erun\x00" + selectionKey(selection) + "\x00"
 	a.mu.Lock()

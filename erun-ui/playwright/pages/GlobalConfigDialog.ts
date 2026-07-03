@@ -1,8 +1,5 @@
 import type { Locator, Page } from '@playwright/test';
 
-// GlobalConfigDialog POM. The dialog is reached from the sidebar gear icon
-// (Sidebar.openSettings) and exposes the default-tenant selector plus the
-// cloud-alias and cloud-context lists.
 export class GlobalConfigDialog {
   constructor(public readonly page: Page) {}
 
@@ -19,9 +16,8 @@ export class GlobalConfigDialog {
   }
 
   defaultTenantTrigger(): Locator {
-    // SelectField wraps Radix Select, whose trigger is a button with the
-    // selected value as its accessible text. Match it by id-based selector
-    // since the visible label maps to id="global-config-defaulttenant".
+    // The trigger's accessible text is the selected value, not a stable label,
+    // so match it by id rather than by role name.
     return this.page.locator('#global-config-defaulttenant');
   }
 
@@ -50,26 +46,19 @@ export class GlobalConfigDialog {
     return this.locator().locator(`[data-cloud-alias="${alias}"]`).first();
   }
 
-  // cloudAliasGroupHeading targets the labelled group heading for a provider
-  // type. data-cloud-alias-group carries the provider type token.
   cloudAliasGroupHeading(providerType: string): Locator {
     return this.locator().locator(`[data-cloud-alias-group="${providerType}"]`);
   }
 
   // --- Add-provider picker ---
   //
-  // Both providers delegate alias creation to the CLI's guided `erun cloud init
-  // <provider>` flow over a PTY session; neither hosts an in-app add form. The
-  // add buttons launch the session and close the settings dialog, handing the
-  // terminal over to the CLI.
+  // Adding a provider delegates to the CLI's guided `erun cloud init` flow, not
+  // an in-app form; the add buttons launch that flow and close the dialog.
 
-  // addAWSButton targets the "AWS" add button in the provider picker.
   addAWSButton(): Locator {
     return this.locator().getByRole('button', { name: 'AWS', exact: true });
   }
 
-  // addCloudflareButton targets the "Cloudflare" add button in the provider
-  // picker.
   addCloudflareButton(): Locator {
     return this.locator().getByRole('button', { name: 'Cloudflare', exact: true });
   }
@@ -82,10 +71,9 @@ export class GlobalConfigDialog {
     await this.addCloudflareButton().click();
   }
 
-  // cloudflareForm targets the removed in-app "add Cloudflare token" form
-  // (deleted in favour of the guided CLI flow). Specs assert this
-  // resolves to zero matches — the negative invariant that no bespoke add form
-  // is hosted in the desktop.
+  // The in-app add form was removed in favour of the guided CLI flow; specs use
+  // this locator to assert it resolves to zero matches — the negative invariant
+  // that the desktop hosts no bespoke add form.
   cloudflareForm(): Locator {
     return this.page.locator('form[aria-label="Add Cloudflare token"]');
   }

@@ -10,13 +10,9 @@ import (
 	"time"
 )
 
-// IdleStopActionSkip / IdleStopActionArm / IdleStopActionWait /
-// IdleStopActionFire are the four outcomes of MaybeArmOrFireIdleStop.
-// They name the decision the caller (the in-pod monitor loop or the
-// desktop) should take: drop the pending entry and do nothing, arm a
-// fresh grace window, keep waiting because the window is open, or
-// fire the actual ec2:StopInstances. The string values are stable
-// and surfaced through `erun activity stop-ready --json`.
+// IdleStopActionSkip / Arm / Wait / Fire are the outcomes of
+// MaybeArmOrFireIdleStop. The string values are stable — they are
+// surfaced through `erun activity stop-ready --json`.
 const (
 	IdleStopActionSkip = "skip"
 	IdleStopActionArm  = "arm"
@@ -24,53 +20,37 @@ const (
 	IdleStopActionFire = "fire"
 )
 
-// StopHistoryCap limits the per-env stop history file. Newer entries
-// push older ones off the tail. Kept on the low end so the file stays
-// human-readable while still being deep enough to diagnose a
-// recurring stop pattern.
+// StopHistoryCap bounds the per-env stop history: low enough to stay
+// human-readable, deep enough to spot a recurring stop pattern.
 const StopHistoryCap = 10
 
-// EnvironmentStopPending is the on-disk record at
-// <home>/.erun/<tenant>/<env>/stop-pending.json. Writing the file
-// arms the grace-period warning; reading it lets readers (the MCP
-// `idle` tool, the desktop, anything driving `stop-ready`) compute
-// the seconds remaining until forced stop without re-running the
-// decision logic.
+// EnvironmentStopPending is the on-disk stop-pending record. Writing
+// it arms the grace-period warning; readers use it to compute the time
+// remaining before a forced stop without re-running the decision logic.
 type EnvironmentStopPending struct {
 	Since            time.Time               `json:"since"`
 	GraceSeconds     int64                   `json:"graceSeconds"`
 	CloudContextName string                  `json:"cloudContextName,omitempty"`
 	ReasonSummary    string                  `json:"reasonSummary,omitempty"`
 	Markers          []EnvironmentIdleMarker `json:"markers,omitempty"`
-	// Policy is the resolved idle policy at the moment the grace
-	// window was armed. Threaded into the history record on fire so
-	// History rows can answer "what was the timeout when this fired?"
-	// even after the user later edits the policy.
+	// Policy is snapshotted when the window is armed, so a stop-history
+	// row stays interpretable after the user later edits the policy.
 	Policy EnvironmentIdlePolicy `json:"policy"`
 }
 
-// Source values for EnvironmentStopHistoryEntry.Source. Stable
-// strings — the desktop renders them as a row badge and the
-// idle_stop_record MCP tool validates against them.
+// StopHistorySourcePodMonitor / StopHistorySourceHostManual are the
+// stable Source values for a stop-history row — the idle_stop_record
+// MCP tool validates against them.
 const (
 	StopHistorySourcePodMonitor = "pod-monitor"
 	StopHistorySourceHostManual = "host-manual"
 )
 
-// EnvironmentStopHistoryEntry is one row in the
-// <home>/.erun/<tenant>/<env>/stop-history.json array. Each entry
-// captures the per-marker idle/active state at grace-arm time plus
-// the moment the actual stop fired, so a user reading the History
-// tab can answer "why did my env stop?" — and "why has it stopped
-// repeatedly?" — without trawling logs.
-//
-// Source distinguishes auto-stops fired by the in-pod idle monitor
-// (entrypoint.sh's stop-ready loop) from manual stops fired by the
-// desktop's Stop button. ArmedAt is the moment the grace window
-// began — only set on pod-monitor stops; host-manual entries leave
-// it zero. Policy snapshots the resolved idle policy at arm/fire
-// time so a History row stays interpretable after the user later
-// edits the timeout or working hours.
+// EnvironmentStopHistoryEntry is one audit row a user reads to answer
+// "why did my env stop?" — and "why repeatedly?" — without trawling
+// logs. ArmedAt is set only on pod-monitor stops; host-manual entries
+// leave it zero. Policy is snapshotted at arm/fire time so the row
+// stays interpretable after the user later edits the policy.
 type EnvironmentStopHistoryEntry struct {
 	StoppedAt        time.Time                      `json:"stoppedAt"`
 	ArmedAt          time.Time                      `json:"armedAt,omitzero"`
@@ -82,13 +62,10 @@ type EnvironmentStopHistoryEntry struct {
 	Markers          []EnvironmentStopHistoryMarker `json:"markers,omitempty"`
 }
 
-// EnvironmentStopHistoryMarker mirrors EnvironmentIdleMarker's
-// salient fields without dragging the full marker shape (which has
-// snapshot timestamps and client lists irrelevant to the audit
-// record). Idle=true means the marker had elapsed its activity
-// timeout when the auto-stop fired; Idle=false records markers that
-// were still active despite the stop firing — useful when chasing a
-// regression where one marker's activity isn't being counted.
+// EnvironmentStopHistoryMarker is the audit-record subset of
+// EnvironmentIdleMarker. Idle=false records a marker still active when
+// the stop fired — useful when chasing a regression where a marker's
+// activity isn't being counted.
 type EnvironmentStopHistoryMarker struct {
 	Name           string `json:"name"`
 	Idle           bool   `json:"idle"`
@@ -96,11 +73,10 @@ type EnvironmentStopHistoryMarker struct {
 	SecondsIdleFor int64  `json:"secondsIdleFor,omitempty"`
 }
 
-// MaybeArmOrFireIdleStopParams collects the inputs for the central
-// decision function so callers do not have to thread eight scalars
-// every time. CloudContextName + ReasonSummary populate the pending
-// entry written on first arm so the desktop's warning toast can name
-// the env and the reason without re-running ResolveStoredEnvironmentIdleStatus.
+// MaybeArmOrFireIdleStopParams are the inputs to MaybeArmOrFireIdleStop.
+// CloudContextName and ReasonSummary are carried into the pending entry
+// so the warning toast can name the env and reason without re-resolving
+// idle status.
 type MaybeArmOrFireIdleStopParams struct {
 	Tenant           string
 	Environment      string
@@ -110,23 +86,18 @@ type MaybeArmOrFireIdleStopParams struct {
 	Now              time.Time
 }
 
-// MaybeArmOrFireIdleStopResult names the action the caller should
-// take. State is the pending entry as it exists on disk after the
-// call: empty when the action is Skip or Fire (the file is cleared),
-// populated otherwise. SecondsRemaining is the time left in the
-// grace window when Action == Wait.
+// MaybeArmOrFireIdleStopResult carries the chosen action and the
+// resulting on-disk state. State is empty on Skip and Fire (the pending
+// file is cleared) and populated otherwise.
 type MaybeArmOrFireIdleStopResult struct {
 	Action           string
 	State            EnvironmentStopPending
 	SecondsRemaining int64
 }
 
-// MaybeArmOrFireIdleStop is the shared decision function that both
-// the in-pod idle monitor (`erun activity stop-ready`) and the
-// desktop (`maybeStopIdleCloudEnvironment`) call. It owns the
-// arm/wait/fire transitions and the stop-pending.json file so the
-// behavior is identical on both sides; the only difference is who
-// performs the AWS call when the result is Fire.
+// MaybeArmOrFireIdleStop is the shared arm/wait/fire decision, owned in
+// one place so the in-pod monitor and the desktop behave identically;
+// the only per-caller difference is who performs the AWS stop on Fire.
 func MaybeArmOrFireIdleStop(params MaybeArmOrFireIdleStopParams) (MaybeArmOrFireIdleStopResult, error) {
 	tenant := strings.TrimSpace(params.Tenant)
 	environment := strings.TrimSpace(params.Environment)
@@ -153,9 +124,6 @@ func MaybeArmOrFireIdleStop(params MaybeArmOrFireIdleStopParams) (MaybeArmOrFire
 	return resolveArmedIdleStopWindow(tenant, environment, pending, now)
 }
 
-// armIdleStopGraceWindow writes a fresh stop-pending entry and reports
-// the Arm action. Called by MaybeArmOrFireIdleStop on the first pass
-// for an eligible env that has no pending window on disk yet.
 func armIdleStopGraceWindow(tenant, environment string, params MaybeArmOrFireIdleStopParams, now time.Time) (MaybeArmOrFireIdleStopResult, error) {
 	grace := idleStopGraceSeconds(params.Status)
 	armed := EnvironmentStopPending{
@@ -176,14 +144,9 @@ func armIdleStopGraceWindow(tenant, environment string, params MaybeArmOrFireIdl
 	}, nil
 }
 
-// resolveArmedIdleStopWindow decides between Wait and Fire for an env
-// whose grace window is already armed. While the window is still open
-// it reports Wait with the seconds remaining; once the grace has
-// elapsed it clears the pending file before reporting Fire so a
-// crashing caller does not leave the env stuck "armed forever" after a
-// successful stop attempt that didn't get a chance to clean up. The
-// history entry is written separately by the caller on successful AWS
-// stop.
+// resolveArmedIdleStopWindow clears the pending file before reporting
+// Fire so a caller that crashes mid-stop does not strand the env
+// "armed forever".
 func resolveArmedIdleStopWindow(tenant, environment string, pending EnvironmentStopPending, now time.Time) (MaybeArmOrFireIdleStopResult, error) {
 	elapsed := now.Sub(pending.Since)
 	if elapsed < time.Duration(pending.GraceSeconds)*time.Second {
@@ -206,10 +169,8 @@ func resolveArmedIdleStopWindow(tenant, environment string, pending EnvironmentS
 	}, nil
 }
 
-// idleStopGraceSeconds picks the grace-period length for an env.
-// The user-facing spec is "at least the idle
-// timeout", so we use the resolved idle timeout verbatim. A
-// 10-minute idle timeout yields a 10-minute warning window.
+// idleStopGraceSeconds uses the resolved idle timeout verbatim as the
+// grace window — the spec is "warn for at least the idle timeout".
 func idleStopGraceSeconds(status EnvironmentIdleStatus) int64 {
 	seconds := int64(status.Policy.Timeout / time.Second)
 	if seconds <= 0 {
@@ -218,11 +179,9 @@ func idleStopGraceSeconds(status EnvironmentIdleStatus) int64 {
 	return seconds
 }
 
-// cloneIdleMarkersForPending drops snapshot-only timestamps from the
-// markers so the pending file stays compact and stable across
-// reads. Client lists are intentionally omitted — the audit need is
-// "which markers were idle when grace was armed", not "which IPs
-// last sent bytes".
+// cloneIdleMarkersForPending copies only the audit-relevant marker
+// fields; client IP lists are omitted because the record needs "which
+// markers were idle when grace was armed", not who last sent bytes.
 func cloneIdleMarkersForPending(markers []EnvironmentIdleMarker) []EnvironmentIdleMarker {
 	if len(markers) == 0 {
 		return nil
@@ -240,11 +199,9 @@ func cloneIdleMarkersForPending(markers []EnvironmentIdleMarker) []EnvironmentId
 	return out
 }
 
-// LoadEnvironmentStopPending reads the pending file for the env.
-// Returns ok=false (no error) when the file is absent — the caller
-// can treat that as "no warning armed". Returns an error on
-// malformed contents so a corrupt file is loud rather than silently
-// suppressed.
+// LoadEnvironmentStopPending returns ok=false and no error when the
+// file is absent ("no warning armed"), and an error on malformed
+// contents so a corrupt file is loud rather than silently ignored.
 func LoadEnvironmentStopPending(tenant, environment string) (EnvironmentStopPending, bool, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
@@ -269,9 +226,9 @@ func LoadEnvironmentStopPending(tenant, environment string) (EnvironmentStopPend
 	return pending, true, nil
 }
 
-// SaveEnvironmentStopPending atomically writes the pending entry.
-// Used by MaybeArmOrFireIdleStop on the "arm" transition; callers
-// should not write the file directly except in tests.
+// SaveEnvironmentStopPending writes the pending entry. Callers should
+// not write the file directly except in tests; go through
+// MaybeArmOrFireIdleStop.
 func SaveEnvironmentStopPending(tenant, environment string, pending EnvironmentStopPending) error {
 	path, err := EnvironmentStopPendingPath(tenant, environment)
 	if err != nil {
@@ -288,9 +245,8 @@ func SaveEnvironmentStopPending(tenant, environment string, pending EnvironmentS
 	return os.WriteFile(path, body, 0o600)
 }
 
-// ClearEnvironmentStopPending removes the pending file. No-op when
-// the file is absent. Used by MaybeArmOrFireIdleStop on the Skip
-// and Fire transitions, and by `erun activity cancel-stop-pending`.
+// ClearEnvironmentStopPending removes the pending file, or no-ops when
+// it is absent.
 func ClearEnvironmentStopPending(tenant, environment string) error {
 	path, err := EnvironmentStopPendingPath(tenant, environment)
 	if err != nil {
@@ -302,10 +258,9 @@ func ClearEnvironmentStopPending(tenant, environment string) error {
 	return nil
 }
 
-// EnvironmentStopPendingPath resolves to
-// <home>/.erun/<tenant>/<env>/stop-pending.json. The file lives
-// next to idle-stop.log so the same shared home PVC carries both
-// signals through pod restarts.
+// EnvironmentStopPendingPath resolves the pending-file path. It sits on
+// the shared home PVC alongside idle-stop.log so both survive pod
+// restarts.
 func EnvironmentStopPendingPath(tenant, environment string) (string, error) {
 	dir, err := environmentRuntimeStateDir(tenant, environment)
 	if err != nil {
@@ -314,8 +269,7 @@ func EnvironmentStopPendingPath(tenant, environment string) (string, error) {
 	return filepath.Join(dir, "stop-pending.json"), nil
 }
 
-// EnvironmentStopHistoryPath resolves to
-// <home>/.erun/<tenant>/<env>/stop-history.json.
+// EnvironmentStopHistoryPath resolves the stop-history file path.
 func EnvironmentStopHistoryPath(tenant, environment string) (string, error) {
 	dir, err := environmentRuntimeStateDir(tenant, environment)
 	if err != nil {
@@ -324,11 +278,9 @@ func EnvironmentStopHistoryPath(tenant, environment string) (string, error) {
 	return filepath.Join(dir, "stop-history.json"), nil
 }
 
-// AppendStopHistoryEntry prepends the entry to stop-history.json
-// (newest-first) and truncates to StopHistoryCap. Called by the
-// caller that actually fires the AWS stop (the in-pod monitor or
-// the desktop's manual Stop button) so the on-disk array always
-// reflects real ec2:StopInstances calls, not just arming events.
+// AppendStopHistoryEntry records one entry newest-first. Only the
+// caller that fires the actual AWS stop calls it, so the history
+// reflects real stops, not arming events.
 func AppendStopHistoryEntry(tenant, environment string, entry EnvironmentStopHistoryEntry) error {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
@@ -358,9 +310,8 @@ func AppendStopHistoryEntry(tenant, environment string, entry EnvironmentStopHis
 	return os.WriteFile(path, body, 0o600)
 }
 
-// LoadEnvironmentStopHistory returns the env's auto-stop audit
-// array newest-first. Returns an empty slice (no error) when the
-// file is absent.
+// LoadEnvironmentStopHistory returns the audit array newest-first, or
+// an empty slice (no error) when the file is absent.
 func LoadEnvironmentStopHistory(tenant, environment string) ([]EnvironmentStopHistoryEntry, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
@@ -374,9 +325,6 @@ func LoadEnvironmentStopHistory(tenant, environment string) ([]EnvironmentStopHi
 	return readStopHistoryFile(path)
 }
 
-// readStopHistoryFile is the shared reader for stop-history.json.
-// Returns an empty slice when the file is missing and an error when
-// the JSON is malformed.
 func readStopHistoryFile(path string) ([]EnvironmentStopHistoryEntry, error) {
 	body, err := os.ReadFile(path)
 	if err != nil {
@@ -395,13 +343,10 @@ func readStopHistoryFile(path string) ([]EnvironmentStopHistoryEntry, error) {
 	return history, nil
 }
 
-// environmentRuntimeStateDir resolves the per-env directory under
-// HOME/.erun where the runtime persists state across pod restarts —
-// idle-stop.log, stop-pending.json, stop-history.json. The path
-// matches the one used by the entrypoint shell script
-// (erun-devops/docker/erun-devops/entrypoint.sh) so the in-pod
-// monitor and any tool running under the same HOME (including the
-// desktop side, where applicable) read and write the same files.
+// environmentRuntimeStateDir resolves the per-env HOME/.erun state
+// directory. The path must match entrypoint.sh
+// (erun-devops/docker/erun-devops/entrypoint.sh) so the in-pod monitor
+// and any tool under the same HOME share the same files.
 func environmentRuntimeStateDir(tenant, environment string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -413,11 +358,8 @@ func environmentRuntimeStateDir(tenant, environment string) (string, error) {
 	return filepath.Join(home, ".erun", tenant, environment), nil
 }
 
-// IdleStopReasonSummary builds the one-line reason string used for
-// both the grace-arm warning toast and the stop-history record.
-// Lists idle markers (excluding working-hours) by name; falls back
-// to "outside working hours" when only that marker is idle, or to a
-// generic "idle policy met" when the markers slice is empty.
+// IdleStopReasonSummary builds the one-line reason shown in both the
+// grace-arm warning toast and the stop-history record.
 func IdleStopReasonSummary(status EnvironmentIdleStatus) string {
 	var parts []string
 	for _, marker := range status.Markers {

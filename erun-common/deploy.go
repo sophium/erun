@@ -21,43 +21,31 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// DefaultHelmDeploymentTimeout is the fallback `helm upgrade --wait --timeout`
-// for a rollout when the environment sets no `deploy.timeout`. It is 5m so the
-// first deploy of a fresh, large image tag against a cold node cache is not
-// failed mid-pull: a ~1GB runtime image can take minutes to pull, and the pod
-// watcher keeps waiting through an in-progress pull up to this bound (aborting
-// early only on a real, non-pull failure). Override per environment via
-// EnvConfig.Deploy.Timeout or per deploy via the --rollout-timeout flag /
-// MCP `timeout` input.
+// DefaultHelmDeploymentTimeout is the fallback helm rollout timeout when an
+// environment sets no deploy.timeout. It is 5m so the first deploy of a large
+// image against a cold node cache is not failed mid-pull: a ~1GB runtime image
+// can take minutes to pull, and the pod watcher waits out an in-progress pull up
+// to this bound, aborting early only on a real, non-pull failure.
 const DefaultHelmDeploymentTimeout = "5m0s"
 
 // EnvironmentDeployConfig carries per-environment deploy tuning persisted on
-// EnvConfig (the `deploy:` block of ~/.config/erun/<tenant>/<env>/config.yaml),
-// the neighbour of the `idle:` block. Today it holds only the helm rollout
-// timeout; it is a struct (rather than a bare field) so future per-env deploy
-// knobs extend it without another config migration.
+// EnvConfig's `deploy:` block.
 type EnvironmentDeployConfig struct {
-	// Timeout is the `helm upgrade --wait --timeout` duration for this env's
-	// rollouts, as a Go duration string (e.g. "5m0s"). Empty falls back to
+	// Timeout is this env's helm rollout timeout; empty falls back to
 	// DefaultHelmDeploymentTimeout.
 	Timeout string `yaml:"timeout,omitempty" json:"timeout,omitempty"`
-	// Components is the per-machine saved deploy selection: the chart names
-	// (directory names under <tenant>-devops/k8s/, plus the runtime release name
-	// <tenant>-devops / erun-devops) that `erun deploy` rolls out for this env
-	// when no --components flag is passed. It is the operator's saved default for
-	// this env on this machine, written by the desktop "Save as default" action.
-	// Empty means "no saved selection": deploy falls back to the repo
-	// k8s.deployments plan, then to the runtime chart alone. Selection is
-	// opt-in-only — only the named charts (plus the runtime when named or when
-	// the whole selection is empty) deploy; nothing else rides along.
+	// Components is the operator's per-machine saved deploy selection for this
+	// env — what `erun deploy` rolls out when no --components flag is passed.
+	// Empty means no saved selection: deploy falls back to the repo plan, then
+	// the runtime chart alone. Selection is opt-in-only: only named charts (plus
+	// the runtime when named or when the selection is empty) deploy.
 	Components []string `yaml:"components,omitempty" json:"components,omitempty"`
 }
 
-// Resolve validates the configured rollout timeout and returns the canonical
-// duration string handed to `helm upgrade --timeout`. An empty value falls back
-// to DefaultHelmDeploymentTimeout; a malformed or non-positive duration is a
-// hard error so a misconfigured environment fails the deploy loudly instead of
-// silently reverting to the default. Mirrors EnvironmentIdleConfig.Resolve.
+// Resolve returns the canonical rollout-timeout string, falling back to
+// DefaultHelmDeploymentTimeout when empty. A malformed or non-positive duration
+// is a hard error so a misconfigured environment fails the deploy loudly rather
+// than silently revert to the default.
 func (c EnvironmentDeployConfig) Resolve() (string, error) {
 	timeout := strings.TrimSpace(c.Timeout)
 	if timeout == "" {
@@ -176,16 +164,16 @@ type HelmDeploySpec struct {
 	Timeout            string
 	Verbosity          int
 	// Cloudflare* deliver a delegated Cloudflare token to the runtime pod.
-	// CloudflareEnabled gates the whole path; CloudflareTokenRef is a handle
-	// into the secret store (never the token itself), resolved at execution time.
+	// CloudflareTokenRef is a handle into the secret store, never the token
+	// itself, resolved at execution time.
 	CloudflareEnabled    bool
 	CloudflareAccountID  string
 	CloudflareSecretName string
 	CloudflareTokenRef   string
-	// RuntimeRegistry is the env's runtime image-ref / runtime-version
-	// registry (EnvConfig.RuntimeRegistry), distinct from ContainerRegistry
-	// (the DEPLOY-marked registry the cluster pulls from). Injected so in-pod
-	// runtime image-ref resolution does not fall back to ghcr.io/sophium.
+	// RuntimeRegistry is the env's runtime image-ref / runtime-version registry,
+	// distinct from ContainerRegistry (the DEPLOY-marked registry the cluster
+	// pulls from). Injected so in-pod runtime image-ref resolution does not fall
+	// back to ghcr.io/sophium.
 	RuntimeRegistry string
 	// ContainerRegistries is the env's full marked registry list, injected so
 	// in-pod build/push role resolution works on remote/runtime pods whose list
@@ -194,17 +182,14 @@ type HelmDeploySpec struct {
 	// DisableBuildScript mirrors EnvConfig.DisableBuildScript so a remote-agent
 	// pod's in-pod build honours the operator's build.sh-discovery choice.
 	DisableBuildScript bool
-	// Platform is the resolved per-instance platform config (base domain,
-	// services zone, authoritative IP, nameservers). Zero for non-platform
-	// projects; when set, deploy threads it to every chart as platform.*
-	// values so the PowerDNS singleton can bootstrap its authoritative zone.
+	// Platform is the resolved per-instance platform config. Zero for
+	// non-platform projects; when set, deploy threads it to every chart as
+	// platform.* values so the PowerDNS singleton can bootstrap its authoritative
+	// zone.
 	Platform PlatformConfig
 	// MCPAuth* require the per-env erun-mcp edge to authenticate bearer tokens
-	// against a trusted public key. MCPAuthEnabled gates the whole
-	// path; MCPAuthPublicKeyPEM is the (non-secret) key delivered out-of-band as
-	// a Secret like the Cloudflare token; MCPAuthIssuer is the file:// issuer the
-	// token's iss claim names and the server loads the key from; MCPAuthAudience
-	// is the per-env audience. Empty leaves the edge in legacy loopback-only
+	// against a trusted public key, delivered out-of-band as a Secret like the
+	// Cloudflare token. Empty leaves the edge in legacy loopback-only
 	// pass-through, so non-desktop deploys are byte-for-byte unchanged.
 	MCPAuthEnabled      bool
 	MCPAuthPublicKeyPEM string
@@ -248,48 +233,35 @@ type DeployTarget struct {
 	VersionOverride string
 	// Components is the explicit, one-shot deploy selection for this run. When
 	// non-empty it fully determines what deploys (opt-in-only), overriding the
-	// env's saved deploy.components and the repo k8s.deployments plan; the
-	// runtime deploys only if named. Names are chart directory names under
-	// <tenant>-devops/k8s/ or the runtime release name (<tenant>-devops /
-	// erun-devops); a name matching no discovered chart and no runtime alias is
-	// an error during resolve. Empty means "no explicit selection": deploy falls
-	// back to the saved set, then the plan, then the runtime chart alone.
+	// env's saved deploy.components and the repo plan; the runtime deploys only
+	// if named, and a name matching no chart or runtime alias errors at resolve.
+	// Empty means no explicit selection: deploy falls back to the saved set, then
+	// the plan, then the runtime chart alone.
 	Components []string
 	// Force re-runs the helm upgrade even when the deployed release already
 	// matches the requested version (no-op rollouts are otherwise skipped).
 	Force bool
-	// RolloutTimeout overrides the helm rollout `--timeout` for this deploy
-	// only, taking precedence over the env's `deploy.timeout` config and the
-	// DefaultHelmDeploymentTimeout. A Go duration string (e.g. "8m"); empty
-	// leaves the resolved per-env/default value untouched. Set by the CLI
-	// `--rollout-timeout` flag and the MCP `timeout` input.
+	// RolloutTimeout overrides the helm rollout timeout for this deploy only,
+	// taking precedence over the env's deploy.timeout and
+	// DefaultHelmDeploymentTimeout. Empty leaves the resolved per-env/default
+	// value untouched.
 	RolloutTimeout string
 	// MCPAuthPublicKeyPath, when set, points at a PEM public key the runtime
-	// chart trusts so the per-env erun-mcp edge requires a bearer token signed
-	// by it. Empty leaves the edge in legacy loopback-only mode, so
-	// non-desktop deploys are unchanged. The desktop sets it to its persisted
-	// public key on both its deploy paths; the CLI exposes it as
-	// `--mcp-auth-public-key`.
+	// chart trusts so the per-env erun-mcp edge requires a bearer token signed by
+	// it. Empty leaves the edge in legacy loopback-only mode, so non-desktop
+	// deploys are unchanged.
 	MCPAuthPublicKeyPath string
-	// RuntimeImageOverride, when set, installs the runtime via the canonical
-	// published erun-devops chart with this image as imageOverrides.erun-devops,
-	// pinned to the deploy version — even when the env has a repo-local runtime
-	// chart. It lets an operator bootstrap an env on the canonical ERun image (or
-	// any external image) before the env's own <tenant>-devops image exists, then
-	// switch to the tenant image once it is built. The CLI exposes it as
-	// `--runtime-image`, mirroring `erun open --runtime-image`; the raw value is
-	// recorded as EnvConfig.RuntimeImage so a later open/redeploy addresses the
-	// same image. Empty leaves runtime-chart resolution untouched.
+	// RuntimeImageOverride lets an operator stand up an env on the shared ERun
+	// base image (or any external image) before the env's own <tenant>-devops
+	// image exists, then switch to the tenant image once it is built. Empty
+	// leaves runtime-chart resolution untouched.
 	RuntimeImageOverride string
 }
 
 // DeploySpec is a pure helm-install plan: it installs the image and chart
-// already published at a version, by reference. deploy does not build, push,
-// or publish — those are the build and push primitives, composed above deploy
-// by an orchestrator (the `build --deploy` shortcut, `erun open --deploy`, or
-// the UI). The image reference rides in via Deploy.ImageOverrides /
-// Deploy.Version; the chart reference is DeployContext.ChartPath (a local path
-// or a published OCI ref), resolved by the caller.
+// already published at a version, by reference. deploy does not build, push, or
+// publish — those are the build and push primitives, composed above deploy by an
+// orchestrator (the build --deploy shortcut, erun open --deploy, or the UI).
 type DeploySpec struct {
 	Target        OpenResult
 	DeployContext KubernetesDeployContext
@@ -301,39 +273,22 @@ type DeploySpec struct {
 	SkipHelm bool
 }
 
-// EnvConfigSaver writes an updated env config to disk. The contract
-// matches what (ConfigStore).SaveEnvConfig provides; CLI and MCP wire
-// it through their stores so shared code can persist post-deploy
-// state without depending on the full ConfigStore.
+// EnvConfigSaver writes an updated env config to disk.
 type EnvConfigSaver func(tenant string, config EnvConfig) error
 
-// PersistRuntimeVersionFromDeploySpecs writes the version and source
-// registry of the runtime chart that was just deployed back into the
-// env config so downstream readers (the desktop runtime dialog, `erun
-// list`, and any `erun open` invocation that doesn't pass --version)
-// reflect the deployed state. Without this, `erun deploy --version
-// 1.0.54` left env config's runtimeversion at the previously persisted
-// value and the dialog kept rendering the stale string.
-//
-// The registry is recorded alongside the version as provenance so a
-// subsequent reopen can address the same image even if the user later
+// PersistRuntimeVersionFromDeploySpecs writes the just-deployed runtime chart's
+// version and source registry back into the env config so downstream readers
+// (the desktop runtime dialog, `erun list`, and a bare `erun open`) reflect the
+// deployed state rather than a stale persisted version. The registry is recorded
+// as provenance so a later reopen addresses the same image even if the user
 // edits the project's container registry.
 //
-// Looks for the spec whose ReleaseName equals <tenant>-devops; if
-// found and its Deploy.Version or Deploy.ContainerRegistry differ from
-// the env config, the env config is rewritten with the deployed pair.
-// Component-only deploys (no runtime chart in the spec list) are
-// no-ops, as are dry-runs and calls with a nil saver.
-//
-// A runtime chart whose helm upgrade was skipped (SkipHelm: every image
-// promoted from the fingerprint cache, so nothing was rebuilt, pushed, or
-// rolled out) keeps a freshly minted Deploy.Version that was never pushed.
-// Persisting that would point the env config — and the desktop runtime dialog —
-// at a phantom version the deploy picker can never offer (it gates on registry
-// presence). Instead, heal RuntimeVersion to the version the release is actually
-// running (resolveDeployedVersion reads the live helm appVersion), which is
-// guaranteed pushed. When that cannot be read, leave RuntimeVersion untouched
-// rather than record a phantom.
+// A runtime chart whose upgrade was skipped (SkipHelm: every image promoted from
+// cache, nothing pushed) carries a freshly minted version that was never pushed;
+// persisting it would point the env config at a phantom version the deploy
+// picker can never offer. Instead, heal RuntimeVersion to the version the release
+// is actually running, which is guaranteed pushed, and leave it untouched when
+// that cannot be read.
 func PersistRuntimeVersionFromDeploySpecs(ctx Context, specs []DeploySpec, save EnvConfigSaver, resolveDeployedVersion HelmReleaseVersionResolverFunc) error {
 	if save == nil || ctx.DryRun || len(specs) == 0 {
 		return nil
@@ -359,9 +314,9 @@ func PersistRuntimeVersionFromDeploySpecs(ctx Context, specs []DeploySpec, save 
 }
 
 // resolveRunningRuntimeVersion returns the version the runtime release is
-// actually running, used to heal RuntimeVersion after a cached (SkipHelm)
-// deploy. An empty string means "could not determine" — the caller then leaves
-// the persisted version untouched rather than recording the never-pushed mint.
+// actually running. An empty string means "could not determine" — the caller
+// then leaves the persisted version untouched rather than record the
+// never-pushed mint.
 func resolveRunningRuntimeVersion(ctx Context, spec DeploySpec, resolveDeployedVersion HelmReleaseVersionResolverFunc) string {
 	if resolveDeployedVersion == nil {
 		return ""
@@ -485,9 +440,8 @@ func loadProjectK8sPlanForRepo(repoPath, environment string) (ProjectK8sConfig, 
 }
 
 // runDeployStep runs every spec in the group. Single-spec steps and dry-run
-// invocations execute serially so traces remain deterministic; real runs with
-// multiple specs in the same step launch goroutines and wait for all to
-// finish, surfacing the joined error if any failed.
+// invocations execute serially so traces stay deterministic; a real multi-spec
+// step runs them in parallel and joins their errors.
 func runDeployStep(ctx Context, stepIndex int, specs []DeploySpec, deploy HelmChartDeployerFunc) error {
 	if len(specs) == 0 {
 		return nil
@@ -525,15 +479,11 @@ func runDeployStep(ctx Context, stepIndex int, specs []DeploySpec, deploy HelmCh
 // when none is needed.
 //
 // A chart that declares dependencies vendors its published subcharts into
-// charts/; helm upgrade --install fails ("found in Chart.yaml, but missing in
-// charts/ directory") when they are absent, and erun deploy is the only step
-// that installs the chart — so it builds them first. This keeps deploy a pure
-// consume/by-reference primitive: the build pulls the already-published
-// dependency charts pinned in Chart.lock (it mints nothing), and it branches on
-// the chart artifact (does it declare deps) — never on env type or name.
-// Published OCI charts (the runtime) have no local charts/ dir, so they are
-// skipped. The build runs against the original chart dir; prepareHelmChartForDeploy
-// then copies the populated charts/ into the version-stamped temp copy helm installs.
+// charts/; helm upgrade --install fails when they are absent, and erun deploy is
+// the only step that installs the chart — so it builds them first. This stays a
+// pure consume primitive: the build pulls already-published dependency charts
+// pinned in Chart.lock (it mints nothing) and branches on the chart artifact
+// (does it declare deps), never on env type or name.
 func chartDependencyBuildPlan(ctx Context, deployInput HelmDeploySpec) (*commandSpec, error) {
 	chartPath := strings.TrimSpace(deployInput.ChartPath)
 	if chartPath == "" || isOCIChartReference(chartPath) {
@@ -551,10 +501,9 @@ func chartDependencyBuildPlan(ctx Context, deployInput HelmDeploySpec) (*command
 	return &build, nil
 }
 
-// runChartDependencyBuild executes the planned dependency build on a real run;
-// it is a no-op when chartDependencyBuildPlan found nothing to build. Called
-// after the single-flight acquire so a deduped or parallel deploy never races
-// on the shared charts/ dir.
+// runChartDependencyBuild executes the planned dependency build (a no-op when
+// there is nothing to build). Called after the single-flight acquire so a
+// deduped or parallel deploy never races on the shared charts/ dir.
 func runChartDependencyBuild(ctx Context, deployInput HelmDeploySpec, build *commandSpec, target string) error {
 	if build == nil {
 		return nil
@@ -581,10 +530,6 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 	if err := applyMCPAuthSecret(ctx, deployInput); err != nil {
 		return fmt.Errorf("deploy %s: %w", deployInput.ReleaseName, err)
 	}
-	// An umbrella chart's published subcharts must be present in charts/ before
-	// helm upgrade --install; trace the build so it shows in the dry-run plan,
-	// and run it (real run) after the single-flight acquire below so a deduped
-	// or parallel deploy never races on the shared charts/ dir.
 	depBuild, err := chartDependencyBuildPlan(ctx, deployInput)
 	if err != nil {
 		return fmt.Errorf("deploy %s: %w", deployInput.ReleaseName, err)
@@ -613,14 +558,12 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 	return runHelmDeployRollout(ctx, deployInput, deploy, target)
 }
 
-// helmDeployTargetLabel builds the "<tenant>/<env>[ · <release>][ <version>]"
-// label used in deploy feedback. It names the release for a non-runtime
-// component so a single-component deploy (e.g. erun-backend-postgres) is not
-// mistaken for a full-env redeploy: "erun/local · erun-backend-postgres 18.3"
-// instead of the bare "erun/local 18.3". The runtime chart's line stays
-// "<tenant>/<env> <version>" — it *is* the env, carries the meaningful runtime
-// version, and feeds the helm-release poller + version persistence. The
-// version on a component line is that component's own version.
+// helmDeployTargetLabel builds the label used in deploy feedback. It names the
+// release for a non-runtime component so a single-component deploy (e.g.
+// erun-backend-postgres) is not mistaken for a full-env redeploy. The runtime
+// chart's line stays "<tenant>/<env> <version>" — it *is* the env, carries the
+// meaningful runtime version, and feeds the helm-release poller + version
+// persistence.
 func helmDeployTargetLabel(deployInput HelmDeploySpec) string {
 	target := deployInput.Tenant + "/" + deployInput.Environment
 	if release := strings.TrimSpace(deployInput.ReleaseName); release != "" && release != RuntimeReleaseName(deployInput.Tenant) {
@@ -633,10 +576,9 @@ func helmDeployTargetLabel(deployInput HelmDeploySpec) string {
 }
 
 // runHelmDeployRollout performs the real-run helm rollout for an acquired,
-// non-duplicate deploy: it emits the user-facing progress lines, runs the
-// deployer under a spinner, and reports timing plus success/failure. The
-// "==> Deploy of <release> failed" / "==> Deployed <target> in <elapsed>"
-// lines are part of the trace contract the desktop activity queue parses.
+// non-duplicate deploy. The "==> Deploy of <release> failed" / "==> Deployed
+// <target> in <elapsed>" lines are part of the trace contract the desktop
+// activity queue parses.
 func runHelmDeployRollout(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDeployerFunc, target string) error {
 	ctx.Info("==> Deploying " + target)
 	ctx.Info("    namespace " + deployInput.Namespace + " on context " + deployInput.KubernetesContext)
@@ -650,9 +592,8 @@ func runHelmDeployRollout(ctx Context, deployInput HelmDeploySpec, deploy HelmCh
 	deployErr := runHelmUpgradeWithSelectorRecovery(ctx, deployInput, deploy, target)
 	elapsed := time.Since(started).Round(time.Second)
 	if deployErr != nil {
-		// Name the release so a parallel step (multiple charts deploying at
-		// once) makes clear which one failed; the helm reason is in the
-		// returned error, surfaced by the command's error handler.
+		// Name the release so a parallel step (multiple charts at once) makes
+		// clear which one failed.
 		failed := "==> Deploy failed after " + elapsed.String()
 		if rel := strings.TrimSpace(deployInput.ReleaseName); rel != "" {
 			failed = "==> Deploy of " + rel + " failed after " + elapsed.String()
@@ -732,12 +673,9 @@ func ResolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 }
 
 // resolveRolloutTimeoutOverride validates an explicit per-deploy rollout-timeout
-// override (the CLI --rollout-timeout flag / MCP `timeout` input). It returns
-// the canonical duration string and ok=true when a non-empty value is set,
-// ok=false when blank (no override), and a hard error on a malformed or
-// non-positive duration so the deploy fails loudly rather than silently
-// ignoring the operator's input. Precedence: this override > env deploy.timeout
-// > DefaultHelmDeploymentTimeout.
+// override. A malformed or non-positive duration is a hard error so the deploy
+// fails loudly rather than silently ignore the operator's input. Precedence:
+// this override > env deploy.timeout > DefaultHelmDeploymentTimeout.
 func resolveRolloutTimeoutOverride(raw string) (string, bool, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -769,12 +707,9 @@ func resolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 
 	runtimeImageOverride := strings.TrimSpace(target.RuntimeImageOverride)
 	if runtimeImageOverride != "" {
-		// The operator chose the runtime image explicitly (the desktop picker's
-		// ERun-base entry, or `--runtime-image`). Record it on the env so the
-		// remote/published-chart paths honour it as imageOverrides.erun-devops and
-		// a later open/redeploy addresses the same image; the local-chart branch
-		// reroutes through the published chart so the override wins even when a
-		// repo-local runtime chart exists.
+		// The operator chose the runtime image explicitly. Record it on the env
+		// so a later open/redeploy addresses the same image, and so the override
+		// wins even when a repo-local runtime chart exists.
 		resolvedTarget.EnvConfig.RuntimeImage = runtimeImageOverride
 	}
 
@@ -782,11 +717,6 @@ func resolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 		return resolvePublishedDevopsDeploySpecs(ctx, store, resolvedTarget, target.VersionOverride)
 	}
 
-	// Opt-in-only selection lives in resolveSelectedLocalDeploySpecs: deploy
-	// exactly the selected charts (precedence --components > saved
-	// deploy.components > the repo plan; empty => the runtime chart alone), with
-	// the published-runtime fallback when the runtime is selected but not vendored
-	// locally.
 	return resolveSelectedLocalDeploySpecs(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, resolvedTarget, target, buildOrchestration, runtimeImageOverride)
 }
 
@@ -838,8 +768,6 @@ func resolveSelectedLocalDeploySpecs(ctx Context, store DeployStore, findProject
 	return specs, nil
 }
 
-// traceDeployComponentSelection emits the dry-run decision line naming which
-// precedence tier chose the deploy selection and what it resolved to.
 func traceDeployComponentSelection(ctx Context, selected []string, source string) {
 	if len(selected) == 0 {
 		ctx.Trace("deploy: component selection source " + source + "; deploying the runtime chart alone")
@@ -850,9 +778,8 @@ func traceDeployComponentSelection(ctx Context, selected []string, source string
 
 // appendRuntimeFallbackSpecs appends the published erun-devops runtime spec when
 // the runtime is selected but the tenant has no repo-local runtime chart — the
-// deploy counterpart of erun open's published fallback, letting a
-// plain deploy bootstrap or heal the runtime from the published ERun image. A
-// --runtime-image override rides in as imageOverrides.erun-devops.
+// deploy counterpart of erun open's published fallback, letting a plain deploy
+// bootstrap or heal the runtime from the published ERun image.
 func appendRuntimeFallbackSpecs(ctx Context, store DeployStore, resolvedTarget OpenResult, versionOverride string, specs []DeploySpec, runtimeSelected, hasLocalRuntime bool) ([]DeploySpec, error) {
 	if !runtimeSelected || hasLocalRuntime {
 		return specs, nil
@@ -865,8 +792,6 @@ func appendRuntimeFallbackSpecs(ctx Context, store DeployStore, resolvedTarget O
 	return append(specs, publishedSpecs...), nil
 }
 
-// resolveDeploySpecsForContexts resolves a deploy spec for each local k8s deploy
-// context, preserving order.
 func resolveDeploySpecsForContexts(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, deployContexts []KubernetesDeployContext, versionOverride string, currentBuild *DockerBuildSpec, runtimeImageOverride string) ([]DeploySpec, error) {
 	specs := make([]DeploySpec, 0, len(deployContexts))
 	for _, deployContext := range deployContexts {
@@ -881,8 +806,8 @@ func resolveDeploySpecsForContexts(ctx Context, store DeployStore, findProjectRo
 
 // resolvePublishedDevopsDeploySpecs resolves the single published-devops deploy
 // spec for a target with no local k8s tree to install — a remote-repo target, or
-// a local env bootstrapping on `--runtime-image` before its own <tenant>-devops
-// chart exists — attaching cloud/tenant metadata to the helm input.
+// a local env bootstrapping on --runtime-image before its own <tenant>-devops
+// chart exists.
 func resolvePublishedDevopsDeploySpecs(ctx Context, store DeployStore, resolvedTarget OpenResult, versionOverride string) ([]DeploySpec, error) {
 	spec, err := resolvePublishedDevopsDeploySpec(ctx, resolvedTarget, versionOverride)
 	if err != nil {
@@ -894,13 +819,11 @@ func resolvePublishedDevopsDeploySpecs(ctx Context, store DeployStore, resolvedT
 	return []DeploySpec{spec}, nil
 }
 
-// resolveCurrentLocalDeployContexts discovers the local k8s deploy contexts for
-// the target's repo, filters them to the opt-in-only selection, and sorts them
-// into the project's configured deploy order. A missing or empty
-// <tenant>-devops/k8s tree is not an error: it yields an empty context set, and
-// the caller stands the runtime up via the published erun-devops chart when the
-// runtime is selected. Any other discovery error (a malformed chart) still
-// propagates.
+// resolveCurrentLocalDeployContexts discovers, filters, and orders the local k8s
+// deploy contexts for the target's repo. A missing or empty <tenant>-devops/k8s
+// tree is not an error: it yields an empty set, and the caller stands the runtime
+// up via the published erun-devops chart. Any other discovery error (a malformed
+// chart) still propagates.
 func resolveCurrentLocalDeployContexts(findProjectRoot ProjectFinderFunc, resolveKubernetesDeployContext DeployContextResolverFunc, resolvedTarget OpenResult, selected []string, plan ProjectK8sConfig) ([]KubernetesDeployContext, error) {
 	deployContexts, err := ResolveCurrentKubernetesDeployContexts(findProjectRoot, resolveKubernetesDeployContext, resolvedTarget.RepoPath)
 	if err != nil {
@@ -946,18 +869,14 @@ func resolveDeploySpecForOpenResult(ctx Context, store DeployStore, findProjectR
 }
 
 func resolveDeploySpecForContext(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, deployContext KubernetesDeployContext, versionOverride string, currentBuild *DockerBuildSpec, runtimeImageOverride string) (DeploySpec, error) {
-	// A pure deploy installs by reference; only the store is consulted (for
-	// cloud/tenant metadata and image verification). findProjectRoot,
-	// resolveDockerBuildContext, resolveKubernetesDeployContext, and now are
-	// retained on the signature for the shared resolution contract but are not
-	// needed once deploy stopped building.
+	// A pure deploy installs by reference and only consults the store; the other
+	// dependencies are kept on the signature for the shared resolution contract.
 	store, _, _, _, _ = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	target = applyDeployKubernetesContext(store, target)
 
-	// Build-orchestration path: a `build --deploy` / `open --deploy` / UI
-	// orchestration has already built and pushed the working-tree image and
-	// hands it to deploy by reference. deploy installs it via an ImageOverride
-	// at the built version; it does not build it (see resolveDeploySpecForCurrentDockerBuild).
+	// Build-orchestration path: a build --deploy / open --deploy / UI run has
+	// already built and pushed the working-tree image and hands it to deploy by
+	// reference; deploy installs it via an ImageOverride and never builds it.
 	if currentBuild != nil && deployContextOwnsDockerBuild(deployContext, *currentBuild) {
 		return resolveDeploySpecForCurrentDockerBuild(store, target, deployContext, *currentBuild)
 	}
@@ -980,11 +899,8 @@ func resolveDeploySpecForContext(ctx Context, store DeployStore, findProjectRoot
 	if version == "" {
 		return DeploySpec{}, fmt.Errorf("deploy: a version is required — pass a version produced by `erun build`/`erun push`, or `--current` to redeploy the version this environment already runs")
 	}
-	// An explicit runtime-image override installs the canonical published
-	// erun-devops chart with the chosen image (imageOverrides.erun-devops),
-	// bypassing the repo-local runtime chart so the operator can bootstrap the
-	// env on the ERun base image before its own <tenant>-devops image exists.
-	// target.EnvConfig.RuntimeImage already carries the override.
+	// A runtime-image override lets an operator stand up a new env on the shared
+	// ERun base image before the tenant's own <tenant>-devops image exists.
 	if runtimeImageOverride != "" && deployContextOwnsRuntimeChart(deployContext, target.Tenant) {
 		return resolvePublishedDevopsDeploySpecWithReason(ctx, target, version, "bypassing the repo-local runtime chart for the runtime image override "+runtimeImageOverride)
 	}
@@ -992,14 +908,11 @@ func resolveDeploySpecForContext(ctx Context, store DeployStore, findProjectRoot
 }
 
 // resolveInstallExistingVersionDeploySpec resolves a deploy that installs the
-// image already published at the pinned version, without building or pushing
-// anything. deploy and upgrade are consume operations: a version names a content
-// identity, so a builds-here env addresses the published tag by reference
-// rather than rebuilding the working tree under that label. The chart's
-// referenced images are verified to exist (locally or in the registry) so a
-// version that was never built fails fast — deploy installs, it does not
-// build. helm still runs (no builds means SkipHelm stays false), pinned to the
-// requested version.
+// image already published at the pinned version, without building or pushing.
+// A builds-here env addresses the published tag by reference rather than
+// rebuilding the working tree under that label. The chart's referenced images
+// are verified to exist so a version that was never built fails fast. helm still
+// runs (no builds means SkipHelm stays false).
 func resolveInstallExistingVersionDeploySpec(ctx Context, store DeployStore, target OpenResult, deployContext KubernetesDeployContext, version string, versionFromPersist bool) (DeploySpec, error) {
 	deployInput, err := newHelmDeploySpec(target, deployContext, version)
 	if err != nil {
@@ -1299,18 +1212,12 @@ func normalizeBuildDeployDependencies(store BuildDeployStore, findProjectRoot Pr
 }
 
 // freezeNow pins now to a single instant so every snapshot version minted while
-// resolving one deploy (or build) shares the same timestamp. The per-chart build
-// (ResolveDockerBuildForComponent), the cwd "current build"
-// (resolveCurrentDockerComponentBuildForDeploy), and each image's version
-// (resolveDockerImageVersion) otherwise call now() independently; across a
-// multi-image / multi-spec deploy those timestamps drift apart, so the runtime
-// chart's persisted RuntimeVersion can end up differing from the tag actually
-// built and pushed — a phantom version the deploy picker can never offer because
-// it gates on registry presence. Capturing now() once at the resolution
-// entrypoint and threading the frozen clock downstream keeps build, push, helm,
-// and persist on one identical tag. freezeNow is idempotent: freezing an
-// already-frozen clock reproduces the same instant, so applying it at more than
-// one entrypoint on the same call path is safe.
+// resolving one deploy (or build) shares the same timestamp. Otherwise each
+// image's version calls now() independently, and across a multi-image deploy
+// those timestamps drift apart — the runtime chart's persisted RuntimeVersion
+// can end up differing from the tag actually built and pushed, a phantom version
+// the deploy picker can never offer. freezeNow is idempotent, so applying it at
+// more than one entrypoint on the same call path is safe.
 func freezeNow(now NowFunc) NowFunc {
 	if now == nil {
 		now = time.Now
@@ -1415,9 +1322,8 @@ func resolveDeployContext(findProjectRoot ProjectFinderFunc, resolveKubernetesDe
 }
 
 // tenantOwnsProjectRoot reports whether one of the tenant's envs records the
-// given project root as its local repo path (the path moved off the
-// tenant onto the env). A tenant whose envs aren't initialized simply doesn't
-// own the root.
+// given project root as its local repo path. A tenant whose envs aren't
+// initialized simply doesn't own the root.
 func tenantOwnsProjectRoot(store DeployStore, tenant, cleanProjectRoot string) (bool, error) {
 	envs, err := store.ListEnvConfigs(tenant)
 	if err != nil {
@@ -1841,9 +1747,6 @@ func (d HelmDeploySpec) command() commandSpec {
 	}
 }
 
-// isOCIChartReference reports whether the chart path addresses a published
-// OCI chart (oci://<registry>/charts/<name>) rather than a local chart
-// directory.
 func isOCIChartReference(chartPath string) bool {
 	return strings.HasPrefix(strings.TrimSpace(chartPath), "oci://")
 }
@@ -2015,11 +1918,9 @@ func helmIdleTimezone(config EnvironmentIdleConfig) string {
 	return policy.Timezone
 }
 
-// helmRegistrySetArgs returns the registry-projection helm --set args: the
-// deploy/build container registry plus the in-pod runtime registry and marked
-// container-registry list. Each is guarded on presence so an env that
-// carries none renders nothing and an old chart with no .Values for them is
-// unaffected.
+// helmRegistrySetArgs returns the registry-projection helm --set args, each
+// guarded on presence so an env that carries none renders nothing and an old
+// chart with no .Values for them is unaffected.
 func helmRegistrySetArgs(d HelmDeploySpec) []string {
 	var args []string
 	if registry := strings.TrimSpace(d.ContainerRegistry); registry != "" {
@@ -2252,8 +2153,7 @@ func resolveCurrentDevopsK8sDir(findProjectRoot ProjectFinderFunc, dir, projectR
 }
 
 // resolveDirDevopsK8sDir returns dir/k8s when dir is itself a "-devops" module
-// directory whose k8s subdir holds helm charts. It reports (k8sDir, true) on a
-// match and ("", false) when dir is not a devops module or has no charts.
+// directory whose k8s subdir holds helm charts.
 func resolveDirDevopsK8sDir(dir string) (string, bool, error) {
 	if !strings.HasSuffix(filepath.Base(dir), "-devops") {
 		return "", false, nil
@@ -2384,9 +2284,6 @@ func resolveHelmDeployChartPath(params HelmDeployParams) (string, func(), error)
 	return chartPath, cleanup, nil
 }
 
-// helmDeployCommandSpec builds the helm upgrade command for the deploy,
-// reusing the HelmDeploySpec command builder with the resolved (possibly
-// stamped) chart path.
 func helmDeployCommandSpec(params HelmDeployParams, chartPath string) commandSpec {
 	return HelmDeploySpec{
 		ReleaseName:        params.ReleaseName,
@@ -2517,11 +2414,10 @@ func DeployHelmChart(params HelmDeployParams) error {
 }
 
 // classifyHelmDeployResult turns the raw helm/pod-watch outcome into the final
-// error: an early container failure (watchOutcome) wins, then the
-// pending-operation and published-chart-not-found special cases are recognized
-// from helm's stderr, and otherwise a helm failure is returned with its
-// captured output appended (at non-debug verbosity, where the stream was
-// silenced). A nil helmErr with no watch failure means success.
+// error: an early container failure wins over a helm error, then the
+// pending-operation and published-chart-not-found stderr cases are recognized,
+// and otherwise the helm error is returned with its captured output appended
+// (at non-debug verbosity, where the stream was silenced).
 func classifyHelmDeployResult(params HelmDeployParams, watchOutcome podWatchOutcome, helmErr error, helmOutput *bytes.Buffer, stderr *strings.Builder) error {
 	if watchOutcome.Failure != nil {
 		failure := watchOutcome.Failure
@@ -2656,11 +2552,9 @@ func runHelmUpgradeWithSelectorRecovery(ctx Context, deployInput HelmDeploySpec,
 }
 
 // recreateDeploymentAndRetry deletes the Deployment whose immutable selector
-// blocked the helm upgrade and retries the upgrade once. The delete removes
-// only the Deployment; the release's PVCs (home, docker, worktree) are
-// separate objects, so the recreated pod re-mounts the same data. The decision
-// is traced on the always-visible audit channel and the literal kubectl delete
-// is traced via TraceCommand (-vv), mirroring how the helm upgrade is logged.
+// blocked the helm upgrade and retries the upgrade once. The delete removes only
+// the Deployment; the release's PVCs (home, docker, worktree) are separate
+// objects, so the recreated pod re-mounts the same data.
 func recreateDeploymentAndRetry(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDeployerFunc, deployment string) error {
 	ctx.Trace("deploy: Deployment " + deployment + " selector is immutable and changed; deleting it (PVCs preserved) and retrying the upgrade")
 	command := deleteDeploymentCommand(deployment, deployInput.Namespace, deployInput.KubernetesContext)

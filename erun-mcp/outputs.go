@@ -22,9 +22,8 @@ type OutputsDownloadInput struct {
 }
 
 // OutputsDownloadResult is the structured result of the outputs_download tool.
-// Because the MCP server runs inside the pod, co-located with the files, the
-// bytes are returned inline as base64 Content (empty in preview) rather than
-// written to a host path; the caller decodes and saves them.
+// The MCP server is co-located with the files inside the pod, so bytes are
+// returned inline as base64 rather than written to a host path.
 type OutputsDownloadResult struct {
 	Name          string `json:"name"`
 	IsArchive     bool   `json:"isArchive"`
@@ -34,8 +33,6 @@ type OutputsDownloadResult struct {
 	Content       string `json:"content,omitempty"`
 }
 
-// outputsListTool lists the agent outputs directory inside the runtime pod. It
-// is read-only, so there is no preview path.
 func outputsListTool() func(context.Context, *mcp.CallToolRequest, OutputsListInput) (*mcp.CallToolResult, eruncommon.RuntimeOutputsListResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input OutputsListInput) (*mcp.CallToolResult, eruncommon.RuntimeOutputsListResult, error) {
 		result, err := eruncommon.ResolveLocalOutputs(eruncommon.RuntimeOutputsParams{
@@ -49,8 +46,6 @@ func outputsListTool() func(context.Context, *mcp.CallToolRequest, OutputsListIn
 	}
 }
 
-// outputsDownloadTool reads one entry from the runtime pod's outputs directory
-// and returns its bytes inline as base64. Preview returns metadata only.
 func outputsDownloadTool() func(context.Context, *mcp.CallToolRequest, OutputsDownloadInput) (*mcp.CallToolResult, OutputsDownloadResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input OutputsDownloadInput) (*mcp.CallToolResult, OutputsDownloadResult, error) {
 		params := eruncommon.RuntimeOutputDownloadParams{

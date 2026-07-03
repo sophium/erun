@@ -25,9 +25,6 @@ import type { AppThunk } from './store';
 import { requireController } from './thunkExtra';
 import { selectionKey } from './versionSuggestions';
 
-// reviewThunks own the diff/review-panel state: filter input, scope selector,
-// directory expansion, refresh polling, and the MCP-reconnect dialog flow.
-
 const REVIEW_DIFF_REFRESH_INTERVAL_MS = 5000;
 
 export const setDiffFilter =
@@ -200,8 +197,6 @@ function scheduleReviewDiffRefresh(
   }, delay);
 }
 
-// Reconnect dialog ============================================================
-
 const idleReconnect = () => ({
   status: 'idle' as const,
   tenant: '',
@@ -268,9 +263,7 @@ export const confirmReconnect = (): AppThunk<Promise<void>> => async (dispatch, 
   }
 };
 
-// dismissReconnect closes the error surface after the user has read it. Safe to
-// call from anywhere because cancelReconnect refuses to run while status is
-// 'running'; dismissReconnect mirrors that for the terminal 'error' state.
+// dismissReconnect closes the error surface after the user has read it.
 export const dismissReconnect = (): AppThunk => (dispatch, getState) => {
   if (getState().review.reconnect.status !== 'error') {
     return;

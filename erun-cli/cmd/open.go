@@ -84,9 +84,8 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 				AppSession:       strings.TrimSpace(appSession),
 				AI:               aiTab,
 				Contribute:       contributeTab,
-				// open is pure by default. --deploy is the operator-convenience
-				// shortcut; a --version / --runtime-image override also implies a
-				// deploy, since pinning a version is only meaningful if it rolls out.
+				// A --version or --runtime-image override also implies a deploy:
+				// pinning a version is only meaningful if it rolls out.
 				Deploy: deployRuntime || strings.TrimSpace(versionOverride) != "" || strings.TrimSpace(runtimeImage) != "",
 			}, promptRunner, openShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart, activateMCP, activateAPI, activateSSHD, launchVSCode, launchIntelliJ)
 		},
@@ -102,9 +101,9 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 	cmd.Flags().StringVar(&versionOverride, "version", "", "Override the runtime chart and image version before opening")
 	cmd.Flags().StringVar(&runtimeImage, "runtime-image", "", "Override the runtime image repository before opening")
 	// Desktop-integration flags: the app runs the remote shell as a persistent,
-	// reattachable dtach session so closing/reopening a tab reconnects to the
-	// running shell (and the AI tab's claude keeps working). Hidden because they
-	// only make sense when the desktop manages the session lifecycle.
+	// reattachable session so closing and reopening a tab reconnects to the
+	// running shell. Hidden because they only make sense when the desktop
+	// manages the session lifecycle.
 	cmd.Flags().StringVar(&appSession, "app-session", "", "Reattach to a persistent terminal session with this id")
 	cmd.Flags().BoolVar(&aiTab, "ai", false, "Launch the configured AI tool as the persistent session's program")
 	cmd.Flags().BoolVar(&contributeTab, "contribute", false, "Start the persistent session in the contribute clone")
@@ -314,17 +313,14 @@ func (r *resolvedOpenRunner) run() error {
 	shellReq.AI = r.options.AI
 	shellReq.Contribute = r.options.Contribute
 	if r.options.Deploy {
-		// --deploy is the operator-convenience shortcut (root AGENTS.md §
-		// "Command primitives vs orchestration"): deploy the runtime before
-		// opening. Programmatic callers (the desktop) must NOT use it — they
-		// compose build→push→deploy themselves and open the pure shell.
+		// --deploy is operator-convenience only (root AGENTS.md § "Command
+		// primitives vs orchestration"): programmatic callers like the desktop
+		// must NOT use it — they compose build→push→deploy themselves and open
+		// the pure shell.
 		if err := r.maybeDeployRuntime(shellReq); err != nil {
 			return err
 		}
 	} else {
-		// open is a pure primitive: it does not deploy. The runtime must
-		// already be deployed (by `erun deploy`, or by the desktop's composed
-		// build→push→deploy on create); the forwarders below bind to it.
 		r.ctx.Trace("open: pure primitive — not deploying (run `erun deploy` first, or pass --deploy to deploy before opening)")
 	}
 	if err := r.activateForwarders(); err != nil {
@@ -400,15 +396,9 @@ func (r *resolvedOpenRunner) maybeDeployRuntime(shellReq common.ShellLaunchParam
 }
 
 func (r *resolvedOpenRunner) resolveRuntimeExecution() (common.DeploySpec, error) {
-	// Migrate any legacy tenant Chart.yaml still pinned to the
-	// literal "1.0.0" placeholder before resolving the deploy spec.
-	// The migration is a no-op for tenants whose chart does not
-	// exist (the materialized default path handles that) or whose
-	// Chart.yaml has been hand-customised; only the exact legacy
-	// shape is rewritten. Without this, an env created by an older
-	// binary keeps asking helm for erun-mcp:1.0.0 from the tenant's
-	// container registry — an image that may never have been
-	// published — so every rollout fails at pod startup.
+	// Heal envs created by older binaries: their tenant Chart.yaml is pinned to
+	// the literal "1.0.0" placeholder, so helm keeps pulling an erun-mcp:1.0.0
+	// image that was never published and every rollout fails at pod startup.
 	appVersion := strings.TrimSpace(r.result.EnvConfig.RuntimeVersion)
 	if appVersion == "" {
 		appVersion = currentBuildInfo().Version
@@ -470,15 +460,13 @@ func (r *resolvedOpenRunner) deployRuntime(execution common.DeploySpec) error {
 		return err
 	}
 	if execution.SkipHelm {
-		// Every runtime image promoted from the fingerprint cache, so
-		// RunDeploySpec rebuilt, pushed, and rolled out nothing.
+		// All runtime images came from the fingerprint cache, so
 		// execution.Deploy.Version is a freshly minted snapshot timestamp that
-		// was never pushed; persisting it would leave the env config — and the
-		// desktop runtime dialog — pointing at a phantom version the deploy
-		// picker can never offer (it gates on registry presence). Heal the
-		// persisted version to what the release is actually running (guaranteed
-		// pushed) instead; if it can't be read, leave it unchanged. Twin of the
-		// deploy-command guard in PersistRuntimeVersionFromDeploySpecs.
+		// was never pushed. Persisting it would point the env config — and the
+		// desktop runtime dialog — at a phantom version the deploy picker can
+		// never offer (it gates on registry presence), so heal to the version the
+		// release is actually running instead. Twin of the deploy-command guard in
+		// PersistRuntimeVersionFromDeploySpecs.
 		running := r.resolveRunningRuntimeVersion(execution)
 		if running == "" {
 			r.ctx.Trace("open: runtime images all cached (no rebuild); could not read the deployed version, leaving persisted runtime version unchanged")
@@ -510,10 +498,9 @@ func (r *resolvedOpenRunner) persistRuntimeVersion(version, registry string) err
 	return nil
 }
 
-// resolveRunningRuntimeVersion reads the version the runtime release is actually
-// running, used to heal the persisted version after a cached (SkipHelm) open.
-// Returns "" when it can't be read (dry-run, no resolver, helm error) so the
-// caller leaves the persisted version untouched rather than recording a phantom.
+// resolveRunningRuntimeVersion returns "" when the running version can't be read
+// (dry-run, no resolver, helm error), signalling the caller to leave the
+// persisted version untouched rather than record a phantom.
 func (r *resolvedOpenRunner) resolveRunningRuntimeVersion(execution common.DeploySpec) string {
 	if r.ctx.DryRun || r.resolveDeployedVersion == nil {
 		return ""
@@ -600,11 +587,10 @@ func (r *resolvedOpenRunner) runShellLoop(shellReq common.ShellLaunchParams) err
 			continue
 		}
 		if errors.Is(err, common.ErrShellSessionTakenOver) {
-			// Another ERun window re-attached this persistent session
-			// (screen-style detach-and-reattach). The session keeps running
-			// there; end this viewer cleanly. The notice line is the
-			// desktop's signal to stop its reconnect loop instead of
-			// stealing the session straight back.
+			// Another ERun window re-attached this persistent session; it keeps
+			// running there, so end this viewer cleanly. The notice line is the
+			// desktop's signal to stop its reconnect loop instead of stealing the
+			// session straight back.
 			r.ctx.Info(common.ShellSessionTakenOverNotice)
 			return nil
 		}
@@ -654,11 +640,9 @@ func wrapOpenHelmDeployWithSpinner(ctx common.Context, releaseName string, deplo
 	}
 }
 
-// applyRuntimeDeployImageOverride rebuilds the runtime spec against the
-// published erun-devops chart with the user's image override riding in as
-// imageOverrides.erun-devops. Envs that deploy a repo-local chart ignore the
-// override, matching the historical behavior (the local chart's templates own
-// their image references).
+// applyRuntimeDeployImageOverride applies a runtime-image override only for
+// published-chart envs; envs on a repo-local chart ignore it because the local
+// chart's templates own their image references.
 func applyRuntimeDeployImageOverride(ctx common.Context, result common.OpenResult, execution common.DeploySpec, runtimeImage string) (common.DeploySpec, error) {
 	runtimeImage = strings.TrimSpace(runtimeImage)
 	if runtimeImage == "" {
@@ -699,9 +683,6 @@ func emitLocalShellSetupForOpenResult(ctx common.Context, result common.OpenResu
 	return err
 }
 
-// stdoutIsTerminalForAliasSetup gates the interactive alias-setup prompt on a
-// real terminal (the shared writerIsTerminal check, including its
-// ERUN_FORCE_TTY test seam).
 func stdoutIsTerminalForAliasSetup(stdout io.Writer) bool {
 	return writerIsTerminal(stdout)
 }

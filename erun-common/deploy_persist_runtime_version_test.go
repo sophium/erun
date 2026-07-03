@@ -5,18 +5,14 @@ import (
 	"testing"
 )
 
-// TestPersistRuntimeVersionFromDeploySpecs pins how the env config's runtime
-// version is advanced after a deploy:
-//   - a real rollout records the version that was built and pushed;
-//   - a cached no-op (SkipHelm: every image promoted from the fingerprint
-//     cache, nothing rebuilt/pushed/rolled) must NOT record the freshly minted
-//     Deploy.Version — it was never pushed — and instead heals to the version
-//     the release is actually running (resolveDeployedVersion), which is
-//     guaranteed pushed; when that can't be read it leaves the value untouched.
+// TestPersistRuntimeVersionFromDeploySpecs pins how the runtime version advances
+// after a deploy: a real rollout records the built-and-pushed version, while a
+// cached no-op must NOT record the freshly minted version — it was never pushed —
+// and instead heals to the version the release is actually running, leaving it
+// untouched when that can't be read.
 //
-// Persist is a real, non-dry-run side effect (it early-returns on DryRun), so it
-// is unreachable from the dry-run integration binary; this white-box unit test
-// is the contract owner.
+// Persist is a real, non-dry-run side effect, so it is unreachable from the
+// dry-run integration binary and this white-box unit test is the contract owner.
 func TestPersistRuntimeVersionFromDeploySpecs(t *testing.T) {
 	const tenant = "erun"
 	const mintedVersion = "1.0.86-snapshot-20260608124610"
@@ -42,7 +38,6 @@ func TestPersistRuntimeVersionFromDeploySpecs(t *testing.T) {
 		var savedTenant string
 		var saved *EnvConfig
 		save := capturingSave(&savedTenant, &saved)
-		// A real rollout records Deploy.Version and never consults the cluster.
 		persistOrFatal(t, Context{}, []DeploySpec{runtimeSpec(false)}, save, fixedRunningVersion(runningVersion))
 		if saved == nil || savedTenant != tenant {
 			t.Fatalf("expected save for tenant %q after a real rollout (saved=%v tenant=%q)", tenant, saved != nil, savedTenant)
@@ -90,8 +85,6 @@ func TestPersistRuntimeVersionFromDeploySpecs(t *testing.T) {
 	})
 }
 
-// capturingSave returns a save func that records the tenant and a copy of the
-// saved EnvConfig through the given pointers.
 func capturingSave(savedTenant *string, saved **EnvConfig) func(string, EnvConfig) error {
 	return func(tn string, cfg EnvConfig) error {
 		*savedTenant = tn
@@ -101,8 +94,6 @@ func capturingSave(savedTenant *string, saved **EnvConfig) func(string, EnvConfi
 	}
 }
 
-// persistOrFatal runs PersistRuntimeVersionFromDeploySpecs and fails the test
-// if it errors, so each subtest can focus on its persistence assertions.
 func persistOrFatal(t *testing.T, ctx Context, specs []DeploySpec, save func(string, EnvConfig) error, resolve HelmReleaseVersionResolverFunc) {
 	t.Helper()
 	if err := PersistRuntimeVersionFromDeploySpecs(ctx, specs, save, resolve); err != nil {
@@ -110,14 +101,11 @@ func persistOrFatal(t *testing.T, ctx Context, specs []DeploySpec, save func(str
 	}
 }
 
-// TestCachedDeployRunThenPersistHealsToRunningVersion drives the real
-// RunDeploySpecs orchestration for a cached runtime chart (SkipHelm) and then
-// PersistRuntimeVersionFromDeploySpecs — the exact sequence the CLI deploy
-// command runs. It proves the end-to-end cached-deploy path: RunDeploySpec
-// short-circuits before building, pushing, or running helm (nothing reaches the
-// registry or rolls the pod), and the persist step heals RuntimeVersion to the
-// version the release is actually running rather than the freshly minted,
-// never-pushed Deploy.Version.
+// TestCachedDeployRunThenPersistHealsToRunningVersion drives RunDeploySpecs then
+// PersistRuntimeVersionFromDeploySpecs — the exact sequence the CLI deploy command
+// runs — to prove that a cached deploy never reaches the registry or rolls the pod
+// and still heals the runtime version to the one actually running rather than the
+// freshly minted, never-pushed version.
 func TestCachedDeployRunThenPersistHealsToRunningVersion(t *testing.T) {
 	const tenant = "erun"
 	const mintedVersion = "1.0.86-snapshot-20260608124610"

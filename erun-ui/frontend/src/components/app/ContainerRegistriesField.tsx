@@ -7,8 +7,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import type { UIContainerRegistryEntry } from '@/types';
 
-// REGISTRY_ROLES is the marked-list vocabulary, in build → copy → deploy order.
-// Kept in lockstep with eruncommon.RegistryRole.
+// Mirrors eruncommon.RegistryRole and must stay in lockstep; ordered by build → copy → deploy pipeline phase.
 const REGISTRY_ROLES = ['build', 'from', 'to', 'deploy'] as const;
 type RegistryRole = (typeof REGISTRY_ROLES)[number];
 
@@ -19,11 +18,7 @@ const ROLE_HINT: Record<RegistryRole, string> = {
   deploy: 'cluster pulls from here',
 };
 
-// ContainerRegistriesField edits an environment's marked registry list: rows of
-// a registry host plus build/from/to/deploy role toggles, with add/remove. An
-// empty list inherits the project default. A live validation hint mirrors the
-// backend marker invariants so the operator sees the problem before saving
-// (the backend Validate() is the authoritative gate).
+// ContainerRegistriesField edits an environment's registry list, or inherits the project default when the list is empty. Its inline hint previews the backend marker rules so operators can fix problems before saving.
 export function ContainerRegistriesField({
   entries,
   suggestions,
@@ -168,9 +163,7 @@ function RegistryRow({
   );
 }
 
-// registriesValidationHint mirrors eruncommon.ContainerRegistries.Validate so
-// the operator gets immediate, inline guidance (Nielsen #5 error prevention).
-// The backend remains the authoritative gate; this only previews the same rule.
+// registriesValidationHint previews eruncommon.ContainerRegistries.Validate inline so operators catch marker problems before saving; the backend stays the authoritative gate.
 function registriesValidationHint(entries: UIContainerRegistryEntry[]): string {
   const rows = entries.filter((entry) => entry.registry.trim() !== '');
   if (rows.length === 0) {

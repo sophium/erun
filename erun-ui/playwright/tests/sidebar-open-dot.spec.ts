@@ -1,29 +1,15 @@
 import { expect, test } from '../fixtures/erunApp.js';
 
-// sidebar-open-dot covers the per-env green dot that signals
-// "this env has tabs open in the desktop" and is clickable to
-// close the env (tear down its Local/ERun/AI tabs and stop
-// tracking it from the desktop session state). The dot is
-// independent of the LOCAL pill (which marks the dev-machine env)
-// and of the busy spinner (which fires only while an
-// activity-queue entry is running): open and busy are independent
-// states and can coexist.
-//
-// The dot is driven by state.terminal.tabsByEnv[selectionKey]
-// having at least one entry. The headless harness exercises the
-// same openSelection thunk a real click hits, so the dot mounts
-// after openEnvironment and disappears after the close click.
-//
-// The open/close tests run against a per-test seeded env (the seededEnv
-// fixture) so their tab churn never leaks into the shared baseline rows.
+// The per-env open dot signals "this env has tabs open" and closes the env when
+// clicked. It is independent of the LOCAL pill and the busy spinner: open and busy
+// can coexist. Open/close tests use the seededEnv fixture so their tab churn never
+// leaks into the shared baseline rows.
 
 test.describe('sidebar env open dot', () => {
   test('a never-opened env row shows no open dot', async ({ app, seededEnv }) => {
-    // Backend sessions persist across specs and the boot sequence can
-    // reattach them, so baseline rows may legitimately boot with dots. A
-    // per-test seeded env is guaranteed never-opened: its row must stay
-    // quiet. A regression that always-rendered the dot (e.g. not
-    // null-checking the tabsByEnv lookup) would light this row and fail.
+    // Backend sessions persist across specs and boot can reattach them, so baseline
+    // rows may legitimately boot with dots. A per-test seeded env is guaranteed
+    // never-opened, so its row must stay quiet.
     const row = app.sidebar.envRowButton(seededEnv.tenant, seededEnv.environment).locator('..');
     await expect(row.getByTestId('env-open-dot')).toHaveCount(0);
   });
@@ -42,10 +28,7 @@ test.describe('sidebar env open dot', () => {
     const dot = sidebar.getByRole('button', { name: `Close ${tenant} / ${environment}` });
     await expect(dot).toBeVisible();
 
-    // Clicking the dot must not also trigger the row's openSelection.
-    // The selected env after the close should NOT remain on the one
-    // we just closed; we assert the dot disappears, which is the
-    // observable signal that tabsByEnv was cleared.
+    // Clicking the dot closes the env; it must not also trigger the row's openSelection.
     await dot.click();
     await expect(dot).toHaveCount(0);
   });
@@ -88,8 +71,8 @@ test.describe('sidebar env open dot', () => {
   });
 });
 
-// emitEnvStatus injects an `env-status` event, mirroring what the Go side
-// emits from tryReconnect's refusal paths and the open/respawn clears.
+// Mirrors the env-status event the Go side emits from tryReconnect's refusal paths
+// and the open/respawn clears, so the spec can drive states it cannot stage headless.
 async function emitEnvStatus(
   page: import('@playwright/test').Page,
   tenant: string,

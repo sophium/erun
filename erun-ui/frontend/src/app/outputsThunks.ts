@@ -11,8 +11,7 @@ import {
 } from './slices/outputsDialogSlice';
 import type { AppThunk } from './store';
 
-// openOutputs opens the Outputs dialog for an env and lists the files an agent
-// produced in its runtime pod outputs directory, newest-first. Read-only.
+// openOutputs surfaces the files an agent produced in its runtime pod, newest-first.
 export const openOutputs =
   (selection: UISelection): AppThunk<Promise<void>> =>
   async (dispatch) => {
@@ -25,10 +24,7 @@ export const openOutputs =
     }
   };
 
-// downloadOutput downloads one entry from the pod through a native Save dialog
-// (the backend writes the chosen path). It reports the outcome — saved path,
-// cancelled, or error — so the operator can tell whether their click succeeded
-// (Nielsen #1 visibility of system status, #9 recovery from errors).
+// downloadOutput saves one entry through a native Save dialog; an empty path back means the operator cancelled.
 export const downloadOutput =
   (name: string): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {

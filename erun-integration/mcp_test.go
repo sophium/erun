@@ -21,9 +21,6 @@ func TestMCP(t *testing.T) {
 	})
 
 	t.Run("dry_run_traces_emcp_launch", func(t *testing.T) {
-		// Exercises mcp.go: --dry-run must trace the exact emcp command line
-		// (host, port, path, tenant, environment, repo-path, k8s context,
-		// namespace) without starting the server.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		args := []string{
@@ -40,11 +37,9 @@ func TestMCP(t *testing.T) {
 	})
 
 	t.Run("dry_run_uses_environment_local_port_by_default", func(t *testing.T) {
-		// Exercises mcp.go default-port resolution: when invoked with a
-		// tenant/environment but no --port, the trace must show the
-		// environment-scoped local MCP port. Two tenants force "team" to
-		// index 1, so the MCP port is 17000 + 100 = 17100 rather than the
-		// index-0 17000.
+		// Seeding alpha first pushes "team" to index 1, so the default port
+		// resolves to 17100 (17000 + 100), not the index-0 17000 — the seed
+		// order proves the port is environment-scoped.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "alpha", "dev")
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -56,13 +51,9 @@ func TestMCP(t *testing.T) {
 	})
 
 	t.Run("real_run_launches_emcp_stub", func(t *testing.T) {
-		// Exercises launchMCPProcess + resolveMCPExecutable's bare-name
-		// fallthrough: no emcp sibling exists next to the harness-built erun
-		// binary, so resolution falls through to "emcp" and
-		// eruncommon.Command routes the spawn to the stub via ERUN_EMCP_BIN.
-		// Real-run because the launcher body only executes past the dry-run
-		// gate; the stub echoes its argv so the golden locks the launched
-		// command line next to the -vv trace of the same argv.
+		// Real-run: the launcher body only executes past the dry-run gate,
+		// so a stub is the only way to reach the bare-name emcp resolution
+		// and lock the argv it launches.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		stubs := setup.Cwd + "/stubs"
@@ -77,10 +68,8 @@ exit 0`)
 	})
 
 	t.Run("real_run_errors_when_emcp_missing", func(t *testing.T) {
-		// launchMCPProcess's exec.ErrNotFound branch: with no ERUN_EMCP_BIN
-		// override and PATH pointing at an empty directory, the lookup fails
-		// and the launcher must surface the friendly "build or install it
-		// first" message instead of a raw exec error.
+		// A missing emcp must surface the friendly "build or install it
+		// first" message, not a raw exec error.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		envVars := append(setup.Env(), emptyPathDir(t, setup.Cwd))
@@ -92,9 +81,9 @@ exit 0`)
 	})
 
 	t.Run("real_run_propagates_emcp_exit_failure", func(t *testing.T) {
-		// launchMCPProcess's generic error branch: a launched emcp that
-		// exits non-zero is not exec.ErrNotFound, so the raw "exit status"
-		// error must propagate to the user together with the tool's stderr.
+		// A launched emcp that exits non-zero must propagate its raw exit
+		// error and the tool's stderr (not the friendly missing-binary
+		// message).
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		stubs := setup.Cwd + "/stubs"

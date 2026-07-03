@@ -24,10 +24,6 @@ func TestApp(t *testing.T) {
 	})
 
 	t.Run("dry_run_traces_app_executable_without_launching", func(t *testing.T) {
-		// Exercises app.go: --dry-run must trace the resolved erun-app
-		// executable path and short-circuit before launching the desktop
-		// process. The trace presence is the contract; the absence of any
-		// child process is enforced by the dry-run gate.
 		setup := env.New(t)
 		result := erun.Run(t, []string{"app", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
@@ -37,10 +33,8 @@ func TestApp(t *testing.T) {
 	})
 
 	t.Run("dry_run_traces_headless_flags_for_app_executable", func(t *testing.T) {
-		// --headless / --port are forwarded to erun-app so a headless
-		// browser harness can drive the same frontend. The dry-run
-		// trace must show them as part of the resolved launch command
-		// so reviewers can audit what would have been spawned.
+		// --headless / --port let a headless browser harness drive the
+		// same frontend the desktop app renders.
 		setup := env.New(t)
 		result := erun.Run(t, []string{"app", "--headless", "--port", "34123", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
@@ -50,14 +44,9 @@ func TestApp(t *testing.T) {
 	})
 
 	t.Run("real_run_detaches_app_stub_with_headless_args", func(t *testing.T) {
-		// Exercises launchAppProcess (Start + Process.Release) and the
-		// non-darwin arm of newAppProcessCommand: resolveAppExecutable finds
-		// no erun-app sibling next to the harness-built erun binary, falls
-		// through to the bare name, and ERUN_ERUN_APP_BIN routes the spawn
-		// to the stub. The launcher detaches immediately, so the proof that
-		// the headless argv reached the desktop process is a marker file the
-		// stub writes, polled with a deadline; the golden locks the audit +
-		// -vv trace of the launch command.
+		// The launcher detaches the desktop process immediately, so the only
+		// proof the headless argv was delivered is the marker file the stub
+		// writes — the golden cannot observe the detached child.
 		setup := env.New(t)
 		stubs := setup.Cwd + "/stubs"
 		marker := filepath.Join(setup.Cwd, "app-launch-marker")
@@ -76,10 +65,8 @@ exit 0`)
 	})
 
 	t.Run("real_run_errors_when_app_binary_missing", func(t *testing.T) {
-		// launchAppProcess's exec.ErrNotFound branch: with no
-		// ERUN_ERUN_APP_BIN override and PATH pointing at an empty
-		// directory, Start fails the lookup and the launcher must surface
-		// the friendly "build or install it first" message.
+		// A missing erun-app must surface the friendly build-or-install
+		// message rather than a raw exec error.
 		setup := env.New(t)
 		envVars := append(setup.Env(), emptyPathDir(t, setup.Cwd))
 		result := erun.Run(t, []string{"app"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
@@ -90,10 +77,8 @@ exit 0`)
 	})
 
 	t.Run("real_run_propagates_invalid_override_path_error", func(t *testing.T) {
-		// launchAppProcess's generic error branch: an ERUN_ERUN_APP_BIN
-		// override pointing at a nonexistent path fails Start with a
-		// fork/exec PathError, which is not exec.ErrNotFound and must
-		// propagate raw so the broken override is visible to the user.
+		// A bad executable override must propagate the raw fork/exec error,
+		// not the friendly not-found message, so the broken path stays visible.
 		setup := env.New(t)
 		envVars := append(setup.Env(), "ERUN_ERUN_APP_BIN="+filepath.Join(setup.Cwd, "missing", "erun-app"))
 		result := erun.Run(t, []string{"app"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})

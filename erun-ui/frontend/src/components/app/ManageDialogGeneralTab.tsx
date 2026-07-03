@@ -26,9 +26,8 @@ import {
   type UIEnvironmentCloudAlias,
 } from '@/types';
 
-// Sentinel for the clear ("— None —") option in the cloud-alias dropdown.
-// Radix Select rejects an empty-string item value, so the option carries this
-// value and CloudAliasSelect maps it back to "" before persisting.
+// Radix Select rejects an empty-string item value, so the clear ("— None —")
+// option needs a non-empty sentinel that maps back to "".
 const CLOUD_ALIAS_NONE_VALUE = '__none__';
 
 export function GeneralTab(): React.ReactElement {
@@ -43,19 +42,16 @@ export function GeneralTab(): React.ReactElement {
       ]),
     [config.containerRegistries],
   );
-  // Show the raw LocalRepoPath when set; fall back to the effective path so the
-  // field is never blank for an env whose path is derived. Editing sets
-  // localRepoPath, which SaveEnvironmentConfig persists.
+  // Fall back to the effective path so the field is never blank for an env
+  // whose repo path is derived rather than explicitly set.
   const repoPathValue = config.localRepoPath?.trim() ? config.localRepoPath : config.repoPath;
   return (
     <>
       {config.type === 'local-agent' ? (
-        // A local-agent env mounts its worktree from this host path
-        // (EnvConfig.LocalRepoPath); make it correctable here so an operator can
-        // repoint a moved repo without hand-editing config.yaml. Free-text +
-        // Browse (recognition over recall). Remote-agent (PVC worktree) and
-        // runtime (no worktree) keep the read-only field — their repo is not a
-        // local host path. Persisted on Save; takes effect on the next deploy.
+        // Only a local-agent env mounts its worktree from a host path, so only
+        // it gets an editable field — letting an operator repoint a moved repo
+        // without hand-editing config.yaml. Remote-agent (PVC) and runtime (no
+        // worktree) repos are not local paths, so they stay read-only.
         <LocalRepoPathInput
           id="environment-config-repopath"
           label="Repository path"
@@ -122,14 +118,8 @@ function environmentTypeLabel(type: string | undefined): string {
   }
 }
 
-// EnvironmentTypeField makes the env type a correctable, constrained selector
-// rather than a read-only label. The type drives build/deploy policy
-// (BuildsHere / RemoteWorktree), so it is set deliberately at init and is not a
-// derived value — but a wrong value (e.g. a type that resolved to "runtime" on
-// what is really a remote-agent env) otherwise has no recovery
-// surface short of hand-editing config.yaml. Recognition over recall: the
-// option set is the three known types. The change is applied on Save and takes
-// effect on the next deploy, which reconfigures the worktree storage.
+// The env type drives build/deploy policy but is otherwise only correctable by
+// hand-editing config.yaml, so a mis-set type is fixable here as a selector.
 function EnvironmentTypeField({
   value,
   disabled,
@@ -156,12 +146,10 @@ function EnvironmentTypeField({
   );
 }
 
-// CloudAliasSlots renders one cloud-alias selector per provider type the env
-// can attach: an AWS account AND a Cloudflare token can be linked
-// independently, each with its own "— None —" clear option. The per-type slots
-// come from the backend (EnvConfig.ResolvedCloudAliases grouped by type). When
-// the backend predates slots, a single AWS selector renders as a fallback so
-// the control never disappears.
+// Each provider type (e.g. an AWS account and a Cloudflare token) can be linked
+// independently, so the env gets one selector per slot. An older backend that
+// predates slots sends none; a single AWS selector renders as a fallback so the
+// control never disappears.
 function CloudAliasSlots({
   config,
   disabled,
@@ -208,10 +196,8 @@ function CloudAliasSlots({
   );
 }
 
-// cloudAliasSlotFieldId keeps the AWS slot on the historical id
-// (#environment-config-cloudprovideralias) so the long-standing AWS selector
-// contract — and the specs that target it — stay stable, while every other
-// provider type gets a suffixed id so the per-type selectors are addressable.
+// AWS keeps the historical element id so the long-standing specs that target
+// the AWS selector stay stable.
 function cloudAliasSlotFieldId(provider: string): string {
   const type = provider.trim().toLowerCase();
   return type === '' || type === 'aws'
@@ -268,11 +254,6 @@ function CloudAliasSelect({
       </div>
     );
   }
-  // Radix Select forbids an empty-string item value, so the clear option uses
-  // a sentinel that maps back to "" on change. This gives the user a way out
-  // of a selected alias — without it the dropdown only ever offered aliases
-  // and a set value could never be cleared. "" resolves to the
-  // placeholder, which renders the env as "Not linked" downstream.
   const optionItems = [
     { value: CLOUD_ALIAS_NONE_VALUE, label: '— None —' },
     ...selectOptions.map((option) => ({ value: option, label: option })),
@@ -375,11 +356,8 @@ function CloudContextField({
   );
 }
 
-// UnlinkedCloudContext renders an empty-state surface that explains why
-// no context is currently linked AND offers the matching recovery action.
-// Per AGENTS.md, the dashed-card with raw "Not linked" text was a gap:
-// users saw the missing state but had no path to recover. Now the path is
-// either "pick an alias above" or "open ERun settings to init a context".
+// An unlinked context must offer a recovery path, not just show "Not linked":
+// either pick an alias above, or open ERun settings to init a context.
 function UnlinkedCloudContext({
   cloudProviderAlias,
 }: {

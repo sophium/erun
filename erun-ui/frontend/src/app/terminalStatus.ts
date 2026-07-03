@@ -49,9 +49,6 @@ export function successfulTerminalExitReason(selections: TerminalExitSelections)
   return 'Session ended.';
 }
 
-// cloudProviderLabel renders the user-facing provider name for cloud-init exit
-// toasts so they name the provider the session actually set up, rather than
-// always saying "AWS".
 function cloudProviderLabel(provider: CloudInitProvider): string {
   return provider === 'cloudflare' ? 'Cloudflare' : 'AWS';
 }
@@ -144,8 +141,7 @@ export function statusForTerminalOutput(output: string): string {
   return rule?.message(output) ?? '';
 }
 
-// decodeTerminalOutput strips ANSI control sequences and normalizes line
-// endings so the open-status parser sees plain text.
+// decodeTerminalOutput yields plain text so the open-status parser's substring matches aren't thrown off by ANSI escapes.
 export function decodeTerminalOutput(data: Uint8Array): string {
   return new TextDecoder()
     .decode(data)

@@ -21,18 +21,11 @@ func RunDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBu
 	return build(buildInput, ctx.Stdout, ctx.Stderr)
 }
 
-// traceIncrementalDecision emits the "<inspect> + <reason>" trace pattern for
-// the fingerprint-based incremental path. The inspect was already executed
-// during resolution (applyIncrementalPromotion), but emitting it here keeps
-// dry-run output complete. Builds without a fingerprint (incremental disabled,
-// or no fp tag was looked up) produce no extra trace.
-//
-// The trace is intentionally explicit: each fp-tag inspect line is followed
-// by a "found"/"missing" result line, and the summary line names the actual
-// trigger (specific platforms missing, or a cascading dependency rebuild).
-// "rebuilding because cached fingerprint image is missing or stale" was too
-// vague to debug — a maintainer could not tell from the trace which fp-tag
-// failed to look up or whether the rebuild was driven by a FROM dependency.
+// traceIncrementalDecision re-emits the fingerprint inspect already run during
+// resolution so dry-run output stays complete, then names the concrete rebuild
+// trigger. The per-platform detail is deliberate: a single vague "missing or
+// stale" line could not tell a maintainer which fp-tag or dependency forced the
+// rebuild.
 func traceIncrementalDecision(ctx Context, buildInput DockerBuildSpec) {
 	if buildInput.Fingerprint == "" {
 		return
@@ -95,13 +88,10 @@ func RunDockerBuilds(ctx Context, builds []DockerBuildSpec, build DockerImageBui
 	return nil
 }
 
-// traceBuildUmbrella emits the `==> Building` start marker and returns a finish
-// func to defer with the run's error pointer; the finish func emits
-// `==> Built in N` or `==> Build failed after N`. These are the umbrella traces
-// the desktop's activity-queue parser keys off (mirrors RunHelmDeploy's
-// `==> Deploying` / `==> Deployed`). Real run only: dry-run performs no work so
-// there is nothing to put a spinner on, and skipping these lines in dry-run
-// also keeps the dry-run integration goldens stable.
+// traceBuildUmbrella brackets a build with the `==> Building` / `==> Built`
+// markers the desktop's activity-queue parser keys off to drive its spinner.
+// Skipped in dry-run, which does no work and must keep the integration goldens
+// stable.
 func traceBuildUmbrella(ctx Context) func(*error) {
 	if ctx.DryRun {
 		return func(*error) {}
@@ -129,11 +119,9 @@ func RunBuildExecutionAndDeploy(ctx Context, execution BuildExecutionSpec, deplo
 func runBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) (err error) {
 	defer traceBuildUmbrella(ctx)(&err)
 	if execution.release != nil {
-		// Call the unexported runReleaseSpec, not the exported
-		// RunReleaseSpec: the release phase here is already wrapped by
-		// the `==> Building` umbrella above, so emitting RunReleaseSpec's
-		// own `==> Releasing` markers would register a redundant second
-		// activity entry for the same `erun build --release` invocation.
+		// The exported RunReleaseSpec would emit its own `==> Releasing`
+		// markers, double-registering activity under the `==> Building`
+		// umbrella already active for this `erun build --release`.
 		if err = runReleaseSpec(ctx, *execution.release, nil, runScript, nil); err != nil {
 			return err
 		}
@@ -145,10 +133,8 @@ func runBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []
 	if _, err = runBuildExecutionBuilds(ctx, execution, deploySpecs, runScript, build, push); err != nil {
 		return err
 	}
-	// The build phase above built and pushed the images — and push publishes
-	// the runtime chart in lockstep with the runtime image (including for
-	// --release). The deploy specs are pure (they reference those images via
-	// ImageOverride) so deploy only runs helm here.
+	// build+push above already published the images and runtime chart, so
+	// these pure deploy specs only run helm.
 	for _, deploySpec := range deploySpecs {
 		if err = RunDeploySpec(ctx, deploySpec, deploy); err != nil {
 			return err
@@ -230,19 +216,12 @@ func deployedVersionForSpecs(specs []DeploySpec) string {
 	return version
 }
 
-// RunPushCommand wraps a standalone `erun push` operation with the
-// `==> Pushing` / `==> Pushed in N` / `==> Push failed after N` umbrella
-// traces the desktop's activity-queue parser keys off so the sidebar
-// spinner lights while the push runs (mirrors runBuildExecution's
-// `==> Building`). Real run only: dry-run does no work.
-//
-// Only the standalone push entrypoints (the CLI `push` command and the
-// MCP push tool) route through here. Pushes that happen inside
-// `erun build`/`erun build --deploy` are already covered by the
-// `==> Building` umbrella, and the shared push executors
-// (RunDockerPushExecution / RunDockerPushSpec) run per-image inside that
-// flow — bracketing them directly would emit a marker per image and
-// double-fire under `==> Building`.
+// RunPushCommand brackets a standalone `erun push` with the `==> Pushing` /
+// `==> Pushed` markers the desktop's activity-queue parser keys off. Only the
+// standalone push entrypoints route through here: pushes inside `erun build`
+// already sit under the `==> Building` umbrella, and the per-image push
+// executors would fire a marker per image and double-count if bracketed here.
+// Dry-run does no work.
 func RunPushCommand(ctx Context, op func() error) (err error) {
 	if ctx.DryRun {
 		return op()
@@ -279,8 +258,8 @@ func RunDockerPushSpec(ctx Context, pushInput DockerPushSpec, buildInput *Docker
 			return err
 		}
 		if buildInput.Push {
-			// The multi-arch build already pushed the image; publish its chart at
-			// the image's own version (single-image push: image and chart match).
+			// The multi-arch build already pushed the image, so only the chart
+			// remains; a single-image push aligns chart and image versions.
 			return publishComponentChart(ctx, buildInput.Image, buildInput.Image.Version)
 		}
 	}
@@ -299,11 +278,11 @@ func RunDockerPushExecution(ctx Context, execution DockerPushExecutionSpec, buil
 	if err := RunDockerBuilds(ctx, execution.builds, build); err != nil {
 		return err
 	}
-	// Every component chart publishes at the push/release version, decoupled from
+	// Every component chart publishes at the push/release version regardless of
 	// whether its image was re-pushed: version-pinned bases (erun-powerdns,
-	// erun-backend-postgres) keep their image at the upstream pin and are not
-	// re-pushed here, but their chart must still publish at the release version so
-	// platform deploys and wrapper charts resolve it.
+	// erun-backend-postgres) keep their upstream image pin but their chart must
+	// still publish at the release version so platform deploys and wrapper charts
+	// resolve it.
 	chartVersion := componentChartPublishVersion(execution.builds)
 	builtAndPushedTags := make(map[string]struct{}, len(execution.builds))
 	for _, buildInput := range execution.builds {
@@ -325,14 +304,11 @@ func RunDockerPushExecution(ctx Context, execution DockerPushExecutionSpec, buil
 	return nil
 }
 
-// componentChartPublishVersion returns the version every component chart in the
-// execution publishes at: the push/release version. It is the Version of the
-// first build that is not a version-pinned base — those (erun-powerdns,
-// erun-backend-postgres) carry their upstream pin in Image.Version (e.g. 4.9.3),
-// while the runtime and built components carry the release version. The runtime
-// (erun-devops) is always present and non-pinned, so a release/push always finds
-// it; an empty result (no non-pinned build) leaves each chart to fall back to
-// its image's own version.
+// componentChartPublishVersion is the release version every component chart
+// publishes at. Version-pinned bases (VersionFromBuildDir, e.g. erun-powerdns,
+// erun-backend-postgres) keep their upstream image pin and are skipped; the
+// always-present, non-pinned runtime (erun-devops) guarantees a match. An empty
+// result lets each chart fall back to its own image version.
 func componentChartPublishVersion(builds []DockerBuildSpec) string {
 	for _, buildInput := range builds {
 		if buildInput.Image.VersionFromBuildDir {

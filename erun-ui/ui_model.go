@@ -31,11 +31,9 @@ type uiEnvironment struct {
 	AutoStart         *bool  `json:"autoStart,omitempty"`
 }
 
-// uiWorkingIssue is the sidebar hover card's "what is this env working on"
-// read model: the env worktree's current git branch and, when the branch
-// names an issue (feature/<n>-… or bug/<n>-…), the resolved issue title.
-// Empty fields render as honest empty states; Available is false when the
-// worktree isn't reachable from the host (remote-agent / runtime envs).
+// uiWorkingIssue backs the sidebar hover card's "what is this env working on".
+// Available is false when the env worktree isn't reachable from the host
+// (remote-agent / runtime envs).
 type uiWorkingIssue struct {
 	Available   bool   `json:"available"`
 	Branch      string `json:"branch,omitempty"`
@@ -74,11 +72,10 @@ type uiSelection struct {
 	LocalRepoPath     string `json:"localRepoPath,omitempty"`
 	NoGit             bool   `json:"noGit,omitempty"`
 	SetDefaultTenant  bool   `json:"setDefaultTenant,omitempty"`
-	// Components is the explicit one-shot deploy selection from the Runtime
-	// tab's "Components to deploy" checklist. When set, the desktop threads it
-	// into `deploy --components` so exactly these charts roll out; empty leaves
-	// deploy to resolve the env's saved default. Chart directory names (plus the
-	// runtime release name) — never the wrapped erun-* dependency names.
+	// Components is the explicit one-shot deploy selection from the Runtime tab's
+	// "Components to deploy" checklist; empty leaves deploy to resolve the env's
+	// saved default. Values are chart directory names (plus the runtime release
+	// name) — never the wrapped erun-* dependency names.
 	Components []string `json:"components,omitempty"`
 }
 
@@ -123,10 +120,9 @@ type uiTenantDashboardInput struct {
 	KubernetesContext  string `json:"kubernetesContext,omitempty"`
 	CloudProviderAlias string `json:"cloudProviderAlias"`
 
-	// mcpBearer is the per-env MCP edge token the dashboard's
-	// MCP API-log read sends. It is set server-side by LoadTenantDashboard
-	// from the desktop identity, never by the frontend; being unexported it
-	// is excluded from generated Wails bindings and never serialized.
+	// mcpBearer is the per-env MCP edge token for the dashboard's MCP API-log
+	// read. Set server-side from the desktop identity, never by the frontend;
+	// unexported so the secret never crosses the Wails boundary.
 	mcpBearer string
 }
 
@@ -218,9 +214,9 @@ type uiPortStatus struct {
 }
 
 // uiContainerRegistryEntry mirrors eruncommon.ContainerRegistryEntry for the
-// desktop env-settings registry-list editor: a registry host plus the roles it
-// carries (any of build/from/to/deploy). Roles ride as plain strings at the
-// Wails boundary (RegistryRole is a string alias).
+// desktop registry-list editor. Roles carry the value set build/from/to/deploy
+// but ride as plain strings because RegistryRole is a string alias at the Wails
+// boundary.
 type uiContainerRegistryEntry struct {
 	Registry string   `json:"registry"`
 	Roles    []string `json:"roles"`
@@ -250,12 +246,11 @@ type uiEnvironmentConfig struct {
 	AutoUpgrade           bool                       `json:"autoUpgrade"`
 	UpgradeChannel        string                     `json:"upgradeChannel,omitempty"`
 	DisableBuildScript    bool                       `json:"disableBuildScript"`
-	// DeployComponents is the per-machine saved deploy selection (EnvConfig
-	// deploy.components): the charts `erun deploy` rolls out for this env by
-	// default. Empty means "no saved selection" — deploy falls back to the repo
-	// plan, then the runtime chart alone. The Runtime tab's checklist edits it;
-	// saving it raises the pending-redeploy banner (it changes what a redeploy
-	// rolls out).
+	// DeployComponents is the per-machine saved deploy selection: the charts
+	// `erun deploy` rolls out for this env by default. Empty means no saved
+	// selection — deploy falls back to the repo plan, then the runtime chart
+	// alone. Editing it raises the pending-redeploy banner, since it changes what
+	// a redeploy rolls out.
 	DeployComponents []string `json:"deployComponents,omitempty"`
 }
 
@@ -367,10 +362,8 @@ type uiAWSCloudAliasInput struct {
 }
 
 // uiEnvironmentCloudAlias is one provider-type slot in the env's cloud-alias
-// view: the provider type ("aws", "cloudflare"), the alias currently attached
-// to the env for that type (empty when none), and the configured aliases of
-// that type the operator can choose from. The frontend renders one selector
-// per slot so an env can attach an AWS alias AND a Cloudflare alias at once.
+// view. The frontend renders one selector per slot so an env can attach an AWS
+// alias AND a Cloudflare alias at once.
 type uiEnvironmentCloudAlias struct {
 	Provider string   `json:"provider"`
 	Alias    string   `json:"alias"`
@@ -417,10 +410,9 @@ type terminalExitPayload struct {
 	Reason    string `json:"reason,omitempty"`
 }
 
-// aiActivityPayload mirrors the debounced AI-session "busy" signal that
-// the desktop sidebar uses to render a spinner on env rows whose AI tab
-// is actively producing output. Busy flips true after ~5 s of sustained
-// output and back to false after ~3 s of silence; see recordAIActivity.
+// aiActivityPayload carries the debounced AI-session "busy" signal the sidebar
+// uses to spin env rows whose AI tab is actively producing output. Busy flips
+// true after ~5 s of sustained output and back to false after ~3 s of silence.
 type aiActivityPayload struct {
 	SessionID   int    `json:"sessionId"`
 	Tenant      string `json:"tenant"`
@@ -451,9 +443,9 @@ type appNotificationPayload struct {
 	Source      string `json:"source,omitempty"`
 }
 
-// appNotificationClearPayload dismisses an env-tagged notification (see
-// appNotificationClearEvent). The frontend clears the current notification
-// only when its source/tenant/environment all match.
+// appNotificationClearPayload dismisses an env-tagged notification. The frontend
+// clears the current notification only when its source/tenant/environment all
+// match.
 type appNotificationClearPayload struct {
 	Tenant      string `json:"tenant"`
 	Environment string `json:"environment"`
@@ -492,19 +484,12 @@ type uiIdleStatus struct {
 	GracePeriodSeconds     int64  `json:"gracePeriodSeconds,omitempty"`
 }
 
-// uiLastStopEvent describes the most recent automatic stop of a
-// managed cloud env. Populated from <userConfig>/erun/<tenant>/<env>/
-// last-stop.json which is written by the desktop's idle-stop fire
-// path. Surfaced in the idle tooltip so the user can answer "why did
-// my env stop?" without trawling the activity drawer.
-//
-// Source is the stable string from
-// EnvironmentStopHistoryEntry.Source ("pod-monitor" or
-// "host-manual"); the frontend turns it into a row badge. ArmedAt
-// is the moment the grace window began; empty for host-manual rows
-// without a prior armed grace. Policy is the resolved idle policy
-// at fire time so the row stays interpretable after the user later
-// edits the timeout.
+// uiLastStopEvent describes the most recent automatic stop of a managed cloud
+// env, surfaced in the idle tooltip so the user can answer "why did my env
+// stop?" without trawling the activity drawer. Source is one of "pod-monitor"
+// or "host-manual". ArmedAt is empty for host-manual stops without a prior
+// armed grace. Policy is snapshotted at fire time so the row stays
+// interpretable after the user later edits the timeout.
 type uiLastStopEvent struct {
 	StoppedAt        string             `json:"stoppedAt"`
 	ArmedAt          string             `json:"armedAt,omitempty"`
@@ -516,10 +501,9 @@ type uiLastStopEvent struct {
 	Markers          []uiLastStopMarker `json:"markers,omitempty"`
 }
 
-// uiIdlePolicy is the History-tab-facing snapshot of the resolved
-// idle policy. Mirrors common.EnvironmentIdlePolicy in shape, but
-// renders TimeoutSeconds rather than a Go duration so the
-// frontend never has to parse "10m0s".
+// uiIdlePolicy is the History-tab-facing snapshot of the resolved idle policy.
+// It renders TimeoutSeconds rather than a Go duration so the frontend never has
+// to parse "10m0s".
 type uiIdlePolicy struct {
 	TimeoutSeconds   int64  `json:"timeoutSeconds"`
 	WorkingHours     string `json:"workingHours,omitempty"`
@@ -545,10 +529,8 @@ type uiIdleMarker struct {
 	Clients          []uiIdleMarkerClient `json:"clients,omitempty"`
 }
 
-// uiIdleMarkerClient is the desktop's per-IP detail row for a marker.
-// The SSH-proxy populates the underlying snapshot; other activity kinds
-// leave Clients nil. Bytes and SecondsAgo are pre-formatted at the
-// boundary so the React tooltip can render without computing them.
+// uiIdleMarkerClient is the desktop's per-IP detail row for a marker. Only the
+// SSH-proxy populates it; other activity kinds leave Clients nil.
 type uiIdleMarkerClient struct {
 	Address    string `json:"address"`
 	Bytes      int64  `json:"bytes,omitempty"`

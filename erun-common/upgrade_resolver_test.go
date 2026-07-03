@@ -7,12 +7,9 @@ import (
 	"testing"
 )
 
-// TestUpgradeVersionsResolverForStore pins the resolution policy every
-// transport shares for Upgrade all: it queries the env's listed registries
-// (provenance first) plus the canonical ERun image, tags each result with its
-// source registry, and only fails when no registry resolves. The registry
-// interaction is not reachable from the dry-run integration harness (network),
-// so a white-box test with an injected lookup owns the policy.
+// TestUpgradeVersionsResolverForStore owns the shared Upgrade-all resolution
+// policy as a white-box test because the registry lookup needs network and the
+// dry-run integration harness cannot reach it.
 func TestUpgradeVersionsResolverForStore(t *testing.T) {
 	petiosEnv := EnvConfig{Name: "rihards-develop", RuntimeRegistry: "ghcr.io/petios"}
 
@@ -79,8 +76,6 @@ func TestUpgradeVersionsResolverForStore(t *testing.T) {
 	})
 }
 
-// assertProvenanceAndCanonicalSources pins that both the provenance registry
-// and the canonical image resolved, with provenance first.
 func assertProvenanceAndCanonicalSources(t *testing.T, sourced []SourcedRuntimeVersions) {
 	t.Helper()
 	if len(sourced) != 2 || sourced[0].Registry != "ghcr.io/petios" {
@@ -88,8 +83,6 @@ func assertProvenanceAndCanonicalSources(t *testing.T, sourced []SourcedRuntimeV
 	}
 }
 
-// assertCanonicalSourceCarriedThrough pins that the canonical source alone
-// carried its stable version through after a tenant-listing failure.
 func assertCanonicalSourceCarriedThrough(t *testing.T, sourced []SourcedRuntimeVersions) {
 	t.Helper()
 	if len(sourced) != 1 || sourced[0].Versions.LatestStable != "1.0.85" {
@@ -97,8 +90,6 @@ func assertCanonicalSourceCarriedThrough(t *testing.T, sourced []SourcedRuntimeV
 	}
 }
 
-// resolveOrFatal runs the sourced-versions resolver and fails with failMsg (a
-// %v format) on error, returning the resolved sources for further assertions.
 func resolveOrFatal(t *testing.T, resolver func(Context, string, EnvConfig) ([]SourcedRuntimeVersions, error), tenant string, env EnvConfig, failMsg string) []SourcedRuntimeVersions {
 	t.Helper()
 	sourced, err := resolver(Context{}, tenant, env)
@@ -108,10 +99,9 @@ func resolveOrFatal(t *testing.T, resolver func(Context, string, EnvConfig) ([]S
 	return sourced
 }
 
-// TestResolveEnvUpgradeItemCandidates pins the per-env candidate logic:
-// registries agreeing on the newest version yield a single target,
-// disagreeing registries yield an ambiguous item the caller must pick, and a
-// version equal to current is up to date.
+// TestResolveEnvUpgradeItemCandidates pins the per-env candidate contract,
+// notably that registry disagreement yields an ambiguous item the caller must
+// resolve rather than an auto-target.
 func TestResolveEnvUpgradeItemCandidates(t *testing.T) {
 	env := EnvConfig{Name: "prod", RuntimeVersion: "1.0.0", Type: EnvironmentTypeRuntime}
 	noTrace := func(string) {}
@@ -156,8 +146,6 @@ func TestResolveEnvUpgradeItemCandidates(t *testing.T) {
 	})
 }
 
-// assertLaggingSingleTarget pins an item that lags with exactly one candidate
-// pointing at wantTarget, reporting failMsg (a %+v format) with the item.
 func assertLaggingSingleTarget(t *testing.T, item UpgradePlanItem, wantTarget, failMsg string) {
 	t.Helper()
 	if !item.Lagging || item.Target != wantTarget || len(item.Candidates) != 1 {
@@ -165,8 +153,7 @@ func assertLaggingSingleTarget(t *testing.T, item UpgradePlanItem, wantTarget, f
 	}
 }
 
-// TestBuildUpgradePlanPerEnv pins the per-env enumeration: only opted-in envs
-// become plan items, each resolved independently.
+// TestBuildUpgradePlanPerEnv pins that only opted-in envs become plan items.
 func TestBuildUpgradePlanPerEnv(t *testing.T) {
 	store := upgradeResolverStore{
 		tenants: []TenantConfig{{Name: "team"}},
@@ -189,9 +176,8 @@ func TestBuildUpgradePlanPerEnv(t *testing.T) {
 	}
 }
 
-// TestRunUpgradePlanReportsUnresolvedDistinctly pins the run-side accounting:
-// a member whose target is unresolved is never counted "up to date" — it has
-// its own class in the result and the deployer never sees it.
+// TestRunUpgradePlanReportsUnresolvedDistinctly pins that an unresolved member
+// is never counted up to date and never reaches the deployer.
 func TestRunUpgradePlanReportsUnresolvedDistinctly(t *testing.T) {
 	plan := UpgradePlan{Items: []UpgradePlanItem{
 		{Tenant: "team", Environment: "lagging", Channel: "stable", Current: "1.0.0", Target: "2.0.0", Lagging: true},
@@ -214,7 +200,6 @@ func TestRunUpgradePlanReportsUnresolvedDistinctly(t *testing.T) {
 	}
 }
 
-// upgradeResolverStore is the minimal DeployStore for the plan tests.
 type upgradeResolverStore struct {
 	tenants      []TenantConfig
 	envsByTenant map[string][]EnvConfig

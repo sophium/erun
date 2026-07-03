@@ -2,26 +2,16 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-// seedRoot owns the suite's isolated config root. The headless
-// backend — and every `erun` child process it spawns — runs against a
-// throwaway HOME under this root, so the suite never reads or writes the
-// developer's real ~/.erun / ~/.config/erun, and every machine sees the same
-// deterministic baseline.
-//
-// Layout mirrors erun-integration/internal/env.New:
-//
-//   <root>/home/                 → HOME
-//   <root>/home/.config/         → XDG_CONFIG_HOME
-//   <root>/home/.cache/          → XDG_CACHE_HOME
-//   <root>/home/.local/share/    → XDG_DATA_HOME
-//   <root>/repo/                 → repopath / projectroot of the seeded envs
-//   <root>/stubs/                → kubectl/helm/docker/aws stubs (PATH-prepended)
-//
-// The seeded config tree mirrors erun-integration/internal/fixture.SeedTenantEnv
-// — keep the two in lockstep when a config field becomes load-bearing — plus
-// two deliberate extensions: `type: local-agent` (the badge/type contract the
-// sidebar specs assert) and `aitool: sh` (the AI tab launches an inert shell
-// instead of a real claude/codex process).
+// seedRoot owns the suite's isolated config root: the headless backend and
+// every `erun` child it spawns run against a throwaway HOME under this root, so
+// the suite never touches the developer's real ~/.erun / ~/.config/erun and
+// every machine sees the same deterministic baseline. Directory layout mirrors
+// erun-integration/internal/env.New and the seeded config tree mirrors
+// erun-integration/internal/fixture.SeedTenantEnv — keep both in lockstep when a
+// path or config field becomes load-bearing. Two deliberate extensions on top:
+// `type: local-agent` (the badge/type contract the sidebar specs assert) and
+// `aitool: sh` (the AI tab launches an inert shell instead of a real
+// claude/codex process).
 
 // Baseline names every spec can rely on. One tenant, two inert local-agent
 // environments. `alpha` sorts (and renders) first; `beta` exists so flows
@@ -47,10 +37,10 @@ export const SEED_CLOUD_ALIAS = 'pw-aws';
 // (re-verify) action without a live Cloudflare account.
 export const SEED_CLOUDFLARE_ALIAS = 'pw-token+0123456789abcdef@cloudflare';
 
-// isolatedRoot resolves the suite-owned root directory. run.sh exports
-// ERUN_PLAYWRIGHT_HOME; when the suite is launched without it (direct
-// `playwright test`), a fresh temp root is created once in the runner
-// process and propagated to workers through process.env.
+// isolatedRoot resolves the suite-owned root. When run.sh has not exported
+// ERUN_PLAYWRIGHT_HOME (a direct `playwright test`), the fresh temp root is
+// cached back into the env so every worker shares one root instead of minting
+// its own.
 export function isolatedRoot(): string {
   const configured = process.env.ERUN_PLAYWRIGHT_HOME?.trim();
   if (configured) {
@@ -77,29 +67,25 @@ function erunConfigDir(): string {
   return path.join(isolatedHomeDir(), '.config', 'erun');
 }
 
-// e2eK3dEnabled reports whether the opt-in, k3d-backed real-cluster mode is on.
-// It gates every real-cluster branch below; when false the suite
-// is the default inert/offline harness (stubs prepended, ERUN_APP_CLI pinned).
-// Set ERUN_E2E_K3D=1 only on a host with Docker + k3d + binfmt — never in the
-// default `run.sh` or `make integration-test`.
+// e2eK3dEnabled gates every real-cluster branch below; when false the suite is
+// the default inert/offline harness. Enable it only on a Docker + k3d + binfmt
+// host — never in the default `run.sh` or `make integration-test`.
 export function e2eK3dEnabled(): boolean {
   return process.env.ERUN_E2E_K3D === '1';
 }
 
-// kubeconfigPath is the fixed kubeconfig location for the k3d mode. backendEnv()
-// pins KUBECONFIG here at config-load time; global-setup writes the live
-// cluster's kubeconfig into it before the backend boots, so the backend and the
-// specs share one isolated kubeconfig and never read the developer's ~/.kube.
+// kubeconfigPath is the fixed kubeconfig for k3d mode so the backend and specs
+// share one isolated kubeconfig and never read the developer's ~/.kube.
+// global-setup must write the live cluster's kubeconfig here before the backend
+// boots.
 export function kubeconfigPath(): string {
   return path.join(isolatedHomeDir(), '.kube', 'config');
 }
 
-// backendEnv returns the environment overrides for the `erun-app --headless`
-// webServer process. HOME + XDG_* redirect both config roots (xdg.ConfigHome
-// + "erun" and os.UserHomeDir() + ".erun") into the isolated root; the PATH
-// prepend routes kubectl/helm/docker/aws — for the backend and for every
-// `erun`/shell child it spawns — to the inert stubs so no real cluster,
-// cloud, or docker daemon is ever touched.
+// backendEnv redirects both erun roots — xdg config home and os.UserHomeDir +
+// ".erun" — into the isolated root via HOME + XDG_*, and the PATH-prepended
+// stubs keep the backend and every `erun`/shell child it spawns off any real
+// cluster, cloud, or docker daemon.
 export function backendEnv(): Record<string, string> {
   const home = isolatedHomeDir();
   const base: Record<string, string> = {
@@ -109,21 +95,16 @@ export function backendEnv(): Record<string, string> {
     XDG_DATA_HOME: path.join(home, '.local', 'share'),
   };
   if (e2eK3dEnabled()) {
-    // k3d mode: use the REAL docker/kubectl/helm and the real built
-    // `erun` binary — only `aws` stays stubbed (no cloud account in CI; the
-    // cloud-context lifecycle is driven via the ERUN_AWS_BIN argv-stub seam).
-    // The runtime kubeconfig is the isolated one global-setup writes. This
-    // branch must never run in the default inert mode.
+    // k3d mode drives a live cluster with the real docker/kubectl/helm and
+    // built `erun`; only `aws` stays stubbed (no cloud account). This branch
+    // must never run in the default inert mode.
     return {
       ...base,
       PATH: `${stubsDir()}${path.delimiter}${process.env.PATH ?? ''}`,
       KUBECONFIG: kubeconfigPath(),
-      // The aws stub lives in stubsDir() (createIsolatedLayout writes only it in
-      // k3d mode); ERUN_AWS_BIN routes erun-common's aws calls to it explicitly,
-      // independent of PATH order.
+      // Route erun-common's aws calls to the stub explicitly, independent of
+      // PATH order.
       ERUN_AWS_BIN: path.join(stubsDir(), 'aws'),
-      // The desktop tabs run the real CLI. ERUN_E2E_ERUN_BIN is the built
-      // erun-cli binary run.sh wires; fall back to PATH resolution otherwise.
       ERUN_APP_CLI: process.env.ERUN_E2E_ERUN_BIN ?? 'erun',
     };
   }
@@ -139,8 +120,8 @@ export function backendEnv(): Record<string, string> {
   };
 }
 
-// createIsolatedLayout materializes the directory layout and the stub
-// binaries. Refuses to operate on anything that could be a real home.
+// createIsolatedLayout refuses to run against anything that could be a real
+// home directory.
 export function createIsolatedLayout(): void {
   const root = isolatedRoot();
   if (!root || root === os.homedir() || root === '/') {
@@ -157,20 +138,16 @@ export function createIsolatedLayout(): void {
   ]) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  // k3d mode uses real docker/kubectl/helm/erun against a live cluster; only
-  // `aws` stays stubbed (no cloud account). The default mode stubs everything.
   const stubs = e2eK3dEnabled() ? ['aws'] : ['kubectl', 'helm', 'docker', 'aws', 'erun'];
   for (const name of stubs) {
     writeStubBinary(name);
   }
 }
 
-// seedEnvironmentForK3d writes a fresh local-agent env pointed at the live k3d
-// cluster: the real kube context k3d created and the cluster's
-// built-in registry, and — critically — NO runtimeversion, so the desktop's
-// create flow must build → push → deploy a fresh version
-// rather than installing a pre-pinned one. The repo is the suite's seeded repo
-// (which carries a buildable devops module on the k3d-mode host).
+// seedEnvironmentForK3d writes a k3d env with — critically — NO runtimeversion,
+// so the desktop's create flow must build → push → deploy a fresh version
+// rather than install a pre-pinned one. Its repo is the seeded repo, which
+// carries a buildable devops module on the k3d-mode host.
 export function seedEnvironmentForK3d(
   tenant: string,
   environment: string,
@@ -203,7 +180,6 @@ export function seedEnvironmentForK3d(
 // - kubectl: answers the context listing with an empty set (the env-init
 //   dialog's deterministic empty state) and reports everything else as
 //   unreachable.
-// - helm/docker/aws: fail fast unconditionally.
 function writeStubBinary(name: string): void {
   let body: string;
   if (name === 'erun') {
@@ -241,9 +217,8 @@ function writeStubBinary(name: string): void {
   fs.writeFileSync(path.join(stubsDir(), name), body, { mode: 0o755 });
 }
 
-// seedBaseline writes the deterministic config tree the specs assert
-// against: root config (default tenant + the one cloud provider), the pw
-// tenant, and the alpha/beta environments.
+// seedBaseline writes the deterministic default-mode config tree every spec
+// asserts against.
 export function seedBaseline(): void {
   const root = erunConfigDir();
   fs.mkdirSync(path.join(root, SEED_TENANT), { recursive: true });
@@ -254,9 +229,6 @@ export function seedBaseline(): void {
       `  - alias: ${SEED_CLOUD_ALIAS}\n` +
       '    provider: aws\n' +
       `    profile: ${SEED_CLOUD_ALIAS}\n` +
-      // The Cloudflare alias carries its identity (account id + token label) and
-      // a token ref, but no token is written to the secret store, so its status
-      // resolves to not_configured without touching the Cloudflare API.
       `  - alias: ${SEED_CLOUDFLARE_ALIAS}\n` +
       '    provider: cloudflare\n' +
       '    username: pw-token\n' +
@@ -292,11 +264,9 @@ export function seedBaseline(): void {
   );
 }
 
-// seedBaselineForK3d writes the minimal config tree for the k3d e2e mode:
-// the root config (default tenant, no cloud providers) and the
-// pw tenant, but NO environments. The e2e spec seeds its own env at the live
-// cluster via seedEnvironmentForK3d, so the inert `test-context` baseline envs
-// (which would fail real kubectl status checks) are never written.
+// seedBaselineForK3d seeds the pw tenant but NO environments: the e2e spec
+// creates its own env at the live cluster, and the inert `test-context`
+// baseline envs would fail real kubectl status checks.
 export function seedBaselineForK3d(): void {
   const root = erunConfigDir();
   fs.mkdirSync(path.join(root, SEED_TENANT), { recursive: true });
@@ -307,10 +277,9 @@ export function seedBaselineForK3d(): void {
   );
 }
 
-// seedEnvironment writes one inert local-agent env config. Mirrors
-// erun-integration/internal/fixture.SeedTenantEnv's env tree, plus the
-// explicit type (badge contract) and the inert AI tool. extraYaml, when
-// given, is appended verbatim to the env config.
+// seedEnvironment writes one inert local-agent env config, mirroring
+// erun-integration/internal/fixture.SeedTenantEnv's env tree plus the explicit
+// type (badge contract) and the inert `sh` AI tool.
 export function seedEnvironment(tenant: string, environment: string, extraYaml = ''): void {
   const envDir = path.join(erunConfigDir(), tenant, environment);
   fs.mkdirSync(envDir, { recursive: true });
@@ -334,12 +303,10 @@ export function removeEnvironment(tenant: string, environment: string): void {
   fs.rmSync(path.join(erunConfigDir(), tenant, environment), { recursive: true, force: true });
 }
 
-// seedTenant writes a brand-new tenant's config.yaml (name + default
-// environment) — the minimum ListTenantConfigs needs to surface the tenant
-// at all (a tenant dir with no config.yaml is skipped as uninitialized).
-// Mirrors what `erun init` writes for a new tenant (see createTenantConfig in
-// erun-common/init.go). Pair with seedEnvironment to add the tenant's
-// environments, and removeTenant to clean up afterwards.
+// seedTenant writes the minimal tenant config.yaml ListTenantConfigs needs to
+// surface a tenant at all — a tenant dir with no config.yaml is skipped as
+// uninitialized. Mirrors what `erun init` writes (createTenantConfig in
+// erun-common/init.go).
 export function seedTenant(tenant: string, defaultEnvironment: string): void {
   const tenantDir = path.join(erunConfigDir(), tenant);
   fs.mkdirSync(tenantDir, { recursive: true });
@@ -367,9 +334,8 @@ export function removeIsolatedRoot(): void {
   fs.rmSync(root, { recursive: true, force: true });
 }
 
-// uniqueEnvironmentName derives a per-test throwaway env name from the spec
-// title: a short slug plus a random suffix so concurrent or repeated runs
-// never collide.
+// uniqueEnvironmentName derives a per-test env name from the spec title so
+// concurrent or repeated runs never collide.
 export function uniqueEnvironmentName(title: string): string {
   const slug =
     title

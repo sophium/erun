@@ -1,10 +1,8 @@
-// uiTraceBuffer is the Diagnostics console's "UI trace" source:
-// a bounded, in-memory history of dispatched Redux actions and the top-level
-// state slices each one changed — the packaged WebView has no Redux
-// DevTools, so this is the in-app equivalent of its action timeline.
+// The Diagnostics console's in-app stand-in for Redux DevTools, which the
+// packaged WebView cannot provide.
 // Deliberately NOT Redux state: recording into the store would make every
-// recorded action dispatch another write (a feedback loop) and churn
-// subscribers; the console polls this module instead.
+// recorded action dispatch another write — a feedback loop — so the console
+// polls this module instead.
 
 export interface UITraceEntry {
   at: number;

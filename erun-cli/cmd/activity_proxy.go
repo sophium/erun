@@ -96,11 +96,9 @@ func proxySSHActivityConnection(client net.Conn, targetAddress string, recorder 
 		_ = target.Close()
 	}()
 
-	// Key activity by client IP only: a single peer opens many short-lived
-	// source ports (kube port-forward uses a fresh ephemeral port per
-	// stream), so the bare IP keeps the per-client map key stable. Fall back
-	// to the raw address when it cannot be split, to still capture something
-	// identifiable.
+	// Key activity by client IP only: kube port-forward opens a fresh ephemeral
+	// source port per stream, so keying on the full address would fragment one
+	// peer across many map entries.
 	clientAddress := extractRemoteHost(client.RemoteAddr())
 
 	var wg sync.WaitGroup

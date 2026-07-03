@@ -1,21 +1,8 @@
 // Package headlessserver hosts the ERun desktop frontend over plain HTTP so
 // headless clients (Playwright, scripts, CI) can drive the same React bundle
-// without a Wails window.
-//
-// The package is deliberately decoupled from the Wails runtime: it accepts a
-// concrete fs.FS for the frontend bundle and a target object whose exported
-// methods become the Wails-style RPC surface. The HTTP transport mirrors what
-// Wails injects into the WebView:
-//
-//   - /                  serves index.html with a shim <script> prepended so
-//     window.runtime and window.go.main.App resolve before
-//     the main bundle loads.
-//   - /__erun_invoke     reflective JSON-RPC over POST, one method per call.
-//   - /__erun_events     Server-Sent Events stream of EventsEmit fan-out.
-//   - /__erun_emit       fire-and-forget EventsEmit triggered from JS.
-//   - /__erun_clipboard  in-memory clipboard store for tests.
-//
-// Everything else under / is served straight from the embedded bundle.
+// without a Wails window. It mirrors the runtime Wails injects into the WebView
+// — a shim makes window.runtime and window.go.main.App resolve before the main
+// bundle loads — so the unmodified bundle runs headless.
 package headlessserver
 
 import (
@@ -33,9 +20,8 @@ import (
 	"sync/atomic"
 )
 
-// Server is the HTTP transport for headless mode. Construct with New, register
-// it on a net/http server, and call Close on shutdown to drain SSE
-// subscribers. The zero value is not usable.
+// Server is the HTTP transport for headless mode. The zero value is not usable;
+// construct with New.
 type Server struct {
 	target reflect.Value
 	bundle fs.FS
@@ -57,10 +43,9 @@ type event struct {
 	Args []any  `json:"args"`
 }
 
-// New builds a Server that exposes the exported methods of target as
-// /__erun_invoke handlers and serves bundle at the document root. The target
-// is typically *main.App; methods are matched by exact name in
-// window.go.main.App.<Name> the same way Wails would bind them.
+// New builds a Server whose target — typically *main.App — is bound by exact
+// method name the same way Wails binds window.go.main.App.<Name>, so the
+// headless RPC surface matches the desktop one.
 func New(target any, bundle fs.FS) *Server {
 	s := &Server{
 		target: reflect.ValueOf(target),
@@ -72,18 +57,16 @@ func New(target any, bundle fs.FS) *Server {
 	return s
 }
 
-// Emit fans the named event with the given args out to every active SSE
-// subscriber. The headless main wires this up as the App's emitter so
-// runtime.EventsEmit-style calls reach the browser without involving Wails.
+// Emit fans an event out to every active SSE subscriber; the headless main
+// wires it in as the App's emitter so EventsEmit-style calls reach the browser
+// without Wails.
 func (s *Server) Emit(name string, args ...any) {
 	ev := event{Name: name, Args: args}
 	s.subsMu.Lock()
 	defer s.subsMu.Unlock()
 	for _, ch := range s.subs {
-		// Non-blocking send: a subscriber that can't keep up just drops
-		// events. The buffer is sized for a reasonable burst; if it
-		// fills the client is likely disconnected and will be cleaned
-		// up on the next write.
+		// Best-effort delivery: a subscriber that can't keep up drops events
+		// rather than blocking the emitter.
 		select {
 		case ch <- ev:
 		default:
@@ -102,8 +85,7 @@ func (s *Server) Close() {
 	}
 }
 
-// Handler returns the mux that wires every HTTP route this transport owns.
-// Mount it on the root of an http.Server in main.go.
+// Handler returns the mux wiring every HTTP route this transport owns.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/__erun_invoke", s.handleInvoke)
@@ -120,9 +102,8 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 		s.serveIndex(w, r)
 		return
 	}
-	// Resolve files inside the bundle. Anything missing falls back to
-	// index.html so SPA-style deep links still load — the React router
-	// can then decide what to render.
+	// Missing files fall back to index.html so SPA deep links still load and the
+	// React router can resolve them.
 	if data, err := fs.ReadFile(s.bundle, path); err == nil {
 		writeStatic(w, path, data)
 		return
@@ -150,9 +131,7 @@ func writeStatic(w http.ResponseWriter, path string, data []byte) {
 	_, _ = w.Write(data)
 }
 
-// contentTypeBySuffix maps a file-extension suffix to the Content-Type the
-// static handler advertises. Order matters: ".woff2" must precede ".woff" so
-// the longer suffix wins.
+// Order matters: ".woff2" must precede ".woff" so the longer suffix wins.
 var contentTypeBySuffix = []struct {
 	suffix      string
 	contentType string
@@ -177,9 +156,8 @@ func contentTypeForPath(path string) string {
 	return ""
 }
 
-// invokeRequest is the wire payload for /__erun_invoke. args is held as raw
-// JSON so we can reflectively unmarshal each element into the exact Go type
-// the target method expects.
+// invokeRequest keeps args as raw JSON so each is unmarshalled into the exact
+// Go type its target method parameter expects.
 type invokeRequest struct {
 	Method string            `json:"method"`
 	Args   []json.RawMessage `json:"args"`
@@ -226,9 +204,8 @@ func callMethod(method reflect.Value, rawArgs []json.RawMessage) (any, error) {
 	return mapMethodResults(method.Call(in))
 }
 
-// decodeMethodArgs reflectively unmarshals each raw JSON arg into the exact Go
-// type the method's matching parameter expects. A missing or null arg leaves
-// the parameter at its zero value, matching Wails' lenient call convention.
+// A missing or null arg leaves the parameter at its zero value, matching Wails'
+// lenient call convention.
 func decodeMethodArgs(mt reflect.Type, rawArgs []json.RawMessage) ([]reflect.Value, error) {
 	in := make([]reflect.Value, mt.NumIn())
 	for i := 0; i < mt.NumIn(); i++ {
@@ -372,9 +349,8 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	}
 }
 
-// Listen wires the Server's handler onto a context-bound HTTP listener and
-// blocks until the context is cancelled. Returns any non-graceful shutdown
-// error.
+// Listen serves the handler on addr and blocks until ctx is cancelled,
+// returning any non-graceful shutdown error.
 func (s *Server) Listen(ctx context.Context, addr string) error {
 	server := &http.Server{Addr: addr, Handler: s.Handler()}
 	errCh := make(chan error, 1)

@@ -9,17 +9,12 @@ import (
 	"time"
 )
 
-// envTraceLogMaxBytes bounds the per-env trace log: when the current file
-// exceeds it, the file rotates to trace.log.1 (replacing any prior one) so
-// the pair never grows past ~2× the cap.
+// envTraceLogMaxBytes caps each trace file so the rotated pair stays under ~2× this.
 const envTraceLogMaxBytes = 5 * 1024 * 1024
 
-// EnvTraceLogPath is the per-env trace log: the full
-// VerbosityTrace stream of every env-scoped erun invocation, appended by
-// the runtime itself so the desktop's Diagnostics console can show what
-// happened at any time — including for commands that ran before the console
-// was opened. Host-side invocations write the host file; in-pod invocations
-// write the pod's (both resolve $HOME).
+// EnvTraceLogPath resolves the per-env trace log the runtime appends every
+// env-scoped invocation to, so the desktop Diagnostics console can show history
+// even for commands that ran before it was opened.
 func EnvTraceLogPath(tenant, environment string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -33,15 +28,14 @@ func EnvTraceLogPath(tenant, environment string) (string, error) {
 	return filepath.Join(home, ".erun", tenant, environment, "trace.log"), nil
 }
 
-// ActivateEnvTrace turns on the per-env trace tee for this invocation.
-// Capture is always on: diagnostics must exist for the first
-// failure, not only for failures after an operator opted in. Returns the
-// (possibly) tee'd context and a closer the caller defers.
+// ActivateEnvTrace turns on the per-env trace tee for this invocation. Capture
+// is always on so diagnostics exist for the first failure, not only after an
+// operator opts in.
 //
-// The tee is diagnostics, never a failure source: an unopenable file or a
-// failed rotation degrades to the un-tee'd context with a trace line. In
-// dry-run mode nothing is written; the trace names the resolved log path so
-// the plan stays auditable (the integration-golden contract).
+// The tee is diagnostics, never a failure source, so any setup error degrades
+// to the un-tee'd context. In dry-run nothing is written, but the trace still
+// names the resolved path so the plan stays auditable (the integration-golden
+// contract).
 func ActivateEnvTrace(ctx Context, tenant, environment string) (Context, func()) {
 	noop := func() {}
 	tenant = strings.TrimSpace(tenant)
@@ -68,8 +62,6 @@ func ActivateEnvTrace(ctx Context, tenant, environment string) (Context, func())
 	return ctx, func() { _ = file.Close() }
 }
 
-// openEnvTraceLog opens the append-mode log, rotating the current file to
-// trace.log.1 once it exceeds the cap.
 func openEnvTraceLog(path string) (*os.File, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
@@ -82,8 +74,8 @@ func openEnvTraceLog(path string) (*os.File, error) {
 	return os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 }
 
-// stampedLineWriter prefixes each written line with an RFC3339 timestamp so
-// interleaved invocations stay attributable in the shared per-env log.
+// stampedLineWriter stamps each line so interleaved invocations stay
+// attributable in the shared per-env log.
 type stampedLineWriter struct {
 	out io.Writer
 	now func() time.Time

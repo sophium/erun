@@ -17,7 +17,6 @@ import { isolatedRoot, kubeconfigPath } from './seedRoot.js';
 export interface K3dCluster {
   clusterName: string;
   registryName: string;
-  // context is the kubeconfig context k3d creates: `k3d-<clusterName>`.
   context: string;
   // registry is the host:port reference the cluster pulls from and `erun push`
   // publishes to (the k3d built-in registry, reachable from both the host and
@@ -35,19 +34,13 @@ function run(bin: string, args: string[]): string {
   return execFileSync(bin, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
 }
 
-// createK3dCluster creates a throwaway cluster + built-in registry, writes the
-// cluster's kubeconfig into the isolated home, and persists the cluster facts so
-// specs (and teardown) read them without re-shelling k3d. Idempotent on a
-// leftover cluster of the same name from an aborted run.
 export function createK3dCluster(): K3dCluster {
-  // A random suffix keeps concurrent/aborted runs from colliding; the registry
-  // shares the suffix so teardown can find both. k3d registry names must start
-  // with `k3d-`.
+  // A random suffix keeps concurrent/aborted runs from colliding. k3d registry
+  // names must start with `k3d-`.
   const suffix = Math.random().toString(36).slice(2, 8);
   const clusterName = `erun-e2e-${suffix}`;
   const registryName = `k3d-erun-e2e-reg-${suffix}`;
-  // 0 lets k3d pick a free host port for the registry; we read the resolved
-  // host:port back from `k3d registry list` after creation.
+  // Port 0 lets k3d pick a free host port for the registry.
   run('k3d', [
     'cluster',
     'create',
@@ -74,9 +67,6 @@ export function createK3dCluster(): K3dCluster {
   return cluster;
 }
 
-// resolveRegistryHostPort reads the host-reachable host:port of the built-in
-// registry from `k3d registry list -o json`. The host port is what both
-// `erun push` (from the host) and the cluster's pulls address.
 function resolveRegistryHostPort(registryName: string): string {
   const raw = run('k3d', ['registry', 'list', '-o', 'json']);
   const entries = JSON.parse(raw) as Array<{
@@ -94,8 +84,8 @@ function resolveRegistryHostPort(registryName: string): string {
   return `localhost:${port}`;
 }
 
-// readK3dCluster loads the cluster facts persisted by createK3dCluster. Specs
-// call it to seed an env at the live cluster.
+// readK3dCluster loads the persisted cluster facts so specs can seed an env at
+// the live cluster.
 export function readK3dCluster(): K3dCluster {
   return JSON.parse(fs.readFileSync(statePath(), 'utf8')) as K3dCluster;
 }

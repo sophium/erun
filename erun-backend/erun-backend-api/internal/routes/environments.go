@@ -28,10 +28,8 @@ type EnvironmentRoutes struct {
 	quotas       TenantQuotaRepository
 }
 
-// createEnvironmentRequest is the env-registration body. The tenant is resolved
-// from the caller's token (RLS scopes the write), never from the body, so it is
-// absent here. The env references its context by contextId; the composite
-// foreign key enforces that the context belongs to the caller's tenant.
+// createEnvironmentRequest carries only operator-authored fields; the tenant is
+// resolved from the caller's token, never trusted from the body.
 type createEnvironmentRequest struct {
 	Name              string `json:"name"`
 	Type              string `json:"type"`
@@ -66,8 +64,7 @@ func (r EnvironmentRoutes) getEnvironment(w http.ResponseWriter, req *http.Reque
 }
 
 // validNamespaceLabel reports whether s is a DNS-1123 label safe to use as the
-// env component of the <tenant>-<env> runtime namespace: lowercase letters,
-// digits, and internal hyphens, not hyphen-bounded, at most 63 characters.
+// env component of the <tenant>-<env> runtime namespace.
 func validNamespaceLabel(s string) bool {
 	if s == "" || len(s) > 63 || s[0] == '-' || s[len(s)-1] == '-' {
 		return false
@@ -81,19 +78,12 @@ func validNamespaceLabel(s string) bool {
 	return true
 }
 
-// validEnvironmentTypes is the closed set of env types the registration API
-// accepts, matching model.EnvironmentType.
 var validEnvironmentTypes = map[model.EnvironmentType]struct{}{
 	model.EnvironmentTypeRuntime:     {},
 	model.EnvironmentTypeRemoteAgent: {},
 	model.EnvironmentTypeLocalAgent:  {},
 }
 
-// createEnvironment registers an environment in the caller's tenant (resolved
-// from the token; RLS scopes the write) and returns the persisted row. It
-// validates the operator-authored input, then persists; the env references its
-// context by contextId, and the composite foreign key enforces that the context
-// belongs to the caller's tenant.
 func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Request) {
 	var body createEnvironmentRequest
 	if err := decodeJSON(req, &body); err != nil {
@@ -102,10 +92,9 @@ func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Re
 	}
 
 	name := strings.TrimSpace(body.Name)
-	// The env name forms the <tenant>-<env> namespace, so it must be a DNS-1123
-	// label. The tenant is already hyphen-free (ValidateTenantName on tenant
-	// registration), so the env may itself contain internal hyphens and the
-	// first-hyphen split stays unambiguous (injective-namespace guardrail).
+	// The tenant is hyphen-free (enforced at tenant registration), so allowing
+	// internal hyphens in the env keeps the first-hyphen split of the
+	// <tenant>-<env> namespace unambiguous.
 	if !validNamespaceLabel(name) {
 		writeError(w, http.StatusBadRequest, "name must be a DNS-1123 label: lowercase letters, digits, and internal hyphens, not starting or ending with a hyphen, at most 63 characters")
 		return
@@ -116,11 +105,6 @@ func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Re
 		return
 	}
 
-	// Enforce the per-tenant environment-count quota before persisting. The cap
-	// is the tenant's tenant_quotas.max_environments (default 10 when no row
-	// exists); the count is the tenant's existing environments. Both reads are
-	// RLS-scoped to the caller's tenant. At or over the cap, reject with 409 and
-	// do not run Create.
 	maxEnvironments, err := r.quotas.MaxEnvironments(req.Context())
 	if err != nil {
 		writeRepositoryError(w, err)
@@ -144,17 +128,15 @@ func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Re
 		RuntimeVersion:    strings.TrimSpace(body.RuntimeVersion),
 	})
 	if err != nil {
-		// A context_id that does not belong to the caller's tenant violates the
-		// composite (tenant_id, context_id) foreign key; surface it as the
-		// repository error (a clean 4xx/5xx) rather than leaking the SQL detail.
+		// A context belonging to another tenant is rejected here — the
+		// enforcement point for tenant isolation on the context reference.
 		writeRepositoryError(w, err)
 		return
 	}
 
-	// TODO(live): run RunBootstrapInitWithDependencies server-side to ensure
-	// the <tenant>-<env> namespace + deploy the runtime chart; requires a live
-	// cluster, not executed in this build — the row stands as registered config
-	// until then.
+	// TODO(live): provision the <tenant>-<env> namespace and deploy the runtime
+	// chart server-side; needs a live cluster, so for now the row is only
+	// registered config, not a running environment.
 
 	writeJSON(w, http.StatusCreated, created)
 }

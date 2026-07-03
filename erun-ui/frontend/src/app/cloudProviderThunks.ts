@@ -9,9 +9,7 @@ import { setSidebarCloudAliasBusy } from './slices/sidebarSlice';
 import { setCloudProviders } from './slices/tenantsSlice';
 import type { AppThunk, RootState } from './store';
 
-// cloudProviderThunks own the sidebar's per-provider-type cloud-alias controls.
-// Busy/action flags are keyed by alias on the sidebar slice, so AWS and
-// Cloudflare rows spin independently.
+// Per-alias busy/action state keeps AWS and Cloudflare sidebar rows spinning independently.
 
 export const loginPrimaryCloudProvider =
   (alias: string): AppThunk<Promise<void>> =>

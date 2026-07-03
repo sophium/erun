@@ -79,18 +79,12 @@ func newDoctorCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error)
 }
 
 func runDoctorCommand(ctx common.Context, resolveOpen func(common.OpenParams) (common.OpenResult, error), configStore common.ConfigStore, cloudDeps common.CloudDependencies, cloudContextDeps common.CloudContextDependencies, promptRunner PromptRunner, options doctorOptions, args []string) error {
-	// In-runtime invocations target a different surface entirely
-	// (remote-init recovery), and the root config they would inspect
-	// lives on the user's host, not in the pod. Short-circuit before
-	// the host-side checks fire.
+	// In-pod invocations target remote-init recovery instead; the host root
+	// config the checks below would inspect does not exist in the pod.
 	if common.IsInRuntimeEnvironment(os.Getenv) {
 		return runDoctorInRuntime(ctx, promptRunner, options)
 	}
 
-	// Run the host-side config repairs (root config, then per-env config)
-	// before any tenant/env work: a broken or mis-set config can block the
-	// resolveOpen the rest of doctor relies on. done=true means the caller
-	// asked only for config repair, so stop before tenant/env cleanup.
 	if done, err := runDoctorConfigRepairs(ctx, configStore, cloudDeps, cloudContextDeps, promptRunner, options, args); err != nil || done {
 		return err
 	}
@@ -119,16 +113,10 @@ func runDoctorCommand(ctx common.Context, resolveOpen func(common.OpenParams) (c
 	return runDoctorCleanupActions(ctx, promptRunner, result, options)
 }
 
-// runDoctorConfigRepairs runs the host-side config recoveries that must
-// precede resolveOpen, in order, and reports whether the run should stop after
-// them. The root-config inspection runs first so a broken root config (the
-// failure mode that motivated this flow: missing CloudProviders blocking
-// resolveOpen) does not prevent recovery — its repair path writes via
-// SaveERunConfig + InitAWSCloudProvider, and resolveOpen later picks up the
-// healed state. The per-env restore runs next, since a config that was changed
-// or corrupted (e.g. a type silently resolved to the wrong value) can block the
-// resolve too. Returns done=true when the caller asked only for config repair,
-// so the outer flow stops before tenant/env cleanup.
+// runDoctorConfigRepairs runs the host-side config recoveries before
+// resolveOpen: a broken root config (the motivating failure mode — missing
+// CloudProviders that block resolveOpen) or a corrupted per-env config would
+// otherwise block the resolve the rest of doctor relies on.
 func runDoctorConfigRepairs(ctx common.Context, configStore common.ConfigStore, cloudDeps common.CloudDependencies, cloudContextDeps common.CloudContextDependencies, promptRunner PromptRunner, options doctorOptions, args []string) (bool, error) {
 	if _, err := runRootConfigDoctor(ctx, configStore, cloudDeps, cloudContextDeps, promptRunner, options); err != nil {
 		return false, err
@@ -147,10 +135,6 @@ func runDoctorConfigRepairs(ctx common.Context, configStore common.ConfigStore, 
 	return false, nil
 }
 
-// doctorOnlyRepairConfig mirrors doctorOnlySelectedJetBrainsGatewayRepair:
-// when the only repair-style flag set is --repair-config (or
-// --restore-config-from-backup), the doctor flow should stop after
-// the root-config work instead of also attempting tenant/env cleanup.
 func doctorOnlyRepairConfig(options doctorOptions) bool {
 	repairOnly := options.repairConfig || strings.TrimSpace(options.restoreConfigFromBackup) != ""
 	return repairOnly &&
@@ -161,10 +145,6 @@ func doctorOnlyRepairConfig(options doctorOptions) bool {
 		!options.finishRemoteInit
 }
 
-// doctorOnlyRestoreEnvConfig reports whether --restore-env-config-from-backup
-// is the only action requested, so doctor stops after the env-config restore
-// instead of also resolving the env and running tenant/env cleanup. Mirrors
-// doctorOnlyRepairConfig for the per-env restore path.
 func doctorOnlyRestoreEnvConfig(options doctorOptions) bool {
 	return strings.TrimSpace(options.restoreEnvConfigFromBackup) != "" &&
 		!options.repairConfig &&
@@ -228,15 +208,14 @@ func writeNoDoctorActionsSelected(ctx common.Context) error {
 	return err
 }
 
-// deployDiagnosisGuidance points the reader at the fixes for the common
-// deploy-failure modes the diagnosis surfaces. The desktop Activities panel
-// exposes these same fixes as one-click buttons on a failed deploy card.
+// deployDiagnosisGuidance points at fixes for the common deploy-failure modes;
+// the desktop Activities panel exposes these same fixes as one-click buttons on
+// a failed deploy card.
 const deployDiagnosisGuidance = "If the release is stuck pending or an image failed to pull, re-run `erun deploy --force` to rebuild and redeploy, or clear the pending release."
 
-// runDeployDiagnosis reports the helm release status and runtime pods so the
-// reader can see why a deploy failed before any recovery. Read-only; the
-// commands are traced for --dry-run. Returns the diagnosis so the caller can
-// decide whether to offer the (destructive) recovery actions.
+// runDeployDiagnosis reports helm release status and pods, read-only, so the
+// reader sees why a deploy failed before deciding on the destructive recovery
+// actions.
 func runDeployDiagnosis(ctx common.Context, req common.ShellLaunchParams) (common.DeployDiagnosisResult, error) {
 	diagnosis := common.RunDeployDiagnosis(ctx, req)
 	if ctx.DryRun {
@@ -251,10 +230,9 @@ func runDeployDiagnosis(ctx common.Context, req common.ShellLaunchParams) (commo
 	return diagnosis, nil
 }
 
-// runDeployRecoveryActions runs the helm-level recovery actions the user
-// selected (via flag, or via prompt when the diagnosis shows the release is
-// unhealthy). The actions mutate the live release, so prompts are gated on an
-// unhealthy diagnosis — `erun doctor` never offers rollback on a healthy env.
+// runDeployRecoveryActions runs the selected helm-level recovery. The actions
+// mutate the live release, so prompts are gated on an unhealthy diagnosis —
+// `erun doctor` never offers rollback on a healthy env.
 func runDeployRecoveryActions(ctx common.Context, promptRunner PromptRunner, req common.ShellLaunchParams, options doctorOptions, diagnosis common.DeployDiagnosisResult) error {
 	actions, err := selectedDeployRecoveryActions(promptRunner, req, options, diagnosis, ctx.DryRun)
 	if err != nil {
@@ -277,12 +255,10 @@ func runDeployRecoveryActions(ctx common.Context, promptRunner PromptRunner, req
 	return nil
 }
 
-// selectedDeployRecoveryActions resolves which recovery to run. Explicit flags
-// win (and are mutually exclusive — see validateDoctorRecoveryFlags). With no
-// flag, the interactive path offers a single confirm for the one recovery that
-// fits the diagnosis rather than asking about every action in turn: clearing a
-// pending lock and rolling back are alternative fixes, and running both is
-// wrong.
+// selectedDeployRecoveryActions resolves which recovery to run: explicit flags
+// win, else the interactive path offers a single confirm for the one recovery
+// that fits the diagnosis — clearing a pending lock and rolling back are
+// alternative fixes, and running both is wrong.
 func selectedDeployRecoveryActions(promptRunner PromptRunner, req common.ShellLaunchParams, options doctorOptions, diagnosis common.DeployDiagnosisResult, dryRun bool) ([]common.DeployRecoveryAction, error) {
 	if options.clearPendingHelm {
 		return []common.DeployRecoveryAction{common.DeployRecoveryClearPendingHelm}, nil
@@ -451,10 +427,9 @@ func runDoctorInRuntime(ctx common.Context, promptRunner PromptRunner, options d
 	if err != nil {
 		return err
 	}
-	// --sync-config reconciles the in-pod config and short-circuits before
-	// remote-init: config drift is cheaper and more fundamental (a wrong type:
-	// mis-drives everything downstream), and gating it here keeps plain
-	// `erun doctor` in-pod output byte-for-byte unchanged.
+	// --sync-config short-circuits before remote-init: config drift is more
+	// fundamental (a wrong type mis-drives everything downstream), and gating it
+	// here leaves plain in-pod `erun doctor` output byte-for-byte unchanged.
 	if options.syncConfig {
 		return runRuntimeConfigSync(ctx, promptRunner, options, resolveRuntimeConfigHome(homeDir))
 	}

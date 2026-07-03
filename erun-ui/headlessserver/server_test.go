@@ -13,10 +13,9 @@ import (
 	"time"
 )
 
-// stubTarget is the App-shaped object the reflective invoke handler reaches
-// through. The headless transport's only requirement on App is "expose
-// exported methods that return (T, error) | (T) | (error) | ()", so we model
-// that surface here without dragging the real desktop module in.
+// stubTarget models the four method-return shapes the reflective invoke
+// handler supports — (T, error), (T), (error), () — without importing the
+// real desktop App.
 type stubTarget struct {
 	calls []string
 }
@@ -191,8 +190,6 @@ func TestEmitFansOutToSubscriber(t *testing.T) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	// Subscription happens during the handler; give it a beat to register
-	// before emitting so the test does not race the subscriber map.
 	var wg sync.WaitGroup
 	wg.Add(1)
 	got := make(chan event, 1)
@@ -215,8 +212,6 @@ func TestEmitFansOutToSubscriber(t *testing.T) {
 	}
 }
 
-// readFirstSSEEvent reads SSE "data:" frames from the response body until it
-// decodes one event, then sends it on got and returns.
 func readFirstSSEEvent(body io.Reader, got chan<- event) {
 	reader := bufioReaderForSSE(body)
 	for {
@@ -236,8 +231,8 @@ func readFirstSSEEvent(body io.Reader, got chan<- event) {
 	}
 }
 
-// waitForSubscriber blocks until the server has registered at least one SSE
-// subscriber, so an Emit cannot race ahead of the subscription.
+// waitForSubscriber blocks until the SSE subscription registers, so Emit
+// cannot race ahead of it.
 func waitForSubscriber(t *testing.T, srv *Server) {
 	t.Helper()
 
@@ -280,8 +275,6 @@ func TestClipboardStoresInMemory(t *testing.T) {
 	}
 }
 
-// bufioReaderForSSE wraps an io.Reader as a buffered string reader. It's
-// inlined here to avoid pulling bufio into the public file unnecessarily.
 func bufioReaderForSSE(r io.Reader) *lineReader {
 	return &lineReader{r: r}
 }

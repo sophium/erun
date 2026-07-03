@@ -92,11 +92,10 @@ func (a *App) StopCloudContext(name string) (uiCloudContextStatus, error) {
 		return uiCloudContextStatus{}, err
 	}
 	a.setCloudContextStatusInCache(status.Name, status.Status)
-	// Best-effort: record one host-manual entry in each linked env's
-	// stop-history.json so the History tab shows "you clicked Stop"
-	// alongside the in-pod monitor's auto-stops. Failures are logged
-	// to the activity queue and ignored — the AWS stop has already
-	// succeeded, so the user-visible action is complete.
+	// Best-effort: surface the manual stop in each linked env's History
+	// tab alongside the in-pod monitor's auto-stops. Failures are ignored
+	// because the AWS stop already succeeded — the user-visible action is
+	// complete.
 	a.recordManualStopForCloudContext(ctx, status.Name)
 	return cloudContextStatusToUI(status), nil
 }
@@ -112,11 +111,9 @@ func (a *App) StartCloudContext(name string) (uiCloudContextStatus, error) {
 	return cloudContextStatusToUI(status), nil
 }
 
-// DisableCloudContextApiStop sets AWS DisableApiStop=true for the named
-// cloud context so the in-pod idle monitor, the desktop Stop button,
-// and any external caller all hit OperationNotPermitted on subsequent
-// stop calls. This is the recovery lever the user reaches for when
-// auto-stop is racing against an unhealthy env.
+// DisableCloudContextApiStop turns on AWS stop protection — the recovery
+// lever an operator reaches for when auto-stop is racing against an
+// unhealthy env.
 func (a *App) DisableCloudContextApiStop(name string) (uiCloudContextStatus, error) {
 	status, err := eruncommon.SetCloudContextStopProtection(eruncommon.Context{}, a.deps.store, eruncommon.CloudContextStopProtectionParams{
 		Name:    name,
@@ -128,10 +125,8 @@ func (a *App) DisableCloudContextApiStop(name string) (uiCloudContextStatus, err
 	return cloudContextStatusToUI(status), nil
 }
 
-// EnableCloudContextApiStop clears the AWS DisableApiStop attribute so
-// the normal auto-stop / manual-stop behaviour resumes. Mirrors
-// DisableCloudContextApiStop to keep the two transitions symmetrical
-// on the desktop's lock toggle.
+// EnableCloudContextApiStop turns AWS stop protection back off so normal
+// auto-stop and manual stop resume.
 func (a *App) EnableCloudContextApiStop(name string) (uiCloudContextStatus, error) {
 	status, err := eruncommon.SetCloudContextStopProtection(eruncommon.Context{}, a.deps.store, eruncommon.CloudContextStopProtectionParams{
 		Name:    name,
@@ -143,11 +138,10 @@ func (a *App) EnableCloudContextApiStop(name string) (uiCloudContextStatus, erro
 	return cloudContextStatusToUI(status), nil
 }
 
-// DescribeCloudContextApiStop reads the live DisableApiStop attribute
-// without mutating it. Called lazily by the titlebar lock toggle so
-// the icon reflects the AWS state rather than a stale local cache —
-// the bulk RefreshCloudContextStatuses path deliberately skips this
-// to avoid an extra AWS round-trip per configured env on every poll.
+// DescribeCloudContextApiStop reads live AWS stop-protection state on
+// demand: the bulk status refresh deliberately skips it to avoid an AWS
+// round-trip per env on every poll, so the titlebar lock toggle reads it
+// lazily instead.
 func (a *App) DescribeCloudContextApiStop(name string) (uiCloudContextStatus, error) {
 	status, err := eruncommon.DescribeCloudContextStopProtection(eruncommon.Context{}, a.deps.store, name, a.deps.cloudContextDeps)
 	if err != nil {

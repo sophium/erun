@@ -10,16 +10,14 @@ interface ActivityLockOverlayProps {
   onProceedAnyway?: () => void;
 }
 
-// ActivityLockOverlay renders a small badge over a terminal whose session
-// is currently waiting on an activity (deploy/build/release) that touches
-// the runtime hosting it. The overlay is intentionally non-blocking:
-// pointer events pass through everywhere except the inline card itself,
-// so the underlying terminal stays interactive — the in-pod CLI may
-// prompt for input (helm pending-release recovery, etc.) and the user
-// must be able to answer it without first dismissing the overlay.
+// ActivityLockOverlay flags a terminal whose session is waiting on an activity
+// (deploy/build/release) touching the runtime hosting it. It is intentionally
+// non-blocking so the terminal stays interactive: the in-pod CLI may prompt for
+// input (helm pending-release recovery, etc.) and the user must be able to
+// answer without first dismissing the overlay.
 //
-// The "Hide" action dismisses the overlay locally for this session
-// without affecting the activity record on the backend.
+// "Hide" dismisses the overlay only for this session; it does not touch the
+// activity record on the backend.
 export function ActivityLockOverlay({
   lock,
   onOpenQueue,
@@ -27,9 +25,8 @@ export function ActivityLockOverlay({
 }: ActivityLockOverlayProps): React.ReactElement {
   return (
     <div
-      // Cap the card at the pane width (minus the 12px inset on each side) so a
-      // narrow/starved terminal pane shrinks it to fit instead of clipping its
-      // right edge behind the pane's own overflow-hidden.
+      // Cap the card at the pane width so a narrow/starved terminal pane shrinks
+      // it to fit instead of clipping its right edge behind the pane's overflow-hidden.
       className="pointer-events-none absolute top-3 right-3 z-10 flex max-w-[min(360px,calc(100%_-_1.5rem))] flex-col items-end gap-1"
       role="status"
       aria-live="polite"

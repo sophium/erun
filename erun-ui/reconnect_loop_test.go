@@ -12,16 +12,10 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// TestStartSessionStopsReconnectingAfterRepeatedFailures locks the
-// fast-exit loop guard. Before this gate, a managed
-// `erun open` PTY whose cluster kept tearing down the freshly-spawned
-// pod (helm rollout timeouts, MCP port-forward races against a
-// terminating EC2) would respawn indefinitely — each respawn re-ran
-// `erun open`, deployed, failed in a few seconds, and exited, leaving
-// the user with N stacked failed-deploy entries in the activity drawer
-// and a wall of reconnect markers. tryReconnect now stops after the
-// cap and emits a single retry marker via the terminal-output channel
-// so the user sees an explicit stop.
+// TestStartSessionStopsReconnectingAfterRepeatedFailures guards against
+// infinite respawn: a managed session whose pod kept dying on spawn used
+// to respawn forever, stacking failed-deploy entries in the activity
+// drawer. The loop now caps respawns and emits a single stop marker.
 func TestStartSessionStopsReconnectingAfterRepeatedFailures(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
@@ -55,11 +49,6 @@ func TestStartSessionStopsReconnectingAfterRepeatedFailures(t *testing.T) {
 		t.Fatalf("StartSession failed: %v", err)
 	}
 
-	// reconnectLoopMaxExits is the production cap. Closing the
-	// session that many times must each trigger a respawn (so we end
-	// up with maxExits+1 stubs in the slice — original plus
-	// maxExits respawns). The final close past the cap must NOT
-	// trigger a respawn.
 	const closes = reconnectLoopMaxExits + 1
 	for i := 0; i < closes; i++ {
 		expected := i + 1
@@ -70,9 +59,6 @@ func TestStartSessionStopsReconnectingAfterRepeatedFailures(t *testing.T) {
 		_ = current.Close()
 	}
 
-	// Give tryReconnect a beat to run for the over-cap close. If the
-	// gate broke, a fresh session would land in the slice; the assert
-	// below catches it.
 	time.Sleep(200 * time.Millisecond)
 	sessionsMu.Lock()
 	got := len(sessions)
@@ -82,8 +68,6 @@ func TestStartSessionStopsReconnectingAfterRepeatedFailures(t *testing.T) {
 			closes, reconnectLoopMaxExits, got)
 	}
 
-	// The retry marker is emitted through terminal-output as a
-	// base64-encoded ANSI line.
 	if !sawLoopMarker(emits) {
 		t.Fatal("expected reconnect-loop marker on terminal-output channel after cap")
 	}
@@ -125,18 +109,14 @@ func sawLoopMarker(emits *capturedEmits) bool {
 	return false
 }
 
-// TestTrackExitForLoopGuardPrunesOldExits documents the window-based
-// pruning: a single exit after a long-running session must not trip
-// the cap. Without pruning, a managed terminal that ran for hours and
-// then exited cleanly would refuse to reconnect on its very first
-// failure because counters were stale.
+// TestTrackExitForLoopGuardPrunesOldExits guards windowed pruning: a
+// session that ran for hours and then exited once must still reconnect on
+// its next failure; without pruning, stale exit counters would trip the
+// cap and refuse it.
 func TestTrackExitForLoopGuardPrunesOldExits(t *testing.T) {
 	app := &App{}
 	managed := &managedTerminal{}
 
-	// Backfill exits older than the window. Pruning should drop all
-	// of them on the next call, leaving a single fresh entry — well
-	// under the cap.
 	older := time.Now().Add(-2 * reconnectLoopWindow)
 	managed.recentExits = []time.Time{older, older, older, older}
 
@@ -148,19 +128,11 @@ func TestTrackExitForLoopGuardPrunesOldExits(t *testing.T) {
 	}
 }
 
-// TestStopCloudContextSuppressesReconnect locks the intentional-stop
-// gate. Before this gate, clicking the Power button
-// in the titlebar fired `StopCloudContext` and the kubectl session
-// died moments later as the EC2 instance entered `stopping`. The
-// reconnect loop then re-ran `erun open`, whose CloudContextPreflight
-// called StartCloudContext and immediately undid the user's stop.
-// `shouldRespawnForCloudContext` already blocked reconnect when the
-// on-disk cloud-context status was non-running, but the status poller
-// writes that field on its own cadence so a race window stayed wide
-// open. StopCloudContext now records an intent marker the moment the
-// AWS call returns; shouldRespawnForCloudContext consults it before
-// reading the on-disk status, so the marker closes the race without
-// waiting for the poller.
+// TestStopCloudContextSuppressesReconnect guards the intentional-stop
+// race: clicking Power stops the cloud context, but the reconnect loop
+// would re-run `erun open` and restart it. The on-disk status gate alone
+// races the status poller, so an intent marker recorded the moment Stop
+// returns is what closes that window.
 func TestStopCloudContextSuppressesReconnect(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
@@ -196,10 +168,9 @@ func TestStopCloudContextSuppressesReconnect(t *testing.T) {
 			sessionsMu.Unlock()
 			return session, nil
 		},
-		// Stub stop so the test does not need a real AWS client. Pretend the
-		// instance entered `stopping` but the cache stays at running so the
-		// shouldRespawnForCloudContext on-disk branch alone would NOT block
-		// the respawn — only the intent marker can.
+		// The instance goes to `stopping` but the cache stays running, so the
+		// on-disk status branch alone would allow the respawn — only the intent
+		// marker can block it, which is what this test isolates.
 		stopCloudContext: func(_ context.Context, name string) (eruncommon.CloudContextStatus, error) {
 			return eruncommon.CloudContextStatus{
 				CloudContextConfig: eruncommon.CloudContextConfig{Name: name, KubernetesContext: "cluster-cloud"},
@@ -208,8 +179,6 @@ func TestStopCloudContextSuppressesReconnect(t *testing.T) {
 		},
 	})
 	defer app.shutdown(context.Background())
-	// Seed the cache so shouldRespawnForCloudContext's on-disk fallback
-	// would allow respawn if the intent marker were not in place.
 	app.setCloudContextStatusInCache("managed-cloud", eruncommon.CloudContextStatusRunning)
 
 	selection := uiSelection{Tenant: "erun", Environment: "remote"}
@@ -218,24 +187,15 @@ func TestStopCloudContextSuppressesReconnect(t *testing.T) {
 	}
 	waitForSessionCount(t, &sessionsMu, &sessions, 1, 2*time.Second)
 
-	// User clicks the Power button. StopCloudContext marks intent BEFORE
-	// the AWS call, then sets the cache to stopping — but we keep the
-	// returned status's effect on the cache irrelevant by leaving the
-	// stub above with the same `Stopping` value. The poller has not run.
 	if _, err := app.StopCloudContext("managed-cloud"); err != nil {
 		t.Fatalf("StopCloudContext failed: %v", err)
 	}
 
-	// Now drop the live PTY the way the kubectl session dies when the
-	// API server goes away. Without the marker, tryReconnect respawns
-	// and a second stub appears in `sessions`.
 	sessionsMu.Lock()
 	first := sessions[0]
 	sessionsMu.Unlock()
 	_ = first.Close()
 
-	// Give tryReconnect a beat. The deadline mirrors the cloud-context
-	// gate test so a regression races for ~1s.
 	deadline := time.Now().Add(1 * time.Second)
 	for time.Now().Before(deadline) {
 		sessionsMu.Lock()
@@ -248,15 +208,10 @@ func TestStopCloudContextSuppressesReconnect(t *testing.T) {
 	}
 }
 
-// TestClearIntentionalStopForCloudContext documents the recovery
-// path: once the user explicitly resumes (via the titlebar Start
-// button, the sidebar re-click that runs `erun open`, or a successful
-// idle-stop clear), the intent marker must clear so a subsequent
-// kubectl-drop reconnects normally. Without this clear, the env
-// would be permanently stuck in "no reconnect" after every Stop
-// click. StartCloudContext, ensureLinkedCloudContextRunning, and the
-// idle-stop clear path all funnel through
-// clearIntentionalStopForCloudContext.
+// TestClearIntentionalStopForCloudContext guards the recovery path:
+// once the user resumes, the intent marker must clear so a later drop
+// reconnects normally; otherwise the env stays permanently stuck in
+// "no reconnect" after every Stop.
 func TestClearIntentionalStopForCloudContext(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
@@ -300,21 +255,16 @@ func TestClearIntentionalStopForCloudContext(t *testing.T) {
 		t.Fatal("expected intentional-stop marker after StopCloudContext")
 	}
 
-	// The recovery callers (StartCloudContext, ensureLinkedCloudContextRunning,
-	// idle-stop's clear path) all clear the marker via the same helper. Test
-	// the helper directly so the test does not need to stand up a full AWS
-	// stub harness with valid instance IDs.
 	app.clearIntentionalStopForCloudContext("managed-cloud")
 	if app.isIntentionalStop(selection) {
 		t.Fatal("expected intentional-stop marker to clear after clearIntentionalStopForCloudContext")
 	}
 }
 
-// TestStopCloudContextErrorClearsIntentionalStop locks the failure
-// path: if the AWS Stop call returns an error, the cluster is still
-// up, so a subsequent kubectl drop must reconnect normally. Leaving
-// the marker behind would silently disable reconnect after a
-// transient stop error.
+// TestStopCloudContextErrorClearsIntentionalStop guards the failure
+// path: if the AWS Stop call errors the cluster is still up, so a
+// later drop must reconnect; leaving the intent marker behind would
+// silently disable reconnect after a transient stop error.
 func TestStopCloudContextErrorClearsIntentionalStop(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
@@ -356,10 +306,8 @@ func TestStopCloudContextErrorClearsIntentionalStop(t *testing.T) {
 	}
 }
 
-// TestTrackExitForLoopGuardTripsAfterCap exercises the threshold edge
-// without a real PTY. Calling trackExitForLoopGuard maxExits+1 times
-// in immediate succession must return false for the first maxExits
-// calls and true on the next, matching the cap on tryReconnect.
+// TestTrackExitForLoopGuardTripsAfterCap: back-to-back exits (no pruning
+// window elapses) must trip the guard exactly at the cap.
 func TestTrackExitForLoopGuardTripsAfterCap(t *testing.T) {
 	app := &App{}
 	managed := &managedTerminal{}
@@ -375,12 +323,11 @@ func TestTrackExitForLoopGuardTripsAfterCap(t *testing.T) {
 	}
 }
 
-// TestTryReconnectRefusesAfterDeployFailure pins the deploy-failure gate: when an env's open
-// ended in a deploy failure (signalReady recorded an error from
-// `==> Deploy failed`), tryReconnect must NOT respawn. Respawning re-runs
-// `erun open`, re-deploying a broken env — and because every tab (ERun + AI)
-// reconnects independently, that becomes a parallel re-deploy storm. The user
-// recovers via the failed-deploy card actions or by reopening the env.
+// TestTryReconnectRefusesAfterDeployFailure pins the deploy-failure gate: when
+// an env's open ended in a deploy failure, tryReconnect must not respawn.
+// Respawning re-runs `erun open`, re-deploying a broken env — and because every
+// tab reconnects independently, that becomes a parallel re-deploy storm. The
+// user recovers via the failed-deploy card actions.
 func TestTryReconnectRefusesAfterDeployFailure(t *testing.T) {
 	emits := newCapturedEmits()
 	app := &App{}
@@ -409,10 +356,10 @@ func TestTryReconnectRefusesAfterDeployFailure(t *testing.T) {
 }
 
 // TestTryReconnectRefusesWhenActivityDeployFailed covers the case the readyErr
-// guard misses: the deploy failed in a *separate* activity and this open exits
-// with an MCP port-forward timeout / pod-not-ready (no `==> Deploy failed`
-// readyErr) while trying to reach the never-ready pod. tryReconnect must still
-// refuse, consulting the activity queue, so the env stops hammering itself.
+// guard misses: the deploy failed in a separate activity and this open times
+// out reaching the never-ready pod, so its own readyErr is clean. tryReconnect
+// must still refuse — consulting the activity queue — so the env stops
+// hammering itself.
 func TestTryReconnectRefusesWhenActivityDeployFailed(t *testing.T) {
 	emits := newCapturedEmits()
 	app := &App{}
@@ -446,9 +393,9 @@ func TestTryReconnectRefusesWhenActivityDeployFailed(t *testing.T) {
 }
 
 // TestTryReconnectAfterHealthyDropRespawns is the counterpart: a session that
-// reached a healthy ready (readyErr == nil) and then dropped is a transient
-// drop and must still reconnect. Its `erun open` finds the deploy already
-// current and skips it, so no re-deploy storm.
+// reached a healthy ready and then dropped is a transient drop and must still
+// reconnect — its `erun open` finds the deploy current and skips it, so no
+// re-deploy storm.
 func TestTryReconnectAfterHealthyDropRespawns(t *testing.T) {
 	emits := newCapturedEmits()
 	app := &App{}
@@ -491,13 +438,13 @@ func sawDeployFailedMarker(emits *capturedEmits) bool {
 	return false
 }
 
-// TestSessionTakenOverByAnotherWindowDoesNotReconnect locks the takeover
-// handover: when another ERun window re-attaches a persistent pod
-// session, this window's `erun open` prints the stable taken-over notice and
-// exits cleanly. The desktop must NOT respawn — a respawn would re-attach and
-// steal the session straight back, and the two windows would fight over it —
-// and must surface the take-back affordance marker instead. Clicking the env
-// in the sidebar is the deliberate take-back (it starts a fresh session).
+// TestSessionTakenOverByAnotherWindowDoesNotReconnect guards the takeover
+// handover: when another ERun window re-attaches a persistent pod session,
+// this window's `erun open` prints the taken-over notice and exits. The
+// desktop must not respawn — that would steal the session straight back and
+// the two windows would fight over it — and must surface the take-back
+// affordance instead. The deliberate take-back is clicking the env in the
+// sidebar.
 func TestSessionTakenOverByAnotherWindowDoesNotReconnect(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
@@ -518,8 +465,6 @@ func TestSessionTakenOverByAnotherWindowDoesNotReconnect(t *testing.T) {
 		resolveCLIPath:  func() string { return "/tmp/erun" },
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			session := newStubTerminalSession()
-			// The PTY replays `erun open`'s output: the kubectl attach line,
-			// then the taken-over notice another window's attach triggered.
 			session.initialOutput = append(session.initialOutput,
 				[]byte(eruncommon.ShellSessionTakenOverNotice+"\n")...)
 			sessionsMu.Lock()
@@ -536,8 +481,6 @@ func TestSessionTakenOverByAnotherWindowDoesNotReconnect(t *testing.T) {
 	}
 	waitForSessionCount(t, &sessionsMu, &sessions, 1, 2*time.Second)
 
-	// Let streamSession scan the notice line, then end the PTY the way the
-	// CLI does after printing it.
 	waitForTakenOverFlag(t, app, 2*time.Second)
 	sessionsMu.Lock()
 	current := sessions[0]

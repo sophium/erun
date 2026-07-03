@@ -9,16 +9,10 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// findLocalPortHolder reports the PID and full argv of the process holding a
-// listener on 127.0.0.1:port, if it can be determined via the host's lsof + ps.
-// Both macOS and Linux ship a compatible lsof, so the only cross-host risk is
-// that lsof is not installed; in that case we behave as if no holder was
-// found, and the caller falls back to the legacy "already in use" error path.
-//
-// Returning (0, nil, false) is reserved for "I could not determine a holder",
-// not "the port is free". The caller has already established via
-// canConnectLocalPort that the port is held; this function is strictly about
-// identifying *who* holds it.
+// findLocalPortHolder identifies which process holds a port the caller has
+// already confirmed is held. (0, nil, false) means the holder could not be
+// determined (e.g. lsof is absent), not that the port is free — the caller
+// then falls back to the legacy "already in use" error.
 func findLocalPortHolder(port int) (int, []string, bool) {
 	if port <= 0 {
 		return 0, nil, false
@@ -59,9 +53,7 @@ func readProcessArgv(pid int) ([]string, bool) {
 	if command == "" {
 		return nil, false
 	}
-	// `ps -o command=` returns a single line per pid with space-separated
-	// argv tokens. kubectl port-forward never embeds quoted spaces in any
-	// of its args (paths can but namespaces/contexts/deployments cannot),
-	// so a plain Fields split is safe here.
+	// kubectl port-forward never embeds spaces in its args (paths can, but
+	// namespaces/contexts/deployments cannot), so a plain whitespace split is safe.
 	return strings.Fields(command), true
 }

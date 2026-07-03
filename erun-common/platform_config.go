@@ -59,10 +59,8 @@ func (c PlatformConfig) IsZero() bool {
 		strings.TrimSpace(c.ACMEEmail) == ""
 }
 
-// Resolve returns a copy with the derived defaults filled in from BaseDomain
-// (services zone, auth host, nameservers). It does not mutate the receiver and
-// does not invent a BaseDomain: with BaseDomain unset the trimmed input is
-// returned unchanged and Validate rejects the in-use block.
+// Resolve returns a copy with defaults derived from BaseDomain. It never invents
+// a BaseDomain: an unset one is left empty for Validate to reject, not filled in.
 func (c PlatformConfig) Resolve() PlatformConfig {
 	resolved := c
 	resolved.BaseDomain = strings.TrimSpace(c.BaseDomain)
@@ -86,11 +84,8 @@ func (c PlatformConfig) Resolve() PlatformConfig {
 	return resolved
 }
 
-// Validate enforces internal consistency of an in-use platform block; it is a
-// no-op for an empty block. The rules keep the nothing-hardcoded invariant
-// honest: a deployment must declare its own base domain, a services zone under
-// that domain, a parseable authoritative IP (when set), an auth host under the
-// base domain, and a platform env name that is a clean namespace label.
+// Validate enforces internal consistency of an in-use platform block and is a
+// no-op for an empty one, keeping the nothing-hardcoded invariant honest.
 func (c PlatformConfig) Validate() error {
 	if c.IsZero() {
 		return nil
@@ -117,10 +112,8 @@ func (c PlatformConfig) Validate() error {
 	return nil
 }
 
-// validatePlatformHost checks that a derived platform host (the services zone or
-// the auth host) is a valid domain name and sits at or under the base domain,
-// keeping the nothing-hardcoded invariant honest and the value safe to thread
-// into helm --set-string.
+// validatePlatformHost keeps a derived host under the base domain, so the
+// nothing-hardcoded invariant holds and the value is safe to pass to helm --set-string.
 func validatePlatformHost(field, host, base string) error {
 	if !isDNSName(host) {
 		return fmt.Errorf("platform config: %s %q is not a valid domain name", field, host)
@@ -131,15 +124,12 @@ func validatePlatformHost(field, host, base string) error {
 	return nil
 }
 
-// isUnderDomain reports whether host is base itself or a subdomain of base.
 func isUnderDomain(host, base string) bool {
 	return host == base || strings.HasSuffix(host, "."+base)
 }
 
-// isDNSName reports whether name is a plausible DNS domain name: dotted,
-// lowercase, with labels of [a-z0-9-] that do not start or end with a hyphen.
-// It is intentionally strict and lowercase-only so config values match the
-// charset the rest of erun normalizes hostnames to.
+// isDNSName is intentionally strict and lowercase-only so config values match
+// the charset the rest of erun normalizes hostnames to.
 func isDNSName(name string) bool {
 	if name == "" || len(name) > 253 || !strings.Contains(name, ".") {
 		return false
@@ -152,9 +142,6 @@ func isDNSName(name string) bool {
 	return true
 }
 
-// isDNSLabel reports whether label is a valid single DNS label: non-empty,
-// not hyphen-bounded, and composed only of lowercase letters, digits, and
-// hyphens.
 func isDNSLabel(label string) bool {
 	if label == "" || label[0] == '-' || label[len(label)-1] == '-' {
 		return false
@@ -167,8 +154,6 @@ func isDNSLabel(label string) bool {
 	return true
 }
 
-// isDNSLabelChar reports whether r is allowed inside a DNS label under erun's
-// strict, lowercase-only charset.
 func isDNSLabelChar(r rune) bool {
 	return (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-'
 }

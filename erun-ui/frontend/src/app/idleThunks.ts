@@ -10,20 +10,15 @@ import { bumpIdleStatus } from './slices/requestCountersSlice';
 import type { AppThunk } from './store';
 import { requireController } from './thunkExtra';
 
-// cloudContextStatusOf reads the lowercased cloud-context status from an
-// idle-status payload; "" means no managed cloud or no idle status.
 function cloudContextStatusOf(status: UIIdleStatus | null): string {
   return (status?.cloudContextStatus ?? '').trim().toLowerCase();
 }
 
-// reactToCloudContextTransition fires the env-restore thunk when the
-// poll observes a non-running → running flip for the selected env.
-// tryReconnect refuses respawn while the context is stopped and drops
-// the AI/ERun tabs (see erun-ui/terminal_sessions.go:973); without an
-// explicit re-spawn on this transition, the env returns to Running but
-// its tabs stay gone. The titlebar Play button's success path already
-// re-opens; this catches the recovery-after-transient-error path where
-// the start command errored but the instance landed in Running anyway.
+// A context returning to Running does not restore its tabs on its own:
+// tryReconnect drops the AI/ERun tabs while it is stopped and won't respawn
+// them. The Play button re-opens them on its own success path; this handles
+// the recovery case where the start command errored but the instance reached
+// Running anyway.
 function reactToCloudContextTransition(
   previousStatus: string,
   nextStatus: string,
@@ -52,15 +47,9 @@ function isRequestStillCurrent(
   return current?.tenant === selection.tenant && current.environment === selection.environment;
 }
 
-// refreshIdleStatus polls the backend for the currently-selected env's
-// idle status and re-arms the polling timer on the controller. The
-// recursive schedule keeps polling alive across selection changes (a
-// fresh request bumps the counter; in-flight stale requests detect they
-// no longer match and skip their state write).
-//
-// The poll-timer handle stays on the controller because it is a
-// setTimeout cancellation token tied to the mount lifecycle; thunks
-// reach it through `extra.controller`.
+// refreshIdleStatus polls the selected env's idle status and re-arms the
+// self-rescheduling poll timer. A request whose selection changed mid-flight
+// detects it is stale and skips its state write.
 export const refreshIdleStatus =
   (): AppThunk<Promise<void>> => async (dispatch, getState, extra) => {
     const controller = requireController(extra);
@@ -96,13 +85,9 @@ export const refreshIdleStatus =
     }
   };
 
-// cancelPendingIdleStop dismisses the grace-period warning for the
-// supplied env. The Go side proxies through the in-pod MCP
-// `idle_stop_cancel` tool to clear the shared stop-pending.json
-// file; the next idle poll from either the desktop or the in-pod
-// monitor re-evaluates eligibility from scratch, so this is
-// effectively a one-shot snooze — if the user remains idle, the
-// warning re-arms with a fresh grace window.
+// cancelPendingIdleStop dismisses the grace-period auto-stop warning for the
+// env. This is a one-shot snooze, not a permanent opt-out: if the user stays
+// idle, the next poll re-arms the warning with a fresh grace window.
 export const cancelPendingIdleStop =
   (selection: UISelection): AppThunk<Promise<void>> =>
   async (dispatch) => {

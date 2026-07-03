@@ -11,14 +11,10 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// workingIssueCommandRunner runs a command (git, gh) in dir and returns its
-// trimmed stdout. Injected so tests drive the resolver without a real repo or
-// network.
 type workingIssueCommandRunner func(ctx context.Context, dir, name string, args ...string) (string, error)
 
-// workingIssueCacheTTL bounds how long a resolved working issue is reused. The
-// hover card fetches lazily on open; a short TTL keeps the branch/title fresh
-// across a `git checkout` without re-running git + gh on every hover.
+// A short TTL keeps the branch/title fresh across a `git checkout` without
+// re-running git + gh on every hover.
 const workingIssueCacheTTL = 30 * time.Second
 
 type workingIssueCacheEntry struct {
@@ -26,13 +22,10 @@ type workingIssueCacheEntry struct {
 	expiresAt time.Time
 }
 
-// branchIssuePattern matches the repository's branch naming convention
-// (feature/<n>-… / bug/<n>-…) so the issue number is parseable from the
-// branch. See the root AGENTS.md "Branching Strategy".
+// branchIssuePattern encodes the repo's branch naming convention (root
+// AGENTS.md "Branching Strategy").
 var branchIssuePattern = regexp.MustCompile(`^(?:feature|bug)/(\d+)-`)
 
-// parseIssueNumberFromBranch extracts the issue number a branch is working on,
-// or 0 when the branch doesn't follow the feature/<n>- / bug/<n>- convention.
 func parseIssueNumberFromBranch(branch string) int {
 	match := branchIssuePattern.FindStringSubmatch(strings.TrimSpace(branch))
 	if match == nil {
@@ -53,12 +46,10 @@ func execWorkingIssueCommand(ctx context.Context, dir, name string, args ...stri
 }
 
 // EnvironmentWorkingIssue resolves what an environment is currently working on
-// for the sidebar hover card: the worktree's current git branch and, when the
-// branch names an issue, that issue's title. Local-agent envs read the host
-// worktree; remote-agent / runtime envs read the in-pod worktree over the
-// env's MCP port-forward while it is reachable, and report an honest
-// open-to-view state otherwise. Resolved results are cached per
-// env for workingIssueCacheTTL.
+// for the sidebar hover card — its current git branch and, when the branch
+// names an issue, that issue's title. Local-agent envs read the host worktree;
+// remote/runtime envs read the in-pod worktree while the env is open, otherwise
+// reporting an honest open-to-view state.
 func (a *App) EnvironmentWorkingIssue(selection uiSelection) (uiWorkingIssue, error) {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
@@ -88,11 +79,6 @@ func (a *App) EnvironmentWorkingIssue(selection uiSelection) (uiWorkingIssue, er
 	return value, nil
 }
 
-// resolveWorkingIssue is the transport-free core: it reads the env worktree's
-// current branch — from the host worktree for local-agent envs, from inside
-// the pod for remote/runtime envs — then resolves the linked issue title. It
-// never errors out to the caller — an unreachable worktree or a failed
-// lookup degrades to an honest empty/partial state the hover card renders.
 func (a *App) resolveWorkingIssue(result eruncommon.OpenResult) uiWorkingIssue {
 	env := result.EnvConfig
 	if env.RemoteWorktree() {
@@ -114,13 +100,10 @@ func (a *App) resolveWorkingIssue(result eruncommon.OpenResult) uiWorkingIssue {
 	return a.workingIssueFromBranch(ctx, repo, branch)
 }
 
-// resolvePodWorkingIssue reads the in-pod branch over the env's MCP
-// port-forward (the card used to show the implementation excuse
-// "worktree lives in the pod" instead of the work). Reachability is the
-// existing canConnectLocalPort signal — the port-forward only exists while
-// the env is open in this desktop, so an unreachable port means there is
-// nothing to query yet, and the honest state is the next step the user can
-// take.
+// resolvePodWorkingIssue reads the in-pod branch for a remote/runtime env. The
+// port-forward exists only while the env is open here, so an unreachable port
+// means there is nothing to query yet — the honest state prompts the operator
+// to open the env.
 func (a *App) resolvePodWorkingIssue(result eruncommon.OpenResult) uiWorkingIssue {
 	mcpPort := eruncommon.MCPPortForResult(result)
 	if mcpPort <= 0 || !a.deps.canConnectLocalPort(mcpPort) {
@@ -139,11 +122,6 @@ func (a *App) resolvePodWorkingIssue(result eruncommon.OpenResult) uiWorkingIssu
 	return a.workingIssueFromBranch(ctx, strings.TrimSpace(result.RepoPath), branch)
 }
 
-// workingIssueFromBranch maps a resolved branch to the hover card's read
-// model: the branch itself, the issue number the branch names (per the
-// feature/<n>- / bug/<n>- convention), and — when titleRepo is set — the
-// issue title via gh. A failed title lookup (offline, gh unauthenticated,
-// issue gone) leaves the number without a title — still useful.
 func (a *App) workingIssueFromBranch(ctx context.Context, titleRepo, branch string) uiWorkingIssue {
 	branch = strings.TrimSpace(branch)
 	if branch == "" || branch == "HEAD" {

@@ -11,17 +11,10 @@ interface ErrorBoundaryState {
   error: Error | null;
 }
 
-// ErrorBoundary catches uncaught render errors in the app content and renders
-// a recoverable surface instead of an unrecoverable blank screen. A bare
-// React tree unmounts its whole root when a render throws, which left the
-// content area white with no way to recover. Surfacing the error
-// with a retry/reload action satisfies Nielsen #1 (visibility of system
-// status) and #9 (help users recognize, diagnose, and recover from errors).
-//
-// React only invokes error-boundary lifecycle on class components, so this is
-// intentionally a class even though the rest of the tree is function
-// components. It scopes the boundary to its children (the content region) so
-// the surrounding chrome — the titlebar — stays interactive while the user
+// ErrorBoundary shows a recoverable surface instead of the blank white screen a
+// bare React tree leaves when a render throws and unmounts the whole root. Must
+// stay a class: React only runs error-boundary lifecycle on class components.
+// Scoped to its children so the titlebar chrome stays interactive while the user
 // recovers.
 export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
@@ -34,8 +27,6 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   }
 
   override componentDidCatch(error: Error, info: React.ErrorInfo): void {
-    // Keep the stack in the devtools console so the specific trigger stays
-    // diagnosable; the rendered surface only shows the user-facing message.
     console.error('Unhandled error in app content:', error, info.componentStack);
   }
 

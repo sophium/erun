@@ -10,9 +10,6 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-// quietOutputsContext is the shared-primitive Context the desktop uses for
-// outputs reads: no dry-run, output discarded (the desktop consumes the
-// structured result, not the human trace).
 func quietOutputsContext() eruncommon.Context {
 	return eruncommon.Context{
 		Logger: eruncommon.NewLoggerWithWriters(0, io.Discard, io.Discard),
@@ -31,9 +28,7 @@ func downloadAgentOutputViaRuntime(result eruncommon.OpenResult, params eruncomm
 	return eruncommon.DownloadRuntimeOutput(quietOutputsContext(), req, params, eruncommon.RunRemoteCommand)
 }
 
-// ListAgentOutputs lists the files an agent produced in the selected env's
-// runtime pod outputs directory, newest-first. The desktop runs off the pod, so
-// it reads through the same kubectl-exec primitive the CLI uses.
+// ListAgentOutputs lists the files an agent produced in the selected env's runtime pod, newest-first.
 func (a *App) ListAgentOutputs(selection uiSelection) (eruncommon.RuntimeOutputsListResult, error) {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {

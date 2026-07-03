@@ -14,10 +14,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 
-// ReconnectDialog is the confirmation-only modal: it opens when the user asks
-// to reconnect and closes the moment the operation starts. The in-flight and
-// failure states render in the non-modal ReconnectStatusPanel so other
-// environments stay interactive while one is being reconnected.
+// Confirmation only; in-flight and failure states live in the non-modal
+// ReconnectStatusPanel so other environments stay interactive while one reconnects.
 export function ReconnectDialog(): React.ReactElement {
   const dispatch = useAppDispatch();
   const status = useAppSelector((state) => state.review.reconnect.status);

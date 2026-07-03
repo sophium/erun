@@ -34,8 +34,7 @@ import { defaultCloudContextInitInput, defaultGlobalConfigDialog } from './state
 import type { AppDispatch, AppThunk, RootState } from './store';
 import { requireController } from './thunkExtra';
 
-// The controller is reserved for imperative xterm/PTY work
-// (refreshKubernetesContexts, fitTerminal, sessions, etc.); thunks otherwise
+// The controller is reserved for imperative xterm/PTY work; thunks otherwise
 // operate purely on Redux state.
 
 export const openGlobalConfigDialog = (): AppThunk => (dispatch) => {
@@ -296,12 +295,8 @@ export const toggleIdleCloudContext = (): AppThunk<Promise<void>> => async (disp
   }
 };
 
-// startCloudInitSession launches a guided `erun cloud init <provider>` PTY
-// session, the way the operator would add a cloud alias from a terminal. The
-// CLI owns the whole flow (prompt, verify, resolve, persist); the desktop only
-// hands the terminal over to it. AWS and Cloudflare share this body — they
-// differ only in which Wails session launcher runs and which busyAction marks
-// the button spinner — so a single helper keeps the two add paths in lockstep.
+// Adding a cloud alias is delegated entirely to the CLI (prompt, verify,
+// resolve, persist); the desktop only hands the terminal over to it.
 const startCloudInitSession =
   (
     busyAction: 'cloud-provider-init' | 'cloud-provider-cloudflare-init',
@@ -352,10 +347,6 @@ const startCloudInitSession =
 export const startAWSCloudInit = (): AppThunk<Promise<void>> =>
   startCloudInitSession('cloud-provider-init', 'aws', StartCloudInitAWSSession);
 
-// startCloudflareCloudInit mirrors startAWSCloudInit: it launches the guided
-// `erun cloud init cloudflare` PTY so the CLI prompts for the scoped token,
-// verifies it, auto-resolves the account, and defaults a label — no in-app
-// form. Add-alias is delegated to the CLI for every provider type.
 export const startCloudflareCloudInit = (): AppThunk<Promise<void>> =>
   startCloudInitSession(
     'cloud-provider-cloudflare-init',

@@ -27,10 +27,8 @@ export const tenantsSlice = createSlice({
     setVersionSuggestions(state, action: PayloadAction<UIVersionSuggestion[]>) {
       state.versionSuggestions = action.payload;
     },
-    // patchTenantEnvironmentAutoStart mirrors a freshly persisted AutoStart
-    // override into the in-memory tenants tree so openSelection re-renders
-    // hit the new policy on the next click without waiting for a full
-    // ReloadState round-trip.
+    // Optimistically reflect a persisted AutoStart change so the next env-open
+    // uses the new policy without waiting for a full state reload.
     patchTenantEnvironmentAutoStart(
       state,
       action: PayloadAction<{

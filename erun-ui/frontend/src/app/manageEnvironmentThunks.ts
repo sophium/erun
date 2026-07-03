@@ -1,8 +1,3 @@
-// Manage-environment thunk facade. The implementation is split across
-// per-domain modules; this file re-exports their public symbols so existing
-// consumers can keep importing from `@/app/manageEnvironmentThunks` while the
-// underlying code stays under the per-file line budget.
-
 export { startManageCloudContext, stopManageCloudContext } from './manageCloudContextThunks';
 export { submitManageDelete } from './manageDeleteThunks';
 export { submitManageDeploy } from './manageDeployThunks';

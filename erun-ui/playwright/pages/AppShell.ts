@@ -11,11 +11,7 @@ import { Sidebar } from './Sidebar';
 import { TenantDialog } from './TenantDialog';
 import { Titlebar } from './Titlebar';
 
-// AppShell wraps the top-level rendered app. Tests use it as their entry
-// point; component-specific POMs are reached through the accessor properties
-// below. open() navigates to '/' and waits until the boot sequence has
-// rendered the sidebar's toggle control — that is the latest thing in the
-// boot critical path, so its presence implies the rest of the chrome is up.
+// AppShell is the tests' entry point into the rendered app.
 export class AppShell {
   constructor(public readonly page: Page) {}
 
@@ -23,17 +19,15 @@ export class AppShell {
     await this.page.goto('/');
     await this.page.waitForLoadState('domcontentloaded');
     await this.titlebar.toggleButton().waitFor({ state: 'visible' });
-    // boot() in TerminalController shows "Loading environments..." in the
-    // terminal-busy overlay until LoadState resolves. Wait for that
-    // overlay to disappear so the sidebar reflects the final tenant list,
-    // and only then accept either the empty-state or the first tenant
-    // row.
+    // The "Loading environments..." overlay clears only once the tenant list
+    // is final; wait it out before asserting on sidebar rows, or the check
+    // races the still-loading list.
     await this.page
       .getByText('Loading environments...', { exact: true })
       .waitFor({ state: 'hidden', timeout: 15_000 })
       .catch(() => {
-        // The overlay may have already cleared by the time we get here on
-        // a fast machine; ignore the timeout in that case and continue.
+        // The overlay may already be gone on a fast machine, so the timeout
+        // here is expected rather than a failure.
       });
     await this.page
       .locator(
@@ -43,11 +37,9 @@ export class AppShell {
       .waitFor({ state: 'visible' });
   }
 
-  // reloadEnvironments forces the frontend to re-fetch tenant/env state from
-  // disk by emitting the same `environments-changed` event the backend's config
-  // watcher fires. Used to surface a freshly-seeded env deterministically
-  // instead of waiting on fsnotify, which can race the watcher's readiness right
-  // after boot (see the seededEnv fixture).
+  // reloadEnvironments surfaces a freshly-seeded env deterministically instead
+  // of waiting on fsnotify, which can race the watcher's readiness right after
+  // boot (see the seededEnv fixture).
   async reloadEnvironments(): Promise<void> {
     await this.page.evaluate(() => {
       (window as unknown as { runtime: { EventsEmit: (name: string) => void } }).runtime.EventsEmit(

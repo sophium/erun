@@ -3,32 +3,20 @@ import type { Page } from '@playwright/test';
 import { expect, test } from '../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
-// idle-widget-stop-protection covers the two changes:
+// Two invariants of the idle widget:
 //
-//   A. The lock toggle no longer flips back to amber when the
-//      describe-after-modify hits AWS's eventual-consistency window.
-//      Before the fix, `enableCloudContextApiStop` declared
-//      `invalidatesTags`, which fired DescribeCloudContextApiStop right
-//      after the mutation resolved; if AWS returned the pre-modify
-//      `True` for a few hundred ms, the cache flipped back to locked
-//      and the icon stayed Lock/amber even though the success toast
-//      had already fired. The fix replaces the invalidation with
-//      `onQueryStarted` + `updateQueryData` so the mutation result is
-//      the cache update; no AWS describe is solicited right after.
+//   A. Unlocking must survive AWS's eventual-consistency window: a
+//      describe right after the toggle can still return the stale
+//      pre-modify "locked", and the icon must not flip back to it.
 //
-//   B. While a start/stop is in flight, the titlebar surfaces a
-//      visible "Stopping <name>…" / "Starting <name>…" pill instead of
-//      relying on the action button's spinner alone — the idle-time
-//      pill that would otherwise carry the env name vanishes
-//      mid-transition because `cloudContextStatus` flips out of
-//      `running` before the synchronous AWS `wait instance-stopped`
-//      waiter returns.
+//   B. An in-flight start/stop must show a persistent transition pill.
+//      cloudContextStatus flips out of `running` before the synchronous
+//      AWS waiter returns, so the env-name idle pill would otherwise
+//      vanish mid-transition.
 //
-// The isolated harness has no managed cloud context, and we never want a
-// Playwright test to fire a real ec2:ModifyInstanceAttribute or
-// ec2:StopInstances. Intercept the relevant Wails RPCs over the
-// /__erun_invoke bridge so the React tree drives a fully simulated
-// lifecycle.
+// The harness has no managed cloud context and must never fire a real AWS
+// mutation, so every relevant RPC is intercepted and the lifecycle is
+// fully simulated.
 
 interface InvokeBody {
   method: string;
@@ -90,10 +78,8 @@ function envelope(data: unknown): { contentType: string; body: string } {
   return { contentType: 'application/json', body: JSON.stringify({ data }) };
 }
 
-// deferred returns a Promise plus its resolve handle as one value. The
-// inline `let releaseStop = null; new Promise((resolve) => { releaseStop = resolve })`
-// pattern narrows `releaseStop` to `null` outside the executor callback,
-// which then refuses the later `releaseStop?.()` call as `never`.
+// A helper instead of the inline `let resolve = null; new Promise(...)`
+// pattern: TS narrows the captured handle to `never` outside the executor.
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void;
   const promise = new Promise<void>((r) => {
@@ -102,11 +88,9 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
   return { promise, resolve };
 }
 
-// waitForNextIdlePoll resolves when the next LoadIdleStatus RPC round-trips.
-// The widget polls idle status ~every second, so this is a deterministic "beat"
-// tied to a real poll cycle — used instead of a fixed sleep to assert that a
-// state survives (or that nothing further fired) across a poll without relying
-// on wall-clock timing.
+// A deterministic beat tied to a real poll cycle (the widget polls idle
+// status ~every second) — used instead of a wall-clock sleep to assert a
+// state survives, or that nothing further fired, across a poll.
 async function waitForNextIdlePoll(page: Page): Promise<void> {
   await page.waitForResponse(
     (response) =>
@@ -136,9 +120,8 @@ test.describe('idle widget stop protection', () => {
       }
       if (body.method === 'DescribeCloudContextApiStop') {
         describeCalls++;
-        // Always returns locked. With the old invalidatesTags wiring,
-        // an EnableCloudContextApiStop success would trigger a refetch
-        // that hit this path and flipped the icon back to amber.
+        // Always locked: any refetch after the unlock mutation overwrites
+        // the cache with this stale value and flips the icon back.
         return route.fulfill(envelope(apiStopStatus(ctxName, true)));
       }
       if (body.method === 'EnableCloudContextApiStop') {
@@ -153,10 +136,9 @@ test.describe('idle widget stop protection', () => {
 
     await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
 
-    // The button's accessible label names the action available from
-    // the current state: while locked, clicking it would unlock, so
-    // the label is "Unlock <ctx>: …"; while unlocked the label is
-    // "Lock <ctx>: …". aria-pressed reflects locked.
+    // The label names the action the click performs, so the locked state's
+    // button reads "Unlock <ctx>" (and "Lock <ctx>" once unlocked);
+    // aria-pressed reflects locked.
     const buttonWhileLocked = page.getByRole('button', {
       name: new RegExp(`^Unlock ${ctxName}`),
     });
@@ -166,10 +148,6 @@ test.describe('idle widget stop protection', () => {
     const describesBeforeClick = describeCalls;
     await buttonWhileLocked.click();
 
-    // After the unlock mutation succeeds the cache is updated directly
-    // from the mutation result (StopProtection=false). The button's
-    // accessible label rotates to the Lock form, and aria-pressed
-    // flips false.
     const buttonWhileUnlocked = page.getByRole('button', {
       name: new RegExp(`^Lock ${ctxName}`),
     });
@@ -178,13 +156,10 @@ test.describe('idle widget stop protection', () => {
 
     expect(enableCalls).toBe(1);
 
-    // Critical assertion: no DescribeCloudContextApiStop call fired in
-    // response to the mutation resolving. Under the previous invalidatesTags
-    // wiring this would be `describesBeforeClick + 1` and the cache would be
-    // overwritten with the stale `locked: true` response, flipping the icon
-    // back. Wait for the next real idle poll — a full round-trip after the
-    // mutation resolved, by which any refetch would already have hit the route
-    // — then assert the describe count is unchanged.
+    // The crux: no describe may fire in response to the mutation resolving.
+    // Under the old wiring a refetch here overwrote the cache with the stale
+    // locked value and flipped the icon back. A full poll round-trip bounds
+    // the window in which any such refetch would have landed.
     await waitForNextIdlePoll(page);
     expect(describeCalls).toBe(describesBeforeClick);
   });
@@ -210,9 +185,8 @@ test.describe('idle widget stop protection', () => {
         return route.fulfill(envelope(apiStopStatus(ctxName, false)));
       }
       if (body.method === 'StopCloudContext') {
-        // Hold the RPC open. This mirrors the production behaviour
-        // where the Wails call blocks for the full
-        // `aws ec2 wait instance-stopped` waiter (30s-10min). The pill
+        // Mirror production, where the call blocks for the full
+        // `aws ec2 wait instance-stopped` waiter (30s-10min); the pill
         // must stay visible the whole time.
         await stopHeld;
         return route.fulfill(
@@ -237,15 +211,12 @@ test.describe('idle widget stop protection', () => {
     await expect(transitionPill).toBeVisible();
     await expect(transitionPill).toContainText('Stopping');
     await expect(transitionPill).toContainText(ctxName);
-    // Persists across a real poll cycle, not just as a transient overlay: wait
-    // for the next idle poll to land, then assert the pill survived it.
+    // The pill must persist across a real poll cycle, not flash as a transient overlay.
     await waitForNextIdlePoll(page);
     await expect(transitionPill).toBeVisible();
     await expect(transitionPill).toContainText('Stopping');
 
-    // Release the held StopCloudContext RPC so the thunk can finish
-    // cleanly. Without this the route handler would leak the test
-    // teardown.
+    // Release the held RPC or the route handler leaks into test teardown.
     releaseStop();
   });
 
@@ -253,25 +224,12 @@ test.describe('idle widget stop protection', () => {
     app,
     page,
   }) => {
-    // This test reuses the same StopCloudContext-held setup as the
-    // transition-pill test (mocked LoadIdleStatus says running, the
-    // Stop RPC hangs while busy=true). While busy is true, the React
-    // tree treats the cloud as not-fully-running for the purpose of
-    // the IDE-button gate, so the IDE buttons disable with the
-    // "Start the cloud environment before opening …" tooltip and the
-    // diff panel toggle stays enabled (env-touching only by design).
-    //
-    // We arrive at this state via the seeded local-agent env
-    // (pw/alpha). The IDE buttons are normally
-    // disabled for local envs via isIdeDisabled (env.remote === false
-    // would short-circuit envRunning to true; isIdeDisabled's
-    // remote+!sshd check disables them anyway). The deterministic
-    // assertion here is on the diff panel toggle, which is the
-    // load-bearing design choice: env-touching icons disable, pure-UI
-    // icons stay enabled. The full IDE-disabled-when-not-running
-    // path is covered by reading the helper isEnvOpenedAndRunning in
-    // Titlebar.helpers.ts — it has no other call sites and its branch
-    // logic is straight-line.
+    // The load-bearing invariant here is the pure-UI diff-panel toggle
+    // staying enabled while env-touching icons disable during a transition.
+    // The full "IDE buttons disable when not running" path can't be cleanly
+    // asserted for the seeded local env (its IDE buttons are already disabled
+    // for an unrelated reason); that path is the straight-line
+    // isEnvOpenedAndRunning helper in Titlebar.helpers.ts.
     const ctxName = 'mock-ctx-diff-toggle';
     const idle: IdleStatusFixture = {
       cloudContextName: ctxName,
@@ -299,15 +257,12 @@ test.describe('idle widget stop protection', () => {
 
     await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
 
-    // Fire the stop so the React tree enters the "busy stopping" state
-    // and cloudContextStatus flips out of `running` for the IDE-button
-    // gate.
     const stopButton = page.getByRole('button', { name: new RegExp(`^Stop ${ctxName}`) });
     await expect(stopButton).toBeVisible();
     await stopButton.click();
 
-    // The transition pill must be visible — that confirms we are in
-    // the state we want to assert against.
+    // Precondition: confirm we reached the busy-stopping state before
+    // asserting against it.
     const transitionPill = page.getByTestId('titlebar-idle-transition');
     await expect(transitionPill).toBeVisible();
 
@@ -346,9 +301,8 @@ test.describe('idle widget stop protection', () => {
       }
       if (body.method === 'CancelPendingIdleStop') {
         cancelCalls++;
-        // After cancel, the next poll should observe no pending stop.
-        // Mutate the in-test fixture so subsequent LoadIdleStatus
-        // calls reflect the cleared state.
+        // Simulate the backend clearing the pending stop so the next poll —
+        // and thus the warning banner — reflects the cleared state.
         pending.stopPendingSince = '';
         pending.secondsUntilForcedStop = 0;
         return route.fulfill(envelope(null));
@@ -365,12 +319,8 @@ test.describe('idle widget stop protection', () => {
     // is set in the idle status.
     const warning = page.getByTestId('titlebar-idle-stop-warning');
     await expect(warning).toBeVisible();
-    // 137s → "in 2m 17s" per formatGraceCountdown.
     await expect(warning).toContainText('Auto-stop in 2m 17s');
 
-    // Clicking Cancel calls CancelPendingIdleStop with the env's
-    // cloud-context name and the warning then disappears once the
-    // next poll observes the cleared pending state.
     const cancelBtn = page.getByTestId('titlebar-idle-stop-cancel');
     await expect(cancelBtn).toBeVisible();
     await cancelBtn.click();
@@ -382,20 +332,13 @@ test.describe('idle widget stop protection', () => {
     app,
     page,
   }) => {
-    // The bug: clicking the Power button on a remote env caused the
-    // env to silently auto-reopen. The Go-side fix lives in the
-    // terminal-reconnect loop and is covered end-to-end by
-    // erun-ui/reconnect_loop_test.go's TestStopCloudContextSuppressesReconnect.
-    // The headless harness cannot drive a real PTY exit (the kubectl
-    // session dying because the cluster API server dropped) so the
-    // reconnect branch is not directly reachable here. The closest
-    // observable invariant we *can* reach is the frontend-side
-    // contract: clicking Stop must not cause the React tree to fire
-    // a StartCloudContext, StartSession, or StartAISession RPC of
-    // its own accord. If a future refactor sneaks a frontend-side
-    // restart into the stop pathway, this assertion will catch it
-    // before it ships, and the Go test will catch any regression in
-    // the in-Go reconnect-loop gate.
+    // The bug: clicking Stop on a remote env silently auto-reopened it. The
+    // fix lives in the Go terminal-reconnect loop and is owned by
+    // erun-ui/reconnect_loop_test.go's TestStopCloudContextSuppressesReconnect;
+    // the headless harness can't drive a real PTY exit, so that branch is
+    // unreachable here. The closest invariant this spec can hold is the
+    // frontend contract: Stop must not, of its own accord, fire a
+    // StartCloudContext, StartSession, or StartAISession.
     const ctxName = 'mock-ctx-no-restart';
     const idle: IdleStatusFixture = {
       cloudContextName: ctxName,
@@ -417,9 +360,8 @@ test.describe('idle widget stop protection', () => {
       }
       if (body.method === 'StopCloudContext') {
         stopCloudContextCalls++;
-        // Flip the in-test fixture so subsequent LoadIdleStatus polls
-        // report stopped — mirrors the real backend updating its
-        // cache after StopInstances returns.
+        // Mirror the backend marking the env stopped once StopInstances
+        // returns, so subsequent polls report stopped.
         idle.cloudContextStatus = 'stopped';
         return route.fulfill(
           envelope({
@@ -431,9 +373,8 @@ test.describe('idle widget stop protection', () => {
       }
       if (body.method === 'StartCloudContext') {
         startCloudContextCalls++;
-        // Defensive: this is the call we are asserting must NOT happen
-        // in this flow. Returning a value lets the test fail with an
-        // assertion error rather than hang.
+        // The call we assert must NOT happen; return a value so a regression
+        // fails with an assertion error instead of hanging.
         return route.fulfill(envelope({ name: ctxName, status: 'running' }));
       }
       if (body.method === 'StartSession') {
@@ -452,17 +393,15 @@ test.describe('idle widget stop protection', () => {
     const stopButton = page.getByRole('button', { name: new RegExp(`^Stop ${ctxName}`) });
     await expect(stopButton).toBeVisible();
 
-    // Snapshot the start-call counts AFTER the env opens (the open
-    // legitimately calls StartSession once) so the post-stop assertion
-    // can compare against a baseline rather than zero.
+    // Opening the env legitimately fires StartSession once, so baseline the
+    // counts here rather than asserting zero after the stop.
     const baselineStartSession = startSessionCalls;
     const baselineStartAISession = startAISessionCalls;
 
     await stopButton.click();
 
-    // Wait for the stop to land (StopCloudContext fired), then for the next
-    // idle poll to round-trip — a real beat after which any follow-up restart
-    // RPC would already have fired — and assert none did.
+    // A full poll round-trip after the stop bounds the window in which any
+    // follow-up restart RPC would have fired; then assert none did.
     await expect.poll(() => stopCloudContextCalls).toBe(1);
     await waitForNextIdlePoll(page);
 
@@ -475,14 +414,9 @@ test.describe('idle widget stop protection', () => {
     app,
     page,
   }) => {
-    // Three mocked stop records simulate the rolling history a user
-    // would see in the Manage > History tab: one in-pod auto-stop
-    // with the per-marker breakdown, one manual desktop stop, and
-    // one legacy auto-stop without the new source/armedAt/policy
-    // fields. The spec asserts newest-first ordering, the source
-    // labels distinguishing pod-monitor vs. host-manual vs. legacy,
-    // the dual-timestamp line, the policy snapshot, and the marker
-    // breakdown.
+    // Three records cover the distinct history shapes: an in-pod auto-stop
+    // with a per-marker breakdown, a manual desktop stop, and a legacy entry
+    // written before the source/armedAt/policy fields existed.
     const history = [
       {
         stoppedAt: '2026-05-31T12:30:00Z',
@@ -535,11 +469,9 @@ test.describe('idle widget stop protection', () => {
     const rows = page.getByTestId('manage-history-row');
     await expect(rows).toHaveCount(history.length);
 
-    // Newest first: the row at index 0 corresponds to history[0],
-    // the pod-monitor auto-stop. It must carry the source label,
-    // grace marker, dual-timestamp line, and policy snapshot — so a
-    // user reading the row can answer "what triggered it?" without
-    // recalling the underlying timeout.
+    // Newest first: row 0 is the pod-monitor auto-stop, and must carry enough
+    // (source, grace, timestamps, policy) for a user to answer "what triggered
+    // it?" without recalling the underlying timeout.
     const firstRow = rows.nth(0);
     await expect(firstRow.getByTestId('manage-history-row-when')).toContainText('2026-05-31');
     await expect(firstRow.getByTestId('manage-history-row-source')).toContainText(
@@ -561,10 +493,8 @@ test.describe('idle widget stop protection', () => {
     await expect(firstRow).toContainText('terminal-stdin');
     await expect(firstRow).toContainText('ai');
 
-    // The middle row is a manual desktop stop — must render with
-    // the host-manual source label, no grace tag, no armed-at line,
-    // no policy line, and no marker breakdown. This is the row that
-    // answers "did I click Stop?" — keep its shape narrow.
+    // The manual desktop stop — the row that answers "did I click Stop?".
+    // Keep its shape narrow: no grace, armed-at, policy, or marker lines.
     const secondRow = rows.nth(1);
     await expect(secondRow.getByTestId('manage-history-row-source')).toContainText(
       'Desktop manual stop',
@@ -589,16 +519,13 @@ test.describe('idle widget stop protection', () => {
     await app.manageDialog.waitForClosed();
   });
 
-  // A failed stop used to surface as a bare "exit status 1"
-  // while the instance kept running. erun-common's
-  // classifyCloudContextPowerError now names the reason and the unlock
-  // lever; this locks the desktop surface: the error toast carries the
-  // actionable message and the widget keeps reporting the running state
-  // (the stop affordance), never a false "stopped". A real AWS
-  // OperationNotPermitted cannot be staged headless (no EC2 with stop
-  // protection in the harness), so the rejected RPC carries the exact
-  // message shape the classifier emits; the classification itself is owned
-  // by erun-common/cloud_context_power_error_test.go.
+  // A failed stop used to surface as a bare "exit status 1" while the
+  // instance kept running. The desktop now shows the classifier's actionable
+  // message (naming the unlock lever) and keeps reporting the running state,
+  // never a false "stopped". A real AWS OperationNotPermitted can't be staged
+  // headless, so the RPC rejects with the exact message the classifier emits;
+  // the classification itself is owned by
+  // erun-common/cloud_context_power_error_test.go.
   test('a failed stop surfaces the actionable reason and keeps the running state', async ({
     app,
     page,

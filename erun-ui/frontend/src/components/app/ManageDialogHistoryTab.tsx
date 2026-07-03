@@ -6,29 +6,13 @@ import type { UIIdlePolicy, UILastStopEvent, UILastStopMarker, UISelection } fro
 
 import { LoadStopHistory } from '../../../wailsjs/go/main/App';
 
-// Source values shipped from EnvironmentStopHistoryEntry.Source.
-// Kept here as constants (rather than an enum import) because the
-// Go side ships them as strings and the matching renders are local
-// to this component. Empty source ("") is the legacy fallback for
-// rows written before the field existed.
 const STOP_SOURCE_POD_MONITOR = 'pod-monitor';
 const STOP_SOURCE_HOST_MANUAL = 'host-manual';
 
-// HistoryTab renders the last N stop events for the selected env
-// (Go-side cap is stopHistoryCap = 10, newest first). The tab is
-// read-only — it pulls fresh data from disk every time the user
-// opens it so a stop that fired while the dialog was open shows up
-// the next time they switch back to this tab. Refresh is cheap
-// (one MCP call against the in-pod tool) so we don't cache.
-//
-// The "why did my env stop?" question motivated this surface.
-// Each row carries: the source (in-pod idle
-// monitor vs. desktop manual stop), the resolved idle policy
-// snapshot at fire time, the grace-armed timestamp alongside the
-// AWS-stop timestamp, and the per-marker idle/active state captured
-// at grace-arm time. Together that lets the user distinguish "I
-// clicked Stop" from "the idle policy fired" from "a specific
-// marker (e.g., ssh-proxy) was incorrectly quiet."
+// HistoryTab answers "why did my env stop?": it re-fetches on every open so a
+// stop that fired while the dialog was open shows up when the user returns, and
+// shows enough per-stop detail to distinguish a manual Stop from an idle-policy
+// fire from a single marker that was wrongly quiet.
 export function HistoryTab({
   selection,
   open,
@@ -234,8 +218,6 @@ function formatStoppedAt(timestamp: string): string {
   if (Number.isNaN(parsed.getTime())) {
     return timestamp;
   }
-  // ISO-style local time, e.g., "2026-05-31 12:34" — readable across
-  // locales without burning the file or React tree on Intl.
   const year = parsed.getFullYear();
   const month = String(parsed.getMonth() + 1).padStart(2, '0');
   const day = String(parsed.getDate()).padStart(2, '0');

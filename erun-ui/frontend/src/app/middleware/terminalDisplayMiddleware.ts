@@ -5,12 +5,9 @@ import type { AppDispatch, RootState } from '../store';
 import { rebuildTerminalDisplayBuffer } from '../terminalBuffers';
 import { thunkExtra } from '../thunkExtra';
 
-// terminalDisplayMiddleware makes the xterm output a true derivation of the
-// Redux terminal slice. Every setSessionId dispatch flows through here and
-// triggers the imperative xterm refresh, so no caller has to remember to
-// pair the dispatch with a manual reset/write. Only refreshes when the id
-// actually changed, matching the prior behaviour of re-opening the same env
-// without wiping its terminal buffer.
+// Makes xterm output a derivation of the Redux terminal slice, so no caller
+// has to pair a setSessionId dispatch with a manual reset/write. Re-opening
+// the same env leaves its existing terminal buffer intact.
 export const terminalDisplayMiddleware = createListenerMiddleware();
 
 const startListening = terminalDisplayMiddleware.startListening.withTypes<RootState, AppDispatch>();

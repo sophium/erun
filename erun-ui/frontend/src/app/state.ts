@@ -95,10 +95,6 @@ export interface ManageDialogState {
   choicesOpen: boolean;
   error: string;
   pendingRedeploy: boolean;
-  // deployComponents lists the env's deployable charts (the "Components to
-  // deploy" checklist), loaded from the read model. deployComponentSelection is
-  // the working checked set the operator edits; deployComponentsLoading gates
-  // the checklist while the read model resolves.
   deployComponents: UIDeployableComponent[];
   deployComponentSelection: string[];
   deployComponentsLoading: boolean;
@@ -131,10 +127,7 @@ export interface GlobalConfigDialogState {
   cloudContextDraft: UICloudContextInitInput;
   configLoading: boolean;
   busy: boolean;
-  // busyAction marks which side-effecting action is in flight so the matching
-  // control can show its own spinner. The cloud-provider add actions
-  // ('cloud-provider-init' for AWS, 'cloud-provider-cloudflare-init' for
-  // Cloudflare) each launch a guided `erun cloud init <provider>` PTY session.
+  // 'cloud-provider-init' is the AWS add action; 'cloud-provider-cloudflare-init' is Cloudflare.
   busyAction:
     | ''
     | 'save'
@@ -150,10 +143,7 @@ export interface GlobalConfigDialogState {
 export interface AppNotification {
   kind: 'success' | 'warning' | 'error' | 'info';
   message: string;
-  // Optional env tag so a notification can be cleared later by the state it
-  // describes. The runtime-unreachable warning carries the env it
-  // targets and a stable `source`; the deploy lifecycle dismisses it by matching
-  // all three (see dismissNotificationForEnv).
+  // Optional tags so a notification can be dismissed later by the state that raised it.
   tenant?: string;
   environment?: string;
   source?: string;
@@ -191,23 +181,18 @@ export interface ReconnectState {
   // interactive while this one is running. Empty when status === 'idle'.
   tenant: string;
   environment: string;
-  // Rolling buffer of the latest reconnect output lines. Capped by the slice
-  // reducer to keep memory bounded under long deploys.
+  // Rolling buffer of the latest reconnect output lines, not the full transcript.
   lines: string[];
   error: string;
 }
 
-// Maximum number of reconnect output lines retained in ReconnectState.lines.
-// The status surface shows a scrollable view; older lines beyond this cap drop
-// off the top so the buffer can't grow unbounded across a long deploy.
+// Caps ReconnectState.lines so the buffer can't grow unbounded across a long deploy.
 export const RECONNECT_LINE_BUFFER_LIMIT = 200;
 
-// AutoStartPromptState backs the first-time "Auto-start this environment?"
-// dialog. The dialog opens when openSelection is asked to navigate to a remote
-// env whose linked cloud context is stopped and whose env config does not yet
-// record an AutoStart override. The user's answer is persisted via
-// SetEnvironmentAutoStart so the prompt does not appear again unless the
-// setting is reset from the manage-env dialog.
+// AutoStartPromptState backs the first-time "Auto-start this environment?" dialog,
+// shown when opening a remote env whose cloud context is stopped and that has no
+// AutoStart choice recorded yet. The answer is persisted so the prompt does not
+// reappear unless the setting is reset.
 export interface AutoStartPromptState {
   open: boolean;
   selection: UISelection | null;

@@ -1,17 +1,6 @@
-// Command portsim is a stand-in for `kubectl port-forward` in integration
-// tests. It listens on the requested local TCP port until killed, mirroring
-// the long-lived behavior of a real port-forward, and answers production's
-// reachability probes on each accepted connection:
-//
-//   - With --banner set (the sshd port), it writes the banner first so the
-//     SSH probe — which reads the server greeting and checks for a "SSH-"
-//     prefix — succeeds.
-//   - Without a banner (the MCP and API ports), it reads the probe's HTTP
-//     request and replies with a minimal "200 OK". The MCP probe (GET /mcp)
-//     and the API probe (GET /healthz, which requires a 2xx) both need a real
-//     HTTP response, so a bare accept-and-close does not satisfy them.
-//
-// Usage: portsim --port PORT [--banner "SSH-2.0-test\r\n"]
+// Command portsim stands in for `kubectl port-forward` in integration tests: it
+// stays alive until killed and answers production's protocol-specific
+// reachability probes, so an environment looks reachable without a real cluster.
 package main
 
 import (
@@ -57,16 +46,12 @@ func main() {
 	}
 }
 
-// serve answers a single probe connection. A real kubectl port-forward is
-// opaque TCP, but production's reachability checks are protocol-specific, and
-// the caller signals which protocol a port speaks by whether it sets a banner:
-//
-//   - banner set → SSH: the probe reads the server greeting and checks for a
-//     "SSH-" prefix, so we write the banner first (server-speaks-first).
-//   - no banner → HTTP (MCP /mcp, API /healthz): the probe issues an HTTP
-//     request and requires a successful response, so we read the request and
-//     reply with a minimal 200. We drain the request before closing so the
-//     client reads the full response without a connection-reset race.
+// serve answers one probe connection. A real port-forward is opaque TCP, but
+// production's probes are protocol-specific, so the caller encodes the protocol
+// in whether it sets a banner: a banner means SSH (the probe checks for a "SSH-"
+// prefix, so we speak first), none means HTTP (the probe needs a real 2xx, so a
+// bare accept-and-close won't do). We drain the request before closing to avoid
+// a connection-reset race that truncates the client's read.
 func serve(conn net.Conn, bannerBytes []byte) {
 	defer func() { _ = conn.Close() }()
 	if len(bannerBytes) > 0 {
@@ -78,8 +63,6 @@ func serve(conn net.Conn, bannerBytes []byte) {
 	_, _ = conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"))
 }
 
-// decodeBanner unescapes \r, \n, and \t so callers can pass "SSH-2.0-test\r\n"
-// as a flag value without shell-escape gymnastics.
 func decodeBanner(value string) []byte {
 	if value == "" {
 		return nil

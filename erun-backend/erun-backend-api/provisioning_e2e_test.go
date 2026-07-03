@@ -20,18 +20,8 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/secrets"
 )
 
-// TestProvisionContextEndToEnd exercises the live provisioning executor against
-// real infrastructure: the DBOS durable workflow runs erun's
-// InitCloudContext bootstrap with its aws calls pointed at a local floci
-// emulator, custodies the k3s token, and drives the context status
-// provisioning -> running. It is opt-in (it needs a migrated Postgres, a DBOS
-// system database, and floci on :4566) and skips otherwise, mirroring the
-// k3d e2e gate. Run it with:
-//
-//	ERUN_E2E_PROVISION=1 \
-//	ERUN_E2E_PROVISION_DATABASE_URL=postgres://erun:erun@127.0.0.1:5432/erun?sslmode=disable \
-//	DBOS_SYSTEM_DATABASE_URL=postgres://erun:erun@127.0.0.1:5432/dbos_system?sslmode=disable \
-//	  go test ./... -run TestProvisionContextEndToEnd
+// TestProvisionContextEndToEnd is an opt-in end-to-end gate, like the k3d e2e
+// test: it runs the real provisioning workflow against live infra (not mocks).
 const e2eDevToken = "DEV-TOKEN"
 
 func TestProvisionContextEndToEnd(t *testing.T) {
@@ -114,7 +104,7 @@ func TestProvisionContextEndToEnd(t *testing.T) {
 			if got.InstanceID == "" || got.PublicIP == "" {
 				t.Fatalf("running but missing instance/ip: %s", b)
 			}
-			return // success
+			return
 		case "failed":
 			t.Fatalf("provisioning failed: %s", got.ProvisionError)
 		}

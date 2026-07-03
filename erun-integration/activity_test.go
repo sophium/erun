@@ -16,15 +16,11 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// activity is a hidden command group used by the runtime entrypoint to record
-// SSH/MCP/CLI/Codex traffic. Its subcommands are exercised here so the activity
-// package is covered without spinning up a real proxy.
+// activity is a hidden command group the runtime entrypoint uses to record
+// SSH/MCP/CLI/Codex traffic; its subcommands are exercised here.
 
-// seedManagedCloudTenantEnv writes the same tree as fixture.SeedTenantEnv and
-// flips managedcloud: true on the env config, so the shared idle resolver
-// treats the env as cloud-managed without needing a cloud-context store. This
-// unlocks the Arm/Wait/Fire arms of eruncommon.MaybeArmOrFireIdleStop, which
-// are gated on Status.ManagedCloud && Status.StopEligible.
+// seedManagedCloudTenantEnv marks the seeded env cloud-managed so the idle
+// resolver's Arm/Wait/Fire branches become reachable.
 func seedManagedCloudTenantEnv(t *testing.T, setup env.Setup, tenant, environment string) {
 	t.Helper()
 	fixture.SeedTenantEnv(t, setup, tenant, environment)
@@ -38,10 +34,8 @@ func seedManagedCloudTenantEnv(t *testing.T, setup env.Setup, tenant, environmen
 	}
 }
 
-// seedStopPending writes <home>/.erun/<tenant>/<env>/stop-pending.json
-// directly so a scenario can enter the grace state machine mid-flight with an
-// explicit, deterministic Since timestamp instead of sleeping through a real
-// grace window. Returns the file path for on-disk asserts.
+// seedStopPending lets a scenario enter the grace state machine mid-flight with
+// a deterministic Since timestamp instead of sleeping through a real grace window.
 func seedStopPending(t *testing.T, home, tenant, environment, body string) string {
 	t.Helper()
 	dir := filepath.Join(home, ".erun", tenant, environment)
@@ -55,10 +49,8 @@ func seedStopPending(t *testing.T, home, tenant, environment, body string) strin
 	return path
 }
 
-// seedActivitySnapshot writes the per-kind activity JSON under the XDG cache
-// tree (the same file `activity touch` maintains) so scenarios can seed stale
-// lastActivity/lastSeen timestamps that stay deterministically past the idle
-// timeout for decades.
+// seedActivitySnapshot lets scenarios seed stale activity timestamps that stay
+// deterministically past the idle timeout for decades.
 func seedActivitySnapshot(t *testing.T, cacheHome, tenant, environment, kind, body string) {
 	t.Helper()
 	dir := filepath.Join(cacheHome, "erun", "activity", tenant, environment)
@@ -83,10 +75,8 @@ func TestActivity(t *testing.T) {
 	})
 
 	t.Run("status_with_seeded_env", func(t *testing.T) {
-		// Exercises erun-cli/cmd/activity.go writeActivityStatus + the
-		// shared idle resolver. The working-hours line varies by wall
-		// clock; assert the stable lines exactly and the variable line
-		// structurally so the test is time-of-day-agnostic.
+		// The working-hours line varies by wall clock; assert the stable lines
+		// exactly and the variable line structurally so the test is time-of-day-agnostic.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"activity", "status", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -104,8 +94,6 @@ func TestActivity(t *testing.T) {
 				t.Errorf("expected stdout to contain %q, got:\n%s", line, result.Stdout)
 			}
 		}
-		// working-hours: idle (outside working hours 08:00-20:00) OR
-		// active (inside working hours 08:00-20:00) — both shapes valid.
 		workingHours := regexp.MustCompile(`(?m)^\s*working-hours: (idle|active) \((inside|outside) working hours \d{2}:\d{2}-\d{2}:\d{2}\)\s*$`)
 		if !workingHours.MatchString(result.Stdout) {
 			t.Errorf("expected working-hours marker line, got:\n%s", result.Stdout)
@@ -113,8 +101,6 @@ func TestActivity(t *testing.T) {
 	})
 
 	t.Run("status_json_output", func(t *testing.T) {
-		// Exercises activity.go --json branch: structured status output
-		// via json.NewEncoder bypasses writeActivityStatus's text format.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"activity", "status", "--tenant", "team", "--environment", "dev", "--json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -130,19 +116,14 @@ func TestActivity(t *testing.T) {
 	t.Run("stop_ready_blocks_when_active", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		// Touch CLI first to make the env not idle, then stop-ready should
-		// exit non-zero with a blocked reason.
 		erun.Run(t, []string{"activity", "touch", "--tenant", "team", "--environment", "dev", "--kind", "cli"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		result := erun.Run(t, []string{"activity", "stop-ready", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		golden.Equal(t, "activity/stop_ready_blocks_when_active", normalize.Apply(result.Combined))
 	})
 
 	t.Run("status_json_includes_per_client_breakdown", func(t *testing.T) {
-		// Exercises the SSH-proxy contract that ships per-IP byte
-		// deltas via EnvironmentActivityParams.ClientUpdates. The
-		// desktop tooltip and external `activity status --json`
-		// consumers both read the resulting `clients` slice off the
-		// marker, so the JSON contract is locked here.
+		// The desktop tooltip and external `activity status --json` consumers both
+		// read the per-client `clients` breakdown, so this JSON contract is locked here.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		erun.Run(t, []string{
@@ -175,10 +156,9 @@ func TestActivity(t *testing.T) {
 	})
 
 	t.Run("stop_ready_json_emits_structured_decision", func(t *testing.T) {
-		// Exercises the --json flag wired for the runtime entrypoint's
-		// idle-monitor heartbeat log. JSON must land on stdout regardless of
-		// the stop-eligible exit code so the bash loop can record a tick
-		// even when the env stays active.
+		// The runtime entrypoint's idle-monitor bash loop needs the JSON on stdout
+		// regardless of the stop-eligible exit code, so it can record a tick even
+		// when the env stays active.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		erun.Run(t, []string{"activity", "touch", "--tenant", "team", "--environment", "dev", "--kind", "cli"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -195,16 +175,10 @@ func TestActivity(t *testing.T) {
 	})
 
 	t.Run("record_stop_folds_state_stdin_into_history", func(t *testing.T) {
-		// The in-pod monitor pipes the stop-ready --json blob into
-		// `record-stop --state-stdin --source pod-monitor` because the
-		// Fire branch of stop-ready has already cleared
-		// stop-pending.json by the time record-stop runs. This
-		// scenario locks that contract end-to-end: pipe a synthetic
-		// stop-ready JSON in, then read the resulting
-		// stop-history.json off the per-env runtime state dir and
-		// assert source/grace/policy/markers all made the round trip
-		// — which is what the History tab needs to answer "what
-		// triggered it?"
+		// The in-pod monitor pipes the stop-ready --json blob into record-stop
+		// because the Fire branch already cleared stop-pending.json by the time
+		// record-stop runs, so the state must round-trip through stdin for the
+		// History tab to answer "what triggered it?"
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		stdin := `{
@@ -244,14 +218,9 @@ func TestActivity(t *testing.T) {
 			t.Fatalf("read stop-history.json: %v", err)
 		}
 		text := string(body)
-		// Source must be the value supplied via the flag — that is
-		// the field the History tab uses to render the row badge.
 		if !strings.Contains(text, `"source": "pod-monitor"`) {
 			t.Errorf("expected source=pod-monitor in history, got:\n%s", text)
 		}
-		// Grace + reason + cloud context must all fold from the
-		// piped pending payload — the on-disk pending file is
-		// already gone by the time the monitor calls record-stop.
 		if !strings.Contains(text, `"graceSeconds": 600`) {
 			t.Errorf("expected graceSeconds=600 carried through stdin, got:\n%s", text)
 		}
@@ -261,7 +230,6 @@ func TestActivity(t *testing.T) {
 		if !strings.Contains(text, `"cloudContextName": "mock-cluster"`) {
 			t.Errorf("expected cloud context name from pending, got:\n%s", text)
 		}
-		// Policy snapshot + markers must survive the round trip.
 		if !strings.Contains(text, `"workingHours": "09:00-18:00"`) {
 			t.Errorf("expected working-hours snapshot, got:\n%s", text)
 		}
@@ -271,12 +239,9 @@ func TestActivity(t *testing.T) {
 	})
 
 	t.Run("record_stop_host_manual_without_pending", func(t *testing.T) {
-		// Manual desktop stop without a prior armed grace. No stdin,
-		// no pending file on disk — the resulting row should still
-		// land with source=host-manual and the explicit reason
-		// flagged through. This is the bare path the desktop's Stop
-		// button takes when the user has not let the idle policy
-		// build any grace.
+		// The path the desktop's Stop button takes when the user stops before the
+		// idle policy has armed any grace — no pending file, yet the row must still
+		// record the source and reason.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{
@@ -300,9 +265,8 @@ func TestActivity(t *testing.T) {
 		if !strings.Contains(text, `"reason": "Manual stop via desktop"`) {
 			t.Errorf("expected explicit reason carried through, got:\n%s", text)
 		}
-		// Without a pending file the row carries no grace, no
-		// armedAt, and no policy. Those fields are JSON-omitempty so
-		// they should not appear at all.
+		// These fields are JSON-omitempty, so without a pending file they must be
+		// absent entirely, not empty.
 		if strings.Contains(text, `"armedAt"`) {
 			t.Errorf("expected no armedAt without pending, got:\n%s", text)
 		}
@@ -312,15 +276,11 @@ func TestActivity(t *testing.T) {
 	})
 
 	t.Run("stop_ready_arms_grace_for_managed_cloud_env", func(t *testing.T) {
-		// First eligible stop-ready call on a cloud-managed idle env takes
-		// MaybeArmOrFireIdleStop's Arm branch: SaveEnvironmentStopPending
-		// writes stop-pending.json with the resolved grace (= the idle
-		// timeout, 300s by default), the per-marker snapshot, and the
-		// --cloud-context value, then the command exits non-zero so the
-		// in-pod monitor does not stop the instance yet. With no activity
-		// recorded every kind marker is idle, so the env is stop-eligible
-		// regardless of wall clock (outside working hours short-circuits to
-		// eligible; inside, all markers being idle does the same).
+		// First eligible stop-ready call on a cloud-managed idle env arms the grace
+		// and exits non-zero, so the in-pod monitor does not stop the instance yet.
+		// With no activity recorded every marker is idle, so the env is stop-eligible
+		// regardless of wall clock (outside working hours short-circuits to eligible;
+		// inside, all markers idle does the same).
 		setup := env.New(t)
 		seedManagedCloudTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"activity", "stop-ready", "--tenant", "team", "--environment", "dev", "--cloud-context", "mock-cluster"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -347,13 +307,10 @@ func TestActivity(t *testing.T) {
 	})
 
 	t.Run("stop_ready_waits_while_grace_window_open", func(t *testing.T) {
-		// Second eligible call inside the grace window takes the Wait
-		// branch: stop-pending.json stays byte-identical and the command
-		// exits non-zero reporting the seconds remaining. The
-		// remaining-seconds value depends on real wall time elapsed between
-		// the two subprocess invocations, so the stream cannot be locked by
-		// a golden; the branch is asserted structurally (message shape +
-		// unchanged pending file), per the intrinsically-variable-line
+		// Second eligible call inside the grace window takes the Wait branch: the
+		// pending file stays byte-identical. The remaining-seconds value depends on
+		// real wall time between the two subprocesses, so a golden cannot lock the
+		// stream; the branch is asserted structurally, per the intrinsically-variable-line
 		// exception in AGENTS.md.
 		setup := env.New(t)
 		seedManagedCloudTenantEnv(t, setup, "team", "dev")
@@ -384,14 +341,10 @@ func TestActivity(t *testing.T) {
 	})
 
 	t.Run("stop_ready_fires_after_grace_elapsed", func(t *testing.T) {
-		// Fire branch: a seeded grace window whose Since is long past keeps
-		// elapsed >> grace deterministic for decades. stop-ready must exit 0
-		// (the only exit-0 outcome — the monitor's cue to call
-		// ec2:StopInstances), emit the --json payload with action=fire and
-		// the just-cleared pending entry under pendingState, and remove
-		// stop-pending.json before reporting (crash safety). The payload's
-		// graceSeconds=600 comes from overlayStopPending reading the same
-		// seeded file with its remaining-seconds clamped to 0.
+		// Fire branch: a seeded Since long in the past keeps elapsed >> grace
+		// deterministic for decades. Exit 0 is the only exit-0 outcome — the
+		// monitor's cue to call ec2:StopInstances — and stop-pending.json is
+		// cleared before reporting for crash safety.
 		setup := env.New(t)
 		seedManagedCloudTenantEnv(t, setup, "team", "dev")
 		pendingPath := seedStopPending(t, setup.Home, "team", "dev", `{
@@ -425,10 +378,9 @@ func TestActivity(t *testing.T) {
 	})
 
 	t.Run("stop_ready_skip_clears_stale_pending", func(t *testing.T) {
-		// Skip branch: when eligibility lapses (here: the env is not
-		// cloud-managed), a leftover stop-pending.json from an earlier grace
-		// window must be deleted so a stale stop cannot fire later. The
-		// command still exits non-zero with the blocked reason.
+		// Skip branch: when eligibility lapses (here the env is no longer
+		// cloud-managed), a leftover stop-pending.json must be deleted so a stale
+		// stop cannot fire later.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		pendingPath := seedStopPending(t, setup.Home, "team", "dev", `{"since": "2026-01-01T00:00:00Z", "graceSeconds": 600}
@@ -444,10 +396,8 @@ func TestActivity(t *testing.T) {
 	})
 
 	t.Run("cancel_stop_pending_removes_armed_grace", func(t *testing.T) {
-		// `activity cancel-stop-pending` is the desktop Cancel button's
-		// dismissal path: it must remove stop-pending.json and exit 0. The
-		// command takes no status resolution, so only the seeded pending
-		// file matters.
+		// cancel-stop-pending is the desktop Cancel button's dismissal path: it
+		// removes the pending file and exits 0, with no status resolution.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		pendingPath := seedStopPending(t, setup.Home, "team", "dev", `{"since": "2026-01-01T00:00:00Z", "graceSeconds": 600}
@@ -463,9 +413,8 @@ func TestActivity(t *testing.T) {
 	})
 
 	t.Run("stop_ready_requires_target", func(t *testing.T) {
-		// resolveActivityStatus validation arm via stop-ready: the in-pod
-		// monitor must get a clear error (not a stack of resolver noise)
-		// when it forgets the target flags.
+		// The in-pod monitor must get a clear error, not a stack of resolver noise,
+		// when it invokes stop-ready without the target flags.
 		setup := env.New(t)
 		result := erun.Run(t, []string{"activity", "stop-ready"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode == 0 {
@@ -475,12 +424,10 @@ func TestActivity(t *testing.T) {
 	})
 
 	t.Run("stop_ready_errors_on_corrupt_pending", func(t *testing.T) {
-		// LoadEnvironmentStopPending's malformed-contents arm: a corrupt
-		// stop-pending.json must fail loudly with the file path (not be
-		// silently treated as "no grace armed", which would re-arm and
-		// stretch the stop window forever). overlayStopPending swallows the
-		// same load error by design — status readers stay usable — so the
-		// failure surfaces from the decision function.
+		// A corrupt stop-pending.json must fail loudly, not be silently treated as
+		// "no grace armed" (which would re-arm and stretch the stop window forever).
+		// Status readers swallow the same load error by design, so the failure
+		// surfaces only from the decision path.
 		setup := env.New(t)
 		seedManagedCloudTenantEnv(t, setup, "team", "dev")
 		seedStopPending(t, setup.Home, "team", "dev", "{not-json\n")
@@ -498,9 +445,8 @@ func TestActivity(t *testing.T) {
 	})
 
 	t.Run("record_stop_errors_on_corrupt_history", func(t *testing.T) {
-		// readStopHistoryFile's malformed-contents arm: a corrupt
-		// stop-history.json must fail the append loudly with the file path
-		// instead of silently overwriting the audit trail.
+		// A corrupt stop-history.json must fail the append loudly instead of
+		// silently overwriting the audit trail.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		historyDir := filepath.Join(setup.Home, ".erun", "team", "dev")
@@ -524,8 +470,6 @@ func TestActivity(t *testing.T) {
 	})
 
 	t.Run("cancel_stop_pending_requires_target", func(t *testing.T) {
-		// Validation arm of cancel-stop-pending: without --tenant and
-		// --environment the command must fail before touching any state.
 		setup := env.New(t)
 		result := erun.Run(t, []string{"activity", "cancel-stop-pending"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode == 0 {
@@ -535,14 +479,10 @@ func TestActivity(t *testing.T) {
 	})
 
 	t.Run("record_stop_falls_back_to_on_disk_pending", func(t *testing.T) {
-		// Layer-2 recovery in loadPendingForRecord: no --state-stdin, but
-		// stop-pending.json still exists (a manual stop during an armed
-		// grace). The history row must fold grace/armedAt/policy/markers
-		// from the on-disk pending entry, compute secondsIdleFor off the
-		// marker's lastActivity relative to the armed Since, and clear the
-		// pending file once the row is persisted. A second record-stop then
-		// locks readStopHistoryFile's parse-existing branch: the new row is
-		// prepended newest-first.
+		// A manual stop during an armed grace: with no --state-stdin, record-stop
+		// recovers the grace/policy/markers from the on-disk pending file, then
+		// clears it. A second record-stop locks newest-first ordering: the new row
+		// is prepended.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		pendingPath := seedStopPending(t, setup.Home, "team", "dev", `{
@@ -606,9 +546,6 @@ func TestActivity(t *testing.T) {
 	})
 
 	t.Run("record_stop_caps_history_at_ten", func(t *testing.T) {
-		// AppendStopHistoryEntry truncates the audit array to
-		// StopHistoryCap (10) newest-first: the 11th stop must push the
-		// first one off the tail.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		for i := 1; i <= 11; i++ {
@@ -636,8 +573,7 @@ func TestActivity(t *testing.T) {
 	})
 
 	t.Run("touch_rejects_unknown_kind", func(t *testing.T) {
-		// RecordEnvironmentActivity's kind validation: an unsupported kind
-		// must fail loudly instead of writing a stray snapshot file.
+		// An unsupported kind must fail loudly instead of writing a stray snapshot file.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"activity", "touch", "--tenant", "team", "--environment", "dev", "--kind", "bogus"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -648,11 +584,9 @@ func TestActivity(t *testing.T) {
 	})
 
 	t.Run("touch_evicts_oldest_client_beyond_cap", func(t *testing.T) {
-		// environmentActivityClientCap is 8: the 9th distinct client
-		// address must evict the LRU entry. The first-touched address is
-		// deterministically the oldest because the touches run as
-		// sequential subprocesses, each stamping LastActivity with its own
-		// wall-clock now.
+		// The first-touched address is deterministically the oldest (evicted at the
+		// 8-client cap) because the touches run as sequential subprocesses, each
+		// stamping LastActivity with its own wall-clock now.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		for i := 1; i <= 9; i++ {
@@ -686,13 +620,11 @@ func TestActivity(t *testing.T) {
 	})
 
 	t.Run("status_distinguishes_stale_and_codex_open_markers", func(t *testing.T) {
-		// activityIdleMarker branches: a marker whose lastActivity exceeded
-		// the timeout reports "last activity exceeded timeout", while the
-		// codex marker with a fresh LastSeen heartbeat (touch --seen) but a
-		// stale lastActivity reports "codex is open but idle". Stale
-		// timestamps are seeded directly (2026-01-01 stays past the 300s
-		// timeout for decades). Whole-stream golden is impossible here: the
-		// working-hours line depends on wall clock.
+		// A stale marker reports "last activity exceeded timeout", while codex with
+		// a fresh --seen heartbeat but stale activity reports "codex is open but
+		// idle". Timestamps are seeded in the past so they stay idle for decades; no
+		// whole-stream golden is possible because the working-hours line depends on
+		// wall clock.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		seedActivitySnapshot(t, setup.CacheHome, "team", "dev", "cli", `{"lastActivity": "2026-01-01T08:00:00Z", "lastSeen": "2026-01-01T08:00:00Z"}
@@ -716,8 +648,6 @@ func TestActivity(t *testing.T) {
 	})
 
 	t.Run("ssh_proxy_requires_tenant_and_environment", func(t *testing.T) {
-		// runActivitySSHProxy validation arm: target identity is mandatory
-		// before any socket is opened.
 		setup := env.New(t)
 		result := erun.Run(t, []string{"activity", "ssh-proxy", "--listen", "127.0.0.1:0", "--target", "127.0.0.1:1"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode == 0 {
@@ -727,8 +657,6 @@ func TestActivity(t *testing.T) {
 	})
 
 	t.Run("ssh_proxy_requires_listen_and_target", func(t *testing.T) {
-		// runActivitySSHProxy validation arm: both proxy addresses are
-		// required before any socket is opened.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"activity", "ssh-proxy", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -739,8 +667,7 @@ func TestActivity(t *testing.T) {
 	})
 
 	t.Run("ssh_proxy_rejects_negative_idle_traffic_threshold", func(t *testing.T) {
-		// runActivitySSHProxy validation arm: a negative byte threshold is
-		// a misconfiguration, not "always idle".
+		// A negative byte threshold is a misconfiguration, not "always idle".
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"activity", "ssh-proxy", "--tenant", "team", "--environment", "dev", "--listen", "127.0.0.1:0", "--target", "127.0.0.1:1", "--idle-traffic-bytes=-1"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -751,10 +678,9 @@ func TestActivity(t *testing.T) {
 	})
 
 	t.Run("ssh_proxy_rejects_unlistenable_address", func(t *testing.T) {
-		// runActivitySSHProxy's net.Listen error arm: a listen address with
-		// no port fails deterministically (no DNS, no port collision) so
-		// the listener-setup error path is locked without starting the
-		// accept loop.
+		// A listen address with no port fails deterministically (no DNS, no port
+		// collision), so the listener-setup error path is locked without starting
+		// the accept loop.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"activity", "ssh-proxy", "--tenant", "team", "--environment", "dev", "--listen", "127.0.0.1", "--target", "127.0.0.1:1"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})

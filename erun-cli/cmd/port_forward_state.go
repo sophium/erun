@@ -6,19 +6,9 @@ import (
 	"strings"
 )
 
-// portForwardStatePath returns the on-disk path for a port-forward state
-// file, scoped by kind (mcp / sshd / api), tenant, and environment.
-//
-// State now lives under os.UserConfigDir() rather than os.UserCacheDir().
-// Cache directories are explicitly evictable by the OS and by user-level
-// cleanup tools, and we saw the eviction-then-orphan failure mode in
-// practice: macOS purges ~/Library/Caches/erun/..., the detached `kubectl
-// port-forward` outlives the record, and the next `erun open` has no way
-// to recognise its own forward.
-//
-// For installs that already have state under the legacy cache path,
-// portForwardStatePath performs a one-time, silent rename on first access
-// so the relink does not require user action.
+// State lives under the config dir, not the cache dir: an evicted cache
+// entry would orphan the still-running kubectl port-forward and leave the
+// next `erun open` unable to recognise its own forward.
 func portForwardStatePath(kind, tenant, environment string) (string, error) {
 	configDir, err := os.UserConfigDir()
 	if err != nil {

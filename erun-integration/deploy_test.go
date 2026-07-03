@@ -1036,9 +1036,7 @@ func TestDeploy(t *testing.T) {
 		// Exercises eruncommon.applyCloudProviderDeployMetadata,
 		// findCloudContextForKubernetesContext, cloudContextRegionFromName,
 		// and the managed-cloud helm --set-string lines that come from
-		// per-tenant cloud provider/context resolution. Seeds an env with
-		// managedcloud=true, cloudprovideralias=dev, and a matching cloud
-		// context that points at the same kubernetes context.
+		// per-tenant cloud provider/context resolution.
 		setup := env.New(t)
 		seedCloudContextConfig(t, setup, "edge")
 		root := filepath.Join(setup.ConfigHome, "erun")
@@ -1066,13 +1064,10 @@ func TestDeploy(t *testing.T) {
 	})
 
 	t.Run("dry_run_with_aws_claude_models_traces_set_strings", func(t *testing.T) {
-		// Exercises eruncommon.helmClaudeSetArgs Models + MaxOutputTokens
-		// branches and EnvironmentClaudeConfig.NormalizedModels. With
-		// claude.usebedrock=true, claude.models=[opus,sonnet,haiku] and
-		// claude.maxoutputtokens=8192 set on the env, the resolved helm
-		// command must include --set-string claude.useBedrock=1,
-		// --set-string claude.availableModels=opus,sonnet,haiku and
-		// --set-string claude.maxOutputTokens=8192.
+		// Exercises eruncommon.helmClaudeSetArgs' Models + MaxOutputTokens
+		// branches and NormalizedModels: claude.usebedrock/models/maxoutputtokens
+		// resolve into the runtime chart's claude.useBedrock/availableModels/
+		// maxOutputTokens helm --set-string args.
 		setup := env.New(t)
 		seedCloudContextConfig(t, setup, "edge")
 		root := filepath.Join(setup.ConfigHome, "erun")
@@ -1122,9 +1117,6 @@ func TestDeploy(t *testing.T) {
 		stubs := setup.Cwd + "/stubs"
 		fixture.StubBinary(t, stubs, "kubectl", "")
 		fixture.StubBinary(t, stubs, "docker", "")
-		// Counter-driven helm stub: print the pending-operation message
-		// on the first `upgrade --install` call, exit 0 on every other
-		// invocation (rollback recovery + retry upgrade).
 		counter := filepath.Join(stubs, "helm-counter")
 		fixture.StubBinaryWithScript(t, stubs, "helm", strings.Join([]string{
 			`first_arg="$1"`,
@@ -1358,10 +1350,9 @@ func TestDeploy(t *testing.T) {
 
 	t.Run("devops_k8s_deploy_component_dry_run", func(t *testing.T) {
 		// Exercises the `devops k8s deploy COMPONENT` single-component path:
-		// newK8sDeployCmd -> ResolveDeploySpec -> resolveDeployVersionOverride
-		// (the --version flag wins) -> resolveDeployTarget's default-tenant
-		// branch (no tenant/env args) -> resolveDeployContextForTarget's
-		// component branch (findComponentHelmChartPath under the tenant repo).
+		// --version wins as the version override, no tenant/env args resolves
+		// the default tenant, and the component resolves to its chart under the
+		// tenant repo.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -1584,7 +1575,6 @@ func TestDeploy(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
-		// First dry-run: capture the params hash from "dedup: ready (..., hash=<HASH>)".
 		first := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run", "-vv"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if first.ExitCode != 0 {
 			t.Fatalf("first dry-run exited %d:\n%s", first.ExitCode, first.Combined)
@@ -1670,12 +1660,9 @@ func TestDeploy(t *testing.T) {
 	})
 }
 
-// seedDevopsChartRuntimeImage adds a templates/deployment.yaml to the seeded
-// <tenant>-devops chart that references imageRef (which may embed
-// {{ .Chart.AppVersion }}). It makes findDockerImagesInChart resolve a concrete
-// image the deploy must address, so the install-by-reference path has
-// something to verify — the stub SeedDevopsRepo chart has no templates and
-// therefore no chart-referenced image.
+// seedDevopsChartRuntimeImage gives the seeded <tenant>-devops chart a concrete
+// chart-referenced image so the install-by-reference path has something to
+// verify; the default SeedDevopsRepo chart has no templates and no such image.
 func seedDevopsChartRuntimeImage(t *testing.T, setup env.Setup, tenant, imageRef string) {
 	t.Helper()
 	templates := filepath.Join(setup.Cwd, tenant+"-devops", "k8s", tenant+"-devops", "templates")
@@ -1720,11 +1707,10 @@ func isHex(c byte) bool {
 	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
 }
 
-// reapedChildPID spawns a short-lived child, waits for it to exit, and
-// returns its now-dead PID. Calling isProcessAlive against this PID
-// exercises the real signal(0) error path: ESRCH on linux,
-// os.ErrProcessDone on darwin. PID reuse is theoretically possible but
-// vanishingly unlikely between the wait return and the marker read.
+// reapedChildPID returns the PID of an already-exited child, so isProcessAlive
+// hits the real signal(0) error path (ESRCH on linux, os.ErrProcessDone on
+// darwin). PID reuse between the wait and the marker read is theoretically
+// possible but vanishingly unlikely.
 func reapedChildPID(t *testing.T) int {
 	t.Helper()
 	cmd := exec.Command("/bin/sh", "-c", "exit 0")

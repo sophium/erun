@@ -6,17 +6,12 @@ import {
   uniqueEnvironmentName,
 } from '../fixtures/seedRoot.js';
 
-// The erun-trace pane gains a non-destructive "Clear" that baselines the
-// view — it hides everything currently shown so new lines stand out, without
-// truncating the persistent log or the Copy / Copy-report reads.
+// "Clear" on the erun-trace pane is non-destructive: it baselines the view so
+// new lines stand out, without truncating the persistent log or the Copy reads.
 //
-// The headless harness can't populate a real trace.log for an inert seeded env
-// (capture depends on which commands ran), so these stub the
-// LoadEnvTrace RPC over /__erun_invoke to drive deterministic, evolving
-// content — the same technique sidebar-upgrade-all.spec.ts uses for
-// ResolveUpgradePlan. The baseline math itself (suffix vs rotation fallback)
-// is owned by the unit-level hook useErunTraceBaseline; here we lock the
-// rendered behaviour end to end.
+// The headless harness has no real trace.log for an inert seeded env, so these
+// stub the trace RPC to drive deterministic, evolving content. The baseline
+// math lives in the useErunTraceBaseline hook; here we lock the rendered view.
 test.describe('diagnostics erun-trace clear', () => {
   test.beforeEach(async ({ app }) => {
     if (!(await app.debugPanel.isOpen())) {
@@ -37,8 +32,7 @@ test.describe('diagnostics erun-trace clear', () => {
     page,
     seededEnv,
   }) => {
-    // Mutable so a later poll tick can deliver a line that arrived "after" the
-    // baseline; every other RPC passes through untouched.
+    // Mutated later so a poll tick delivers a line that arrived after the baseline.
     let extra = '';
     await page.route('**/__erun_invoke', async (route, request) => {
       const body = JSON.parse(request.postData() ?? '{}') as { method: string };
@@ -57,37 +51,29 @@ test.describe('diagnostics erun-trace clear', () => {
       await route.continue();
     });
 
-    // Selecting the env drives the erun-trace pane (the console is already open
-    // on the erun-trace tab from beforeEach).
     await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
     const pane = app.debugPanel.erunTracePane();
     await expect(pane).toContainText('TRACE-OLD-1', { timeout: 10_000 });
 
-    // Clear baselines the view: the pre-clear lines vanish, the since-cleared
-    // notice explains why, and (nothing new yet) the pane says so.
     await app.debugPanel.erunTraceClearButton().click();
     await expect(page.getByText('Showing entries since you cleared.')).toBeVisible();
     await expect(pane).not.toContainText('TRACE-OLD-1');
     await expect(pane).toContainText('No new entries since you cleared.');
 
-    // A line that arrives after the baseline stands out; the pre-clear lines
-    // stay hidden.
     extra = 'TRACE-NEW-1\n';
     await expect(pane).toContainText('TRACE-NEW-1', { timeout: 10_000 });
     await expect(pane).not.toContainText('TRACE-OLD-1');
 
-    // Show all is reversible and non-destructive: the full log returns, proving
-    // Clear never truncated the underlying content (Copy / Copy report read the
-    // same full content, never the cleared view).
+    // Show all restores the full log, proving Clear hid rather than truncated it.
     await app.debugPanel.erunTraceShowAllButton().click();
     await expect(pane).toContainText('TRACE-OLD-1');
     await expect(page.getByText('Showing entries since you cleared.')).toBeHidden();
   });
 
   test('the baseline is per-env: switching envs resets it', async ({ app, page, seededEnv }) => {
-    // Two throwaway envs (seededEnv plus one seeded inline) so opening both
-    // never leaves the shared baseline rows open for other specs. Per-env
-    // content keyed off the LoadEnvTrace args makes a leaked cut point visible.
+    // Two throwaway envs (seededEnv plus one seeded inline) so opening both never
+    // leaves the shared baseline rows open for other specs. Per-env trace content
+    // makes a baseline that leaked across the switch visible.
     const envA = seededEnv.environment;
     const envB = uniqueEnvironmentName('per-env-reset-b');
     seedEnvironment(SEED_TENANT, envB);
@@ -124,8 +110,6 @@ test.describe('diagnostics erun-trace clear', () => {
       await app.debugPanel.erunTraceClearButton().click();
       await expect(page.getByText('Showing entries since you cleared.')).toBeVisible();
 
-      // Switching to a different env resets the baseline — the cleared state
-      // must not carry across, and the new env's content shows in full.
       await app.sidebar.openEnvironment(SEED_TENANT, envB);
       await expect(page.getByText('Showing entries since you cleared.')).toBeHidden();
       await expect(pane).toContainText(`LINE-FOR-${envB}-1`, { timeout: 10_000 });

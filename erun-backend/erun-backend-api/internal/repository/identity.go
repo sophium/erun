@@ -29,14 +29,10 @@ func NewIdentityRepository(db *sql.DB, dialect Dialect) *IdentityRepository {
 	return &IdentityRepository{db: bun.NewDB(db, pgdialect.New()), dialect: dialect, orgKeys: newIssuerOrgKeyCache()}
 }
 
-// issuerOrgKeyCacheTTL bounds how long a cached issuers.org_field_key (the
-// per-issuer org-scoping mode) is trusted before re-reading it, so an issuer
-// reconfigured between single-tenant and org-scoped converges without a restart.
+// issuerOrgKeyCacheTTL bounds staleness so an issuer reconfigured between
+// single-tenant and org-scoped converges without a restart.
 const issuerOrgKeyCacheTTL = 5 * time.Minute
 
-// issuerOrgKeyCache memoizes the small, stable issuers.org_field_key lookup so
-// the authenticated hot path (cache-key derivation and resolution) does not read
-// the issuers table on every request.
 type issuerOrgKeyCache struct {
 	mu      sync.Mutex
 	entries map[string]issuerOrgKeyEntry
@@ -74,9 +70,9 @@ func (c *issuerOrgKeyCache) set(issuer string, entry issuerOrgKeyEntry) {
 }
 
 // orgFieldKeyForIssuer returns the issuer's org-scoping mode: registered=false
-// means the issuer is not in the issuers registry, registered=true with an empty
-// orgFieldKey means a single-tenant issuer, and a non-empty orgFieldKey names the
-// token claim whose value selects the tenant. Reads are memoized for a bounded TTL.
+// means the issuer is not in the registry; registered=true with an empty
+// orgFieldKey is a single-tenant issuer; a non-empty orgFieldKey names the token
+// claim whose value selects the tenant.
 func (r *IdentityRepository) orgFieldKeyForIssuer(ctx context.Context, issuer string) (orgFieldKey string, registered bool, err error) {
 	if r.orgKeys != nil {
 		if entry, ok := r.orgKeys.get(issuer); ok {
@@ -192,8 +188,6 @@ func (r *IdentityRepository) ResolveTenantByIssuer(ctx context.Context, claims s
 		return model.Tenant{}, err
 	}
 	if !registered {
-		// Unregistered issuer: unauthorized, or routes to first-identity
-		// bootstrap when the database is empty.
 		return model.Tenant{}, ErrNotFound
 	}
 
@@ -201,7 +195,6 @@ func (r *IdentityRepository) ResolveTenantByIssuer(ctx context.Context, claims s
 	if orgFieldKey != "" {
 		org := orgClaimValue(claims.Raw, orgFieldKey)
 		if org == "" {
-			// Org-scoped issuer but the token carries no usable org claim.
 			return model.Tenant{}, ErrNotFound
 		}
 		err = r.db.NewRaw(`

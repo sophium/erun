@@ -34,11 +34,10 @@ interface CloudAliasRowView {
   bearerBusy: boolean;
 }
 
-// PrimaryCloudAliasControl renders one cloud-status row per provider type the
-// active tenant uses: an AWS account and a Cloudflare token each
-// get an independent login/logout/status control with its own spinner. AWS
-// rows additionally offer "Get bearer token" (OIDC web-identity); Cloudflare
-// has no OIDC, so that action is hidden and "Log in" reads "Verify token".
+// PrimaryCloudAliasControl renders a login/status row per cloud alias the active
+// tenant uses. AWS aliases authenticate via OIDC and can mint a bearer token to
+// authenticate the runtime; Cloudflare aliases use a scoped API token with no
+// OIDC, so the bearer action is hidden and "Log in" becomes "Verify token".
 export function PrimaryCloudAliasControl(): React.ReactElement | null {
   const dispatch = useAppDispatch();
   const tenants = useAppSelector((s) => s.tenants.tenants);
@@ -152,8 +151,6 @@ function CloudAliasActiveActions({
 }): React.ReactElement {
   return (
     <>
-      {/* Cloudflare aliases authenticate the runtime with a scoped API token,
-          not an OIDC JWT, so "Get bearer token" is N/A and hidden for them. */}
       {!view.isCloudflare && (
         <Button
           type="button"
@@ -204,9 +201,6 @@ function CloudAliasLoginAction({
   view: CloudAliasRowView;
   dispatch: ReturnType<typeof useAppDispatch>;
 }): React.ReactElement {
-  // Cloudflare "login" re-verifies the stored scoped token against the
-  // Cloudflare API — there is no browser SSO — so the action reads "Verify
-  // token" (match between system and the real world, Nielsen #2).
   return (
     <Button
       type="button"

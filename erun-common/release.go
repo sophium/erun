@@ -170,16 +170,12 @@ func resolveReleaseSpec(ctx Context, findProjectRoot ProjectFinderFunc, loadProj
 type ReleasePackagingSyncerFunc func(Context, ReleasePackagingSyncSpec) ([]ReleaseFileUpdate, error)
 
 func RunReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc) (err error) {
-	// `==> Releasing` / `==> Released ... in N` / `==> Release failed
-	// after N` are the umbrella traces the desktop's activity-queue
-	// parser keys off so a standalone `erun release` lights the sidebar
-	// spinner (mirrors RunHelmDeploy's `==> Deploying` and
-	// runBuildExecution's `==> Building`). Real run only: dry-run does no
-	// work, and skipping these lines keeps the dry-run release goldens
-	// stable. `erun build --release` does not pass through here —
-	// runBuildExecution calls the unexported runReleaseSpec directly so
-	// the release phase stays under the single `==> Building` umbrella
-	// instead of double-bracketing with a second activity entry.
+	// The `==> Releasing`/`==> Released`/`==> Release failed` lines are a
+	// contract the desktop activity-queue parser keys off to light the
+	// sidebar spinner; dry-run omits them so the release goldens stay stable.
+	// `erun build --release` deliberately bypasses this wrapper by calling
+	// runReleaseSpec directly, keeping its release phase under the single
+	// `==> Building` activity entry instead of opening a second one.
 	if !ctx.DryRun {
 		releasing, released := "==> Releasing", "==> Released"
 		if target := strings.TrimSpace(spec.Version); target != "" {
@@ -714,12 +710,9 @@ func discoverStableReleaseArtifacts(ctx Context, inputs releaseInputs, artifacts
 // launcher wiring all depend on that artifact name.
 var requiredScoopBinaries = []string{"erun.exe", "emcp.exe", "eapi.exe", "erun-app.exe"}
 
-// validateStableScoopManifest fails the stable release when the checked-in
-// Scoop manifest has drifted from the invariants the Windows install depends
-// on, so a malformed bucket/erun.json is caught before the release publishes it
-// rather than at a user's `scoop install`. No-op when the project ships no
-// manifest. Runs during release resolution so the bailout precedes any git
-// mutation; the attempt is traced so --dry-run shows the check.
+// Catches a drifted checked-in Scoop manifest before the release publishes it,
+// rather than at a user's `scoop install`. Runs during release resolution so
+// the bailout precedes any git mutation.
 func validateStableScoopManifest(ctx Context, projectRoot string) error {
 	scoopPath := filepath.Join(projectRoot, "bucket", "erun.json")
 	if !fileExists(scoopPath) {
@@ -729,11 +722,8 @@ func validateStableScoopManifest(ctx Context, projectRoot string) error {
 	return checkScoopManifestInvariants(scoopPath)
 }
 
-// checkScoopManifestInvariants asserts the structural facts the Windows build
-// relies on: the MinGW C-compiler dependency plus its CGO/Wails prerequisite
-// wording (and the absence of the stale Fyne wording), a non-empty installer
-// script, and all four shipped executables in bin. It reports every violation
-// at once so a single failed release names everything that needs fixing.
+// Reports every manifest-invariant violation at once, so a single failed
+// release names everything that needs fixing instead of stopping at the first.
 func checkScoopManifestInvariants(scoopPath string) error {
 	data, err := os.ReadFile(scoopPath)
 	if err != nil {
@@ -1018,9 +1008,6 @@ func discoverStableReleasePackaging(projectRoot, version string) ([]ReleaseFileU
 	return updates, syncSpec, nil
 }
 
-// appendReleasePackagingUpdate runs a packaging-file version updater and, when
-// it reports a change, appends the rewritten content as a ReleaseFileUpdate.
-// An updater error propagates unchanged so the discovery aborts as before.
 func appendReleasePackagingUpdate(
 	updates []ReleaseFileUpdate,
 	path, version string,
@@ -1269,10 +1256,9 @@ func syncScoopReleaseChecksum(ctx Context, spec ReleasePackagingSyncSpec) (Relea
 	return ReleaseFileUpdate{Path: spec.ScoopPath, Content: content}, true, nil
 }
 
-// syncMarketplaceReleaseSHA bumps .claude-plugin/marketplace.json plugins[*].source.sha
-// to the commit the release tag points at, so the marketplace catalogue pins
-// the plugin to the release commit. Runs in the same stage as Homebrew/Scoop
-// because both require the release tag to exist first.
+// Pins the marketplace catalogue's plugin sha to the release commit. Runs
+// alongside Homebrew/Scoop because all three require the release tag to exist
+// first.
 func syncMarketplaceReleaseSHA(ctx Context, spec ReleasePackagingSyncSpec) (ReleaseFileUpdate, bool, error) {
 	if spec.MarketplacePath == "" {
 		return ReleaseFileUpdate{}, false, nil
@@ -1300,10 +1286,8 @@ func syncMarketplaceReleaseSHA(ctx Context, spec ReleasePackagingSyncSpec) (Rele
 	return ReleaseFileUpdate{Path: spec.MarketplacePath, Content: content}, true, nil
 }
 
-// updateMarketplaceReleaseSHA swaps every "sha": "<hex>" field inside
-// .claude-plugin/marketplace.json with the given sha. Uses targeted text
-// replacement (not JSON marshal) to preserve the file's formatting and
-// key ordering.
+// Uses targeted text replacement rather than JSON marshal so the file's
+// existing formatting and key ordering survive the sha bump.
 func updateMarketplaceReleaseSHA(marketplacePath, sha string) (string, bool, error) {
 	data, err := os.ReadFile(marketplacePath)
 	if err != nil {
@@ -1644,12 +1628,9 @@ func nestedReleaseRootCandidate(projectRoot, path string, d os.DirEntry, err err
 	return dir, true, nil
 }
 
-// releaseDiscoverySkipDir reports whether the release walker should skip
-// descending into d. .git is excluded unconditionally (it is the VCS
-// store, not source). Anything ignored by the repo's .gitignore (root or
-// nested) is excluded too — third-party trees like node_modules/ or
-// vendor/ ship their own VERSION/Chart.yaml files that must not be
-// counted as release-root candidates.
+// Excludes .git (VCS store, not source) and anything the repo's .gitignore
+// covers: third-party trees like node_modules/ or vendor/ ship their own
+// VERSION/Chart.yaml files that must not count as release-root candidates.
 func releaseDiscoverySkipDir(projectRoot, path string, d os.DirEntry, ignored *ignoreSet) bool {
 	if d.Name() == ".git" {
 		return true
@@ -1664,11 +1645,9 @@ func releaseDiscoverySkipDir(projectRoot, path string, d os.DirEntry, ignored *i
 	return ignored.matches(filepath.ToSlash(rel), true)
 }
 
-// loadReleaseDiscoveryIgnoreSet builds the gitignore-only matcher used to
-// keep third-party trees out of release-root discovery. It deliberately
-// omits .dockerignore — that is the build-context contract, not the
-// source-tree contract — and relies on .gitignore alone to mark "not
-// part of this repo's source".
+// Matches on .gitignore alone: .dockerignore is the build-context contract,
+// not the source-tree contract, so only .gitignore marks a tree as "not part
+// of this repo's source" for release-root discovery.
 func loadReleaseDiscoveryIgnoreSet(projectRoot string) (*ignoreSet, error) {
 	combined := &ignoreSet{}
 	root, err := loadIgnoreFile(filepath.Join(projectRoot, ".gitignore"), "")

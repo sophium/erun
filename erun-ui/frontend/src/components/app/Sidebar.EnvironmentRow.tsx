@@ -111,19 +111,10 @@ function BusyRowSpinner({ label }: { label: string }): React.ReactElement {
   );
 }
 
-// OpenEnvDot renders the open indicator next to an env name when the env has
-// live tabs registered (the user clicked the row at least once and
-// Local/ERun/AI tabs were spawned). Its shape and colour reflect the env's
-// REAL condition (tab presence alone is not running-ness):
-// green filled circle while running, a hollow grey ring while the linked
-// cloud context is stopped, an amber triangle after a failed deploy /
-// abandoned reconnect. Shape + accessible label carry the state, never
-// colour alone. The dot is a real button so clicking it tears the tabs down
-// via the closeEnvironment thunk; stopPropagation keeps the click from
-// bubbling to the row's openSelection handler. Distinct from the LOCAL pill
-// (which marks the row as the dev-machine env) and from BusyRowSpinner
-// (which fires only while an activity-queue entry is running) — open and
-// busy are independent states and can be visible together.
+// The open dot's shape carries the env's real condition (running / stopped /
+// failed), not mere tab presence — open is not running — and conveys it via
+// shape + label, never colour alone. Independent of the busy spinner; both
+// can show at once.
 function OpenEnvDot({
   tenantName,
   environmentName,
@@ -183,21 +174,16 @@ function OpenEnvDot({
   );
 }
 
-// useEnvironmentRowSelectors batches the per-env state reads the sidebar
-// row needs. Each selector returns a primitive (or a memoised array) so
-// React-Redux's default equality short-circuits row re-renders when
-// unrelated slice churn happens.
+// Each selector returns a primitive so React-Redux equality short-circuits
+// row re-renders on unrelated slice churn.
 function useEnvironmentRowSelectors(tenantName: string, environmentName: string) {
   const selectedSelection = useAppSelector((state) => state.selection.selected);
   const tenants = useAppSelector((state) => state.tenants.tenants);
   const isOpening = useAppSelector(
     (state) => state.sessions.openingByEnv[envKey(tenantName, environmentName)] === true,
   );
-  // runningCommand is the first 'running' activity command attached to
-  // this env (deploy / init / sshd-init / doctor / build / push /
-  // release). Picking the first entry keeps the selector primitive-
-  // returning so the activity slice's additive churn does not re-render
-  // every row.
+  // First running entry only, so the selector stays primitive-returning and
+  // the activity slice's additive churn does not re-render every row.
   const runningCommand = useAppSelector((state) => {
     for (const entry of state.activity.entries) {
       if (
@@ -216,25 +202,20 @@ function useEnvironmentRowSelectors(tenantName: string, environmentName: string)
         selectionKey({ tenant: tenantName, environment: environmentName })
       ] === true,
   );
-  // isOpen = the user has opened this env at least once and at least
-  // one of its tabs is still alive.
   const isOpen = useAppSelector((state) => {
     const key = selectionKey({ tenant: tenantName, environment: environmentName });
     return (state.terminal.tabsByEnv[key]?.length ?? 0) > 0;
   });
-  // reconnecting flips the row's busy indicator while the review-pane
-  // reconnect/redeploy is in flight for THIS env. Other rows stay
-  // interactive and unspinning (Nielsen #1 visibility of system status
-  // without blocking Nielsen #3 user control & freedom).
+  // Scope the busy indicator to THIS env so a reconnect/redeploy in the
+  // review pane does not spin or lock the other rows.
   const reconnecting = useAppSelector(
     (state) =>
       state.review.reconnect.status === 'running' &&
       state.review.reconnect.tenant === tenantName &&
       state.review.reconnect.environment === environmentName,
   );
-  // envState is the env's real condition behind the open dot:
-  // '' (running/normal), 'stopped' (cloud context not running), 'failed'
-  // (deploy failed / reconnect gave up). Driven by the env-status event.
+  // The env's real condition behind the open dot: '' running, 'stopped'
+  // cloud context down, 'failed' deploy or reconnect gave up.
   const envState = useAppSelector(
     (state) =>
       state.envStatus.statusByEnv[
@@ -341,14 +322,10 @@ export function EnvironmentRow({
   );
 }
 
-// PendingEnvironmentRow renders an optimistic, non-interactive
-// placeholder row for an environment that is currently being created
-// by `erun init`. It exists to satisfy Nielsen #1 (visibility of
-// system status) for the ~1–2 min init runs: without it,
-// state.selected is set but produces no visible affordance because
-// the env is not in state.tenants yet. Italic name + "Creating"
-// badge + spinner + aria-busy communicate the in-flight state
-// without inviting interaction.
+// PendingEnvironmentRow is an optimistic placeholder for an env being created
+// by `erun init`: during the ~1–2 min run state.selected points at an env not
+// yet in state.tenants, so without this row the selection has no visible
+// affordance.
 export function PendingEnvironmentRow({
   tenantName,
   environmentName,

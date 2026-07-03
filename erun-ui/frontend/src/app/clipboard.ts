@@ -5,11 +5,9 @@ export function isTerminalPasteTarget(
   return target instanceof Node && terminalRoot.contains(target);
 }
 
-// pastedFiles returns every file on the clipboard, regardless of MIME type.
-// Plain-text paste arrives as `kind === 'string'` items, never `'file'`, so it
-// is left untouched here and flows through to the terminal's normal text paste.
-// Files with an empty MIME type (common for non-image files) still carry their
-// extension in the name, so the backend can derive a sensible remote filename.
+// pastedFiles returns clipboard files for upload; plain-text paste is left to
+// the terminal's own paste path, and files with no MIME type are still returned
+// because their name carries the extension the backend uses for the remote name.
 export function pastedFiles(event: ClipboardEvent): File[] {
   const items = event.clipboardData?.items;
   if (!items) {

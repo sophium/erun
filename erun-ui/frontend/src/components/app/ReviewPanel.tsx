@@ -111,11 +111,8 @@ function ChangedFilesAside({ visible }: { visible: boolean }): React.ReactElemen
   const controller = useController();
   const changedFilesOpen = useAppSelector((state) => state.layout.changedFilesOpen);
   const diffFilter = useAppSelector((state) => state.review.diffFilter);
-  // Register the tree's own scroll container with the controller so the
-  // diff→tree scrollspy can keep the active node visible. A callback
-  // ref (stable across renders) tracks the conditionally-rendered container:
-  // it passes the node on mount and null when the Changed files section
-  // collapses, so the controller never holds a detached node.
+  // Register the tree's scroll container so the diff→tree scrollspy can keep
+  // the active node visible as the diff scrolls.
   const setTreeContainer = React.useCallback(
     (element: HTMLDivElement | null) => {
       controller.setTreeContainer(element);
@@ -161,11 +158,8 @@ function ChangedFilesAside({ visible }: { visible: boolean }): React.ReactElemen
   );
 }
 
-// DiffSourceControl is the segmented toggle that appears in the changed-
-// files aside when the selected env is in contribute mode. It flips the
-// review panel between the env's diff and the ERun contribute-clone
-// diff so the contributor can audit the same work in both repos without
-// leaving the panel.
+// Lets a contributor audit the same work in both the env repo and the ERun
+// contribute-clone without leaving the review panel.
 function DiffSourceControl(): React.ReactElement | null {
   const dispatch = useAppDispatch();
   const selected = useAppSelector((state) => state.selection.selected);

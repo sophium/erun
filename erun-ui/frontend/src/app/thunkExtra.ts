@@ -1,10 +1,7 @@
 import type { TerminalController } from './TerminalController';
 
-// thunkExtra holds the late-bound TerminalController reference that thunks
-// reach for imperative side effects (xterm callbacks, session lifecycle,
-// notifications). The store is constructed before the controller, so the
-// controller writes itself into this holder in its constructor; thunks
-// guard against null by asserting it before use.
+// The store is constructed before the TerminalController, so the controller
+// late-binds itself here; the reference stays null until then.
 export const thunkExtra: { controller: TerminalController | null } = { controller: null };
 
 export type ThunkExtra = typeof thunkExtra;

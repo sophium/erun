@@ -3,11 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from '../App';
 
-// The increment's real verification: with a dev token present, App drives
-// auth → fetchConfig → ConfigView, so mocking `fetch` exercises the whole read
-// path end-to-end (client parse + render). The OIDC flow itself is not covered
-// here — it is a flagged placeholder (a TODO in src/auth/auth.ts) that needs
-// a live IdP to verify; a Playwright e2e harness like erun-ui's is the follow-up.
+// Mocking `fetch` exercises the whole config read path end-to-end. The OIDC
+// login flow is deliberately not covered here — it is a flagged placeholder
+// that needs a live IdP to verify.
 
 const SAMPLE_CONFIG = {
   tenant: { tenantId: 'tn-1', name: 'Acme', type: 'COMPANY' },
@@ -68,7 +66,6 @@ function mockFetch(response: Response): void {
 }
 
 beforeEach(() => {
-  // The dev token source App reads to decide whether to fetch at all.
   vi.stubEnv('VITE_DEV_BEARER_TOKEN', 'dev-token');
 });
 
@@ -85,20 +82,16 @@ describe('ConfigView via App', () => {
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Acme' })).toBeInTheDocument();
 
-    // Both environment names render.
     expect(screen.getByRole('cell', { name: 'prod' })).toBeInTheDocument();
     expect(screen.getByRole('cell', { name: 'dev' })).toBeInTheDocument();
 
-    // Both environment types render.
     expect(screen.getByRole('cell', { name: 'runtime' })).toBeInTheDocument();
     expect(screen.getByRole('cell', { name: 'remote-agent' })).toBeInTheDocument();
 
-    // The runtime version of the env that has one.
     expect(screen.getByRole('cell', { name: '1.2.3' })).toBeInTheDocument();
 
-    // The cloud context: name + provider/region. Scoped to the contexts section
-    // because the context name "primary" also appears as an env's kubernetes
-    // context cell (the api-protocol.md sample reuses the name for both).
+    // Scoped to the contexts section because the context name "primary" also
+    // appears as an env's kubernetes context cell, so an unscoped query is ambiguous.
     const contexts = within(screen.getByRole('region', { name: 'Cloud contexts' }));
     expect(contexts.getByText('primary')).toBeInTheDocument();
     expect(contexts.getByText('aws · eu-west-2')).toBeInTheDocument();
@@ -110,12 +103,10 @@ describe('ConfigView via App', () => {
 
     const contexts = within(await screen.findByRole('region', { name: 'Cloud contexts' }));
 
-    // The running context shows a "Running" badge (semantic text label, not
-    // color-only) and no error reason.
+    // The running context's badge is a semantic text label, not color-only.
     expect(contexts.getByText('Running')).toBeInTheDocument();
 
-    // The failed context shows a "Failed" badge plus the provision error inline
-    // (essential info is visible text, not hidden behind a bare title tooltip).
+    // The provision error is visible text, not hidden behind a bare title tooltip.
     expect(contexts.getByText('Failed')).toBeInTheDocument();
     expect(contexts.getByText('run-instances: InsufficientInstanceCapacity')).toBeInTheDocument();
   });
@@ -126,7 +117,6 @@ describe('ConfigView via App', () => {
 
     expect(await screen.findByText('No environments yet.')).toBeInTheDocument();
     expect(screen.getByText('No cloud contexts yet.')).toBeInTheDocument();
-    // The tenant header still renders.
     expect(screen.getByRole('heading', { level: 1, name: 'Acme' })).toBeInTheDocument();
   });
 

@@ -45,19 +45,13 @@ import {
 import { requireController } from './thunkExtra';
 import { selectionKey } from './versionSuggestions';
 
-// wailsEventThunks own the state-side handling of every Wails event the
-// controller subscribes to. The controller's mount() arms the EventsOn
-// callbacks; each callback dispatches one of these thunks. The lone
-// exception is terminal-output, which still does its imperative xterm
-// write on the controller because the registry buffers + the live xterm
-// instance both live there.
+// Every Wails event the controller subscribes to is handled here as a
+// state-side thunk — except terminal-output, which stays imperative on the
+// controller because both the registry buffers and the live xterm instance
+// live there.
 
-// handleAIActivity flips the per-env "AI tab is working" latch driven by
-// the Go-side debounced ai-activity event. The sidebar's env row picks
-// it up via deriveEnvironmentRow so a Claude/Codex generation in env A
-// is visible while the user is looking at env B. Nielsen #1 (visibility
-// of system status). See erun-ui/terminal_sessions.go: recordAIActivity
-// for the debounce policy.
+// handleAIActivity surfaces that an AI tab is working in one env while the
+// user is looking at another (Nielsen #1, visibility of system status).
 export const handleAIActivity =
   (payload: AIActivityPayload): AppThunk =>
   (dispatch) => {
@@ -70,13 +64,9 @@ export const handleAIActivity =
     dispatch(setAIBusyForEnv({ key, busy: payload.busy }));
   };
 
-// handleEnvStatus records the env's real condition behind the sidebar's open
-// dot: the Go side flags a row 'stopped' when reconnect is
-// refused because the linked cloud context is not running, 'failed' when a
-// deploy failure / reconnect loop ends retries, and clears the flag ('') on
-// every fresh open attempt and successful respawn. Match between system and
-// real state (Nielsen #2): the dot must not claim "running" on tab presence
-// alone.
+// handleEnvStatus keeps the sidebar's open dot reflecting the env's real
+// condition, not mere tab presence (Nielsen #2, match between system and
+// real state).
 export const handleEnvStatus =
   (payload: EnvStatusPayload): AppThunk =>
   (dispatch) => {
@@ -89,8 +79,7 @@ export const handleEnvStatus =
     dispatch(setEnvStatusForEnv({ key, status: payload.status.trim() }));
   };
 
-// handleAppStatus surfaces backend status lines as a busy-state terminal
-// message.
+// handleAppStatus surfaces a backend status line to the user.
 export const handleAppStatus =
   (payload: AppStatusPayload): AppThunk =>
   (dispatch) => {
@@ -101,11 +90,8 @@ export const handleAppStatus =
     dispatch(showTerminalMessage(message, payload.busy === true));
   };
 
-// handleAppNotification routes a transient toast emitted from the Go
-// side through the auto-dismissing notification slot. Used for one-shot
-// info/success events (e.g. "Stopped idle cloud context X.") that
-// would go stale if left on the persistent titlebar pill — see
-// erun-ui/AGENTS.md § "UX Impact Review Checklist" item 3.
+// handleAppNotification shows one-shot info/success events as a transient
+// toast; they would go stale if left on the persistent titlebar pill.
 export const handleAppNotification =
   (payload: AppNotificationPayload): AppThunk =>
   (dispatch) => {
@@ -123,18 +109,12 @@ export const handleAppNotification =
     );
   };
 
-// Bounded retry budget for surfacing a just-initialized env. The
-// `==> Initialized` trace fires only after `erun init` has written the
-// tenant/env config to disk, so the env is on disk by the time we reload.
-// A single reload can still miss it though: a transient getInitialState
-// failure (swallowed as best-effort by reloadStateAfterEnvironmentChange)
-// or a reload that coalesced with the fsnotify watcher's near-simultaneous
-// refresh leaves the sidebar stale with no other recovery for the targeted
-// init signal — the regression class in erun-ui/AGENTS.md § "Command
-// Completion And State-Refresh Wiring". Retrying until the known env
-// appears makes a missed first refresh self-heal instead of silently
-// dropping the new environment. The first attempt has no delay, so the
-// happy path (env already visible) adds no latency.
+// Bounded retry budget for surfacing a just-initialized env. A single reload
+// can miss it — a best-effort getInitialState failure, or a reload that
+// coalesced with the fsnotify watcher's refresh — leaving the sidebar stale
+// with no other recovery. Retrying self-heals the missed refresh instead of
+// silently dropping the new environment (erun-ui/AGENTS.md § "Command
+// Completion And State-Refresh Wiring").
 const ENVIRONMENT_INIT_RELOAD_ATTEMPTS = 3;
 const ENVIRONMENT_INIT_RELOAD_DELAY_MS = 400;
 
@@ -143,9 +123,6 @@ const delayMs = (ms: number): Promise<void> =>
     window.setTimeout(resolve, ms);
   });
 
-// reloadUntilEnvironmentVisible refreshes the read model until the named env
-// surfaces in state.tenants, or the attempt budget is exhausted. Returns
-// whether the env became visible.
 const reloadUntilEnvironmentVisible =
   (tenant: string, environment: string): AppThunk<Promise<boolean>> =>
   async (dispatch, getState) => {
@@ -161,19 +138,14 @@ const reloadUntilEnvironmentVisible =
     return false;
   };
 
-// Fires when the backend's PTY trace handler observes
-// `==> Initialized <tenant>/<env>` from a piped `erun init` command, or
-// when the config-file watcher detects a new env. Reload state so the new
-// env appears in the sidebar, surface a success toast (Nielsen #1 system
-// status visibility), then COMPOSE A DEPLOY — not an open. `erun init` does
-// not deploy a local-agent env's runtime, and `open` is a pure primitive that
-// no longer deploys, so opening here would spawn tabs against a
-// runtime that does not exist and fail with an MCP port-forward timeout. The
-// desktop deploys (build→push→deploy for builds-here envs, an in-shell deploy
-// for the rest) via startDeploySelection, records the env as pending-open, and
-// the matching `environment-deployed` signal (handleEnvironmentDeployed) opens
-// the tabs once the runtime is actually up. See erun-ui/AGENTS.md §
-// "Command Completion And State-Refresh Wiring".
+// Fires when the backend observes `==> Initialized <tenant>/<env>` (or the
+// config watcher detects a new env). After reloading, COMPOSE A DEPLOY, not an
+// open: `erun init` does not deploy the runtime and `open` no longer deploys,
+// so opening here would spawn tabs against a runtime that does not exist and
+// fail with an MCP port-forward timeout. The env is recorded pending-open and
+// its tabs open only on the matching `environment-deployed` signal
+// (handleEnvironmentDeployed). See erun-ui/AGENTS.md § "Command Completion
+// And State-Refresh Wiring".
 export const handleEnvironmentInitialized =
   (payload: EnvironmentInitializedPayload): AppThunk<Promise<void>> =>
   async (dispatch) => {
@@ -184,10 +156,6 @@ export const handleEnvironmentInitialized =
     }
     const visible = await dispatch(reloadUntilEnvironmentVisible(tenant, environment));
     if (!visible) {
-      // The success trace fired (init wrote the config), but the env never
-      // surfaced in the read model after repeated refreshes. Surface a
-      // recoverable error instead of leaving the user staring at a sidebar
-      // that silently dropped their new environment (Nielsen #1 + #9).
       dispatch(
         showNotification(
           'error',
@@ -197,11 +165,6 @@ export const handleEnvironmentInitialized =
       return;
     }
     dispatch(showNotification('success', `Created ${tenant} / ${environment}.`));
-    // Queue the open for after the deploy lands, then start the deploy. The
-    // deploy streams build/push/deploy progress into the activity queue; its
-    // success fires `environment-deployed`, which opens the tabs. A failed
-    // deploy stays visible in the activity drawer with recovery actions and
-    // simply does not auto-open (the user retries the deploy, which then opens).
     dispatch(setPendingOpenAfterDeploy({ tenant, environment }));
     try {
       await dispatch(startDeploySelection({ tenant, environment }));
@@ -211,12 +174,10 @@ export const handleEnvironmentInitialized =
     }
   };
 
-// Fires when the backend observes a successful (or skipped — already current)
-// deploy via `==> Deployed`/`==> Skipping`. Gates the create→deploy→open flow:
-// if this env was queued to open after its create-time deploy,
-// the runtime is now reachable, so open its tabs. For any other deploy (the
-// Deploy button, a manual redeploy) there is no pending entry, so this is a
-// no-op — the env opens only when the user created it and asked to open it.
+// Fires on a successful or skipped deploy. Gates the create→deploy→open flow:
+// opens the env's tabs only if it was queued pending-open at create time; any
+// other deploy (the Deploy button, a manual redeploy) has no pending entry and
+// is a no-op, so an env auto-opens only when the user created it.
 export const handleEnvironmentDeployed =
   (payload: EnvironmentInitializedPayload): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
@@ -237,10 +198,8 @@ export const handleEnvironmentDeployed =
     }
   };
 
-// Fires when the backend's PTY trace handler observes `==> Initialization
-// failed <tenant>/<env>`. Surfaces an error toast (Nielsen #1 + #9) and
-// reverts the optimistic state.selected so the sidebar's "creating ..."
-// placeholder row disappears.
+// Fires on an init failure. Surfaces an error toast and reverts the optimistic
+// state.selected so the sidebar's "creating ..." placeholder row disappears.
 export const handleEnvironmentInitFailed =
   (payload: EnvironmentInitializedPayload): AppThunk =>
   (dispatch, getState) => {
@@ -260,9 +219,8 @@ export const handleEnvironmentInitFailed =
     }
   };
 
-// handleReconnectLine appends a status line from the reconnect PTY into
-// the reconnect line buffer while it is running. The subscription wiring
-// stays on the controller; this thunk owns the state write.
+// handleReconnectLine buffers a reconnect PTY status line while the reconnect
+// is running.
 export const handleReconnectLine =
   (line: string): AppThunk =>
   (dispatch, getState) => {
@@ -276,11 +234,8 @@ export const handleReconnectLine =
     dispatch(appendReconnectLine(trimmed));
   };
 
-// updateOpenStatusFromOutput inspects a freshly-decoded chunk of terminal
-// output and, when the session is an open-env session that has not yet
-// landed on its prompt, promotes a recognised status fragment into the
-// busy-state terminal message. The output buffer is the source of truth;
-// this is purely state.
+// updateOpenStatusFromOutput promotes a recognised status fragment from an
+// opening env's terminal output into the busy-state message.
 export const updateOpenStatusFromOutput =
   (sessionId: number, output: string): AppThunk =>
   (dispatch, getState) => {
@@ -298,9 +253,8 @@ export const updateOpenStatusFromOutput =
     dispatch(showTerminalMessage(status, true));
   };
 
-// hideTerminalMessageIfActive hides the busy message when fresh output
-// arrives for the active session and no copy-output is set. Called from
-// the imperative terminal-output handler on the controller.
+// hideTerminalMessageIfActive clears the busy message once real output
+// resumes on the active session.
 export const hideTerminalMessageIfActive =
   (sessionId: number): AppThunk =>
   (dispatch, getState) => {

@@ -21,15 +21,12 @@ export function compactClaudeDraft(
   return next;
 }
 
-// aiSessionLaunchSignature distills the env config down to what changes the
-// AI tab's Claude launch command, mirroring the resolution that erun-common's
-// AISessionLaunchCommand (the Go owner of the real command) applies:
-// --effort / --model / --verbose --debug compose from the Claude config, the
-// model counting only while it is among the env's available models. Saving a
-// config whose signature changed must reopen the env's open AI tabs — a
-// launch flag only takes effect when the persistent session's program starts.
-// Envs whose AI tool launches verbatim (non-claude) are
-// filtered backend-side by EndAISessions, which knows the tool.
+// aiSessionLaunchSignature distills the env config down to what changes the AI
+// tab's Claude launch command, mirroring the resolution erun-common's
+// AISessionLaunchCommand (the Go owner) applies. A save whose signature changed
+// must reopen the env's open AI tabs — a launch flag only takes effect when the
+// persistent session restarts. Non-claude tools launch verbatim and are
+// filtered backend-side by EndAISessions.
 export function aiSessionLaunchSignature(config: UIEnvironmentConfig): string {
   const claude = config.claude;
   const available =
@@ -58,18 +55,13 @@ export function nextPendingRedeploy(
   return deployRelevantSignature(prior) !== deployRelevantSignature(saved);
 }
 
-// deployRelevantSignature distills the env config down to the fields whose
-// change a redeploy would apply: the values erun-common/deploy.go renders into
-// the Helm release (pod resources, idle.* pod env, the claude.* pod env subset)
-// plus the image registry/channel and the cloud binding the deploy resolves
-// against, and disablebuildscript — which changes how a redeploy rebuilds the
-// runtime image (project build.sh vs docker/release contexts). Fields a
-// redeploy would not apply stay out: autoUpgrade / upgradeChannel select a
-// future `erun upgrade` run, autoStart and remoteHostCredentials are
-// desktop-side behaviour, sshd.workspaceSync* is desktop sync, and claude
+// deployRelevantSignature captures only the fields a redeploy would apply, so a
+// metadata-only save does not raise the pending-redeploy banner. The other
+// fields deliberately stay out because a redeploy would not touch them:
+// autoUpgrade/upgradeChannel select a future `erun upgrade`, autoStart and
+// remoteHostCredentials and sshd sync are desktop-side, and claude
 // effort/defaultModel/verboseDebug only change the AI launch command (the save
-// path relaunches AI tabs for those). A save whose signature is unchanged must
-// not raise the pending-redeploy banner.
+// path relaunches AI tabs for those instead).
 function deployRelevantSignature(config: UIEnvironmentConfig): string {
   return JSON.stringify({
     // A local-agent env's worktree hostPath is its LocalRepoPath, so retargeting

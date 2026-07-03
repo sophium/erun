@@ -31,15 +31,9 @@ export function isIdeDisabled(selected: UISelection | null, tenants: AppState['t
   return environmentTypeIsRemoteWorktree(env.type) && env.sshdEnabled !== true;
 }
 
-// isEnvOpenedAndRunning reports whether the env behind `selected` is
-// in a state that supports remote operations from the titlebar (IDE
-// launch, Contribute mode, Contribute app launcher). For local envs
-// the answer is always yes — there is no cloud context to gate on.
-// For envs with a managed cloud context, the cloud must be in the
-// `running` state; `pending`, `stopping`, `stopped`, and unset all
-// disable the affordance. Remote envs without a managed cloud context
-// stay enabled because the desktop has no signal to gate on and the
-// user is responsible for provisioning.
+// isEnvOpenedAndRunning gates titlebar remote operations. A remote env
+// with no managed cloud context stays enabled because the desktop has no
+// signal to gate on and the operator owns provisioning.
 export function isEnvOpenedAndRunning(
   selected: UISelection | null,
   idleStatus: IdleStatus | null,
@@ -62,17 +56,14 @@ export function idleCloudDisplayName(idleStatus: IdleStatus, fallback: string): 
   return trimmedLabel !== '' ? trimmedLabel : fallback;
 }
 
-// idleStopPending reports whether an auto-stop is currently armed for
-// the env (the desktop has seen StopEligible=true and started the
-// grace-period warning). The frontend uses this to swap the idle
-// pill for the amber warning pill.
+// idleStopPending reports whether an auto-stop grace-period warning is
+// currently armed for the env.
 export function idleStopPending(idleStatus: IdleStatus): boolean {
   return Boolean((idleStatus.stopPendingSince ?? '').trim());
 }
 
-// formatGraceCountdown renders the remaining seconds in the
-// grace-period warning as a short, glanceable string. Matches the
-// style of the existing "idle Xs" pill.
+// formatGraceCountdown renders the grace-period countdown as a short,
+// glanceable string.
 export function formatGraceCountdown(seconds: number): string {
   const remaining = Math.max(0, Math.floor(seconds));
   if (remaining < 60) {
@@ -203,11 +194,9 @@ function idleStatusActiveMarkerLine(marker: NonNullable<IdleStatus['markers']>[n
   return `- ${marker.name}${marker.reason ? `: ${marker.reason}` : ''}${remaining}`;
 }
 
-// idleStatusActiveMarkerClientLines emits "  - <address>, <bytes>, <ago>"
-// for each per-peer entry attached to the marker. The leading two spaces
-// keep these visually nested under their parent "- <name>: ..." line; the
-// Titlebar tooltip JSX leaves the prefix alone but already applies the
-// `pl-2` indent class to any line beginning with "- ".
+// The two leading spaces nest each per-peer line under its parent marker
+// line; the Titlebar tooltip JSX applies its `pl-2` indent only to lines
+// beginning with "- ", so deeper nesting must be baked into the prefix.
 function idleStatusActiveMarkerClientLines(
   marker: NonNullable<IdleStatus['markers']>[number],
 ): string[] {

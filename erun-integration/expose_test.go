@@ -21,9 +21,7 @@ func TestExpose(t *testing.T) {
 	})
 
 	t.Run("dry_run", func(t *testing.T) {
-		// With a platform block and an env, expose resolves the public hostname
-		// and traces the full plan: the per-env wildcard A record upsert into
-		// the services zone and the Host-routing Ingress apply. No side effects.
+		// Happy path: a platform block plus an env yields a complete expose plan with no side effects.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedGitRepo(t, setup.Cwd)
@@ -33,12 +31,10 @@ func TestExpose(t *testing.T) {
 	})
 
 	t.Run("dry_run_cross_cluster", func(t *testing.T) {
-		// The platform env (frs-prod) that owns PowerDNS is on a different
-		// cluster than the target env (team-dev). The per-env wildcard DNS write
-		// must exec against the platform env's own kube context, while the Ingress
-		// applies against the target env's context — the two must not collapse to
-		// one (a cross-cluster misroute). The platform env is seeded with a
-		// distinct context to lock that the DNS exec uses it.
+		// The platform env that owns PowerDNS sits on a different cluster than the
+		// target env: the wildcard DNS write must exec against the platform env's
+		// kube context while the Ingress applies against the target env's, and the
+		// two must never collapse into one cross-cluster misroute.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedTenantEnvWithContext(t, setup, "frs", "prod", "platform-context")
@@ -50,8 +46,8 @@ func TestExpose(t *testing.T) {
 
 	t.Run("requires_platform_config", func(t *testing.T) {
 		// expose only makes sense for a platform deployment; without a platform
-		// block in .erun/config.yaml it fails with an actionable error rather
-		// than resolving a hostname under an unknown zone.
+		// block it fails with an actionable error rather than resolving a hostname
+		// under an unknown zone.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedGitRepo(t, setup.Cwd)
@@ -63,10 +59,8 @@ func TestExpose(t *testing.T) {
 	})
 
 	t.Run("requires_platform_env", func(t *testing.T) {
-		// platform.env locates the PowerDNS pod's namespace for the per-env
-		// wildcard DNS write. A platform block with a base domain but no env would
-		// otherwise produce a `kubectl -n "" exec` that silently misroutes, so
-		// expose fails fast with an actionable error.
+		// Without platform.env the per-env wildcard DNS write would exec as
+		// `kubectl -n "" exec` and silently misroute, so expose fails fast.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedGitRepo(t, setup.Cwd)

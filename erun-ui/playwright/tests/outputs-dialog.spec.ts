@@ -1,20 +1,13 @@
 import { expect, test } from '../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
-// outputs-dialog covers the per-env Outputs dialog, which lists the files an
-// agent produced in the runtime pod's outputs directory and lets the operator
-// download each onto their machine.
-//
-// Harness limitation: ListAgentOutputs and DownloadAgentOutput reach the live
-// runtime pod over `kubectl exec`, and DownloadAgentOutput opens a native Save
-// dialog — neither is reachable in the headless harness. So this spec mocks
-// both RPCs over /__erun_invoke and locks the reachable frontend invariants:
-//   1. opening the dialog lists the (mocked) entries with their type/size; and
-//   2. clicking Download invokes DownloadAgentOutput with the env + entry name
-//      and surfaces the saved-path status.
-// The kubectl-exec read/transfer, filename derivation, and traversal safety are
-// covered by the Go integration goldens (erun-integration/outputs_test.go) and
-// the erun-common/erun-ui Go tests.
+// The per-env Outputs dialog lets an operator download the files an agent
+// produced in the runtime pod. The real backend RPCs need a live pod
+// (kubectl exec) and a native Save dialog, so the headless harness cannot
+// drive them: this spec mocks both and locks only the reachable frontend
+// invariants. The kubectl-exec transfer, filename derivation, and traversal
+// safety live in the Go tests (erun-integration/outputs_test.go and the
+// erun-common/erun-ui tests).
 
 interface InvokeBody {
   method?: string;
@@ -69,13 +62,10 @@ test.describe('agent outputs dialog (#588)', () => {
 
     await app.sidebar.openOutputs(SEED_TENANT, SEED_ENV_ALPHA);
 
-    // (1) the dialog opens and lists the mocked entries, newest-first.
     await expect(app.outputsDialog.locator()).toBeVisible();
     await expect(app.outputsDialog.entry('results')).toBeVisible();
     await expect(app.outputsDialog.entry('report.pdf')).toBeVisible();
 
-    // (2) Download invokes the backend with the env selection + entry name and
-    // surfaces the saved path.
     await app.outputsDialog.downloadButton('report.pdf').click();
     await expect
       .poll(() =>

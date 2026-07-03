@@ -1,8 +1,6 @@
-// Types mirroring the JSON shape of `GET /v1/config` on erun-backend-api.
-// See erun-docs/docs/agent-reference/api-protocol.md § Endpoints:
-// the endpoint returns the per-tenant erun read model as
-// `{ tenant, environments[], contexts[] }`, denormalized to the on-disk
-// erun config shape. All reads are tenant-scoped by row-level security.
+// Types mirroring the wire shape of `GET /v1/config` on erun-backend-api — the
+// per-tenant erun read model, denormalized to the on-disk erun config shape.
+// See erun-docs/docs/agent-reference/api-protocol.md § Endpoints.
 
 export interface Tenant {
   tenantId: string;
@@ -18,17 +16,14 @@ export interface Environment {
   // "runtime" | "remote-agent" | "local-agent"; kept as a string for the
   // same forward-compatibility reason as Tenant.type.
   type: string;
-  // Optional fields — the backend omits them when unset (see POST /v1/environments).
   kubernetesContext?: string;
   contextId?: string;
   runtimeVersion?: string;
 }
 
-// The provisioning lifecycle a context moves through once `POST /v1/contexts`
-// kicks off the live bootstrap: `provisioning` → `running`
-// (success) | `failed`. Kept as a string union for the known states but parsed
-// leniently from the wire (see parseContext) so an unknown future state still
-// renders rather than failing the parse.
+// The provisioning lifecycle a context moves through: `provisioning` → `running`
+// | `failed`. A union of the known states, parsed leniently so an unknown future
+// state still renders.
 export type ContextStatus = 'provisioning' | 'running' | 'failed';
 
 export interface CloudContext {
@@ -40,14 +35,11 @@ export interface CloudContext {
   kubernetesContext?: string;
   cloudProviderAlias?: string;
   instanceType?: string;
-  // Provisioning status from `GET /v1/contexts/{id}` (omitted by the read model
-  // for contexts registered before live provisioning existed).
+  // Omitted by the read model for contexts registered before live provisioning existed.
   status?: ContextStatus;
-  // The failure reason when `status === 'failed'`.
   provisionError?: string;
 }
 
-// The console's read model over the per-tenant erun config.
 export interface TenantConfigView {
   tenant: Tenant;
   environments: Environment[];

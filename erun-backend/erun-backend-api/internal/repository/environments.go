@@ -17,14 +17,9 @@ func NewEnvironmentRepository(txs *TxManager) *EnvironmentRepository {
 	return &EnvironmentRepository{txs: txs}
 }
 
-// Create inserts a new environment for the caller's tenant and returns the
-// persisted row. Only the operator-authored columns are written; environment_id,
-// tenant_id, and the timestamps are owned by the database (the tenant_id DEFAULT +
-// RLS bind the row to the caller's tenant automatically), so they are excluded
-// from the Column list and populated by Returning("*"). The env references its
-// context by context_id; the composite (tenant_id, context_id) foreign key
-// enforces that the context belongs to the same tenant, so a context_id from
-// another tenant surfaces as a foreign-key-violation error here.
+// Create inserts a new environment for the caller's tenant. A context that
+// belongs to another tenant is rejected, keeping context references
+// tenant-isolated.
 func (r *EnvironmentRepository) Create(ctx context.Context, environment model.Environment) (model.Environment, error) {
 	created := environment
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
@@ -49,9 +44,8 @@ func (r *EnvironmentRepository) List(ctx context.Context) ([]model.Environment, 
 	return environments, err
 }
 
-// Count returns how many environments the caller's tenant has. RLS scopes the
-// count to the caller's tenant, so no tenant filter is needed here; the quota
-// guardrail compares it against the tenant's environment-count cap.
+// Count returns how many environments the caller's tenant has, for enforcing
+// the tenant's environment-count quota cap.
 func (r *EnvironmentRepository) Count(ctx context.Context) (int, error) {
 	var count int
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {

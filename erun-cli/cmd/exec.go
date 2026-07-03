@@ -71,12 +71,10 @@ func newExecRawCmd(findProjectRoot common.ProjectFinderFunc, runRaw common.RawCo
 	return cmd
 }
 
-// rawCommandWantsHelp reports whether the user asked for help on `exec raw`
-// itself, rather than passing --help through to the wrapped command. Because
-// the command sets DisableFlagParsing, cobra never intercepts --help; without
-// this, `erun exec raw --help` is handed through verbatim and tries to execute
-// a binary called "--help". A literal `--` ends the scan so the wrapped command
-// can still receive its own --help.
+// rawCommandWantsHelp intercepts help for `exec raw` itself: DisableFlagParsing
+// stops cobra from handling --help, so without this `erun exec raw --help` would
+// try to exec a binary named "--help". A literal `--` ends the scan so the
+// wrapped command keeps its own --help.
 func rawCommandWantsHelp(args []string) bool {
 	for _, arg := range args {
 		if arg == "--" {
@@ -89,12 +87,10 @@ func rawCommandWantsHelp(args []string) bool {
 	return false
 }
 
-// extractDryRunFlag pulls erun's own --dry-run out of the pass-through args
-// for `exec raw`. Because the command sets DisableFlagParsing, cobra hands
-// the entire arg list through verbatim; without this the user has no way to
-// drive the wrapped command in dry-run mode and the integration suite
-// cannot exercise the trace path. A literal `--` ends erun-flag scanning so
-// the wrapped command can still receive its own `--dry-run` argument.
+// extractDryRunFlag pulls erun's own --dry-run out of the pass-through args:
+// DisableFlagParsing hands the whole arg list through verbatim, so without this
+// --dry-run would reach the wrapped command instead of enabling erun's dry-run.
+// A literal `--` ends the scan so the wrapped command keeps its own --dry-run.
 func extractDryRunFlag(args []string) ([]string, bool) {
 	cleaned := make([]string, 0, len(args))
 	dryRun := false

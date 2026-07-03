@@ -35,10 +35,9 @@ type environmentPortStore interface {
 	ListEnvConfigs(string) ([]EnvConfig, error)
 }
 
-// ErrLocalPortRangeOverlap is returned when two envs persist the same
-// LocalPortRangeStart. Surfacing the conflict is preferred over silent
-// reassignment because the persisted value is the durable user-visible
-// contract and either of the two configs must be edited to resolve it.
+// ErrLocalPortRangeOverlap is returned when two envs persist the same range
+// start. The conflict is surfaced rather than silently reassigned because the
+// persisted value is a durable, user-visible contract only the operator may change.
 type ErrLocalPortRangeOverlap struct {
 	A          string
 	B          string
@@ -54,8 +53,7 @@ func ServicePort(offset int) int {
 }
 
 // EnvironmentLocalPortsFromRangeStart derives the per-service ports from a
-// persisted range start. Callers should prefer this over assembling the
-// struct piecemeal so the offsets stay in one place.
+// persisted range start.
 func EnvironmentLocalPortsFromRangeStart(rangeStart int) EnvironmentLocalPorts {
 	if rangeStart <= 0 {
 		return EnvironmentLocalPorts{}
@@ -71,11 +69,10 @@ func EnvironmentLocalPortsFromRangeStart(rangeStart int) EnvironmentLocalPorts {
 }
 
 // LocalPortsForResult derives the effective local ports for an OpenResult.
-// It prefers the persisted EnvConfig.LocalPortRangeStart over the resolver's
-// in-memory allocation so the result is stable regardless of how many other
-// envs exist. If neither is set it returns a zero value — callers that
-// actually need to bind a port will fail loudly on port 0, which is the
-// intended signal: a missing range is a bug upstream, not a default.
+// It prefers a persisted range start over the resolver's in-memory allocation
+// so the result stays stable no matter how many other envs exist. A zero
+// result is deliberate: a missing range is an upstream bug, so callers that
+// need to bind fail loudly on port 0 rather than get a silent default.
 func LocalPortsForResult(result OpenResult) EnvironmentLocalPorts {
 	var ports EnvironmentLocalPorts
 	switch {
@@ -116,25 +113,18 @@ func SSHLocalPortForResult(result OpenResult) int {
 	return LocalPortsForResult(result).SSH
 }
 
-// ContributeAppPortForResult returns the contribute-app port for the
-// env. The port is always allocated within the env's local port range;
-// it is only bound when contribute mode is active and `erun app
-// --headless` is running inside the env.
+// ContributeAppPortForResult returns the contribute-app port. It is always
+// allocated within the env's local port range but only bound when contribute
+// mode is active and `erun app --headless` runs inside the env.
 func ContributeAppPortForResult(result OpenResult) int {
 	return LocalPortsForResult(result).ContributeApp
 }
 
-// environmentPortRef pairs an env's tenant/environment key with its config so
-// the two-pass allocator can split envs into persisted and unpersisted groups.
 type environmentPortRef struct {
 	key string
 	env EnvConfig
 }
 
-// collectEnvironmentPortRefs walks every tenant's envs in alphabetical
-// (tenant, env) order, splitting them into those with a persisted
-// LocalPortRangeStart and those without. Tenants and envs with blank names are
-// skipped.
 func collectEnvironmentPortRefs(store environmentPortStore) (persisted, unpersisted []environmentPortRef, err error) {
 	tenants, err := store.ListTenantConfigs()
 	if err != nil {
@@ -172,13 +162,11 @@ func collectEnvironmentPortRefs(store environmentPortStore) (persisted, unpersis
 	return persisted, unpersisted, nil
 }
 
-// ResolveAllEnvironmentLocalPorts returns a per-env port allocation in two
-// passes. Pass A locks in any env whose config has a non-zero
-// LocalPortRangeStart at its declared range. Pass B walks the remaining envs
-// in alphabetical (tenant, env) order, picking the lowest index not already
-// claimed by Pass A. Two persisted envs that share a range start cause an
-// ErrLocalPortRangeOverlap so the misconfiguration is surfaced instead of
-// silently reassigned.
+// ResolveAllEnvironmentLocalPorts allocates a range to every env in two passes:
+// persisted envs keep their declared range start, then the rest fill the lowest
+// free index in alphabetical (tenant, env) order so allocation is deterministic.
+// Two persisted envs claiming the same range start surface as
+// ErrLocalPortRangeOverlap instead of being silently reassigned.
 func ResolveAllEnvironmentLocalPorts(store environmentPortStore) (map[string]EnvironmentLocalPorts, error) {
 	if store == nil {
 		return nil, fmt.Errorf("store is required")
@@ -202,9 +190,6 @@ func ResolveAllEnvironmentLocalPorts(store environmentPortStore) (map[string]Env
 	return allocations, nil
 }
 
-// allocatePersistedEnvironmentPorts locks each persisted env in at the index
-// derived from its declared range start, recording the claim and its ports. A
-// second env claiming the same index yields an ErrLocalPortRangeOverlap.
 func allocatePersistedEnvironmentPorts(persisted []environmentPortRef, allocations map[string]EnvironmentLocalPorts, claimedByIndex map[int]string) error {
 	for _, ref := range persisted {
 		index, err := environmentPortIndexForRangeStart(ref.env.LocalPortRangeStart, ref.key)
@@ -224,8 +209,6 @@ func allocatePersistedEnvironmentPorts(persisted []environmentPortRef, allocatio
 	return nil
 }
 
-// allocateUnpersistedEnvironmentPorts walks the remaining envs in order,
-// assigning each the lowest index not already claimed by the persisted pass.
 func allocateUnpersistedEnvironmentPorts(unpersisted []environmentPortRef, allocations map[string]EnvironmentLocalPorts, claimedByIndex map[int]string) error {
 	walkerIndex := 0
 	for _, ref := range unpersisted {
@@ -264,10 +247,9 @@ func environmentLocalPortsForTarget(store OpenStore, tenant string, env EnvConfi
 	if !ok {
 		return EnvironmentLocalPorts{}, fmt.Errorf("local port range cannot be resolved without tenant/environment listing for %s/%s", strings.TrimSpace(tenant), strings.TrimSpace(env.Name))
 	}
-	// Always go through the two-pass resolver, even when env already has a
-	// persisted range start: the resolver is what catches cross-tenant
-	// overlap between two persisted envs, and skipping it for the
-	// already-persisted env would let the conflict slip through silently.
+	// Always resolve through the two-pass resolver even for an already-persisted
+	// env: shortcutting it would skip the cross-tenant overlap check between two
+	// persisted envs.
 	ports, err := ResolveEnvironmentLocalPorts(portStore, tenant, env.Name)
 	if err != nil {
 		return EnvironmentLocalPorts{}, err

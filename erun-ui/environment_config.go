@@ -51,11 +51,6 @@ func (a *App) SaveEnvironmentConfig(selection uiSelection, config uiEnvironmentC
 	return a.environmentConfigToUI(selection.Tenant, updated, selection.Environment, ports)
 }
 
-// persistEnvironmentConfig builds the updated env config from the edited UI
-// values and existing config, routes the container-registry list to its
-// owning store, applies a changed remote cloud alias, saves the env config,
-// and reconciles the workspace-sync and cloud-credentials refreshers. It
-// returns the saved config so the caller can render it back to the UI.
 func (a *App) persistEnvironmentConfig(selection uiSelection, config uiEnvironmentConfig, existing eruncommon.EnvConfig) (eruncommon.EnvConfig, error) {
 	updated, err := a.updatedEnvironmentConfig(config, existing)
 	if err != nil {
@@ -79,10 +74,10 @@ func (a *App) persistEnvironmentConfig(selection uiSelection, config uiEnvironme
 	return updated, nil
 }
 
-// applyContainerRegistries persists the edited marked list to the place that
-// drives resolution: project config (.erun/config.yaml) for local-agent envs,
-// whose build/deploy resolvers read the project list, and the env config for
-// remote/runtime envs, whose project config is not on the local machine.
+// applyContainerRegistries routes the registry list by env type: local-agent
+// envs store it in project config, where the build/deploy resolvers read it;
+// remote/runtime envs keep it on the env config because their project config
+// is not on the local machine.
 func (a *App) applyContainerRegistries(selection uiSelection, updated *eruncommon.EnvConfig, registries eruncommon.ContainerRegistries) error {
 	if updated.ResolvedType() == eruncommon.EnvironmentTypeLocalAgent {
 		updated.ContainerRegistries = nil
@@ -92,11 +87,9 @@ func (a *App) applyContainerRegistries(selection uiSelection, updated *eruncommo
 	return nil
 }
 
-// saveEnvironmentProjectRegistries writes a local-agent env's marked list into
-// the project's .erun/config.yaml as a per-env override (collapsing to the
-// project default when they match). Fails clearly when the project root or a
-// project-config store can't be resolved — a local-agent env's list has nowhere
-// else to live.
+// saveEnvironmentProjectRegistries writes a local-agent env's registry list to
+// its repo's .erun/config.yaml — the only place such a list can live — so it
+// fails clearly when the project root can't be resolved.
 func (a *App) saveEnvironmentProjectRegistries(tenant string, config eruncommon.EnvConfig, registries eruncommon.ContainerRegistries) error {
 	projectRoot, store, ok := a.environmentProjectConfigStore(config)
 	if !ok {
@@ -110,12 +103,10 @@ func (a *App) saveEnvironmentProjectRegistries(tenant string, config eruncommon.
 	return store.SaveProjectConfig(projectRoot, projectConfig)
 }
 
-// SetEnvironmentAutoStart persists the desktop's auto-start preference for one
-// environment. mode is "ask" (clear the override and prompt again on next
-// open), "always" (start the linked cloud context without prompting), or
-// "never" (skip auto-start and render the "Start environment" empty state).
-// The setting only affects the desktop's openSelection branch; CLI users keep
-// the unconditional preflight start.
+// SetEnvironmentAutoStart persists the desktop's per-env auto-start preference:
+// "ask" prompts again on next open, "always" starts the linked cloud context
+// without prompting, "never" shows the "Start environment" empty state. Only
+// the desktop honors it; CLI users always run the preflight start.
 func (a *App) SetEnvironmentAutoStart(selection uiSelection, mode string) (uiEnvironmentConfig, error) {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
@@ -188,11 +179,9 @@ func resolveWorkspaceSyncDialogDefaultDirectory(findProjectRoot eruncommon.Proje
 	return strings.TrimSpace(projectRoot)
 }
 
-// ChooseLocalRepoPath opens a native directory picker for the env-init
-// dialog's "Local repo path" field. local-agent envs mount this path into
-// the agent pod as the worktree, so the user has to pick a real directory
-// on this machine — typing absolute paths by hand is error-prone. Returns
-// the empty string if the user cancels the dialog.
+// ChooseLocalRepoPath opens a native directory picker for the env-init dialog's
+// local repo path. A local-agent env mounts this path into the agent pod as its
+// worktree, so it must be a real directory on this machine.
 func (a *App) ChooseLocalRepoPath(current string) (string, error) {
 	if a.ctx == nil {
 		return "", fmt.Errorf("application context is not ready")
@@ -343,8 +332,6 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 	return result, nil
 }
 
-// containerRegistriesToUI converts the resolved marked list to the desktop
-// editor's row shape.
 func containerRegistriesToUI(list eruncommon.ContainerRegistries) []uiContainerRegistryEntry {
 	entries := make([]uiContainerRegistryEntry, 0, len(list))
 	for _, entry := range list {
@@ -357,10 +344,9 @@ func containerRegistriesToUI(list eruncommon.ContainerRegistries) []uiContainerR
 	return entries
 }
 
-// uiToContainerRegistries converts the desktop editor's rows back to a marked
-// list, dropping blank registries, and validates the marker invariants when the
-// list is non-empty so a bad list is rejected on save with an actionable error
-// (an empty list clears the env's override and inherits the project default).
+// uiToContainerRegistries builds the marked list from the editor's rows; an
+// empty result (all rows blank) clears the env's override so it inherits the
+// project default.
 func uiToContainerRegistries(entries []uiContainerRegistryEntry) (eruncommon.ContainerRegistries, error) {
 	list := make(eruncommon.ContainerRegistries, 0, len(entries))
 	for _, entry := range entries {
@@ -385,11 +371,9 @@ func uiToContainerRegistries(entries []uiContainerRegistryEntry) (eruncommon.Con
 	return list, nil
 }
 
-// effectiveEnvironmentContainerRegistries resolves the marked list the editor
-// shows: the per-env list on the env config (remote/runtime envs) when set,
-// otherwise the project's list resolved through the store. Mirrors the
-// resolution order the build/deploy resolvers use, but goes through the store
-// so the desktop (and its test stub) drive it.
+// effectiveEnvironmentContainerRegistries mirrors the container-registry
+// resolution order the build/deploy resolvers use, so the editor shows the same
+// list they will act on.
 func (a *App) effectiveEnvironmentContainerRegistries(tenant, environment string, config eruncommon.EnvConfig) eruncommon.ContainerRegistries {
 	if !config.ContainerRegistries.IsZero() {
 		return config.ContainerRegistries
@@ -401,10 +385,6 @@ func (a *App) effectiveEnvironmentContainerRegistries(tenant, environment string
 	return projectConfig.ContainerRegistriesForEnvironment(environmentName(environment, config))
 }
 
-// loadEnvironmentProjectConfig loads the project config that backs an env's
-// registry list (local-agent envs), resolving the project root from the tenant
-// config then the env's repo path. ok is false when the project config can't be
-// reached (no project root, store can't load project config, or load failed).
 func (a *App) loadEnvironmentProjectConfig(tenant string, config eruncommon.EnvConfig) (eruncommon.ProjectConfig, bool) {
 	projectRoot, store, ok := a.environmentProjectConfigStore(config)
 	if !ok {
@@ -417,15 +397,10 @@ func (a *App) loadEnvironmentProjectConfig(tenant string, config eruncommon.EnvC
 	return projectConfig, true
 }
 
-// environmentProjectConfigStore resolves the project root for an env and the
-// project-config store, used to read and write a local-agent env's registry
-// list in .erun/config.yaml.
 func (a *App) environmentProjectConfigStore(config eruncommon.EnvConfig) (string, projectConfigStore, bool) {
 	if a.deps.store == nil {
 		return "", nil, false
 	}
-	// The env's own local repo path is the project root (the path moved
-	// off TenantConfig onto the env).
 	projectRoot := strings.TrimSpace(config.EffectiveLocalRepoPath())
 	if projectRoot == "" {
 		return "", nil, false
@@ -444,22 +419,20 @@ func environmentName(fallbackName string, config eruncommon.EnvConfig) string {
 	return strings.TrimSpace(fallbackName)
 }
 
-// environmentCloudProviderTypes is the order cloud-alias slots render in: AWS
-// first (the legacy primary), then Cloudflare. Adding a provider type to the
-// list gives it its own env selector and sidebar login row.
+// environmentCloudProviderTypes is the render order for cloud-alias slots, AWS
+// first as the legacy primary. Adding a type here gives it its own env selector
+// and sidebar login row.
 var environmentCloudProviderTypes = []string{
 	eruncommon.CloudProviderAWS,
 	eruncommon.CloudProviderCloudflare,
 }
 
-// environmentCloudAliasSlots builds the per-provider-type cloud-alias view for
-// one env: for each known provider type, the alias currently attached to the
-// env for that type (from EnvConfig.ResolvedCloudAliases) plus the configured
-// aliases of that type the operator can pick from. A type with no configured
-// aliases and nothing attached is omitted so the env settings don't show an
-// empty Cloudflare selector before any Cloudflare token exists. A currently
-// attached alias whose provider config was deleted is still listed as an option
-// so the operator can see and clear it (recognition over recall).
+// environmentCloudAliasSlots builds the per-provider-type cloud-alias slots for
+// one env. Two rules shape it: omit a type that has no configured aliases and
+// nothing attached, so a new env shows no empty selector before any token of
+// that type exists; and keep a currently-attached alias whose provider config
+// was deleted as an option, so the operator can still see and clear it
+// (recognition over recall).
 func environmentCloudAliasSlots(store eruncommon.CloudReadStore, config eruncommon.EnvConfig) []uiEnvironmentCloudAlias {
 	optionsByType := configuredCloudAliasesByType(store)
 	attached := config.ResolvedCloudAliases()
@@ -482,8 +455,6 @@ func environmentCloudAliasSlots(store eruncommon.CloudReadStore, config eruncomm
 	return slots
 }
 
-// configuredCloudAliasesByType groups every configured cloud provider alias by
-// its provider type so each env slot can offer only the aliases that match.
 func configuredCloudAliasesByType(store eruncommon.CloudReadStore) map[string][]string {
 	grouped := make(map[string][]string)
 	providers, err := eruncommon.ListCloudProviders(store)
@@ -565,9 +536,8 @@ func canConnectLocalTCP(port int) bool {
 func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.EnvConfig) eruncommon.EnvConfig {
 	existing.Name = strings.TrimSpace(config.Name)
 	applyEnvironmentCloudAliasSlots(&existing, config)
-	// ContainerRegistries are written by SaveEnvironmentConfig, which routes the
-	// marked list to project config (.erun/config.yaml) for local-agent envs and
-	// to the env config for remote/runtime envs.
+	// ContainerRegistries are intentionally not set here; SaveEnvironmentConfig
+	// routes the marked list to the right store by env type.
 	existing.RuntimePod = runtimePodConfigFromUI(config.RuntimePod)
 	existing.SSHD.WorkspaceSync.Enabled = config.SSHD.WorkspaceSyncEnabled
 	existing.SSHD.WorkspaceSync.LocalPath = strings.TrimSpace(config.SSHD.WorkspaceSyncLocalPath)
@@ -597,8 +567,6 @@ func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.Env
 	return existing
 }
 
-// trimmedComponentNames trims blanks and drops empty entries from a saved deploy
-// component list so the persisted config carries only real chart names.
 func trimmedComponentNames(names []string) []string {
 	out := make([]string, 0, len(names))
 	for _, raw := range names {
@@ -612,16 +580,12 @@ func trimmedComponentNames(names []string) []string {
 	return out
 }
 
-// applyEnvironmentCloudAliasSlots writes the edited per-provider-type cloud
-// aliases back onto the env config. Each slot routes by its provider type with
-// the same semantics as erun-common's SetEnvironmentCloudProviderAlias: the AWS
-// alias stays in the legacy CloudProviderAlias scalar (so every existing AWS
-// reader — saveRemoteCloudAlias, linkedCloudContext, the credential refresher —
-// is byte-for-byte unchanged), and every other type lives in the per-type
-// CloudProviderAliases map. An empty slot value clears that type's attachment
-// (the "— None —" option). When the UI sends no slots (older callers, the
-// AWS-only single-selector path), the legacy scalar is applied directly so
-// behavior is preserved.
+// applyEnvironmentCloudAliasSlots writes the edited cloud aliases back onto the
+// env config. The AWS alias stays in the legacy CloudProviderAlias scalar so
+// every existing AWS reader is unchanged; other types live in the per-type
+// CloudProviderAliases map. An empty slot value clears that type's attachment.
+// When the UI sends no slots (the AWS-only single-selector path), the legacy
+// scalar is applied directly to preserve older-caller behavior.
 func applyEnvironmentCloudAliasSlots(existing *eruncommon.EnvConfig, config uiEnvironmentConfig) {
 	if len(config.CloudAliasSlots) == 0 {
 		existing.CloudProviderAlias = strings.TrimSpace(config.CloudProviderAlias)
@@ -748,12 +712,10 @@ func idleConfigValue(value, fallback string) string {
 	return value
 }
 
-// linkedCloudContext returns the cloud context backing the supplied
-// env, with its Status field populated from the in-memory cache the
-// background poller maintains. The persisted config no longer carries
-// Status, so callers that need a current value must consult the cache;
-// a missing cache entry surfaces as Status="" and callers must treat
-// that as "not yet observed."
+// linkedCloudContext returns the cloud context backing the env, with Status
+// filled from the background poller's in-memory cache. The persisted config no
+// longer carries Status, so a missing cache entry surfaces as Status="" that
+// callers must treat as "not yet observed," not "stopped."
 func (a *App) linkedCloudContext(config eruncommon.EnvConfig) (eruncommon.CloudContextStatus, bool, error) {
 	cloudProviderAlias := strings.TrimSpace(config.CloudProviderAlias)
 	kubernetesContext := strings.TrimSpace(config.KubernetesContext)

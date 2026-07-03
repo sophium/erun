@@ -1,8 +1,6 @@
 export type StatusBadgeTone = 'success' | 'warning' | 'destructive' | 'in-progress' | 'muted';
 
-// Lookup table keeps cloudProviderStatusTone within the eslint complexity
-// ceiling. Keys are the canonical cloud-context status strings emitted by
-// the backend.
+// Keys are the canonical cloud-context status strings emitted by the backend.
 const statusTonesByName: Record<string, StatusBadgeTone> = {
   active: 'success',
   running: 'success',

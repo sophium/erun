@@ -7,8 +7,6 @@ test.describe('environment init dialog', () => {
     await app.envInitDialog.waitForOpen();
     await expect(app.envInitDialog.locator()).toBeVisible();
 
-    // The dialog pre-populates the tenant field with the current
-    // selection's tenant — the seeded baseline tenant.
     const tenantInput = app.envInitDialog.tenantInput();
     await expect(tenantInput).toBeVisible();
     expect((await tenantInput.inputValue()).trim()).toBe(SEED_TENANT);
@@ -23,18 +21,12 @@ test.describe('environment init dialog', () => {
     await app.sidebar.openInitDialog();
     await app.envInitDialog.waitForOpen();
 
-    // The new mode-aware description text must mention "Create" rather
-    // than the generic "Enter the tenant and environment name." copy.
-    // Match a regex so both the "with pre-populated values" and "blank"
-    // copy branches pass.
+    // Two copy branches (pre-populated vs blank) both carry "Create", so match loosely.
     const dialog = app.envInitDialog.locator();
     await expect(dialog.getByText(/Create|create/).first()).toBeVisible();
 
-    // The submit-disabled reason container exists with role=status; it
-    // may be empty when the dialog has no current blockers. The
-    // important invariant is that the live-region container is in the
-    // DOM so blocking reasons can surface there without a re-render
-    // shift.
+    // The live region stays mounted even with no blockers, so a blocking reason can
+    // appear without a layout shift.
     const reason = app.page.locator('#environment-dialog-submit-reason');
     await expect(reason).toHaveCount(1);
 
@@ -49,13 +41,7 @@ test.describe('environment init dialog', () => {
     await app.sidebar.openInitDialog();
     await app.envInitDialog.waitForOpen();
 
-    // The Bootstrap toggle used to live at #environment-bootstrap. The
-    // value is now computed by environmentDialogSelection
-    // (!tenantExists), so the checkbox must not be in the DOM under any
-    // dialog state.
     await expect(page.locator('#environment-bootstrap')).toHaveCount(0);
-    // The "Set as default tenant" and "Initialize without Git checkout"
-    // toggles still belong to the dialog — confirm they're untouched.
     await expect(page.locator('#environment-default-tenant')).toBeVisible();
     await expect(page.locator('#environment-no-git')).toBeVisible();
 
@@ -75,23 +61,19 @@ test.describe('environment init dialog', () => {
     const browseButton = page.getByRole('button', { name: /Browse/ });
     const noGitCheckbox = page.locator('#environment-no-git');
 
-    // Default is remote-agent — the no-Git toggle is visible and
-    // LocalRepoPath / Browse are absent from the DOM.
     await expect(typeSelect).toBeVisible();
     await expect(localRepoPathInput).toHaveCount(0);
     await expect(browseButton).toHaveCount(0);
     await expect(noGitCheckbox).toBeVisible();
 
-    // Switch to local-agent: LocalRepoPath + Browse appear, the no-Git
-    // toggle drops out (it doesn't influence the local-agent init path
-    // — see EnvironmentCreateChecks for the rationale).
+    // The no-Git toggle is hidden for local-agent because it does not affect that
+    // init path (see EnvironmentCreateChecks).
     await typeSelect.click();
     await page.getByRole('option', { name: 'Local agent' }).click();
     await expect(localRepoPathInput).toBeVisible();
     await expect(browseButton).toBeVisible();
     await expect(noGitCheckbox).toHaveCount(0);
 
-    // Switch to runtime: LocalRepoPath disappears, no-Git returns.
     await typeSelect.click();
     await page.getByRole('option', { name: 'Runtime' }).click();
     await expect(localRepoPathInput).toHaveCount(0);
@@ -106,15 +88,11 @@ test.describe('environment init dialog', () => {
     app,
     page,
   }) => {
-    // Regression: reloadStateAfterEnvironmentChange used to dispatch
-    // selectLoadedKubernetesContexts(loaded.kubernetesContexts ?? []),
-    // but the Go uiState never carried that field — every
-    // environments-changed tick overwrote the populated dropdown with
-    // []. Invariant: while the dialog is open, firing the event must
-    // leave the same surface visible. The isolated harness's kubectl stub
-    // reports no contexts, so the deterministic surface is the empty state
-    // (rendered as a status block with a Rescan action), and the populated
-    // select must never appear.
+    // Regression guard: an environments-changed tick used to wipe the kube-context
+    // dropdown because the Go uiState never carried that field. Firing the event
+    // while the dialog is open must leave the same surface visible. The harness's
+    // kubectl stub reports no contexts, so that surface is the empty state, never a
+    // populated select.
     await app.sidebar.openInitDialog();
     await app.envInitDialog.waitForOpen();
 
@@ -124,7 +102,6 @@ test.describe('environment init dialog', () => {
       .getByText('No Kubernetes contexts found')
       .first();
 
-    // Wait for "Loading contexts..." to clear into the empty state.
     await expect(emptyState).toBeVisible();
     await expect(select).toBeHidden();
 
@@ -135,8 +112,6 @@ test.describe('environment init dialog', () => {
       runtime.EventsEmit('environments-changed');
     });
 
-    // Allow the dispatch chain (event → reload → store update) to
-    // settle, then assert the surface we started with is still visible.
     await expect(emptyState).toBeVisible();
     await expect(select).toBeHidden();
 

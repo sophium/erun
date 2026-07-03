@@ -24,10 +24,8 @@ type HandlerOptions struct {
 	Authorizer       Authorizer
 	DB               *sql.DB
 	DBDialect        repository.Dialect
-	// DBOSContext + Cipher enable live context provisioning:
-	// when both are set (alongside DB), POST /v1/contexts starts a durable DBOS
-	// workflow that runs the real bootstrap and custodies the k3s token. When
-	// absent, context creation only registers the row (no live bootstrap).
+	// With both set (and DB), context creation runs the real provisioning
+	// bootstrap; without them it only registers the context row.
 	DBOSContext dbos.DBOSContext
 	Cipher      *secrets.Cipher
 	// AWSEndpoint pins provisioning's aws calls at a local emulator (floci) for

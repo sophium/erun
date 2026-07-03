@@ -1,16 +1,13 @@
 import type { CloudContext, ContextStatus, Environment, Tenant, TenantConfigView } from './types';
 
-// Base URL of the erun-backend-api. The console calls the API directly — there
-// is no separate BFF service in this increment (the API already carries the
-// OIDC/JWKS auth middleware, the tenant boundary, and GET /v1/config). Defaults
-// to same-origin so the SPA can be served behind the same auth edge that fronts
-// the API.
+// No separate BFF in this increment — the console calls the auth-carrying
+// erun-backend-api directly. Same-origin default lets the SPA sit behind the
+// same auth edge that fronts the API.
 const API_BASE = import.meta.env.VITE_API_BASE ?? '';
 
-// Error raised when the config fetch fails. `status` is the HTTP status when the
-// server responded (e.g. 401 for an unauthenticated/expired token), or undefined
-// for a transport-level failure (network down, CORS, etc.). The ConfigView keys
-// its sign-in prompt off `status === 401`.
+// ConfigFetchError carries the HTTP `status` when the server responded (undefined
+// for a transport-level failure); ConfigView keys its sign-in prompt off
+// `status === 401`.
 export class ConfigFetchError extends Error {
   readonly status?: number;
 
@@ -29,9 +26,8 @@ function asOptionalString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
-// Parse the context provisioning status. Only the three known states are
-// surfaced as a ContextStatus; anything else (including an absent field) is
-// undefined so the UI renders no badge rather than a misleading one.
+// An unknown or absent status maps to undefined so the UI shows no badge rather
+// than a misleading one.
 function asContextStatus(value: unknown): ContextStatus | undefined {
   return value === 'provisioning' || value === 'running' || value === 'failed' ? value : undefined;
 }
@@ -91,10 +87,7 @@ function parseConfig(body: unknown): TenantConfigView {
   };
 }
 
-// Fetch the tenant's erun read model from `GET ${API_BASE}/v1/config` with the
-// caller's bearer token. Resolves to the parsed `{ tenant, environments,
-// contexts }`; rejects with a ConfigFetchError (carrying the HTTP status when
-// one is available) on any non-2xx response or transport failure.
+// fetchConfig loads the tenant's erun read model for the console's read view.
 export async function fetchConfig(token: string): Promise<TenantConfigView> {
   let response: Response;
   try {
@@ -119,9 +112,6 @@ export async function fetchConfig(token: string): Promise<TenantConfigView> {
   return parseConfig(body);
 }
 
-// The bearer-auth header every authenticated call sends, exactly as fetchConfig
-// builds it. `Accept` carries application/json; callers that send a body add
-// Content-Type themselves.
 function authHeaders(token: string): Record<string, string> {
   return {
     Authorization: `Bearer ${token}`,
@@ -129,8 +119,6 @@ function authHeaders(token: string): Record<string, string> {
   };
 }
 
-// Issue `fetch` with the standard auth header, translating a transport failure
-// into a ConfigFetchError (status undefined) so callers see one error type.
 async function authedFetch(
   path: string,
   token: string,
@@ -154,10 +142,8 @@ export interface CloudProviderAliasInput {
   credentials: string;
 }
 
-// Register/update the tenant's BYO-cloud credentials under `alias`
-// (`PUT /v1/cloud-provider-aliases/{alias}`). The API encrypts the credentials
-// at rest and returns 204 No Content; any non-2xx is a ConfigFetchError carrying
-// the status (e.g. 400 empty credentials, 401 bad token).
+// setCloudProviderAlias registers or updates the tenant's BYO-cloud credentials
+// under `alias`.
 export async function setCloudProviderAlias(
   token: string,
   alias: string,
@@ -187,11 +173,9 @@ export interface CreateContextInput {
   region: string;
 }
 
-// Register a cloud context and kick off its live bootstrap
-// (`POST /v1/contexts`, preview omitted so it defaults to false). Resolves to
-// the created context (parsed from the 202 body's `context` field, at status
-// `provisioning`); poll getContext to follow it to `running`/`failed`. A non-2xx
-// is a ConfigFetchError carrying the status (e.g. 400 missing field, 401).
+// createContext registers a cloud context and kicks off its live provisioning;
+// it returns while still `provisioning`, so poll getContext to follow it to
+// `running`/`failed`.
 export async function createContext(
   token: string,
   input: CreateContextInput,
@@ -214,9 +198,8 @@ export async function createContext(
   return parseContext(body.context);
 }
 
-// Fetch one cloud context by id, including its provisioning `status`
-// (`GET /v1/contexts/{context_id}`). The console polls this after createContext
-// until status reaches `running`/`failed`.
+// getContext fetches one cloud context by id; the console polls it after
+// createContext until `status` reaches `running`/`failed`.
 export async function getContext(token: string, contextId: string): Promise<CloudContext> {
   const response = await authedFetch(`/v1/contexts/${encodeURIComponent(contextId)}`, token);
   if (!response.ok) {

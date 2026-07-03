@@ -12,18 +12,14 @@ type ConfigTenantRepository interface {
 }
 
 // ConfigRoutes serves the console read model: the caller's tenant config
-// denormalized as the on-disk erun config shape (tenant + environments +
-// contexts). All three reads are tenant-scoped by RLS, so the response only
-// ever contains the caller's own rows.
+// denormalized as the on-disk erun config shape. RLS tenant-scopes every read,
+// so the response only ever contains the caller's own rows.
 type ConfigRoutes struct {
 	tenants      ConfigTenantRepository
 	environments EnvironmentRepository
 	contexts     ContextRepository
 }
 
-// configResponse is the denormalized read model the web console renders. It
-// projects the per-tenant erun config: the tenant header plus its
-// environments and the cloud contexts they reference.
 type configResponse struct {
 	Tenant       model.Tenant        `json:"tenant"`
 	Environments []model.Environment `json:"environments"`

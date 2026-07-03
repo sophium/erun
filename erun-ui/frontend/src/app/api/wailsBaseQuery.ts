@@ -6,11 +6,9 @@ export interface WailsQueryError {
   message: string;
 }
 
-// NoValue stands in for `void` in generic type positions where the
-// `@typescript-eslint/no-invalid-void-type` rule disallows it. RTK Query and
-// our Wails bindings use it for endpoints with no input or no return value.
-// The lint rule allows `void` only in return-type position; we capture that
-// return-type form via ReturnType so the alias itself does not trip the rule.
+// NoValue stands in for `void` in generic positions, which
+// @typescript-eslint/no-invalid-void-type forbids; the ReturnType wrapper
+// captures the one place the rule permits `void` so the alias itself is legal.
 type _VoidReturning = () => void;
 export type NoValue = ReturnType<_VoidReturning>;
 
@@ -27,10 +25,8 @@ export function wailsQueryFn<Arg, Result>(call: WailsQueryFn<Arg, Result>) {
   };
 }
 
-// fakeBaseQuery is used because every endpoint provides its own queryFn that
-// wraps a Wails Go binding. There is no shared HTTP transport. The async
-// signature is mandated by RTK Query's BaseQueryFn type even though this
-// stub body never awaits.
+// No shared HTTP transport exists: every endpoint supplies its own queryFn
+// wrapping a Wails Go binding, so this base query is only a fallback guard.
 export const wailsBaseQuery: BaseQueryFn<void, unknown, WailsQueryError> = (): Promise<{
   error: WailsQueryError;
 }> =>

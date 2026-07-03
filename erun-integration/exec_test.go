@@ -60,9 +60,8 @@ func TestExec(t *testing.T) {
 	})
 
 	t.Run("raw_help", func(t *testing.T) {
-		// raw sets DisableFlagParsing, so cobra never intercepts --help on its
-		// own. rawCommandWantsHelp must catch it and render help instead of
-		// trying to execute a binary called "--help".
+		// raw disables flag parsing, so --help must be intercepted explicitly
+		// and render help rather than being run as a binary named "--help".
 		setup := env.New(t)
 		result := erun.Run(t, []string{"exec", "raw", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
@@ -72,9 +71,6 @@ func TestExec(t *testing.T) {
 	})
 
 	t.Run("raw_dry_run_traces_inside_project", func(t *testing.T) {
-		// Exercises eruncommon.RunRawCommand: with a real project root
-		// resolved, the dry-run trace must show the resolved cwd and the
-		// raw command before the runner short-circuits.
 		setup := env.New(t)
 		fixture.SeedGitRepo(t, setup.Cwd)
 		result := erun.Run(t, []string{"exec", "raw", "echo", "hello", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -82,10 +78,6 @@ func TestExec(t *testing.T) {
 	})
 
 	t.Run("raw_dry_run_redacts_sensitive_args", func(t *testing.T) {
-		// Exercises feedback_render.go redactAuditArgs and
-		// eruncommon.RunRawCommand argument redaction: --token and
-		// --password values must appear as <redacted> in both the audit
-		// line and the raw-command trace line.
 		setup := env.New(t)
 		fixture.SeedGitRepo(t, setup.Cwd)
 		result := erun.Run(t, []string{"exec", "raw", "--dry-run", "curl", "https://example", "--token", "secret-value", "--password=hidden", "ok"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -93,12 +85,9 @@ func TestExec(t *testing.T) {
 	})
 
 	t.Run("raw_dry_run_double_dash_passes_flags_through", func(t *testing.T) {
-		// Exercises extractDryRunFlag's `--dry-run=true` arm plus the `--`
-		// passthrough in both extractDryRunFlag and rawCommandWantsHelp:
-		// erun's own --dry-run=true is consumed (no execution, exit 0),
-		// while everything after `--` — including the wrapped command's
-		// --dry-run and --help — is handed through verbatim, visible in
-		// the audit line's argv.
+		// raw disables flag parsing, yet erun's own --dry-run=true before --
+		// is still consumed while everything after -- passes through verbatim,
+		// including the wrapped command's own --dry-run and --help.
 		setup := env.New(t)
 		fixture.SeedGitRepo(t, setup.Cwd)
 		result := erun.Run(t, []string{"exec", "raw", "--dry-run=true", "--", "echo", "--dry-run", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -109,9 +98,6 @@ func TestExec(t *testing.T) {
 	})
 
 	t.Run("diff_dry_run_traces_git_diff", func(t *testing.T) {
-		// Exercises exec.go runExecDiffCommand: --dry-run must trace the
-		// `git diff --no-color --no-ext-diff` command line for the resolved
-		// project root.
 		setup := env.New(t)
 		fixture.SeedGitRepo(t, setup.Cwd)
 		result := erun.Run(t, []string{"exec", "diff", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -119,9 +105,6 @@ func TestExec(t *testing.T) {
 	})
 
 	t.Run("diff_dry_run_errors_outside_git_project", func(t *testing.T) {
-		// Exercises exec.go runExecDiffCommand error path: outside a git
-		// project, findProjectRoot fails and the audit line surfaces the
-		// `cannot find git project` message before any side effect runs.
 		setup := env.New(t)
 		result := erun.Run(t, []string{"exec", "diff", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode == 0 {
@@ -131,9 +114,6 @@ func TestExec(t *testing.T) {
 	})
 
 	t.Run("diff_json_emits_structured_result", func(t *testing.T) {
-		// Exercises eruncommon.ResolveGitDiff + ParseGitDiff: modifying a
-		// tracked file then running `exec diff --json` must emit a parsed
-		// DiffResult with summary, files, and tree populated.
 		setup := env.New(t)
 		fixture.SeedGitRepo(t, setup.Cwd)
 		mustWriteFile(t, filepath.Join(setup.Cwd, "README.md"), "# test\nadded line\n")
@@ -166,9 +146,6 @@ func TestExec(t *testing.T) {
 	})
 
 	t.Run("diff_includes_untracked_files", func(t *testing.T) {
-		// Exercises eruncommon.appendUntrackedGitDiff: a brand-new file in
-		// the worktree must show up in the parsed Files list when the diff
-		// runs in default scope.
 		setup := env.New(t)
 		fixture.SeedGitRepo(t, setup.Cwd)
 		mustWriteFile(t, filepath.Join(setup.Cwd, "new-file.txt"), "untracked content\n")
@@ -193,15 +170,11 @@ func TestExec(t *testing.T) {
 	})
 
 	t.Run("diff_files_match_tree_order", func(t *testing.T) {
-		// Exercises eruncommon.ParseGitDiff's reorderFilesByTree: the diff
-		// panel renders Files while the changed-files list renders Tree, so
-		// Files must follow the tree's directory-grouped DFS leaf order. The
-		// divergence appears when an untracked file (appended last in git
-		// order) belongs to a directory whose first file is a tracked change.
-		// Here: dir/a.txt (tracked, modified), root.txt (tracked, modified),
-		// dir/b.txt (untracked). Git order is [dir/a.txt, root.txt, dir/b.txt]
-		// but the tree groups dir/b.txt under dir/, so Files must come out as
-		// [dir/a.txt, dir/b.txt, root.txt] to match the changed-files list.
+		// The diff panel renders Files while the changed-files list renders
+		// Tree, so Files must come out in the tree's directory-grouped leaf
+		// order, not git's raw order; the two diverge when an untracked file
+		// (last in git order) sits in a directory whose first entry is a
+		// tracked change.
 		setup := env.New(t)
 		fixture.SeedGitRepo(t, setup.Cwd)
 		if err := os.MkdirAll(filepath.Join(setup.Cwd, "dir"), 0o755); err != nil {
@@ -241,10 +214,6 @@ func TestExec(t *testing.T) {
 	})
 
 	t.Run("diff_scope_all_traces_review_base", func(t *testing.T) {
-		// Exercises eruncommon.ResolveGitDiffWithOptions + review-base
-		// resolution: with a follow-up commit and a worktree change,
-		// `--scope=all --json` must populate ReviewBase and ReviewCommits
-		// against local main.
 		setup := env.New(t)
 		fixture.SeedGitRepo(t, setup.Cwd)
 		mustWriteFile(t, filepath.Join(setup.Cwd, "feature.txt"), "feature\n")
@@ -275,10 +244,6 @@ func TestExec(t *testing.T) {
 	})
 
 	t.Run("diff_scope_commit_uses_selected_commit_parent", func(t *testing.T) {
-		// Exercises eruncommon.gitDiffReviewArgs scope=commit branch:
-		// `--scope=commit --selected-commit=<hash>` must run
-		// `git diff <hash>^` so the parsed diff covers commits since the
-		// selected commit's parent.
 		setup := env.New(t)
 		fixture.SeedGitRepo(t, setup.Cwd)
 		mustWriteFile(t, filepath.Join(setup.Cwd, "second.txt"), "second\n")
@@ -305,10 +270,6 @@ func TestExec(t *testing.T) {
 	})
 
 	t.Run("diff_parses_deleted_and_binary_files", func(t *testing.T) {
-		// Exercises diffFileParser.parseFileMetadata's "deleted file mode"
-		// and "Binary files ... differ" arms: removing a tracked file and
-		// rewriting a committed binary in the worktree must surface as
-		// status=deleted and binary=true in the parsed --json output.
 		setup := env.New(t)
 		fixture.SeedGitRepo(t, setup.Cwd)
 		binPath := filepath.Join(setup.Cwd, "img.bin")
@@ -344,13 +305,6 @@ func TestExec(t *testing.T) {
 	})
 
 	t.Run("diff_scope_all_resolves_origin_head_and_renames", func(t *testing.T) {
-		// Exercises resolveGitDiffReviewBaseBranch's origin/HEAD arm — the
-		// symbolic-ref lookup must translate "origin/HEAD" into the real
-		// remote default branch name for ReviewBase.Branch — plus
-		// parseFileMetadata's "rename from"/"rename to" arms via a committed
-		// `git mv` that scope=all diffs against the merge base. The
-		// origin/* refs are created locally (update-ref + symbolic-ref) so
-		// no network is involved.
 		setup := env.New(t)
 		fixture.SeedGitRepo(t, setup.Cwd)
 		fixture.RunGit(t, setup.Cwd, "update-ref", "refs/remotes/origin/main", "main")
@@ -379,9 +333,6 @@ func TestExec(t *testing.T) {
 	})
 
 	t.Run("diff_raw_output_includes_deletions", func(t *testing.T) {
-		// Exercises eruncommon.WriteRawDiff and appendDeletedLine: removing
-		// the seeded README content and writing fresh lines must produce a
-		// raw diff with both '-' and '+' hunk lines on stdout.
 		setup := env.New(t)
 		fixture.SeedGitRepo(t, setup.Cwd)
 		mustWriteFile(t, filepath.Join(setup.Cwd, "README.md"), "rewritten\n")
@@ -393,8 +344,6 @@ func TestExec(t *testing.T) {
 	})
 
 	t.Run("diff_selected_commit_without_scope_errors", func(t *testing.T) {
-		// Exercises exec.go resolveExecDiff guard: --selected-commit without
-		// --scope=commit must fail before any git command runs.
 		setup := env.New(t)
 		fixture.SeedGitRepo(t, setup.Cwd)
 		result := erun.Run(t, []string{"exec", "diff", "--selected-commit=abc1234"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -405,10 +354,6 @@ func TestExec(t *testing.T) {
 	})
 
 	t.Run("dry_run_with_time_flag_prints_elapsed_on_error", func(t *testing.T) {
-		// Exercises feedback_render.go printElapsedTime error path: when
-		// --time is set and the command fails, the `elapsed:` line must
-		// still appear on stderr. Driving this through `exec diff --dry-run`
-		// outside a git project keeps the run side-effect-free.
 		setup := env.New(t)
 		result := erun.Run(t, []string{"exec", "diff", "--dry-run", "--time"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode == 0 {

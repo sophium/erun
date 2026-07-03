@@ -140,11 +140,9 @@ func findDevopsDockerDirs(projectRoot string) ([]string, error) {
 	return candidates, nil
 }
 
-// projectHasDevopsFolder reports whether the project root contains any
-// <name>-devops directory. This is a bare presence check — unlike
-// findDevopsDockerDirs it does not require a buildable docker module — so the
-// build-env advisory fires only when there is no devops module at all, not when
-// one exists but is still being set up.
+// projectHasDevopsFolder is a bare presence check — it does not require a
+// buildable docker module — so the build-env advisory fires only when there is
+// no devops module at all, not when one exists but is still being set up.
 func projectHasDevopsFolder(projectRoot string) (bool, error) {
 	projectRoot = strings.TrimSpace(projectRoot)
 	if projectRoot == "" {
@@ -213,7 +211,6 @@ func dockerBuildEnvironmentFromTenantConfigs(store DockerStore, cleanProjectRoot
 	}
 
 	for _, tenantConfig := range tenants {
-		// Match the first env whose local repo path (preferred over legacy) equals the cwd.
 		if envName, err := dockerBuildEnvironmentFromTenantEnvs(store, tenantConfig.Name, cleanProjectRoot); err != nil {
 			return "", err
 		} else if envName != "" {
@@ -265,12 +262,11 @@ func dockerBuildEnvironmentFromDetectedProject(store DockerStore, findProjectRoo
 	return strings.TrimSpace(tenantConfig.DefaultEnvironment), nil
 }
 
-// ResolveDockerBuildEnvConfig returns the saved EnvConfig for the environment a
-// build resolves to — the env whose local repo path matches the project root,
-// optionally filtered by target.Environment — or nil when none matches. The
-// build path is otherwise env-agnostic; this is the seam for reading per-env
-// build toggles such as DisableBuildScript. Best-effort: any store error or a
-// miss yields nil so the build proceeds with default behaviour.
+// ResolveDockerBuildEnvConfig returns the saved EnvConfig a build resolves to,
+// or nil when none matches. The build path is otherwise env-agnostic; this is
+// the seam for reading per-env build toggles such as DisableBuildScript.
+// Best-effort: any store error or a miss yields nil so the build proceeds with
+// default behaviour.
 func ResolveDockerBuildEnvConfig(store DockerStore, findProjectRoot ProjectFinderFunc, target DockerCommandTarget) *EnvConfig {
 	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil || strings.TrimSpace(projectRoot) == "" {
@@ -295,9 +291,6 @@ func ResolveDockerBuildEnvConfig(store DockerStore, findProjectRoot ProjectFinde
 	return nil
 }
 
-// matchDockerBuildEnvConfig returns the first env in envs whose effective local
-// repo path matches cleanRoot, optionally filtered to wantEnv (when non-empty),
-// or nil when none matches.
 func matchDockerBuildEnvConfig(envs []EnvConfig, wantEnv, cleanRoot string) *EnvConfig {
 	for i := range envs {
 		if wantEnv != "" && envs[i].Name != wantEnv {

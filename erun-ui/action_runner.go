@@ -8,9 +8,8 @@ import (
 	"time"
 )
 
-// desktopAction is one piece of work the runner serializes. The run
-// closure is called by the env-worker goroutine when this action's turn
-// comes; it should respect ctx.Done() for cancellation.
+// desktopAction is one unit of work the runner serializes; its run
+// closure must honour ctx cancellation.
 type desktopAction struct {
 	id        string
 	kind      string
@@ -19,20 +18,18 @@ type desktopAction struct {
 	run       func(ctx context.Context) error
 }
 
-// envActionQueue owns the channel + worker for one (tenant, env)
-// queue. Channels are buffered so enqueue never blocks the Wails
-// caller; the buffer is sized so a single user clicking through the UI
-// can pile up requests without dropping.
+// envActionQueue serializes work for one (tenant, env). Its channel is
+// buffered so enqueue never blocks the Wails caller and a user clicking
+// through the UI can queue requests without dropping them.
 type envActionQueue struct {
 	pending chan *desktopAction
 }
 
 const desktopActionQueueDepth = 64
 
-// envActionQueueKey returns the key the runner uses to map selection →
-// per-env worker. Tenant/env-less actions (cloud provider login, etc.)
-// share a single global queue, so they too serialize among themselves
-// without blocking per-env work.
+// envActionQueueKey groups all tenant/env-less actions (cloud provider
+// login, etc.) under one global queue so they serialize among
+// themselves without blocking per-env work.
 func envActionQueueKey(selection uiSelection) string {
 	tenant := strings.TrimSpace(selection.Tenant)
 	env := strings.TrimSpace(selection.Environment)
@@ -42,12 +39,9 @@ func envActionQueueKey(selection uiSelection) string {
 	return tenant + "\x00" + env
 }
 
-// enqueueDesktopAction registers a fresh waiting entry in the activity
-// queue and pushes the action onto its env-queue's worker channel.
-// Returns the entry ID so callers can correlate later events. Errors
-// only surface for setup failures (no activity store, malformed action);
-// the action's own errors are reported through the entry's terminal
-// status.
+// enqueueDesktopAction returns an error only for setup failures (no
+// activity store, malformed action); the action's own errors surface
+// through the entry's terminal status, not the return value.
 func (a *App) enqueueDesktopAction(action desktopAction) (string, error) {
 	if a == nil || a.activityQueue == nil {
 		return "", errors.New("activity queue not initialized")
@@ -87,10 +81,8 @@ func (a *App) enqueueDesktopAction(action desktopAction) (string, error) {
 		StartedAt:         enq,
 	})
 	if !fresh {
-		// A waiting entry with this ID already exists — collapse onto
-		// it rather than creating a duplicate. The original action's
-		// run closure stays in flight; the duplicate's payload is
-		// discarded.
+		// Duplicate of an in-flight entry: collapse onto it and discard
+		// this payload rather than double-running the action.
 		return entry.ID, nil
 	}
 	a.rememberKubeContextForActivity(action.selection.KubernetesContext)
@@ -107,9 +99,6 @@ func (a *App) enqueueDesktopAction(action desktopAction) (string, error) {
 	}
 }
 
-// summaryForAction renders a default human label when the caller did
-// not supply one. Mirrors the conventions used elsewhere in the queue
-// so the drawer's command-subtitle helpers continue to render nicely.
 func summaryForAction(action desktopAction) string {
 	if s := strings.TrimSpace(action.summary); s != "" {
 		return s
@@ -144,9 +133,6 @@ func (a *App) ensureEnvActionQueue(key string) *envActionQueue {
 	return queue
 }
 
-// runEnvActionWorker is the per-(tenant,env) goroutine that drains
-// pending actions one at a time. It exits when the channel is closed
-// (which happens at desktop shutdown or never).
 func (a *App) runEnvActionWorker(key string, queue *envActionQueue) {
 	for action := range queue.pending {
 		a.executeDesktopAction(action)
@@ -154,11 +140,6 @@ func (a *App) runEnvActionWorker(key string, queue *envActionQueue) {
 	_ = key
 }
 
-// executeDesktopAction promotes the entry from waiting → running, runs
-// the action's closure with a cancellable context, then finalizes the
-// entry to a terminal status. If the entry was cancelled while waiting
-// (forceDismiss/cancelWaitingAction), the action is skipped without
-// running.
 func (a *App) executeDesktopAction(action *desktopAction) {
 	if a == nil || a.activityQueue == nil {
 		return
@@ -169,19 +150,15 @@ func (a *App) executeDesktopAction(action *desktopAction) {
 		return
 	}
 	if current.Status == activityQueueStatusCancelled || activityQueueStatusIsTerminal(current.Status) {
-		// Already cancelled by the user or finalized externally.
 		return
 	}
 	promoted, ok := a.activityQueue.promoteToRunning(action.id)
 	if !ok {
 		return
 	}
-	// Re-emit the running snapshot so a dropped activity:state event
-	// or a frontend that mounted after the first emit still sees the
-	// transition. The store's notifyLocked already fired once; this
-	// belt-and-braces resync covers Wails-runtime delivery hiccups
-	// without changing semantics (the frontend dedupes on identical
-	// payloads via activityEntriesShallowEqual).
+	// Re-emit the running snapshot so a dropped activity:state event or
+	// a late-mounted frontend still sees the transition; safe because
+	// the frontend dedupes identical payloads.
 	a.emitActivityState(promoted)
 	a.lockTerminalsForActivity(promoted)
 	a.startActivityStatusPollerForAction(action, current)
@@ -198,10 +175,6 @@ func (a *App) executeDesktopAction(action *desktopAction) {
 	}
 }
 
-// startActivityStatusPollerForAction kicks off the container-status poller
-// for deploy/force-deploy actions when a poller is configured. Other action
-// kinds (and a nil poller) are a no-op. Extracted from executeDesktopAction
-// so it stays under the cyclomatic-complexity limit.
 func (a *App) startActivityStatusPollerForAction(action *desktopAction, entry activityQueueEntry) {
 	if action.kind != "deploy" && action.kind != "force-deploy" {
 		return
@@ -212,11 +185,6 @@ func (a *App) startActivityStatusPollerForAction(action *desktopAction, entry ac
 	a.activityStatusPoller(entry)
 }
 
-// desktopActionTerminalStatus maps an action's run error to the terminal
-// queue status and message. A nil error succeeds; a context.Canceled error
-// is reported as cancelled; anything else fails with the error text.
-// Extracted from executeDesktopAction so it stays under the
-// cyclomatic-complexity limit.
 func desktopActionTerminalStatus(err error) (activityQueueStatus, string) {
 	if err == nil {
 		return activityQueueStatusSucceeded, ""
@@ -227,11 +195,9 @@ func desktopActionTerminalStatus(err error) (activityQueueStatus, string) {
 	return activityQueueStatusFailed, err.Error()
 }
 
-// registerCancel and clearCancel track the active context.CancelFunc
-// for each in-flight action so a follow-up cancelWaitingAction can
-// cancel the *running* action when the user explicitly opts in (today
-// only waiting cancellation is exposed; this hook keeps the plumbing
-// ready for a future Cancel-running button).
+// registerCancel/clearCancel retain per-action cancel plumbing so a
+// running action can be cancelled. Only waiting cancellation is exposed
+// today; this keeps a future Cancel-running button ready.
 func (a *App) registerCancel(id string, cancel context.CancelFunc) {
 	a.actionQueueMu.Lock()
 	defer a.actionQueueMu.Unlock()
@@ -247,10 +213,9 @@ func (a *App) clearCancel(id string) {
 	delete(a.actionCancels, id)
 }
 
-// CancelWaitingAction removes a waiting (queued but not yet started)
-// action from its env-queue and finalizes the entry as cancelled. No-op
-// for actions already running, finalized, or unknown — returns false in
-// those cases. Wails-exported.
+// CancelWaitingAction cancels a queued-but-not-yet-started action;
+// no-op (returns false) once it is running, finalized, or unknown.
+// Wails-exported.
 func (a *App) CancelWaitingAction(id string) bool {
 	if a == nil || a.activityQueue == nil {
 		return false
@@ -268,16 +233,13 @@ func (a *App) CancelWaitingAction(id string) bool {
 	}
 	if final, finished := a.activityQueue.finish(id, activityQueueStatusCancelled, "cancelled before start"); finished {
 		a.unlockTerminalsForActivity(final)
-		// The worker goroutine will pop this action eventually and
-		// observe its terminal status via findByID; executeDesktopAction
-		// short-circuits when status is already terminal.
+		// The queued action stays in the channel; the worker pops it
+		// later and skips it because the entry is now terminal.
 		return true
 	}
 	return false
 }
 
-// findByID is a convenience for callers (the runner, recovery actions)
-// that need a single entry without iterating the full snapshot.
 func (s *activityQueueStore) findByID(id string) (activityQueueEntry, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -292,27 +254,19 @@ func (s *activityQueueStore) findByID(id string) (activityQueueEntry, bool) {
 	return activityQueueEntry{}, false
 }
 
-// gatedSessionStarter is the closure provided by Wails-exported
-// session methods (StartSession, StartAISession). It runs once the
-// runner pops the action and produces both the result the Wails
-// caller wants AND the managedTerminal the runner uses to wait for
-// the session-ready signal.
+// gatedSessionStarter returns both the result the Wails caller wants
+// and the managedTerminal the runner waits on for the session-ready
+// signal.
 type gatedSessionStarter func(ctx context.Context) (startSessionResult, *managedTerminal, error)
 
-// gatedSessionMaxSetup is the upper bound on how long the runner will
-// hold the gate waiting for a session's setup-complete marker. The
-// session-ready detector (signalSessionReadyOnLine) covers the common
-// markers, but if all of them are missed the gate must still release
-// so the queue can drain. The bound is intentionally generous enough
-// to span a cold cache build+deploy (~5 min) without prematurely
-// releasing.
+// gatedSessionMaxSetup caps how long the runner holds the gate waiting
+// for a session-ready marker: a safety net so the queue still drains if
+// every marker is missed, sized generously to span a cold build+deploy.
 const gatedSessionMaxSetup = 6 * time.Minute
 
-// enqueueGatedSession is the shared helper used by StartSession /
-// StartAISession (and any future PTY-backed gated session). It
-// enqueues a desktop action keyed on the selection, blocks the Wails
-// caller until the action runs and the session is created, and lets
-// the runner hold the gate until the session signals ready.
+// enqueueGatedSession blocks the Wails caller until the enqueued action
+// runs and creates the session, then holds the gate until the session
+// signals ready.
 func (a *App) enqueueGatedSession(selection uiSelection, kind string, start gatedSessionStarter) (startSessionResult, error) {
 	type spawnOutcome struct {
 		result startSessionResult
@@ -334,12 +288,9 @@ func (a *App) enqueueGatedSession(selection uiSelection, kind string, start gate
 				return nil
 			}
 			waitErr := managed.waitReady(ctx, gatedSessionMaxSetup)
-			// Treat the safety-net timeout as a successful release.
-			// If we hit it, the session is interactive but its
-			// setup-complete marker wasn't matched (regex drift,
-			// custom shell, etc.). Failing the entry here would be
-			// misleading — the user's session is fine; the gate just
-			// took longer than expected to release.
+			// A safety-net timeout is a successful release, not a
+			// failure: the session is interactive, only its ready
+			// marker went unmatched, so failing the entry would mislead.
 			if errors.Is(waitErr, context.DeadlineExceeded) {
 				return nil
 			}
@@ -353,8 +304,6 @@ func (a *App) enqueueGatedSession(selection uiSelection, kind string, start gate
 	return outcome.result, outcome.err
 }
 
-// stopActionRunners closes every per-env channel so worker goroutines
-// drain and exit. Called from App.shutdown.
 func (a *App) stopActionRunners() {
 	a.actionQueueMu.Lock()
 	queues := a.actionQueues

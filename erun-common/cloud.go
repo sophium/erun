@@ -26,9 +26,8 @@ const (
 )
 
 // ErrCloudProviderNoOIDC reports that a provider type does not participate in
-// OIDC web-identity federation (Cloudflare aliases authenticate the runtime
-// with a scoped API token, not a JWT issuer). Callers that aggregate issuers
-// — ResolveTenantCloudProviderIssuers — skip such providers rather than fail.
+// OIDC web-identity federation, so callers aggregating issuers skip it rather
+// than fail. Cloudflare authenticates with a scoped API token, not a JWT issuer.
 var ErrCloudProviderNoOIDC = errors.New("cloud provider does not support OIDC issuance")
 
 type CloudStore interface {
@@ -55,18 +54,15 @@ type CloudProviderConfig struct {
 	SSOStartURL   string `json:"ssoStartUrl,omitempty" yaml:"ssostarturl,omitempty"`
 	OIDCIssuerURL string `json:"oidcIssuerUrl,omitempty" yaml:"oidcissuerurl,omitempty"`
 
-	// Cloudflare carries the provider-specific identity for a Cloudflare
-	// alias. It is set only when Provider == CloudProviderCloudflare. The
-	// scoped API token itself is never stored inline; CloudflareProviderConfig
-	// holds a TokenRef pointing at the secret store instead.
+	// Cloudflare is set only when Provider == CloudProviderCloudflare; the
+	// scoped API token is never stored inline, only a reference to the secret
+	// store.
 	Cloudflare *CloudflareProviderConfig `json:"cloudflare,omitempty" yaml:"cloudflare,omitempty"`
 }
 
 // CloudflareProviderConfig is the Cloudflare-specific identity for a cloud
-// alias. AccountID is the Cloudflare account the delegated, account-scoped
-// API token belongs to; TokenName is an operator-facing label for the token;
-// TokenRef is an opaque handle the CloudSecretStore resolves to the token
-// value, so the raw token never lands in erun-config.yaml.
+// alias. The raw scoped API token never lands in erun-config.yaml; only
+// TokenRef, an opaque handle the secret store resolves, is persisted.
 type CloudflareProviderConfig struct {
 	AccountID string `json:"accountId,omitempty" yaml:"accountid,omitempty"`
 	TokenName string `json:"tokenName,omitempty" yaml:"tokenname,omitempty"`
@@ -130,21 +126,17 @@ type CloudDependencies struct {
 	ResolveAWSIdentity      func(Context, string) (AWSIdentity, error)
 	CheckAWSStatus          func(Context, CloudProviderConfig) CloudProviderStatus
 
-	// VerifyCloudflareToken validates a Cloudflare scoped API token against the
-	// Cloudflare API. ListCloudflareAccounts resolves the accounts a token can
-	// act on (used to auto-derive the account id during guided setup).
-	// CloudSecretStore persists Cloudflare tokens off-config; it is nil unless a
-	// transport wires one, and Cloudflare operations that need it fail clearly
-	// when it is absent.
+	// CloudSecretStore is nil unless a transport wires one; Cloudflare operations
+	// that need it fail clearly when it is absent.
 	VerifyCloudflareToken  func(Context, string) (CloudflareTokenInfo, error)
 	ListCloudflareAccounts func(Context, string) ([]CloudflareAccount, error)
 	CloudSecretStore       CloudSecretStore
 }
 
 // CloudProviderCredentials is a snapshot of temporary AWS credentials derived
-// from a configured host profile, suitable for injecting into a remote
-// runtime so it acts as the host's IAM identity. Expiration tells callers
-// when to refresh; AWS hands out roughly 1h windows by default.
+// from a configured host profile, for injecting into a remote runtime so it
+// acts as the host's IAM identity. AWS hands out roughly 1h windows, so
+// callers must refresh.
 type CloudProviderCredentials struct {
 	Alias           string    `json:"alias"`
 	AccessKeyID     string    `json:"accessKeyId"`
@@ -192,16 +184,10 @@ func CloudProviderAlias(username, accountID, provider string) string {
 	return username + "+" + accountID + "@" + provider
 }
 
-// ParseCloudProviderAlias is the inverse of CloudProviderAlias. It
-// splits a "username+accountid@provider" string into its three
-// components. Used by the doctor's root-config repair flow to seed
-// a fresh InitAWSCloudProviderParams from a dangling alias reference
-// when the underlying CloudProviderConfig has been lost from
-// erun-config but the tenant or cloud-context still names it.
-//
-// Returns ok=false when the alias does not match the documented
-// shape — callers should treat that as "cannot auto-repair, prompt
-// the user to recreate from scratch."
+// ParseCloudProviderAlias is the inverse of CloudProviderAlias. The doctor's
+// root-config repair flow uses it to reseed setup from a dangling alias when
+// the CloudProviderConfig was lost from erun-config but a tenant or
+// cloud-context still names it; ok=false means the alias cannot be auto-repaired.
 func ParseCloudProviderAlias(alias string) (username, accountID, provider string, ok bool) {
 	alias = strings.TrimSpace(alias)
 	if alias == "" {
@@ -365,8 +351,8 @@ func LoginCloudProviderAlias(ctx Context, store CloudStore, params CloudLoginPar
 			return status, err
 		}
 	case CloudProviderCloudflare:
-		// Cloudflare aliases carry a stored scoped token; there is no
-		// interactive login. Fall through to the token status re-check below.
+		// Cloudflare has no interactive login; fall through to the token
+		// status re-check.
 	default:
 		return status, fmt.Errorf("unsupported cloud provider %q", provider.Provider)
 	}
@@ -440,12 +426,6 @@ func CloudProviderBearerToken(ctx Context, store CloudReadStore, params CloudBea
 	}
 }
 
-// awsCloudProviderBearerToken mints an AWS web-identity bearer token for
-// the resolved provider: it re-logs in when the SSO session is stale,
-// fetches the token (enabling outbound web identity federation and
-// retrying once when AWS reports it disabled), and derives the issuer
-// from the JWT. In dry-run mode with no real token it returns the
-// synthetic issuer the trace path expects.
 func awsCloudProviderBearerToken(ctx Context, provider CloudProviderConfig, params CloudBearerParams, deps CloudDependencies) (CloudBearerToken, error) {
 	status := CloudProviderTokenStatus(provider, deps)
 	if status.Status != CloudTokenStatusActive {
@@ -477,10 +457,6 @@ func awsCloudProviderBearerToken(ctx Context, provider CloudProviderConfig, para
 	}, nil
 }
 
-// awsBearerTokenWithOIDCRetry fetches the AWS web-identity token and, when
-// the first attempt fails because outbound web identity federation is
-// disabled, enables it and retries exactly once. Any other failure is
-// returned unchanged.
 func awsBearerTokenWithOIDCRetry(ctx Context, provider CloudProviderConfig, audience string, deps CloudDependencies) (string, error) {
 	rawToken, err := deps.RunAWSBearerToken(ctx, provider.Profile, audience)
 	if err == nil {
@@ -496,11 +472,10 @@ func awsBearerTokenWithOIDCRetry(ctx Context, provider CloudProviderConfig, audi
 }
 
 // ExportCloudProviderCredentials returns short-lived AWS credentials derived
-// from the host profile registered under alias. The desktop uses these to
-// keep a remote runtime's `~/.aws/credentials` refreshed so it acts as the
-// host identity. Returns an error when the alias is not configured, the
-// provider is unsupported, or the local AWS CLI cannot export credentials
-// (typically because the SSO session expired and needs `erun cloud login`).
+// from the host profile registered under alias. The desktop uses these to keep
+// a remote runtime's `~/.aws/credentials` refreshed so it acts as the host
+// identity; a failure typically means the SSO session expired and needs
+// `erun cloud login`.
 func ExportCloudProviderCredentials(ctx Context, store CloudReadStore, alias string, deps CloudDependencies) (CloudProviderCredentials, error) {
 	provider, err := ResolveCloudProvider(store, alias)
 	if err != nil {
@@ -587,9 +562,8 @@ func saveManagedCloudAliasIfNeeded(ctx Context, store EnvironmentCloudAliasStore
 	return config, nil
 }
 
-// cloudProviderTypeFromAlias extracts the provider type from an alias's
-// "@provider" suffix, defaulting to AWS for any legacy or unparseable value so
-// pre-existing single-alias configs keep resolving to the AWS slot.
+// cloudProviderTypeFromAlias defaults to AWS for any legacy or unparseable
+// alias so pre-existing single-alias configs keep resolving to the AWS slot.
 func cloudProviderTypeFromAlias(alias string) string {
 	if _, _, provider, ok := ParseCloudProviderAlias(alias); ok {
 		return provider
@@ -597,8 +571,8 @@ func cloudProviderTypeFromAlias(alias string) string {
 	return CloudProviderAWS
 }
 
-// cloudEnvAliasForType reads the env's attached alias for a provider type. AWS
-// lives in the legacy scalar; every other type lives in the per-type map.
+// cloudEnvAliasForType reads AWS from the legacy scalar field and every other
+// provider type from the per-type map.
 func cloudEnvAliasForType(config EnvConfig, providerType string) string {
 	if providerType == CloudProviderAWS {
 		return config.CloudProviderAlias
@@ -606,8 +580,8 @@ func cloudEnvAliasForType(config EnvConfig, providerType string) string {
 	return config.CloudProviderAliases[providerType]
 }
 
-// setCloudEnvAliasForType writes the env's attached alias for a provider type,
-// keeping AWS in the legacy scalar so AWS behavior is byte-for-byte unchanged.
+// setCloudEnvAliasForType keeps AWS in the legacy scalar field so AWS behavior
+// stays byte-for-byte unchanged; other types go in the per-type map.
 func setCloudEnvAliasForType(config *EnvConfig, providerType, alias string) {
 	if providerType == CloudProviderAWS {
 		config.CloudProviderAlias = alias
@@ -667,10 +641,9 @@ func ResolveTenantCloudProviderIssuers(store CloudReadStore, tenant TenantConfig
 	return issuers, nil
 }
 
-// cloudProviderSupportsOIDC reports whether a provider type participates in
-// OIDC web-identity federation. AWS mints web-identity JWTs; Cloudflare does
-// not. The check gates issuer aggregation strictly on provider type so an AWS
-// alias with a genuinely missing issuer still surfaces as an error.
+// cloudProviderSupportsOIDC gates issuer aggregation strictly on provider type
+// (only Cloudflare is exempt) so an AWS alias with a genuinely missing issuer
+// still surfaces as an error instead of being silently skipped.
 func cloudProviderSupportsOIDC(provider string) bool {
 	return strings.ToLower(strings.TrimSpace(provider)) != CloudProviderCloudflare
 }
@@ -862,7 +835,6 @@ func normalizeCloudDependencies(deps CloudDependencies) CloudDependencies {
 	return deps
 }
 
-// normalizeAWSCloudDependencies fills any unset AWS runner with its default.
 func normalizeAWSCloudDependencies(deps CloudDependencies) CloudDependencies {
 	if deps.RunAWSConfigureSSO == nil {
 		deps.RunAWSConfigureSSO = defaultRunAWSConfigureSSO
@@ -891,9 +863,9 @@ func normalizeAWSCloudDependencies(deps CloudDependencies) CloudDependencies {
 	return deps
 }
 
-// normalizeCloudflareCloudDependencies fills any unset Cloudflare runner with
-// its default. The CloudSecretStore is intentionally left nil unless a transport
-// wires one (Cloudflare operations that need it fail clearly when it is absent).
+// normalizeCloudflareCloudDependencies leaves CloudSecretStore nil on purpose:
+// only a transport wires one, and Cloudflare operations that need it fail
+// clearly when it is absent.
 func normalizeCloudflareCloudDependencies(deps CloudDependencies) CloudDependencies {
 	if deps.VerifyCloudflareToken == nil {
 		deps.VerifyCloudflareToken = defaultVerifyCloudflareToken

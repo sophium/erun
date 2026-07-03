@@ -1,10 +1,8 @@
-// Strings shown when the desktop loses its connection to an environment's
-// in-cluster runtime (the local MCP port-forward is unreachable). The same
-// copy is reused across surfaces — review panel, manage dialog — so users
-// see consistent labels for what is essentially one recovery flow.
+// Shared copy for the runtime-reconnect flow, reused across the review panel
+// and manage dialog so recovery reads as one consistent action.
 //
-// The marker comes from erun-ui/mcp_errors.go and is opaque; it never
-// appears in user-facing text.
+// The marker mirrors the opaque prefix the Go backend puts on MCP-unreachable
+// errors; it is a machine token and must never be shown to users.
 export const MCP_UNREACHABLE_MARKER = 'ERUN_MCP_UNREACHABLE: ';
 
 export const reconnectCopy = {
@@ -24,9 +22,6 @@ export const reconnectCopy = {
   dismiss: 'Dismiss',
 } as const;
 
-// Strip the opaque marker from a wrapped backend error before surfacing it
-// in user-facing text. The marker prefix indicates the typed error category
-// but is never shown verbatim.
 export function stripMcpUnreachableMarker(message: string): string {
   if (message.startsWith(MCP_UNREACHABLE_MARKER)) {
     return message.slice(MCP_UNREACHABLE_MARKER.length);

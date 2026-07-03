@@ -14,19 +14,10 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// runDeployOrchestration composes the pure command primitives for an Operator's
-// deploy the way the desktop is required to (erun-ui/AGENTS.md): it never uses
-// the `build --deploy` / `deploy --build` operator-convenience switches. For a
-// builds-here agent env with the source on this machine it runs build -> push
-// -> deploy as discrete captured subprocesses, capturing the version `build`
-// minted from `--output json` and threading it into push and deploy so what
-// deploys is exactly what was built. For a runtime env (or a remote-repo env
-// that consumes a published chart) it installs the selected version by
-// reference, or --current to redeploy the version the env already runs.
-//
-// Progress streams to the activity queue via the shared trace-line handler:
-// build/push/deploy each emit their `==> ...` umbrella lines, so the queue
-// shows the same per-step progress it does for any other command.
+// runDeployOrchestration is the desktop's deploy. The desktop is barred from the
+// `build --deploy` operator-convenience switches (erun-ui/AGENTS.md), so it
+// composes the pure primitives itself and threads the version `build` minted
+// forward, guaranteeing what deploys is exactly what was built.
 func (a *App) runDeployOrchestration(ctx context.Context, selection uiSelection, result eruncommon.OpenResult, force bool) error {
 	cli := a.deps.resolveCLIPath()
 	dir := resolveTerminalStartDir(result.RepoPath)
@@ -38,9 +29,6 @@ func (a *App) runDeployOrchestration(ctx context.Context, selection uiSelection,
 	return a.runInstallByReferenceDeploy(ctx, cli, dir, onLine, selection, force)
 }
 
-// runBuildPushDeployOrchestration is the builds-here path: build the working
-// tree, push the minted version, then deploy it by reference, threading the
-// version `build` reported so what deploys is exactly what was built.
 func (a *App) runBuildPushDeployOrchestration(ctx context.Context, cli, dir string, onLine func(string), selection uiSelection, force bool) error {
 	buildArgs := []string{"build", "--output", "json"}
 	if force {
@@ -67,9 +55,6 @@ func (a *App) runBuildPushDeployOrchestration(ctx context.Context, cli, dir stri
 	return err
 }
 
-// runInstallByReferenceDeploy is the runtime/remote path: install the selected
-// version (or --current) by reference, threading the picked runtime-image
-// override so a bootstrap on the ERun base image rolls out.
 func (a *App) runInstallByReferenceDeploy(ctx context.Context, cli, dir string, onLine func(string), selection uiSelection, force bool) error {
 	args := []string{"deploy", selection.Tenant, selection.Environment}
 	if version := strings.TrimSpace(selection.Version); version != "" {
@@ -89,14 +74,11 @@ func (a *App) runInstallByReferenceDeploy(ctx context.Context, cli, dir string, 
 	return err
 }
 
-// appendMCPAuthPublicKeyFlag appends `--mcp-auth-public-key <path>` so the
-// deployed env requires the same desktop-signed bearer the desktop sends to its
-// MCP edge. The public key is written beside the desktop's private
-// identity; ensurePublicKeyPath generates it on first use. A nil identity (unit
-// tests) or an unset identity dir yields no flag, leaving the env
-// unauthenticated. A generation error logs and proceeds without the flag rather
-// than failing the deploy — an unauthenticated env is recoverable; a blocked
-// deploy is not.
+// appendMCPAuthPublicKeyFlag makes the deployed env require the same
+// desktop-signed bearer the desktop sends to its MCP edge. A missing identity
+// (as in unit tests) or a key-generation failure proceeds without the flag
+// rather than blocking the deploy: an unauthenticated env is recoverable, a
+// blocked deploy is not.
 func (a *App) appendMCPAuthPublicKeyFlag(args []string) []string {
 	if a.identity == nil {
 		return args
@@ -112,15 +94,12 @@ func (a *App) appendMCPAuthPublicKeyFlag(args []string) []string {
 	return append(args, "--mcp-auth-public-key", path)
 }
 
-// deployNeedsBuildOrchestration is the desktop's per-env-type deploy policy
-// (root AGENTS.md § "Command primitives vs orchestration"): an Operator's
-// deploy of a builds-here env whose source is on this machine (local-agent)
-// means "build fresh, then publish, then install" — composed from the pure
-// primitives — while a runtime env, or a builds-here env the operator pinned to
-// a specific published version, means "install that version by reference". A
-// forced deploy (the rebuild-&-redeploy recovery) always rebuilds. Remote-agent
-// envs build in their pod, not through this local-machine orchestration, so
-// their remote worktree excludes them here.
+// deployNeedsBuildOrchestration encodes the desktop's per-env-type deploy policy
+// (root AGENTS.md § "Command primitives vs orchestration"): a builds-here env
+// with source on this machine rebuilds from scratch, while a runtime env or a
+// pinned published version installs by reference. A forced deploy is the
+// rebuild-&-redeploy recovery, so it always rebuilds; remote-agent envs build in
+// their own pod, not through this local orchestration.
 func deployNeedsBuildOrchestration(result eruncommon.OpenResult, version string, force bool) bool {
 	if !result.EnvConfig.BuildsHere() || result.RemoteRepo() {
 		return false
@@ -128,12 +107,9 @@ func deployNeedsBuildOrchestration(result eruncommon.OpenResult, version string,
 	return force || strings.TrimSpace(version) == ""
 }
 
-// maybeStartDeployOrchestration starts the desktop's pure-primitive deploy
-// orchestration for a builds-here agent env on this machine, returning
-// (result, true) once the background run is launched. For runtime/remote envs
-// it returns (_, false) so the caller falls back to the in-shell `erun deploy`
-// path. The orchestration runs in the background; progress and failures surface
-// through the activity queue via the streamed `==> ...` trace lines.
+// maybeStartDeployOrchestration launches the desktop's pure-primitive deploy in
+// the background and returns true once started. Runtime/remote envs return false
+// so the caller falls back to the in-shell `erun deploy` path.
 func (a *App) maybeStartDeployOrchestration(selection uiSelection, force bool) (startSessionResult, bool) {
 	selection = normalizeSelection(selection)
 	// a.ctx is nil in unit tests; never fall back to the machine's real CLI
@@ -154,10 +130,9 @@ func (a *App) maybeStartDeployOrchestration(selection uiSelection, force bool) (
 	return startSessionResult{Selection: selection, Orchestrated: true}, true
 }
 
-// runErunCaptured runs `erun <args>` in dir, streaming the trace stream
-// (stderr — where erun's Logger writes its `==>` and trace lines) to onLine and
-// capturing stdout, where `--output json` writes the structured result. Returns
-// the captured stdout.
+// runErunCaptured runs `erun <args>` in dir and returns its captured stdout. erun
+// writes its `--output json` result to stdout and trace/`==>` lines to stderr
+// (forwarded to onLine), so the structured result stays clean of progress noise.
 func runErunCaptured(ctx context.Context, cliPath, dir string, onLine func(string), args ...string) (string, error) {
 	if strings.TrimSpace(cliPath) == "" {
 		cliPath = "erun"
@@ -204,10 +179,6 @@ func runErunCaptured(ctx context.Context, cliPath, dir string, onLine func(strin
 	return stdoutBuf.String(), nil
 }
 
-// scanErunStderr streams erun's trace stream line by line: every non-blank
-// line is forwarded to onLine (the activity-queue trace handler) and every
-// line is accumulated into lastErr (newline-separated) so the captured tail
-// can be attached to a non-zero-exit error.
 func scanErunStderr(stderrPipe io.Reader, onLine func(string), lastErr *strings.Builder) {
 	scanner := bufio.NewScanner(stderrPipe)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)

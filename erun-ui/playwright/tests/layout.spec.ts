@@ -38,11 +38,8 @@ test.describe('layout panels', () => {
     await app.titlebar.toggleReviewPanel();
   });
 
-  // Regression: opening the Review panel squashed the terminal,
-  // and closing it left the terminal at the narrow cols because the 40 ms
-  // debounce in queueTerminalResize was wide enough for the shell to emit a
-  // prompt at the old cols. flushTerminalResize refits on the next animation
-  // frame and resizes the PTY before that gap closes.
+  // Regression: closing the Review panel used to leave the terminal stuck at the
+  // narrow cols it shrank to when the panel opened; guard the resize on both edges.
   test('review panel toggle resizes terminal cols on both edges', async ({ app, page }) => {
     await expect.poll(() => readTerminalCols(page)).toBeGreaterThan(0);
     const wideCols = await readTerminalCols(page);
@@ -53,11 +50,9 @@ test.describe('layout panels', () => {
     expect(narrowCols).toBeGreaterThan(0);
 
     await app.titlebar.toggleReviewPanel();
-    // xterm's FitAddon floors cols from the available pixel width, so a panel
-    // open→close round-trip can settle one column shy of the original from
-    // sub-pixel rounding. The guard is that the terminal returns to ~wide
-    // (not stuck near narrowCols, which is many columns off), so tolerate a
-    // 1-col delta rather than requiring exact equality.
+    // A panel open→close round-trip can settle one column shy of the original from
+    // xterm's sub-pixel col rounding; tolerate a 1-col delta since the guard is that
+    // the terminal returns to ~wide, not stays stuck near narrow.
     await expect
       .poll(async () => Math.abs((await readTerminalCols(page)) - wideCols))
       .toBeLessThanOrEqual(1);

@@ -18,11 +18,9 @@ import { cn } from '@/lib/utils';
 
 import { ClipboardSetText } from '../../../wailsjs/runtime/runtime';
 
-// Long error text (AWS/IAM/Helm/etc. messages) routinely runs over the
-// titlebar pill width. Anything past this threshold escalates the trigger
-// from a hover tooltip to a click-to-open popover with selectable content
-// — that's the only path that lets the user copy/select the error to
-// paste into a bug report (Nielsen #9: recovery from errors).
+// Long error text can't be read or copied from a hover tooltip, so past
+// this length the message escalates to a selectable popover the operator
+// can copy into a bug report.
 const LONG_STATUS_THRESHOLD = 160;
 
 type TitlebarStatusKind =
@@ -62,9 +60,8 @@ export function TitlebarStatus(): React.ReactElement | null {
     return null;
   }
 
-  // Width: cap so the status pill never crowds the right-cluster buttons
-  // even on narrow viewports. Long messages still escalate to a popover
-  // via StatusMessagePopover when they exceed LONG_STATUS_THRESHOLD.
+  // Cap width so the status pill never crowds the right-cluster buttons on
+  // narrow viewports.
   return (
     <div
       className="pointer-events-none flex min-w-0 max-w-full [--wails-draggable:no-drag]"
@@ -110,10 +107,8 @@ function computeTitlebarStatus(
       source: 'notification',
       detail: '',
       busy: false,
-      // Error/warning notifications (deploy failed, runtime unreachable) carry
-      // an actionable message with long paths the operator needs to copy into a
-      // bug report — give them a copy button, like the terminal-status errors
-      // already have. Transient success/info toasts don't need one.
+      // Only error/warning notifications carry a message the operator needs to
+      // copy into a bug report; transient success/info toasts don't get one.
       copyOutput:
         notification.kind === 'error' || notification.kind === 'warning'
           ? notification.message
@@ -268,10 +263,6 @@ function StatusCopyAction({ status }: { status: TitlebarStatusValue }): React.Re
   );
 }
 
-// NotificationCopyAction copies an error/warning notification's message to the
-// clipboard. Notifications have no terminal copy-output slot, so it
-// copies the message directly and shows a transient "Copied" via local state —
-// the terminal path (StatusCopyAction) keeps its Redux-backed copy flow.
 function NotificationCopyAction({ text }: { text: string }): React.ReactElement {
   const [copied, setCopied] = React.useState(false);
   const onCopy = React.useCallback(() => {

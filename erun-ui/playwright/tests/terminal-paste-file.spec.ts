@@ -1,21 +1,15 @@
 import { expect, test } from '../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
-// terminal-paste-file covers the desktop terminal's clipboard paste: it used
-// to accept image files only — a pasted PDF / CSV / archive was silently
-// dropped by the image-only MIME filter. After the fix, ANY pasted file is
-// copied into the runtime pod and its remote path typed into the shell, with
-// the original filename preserved.
+// terminal-paste-file guards the desktop terminal's clipboard paste: an
+// image-only MIME filter used to silently drop a pasted PDF / CSV / archive.
+// Now any pasted file is copied into the runtime pod, its original filename
+// preserved, and its remote path typed into the shell.
 //
-// Harness limitation: the actual copy is `kubectl exec ... base64 -d > path`
-// into a live runtime pod, which the headless harness deliberately lacks
-// (kubectl is an inert stub). So this spec mocks the SavePastedFile RPC over
-// /__erun_invoke and locks the two reachable frontend invariants:
-//   1. a non-image paste dispatches SavePastedFile carrying the file's real
-//      MIME type and name — proving the old image-only gate is gone; and
-//   2. the remote path SavePastedFile returns is typed into the terminal via
-//      SendSessionInput.
-// The copy itself, the filename derivation, and the path-traversal safety are
+// Harness limitation: the real copy is a `kubectl exec` into a live runtime
+// pod that the headless harness deliberately lacks (kubectl is an inert stub),
+// so this spec mocks the copy and asserts only the reachable frontend
+// behaviour. The copy, filename derivation, and path-traversal safety are
 // covered by the Go tests in erun-ui/app_test.go (TestSavePastedFile*,
 // TestPastedFileFilenameDerivation, TestPastedFileFilenameRejectsTraversal).
 
@@ -32,10 +26,8 @@ interface PastePayload {
 
 const REMOTE_PATH = '/home/erun/.codex/attachments/paste-20260101-000000.000000000-report.pdf';
 
-// dispatchFilePaste fires a synthetic `paste` ClipboardEvent on the terminal
-// root carrying one file, mirroring the browser paste the controller listens
-// for. The handler reads event.clipboardData.items, so a DataTransfer with the
-// file added drives the exact production path.
+// The production paste handler reads event.clipboardData.items, so the
+// synthetic paste event must carry the file there to drive the real path.
 async function dispatchFilePaste(
   page: import('@playwright/test').Page,
   file: { name: string; type: string; text: string },
@@ -100,13 +92,12 @@ test.describe('terminal paste of any file (#584)', () => {
       )
       .toBe('application/pdf');
 
-    // The original filename is preserved (an agent sees report.pdf, not
-    // paste-….bin), and the payload carries the file bytes.
+    // The original filename is preserved so an agent sees report.pdf, not a
+    // generic paste-….bin.
     expect(savePayload?.name).toBe('report.pdf');
     expect(typeof savePayload?.data).toBe('string');
     expect(savePayload?.data?.length ?? 0).toBeGreaterThan(0);
 
-    // The remote path the copy returned is typed into the terminal.
     await expect.poll(() => sentInputs.some((input) => input.includes(REMOTE_PATH))).toBe(true);
   });
 });

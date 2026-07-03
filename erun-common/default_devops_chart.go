@@ -10,26 +10,16 @@ import (
 )
 
 // The embedded Chart.yaml exists only to migrate legacy scaffolded tenant
-// charts (see MigrateDefaultDevopsChartAppVersion). New environments deploy
-// the published erun-devops chart directly; the per-tenant scaffold
-// copies — and the drift they accumulated — are retired.
+// charts; new environments deploy the published erun-devops chart directly.
 //
 //go:embed assets/default-devops-chart/Chart.yaml
 var defaultDevopsChartFiles embed.FS
 
-// MigrateDefaultDevopsChartAppVersion rewrites an existing tenant
-// `<tenant>-devops/k8s/<tenant>-devops/Chart.yaml` whose appVersion
-// still carries the literal placeholder. Tenants with a
-// scaffolded devops module keep deploying their local chart (the
-// published-chart flow only applies when no local chart exists), so
-// this compat migration stays. The legacy detection already used by
-// ensureDefaultDevopsFile (description-scoped to "ERun DevOps",
-// version + appVersion lines forced to "1.0.0") keeps the rewrite from
-// clobbering hand-customised tenant charts.
-//
-// The trace lines emitted by ensureDefaultDevopsFile remain the
-// only side effect in dry-run mode, so adding this call into the
-// open path keeps the --dry-run contract intact.
+// MigrateDefaultDevopsChartAppVersion rewrites a legacy scaffolded tenant
+// Chart.yaml still pinned to the placeholder appVersion, so tenants that keep
+// their own local chart pick up the current version. It only ever rewrites the
+// legacy shape, never hand-customised charts, and emits only trace lines so it
+// stays safe on the dry-run open path.
 func MigrateDefaultDevopsChartAppVersion(ctx Context, projectRoot, tenant, appVersion string) error {
 	projectRoot = strings.TrimSpace(projectRoot)
 	tenant = strings.TrimSpace(tenant)
@@ -42,8 +32,6 @@ func MigrateDefaultDevopsChartAppVersion(ctx Context, projectRoot, tenant, appVe
 	chartPath := filepath.Join(projectRoot, moduleName, "k8s", moduleName, "Chart.yaml")
 	if _, err := os.Stat(chartPath); err != nil {
 		if os.IsNotExist(err) {
-			// Nothing to migrate: the env has no scaffolded chart and
-			// deploys the published erun-devops chart instead.
 			return nil
 		}
 		return err
@@ -61,9 +49,7 @@ func MigrateDefaultDevopsChartAppVersion(ctx Context, projectRoot, tenant, appVe
 func defaultDevopsChartAppVersion(appVersion string) string {
 	appVersion = strings.TrimSpace(appVersion)
 	if appVersion == "" {
-		// NormalizeBuildInfo uses "dev" as the unbuilt-binary fallback;
-		// keep the placeholder consistent so tests and integration
-		// goldens read uniformly.
+		// "dev" matches NormalizeBuildInfo's unbuilt-binary fallback.
 		return "dev"
 	}
 	return appVersion
@@ -94,13 +80,10 @@ func resolveOpenRuntimeDeploySpec(ctx Context, store DeployStore, findProjectRoo
 	return resolvePublishedDevopsDeploySpec(ctx, target, "")
 }
 
-// runtimeComponentNames returns the chart directory names that identify an
-// environment's runtime chart, most-specific first: the tenant-prefixed
-// <tenant>-devops, then the canonical erun-devops. Both `erun open` (local
-// runtime chart discovery) and `erun deploy` (runtime selection + published
-// fallback) resolve the runtime against this dual-lookup so a tenant tree that
-// vendors the chart under either name — or under neither, deferring to the
-// published erun-devops chart — resolves the same way.
+// runtimeComponentNames lists an environment's candidate runtime chart names
+// most-specific first (tenant-prefixed, then canonical erun-devops), so open
+// and deploy resolve the same chart — or fall back to the published one —
+// uniformly.
 func runtimeComponentNames(tenant string) []string {
 	names := []string{DevopsComponentName}
 	tenant = strings.TrimSpace(tenant)
@@ -178,17 +161,9 @@ func shouldReplaceDefaultDevopsFile(existing, content []byte) bool {
 	return false
 }
 
-// legacyDevopsChartYAMLCandidates returns the legacy shapes of a
-// tenant devops chart's Chart.yaml so an existing tenant chart still
-// pinned to the literal placeholder `appVersion: "1.0.0"` gets
-// auto-rewritten on the next open. Only the devops chart is in scope —
-// `description: ERun DevOps` is what disambiguates from the backend-*
-// charts that share the base name.
-//
-// The candidates are the *new* content with the version + appVersion
-// lines forced back to "1.0.0", so byte-exact comparison in
-// shouldReplaceDefaultDevopsFile picks up the upgrade target without
-// needing structural YAML diffing.
+// legacyDevopsChartYAMLCandidates returns the legacy Chart.yaml shapes that get
+// auto-rewritten on the next open. The `description: ERun DevOps` guard scopes
+// this to the devops chart, not the backend-* charts that share the base name.
 func legacyDevopsChartYAMLCandidates(content []byte) []string {
 	if !bytes.Contains(content, []byte("description: ERun DevOps")) {
 		return nil

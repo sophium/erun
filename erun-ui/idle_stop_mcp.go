@@ -11,23 +11,14 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// idleStopMCPTimeout caps every MCP-tool round-trip the desktop
-// makes for the idle-stop tools. Without a deadline,
-// `context.Background()` lets `Connect` and `CallTool` hang for the
-// app's entire lifetime if the runtime image is older than the
-// desktop (the tool isn't registered, the SDK's error surface
-// hasn't bubbled up yet) or if the kubectl port-forward is wedged.
-// 10 s is long enough to absorb a slow cold-start handshake on a
-// real cluster and short enough that the "Loading…" placeholder
-// resolves into a real error message during a normal user
-// interaction.
+// idleStopMCPTimeout bounds every idle-stop MCP round-trip so a stale
+// runtime image or a wedged port-forward surfaces as an error instead
+// of hanging for the app's lifetime; 10 s absorbs a cold-start
+// handshake while still resolving the loading state promptly.
 const idleStopMCPTimeout = 10 * time.Second
 
-// cancelStopPendingViaMCP calls the in-pod `idle_stop_cancel` tool
-// to dismiss the grace-period warning for the env behind `endpoint`.
-// The in-pod handler removes <home>/.erun/<tenant>/<env>/stop-pending.json;
-// the next idle poll from any client (including the in-pod monitor's
-// next 30 s tick) re-evaluates eligibility and re-arms the warning
+// cancelStopPendingViaMCP dismisses the grace-period warning for an env.
+// The dismissal is not permanent: the next idle poll re-arms the warning
 // if the env is still idle.
 func cancelStopPendingViaMCP(ctx context.Context, endpoint, bearer, tenant, environment string) error {
 	ctx, cancel := context.WithTimeout(ctx, idleStopMCPTimeout)
@@ -56,11 +47,9 @@ func cancelStopPendingViaMCP(ctx context.Context, endpoint, bearer, tenant, envi
 	return nil
 }
 
-// loadStopHistoryViaMCP calls the in-pod `idle_stop_history` tool
-// and returns the entries verbatim. The in-pod handler reads
-// stop-history.json from the env's shared PVC, so a desktop running
-// after a long break sees the same audit trail the in-pod monitor
-// has been appending to.
+// loadStopHistoryViaMCP reads the stop-history audit trail from the pod,
+// the source of truth the in-pod monitor appends to, so a desktop
+// returning after a break sees the complete history.
 func loadStopHistoryViaMCP(ctx context.Context, endpoint, bearer, tenant, environment string) ([]eruncommon.EnvironmentStopHistoryEntry, error) {
 	ctx, cancel := context.WithTimeout(ctx, idleStopMCPTimeout)
 	defer cancel()
@@ -102,15 +91,9 @@ func loadStopHistoryViaMCP(ctx context.Context, endpoint, bearer, tenant, enviro
 	return payload.Entries, nil
 }
 
-// recordManualStopViaMCP calls the in-pod `idle_stop_record` tool
-// to append a host-manual entry to stop-history.json. Used by the
-// desktop's Stop button so the History tab also explains "you
-// clicked Stop", not just auto-stops fired by the in-pod monitor.
-// Reason is the free-form text rendered on the row; passing the
-// empty string defers to the tool's default ("Manual stop"). On
-// older runtime images that do not register the tool yet, the
-// caller swallows the formatted error so manual stops still
-// succeed — formatIdleStopMCPError points at the rebuild fix.
+// recordManualStopViaMCP records a manual stop in the audit trail so the
+// History tab distinguishes "you clicked Stop" from auto-stops fired by
+// the in-pod monitor.
 func recordManualStopViaMCP(ctx context.Context, endpoint, bearer, tenant, environment, reason, cloudContextName string) error {
 	ctx, cancel := context.WithTimeout(ctx, idleStopMCPTimeout)
 	defer cancel()
@@ -144,15 +127,10 @@ func recordManualStopViaMCP(ctx context.Context, endpoint, bearer, tenant, envir
 	return nil
 }
 
-// formatIdleStopMCPError rewrites the SDK error to spell out the
-// most common failure mode plainly: the runtime image in the pod
-// predates this desktop version and does not have the new tool
-// registered yet. The SDK returns "Method not found" / "tool not
-// found" or wraps the JSON-RPC code -32601; we match those shapes
-// and translate to a single user-facing line that points at the
-// fix (rebuild the runtime image). For any other error we surface
-// the raw message so cluster-side failures (port-forward dead,
-// MCP container OOMed, etc.) still reach the user.
+// formatIdleStopMCPError translates the common "runtime image predates
+// this desktop and lacks the idle_stop_* tool" failure into a single
+// user-facing line pointing at the rebuild fix; any other error passes
+// through raw so real cluster-side failures still reach the user.
 func formatIdleStopMCPError(tool string, err error) error {
 	if err == nil {
 		return nil

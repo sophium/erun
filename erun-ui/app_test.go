@@ -164,12 +164,10 @@ func TestLoadVersionSuggestionsFiltersOutMissingTenantImageTags(t *testing.T) {
 }
 
 func TestLoadVersionSuggestionsUsesEnvPersistedRuntimeRegistry(t *testing.T) {
-	// The "Version to deploy" picker must query the registry the env's
-	// runtime image was actually published to (EnvConfig.RuntimeRegistry, the
-	// provenance deploy records), not the hardcoded default. Otherwise an env on
-	// a non-default registry resolves its suggestions from the wrong place and
-	// can never offer its own deployed version back. The ERun fallback image
-	// stays on the canonical default registry.
+	// The "Version to deploy" picker must query the registry the env's runtime
+	// image was actually published to, not the hardcoded default — otherwise an
+	// env on a non-default registry can never offer its own deployed version
+	// back. The ERun fallback image stays on the canonical default registry.
 	const customRegistry = "harbor.example/team"
 	var tenantImageNamespace string
 	app := NewApp(erunUIDeps{
@@ -210,10 +208,8 @@ func TestLoadVersionSuggestionsUsesEnvPersistedRuntimeRegistry(t *testing.T) {
 }
 
 func TestLoadVersionSuggestionsQueriesEachListedRegistry(t *testing.T) {
-	// The version picker must query every registry in the env's marked
-	// list, so an offered version can come from any listed registry and carries
-	// its source. Here the env lists build+from on a public registry and
-	// to+deploy on a mirror; both are queried for the tenant image.
+	// The version picker must query every registry in the env's marked list, so
+	// an offered version can come from any listed registry and carries its source.
 	queried := map[string]bool{}
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
@@ -747,10 +743,8 @@ func TestBuildDeployArgsRunsDeploy(t *testing.T) {
 }
 
 // TestBuildDeployArgsThreadsRuntimeImageOverride covers the runtime-image
-// override: picking the canonical ERun base image in the runtime dialog must
-// thread --runtime-image so deploy installs the published erun-devops chart with
-// that image, letting the operator bootstrap an env before its own image is
-// built.
+// override that lets an operator bootstrap an env on the ERun base image before
+// the tenant's own image is built.
 func TestBuildDeployArgsThreadsRuntimeImageOverride(t *testing.T) {
 	got := buildDeployArgs(uiSelection{
 		Tenant:       "frs",
@@ -762,9 +756,8 @@ func TestBuildDeployArgsThreadsRuntimeImageOverride(t *testing.T) {
 	assertArgsEqual(t, got, want)
 }
 
-// TestBuildDeployArgsOmitsOwnTenantImage covers the other family: picking the
-// env's own <tenant>-devops image is not an override — deploy installs the env's
-// own chart as before, with no --runtime-image flag.
+// TestBuildDeployArgsOmitsOwnTenantImage covers the counterpart: picking the
+// env's own image is not an override.
 func TestBuildDeployArgsOmitsOwnTenantImage(t *testing.T) {
 	got := buildDeployArgs(uiSelection{
 		Tenant:       "frs",
@@ -1094,10 +1087,8 @@ func TestStartDeploySessionPipesCommandToLocal(t *testing.T) {
 			return s, nil
 		},
 	})
-	// No desktop identity: the in-shell deploy stays unauthenticated, so this
-	// test asserts the bare `erun deploy ...` command without the
-	// --mcp-auth-public-key flag. The auth-injecting path is
-	// covered by its own test below.
+	// With no desktop identity the in-shell deploy stays unauthenticated; the
+	// auth-injecting path has its own test below.
 	app.identity = nil
 	defer app.shutdown(context.Background())
 
@@ -1114,12 +1105,9 @@ func TestStartDeploySessionPipesCommandToLocal(t *testing.T) {
 	}
 }
 
-// TestStartDeploySessionInjectsMCPAuthPublicKey covers the auth-injecting half
-// of the deploy path: when the desktop has a signing identity, the
-// in-shell `erun deploy` carries `--mcp-auth-public-key <path>` so the deployed
-// env requires the same desktop-signed bearer the desktop sends to its MCP
-// edge. The identity is pinned to a temp dir so the test never touches the
-// developer's real config and the public key lands at a deterministic path.
+// TestStartDeploySessionInjectsMCPAuthPublicKey covers the auth-injecting deploy
+// path: with a signing identity, the in-shell deploy requires the same
+// desktop-signed bearer the desktop sends to its MCP edge.
 func TestStartDeploySessionInjectsMCPAuthPublicKey(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
@@ -1151,9 +1139,8 @@ func TestStartDeploySessionInjectsMCPAuthPublicKey(t *testing.T) {
 	}
 	wantPath := filepath.Join(identityDir, desktopIdentityPubFile)
 	written := sessions[0].WrittenString()
-	// The path is shell-quoted by buildLocalErunCommand only when it needs it
-	// (e.g. spaces in the temp dir), so assert against the same quoting helper
-	// rather than a fixed literal.
+	// The temp-dir path is shell-quoted only when it needs it (e.g. spaces), so
+	// assert against the same quoting helper rather than a fixed literal.
 	wantFlag := "--mcp-auth-public-key " + shellQuoteIfNeeded(wantPath)
 	if !strings.Contains(written, "deploy erun remote --version 1.0.19 "+wantFlag+"\n") {
 		t.Fatalf("expected deploy command to carry %q, got %q", wantFlag, written)
@@ -1960,11 +1947,9 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 	assertStoredEnvironmentConfig(t, stored, projectRoot)
 }
 
-// TestSaveAndLoadDeployComponentsRoundTrip covers the per-machine saved deploy
-// selection (EnvConfig.deploy.components): a save trims blanks and
-// persists the selection, and a load reflects it. Exercises the non-empty
-// selection path the Playwright checklist cannot reach (the headless baseline
-// vendors no local component charts to select).
+// TestSaveAndLoadDeployComponentsRoundTrip exercises the non-empty deploy-
+// selection path the Playwright checklist cannot reach: the headless baseline
+// vendors no local component charts to select.
 func TestSaveAndLoadDeployComponentsRoundTrip(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
@@ -2005,11 +1990,9 @@ func TestSaveAndLoadDeployComponentsRoundTrip(t *testing.T) {
 	}
 }
 
-// TestLoadDeployComponentsRuntimeOnlyWhenNoLocalCharts covers the read model
-// for a component-only/inert env: with no repo-local charts it offers the
-// runtime item alone, sourced from the published erun-devops chart and
-// pre-selected (the bootstrap/heal default). A saved selection is reflected in
-// the item's Selected flag.
+// TestLoadDeployComponentsRuntimeOnlyWhenNoLocalCharts covers the read model for
+// an inert env: with no repo-local charts it offers only the runtime item,
+// pre-selected as the bootstrap/heal default.
 func TestLoadDeployComponentsRuntimeOnlyWhenNoLocalCharts(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
@@ -2070,8 +2053,6 @@ func assertSavedEnvironmentConfig(t *testing.T, saved uiEnvironmentConfig, proje
 	assertLocalPorts(t, saved.LocalPorts)
 }
 
-// uiRegistryWithRole returns the registry in the desktop editor's row list that
-// carries the given role, or "" when none does.
 func uiRegistryWithRole(entries []uiContainerRegistryEntry, role string) string {
 	for _, entry := range entries {
 		for _, candidate := range entry.Roles {
@@ -2210,10 +2191,9 @@ func TestSaveEnvironmentConfigPreservesProjectContainerRegistryReadModel(t *test
 	}
 }
 
-// TestSaveEnvironmentConfigWritesLocalAgentRegistryListToProjectConfig pins the
-// desktop editor: editing a local-agent env's marked registry list writes
-// it to the project's .erun/config.yaml (where the build/deploy resolvers read
-// it), not to the env config, and the saved UI round-trips the full list.
+// TestSaveEnvironmentConfigWritesLocalAgentRegistryListToProjectConfig pins that
+// editing a local-agent env's registry list writes to the project config —
+// where the build/deploy resolvers read it — not to the env config.
 func TestSaveEnvironmentConfigWritesLocalAgentRegistryListToProjectConfig(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
@@ -2256,9 +2236,8 @@ func TestSaveEnvironmentConfigWritesLocalAgentRegistryListToProjectConfig(t *tes
 	}
 }
 
-// TestSaveEnvironmentConfigRejectsInvalidRegistryList confirms the marker
-// invariants are enforced on save and surfaced as an error (a list with no
-// deploy registry is rejected before persistence).
+// TestSaveEnvironmentConfigRejectsInvalidRegistryList confirms marker invariants
+// are enforced before persistence: a list with no deploy registry is rejected.
 func TestSaveEnvironmentConfigRejectsInvalidRegistryList(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
@@ -2438,10 +2417,8 @@ func TestSaveEnvironmentConfigRoundTripsClaudeOverrides(t *testing.T) {
 	}
 }
 
-// TestSaveEnvironmentConfigRoundTripsClaudeLaunchFlags pins the desktop
-// round-trip of the per-env Claude launch fields: the
-// default model and the verbose+debug toggle survive a save both in the
-// returned config and in the persisted store.
+// TestSaveEnvironmentConfigRoundTripsClaudeLaunchFlags pins the desktop round-
+// trip of the per-env Claude launch fields (default model, verbose+debug).
 func TestSaveEnvironmentConfigRoundTripsClaudeLaunchFlags(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
@@ -2688,10 +2665,9 @@ func TestStartSessionLeavesCloudContextStartupToErunCommand(t *testing.T) {
 	}
 
 	got := strings.Join(actions, "\n")
-	// The ERun tab runs a pure `erun open … --app-session open-0`: a
-	// persistent, reattachable dtach session. open no longer deploys —
-	// the shared thin reconnect rebinds the forwarders, and deploy is
-	// the caller's job — so there is no --skip-ensure flag any more.
+	// The ERun tab runs a pure `erun open`: it no longer deploys (the shared thin
+	// reconnect rebinds forwarders, deploy is the caller's job), so there is no
+	// --skip-ensure flag any more.
 	if got != "terminal open frs prod --app-session open-0" {
 		t.Fatalf("expected only terminal start action, got:\n%s", got)
 	}
@@ -3923,14 +3899,10 @@ func TestStartAISessionRunsErunOpenAsPersistentAITab(t *testing.T) {
 	if started.Executable != "/tmp/erun" {
 		t.Fatalf("expected erun executable, got %q", started.Executable)
 	}
-	// The AI tab runs a pure `erun open --app-session ai --ai`: the persistent
-	// remote session launches the AI tool itself (pod-side, once on create), so a
-	// reopen reconnects to the running claude. The desktop no longer types the
-	// launch in, so there is no initial input. The AI tool + effort are resolved
-	// pod-side by `erun open --ai`; AISessionLaunchCommand is covered in
-	// erun-common. open is pure now: no --skip-ensure flag — the
-	// shared thin reconnect rebinds forwarders once per env, deploy is
-	// the caller's job.
+	// The AI tab runs a pure `erun open --ai`: claude launches pod-side (once on
+	// create), so a reopen reconnects to the running tool and the desktop pipes no
+	// initial input. open is pure — no --skip-ensure — so deploy stays the
+	// caller's job.
 	wantArgs := []string{"open", "erun", "remote", "--app-session", "ai", "--ai"}
 	if strings.Join(started.Args, "\n") != strings.Join(wantArgs, "\n") {
 		t.Fatalf("unexpected args: got %+v want %+v", started.Args, wantArgs)
@@ -4469,7 +4441,6 @@ func TestStartSessionDoesNotLogWhenLocalAbsent(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	// No StartLocalSession — Local does not exist.
 	if _, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
 		t.Fatalf("StartSession failed: %v", err)
 	}

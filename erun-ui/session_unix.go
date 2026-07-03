@@ -85,10 +85,9 @@ func (s *unixTerminalSession) Close() error {
 	}
 	if s.cmd != nil && s.cmd.Process != nil {
 		// Kill the whole process group, not just `erun open`: its kubectl exec
-		// child otherwise survives as an orphan that holds the exec stream open,
-		// leaving a stale dtach client attached in the pod after every close.
-		// pty.Start ran the child with Setsid, so it leads its own group
-		// (pgid == pid) and the negative-pid signal reaps the full chain.
+		// child otherwise orphans and holds the exec stream open, leaving a stale
+		// dtach client attached in the pod after every close. pty.Start made the
+		// child a session leader, so a negative-pid kill reaps the full chain.
 		if pid := s.cmd.Process.Pid; pid > 0 {
 			_ = syscall.Kill(-pid, syscall.SIGKILL)
 		}

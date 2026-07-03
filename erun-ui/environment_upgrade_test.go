@@ -9,12 +9,10 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing locks
-// the Upgrade-all plan to the same tenant→ERun fallback the Runtime version
-// picker uses (see TestLoadVersionSuggestionsFallsBackToDefaultRuntimeTagsWhenTenantImageMissing):
-// when the tenant-specific image (`petios-devops`) has no resolvable versions,
-// the channel target comes from the default ERun image (`erun-devops`) so the
-// env still gets an upgrade target instead of resolving to "(unset)".
+// TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing verifies
+// that when the tenant image has no published versions, the upgrade target falls
+// back to the default ERun image so the env still gets a target instead of
+// resolving to "(unset)".
 func TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing(t *testing.T) {
 	const fallbackSnapshot = "1.0.86-snapshot-20260606082157"
 	app := NewApp(erunUIDeps{
@@ -37,10 +35,8 @@ func TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing(t *te
 			}
 			switch repository {
 			case "petios-devops":
-				// Tenant image never published: the lookup succeeds but finds
-				// no tags. This — and only this — falls back to the default
-				// image; a FAILED lookup (e.g. ghcr 403) must not (see
-				// TestResolveUpgradePlanReportsFailedLookupAsUnresolved).
+				// A successful-but-empty lookup (not a failed one) is what triggers
+				// the fallback to the default image.
 				return eruncommon.RuntimeRegistryVersions{}, nil
 			case eruncommon.DefaultRuntimeImageName:
 				return eruncommon.RuntimeRegistryVersions{
@@ -75,12 +71,10 @@ func TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing(t *te
 	}
 }
 
-// TestResolveUpgradePlanOffersCandidatesWhenRegistriesDisagree confirms the
-// multi-registry pick: when the env's listed registries and the
-// canonical image publish different newer versions for the tracked channel, the
-// env is not auto-resolved — it carries every distinct candidate so the
-// operator picks one in the Upgrade-all dialog, and the run skips it until they
-// do.
+// TestResolveUpgradePlanOffersCandidatesWhenRegistriesDisagree verifies that when
+// registries publish different newer versions for the tracked channel, the env is
+// not auto-resolved: it carries each candidate for the operator to pick in the
+// Upgrade-all dialog, and the run skips it until they do.
 func TestResolveUpgradePlanOffersCandidatesWhenRegistriesDisagree(t *testing.T) {
 	const tenantSnapshot = "1.0.90-snapshot-20260606090000"
 	const defaultSnapshot = "1.0.86-snapshot-20260606082157"
@@ -121,9 +115,6 @@ func TestResolveUpgradePlanOffersCandidatesWhenRegistriesDisagree(t *testing.T) 
 	assertCandidateVersions(t, item.Candidates, tenantSnapshot, defaultSnapshot)
 }
 
-// disagreeingSnapshotRegistry resolves the tenant image and the canonical ERun
-// image to different latest snapshots, so the upgrade planner sees two distinct
-// newer versions for the tracked channel.
 func disagreeingSnapshotRegistry(t *testing.T, tenantSnapshot, defaultSnapshot string) func(context.Context, string, string) (eruncommon.RuntimeRegistryVersions, error) {
 	t.Helper()
 
@@ -147,8 +138,6 @@ func disagreeingSnapshotRegistry(t *testing.T, tenantSnapshot, defaultSnapshot s
 	}
 }
 
-// assertCandidateVersions confirms each wanted version appears among the
-// offered upgrade candidates.
 func assertCandidateVersions(t *testing.T, candidates []eruncommon.UpgradeVersionCandidate, want ...string) {
 	t.Helper()
 
@@ -163,13 +152,10 @@ func assertCandidateVersions(t *testing.T, candidates []eruncommon.UpgradeVersio
 	}
 }
 
-// TestResolveUpgradePlanFallsBackToCanonicalOnFailedTenantLookup locks the
-// corrected policy: a tenant whose registry listing FAILS (the
-// observed ghcr 403 — indistinguishable from "never published" on ghcr) gets
-// its target from the canonical ERun image, because the tenant image is a
-// wrapper the deploy rebuilds FROM that canonical image at the requested
-// version. The env therefore upgrades instead of being parked on "latest
-// unknown".
+// TestResolveUpgradePlanFallsBackToCanonicalOnFailedTenantLookup verifies that a
+// failed tenant-registry lookup falls back to the canonical ERun image — the
+// tenant image is a wrapper the deploy rebuilds from canonical — so the env
+// upgrades instead of being parked on "latest unknown".
 func TestResolveUpgradePlanFallsBackToCanonicalOnFailedTenantLookup(t *testing.T) {
 	const canonicalSnapshot = "1.0.86-snapshot-20260611061111"
 	app := NewApp(erunUIDeps{
@@ -210,10 +196,10 @@ func TestResolveUpgradePlanFallsBackToCanonicalOnFailedTenantLookup(t *testing.T
 	}
 }
 
-// TestResolveUpgradePlanUnresolvedWhenCanonicalLookupAlsoFails keeps the
-// honest terminal state: when neither the tenant repo nor the canonical
-// image is resolvable, the member is "latest unknown" with the registry
-// failure as the reason — the dialog renders it and the run skips it.
+// TestResolveUpgradePlanUnresolvedWhenCanonicalLookupAlsoFails verifies that when
+// neither the tenant nor the canonical image resolves, the member is "latest
+// unknown" with the registry failure as its reason, so the dialog renders it and
+// the run skips it.
 func TestResolveUpgradePlanUnresolvedWhenCanonicalLookupAlsoFails(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{

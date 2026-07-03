@@ -9,9 +9,8 @@ import (
 	common "github.com/sophium/erun/erun-common"
 )
 
-// resolveRuntimeConfigHome mirrors the entrypoint's config-home precedence
-// (XDG_CONFIG_HOME, else $HOME/.config) so the in-pod reconciliation reads and
-// writes the same tree initialize_erun_config wrote.
+// resolveRuntimeConfigHome mirrors the entrypoint's config-home precedence so
+// in-pod reconciliation reads and writes the same tree initialize_erun_config wrote.
 func resolveRuntimeConfigHome(homeDir string) string {
 	if configHome := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); configHome != "" {
 		return configHome
@@ -19,11 +18,9 @@ func resolveRuntimeConfigHome(homeDir string) string {
 	return filepath.Join(homeDir, ".config")
 }
 
-// runRuntimeConfigSync reconciles the in-pod erun config with the
-// helm-injected ERUN_* env vars (`erun doctor --sync-config`). The
-// --sync-config flag is the explicit confirmation, so it applies without a
-// further prompt; in --dry-run it traces the file writes without performing
-// them.
+// runRuntimeConfigSync reconciles the in-pod erun config with the helm-injected
+// env vars. The --sync-config flag is itself the operator's confirmation, so it
+// applies without a further prompt.
 func runRuntimeConfigSync(ctx common.Context, promptRunner PromptRunner, options doctorOptions, configHome string) error {
 	_ = promptRunner
 	_ = options

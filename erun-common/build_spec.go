@@ -66,14 +66,10 @@ func currentComponentDockerBuildContext(resolveBuildContext BuildContextResolver
 	return buildContext, strings.TrimSpace(buildContext.DockerfilePath) != ""
 }
 
-// parseDockerImageReference splits a trimmed image reference into its registry,
-// image name, and version. ok is false when the reference is empty, lacks a
-// usable name:tag, or carries a registry that looks like a version string.
-//
-// A version-looking registry (e.g. "1.0.51-snapshot-20260505151841/image-name:tag")
-// arises from helm chart printf templates that embed .Chart.AppVersion as a
-// namespace prefix; such references are not valid Docker registry hosts and
-// would cause a push-time DNS lookup failure, so they are rejected here.
+// parseDockerImageReference rejects a reference whose "registry" is really a
+// version string: helm printf templates embed .Chart.AppVersion as a namespace
+// prefix (e.g. "1.0.51-snapshot-.../image:tag"), which is not a valid registry
+// host and would fail with a push-time DNS lookup.
 func parseDockerImageReference(image string) (registry, imageName, version string, ok bool) {
 	if image == "" {
 		return "", "", "", false
@@ -185,13 +181,10 @@ func resolveDockerImageReferenceForProject(now NowFunc, projectRoot, environment
 	return ref, nil
 }
 
-// resolveDockerImageVersion returns (version, baseVersion, versionFromBuildDir, versionFilePath, error).
-// version carries a snapshot suffix by default; baseVersion is the stable semver.
-//
-// build mints the version and no longer keys it off the environment: a snapshot
-// (<base>-snapshot-<utc-ts>) by default, the bare base version only when an
-// explicit --version/override pins it or a version-from-build-dir file fixes it
-// (release passes the resolved release version as the override).
+// resolveDockerImageVersion mints the build version independently of the
+// environment: a timestamped snapshot by default, the bare base semver only when
+// an explicit override or a version-from-build-dir file pins it (release passes
+// the resolved release version as that override).
 func resolveDockerImageVersion(now NowFunc, projectRoot, buildDir, versionOverride string) (string, string, bool, string, error) {
 	baseVersion, versionFromBuildDir, versionFilePath, err := ResolveDockerBuildVersion(buildDir, projectRoot)
 	if err != nil {
@@ -226,14 +219,8 @@ func newDockerBuildSpec(now NowFunc, projectRoot, environment string, buildConte
 		return DockerBuildSpec{}, err
 	}
 
-	// For local snapshot builds, append "-snapshot" to the stable base version
-	// so ERUN_VERSION reads "1.0.51-snapshot" rather than "1.0.51" (which would
-	// falsely claim a release).  All images — both source-compiled and wrapper —
-	// use this as their ERUN_VERSION build arg.  The build system also emits a
-	// stable local tag (e.g. erun-devops:1.0.51-snapshot) so that wrapper images
-	// whose FROM references ${ERUN_VERSION} always resolve the same local image,
-	// keeping the Docker build cache valid across pushes.  The stable local tag
-	// is never pushed; only the timestamped snapshot tag goes to the registry.
+	// Mark local snapshot builds so ERUN_VERSION reads "1.0.51-snapshot", not
+	// "1.0.51", which would falsely claim a release.
 	if imageRef.BaseVersion != "" {
 		imageRef.BaseVersion = imageRef.BaseVersion + "-snapshot"
 	}
@@ -293,10 +280,8 @@ func multiPlatformTraceCommands(b DockerBuildSpec) []commandSpec {
 	return commands
 }
 
-// stableBaseVersionTraceCommands mirrors tagStableBaseVersionAfterBuild in the
-// dry-run plan: a per-arch stable tag (what ${ERUN_VERSION} wrappers resolve)
-// followed by the arch-less stable tag, in the same order the executor writes
-// them so the trace stays an honest preview of the real build.
+// stableBaseVersionTraceCommands must mirror tagStableBaseVersionAfterBuild's
+// ordering so the dry-run trace stays an honest preview of the real build.
 func stableBaseVersionTraceCommands(dir, platformTag, baseTag, platform string) []commandSpec {
 	if baseTag == "" {
 		return nil

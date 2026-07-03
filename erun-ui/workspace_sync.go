@@ -131,27 +131,16 @@ func (a *App) runWorkspaceSyncLoop(ctx context.Context, key string, selection ui
 	}
 }
 
-// workspaceSyncPassOutcome tells runWorkspaceSyncLoop how to proceed after the
-// pre-sync readiness checks.
 type workspaceSyncPassOutcome int
 
 const (
-	// workspaceSyncPassProceed means the prerequisites are satisfied and the
-	// loop should run the sync.
 	workspaceSyncPassProceed workspaceSyncPassOutcome = iota
-	// workspaceSyncPassRetry means a prerequisite was not ready (the loop should
-	// continue to the next iteration after the interval has already elapsed).
 	workspaceSyncPassRetry
-	// workspaceSyncPassStop means the context was cancelled while waiting (the
-	// loop should return).
 	workspaceSyncPassStop
 )
 
-// prepareWorkspaceSyncPass runs the per-iteration readiness checks for the sync
-// loop: it ensures SSHD when the local port cannot be reached and waits for the
-// remote SSHD to answer. On any failure it records the worker status, sleeps one
-// interval, and reports whether the loop should retry or stop; otherwise it
-// reports proceed.
+// prepareWorkspaceSyncPass sleeps one interval itself before signalling retry, so
+// the sync loop's continue does not busy-spin on an unreachable SSHD.
 func (a *App) prepareWorkspaceSyncPass(ctx context.Context, key string, result eruncommon.OpenResult, params workspaceSyncParams) workspaceSyncPassOutcome {
 	if a.deps.canConnectLocalPort != nil && !a.deps.canConnectLocalPort(eruncommon.SSHLocalPortForResult(result)) && a.deps.ensureSSHD != nil {
 		if err := a.deps.ensureSSHD(ctx, result); err != nil {
@@ -276,10 +265,8 @@ func syncWorkspaceOnce(ctx context.Context, params workspaceSyncParams) (workspa
 	return workspaceSyncResult{FilesCopied: len(remotePaths), FilesDeleted: deleted}, nil
 }
 
-// resolveWorkspaceSyncPaths lists the Git-visible files on the remote and local
-// sides for one sync pass, applying the local ignore filter to the remote set.
-// notGitRepo is true (with a nil error) when the remote workspace is not a Git
-// repository, which syncWorkspaceOnce treats as a no-op.
+// resolveWorkspaceSyncPaths reports notGitRepo=true (with a nil error) when the
+// remote is not a Git repository; callers treat that as a no-op sync pass.
 func resolveWorkspaceSyncPaths(ctx context.Context, params workspaceSyncParams) (remotePaths, localPaths []string, notGitRepo bool, err error) {
 	remotePaths, err = remoteWorkspaceGitVisibleFiles(ctx, params.HostAlias, params.RemotePath)
 	if errors.Is(err, errRemoteNotGitRepo) {

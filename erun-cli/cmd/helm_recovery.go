@@ -54,9 +54,7 @@ func confirmHelmReleaseRecovery(run PromptRunner, pending *common.HelmReleasePen
 		Default:   "y",
 	}
 
-	// CI / non-interactive callers can opt in to the default-accept path
-	// by setting ERUN_AUTO_RECOVER_HELM=1, which mirrors the prompt's
-	// own Default="y" behavior without requiring a TTY.
+	// Non-interactive / CI callers auto-accept recovery without a TTY.
 	if isTrueishEnv("ERUN_AUTO_RECOVER_HELM") {
 		return true, nil
 	}
@@ -77,9 +75,6 @@ func confirmHelmReleaseRecovery(run PromptRunner, pending *common.HelmReleasePen
 	return strings.EqualFold(strings.TrimSpace(result), "y"), nil
 }
 
-// isTrueishEnv returns true when the named env var is set to a value that
-// callers commonly use to mean "yes": 1, true, yes, on (case-insensitive).
-// Empty / unset / 0 / false / no / off all return false.
 func isTrueishEnv(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
 	case "1", "true", "yes", "on":

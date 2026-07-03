@@ -1,8 +1,6 @@
-// Package provision runs the durable live provisioning of a cloud context: it
-// executes erun's real InitCloudContext (DryRun=false) against the tenant's
-// BYO-cloud alias, custodies the resulting k3s admin token, and records the
-// context's provisioning lifecycle — all as a DBOS durable workflow so a
-// control-plane restart resumes from the last completed step.
+// Package provision runs the durable live provisioning of a tenant's cloud
+// context as a DBOS workflow, so a control-plane restart resumes from the last
+// completed step instead of re-running the whole bootstrap.
 package provision
 
 import (
@@ -21,9 +19,9 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// ProvisionInput is the serializable workflow input DBOS checkpoints. It carries
-// only the tenant identity (to rebuild the RLS security context inside each
-// step) and the operator-authored bootstrap parameters — never a secret.
+// ProvisionInput is the workflow input DBOS checkpoints. Because the checkpoint
+// is persisted, it carries only tenant identity and operator-authored bootstrap
+// parameters — never a secret.
 type ProvisionInput struct {
 	TenantID           string `json:"tenantId"`
 	TenantType         string `json:"tenantType"`
@@ -44,9 +42,9 @@ type ProvisionResult struct {
 	Status     string `json:"status"`
 }
 
-// bootstrapResult is the non-secret output of the bootstrap step. The k3s admin
-// token is custodied (encrypted) inside the step and never returned, so it is
-// never written to DBOS's plaintext step-output checkpoint.
+// bootstrapResult is deliberately non-secret: the k3s admin token is custodied
+// inside the step and never returned, so it never lands in DBOS's plaintext
+// step-output checkpoint.
 type bootstrapResult struct {
 	InstanceID string `json:"instanceId"`
 	PublicIP   string `json:"publicIp"`
@@ -63,8 +61,7 @@ type Provisioner struct {
 	contexts    *repository.ContextRepository
 	credentials *repository.ContextCredentialRepository
 	aliases     *repository.CloudProviderAliasRepository
-	// awsEndpoint, when set, points every aws call at a local emulator (floci)
-	// for verification; empty means the real AWS endpoints.
+	// awsEndpoint pins aws calls at a local emulator (floci) for verification.
 	awsEndpoint string
 	cipher      *secrets.Cipher
 	workflowFn  func(dbos.DBOSContext, ProvisionInput) (ProvisionResult, error)
@@ -88,18 +85,18 @@ func NewProvisioner(
 		cipher:      cipher,
 		awsEndpoint: awsEndpoint,
 	}
-	// A method value: a stable workflow name across restarts (so DBOS recovers
-	// it) that also captures p's dependencies. Registered once here and reused
-	// by Start, so RegisterWorkflow and RunWorkflow see the same function.
+	// Stored once so RegisterWorkflow (here) and RunWorkflow (in Start) share one
+	// stable function value, which is how DBOS names the workflow and recovers it
+	// across restarts.
 	p.workflowFn = p.provisionWorkflow
 	dbos.RegisterWorkflow(dbosCtx, p.workflowFn)
 	return p
 }
 
-// Start kicks off provisioning asynchronously. The HTTP handler returns
-// immediately; the durable workflow drives the (minutes-long) bootstrap and
-// updates the context's status. The context_id is the idempotency key, so a
-// retried request does not start a second bootstrap.
+// Start kicks off provisioning asynchronously so the HTTP handler returns
+// immediately while the durable workflow runs the minutes-long bootstrap. The
+// context id is the idempotency key, so a retried request does not start a
+// second bootstrap.
 func (p *Provisioner) Start(input ProvisionInput) error {
 	_, err := dbos.RunWorkflow(p.dbosCtx, p.workflowFn, input, dbos.WithWorkflowID("provision-"+input.ContextID))
 	return err
@@ -125,9 +122,8 @@ func (p *Provisioner) provisionWorkflow(dctx dbos.DBOSContext, input ProvisionIn
 	return ProvisionResult{InstanceID: boot.InstanceID, PublicIP: boot.PublicIP, Status: statusRunning}, nil
 }
 
-// bootstrapAndCustody resolves the tenant's alias, runs the real EC2+k3s
-// bootstrap, and custodies the k3s admin token (encrypted) — all within one
-// step so the token never becomes a DBOS step-output checkpoint.
+// bootstrapAndCustody does the bootstrap and token custody in a single DBOS step
+// so the k3s admin token never becomes a step-output checkpoint.
 func (p *Provisioner) bootstrapAndCustody(c context.Context, input ProvisionInput) (bootstrapResult, error) {
 	sc := p.scoped(c, input)
 	alias, err := p.aliases.Get(sc, input.CloudProviderAlias)
@@ -152,11 +148,10 @@ func (p *Provisioner) bootstrapAndCustody(c context.Context, input ProvisionInpu
 	status, err := eruncommon.InitCloudContext(ectx, store, params, eruncommon.CloudContextDependencies{
 		RunAWS:     p.awsRunner(c, alias.Credentials),
 		RunKubectl: func(eruncommon.Context, []string) error { return nil },
-		// Deterministic k3s admin token derived from the context id: a re-run
-		// (durable workflow resuming after a crash, reusing the existing tagged
-		// instance) re-derives the SAME token the instance baked, so custody is
-		// idempotent. Domain-separated from encryption; never stored in the DBOS
-		// checkpoint.
+		// Deterministic token from the context id: a crash-resumed re-run (reusing
+		// the existing tagged instance) re-derives the SAME token the instance
+		// already baked, so custody stays idempotent. Domain-separated from
+		// encryption.
 		NewToken: func() string { return p.cipher.DeriveToken("k3s-admin-token:" + input.ContextID) },
 	})
 	if err != nil {
@@ -186,9 +181,6 @@ func (p *Provisioner) scoped(c context.Context, input ProvisionInput) context.Co
 	})
 }
 
-// awsRunner returns a CloudContextDependencies.RunAWS that shells the aws CLI
-// with the tenant's decrypted credentials, optionally pinned at a local emulator
-// endpoint (floci) for verification.
 func (p *Provisioner) awsRunner(ctx context.Context, credentialsJSON string) func(eruncommon.Context, eruncommon.CloudProviderConfig, string, []string) (string, error) {
 	return func(_ eruncommon.Context, _ eruncommon.CloudProviderConfig, region string, args []string) (string, error) {
 		argv := []string{"--region", region}
@@ -230,10 +222,9 @@ func awsEnv(credentialsJSON string) []string {
 	return env
 }
 
-// aliasStore is the minimal eruncommon.CloudContextStore InitCloudContext needs
-// to resolve the provider for an alias. It never persists (SaveERunConfig is a
-// no-op): the provisioner captures InitCloudContext's returned identity and
-// writes it to the contexts table itself.
+// aliasStore is the minimal CloudContextStore InitCloudContext needs to resolve
+// the provider for an alias. SaveERunConfig is intentionally a no-op: the
+// provisioner writes the returned identity to the contexts table itself.
 type aliasStore struct {
 	alias    string
 	provider string

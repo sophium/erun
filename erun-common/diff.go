@@ -83,10 +83,8 @@ type DiffCommit struct {
 type DiffOptions struct {
 	Scope          string `json:"scope,omitempty"`
 	SelectedCommit string `json:"selectedCommit,omitempty"`
-	// Target selects which repository to diff. "" or "env" diffs the
-	// environment's runtime working directory (the default behaviour).
-	// "erun" diffs the contribute-mode clone at $HOME/git/erun inside
-	// the environment.
+	// Target selects which repo to diff: "env" (default) the environment's
+	// runtime working directory, "erun" the contribute-mode erun clone.
 	Target string `json:"target,omitempty"`
 }
 
@@ -95,9 +93,8 @@ const (
 	DiffTargetERun = "erun"
 )
 
-// NormalizeDiffTarget canonicalizes the diff target string. Empty input
-// resolves to "env" (the historical default) so callers that omit the
-// field keep their existing behavior.
+// NormalizeDiffTarget canonicalizes the diff target; empty resolves to the
+// historical "env" default.
 func NormalizeDiffTarget(target string) string {
 	switch strings.TrimSpace(target) {
 	case DiffTargetERun:
@@ -107,10 +104,8 @@ func NormalizeDiffTarget(target string) string {
 	}
 }
 
-// ResolveDiffTargetRoot returns the working directory the diff tool
-// should operate on for a given target. envRoot is the env's runtime
-// repo path; homeDir is the env's $HOME (used to locate the contribute
-// clone).
+// ResolveDiffTargetRoot returns the working directory the diff tool should
+// operate on for the given target.
 func ResolveDiffTargetRoot(target, envRoot, homeDir string) (string, error) {
 	switch NormalizeDiffTarget(target) {
 	case DiffTargetERun:
@@ -362,17 +357,10 @@ func ParseGitDiff(raw string) DiffResult {
 	return result
 }
 
-// reorderFilesByTree returns files reordered to follow the file-leaf order of
-// the diff tree (directory-grouped, pre-order DFS). The changed-files list the
-// desktop renders is driven by Tree, while the scrollable diff panel is driven
-// by Files; parsing emits Files in raw `git diff` order (tracked changes in
-// git's order, untracked files appended last), so the two diverge whenever an
-// untracked file belongs to a directory that already appears earlier in the
-// tree. Aligning Files to the tree's leaf order makes both panels agree.
-//
-// Any file whose path is not represented in the tree (e.g. empty/odd paths
-// BuildDiffTree skips) is preserved in its original order and appended at the
-// end so no file is dropped.
+// reorderFilesByTree aligns Files to the tree's file-leaf order so the
+// desktop's two panels agree: its changed-files list is driven by Tree and its
+// diff panel by Files, which otherwise diverge for untracked files (parsing
+// appends them last, out of tree order).
 func reorderFilesByTree(files []DiffFile, tree []DiffTreeNode) []DiffFile {
 	if len(files) <= 1 {
 		return files

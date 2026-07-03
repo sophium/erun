@@ -30,21 +30,10 @@ import type { UIEnvTrace, UISelection } from '@/types';
 import { LoadEnvTrace } from '../../../wailsjs/go/main/App';
 import { ClipboardSetText } from '../../../wailsjs/runtime/runtime';
 
-// DebugPanel is the Diagnostics console: two separate,
-// copyable diagnostic surfaces designed to be pasted into an error report.
-//
-//   - erun trace — the selected env's persistent trace log
-//     (~/.erun/<tenant>/<env>/trace.log), written by erun itself at full
-//     trace verbosity on every env-scoped invocation (always on),
-//     readable at any time — including for commands that ran before this
-//     console was opened. Host file for local envs, in-pod file
-//     (reachability-gated) for remote.
-//   - UI trace — the in-app Redux action history (the packaged WebView has
-//     no Redux DevTools).
-//
-// It replaces the old raw-PTY mirror, which rendered the active session's
-// byte stream and turned the panel into ANSI gibberish whenever the AI tab's
-// TUI was active. The console never reads PTY bytes at all now.
+// DebugPanel is the Diagnostics console: two copyable surfaces meant to be
+// pasted into a bug report. The erun trace is always-on and covers commands
+// that ran before the console was opened (remote envs are reachability-gated);
+// the UI trace exists because the packaged WebView has no Redux DevTools.
 
 const debugSplitterClassName =
   'relative cursor-row-resize bg-[oklch(0.06_0_0)] before:absolute before:left-0 before:right-0 before:top-1 before:h-px before:bg-transparent before:transition-colors hover:before:bg-[oklch(0.36_0_0)] [.is-resizing-debug_&]:before:bg-[oklch(0.46_0_0)]';
@@ -150,8 +139,6 @@ function DiagnosticsTabButton({
   );
 }
 
-// useStickToBottom keeps the pane pinned to its newest line unless the user
-// scrolled up to read.
 function useStickToBottom(content: string): {
   outputRef: React.RefObject<HTMLDivElement | null>;
   handleScroll: React.UIEventHandler<HTMLDivElement>;
@@ -218,10 +205,9 @@ function CopyButton({
   );
 }
 
-// CopyReportButton assembles the one-click bug report: app
-// build, the selected env's identity/state, a fresh erun-trace read (so the
-// report is current even between poll ticks), and the UI action history —
-// one paste-ready block, available from either tab.
+// CopyReportButton produces the one-click bug report. It re-reads the erun
+// trace fresh rather than reusing the polled copy, so the report stays
+// current even between poll ticks.
 function CopyReportButton({ selection }: { selection: UISelection | null }): React.ReactElement {
   const selectInitialState = React.useMemo(
     () => stateApi.endpoints.getInitialState.select(undefined),
@@ -290,9 +276,6 @@ function CopyReportButton({ selection }: { selection: UISelection | null }): Rea
   );
 }
 
-// useEnvTracePoll loads the selected env's persistent trace log and keeps
-// it fresh while the pane is visible, so a running command's lines arrive
-// without manual refresh.
 function useEnvTracePoll(
   tenant: string,
   environment: string,
@@ -321,25 +304,21 @@ function useEnvTracePoll(
   return { trace, refresh };
 }
 
-// ErunTracePane renders the selected env's persistent trace log.
 function ErunTracePane({ selection }: { selection: UISelection | null }): React.ReactElement {
   const tenant = selection?.tenant ?? '';
   const environment = selection?.environment ?? '';
   const { trace, refresh } = useEnvTracePoll(tenant, environment);
   const content = trace?.content ?? '';
-  // The Clear view baseline is owned by useErunTraceBaseline; the
-  // pane only renders its result. Refresh / Copy / Copy report all keep
-  // reading the full `content`, so a cleared view never truncates a report.
+  // Clear is view-only: Copy and Copy report read the full content, so a
+  // cleared view never truncates a bug report.
   const { cleared, rotatedOut, visibleContent, clear, showAll } = useErunTraceBaseline(
     `${tenant}/${environment}`,
     content,
   );
   const { outputRef, handleScroll } = useStickToBottom(visibleContent);
 
-  // The toolbar (and the since-cleared notice) sit in their own grid rows,
-  // outside the scroll region: stick-to-bottom would otherwise scroll the
-  // actions out the top the moment the log outgrows the pane — an affordance
-  // that exists but cannot be seen does not exist.
+  // Toolbar and the cleared notice sit in their own grid rows, outside the
+  // scroll region, so stick-to-bottom cannot scroll the actions out of view.
   return (
     <div
       className={cn(
@@ -373,11 +352,9 @@ function ErunTracePane({ selection }: { selection: UISelection | null }): React.
   );
 }
 
-// ClearedNotice surfaces why earlier lines vanished after Clear and offers a
-// one-click return to the full view. Visibility of system status
-// (Nielsen #1) + user control / reversibility (Nielsen #3): the baseline hides
-// scrollback but the operator can always recover it, and the persistent log is
-// untouched. Lives in its own pinned grid row so it is never scrolled away.
+// ClearedNotice explains why earlier lines vanished after Clear and offers a
+// one-click return to the full view: Clear only hides scrollback, the
+// persistent log is untouched and always recoverable.
 function ClearedNotice({
   rotatedOut,
   onShowAll,
@@ -479,9 +456,8 @@ function ErunTraceBody({
     return null;
   }
   if (trace.available) {
-    // visibleContent is the cleared-view slice (== trace.content when not
-    // cleared). When cleared and nothing new has arrived yet, say so rather
-    // than rendering a blank pane (visibility of system status).
+    // When cleared and nothing new has arrived yet, say so rather than
+    // render a blank pane.
     return (
       <>
         <TraceNotice notice={trace.notice} />
@@ -503,9 +479,8 @@ function ErunTraceBody({
   );
 }
 
-// TraceNotice surfaces a non-fatal caveat about the shown trace: e.g. the
-// in-pod side of a remote env could not be included. The content below is
-// still real — the notice keeps it honest.
+// TraceNotice surfaces a non-fatal caveat (e.g. a remote env's in-pod trace
+// could not be included); the content shown is still real.
 function TraceNotice({ notice }: { notice?: string }): React.ReactElement | null {
   if (!notice) {
     return null;
@@ -513,9 +488,8 @@ function TraceNotice({ notice }: { notice?: string }): React.ReactElement | null
   return <p className="m-0 mb-1 text-[oklch(0.6_0_0)] italic">{notice}</p>;
 }
 
-// UITracePane renders the Redux action history, polling the module buffer
-// while visible (the buffer is deliberately outside Redux — see
-// uiTraceBuffer.ts).
+// The UI trace buffer lives outside Redux (see uiTraceBuffer.ts), so this
+// pane polls it instead of subscribing to a selector.
 function UITracePane(): React.ReactElement {
   const [entries, setEntries] = React.useState<UITraceEntry[]>(() => uiTraceEntries());
   const generationRef = React.useRef(uiTraceGeneration());

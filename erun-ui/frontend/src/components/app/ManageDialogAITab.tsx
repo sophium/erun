@@ -15,8 +15,8 @@ import type { UIEnvironmentConfig } from '@/types';
 
 type ManageDialog = AppState['manageDialog'];
 
-// claudeOverrideResetValues clears every per-env Claude override the AI tab
-// edits; "Reset all to defaults" must stay in sync with the rendered fields.
+// Must list every per-env Claude override the AI tab edits, or "Reset all to
+// defaults" leaves some behind.
 const claudeOverrideResetValues: Partial<UIEnvironmentConfig['claude']> = {
   useMantle: undefined,
   useBedrock: undefined,
@@ -128,9 +128,8 @@ function ClaudeVerboseDebugField({
   disabled?: boolean;
   onChange: (value: true | undefined) => void;
 }): React.ReactElement {
-  // A pure on/off launch toggle with no global default to inherit, so a
-  // checkbox — not the tri-state select the *bool fields use. Off persists as
-  // absent (absent ≡ off, no information lost).
+  // No global default to inherit, so off persists as absent (absent ≡ off)
+  // rather than as a tri-state override like the sibling *bool fields.
   return (
     <CheckboxField
       id="environment-config-claude-verbose-debug"
@@ -156,12 +155,10 @@ function ClaudeDefaultModelField({
   disabled?: boolean;
   onChange: (value: string | undefined) => void;
 }): React.ReactElement {
-  // The option set is the env's available models (recognition over recall):
-  // the per-env override when one is set, else the default available set —
-  // the same set the launch-side resolution honours, so the selector can
-  // never pick a --model the env does not expose (error prevention). A
-  // stored model that fell out of that set stays visible as a flagged
-  // option (visibility of system status) and is dropped at launch.
+  // The selectable models mirror what launch-side resolution honours, so an
+  // operator can never pick a model the env does not expose. A stored model
+  // no longer in that set stays visible as a flagged option but is dropped at
+  // launch.
   const available = (claude.models?.length ?? 0) > 0 ? (claude.models ?? []) : defaults.models;
   // "Default" starts on the first available model rather than the agent's own
   // default, so name it "Default (<model>)" to show which model that is.
@@ -205,9 +202,6 @@ function ClaudeEffortField({
   disabled?: boolean;
   onChange: (value: string | undefined) => void;
 }): React.ReactElement {
-  // Effort is a fixed, known level set, so a constrained selector (recognition
-  // over recall) is the right control rather than free text. "Default (<level>)"
-  // mirrors the sibling Claude fields' override/reset pattern (Nielsen #4).
   return (
     <SelectField
       id="environment-config-claude-effort"

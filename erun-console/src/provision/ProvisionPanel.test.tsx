@@ -3,11 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ProvisionPanel } from './ProvisionPanel';
 
-// Component tests for the provisioning panel. `fetch` is mocked per request
-// (matched on method + URL) so each flow exercises the real client + controller
-// against the documented API shapes (api-protocol.md): PUT alias → 204,
-// POST /v1/contexts → 202 with the registered context at `provisioning`, then
-// GET /v1/contexts/{id} polled until `running`/`failed`.
+// fetch is mocked at the boundary so each flow exercises the real client +
+// controller against the api-protocol.md contract.
 
 interface MockReq {
   method: string;
@@ -32,8 +29,6 @@ function noContentResponse(): Response {
   } as unknown as Response;
 }
 
-// The client always calls fetch with a string URL, so resolving the recorded
-// URL only needs the string and URL cases (no Request objects in these flows).
 function requestUrl(input: string | URL): string {
   return input instanceof URL ? input.href : input;
 }
@@ -118,8 +113,7 @@ describe('ProvisionPanel alias form', () => {
 describe('ProvisionPanel create-context flow', () => {
   it('POSTs the context then polls getContext and shows the final running status', async () => {
     vi.useFakeTimers();
-    // POST → 202 provisioning; first GET still provisioning (so the poll loop is
-    // exercised), second GET running (terminal).
+    // First GET stays provisioning so the poll loop iterates before the terminal running.
     let getCount = 0;
     const calls = mockFetch((req) => {
       if (req.method === 'POST') {
@@ -136,8 +130,8 @@ describe('ProvisionPanel create-context flow', () => {
     });
     fireEvent.change(screen.getByLabelText('Region'), { target: { value: 'eu-west-2' } });
 
-    // The click triggers the POST + first poll, whose promise resolutions update
-    // state; flush them inside act so React applies them before we assert.
+    // Flush the POST + first poll's promise resolutions inside act so React
+    // applies the state updates before we assert.
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Provision context' }));
       await Promise.resolve();
@@ -145,8 +139,6 @@ describe('ProvisionPanel create-context flow', () => {
     });
     expect(screen.getByText('Provisioning primary…')).toBeInTheDocument();
 
-    // Advancing the poll interval fires the next GET, which returns `running`.
-    // Wrapped in act so the poll-driven state update is flushed inside React.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2000);
     });
@@ -182,8 +174,7 @@ describe('ProvisionPanel create-context flow', () => {
     fireEvent.change(screen.getByLabelText('Region'), { target: { value: 'eu-west-2' } });
     fireEvent.click(screen.getByRole('button', { name: 'Provision context' }));
 
-    // The 202 already carries `failed`, so the terminal state is shown without
-    // polling — both the status line and the reason render.
+    // The 202 already carries `failed`, so the terminal state renders without polling.
     expect(await screen.findByText('primary failed to provision.')).toBeInTheDocument();
     expect(screen.getByText('run-instances: InsufficientInstanceCapacity')).toBeInTheDocument();
   });

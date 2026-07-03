@@ -51,25 +51,18 @@ func TestRecordAIActivityDebounce(t *testing.T) {
 				t.Fatalf("unexpected immediate emit: %+v", emits.events(aiActivityEvent))
 			}
 
-			// Simulate 5 s of sustained output by backdating the
-			// session's aiActiveSince before the second record call.
 			app.mu.Lock()
 			managed.aiActiveSince = time.Now().Add(-(aiActivitySustainedThreshold + time.Second))
 			app.mu.Unlock()
 			app.recordAIActivity(managed)
 			assertBusyEmit(t, emits.events(aiActivityEvent), tc.kind, tc.wantEmits)
 
-			// finalizeAIActivity must release a latched busy=true. For
-			// non-AI kinds it must remain a no-op (no emits at all).
 			app.finalizeAIActivity(managed)
 			assertFinalizeEmit(t, emits.events(aiActivityEvent), tc.kind, tc.wantEmits)
 		})
 	}
 }
 
-// assertBusyEmit checks the emit set after sustained output: an AI session
-// must have produced exactly one busy=true payload echoing the selection,
-// while a silent kind must have produced nothing.
 func assertBusyEmit(t *testing.T, busyEvents []any, kind sessionKind, wantEmits bool) {
 	t.Helper()
 
@@ -94,8 +87,6 @@ func assertBusyEmit(t *testing.T, busyEvents []any, kind sessionKind, wantEmits 
 	}
 }
 
-// assertFinalizeEmit checks the emit set after finalize: an AI session must
-// now show a trailing busy=false release, while a silent kind stays empty.
 func assertFinalizeEmit(t *testing.T, allEvents []any, kind sessionKind, wantEmits bool) {
 	t.Helper()
 

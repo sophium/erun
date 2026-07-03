@@ -74,9 +74,8 @@ type BootstrapInitParams struct {
 	NoGit                    bool
 	KubernetesContext        string
 	ContainerRegistry        string
-	// Type, when set, is the canonical environment type for the new env.
-	// Takes precedence over the legacy Remote bool. When unset, the bootstrap
-	// derives the type from Remote (true→remote-agent, false→local-agent) for
+	// Type is the canonical environment type and takes precedence over the
+	// legacy Remote bool; when unset the type is derived from Remote for
 	// backward compatibility with --remote flag callers.
 	Type                    EnvironmentType
 	Remote                  bool
@@ -89,15 +88,12 @@ type BootstrapInitParams struct {
 	ConfirmRemoteKeyImport  *bool
 	AutoApprove             bool
 	ResolveTenant           bool
-	// DisableBuildScript sets EnvConfig.DisableBuildScript on the new env so
-	// erun build ignores any project build.sh and resolves docker/release
-	// builds directly.
-	DisableBuildScript bool
+	DisableBuildScript      bool
 }
 
-// ResolvedType returns the new env's type. When Type is explicitly set it is
-// the source of truth; otherwise Remote selects between local-agent and
-// remote-agent, matching the pre-type behavior of `erun init [--remote]`.
+// ResolvedType returns the new env's type: an explicit Type wins, otherwise it
+// is derived from Remote to preserve the pre-type behavior of `erun init
+// [--remote]`.
 func (p BootstrapInitParams) ResolvedType() EnvironmentType {
 	if p.Type.IsValid() {
 		return p.Type
@@ -108,9 +104,8 @@ func (p BootstrapInitParams) ResolvedType() EnvironmentType {
 	return EnvironmentTypeLocalAgent
 }
 
-// RemoteWorktree reports whether the new env's worktree will live outside
-// the local machine. Derived from ResolvedType so callers can ignore which
-// shape (--type or --remote) was used to specify the env.
+// RemoteWorktree reports whether the new env's worktree will live outside the
+// local machine.
 func (p BootstrapInitParams) RemoteWorktree() bool {
 	return p.ResolvedType() != EnvironmentTypeLocalAgent
 }
@@ -368,11 +363,10 @@ func (s *bootstrapRunState) run() error {
 	return nil
 }
 
-// emitInitializingTrace emits the umbrella `==> Initializing <tenant>/<env>`
-// line that the desktop's activity-queue trace handler registers as an
-// in-flight init activity. Mirrors RunHelmDeploy's `==> Deploying` line.
-// No-op when tenant/env have not been resolved yet (early validation
-// failure) — there is nothing meaningful to register.
+// emitInitializingTrace records the in-flight init activity: the desktop's
+// activity-queue trace handler parses this `==> Initializing` line (mirrors
+// RunHelmDeploy's `==> Deploying`). No-op before tenant/env resolve, when there
+// is nothing to register.
 func (s *bootstrapRunState) emitInitializingTrace() {
 	if s.tenant == "" || s.envName == "" {
 		return
@@ -380,9 +374,8 @@ func (s *bootstrapRunState) emitInitializingTrace() {
 	s.runner.Context.Info("==> Initializing " + s.tenant + "/" + s.envName)
 }
 
-// emitInitializationFailedTrace finalizes the umbrella activity entry on
-// post-Initializing failure (config-write failure, devops asset failure,
-// embedded deploy failure). No-op when no Initializing line was emitted.
+// emitInitializationFailedTrace finalizes the umbrella activity entry when init
+// fails after the Initializing line was emitted; no-op otherwise.
 func (s *bootstrapRunState) emitInitializationFailedTrace() {
 	if s.tenant == "" || s.envName == "" {
 		return
@@ -773,8 +766,7 @@ func (s *bootstrapRunState) createEnvConfig() error {
 		return err
 	}
 	s.runner.Context.Trace("Adding new environment")
-	// Every env type records localRepoPath: with TenantConfig.projectroot
-	// removed, the env's own localRepoPath is the single source for cwd→tenant
+	// Every env type records localRepoPath — the single source for cwd→tenant
 	// matching, the open repo path, and the deploy worktree repo name. For
 	// local-agent envs it is also the hostPath mounted into the pod; remote/runtime
 	// envs use a PVC worktree, so the value is the init-time project root (its
@@ -854,10 +846,9 @@ func (s *bootstrapRunState) updateRemoteEnvConfig() {
 	if !s.params.RemoteWorktree() {
 		return
 	}
-	// A remote env carries no host repo path in its persisted config
-	// (LocalRepoPath is laptop-only; the worktree lives in-pod). The bootstrap
-	// run resolves the project root from params/tenant via projectRoot(), so
-	// there is no longer an env-config field to thread it through here.
+	// A remote env persists no host repo path: LocalRepoPath is laptop-only and
+	// the worktree lives in-pod, so the project root is resolved from
+	// params/tenant rather than threaded through env config here.
 	if runtimeVersion := strings.TrimSpace(s.params.RuntimeVersion); runtimeVersion != "" && s.envConfig.RuntimeVersion != runtimeVersion {
 		s.envConfig.RuntimeVersion = runtimeVersion
 		s.envConfigChanged = true
@@ -936,12 +927,11 @@ func (s *bootstrapRunState) projectRoot() string {
 	return strings.TrimSpace(s.params.ProjectRoot)
 }
 
-// ensureDevopsAssets used to scaffold a per-tenant devops module and chart
-// copy here. That scaffold is retired: environments deploy the
-// published erun-devops chart, and custom toolchains are a user-authored
-// Dockerfile FROM the published runtime image (see the erun-build-env
-// skill). Tenants with an existing scaffolded module keep working — deploy
-// prefers a local chart when one exists.
+// ensureDevopsAssets no longer scaffolds a per-tenant devops module: environments
+// deploy the published erun-devops chart, and custom toolchains are a user-authored
+// Dockerfile FROM the published runtime image (see the erun-build-env skill).
+// Tenants with an existing scaffolded module keep working — deploy prefers a
+// local chart when one exists.
 func (s *bootstrapRunState) ensureDevopsAssets() error {
 	projectRoot := s.projectRoot()
 	if s.params.RemoteWorktree() {
@@ -1367,15 +1357,12 @@ func (s bootstrapRunner) selectTenant(params BootstrapInitParams, tenants []Tena
 	return selection, nil
 }
 
-// findTenantForDirectory resolves which tenant owns the working directory by
-// matching it against each tenant's environments' local repo paths
-// (EffectiveLocalRepoPath), longest match wins. It replaces the old
-// match against TenantConfig.projectroot: a tenant can host both local and
-// remote envs, so the host path belongs on the env, not the tenant. An env
-// with no local repo path (a remote/runtime env with no host worktree) cannot
-// own a host directory and is skipped. Ties across tenants at the same
-// longest path are ambiguous and resolve to no match, so the caller falls back
-// to the default-tenant / selection path rather than guessing.
+// findTenantForDirectory resolves which tenant owns the working directory,
+// longest matching repo path wins. The host path lives on the env, not the
+// tenant, because a tenant can host both local and remote envs; a remote env
+// with no host worktree owns no directory. Ties across tenants resolve to no
+// match, so the caller falls back to the default-tenant / selection path rather
+// than guessing.
 func findTenantForDirectory(dir string, tenants []TenantConfig, envsByTenant map[string][]EnvConfig) (TenantConfig, bool) {
 	cleanDir := filepath.Clean(dir)
 	bestTenant := -1

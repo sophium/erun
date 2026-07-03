@@ -8,13 +8,9 @@ import (
 	"time"
 )
 
-// TestActivateEnvTrace pins the per-env trace capture:
-// the tee is always on for env-scoped invocations and mirrors the full
-// trace stream — including lines the terminal verbosity suppresses — into
-// ~/.erun/<tenant>/<env>/trace.log, stamped per line; dry-run only names
-// the path. The real-write branches are unreachable from the dry-run
-// integration harness by design, so this white-box test owns them; the
-// dry-run trace contract is locked by the open goldens.
+// TestActivateEnvTrace owns the real-write branches, which the dry-run
+// integration harness cannot reach by design; the dry-run trace contract
+// itself is locked by the open goldens.
 func TestActivateEnvTrace(t *testing.T) {
 	t.Run("tee captures suppressed trace lines, stamped, with no opt-in", func(t *testing.T) {
 		home := t.TempDir()
@@ -87,8 +83,6 @@ func TestActivateEnvTrace(t *testing.T) {
 	})
 }
 
-// assertTraceLogContains fails when content is missing any of the wanted
-// substrings, reporting the want and the full content.
 func assertTraceLogContains(t *testing.T, content string, wants ...string) {
 	t.Helper()
 	for _, want := range wants {
@@ -98,8 +92,6 @@ func assertTraceLogContains(t *testing.T, content string, wants ...string) {
 	}
 }
 
-// assertTraceLogLinesStamped fails unless every non-blank line begins with an
-// RFC3339 timestamp followed by a space.
 func assertTraceLogLinesStamped(t *testing.T, content string) {
 	t.Helper()
 	for _, line := range strings.Split(strings.TrimSpace(content), "\n") {

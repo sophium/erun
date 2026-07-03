@@ -10,10 +10,9 @@ import (
 	"time"
 )
 
-// resolveDockerBuildRegistryForEnvironment resolves the BUILD-marked registry
-// images are tagged and pushed to. An environment whose effective registry
-// list marks no build registry cannot build: the returned error is the
-// user-facing contract, surfaced identically in dry-run and real runs.
+// resolveDockerBuildRegistryForEnvironment errors when no registry is marked
+// for the build role; that message is the user-facing contract and must read
+// identically in dry-run and real runs.
 func resolveDockerBuildRegistryForEnvironment(projectRoot, environment string) (string, error) {
 	list, err := effectiveContainerRegistries(projectRoot, environment)
 	if err != nil {
@@ -139,19 +138,12 @@ func IsDockerCreatePackageDenied(message string) bool {
 	return strings.Contains(strings.ToLower(message), "create_package")
 }
 
-// IsDockerScopeDenied reports whether a registry auth error matches the
-// GitHub-specific scope-mismatch case where the docker login token lacks
-// write:packages (or otherwise doesn't satisfy the required scopes).
-// This is distinct from IsDockerCreatePackageDenied (org-policy "cannot
-// create a new package") and from a missing-credentials case (which a
-// generic re-login would fix). When true, callers should attempt
-// TryGHCRNamespaceLogin to re-auth as the namespace owner via gh, since
-// the prompt-driven `docker login` flow will not change which token
-// docker holds.
-//
-// Markers are intentionally narrow to avoid swallowing the generic
-// "insufficient_scope" / "denied" cases that the prompt-retry path
-// handles correctly.
+// IsDockerScopeDenied reports the GitHub scope-mismatch case where docker's
+// login token lacks write:packages. It stays deliberately narrow — distinct
+// from the org-policy create_package denial and from missing credentials a
+// re-login fixes — because only this case warrants a namespace-owner re-auth
+// (TryGHCRNamespaceLogin) via gh; a prompt-driven docker login cannot change
+// which token docker already holds.
 func IsDockerScopeDenied(message string) bool {
 	msg := strings.ToLower(message)
 	if strings.Contains(msg, "create_package") {
@@ -224,20 +216,15 @@ func (e DockerRegistryAuthError) Unwrap() error {
 	return e.Err
 }
 
-// dockerVersionRegistryPattern matches strings that look like a semantic version
-// (e.g. "1.0.51-snapshot-20260505151841") rather than a Docker registry hostname
-// (e.g. "ghcr.io", "docker.io", "localhost:5000").  Such strings arise when helm
-// chart templates use the app version as a namespace prefix:
-//
-//	{{ printf "%s/image-name:%s" .Chart.AppVersion .Chart.AppVersion }}
-//
-// A valid Docker registry hostname starts with a letter or is an IP:port pair;
-// it never starts with DIGIT.DIGIT.DIGIT.
+// dockerVersionRegistryPattern flags a value that looks like a semver/snapshot
+// string rather than a registry hostname. Such values leak in when a helm chart
+// uses .Chart.AppVersion as a namespace prefix; a real registry hostname never
+// starts with DIGIT.DIGIT.DIGIT, so that shape is the tell.
 var dockerVersionRegistryPattern = regexp.MustCompile(`^\d+\.\d+\.\d+`)
 
-// dockerRegistryLooksLikeVersion reports whether registry appears to be a
-// semver/snapshot version string masquerading as a registry hostname.  Docker
-// will fail to push to such addresses because they are not resolvable hostnames.
+// dockerRegistryLooksLikeVersion guards against a version string masquerading
+// as a registry hostname; pushing to such an address fails because it is not a
+// resolvable host.
 func dockerRegistryLooksLikeVersion(registry string) bool {
 	registry = strings.TrimSpace(registry)
 	if registry == "" {

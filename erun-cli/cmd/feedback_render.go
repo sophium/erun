@@ -31,9 +31,8 @@ func addOutputFlag(cmd *cobra.Command) {
 	cmd.PersistentFlags().String("output", "text", outputFlagUsage)
 }
 
-// commandOutputMode reads the universal --output flag. An unparsable or unset
-// value falls back to text so output rendering never blocks a command; the
-// flag value is validated separately where it must be strict.
+// commandOutputMode falls back to text on an unset or unparsable value so output
+// rendering never blocks; strict --output validation lives elsewhere.
 func commandOutputMode(cmd *cobra.Command) common.OutputMode {
 	raw, err := cmd.Flags().GetString("output")
 	if err != nil {
@@ -77,12 +76,9 @@ func commandVerbosity(cmd *cobra.Command) int {
 	return verbosity
 }
 
-// shouldSilenceNoShellOutput keeps an `eval "$(erun open ... --no-shell)"`
-// alias quiet on stderr. The audit and trace lines are useful when the user
-// is actively auditing (-v / -vv) or previewing (--dry-run), but they surface
-// in the wrapping terminal on every alias invocation, which the docs already
-// promise is silent. Returns true only when the user has opted into none of
-// the verbose paths.
+// shouldSilenceNoShellOutput keeps an `eval "$(erun open ... --no-shell)"` alias
+// silent on stderr as the docs promise; its audit/trace lines would otherwise
+// surface in the wrapping terminal on every alias invocation.
 func shouldSilenceNoShellOutput(cmd *cobra.Command, userAskedForVerbose bool) bool {
 	return !userAskedForVerbose && !isDryRunCommand(cmd) && isNoShellCommand(cmd)
 }

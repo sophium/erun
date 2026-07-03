@@ -32,15 +32,10 @@ func TestRoot(t *testing.T) {
 	})
 
 	t.Run("tenant_select_via_stdin", func(t *testing.T) {
-		// Executes selectTenantPrompt (init.go) and the bootstrap's
-		// resolveTenantFromSelection: two tenants are seeded without a
-		// default-tenant root config and the cwd sits outside both project
-		// roots, so the bare root command falls through to the interactive
-		// tenant selection. The piped run takes the plain (non-TTY) select
-		// path; stdin "2\n" picks the second tenant by number, and the
-		// trace then shows the selected tenant's env being (re)initialized.
-		// Scripted stdin is the honest tool here: the scenario exists to
-		// execute the select-prompt body.
+		// Covers the interactive tenant-selection prompt. Seeding two
+		// tenants with no default, plus a cwd outside both project roots,
+		// forces the bare command to fall through to the select prompt,
+		// which only scripted stdin can drive under the non-TTY harness.
 		setup := env.New(t)
 		seedTenantWithoutDefault(t, setup, "alpha", "dev")
 		seedTenantWithoutDefault(t, setup, "beta", "dev")
@@ -53,12 +48,10 @@ func TestRoot(t *testing.T) {
 	})
 
 	t.Run("tenant_select_initialize_current_project_via_stdin", func(t *testing.T) {
-		// Executes selectTenantPrompt's "Initialize current project" arm:
-		// stdin "3\n" picks the initialize option (the third plain-select
-		// entry) by number. The cwd is not a git repository, so the bootstrap must
-		// stop with the "erun config is not initialized" guidance instead
-		// of initializing anything. Scripted stdin is the honest tool here:
-		// the initialize arm only exists inside the interactive prompt.
+		// Covers the select prompt's "Initialize current project" arm.
+		// The cwd is not a git repo, so the bootstrap must stop with the
+		// "erun config is not initialized" guidance rather than initialize;
+		// only scripted stdin can reach this arm.
 		setup := env.New(t)
 		seedTenantWithoutDefault(t, setup, "alpha", "dev")
 		seedTenantWithoutDefault(t, setup, "beta", "dev")

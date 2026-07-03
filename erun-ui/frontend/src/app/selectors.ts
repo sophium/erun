@@ -3,9 +3,6 @@ import type { UISelection } from '@/types';
 import type { RootState } from './store';
 import { normalizeDialogValue, selectionKey } from './versionSuggestions';
 
-// Pure selectors derived from store state, kept off the imperative
-// controller so they stay composable and testable.
-
 export const selectEnvironmentExists = (
   state: RootState,
   tenant: string,
@@ -30,18 +27,14 @@ export const selectSelectedIsPendingFor = (
 };
 
 // selectPendingOpenAfterDeploy returns the env queued to open once its
-// create-time deploy lands, or null. The create→deploy→open gate
-// reads it when an `environment-deployed` signal arrives.
+// create-time deploy lands — the create→deploy→open gate — or null.
 export const selectPendingOpenAfterDeploy = (state: RootState): UISelection | null =>
   state.selection.pendingOpenAfterDeploy;
 
-// selectEnvHasFailedDeploy reports whether the env currently has a failed
-// deploy in the activity queue. Reopening a dead default tab (ai/local/erun)
-// re-runs `erun open`, which re-deploys; doing that for an env whose deploy
-// just failed re-fails the same way (and, across tabs, storms parallel
-// re-deploys). The click-driven respawn uses this to refuse — the same
-// terminal-state auto-reconnect stops on (reconnectBlockedByDeployFailure)
-// — leaving recovery to the explicit failed-deploy card actions.
+// selectEnvHasFailedDeploy lets tab respawn and auto-reconnect refuse an env
+// whose deploy just failed: reopening a dead tab re-runs open and re-deploys,
+// which would re-fail in a loop and storm parallel re-deploys across tabs.
+// Recovery is left to the explicit failed-deploy card actions.
 export const selectEnvHasFailedDeploy = (
   state: RootState,
   tenant: string,
@@ -74,7 +67,6 @@ export const selectManageRuntimeImage = (state: RootState, version: string): str
 };
 
 // selectDialogKubernetesContext picks the env-dialog k8s context to display.
-// Used by the boot/refresh thunks that update the dialog after a list refresh.
 export const selectDialogKubernetesContext = (state: RootState, contexts: string[]): string => {
   const current = normalizeDialogValue(state.environmentDialog.kubernetesContext);
   if (current && contexts.includes(current)) {

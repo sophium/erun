@@ -13,7 +13,6 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// seedUpgradeTenant writes the tenant + global config for the upgrade tests.
 func seedUpgradeTenant(t testing.TB, setup env.Setup, tenant, defaultEnv string) string {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -27,8 +26,6 @@ func seedUpgradeTenant(t testing.TB, setup env.Setup, tenant, defaultEnv string)
 	return tenantDir
 }
 
-// seedUpgradeEnv writes one env config with explicit upgrade fields. body is
-// the env config.yaml contents minus the name (added here).
 func seedUpgradeEnv(t testing.TB, setup env.Setup, tenant, environment, body string) {
 	t.Helper()
 	envDir := filepath.Join(setup.ConfigHome, "erun", tenant, environment)

@@ -16,12 +16,9 @@ type cloudCommandStoreInterface interface {
 	common.EnvironmentCloudAliasStore
 }
 
-// cloudDependencies wires the CLI's cloud-command dependencies. The AWS runners
-// and the Cloudflare verifier/account-lister default inside erun-common, but the
-// secret store is nil unless a transport wires one — so Cloudflare alias init,
-// login, and doctor repair can persist and read the scoped token. A missing
-// config dir leaves the store nil and those Cloudflare operations fail clearly.
-// This mirrors the MCP transport's wiring in erun-mcp/cloud.go.
+// cloudDependencies tolerates a missing secret store: when it can't be created
+// the store stays nil, and Cloudflare operations that need the scoped token then
+// fail clearly rather than crashing.
 func cloudDependencies() common.CloudDependencies {
 	deps := common.CloudDependencies{}
 	if store, err := common.DefaultCloudSecretStore(); err == nil {
@@ -146,26 +143,18 @@ func newCloudInitCloudflareCmd(store common.CloudStore, promptRunner PromptRunne
 func runCloudInitCloudflareCommand(ctx common.Context, store common.CloudStore, promptRunner PromptRunner, selectRunner SelectRunner, params common.InitCloudflareCloudProviderParams, deps common.CloudDependencies) error {
 	switch {
 	case !ctx.DryRun && strings.TrimSpace(params.APIToken) == "":
-		// Interactive guided wizard: prompts for the token, verifies it, and
-		// resolves the account/label step by step.
 		var err error
 		params, err = runCloudflareInitWizard(ctx, promptRunner, selectRunner, params, deps)
 		if err != nil {
 			return err
 		}
 	case strings.TrimSpace(params.APIToken) != "" && strings.TrimSpace(params.AccountID) == "":
-		// Non-interactive (flags / dry-run / MCP) with the account omitted:
-		// auto-resolve it from the token, the same as the guided flow.
-		// Under --dry-run this traces the GET /accounts call without contacting
-		// Cloudflare. --token-name is still required (the shared init enforces it).
 		accountID, err := resolveCloudflareAccountNonInteractive(ctx, params.APIToken, deps)
 		if err != nil {
 			return err
 		}
 		params.AccountID = accountID
 	}
-	// The shared init validates, verifies, stores, and saves — and traces the
-	// full plan under --dry-run.
 	provider, err := common.InitCloudflareCloudProvider(ctx, store, params, deps)
 	if err != nil {
 		return err
@@ -177,10 +166,6 @@ func runCloudInitCloudflareCommand(ctx common.Context, store common.CloudStore, 
 	return writeCloudProviderSaved(ctx, provider)
 }
 
-// resolveCloudflareAccountNonInteractive auto-resolves the account ID from the
-// token for the non-interactive path (flags / dry-run / MCP). It requires the
-// token to map to exactly one account; otherwise the caller must pass
-// --account-id. Under --dry-run the underlying lookup is traced, not executed.
 func resolveCloudflareAccountNonInteractive(ctx common.Context, token string, deps common.CloudDependencies) (string, error) {
 	accounts, err := common.ResolveCloudflareAccounts(ctx, token, deps)
 	if err != nil {
@@ -197,10 +182,6 @@ func resolveCloudflareAccountNonInteractive(ctx common.Context, token string, de
 	}
 }
 
-// runCloudflareInitWizard is the guided, step-by-step interactive setup: it
-// points the operator at the token-creation page, takes the token (masked) and
-// verifies it (re-prompting on failure), auto-resolves the account ID from the
-// token, and defaults an editable label. Each step validates before advancing.
 func runCloudflareInitWizard(ctx common.Context, promptRunner PromptRunner, selectRunner SelectRunner, params common.InitCloudflareCloudProviderParams, deps common.CloudDependencies) (common.InitCloudflareCloudProviderParams, error) {
 	out := ctx.Stdout
 	_, _ = fmt.Fprintln(out, "\nAdd a Cloudflare cloud alias")
@@ -242,8 +223,6 @@ func runCloudflareInitWizard(ctx common.Context, promptRunner PromptRunner, sele
 	return params, nil
 }
 
-// verifyCloudflareTokenInteractive prompts for the token (masked) and verifies
-// it, re-prompting in place until a valid token is entered.
 func verifyCloudflareTokenInteractive(ctx common.Context, promptRunner PromptRunner, deps common.CloudDependencies) (string, error) {
 	for {
 		token, err := requiredCloudSecretPrompt(promptRunner, "Cloudflare API token")
@@ -260,9 +239,6 @@ func verifyCloudflareTokenInteractive(ctx common.Context, promptRunner PromptRun
 	}
 }
 
-// resolveCloudflareAccountInteractive auto-resolves the account from the token,
-// shows a picker when the token sees several, and falls back to a manual prompt
-// when none can be listed.
 func resolveCloudflareAccountInteractive(ctx common.Context, promptRunner PromptRunner, selectRunner SelectRunner, token string, deps common.CloudDependencies) (string, error) {
 	accounts, err := common.ResolveCloudflareAccounts(ctx, token, deps)
 	if err != nil || len(accounts) == 0 {
@@ -284,8 +260,6 @@ func resolveCloudflareAccountInteractive(ctx common.Context, promptRunner Prompt
 	return accounts[index].ID, nil
 }
 
-// defaultCloudflareTokenLabel proposes a recognizable label tied to this host
-// and day so the operator can accept it without typing.
 func defaultCloudflareTokenLabel() string {
 	host, _ := os.Hostname()
 	host = strings.TrimSpace(host)
@@ -487,9 +461,6 @@ func runCloudLoginCommand(ctx common.Context, store common.CloudStore, promptRun
 	return writeCloudStatus(ctx, status)
 }
 
-// traceCloudLoginPlan emits the provider-appropriate login plan for dry-run.
-// AWS re-runs the SSO browser login; Cloudflare re-verifies its stored scoped
-// token against the Cloudflare API.
 func traceCloudLoginPlan(ctx common.Context, provider common.CloudProviderConfig) {
 	switch provider.Provider {
 	case common.CloudProviderCloudflare:

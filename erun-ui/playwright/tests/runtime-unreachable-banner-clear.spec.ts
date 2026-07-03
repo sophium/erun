@@ -1,39 +1,28 @@
 import { test, expect } from '../fixtures/erunApp.js';
 import type { Page } from '@playwright/test';
 
-// The "Could not reach the runtime … Deploy the environment to
-// bring it up." warning used to linger while a deploy for that env
-// was already in flight, contradicting the deploy-progress overlay, and stayed
-// up after the runtime became reachable again. The Go side now tags the warning
-// with its env + a stable source and fires an `app-notification-clear` when the
-// state it describes moves on (a deploy for the env starts, or the runtime is
-// reached). This spec locks the frontend contract that backs that clear: a
-// matching clear dismisses the warning, a mismatched one leaves it alone.
-//
-// The events are the same ones the Go side emits (app-notification /
-// app-notification-clear), injected over the EventsEmit seam, so no cluster or
-// real reconnect is needed. The Go decisions that fire these events are covered
-// by env_ensure_test.go and activity_queue_app_test.go.
+// The runtime-unreachable warning used to linger while a deploy for that env was
+// already in flight, and stay up after the runtime came back — contradicting the
+// deploy-progress overlay. The Go side now tags the warning with its env and fires
+// an `app-notification-clear` when that state moves on; a matching clear must dismiss
+// the warning while a mismatched one must not. The Go decisions that fire these
+// events are covered by env_ensure_test.go and activity_queue_app_test.go.
 test.describe('runtime-unreachable banner clears with the deploy lifecycle (#713)', () => {
   const message =
     'Could not reach the runtime for frs/prod: timed out waiting for API port-forward. Deploy the environment to bring it up.';
   const banner = (page: Page) => page.getByText(/Could not reach the runtime for frs\/prod/);
 
   test('a matching clear dismisses the warning; a mismatched one does not', async ({ app }) => {
-    // The `app` fixture boots the headless app (navigates to '/' and installs
-    // the window.runtime shim the injected events ride on).
     const { page } = app;
     await emitRuntimeUnreachable(page, message);
     await expect(banner(page)).toBeVisible();
 
-    // The warning renders with the attention icon (lucide circle-alert), not the
-    // neutral info ⓘ — the Go side must emit kind "warning", not an unrecognized
-    // "warn" that falls through to the info icon.
+    // Guards against the Go side emitting an unrecognized kind (e.g. "warn") that
+    // falls through to the neutral info icon instead of the warning attention icon.
     expect(await bannerIconKind(page)).toBe('alert');
 
-    // A clear for a different env must NOT dismiss this warning. Sample over a
-    // window (mirrors terminal-scroll-on-resize's negative check) so a buggy
-    // "clear everything" would be caught once its SSE round-trip lands.
+    // A clear for a different env must NOT dismiss this warning; sampling over a
+    // window catches a buggy "clear everything" once its async SSE clear lands.
     await emitNotificationClear(page, {
       tenant: 'other',
       environment: 'prod',
@@ -41,8 +30,6 @@ test.describe('runtime-unreachable banner clears with the deploy lifecycle (#713
     });
     expect(await bannerHiddenWithin(page, 700)).toBe(false);
 
-    // The matching clear — what the deploy lifecycle fires when a deploy for
-    // frs/prod starts or the runtime is reached — dismisses it.
     await emitNotificationClear(page, {
       tenant: 'frs',
       environment: 'prod',
@@ -55,10 +42,9 @@ test.describe('runtime-unreachable banner clears with the deploy lifecycle (#713
     app,
   }) => {
     const { page } = app;
-    // A real runtime-unreachable message includes the port-forward log path and
-    // is far longer than the pill — it used to stretch the header past the
-    // viewport, so nothing truncated and the dismiss X was pushed off-screen,
-    // leaving the banner un-dismissable.
+    // A real runtime-unreachable message is far longer than the pill; it used to
+    // stretch the header past the viewport so nothing truncated and the dismiss X
+    // was pushed off-screen, leaving the banner un-dismissable.
     const longMessage =
       'Could not reach the runtime for frs/prod: activate MCP port-forward: exit status 1: ' +
       'timed out waiting for API port-forward on 127.0.0.1:17333; see ' +
@@ -67,8 +53,6 @@ test.describe('runtime-unreachable banner clears with the deploy lifecycle (#713
     await emitRuntimeUnreachable(page, longMessage);
     await expect(banner(page)).toBeVisible();
 
-    // The header must not overflow the viewport, and the dismiss button must sit
-    // fully inside it (the bug pushed it hundreds of px off the right edge).
     const viewportWidth = page.viewportSize()?.width ?? 0;
     const headerRight = await page.evaluate(
       () =>
@@ -81,7 +65,6 @@ test.describe('runtime-unreachable banner clears with the deploy lifecycle (#713
     expect(box).not.toBeNull();
     expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(viewportWidth);
 
-    // And it actually dismisses — the whole point.
     await dismiss.click();
     await expect(banner(page)).toBeHidden();
   });
@@ -112,9 +95,6 @@ async function emitNotificationClear(
   }, target);
 }
 
-// bannerIconKind reads the icon lucide renders inside the runtime-unreachable
-// banner: 'alert' for the attention icon (circle-alert, warning/error), 'info'
-// for the neutral ⓘ, or 'other'. Locks that the warning gets the attention icon.
 async function bannerIconKind(page: Page): Promise<'alert' | 'info' | 'other'> {
   return await page.evaluate(() => {
     const banners = Array.from(document.querySelectorAll('[role="status"],[role="alert"]'));
@@ -132,11 +112,9 @@ async function bannerIconKind(page: Page): Promise<'alert' | 'info' | 'other'> {
   });
 }
 
-// bannerHiddenWithin samples the banner's presence for `ms` and reports whether
-// it ever went hidden — the deterministic "assert it stayed" primitive for the
-// mismatched-clear case (an async SSE clear would land within the window). The
-// sampling loop runs in the browser (mirrors terminal-scroll-on-resize's
-// viewportEverAtBottom) so it is a bounded observation, not a spec-side sleep.
+// bannerHiddenWithin is the deterministic "assert it stayed" primitive for the
+// mismatched-clear case: a real (async SSE) clear would land within the window, and
+// the in-browser poll is a bounded observation, not a banned spec-side sleep.
 async function bannerHiddenWithin(page: Page, ms: number): Promise<boolean> {
   return await page.evaluate(async (duration) => {
     const present = (): boolean =>

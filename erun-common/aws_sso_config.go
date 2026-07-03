@@ -9,15 +9,11 @@ import (
 	"strings"
 )
 
-// awsConfigUserHomeDir is the seam tests use to point lookups at a
-// fake home directory. Mirrors the openUserHomeDir / hostUserHomeDir
-// pattern used elsewhere in this package so we do not invent a new
-// override mechanism just for this file.
 var awsConfigUserHomeDir = os.UserHomeDir
 
-// AWSSSOProfile is the subset of an AWS shared config profile the
-// doctor needs to pre-fill an InitAWSCloudProviderParams. Fields are
-// trimmed and never empty unless the source file omitted the entry.
+// AWSSSOProfile is the subset of an AWS shared config profile the doctor needs
+// to pre-fill an InitAWSCloudProviderParams; fields are trimmed and empty only
+// when the source omitted the entry.
 type AWSSSOProfile struct {
 	Profile     string
 	SSOStartURL string
@@ -27,17 +23,9 @@ type AWSSSOProfile struct {
 	Region      string
 }
 
-// LookupAWSSSOProfileByAccountID scans ~/.aws/config (or whichever
-// path AWS_CONFIG_FILE overrides it to) and returns the first profile
-// whose sso_account_id matches the supplied account. Returns
-// ok=false when no profile matches or the file does not exist.
-//
-// Both legacy "inline" SSO settings (the profile carries
-// sso_start_url, sso_region, sso_account_id directly) and the newer
-// sso_session indirection ("sso_session = foo" → look up the
-// matching [sso-session foo] block for sso_start_url + sso_region)
-// are resolved. Profiles whose sso_account_id is empty are
-// considered non-matches.
+// LookupAWSSSOProfileByAccountID returns the AWS shared-config profile matching
+// the given account id, resolving both inline SSO settings and the sso_session
+// indirection. ok is false when no profile matches or the config file is absent.
 func LookupAWSSSOProfileByAccountID(accountID string) (AWSSSOProfile, bool, error) {
 	accountID = strings.TrimSpace(accountID)
 	if accountID == "" {
@@ -107,18 +95,13 @@ func buildAWSSSOSessionIndex(sections []awsConfigSection) map[string]awsConfigSe
 }
 
 type awsConfigSection struct {
-	// kind is "profile" or "sso-session"; the "default" block is
-	// surfaced as kind="profile", name="default".
 	kind   string
 	name   string
 	values map[string]string
 }
 
-// parseAWSSharedConfig parses the INI-flavored AWS shared config.
-// Only the subset we actually need is supported: top-level keys
-// inside a section. Nested-key blocks (the "s3 =" multi-line form
-// used by some advanced configs) are skipped — they have no overlap
-// with SSO settings.
+// parseAWSSharedConfig deliberately parses only flat top-level keys; the nested
+// "s3 ="-style blocks some configs use carry no SSO settings, so it skips them.
 func parseAWSSharedConfig(r io.Reader) ([]awsConfigSection, error) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -138,9 +121,6 @@ func parseAWSSharedConfig(r io.Reader) ([]awsConfigSection, error) {
 		if current == nil {
 			continue
 		}
-		// Nested-key continuation lines start with whitespace in the
-		// original file, which TrimSpace strips. Anything without "="
-		// at this point is a nested-block value we can safely ignore.
 		eq := strings.Index(line, "=")
 		if eq <= 0 {
 			continue
@@ -177,9 +157,6 @@ func newAWSConfigSection(header string) awsConfigSection {
 	}
 }
 
-// awsConfigPath returns the path the AWS CLI would read for its
-// shared config. AWS_CONFIG_FILE wins when set; otherwise the
-// canonical "~/.aws/config" applies.
 func awsConfigPath() (string, error) {
 	if override := strings.TrimSpace(os.Getenv("AWS_CONFIG_FILE")); override != "" {
 		return override, nil

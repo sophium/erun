@@ -6,10 +6,9 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// Context mirrors the contexts table — the per-tenant system of record for a
-// managed cloud context (cluster), the DB-backed shape of
-// eruncommon.CloudContextConfig. The k3s admin token is a server secret and is
-// deliberately not part of this read model.
+// Context is the per-tenant system of record for a managed cloud cluster,
+// mirroring eruncommon.CloudContextConfig. The k3s admin token is a server
+// secret, deliberately excluded from this read model.
 type Context struct {
 	bun.BaseModel      `bun:"table:contexts,alias:c"`
 	ContextID          string    `json:"contextId" bun:"context_id,pk,scanonly"`
@@ -25,7 +24,6 @@ type Context struct {
 	DiskSizeGB         int       `json:"diskSizeGb,omitempty" bun:"disk_size_gb,nullzero"`
 	KubernetesContext  string    `json:"kubernetesContext,omitempty" bun:"kubernetes_context,nullzero"`
 	// Status is the provisioning lifecycle: provisioning | running | failed.
-	// ProvisionError carries the failure reason when failed.
 	Status         string    `json:"status" bun:"status,scanonly"`
 	ProvisionError string    `json:"provisionError,omitempty" bun:"provision_error,nullzero,scanonly"`
 	CreatedAt      time.Time `json:"createdAt" bun:"created_at,scanonly"`
