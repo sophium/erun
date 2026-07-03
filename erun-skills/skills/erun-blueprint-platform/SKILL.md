@@ -29,8 +29,8 @@ best practices for platform deploy wiring — the conventions encoded here are
 the contract; do not freelance them.
 
 Throughout, `<tenant>` is the env's tenant and `<env>` is the **short**
-environment name (e.g. tenant `frs`, env `prod` → `terraform-frs/prod/`,
-namespace `frs-prod`). The worked paths below use `frs` / `prod`.
+environment name (e.g. tenant `acme`, env `prod` → `terraform-acme/prod/`,
+namespace `acme-prod`). The worked paths below use `acme` / `prod`.
 
 ## What this is not
 
@@ -78,12 +78,12 @@ env's services via the folder's own `main.tf`, with values from `<env>.tfvars`.
 The tenant modules in `modules/` wrap erun's published modules.
 
 ```
-terraform-frs/
+terraform-acme/
 ├── common.tf                       # providers + shared locals — CANONICAL
 ├── variables.tf                    # shared variable declarations — CANONICAL
 ├── .gitignore                      # .terraform/, *.tfplan, *.tfstate*
 ├── modules/
-│   └── terraform-frs-cluster-edge/ # wraps erun's terraform-erun-cluster-edge
+│   └── terraform-acme-cluster-edge/ # wraps erun's terraform-erun-cluster-edge
 │       ├── main.tf
 │       ├── variables.tf
 │       └── outputs.tf
@@ -97,7 +97,7 @@ terraform-frs/
 There is **no `run.tf`** and **no per-env `apply.sh`/`setup.sh`/`confirm.sh`** —
 `erun terraform apply` provides that workflow (Step 4).
 
-**`terraform-frs/common.tf`** (canonical; symlinked into each env):
+**`terraform-acme/common.tf`** (canonical; symlinked into each env):
 
 ```hcl
 terraform {
@@ -115,7 +115,7 @@ provider "helm" {
 }
 ```
 
-**`terraform-frs/variables.tf`** (canonical; symlinked into each env). The
+**`terraform-acme/variables.tf`** (canonical; symlinked into each env). The
 Cloudflare token is **not** a tfvar — it is a secret injected at apply time as
 `TF_VAR_cloudflare_api_token` from the env's `CLOUDFLARE_API_TOKEN`:
 
@@ -128,7 +128,7 @@ variable "acme_email" { type = string }
 variable "services_zone" { type = string }
 ```
 
-**`terraform-frs/modules/terraform-frs-cluster-edge/main.tf`** — the tenant
+**`terraform-acme/modules/terraform-acme-cluster-edge/main.tf`** — the tenant
 module that wraps erun's published module, pinned to `<ref>`:
 
 ```hcl
@@ -153,12 +153,12 @@ Substitute the real `?ref=v<erun_version>` from Step 1. Add `variables.tf` /
 publishes more platform modules (e.g. `terraform-erun-cloudflare-services`),
 add a sibling tenant module under `modules/` the same way.
 
-**`terraform-frs/prod/main.tf`** — instantiates the tenant module(s) for this
+**`terraform-acme/prod/main.tf`** — instantiates the tenant module(s) for this
 env:
 
 ```hcl
 module "cluster_edge" {
-  source = "../modules/terraform-frs-cluster-edge"
+  source = "../modules/terraform-acme-cluster-edge"
 
   cloudflare_api_token = var.cloudflare_api_token
   acme_email           = var.acme_email
@@ -166,7 +166,7 @@ module "cluster_edge" {
 }
 ```
 
-**`terraform-frs/prod/prod.tfvars`** — env-specific values (no secrets):
+**`terraform-acme/prod/prod.tfvars`** — env-specific values (no secrets):
 
 ```hcl
 services_zone = "services.erunpaas.com"
@@ -177,20 +177,20 @@ Create the env folder's `common.tf` and `variables.tf` as **relative symlinks**
 to the root, so every env runs identical providers + var declarations:
 
 ```sh
-mkdir -p terraform-frs/prod
-ln -s ../common.tf    terraform-frs/prod/common.tf
-ln -s ../variables.tf terraform-frs/prod/variables.tf
+mkdir -p terraform-acme/prod
+ln -s ../common.tf    terraform-acme/prod/common.tf
+ln -s ../variables.tf terraform-acme/prod/variables.tf
 ```
 
 ## Step 3 — the Helm side
 
 Each platform component is a thin umbrella chart under
 `<tenant>-devops/k8s/<tenant>-<component>/` — the directory name, the `Chart.yaml`
-`name:`, and the Helm release are all `<tenant>-<component>` (e.g. `frs-docs`,
-`frs-backend-api`) — that **depends on** erun's published OCI chart
+`name:`, and the Helm release are all `<tenant>-<component>` (e.g. `acme-docs`,
+`acme-backend-api`) — that **depends on** erun's published OCI chart
 `erun-<component>` (never a copy), with its **per-env values** beside it. Name the
 directory for the tenant, not for the erun chart it wraps: `erun deploy` keys the
-component name off the directory, so `frs-docs/` deploys as `frs-docs` (wrapping
+component name off the directory, so `acme-docs/` deploys as `acme-docs` (wrapping
 `erun-docs`), not as `erun-docs`.
 
 Component selection is **opt-in**: `erun deploy` rolls out exactly the charts you
@@ -221,9 +221,9 @@ in.)
 So each component gets three files:
 
 ```yaml
-# <tenant>-devops/k8s/frs-backend-api/Chart.yaml   (dir name == chart name == <tenant>-<component>)
+# <tenant>-devops/k8s/acme-backend-api/Chart.yaml   (dir name == chart name == <tenant>-<component>)
 apiVersion: v2
-name: frs-backend-api
+name: acme-backend-api
 version: 0.1.0
 dependencies:
   - name: erun-backend-api
@@ -232,16 +232,16 @@ dependencies:
 ```
 
 ```yaml
-# <tenant>-devops/k8s/frs-backend-api/values.local.yaml
+# <tenant>-devops/k8s/acme-backend-api/values.local.yaml
 # Subchart values nest under the dependency name. Forward tenant + environment
 # (see note below); the published chart carries every other default.
 erun-backend-api:
-  tenant: <tenant>          # e.g. frs
+  tenant: <tenant>          # e.g. acme
   environment: <env>        # the short env name, e.g. local
 ```
 
 ```yaml
-# <tenant>-devops/k8s/frs-backend-api/values.prod.yaml
+# <tenant>-devops/k8s/acme-backend-api/values.prod.yaml
 erun-backend-api:
   tenant: <tenant>
   environment: <env>        # e.g. prod
@@ -252,7 +252,7 @@ Do this for **every** platform component you deploy — one `<tenant>-<component
 umbrella dir per wrapped erun chart. This is the closed set of the erun
 platform's components (`erun-backend-api`, `erun-backend-postgres`,
 `erun-backend-db`, `erun-powerdns`, `erun-docs`) — **never** the runtime
-`erun-devops` chart (see What this is not). E.g. `frs-backend-api/` wraps
+`erun-devops` chart (see What this is not). E.g. `acme-backend-api/` wraps
 `erun-backend-api`. Keep each values file to genuinely env-specific
 overrides; the published charts carry the defaults.
 
@@ -321,12 +321,12 @@ or `kubectl`:
 
 ```sh
 # Terraform: formatting + per-env structure are valid (init needs network for the module).
-terraform -chdir=terraform-frs/prod fmt -check -recursive ..
-terraform -chdir=terraform-frs/prod validate || true   # validate after `init` resolves the module
+terraform -chdir=terraform-acme/prod fmt -check -recursive ..
+terraform -chdir=terraform-acme/prod validate || true   # validate after `init` resolves the module
 
 # Symlinks resolve and point at the canonical root files.
-readlink terraform-frs/prod/common.tf      # -> ../common.tf
-readlink terraform-frs/prod/variables.tf   # -> ../variables.tf
+readlink terraform-acme/prod/common.tf      # -> ../common.tf
+readlink terraform-acme/prod/variables.tf   # -> ../variables.tf
 
 # Helm umbrellas: dependencies resolve from OCI, and every chart has a values
 # file for every env it deploys to (missing one fails erun deploy — see below).
@@ -374,6 +374,20 @@ every Helm chart `version` — so bump them together, never piecemeal.
   scaffold with no lock and `erun deploy`'s pre-install step, not a re-pin.) Then
   re-apply terraform (`erun terraform apply`, Step 4) so the tree carries the
   upgraded module.
+- **Clean up what the reconcile supersedes** — after previewing, remove only what
+  no longer belongs: a `<tenant>-<component>` umbrella dir dropped from the plan
+  (repo side), and in the env's namespace a deployed release the new set replaces —
+  a hand-deployed release whose name doesn't match the `<tenant>-<component>`
+  convention (e.g. `erun-backend-api`, now owned by the umbrella as
+  `acme-backend-api`), or a component release no longer selected (`helm
+  --kube-context <ctx> -n <ns> list` finds them). Uninstall a superseded release so
+  the new one can adopt its resources — **but only when it is stateless.** A
+  stateful release (postgres, or anything owning a data PVC) must not be casually
+  `helm uninstall`ed: that can delete the PVC and the data with it (a chart-templated
+  PVC — like postgres's — is removed on uninstall). Preserve the volume
+  (retain it, let the new release adopt it) or **stop and flag it for explicit
+  operator action** — never drop data, `/home/erun`, or a Secret as a side effect of
+  a rename. When in doubt, leave it and report it.
 
 **Idempotent, in-place, preview first.** Safe to re-run; edit files where they
 live; **show the diff/plan before writing** — the pin changes and the files

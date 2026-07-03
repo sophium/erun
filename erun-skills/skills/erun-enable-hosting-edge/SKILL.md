@@ -121,6 +121,12 @@ re-running *is* the maintenance path, not an error.
   DNS-01 `ClusterIssuer`, so healing drift is the same re-apply — no separate repair path,
   no new scaffold artifacts. Preview with `terraform plan` first and apply only the version
   pin + reconciliation; never let a re-apply clobber operator-owned cluster content.
+- **Clean up.** Nothing local to prune (each run uses a throwaway `mktemp -d`), and
+  re-apply reconciles rather than accumulates — so cleanup isn't part of the normal
+  path. Tearing the edge down (removing cert-manager, Traefik, the `ClusterIssuer`)
+  is `erun terraform destroy` — a deliberate, high-blast-radius operator action that
+  drops TLS for the whole services zone; point the operator at it, never run it as a
+  side effect of maintenance.
 
 ## If issuance stalls
 

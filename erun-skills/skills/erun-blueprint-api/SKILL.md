@@ -350,6 +350,15 @@ content.
 - Refresh derived state: `go mod tidy`, then `go build ./...` and
   `go test ./...` to confirm the bump is clean.
 
+### Clean up
+
+- Remove only scaffolding this blueprint previously emitted but no longer
+  does — a renamed or merged generated file (e.g. an old `oidc.go`/`auth.go`
+  split the blueprint has since combined) — after previewing the deletion.
+  Never delete the project's own domain entities, handlers, or business
+  logic; when a file mixes generated plumbing with the project's code, leave
+  it and flag the drift rather than removing it.
+
 ## Error behaviour
 
 | Failure mode | Recovery |

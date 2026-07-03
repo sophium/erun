@@ -236,6 +236,11 @@ version pins and genuine gaps, never the project's own content pages.
   `yarn build` to re-prove the site (link checker included), and rebuild the
   image. The chart is a leaf (no `Chart.lock`) unless it later gains
   dependencies, in which case `helm dependency update` regenerates it.
+- **Clean up.** Remove only superseded deploy-wiring the blueprint no longer
+  emits (a renamed `templates/` file, an obsolete chart file), after previewing.
+  Never delete the operator's `docs/` pages, `sidebars.ts`, `src/css/custom.css`,
+  or static assets — those are content, not blueprint. A stale Cloudflare Pages
+  project or deployment is the operator's to remove, not this skill's.
 
 ## Error behaviour
 

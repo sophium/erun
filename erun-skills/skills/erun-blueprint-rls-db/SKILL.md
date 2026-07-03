@@ -284,6 +284,13 @@ current `erun-backend-db` blueprint (see Repair). Then refresh derived
 state: `atlas migrate diff <name> --env default` → commit the new forward
 migration → `atlas migrate apply`.
 
+**Clean up (never destructive).** Remove only superseded blueprint scaffolding
+— a renamed `schema/` file the current blueprint no longer emits — after
+previewing. **Never** drop a table, delete a column, or rewrite/delete a
+committed migration under `migrations/default/`: a schema removal is data loss
+and belongs in a reviewed forward migration the operator applies deliberately,
+not in a cleanup pass. Flag the drift; don't act on it.
+
 ## Error behaviour
 
 | Failure mode | Recovery |

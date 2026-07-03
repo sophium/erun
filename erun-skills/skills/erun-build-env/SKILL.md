@@ -208,6 +208,12 @@ maintenance mode; absent → the scaffold flow above.
 Bump every pin together — the whole module rides one erun version. Re-running is
 safe: it edits in place and only moves version pins and fills gaps.
 
+**Clean up.** If the module was renamed or relocated (a stray `<old>-devops/`, or a
+second `docker/<oldname>/` under it), remove the superseded copy after previewing so
+`erun build` discovers exactly one runtime module. Leave the project's toolchain
+layers alone, and don't prune pushed images — an unreferenced tag in the registry is
+the operator's to remove, not this skill's; note it rather than deleting it.
+
 ## Important
 
 - Always extend `erun-devops`; do not replace it with an unrelated base —
