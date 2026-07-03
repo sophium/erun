@@ -42,7 +42,7 @@ func writerIsTerminal(w io.Writer) bool {
 // runPlainPrompt is the non-TTY fallback for promptui.Prompt: a plain
 // fmt-rendered label plus a buffered line read, no cursor-control escapes.
 // Pipes get one deterministic line per prompt, which keeps scripted use and
-// the integration goldens stable (#520). Semantics mirror promptui: an empty
+// the integration goldens stable. Semantics mirror promptui: an empty
 // line submits the default, Validate re-prompts, and IsConfirm returns
 // promptui.ErrAbort unless the answer (or a "y" default met by an empty line)
 // confirms.

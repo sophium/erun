@@ -179,7 +179,7 @@ func (c EnvConfig) ResolvedCloudAliases() map[string]string {
 	return resolved
 }
 
-// ResolvedType returns the env's type, or "" when unresolved. Pre-#376 configs
+// ResolvedType returns the env's type, or "" when unresolved. Older configs
 // that carried only the legacy remote+snapshot pair are migrated to a concrete
 // Type during YAML decode (see EnvConfig.UnmarshalYAML), so Type is the single
 // source of truth here.
@@ -215,7 +215,7 @@ func (c EnvConfig) HasAWSCloudAlias() bool {
 }
 
 // legacyEnvTypeFromRemoteSnapshot derives the environment type from the
-// pre-#376 remote+snapshot pair, for configs written before the `type` field
+// legacy remote+snapshot pair, for configs written before the `type` field
 // existed. It reproduces the old fallback deciders exactly: RemoteWorktree()
 // fell back to the remote flag, and BuildsHere() fell back to SnapshotEnabled()
 // (snapshot != nil && *snapshot), so a missing snapshot key meant "does not

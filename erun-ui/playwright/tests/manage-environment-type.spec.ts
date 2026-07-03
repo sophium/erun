@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/erunApp.js';
 
-// Issue #615 — the Manage dialog's General tab "Environment type" is now an
+// The Manage dialog's General tab "Environment type" is now an
 // editable, constrained selector (local-agent | remote-agent | runtime) rather
 // than a read-only label, so an env whose type was mis-set (e.g. resolved to
 // "runtime" on what is really a remote-agent env) can be corrected in place.

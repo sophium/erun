@@ -11,7 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// In-pod config reconciliation (`erun doctor --sync-config`, #548).
+// In-pod config reconciliation (`erun doctor --sync-config`).
 //
 // The runtime pod's on-disk erun config is a projection of the env's
 // EnvConfig, written by the entrypoint from the ERUN_* env vars the chart
@@ -34,7 +34,7 @@ const (
 	ConfigDriftMissing ConfigDriftKind = "missing"
 	// ConfigDriftWrong: both carry the key but the values differ.
 	ConfigDriftWrong ConfigDriftKind = "wrong"
-	// ConfigDriftLegacyKey: the on-disk config still carries a pre-#376 legacy
+	// ConfigDriftLegacyKey: the on-disk config still carries a legacy
 	// key (e.g. `remote:`) that the canonical projection replaces.
 	ConfigDriftLegacyKey ConfigDriftKind = "legacy"
 )
@@ -196,10 +196,10 @@ func parseInjectedContainerRegistries(value string) ContainerRegistries {
 	return registries
 }
 
-// runtimeConfigPaths resolves the in-pod env and root config file paths under
-// the given config home (XDG_CONFIG_HOME or $HOME/.config) without going
-// through the xdg global, so the inspection and writer are testable in
-// isolation.
+// runtimeEnvConfigPath and runtimeRootConfigPath resolve the in-pod env and
+// root config file paths under the given config home (XDG_CONFIG_HOME or
+// $HOME/.config) without going through the xdg global, so the inspection and
+// writer are testable in isolation.
 func runtimeEnvConfigPath(configHome, tenant, environment string) string {
 	return filepath.Join(configHome, configRoot, tenant, environment, configFile)
 }

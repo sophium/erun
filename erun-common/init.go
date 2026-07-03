@@ -773,7 +773,7 @@ func (s *bootstrapRunState) createEnvConfig() error {
 		return err
 	}
 	s.runner.Context.Trace("Adding new environment")
-	// Every env type records localRepoPath (#549): with TenantConfig.projectroot
+	// Every env type records localRepoPath: with TenantConfig.projectroot
 	// removed, the env's own localRepoPath is the single source for cwd→tenant
 	// matching, the open repo path, and the deploy worktree repo name. For
 	// local-agent envs it is also the hostPath mounted into the pod; remote/runtime
@@ -937,7 +937,7 @@ func (s *bootstrapRunState) projectRoot() string {
 }
 
 // ensureDevopsAssets used to scaffold a per-tenant devops module and chart
-// copy here. That scaffold is retired (#505): environments deploy the
+// copy here. That scaffold is retired: environments deploy the
 // published erun-devops chart, and custom toolchains are a user-authored
 // Dockerfile FROM the published runtime image (see the erun-build-env
 // skill). Tenants with an existing scaffolded module keep working — deploy
@@ -1369,7 +1369,7 @@ func (s bootstrapRunner) selectTenant(params BootstrapInitParams, tenants []Tena
 
 // findTenantForDirectory resolves which tenant owns the working directory by
 // matching it against each tenant's environments' local repo paths
-// (EffectiveLocalRepoPath), longest match wins (#549). It replaces the old
+// (EffectiveLocalRepoPath), longest match wins. It replaces the old
 // match against TenantConfig.projectroot: a tenant can host both local and
 // remote envs, so the host path belongs on the env, not the tenant. An env
 // with no local repo path (a remote/runtime env with no host worktree) cannot

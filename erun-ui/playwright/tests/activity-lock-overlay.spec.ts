@@ -2,7 +2,7 @@ import { test, expect } from '../fixtures/erunApp.js';
 import type { Page, Request } from '@playwright/test';
 import type { AppShell } from '../pages/index.js';
 
-// Issue #713 — the deploy-progress overlay (ActivityLockOverlay) is anchored to
+// The deploy-progress overlay (ActivityLockOverlay) is anchored to
 // the top-right of the terminal pane. The pane used to carry a hard 360px
 // grid-column minimum, so when the pane's available width dropped below that
 // (wide sidebar and/or narrow window) the pane overflowed its overflow-hidden

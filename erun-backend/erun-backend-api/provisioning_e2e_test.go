@@ -21,11 +21,11 @@ import (
 )
 
 // TestProvisionContextEndToEnd exercises the live provisioning executor against
-// real infrastructure (issue #605/#676): the DBOS durable workflow runs erun's
+// real infrastructure: the DBOS durable workflow runs erun's
 // InitCloudContext bootstrap with its aws calls pointed at a local floci
 // emulator, custodies the k3s token, and drives the context status
 // provisioning -> running. It is opt-in (it needs a migrated Postgres, a DBOS
-// system database, and floci on :4566) and skips otherwise, mirroring the #647
+// system database, and floci on :4566) and skips otherwise, mirroring the
 // k3d e2e gate. Run it with:
 //
 //	ERUN_E2E_PROVISION=1 \

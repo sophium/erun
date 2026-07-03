@@ -40,7 +40,7 @@ func (r *stubEnvironmentRepository) Count(context.Context) (int, error) {
 }
 
 // stubTenantQuotaRepository reports a fixed environment-count cap for the
-// quota guardrail; maxEnvironments is the cap the handler compares against.
+// quota guardrail.
 type stubTenantQuotaRepository struct {
 	maxEnvironments int
 	err             error

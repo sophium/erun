@@ -59,7 +59,7 @@ export function TerminalPane({
         // (e.g. minmax(360px,1fr)) forces the pane wider than the available
         // area when the sidebar is wide or the window is narrow, so the
         // `overflow-hidden` parent clips its right edge — and drags the
-        // right-anchored ActivityLockOverlay off-screen with it (issue #713).
+        // right-anchored ActivityLockOverlay off-screen with it.
         // At any width where the terminal already fits, `minmax(0,1fr)` is
         // pixel-identical to a hard min; it only differs when starved, where
         // letting xterm reflow narrower beats clipping content off the right.

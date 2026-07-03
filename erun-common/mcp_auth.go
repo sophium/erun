@@ -14,11 +14,11 @@ import (
 	"time"
 )
 
-// MCP auth edge (issues #655, #656). The per-env erun-mcp server is exposed
+// MCP auth edge. The per-env erun-mcp server is exposed
 // publicly and its `raw` tool can kubectl-exec, so it must always be
 // authenticated. A trusted issuer is one of two kinds, dispatched on its scheme:
 //
-//   - `file://<path>` — the desktop case (#655). The trust anchor is a
+//   - `file://<path>` — the desktop case. The trust anchor is a
 //     self-contained Ed25519 keypair: the desktop signs an EdDSA JWT with its
 //     private key (desktopid.key), injects the matching public key into the
 //     runtime pod, and names that public key in the token's `iss` claim as a
@@ -29,7 +29,7 @@ import (
 //     issuer the caller already trusts, never an arbitrary `file://` from the
 //     token.
 //
-//   - `https://…` — an OIDC issuer (#656), e.g. a Zitadel or AWS STS issuer.
+//   - `https://…` — an OIDC issuer, e.g. a Zitadel or AWS STS issuer.
 //     The signature is verified against the issuer's published JWKS via the
 //     shared *OIDCVerifier (the same verifier the hosted backend API uses), and
 //     `iss`/`exp`/audience are enforced. Standard OIDC signing algorithms apply
@@ -59,7 +59,7 @@ const mcpTokenAlgorithm = "EdDSA"
 // GenerateDesktopIdentity creates a new Ed25519 desktop identity keypair and
 // returns it PEM-encoded (PKCS#8 private, PKIX public). The desktop persists the
 // private key as desktopid.key and injects the public key into the runtime pod;
-// the MCP server verifies bearer tokens against the public key (issue #655).
+// the MCP server verifies bearer tokens against the public key.
 func GenerateDesktopIdentity() (privatePEM, publicPEM []byte, err error) {
 	public, private, err := ed25519.GenerateKey(nil)
 	if err != nil {
@@ -108,7 +108,7 @@ func DesktopMCPIssuer() string {
 
 // MCPTokenAudience is the stable per-environment audience a desktop or console
 // token must carry and the env's MCP edge enforces, so a token minted for one
-// environment cannot be replayed against another (issue #655). It is transport-
+// environment cannot be replayed against another. It is transport-
 // independent — the same value whether the edge is reached over the desktop's
 // local port-forward or the public Traefik route — so the signer and the
 // chart's ERUN_MCP_AUDIENCE always agree.
@@ -164,13 +164,13 @@ func VerifyMCPToken(ctx context.Context, oidc *OIDCVerifier, token, trustedIssue
 }
 
 // isFileIssuer reports whether the trusted issuer is a `file://` desktop key
-// issuer (the #655 path) rather than an `https://` OIDC issuer (#656).
+// issuer rather than an `https://` OIDC issuer.
 func isFileIssuer(issuer string) bool {
 	parsed, err := url.Parse(issuer)
 	return err == nil && parsed.Scheme == "file"
 }
 
-// verifyFileMCPToken is the Ed25519 desktop-key path (#655): alg is hard-locked
+// verifyFileMCPToken is the Ed25519 desktop-key path: alg is hard-locked
 // to EdDSA, and the public key is loaded only from the trusted issuer's path.
 func verifyFileMCPToken(token, trustedIssuer, expectedAudience string, now time.Time) (MCPTokenClaims, error) {
 	signingInput, claims, signature, err := parseMCPToken(token)
@@ -200,7 +200,7 @@ func verifyFileMCPToken(token, trustedIssuer, expectedAudience string, now time.
 	return claims, nil
 }
 
-// verifyOIDCMCPToken is the OIDC issuer path (#656): the signature is verified
+// verifyOIDCMCPToken is the OIDC issuer path: the signature is verified
 // against the trusted issuer's JWKS by the shared verifier, then the same
 // issuer / expiry / audience contract as the file:// path is enforced. The OIDC
 // verifier already checks the signature and the standard time claims, so the

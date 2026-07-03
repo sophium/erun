@@ -26,7 +26,7 @@ export function Titlebar(): React.ReactElement {
   // message then stretched the header past the viewport, so the pill's
   // `max-w-full` resolved to that oversized width — the message never truncated
   // and the dismiss button was pushed off-screen, leaving the banner
-  // un-dismissable (#713). min-w-0 caps the header at the grid track (viewport),
+  // un-dismissable. min-w-0 caps the header at the grid track (viewport),
   // restoring the truncate chain so the message ellipsizes and the dismiss X
   // stays reachable.
   return (

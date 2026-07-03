@@ -21,8 +21,8 @@ const STOP_SOURCE_HOST_MANUAL = 'host-manual';
 // the next time they switch back to this tab. Refresh is cheap
 // (one MCP call against the in-pod tool) so we don't cache.
 //
-// The "why did my env stop?" question motivated this surface
-// (issue #410 / #421). Each row carries: the source (in-pod idle
+// The "why did my env stop?" question motivated this surface.
+// Each row carries: the source (in-pod idle
 // monitor vs. desktop manual stop), the resolved idle policy
 // snapshot at fire time, the grace-armed timestamp alongside the
 // AWS-stop timestamp, and the per-marker idle/active state captured

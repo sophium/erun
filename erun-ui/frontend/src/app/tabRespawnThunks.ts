@@ -55,8 +55,8 @@ export const maybeRespawnDeadDefaultTab =
       return false;
     }
     // Refuse the respawn when the env's deploy failed: reopening would re-run
-    // `erun open` and re-deploy the broken env, the same re-deploy storm #447
-    // stops for auto-reconnect. Returning false lets selectTerminalTab show the
+    // `erun open` and re-deploy the broken env, the same re-deploy storm that
+    // auto-reconnect stops. Returning false lets selectTerminalTab show the
     // dead session's captured failure output and the deploy-failed marker
     // instead, with recovery left to the failed-deploy card (Run doctor /
     // Rebuild & redeploy).
@@ -149,7 +149,7 @@ function isAITabKind(tab: TerminalTab): boolean {
 }
 
 // relaunchAISessionsForLaunchChange applies a saved Claude launch-flag change
-// (--effort / --model / --verbose --debug, issues #477/#482) to the env's AI
+// (--effort / --model / --verbose --debug) to the env's AI
 // sessions. The launch command runs once when the persistent pod session is
 // created — reattaches never re-run it — so the backend first ends the env's
 // AI sessions (desktop and pod side); the AI tabs open in this window are

@@ -38,7 +38,6 @@ function requestUrl(input: string | URL): string {
   return input instanceof URL ? input.href : input;
 }
 
-// Install a fetch mock that records every request and answers via `handler`.
 function mockFetch(handler: (req: MockReq) => Response): MockReq[] {
   const calls: MockReq[] = [];
   vi.stubGlobal(
@@ -144,7 +143,6 @@ describe('ProvisionPanel create-context flow', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    // After the POST + first poll, the panel is in the polling state.
     expect(screen.getByText('Provisioning primary…')).toBeInTheDocument();
 
     // Advancing the poll interval fires the next GET, which returns `running`.

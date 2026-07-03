@@ -542,7 +542,7 @@ func captureGHCommand(args ...string) (string, error) {
 // stdin (MCP, CI, pipes) — it does not launch gh and returns (false, err)
 // with the actionable recovery error from newNonInteractiveGHCRScopeRefreshError,
 // so the caller fails clearly with the manual recovery commands instead of
-// stranding the operator on a device-code prompt that can never advance (#587).
+// stranding the operator on a device-code prompt that can never advance.
 //
 // Use this only after TryGHCRNamespaceLogin + retry fails with a
 // scope-denied error: that signals the gh-stored token itself lacks the
@@ -632,7 +632,7 @@ func inInjectedRuntimePod() bool {
 // when the scope-refresh escalation cannot run its interactive gh flow. It
 // names the missing write:packages scope and the exact commands to run from a
 // host shell with a browser, so the operator has a clear path forward instead
-// of a hung prompt (#587).
+// of a hung prompt.
 func newNonInteractiveGHCRScopeRefreshError(tag, namespace string) error {
 	registry := dockerRegistryFromImageTag(tag)
 	if registry == "" {

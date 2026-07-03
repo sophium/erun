@@ -65,7 +65,7 @@ func newHTTPHandler(info eruncommon.BuildInfo, cfg HTTPConfig, runtime RuntimeCo
 	})
 
 	mux := http.NewServeMux()
-	// Auth is the outermost edge: when a trusted issuer is configured (#655),
+	// Auth is the outermost edge: when a trusted issuer is configured,
 	// every request on the MCP path — including idle probes — must carry a valid
 	// bearer token signed by the desktop's injected key before any tool runs.
 	mux.Handle(cfg.Path, authHTTPMiddleware(mcpAuthConfigFromEnv(), activityHTTPMiddleware(runtime, handler)))
@@ -246,7 +246,7 @@ func registerContextTools(server *mcp.Server, runtime RuntimeConfig) {
 }
 
 // registerDeliveryTools registers the init → build → push → deploy lifecycle
-// tools plus upgrade, doctor, and delete.
+// tools plus upgrade, doctor, delete, expose, and terraform.
 func registerDeliveryTools(server *mcp.Server, runtime RuntimeConfig) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "init",

@@ -3,7 +3,7 @@ import type { Page } from '@playwright/test';
 import { expect, test } from '../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
-// idle-widget-stop-protection covers the two changes from issue #410:
+// idle-widget-stop-protection covers the two changes:
 //
 //   A. The lock toggle no longer flips back to amber when the
 //      describe-after-modify hits AWS's eventual-consistency window.
@@ -312,7 +312,7 @@ test.describe('idle widget stop protection', () => {
     await expect(transitionPill).toBeVisible();
 
     // Pure-UI affordance — stays enabled by the design choice we
-    // codified in PR #411 (env-touching only). A regression here
+    // codified (env-touching only). A regression here
     // would mean someone added the env-running gate to the wrong
     // button group.
     const diffPanelToggle = page.getByRole('button', { name: 'Toggle diff panel' });
@@ -589,7 +589,7 @@ test.describe('idle widget stop protection', () => {
     await app.manageDialog.waitForClosed();
   });
 
-  // Issue #456 — a failed stop used to surface as a bare "exit status 1"
+  // A failed stop used to surface as a bare "exit status 1"
   // while the instance kept running. erun-common's
   // classifyCloudContextPowerError now names the reason and the unlock
   // lever; this locks the desktop surface: the error toast carries the

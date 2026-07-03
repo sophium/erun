@@ -410,7 +410,7 @@ func runRootConfigRestore(ctx common.Context, livePath string, backup common.Con
 
 // offerOrphanedAliasRepair walks a single orphan through the repair
 // decision tree. It is intentionally only allowed to bail out early
-// via guard helpers (orphanRepairBlocked, runOrphanRepairDryRun) so
+// via guard helpers (orphanRepairBlockedReason, runOrphanRepairDryRun) so
 // the function body stays linear and short.
 func offerOrphanedAliasRepair(ctx common.Context, configStore common.ConfigStore, cloudDeps common.CloudDependencies, promptRunner PromptRunner, orphan common.OrphanedAlias) (bool, error) {
 	if reason, blocked := orphanRepairBlockedReason(orphan); blocked {

@@ -6,12 +6,12 @@ import (
 	"testing"
 )
 
-// TestAISessionLaunchCommand pins the AI tab's pod-side launcher (relocated from
-// erun-ui): a bare/claude tool is wrapped in the cwd-guarded
-// resume with the env effort injected into both branches; any other tool, or
-// claude with explicit flags, launches verbatim. The <tenant>/<env> Remote
-// Control naming that every managed launch also carries is pinned separately by
-// TestAISessionLaunchRemoteControl; these cases pass a fixed team/dev.
+// TestAISessionLaunchCommand pins the AI tab's pod-side launcher: a bare/claude
+// tool is wrapped in the cwd-guarded resume with the env effort injected into
+// both branches; any other tool, or claude with explicit flags, launches
+// verbatim. The <tenant>/<env> Remote Control naming that every managed launch
+// also carries is pinned separately by TestAISessionLaunchRemoteControl; these
+// cases pass a fixed team/dev.
 func TestAISessionLaunchCommand(t *testing.T) {
 	effort := func(level string) EnvironmentClaudeConfig {
 		l := level

@@ -23,11 +23,8 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { UISelection } from '@/types';
 
-// Each titlebar button used to set its own absolute position with a
-// hardcoded `right-[Npx]` offset; that coupled the layout to the rendered
-// width of every other button in three files. After the flex refactor the
-// buttons just declare their visual state and the parent flex row owns
-// spacing.
+// Buttons declare only their visual state; the parent flex row owns
+// spacing, so no button hardcodes an absolute position or pixel offset.
 const titlebarButtonClassName =
   'size-7 flex-none cursor-pointer rounded-[var(--radius)] border-0 bg-transparent text-muted-foreground [--wails-draggable:no-drag] hover:bg-accent hover:text-accent-foreground [&_svg]:size-[18px]';
 
@@ -63,10 +60,7 @@ export function TitlebarLeftControls(): React.ReactElement {
 }
 
 // TitlebarRightControls renders the right cluster: the two IDE launchers,
-// the diff-panel toggle, and the files-list toggle. Their visibility,
-// disabled state, and accessible labels are unchanged from the absolute
-// layout; the only difference is they now flow inside their parent flex
-// row instead of stacking with right-pixel offsets.
+// the diff-panel toggle, and the files-list toggle.
 export function TitlebarRightControls(): React.ReactElement {
   const dispatch = useAppDispatch();
   const reviewOpen = useAppSelector((state) => state.layout.reviewOpen);

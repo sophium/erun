@@ -17,9 +17,8 @@ import (
 )
 
 // activity is a hidden command group used by the runtime entrypoint to record
-// SSH/MCP/CLI/Codex traffic. The dry-run-friendly subcommands `touch`,
-// `status`, and `stop-ready` are exercised here so the activity package is
-// covered without spinning up a real proxy.
+// SSH/MCP/CLI/Codex traffic. Its subcommands are exercised here so the activity
+// package is covered without spinning up a real proxy.
 
 // seedManagedCloudTenantEnv writes the same tree as fixture.SeedTenantEnv and
 // flips managedcloud: true on the env config, so the shared idle resolver

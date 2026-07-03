@@ -1,7 +1,7 @@
 import { expect, test } from '../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
-// Contribute-toggle coverage for feature/396-contribute-toggle.
+// Contribute-toggle coverage.
 //
 // The Contribute toggle is a per-env titlebar control that:
 //   - is hidden when no env is selected;

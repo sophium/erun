@@ -1,7 +1,7 @@
 import { expect, test } from '../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
-// terminal-paste-file covers #584: the desktop terminal's clipboard paste used
+// terminal-paste-file covers the desktop terminal's clipboard paste: it used
 // to accept image files only — a pasted PDF / CSV / archive was silently
 // dropped by the image-only MIME filter. After the fix, ANY pasted file is
 // copied into the runtime pod and its remote path typed into the shell, with

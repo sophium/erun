@@ -18,7 +18,7 @@ import (
 // kubeconfig.
 var loginEnvOnce sync.Once
 
-// importLoginShellEnv runs the user's login shell with -lc to capture
+// importLoginShellEnv runs the user's login shell with -ilc to capture
 // the env it exports (PATH, KUBECONFIG, AWS_PROFILE, ...) and merges a
 // short allowlist of variables into the current process. macOS only;
 // Linux desktop GUIs typically inherit the user session's env so the

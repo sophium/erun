@@ -445,7 +445,7 @@ func initCloudContextSecurityGroup(ctx Context, deps CloudContextDependencies, p
 }
 
 func runInitCloudContextInstance(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, params InitCloudContextParams, config *CloudContextConfig) (string, error) {
-	// Idempotency (issue #605): a re-run — a durable provisioning workflow
+	// Idempotency: a re-run — a durable provisioning workflow
 	// resuming after a crash, or a re-issued `erun context init` — must not
 	// launch a duplicate instance. Reuse the instance already tagged for this
 	// context, if one is still pending/running. The admin token comes from
@@ -634,7 +634,7 @@ func StopCloudContext(ctx Context, store CloudContextStore, params CloudContextP
 		return CloudContextStatus{}, err
 	}
 	// stop-instances accepts the action but the EC2 then transitions
-	// running → stopping → stopped over ~30-60 s. Until #361, this
+	// running → stopping → stopped over ~30-60 s. Previously, this
 	// helper returned the instant AWS acknowledged stop-instances,
 	// which lied about the live state: a follow-up `cloud-context
 	// start` issued in the next few seconds would race the
@@ -712,7 +712,7 @@ func isAWSExpiredCredentialsError(err error) bool {
 
 // classifyCloudContextPowerError translates a raw start-instances /
 // stop-instances failure into the actionable reason the operator needs
-// (issue #456: a failed Stop surfaced as a bare exit 1 while the instance
+// (a failed Stop surfaced as a bare exit 1 while the instance
 // kept running). The two failure families with a known next step:
 //
 //   - OperationNotPermitted on stop — stop protection (DisableApiStop) is
@@ -823,7 +823,7 @@ func enforceCloudContextStartWorkingHoursGate(ctx Context, store CloudContextSto
 // instances. Wait for the transition to settle and retry once. Without
 // this recovery the user's click on an env whose linked context just
 // auto-stopped fails with a confusing AWS error and the desktop's
-// reconnect loop spins pointlessly. See issue #361.
+// reconnect loop spins pointlessly.
 func recoverCloudContextStartFromTransitionalState(ctx Context, store CloudContextStore, params CloudContextParams, deps CloudContextDependencies, startErr error) (CloudContextStatus, error) {
 	if !isAWSIncorrectInstanceStateError(startErr) {
 		return CloudContextStatus{}, startErr
@@ -1259,8 +1259,7 @@ func resolveCloudContextWorkingHoursKubeContext(store CloudReadStore, contextNam
 // attached env is inside its working hours (the caller treats that as
 // "gate clear" and stops), and otherwise returns the first
 // outside-working-hours reason it observed. Environments whose idle
-// policy or working-hours status cannot be resolved are skipped, matching
-// the original inline behavior.
+// policy or working-hours status cannot be resolved are skipped.
 func evaluateTenantWorkingHoursGate(tenant TenantConfig, envs []EnvConfig, kubeContext string, now time.Time, hasAttachedEnv *bool) (bool, string) {
 	var blockedReason string
 	for _, env := range envs {

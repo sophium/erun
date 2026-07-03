@@ -42,27 +42,27 @@ export class ManageDialog {
   }
 
   // tabHasUnsavedChanges reads the dirty marker off the tab trigger's
-  // accessible name ("<label>, has unsaved changes" — issue #460).
+  // accessible name ("<label>, has unsaved changes").
   async tabHasUnsavedChanges(name: ManageTab): Promise<boolean> {
     const label = await this.tab(name).getAttribute('aria-label');
     return label?.includes('has unsaved changes') ?? false;
   }
 
   // redeployBanner targets the amber "Pending redeploy" alert raised after a
-  // save that changed a pod-shaping field (issue #460).
+  // save that changed a pod-shaping field.
   redeployBanner(): Locator {
     return this.locator().getByRole('alert').filter({ hasText: 'Pending redeploy' });
   }
 
   // autoUpgradeCheckbox targets the Runtime tab's "Include in Upgrade all"
   // opt-in — selection metadata for a future `erun upgrade`, never a pod
-  // input (issue #460).
+  // input.
   autoUpgradeCheckbox(): Locator {
     return this.locator().locator('#environment-config-autoupgrade');
   }
 
   // disableBuildScriptCheckbox targets the Runtime tab's "Ignore project
-  // build.sh" toggle (EnvConfig.disableBuildScript, issue #533) — a build-time
+  // build.sh" toggle (EnvConfig.disableBuildScript) — a build-time
   // CLI setting, never a pod input.
   disableBuildScriptCheckbox(): Locator {
     return this.locator().locator('#environment-config-disablebuildscript');
@@ -77,7 +77,7 @@ export class ManageDialog {
   // runtimeVersionInput targets the Runtime tab's "Version to deploy" field
   // (RuntimeDeployVersionPicker). Empty means "deploy the current code": for a
   // builds-here agent env the desktop orchestrates build -> push -> deploy from
-  // it; a typed version installs that published version by reference (#558).
+  // it; a typed version installs that published version by reference.
   runtimeVersionInput(): Locator {
     return this.locator().locator('#manage-version');
   }
@@ -141,7 +141,7 @@ export class ManageDialog {
       .click();
   }
 
-  // --- Container-registries editor (General tab, issue #527) ---
+  // --- Container-registries editor (General tab) ---
 
   addRegistryButton(): Locator {
     return this.locator().getByRole('button', { name: 'Add registry' });
@@ -163,12 +163,12 @@ export class ManageDialog {
   // specs can read the env's resolved type without a backend round-trip.
   //
   // The type field used to be a ReadonlyField (value carried on a sibling
-  // labelled [aria-labelledby="environment-config-type"]), but #617 turned it
-  // into the correctable EnvironmentTypeField SelectField whose value text
-  // lives on the trigger itself (id="environment-config-type"). The old
+  // labelled [aria-labelledby="environment-config-type"]), but a later change
+  // turned it into the correctable EnvironmentTypeField SelectField whose value
+  // text lives on the trigger itself (id="environment-config-type"). The old
   // aria-labelledby selector matches nothing now, which silently read every
-  // type as "" — caught here and fixed alongside the #630 cloud-alias work.
-  // Read the SelectField trigger's text content (its selected-value label).
+  // type as "". Read the SelectField trigger's text content (its
+  // selected-value label).
   async envTypeFieldValue(): Promise<string> {
     const field = this.environmentTypeSelect();
     if ((await field.count()) === 0) {
@@ -181,8 +181,8 @@ export class ManageDialog {
   // hasRemoteWorktree returns true when the env type is anything other than
   // the local-agent variant. Mirrors the Go-side EnvConfig.RemoteWorktree()
   // predicate by reading the Environment type label rendered on the
-  // General tab — the canonical control after #375 collapsed the legacy
-  // remote/snapshot pair into Type.
+  // General tab — the canonical control after the legacy remote/snapshot pair
+  // was collapsed into Type.
   async hasRemoteWorktree(): Promise<boolean> {
     const label = await this.envTypeFieldValue();
     return label !== '' && !/local agent/i.test(label);
@@ -236,7 +236,7 @@ export class ManageDialog {
     await this.cloudAliasSelect().click();
   }
 
-  // cloudAliasNoneOption targets the "— None —" clear entry (issue #211). The
+  // cloudAliasNoneOption targets the "— None —" clear entry. The
   // Radix listbox is portal'd to the document body, so it is queried at the
   // page root rather than inside the dialog.
   cloudAliasNoneOption(): Locator {
@@ -248,7 +248,7 @@ export class ManageDialog {
     await this.cloudAliasNoneOption().click();
   }
 
-  // --- Per-provider-type cloud-alias selectors (issue #630) ---
+  // --- Per-provider-type cloud-alias selectors ---
 
   // cloudAliasSlotSelect targets the per-provider-type cloud-alias selector on
   // the General tab. The AWS slot keeps the historical id
@@ -280,14 +280,14 @@ export class ManageDialog {
 
   // hostAwsCredentialsCheckbox targets the removed standalone "Use host AWS
   // credentials" toggle. It must not render — attaching an AWS alias now
-  // delivers its credentials into the env (issue #641), so there is no separate
+  // delivers its credentials into the env, so there is no separate
   // toggle to reconcile against the alias selectors.
   hostAwsCredentialsCheckbox(): Locator {
     return this.locator().getByLabel('Use host AWS credentials inside this env');
   }
 
   // claudeEffortSelect targets the "Effort" SelectField in the Claude section
-  // of the AI tab (issues #469/#491). It always renders; with no per-env
+  // of the AI tab. It always renders; with no per-env
   // override it shows "Default (ultracode)".
   claudeEffortSelect(): Locator {
     return this.locator().locator('#environment-config-claude-effort');
@@ -306,7 +306,7 @@ export class ManageDialog {
   }
 
   // environmentTypeSelect targets the "Environment type" SelectField on the
-  // General tab (issue #615). It is an editable selector — not a read-only
+  // General tab. It is an editable selector — not a read-only
   // label — so a mis-set type can be corrected in place; the value shows the
   // env's type label.
   environmentTypeSelect(): Locator {
@@ -326,8 +326,8 @@ export class ManageDialog {
   }
 
   // repositoryPathInput targets the "Repository path" field on the General tab.
-  // For a local-agent env it is an editable Input the operator can retarget
-  // (#709); for remote-agent/runtime it is a ReadonlyField whose value lives on
+  // For a local-agent env it is an editable Input the operator can retarget;
+  // for remote-agent/runtime it is a ReadonlyField whose value lives on
   // a sibling labelled [aria-labelledby="environment-config-repopath"].
   repositoryPathInput(): Locator {
     // Tag-qualified: only the editable local-agent Input is an <input> with this
@@ -375,7 +375,7 @@ export class ManageDialog {
   }
 
   // claudeVerboseDebugCheckbox targets the "Launch Claude in verbose + debug
-  // mode" launch toggle (issue #477).
+  // mode" launch toggle.
   claudeVerboseDebugCheckbox(): Locator {
     return this.locator().locator('#environment-config-claude-verbose-debug');
   }

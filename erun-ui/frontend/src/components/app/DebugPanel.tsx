@@ -30,12 +30,12 @@ import type { UIEnvTrace, UISelection } from '@/types';
 import { LoadEnvTrace } from '../../../wailsjs/go/main/App';
 import { ClipboardSetText } from '../../../wailsjs/runtime/runtime';
 
-// DebugPanel is the Diagnostics console (issue #466): two separate,
+// DebugPanel is the Diagnostics console: two separate,
 // copyable diagnostic surfaces designed to be pasted into an error report.
 //
 //   - erun trace — the selected env's persistent trace log
 //     (~/.erun/<tenant>/<env>/trace.log), written by erun itself at full
-//     trace verbosity on every env-scoped invocation (always on, #508),
+//     trace verbosity on every env-scoped invocation (always on),
 //     readable at any time — including for commands that ran before this
 //     console was opened. Host file for local envs, in-pod file
 //     (reachability-gated) for remote.
@@ -218,7 +218,7 @@ function CopyButton({
   );
 }
 
-// CopyReportButton assembles the one-click bug report (issue #514): app
+// CopyReportButton assembles the one-click bug report: app
 // build, the selected env's identity/state, a fresh erun-trace read (so the
 // report is current even between poll ticks), and the UI action history —
 // one paste-ready block, available from either tab.
@@ -327,7 +327,7 @@ function ErunTracePane({ selection }: { selection: UISelection | null }): React.
   const environment = selection?.environment ?? '';
   const { trace, refresh } = useEnvTracePoll(tenant, environment);
   const content = trace?.content ?? '';
-  // The Clear view baseline (issue #529) is owned by useErunTraceBaseline; the
+  // The Clear view baseline is owned by useErunTraceBaseline; the
   // pane only renders its result. Refresh / Copy / Copy report all keep
   // reading the full `content`, so a cleared view never truncates a report.
   const { cleared, rotatedOut, visibleContent, clear, showAll } = useErunTraceBaseline(
@@ -339,7 +339,7 @@ function ErunTracePane({ selection }: { selection: UISelection | null }): React.
   // The toolbar (and the since-cleared notice) sit in their own grid rows,
   // outside the scroll region: stick-to-bottom would otherwise scroll the
   // actions out the top the moment the log outgrows the pane — an affordance
-  // that exists but cannot be seen does not exist (issue #514).
+  // that exists but cannot be seen does not exist.
   return (
     <div
       className={cn(
@@ -374,7 +374,7 @@ function ErunTracePane({ selection }: { selection: UISelection | null }): React.
 }
 
 // ClearedNotice surfaces why earlier lines vanished after Clear and offers a
-// one-click return to the full view (issue #529). Visibility of system status
+// one-click return to the full view. Visibility of system status
 // (Nielsen #1) + user control / reversibility (Nielsen #3): the baseline hides
 // scrollback but the operator can always recover it, and the persistent log is
 // untouched. Lives in its own pinned grid row so it is never scrolled away.
@@ -424,7 +424,7 @@ function ErunTraceToolbar({
   onClear: () => void;
 }): React.ReactElement {
   // Copy reads the full content, never the cleared view — a baselined view
-  // must never produce a truncated bug report (issue #529).
+  // must never produce a truncated bug report.
   const { copyStatus, copy } = useCopyAction(content);
   return (
     <div className="flex items-center justify-between gap-2 px-3 pt-1.5 pb-1">
@@ -481,7 +481,7 @@ function ErunTraceBody({
   if (trace.available) {
     // visibleContent is the cleared-view slice (== trace.content when not
     // cleared). When cleared and nothing new has arrived yet, say so rather
-    // than rendering a blank pane (visibility of system status, #529).
+    // than rendering a blank pane (visibility of system status).
     return (
       <>
         <TraceNotice notice={trace.notice} />
@@ -503,9 +503,9 @@ function ErunTraceBody({
   );
 }
 
-// TraceNotice surfaces a non-fatal caveat about the shown trace (issue
-// #516): e.g. the in-pod side of a remote env could not be included. The
-// content below is still real — the notice keeps it honest.
+// TraceNotice surfaces a non-fatal caveat about the shown trace: e.g. the
+// in-pod side of a remote env could not be included. The content below is
+// still real — the notice keeps it honest.
 function TraceNotice({ notice }: { notice?: string }): React.ReactElement | null {
   if (!notice) {
     return null;
@@ -538,7 +538,7 @@ function UITracePane(): React.ReactElement {
   const { copyStatus, copy } = useCopyAction(text);
 
   // Actions are pinned outside the scroll region — same rationale as the
-  // erun trace toolbar (issue #514).
+  // erun trace toolbar.
   return (
     <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)]">
       <div className="flex items-center justify-end gap-1 px-3 pt-1.5 pb-1">

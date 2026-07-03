@@ -29,11 +29,9 @@ const configBackupSuffix = ".bak"
 // its own independent rotation).
 const configBackupKeep = 5
 
-// timeNow is the package-level clock used by every time-sensitive
-// helper in this file (backup naming, rotation, listing). Tests swap
-// it with a fixed clock; production keeps the default time.Now.
-// Defined here so the backup code is the only consumer that needs to
-// know about clock injection.
+// timeNow is the injectable package clock threaded into the backup
+// writers as their date stamp source. Tests swap it with a fixed clock;
+// production keeps the default time.Now.
 var timeNow = time.Now
 
 // ConfigBackup describes one dated backup file on disk. The Date field

@@ -208,8 +208,8 @@ func resolvePodWatchPollInterval() time.Duration {
 }
 
 // watchReleasePods polls kubectl until the parent context is canceled or a
-// terminal container failure is observed. It writes a fresh status line to
-// stderr each time the per-pod summary changes so the user sees progress.
+// terminal container failure is observed. It writes a fresh status line
+// each time the per-pod summary changes so the user sees progress.
 // The poller itself is best-effort: transient kubectl errors are ignored
 // (a flaky `get pods` call should not abort a deploy that helm would
 // otherwise drive to success).
@@ -455,7 +455,7 @@ func formatContainerStatus(c containerStatusEntry) string {
 }
 
 // renderPodSummaries writes a status line for every pod whose summary
-// changed since the last poll. Output goes to stderr and is prefixed with
+// changed since the last poll. Output is prefixed with
 // four spaces to align with the existing "    namespace ..." block.
 func renderPodSummaries(out io.Writer, summaries []podSummary, last map[string]string) {
 	if out == nil {

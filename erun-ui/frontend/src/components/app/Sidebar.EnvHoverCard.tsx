@@ -5,8 +5,8 @@ import type { UISelection, UIWorkingIssue } from '@/types';
 
 import { EnvironmentWorkingIssue } from '../../../wailsjs/go/main/App';
 
-// EnvHoverCard wraps a sidebar environment row and shows a richer hover card
-// (issue #437): the env's runtime version, the issue it's working on (current
+// EnvHoverCard wraps a sidebar environment row and shows a richer hover card:
+// the env's runtime version, the issue it's working on (current
 // branch + linked issue title), and its current activity. It replaces the
 // plain tenant/env tooltip — a multi-field card belongs in a Popover, not a
 // tooltip (erun-ui/AGENTS.md). The card opens on hover or keyboard focus of
@@ -141,8 +141,8 @@ function Muted({ children }: { children: React.ReactNode }): React.ReactElement 
   return <span className="text-muted-foreground">{children}</span>;
 }
 
-// ActivityState renders the card's Activity row from the env's real state
-// (issue #462): a desktop in-flight operation wins, then the env-status flag
+// ActivityState renders the card's Activity row from the env's real state:
+// a desktop in-flight operation wins, then the env-status flag
 // (stopped / failed), then open-and-quiet ("Idle"), and a never-opened env
 // says so instead of claiming "Idle" — there is no pod to be idle.
 function ActivityState({
@@ -205,8 +205,8 @@ type WorkingIssueState =
 // useWorkingIssue resolves the env's working issue lazily, on each card
 // open. Re-resolving per open (instead of once per row lifetime) is what
 // lets a remote env's answer flip from "open this environment to see its
-// in-pod work" to the actual in-pod branch as soon as the env opens (issue
-// #462); the backend caches resolved work for a short TTL, so repeat hovers
+// in-pod work" to the actual in-pod branch as soon as the env opens; the
+// backend caches resolved work for a short TTL, so repeat hovers
 // stay cheap. While a refetch is in flight the previous value keeps
 // rendering — no "Resolving…" flash over known data.
 //

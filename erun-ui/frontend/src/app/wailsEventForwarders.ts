@@ -18,8 +18,8 @@ export function attachWailsEventForwarders(dispatch: AppDispatch): void {
   EventsOn('activity:lock', (event: ActivityLockEvent) => {
     dispatch(setActivityLock(event));
   });
-  // Retire an env-tagged notification when the state it described has moved on
-  // (issue #713): the runtime-unreachable warning is cleared once a deploy for
+  // Retire an env-tagged notification when the state it described has moved on:
+  // the runtime-unreachable warning is cleared once a deploy for
   // its env starts or the runtime becomes reachable. The reducer clears it only
   // when source/tenant/environment all match, so an unrelated toast is untouched.
   EventsOn('app-notification-clear', (event: AppNotificationClearPayload) => {

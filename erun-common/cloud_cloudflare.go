@@ -21,7 +21,7 @@ import (
 // override (the CloudDependencies func fields) is unreachable from a desktop or
 // real-run e2e test; an env var crosses the process boundary and lets a mock
 // HTTP server stand in for Cloudflare. Mirrors the ERUN_UPGRADE_VERSIONS_OVERRIDE
-// env seam (issue #646).
+// env seam.
 const cloudflareAPIBaseURLEnv = "ERUN_CLOUDFLARE_API_BASE_URL"
 
 // defaultCloudflareAPIBaseURL is the live Cloudflare API root used when the

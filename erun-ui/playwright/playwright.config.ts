@@ -19,7 +19,7 @@ isolatedRoot();
 
 export default defineConfig({
   testDir: './tests',
-  // The opt-in k3d e2e specs (tests/e2e/, issue #647) need a real Docker + k3d
+  // The opt-in k3d e2e specs (tests/e2e/) need a real Docker + k3d
   // cluster and use the un-stubbed backend, so they must never run in the
   // default inert mode. Excluding them here (rather than per-spec test.skip)
   // keeps the default suite clean — they are not collected at all — while

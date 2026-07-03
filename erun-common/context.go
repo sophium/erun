@@ -14,7 +14,7 @@ type Context struct {
 	DryRun    bool
 	// Output selects how a command renders its machine-readable result.
 	// The default (zero value, OutputText) is the human text/trace stream on
-	// stderr — unchanged behaviour. OutputJSON additionally writes a single
+	// stderr. OutputJSON additionally writes a single
 	// structured result object to Stdout so an orchestrator (the UI, a script)
 	// can capture it; the Logger already writes Info/Trace to Stderr, so the
 	// JSON payload on Stdout stays uncorrupted.

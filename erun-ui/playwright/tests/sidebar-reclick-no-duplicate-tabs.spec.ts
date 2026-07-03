@@ -1,7 +1,7 @@
 import { expect, test } from '../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
-// Sidebar-reclick coverage for bug/368-respawn-dead-tabs-from-sidebar.
+// Sidebar-reclick coverage for respawning dead tabs from the sidebar.
 //
 // ensureDefaultEnvTabs now treats a tab whose sessionId has an exitReason
 // as a zombie and respawns it through spawnDefaultTab / spawnERunTabPassive
@@ -49,7 +49,7 @@ test.describe('sidebar env re-click with alive default tabs', () => {
 
     // Generous window so a delayed misfire of ensureLiveDefaultTab on
     // a healthy session still trips this assertion. The headless backend
-    // is a singleton with workers: 1, so 2 s is cheap.
+    // is a singleton with workers: 1, so the default expect window is cheap.
     await expect(page.getByText(/Reopening Local shell/i)).toBeHidden();
     await expect(page.getByText(/Reopening AI session/i)).toBeHidden();
     await expect(page.getByText(/Reopening ERun session/i)).toBeHidden();

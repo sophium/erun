@@ -1,7 +1,7 @@
 import { expect, test } from '../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
-// outputs-dialog covers #588: the per-env Outputs dialog lists the files an
+// outputs-dialog covers the per-env Outputs dialog, which lists the files an
 // agent produced in the runtime pod's outputs directory and lets the operator
 // download each onto their machine.
 //

@@ -1,10 +1,10 @@
 import { test, expect } from '../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
-// Issue #469 — the env Manage dialog's AI tab gained a per-env Claude "Effort"
+// The env Manage dialog's AI tab gained a per-env Claude "Effort"
 // selector (low|medium|high|xhigh|max|ultracode) that the desktop applies when
 // launching the AI tab: the five --effort levels as `claude --effort`, and
-// ultracode (issue #491) via `--settings '{"ultracode":true}'` — it is the
+// ultracode via `--settings '{"ultracode":true}'` — it is the
 // default. This spec exercises the control end-to-end after a real boot: it
 // renders, defaults to "Default (ultracode)", an override is reflected in the
 // draft and marks the tab dirty, and resetting to default returns the draft.
@@ -12,8 +12,8 @@ import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 // no-save approach in manage-cloud-alias-clear).
 //
 // Harness note: the real claude launch cannot run headless, so the observable
-// invariant here is the persisted-draft value of the selector (the #331
-// pattern). The launch-string composition (--effort vs --settings) and the
+// invariant here is the persisted-draft value of the selector. The
+// launch-string composition (--effort vs --settings) and the
 // ultracode fallback for unset/invalid values are covered by the Go tests
 // TestAISessionLaunchCommand* and TestResolveClaudeEffort in erun-common.
 test.describe('manage dialog claude effort', () => {

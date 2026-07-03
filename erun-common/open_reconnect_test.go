@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// TestRemoteShellLaunchPersistentSession pins the #478 reconnect mechanism: a
+// TestRemoteShellLaunchPersistentSession pins the reconnect mechanism: a
 // desktop tab (AppSession set) runs the remote shell inside a persistent dtach
 // session keyed by the id, with the per-tab prelude (contribute cd, AI launch)
 // as the session's create-time program; the bare `erun open` CLI path is left
@@ -85,12 +85,12 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 		// AI tab repaints on reattach via -r winch, not -r ctrl_l: Claude's
 		// main-screen TUI ignores a bare ^L (and can mis-consume it as a
 		// keystroke), so only a SIGWINCH redraws it. Bash tabs keep -r ctrl_l
-		// (asserted above). Regression guard for issue #613.
+		// (asserted above). Regression guard.
 		assertScriptHas(t, script, `dtach -A "/tmp/erun-app/erun-local-ai.dtach" -r winch`, "AI tab must reattach with -r winch so Claude repaints")
 		assertScriptLacks(t, script, `erun-local-ai.dtach" -r ctrl_l`, "AI tab must not use -r ctrl_l (Claude ignores the bare ^L)")
 		assertScriptHas(t, script, `claude --continue --settings '{"ultracode":true}'`, "AI tab must launch the claude guard at the default effort (ultracode)")
 		// Claude's exit must not silently fall through to the shell: the
-		// wrapper names the exit and the resume command first (issue #464).
+		// wrapper names the exit and the resume command first.
 		if !strings.Contains(script, "fi || ai_status=$?") || !strings.Contains(script, "resume with: %s") {
 			t.Fatalf("AI launcher missing the exit wrapper:\n%s", script)
 		}

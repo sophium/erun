@@ -3,9 +3,8 @@ import type { UISelection } from '@/types';
 import type { RootState } from './store';
 import { normalizeDialogValue, selectionKey } from './versionSuggestions';
 
-// Pure selectors derived from store state. These used to live on the
-// TerminalController as instance methods even though they touched no
-// imperative state. Selectors keep them composable and testable.
+// Pure selectors derived from store state, kept off the imperative
+// controller so they stay composable and testable.
 
 export const selectEnvironmentExists = (
   state: RootState,
@@ -31,7 +30,7 @@ export const selectSelectedIsPendingFor = (
 };
 
 // selectPendingOpenAfterDeploy returns the env queued to open once its
-// create-time deploy lands (issue #644), or null. The create→deploy→open gate
+// create-time deploy lands, or null. The create→deploy→open gate
 // reads it when an `environment-deployed` signal arrives.
 export const selectPendingOpenAfterDeploy = (state: RootState): UISelection | null =>
   state.selection.pendingOpenAfterDeploy;
@@ -41,7 +40,7 @@ export const selectPendingOpenAfterDeploy = (state: RootState): UISelection | nu
 // re-runs `erun open`, which re-deploys; doing that for an env whose deploy
 // just failed re-fails the same way (and, across tabs, storms parallel
 // re-deploys). The click-driven respawn uses this to refuse — the same
-// terminal-state #447 stops for auto-reconnect (reconnectBlockedByDeployFailure)
+// terminal-state auto-reconnect stops on (reconnectBlockedByDeployFailure)
 // — leaving recovery to the explicit failed-deploy card actions.
 export const selectEnvHasFailedDeploy = (
   state: RootState,

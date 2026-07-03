@@ -36,7 +36,7 @@ export interface UIWorkingIssue {
 }
 
 // UIEnvTrace mirrors the Go uiEnvTrace from the LoadEnvTrace binding: the
-// Diagnostics console's erun-trace read model (issues #466/#508).
+// Diagnostics console's erun-trace read model.
 export interface UIEnvTrace {
   available: boolean;
   content?: string;
@@ -46,8 +46,7 @@ export interface UIEnvTrace {
 }
 
 // UIUpgradeVersionCandidate mirrors the Go UpgradeVersionCandidate: one newer
-// version an env's registries offered, tagged with the registry it came from
-// (issue #527).
+// version an env's registries offered, tagged with the registry it came from.
 export interface UIUpgradeVersionCandidate {
   version: string;
   registry?: string;
@@ -65,11 +64,11 @@ export interface UIUpgradePlanItem {
   lagging: boolean;
   // The distinct newer versions discovered across the env's listed registries,
   // each with its source registry. One entry when a single target resolved;
-  // more than one when the operator must pick (issue #527).
+  // more than one when the operator must pick.
   candidates?: UIUpgradeVersionCandidate[];
   // Why target is empty (registry lookup failed, no published version for the
   // channel, or multiple newer candidates await a pick) — rendered under
-  // "latest unknown" / the picker (issues #497, #527).
+  // "latest unknown" / the picker.
   unresolvedReason?: string;
 }
 

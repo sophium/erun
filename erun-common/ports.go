@@ -134,7 +134,7 @@ type environmentPortRef struct {
 // collectEnvironmentPortRefs walks every tenant's envs in alphabetical
 // (tenant, env) order, splitting them into those with a persisted
 // LocalPortRangeStart and those without. Tenants and envs with blank names are
-// skipped, matching the original inline collection.
+// skipped.
 func collectEnvironmentPortRefs(store environmentPortStore) (persisted, unpersisted []environmentPortRef, err error) {
 	tenants, err := store.ListTenantConfigs()
 	if err != nil {

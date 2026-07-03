@@ -1,13 +1,13 @@
 import { test, expect } from '../fixtures/erunApp.js';
 import { SEED_CLOUD_ALIAS, SEED_ENV_BETA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
-// Regression: issue #211 — the env Manage dialog's Cloud alias dropdown had no
+// Regression: the env Manage dialog's Cloud alias dropdown had no
 // way to clear a selection once set; it only offered configured aliases. The
 // fix always adds a selectable "— None —" entry whenever at least one alias is
 // configured, mapping to an empty cloudProviderAlias (env renders "Not
 // linked"). Verified here without saving, so the seeded config is untouched.
 //
-// The seeded baseline stages exactly the #211 starting state: beta links the
+// The seeded baseline stages exactly the starting state: beta links the
 // configured pw-aws alias (backed by the inert aws stub), so the select must
 // render with the alias selected and clearing it must return the placeholder.
 test.describe('manage dialog cloud alias clear', () => {

@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/erunApp.js';
 
-// Regression: issue #436 — toggling the left sidebar sometimes blanked the
+// Regression: toggling the left sidebar sometimes blanked the
 // entire content area to white (only the titlebar survived), unrecoverable
 // until reload. The fix wraps the content region in an ErrorBoundary so an
 // uncaught render error shows a recoverable surface instead of a blank screen.

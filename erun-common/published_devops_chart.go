@@ -39,17 +39,17 @@ func ResolvePublishedDevopsDeploySpec(ctx Context, target OpenResult, versionOve
 // addressed by OCI reference and pinned to the env's runtime version (one
 // version covers chart and image — they are published together at release).
 // The env's RuntimeRegistry provenance wins over the published default so a
-// reopen keeps addressing the registry the env was deployed from (#363); a
+// reopen keeps addressing the registry the env was deployed from; a
 // custom EnvConfig.RuntimeImage rides in as imageOverrides.erun-devops.
 //
 // This replaces the embedded default-devops-chart copy that init used to
 // scaffold per tenant — the copy had already drifted from the canonical
-// chart (#510); the published chart is the single contract (#505).
+// chart; the published chart is the single contract.
 func resolvePublishedDevopsDeploySpec(ctx Context, target OpenResult, versionOverride string) (DeploySpec, error) {
 	// "no local runtime chart" is the reason the published chart is used on the
 	// usual callers (remote envs, envs with no <tenant>-devops chart). The
 	// runtime-image override caller passes its own reason, since the env there
-	// does have a local chart it is deliberately bypassing (#697).
+	// does have a local chart it is deliberately bypassing.
 	return resolvePublishedDevopsDeploySpecWithReason(ctx, target, versionOverride, "no local runtime chart")
 }
 
@@ -63,7 +63,7 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, 
 		// Bailout trace (dry-run contract): name the decision that stops the
 		// plan before returning. This is the fresh-env path — no local chart
 		// and no persisted/overridden runtime version — that a desktop create
-		// must avoid by composing deploy at a built version (issue #644).
+		// must avoid by composing deploy at a built version.
 		ctx.Trace("deploy: " + reason + " and no runtime version resolved; cannot deploy the published " + DevopsComponentName + " chart")
 		return DeploySpec{}, fmt.Errorf("runtime version is required to deploy the published %s chart: pass --version or persist runtimeversion in the env config", DevopsComponentName)
 	}

@@ -65,8 +65,8 @@ const REVIEW_DIFF_REFRESH_INTERVAL_MS = 5000;
 export class TerminalController {
   readonly sessions = new TerminalSessionRegistry();
   // Tracks the source session of each in-flight xterm write so terminal query
-  // replies route back to the asking session, not the currently-selected one
-  // (issue #347). See TerminalWriteSourceQueue and writeToTerminal().
+  // replies route back to the asking session, not the currently-selected one.
+  // See TerminalWriteSourceQueue and writeToTerminal().
   private readonly writeSources = new TerminalWriteSourceQueue();
   private terminal: Terminal | null = null;
   private fitAddon: FitAddon | null = null;
@@ -127,7 +127,7 @@ export class TerminalController {
   }
 
   // setTreeContainer registers the changed-files tree's scroll container so the
-  // diff→tree scrollspy can keep the active node visible (#547). It is a
+  // diff→tree scrollspy can keep the active node visible. It is a
   // callback ref, not part of mount(): the tree container is conditionally
   // rendered (only while the Changed files section is open), so it mounts and
   // unmounts independently of the one-time controller mount — passing null on
@@ -155,7 +155,7 @@ export class TerminalController {
 
   // subscribeEnvironmentLifecycleEvents wires the create/deploy lifecycle
   // signals the backend emits from the activity trace handler: init success,
-  // init failure, and deploy success (the create→deploy→open gate, issue #644).
+  // init failure, and deploy success (the create→deploy→open gate).
   private subscribeEnvironmentLifecycleEvents(): void {
     this.environmentInitializedOff = EventsOn(
       'environment-initialized',
@@ -212,7 +212,7 @@ export class TerminalController {
       // Address the reply to the session whose output xterm is parsing right
       // now (writeSources head), falling back to the current selection when no
       // write is in flight. Reading the live selection here would misroute the
-      // reply if the user switched sessions during a deferred parse (#347).
+      // reply if the user switched sessions during a deferred parse.
       (data) =>
         SendSessionInput(this.writeSources.current(store.getState().terminal.sessionId), data),
       (error) => {
@@ -220,7 +220,7 @@ export class TerminalController {
       },
       // Suppress replies to queries re-parsed from a replayed display buffer:
       // the asking tool consumed the live reply long ago, so a second reply
-      // would land on the session's shell as typed input (#484).
+      // would land on the session's shell as typed input.
       () => this.writeSources.currentIsReplay(),
     );
     this.terminalDataDisposable = this.terminal.onData((data) => {
@@ -396,9 +396,9 @@ export class TerminalController {
   // writeToTerminal is the single seam for every xterm write. It tags the write
   // with its source session via the write-source queue and hands xterm the
   // matching completion callback, so terminal query replies fired while xterm
-  // parses this chunk route back to sessionId (issue #347). replay marks
+  // parses this chunk route back to sessionId. replay marks
   // chunks re-rendered from the saved display buffer, whose stale queries must
-  // be consumed without replying (issue #484).
+  // be consumed without replying.
   private writeToTerminal(sessionId: number, data: TerminalWriteData, replay = false): void {
     const terminal = this.terminal;
     if (!terminal) {
@@ -516,7 +516,7 @@ export class TerminalController {
       return;
     }
     store.dispatch(setSelectedDiffPath(path));
-    // Keep the now-active node visible in the changed-files tree (#547). Only
+    // Keep the now-active node visible in the changed-files tree. Only
     // the diff→tree direction drives this, and it scrolls the tree container,
     // never the diff — so it can't feed back into visibleDiffPath above (which
     // reads the diff/reviewMain scroll position) and re-trigger selection.
@@ -601,7 +601,7 @@ export class TerminalController {
     // laid out. Enqueue an empty write whose completion callback fires only
     // after every replayed chunk has flushed (xterm runs write callbacks in
     // order), then scroll to the live prompt — so switching sessions always
-    // lands at the bottom rather than in the middle of history (issue #438).
+    // lands at the bottom rather than in the middle of history.
     this.terminal?.write('', () => {
       this.terminal?.scrollToBottom();
     });

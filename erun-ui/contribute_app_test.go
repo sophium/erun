@@ -15,10 +15,10 @@ import (
 	"time"
 )
 
-// Tests in this file pin the respawn-on-early-exit contract that
-// fixes #407 (kubectl port-forward died before the in-pod listener
+// Tests in this file pin the respawn-on-early-exit contract for the
+// bug where kubectl port-forward died before the in-pod listener
 // bound, so the contribute-app open flow gave up before the headless
-// erun-app finished its CLI rebuild). They exercise
+// erun-app finished its CLI rebuild. They exercise
 // waitForContributeAppReachable with a fake spawn that emits
 // short-lived `sh -c` subprocesses, which keeps the exec.Cmd /
 // ProcessState integration honest without needing a real kubectl.
@@ -150,7 +150,7 @@ func TestWaitForContributeAppReachableSucceedsWhenAlreadyServing(t *testing.T) {
 }
 
 // TestWaitForContributeAppReachableRespawnsKubectlOnEarlyExit locks
-// the bug from #407. The first kubectl spawn dies immediately
+// the bug. The first kubectl spawn dies immediately
 // (simulating kubectl's "lost connection to pod" when the in-pod
 // listener has not yet bound during the CLI rebuild window). The
 // loop must respawn and succeed once the in-pod side is up.

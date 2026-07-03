@@ -465,7 +465,7 @@ func TestContext(t *testing.T) {
 		// branch: stop-instances is rejected because DisableApiStop is
 		// set, and the user-facing error must name the unlock command
 		// (`erun context enable-api-stop edge`) instead of surfacing a
-		// bare AWS exit 1 (issue #456). Dry-run cannot reach this: the
+		// bare AWS exit 1. Dry-run cannot reach this: the
 		// classifier branches on the aws CLI's error output.
 		setup := env.New(t)
 		seedCloudContextConfig(t, setup, "edge")
@@ -658,8 +658,8 @@ func TestContext(t *testing.T) {
 	})
 
 	t.Run("start_real_run_retries_after_transitional_state", func(t *testing.T) {
-		// Unlocks StartCloudContext's IncorrectInstanceState recovery (issue
-		// #361): the first start-instances is rejected because the instance
+		// Unlocks StartCloudContext's IncorrectInstanceState recovery: the
+		// first start-instances is rejected because the instance
 		// is still stopping, production must wait for instance-stopped and
 		// retry start-instances once, then continue the normal start (wait
 		// running, public IP refresh, kube-context configuration, persist).
@@ -741,8 +741,8 @@ func TestContext(t *testing.T) {
 		// Unlocks StopCloudContext's post-stop wait failure branch: AWS
 		// accepts stop-instances but `ec2 wait instance-stopped` exhausts its
 		// attempts, and the user-facing error must say the stop was accepted
-		// but the instance was not observed stopped (issue #361's contract
-		// that "stopped" is only reported once AWS observes it). Dry-run
+		// but the instance was not observed stopped (the contract that
+		// "stopped" is only reported once AWS observes it). Dry-run
 		// cannot reach this: the wait result only exists in real execution.
 		setup := env.New(t)
 		seedCloudContextConfig(t, setup, "edge")

@@ -1,7 +1,7 @@
 import { test, expect } from '../fixtures/erunApp.js';
 import type { Page } from '@playwright/test';
 
-// Regression: issue #438 — switching environments/tabs could leave the
+// Regression: switching environments/tabs could leave the
 // terminal scrolled mid-history instead of at the live prompt, because
 // writeTerminalBuffer replayed the display buffer without forcing a
 // scroll-to-bottom and xterm's write() is asynchronous. The fix scrolls to
@@ -62,7 +62,7 @@ test.describe('terminal scroll on session switch', () => {
 
     // Close the spawned terminal so the extra session does not drift the
     // session set the singleton headless backend hands to later specs. The
-    // explicit close also ends the pod-side session (#478), so remote-session
+    // explicit close also ends the pod-side session, so remote-session
     // detection cannot resurrect the tab on a later env open.
     await tablist
       .getByRole('button', { name: /^Close / })

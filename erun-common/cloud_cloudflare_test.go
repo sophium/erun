@@ -229,7 +229,7 @@ func TestResolveCloudflareAccountsViaZones(t *testing.T) {
 // seam: with only the env var set (no in-process CloudDependencies injection),
 // the default verifier and accounts resolver hit a mock standing in for the
 // Cloudflare API. This is the path a desktop/e2e test exercises through the
-// `erun cloud init cloudflare` subprocess (issue #646).
+// `erun cloud init cloudflare` subprocess.
 func TestDefaultCloudflareCallsHonorBaseURLSeam(t *testing.T) {
 	gotPaths := make(map[string]bool)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

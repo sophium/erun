@@ -8,7 +8,7 @@ import (
 )
 
 // TestDeployRuntimeHealsPersistedVersionOnCachedNoOp pins the open-flow twin of
-// the deploy-command guard in PersistRuntimeVersionFromDeploySpecs (#475). When
+// the deploy-command guard in PersistRuntimeVersionFromDeploySpecs. When
 // the runtime deploy promoted every image from the fingerprint cache (SkipHelm:
 // RunDeploySpec rebuilt, pushed, and rolled out nothing), execution.Deploy.Version
 // is a freshly minted snapshot that was never pushed. Persisting it left the env

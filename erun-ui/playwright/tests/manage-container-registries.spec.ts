@@ -1,7 +1,7 @@
 import { test, expect } from '../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
-// Issue #527 — the env Manage dialog's General tab edits the project's MARKED
+// The env Manage dialog's General tab edits the project's MARKED
 // container-registry list: rows of a registry host plus build/from/to/deploy
 // role toggles, with add/remove and a live validation hint mirroring the
 // backend marker invariants. The seeded local-agent env carries a single
@@ -35,7 +35,7 @@ test.describe('manage dialog container registries', () => {
     ).toBeHidden();
 
     // A deploy-only registry is valid — the image it serves may be published
-    // there externally, so no build/to role is forced on it (#527 follow-up).
+    // there externally, so no build/to role is forced on it.
     await app.manageDialog.registryRoleCheckbox(0, 'build').click();
     await expect(app.manageDialog.registryRoleCheckbox(0, 'deploy')).toBeChecked();
     await expect(app.manageDialog.registryRoleCheckbox(0, 'build')).not.toBeChecked();
@@ -65,7 +65,7 @@ test.describe('manage dialog container registries', () => {
 
     await app.manageDialog.save();
     // The manage dialog stays open after save; the changed registry list is a
-    // pod-shaping value, so it raises the pending-redeploy banner (#460).
+    // pod-shaping value, so it raises the pending-redeploy banner.
     await expect(app.manageDialog.redeployBanner()).toBeVisible();
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();

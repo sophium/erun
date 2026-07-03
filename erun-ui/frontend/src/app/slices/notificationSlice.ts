@@ -28,7 +28,7 @@ export const notificationSlice = createSlice({
     },
     // dismissNotificationForEnv clears the current notification when it targets
     // this env, so the deploy lifecycle can retire the warning it raised without
-    // touching an unrelated toast (issue #713). An empty `source` matches any
+    // touching an unrelated toast. An empty `source` matches any
     // env-scoped notification (a deploy starting retires both the
     // runtime-unreachable warning and a prior deploy-failed error); a non-empty
     // `source` clears only that kind.

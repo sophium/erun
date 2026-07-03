@@ -68,7 +68,7 @@ func TestListRemoteAppSessionsFailsSoft(t *testing.T) {
 }
 
 // newEndAISessionsTestApp is a test helper for the EndAISessions contract
-// tests (issues #477/#482): an App over a stub store whose env declares the
+// tests: an App over a stub store whose env declares the
 // given AI tool, with terminals stubbed and kubectl PATH-stubbed so every
 // invocation appends its argv to the returned capture file.
 func newEndAISessionsTestApp(t *testing.T, aiTool string) (*App, string) {
@@ -106,11 +106,11 @@ func newEndAISessionsTestApp(t *testing.T, aiTool string) (*App, string) {
 }
 
 // TestEndAISessionsEndsBothPodSessions pins the pod side of the relaunch
-// contract behind the Manage dialog's Claude launch-flag save (issues
-// #477/#482): both AI pod sessions ("ai" and "contribute-ai") are ended —
-// `dtach -A` would otherwise reattach to the running claude and a changed
-// launch flag could never apply. contribute-ai is ended even though no
-// contribute tab is open: a detached claude must not keep stale flags.
+// contract behind the Manage dialog's Claude launch-flag save: both AI pod
+// sessions ("ai" and "contribute-ai") are ended — `dtach -A` would otherwise
+// reattach to the running claude and a changed launch flag could never apply.
+// contribute-ai is ended even though no contribute tab is open: a detached
+// claude must not keep stale flags.
 func TestEndAISessionsEndsBothPodSessions(t *testing.T) {
 	app, captureFile := newEndAISessionsTestApp(t, "")
 	selection := uiSelection{Tenant: "erun", Environment: "remote"}

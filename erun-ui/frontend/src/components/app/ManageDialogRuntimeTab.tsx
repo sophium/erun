@@ -81,7 +81,7 @@ export function RuntimeTab(): React.ReactElement {
 // DeployComponentsField renders the "Components to deploy" checklist: what
 // `erun deploy` rolls out for this env, opt-in-only. The runtime item is
 // pre-checked when nothing is saved (bootstrap/heal default). Toggling edits the
-// one-shot selection the Deploy button threads; "Save as default" persists it as
+// one-shot selection the Deploy button threads; "Set as default" persists it as
 // the env's per-machine default (deploy.components). Constrained option set →
 // checkboxes (recognition over recall; no typo'd chart names).
 function DeployComponentsField({ dialog }: { dialog: ManageDialog }): React.ReactElement {

@@ -203,7 +203,7 @@ function idleStatusActiveMarkerLine(marker: NonNullable<IdleStatus['markers']>[n
   return `- ${marker.name}${marker.reason ? `: ${marker.reason}` : ''}${remaining}`;
 }
 
-// idleStatusActiveMarkerClientLines emits "  - <address> — <bytes>, <ago>"
+// idleStatusActiveMarkerClientLines emits "  - <address>, <bytes>, <ago>"
 // for each per-peer entry attached to the marker. The leading two spaces
 // keep these visually nested under their parent "- <name>: ..." line; the
 // Titlebar tooltip JSX leaves the prefix alone but already applies the

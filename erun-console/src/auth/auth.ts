@@ -2,7 +2,7 @@
 // PLACEHOLDER — NOT A WORKING SIGN-IN FLOW.
 // ============================================================================
 //
-// TODO(#606): OIDC Authorization Code + PKCE against the platform issuer
+// TODO: OIDC Authorization Code + PKCE against the platform issuer
 // (Zitadel). Not implemented — needs the live IdP to verify. The hosted console
 // will redirect the Operator to the instance's OIDC issuer, complete the
 // Authorization Code + PKCE exchange, and hold the resulting JWT to present as
@@ -12,7 +12,7 @@
 // requires a live Zitadel issuer to authenticate against, so it is deliberately
 // left unimplemented in this first increment and cannot be claimed as working.
 //
-// TODO(#606): driving each environment's per-env MCP (reached at
+// TODO: driving each environment's per-env MCP (reached at
 // `mcp.<tenant>-<env>.services.<base-domain>`, behind the per-env auth edge — see
 // api-protocol.md § "Per-env MCP edge authentication") is a later increment. It
 // is RCE-sensitive (its `raw` tool can `kubectl exec`) and needs a live env to

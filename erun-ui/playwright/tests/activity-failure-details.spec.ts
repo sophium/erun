@@ -1,6 +1,6 @@
 import { expect, test } from '../fixtures/erunApp.js';
 
-// Pins the deploy-failure-details surface (issue #430): a failed deploy card
+// Pins the deploy-failure-details surface: a failed deploy card
 // exposes the captured command output behind a "Show output" disclosure and a
 // "Copy failure report" action, so the user can see why a deploy failed and
 // hand the evidence to developers/admins instead of facing a bare one-line

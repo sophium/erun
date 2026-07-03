@@ -15,7 +15,7 @@ import { SEED_ENV_ALPHA, SEED_ENV_BETA, SEED_TENANT } from '../fixtures/seedRoot
 // ux-tooltip-rules.spec.ts uses. The third test drives the positive flow
 // end to end: a running entry lights a labelled spinner on the env row,
 // and finishing it clears the spinner. This is the observable contract
-// that #428 wired up (CLI emits ==> Building/Releasing/Pushing, the
+// wired up (CLI emits ==> Building/Releasing/Pushing, the
 // desktop registers a running entry, deriveEnvironmentRow renders the
 // spinner + per-command aria-label).
 

@@ -10,7 +10,7 @@ import (
 )
 
 // These tests lock the env-status event contract behind the sidebar's open
-// dot (issue #470): tab presence alone is not running-ness, so the desktop
+// dot: tab presence alone is not running-ness, so the desktop
 // flags the row "stopped" when reconnect is refused because the linked cloud
 // context is not running, "failed" when reconnect gives up (deploy failure /
 // loop guard), and clears the flag on every fresh open attempt and every
@@ -150,8 +150,8 @@ func TestEnvStatusFailedAfterReconnectLoopCapAndClearedByRespawns(t *testing.T) 
 	}
 }
 
-// TestEnvStatusClearedByLaterSuccessfulDeploy locks the recovery path from
-// issue #498: an env flagged 'failed' (amber dot, refused ERun-tab respawn)
+// TestEnvStatusClearedByLaterSuccessfulDeploy locks the recovery path: an env
+// flagged 'failed' (amber dot, refused ERun-tab respawn)
 // must drop the flag the moment a later deploy for it succeeds through the
 // activity queue — e.g. an `erun upgrade` run — instead of keeping a stale
 // failure on the row until the next manual row click.

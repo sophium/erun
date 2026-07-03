@@ -112,7 +112,7 @@ function ChangedFilesAside({ visible }: { visible: boolean }): React.ReactElemen
   const changedFilesOpen = useAppSelector((state) => state.layout.changedFilesOpen);
   const diffFilter = useAppSelector((state) => state.review.diffFilter);
   // Register the tree's own scroll container with the controller so the
-  // diff→tree scrollspy can keep the active node visible (#547). A callback
+  // diff→tree scrollspy can keep the active node visible. A callback
   // ref (stable across renders) tracks the conditionally-rendered container:
   // it passes the node on mount and null when the Changed files section
   // collapses, so the controller never holds a detached node.

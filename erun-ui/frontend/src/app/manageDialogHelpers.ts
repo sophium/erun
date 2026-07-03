@@ -27,8 +27,8 @@ export function compactClaudeDraft(
 // --effort / --model / --verbose --debug compose from the Claude config, the
 // model counting only while it is among the env's available models. Saving a
 // config whose signature changed must reopen the env's open AI tabs — a
-// launch flag only takes effect when the persistent session's program starts
-// (issues #477/#482). Envs whose AI tool launches verbatim (non-claude) are
+// launch flag only takes effect when the persistent session's program starts.
+// Envs whose AI tool launches verbatim (non-claude) are
 // filtered backend-side by EndAISessions, which knows the tool.
 export function aiSessionLaunchSignature(config: UIEnvironmentConfig): string {
   const claude = config.claude;
@@ -44,7 +44,7 @@ export function aiSessionLaunchSignature(config: UIEnvironmentConfig): string {
 // nextPendingRedeploy reports whether the pending-redeploy banner should be
 // up after a save: it stays up once raised (a later metadata-only save must
 // not clear a redeploy the user still owes the pod), and a save raises it
-// only when it changed a pod-shaping field (issue #460). A missing prior
+// only when it changed a pod-shaping field. A missing prior
 // config means the diff cannot be computed, so claim the redeploy — the
 // conservative direction.
 export function nextPendingRedeploy(
@@ -69,11 +69,11 @@ export function nextPendingRedeploy(
 // desktop-side behaviour, sshd.workspaceSync* is desktop sync, and claude
 // effort/defaultModel/verboseDebug only change the AI launch command (the save
 // path relaunches AI tabs for those). A save whose signature is unchanged must
-// not raise the pending-redeploy banner (issue #460).
+// not raise the pending-redeploy banner.
 function deployRelevantSignature(config: UIEnvironmentConfig): string {
   return JSON.stringify({
     // A local-agent env's worktree hostPath is its LocalRepoPath, so retargeting
-    // it changes what the next deploy mounts — deploy-relevant (#709).
+    // it changes what the next deploy mounts — deploy-relevant.
     localRepoPath: config.localRepoPath,
     containerRegistries: config.containerRegistries,
     disableBuildScript: config.disableBuildScript,

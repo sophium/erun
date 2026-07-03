@@ -104,7 +104,7 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 	// Desktop-integration flags: the app runs the remote shell as a persistent,
 	// reattachable dtach session so closing/reopening a tab reconnects to the
 	// running shell (and the AI tab's claude keeps working). Hidden because they
-	// only make sense when the desktop manages the session lifecycle. See #478.
+	// only make sense when the desktop manages the session lifecycle.
 	cmd.Flags().StringVar(&appSession, "app-session", "", "Reattach to a persistent terminal session with this id")
 	cmd.Flags().BoolVar(&aiTab, "ai", false, "Launch the configured AI tool as the persistent session's program")
 	cmd.Flags().BoolVar(&contributeTab, "contribute", false, "Start the persistent session in the contribute clone")
@@ -400,7 +400,7 @@ func (r *resolvedOpenRunner) maybeDeployRuntime(shellReq common.ShellLaunchParam
 }
 
 func (r *resolvedOpenRunner) resolveRuntimeExecution() (common.DeploySpec, error) {
-	// Migrate any pre-#361 tenant Chart.yaml still pinned to the
+	// Migrate any legacy tenant Chart.yaml still pinned to the
 	// literal "1.0.0" placeholder before resolving the deploy spec.
 	// The migration is a no-op for tenants whose chart does not
 	// exist (the materialized default path handles that) or whose
@@ -478,7 +478,7 @@ func (r *resolvedOpenRunner) deployRuntime(execution common.DeploySpec) error {
 		// picker can never offer (it gates on registry presence). Heal the
 		// persisted version to what the release is actually running (guaranteed
 		// pushed) instead; if it can't be read, leave it unchanged. Twin of the
-		// deploy-command guard in PersistRuntimeVersionFromDeploySpecs. See #475.
+		// deploy-command guard in PersistRuntimeVersionFromDeploySpecs.
 		running := r.resolveRunningRuntimeVersion(execution)
 		if running == "" {
 			r.ctx.Trace("open: runtime images all cached (no rebuild); could not read the deployed version, leaving persisted runtime version unchanged")

@@ -12,7 +12,7 @@ import (
 // querying the registry, so tests and integration scenarios can drive the
 // channel-target resolution deterministically without network. Format:
 // "stable=<v>,snapshot=<v>" (either key optional), or "error=<msg>" to stage
-// a tenant whose resolution fails (the target-unresolved path, issue #497).
+// a tenant whose resolution fails (the target-unresolved path).
 // Mirrors the ERUN_HOST_OS_OVERRIDE pattern — a deliberate test seam, not a
 // production knob.
 const UpgradeVersionsOverrideEnv = "ERUN_UPGRADE_VERSIONS_OVERRIDE"
@@ -74,12 +74,12 @@ type EnvVersionsResolver func(ctx Context, tenant string, env EnvConfig) ([]Sour
 // was last deployed from) for the tenant runtime image, and always queries the
 // canonical ERun image too: tenant images are thin wrappers the deploy rebuilds
 // FROM the canonical image, so its channel-latest is part of the env's real
-// target universe and a private/nonexistent tenant repo (ghcr 403s both alike,
-// issue #501) never blocks the upgrade. Each result is tagged with its source
-// registry so the caller can offer a pick when registries disagree on the
-// newest version (issue #527). The UpgradeVersionsOverrideEnv seam wins for
-// deterministic tests. Only when no registry resolves does the env go
-// unresolved, with the first failure as the reason (issue #497).
+// target universe and a private/nonexistent tenant repo (ghcr 403s both alike)
+// never blocks the upgrade. Each result is tagged with its source registry so
+// the caller can offer a pick when registries disagree on the newest version.
+// The UpgradeVersionsOverrideEnv seam wins for deterministic tests. Only when
+// no registry resolves does the env go unresolved, with the first failure as
+// the reason.
 func UpgradeVersionsResolverForStore(_ DeployStore, lookup RegistryVersionsLookup) EnvVersionsResolver {
 	return func(_ Context, tenant string, env EnvConfig) ([]SourcedRuntimeVersions, error) {
 		if versions, forcedError, ok := runtimeVersionsOverrideFromEnvWithError(); ok {
@@ -124,7 +124,7 @@ func UpgradeVersionsResolverForStore(_ DeployStore, lookup RegistryVersionsLooku
 
 // upgradeDiscoveryRegistries returns the registries the upgrade resolver
 // queries for an env's tenant runtime image: the registry it was last deployed
-// from (provenance, issue #475) plus every registry in its marked list,
+// from (provenance) plus every registry in its marked list,
 // defaulting to the canonical registry.
 func upgradeDiscoveryRegistries(env EnvConfig) []string {
 	registries := make([]string, 0, 4)
@@ -342,7 +342,7 @@ type UpgradeItemFailure struct {
 
 // UpgradeResult summarizes an upgrade run: members redeployed, members already
 // up to date (skipped), members whose channel target could not be resolved
-// (skipped — never "up to date", issue #497), and members whose deploy
+// (skipped — never "up to date"), and members whose deploy
 // failed. The run continues past a failure so one bad env doesn't strand the
 // rest.
 type UpgradeResult struct {
@@ -402,7 +402,7 @@ func displayVersion(v string) string {
 
 // UpgradeVersionCandidate is one newer runtime version discovered for an env,
 // tagged with the registry that offered it. When an env has more than one
-// distinct newer candidate, the caller picks one (issue #527).
+// distinct newer candidate, the caller picks one.
 type UpgradeVersionCandidate struct {
 	Version  string `json:"version"`
 	Registry string `json:"registry,omitempty"`
@@ -429,7 +429,7 @@ type UpgradePlanItem struct {
 	// UnresolvedReason says why Target is empty (registry lookup failed, no
 	// published version for the channel, or multiple newer candidates need a
 	// pick) so the dialog and the run report the cause instead of a bare
-	// "(unset)" (issues #497, #527).
+	// "(unset)".
 	UnresolvedReason string `json:"unresolvedReason,omitempty"`
 }
 
@@ -454,7 +454,7 @@ func (p UpgradePlan) Lagging() []UpgradePlanItem {
 
 // channelTarget picks the latest version for a channel from resolved registry
 // versions. Unknown channels fall back to stable. The snapshot channel targets
-// the latest snapshot unless a stable release supersedes it (issue #524).
+// the latest snapshot unless a stable release supersedes it.
 func channelTarget(versions RuntimeRegistryVersions, channel string) string {
 	if strings.TrimSpace(channel) == UpgradeChannelSnapshot {
 		if stable, _, superseded := stableSupersedesSnapshot(versions); superseded {
@@ -466,7 +466,7 @@ func channelTarget(versions RuntimeRegistryVersions, channel string) string {
 }
 
 // stableSupersedesSnapshot reports whether the latest stable release is the
-// newer artifact for the snapshot channel (issue #524). A snapshot tag is a
+// newer artifact for the snapshot channel. A snapshot tag is a
 // pre-release of its base version — builds stamp <version>-snapshot-<utc-ts>
 // and the release flow bumps the version right after each stable release — so
 // a stable at or above the snapshot's base version was published on top of

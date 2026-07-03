@@ -8,17 +8,14 @@ import (
 	"strings"
 )
 
-// ResolveCurrentLinuxBuildScripts returns linux package build.sh scripts for
-// the current build context, but only when the caller is explicitly positioned
-// inside a linux package directory (linux/<component>) or directly inside a
-// linux/ dir. Project-root and <tenant>-devops invocations no longer auto-
-// discover linux package contexts here: nothing outside the release flow
-// consumes the .deb output, so rebuilding it on every `erun build` /
-// `erun deploy` from the project root just adds 10s of `go build` for no
-// benefit. Release publishing has its own resolver
+// ResolveCurrentLinuxBuildScripts returns linux package build.sh scripts, but
+// only when the caller is explicitly inside a linux package directory
+// (linux/<component>) or the linux/ parent. It intentionally skips the
+// project-root and <tenant>-devops auto-discovery: nothing outside the release
+// flow consumes the .deb, so rebuilding it on every `erun build` / `erun deploy`
+// from the project root is wasted work. Release publishing has its own resolver
 // (release.go:discoverReleaseLinuxScripts) that walks the release root, so
-// `erun build --release` and `erun release` continue to produce and upload the
-// .deb.
+// `erun build --release` and `erun release` still produce the .deb.
 func ResolveCurrentLinuxBuildScripts(findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, target DockerCommandTarget, version string) ([]scriptSpec, error) {
 	contexts, err := resolveExplicitLinuxPackageContexts(resolveBuildContext)
 	if err != nil {

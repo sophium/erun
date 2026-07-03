@@ -4,7 +4,7 @@ import type { UISelection } from '@/types';
 
 export interface SelectionState {
   selected: UISelection | null;
-  // pendingOpenAfterDeploy gates the create→deploy→open flow (issue #644):
+  // pendingOpenAfterDeploy gates the create→deploy→open flow:
   // after `erun init` the desktop composes a deploy and records the new env
   // here; the env's tabs open only once the matching `environment-deployed`
   // signal arrives, never against a runtime that does not exist yet.

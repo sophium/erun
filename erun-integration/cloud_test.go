@@ -172,8 +172,8 @@ func TestCloud(t *testing.T) {
 	})
 
 	t.Run("init_cloudflare_dry_run_honors_api_base_url_seam", func(t *testing.T) {
-		// Exercises the ERUN_CLOUDFLARE_API_BASE_URL subprocess-reachable seam
-		// (issue #646): when set, every Cloudflare API call targets the override
+		// Exercises the ERUN_CLOUDFLARE_API_BASE_URL subprocess-reachable seam:
+		// when set, every Cloudflare API call targets the override
 		// base instead of api.cloudflare.com. The seam is what lets a desktop /
 		// real-run e2e point the `erun cloud init cloudflare` subprocess at a
 		// mock. In --dry-run the GET trace fires before the network short-circuit,

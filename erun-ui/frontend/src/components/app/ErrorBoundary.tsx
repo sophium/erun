@@ -14,7 +14,7 @@ interface ErrorBoundaryState {
 // ErrorBoundary catches uncaught render errors in the app content and renders
 // a recoverable surface instead of an unrecoverable blank screen. A bare
 // React tree unmounts its whole root when a render throws, which left the
-// content area white with no way to recover (issue #436). Surfacing the error
+// content area white with no way to recover. Surfacing the error
 // with a retry/reload action satisfies Nielsen #1 (visibility of system
 // status) and #9 (help users recognize, diagnose, and recover from errors).
 //

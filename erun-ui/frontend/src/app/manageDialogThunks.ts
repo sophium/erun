@@ -150,7 +150,7 @@ export const updateManageConfig =
   };
 
 // updateManageCloudAliasSlot updates one provider-type cloud-alias slot in the
-// draft (issue #630). It rewrites the matching entry in cloudAliasSlots and, for
+// draft. It rewrites the matching entry in cloudAliasSlots and, for
 // the AWS slot, also mirrors the alias into the legacy cloudProviderAlias scalar
 // so the cloud-context linkage UI keeps working. Like updateManageConfig's
 // alias branch, changing the AWS alias clears the resolved cloud context so the
@@ -351,15 +351,15 @@ export const submitManageConfig = (): AppThunk<Promise<void>> => async (dispatch
         busyTarget: '',
         error: '',
         // The banner means "the running pod is behind the saved config", so
-        // raise it only when this save changed a pod-shaping field (issue
-        // #460: saving autoUpgrade/autoStart must not prompt a pod roll).
+        // raise it only when this save changed a pod-shaping field (saving
+        // autoUpgrade/autoStart must not prompt a pod roll).
         pendingRedeploy: nextPendingRedeploy(dialog.pendingRedeploy, priorConfig, displayConfig),
       }),
     );
     // A changed Claude launch flag only applies when the AI session's
     // create-time program runs, so reopen the env's open AI tabs now rather
-    // than leaving a live claude on the stale flags (issues #477/#482). A
-    // save that did not change the launch signature must not churn tabs.
+    // than leaving a live claude on the stale flags. A save that did not
+    // change the launch signature must not churn tabs.
     if (
       priorConfig &&
       aiSessionLaunchSignature(priorConfig) !== aiSessionLaunchSignature(displayConfig)

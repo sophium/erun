@@ -52,7 +52,7 @@ const (
 )
 
 // envStatusPayload tells the sidebar the real per-env condition behind the
-// open dot (issue #470: tab presence alone is not running-ness — the dot must
+// open dot (tab presence alone is not running-ness — the dot must
 // not show green for an env that is actually stopped or whose deploy failed).
 // Status is one of "", envStatusStopped, envStatusFailed.
 type envStatusPayload struct {
@@ -123,7 +123,7 @@ type uiTenantDashboardInput struct {
 	KubernetesContext  string `json:"kubernetesContext,omitempty"`
 	CloudProviderAlias string `json:"cloudProviderAlias"`
 
-	// mcpBearer is the per-env MCP edge token (issue #655) the dashboard's
+	// mcpBearer is the per-env MCP edge token the dashboard's
 	// MCP API-log read sends. It is set server-side by LoadTenantDashboard
 	// from the desktop identity, never by the frontend; being unexported it
 	// is excluded from generated Wails bindings and never serialized.
@@ -442,7 +442,7 @@ type appNotificationPayload struct {
 	Kind    string `json:"kind"`
 	Message string `json:"message"`
 	// Tenant/Environment/Source tag a notification so it can be cleared later
-	// by the state it describes. The runtime-unreachable warning (issue #713)
+	// by the state it describes. The runtime-unreachable warning
 	// carries the env it targets and a stable source, so the deploy lifecycle
 	// (a deploy starting for that env, or the runtime becoming reachable) can
 	// dismiss it without touching an unrelated toast.

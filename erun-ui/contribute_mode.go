@@ -133,12 +133,6 @@ func (a *App) runEnsureErunClone(selection uiSelection) error {
 	return nil
 }
 
-// StartContributeApp is the Wails-exposed entrypoint for the "Open
-// contribute app" affordance. It boots `erun app --headless --port N`
-// inside the env's ERun (contribute) tab, brings up a kubectl
-// port-forward for the contribute-app port, waits for the headless
-// server to accept connections, and returns the http URL the frontend
-// should open in the user's browser.
 // resolveContributeAppPort validates that the selection is in contribute mode
 // and resolves the env's allocated contribute-app port. It returns an error
 // describing the first failing precondition (missing tenant/env, contribute
@@ -164,6 +158,12 @@ func (a *App) resolveContributeAppPort(selection uiSelection) (int, error) {
 	return port, nil
 }
 
+// StartContributeApp is the Wails-exposed entrypoint for the "Open
+// contribute app" affordance. It boots `erun app --headless --port N`
+// inside the env's ERun (contribute) tab, brings up a kubectl
+// port-forward for the contribute-app port, waits for the headless
+// server to accept connections, and returns the http URL the frontend
+// should open in the user's browser.
 func (a *App) StartContributeApp(selection uiSelection) (uiContributeAppLaunch, error) {
 	selection = normalizeSelection(selection)
 	port, err := a.resolveContributeAppPort(selection)

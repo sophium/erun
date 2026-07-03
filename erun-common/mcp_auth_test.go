@@ -164,7 +164,7 @@ func TestMCPTokenVerifyRejections(t *testing.T) {
 	})
 }
 
-// TestVerifyMCPTokenOIDCDispatch locks the #656 dispatch: when the trusted issuer
+// TestVerifyMCPTokenOIDCDispatch locks the dispatch: when the trusted issuer
 // is an https:// OIDC issuer, VerifyMCPToken verifies the RS256 token against the
 // issuer's JWKS via the shared OIDC verifier and enforces the same per-env
 // audience contract, while a file:// trusted issuer keeps the Ed25519 path.

@@ -43,7 +43,7 @@ type EnvironmentClaudeConfig struct {
 	// which this field does not touch.
 	DefaultModel *string `yaml:"defaultmodel,omitempty" json:"defaultModel,omitempty"`
 	// VerboseDebug launches the AI tab's Claude with `--verbose --debug` so
-	// Claude's own diagnostics stream into the tab (issue #477). A plain bool,
+	// Claude's own diagnostics stream into the tab. A plain bool,
 	// not *bool: unlike UseMantle/UseBedrock it has no global-default/inherit
 	// semantics — absent means off with no information lost.
 	VerboseDebug bool `yaml:"verbosedebug,omitempty" json:"verboseDebug,omitempty"`

@@ -51,7 +51,7 @@ export function EnvironmentDialogView(): React.ReactElement {
   const tenantRef = React.useRef<HTMLInputElement>(null);
   const environmentRef = React.useRef<HTMLInputElement>(null);
 
-  // tenantRefValue mirrors dialog.tenant via a separate effect so the
+  // tenantValueRef mirrors dialog.tenant via a separate effect so the
   // focus-on-open effect below stays scoped to dialog.open. Re-running on
   // every dialog.tenant change would yank focus while the user is typing.
   const tenantValueRef = React.useRef(dialog.tenant);

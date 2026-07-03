@@ -69,7 +69,7 @@ func (a *App) runBuildPushDeployOrchestration(ctx context.Context, cli, dir stri
 
 // runInstallByReferenceDeploy is the runtime/remote path: install the selected
 // version (or --current) by reference, threading the picked runtime-image
-// override so a bootstrap on the ERun base image rolls out (#697).
+// override so a bootstrap on the ERun base image rolls out.
 func (a *App) runInstallByReferenceDeploy(ctx context.Context, cli, dir string, onLine func(string), selection uiSelection, force bool) error {
 	args := []string{"deploy", selection.Tenant, selection.Environment}
 	if version := strings.TrimSpace(selection.Version); version != "" {
@@ -91,7 +91,7 @@ func (a *App) runInstallByReferenceDeploy(ctx context.Context, cli, dir string, 
 
 // appendMCPAuthPublicKeyFlag appends `--mcp-auth-public-key <path>` so the
 // deployed env requires the same desktop-signed bearer the desktop sends to its
-// MCP edge (issue #655). The public key is written beside the desktop's private
+// MCP edge. The public key is written beside the desktop's private
 // identity; ensurePublicKeyPath generates it on first use. A nil identity (unit
 // tests) or an unset identity dir yields no flag, leaving the env
 // unauthenticated. A generation error logs and proceeds without the flag rather
@@ -137,7 +137,7 @@ func deployNeedsBuildOrchestration(result eruncommon.OpenResult, version string,
 func (a *App) maybeStartDeployOrchestration(selection uiSelection, force bool) (startSessionResult, bool) {
 	selection = normalizeSelection(selection)
 	// a.ctx is nil in unit tests; never fall back to the machine's real CLI
-	// and config there (the #492 hazard class).
+	// and config there (the hazard class).
 	if a.ctx == nil || selection.Tenant == "" || selection.Environment == "" {
 		return startSessionResult{}, false
 	}

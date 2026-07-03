@@ -2,7 +2,7 @@
 // executes erun's real InitCloudContext (DryRun=false) against the tenant's
 // BYO-cloud alias, custodies the resulting k3s admin token, and records the
 // context's provisioning lifecycle — all as a DBOS durable workflow so a
-// control-plane restart resumes from the last completed step (issues #605/#676).
+// control-plane restart resumes from the last completed step.
 package provision
 
 import (

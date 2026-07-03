@@ -22,8 +22,8 @@ export interface SeededEnvironment {
 //   bodies can jump straight to behaviour.
 // - `seededEnv`: provisions a unique throwaway env (`<spec-slug>-<rand>`
 //   under the `pw` tenant) by writing the same config tree the global
-//   baseline uses; the backend's fsnotify config watcher surfaces the new
-//   row, and teardown removes the env again. Use it in specs that mutate
+//   baseline uses; a forced reload surfaces the new row, and teardown
+//   removes the env again. Use it in specs that mutate
 //   per-env state (open/close, tab churn, status injection) so the shared
 //   baseline rows stay quiet for everyone else.
 export const test = base.extend<{ app: AppShell; seededEnv: SeededEnvironment }>({

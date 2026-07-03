@@ -12,10 +12,9 @@ import { normalizeDialogValue } from './versionSuggestions';
 // environmentDialogThunks; this module covers dialog-open seeding and the
 // user-triggered "rescan k8s contexts" button.
 
-// refreshDialogRuntimeResources hits the runtime-resources endpoint for
-// the dialog's currently-selected k8s context and patches the dialog with
-// the resulting CPU/memory totals. Internal helper; not exported because
-// callers should drive it via refreshKubernetesContexts.
+// refreshDialogRuntimeResources patches the dialog with runtime CPU/memory
+// totals for the currently-selected k8s context. Not exported: callers
+// drive it via refreshKubernetesContexts.
 const refreshDialogRuntimeResources =
   (kubernetesContext: string): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {

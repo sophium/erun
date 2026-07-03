@@ -68,7 +68,7 @@ const PUBLISHED_RUNTIME_CHART_NAME = 'erun-devops';
 // name separately, because component.name there is only the Helm release name
 // (<tenant>-devops): no per-tenant chart is published, so "<tenant>-devops
 // (published)" wrongly implied a published <tenant>-devops chart and contradicted
-// the erun-devops versions the picker offers (#721). The local-chart case is
+// the erun-devops versions the picker offers. The local-chart case is
 // left as-is — there component.name is a real repo-local chart directory the
 // operator does manage.
 export function deployComponentLabel(component: UIDeployableComponent): string {

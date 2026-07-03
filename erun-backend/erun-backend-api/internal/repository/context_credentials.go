@@ -8,7 +8,7 @@ import (
 )
 
 // ContextCredentialRepository custodies the k3s admin token a successful
-// provisioning run produces (issue #605/#676). The token is encrypted at rest
+// provisioning run produces. The token is encrypted at rest
 // and kept out of the contexts read model, which deliberately excludes the
 // secret. One row per context.
 type ContextCredentialRepository struct {

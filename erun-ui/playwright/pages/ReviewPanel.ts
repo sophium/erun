@@ -35,7 +35,7 @@ export class ReviewPanel {
     await this.page.getByRole('button', { name: 'Toggle changed files list' }).click();
   }
 
-  // changedFilesTree is the tree's own scroll container (#547).
+  // changedFilesTree is the tree's own scroll container.
   changedFilesTree(): Locator {
     return this.page.getByLabel('Changed files tree');
   }

@@ -1,7 +1,7 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 
 // envStatusSlice keeps the per-env real-condition flag driven by the Go-side
-// env-status Wails event (issue #470). The sidebar's open dot reads it so a
+// env-status Wails event. The sidebar's open dot reads it so a
 // row with live tabs does not claim "running" (green) while the env is
 // actually stopped or its deploy failed — tab presence alone is not
 // running-ness. Keyed by `${tenant}\x00${environment}` (the same

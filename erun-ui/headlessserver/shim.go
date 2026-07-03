@@ -7,8 +7,8 @@ import (
 
 // shimHeader is the prelude of the injected runtime: it sets up window.runtime
 // and window.go.main.App so the main bundle can import wailsjs files without
-// rewriting them. The companion shimBindingsTemplate fills in the actual
-// method bindings reflected from the App at startup.
+// rewriting them. buildShimJS appends the actual method bindings after this
+// header.
 const shimHeader = `(function(){
   if (window.__erunHeadlessInstalled) { return; }
   window.__erunHeadlessInstalled = true;

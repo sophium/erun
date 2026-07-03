@@ -77,8 +77,8 @@ func (a *App) runContributeSession(ctx context.Context, selection uiSelection, s
 	// [--ai]`: the persistent remote session cds into the contribute clone with
 	// its env (and launches the AI tool for the AI variant) as its create-time
 	// program, once, so reopening reconnects instead of re-running the prelude or
-	// spawning a parallel session (#478). What used to be typed in (issue #469)
-	// now happens pod-side in `erun open`.
+	// spawning a parallel session. What used to be typed in now happens pod-side
+	// in `erun open`.
 	appSessionID := "contribute-erun"
 	if withAI {
 		appSessionID = "contribute-ai"

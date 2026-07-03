@@ -118,7 +118,7 @@ export class Sidebar {
   }
 
   // hoverEnvironmentRow moves the pointer over the env row, which opens the
-  // env hover card (issue #437). Hovering the inner row button enters the row
+  // env hover card. Hovering the inner row button enters the row
   // container that carries the open handler.
   async hoverEnvironmentRow(tenant: string, env: string): Promise<void> {
     await this.envRowButton(tenant, env).hover();
@@ -130,7 +130,7 @@ export class Sidebar {
     return this.page.getByRole('dialog', { name: `${tenant} / ${env} details` });
   }
 
-  // envOpenDot targets the env row's open indicator (issue #470): a button
+  // envOpenDot targets the env row's open indicator: a button
   // whose data-env-state attribute carries the env's real condition
   // (running / stopped / failed) and whose click closes the env's tabs. The
   // row container is the row button's parent, so the lookup stays scoped to
@@ -160,7 +160,7 @@ export class Sidebar {
     return this.locator().getByRole('button').last();
   }
 
-  // --- Per-provider-type cloud-alias rows (issue #630) ---
+  // --- Per-provider-type cloud-alias rows ---
 
   // cloudAliasRowTrigger targets one bottom-of-sidebar cloud-status row by its
   // alias. Each provider type the active tenant uses gets its own row, labelled
@@ -183,7 +183,7 @@ export class Sidebar {
 
   // cloudAliasPopover targets the open popover for a cloud-alias row. The
   // popover is portal'd to the document body, so it is queried at the page
-  // root. Scoping by the alias text inside it keeps the right one selected.
+  // root.
   cloudAliasPopover(): Locator {
     return this.page.locator('[data-radix-popper-content-wrapper]').first();
   }

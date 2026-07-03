@@ -2,7 +2,7 @@ import { test, expect } from '../fixtures/erunApp.js';
 import type { AppShell } from '../pages/index.js';
 import { SEED_ENV_ALPHA, SEED_ENV_BETA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
-// Regression: issue #443 — the sidebar LOCAL badge keyed off the legacy
+// Regression: the sidebar LOCAL badge keyed off the legacy
 // `remote` flag instead of the resolved environment type, so a local-agent
 // env created with the new `type` shape (legacy `remote` unset) showed no
 // badge even though the Manage dialog reported "Local agent". The fix derives
@@ -12,7 +12,7 @@ import { SEED_ENV_ALPHA, SEED_ENV_BETA, SEED_TENANT } from '../fixtures/seedRoot
 // dialog's "Environment type" field. The contract is — if the dialog says
 // "Local agent", the sidebar row must show the LOCAL pill, and vice versa.
 // The seeded baseline envs carry an explicit `type: local-agent` (the exact
-// shape #443 regressed on), so both must report "Local agent" and show the
+// shape the bug regressed on), so both must report "Local agent" and show the
 // pill.
 test.describe('sidebar LOCAL badge', () => {
   test('badge matches the environment type and the (local) label suffix', async ({ app }) => {

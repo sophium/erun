@@ -1,6 +1,6 @@
 // Package secrets provides authenticated encryption for tenant secrets stored at
 // rest in the database (the k3s admin token in context_credentials, the
-// BYO-cloud credentials in cloud_provider_aliases — issues #605/#676). The
+// BYO-cloud credentials in cloud_provider_aliases). The
 // ciphertext columns are bytea; repositories encrypt before INSERT and decrypt
 // after SELECT so the database never holds a plaintext secret.
 package secrets

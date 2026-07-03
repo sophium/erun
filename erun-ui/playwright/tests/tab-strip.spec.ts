@@ -1,7 +1,7 @@
 import { expect, test } from '../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
-// Tab-strip respawn coverage for bug/337-respawn-dead-default-tabs-on-click.
+// Tab-strip respawn coverage.
 //
 // The change in tabRespawnThunks adds a click-driven respawn for the
 // default-spawned tabs (ai, local, erun) whose underlying PTY has already

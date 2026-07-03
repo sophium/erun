@@ -6,7 +6,7 @@ import { e2eK3dEnabled, removeIsolatedRoot } from './fixtures/seedRoot.js';
 // the root it created via its EXIT trap, covering aborted runs.
 export default function globalTeardown(): void {
   if (e2eK3dEnabled()) {
-    // Tear the real k3d cluster + registry down (issue #647); run.sh's EXIT
+    // Tear the real k3d cluster + registry down; run.sh's EXIT
     // trap is the backstop for an aborted run.
     deleteK3dCluster();
   }

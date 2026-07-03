@@ -164,7 +164,7 @@ func TestLoadVersionSuggestionsFiltersOutMissingTenantImageTags(t *testing.T) {
 }
 
 func TestLoadVersionSuggestionsUsesEnvPersistedRuntimeRegistry(t *testing.T) {
-	// #475: the "Version to deploy" picker must query the registry the env's
+	// The "Version to deploy" picker must query the registry the env's
 	// runtime image was actually published to (EnvConfig.RuntimeRegistry, the
 	// provenance deploy records), not the hardcoded default. Otherwise an env on
 	// a non-default registry resolves its suggestions from the wrong place and
@@ -210,7 +210,7 @@ func TestLoadVersionSuggestionsUsesEnvPersistedRuntimeRegistry(t *testing.T) {
 }
 
 func TestLoadVersionSuggestionsQueriesEachListedRegistry(t *testing.T) {
-	// #527: the version picker must query every registry in the env's marked
+	// The version picker must query every registry in the env's marked
 	// list, so an offered version can come from any listed registry and carries
 	// its source. Here the env lists build+from on a public registry and
 	// to+deploy on a mirror; both are queried for the tenant image.
@@ -746,10 +746,11 @@ func TestBuildDeployArgsRunsDeploy(t *testing.T) {
 	assertArgsEqual(t, got, want)
 }
 
-// TestBuildDeployArgsThreadsRuntimeImageOverride covers #697: picking the
-// canonical ERun base image in the runtime dialog must thread --runtime-image so
-// deploy installs the published erun-devops chart with that image, letting the
-// operator bootstrap an env before its own image is built.
+// TestBuildDeployArgsThreadsRuntimeImageOverride covers the runtime-image
+// override: picking the canonical ERun base image in the runtime dialog must
+// thread --runtime-image so deploy installs the published erun-devops chart with
+// that image, letting the operator bootstrap an env before its own image is
+// built.
 func TestBuildDeployArgsThreadsRuntimeImageOverride(t *testing.T) {
 	got := buildDeployArgs(uiSelection{
 		Tenant:       "frs",
@@ -817,7 +818,7 @@ func TestResolveCLIExecutableFromPathUsesExecutableSibling(t *testing.T) {
 func TestResolveCLIExecutableHonorsAppCLISeam(t *testing.T) {
 	// The Playwright harness sets ERUN_APP_CLI to its inert `erun` stub so the
 	// desktop runs the stub regardless of any real erun-cli/bin/erun build
-	// artifact sitting next to the app binary (#525). The seam wins over the
+	// artifact sitting next to the app binary. The seam wins over the
 	// build-relative + PATH resolution.
 	t.Setenv("ERUN_APP_CLI", "/seam/stub/erun")
 	if got := resolveCLIExecutable(); got != "/seam/stub/erun" {
@@ -1095,7 +1096,7 @@ func TestStartDeploySessionPipesCommandToLocal(t *testing.T) {
 	})
 	// No desktop identity: the in-shell deploy stays unauthenticated, so this
 	// test asserts the bare `erun deploy ...` command without the
-	// --mcp-auth-public-key flag (issue #655). The auth-injecting path is
+	// --mcp-auth-public-key flag. The auth-injecting path is
 	// covered by its own test below.
 	app.identity = nil
 	defer app.shutdown(context.Background())
@@ -1114,7 +1115,7 @@ func TestStartDeploySessionPipesCommandToLocal(t *testing.T) {
 }
 
 // TestStartDeploySessionInjectsMCPAuthPublicKey covers the auth-injecting half
-// of the deploy path (issue #655): when the desktop has a signing identity, the
+// of the deploy path: when the desktop has a signing identity, the
 // in-shell `erun deploy` carries `--mcp-auth-public-key <path>` so the deployed
 // env requires the same desktop-signed bearer the desktop sends to its MCP
 // edge. The identity is pinned to a temp dir so the test never touches the
@@ -1960,7 +1961,7 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 }
 
 // TestSaveAndLoadDeployComponentsRoundTrip covers the per-machine saved deploy
-// selection (EnvConfig.deploy.components, #718): a save trims blanks and
+// selection (EnvConfig.deploy.components): a save trims blanks and
 // persists the selection, and a load reflects it. Exercises the non-empty
 // selection path the Playwright checklist cannot reach (the headless baseline
 // vendors no local component charts to select).
@@ -2005,7 +2006,7 @@ func TestSaveAndLoadDeployComponentsRoundTrip(t *testing.T) {
 }
 
 // TestLoadDeployComponentsRuntimeOnlyWhenNoLocalCharts covers the read model
-// (#718) for a component-only/inert env: with no repo-local charts it offers the
+// for a component-only/inert env: with no repo-local charts it offers the
 // runtime item alone, sourced from the published erun-devops chart and
 // pre-selected (the bootstrap/heal default). A saved selection is reflected in
 // the item's Selected flag.
@@ -2210,7 +2211,7 @@ func TestSaveEnvironmentConfigPreservesProjectContainerRegistryReadModel(t *test
 }
 
 // TestSaveEnvironmentConfigWritesLocalAgentRegistryListToProjectConfig pins the
-// #527 desktop editor: editing a local-agent env's marked registry list writes
+// desktop editor: editing a local-agent env's marked registry list writes
 // it to the project's .erun/config.yaml (where the build/deploy resolvers read
 // it), not to the env config, and the saved UI round-trips the full list.
 func TestSaveEnvironmentConfigWritesLocalAgentRegistryListToProjectConfig(t *testing.T) {
@@ -2285,7 +2286,7 @@ func TestSaveEnvironmentConfigRejectsInvalidRegistryList(t *testing.T) {
 // TestSaveEnvironmentConfigAcceptsDeployOnlyRegistry pins that a registry
 // marked deploy-only is valid: the image it serves may be published there
 // externally (a runtime env pulling a released image), so erun must not force
-// a build or to role on it (issue #527 follow-up).
+// a build or to role on it.
 func TestSaveEnvironmentConfigAcceptsDeployOnlyRegistry(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
@@ -2438,7 +2439,7 @@ func TestSaveEnvironmentConfigRoundTripsClaudeOverrides(t *testing.T) {
 }
 
 // TestSaveEnvironmentConfigRoundTripsClaudeLaunchFlags pins the desktop
-// round-trip of the per-env Claude launch fields (issues #482/#477): the
+// round-trip of the per-env Claude launch fields: the
 // default model and the verbose+debug toggle survive a save both in the
 // returned config and in the persisted store.
 func TestSaveEnvironmentConfigRoundTripsClaudeLaunchFlags(t *testing.T) {
@@ -2687,9 +2688,9 @@ func TestStartSessionLeavesCloudContextStartupToErunCommand(t *testing.T) {
 	}
 
 	got := strings.Join(actions, "\n")
-	// The ERun tab runs a pure `erun open … --app-session open-0` (#644): a
-	// persistent, reattachable dtach session (#478). open no longer deploys —
-	// the shared thin reconnect (#463) rebinds the forwarders, and deploy is
+	// The ERun tab runs a pure `erun open … --app-session open-0`: a
+	// persistent, reattachable dtach session. open no longer deploys —
+	// the shared thin reconnect rebinds the forwarders, and deploy is
 	// the caller's job — so there is no --skip-ensure flag any more.
 	if got != "terminal open frs prod --app-session open-0" {
 		t.Fatalf("expected only terminal start action, got:\n%s", got)
@@ -3154,9 +3155,8 @@ func TestMergeLocalIdleActivityUsesSavedPolicyWithRemoteActivity(t *testing.T) {
 
 // Note: the previous TestLoadIdleStatusStopsLinkedCloudContextWhenStopEligible
 // test verified that LoadIdleStatus would itself fire ec2:StopInstances
-// when the env became eligible. That behavior moved out of the desktop
-// in PR #411 commit "Unify auto-stop grace period across desktop and
-// in-pod monitor" — the shared `MaybeArmOrFireIdleStop` in erun-common
+// when the env became eligible. That behavior moved out of the desktop —
+// the shared `MaybeArmOrFireIdleStop` in erun-common
 // is now the only arbiter and it is driven exclusively by the in-pod
 // monitor via `erun activity stop-ready`. The desktop is a pure
 // observer (renders the warning pill, exposes the Cancel button via
@@ -3615,7 +3615,7 @@ func TestBuildPastedFileCopyCommandTargetsRuntimeDeployment(t *testing.T) {
 	// Use a non-erun tenant so the Helm release name (petios-devops) is distinct
 	// from the runtime container literal (erun-devops). For tenant "erun" the two
 	// coincide, which previously masked the bug where the release name was passed
-	// as the kubectl -c container flag (#532).
+	// as the kubectl -c container flag.
 	result := eruncommon.OpenResult{
 		Tenant:      "petios",
 		Environment: "local",
@@ -3928,8 +3928,8 @@ func TestStartAISessionRunsErunOpenAsPersistentAITab(t *testing.T) {
 	// reopen reconnects to the running claude. The desktop no longer types the
 	// launch in, so there is no initial input. The AI tool + effort are resolved
 	// pod-side by `erun open --ai`; AISessionLaunchCommand is covered in
-	// erun-common. #478. open is pure now (#644): no --skip-ensure flag — the
-	// shared thin reconnect rebinds forwarders once per env (#463), deploy is
+	// erun-common. open is pure now: no --skip-ensure flag — the
+	// shared thin reconnect rebinds forwarders once per env, deploy is
 	// the caller's job.
 	wantArgs := []string{"open", "erun", "remote", "--app-session", "ai", "--ai"}
 	if strings.Join(started.Args, "\n") != strings.Join(wantArgs, "\n") {
@@ -3946,7 +3946,7 @@ func swapAIRepaintNudgeTimings(delay, settle time.Duration) func() {
 	return func() { aiRepaintNudgeDelay, aiRepaintNudgeSettle = prevDelay, prevSettle }
 }
 
-// TestAISessionRepaintNudgeFiresOnAttachMarker pins the #618 fix: an AI tab
+// TestAISessionRepaintNudgeFiresOnAttachMarker pins the fix: an AI tab
 // reattaching to a running Claude renders blank because Claude (a main-screen
 // TUI) only repaints on a real geometry change, and a same-size reattach
 // raises none. The desktop forces the repaint by briefly resizing the pty one

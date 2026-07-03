@@ -152,7 +152,7 @@ func writeStatic(w http.ResponseWriter, path string, data []byte) {
 
 // contentTypeBySuffix maps a file-extension suffix to the Content-Type the
 // static handler advertises. Order matters: ".woff2" must precede ".woff" so
-// the longer suffix wins, mirroring the original switch.
+// the longer suffix wins.
 var contentTypeBySuffix = []struct {
 	suffix      string
 	contentType string

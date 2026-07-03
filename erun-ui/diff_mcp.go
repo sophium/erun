@@ -25,7 +25,7 @@ func (t idleProbeRoundTripper) RoundTrip(req *http.Request) (*http.Response, err
 }
 
 // mcpAuthRoundTripper stamps the per-env bearer onto every MCP request so an
-// auth-enabled env edge (issue #655) accepts the call. An empty token is a
+// auth-enabled env edge accepts the call. An empty token is a
 // no-op, so non-auth envs and unit tests (which sign no token) keep working;
 // an auth-enabled env rejects the empty bearer with 401, which is correct.
 type mcpAuthRoundTripper struct {
@@ -170,7 +170,7 @@ func runPodRawFromMCP(ctx context.Context, endpoint, bearer string, argv []strin
 
 // loadPodBranchFromMCP reads the env worktree's current git branch from
 // inside the runtime pod via the per-env MCP endpoint's raw tool — the
-// sidebar hover card's "Working on" source for remote envs (issue #462).
+// sidebar hover card's "Working on" source for remote envs.
 func loadPodBranchFromMCP(ctx context.Context, endpoint, bearer string) (string, error) {
 	out, err := runPodRawFromMCP(ctx, endpoint, bearer, []string{"git", "rev-parse", "--abbrev-ref", "HEAD"})
 	if err != nil {

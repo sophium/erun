@@ -6,7 +6,7 @@ import { App } from '../App';
 // The increment's real verification: with a dev token present, App drives
 // auth → fetchConfig → ConfigView, so mocking `fetch` exercises the whole read
 // path end-to-end (client parse + render). The OIDC flow itself is not covered
-// here — it is a flagged placeholder (TODO(#606) in src/auth/auth.ts) that needs
+// here — it is a flagged placeholder (a TODO in src/auth/auth.ts) that needs
 // a live IdP to verify; a Playwright e2e harness like erun-ui's is the follow-up.
 
 const SAMPLE_CONFIG = {

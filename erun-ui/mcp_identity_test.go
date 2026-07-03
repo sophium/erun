@@ -20,7 +20,7 @@ func mustNoErr(t *testing.T, err error, what string) {
 // TestDesktopIdentityRoundTrip locks the desktop↔server contract: the keypair
 // the desktop persists (and whose public half it injects on deploy) signs a
 // token the real erun-common verifier accepts, and signToken stamps the shared
-// file:// issuer + the per-env audience the MCP edge enforces (#655).
+// file:// issuer + the per-env audience the MCP edge enforces.
 func TestDesktopIdentityRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	id := newDesktopIdentity(dir)

@@ -6,10 +6,9 @@ import {
 import type { UISelection } from '@/types';
 
 // deployUiSelection builds the uiSelection a deploy-oriented recovery action
-// (force redeploy, doctor) needs from an activity entry. Only the fields those
-// flows read are populated from the entry; the rest are left empty so the
-// backend resolves them from the env config, matching how the container-status
-// recovery action constructs its selection.
+// (force redeploy, doctor) needs from an activity entry. Fields these flows
+// don't read are left empty so the backend resolves them from the env config,
+// matching the container-status recovery action.
 export function deployUiSelection(entry: ActivityQueueEntry): UISelection {
   return {
     tenant: entry.tenant,
@@ -291,12 +290,11 @@ function failureReportContainerLines(entry: ActivityQueueEntry): string[] {
   return ['', 'Containers:', ...entry.containers.map(failureReportContainerLine)];
 }
 
-// buildFailureReport assembles a complete, paste-ready plain-text report for a
-// failed activity: the structured context the user cannot easily retype
-// (target, version, namespace, Kubernetes context, timing, container states)
-// plus the captured command output. It is the payload of the "Copy failure
-// report" action, so a user can hand a deploy failure to developers/admins
-// without scraping the terminal. Sections with no data are omitted.
+// buildFailureReport assembles a paste-ready plain-text report for a failed
+// activity — structured context the user cannot easily retype plus captured
+// command output — as the payload of the "Copy failure report" action, so a
+// user can hand a deploy failure to developers/admins without scraping the
+// terminal. Sections with no data are omitted.
 export function buildFailureReport(entry: ActivityQueueEntry): string {
   const lines = [...failureReportContextLines(entry), ...failureReportContainerLines(entry)];
   if (entry.error) lines.push('', `Error: ${entry.error}`);

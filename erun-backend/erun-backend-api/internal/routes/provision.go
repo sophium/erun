@@ -72,7 +72,7 @@ func RegisterProvisionRoute(register ProtectedRouteRegistrar, tenants ConfigTena
 // (cluster) bootstrap, namespace creation, env registration, and runtime
 // deploy into one auditable preview. It NEVER executes the plan and NEVER
 // writes to the database — this endpoint is plan-only in this build (see the
-// TODO(#605 live) below for the real orchestration).
+// TODO(live) below for the real orchestration).
 func (r ProvisionRoutes) provision(w http.ResponseWriter, req *http.Request) {
 	var body provisionRequest
 	if err := decodeJSON(req, &body); err != nil {
@@ -84,7 +84,7 @@ func (r ProvisionRoutes) provision(w http.ResponseWriter, req *http.Request) {
 	// The env name forms the <tenant>-<env> namespace, so it must be a DNS-1123
 	// label (same guardrail as POST /v1/environments). The tenant is hyphen-free
 	// (ValidateTenantName at tenant registration), so the first-hyphen split of
-	// the namespace stays unambiguous (#605 injective-namespace guardrail).
+	// the namespace stays unambiguous (injective-namespace guardrail).
 	if !validNamespaceLabel(envName) {
 		writeError(w, http.StatusBadRequest, "environment.name must be a DNS-1123 label: lowercase letters, digits, and internal hyphens, not starting or ending with a hyphen, at most 63 characters")
 		return
@@ -189,7 +189,7 @@ func (r ProvisionRoutes) provision(w http.ResponseWriter, req *http.Request) {
 	// 6. deploy: helm-install the runtime chart for the tenant into the namespace.
 	plan = append(plan, fmt.Sprintf("deploy: would helm install the erun-devops runtime chart (release %s) into %s", eruncommon.RuntimeReleaseName(tenantName), namespace))
 
-	// TODO(#605 live): execute this plan — InitCloudContext (DryRun=false) →
+	// TODO(live): execute this plan — InitCloudContext (DryRun=false) →
 	// ensure namespace → RunBootstrapInitWithDependencies/deploy the runtime
 	// chart → wire exposure + the auth edge. Requires a live AWS account +
 	// cluster; this endpoint is plan-only in this build. Do not persist here —

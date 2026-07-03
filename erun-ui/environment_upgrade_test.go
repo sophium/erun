@@ -39,8 +39,8 @@ func TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing(t *te
 			case "petios-devops":
 				// Tenant image never published: the lookup succeeds but finds
 				// no tags. This — and only this — falls back to the default
-				// image; a FAILED lookup (e.g. ghcr 403) must not (issue
-				// #497, see TestResolveUpgradePlanReportsFailedLookupAsUnresolved).
+				// image; a FAILED lookup (e.g. ghcr 403) must not (see
+				// TestResolveUpgradePlanReportsFailedLookupAsUnresolved).
 				return eruncommon.RuntimeRegistryVersions{}, nil
 			case eruncommon.DefaultRuntimeImageName:
 				return eruncommon.RuntimeRegistryVersions{
@@ -76,7 +76,7 @@ func TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing(t *te
 }
 
 // TestResolveUpgradePlanOffersCandidatesWhenRegistriesDisagree confirms the
-// multi-registry pick (issue #527): when the env's listed registries and the
+// multi-registry pick: when the env's listed registries and the
 // canonical image publish different newer versions for the tracked channel, the
 // env is not auto-resolved — it carries every distinct candidate so the
 // operator picks one in the Upgrade-all dialog, and the run skips it until they
@@ -164,7 +164,7 @@ func assertCandidateVersions(t *testing.T, candidates []eruncommon.UpgradeVersio
 }
 
 // TestResolveUpgradePlanFallsBackToCanonicalOnFailedTenantLookup locks the
-// corrected policy (issue #501): a tenant whose registry listing FAILS (the
+// corrected policy: a tenant whose registry listing FAILS (the
 // observed ghcr 403 — indistinguishable from "never published" on ghcr) gets
 // its target from the canonical ERun image, because the tenant image is a
 // wrapper the deploy rebuilds FROM that canonical image at the requested

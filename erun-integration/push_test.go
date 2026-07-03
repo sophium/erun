@@ -157,7 +157,7 @@ func TestPush(t *testing.T) {
 	})
 
 	t.Run("dry_run_build_shortcut_builds_then_pushes_minted_version", func(t *testing.T) {
-		// #585: `erun push --build` is the operator shortcut that builds the
+		// `erun push --build` is the operator shortcut that builds the
 		// current source first (minting a snapshot version) and then pushes
 		// that exact version — no --version needed. The dry-run trace must
 		// show the build actions (==> would not appear in dry-run, but the
@@ -187,7 +187,7 @@ func TestPush(t *testing.T) {
 	})
 
 	t.Run("dry_run_build_shortcut_force_rebuilds", func(t *testing.T) {
-		// #585: --force must propagate to the --build step, so the build
+		// --force must propagate to the --build step, so the build
 		// rebuilds every image instead of promoting from the fingerprint
 		// cache. The dry-run trace differs from the plain --build run (no
 		// fingerprint-promote decision lines) which is what this golden locks.
@@ -215,7 +215,7 @@ func TestPush(t *testing.T) {
 	})
 
 	t.Run("build_shortcut_with_explicit_version_errors", func(t *testing.T) {
-		// #585: --build mints the version itself, so combining it with an
+		// --build mints the version itself, so combining it with an
 		// explicit --version is contradictory and must fail clearly before any
 		// build or push work.
 		setup := env.New(t)
@@ -388,8 +388,8 @@ func TestPush(t *testing.T) {
 		// stubbed gh exits 0 so RefreshGHCRPackageScopes returns true,
 		// and the retry push succeeds on the second invocation.
 		//
-		// ERUN_FORCE_TTY=1 is the deliberate seam that lets the gate added
-		// in #587 treat this piped-stdin harness run as interactive, so the
+		// ERUN_FORCE_TTY=1 is the deliberate seam that lets the gate treat
+		// this piped-stdin harness run as interactive, so the
 		// interactive scope-refresh success path stays covered. The two
 		// scenarios below assert the non-interactive and in-pod paths fail
 		// clearly instead of launching gh.
@@ -442,7 +442,7 @@ func TestPush(t *testing.T) {
 	})
 
 	t.Run("real_run_scope_denied_non_interactive_fails_clearly", func(t *testing.T) {
-		// #587: with no interactive terminal (the harness pipes stdin and
+		// with no interactive terminal (the harness pipes stdin and
 		// ERUN_FORCE_TTY is unset), RefreshGHCRPackageScopes must NOT launch
 		// gh's interactive device-code flow — which would hang forever — and
 		// must instead return the actionable write:packages-scope error. The
@@ -487,7 +487,7 @@ func TestPush(t *testing.T) {
 	})
 
 	t.Run("real_run_scope_denied_in_pod_fails_clearly", func(t *testing.T) {
-		// #587: inside a chart-injected runtime pod (ERUN_TENANT/
+		// inside a chart-injected runtime pod (ERUN_TENANT/
 		// ERUN_ENVIRONMENT set) the desktop terminal is a PTY-backed pod
 		// shell, so ERUN_FORCE_TTY=1 is set to prove the in-pod check wins
 		// over the TTY seam: even with a "terminal", there is no browser, so

@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/erunApp.js';
 
-// #533 — the Manage dialog Runtime tab's "Ignore project build.sh" toggle
+// The Manage dialog Runtime tab's "Ignore project build.sh" toggle
 // (EnvConfig.disableBuildScript). It is an editable field (lights the Runtime
 // tab's unsaved-changes dot) that changes how a redeploy rebuilds the runtime
 // image (build.sh vs docker contexts), so saving it raises the Pending-redeploy

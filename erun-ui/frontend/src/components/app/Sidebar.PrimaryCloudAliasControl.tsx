@@ -35,7 +35,7 @@ interface CloudAliasRowView {
 }
 
 // PrimaryCloudAliasControl renders one cloud-status row per provider type the
-// active tenant uses (issue #630): an AWS account and a Cloudflare token each
+// active tenant uses: an AWS account and a Cloudflare token each
 // get an independent login/logout/status control with its own spinner. AWS
 // rows additionally offer "Get bearer token" (OIDC web-identity); Cloudflare
 // has no OIDC, so that action is hidden and "Log in" reads "Verify token".

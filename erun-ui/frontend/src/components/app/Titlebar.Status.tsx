@@ -113,7 +113,7 @@ function computeTitlebarStatus(
       // Error/warning notifications (deploy failed, runtime unreachable) carry
       // an actionable message with long paths the operator needs to copy into a
       // bug report — give them a copy button, like the terminal-status errors
-      // already have (issue #713). Transient success/info toasts don't need one.
+      // already have. Transient success/info toasts don't need one.
       copyOutput:
         notification.kind === 'error' || notification.kind === 'warning'
           ? notification.message
@@ -269,7 +269,7 @@ function StatusCopyAction({ status }: { status: TitlebarStatusValue }): React.Re
 }
 
 // NotificationCopyAction copies an error/warning notification's message to the
-// clipboard (issue #713). Notifications have no terminal copy-output slot, so it
+// clipboard. Notifications have no terminal copy-output slot, so it
 // copies the message directly and shows a transient "Copied" via local state —
 // the terminal path (StatusCopyAction) keeps its Redux-backed copy flow.
 function NotificationCopyAction({ text }: { text: string }): React.ReactElement {

@@ -13,13 +13,9 @@ import { SelectField } from './SelectField';
 type EnvironmentDialog = AppState['environmentDialog'];
 
 // KubernetesContextSelect renders the Kubernetes-context picker for the
-// env-init dialog. Three surfaces:
-//  - loading: SelectField with the "Loading contexts..." placeholder.
-//  - populated: SelectField listing each detected context.
-//  - empty: EmptyState explaining where kubectl looks, with a Rescan
-//    action that re-invokes LoadKubernetesContexts and, if kubectl
-//    surfaced an error on the previous call, includes that as a "Last
-//    error from kubectl" suffix.
+// env-init dialog. When no contexts are found it falls back to an
+// EmptyState with recovery guidance and a Rescan action that appends
+// kubectl's last error when a previous scan failed.
 export function KubernetesContextSelect({
   dialog,
 }: {

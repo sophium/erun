@@ -207,7 +207,7 @@ func resolveArmedIdleStopWindow(tenant, environment string, pending EnvironmentS
 }
 
 // idleStopGraceSeconds picks the grace-period length for an env.
-// The user-facing spec (#410 follow-up) is "at least the idle
+// The user-facing spec is "at least the idle
 // timeout", so we use the resolved idle timeout verbatim. A
 // 10-minute idle timeout yields a 10-minute warning window.
 func idleStopGraceSeconds(status EnvironmentIdleStatus) int64 {

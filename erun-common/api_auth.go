@@ -1,7 +1,7 @@
 package eruncommon
 
-// Hosted-API auth edge (issue #674). erun-backend-api, like the per-env MCP edge
-// (#655/#656), is always authenticated via the token's `iss` and trusts the same
+// Hosted-API auth edge. erun-backend-api, like the per-env MCP edge,
+// is always authenticated via the token's `iss` and trusts the same
 // two kinds of issuer through one verification flow:
 //
 //   - `file://<path>` — the desktop case: a self-contained Ed25519 keypair. The

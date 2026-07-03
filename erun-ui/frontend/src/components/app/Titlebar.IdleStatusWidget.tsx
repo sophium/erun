@@ -34,11 +34,8 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
-// useIdleWidgetState pulls the redux selectors and derives the
-// render-time view of the titlebar. Extracting it keeps the
-// IdleStatusWidget component itself thin enough to read top-down and
-// shifts the boolean fan-out into a single helper. Returns null when
-// the widget should render nothing.
+// useIdleWidgetState derives the titlebar's render-time view from the
+// redux idle state, returning null when the widget should render nothing.
 function useIdleWidgetState(): {
   idleStatus: IdleStatus | null;
   idleBadge: { label: string; className: string } | null;
@@ -57,11 +54,9 @@ function useIdleWidgetState(): {
   return { idleStatus, idleBadge, idleAction, cloudContextName };
 }
 
-// renderIdleLeadingBadge picks between the warning pill (auto-stop
-// armed), the busy-transition pill (Wails stop/start in flight), the
-// idle-status pill (default), and rendering nothing. Extracted to
-// keep IdleStatusWidget itself under the eslint complexity ceiling
-// and to give each surface a single, named owner.
+// renderIdleLeadingBadge chooses the leading pill for the current
+// state: the warning pill when auto-stop is armed, the transition pill
+// during a stop/start, the idle-status pill otherwise, or nothing.
 function renderIdleLeadingBadge(
   busy: boolean,
   idleAction: ReturnType<typeof idleCloudAction>,
@@ -88,10 +83,6 @@ function renderIdleLeadingBadge(
   return null;
 }
 
-// IdleStopWarningBadge is the amber "auto-stop is armed" pill that
-// replaces the idle-time pill once `stopPendingSince` is set. It
-// surfaces the countdown to forced stop and a Cancel button that
-// dismisses the grace window without touching AWS state.
 // pickEnvDisplayName chooses the first non-empty display string for
 // the env, preferring the human-friendly kube context label over the
 // raw context name.
@@ -103,6 +94,10 @@ function pickEnvDisplayName(idleStatus: IdleStatus, fallback: string): string {
   return fallback;
 }
 
+// IdleStopWarningBadge is the amber "auto-stop is armed" pill that
+// replaces the idle-time pill once `stopPendingSince` is set. It
+// surfaces the countdown to forced stop and a Cancel button that
+// dismisses the grace window without touching AWS state.
 function IdleStopWarningBadge({
   idleStatus,
   cloudContextName,
@@ -165,9 +160,7 @@ function IdleStopWarningBadge({
 }
 
 // idleWidgetContainerClass returns the container's tailwind classes
-// for the current widget state. Extracted to keep IdleStatusWidget
-// itself under the eslint complexity ceiling — the busy/pending/idle
-// fan-out is a real branching point and worth naming.
+// for the current busy/pending/idle widget state.
 function idleWidgetContainerClass(
   busy: boolean,
   pending: boolean,
@@ -271,11 +264,9 @@ function IdleStatusBadge({
   );
 }
 
-// idleStatusActionShape returns the icon + rounding/border that depend
-// on whether the action button has a badge to its left and/or another
-// button to its right. Extracted so IdleStatusAction itself stays
-// under the eslint complexity ceiling — the layout permutations are
-// real and worth naming, but they belong in a lookup, not the JSX.
+// idleStatusActionShape returns the icon plus the rounding/border that
+// depend on whether the action button has a badge to its left and/or
+// another button to its right.
 function idleStatusActionShape(
   busy: boolean,
   action: 'start' | 'stop',
@@ -332,8 +323,7 @@ function IdleStatusAction({
 }
 
 // useStopProtectionState centralises the redux-toolkit-query plumbing
-// so StopProtectionToggle stays under the eslint complexity ceiling.
-// The component itself only renders against the returned view.
+// and returns the view StopProtectionToggle renders against.
 //
 // Click is deliberately NOT gated on the in-flight describe call.
 // Before this, an AWS describe-instance-attribute call that hung
@@ -369,12 +359,11 @@ function useStopProtectionState(contextName: string): {
   return { Icon, label, amber: known && locked, pressed: known && locked, busy, locked };
 }
 
-// useStopProtectionMutators isolates the actual Wails-bound RPC + the
-// toast feedback so the JSX-heavy component can stay terse. Each
-// outcome dispatches a notification: success toasts confirm the AWS
-// attribute is now what the user asked for; errors surface the raw
-// AWS message verbatim so a missing SSO token or instance-profile
-// permission stays actionable.
+// useStopProtectionMutators isolates the Wails-bound RPC and toast
+// feedback. Each outcome dispatches a notification: success toasts
+// confirm the AWS attribute is now what the user asked for; errors
+// surface the raw AWS message verbatim so a missing SSO token or
+// instance-profile permission stays actionable.
 function useStopProtectionMutators(contextName: string): {
   disable: () => Promise<void>;
   enable: () => Promise<void>;

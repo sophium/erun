@@ -23,7 +23,7 @@ const ROLE_HINT: Record<RegistryRole, string> = {
 // a registry host plus build/from/to/deploy role toggles, with add/remove. An
 // empty list inherits the project default. A live validation hint mirrors the
 // backend marker invariants so the operator sees the problem before saving
-// (the backend Validate() is the authoritative gate). Issue #527.
+// (the backend Validate() is the authoritative gate).
 export function ContainerRegistriesField({
   entries,
   suggestions,

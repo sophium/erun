@@ -42,7 +42,7 @@ export const boot = (): AppThunk<Promise<void>> => async (dispatch, getState) =>
 
 // reloadStateAfterEnvironmentChange refetches initial state after backend
 // signals an env was created/removed (config watcher, environment-init
-// completion). Preserves the user's existing tenants / cloudProviders /
+// completion). Preserves the user's existing cloudProviders /
 // versionSuggestions if the new payload omits them, since this is a delta
 // refresh — boot() is the authoritative initial load. Does NOT touch the
 // env-init dialog's kubernetes-context list: a stale environments-changed

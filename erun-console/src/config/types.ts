@@ -25,7 +25,7 @@ export interface Environment {
 }
 
 // The provisioning lifecycle a context moves through once `POST /v1/contexts`
-// kicks off the live bootstrap (issue #605/#676): `provisioning` → `running`
+// kicks off the live bootstrap: `provisioning` → `running`
 // (success) | `failed`. Kept as a string union for the known states but parsed
 // leniently from the wire (see parseContext) so an unknown future state still
 // renders rather than failing the parse.

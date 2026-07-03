@@ -2,7 +2,7 @@ import { test, expect } from '../fixtures/erunApp.js';
 import type { AppShell } from '../pages/index.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
-// Issue #460 — two mirror-image defects on the Manage dialog's Runtime tab:
+// Two mirror-image defects on the Manage dialog's Runtime tab:
 // the "Pending redeploy" banner fired on every save, including saves that
 // only touched fields the running pod never sees (autoUpgrade/upgradeChannel
 // select a future `erun upgrade` run; autoStart is desktop open-time

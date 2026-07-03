@@ -71,7 +71,7 @@ export const handleAIActivity =
   };
 
 // handleEnvStatus records the env's real condition behind the sidebar's open
-// dot (issue #470): the Go side flags a row 'stopped' when reconnect is
+// dot: the Go side flags a row 'stopped' when reconnect is
 // refused because the linked cloud context is not running, 'failed' when a
 // deploy failure / reconnect loop ends retries, and clears the flag ('') on
 // every fresh open attempt and successful respawn. Match between system and
@@ -105,8 +105,7 @@ export const handleAppStatus =
 // side through the auto-dismissing notification slot. Used for one-shot
 // info/success events (e.g. "Stopped idle cloud context X.") that
 // would go stale if left on the persistent titlebar pill — see
-// erun-ui/AGENTS.md § "UX Impact Review Checklist" item 3 and issue
-// #361.
+// erun-ui/AGENTS.md § "UX Impact Review Checklist" item 3.
 export const handleAppNotification =
   (payload: AppNotificationPayload): AppThunk =>
   (dispatch) => {
@@ -168,7 +167,7 @@ const reloadUntilEnvironmentVisible =
 // env appears in the sidebar, surface a success toast (Nielsen #1 system
 // status visibility), then COMPOSE A DEPLOY — not an open. `erun init` does
 // not deploy a local-agent env's runtime, and `open` is a pure primitive that
-// no longer deploys (issue #644), so opening here would spawn tabs against a
+// no longer deploys, so opening here would spawn tabs against a
 // runtime that does not exist and fail with an MCP port-forward timeout. The
 // desktop deploys (build→push→deploy for builds-here envs, an in-shell deploy
 // for the rest) via startDeploySelection, records the env as pending-open, and
@@ -213,8 +212,8 @@ export const handleEnvironmentInitialized =
   };
 
 // Fires when the backend observes a successful (or skipped — already current)
-// deploy via `==> Deployed`/`==> Skipping`. Gates the create→deploy→open flow
-// (issue #644): if this env was queued to open after its create-time deploy,
+// deploy via `==> Deployed`/`==> Skipping`. Gates the create→deploy→open flow:
+// if this env was queued to open after its create-time deploy,
 // the runtime is now reachable, so open its tabs. For any other deploy (the
 // Deploy button, a manual redeploy) there is no pending entry, so this is a
 // no-op — the env opens only when the user created it and asked to open it.

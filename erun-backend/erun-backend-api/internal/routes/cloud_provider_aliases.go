@@ -8,10 +8,10 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// CloudProviderAliasWriter stores a tenant's BYO-cloud credentials (issue
-// #605/#676). The credentials blob is opaque to the API — a provider-specific
-// JSON the provisioning executor hands to the cloud SDK/CLI — and is encrypted
-// at rest by the repository.
+// CloudProviderAliasWriter stores a tenant's BYO-cloud credentials. The
+// credentials blob is opaque to the API — a provider-specific JSON the
+// provisioning executor hands to the cloud SDK/CLI — and is encrypted at rest
+// by the repository.
 type CloudProviderAliasWriter interface {
 	Set(ctx context.Context, alias, provider, credentials string) error
 }

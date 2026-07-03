@@ -50,7 +50,7 @@ func (a *App) emitEnvironmentInitFailed(tenant, environment string) {
 // gate the create→deploy→open flow: after `erun init`, the desktop composes a
 // deploy (build→push→deploy for builds-here envs, an in-shell deploy for the
 // rest) and opens the env's tabs only once this signal arrives, so the tabs
-// never spawn against a runtime that does not exist (issue #644). Driven by the
+// never spawn against a runtime that does not exist. Driven by the
 // same `==> Deployed`/`==> Skipping` matcher that finalizes the deploy entry.
 func (a *App) emitEnvironmentDeployed(tenant, environment string) {
 	tenant = strings.TrimSpace(tenant)

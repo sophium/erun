@@ -147,7 +147,7 @@ func runRuntimeCommand(runtime RuntimeConfig, preview bool, verbosity int, run f
 	traceOutput := new(bytes.Buffer)
 	ctx := runtimeCallContext(preview, verbosity, nil, traceOutput, traceOutput)
 	ctx.KubernetesContextPreflight = eruncommon.CloudContextPreflight(runtime.Store, eruncommon.CloudContextDependencies{})
-	// Per-env trace capture (issues #466/#508): every action-tool invocation
+	// Per-env trace capture: every action-tool invocation
 	// appends its full trace to the pod-side ~/.erun/<tenant>/<env>/trace.log
 	// — the same contract the CLI honors, so the desktop's Diagnostics
 	// console shows agent-driven operations too. Always on; read-only tools

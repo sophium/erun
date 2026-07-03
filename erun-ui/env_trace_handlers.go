@@ -15,8 +15,8 @@ import (
 // refresh transfers — enough scrollback to diagnose, small enough to poll.
 const envTraceTailBytes = 64 * 1024
 
-// uiEnvTrace is the Diagnostics console's "erun trace" read model (issues
-// #466/#508/#516): the tail of the env's persistent trace log — capture is
+// uiEnvTrace is the Diagnostics console's "erun trace" read model: the
+// tail of the env's persistent trace log — capture is
 // always on — or an honest reason why there is nothing to show. Notice
 // carries a non-fatal caveat about the shown content (e.g. the in-pod side
 // could not be included).
@@ -29,7 +29,7 @@ type uiEnvTrace struct {
 }
 
 // LoadEnvTrace reads the selected env's trace log for the Diagnostics
-// console. A remote env has two vantage points (issue #516): the host file
+// console. A remote env has two vantage points: the host file
 // holds the operator-driven commands the desktop and CLI run from this
 // machine (open, deploy preflight, doctor, upgrade), while the in-pod file
 // holds agent-driven MCP actions and in-pod CLI runs. Both are read — the

@@ -2,7 +2,7 @@
 // belongs to — and whether the write streams live output or replays a saved
 // buffer — so terminal query replies (CPR/DSR/DECRQSS) route back to the
 // session whose output asked, and stale queries re-parsed from a replayed
-// buffer are never answered at all (issue #484): the asking tool is long gone,
+// buffer are never answered at all: the asking tool is long gone,
 // so the reply would land on the live shell's stdin as typed junk.
 //
 // Why a queue and not a single field: xterm parses writes and fires their
@@ -10,7 +10,7 @@
 // across several tasks (xterm yields after a ~12 ms budget and resumes on a
 // later setTimeout). If the user switches sessions inside that window, reading
 // the currently-selected session at reply time addresses the reply to the wrong
-// PTY (issue #347). Pairing every write with begin() and handing its returned
+// PTY. Pairing every write with begin() and handing its returned
 // completion callback to terminal.write(data, callback) keeps the queue head
 // aligned with the chunk xterm is parsing right now, so current() yields the
 // originating session even across a mid-parse session switch.

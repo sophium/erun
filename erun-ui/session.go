@@ -43,7 +43,7 @@ func resolveCLIExecutable() string {
 	// it at its inert `erun` stub so the ERun/AI tabs run the stub regardless of
 	// whether a real erun-cli/bin/erun build artifact happens to sit next to the
 	// app binary — otherwise that artifact is resolved here, the real `erun open`
-	// hits the stubbed cluster, and the env-open specs loop red (#525).
+	// hits the stubbed cluster, and the env-open specs loop red.
 	if override := strings.TrimSpace(os.Getenv("ERUN_APP_CLI")); override != "" {
 		return override
 	}
@@ -112,7 +112,7 @@ func buildOpenArgs(tenant, environment string) []string {
 // shell instead of spawning a parallel one, and the AI tab's claude keeps
 // working in the pod meanwhile. sessionID is stable per (tab kind, slot) so the
 // reattach lands on the same session; the AI/contribute launch now happens
-// pod-side (no typed prelude). See issue #478.
+// pod-side (no typed prelude).
 func withAppSession(args []string, sessionID string, ai, contribute bool) []string {
 	args = append(args, "--app-session", sessionID)
 	if contribute {
@@ -281,8 +281,7 @@ func runOpenForReconnect(ctx context.Context, cliPath string, result eruncommon.
 // line by line: it forwards non-blank lines to onLine and, when captureErr is
 // set, accumulates every line into lastErr (newline-joined) so the trailing
 // stderr can be folded into the returned error. Extracted from the inline
-// closure so runOpenForReconnect stays under the cyclomatic limit; the
-// per-line behavior is unchanged.
+// closure so runOpenForReconnect stays under the cyclomatic limit.
 func scanReconnectOutput(reader io.Reader, captureErr bool, onLine func(string), lastErr *strings.Builder) {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -345,7 +344,7 @@ func buildInitArgs(selection uiSelection) []string {
 // appendInitOptionalFlags appends the optional `--flag value` pairs that
 // buildInitArgs threads through, in their established order, skipping any whose
 // trimmed value is empty. Extracted so buildInitArgs stays under the cyclomatic
-// limit; the produced argument order and spellings are unchanged.
+// limit.
 func appendInitOptionalFlags(args []string, selection uiSelection) []string {
 	for _, pair := range []struct{ flag, value string }{
 		{"--version", strings.TrimSpace(selection.Version)},
@@ -398,7 +397,7 @@ func appendDeployComponentsFlag(args []string, selection uiSelection) []string {
 }
 
 // deployRuntimeImageOverride returns the picked runtime image to pass as
-// `deploy --runtime-image` (#697), or "" to leave the deploy on the env's own
+// `deploy --runtime-image`, or "" to leave the deploy on the env's own
 // runtime chart. The version picker offers two families: the env's own tenant
 // image (<tenant>-devops) and the canonical ERun base image (erun-devops). A
 // pick of the env's own image deploys the env's own chart as before; only a
@@ -425,9 +424,9 @@ func deployRuntimeImageOverride(selection uiSelection) string {
 
 // buildUpgradeArgs builds the per-environment `erun upgrade` invocation:
 // scoped to the selection's tenant + environment so each Upgrade-all member
-// upgrades in its own env, in parallel with the others (issue #497). A
+// upgrades in its own env, in parallel with the others. A
 // selection Version pins the exact target — used when the operator picked one
-// of several newer versions an env's registries offered (issue #527).
+// of several newer versions an env's registries offered.
 func buildUpgradeArgs(selection uiSelection) []string {
 	args := []string{"upgrade", "--tenant", selection.Tenant, "--environment", selection.Environment}
 	if version := strings.TrimSpace(selection.Version); version != "" {
@@ -504,8 +503,8 @@ func resolveLocalShellCommand(goos string) (string, []string) {
 var claudeEffortLevels = []string{"low", "medium", "high", "xhigh", "max", "ultracode"}
 
 // defaultClaudeEffort is the effort level the desktop applies to a Claude AI
-// tab when the env has no explicit Effort configured, or has an invalid one
-// (issues #469/#491). Ultracode is the default: everything on.
+// tab when the env has no explicit Effort configured, or has an invalid one.
+// Ultracode is the default: everything on.
 const defaultClaudeEffort = "ultracode"
 
 // claudeEffortLevelOptions returns the valid effort levels for transport to the

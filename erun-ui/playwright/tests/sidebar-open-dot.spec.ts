@@ -36,9 +36,8 @@ test.describe('sidebar env open dot', () => {
     const { tenant, environment } = seededEnv;
     await app.sidebar.openEnvironment(tenant, environment);
 
-    // Scope the dot lookup to the same env row to avoid collisions if
-    // multiple envs end up open across the suite — the row containing
-    // the matching edit button is the row this test owns.
+    // Match the close button by its env-specific accessible name so
+    // other envs opened across the suite can't collide with this dot.
     const sidebar = page.locator('aside').first();
     const dot = sidebar.getByRole('button', { name: `Close ${tenant} / ${environment}` });
     await expect(dot).toBeVisible();
@@ -51,15 +50,14 @@ test.describe('sidebar env open dot', () => {
     await expect(dot).toHaveCount(0);
   });
 
-  // Issue #470 — the dot must reflect the env's REAL condition, not just tab
+  // The dot must reflect the env's REAL condition, not just tab
   // presence: green filled circle while running, hollow grey ring while the
   // linked cloud context is stopped, amber triangle after a failed deploy /
   // abandoned reconnect. Shape + accessible label carry the state (never
   // colour alone). A real stopped EC2 context or failed deploy cannot be
   // staged headless, so the spec drives the same env-status Wails event the
   // Go side emits — the emission decisions themselves are owned by
-  // erun-ui/env_status_test.go (tryReconnect refusal paths, the #331
-  // pattern).
+  // erun-ui/env_status_test.go (tryReconnect refusal paths).
   test('the dot reflects the real env state: running → stopped → failed → running', async ({
     app,
     page,

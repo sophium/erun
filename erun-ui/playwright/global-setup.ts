@@ -13,7 +13,7 @@ import {
 export default function globalSetup(): void {
   createIsolatedLayout();
   if (e2eK3dEnabled()) {
-    // Opt-in k3d e2e mode (issue #647): a minimal baseline (no inert
+    // Opt-in k3d e2e mode: a minimal baseline (no inert
     // `test-context` envs) plus a real local cluster the e2e specs deploy to.
     seedBaselineForK3d();
     createK3dCluster();

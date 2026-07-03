@@ -47,8 +47,8 @@ func TestEmitAppNotificationCarriesKindAndMessage(t *testing.T) {
 // verify that the desktop emitted a "Stopped idle cloud context X."
 // notification (and not a persistent pill) when it fired the
 // auto-stop itself. The auto-stop firing moved to the in-pod monitor
-// in PR #411's "Unify auto-stop grace period across desktop and
-// in-pod monitor" commit, so the desktop no longer emits this
+// when the auto-stop grace period was unified across desktop and
+// in-pod monitor, so the desktop no longer emits this
 // notification on its own. The post-fire UX is exercised at the
 // transport boundary by the integration suite (which verifies
 // `erun activity record-stop` writes the history entry) and by the

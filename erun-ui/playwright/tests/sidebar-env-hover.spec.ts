@@ -1,7 +1,7 @@
 import { test, expect } from '../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
-// Issue #437 — hovering a sidebar env row shows a hover card with the env's
+// Hovering a sidebar env row shows a hover card with the env's
 // version, the issue it's working on (branch + linked issue title), and its
 // current activity, replacing the plain tenant/env tooltip.
 //
@@ -20,7 +20,6 @@ test.describe('sidebar env hover card', () => {
     const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
     await expect(card).toBeVisible();
 
-    // All three sections are present.
     await expect(card.getByText('Version', { exact: true })).toBeVisible();
     await expect(card.getByText('Working on', { exact: true })).toBeVisible();
     await expect(card.getByText('Activity', { exact: true })).toBeVisible();
@@ -31,14 +30,14 @@ test.describe('sidebar env hover card', () => {
       .poll(async () => (await card.locator('dd').nth(1).textContent())?.trim() ?? '')
       .not.toBe('');
 
-    // Issue #462 — whatever it resolves to, it is never the implementation
+    // Whatever it resolves to, it is never the implementation
     // excuse the card used to print for remote envs.
     expect((await card.locator('dd').nth(1).textContent()) ?? '').not.toContain(
       'worktree lives in the pod',
     );
   });
 
-  // Issue #462 — a never-opened env has no pod to be "idle" about: the
+  // A never-opened env has no pod to be "idle" about: the
   // Activity row must say it is not open, and the Working-on row must offer
   // the next step instead of an implementation excuse. A per-test seeded env
   // is guaranteed never-opened: it did not exist before this test, and the
@@ -61,7 +60,7 @@ test.describe('sidebar env hover card', () => {
     expect((await workingOn.textContent()) ?? '').not.toContain('worktree lives in the pod');
   });
 
-  // Issue #462/#470 — an open env whose real state is stopped must say
+  // An open env whose real state is stopped must say
   // "Stopped", never "Idle". A real stopped cloud context cannot be staged
   // headless, so the spec drives the env-status event the Go side emits
   // (the emission decisions are owned by erun-ui/env_status_test.go).

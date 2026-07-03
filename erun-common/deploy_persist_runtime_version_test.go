@@ -16,7 +16,7 @@ import (
 //
 // Persist is a real, non-dry-run side effect (it early-returns on DryRun), so it
 // is unreachable from the dry-run integration binary; this white-box unit test
-// is the contract owner. See issue #475.
+// is the contract owner.
 func TestPersistRuntimeVersionFromDeploySpecs(t *testing.T) {
 	const tenant = "erun"
 	const mintedVersion = "1.0.86-snapshot-20260608124610"
@@ -117,7 +117,7 @@ func persistOrFatal(t *testing.T, ctx Context, specs []DeploySpec, save func(str
 // short-circuits before building, pushing, or running helm (nothing reaches the
 // registry or rolls the pod), and the persist step heals RuntimeVersion to the
 // version the release is actually running rather than the freshly minted,
-// never-pushed Deploy.Version. See issue #475.
+// never-pushed Deploy.Version.
 func TestCachedDeployRunThenPersistHealsToRunningVersion(t *testing.T) {
 	const tenant = "erun"
 	const mintedVersion = "1.0.86-snapshot-20260608124610"

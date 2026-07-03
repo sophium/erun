@@ -18,10 +18,9 @@ func NewContextRepository(txs *TxManager) *ContextRepository {
 }
 
 // Create inserts a new cloud context for the caller's tenant and returns the
-// persisted row. Only the operator-authored columns are written; context_id,
-// tenant_id, and the timestamps are owned by the database (the tenant_id
-// DEFAULT + RLS bind the row to the caller's tenant automatically), so they are
-// excluded from the Column list and populated by Returning("*").
+// persisted row. Only operator-authored columns are written; context_id,
+// tenant_id, and the timestamps are database-owned (the tenant_id DEFAULT and
+// RLS bind the row to the caller's tenant), so the database generates them.
 func (r *ContextRepository) Create(ctx context.Context, cloudContext model.Context) (model.Context, error) {
 	created := cloudContext
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
@@ -59,11 +58,11 @@ func (r *ContextRepository) Get(ctx context.Context, contextID string) (model.Co
 	return cloudContext, err
 }
 
-// UpdateProvisioningResult records the outcome of a provisioning run (issue
-// #605/#676): on success the executor passes status="running" with the resolved
-// instance_id/public_ip and an empty error; on failure status="failed" with the
-// reason. RLS scopes the UPDATE to the caller's tenant. Empty instance/IP/error
-// values normalize to NULL so a failed run does not leave a stale instance id.
+// UpdateProvisioningResult records the outcome of a provisioning run: on success
+// the executor passes status="running" with the resolved instance_id/public_ip
+// and an empty error; on failure status="failed" with the reason. RLS scopes the
+// UPDATE to the caller's tenant. Empty instance/IP/error values normalize to
+// NULL so a failed run does not leave a stale instance id.
 func (r *ContextRepository) UpdateProvisioningResult(ctx context.Context, contextID, status, instanceID, publicIP, provisionError string) error {
 	return r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		_, err := tx.NewRaw(`

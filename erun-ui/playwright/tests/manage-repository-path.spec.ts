@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/erunApp.js';
 
-// Issue #709 — the Manage dialog's General tab "Repository path" is an editable
+// The Manage dialog's General tab "Repository path" is an editable
 // Input for local-agent envs (the host worktree path, EnvConfig.LocalRepoPath),
 // so an operator can retarget a moved repo in place instead of hand-editing
 // config.yaml. The edit lights the General tab's unsaved-changes dot and

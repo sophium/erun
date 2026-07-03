@@ -1,7 +1,7 @@
 import { expect, test } from '../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
-// remote-session-tabs covers the detection flow from #478: when an env opens,
+// remote-session-tabs covers the detection flow: when an env opens,
 // finishOpenSession fires reattachRemoteTerminalTabs, which asks the backend
 // (ListRemoteAppSessions → kubectl exec ls of the pod's dtach sockets) for
 // persistent sessions another ERun window created and rebuilds `Terminal N`

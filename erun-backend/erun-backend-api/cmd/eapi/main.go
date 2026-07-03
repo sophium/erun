@@ -128,7 +128,7 @@ type apiConfig struct {
 	DatabaseURL          string
 	AllowedIssuers       string
 	DesktopPublicKeyPath string
-	// SecretsKey + DBOSDatabaseURL enable live context provisioning (#605/#676).
+	// SecretsKey + DBOSDatabaseURL enable live context provisioning.
 	// SecretsKey is a base64 32-byte AES key for the credential tables;
 	// DBOSDatabaseURL is the DBOS durable-workflow system database (a separate
 	// database from ERUN_DATABASE_URL). AWSEndpoint pins provisioning's aws calls

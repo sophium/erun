@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// TestCloseReapsWholeProcessGroup pins the #478 orphan fix: Close() must kill
+// TestCloseReapsWholeProcessGroup pins the orphan fix: Close() must kill
 // the session's entire process group, not only the direct child. The session
 // runs a shell that spawns a grandchild (standing in for the kubectl exec that
 // `erun open` spawns) — after Close() the grandchild must be dead, not left

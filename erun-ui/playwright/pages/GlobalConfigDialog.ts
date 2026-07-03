@@ -51,12 +51,12 @@ export class GlobalConfigDialog {
   }
 
   // cloudAliasGroupHeading targets the labelled group heading for a provider
-  // type (issue #630). data-cloud-alias-group carries the provider type token.
+  // type. data-cloud-alias-group carries the provider type token.
   cloudAliasGroupHeading(providerType: string): Locator {
     return this.locator().locator(`[data-cloud-alias-group="${providerType}"]`);
   }
 
-  // --- Add-provider picker (issue #630, #632) ---
+  // --- Add-provider picker ---
   //
   // Both providers delegate alias creation to the CLI's guided `erun cloud init
   // <provider>` flow over a PTY session; neither hosts an in-app add form. The
@@ -83,7 +83,7 @@ export class GlobalConfigDialog {
   }
 
   // cloudflareForm targets the removed in-app "add Cloudflare token" form
-  // (issue #632 deleted it in favour of the guided CLI flow). Specs assert this
+  // (deleted in favour of the guided CLI flow). Specs assert this
   // resolves to zero matches — the negative invariant that no bespoke add form
   // is hosted in the desktop.
   cloudflareForm(): Locator {

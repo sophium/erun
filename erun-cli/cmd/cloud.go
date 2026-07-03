@@ -155,7 +155,7 @@ func runCloudInitCloudflareCommand(ctx common.Context, store common.CloudStore, 
 		}
 	case strings.TrimSpace(params.APIToken) != "" && strings.TrimSpace(params.AccountID) == "":
 		// Non-interactive (flags / dry-run / MCP) with the account omitted:
-		// auto-resolve it from the token, the same as the guided flow's step 3.
+		// auto-resolve it from the token, the same as the guided flow.
 		// Under --dry-run this traces the GET /accounts call without contacting
 		// Cloudflare. --token-name is still required (the shared init enforces it).
 		accountID, err := resolveCloudflareAccountNonInteractive(ctx, params.APIToken, deps)

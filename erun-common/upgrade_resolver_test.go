@@ -10,10 +10,9 @@ import (
 // TestUpgradeVersionsResolverForStore pins the resolution policy every
 // transport shares for Upgrade all: it queries the env's listed registries
 // (provenance first) plus the canonical ERun image, tags each result with its
-// source registry (issue #527), and only fails when no registry resolves
-// (issues #497/#501). The registry interaction is not reachable from the
-// dry-run integration harness (network), so a white-box test with an injected
-// lookup owns the policy.
+// source registry, and only fails when no registry resolves. The registry
+// interaction is not reachable from the dry-run integration harness (network),
+// so a white-box test with an injected lookup owns the policy.
 func TestUpgradeVersionsResolverForStore(t *testing.T) {
 	petiosEnv := EnvConfig{Name: "rihards-develop", RuntimeRegistry: "ghcr.io/petios"}
 
@@ -109,8 +108,8 @@ func resolveOrFatal(t *testing.T, resolver func(Context, string, EnvConfig) ([]S
 	return sourced
 }
 
-// TestResolveEnvUpgradeItemCandidates pins the per-env candidate logic (issue
-// #527): registries agreeing on the newest version yield a single target,
+// TestResolveEnvUpgradeItemCandidates pins the per-env candidate logic:
+// registries agreeing on the newest version yield a single target,
 // disagreeing registries yield an ambiguous item the caller must pick, and a
 // version equal to current is up to date.
 func TestResolveEnvUpgradeItemCandidates(t *testing.T) {
@@ -190,9 +189,9 @@ func TestBuildUpgradePlanPerEnv(t *testing.T) {
 	}
 }
 
-// TestRunUpgradePlanReportsUnresolvedDistinctly pins the run-side accounting
-// (issue #497): a member whose target is unresolved is never counted "up to
-// date" — it has its own class in the result and the deployer never sees it.
+// TestRunUpgradePlanReportsUnresolvedDistinctly pins the run-side accounting:
+// a member whose target is unresolved is never counted "up to date" — it has
+// its own class in the result and the deployer never sees it.
 func TestRunUpgradePlanReportsUnresolvedDistinctly(t *testing.T) {
 	plan := UpgradePlan{Items: []UpgradePlanItem{
 		{Tenant: "team", Environment: "lagging", Channel: "stable", Current: "1.0.0", Target: "2.0.0", Lagging: true},

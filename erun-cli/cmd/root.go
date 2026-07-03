@@ -21,7 +21,7 @@ type (
 // runPrompt and runSelect keep promptui's interactive rendering for real
 // terminals and fall back to plain line-based prompts when stdout is a pipe.
 // promptui repaints from its own goroutines, so piped output otherwise carries
-// cursor-control frames whose final flush races process exit (#520).
+// cursor-control frames whose final flush races process exit.
 func runPrompt(prompt promptui.Prompt) (string, error) {
 	if writerIsTerminal(os.Stdout) {
 		return prompt.Run()

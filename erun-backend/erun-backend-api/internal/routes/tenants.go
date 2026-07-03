@@ -66,7 +66,7 @@ func (r TenantRoutes) createTenant(w http.ResponseWriter, req *http.Request) {
 
 	name := strings.TrimSpace(body.Name)
 	issuer := strings.TrimSpace(body.Issuer)
-	// Enforce the no-hyphen tenant-name rule (#605 mandatory guardrail): the
+	// Enforce the no-hyphen tenant-name rule (mandatory guardrail): the
 	// runtime namespace is <tenant>-<env>, so a hyphen in the tenant would make
 	// the mapping non-injective (a-b + c and a + b-c both collapse to a-b-c), a
 	// cross-tenant namespace-collision/takeover vector on a public provisioning

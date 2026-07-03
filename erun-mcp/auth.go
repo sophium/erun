@@ -11,7 +11,7 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// MCP auth edge (issue #655). The per-env erun-mcp server is exposed publicly
+// MCP auth edge. The per-env erun-mcp server is exposed publicly
 // (Traefik routes it at mcp.<tenant>-<env>.services.<base-domain>) and its `raw`
 // tool can kubectl-exec, so it must always be authenticated once a trust anchor
 // is configured.
@@ -48,7 +48,7 @@ type mcpAuthConfig struct {
 	audience       string
 	// tenant is this env's own tenant (ERUN_TENANT). A per-env edge serves exactly
 	// one tenant, so a token that resolves to a different tenant — a misconfigured
-	// trusted-issuer map pointing an issuer at another tenant — is rejected (#657).
+	// trusted-issuer map pointing an issuer at another tenant — is rejected.
 	tenant string
 	// oidc verifies tokens from `https://` OIDC issuers against their JWKS. It is
 	// the same shared verifier the hosted backend API uses (erun-common). One
@@ -119,7 +119,7 @@ func authHTTPMiddleware(cfg mcpAuthConfig, next http.Handler) http.Handler {
 			return
 		}
 		// A per-env edge serves exactly one tenant; a token resolving to another
-		// tenant means the trusted-issuer map is misconfigured for this env (#657).
+		// tenant means the trusted-issuer map is misconfigured for this env.
 		if cfg.tenant != "" && tenant != cfg.tenant {
 			writeUnauthorized(w, "token tenant does not match this environment")
 			return

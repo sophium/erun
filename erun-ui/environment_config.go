@@ -54,8 +54,7 @@ func (a *App) SaveEnvironmentConfig(selection uiSelection, config uiEnvironmentC
 // persistEnvironmentConfig builds the updated env config from the edited UI
 // values and existing config, routes the container-registry list to its
 // owning store, applies a changed remote cloud alias, saves the env config,
-// and reconciles the workspace-sync and cloud-credentials refreshers. The
-// steps run in the same order and persist the same fields as before; it
+// and reconciles the workspace-sync and cloud-credentials refreshers. It
 // returns the saved config so the caller can render it back to the UI.
 func (a *App) persistEnvironmentConfig(selection uiSelection, config uiEnvironmentConfig, existing eruncommon.EnvConfig) (eruncommon.EnvConfig, error) {
 	updated, err := a.updatedEnvironmentConfig(config, existing)
@@ -425,7 +424,7 @@ func (a *App) environmentProjectConfigStore(config eruncommon.EnvConfig) (string
 	if a.deps.store == nil {
 		return "", nil, false
 	}
-	// The env's own local repo path is the project root (#549: the path moved
+	// The env's own local repo path is the project root (the path moved
 	// off TenantConfig onto the env).
 	projectRoot := strings.TrimSpace(config.EffectiveLocalRepoPath())
 	if projectRoot == "" {

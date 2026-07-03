@@ -60,7 +60,7 @@ func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 				// watching the trace stream (the desktop's activity queue / toolbar)
 				// registers a failed deploy even when it fails *before* rollout —
 				// e.g. spec resolution. Without this the desktop, which reacts only
-				// to `==> ...` lines, sees no signal and surfaces nothing (#713).
+				// to `==> ...` lines, sees no signal and surfaces nothing.
 				ctx.Trace(fmt.Sprintf("==> Deploy failed %s/%s: %s", deployTarget.Tenant, deployTarget.Environment, err.Error()))
 				return err
 			}

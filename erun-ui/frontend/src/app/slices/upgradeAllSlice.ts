@@ -5,7 +5,7 @@ import type { UIUpgradePlanItem } from '@/types';
 // upgradeAll holds the cross-env "Upgrade all" preview dialog state: the
 // resolved plan (every opted-in env with its channel and current → target),
 // the per-env version the operator picked when an env's registries offered
-// several newer versions (issue #527), plus loading/error while
+// several newer versions, plus loading/error while
 // ResolveUpgradePlan runs. Confirming runs the actual `erun upgrade`; this
 // slice only drives the preview.
 export interface UpgradeAllState {

@@ -6,7 +6,7 @@ import (
 )
 
 // scopedTenantEnv pins a tenant-scoped tool to this per-env MCP server's own
-// environment (#657). A per-env erun-mcp server runs in one tenant's namespace
+// environment. A per-env erun-mcp server runs in one tenant's namespace
 // and operates only on its own tenant/environment, so a caller-supplied
 // tenant/environment that differs from the pod's identity is refused rather than
 // silently honored — closing the gap where a `tenant`/`environment` argument

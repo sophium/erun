@@ -17,7 +17,7 @@ import { selectionKey } from './versionSuggestions';
 // openUpgradeAll opens the Upgrade-all preview dialog and resolves the plan
 // (every opted-in env, its channel, current → target). Read-only — nothing
 // deploys until the user confirms. The plan resolver is the same one the
-// per-env runs use (issue #497), so the preview never promises an upgrade
+// per-env runs use, so the preview never promises an upgrade
 // the run would refuse.
 export const openUpgradeAll = (): AppThunk<Promise<void>> => async (dispatch) => {
   dispatch(openUpgradeAllDialog());
@@ -29,7 +29,7 @@ export const openUpgradeAll = (): AppThunk<Promise<void>> => async (dispatch) =>
   }
 };
 
-// confirmUpgradeAll fans the upgrade out per member (issue #497): every
+// confirmUpgradeAll fans the upgrade out per member: every
 // lagging plan member runs `erun upgrade --tenant <t> --environment <e>` in
 // its OWN Local shell, so members upgrade in parallel and output, activity
 // entries, and failures land on the env they belong to — not on one host
@@ -107,7 +107,7 @@ export const confirmUpgradeAll =
 
 // UpgradeMember is one environment the confirmed Upgrade-all run will redeploy:
 // a lagging env (no version — the CLI resolves its single channel target) or an
-// ambiguous env the operator picked a version for (issue #527).
+// ambiguous env the operator picked a version for.
 interface UpgradeMember {
   tenant: string;
   environment: string;

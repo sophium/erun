@@ -15,7 +15,7 @@ import (
 // message naming the unbuildable platform(s) and the binfmt remediation — the
 // same `tonistiigi/binfmt --install all` step the runtime pod's init container
 // uses. (Root AGENTS.md § "Release Rules": multi-architecture builds must
-// verify daemon capability explicitly; issue #645.)
+// verify daemon capability explicitly.)
 func verifyDockerBuildPlatforms(required []string) error {
 	available, err := dockerBuildxPlatforms()
 	if err != nil {

@@ -243,7 +243,7 @@ function FailedDeployActions({
   const [running, setRunning] = React.useState<boolean>(false);
   // Guard against re-fire: each action runs `erun …` in the shared Local
   // shell, so without a guard (and with the Local tab now focused for
-  // feedback) repeated clicks could pile commands into that shell (#445).
+  // feedback) repeated clicks could pile commands into that shell.
   const runAction = React.useCallback(
     (action: () => Promise<unknown>) => {
       if (running) return;

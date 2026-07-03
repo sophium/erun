@@ -169,7 +169,7 @@ func (a *App) lockTerminalsForActivity(entry activityQueueEntry) {
 		// A deploy just started for this env (only deploys lock terminals). Retire
 		// any env-scoped warning that told the operator to act — the
 		// runtime-unreachable banner, or a prior deploy-failed error — since the
-		// deploy is now underway (#713).
+		// deploy is now underway.
 		a.emitClearEnvNotification(entry.Tenant, entry.Environment, "")
 	}
 }
@@ -206,7 +206,7 @@ func (a *App) lockTerminalForActivity(sessionID int, entry activityQueueEntry) {
 	if event != nil {
 		a.emitEvent(activityQueueLockEvent, *event)
 		// A late-joining session locked onto an in-flight deploy — the runtime is
-		// being (re)deployed, so clear any env-scoped warning for it (#713).
+		// being (re)deployed, so clear any env-scoped warning for it.
 		a.emitClearEnvNotification(entry.Tenant, entry.Environment, "")
 	}
 }
@@ -316,7 +316,7 @@ var activitySkippingLineRe = regexp.MustCompile(`^==> Skipping ([^/\s]+)/([^/\s]
 // activityDeployFailedLineRe matches the `==> Deploy failed tenant/env: reason`
 // trace `erun deploy` emits on any failure — including a pre-rollout failure
 // like spec resolution, which fails before `==> Deploying` and so left the
-// desktop with no signal to surface (issue #713). Captures: tenant,
+// desktop with no signal to surface. Captures: tenant,
 // environment, optional reason.
 var activityDeployFailedLineRe = regexp.MustCompile(`^==> Deploy failed ([^/\s]+)/([^/\s]+)(?::\s*(.*))?$`)
 
@@ -403,7 +403,7 @@ var (
 // Error:) finalize the matching active entry from either channel.
 func newActivityTraceLineHandler(app *App, selection uiSelection, kind sessionKind) func(string) {
 	// RunHelmDeploy names the release on failure ("==> Deploy of <rel> failed
-	// after <elapsed>", #559) and falls back to "==> Deploy failed after
+	// after <elapsed>") and falls back to "==> Deploy failed after
 	// <elapsed>" only when no release is set; match both shapes.
 	failedRe := regexp.MustCompile(`^==> Deploy (?:of \S+ )?failed`)
 	errorRe := regexp.MustCompile(`(?i)^Error: `)
@@ -441,10 +441,10 @@ func (a *App) handleDeployTraceLine(selection uiSelection, line string) bool {
 	}
 	if match := activityDeployFailedLineRe.FindStringSubmatch(line); match != nil {
 		reason := strings.TrimSpace(match[3])
-		// Finalize the drawer entry if one was started, and — the #713 fix —
-		// surface the failure in the toolbar so a failed deploy is visible where
-		// the operator is looking, not only in the activity queue (and not at
-		// all when the failure came before any `==> Deploying` started an entry).
+		// Finalize the drawer entry if one was started, and surface the failure
+		// in the toolbar so a failed deploy is visible where the operator is
+		// looking, not only in the activity queue (and not at all when the
+		// failure came before any `==> Deploying` started an entry).
 		a.finishDeployByTenantEnv(selection, match[1], match[2], activityQueueStatusFailed, reason)
 		a.surfaceDeployFailure(match[1], match[2], reason)
 		return true
@@ -456,7 +456,7 @@ func (a *App) handleDeployTraceLine(selection uiSelection, line string) bool {
 // not just as a red terminal line or a drawer entry: it flags the env's sidebar
 // row failed and posts an env-tagged error notification. The notification is
 // tagged so the deploy lifecycle retires it once the state moves on — the next
-// deploy for the env starts, or the runtime becomes reachable (issue #713).
+// deploy for the env starts, or the runtime becomes reachable.
 func (a *App) surfaceDeployFailure(tenant, environment, reason string) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
@@ -564,7 +564,7 @@ func (a *App) finishDeployByTenantEnv(selection uiSelection, tenant, environment
 		a.unlockTerminalsForActivity(final)
 		if status == activityQueueStatusSucceeded {
 			// A successful deploy supersedes any stale 'failed' flag on the
-			// row (issue #498): the env-status clear keeps the sidebar dot
+			// row: the env-status clear keeps the sidebar dot
 			// and hover card truthful, and the next session exit respawns
 			// normally because latestDeployFailed is now false.
 			a.emitEnvStatus(uiSelection{Tenant: tenant, Environment: environment}, "")
@@ -573,7 +573,7 @@ func (a *App) finishDeployByTenantEnv(selection uiSelection, tenant, environment
 			// The runtime is now reachable (deployed, or skipped because it was
 			// already current). Signal the create→deploy→open gate so a
 			// freshly-created env opens its tabs only after deploy lands, never
-			// against a runtime that does not exist (issue #644).
+			// against a runtime that does not exist.
 			a.emitEnvironmentDeployed(tenant, environment)
 		}
 	}
@@ -658,7 +658,7 @@ func (a *App) startDeployFromTrace(selection uiSelection, tenant, environment, r
 	// empty parsed release means the runtime deploy; fall back to its release
 	// name. A non-runtime component names itself, so the drawer labels it by
 	// component ("deploy erun/local · erun-backend-postgres") instead of
-	// reading like a full-env redeploy (#531).
+	// reading like a full-env redeploy.
 	summary := "deploy " + tenant + "/" + environment
 	if release == "" {
 		release = releaseNameForTenant(tenant)

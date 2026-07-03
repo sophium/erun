@@ -1,7 +1,7 @@
 import { expect, test } from '../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
-// Issue #558 — the desktop deploys an Operator's builds-here agent env by
+// The desktop deploys an Operator's builds-here agent env by
 // composing the pure primitives build -> push -> deploy (root AGENTS.md
 // § "Command primitives vs orchestration"), never by typing `erun deploy`
 // into the Local shell and never via the `build --deploy` operator shortcut.

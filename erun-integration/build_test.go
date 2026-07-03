@@ -20,7 +20,7 @@ var apiFingerprintRE = regexp.MustCompile(`ghcr\.io/sophium/api:fp-([0-9a-f]{16}
 // chartPackageVersion extracts the version a chart is published at from the
 // `helm package <chart> --version <version>` trace line in out. Used to assert
 // the published version when output normalization would otherwise collapse
-// distinct versions to <VERSION> (#701).
+// distinct versions to <VERSION>.
 func chartPackageVersion(t testing.TB, out, chart string) string {
 	t.Helper()
 	re := regexp.MustCompile(`helm package ` + regexp.QuoteMeta(chart) + ` --version (\S+)`)
@@ -50,7 +50,7 @@ func TestBuild(t *testing.T) {
 	})
 
 	t.Run("dry_run_no_devops_recommends_build_env_skill", func(t *testing.T) {
-		// #534: erun build in a project with no <tenant>-devops module emits a
+		// erun build in a project with no <tenant>-devops module emits a
 		// one-line advisory pointing at the erun-build-env skill. The advisory
 		// fires from ResolveBuildExecution whenever a build runs without a devops
 		// build environment — here a project build.sh registers and runs the
@@ -125,7 +125,7 @@ func TestBuild(t *testing.T) {
 		// A release build publishes each component's chart as a release
 		// artifact right after its image pushes (helm package + helm push to
 		// oci://<registry>/charts) and verifies it is fetchable (helm pull) —
-		// image and chart are one contract (#505, #699). The release root here
+		// image and chart are one contract. The release root here
 		// carries the canonical erun-devops chart plus the seeded api component,
 		// so the golden shows both publishing to /charts, not just the runtime.
 		setup := env.New(t)
@@ -150,7 +150,7 @@ func TestBuild(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "build/dry_run_release_publishes_runtime_chart", normalize.Apply(result.Combined))
-		// #701: the version-pinned base (docker/base/VERSION=9.9.9) keeps its
+		// The version-pinned base (docker/base/VERSION=9.9.9) keeps its
 		// image at the upstream pin, but its co-located chart must publish at the
 		// release version — the same version the built `api` chart publishes at,
 		// NOT 9.9.9. Output normalization collapses both 1.4.2-pr.<sha> and 9.9.9
@@ -205,7 +205,7 @@ func TestBuild(t *testing.T) {
 			`      *) exit 0 ;;`,
 			`    esac`,
 			`    ;;`,
-			// The multi-arch daemon-capability preflight (issue #645) runs
+			// The multi-arch daemon-capability preflight runs
 			// `docker buildx inspect` before building; report both required
 			// platforms so it passes. The trailing `*` on the node default is
 			// realistic buildx output and exercises the marker-stripping parse.
@@ -228,8 +228,8 @@ func TestBuild(t *testing.T) {
 
 	t.Run("real_run_fails_when_daemon_cannot_build_required_platform", func(t *testing.T) {
 		// Exercises the multi-arch daemon-capability preflight
-		// (verifyDockerBuildPlatforms in build_platform_preflight.go, issue
-		// #645). erun always builds linux/amd64 + linux/arm64, so before
+		// (verifyDockerBuildPlatforms in build_platform_preflight.go). erun
+		// always builds linux/amd64 + linux/arm64, so before
 		// shelling `docker build` per platform it runs `docker buildx inspect`
 		// and fails fast with a direct, actionable error when the daemon has
 		// no emulator for a required platform — instead of the opaque
@@ -296,7 +296,7 @@ func TestBuild(t *testing.T) {
 	})
 
 	t.Run("dry_run_disable_build_script_ignores_project_build_sh", func(t *testing.T) {
-		// #533: an env with disablebuildscript: true makes erun build ignore the
+		// An env with disablebuildscript: true makes erun build ignore the
 		// project build.sh and resolve docker/release contexts directly. With no
 		// docker context the build ends at the no-buildable-context error rather
 		// than tracing ./build.sh (which dry_run_with_project_build_script does).
@@ -424,7 +424,7 @@ func TestBuild(t *testing.T) {
 		// a .gitignore at the root of a COPY'd directory must scope its
 		// patterns to that subtree so files matching the nested patterns
 		// drop out of the fingerprint hash. This guards the local-vs-CI
-		// drift seen on #359 where locally-built erun-cli/bin artifacts
+		// drift where locally-built erun-cli/bin artifacts
 		// were rolling the devops fingerprint despite being .gitignore'd
 		// by a nested file. Verified by comparing fingerprints across
 		// three runs:
@@ -506,7 +506,7 @@ func TestBuild(t *testing.T) {
 			`case "$1" in`,
 			`  image)`,
 			`    case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
-			// Multi-arch capability preflight (issue #645): report both required
+			// Multi-arch capability preflight: report both required
 			// platforms so `docker buildx inspect` passes.
 			`  buildx)`,
 			`    case "$2" in inspect) echo "Platforms: linux/amd64, linux/arm64" ;; *) exit 0 ;; esac ;;`,
@@ -688,7 +688,7 @@ func TestBuild(t *testing.T) {
 		fixture.SeedDevopsRuntimeDockerfile(t, setup, "team")
 		fixture.SeedGitRepo(t, setup.Cwd)
 		// The second tenant genuinely owns the same project root: cwd→tenant
-		// matching is now via each tenant's envs' localRepoPath (#549), so the
+		// matching is now via each tenant's envs' localRepoPath, so the
 		// other tenant needs an env recording this cwd, not just a bare
 		// tenant-level projectroot, for the ambiguity to hold.
 		otherEnvDir := filepath.Join(setup.ConfigHome, "erun", "other", "dev")

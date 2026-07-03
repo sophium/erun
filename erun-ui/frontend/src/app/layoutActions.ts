@@ -195,7 +195,7 @@ export function toggleReview(
   setFilesOpen(dispatch, getState, getState().layout.filesOpen, false, callbacks.applyLayoutVars);
   // Immediate (rAF) refit so the PTY learns the new cols before the shell
   // emits its next prompt; the 40 ms debounce was wide enough for output
-  // to land at the old cols and stick in scrollback (issue #433).
+  // to land at the old cols and stick in scrollback.
   callbacks.flushTerminalResize();
   if (next) {
     callbacks.loadReviewDiff();

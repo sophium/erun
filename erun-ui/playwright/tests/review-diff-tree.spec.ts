@@ -2,7 +2,7 @@ import type { Page } from '@playwright/test';
 
 import { test, expect } from '../fixtures/erunApp.js';
 
-// #547: two related review-panel guarantees.
+// Two related review-panel guarantees.
 //   Part 2 — the diff panel renders the same files as the changed-files tree,
 //   in the same order, honouring the active filter and collapsed directories.
 //   Part 1 — the tree scrolls to keep the file currently in the diff viewport
@@ -10,7 +10,7 @@ import { test, expect } from '../fixtures/erunApp.js';
 //
 // The diff payload is stubbed via the LoadDiff RPC over /__erun_invoke (the
 // same technique sidebar-upgrade-all.spec.ts uses), so no live cluster is
-// needed. ParseGitDiff already orders diff.files to match the tree (#435);
+// needed. ParseGitDiff already orders diff.files to match the tree;
 // these specs lock that the rendered panels agree.
 
 interface DiffLineStub {
@@ -91,7 +91,7 @@ async function stubDiff(page: Page, diff: unknown): Promise<void> {
 }
 
 // Small two-directory tree for the order / filter / collapse cases. diff.files
-// is in tree pre-order (the #435 contract the desktop relies on).
+// is in tree pre-order (the contract the desktop relies on).
 const SMALL_FILES = [diffFile('src/a.ts', 2), diffFile('src/b.ts', 2), diffFile('docs/c.md', 2)];
 const SMALL_TREE = [
   dirNode('src', 'src', 0),

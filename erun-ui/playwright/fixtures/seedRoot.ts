@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-// seedRoot owns the suite's isolated config root (issue #483). The headless
+// seedRoot owns the suite's isolated config root. The headless
 // backend — and every `erun` child process it spawns — runs against a
 // throwaway HOME under this root, so the suite never reads or writes the
 // developer's real ~/.erun / ~/.config/erun, and every machine sees the same
@@ -30,7 +30,7 @@ export const SEED_TENANT = 'pw';
 export const SEED_ENV_ALPHA = 'alpha';
 export const SEED_ENV_BETA = 'beta';
 // gamma attaches BOTH an AWS alias and a Cloudflare alias so the per-type env
-// cloud-alias selectors (issue #630) are stageable: the General tab must render
+// cloud-alias selectors are stageable: the General tab must render
 // two independent selectors, one per provider type, each pre-selected to the
 // env's attachment.
 export const SEED_ENV_GAMMA = 'gamma';
@@ -38,7 +38,7 @@ export const SEED_ENV_GAMMA = 'gamma';
 // select renders deterministically. The matching `aws` stub keeps its token
 // status check instant and offline.
 export const SEED_CLOUD_ALIAS = 'pw-aws';
-// One configured Cloudflare alias (issue #630). Cloudflare aliases follow the
+// One configured Cloudflare alias. Cloudflare aliases follow the
 // "<token-label>+<account-id>@cloudflare" shape erun-common mints. No token is
 // written to the off-config secret store, so its status reads "not_configured"
 // deterministically and offline — the alias's scoped-token verify never hits
@@ -77,8 +77,8 @@ function erunConfigDir(): string {
   return path.join(isolatedHomeDir(), '.config', 'erun');
 }
 
-// e2eK3dEnabled reports whether the opt-in, k3d-backed real-cluster mode is on
-// (issue #647). It gates every real-cluster branch below; when false the suite
+// e2eK3dEnabled reports whether the opt-in, k3d-backed real-cluster mode is on.
+// It gates every real-cluster branch below; when false the suite
 // is the default inert/offline harness (stubs prepended, ERUN_APP_CLI pinned).
 // Set ERUN_E2E_K3D=1 only on a host with Docker + k3d + binfmt — never in the
 // default `run.sh` or `make integration-test`.
@@ -109,7 +109,7 @@ export function backendEnv(): Record<string, string> {
     XDG_DATA_HOME: path.join(home, '.local', 'share'),
   };
   if (e2eK3dEnabled()) {
-    // k3d mode (issue #647): use the REAL docker/kubectl/helm and the real built
+    // k3d mode: use the REAL docker/kubectl/helm and the real built
     // `erun` binary — only `aws` stays stubbed (no cloud account in CI; the
     // cloud-context lifecycle is driven via the ERUN_AWS_BIN argv-stub seam).
     // The runtime kubeconfig is the isolated one global-setup writes. This
@@ -134,7 +134,7 @@ export function backendEnv(): Record<string, string> {
     // prepend alone is not enough: resolveCLIExecutable resolves a real
     // erun-cli/bin/erun next to the app binary (a dev build artifact) before
     // falling back to PATH, which makes the env-open specs loop red on a
-    // developer machine that has that artifact (#525). This seam pins the stub.
+    // developer machine that has that artifact. This seam pins the stub.
     ERUN_APP_CLI: path.join(stubsDir(), 'erun'),
   };
 }
@@ -166,9 +166,9 @@ export function createIsolatedLayout(): void {
 }
 
 // seedEnvironmentForK3d writes a fresh local-agent env pointed at the live k3d
-// cluster (issue #647): the real kube context k3d created and the cluster's
+// cluster: the real kube context k3d created and the cluster's
 // built-in registry, and — critically — NO runtimeversion, so the desktop's
-// create flow must build → push → deploy a fresh version (the path #644 fixed)
+// create flow must build → push → deploy a fresh version
 // rather than installing a pre-pinned one. The repo is the suite's seeded repo
 // (which carries a buildable devops module on the k3d-mode host).
 export function seedEnvironmentForK3d(
@@ -292,8 +292,8 @@ export function seedBaseline(): void {
   );
 }
 
-// seedBaselineForK3d writes the minimal config tree for the k3d e2e mode
-// (issue #647): the root config (default tenant, no cloud providers) and the
+// seedBaselineForK3d writes the minimal config tree for the k3d e2e mode:
+// the root config (default tenant, no cloud providers) and the
 // pw tenant, but NO environments. The e2e spec seeds its own env at the live
 // cluster via seedEnvironmentForK3d, so the inert `test-context` baseline envs
 // (which would fail real kubectl status checks) are never written.

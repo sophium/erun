@@ -10,7 +10,7 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// These tests lock the per-env ensure dedupe (issue #463): opening an env
+// These tests lock the per-env ensure dedupe: opening an env
 // with its default tabs — and respawning them — must run the open/build/
 // deploy preflight once per (re)start window, not once per tab. The tabs'
 // own `erun open` processes launch with --skip-ensure (locked by the
@@ -117,7 +117,7 @@ func TestEnsureEnvRuntimeOnceRunsAgainAfterTheWindow(t *testing.T) {
 	waitForEnsureCount(t, &ensures, &ensuresMu, 2, 2*time.Second)
 }
 
-// TestEnsureFailureNotificationDedupesPerEpisode locks the #711 fix: a runtime
+// TestEnsureFailureNotificationDedupesPerEpisode locks the fix: a runtime
 // that stays unreachable must surface its "Could not reach the runtime"
 // notification once per failure episode, not on every ensure retry — otherwise
 // the banner re-appears the instant the user dismisses it. The sidebar row is
@@ -236,7 +236,7 @@ func capturedEnsureApp(
 	return app, emits
 }
 
-// TestSurfaceEnsureFailureSuppressedWhileDeployInFlight locks the #713 fix: a
+// TestSurfaceEnsureFailureSuppressedWhileDeployInFlight locks the fix: a
 // deploy for the env being in flight IS the recovery the runtime-unreachable
 // banner would recommend ("Deploy the environment …"), and the deploy-progress
 // overlay already communicates it. Surfacing a contradictory failed status +
@@ -282,13 +282,13 @@ func TestSurfaceEnsureFailureSuppressedWhileDeployInFlight(t *testing.T) {
 		t.Fatalf("notification payload has unexpected type %T", notes[0])
 	}
 	// Kind "warning" (not "warn") is the contract the frontend maps to the
-	// attention icon; an unrecognized kind renders as a neutral info ⓘ (#713).
+	// attention icon; an unrecognized kind renders as a neutral info ⓘ.
 	if note.Kind != "warning" || note.Source != notificationSourceRuntimeUnreachable {
 		t.Fatalf("notification = %+v, want kind=warning source=%q", note, notificationSourceRuntimeUnreachable)
 	}
 }
 
-// TestEnsureSuccessClearsRuntimeUnreachableNotification locks the #713 fix: once
+// TestEnsureSuccessClearsRuntimeUnreachableNotification locks the fix: once
 // the runtime is reachable again, the "Could not reach the runtime …" banner is
 // stale, so a successful ensure clears it (tagged by env + source so an
 // unrelated toast is left alone).

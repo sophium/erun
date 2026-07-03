@@ -21,7 +21,7 @@ import (
 // mockOIDCProvider is a self-contained OIDC issuer for the backend verifier
 // tests: an httptest server publishing discovery + JWKS, plus the RSA key used
 // to mint RS256 tokens. It proves VerifyBearerToken now delegates signature/JWKS
-// verification to the shared eruncommon verifier (issue #656) while keeping the
+// verification to the shared eruncommon verifier while keeping the
 // backend's allow-list and username/AWS-STS mapping.
 type mockOIDCProvider struct {
 	server *httptest.Server
@@ -167,8 +167,8 @@ func TestVerifyBearerTokenDelegatesToSharedVerifier(t *testing.T) {
 	})
 }
 
-// TestVerifyBearerTokenFileIssuer exercises the file:// desktop path (issue
-// #674): a desktop-signed EdDSA token authenticates to the API with no live IdP,
+// TestVerifyBearerTokenFileIssuer exercises the file:// desktop path: a
+// desktop-signed EdDSA token authenticates to the API with no live IdP,
 // the same auth the MCP edge uses, with the API audience enforced.
 func TestVerifyBearerTokenFileIssuer(t *testing.T) {
 	privatePEM, publicPEM, err := eruncommon.GenerateDesktopIdentity()

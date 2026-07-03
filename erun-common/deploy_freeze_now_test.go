@@ -16,7 +16,7 @@ import (
 // multi-spec deploy stamps images with timestamps that drift apart and the
 // runtime chart's persisted RuntimeVersion can end up being a tag that was never
 // built or pushed — a phantom version the deploy picker can never offer because
-// it gates on registry presence. See issue #475.
+// it gates on registry presence.
 //
 // The end-to-end property (one timestamp across a real multi-image deploy) is
 // not observable from the dry-run integration binary: it uses the real clock so

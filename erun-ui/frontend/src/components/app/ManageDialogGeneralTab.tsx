@@ -126,7 +126,7 @@ function environmentTypeLabel(type: string | undefined): string {
 // rather than a read-only label. The type drives build/deploy policy
 // (BuildsHere / RemoteWorktree), so it is set deliberately at init and is not a
 // derived value — but a wrong value (e.g. a type that resolved to "runtime" on
-// what is really a remote-agent env, issue #615) otherwise has no recovery
+// what is really a remote-agent env) otherwise has no recovery
 // surface short of hand-editing config.yaml. Recognition over recall: the
 // option set is the three known types. The change is applied on Save and takes
 // effect on the next deploy, which reconfigures the worktree storage.
@@ -157,7 +157,7 @@ function EnvironmentTypeField({
 }
 
 // CloudAliasSlots renders one cloud-alias selector per provider type the env
-// can attach (issue #630): an AWS account AND a Cloudflare token can be linked
+// can attach: an AWS account AND a Cloudflare token can be linked
 // independently, each with its own "— None —" clear option. The per-type slots
 // come from the backend (EnvConfig.ResolvedCloudAliases grouped by type). When
 // the backend predates slots, a single AWS selector renders as a fallback so
@@ -271,7 +271,7 @@ function CloudAliasSelect({
   // Radix Select forbids an empty-string item value, so the clear option uses
   // a sentinel that maps back to "" on change. This gives the user a way out
   // of a selected alias — without it the dropdown only ever offered aliases
-  // and a set value could never be cleared (issue #211). "" resolves to the
+  // and a set value could never be cleared. "" resolves to the
   // placeholder, which renders the env as "Not linked" downstream.
   const optionItems = [
     { value: CLOUD_ALIAS_NONE_VALUE, label: '— None —' },

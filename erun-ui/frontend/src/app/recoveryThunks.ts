@@ -11,8 +11,8 @@ import { requireController } from './thunkExtra';
 // runLocalRecoverySelection runs an `erun …` recovery command for the given env
 // in the shared Local shell and focuses the Local tab so the user sees it.
 // Without activateLocalAfterCommand the command runs in a background shell with
-// no visible feedback, which led users to click repeatedly and flood the shell
-// (#445). Mirrors startDeploySelection in sessionThunks.
+// no visible feedback, which led users to click repeatedly and flood the shell.
+// Mirrors startDeploySelection in sessionThunks.
 const runLocalRecoverySelection =
   (
     selection: UISelection,

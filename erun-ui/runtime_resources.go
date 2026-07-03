@@ -90,9 +90,6 @@ func runtimeResourceStatusFromKubernetes(input uiRuntimeResourceInput, nodes kub
 // accumulateRuntimePodUsage walks the non-terminal scheduled pods and sums each
 // node's container resource limits, splitting out the target runtime's own
 // containers into targetUsage and reporting the node the target landed on.
-// Extracted from runtimeResourceStatusFromKubernetes so that function stays
-// under the cyclomatic limit; the per-container target/non-target split is
-// unchanged.
 func accumulateRuntimePodUsage(pods kubernetesPodList, target runtimeResourceTargetSpec) (usage, targetUsage map[string]runtimeResourceTotals, targetNode string) {
 	usage = make(map[string]runtimeResourceTotals)
 	targetUsage = make(map[string]runtimeResourceTotals)
@@ -119,8 +116,7 @@ func accumulateRuntimePodUsage(pods kubernetesPodList, target runtimeResourceTar
 }
 
 // addContainerLimits adds a container's parseable CPU and memory limits to the
-// running totals, ignoring limits that fail to parse (the same tolerance the
-// inline accumulation used).
+// running totals, ignoring limits that fail to parse.
 func addContainerLimits(totals runtimeResourceTotals, container kubernetesContainer) runtimeResourceTotals {
 	if cpu, err := eruncommon.ParseKubernetesCPUToMilli(container.Resources.Limits.CPU); err == nil {
 		totals.CPUMilli += cpu

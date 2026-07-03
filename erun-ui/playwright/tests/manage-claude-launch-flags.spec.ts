@@ -1,7 +1,7 @@
 import { test, expect } from '../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
-// Issues #482/#477 — the env Manage dialog's AI tab gained a per-env Claude
+// The env Manage dialog's AI tab gained a per-env Claude
 // "Default model" selector (launched as `claude --model`, with `fable` newly
 // selectable under Available models) and a "verbose + debug" launch toggle
 // (`claude --verbose --debug`). This spec exercises the controls end-to-end
@@ -39,7 +39,7 @@ test.describe('manage dialog claude launch flags', () => {
     await expect(app.manageDialog.claudeVerboseDebugCheckbox()).toBeVisible();
     const initialVerbose = await app.manageDialog.claudeVerboseDebugCheckbox().isChecked();
 
-    // fable is a known model (issue #482) and opt-in: it renders as an
+    // fable is a known model and opt-in: it renders as an
     // Available-models checkbox.
     const fable = app.manageDialog.claudeModelCheckbox('fable');
     await expect(fable).toBeVisible();

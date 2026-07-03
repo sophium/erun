@@ -1,8 +1,8 @@
 import { test, expect } from '../fixtures/erunApp.js';
 import type { Page } from '@playwright/test';
 
-// Issue #713 — the "Could not reach the runtime … Deploy the environment to
-// bring it up." warning (issue #711) used to linger while a deploy for that env
+// The "Could not reach the runtime … Deploy the environment to
+// bring it up." warning used to linger while a deploy for that env
 // was already in flight, contradicting the deploy-progress overlay, and stayed
 // up after the runtime became reachable again. The Go side now tags the warning
 // with its env + a stable source and fires an `app-notification-clear` when the
@@ -28,7 +28,7 @@ test.describe('runtime-unreachable banner clears with the deploy lifecycle (#713
 
     // The warning renders with the attention icon (lucide circle-alert), not the
     // neutral info ⓘ — the Go side must emit kind "warning", not an unrecognized
-    // "warn" that falls through to the info icon (#713).
+    // "warn" that falls through to the info icon.
     expect(await bannerIconKind(page)).toBe('alert');
 
     // A clear for a different env must NOT dismiss this warning. Sample over a
@@ -58,7 +58,7 @@ test.describe('runtime-unreachable banner clears with the deploy lifecycle (#713
     // A real runtime-unreachable message includes the port-forward log path and
     // is far longer than the pill — it used to stretch the header past the
     // viewport, so nothing truncated and the dismiss X was pushed off-screen,
-    // leaving the banner un-dismissable (#713).
+    // leaving the banner un-dismissable.
     const longMessage =
       'Could not reach the runtime for frs/prod: activate MCP port-forward: exit status 1: ' +
       'timed out waiting for API port-forward on 127.0.0.1:17333; see ' +

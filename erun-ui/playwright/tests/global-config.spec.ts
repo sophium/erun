@@ -28,7 +28,7 @@ test.describe('global config dialog', () => {
     // tracks of a sm:grid-cols-2 grid. A configured alias long enough
     // to exceed the track (e.g. "Rihards.Freimanis+020362606330@aws")
     // used to bleed past the trigger and visually cover the start of
-    // the Region trigger (#359). The seeded baseline keeps its alias
+    // the Region trigger. The seeded baseline keeps its alias
     // short and the layout state under test is purely visual, so mutate
     // the select-value span directly to force the same layout state and
     // assert the rendered content stays within its column.

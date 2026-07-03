@@ -78,7 +78,7 @@ func serve(conn net.Conn, bannerBytes []byte) {
 	_, _ = conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"))
 }
 
-// decodeBanner unescapes \r and \n so callers can pass "SSH-2.0-test\r\n"
+// decodeBanner unescapes \r, \n, and \t so callers can pass "SSH-2.0-test\r\n"
 // as a flag value without shell-escape gymnastics.
 func decodeBanner(value string) []byte {
 	if value == "" {

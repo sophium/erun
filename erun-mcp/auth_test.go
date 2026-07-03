@@ -222,7 +222,7 @@ func oidcClaims(issuer, audience string) map[string]any {
 	}
 }
 
-// TestAuthMiddlewareOIDCDispatch proves the #656 dispatch end-to-end through the
+// TestAuthMiddlewareOIDCDispatch proves the dispatch end-to-end through the
 // middleware: an https:// OIDC issuer in the trusted map verifies its RS256
 // token against the issuer's JWKS and resolves the tenant, while wrong issuer,
 // bad signature, and wrong audience are all rejected. The file:// path is still

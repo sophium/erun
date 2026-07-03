@@ -388,7 +388,7 @@ func SeedRemoteTenantEnv(t testing.TB, setup env.Setup, tenant, environment stri
 
 // SeedRuntimeTenantEnvNoVersion writes a runtime-type env tree with NO
 // runtimeversion (and no local/published chart), reproducing the fresh-env
-// decision path that the desktop create regression (#644) hit: with no version
+// decision path that the desktop create regression hit: with no version
 // to deploy, the published-chart resolver bails with "runtime version is
 // required". Every other fixture pins runtimeversion: 1.0.0, so this is the
 // single fixture that locks the empty-version path under `open --deploy`.
@@ -424,7 +424,7 @@ func SeedRuntimeTenantEnvNoVersion(t testing.TB, setup env.Setup, tenant, enviro
 }
 
 // SeedLegacyRemoteTenantEnv writes a tenant/env tree whose env config carries
-// the retired pre-#376 `remote: true` shape with no `type` and no `snapshot`.
+// the retired `remote: true` shape with no `type` and no `snapshot`.
 // It exists to exercise EnvConfig.UnmarshalYAML's legacy migration on read:
 // remote with no build-here signal resolves to runtime. All other fixtures use
 // the modern `type:` field; this one is the single deliberate legacy shape.
@@ -484,7 +484,7 @@ func SeedRemoteTenantEnvWithPortRange(t testing.TB, setup env.Setup, tenant, env
 // SeedRemoteTenantEnvWithClaude writes the same tree as SeedRemoteTenantEnv
 // plus the given claude: YAML block, so scenarios can exercise the per-env
 // Claude launch flags (--effort / --model / --verbose --debug) that the AI
-// tab's persistent session resolves from env config (issues #477/#482).
+// tab's persistent session resolves from env config.
 func SeedRemoteTenantEnvWithClaude(t testing.TB, setup env.Setup, tenant, environment, claudeBlock string) {
 	t.Helper()
 	SeedRemoteTenantEnv(t, setup, tenant, environment)
@@ -577,7 +577,7 @@ func SeedReleaseRepo(t testing.TB, dir, branch string) string {
 	mustWrite(t, filepath.Join(releaseRoot, "k8s", "api", "Chart.yaml"), "apiVersion: v2\nname: api\nversion: 0.1.0\nappVersion: 0.1.0\n")
 	// base is a version-pinned base: its image carries its own VERSION (9.9.9)
 	// and is not re-pushed at the release version, but its co-located chart must
-	// still publish at the release version so platform deploys resolve it (#701).
+	// still publish at the release version so platform deploys resolve it.
 	mustWrite(t, filepath.Join(releaseRoot, "k8s", "base", "Chart.yaml"), "apiVersion: v2\nname: base\nversion: 0.1.0\nappVersion: 0.1.0\n")
 	mustWrite(t, filepath.Join(releaseRoot, "docker", "api", "Dockerfile"), "FROM alpine:3.22\n")
 	mustWrite(t, filepath.Join(releaseRoot, "docker", "base", "Dockerfile"), "FROM alpine:3.22\n")

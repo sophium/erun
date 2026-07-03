@@ -1,7 +1,7 @@
 import * as React from 'react';
 
 // ErunTraceBaseline is the resolved state of the erun-trace "Clear" view
-// baseline (issue #529).
+// baseline.
 export interface ErunTraceBaseline {
   // cleared is true once the operator has clicked Clear and has not yet
   // returned to the full view.
@@ -22,7 +22,7 @@ export interface ErunTraceBaseline {
 // renders only what arrives after it, so new lines stand out on a busy env.
 // It is a view aid only — the persistent log is never truncated and callers
 // keep reading the full content for Refresh / Copy / Copy report. It degrades
-// safely against log rotation (the on-disk trace is a bounded tail, #508):
+// safely against log rotation (the on-disk trace is a bounded tail):
 // the suffix is shown only while the current content still starts with the
 // captured baseline; once the cut point rotates out, it falls back to showing
 // all. The baseline resets whenever envKey changes so a stale cut point never

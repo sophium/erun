@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// TestImageDockerfilesCopyLocalReplaceTarget guards the regression in #691: a
+// TestImageDockerfilesCopyLocalReplaceTarget guards the regression: a
 // module whose go.mod locally replaces erun-common (`replace … => ../../erun-common`)
 // can only build when the replace target is present in the Docker build context.
 // erun-backend-api's image Dockerfile copied only the module's own go.mod/go.sum,

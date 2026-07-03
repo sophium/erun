@@ -1,12 +1,12 @@
 import { expect, test } from '../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
-// Coverage for the deploy-failed respawn guard (feature/449 follow-up).
+// Coverage for the deploy-failed respawn guard.
 //
 // maybeRespawnDeadDefaultTab now refuses to respawn a dead default tab
 // (ai/local/erun) when the env has a failed deploy in the activity queue
 // (selectEnvHasFailedDeploy). Reopening such a tab would re-run `erun open`
-// and re-deploy the broken env — the same re-deploy storm #447 already stops
+// and re-deploy the broken env — the same re-deploy storm already stops
 // for auto-reconnect (reconnectBlockedByDeployFailure). With the guard, the
 // click instead falls through to selectTerminalTab's dead-tab display: the
 // captured failure output and the "── deploy failed — not retrying
@@ -16,7 +16,7 @@ import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 // The positive path — a dead PTY *and* a `status: failed` deploy activity
 // entry for the same env — cannot be staged deterministically in the headless
 // harness: it has no cluster to drive a real failing deploy, so the exited
-// managed terminal (see the bug/368 note in
+// managed terminal (see the note in
 // sidebar-reclick-no-duplicate-tabs.spec.ts) and the failed activity entry
 // cannot be arranged together here. The guard itself is a pure selector
 // over state.activity.entries (selectEnvHasFailedDeploy in app/selectors.ts).
@@ -40,7 +40,7 @@ test.describe('deploy-failed respawn guard', () => {
     // flow would surface the "── deploy failed — not retrying automatically …"
     // marker. (AI/ERun tab presence is not asserted: those depend on a
     // reachable runtime the headless harness has no cluster for — see the
-    // bug/368 note in sidebar-reclick-no-duplicate-tabs.spec.ts.)
+    // note in sidebar-reclick-no-duplicate-tabs.spec.ts.)
     await expect(page.getByText(/deploy failed — not retrying automatically/i)).toBeHidden();
   });
 });

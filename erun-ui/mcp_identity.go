@@ -19,7 +19,7 @@ const (
 	desktopMCPTokenTTL = 5 * time.Minute
 )
 
-// desktopIdentity is the desktop's persistent Ed25519 identity (issue #655). It
+// desktopIdentity is the desktop's persistent Ed25519 identity. It
 // signs the per-env bearer tokens the desktop sends to each env's MCP edge and
 // supplies the public key the deploy injects into the pod so the edge can
 // verify them. The private key is the single source of truth, persisted once

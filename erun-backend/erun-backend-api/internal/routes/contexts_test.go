@@ -116,7 +116,7 @@ func (s *stubContextProvisioner) Start(in provision.ProvisionInput) error {
 
 // TestCreateContextStartsProvisioningWhenWired: with a provisioner wired (DBOS +
 // secrets configured), a non-preview create persists the row and kicks off the
-// durable provisioning workflow, returning 202 Accepted (issue #605/#676).
+// durable provisioning workflow, returning 202 Accepted.
 func TestCreateContextStartsProvisioningWhenWired(t *testing.T) {
 	contexts := &stubContextRepository{created: model.Context{ContextID: "ctx-1", Name: "primary", Provider: "aws", Status: "provisioning"}}
 	prov := &stubContextProvisioner{}

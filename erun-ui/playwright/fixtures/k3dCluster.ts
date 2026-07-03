@@ -4,8 +4,8 @@ import * as path from 'node:path';
 
 import { isolatedRoot, kubeconfigPath } from './seedRoot.js';
 
-// k3dCluster owns the opt-in, real-cluster lifecycle for the k3d e2e mode
-// (issue #647). It is reached ONLY when ERUN_E2E_K3D=1; the default inert suite
+// k3dCluster owns the opt-in, real-cluster lifecycle for the k3d e2e mode. It
+// is reached ONLY when ERUN_E2E_K3D=1; the default inert suite
 // never imports its side effects. A real local k3d cluster + built-in registry
 // stand in for "an erun-owned cluster" so the desktop's full create → build →
 // push → deploy → open → MCP flow runs against a live runtime (the coverage the

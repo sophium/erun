@@ -63,12 +63,12 @@ func (a *App) resolveRuntimeRegistryVersionsForTenant(namespace, tenant string) 
 // given environment's runtime image was last published, so the "Version to
 // deploy" picker queries the same place `erun deploy` pushed to instead of the
 // hardcoded default. It mirrors the deploy provenance recorded by
-// PersistRuntimeVersionFromDeploySpecs (issue #363): the env's persisted
+// PersistRuntimeVersionFromDeploySpecs: the env's persisted
 // RuntimeRegistry. When no specific environment is given (the tenant-wide
 // initial state and the Upgrade-all plan) the first env of the tenant that
 // recorded a registry stands in for the tenant. Returns "" when nothing is
 // recorded — a never-deployed env, or one predating the provenance — so the
-// caller falls back to DefaultContainerRegistry. See issue #475.
+// caller falls back to DefaultContainerRegistry.
 func (a *App) runtimeRegistryNamespace(tenant, environment string) string {
 	tenant = strings.TrimSpace(tenant)
 	if tenant == "" {
@@ -107,7 +107,7 @@ func (a *App) runtimeVersionSuggestions(info eruncommon.BuildInfo, tenant, envir
 		image := strings.TrimRight(strings.TrimSpace(registry), "/") + "/" + tenantImage
 		suggestions = append(suggestions, labelRuntimeVersionSuggestions(tenant, image, eruncommon.RuntimeDeployVersionSuggestions(info, versions))...)
 	}
-	// #501: tenant images are thin wrappers rebuilt from the canonical ERun
+	// tenant images are thin wrappers rebuilt from the canonical ERun
 	// image, so the canonical channel-latest is part of the env's real target
 	// universe. Skipped when the tenant image is the canonical image itself.
 	if tenantImage != eruncommon.DefaultRuntimeImageName {
@@ -118,7 +118,7 @@ func (a *App) runtimeVersionSuggestions(info eruncommon.BuildInfo, tenant, envir
 
 // environmentDiscoveryRegistries returns the registries the version picker
 // queries for an environment: the registry the env was last deployed from
-// (provenance, #475) plus every registry in the env's marked list, so an
+// (provenance) plus every registry in the env's marked list, so an
 // offered version can come from any listed registry and carry its source.
 // Falls back to the canonical registry when nothing is configured.
 func (a *App) environmentDiscoveryRegistries(tenant, environment string) []string {

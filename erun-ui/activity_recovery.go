@@ -87,8 +87,7 @@ func (a *App) resolveRecoverableHelmEntry(id string) (activityQueueEntry, *activ
 
 // combineRecoveryOutput concatenates the helm recovery command's stdout and
 // stderr into the single Output blob the frontend renders, joining them with
-// a newline only when both are non-empty. Behavior matches the inline
-// combination it replaced.
+// a newline only when both are non-empty.
 func combineRecoveryOutput(stdout, stderr string) string {
 	combined := strings.TrimSpace(stdout)
 	if errOut := strings.TrimSpace(stderr); errOut != "" {

@@ -10,9 +10,8 @@ import { setCloudProviders } from './slices/tenantsSlice';
 import type { AppThunk, RootState } from './store';
 
 // cloudProviderThunks own the sidebar's per-provider-type cloud-alias controls.
-// The busy/action flags it writes live on the sidebar slice keyed by alias, so
-// AWS and Cloudflare rows spin independently; the thunks dispatch the matching
-// slice actions directly.
+// Busy/action flags are keyed by alias on the sidebar slice, so AWS and
+// Cloudflare rows spin independently.
 
 export const loginPrimaryCloudProvider =
   (alias: string): AppThunk<Promise<void>> =>

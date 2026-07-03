@@ -201,7 +201,7 @@ func (a *App) executeDesktopAction(action *desktopAction) {
 // startActivityStatusPollerForAction kicks off the container-status poller
 // for deploy/force-deploy actions when a poller is configured. Other action
 // kinds (and a nil poller) are a no-op. Extracted from executeDesktopAction
-// so it stays under the cyclomatic-complexity limit; behavior is unchanged.
+// so it stays under the cyclomatic-complexity limit.
 func (a *App) startActivityStatusPollerForAction(action *desktopAction, entry activityQueueEntry) {
 	if action.kind != "deploy" && action.kind != "force-deploy" {
 		return
@@ -216,7 +216,7 @@ func (a *App) startActivityStatusPollerForAction(action *desktopAction, entry ac
 // queue status and message. A nil error succeeds; a context.Canceled error
 // is reported as cancelled; anything else fails with the error text.
 // Extracted from executeDesktopAction so it stays under the
-// cyclomatic-complexity limit; the mapping is unchanged.
+// cyclomatic-complexity limit.
 func desktopActionTerminalStatus(err error) (activityQueueStatus, string) {
 	if err == nil {
 		return activityQueueStatusSucceeded, ""

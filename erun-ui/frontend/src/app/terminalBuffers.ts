@@ -65,7 +65,7 @@ const TERMINAL_RESPONSE_PATTERNS: RegExp[] = [
   // Bare CPR tail run (`1;64R`, `1;64R1;69R1;1R`, …) — same readline
   // stripping, for cursor-position reports that landed on a shell prompt.
   // terminalQueryResponses no longer answers queries re-parsed from a
-  // replayed buffer (#484), so this is a backstop that cleans buffers
+  // replayed buffer, so this is a backstop that cleans buffers
   // already polluted before that fix. Echoed reports concatenate (each
   // report is typed input, so the next lands right after it), hence the
   // run grouping; the anchoring mirrors the DA tail above.

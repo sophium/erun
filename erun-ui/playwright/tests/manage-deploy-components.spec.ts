@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/erunApp.js';
 
-// Issue #718 — the Runtime tab's "Components to deploy" checklist lets the
+// The Runtime tab's "Components to deploy" checklist lets the
 // operator see and control exactly what `erun deploy` rolls out (opt-in-only),
 // and save that as the env's per-machine default. This spec locks the frontend
 // contract on the inert baseline: for a component-only/inert env the checklist
@@ -32,7 +32,7 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     // The headless baseline vendors no local runtime chart, so the item is the
     // published erun-devops chart. Its label must name that real chart and show
     // <tenant>-devops only as the release name — not present the release name as
-    // a published chart (#721). This keeps the checklist consistent with the
+    // a published chart. This keeps the checklist consistent with the
     // erun-devops versions the "Version to deploy" picker offers.
     await expect(runtime).toHaveAccessibleName(
       `Runtime — published erun-devops chart (released as ${runtimeName})`,

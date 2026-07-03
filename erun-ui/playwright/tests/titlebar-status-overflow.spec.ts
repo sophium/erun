@@ -87,7 +87,7 @@ test.describe('titlebar status overflow', () => {
     expect(text?.trim().length ?? 0).toBeGreaterThanOrEqual(LONG_MESSAGE.length);
   });
 
-  // Issue 3's `app.activityDrawer` uses Tooltip; verify short messages
+  // `app.activityDrawer` uses Tooltip; verify short messages
   // keep the existing tooltip path so we have not regressed the short-
   // message UI. Visibility of system status (Nielsen #1) for short
   // notifications already worked before this change.

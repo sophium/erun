@@ -13,7 +13,7 @@ import (
 )
 
 // TestStartSessionStopsReconnectingAfterRepeatedFailures locks the
-// fast-exit loop guard from issue #361. Before this gate, a managed
+// fast-exit loop guard. Before this gate, a managed
 // `erun open` PTY whose cluster kept tearing down the freshly-spawned
 // pod (helm rollout timeouts, MCP port-forward races against a
 // terminating EC2) would respawn indefinitely — each respawn re-ran
@@ -83,8 +83,7 @@ func TestStartSessionStopsReconnectingAfterRepeatedFailures(t *testing.T) {
 	}
 
 	// The retry marker is emitted through terminal-output as a
-	// base64-encoded ANSI line. Decode the captured payloads and
-	// look for the production marker text.
+	// base64-encoded ANSI line.
 	if !sawLoopMarker(emits) {
 		t.Fatal("expected reconnect-loop marker on terminal-output channel after cap")
 	}
@@ -150,7 +149,7 @@ func TestTrackExitForLoopGuardPrunesOldExits(t *testing.T) {
 }
 
 // TestStopCloudContextSuppressesReconnect locks the intentional-stop
-// gate from issue #412. Before this gate, clicking the Power button
+// gate. Before this gate, clicking the Power button
 // in the titlebar fired `StopCloudContext` and the kubectl session
 // died moments later as the EC2 instance entered `stopping`. The
 // reconnect loop then re-ran `erun open`, whose CloudContextPreflight
@@ -376,7 +375,7 @@ func TestTrackExitForLoopGuardTripsAfterCap(t *testing.T) {
 	}
 }
 
-// TestTryReconnectRefusesAfterDeployFailure pins #447: when an env's open
+// TestTryReconnectRefusesAfterDeployFailure pins the deploy-failure gate: when an env's open
 // ended in a deploy failure (signalReady recorded an error from
 // `==> Deploy failed`), tryReconnect must NOT respawn. Respawning re-runs
 // `erun open`, re-deploying a broken env — and because every tab (ERun + AI)
@@ -493,7 +492,7 @@ func sawDeployFailedMarker(emits *capturedEmits) bool {
 }
 
 // TestSessionTakenOverByAnotherWindowDoesNotReconnect locks the takeover
-// handover from #478: when another ERun window re-attaches a persistent pod
+// handover: when another ERun window re-attaches a persistent pod
 // session, this window's `erun open` prints the stable taken-over notice and
 // exits cleanly. The desktop must NOT respawn — a respawn would re-attach and
 // steal the session straight back, and the two windows would fight over it —

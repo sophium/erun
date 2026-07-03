@@ -37,9 +37,9 @@ export function DiffList(): React.ReactElement {
   }
   // Render the same subset the changed-files tree shows — honouring the active
   // filter and collapsed directories — in the tree's order (diff.files is
-  // already ordered to match the tree, #435). Without this the diff panel
-  // showed every file while the tree showed a filtered/collapsed subset, which
-  // read as an order mismatch (#547).
+  // already ordered to match the tree). Without this the diff panel showed
+  // every file while the tree showed a filtered/collapsed subset, which read
+  // as an order mismatch.
   const visiblePaths = visibleDiffFilePaths(
     review.diff?.tree ?? [],
     review.diffFilter,

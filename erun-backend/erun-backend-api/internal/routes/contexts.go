@@ -20,9 +20,8 @@ type ContextRepository interface {
 }
 
 // ContextProvisioner starts the durable live provisioning of a freshly-created
-// context (issue #605/#676). Optional: when nil, POST /v1/contexts only
-// registers the row and returns the bootstrap plan (no live cluster bootstrap),
-// the pre-#676 behaviour.
+// context. Optional: when nil, POST /v1/contexts only registers the row and
+// returns the bootstrap plan (no live cluster bootstrap).
 type ContextProvisioner interface {
 	Start(provision.ProvisionInput) error
 }

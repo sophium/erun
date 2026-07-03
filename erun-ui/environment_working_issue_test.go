@@ -29,7 +29,7 @@ func TestParseIssueNumberFromBranch(t *testing.T) {
 
 // workingIssueApp builds an App whose store resolves one env and whose
 // working-issue command runner is stubbed, so the resolver runs without a real
-// repo or gh. The pod-path deps are pinned hermetic (issue #492): a remote
+// repo or gh. The pod-path deps are pinned hermetic: a remote
 // env resolved through this helper must never probe the developer machine's
 // real local ports — ResolveOpen allocates a port range even when none is
 // persisted, and a live desktop/headless erun can be listening there, turning
@@ -132,8 +132,8 @@ func TestEnvironmentWorkingIssueUnavailableForRemoteWorktree(t *testing.T) {
 	}
 }
 
-// remoteWorkingIssueApp builds an App for the pod-backed resolution paths
-// (issue #462): a remote-agent env with a port range, an injectable
+// remoteWorkingIssueApp builds an App for the pod-backed resolution paths:
+// a remote-agent env with a port range, an injectable
 // reachability answer, and an injectable in-pod branch loader.
 func remoteWorkingIssueApp(t *testing.T, reachable bool, loadPodBranch func(context.Context, string, string) (string, error), run workingIssueCommandRunner) *App {
 	t.Helper()

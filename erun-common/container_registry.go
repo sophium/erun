@@ -263,7 +263,7 @@ func (c *ProjectConfig) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
-// UnmarshalYAML migrates an env's pre-#376 legacy fields on read so configs
+// UnmarshalYAML migrates an env's legacy fields on read so configs
 // written by older binaries keep working after the fields were removed from the
 // struct: the single `containerregistry` scalar folds into the marked list, and
 // the `remote`+`snapshot` pair derives the env `type` when `type` is unset.
@@ -284,7 +284,7 @@ func (c *EnvConfig) UnmarshalYAML(value *yaml.Node) error {
 	if !c.Type.IsValid() {
 		c.Type = legacyEnvTypeFromRemoteSnapshot(aux.LegacyRemote, aux.LegacySnapshot)
 	}
-	// Fold the pre-#376 `repopath` into `localRepoPath` (dropped struct field;
+	// Fold the legacy `repopath` into `localRepoPath` (dropped struct field;
 	// migrated on read, dropped on next save — same envelope as
 	// `containerregistry`/`remote`/`snapshot`). Unconditional across all env
 	// types: EffectiveLocalRepoPath already resolved `repopath` for every type

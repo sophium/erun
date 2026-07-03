@@ -12,7 +12,7 @@ import (
 // confirms, and each lagging member runs its own scoped `erun upgrade` in its
 // own environment.
 //
-// The resolver is the shared one every transport uses (issue #497): the
+// The resolver is the shared one every transport uses: the
 // preview must never promise an upgrade the run will refuse, so the
 // resolution policy — provenance namespace, default-image fallback only for
 // an unpublished tenant image, lookup errors surfaced as unresolved — is

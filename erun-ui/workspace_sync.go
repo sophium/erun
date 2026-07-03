@@ -151,9 +151,7 @@ const (
 // loop: it ensures SSHD when the local port cannot be reached and waits for the
 // remote SSHD to answer. On any failure it records the worker status, sleeps one
 // interval, and reports whether the loop should retry or stop; otherwise it
-// reports proceed. Extracted so runWorkspaceSyncLoop stays under the cyclomatic
-// limit; the guard order, status writes, and sleep-driven continue/return
-// semantics are unchanged.
+// reports proceed.
 func (a *App) prepareWorkspaceSyncPass(ctx context.Context, key string, result eruncommon.OpenResult, params workspaceSyncParams) workspaceSyncPassOutcome {
 	if a.deps.canConnectLocalPort != nil && !a.deps.canConnectLocalPort(eruncommon.SSHLocalPortForResult(result)) && a.deps.ensureSSHD != nil {
 		if err := a.deps.ensureSSHD(ctx, result); err != nil {
@@ -281,9 +279,7 @@ func syncWorkspaceOnce(ctx context.Context, params workspaceSyncParams) (workspa
 // resolveWorkspaceSyncPaths lists the Git-visible files on the remote and local
 // sides for one sync pass, applying the local ignore filter to the remote set.
 // notGitRepo is true (with a nil error) when the remote workspace is not a Git
-// repository, which syncWorkspaceOnce treats as a no-op. Extracted so
-// syncWorkspaceOnce stays under the cyclomatic limit; the listing and filtering
-// order is unchanged.
+// repository, which syncWorkspaceOnce treats as a no-op.
 func resolveWorkspaceSyncPaths(ctx context.Context, params workspaceSyncParams) (remotePaths, localPaths []string, notGitRepo bool, err error) {
 	remotePaths, err = remoteWorkspaceGitVisibleFiles(ctx, params.HostAlias, params.RemotePath)
 	if errors.Is(err, errRemoteNotGitRepo) {

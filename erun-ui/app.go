@@ -80,7 +80,7 @@ type App struct {
 	ctx  context.Context
 	deps erunUIDeps
 
-	// identity is the desktop's persistent signing identity (issue #655). It
+	// identity is the desktop's persistent signing identity. It
 	// mints the short-lived per-env bearer the desktop sends to each env's MCP
 	// edge and supplies the public key deploy injects so the edge verifies
 	// those tokens. nil in unit tests, where mcpBearer returns "" so non-auth
@@ -191,7 +191,7 @@ func NewApp(deps erunUIDeps) *App {
 }
 
 // mcpBearer mints the short-lived per-env bearer the desktop sends to the env's
-// MCP edge (issue #655). A nil identity (unit tests) or a signing failure yields
+// MCP edge. A nil identity (unit tests) or a signing failure yields
 // "", so non-auth envs and stubbed MCP deps keep working; an auth-enabled env
 // rejects an empty bearer with 401, which is the correct outcome.
 func (a *App) mcpBearer(tenant, environment string) string {

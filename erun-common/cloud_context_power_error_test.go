@@ -8,7 +8,7 @@ import (
 )
 
 // TestCloudContextPowerErrorClassification pins the actionable-error contract
-// for stop/start failures (issue #456: a failed Stop surfaced as a bare
+// for stop/start failures (a failed Stop surfaced as a bare
 // "exit status 1" while the instance kept running). These branches only fire
 // on real AWS error responses, which the dry-run integration harness cannot
 // produce — the same structural gap erun-integration/AGENTS.md records for

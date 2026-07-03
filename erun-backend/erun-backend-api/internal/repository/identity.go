@@ -176,7 +176,7 @@ func (r *IdentityRepository) refreshUserUsername(ctx context.Context, tenant mod
 	return user, nil
 }
 
-// resolveTenant maps a verified token to its tenant. The issuer's org-scoping
+// ResolveTenantByIssuer maps a verified token to its tenant. The issuer's org-scoping
 // mode lives once on issuers.org_field_key: NULL means a single-tenant issuer
 // (resolve by issuer alone, the common BYO/external-IdP case); a set key names
 // the token claim whose value selects the tenant among that issuer's orgs

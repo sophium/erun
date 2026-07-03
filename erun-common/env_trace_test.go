@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// TestActivateEnvTrace pins the per-env trace capture (issues #466/#508):
+// TestActivateEnvTrace pins the per-env trace capture:
 // the tee is always on for env-scoped invocations and mirrors the full
 // trace stream — including lines the terminal verbosity suppresses — into
 // ~/.erun/<tenant>/<env>/trace.log, stamped per line; dry-run only names

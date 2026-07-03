@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/erunApp.js';
 
-// Issue #440 — the sidebar "Upgrade all" button opens a preview dialog that
+// The sidebar "Upgrade all" button opens a preview dialog that
 // resolves the cross-env upgrade plan (every opted-in env, its channel, and
 // current → target) before any deploy. This spec drives the reachable surface:
 // the button opens the dialog, the dialog renders either the plan table or the
@@ -32,7 +32,7 @@ test.describe('sidebar Upgrade all', () => {
     await expect(dialog).toBeHidden();
   });
 
-  // Issue #459 — the dialog must render the same three-way outcome the CLI's
+  // The dialog must render the same three-way outcome the CLI's
   // `erun upgrade` already shows: an opted-in env either lags a known channel
   // latest, sits at the known latest, or has no resolvable target (registry
   // lookup failed / no matching tags). The third case previously rendered as
@@ -44,7 +44,7 @@ test.describe('sidebar Upgrade all', () => {
   // ResolveUpgradePlan RPC over the /__erun_invoke bridge — the same technique
   // idle-widget-stop-protection.spec.ts uses — to drive a deterministic plan
   // with one item in each state. Every other RPC passes through untouched.
-  // The fourth row is the issue #524 shape: a snapshot-channel member whose
+  // The fourth row is a snapshot-channel member whose
   // target is a stable release, because the stable was published on top of
   // the latest snapshot (the resolver decision is owned by the upgrade
   // dry-run goldens; this locks how the dialog renders the resulting row).
@@ -120,7 +120,7 @@ test.describe('sidebar Upgrade all', () => {
     // Unresolved target → "latest unknown", and NOT "up to date" (the
     // regression this fix prevents). The current version is still shown; the
     // unknown target lives in the Status column, not as a "(unset)" target —
-    // and the row carries the actual failure reason (issue #497), so the
+    // and the row carries the actual failure reason, so the
     // operator sees why without leaving the dialog.
     const unresolvedRow = dialog.locator('tr', { hasText: 'unresolved-env' });
     await expect(unresolvedRow).toContainText('latest unknown');
@@ -128,8 +128,8 @@ test.describe('sidebar Upgrade all', () => {
     await expect(unresolvedRow).toContainText('1.0.80-snapshot-20260101000000');
     await expect(unresolvedRow).not.toContainText('up to date');
 
-    // Snapshot-channel member whose stream was superseded by a stable release
-    // (issue #524): the row keeps its snapshot channel but proposes the
+    // Snapshot-channel member whose stream was superseded by a stable release:
+    // the row keeps its snapshot channel but proposes the
     // stable version, and counts as a regular upgrade.
     const stableAdoptRow = dialog.locator('tr', { hasText: 'stable-adopt-env' });
     await expect(stableAdoptRow).toContainText('snapshot');
@@ -152,7 +152,7 @@ test.describe('sidebar Upgrade all', () => {
     await expect(dialog).toBeHidden();
   });
 
-  // Issue #497 — confirming Upgrade all fans out per member: every lagging
+  // Confirming Upgrade all fans out per member: every lagging
   // env runs its own scoped `erun upgrade --tenant <t> --environment <e>` in
   // its OWN Local shell (in parallel), instead of one global run executing
   // serially in a single host env's terminal. And the fan-out must not drag
@@ -162,10 +162,10 @@ test.describe('sidebar Upgrade all', () => {
   // Every Start* RPC is stubbed so neither the real `erun upgrade` nor any
   // real session spawn fires; the spec asserts one scoped dispatch per
   // lagging member (and only those), zero AI-session spawns, and that the
-  // pre-#461 block message never appears. The real parallel deploys are not
+  // pre-fix block message never appears. The real parallel deploys are not
   // stageable headless; the per-env command composition is owned by the
   // upgrade dry-run goldens (dry_run_scoped_flags_lagging) and the Go
-  // resolver tests (the #331 pattern).
+  // resolver tests.
   test('confirming fans out one scoped run per lagging member, with no AI spawn', async ({
     app,
     page,
@@ -258,8 +258,7 @@ test.describe('sidebar Upgrade all', () => {
       .sort();
     expect(ran).toEqual(['acme/lagging-a', 'beta/lagging-b']);
 
-    // No member had an AI tab spawned as a side effect of confirming
-    // (issue #497).
+    // No member had an AI tab spawned as a side effect of confirming.
     expect(memberAISessions).toEqual([]);
 
     // The pre-fix block message must never appear.
@@ -268,7 +267,7 @@ test.describe('sidebar Upgrade all', () => {
     await expect(dialog).toBeHidden();
   });
 
-  // Issue #527 — when an env's listed registries offer more than one newer
+  // When an env's listed registries offer more than one newer
   // version, Upgrade all must not silently auto-pick: the row carries every
   // distinct candidate (each labelled with its source registry) and the
   // operator picks one before it can be redeployed. The CLI/MCP skip such an
@@ -355,7 +354,7 @@ test.describe('sidebar Upgrade all', () => {
     await upgradeButton.click();
 
     // The confirmed run carries the picked version so `erun upgrade` deploys
-    // exactly what the operator chose (issue #527).
+    // exactly what the operator chose.
     await expect.poll(() => upgradeRuns.length).toBe(1);
     expect(upgradeRuns[0]?.environment).toBe('pick-env');
     expect(upgradeRuns[0]?.version).toBe(newer);

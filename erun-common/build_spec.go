@@ -226,16 +226,6 @@ func newDockerBuildSpec(now NowFunc, projectRoot, environment string, buildConte
 		return DockerBuildSpec{}, err
 	}
 
-	// For images whose FROM instruction resolves via ${ERUN_VERSION} (e.g.
-	// erun-backend-api, erun-backend-db, erun-mcp), the snapshot version is
-	// the right ERUN_VERSION build arg because it matches the locally-built
-	// base image tag.  Clear BaseVersion so those images don't try to use the
-	// stable semver — that tag doesn't exist in the local Docker cache.
-	//
-	// Source-compiled images (e.g. erun-devops) use a fixed FROM and bake
-	// ERUN_VERSION into the binary via ldflags.  Keeping BaseVersion set on
-	// those images ensures the binary is stable across snapshot pushes so
-	// Docker can reuse existing registry layers.
 	// For local snapshot builds, append "-snapshot" to the stable base version
 	// so ERUN_VERSION reads "1.0.51-snapshot" rather than "1.0.51" (which would
 	// falsely claim a release).  All images — both source-compiled and wrapper —

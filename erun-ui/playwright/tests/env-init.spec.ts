@@ -23,18 +23,18 @@ test.describe('environment init dialog', () => {
     await app.sidebar.openInitDialog();
     await app.envInitDialog.waitForOpen();
 
-    // The new mode-aware description text (item 8 in the UX plan) must
-    // mention "Create" rather than the generic "Enter the tenant and
-    // environment name." copy. Match a regex so both the "with
-    // pre-populated values" and "blank" copy branches pass.
+    // The new mode-aware description text must mention "Create" rather
+    // than the generic "Enter the tenant and environment name." copy.
+    // Match a regex so both the "with pre-populated values" and "blank"
+    // copy branches pass.
     const dialog = app.envInitDialog.locator();
     await expect(dialog.getByText(/Create|create/).first()).toBeVisible();
 
     // The submit-disabled reason container exists with role=status; it
     // may be empty when the dialog has no current blockers. The
     // important invariant is that the live-region container is in the
-    // DOM (item 11) so blocking reasons can surface there without a
-    // re-render shift.
+    // DOM so blocking reasons can surface there without a re-render
+    // shift.
     const reason = app.page.locator('#environment-dialog-submit-reason');
     await expect(reason).toHaveCount(1);
 

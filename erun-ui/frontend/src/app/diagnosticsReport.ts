@@ -3,7 +3,7 @@ import type { UIBuildDetails, UIEnvironment, UIEnvTrace, UISelection } from '@/t
 import { formatUITrace, type UITraceEntry } from './uiTraceBuffer';
 
 // formatDiagnosticsReport renders the Diagnostics console's one-click bug
-// report (issue #514): everything a reader needs in a single paste-ready
+// report: everything a reader needs in a single paste-ready
 // block — app build, env identity and state, the erun trace tail (or its
 // empty-state reason: "unreachable" is itself evidence), and the UI action
 // history. Mirrors the Activities drawer's "Copy failure report" pattern.

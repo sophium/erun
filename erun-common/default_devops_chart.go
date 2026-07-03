@@ -11,15 +11,15 @@ import (
 
 // The embedded Chart.yaml exists only to migrate legacy scaffolded tenant
 // charts (see MigrateDefaultDevopsChartAppVersion). New environments deploy
-// the published erun-devops chart directly (#505); the per-tenant scaffold
-// copies — and the drift they accumulated (#510) — are retired.
+// the published erun-devops chart directly; the per-tenant scaffold
+// copies — and the drift they accumulated — are retired.
 //
 //go:embed assets/default-devops-chart/Chart.yaml
 var defaultDevopsChartFiles embed.FS
 
 // MigrateDefaultDevopsChartAppVersion rewrites an existing tenant
 // `<tenant>-devops/k8s/<tenant>-devops/Chart.yaml` whose appVersion
-// still carries the pre-#361 literal placeholder. Tenants with a
+// still carries the literal placeholder. Tenants with a
 // scaffolded devops module keep deploying their local chart (the
 // published-chart flow only applies when no local chart exists), so
 // this compat migration stays. The legacy detection already used by
@@ -166,7 +166,7 @@ func shouldWriteExistingDefaultDevopsFile(path string, content []byte) (bool, er
 }
 
 // shouldReplaceDefaultDevopsFile only ever replaces a legacy scaffolded
-// Chart.yaml still pinned to the pre-#361 "1.0.0" placeholder; any other
+// Chart.yaml still pinned to the "1.0.0" placeholder; any other
 // existing content is treated as hand-customised and left alone.
 func shouldReplaceDefaultDevopsFile(existing, content []byte) bool {
 	current := strings.TrimSpace(string(existing))
@@ -178,7 +178,7 @@ func shouldReplaceDefaultDevopsFile(existing, content []byte) bool {
 	return false
 }
 
-// legacyDevopsChartYAMLCandidates returns the pre-#361 shapes of a
+// legacyDevopsChartYAMLCandidates returns the legacy shapes of a
 // tenant devops chart's Chart.yaml so an existing tenant chart still
 // pinned to the literal placeholder `appVersion: "1.0.0"` gets
 // auto-rewritten on the next open. Only the devops chart is in scope —

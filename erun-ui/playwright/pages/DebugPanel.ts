@@ -1,6 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 
-// Diagnostics console POM (issue #466). The panel sits at the bottom of the
+// Diagnostics console POM. The panel sits at the bottom of the
 // terminal area and toggles open/closed; when open it renders a "Resize
 // diagnostics panel" handle, an "erun trace" / "UI trace" tab pair, and
 // per-pane Refresh/Copy/Clear actions.

@@ -3,10 +3,10 @@ import { expect, test } from '../fixtures/erunApp.js';
 // app-notification covers the new Go-side `app-notification` Wails
 // event that surfaces one-shot info/success events as transient,
 // auto-dismissing toasts. The canonical caller is the idle auto-stop
-// success line in erun-ui/idle_status.go: before issue #361 it rode on
+// success line in erun-ui/idle_status.go: it previously rode on
 // the persistent `app-status` channel, which latched the message into
 // the titlebar pill long after the cloud context had been restarted
-// elsewhere — see the issue body for the user-facing symptom.
+// elsewhere.
 //
 // The Go side is covered by erun-ui/notifications_test.go. This spec
 // drives the same React path the production event ends up using: emit
@@ -36,9 +36,8 @@ test.describe('app-notification toast', () => {
     const pill = page.getByRole('status').filter({ hasText: message });
     await expect(pill).toBeVisible();
 
-    // notificationThunks.ts auto-dismisses success/info after 3.2 s.
-    // Give the timer 5 s headroom so we are not racing with it; if the
-    // pill is still up at that point the auto-dismiss broke.
+    // notificationThunks.ts auto-dismisses success/info toasts, so the
+    // pill clears on its own without any explicit dismissal.
     await expect(pill).toHaveCount(0);
   });
 
@@ -95,8 +94,7 @@ test.describe('app-notification toast', () => {
       runtime.EventsEmit('app-notification', { kind: 'error', message: msg });
     }, sentinel);
     await expect(page.getByRole('alert').filter({ hasText: sentinel })).toBeVisible();
-    // The empty payload added no toast: the status count is unchanged and only
-    // the sentinel raised the alert count.
+    // The empty payload added no toast.
     await expect(page.locator('[role="status"]')).toHaveCount(statusBefore);
     await expect(page.locator('[role="alert"]')).toHaveCount(alertBefore + 1);
   });

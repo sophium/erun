@@ -6,12 +6,12 @@ import {
   uniqueEnvironmentName,
 } from '../fixtures/seedRoot.js';
 
-// #529: the erun-trace pane gains a non-destructive "Clear" that baselines the
+// The erun-trace pane gains a non-destructive "Clear" that baselines the
 // view — it hides everything currently shown so new lines stand out, without
 // truncating the persistent log or the Copy / Copy-report reads.
 //
 // The headless harness can't populate a real trace.log for an inert seeded env
-// (capture depends on which commands ran, #508/#483), so these stub the
+// (capture depends on which commands ran), so these stub the
 // LoadEnvTrace RPC over /__erun_invoke to drive deterministic, evolving
 // content — the same technique sidebar-upgrade-all.spec.ts uses for
 // ResolveUpgradePlan. The baseline math itself (suffix vs rotation fallback)

@@ -17,7 +17,7 @@ import (
 
 func TestDeploy(t *testing.T) {
 	t.Run("help_outside_devops_cwd", func(t *testing.T) {
-		// Regression for commit a7b4d08: when cwd has no devops context, the
+		// Regression: when cwd has no devops context, the
 		// deploy command must still be registered so the desktop UI's
 		// `erun deploy <tenant> <env> --version X` invocation can land its
 		// flags. Pre-fix, this returned the root help and "unknown flag:
@@ -55,7 +55,7 @@ func TestDeploy(t *testing.T) {
 		// edge to authenticate bearer tokens signed by the desktop public key:
 		// the key is applied out-of-band as a <release>-mcp-auth Secret and the
 		// file:// issuer + per-env audience ride as mcpAuth.* helm values on the
-		// runtime (team-devops) chart only (#655).
+		// runtime (team-devops) chart only.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -195,7 +195,7 @@ func TestDeploy(t *testing.T) {
 	})
 
 	t.Run("dry_run_no_devops_module_bootstraps_published_runtime", func(t *testing.T) {
-		// Opt-in-only resolution (#718): a local env whose project root has no
+		// Opt-in-only resolution: a local env whose project root has no
 		// *-devops module has no local charts, so an empty selection defaults to
 		// the runtime and — finding no repo-local runtime chart — bootstraps the
 		// env on the published erun-devops chart by reference. This replaces the
@@ -507,7 +507,7 @@ func TestDeploy(t *testing.T) {
 	})
 
 	t.Run("dry_run_pinned_version_installs_buildable_chart_without_building", func(t *testing.T) {
-		// #556: deploy is a consume operation. Even when the chart references a
+		// Deploy is a consume operation. Even when the chart references a
 		// runtime image that HAS a local build context (docker/team-devops/
 		// Dockerfile makes team-devops genuinely buildable), an explicit
 		// --version installs that already-published version by reference: the
@@ -530,7 +530,7 @@ func TestDeploy(t *testing.T) {
 	})
 
 	t.Run("real_run_pinned_version_missing_image_errors", func(t *testing.T) {
-		// #556: deploy installs an existing version and does not build it, so a
+		// Deploy installs an existing version and does not build it, so a
 		// version whose image is absent both locally and in the registry must
 		// fail fast rather than silently rebuild from the working tree. The
 		// existence check runs only in real mode (dry-run traces and skips it),
@@ -554,7 +554,7 @@ func TestDeploy(t *testing.T) {
 	})
 
 	t.Run("dry_run_outside_devops_with_tenant_env", func(t *testing.T) {
-		// Regression for issue #252: when erun deploy <tenant> <env> is
+		// Regression: when erun deploy <tenant> <env> is
 		// invoked from a cwd outside the devops module (e.g. the desktop
 		// UI launching the binary from $HOME for a remote environment),
 		// the resolved tenant project root must drive chart discovery
@@ -575,8 +575,8 @@ func TestDeploy(t *testing.T) {
 		// work: the runtime spec resolves to the published erun-devops OCI
 		// chart (decision trace + helm upgrade pinned by --version).
 		// Historically this materialized an embedded chart copy that had
-		// drifted from the canonical chart (#510); the published chart is
-		// the single contract (#505).
+		// drifted from the canonical chart; the published chart is
+		// the single contract.
 		setup := env.New(t)
 		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 		// Note: no SeedDevopsRepo — there is no local checkout anywhere.
@@ -586,7 +586,7 @@ func TestDeploy(t *testing.T) {
 
 	t.Run("dry_run_remote_env_custom_runtime_image", func(t *testing.T) {
 		// A persisted EnvConfig.RuntimeImage must ride into the published
-		// chart deploy as imageOverrides.erun-devops (#505): the trace
+		// chart deploy as imageOverrides.erun-devops: the trace
 		// names the override decision and the helm command carries the
 		// --set-string. A full reference is used verbatim.
 		setup := env.New(t)
@@ -627,7 +627,7 @@ func TestDeploy(t *testing.T) {
 	})
 
 	t.Run("dry_run_runtime_image_override_uses_published_chart", func(t *testing.T) {
-		// #697: `--runtime-image` installs the canonical published erun-devops
+		// `--runtime-image` installs the canonical published erun-devops
 		// chart with the chosen image as imageOverrides.erun-devops, pinned to
 		// --version, EVEN when the env carries a repo-local runtime chart
 		// (SeedDevopsRepo materializes team-devops/k8s/team-devops). The trace
@@ -647,13 +647,13 @@ func TestDeploy(t *testing.T) {
 	})
 
 	t.Run("dry_run_runtime_image_override_no_k8s_tree_uses_published_chart", func(t *testing.T) {
-		// #707: `--runtime-image` on a local env whose <tenant>-devops module has
+		// `--runtime-image` on a local env whose <tenant>-devops module has
 		// no k8s chart tree (os.ReadDir(.../k8s) → fs.ErrNotExist) must bootstrap
 		// on the published erun-devops chart by reference instead of failing spec
 		// resolution ("open .../k8s: no such file or directory"). The desktop's
 		// ERun-base picker deploys a bare tenant this way before its own
-		// <tenant>-devops chart exists. Contrast dry_run_no_devops_module_errors
-		// (no override → errors) and dry_run_runtime_image_override_uses_published_chart
+		// <tenant>-devops chart exists. Contrast dry_run_no_devops_module_bootstraps_published_runtime
+		// (no override → bootstraps published runtime) and dry_run_runtime_image_override_uses_published_chart
 		// (chart present → reroutes). The module exists (docker + VERSION) but has
 		// no k8s tree, mirroring validation-agent-devops.
 		setup := env.New(t)
@@ -686,7 +686,7 @@ func TestDeploy(t *testing.T) {
 	})
 
 	t.Run("default_skips_optin_backend_charts", func(t *testing.T) {
-		// Opt-in-only resolution (#718, originally #271): when a tenant repo
+		// Opt-in-only resolution: when a tenant repo
 		// contains the runtime chart and the three backend charts, `erun deploy`
 		// with no selection deploys only the runtime chart. Nothing else rides
 		// along — the backend charts ship only when explicitly selected via
@@ -718,7 +718,7 @@ func TestDeploy(t *testing.T) {
 	})
 
 	t.Run("dry_run_umbrella_component_builds_helm_dependencies", func(t *testing.T) {
-		// #723: a local umbrella chart (team-backend-api) declares an OCI
+		// A local umbrella chart (team-backend-api) declares an OCI
 		// dependency on the published erun-backend-api chart. deploy must
 		// `helm dependency build` it before helm upgrade --install, or helm
 		// fails on the subchart missing from charts/. The dry-run plan traces
@@ -763,7 +763,7 @@ func TestDeploy(t *testing.T) {
 	})
 
 	t.Run("project_k8s_plan_includes_listed_charts_without_components_flag", func(t *testing.T) {
-		// The k8s.deployments plan is a selection tier (#718): with no
+		// The k8s.deployments plan is a selection tier: with no
 		// --components and no saved deploy.components, the plan's charts are the
 		// selection, so a user who configured the plan need not pass
 		// --components on every deploy. Here the plan names the runtime
@@ -845,9 +845,9 @@ func TestDeploy(t *testing.T) {
 	})
 
 	t.Run("default_deploys_runtime_only_not_stray_non_optin_chart", func(t *testing.T) {
-		// Opt-in-only (#718): a non-opt-in, non-runtime chart (here team-docs)
+		// Opt-in-only: a non-opt-in, non-runtime chart (here team-docs)
 		// present in the tree must NOT deploy by default — only the runtime does.
-		// Locks the stray-default fix: before #718 any chart outside the
+		// Locks the stray-default fix: previously any chart outside the
 		// hardcoded opt-in set deployed by elimination (e.g. a disabled docs
 		// chart shipped on every deploy).
 		setup := env.New(t)
@@ -865,7 +865,7 @@ func TestDeploy(t *testing.T) {
 		// chart, installs the published erun-devops chart by reference; the
 		// present component charts are NOT deployed (not selected). This is the
 		// dual-lookup + published fallback now available to deploy as it is to
-		// open (#718).
+		// open.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsBackendCharts(t, setup, "team", "dev")
@@ -878,7 +878,7 @@ func TestDeploy(t *testing.T) {
 
 	t.Run("saved_deploy_components_drive_selection_without_flag", func(t *testing.T) {
 		// The per-machine saved set (EnvConfig.deploy.components) is the selection
-		// tier below --components (#718): with no --components, deploy resolves to
+		// tier below --components: with no --components, deploy resolves to
 		// exactly the saved charts. Here the saved set is the postgres backend
 		// only, so deploy rolls out postgres alone — the runtime is NOT added (a
 		// non-empty saved selection that does not name it).
@@ -913,7 +913,7 @@ func TestDeploy(t *testing.T) {
 		// `erun list` kept showing the stale string. Real-run deploy now
 		// writes the deployed version back to the env config.
 		//
-		// Issue #363 extends this: the source registry is persisted
+		// This extends to the source registry, persisted
 		// alongside the version as RuntimeRegistry, so a subsequent
 		// reopen can address the same image even if the user edits the
 		// project's container registry afterwards.
@@ -945,7 +945,7 @@ func TestDeploy(t *testing.T) {
 	})
 
 	t.Run("dry_run_persisted_version_reopen_uses_runtime_registry_provenance", func(t *testing.T) {
-		// Issue #363: when the env has a persisted (RuntimeVersion,
+		// When the env has a persisted (RuntimeVersion,
 		// RuntimeRegistry) pair and the user reopens without --version,
 		// helm renders the runtime chart against RuntimeRegistry — not
 		// the project's currently-configured containerregistry. This
@@ -981,7 +981,7 @@ func TestDeploy(t *testing.T) {
 	})
 
 	t.Run("dry_run_explicit_version_uses_project_registry_not_provenance", func(t *testing.T) {
-		// Issue #363: an explicit --version is a fresh deploy intent.
+		// An explicit --version is a fresh deploy intent.
 		// Even with RuntimeRegistry pinned in env config, helm renders
 		// against the project's current containerregistry — and the
 		// post-deploy persist step will rewrite RuntimeRegistry to that
@@ -1016,7 +1016,7 @@ func TestDeploy(t *testing.T) {
 	})
 
 	t.Run("dry_run_persisted_version_without_provenance_uses_project_registry", func(t *testing.T) {
-		// Issue #363: legacy envs persisted by older binaries have
+		// Legacy envs persisted by older binaries have
 		// runtimeversion but no runtimeregistry. On reopen we must NOT
 		// invent a provenance — fall back to the project's current
 		// containerregistry, the same behaviour callers had before the
@@ -1301,7 +1301,7 @@ func TestDeploy(t *testing.T) {
 	})
 
 	t.Run("dry_run_snapshot_version_resets_postgres_database", func(t *testing.T) {
-		// Locks the #270/#506 contract under pure deploy: installing a snapshot
+		// Locks the contract under pure deploy: installing a snapshot
 		// version resolves ResetDatabase=true (deployResetsDatabase), so the
 		// erun-backend-postgres chart's helm upgrade carries
 		// --set api.postgres.reset=true. deploy installs by reference (no build);
@@ -1399,7 +1399,7 @@ func TestDeploy(t *testing.T) {
 		if !strings.Contains(out, "deploy: step 1 (parallel): team-devops, erun-backend-postgres") {
 			t.Fatalf("expected parallel-step trace line, got:\n%s", out)
 		}
-		// #531: the runtime chart names only the env, while the non-runtime
+		// The runtime chart names only the env, while the non-runtime
 		// component names itself after a ` · ` separator so a component
 		// rollout is not mistaken for a full-env redeploy. Both rollouts
 		// still appear; exactly one of each pair names the component.
@@ -1673,7 +1673,7 @@ func TestDeploy(t *testing.T) {
 // seedDevopsChartRuntimeImage adds a templates/deployment.yaml to the seeded
 // <tenant>-devops chart that references imageRef (which may embed
 // {{ .Chart.AppVersion }}). It makes findDockerImagesInChart resolve a concrete
-// image the deploy must address, so the install-by-reference path (#556) has
+// image the deploy must address, so the install-by-reference path has
 // something to verify — the stub SeedDevopsRepo chart has no templates and
 // therefore no chart-referenced image.
 func seedDevopsChartRuntimeImage(t *testing.T, setup env.Setup, tenant, imageRef string) {

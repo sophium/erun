@@ -57,7 +57,7 @@ func execWorkingIssueCommand(ctx context.Context, dir, name string, args ...stri
 // branch names an issue, that issue's title. Local-agent envs read the host
 // worktree; remote-agent / runtime envs read the in-pod worktree over the
 // env's MCP port-forward while it is reachable, and report an honest
-// open-to-view state otherwise (issue #462). Resolved results are cached per
+// open-to-view state otherwise. Resolved results are cached per
 // env for workingIssueCacheTTL.
 func (a *App) EnvironmentWorkingIssue(selection uiSelection) (uiWorkingIssue, error) {
 	selection = normalizeSelection(selection)
@@ -115,7 +115,7 @@ func (a *App) resolveWorkingIssue(result eruncommon.OpenResult) uiWorkingIssue {
 }
 
 // resolvePodWorkingIssue reads the in-pod branch over the env's MCP
-// port-forward (issue #462: the card used to show the implementation excuse
+// port-forward (the card used to show the implementation excuse
 // "worktree lives in the pod" instead of the work). Reachability is the
 // existing canConnectLocalPort signal — the port-forward only exists while
 // the env is open in this desktop, so an unreachable port means there is

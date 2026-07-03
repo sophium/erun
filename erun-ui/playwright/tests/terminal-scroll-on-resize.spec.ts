@@ -2,7 +2,7 @@ import { test, expect } from '../fixtures/erunApp.js';
 import type { Page, Request } from '@playwright/test';
 import type { AppShell } from '../pages/index.js';
 
-// Regression: issue #465 — resizing the terminal (OS window resize, layout
+// Regression: resizing the terminal (OS window resize, layout
 // panel toggles, debug-pane drag) refit xterm but never re-anchored the
 // viewport, so a user sitting at the live prompt was left scrolled up
 // mid-history after the reflow. runTerminalResize now captures whether the

@@ -3,7 +3,7 @@ import type { Page, Request } from '@playwright/test';
 import type { AppShell } from '../pages/index.js';
 import { expect, test } from '../fixtures/erunApp.js';
 
-// terminal-query-response covers issue #347: a tool inside a PTY emits a
+// terminal-query-response covers the case where a tool inside a PTY emits a
 // terminal query (CPR / DSR / DECRQSS); xterm parses it and the controller's
 // registerTerminalQueryResponseHandlers wiring answers via SendSessionInput.
 // The bug was that the reply was addressed to store.getState().terminal.sessionId
@@ -27,7 +27,7 @@ import { expect, test } from '../fixtures/erunApp.js';
 // because their async reply landed at the bash prompt as junk when the asking
 // tool had exited or the query arrived on reattach. Cursor position is the one
 // reply still sent (tools need it; no sane default), so it is what this spec
-// observes — for live parses only: issue #484 covers the replay side. Query
+// observes — for live parses only: the replay side is covered separately. Query
 // bytes are saved verbatim in the per-session buffer, so re-rendering a tab
 // (setSessionId → terminalDisplayMiddleware → writeTerminalBuffer) re-parses
 // every query a tool ever emitted there; answering those again injects the
@@ -156,7 +156,8 @@ test.describe('terminal query responses (#347)', () => {
     const invokes = captureInvokes(page);
     const selectedId = await discoverSelectedSessionId(app, page);
     // A session id that is definitely neither selected nor a live backend
-    // session, so the only way it could receive a reply is the #347 misroute.
+    // session, so the only way it could receive a reply is the cross-session
+    // misroute.
     const backgroundId = selectedId + 987_654;
 
     // Emit the background query first, then a foreground query. Waiting for the

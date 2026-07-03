@@ -6,7 +6,7 @@ import {
   SEED_TENANT,
 } from '../fixtures/seedRoot.js';
 
-// Multi-provider cloud aliases (issue #630, #632): the desktop surfaces AWS and
+// Multi-provider cloud aliases: the desktop surfaces AWS and
 // Cloudflare aliases as distinct provider types. These specs lock the three
 // user-facing surfaces against the seeded baseline (one AWS alias, one
 // Cloudflare alias, and the `gamma` env attaching both):
@@ -16,7 +16,7 @@ import {
 //  2. the per-provider-type sidebar login rows,
 //  3. the per-provider-type env cloud-alias selectors.
 //
-// Add-alias is delegated to the CLI for every provider type (issue #632): there
+// Add-alias is delegated to the CLI for every provider type: there
 // is no in-app add form. Clicking either "AWS" or "Cloudflare" in the picker
 // launches the guided CLI flow over a PTY and closes the settings dialog,
 // handing the terminal over to the CLI. The harness cannot drive the
@@ -26,7 +26,7 @@ import {
 // guided prompt/verify/resolve flow itself is owned and tested by the CLI
 // (erun-common cloud_cloudflare.go + the erun-cli integration goldens).
 //
-// The provider-correct session-exit toast (issue #641 — it used to hardcode
+// The provider-correct session-exit toast (it used to hardcode
 // "AWS" for every cloud-init session) is NOT asserted here: it fires only after
 // the full PTY spawn → exit → terminal-exit-event → render lifecycle, which is
 // too slow and load-sensitive under the shared-backend harness to assert
@@ -61,7 +61,7 @@ test.describe('multi-provider cloud aliases', () => {
   test('settings AWS add also delegates to the CLI', async ({ app }) => {
     // The AWS add mirrors Cloudflare: clicking it launches `erun cloud init
     // aws` over a PTY and closes the dialog. Asserting both paths the same way
-    // is the consistency invariant issue #632 enforces (Nielsen #4).
+    // is the consistency invariant enforced here (Nielsen #4).
     await app.sidebar.openSettings();
     await app.globalConfigDialog.waitForOpen();
     await app.globalConfigDialog.clickAddAWS();
@@ -96,7 +96,7 @@ test.describe('multi-provider cloud aliases', () => {
     expect(await app.manageDialog.cloudAliasSlotVisible('aws')).toBe(true);
     expect(await app.manageDialog.cloudAliasSlotVisible('cloudflare')).toBe(true);
 
-    // The standalone "Use host AWS credentials" checkbox is gone (issue #641):
+    // The standalone "Use host AWS credentials" checkbox is gone:
     // attaching an alias now delivers its credentials into the env, so the
     // alias selectors are the only control — consistent across providers.
     await expect(app.manageDialog.hostAwsCredentialsCheckbox()).toHaveCount(0);

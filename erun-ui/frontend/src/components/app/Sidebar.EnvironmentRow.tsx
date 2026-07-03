@@ -114,7 +114,7 @@ function BusyRowSpinner({ label }: { label: string }): React.ReactElement {
 // OpenEnvDot renders the open indicator next to an env name when the env has
 // live tabs registered (the user clicked the row at least once and
 // Local/ERun/AI tabs were spawned). Its shape and colour reflect the env's
-// REAL condition (issue #470 — tab presence alone is not running-ness):
+// REAL condition (tab presence alone is not running-ness):
 // green filled circle while running, a hollow grey ring while the linked
 // cloud context is stopped, an amber triangle after a failed deploy /
 // abandoned reconnect. Shape + accessible label carry the state, never
@@ -232,7 +232,7 @@ function useEnvironmentRowSelectors(tenantName: string, environmentName: string)
       state.review.reconnect.tenant === tenantName &&
       state.review.reconnect.environment === environmentName,
   );
-  // envState is the env's real condition behind the open dot (issue #470):
+  // envState is the env's real condition behind the open dot:
   // '' (running/normal), 'stopped' (cloud context not running), 'failed'
   // (deploy failed / reconnect gave up). Driven by the env-status event.
   const envState = useAppSelector(

@@ -7,7 +7,7 @@ import (
 )
 
 // resolveMCPAuthPublicKey reads the PEM public key the deploy will trust the
-// per-env MCP edge against (issue #655). A blank path means no MCP auth — the
+// per-env MCP edge against. A blank path means no MCP auth — the
 // default; the edge stays loopback-only — so ok is false. A non-empty path that
 // cannot be read is a hard error.
 func resolveMCPAuthPublicKey(path string) (string, bool, error) {
@@ -42,7 +42,7 @@ func applyMCPAuthToRuntimeSpec(target DeployTarget, spec *DeploySpec) error {
 }
 
 // mcpAuthSecretName derives the per-release Secret that carries the desktop
-// public key the env's erun-mcp edge verifies bearer tokens against (#655).
+// public key the env's erun-mcp edge verifies bearer tokens against.
 func mcpAuthSecretName(releaseName string) string {
 	return strings.TrimSpace(releaseName) + "-mcp-auth"
 }

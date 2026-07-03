@@ -11,7 +11,7 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 )
 
-// Shared OIDC verifier (issue #656). This is the single signature/JWKS verifier
+// Shared OIDC verifier. This is the single signature/JWKS verifier
 // used by both the hosted backend API and the per-env MCP edge to trust OIDC
 // issuers (e.g. a Zitadel or AWS STS `https://` issuer). It is transport- and
 // policy-agnostic: it verifies the JWT signature against the issuer's published

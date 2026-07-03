@@ -1,4 +1,4 @@
-// uiTraceBuffer is the Diagnostics console's "UI trace" source (issue #466):
+// uiTraceBuffer is the Diagnostics console's "UI trace" source:
 // a bounded, in-memory history of dispatched Redux actions and the top-level
 // state slices each one changed — the packaged WebView has no Redux
 // DevTools, so this is the in-app equivalent of its action timeline.

@@ -13,7 +13,7 @@ type LoadState =
   | { status: 'error'; message: string };
 
 // The sign-in prompt the API's 401 maps to. A real Sign in button lands with
-// the OIDC flow (TODO(#606) in src/auth/auth.ts); until then it explains why
+// the OIDC flow (TODO in src/auth/auth.ts); until then it explains why
 // there is nothing to show — the read view requires a verified token.
 function SignInPrompt(): React.ReactElement {
   return (
@@ -44,7 +44,7 @@ export function App(): React.ReactElement {
   const [state, setState] = React.useState<LoadState>({ status: 'loading' });
   // The dev token is read once; it gates both the config fetch and the
   // provisioning panel (which is only shown when a token is present). Replaced
-  // by the OIDC-derived token once login() lands (TODO(#606) in src/auth/auth.ts).
+  // by the OIDC-derived token once login() lands (TODO in src/auth/auth.ts).
   const token = React.useMemo(() => devBearerToken(), []);
 
   React.useEffect(() => {

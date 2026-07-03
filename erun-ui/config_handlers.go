@@ -391,13 +391,13 @@ func (a *App) emitAppNotification(kind, message string) {
 }
 
 // notificationSourceRuntimeUnreachable tags the "Could not reach the runtime …"
-// warning (issue #711/#713) so the deploy lifecycle can clear it. Must match the
+// warning so the deploy lifecycle can clear it. Must match the
 // string the frontend compares in dismissNotificationForEnv.
 const notificationSourceRuntimeUnreachable = "runtime-unreachable"
 
-// notificationSourceDeployFailed tags the "Deploy of …/… failed" error (issue
-// #713) so the same lifecycle clear retires it once a new deploy for the env
-// starts or the runtime becomes reachable.
+// notificationSourceDeployFailed tags the "Deploy of …/… failed" error so the
+// same lifecycle clear retires it once a new deploy for the env starts or the
+// runtime becomes reachable.
 const notificationSourceDeployFailed = "deploy-failed"
 
 // emitEnvNotification posts a notification tagged with the env it describes and
@@ -419,7 +419,7 @@ func (a *App) emitEnvNotification(kind, tenant, environment, source, message str
 
 // emitClearEnvNotification asks the frontend to dismiss a notification posted by
 // emitEnvNotification, but only when its source/tenant/environment all match.
-// Fired when the state a notification described has moved on (issue #713): a
+// Fired when the state a notification described has moved on: a
 // deploy for the env starts, or the runtime becomes reachable again.
 func (a *App) emitClearEnvNotification(tenant, environment, source string) {
 	a.emit(appNotificationClearEvent, appNotificationClearPayload{

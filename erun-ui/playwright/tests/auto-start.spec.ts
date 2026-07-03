@@ -1,8 +1,7 @@
 import { expect, test } from '../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
-// auto-start covers the desktop-only auto-start gate added in
-// feature/331-idle-stop-and-autostart-gate.
+// auto-start covers the desktop-only auto-start gate.
 //
 // The Runtime-tab "Auto-start when opening" select lives in the Idle-stop
 // card alongside Timeout, Working hours, and Idle SSH activity threshold,

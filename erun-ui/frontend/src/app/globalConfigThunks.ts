@@ -34,9 +34,9 @@ import { defaultCloudContextInitInput, defaultGlobalConfigDialog } from './state
 import type { AppDispatch, AppThunk, RootState } from './store';
 import { requireController } from './thunkExtra';
 
-// Each thunk reads from the Redux store via getState() and writes via
-// dispatch(); the controller is only used for imperative xterm/PTY work
-// (refreshKubernetesContexts, fitTerminal, sessions, etc.).
+// The controller is reserved for imperative xterm/PTY work
+// (refreshKubernetesContexts, fitTerminal, sessions, etc.); thunks otherwise
+// operate purely on Redux state.
 
 export const openGlobalConfigDialog = (): AppThunk => (dispatch) => {
   dispatch(

@@ -10,7 +10,7 @@ import (
 )
 
 // TenantQuotaWriter sets a tenant's environment-count cap (the per-tenant
-// override the #605 quota guardrail enforces on env registration).
+// override the quota guardrail enforces on env registration).
 type TenantQuotaWriter interface {
 	Set(ctx context.Context, tenantID string, maxEnvironments int) (model.TenantQuota, error)
 }

@@ -18,8 +18,8 @@ interface ActivityLockOverlayProps {
 // prompt for input (helm pending-release recovery, etc.) and the user
 // must be able to answer it without first dismissing the overlay.
 //
-// "Open anyway" hides the overlay locally for this session without
-// affecting the activity record on the backend.
+// The "Hide" action dismisses the overlay locally for this session
+// without affecting the activity record on the backend.
 export function ActivityLockOverlay({
   lock,
   onOpenQueue,
@@ -29,7 +29,7 @@ export function ActivityLockOverlay({
     <div
       // Cap the card at the pane width (minus the 12px inset on each side) so a
       // narrow/starved terminal pane shrinks it to fit instead of clipping its
-      // right edge behind the pane's own overflow-hidden (issue #713).
+      // right edge behind the pane's own overflow-hidden.
       className="pointer-events-none absolute top-3 right-3 z-10 flex max-w-[min(360px,calc(100%_-_1.5rem))] flex-col items-end gap-1"
       role="status"
       aria-live="polite"

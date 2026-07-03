@@ -932,7 +932,7 @@ func TestDoctor(t *testing.T) {
 	})
 
 	t.Run("restore_env_config_from_backup_dry_run", func(t *testing.T) {
-		// Per-env restore (issue #614): a dated backup sits next to the
+		// Per-env restore: a dated backup sits next to the
 		// env's config.yaml. Doctor team dev --restore-env-config-from-backup
 		// 2026-05-19 --dry-run must trace the planned cp and stop without
 		// touching the live file.
@@ -1331,7 +1331,7 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/real_run_namespace_listed_but_api_failing_error", normalize.Apply(result.Combined))
 	})
 
-	// --- erun doctor --sync-config (#548): in-pod config reconciliation ---
+	// --- erun doctor --sync-config: in-pod config reconciliation ---
 
 	t.Run("in_runtime_sync_config_in_sync_dry_run", func(t *testing.T) {
 		// The on-disk projection already matches the injected env, so the only
@@ -1364,7 +1364,7 @@ func TestDoctor(t *testing.T) {
 	})
 
 	t.Run("in_runtime_sync_config_legacy_remote_key_dry_run", func(t *testing.T) {
-		// A pre-#376 `remote: true` key on disk is detected as legacy drift for
+		// A `remote: true` key on disk is detected as legacy drift for
 		// `type` even though a struct decode would migrate it away, and the
 		// rewrite drops it in favour of the canonical type.
 		setup := env.New(t)

@@ -55,7 +55,7 @@ func TestLockTerminalsForActivityLocksMatchingSessions(t *testing.T) {
 	}
 }
 
-// TestLockTerminalsForActivityClearsEnvNotifications locks the #713 fix: when a
+// TestLockTerminalsForActivityClearsEnvNotifications locks the fix: when a
 // deploy starts locking an env's terminals, any env-scoped warning that told the
 // operator to act (the runtime-unreachable banner, or a prior deploy-failed
 // error) is now being acted on, so an env-wide app-notification-clear fires
@@ -90,7 +90,7 @@ func TestLockTerminalsForActivityClearsEnvNotifications(t *testing.T) {
 	}
 }
 
-// TestDeployFailedTraceSurfacesToToolbar locks the #713 fix: a `==> Deploy
+// TestDeployFailedTraceSurfacesToToolbar locks the fix: a `==> Deploy
 // failed tenant/env: reason` trace (emitted by `erun deploy` on any failure,
 // including a pre-rollout spec-resolution failure) surfaces the failure in the
 // toolbar — an env-tagged error notification plus a failed sidebar status — so a
@@ -127,7 +127,7 @@ func TestDeployFailedTraceSurfacesToToolbar(t *testing.T) {
 
 // TestLockTerminalsForActivityWithoutMatchClearsNothing guards the gate: a
 // deploy that locks no local sessions (nothing to act on for this desktop) must
-// not fire a stray notification-clear (issue #713).
+// not fire a stray notification-clear.
 func TestLockTerminalsForActivityWithoutMatchClearsNothing(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	emits := newCapturedEmits()
@@ -251,9 +251,9 @@ func TestActivityTraceLineHandlerFinalizesOnDeployedAndFailed(t *testing.T) {
 }
 
 func TestActivityTraceLineHandlerFinalizesOnReleaseNamedFailure(t *testing.T) {
-	// #559 changed the failure line to "==> Deploy of <rel> failed after
+	// The failure line changed to "==> Deploy of <rel> failed after
 	// <elapsed>"; the desktop matcher must still finalize the entry as
-	// failed. The matcher was silently broken between #559 and #531.
+	// failed. The matcher was silently broken by that wording change.
 	app := newTestAppForActivityQueue(t)
 	selection := uiSelection{Tenant: "team", Environment: "dev"}
 	app.activityQueue.start(activityQueueEntry{Command: "deploy", Tenant: "team", Environment: "dev"})
@@ -267,7 +267,7 @@ func TestActivityTraceLineHandlerFinalizesOnReleaseNamedFailure(t *testing.T) {
 }
 
 func TestSessionReadyFailedMatchesReleaseNamedFailure(t *testing.T) {
-	// The session-ready gate matcher must track the same #559 wording so a
+	// The session-ready gate matcher must track the same wording so a
 	// failed deploy still releases the action runner.
 	if !sessionReadyFailedRe.MatchString("==> Deploy of team-devops failed after 2m0s") {
 		t.Fatal("sessionReadyFailedRe must match the release-named failure line")
@@ -281,7 +281,7 @@ func TestActivityTraceLineHandlerLabelsComponentDeployByRelease(t *testing.T) {
 	// A non-runtime component names the release after a ` · ` separator
 	// ("erun/local · erun-backend-postgres 18.3"). The entry must be labeled
 	// by component so the drawer does not read like a full-env redeploy, and
-	// the version is the component's own (#531).
+	// the version is the component's own.
 	app := newTestAppForActivityQueue(t)
 	selection := uiSelection{Tenant: "erun", Environment: "local"}
 	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
@@ -304,7 +304,7 @@ func TestActivityTraceLineHandlerLabelsComponentDeployByRelease(t *testing.T) {
 func TestActivityTraceLineHandlerRuntimeDeployFallsBackToRuntimeRelease(t *testing.T) {
 	// The runtime chart's ==> Deploying line carries no release token; the
 	// entry falls back to the runtime release name and is not
-	// component-labeled (the runtime line shape is unchanged by #531).
+	// component-labeled (the runtime line shape is unchanged).
 	app := newTestAppForActivityQueue(t)
 	selection := uiSelection{Tenant: "erun", Environment: "local"}
 	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)

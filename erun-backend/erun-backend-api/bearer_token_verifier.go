@@ -10,8 +10,8 @@ import (
 )
 
 // BearerTokenVerifier authenticates hosted-API bearer tokens. Like the per-env
-// MCP edge (#655/#656), it is always authenticated via the token's `iss` and
-// trusts two kinds of issuer through one verification flow (issue #674),
+// MCP edge, it is always authenticated via the token's `iss` and
+// trusts two kinds of issuer through one verification flow,
 // dispatching on the issuer the token claims:
 //
 //   - the configured `file://<path>` desktop issuer → the Ed25519 desktop path:

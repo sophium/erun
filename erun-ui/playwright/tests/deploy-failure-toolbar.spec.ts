@@ -1,7 +1,7 @@
 import { test, expect } from '../fixtures/erunApp.js';
 import type { Page } from '@playwright/test';
 
-// Issue #713 — a failed deploy must be visible in the top toolbar, not only as a
+// A failed deploy must be visible in the top toolbar, not only as a
 // red terminal line or a drawer entry (it wasn't surfaced at all when the deploy
 // failed before rollout, e.g. spec resolution). `erun deploy` now emits a
 // `==> Deploy failed tenant/env: reason` trace on every failure path; the desktop
@@ -45,7 +45,7 @@ test.describe('failed deploys surface in the toolbar (#713)', () => {
     await expect(banner(page)).toBeVisible();
 
     // Error notifications carry long paths the operator needs to copy into a bug
-    // report, so they get a copy button like terminal-status errors do (#713).
+    // report, so they get a copy button like terminal-status errors do.
     const copy = page.getByRole('button', { name: 'Copy', exact: true });
     await expect(copy).toBeVisible();
 

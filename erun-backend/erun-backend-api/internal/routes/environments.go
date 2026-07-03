@@ -105,7 +105,7 @@ func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Re
 	// The env name forms the <tenant>-<env> namespace, so it must be a DNS-1123
 	// label. The tenant is already hyphen-free (ValidateTenantName on tenant
 	// registration), so the env may itself contain internal hyphens and the
-	// first-hyphen split stays unambiguous (#605 injective-namespace guardrail).
+	// first-hyphen split stays unambiguous (injective-namespace guardrail).
 	if !validNamespaceLabel(name) {
 		writeError(w, http.StatusBadRequest, "name must be a DNS-1123 label: lowercase letters, digits, and internal hyphens, not starting or ending with a hyphen, at most 63 characters")
 		return
@@ -151,7 +151,7 @@ func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Re
 		return
 	}
 
-	// TODO(#660 live): run RunBootstrapInitWithDependencies server-side to ensure
+	// TODO(live): run RunBootstrapInitWithDependencies server-side to ensure
 	// the <tenant>-<env> namespace + deploy the runtime chart; requires a live
 	// cluster, not executed in this build — the row stands as registered config
 	// until then.

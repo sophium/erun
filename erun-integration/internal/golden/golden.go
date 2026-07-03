@@ -46,12 +46,12 @@ func Equal(t *testing.T, name, actual string) {
 // goldens beside them under testdata/<command>/<name>.txt.
 func pathFor(t *testing.T, name string) string {
 	t.Helper()
-	// Look for the .txt suffix; allow callers to omit it.
+	// Allow callers to omit the .txt suffix.
 	if !strings.HasSuffix(name, ".txt") {
 		name += ".txt"
 	}
-	// Walk up the call stack to find the first frame outside this package.
-	// That frame's file lives next to the testdata directory we want.
+	// The first stack frame outside this package lives next to the testdata
+	// directory we want.
 	for i := 1; i < 16; i++ {
 		_, file, _, ok := runtime.Caller(i)
 		if !ok {

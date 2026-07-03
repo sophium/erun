@@ -201,7 +201,6 @@ func TestEmitFansOutToSubscriber(t *testing.T) {
 		readFirstSSEEvent(resp.Body, got)
 	}()
 
-	// Wait until at least one subscriber is registered before emitting.
 	waitForSubscriber(t, srv)
 
 	srv.Emit("ping", "hello", 42)

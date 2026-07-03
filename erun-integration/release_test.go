@@ -422,7 +422,7 @@ func TestRelease(t *testing.T) {
 	})
 
 	t.Run("dry_run_skips_release_roots_in_gitignored_trees", func(t *testing.T) {
-		// Regression for #398. The release-root walker used to descend
+		// Regression. The release-root walker used to descend
 		// into third-party trees and treat every VERSION file as a
 		// candidate. In a contribute clone where `yarn install` ran in
 		// `erun-docs/`, `erun-docs/node_modules/lunr/VERSION` was
@@ -449,7 +449,7 @@ func TestRelease(t *testing.T) {
 	})
 
 	t.Run("dry_run_with_untracked_file_reports_worktree_clean", func(t *testing.T) {
-		// Regression for #400. release used to call
+		// Regression. release used to call
 		// `git status --porcelain` with no flags and treat any output as
 		// dirty, so an untracked .idea/ (or any other unignored
 		// IDE/generator droppings) blocked release in a real run.

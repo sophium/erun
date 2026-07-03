@@ -34,7 +34,7 @@ function rowKey(item: UIUpgradePlanItem): string {
 // #5 error prevention before a high-blast-radius action). It lists every
 // opted-in env with its channel and current → target, marking which will be
 // redeployed; envs whose registries offer more than one newer version get a
-// per-row picker (issue #527). Upgrade is enabled once at least one env will
+// per-row picker. Upgrade is enabled once at least one env will
 // be redeployed (a lagging env, or one the operator has picked a version for).
 export function UpgradeAllDialog(): React.ReactElement {
   const dispatch = useAppDispatch();
@@ -221,7 +221,7 @@ function UpgradePlanRow({
 // UpgradeVersionCell shows the env's runtime version. A lagging env stacks
 // current → target. An ambiguous env (more than one newer version across its
 // registries) stacks current → a picker the operator chooses from, each option
-// labelled with its source registry (issue #527). Up-to-date and unresolved
+// labelled with its source registry. Up-to-date and unresolved
 // envs render the single current version, with the Status column carrying the
 // rest.
 function UpgradeVersionCell({
@@ -303,7 +303,7 @@ function UpgradePlanRowStatus({
   }
   if (state === 'pick') {
     // More than one newer version across the env's registries — the operator
-    // must pick one before it can be redeployed (issue #527). Once picked it
+    // must pick one before it can be redeployed. Once picked it
     // joins the upgrade set; until then it is amber + icon (non-color-only,
     // WCAG) so the dialog is honest that nothing happens for it yet.
     if (chosen.trim() !== '') {
@@ -323,7 +323,7 @@ function UpgradePlanRowStatus({
     // so we can't tell whether this env lags. Amber + icon (not muted, not the
     // success-coloured "up to date") keeps the status honest and non-color-only
     // (WCAG). Mirrors the CLI's "(target unresolved)"; the reason under it is
-    // the same one the CLI traces (issue #497), so the operator sees why
+    // the same one the CLI traces, so the operator sees why
     // (e.g. a registry 403) without leaving the dialog.
     return (
       <span className="inline-flex flex-col items-end gap-0.5">
@@ -345,7 +345,7 @@ function UpgradePlanRowStatus({
 type UpgradeRowState = 'lagging' | 'pick' | 'upToDate' | 'unresolved';
 
 // upgradeRowState mirrors the outcomes the CLI's `erun upgrade` renders, plus
-// the desktop-only "pick" state (issue #527): an opted-in env either lags a
+// the desktop-only "pick" state: an opted-in env either lags a
 // known channel latest (will be redeployed), has more than one newer version
 // across its registries (the operator picks one), already sits at the known
 // latest (up to date), or has no resolvable target — the registry lookup

@@ -24,8 +24,8 @@ type Context struct {
 	DiskType           string    `json:"diskType,omitempty" bun:"disk_type,nullzero"`
 	DiskSizeGB         int       `json:"diskSizeGb,omitempty" bun:"disk_size_gb,nullzero"`
 	KubernetesContext  string    `json:"kubernetesContext,omitempty" bun:"kubernetes_context,nullzero"`
-	// Status is the provisioning lifecycle (issue #605/#676): provisioning |
-	// running | failed. ProvisionError carries the failure reason when failed.
+	// Status is the provisioning lifecycle: provisioning | running | failed.
+	// ProvisionError carries the failure reason when failed.
 	Status         string    `json:"status" bun:"status,scanonly"`
 	ProvisionError string    `json:"provisionError,omitempty" bun:"provision_error,nullzero,scanonly"`
 	CreatedAt      time.Time `json:"createdAt" bun:"created_at,scanonly"`

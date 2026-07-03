@@ -8,7 +8,7 @@ import {
   uniqueEnvironmentName,
 } from '../fixtures/seedRoot.js';
 
-// Issue #644 — the create flow must compose a deploy before opening, and open
+// The create flow must compose a deploy before opening, and open
 // the env's tabs only once the runtime is actually up. Before the fix,
 // `handleEnvironmentInitialized` opened the env immediately after `erun init`,
 // so the ERun/AI tabs spawned against a runtime that did not exist and failed
@@ -22,7 +22,7 @@ import {
 // docker stubs make a live deploy impossible), so the create→deploy→open *gate*
 // is driven by firing the two lifecycle events directly. The full real
 // create→deploy→open happy path against a live cluster is covered by the
-// opt-in k3d e2e suite (#647); the per-env-type deploy decision is covered by
+// opt-in k3d e2e suite; the per-env-type deploy decision is covered by
 // deploy_orchestration_test.go and deploy-orchestration.spec.ts.
 async function emitWailsEvent(page: Page, name: string, payload?: unknown): Promise<void> {
   await page.evaluate(
@@ -63,7 +63,7 @@ test.describe('create → deploy → open gate (#644)', () => {
         `Created ${tenant} / ${environment}`,
         { timeout: 10_000 },
       );
-      // Create composed a deploy (the #644 fix: init used to open, not deploy).
+      // Create composed a deploy (the fix: init used to open, not deploy).
       await deployStarted;
       // Gate: the env's tabs stay closed against the not-yet-deployed runtime.
       // The just-created env is now selected but has no live runtime, so no

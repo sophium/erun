@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
 // VITE_API_PROXY_TARGET points `yarn dev` at a running erun-backend-api so the
-// console can be driven against a REAL API in local dev / e2e (issue #674). The
+// console can be driven against a REAL API in local dev / e2e. The
 // console fetches `/v1/...` same-origin and Vite proxies it server-side, so
 // there is no browser CORS preflight (the API sets no CORS headers, by design).
 // Unset → defaults to the API's default bind (127.0.0.1:17033). In production

@@ -18,7 +18,7 @@ import type { AppThunk } from './store';
 //     it was asked to navigate to is remote, has a stopped cloud context,
 //     and has no AutoStart override on file yet (state.tenants[].autoStart
 //     === undefined).
-//   - confirmAutoStartPrompt(mode) persists the user's answer via
+//   - confirmAutoStartPrompt(choice) persists the user's answer via
 //     SetEnvironmentAutoStart, mirrors the tenants slice so subsequent
 //     navigation no longer prompts, closes the dialog, and re-fires
 //     openSelection so the just-saved policy is applied immediately (no

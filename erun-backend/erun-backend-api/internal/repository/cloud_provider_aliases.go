@@ -8,9 +8,8 @@ import (
 )
 
 // CloudProviderAliasRepository stores a tenant's BYO-cloud credentials, the
-// secret the provisioning executor resolves to talk to the tenant's cloud
-// (issue #605/#676). Credentials are encrypted at rest; the bytea column never
-// holds plaintext.
+// secret the provisioning executor resolves to talk to the tenant's cloud.
+// Credentials are encrypted at rest; the bytea column never holds plaintext.
 type CloudProviderAliasRepository struct {
 	txs    *TxManager
 	cipher *secrets.Cipher

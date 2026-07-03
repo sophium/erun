@@ -13,7 +13,7 @@ import (
 // versioned component still does. A pinned base's chart tracks the release
 // version and is not published in lockstep with the image (only the runtime
 // devops chart is), so hashing it would churn a stable image's fingerprint every
-// release and force a needless rebuild (#695).
+// release and force a needless rebuild.
 func TestBuildFingerprintExcludesChartForVersionPinnedBase(t *testing.T) {
 	root := t.TempDir()
 	dockerDir := filepath.Join(root, "mod", "docker", "comp")

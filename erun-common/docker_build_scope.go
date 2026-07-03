@@ -213,8 +213,7 @@ func dockerBuildEnvironmentFromTenantConfigs(store DockerStore, cleanProjectRoot
 	}
 
 	for _, tenantConfig := range tenants {
-		// New-shape match: walk each tenant's envs and pick the first whose
-		// LocalRepoPath (preferred) or legacy RepoPath equals the cwd.
+		// Match the first env whose local repo path (preferred over legacy) equals the cwd.
 		if envName, err := dockerBuildEnvironmentFromTenantEnvs(store, tenantConfig.Name, cleanProjectRoot); err != nil {
 			return "", err
 		} else if envName != "" {

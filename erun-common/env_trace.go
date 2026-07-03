@@ -14,7 +14,7 @@ import (
 // the pair never grows past ~2× the cap.
 const envTraceLogMaxBytes = 5 * 1024 * 1024
 
-// EnvTraceLogPath is the per-env trace log (issues #466/#508): the full
+// EnvTraceLogPath is the per-env trace log: the full
 // VerbosityTrace stream of every env-scoped erun invocation, appended by
 // the runtime itself so the desktop's Diagnostics console can show what
 // happened at any time — including for commands that ran before the console
@@ -34,7 +34,7 @@ func EnvTraceLogPath(tenant, environment string) (string, error) {
 }
 
 // ActivateEnvTrace turns on the per-env trace tee for this invocation.
-// Capture is always on (issue #508): diagnostics must exist for the first
+// Capture is always on: diagnostics must exist for the first
 // failure, not only for failures after an operator opted in. Returns the
 // (possibly) tee'd context and a closer the caller defers.
 //
