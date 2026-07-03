@@ -24,22 +24,9 @@ const drawerHiddenClassName = 'translate-x-full';
 
 const drawerVisibleClassName = 'translate-x-0';
 
-// ActivityQueueDrawer renders the right-side activity queue as a slide-in
-// sheet split into three sections:
-//
-//   - Now: entries currently running plus observational running
-//     entries (helm-pending deploys, stale shells).
-//   - Next: action entries waiting in the per-env runner queue. The
-//     user can Cancel a waiting entry before it starts.
-//   - Recent: finished entries (succeeded / failed / skipped /
-//     cancelled), capped at 50 newest.
-//
-// The queue is rebuilt on every desktop launch from real cluster + host
-// objects plus desktop actions enqueued in this session: helm releases
-// drive observational deploy entries, live PTY sessions drive shell
-// entries, and Wails-exported actions register through the action
-// runner. There is no cross-restart persistence, so failed activities
-// from previous sessions don't reappear.
+// ActivityQueueDrawer is the slide-in activity queue drawer. The queue is
+// rebuilt from live cluster and host state on every launch and never persists
+// across restarts, so failures from a previous session don't reappear.
 export function ActivityQueueDrawer({
   open,
   onClose,
@@ -316,10 +303,9 @@ function ActivitySection({
   );
 }
 
-// ClearAllButton wraps the bulk-clear control in the app tooltip primitive
-// so the explanatory hint stays keyboard-reachable and is not delivered via
-// the native title attribute (rejected by AGENTS.md UX rules for meaningful
-// product info). The hint can wrap; the popover content widens to fit.
+// ClearAllButton surfaces its hint through the app tooltip primitive, not a
+// native title attribute — AGENTS.md forbids native title for meaningful
+// product info and it is not keyboard-reachable.
 function ClearAllButton({
   label,
   hint,

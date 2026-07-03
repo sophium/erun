@@ -34,9 +34,6 @@ func TestContribute(t *testing.T) {
 	})
 
 	t.Run("clone_dry_run_fresh", func(t *testing.T) {
-		// Dry-run trace when ~/git/erun does not exist: command emits the
-		// audit line, the mkdir trace for $HOME/git, and the git clone
-		// command line. No side effect on disk.
 		setup := env.New(t)
 		result := erun.Run(t, []string{"contribute", "clone", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
@@ -49,10 +46,6 @@ func TestContribute(t *testing.T) {
 	})
 
 	t.Run("clone_dry_run_already_present", func(t *testing.T) {
-		// Dry-run trace when ~/git/erun is already a checkout whose origin
-		// remote points at the canonical ERun repository. Command short-
-		// circuits with the "already present" audit line; no mkdir or git
-		// clone trace is emitted.
 		setup := env.New(t)
 		seedExistingContributeClone(t, filepath.Join(setup.Home, "git", "erun"), "git@github.com:sophium/erun.git")
 		result := erun.Run(t, []string{"contribute", "clone", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -63,9 +56,8 @@ func TestContribute(t *testing.T) {
 	})
 
 	t.Run("clone_dry_run_wrong_remote", func(t *testing.T) {
-		// When ~/git/erun exists but its origin remote points elsewhere,
-		// the command refuses to proceed with a descriptive error rather
-		// than overwriting the user's checkout.
+		// If ~/git/erun exists but its origin points elsewhere, the command
+		// refuses rather than overwriting the user's checkout.
 		setup := env.New(t)
 		seedExistingContributeClone(t, filepath.Join(setup.Home, "git", "erun"), "git@github.com:other/repo.git")
 		result := erun.Run(t, []string{"contribute", "clone", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -76,12 +68,8 @@ func TestContribute(t *testing.T) {
 	})
 
 	t.Run("clone_real_run_fresh_clones_and_installs_shim", func(t *testing.T) {
-		// Real-run fresh-clone arm of RunContributeCloneWithIO: the parent
-		// dir is created, `git clone` runs (routed through a git stub via
-		// ERUN_GIT_BIN — the suite has no network), the "Cloned" audit line
-		// prints, and installContributeShim writes the PATH-shim wrapper
-		// script for real. The shim body is asserted directly: it must
-		// resolve $HOME at exec time, not embed the install-time home.
+		// The installed shim must resolve $HOME at exec time, not bake in the
+		// install-time home, so it works for whoever runs it later.
 		setup := env.New(t)
 		stubs := setup.Cwd + "/stubs"
 		fixture.StubBinary(t, stubs, "git", "")
@@ -101,12 +89,8 @@ func TestContribute(t *testing.T) {
 	})
 
 	t.Run("clone_real_run_already_present_reinstalls_shim", func(t *testing.T) {
-		// Real-run already-present arm: with ~/git/erun pointing at the
-		// canonical remote, the clone is skipped ("already present" audit
-		// line, no git clone) but the shim is still (re)installed so a
-		// stale or missing shim heals on every clone invocation. Uses the
-		// real git binary for `remote get-url origin` against the seeded
-		// checkout.
+		// Even when the clone is skipped, the shim is reinstalled on every
+		// invocation so a stale or missing shim heals.
 		setup := env.New(t)
 		seedExistingContributeClone(t, filepath.Join(setup.Home, "git", "erun"), "https://github.com/sophium/erun.git")
 		result := erun.Run(t, []string{"contribute", "clone"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -120,9 +104,8 @@ func TestContribute(t *testing.T) {
 	})
 }
 
-// seedExistingContributeClone bootstraps a tiny git repository at dir
-// with the given origin URL so dry-run scenarios can exercise the
-// existing-clone code path without a network round-trip.
+// seedExistingContributeClone stages a local checkout with a chosen origin
+// URL so scenarios can exercise the existing-clone path offline.
 func seedExistingContributeClone(t testing.TB, dir, originURL string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {

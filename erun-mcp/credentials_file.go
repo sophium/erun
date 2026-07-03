@@ -9,13 +9,11 @@ import (
 	"strings"
 )
 
-// awsCredentialEntry is one key=value line inside an AWS credentials profile.
 type awsCredentialEntry struct {
 	Key   string
 	Value string
 }
 
-// awsCredentialProfile is one [name] section of ~/.aws/credentials.
 type awsCredentialProfile struct {
 	Name    string
 	Entries []awsCredentialEntry
@@ -60,15 +58,10 @@ func parseAWSCredentialsFile(data []byte) []awsCredentialProfile {
 	return profiles
 }
 
-// isCommentOrBlankLine reports whether a trimmed credentials-file line carries
-// no profile data (empty, or a `#` / `;` comment).
 func isCommentOrBlankLine(line string) bool {
 	return line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";")
 }
 
-// parseAWSProfileHeader returns the profile name and true when line is a
-// `[name]` section header. The name may be empty (a malformed `[]`), which the
-// caller treats as ending the current profile.
 func parseAWSProfileHeader(line string) (string, bool) {
 	if !strings.HasPrefix(line, "[") || !strings.HasSuffix(line, "]") {
 		return "", false
@@ -76,8 +69,6 @@ func parseAWSProfileHeader(line string) (string, bool) {
 	return strings.TrimSpace(line[1 : len(line)-1]), true
 }
 
-// parseAWSCredentialEntry parses a `key = value` line into an entry. ok is
-// false for lines with no `=` or an empty key.
 func parseAWSCredentialEntry(line string) (awsCredentialEntry, bool) {
 	eq := strings.IndexByte(line, '=')
 	if eq <= 0 {

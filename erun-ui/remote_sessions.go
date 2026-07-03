@@ -8,14 +8,11 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// ListRemoteAppSessions reports the persistent desktop sessions currently
-// running in the env's runtime pod, by session id (`open-0`, `ai`,
-// `contribute-erun`, …). The frontend calls it when an env opens so it can
-// rebuild tabs for sessions another ERun window created (custom terminals);
-// the default tabs attach-or-create on their own. Fail-soft by design: an
-// env without a kubernetes context, an unreachable cluster, or a pod that is
-// not deployed yields nil rather than an error — the open flow must never
-// stall on detection.
+// ListRemoteAppSessions reports the persistent desktop sessions running in the
+// env's runtime pod so the frontend can rebuild tabs for custom terminals
+// another ERun window created; the default tabs attach-or-create on their own.
+// Fail-soft by design: unreachable or undeployed envs yield nil, never an
+// error, so the open flow never stalls on detection.
 func (a *App) ListRemoteAppSessions(selection uiSelection) []string {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
@@ -44,14 +41,12 @@ func (a *App) ListRemoteAppSessions(selection uiSelection) []string {
 	return eruncommon.ParseRemoteAppSessionIDs(selection.Tenant, selection.Environment, output)
 }
 
-// endRemoteAppSession permanently ends one persistent desktop session in the
-// env's runtime pod: the dtach master is killed (its shell/claude follows via
-// SIGHUP) and the socket is removed, so detection will not rebuild the tab.
-// Called when the user explicitly closes a custom terminal tab — the X is
-// that tab's only removal affordance, and without this the session would
-// outlive the close and resurrect on the next env open. Closing the env or
-// quitting the app never calls this; those only detach. Fail-soft: a missing
-// pod means the session is already gone.
+// endRemoteAppSession permanently ends one persistent desktop session so
+// detection will not rebuild its tab. Called only when the user explicitly
+// closes a custom terminal tab; without it the session would outlive the close
+// and resurrect on the next env open. Closing the env or quitting the app only
+// detach — they never end a session. Fail-soft: a missing pod means the
+// session is already gone.
 func (a *App) endRemoteAppSession(selection uiSelection, sessionID string) {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" || strings.TrimSpace(sessionID) == "" {

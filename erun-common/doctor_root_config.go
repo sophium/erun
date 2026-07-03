@@ -7,10 +7,8 @@ import (
 	"strings"
 )
 
-// RootConfigStatus categorizes the on-disk root config's load state.
-// It is the doctor's first signal: "ok" means we can move on to
-// looking for orphaned references, anything else means the file
-// itself needs a restore before alias-level repair makes sense.
+// RootConfigStatus is the doctor's first gate: a non-OK status means the
+// root config file must be restored before alias-level repair makes sense.
 type RootConfigStatus string
 
 const (
@@ -19,21 +17,17 @@ const (
 	RootConfigStatusCorrupted RootConfigStatus = "corrupted"
 )
 
-// OrphanedAliasContextRef names one cloud-context entry that points
-// at a missing root cloud-provider alias. The Region is captured so a
-// repair flow can pre-fill InitAWSCloudProviderParams.Region (it is
-// the only piece of context-side state that overlaps with provider
-// init params).
+// OrphanedAliasContextRef names a cloud-context entry referencing a missing
+// provider alias; Region is captured because it is the only context-side
+// state a repair flow can reuse to seed provider init.
 type OrphanedAliasContextRef struct {
 	Name   string `json:"name"`
 	Region string `json:"region"`
 }
 
-// OrphanedAlias collects every back-reference for a single missing
-// alias plus the decoded username/account/provider triple. The
-// decoded fields are populated when ParseCloudProviderAlias succeeds;
-// otherwise they remain empty and Parsed is false, which tells the
-// repair flow it cannot auto-seed an init call.
+// OrphanedAlias collects every back-reference to a missing alias; when the
+// alias cannot be decoded Parsed is false and the repair flow cannot
+// auto-seed an init call.
 type OrphanedAlias struct {
 	Alias                     string                    `json:"alias"`
 	Username                  string                    `json:"username,omitempty"`
@@ -44,9 +38,8 @@ type OrphanedAlias struct {
 	ReferencedByCloudContexts []OrphanedAliasContextRef `json:"referencedByCloudContexts,omitempty"`
 }
 
-// RootConfigInspection is the structured view of the root config
-// state used by both the CLI doctor and the MCP doctor tool. It is
-// purely descriptive: nothing in this file performs side effects.
+// RootConfigInspection is the read-only view of root-config state shared by
+// the CLI and MCP doctors; nothing here performs side effects.
 type RootConfigInspection struct {
 	ConfigPath       string                 `json:"configPath"`
 	ConfigStatus     RootConfigStatus       `json:"configStatus"`
@@ -59,22 +52,17 @@ type RootConfigInspection struct {
 	TenantHits       int                    `json:"tenantCount"`
 }
 
-// OrphanedCloudContextEnvRef records one (tenant, env) pair whose
-// EnvConfig.KubernetesContext names a cloud context that is missing
-// from the root config's CloudContexts list. The pair is what
-// doctor renders in its report so users can map "broken context"
-// back to "which env am I supposed to open?".
+// OrphanedCloudContextEnvRef records a (tenant, env) pair referencing a
+// missing cloud context, so doctor can map a broken context back to the
+// env it affects.
 type OrphanedCloudContextEnvRef struct {
 	Tenant      string `json:"tenant"`
 	Environment string `json:"environment"`
 }
 
-// OrphanedCloudContext aggregates every env reference for a single
-// missing cloud-context name and the cloud coordinates parseable
-// from the name itself (erun's naming convention encodes account ID
-// and region). The decoded fields exist so a future recovery flow
-// can describe the missing instance to AWS without making the user
-// retype anything.
+// OrphanedCloudContext aggregates every env reference to a missing cloud
+// context; the coordinates decoded from its name let a recovery flow
+// describe the missing instance without the user retyping anything.
 type OrphanedCloudContext struct {
 	KubernetesContext  string                       `json:"kubernetesContext"`
 	AccountID          string                       `json:"accountId,omitempty"`
@@ -83,9 +71,8 @@ type OrphanedCloudContext struct {
 	ReferencedByEnvs   []OrphanedCloudContextEnvRef `json:"referencedByEnvs,omitempty"`
 }
 
-// Complete reports whether the root config is in a state the rest of
-// erun can rely on. False when the file failed to load OR when any
-// orphan reference was found.
+// Complete reports whether the root config is in a state the rest of erun
+// can rely on.
 func (r RootConfigInspection) Complete() bool {
 	if r.ConfigStatus != RootConfigStatusOK {
 		return false
@@ -96,23 +83,18 @@ func (r RootConfigInspection) Complete() bool {
 	return len(r.OrphanedContexts) == 0
 }
 
-// RootConfigInspectionStore is the read-only surface InspectRootConfig
-// needs. Kept narrow on purpose: the inspection must work even when
-// the root config is unloadable, so it leans on ListTenantConfigs +
-// ListEnvConfigs (which read tenant/env-level files independently)
-// and a direct LoadERunConfig probe for the central file.
+// RootConfigInspectionStore is the read-only surface InspectRootConfig needs;
+// it stays narrow so inspection still works when the central root config is
+// unloadable, leaning on tenant/env files that load independently.
 type RootConfigInspectionStore interface {
 	LoadERunConfig() (ERunConfig, string, error)
 	ListTenantConfigs() ([]TenantConfig, error)
 	ListEnvConfigs(tenant string) ([]EnvConfig, error)
 }
 
-// InspectRootConfig walks the root config and every tenant config to
-// surface dangling cloud-provider-alias references. The walk does not
-// mutate anything; on a healthy install it produces an inspection
-// with status=ok, zero orphans, and (when present) the available
-// daily backup list so doctor can offer rollback as an option even on
-// a healthy system.
+// InspectRootConfig walks the root and tenant configs to surface dangling
+// cloud-provider-alias references without mutating anything; it also lists
+// available backups so doctor can offer rollback even on a healthy install.
 func InspectRootConfig(store RootConfigInspectionStore) (RootConfigInspection, error) {
 	if store == nil {
 		return RootConfigInspection{}, errors.New("store is required")
@@ -138,12 +120,9 @@ func InspectRootConfig(store RootConfigInspectionStore) (RootConfigInspection, e
 		inspection.Backups = backups
 	}
 
-	// Only walk references when the root config loaded cleanly. With
-	// a corrupted or missing root we have no source of truth for the
-	// CloudProviders list to compare against — every alias reference
-	// would look orphaned, which is noise. The recommended action in
-	// that state is "restore from backup," surfaced separately via
-	// Backups.
+	// Without a cleanly loaded root there is no CloudProviders list to compare
+	// against, so every alias would look orphaned; restore-from-backup is the
+	// real fix in that state, surfaced via Backups.
 	if inspection.ConfigStatus != RootConfigStatusOK {
 		return inspection, nil
 	}
@@ -169,9 +148,6 @@ func InspectRootConfig(store RootConfigInspectionStore) (RootConfigInspection, e
 	return inspection, nil
 }
 
-// configuredAliasSet returns the set of non-empty, trimmed cloud-provider
-// aliases declared in the root config — the source of truth orphan detection
-// compares tenant and cloud-context references against.
 func configuredAliasSet(providers []CloudProviderConfig) map[string]struct{} {
 	configured := make(map[string]struct{}, len(providers))
 	for _, provider := range providers {
@@ -184,9 +160,6 @@ func configuredAliasSet(providers []CloudProviderConfig) map[string]struct{} {
 	return configured
 }
 
-// detectOrphanedAliases finds cloud-provider aliases referenced by tenants or
-// cloud contexts that are not present in the configured set, aggregated by
-// alias and returned in a stable sorted order.
 func detectOrphanedAliases(configured map[string]struct{}, tenants []TenantConfig, cloudContexts []CloudContextConfig) []OrphanedAlias {
 	orphans := make(map[string]*OrphanedAlias)
 	for _, tenant := range tenants {
@@ -218,8 +191,6 @@ func detectOrphanedAliases(configured map[string]struct{}, tenants []TenantConfi
 	return sortedOrphanedAliases(orphans)
 }
 
-// addOrphanTenantRef records that tenant references the orphaned alias,
-// de-duplicating tenant names.
 func addOrphanTenantRef(orphans map[string]*OrphanedAlias, alias, tenant string) {
 	alias = strings.TrimSpace(alias)
 	tenant = strings.TrimSpace(tenant)
@@ -236,8 +207,6 @@ func addOrphanTenantRef(orphans map[string]*OrphanedAlias, alias, tenant string)
 	}
 }
 
-// addOrphanContextRef records that the named cloud context references the
-// orphaned alias, de-duplicating by context name.
 func addOrphanContextRef(orphans map[string]*OrphanedAlias, alias, contextName, region string) {
 	alias = strings.TrimSpace(alias)
 	contextName = strings.TrimSpace(contextName)
@@ -258,9 +227,6 @@ func addOrphanContextRef(orphans map[string]*OrphanedAlias, alias, contextName, 
 	entry.ReferencedByCloudContexts = append(entry.ReferencedByCloudContexts, ref)
 }
 
-// sortedOrphanedAliases flattens the orphan map into a slice ordered by alias,
-// with each entry's tenant and cloud-context references sorted too, so the
-// inspection output is deterministic.
 func sortedOrphanedAliases(orphans map[string]*OrphanedAlias) []OrphanedAlias {
 	if len(orphans) == 0 {
 		return nil
@@ -282,15 +248,6 @@ func sortedOrphanedAliases(orphans map[string]*OrphanedAlias) []OrphanedAlias {
 	return result
 }
 
-// collectOrphanedCloudContexts walks every env config and reports
-// kubernetescontext references that name a cloud-managed context
-// (the env carries a CloudProviderAlias) but no matching
-// CloudContextConfig exists in the root config. Local Kubernetes
-// targets (orbstack, docker-desktop, kind, ...) are skipped because
-// they are not erun-managed cloud contexts; the heuristic for
-// "cloud-managed" is "env has a non-empty CloudProviderAlias OR the
-// env is flagged ManagedCloud". Aggregates duplicate references so
-// a context shared by N envs becomes a single entry with N back-refs.
 func collectOrphanedCloudContexts(store RootConfigInspectionStore, existing []CloudContextConfig, tenants []TenantConfig) ([]OrphanedCloudContext, error) {
 	known := indexCloudContextsByKubernetesName(existing)
 	orphans := make(map[string]*OrphanedCloudContext)
@@ -372,13 +329,10 @@ func recordOrphanedCloudContext(orphans map[string]*OrphanedCloudContext, known 
 	entry.ReferencedByEnvs = append(entry.ReferencedByEnvs, ref)
 }
 
-// envExpectsCloudContext is the heuristic that separates local
-// kubernetes targets (orbstack, kind, ...) from erun-managed cloud
-// contexts: a non-empty CloudProviderAlias or ManagedCloud=true is
-// the signal that the env is supposed to be backed by a managed
-// CloudContextConfig. Without this gate every env on the box would
-// look like an orphan reference whenever a local kube context name
-// did not appear in CloudContexts.
+// envExpectsCloudContext gates orphan detection to erun-managed cloud envs;
+// without it, every env pointing at a local kube target (orbstack, kind, ...)
+// would look like an orphan whenever its context name is absent from
+// CloudContexts.
 func envExpectsCloudContext(env EnvConfig) bool {
 	if strings.TrimSpace(env.CloudProviderAlias) != "" {
 		return true
@@ -386,12 +340,10 @@ func envExpectsCloudContext(env EnvConfig) bool {
 	return env.ManagedCloud
 }
 
-// parseErunCloudContextName recognises erun's own naming convention
-// for managed cloud contexts: "erun-<seq>-<accountid>-<region>" where
-// <region> may itself contain hyphens (e.g. "eu-west-2"). The
-// account ID is a 12-digit AWS identifier. Returns ("", "") for any
-// name that does not match — the caller still records the orphan,
-// just without decoded coordinates the recovery flow could lean on.
+// parseErunCloudContextName decodes erun's managed-context name
+// "erun-<seq>-<accountid>-<region>", where region may contain hyphens
+// (e.g. "eu-west-2"); a non-matching name yields ("", "") and is still
+// recorded as an orphan, just without decoded coordinates.
 func parseErunCloudContextName(name string) (string, string) {
 	name = strings.TrimSpace(name)
 	if !strings.HasPrefix(name, "erun-") {
@@ -449,13 +401,9 @@ type RepairOrphanedAliasParams struct {
 	SkipLogin     bool
 }
 
-// RepairOrphanedAlias re-creates a CloudProviderConfig for one
-// orphaned alias by routing to InitAWSCloudProvider. The
-// implementation is intentionally a thin adapter: the heavy lifting
-// (SSO setup, identity probe, OIDC issuer resolution) already lives
-// in the cloud init flow, and replicating it here would fork the
-// upstream contract. Returns an error for non-AWS providers (the
-// only supported cloud today) or for unparseable aliases.
+// RepairOrphanedAlias re-creates a provider for one orphaned alias by
+// delegating to InitAWSCloudProvider; it stays a thin adapter so the init
+// flow's SSO/identity/OIDC handling is not forked here.
 func RepairOrphanedAlias(ctx Context, store CloudStore, params RepairOrphanedAliasParams, deps CloudDependencies) (CloudProviderConfig, error) {
 	if !params.Orphan.Parsed {
 		return CloudProviderConfig{}, fmt.Errorf("orphaned alias %q cannot be parsed; recreate the provider manually with `erun cloud init aws`", params.Orphan.Alias)

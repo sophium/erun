@@ -73,8 +73,7 @@ func (r RemoteInitInspection) MissingItems() []RemoteInitInspectionItem {
 }
 
 // IsInRuntimeEnvironment reports whether the current process is running
-// inside an erun runtime pod, based on env vars the deployment template
-// sets on every runtime container.
+// inside an erun runtime pod.
 func IsInRuntimeEnvironment(env func(string) string) bool {
 	if env == nil {
 		env = os.Getenv
@@ -210,10 +209,8 @@ func inspectCodeCommitSSHKey(homeDir string, marker RemoteInitMarker, markerPres
 	return item, true
 }
 
-// bakedSkillsRoot is where the runtime image vendors the canonical agent
-// skills (COPY erun-skills/skills /etc/erun/skills). ERUN_SKILLS_DIR overrides
-// it as a test seam so the integration suite can stage skills without the
-// runtime image.
+// bakedSkillsRoot is the runtime image's baked-in location for the canonical
+// agent skills; ERUN_SKILLS_DIR overrides it in tests.
 func bakedSkillsRoot(env func(string) string) string {
 	if env != nil {
 		if override := strings.TrimSpace(env("ERUN_SKILLS_DIR")); override != "" {
@@ -253,17 +250,12 @@ func inspectSkills(homeDir string, env func(string) string) (RemoteInitInspectio
 }
 
 // RemoteInitFinishParams carries the inputs the in-runtime doctor needs
-// to drive a recovery in non-dry-run mode. RepositoryURL is required
-// when the marker did not record one (e.g., init was interrupted before
-// the URL was resolved) and the user has not yet been prompted.
-// CodeCommitSSHKeyID supplies the IAM-assigned SSH public key ID when
-// the resolved repository URL points at AWS CodeCommit and the marker
-// did not record one; doctor prompts only when both are missing.
-//
-// Sleep is the cadence the SSH-key-import polling loop uses between
-// retries. When nil the production default (2s) is used; tests inject
-// a recording stub so they can assert on retry behavior without
-// real-time waits.
+// to drive a recovery. RepositoryURL is required when the marker did not
+// record one (e.g., init was interrupted before the URL was resolved).
+// CodeCommitSSHKeyID supplies the IAM-assigned SSH public key ID when the
+// repository points at AWS CodeCommit and the marker did not record one;
+// doctor prompts only when both are missing. Sleep is the poll cadence
+// between SSH-key-import retries; nil uses the production default (2s).
 type RemoteInitFinishParams struct {
 	HomeDir            string
 	RepositoryURL      string
@@ -271,12 +263,10 @@ type RemoteInitFinishParams struct {
 	Sleep              SleepFunc
 }
 
-// RemoteInitFinishPrompt requests one value from the caller. The CLI
-// implements this with a promptui prompt; tests pass a stub. doctor
-// invokes it twice when the resolved repository URL is a CodeCommit
-// host and the marker has no SSH key ID: once for the repository URL,
-// once for the CodeCommit SSH public key ID. Each call passes a label
-// that uniquely identifies the request.
+// RemoteInitFinishPrompt requests one value from the caller. doctor invokes
+// it twice for a CodeCommit host whose marker has no SSH key ID — once for
+// the repository URL, once for the CodeCommit SSH public key ID — so the
+// label disambiguates the two requests.
 type RemoteInitFinishPrompt func(label string) (string, error)
 
 // RunRemoteInitFinish executes whichever recovery steps the inspection
@@ -284,14 +274,10 @@ type RemoteInitFinishPrompt func(label string) (string, error)
 // without performing them. Returns the updated inspection so callers
 // can render a final report.
 //
-// The recovery mirrors `erun init --remote` for both the plain SSH
-// host case (ed25519 key, ssh -i) and the AWS CodeCommit case (RSA
-// 4096 key at ~/.ssh/id_rsa_codecommit, ~/.ssh/config with the IAM
-// SSH key ID as user, ssh -F). doctor detects CodeCommit by parsing
-// the resolved repository URL with the same parser init uses, so the
-// user sees the same trace and the same poll cadence whether they're
-// recovering from inside the pod (doctor) or from outside (init). The
-// polling loop is implemented by WaitForGitAccess.
+// The recovery mirrors `erun init --remote` for both plain SSH and AWS
+// CodeCommit hosts, using the same URL parser init uses, so the operator
+// sees the same trace and poll cadence whether recovering from inside the
+// pod (doctor) or outside (init).
 func RunRemoteInitFinish(ctx Context, inspection RemoteInitInspection, params RemoteInitFinishParams, prompt RemoteInitFinishPrompt) (RemoteInitInspection, error) {
 	if inspection.HomeDir == "" {
 		return inspection, errors.New("home directory is required to finish remote init")
@@ -330,10 +316,6 @@ func RunRemoteInitFinish(ctx Context, inspection RemoteInitInspection, params Re
 	return saveRemoteInitCompletionMarker(ctx, inspection, repository, repositoryURL)
 }
 
-// resolveRemoteInitRepositoryURL resolves the git repository URL for a finish
-// run: the explicit param, then the marker, then (only when a clone is needed
-// and we are not in dry-run) an interactive prompt. Returns an error when a
-// clone is required but no URL can be obtained.
 func resolveRemoteInitRepositoryURL(ctx Context, inspection RemoteInitInspection, params RemoteInitFinishParams, prompt RemoteInitFinishPrompt, missing []RemoteInitInspectionItem) (string, error) {
 	repositoryURL := strings.TrimSpace(params.RepositoryURL)
 	if repositoryURL == "" {
@@ -356,9 +338,6 @@ func resolveRemoteInitRepositoryURL(ctx Context, inspection RemoteInitInspection
 	return repositoryURL, nil
 }
 
-// appendMissingCodeCommitKeypair adds the CodeCommit SSH keypair to the missing
-// set when the repo is a CodeCommit host whose keypair is absent on disk but was
-// not already flagged (the inspection only checks it conditionally).
 func appendMissingCodeCommitKeypair(missing []RemoteInitInspectionItem, repository remoteRepositorySpec, homeDir string) []RemoteInitInspectionItem {
 	if repository.CodeCommitHost == "" || remoteInitMissingItem(missing, "CodeCommit SSH keypair") {
 		return missing
@@ -374,9 +353,8 @@ func appendMissingCodeCommitKeypair(missing []RemoteInitInspectionItem, reposito
 	return missing
 }
 
-// remoteInitKeyState carries the SSH/CodeCommit key paths and just-generated
-// flags produced while materializing missing items, plus whether a git checkout
-// is still pending — the checkout runs after the keys exist.
+// remoteInitKeyState threads generated key paths and flags to the deferred
+// git-checkout phase.
 type remoteInitKeyState struct {
 	sshKeyPath                 string
 	sshKeyJustGenerated        bool
@@ -385,10 +363,6 @@ type remoteInitKeyState struct {
 	needsGitCheckout           bool
 }
 
-// applyRemoteInitMissingItems materializes each missing item (project root, SSH
-// keys, agent skills) in canonical order, returning the key state the checkout
-// phase needs. The "git checkout" item only sets needsGitCheckout here because
-// the clone depends on the keys generated above.
 func applyRemoteInitMissingItems(ctx Context, inspection RemoteInitInspection, missing []RemoteInitInspectionItem) (remoteInitKeyState, error) {
 	state := remoteInitKeyState{sshKeyPath: defaultRemoteInitSSHKeyPath(inspection.HomeDir)}
 	for _, item := range orderRemoteInitMissingItems(missing) {
@@ -399,9 +373,9 @@ func applyRemoteInitMissingItems(ctx Context, inspection RemoteInitInspection, m
 	return state, nil
 }
 
-// applyRemoteInitMissingItem materializes a single missing item, recording any
-// generated key path/flag on state. The "git checkout" item only flags
-// needsGitCheckout — the clone is run later, after every key exists.
+// applyRemoteInitMissingItem materializes one missing item. The git-checkout
+// case only flags needsGitCheckout — the clone runs later, after every key
+// exists.
 func applyRemoteInitMissingItem(ctx Context, inspection RemoteInitInspection, item RemoteInitInspectionItem, state *remoteInitKeyState) error {
 	switch item.Label {
 	case "project root":
@@ -426,9 +400,8 @@ func applyRemoteInitMissingItem(ctx Context, inspection RemoteInitInspection, it
 	return nil
 }
 
-// runRemoteInitGitCheckout completes the CodeCommit SSH config (when the repo is
-// a CodeCommit host) and clones the project into ProjectRoot using the resolved
-// keys. repository may be updated in place with a resolved CodeCommit SSH key ID.
+// runRemoteInitGitCheckout clones the project using the resolved keys. It may
+// update repository in place with a resolved CodeCommit SSH key ID.
 func runRemoteInitGitCheckout(ctx Context, inspection RemoteInitInspection, repository *remoteRepositorySpec, state remoteInitKeyState, params RemoteInitFinishParams, prompt RemoteInitFinishPrompt) error {
 	codeCommitKeyPath := state.codeCommitKeyPath
 	if repository.CodeCommitHost != "" {
@@ -448,9 +421,6 @@ func runRemoteInitGitCheckout(ctx Context, inspection RemoteInitInspection, repo
 	return finishRemoteInitGitCheckout(ctx, inspection.ProjectRoot, state.sshKeyPath, *repository)
 }
 
-// saveRemoteInitCompletionMarker stamps the marker complete (tenant, env,
-// project root, and — unless NoGit — the resolved repository details) and
-// persists it, or traces the would-be write in dry-run.
 func saveRemoteInitCompletionMarker(ctx Context, inspection RemoteInitInspection, repository remoteRepositorySpec, repositoryURL string) (RemoteInitInspection, error) {
 	updated := inspection
 	updated.Marker.Tenant = inspection.Tenant
@@ -474,17 +444,11 @@ func saveRemoteInitCompletionMarker(ctx Context, inspection RemoteInitInspection
 	return updated, nil
 }
 
-// resolveCodeCommitSSHKeyID fills in repository.CodeCommitSSHKeyID using
-// the marker-derived value (already on the spec), then the explicit
-// --codecommit-ssh-key-id flag, then an interactive prompt. Before the
-// prompt fires it prints the codeCommitSetupDetails block — the RSA
-// public key the user must import to IAM plus the host stanza they'll
-// land in ~/.ssh/config — because IAM only returns a key ID after the
-// user uploads that public key. Asking for the ID without first
-// showing the key leaves the user stuck looking for a value they have
-// no way to obtain. Skips silently in dry-run (no prompts) and when the
-// spec already has an ID (e.g., parsed from the URL or loaded from the
-// marker).
+// resolveCodeCommitSSHKeyID fills in repository.CodeCommitSSHKeyID from the
+// flag or an interactive prompt. It prints the RSA public key and host stanza
+// before prompting, because IAM only issues the key ID after the user uploads
+// that public key — asking for the ID first would leave the user hunting for a
+// value they cannot yet obtain.
 func resolveCodeCommitSSHKeyID(ctx Context, repository *remoteRepositorySpec, codeCommitKeyPath, tenant, environment, paramKeyID string, prompt RemoteInitFinishPrompt) error {
 	if repository.CodeCommitSSHKeyID != "" || ctx.DryRun {
 		return nil
@@ -512,13 +476,10 @@ func resolveCodeCommitSSHKeyID(ctx Context, repository *remoteRepositorySpec, co
 	return nil
 }
 
-// resolveRemoteInitRepositorySpec parses the resolved repository URL
-// and folds in any CodeCommit metadata the marker recorded. The URL
-// parser is the same one init uses, so doctor's detection stays in
-// lockstep with the regex in init_remote.go. A blank URL — which can
-// happen in dry-run when neither flag nor marker provides one — yields
-// a zero spec, and recovery proceeds as if the repository were plain
-// SSH.
+// resolveRemoteInitRepositorySpec uses the same URL parser init uses, so
+// doctor's CodeCommit detection stays in lockstep with init. A blank URL —
+// possible in dry-run when neither flag nor marker provides one — yields a
+// zero spec, and recovery proceeds as if the repository were plain SSH.
 func resolveRemoteInitRepositorySpec(repositoryURL string, marker RemoteInitMarker) remoteRepositorySpec {
 	repositoryURL = strings.TrimSpace(repositoryURL)
 	if repositoryURL == "" {
@@ -544,14 +505,11 @@ func remoteInitMarkerRepositoryURL(repository remoteRepositorySpec, fallback str
 	return strings.TrimSpace(fallback)
 }
 
-// orderRemoteInitMissingItems returns missing artifacts in the order
-// doctor must finish them: the project root, the ed25519 SSH keypair,
-// and (when applicable) the RSA CodeCommit keypair are prerequisites
-// for the git checkout, so they go first regardless of how the
-// inspection records them. RunRemoteInitFinish appends a CodeCommit
-// item dynamically when the resolved URL is a CodeCommit host but the
-// inspection didn't record one — this helper keeps the final order
-// stable in either case.
+// orderRemoteInitMissingItems sorts missing artifacts into finish order: the
+// project root and SSH keypairs are prerequisites for the git checkout, so
+// they run first regardless of how the inspection recorded them.
+// RunRemoteInitFinish can append a CodeCommit item dynamically, so this keeps
+// the final order stable in either case.
 func orderRemoteInitMissingItems(items []RemoteInitInspectionItem) []RemoteInitInspectionItem {
 	order := []string{"project root", "SSH keypair", "CodeCommit SSH keypair", "git checkout", "agent skills"}
 	ordered := make([]RemoteInitInspectionItem, 0, len(items))
@@ -582,11 +540,11 @@ func finishRemoteInitProjectRoot(ctx Context, path string) error {
 	return os.MkdirAll(path, 0o755)
 }
 
-// finishRemoteInitSkills (re)installs the baked agent skills into
-// ~/.claude/skills and ~/.codex/skills, mirroring the entrypoint so doctor can
-// recover a pod whose skills never landed (e.g. an image built before the
-// /etc/erun/skills permissions were fixed). A skill whose destination SKILL.md
-// already exists is left untouched so in-env edits survive.
+// finishRemoteInitSkills reinstalls the baked agent skills, mirroring the
+// entrypoint so doctor can recover a pod whose skills never landed (e.g. an
+// image built before the /etc/erun/skills permissions were fixed). A skill
+// whose destination SKILL.md already exists is left untouched so in-env edits
+// survive.
 func finishRemoteInitSkills(ctx Context, homeDir string) error {
 	root := bakedSkillsRoot(os.Getenv)
 	entries, err := os.ReadDir(root)
@@ -641,10 +599,8 @@ func finishRemoteInitSSHKey(ctx Context, path string) error {
 	return ensureRemoteInitSSHKeyPermissions(path)
 }
 
-// finishRemoteInitCodeCommitSSHKey generates the RSA 4096 keypair at
-// ~/.ssh/id_rsa_codecommit that AWS CodeCommit requires. This mirrors
-// the script init runs inside the runtime pod (init_remote.go's
-// `remoteRepositoryState`), so doctor and init produce the same key
+// finishRemoteInitCodeCommitSSHKey generates the RSA 4096 keypair AWS
+// CodeCommit requires, mirroring init so doctor and init produce the same key
 // shape.
 func finishRemoteInitCodeCommitSSHKey(ctx Context, path string) error {
 	ctx.TraceCommand("", "ssh-keygen", "-t", "rsa", "-b", "4096", "-N", "", "-f", path)
@@ -664,13 +620,11 @@ func finishRemoteInitCodeCommitSSHKey(ctx Context, path string) error {
 	return ensureRemoteInitSSHKeyPermissions(path)
 }
 
-// finishRemoteInitCodeCommitSSHConfig writes ~/.ssh/config with the
-// Host stanza CodeCommit needs (User = IAM SSH public key ID,
-// IdentityFile = ~/.ssh/id_rsa_codecommit). Without this stanza, git's
-// ssh process has no way to learn which IAM identity to authenticate
-// as, and CodeCommit will reject the connection. The contents come
-// from codeCommitSSHConfig — the same helper init uses — so the file
-// is identical whether init or doctor produced it.
+// finishRemoteInitCodeCommitSSHConfig writes the ~/.ssh/config Host stanza
+// CodeCommit needs. Without it, git's ssh has no way to learn which IAM
+// identity to authenticate as and CodeCommit rejects the connection. The
+// contents come from codeCommitSSHConfig, the same helper init uses, so the
+// file is identical whether init or doctor produced it.
 func finishRemoteInitCodeCommitSSHConfig(ctx Context, homeDir string, repository remoteRepositorySpec) error {
 	if repository.CodeCommitHost == "" {
 		return nil
@@ -690,20 +644,14 @@ func finishRemoteInitCodeCommitSSHConfig(ctx Context, homeDir string, repository
 	return nil
 }
 
-// ensureRemoteInitSSHKeyPermissions forces 0600 on the private key and
-// 0644 on the public key. ssh silently refuses to use a private key
-// that is group- or world-accessible ("WARNING: UNPROTECTED PRIVATE
-// KEY FILE!" → bad permissions → key ignored), and runtime pods on
-// shared PVCs persist files with permissive group bits because the
-// chart's fsGroup makes kubelet re-OR g+rw into every PVC file on
-// each pod start. Init's chmod is therefore best-effort and gets
-// reset between runs, so doctor re-applies the expected mode every
-// time it touches the key. The runtime image's entrypoint also walks
-// ~/.ssh on container start (normalize_ssh_key_permissions in
-// erun-devops/docker/erun-devops/entrypoint.sh), so a freshly
-// restarted pod heals its own permissions before any tool tries to
-// read the key — this function stays as a belt-and-braces guarantee
-// for the doctor recovery path.
+// ensureRemoteInitSSHKeyPermissions re-tightens the SSH key file modes. ssh
+// silently refuses a private key that is group- or world-accessible, and
+// runtime pods on shared PVCs keep getting permissive group bits because the
+// chart's fsGroup makes kubelet re-OR g+rw into every PVC file on each pod
+// start. Init's chmod is therefore best-effort and gets reset between runs, so
+// doctor re-applies the expected mode every time it touches the key. The
+// runtime entrypoint also heals ~/.ssh on container start, so this stays as a
+// belt-and-braces guarantee for the doctor recovery path.
 func ensureRemoteInitSSHKeyPermissions(path string) error {
 	if err := os.Chmod(path, 0o600); err != nil {
 		if os.IsNotExist(err) {
@@ -737,15 +685,10 @@ func finishRemoteInitGitCheckout(ctx Context, projectRoot, sshKeyPath string, re
 	return capture.Apply(cmd.Run())
 }
 
-// finishRemoteInitGitAccess prints the SSH public key the user must
-// import on the git host, then polls `git ls-remote` until access is
-// active. This mirrors init's waitForRemoteKeyImport so the user sees
-// the same trace and the same poll cadence whether they're driving
-// recovery from inside the pod (doctor) or from outside (init). For
-// CodeCommit hosts, doctor prints the RSA codecommit public key plus
-// the IAM setup snippet (same as init) and pins core.sshCommand to
-// `ssh -F ~/.ssh/config`; for plain SSH hosts, doctor prints the
-// ed25519 public key and pins `ssh -i <key>`.
+// finishRemoteInitGitAccess prints the public key the user must import on the
+// git host, then polls `git ls-remote` until access is active. This mirrors
+// init's key-import wait so the operator sees the same trace and poll cadence
+// whether recovering from inside the pod (doctor) or outside (init).
 func finishRemoteInitGitAccess(ctx Context, sshKeyPath, codeCommitKeyPath string, repository remoteRepositorySpec, sshKeyJustGenerated, codeCommitKeyJustGenerated bool, sleep SleepFunc) error {
 	sshCommand := doctorRemoteInitGitSSHCommandFor(repository, sshKeyPath)
 	if ctx.DryRun {
@@ -807,15 +750,12 @@ func defaultRemoteInitCodeCommitSSHKeyPath(homeDir string) string {
 	return filepath.Join(homeDir, ".ssh", "id_rsa_codecommit")
 }
 
-// doctorRemoteInitGitSSHCommandFor renders the ssh command git invokes
-// via core.sshCommand / GIT_SSH_COMMAND. For CodeCommit hosts, doctor
-// must use `ssh -F ~/.ssh/config` so the per-host stanza (User =
-// IAM SSH public key ID, IdentityFile = id_rsa_codecommit) takes
-// effect — pinning a specific identity here would bypass the IAM user
-// resolution and CodeCommit would reject the auth attempt. For plain
-// SSH hosts we keep the existing behavior: pin the ed25519 identity
-// so ssh does not fall back to whatever other keys happen to exist in
-// the user's ~/.ssh, with accept-new for the first connection.
+// doctorRemoteInitGitSSHCommandFor renders git's ssh command. For CodeCommit
+// hosts it uses `ssh -F ~/.ssh/config` so the per-host stanza takes effect —
+// pinning a specific identity would bypass IAM user resolution and CodeCommit
+// would reject the auth. For plain SSH hosts it pins the ed25519 identity so
+// ssh does not fall back to other keys in ~/.ssh, with accept-new for the
+// first connection.
 func doctorRemoteInitGitSSHCommandFor(repository remoteRepositorySpec, sshKeyPath string) string {
 	if repository.CodeCommitHost != "" {
 		return `ssh -F "$HOME/.ssh/config"`
@@ -823,9 +763,8 @@ func doctorRemoteInitGitSSHCommandFor(repository remoteRepositorySpec, sshKeyPat
 	return "ssh -i " + shellQuote(sshKeyPath) + " -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
 }
 
-// WriteRemoteInitInspectionReport renders the inspection to w in the
-// shape doctor prints to the user. Returns an error iff the writer
-// fails.
+// WriteRemoteInitInspectionReport renders the inspection to ctx.Stdout in the
+// shape doctor prints to the user.
 func WriteRemoteInitInspectionReport(ctx Context, inspection RemoteInitInspection) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Remote init checks for %s/%s:\n", remoteInitOrUnknown(inspection.Tenant), remoteInitOrUnknown(inspection.Environment)); err != nil {
 		return err

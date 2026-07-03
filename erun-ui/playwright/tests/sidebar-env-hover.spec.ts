@@ -1,16 +1,9 @@
 import { test, expect } from '../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
-// Issue #437 — hovering a sidebar env row shows a hover card with the env's
-// version, the issue it's working on (branch + linked issue title), and its
-// current activity, replacing the plain tenant/env tooltip.
-//
-// The seeded baseline envs are local-agent with a host-side repopath, so the
-// card structure and the resolved "Working on" state are deterministic. The
-// seeded repo dir is not a git worktree, so the section resolves to an
-// availability reason rather than a branch; the populated branch+issue path
-// needs a real worktree with a linked issue and stays covered by the Go-side
-// working-issue tests.
+// The hover card replaces the plain tenant/env tooltip. Seeded envs aren't git
+// worktrees, so "Working on" resolves to an availability reason, never a branch;
+// the populated branch+issue path is covered by the Go-side working-issue tests.
 test.describe('sidebar env hover card', () => {
   test('hovering an env row opens a card with version, working issue, and activity', async ({
     app,
@@ -20,29 +13,24 @@ test.describe('sidebar env hover card', () => {
     const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
     await expect(card).toBeVisible();
 
-    // All three sections are present.
     await expect(card.getByText('Version', { exact: true })).toBeVisible();
     await expect(card.getByText('Working on', { exact: true })).toBeVisible();
     await expect(card.getByText('Activity', { exact: true })).toBeVisible();
 
-    // The working-issue lookup resolves to a non-empty state (a branch, an
-    // availability reason, or the transient loading text) — never a blank.
     await expect
       .poll(async () => (await card.locator('dd').nth(1).textContent())?.trim() ?? '')
       .not.toBe('');
 
-    // Issue #462 — whatever it resolves to, it is never the implementation
+    // Whatever it resolves to, it is never the implementation
     // excuse the card used to print for remote envs.
     expect((await card.locator('dd').nth(1).textContent()) ?? '').not.toContain(
       'worktree lives in the pod',
     );
   });
 
-  // Issue #462 — a never-opened env has no pod to be "idle" about: the
-  // Activity row must say it is not open, and the Working-on row must offer
-  // the next step instead of an implementation excuse. A per-test seeded env
-  // is guaranteed never-opened: it did not exist before this test, and the
-  // fresh frontend has no tabs for it.
+  // A never-opened env has no pod, so Activity must say "Not open" (never
+  // "Idle") and Working-on must offer a next step, not the pod excuse. A
+  // per-test seeded env is guaranteed never-opened: fresh on disk, no tabs.
   test('a not-open env shows "Not open", never "Idle" or the pod excuse', async ({
     app,
     seededEnv,
@@ -61,10 +49,9 @@ test.describe('sidebar env hover card', () => {
     expect((await workingOn.textContent()) ?? '').not.toContain('worktree lives in the pod');
   });
 
-  // Issue #462/#470 — an open env whose real state is stopped must say
-  // "Stopped", never "Idle". A real stopped cloud context cannot be staged
-  // headless, so the spec drives the env-status event the Go side emits
-  // (the emission decisions are owned by erun-ui/env_status_test.go).
+  // An open env whose real state is stopped must say "Stopped", never "Idle".
+  // A stopped cloud context can't be staged headless, so the spec injects the
+  // env-status event; the emission decisions are owned by env_status_test.go.
   test('an open env flagged stopped shows "Stopped" in the Activity row', async ({
     app,
     page,
@@ -99,7 +86,7 @@ test.describe('sidebar env hover card', () => {
     await expect(dot).toHaveAttribute('data-env-state', 'stopped');
     await expect(activity).toContainText('Stopped');
 
-    // Restore the row's healthy state and close the env for later specs.
+    // Reset the injected status and close the env so it doesn't leak into later specs (shared backend).
     await emitEnvStatusEvent(page, tenant, environment, '');
     await expect(dot).toHaveAttribute('data-env-state', 'running');
     await dot.click();
@@ -107,8 +94,8 @@ test.describe('sidebar env hover card', () => {
   });
 });
 
-// emitEnvStatusEvent injects an `env-status` event, mirroring what the Go
-// side emits from tryReconnect's refusal paths and the open/respawn clears.
+// Injecting env-status is a faithful stand-in: the Go side emits the same event
+// from tryReconnect's refusal paths and the open/respawn clears.
 async function emitEnvStatusEvent(
   page: import('@playwright/test').Page,
   tenant: string,

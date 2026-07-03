@@ -2,13 +2,9 @@ import type * as React from 'react';
 
 import type { CloudContext, ContextStatus, Environment, Tenant, TenantConfigView } from './types';
 
-// What an Operator sees in the console: the tenant header, the list of
-// environments (name, type, kubernetes context, runtime version), and the list
-// of cloud contexts (name, provider, region). Empty collections render a plain
-// empty-state line rather than an empty table — an empty state must not look
-// like a disabled input (Material "Empty states"; erun-ui/AGENTS.md § Professional
-// UX). This is a pure render of the read model the parent already fetched; the
-// fetch/auth lifecycle lives in App.
+// A pure render of the read model the parent fetched; the fetch/auth lifecycle
+// lives in App. Empty collections render an empty-state line, never an empty
+// table, so an empty view never reads as a disabled input.
 
 function placeholder(value: string | undefined): string {
   return value && value.length > 0 ? value : '—';
@@ -73,11 +69,9 @@ const STATUS_LABELS: Record<ContextStatus, string> = {
   failed: 'Failed',
 };
 
-// A semantic, non-color-only status badge: it always carries a text label
-// (Provisioning / Running / Failed) alongside the color, so it reads correctly
-// for color-blind users and screen readers (jsx-a11y; erun-ui/AGENTS.md
-// § Professional UX). Returns null for an absent/unknown status so a context
-// registered before provisioning existed renders no badge.
+// The badge pairs color with a text label so it reads for color-blind and
+// screen-reader users, not color alone. A context registered before
+// provisioning existed has no status and renders no badge.
 function StatusBadge({ status }: { status: ContextStatus | undefined }): React.ReactElement | null {
   if (status === undefined) {
     return null;
@@ -95,9 +89,8 @@ function ContextItem({ context }: { context: CloudContext }): React.ReactElement
       <span className="context-status">
         <StatusBadge status={context.status} />
         {context.status === 'failed' && context.provisionError !== undefined && (
-          // The failure reason is essential information, so it is shown inline
-          // as visible text rather than hidden behind a bare `title` tooltip
-          // (jsx-a11y / module a11y rules).
+          // The failure reason is essential, so it is visible inline rather
+          // than hidden in a title tooltip.
           <span className="context-error">{context.provisionError}</span>
         )}
       </span>

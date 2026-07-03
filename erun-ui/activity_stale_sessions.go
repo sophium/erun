@@ -31,9 +31,6 @@ func (a *App) runStaleShellDetector(stop <-chan struct{}) {
 	}
 }
 
-// reconcileStaleShellsOnce walks live sessions, surfacing stale ones,
-// and removes activity entries whose underlying session has come back
-// (or been closed by the user). Idempotent.
 func (a *App) reconcileStaleShellsOnce() {
 	if a.activityQueue == nil {
 		return
@@ -57,10 +54,9 @@ type staleSessionSnapshot struct {
 	pid       int
 }
 
-// collectStaleSessionSnapshots returns the open sessions whose backing
-// PID has exited. The session is held just long enough to read state;
-// the reconciler runs without the App mutex so kubectl/helm subprocesses
-// don't deadlock against terminal startup.
+// Snapshots stale sessions under a brief App-mutex hold so the surrounding
+// reconciler stays unlocked and can't deadlock kubectl/helm subprocesses
+// against terminal startup.
 func (a *App) collectStaleSessionSnapshots() []staleSessionSnapshot {
 	now := time.Now()
 	a.mu.Lock()
@@ -111,9 +107,6 @@ func (a *App) upsertStaleShellActivity(snapshot staleSessionSnapshot) (activityQ
 	})
 }
 
-// removeRecoveredStaleShellActivities discards entries from the queue
-// for shell-source activities whose underlying session is no longer
-// stale (the user closed it, or the PID came back).
 func (a *App) removeRecoveredStaleShellActivities(stillStale map[string]struct{}) {
 	if a.activityQueue == nil {
 		return
@@ -133,9 +126,8 @@ func (a *App) removeRecoveredStaleShellActivities(stillStale map[string]struct{}
 	}
 }
 
-// KillSession terminates the managed terminal session by serial and
-// removes any shell-source activity entry that referenced it. Wails-
-// exported so the activity drawer's "Kill" button can reach it.
+// KillSession backs the activity drawer's Kill button: it terminates a stale
+// session and dismisses its queue entry.
 func (a *App) KillSession(serial int) bool {
 	if serial <= 0 {
 		return false

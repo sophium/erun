@@ -68,8 +68,7 @@ func TestCreateContextPreviewReturnsPlanWithoutPersisting(t *testing.T) {
 	if len(response.Plan) == 0 {
 		t.Fatalf("preview must return a non-empty bootstrap plan")
 	}
-	// The plan is the InitCloudContext dry-run trace; it must include the EC2
-	// run-instances command the real bootstrap would issue.
+	// The preview plan is a faithful bootstrap dry-run, so it must carry the real provisioning commands.
 	if !planContains(response.Plan, "ec2 run-instances") {
 		t.Fatalf("plan missing the EC2 run-instances step: %v", response.Plan)
 	}
@@ -114,9 +113,7 @@ func (s *stubContextProvisioner) Start(in provision.ProvisionInput) error {
 	return nil
 }
 
-// TestCreateContextStartsProvisioningWhenWired: with a provisioner wired (DBOS +
-// secrets configured), a non-preview create persists the row and kicks off the
-// durable provisioning workflow, returning 202 Accepted (issue #605/#676).
+// TestCreateContextStartsProvisioningWhenWired: a configured provisioner flips create from an inline plan to an async provisioning workflow (202 Accepted).
 func TestCreateContextStartsProvisioningWhenWired(t *testing.T) {
 	contexts := &stubContextRepository{created: model.Context{ContextID: "ctx-1", Name: "primary", Provider: "aws", Status: "provisioning"}}
 	prov := &stubContextProvisioner{}

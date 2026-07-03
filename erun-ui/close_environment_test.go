@@ -5,7 +5,7 @@ import (
 )
 
 // TestCloseEnvironmentSessionsClosesEveryMatchingSession is the
-// regression for issue #426: the sidebar's "close env" dot must
+// regression: the sidebar's "close env" dot must
 // tear down every PTY bound to (tenant, env) — Local + ERun + AI
 // + any extra terminals the user spawned — not just one. The
 // returned slice must list the serial IDs that were closed so the

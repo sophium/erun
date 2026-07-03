@@ -2,12 +2,9 @@ import type { Middleware } from '@reduxjs/toolkit';
 
 import { recordUITraceEntry } from '../uiTraceBuffer';
 
-// uiTraceMiddleware records every dispatched action (thunks surface through
-// the plain actions they dispatch, RTK-Query through its lifecycle actions)
-// plus the top-level state slices the action changed, into the non-Redux
-// ring buffer the Diagnostics console's "UI trace" tab renders (issue
-// #466). Shallow slice comparison keeps the recorder O(slices) per action —
-// no deep diffing on the dispatch path.
+// uiTraceMiddleware feeds the Diagnostics console's "UI trace" tab. The
+// per-action slice comparison stays shallow because it runs on the hot
+// dispatch path.
 export const uiTraceMiddleware: Middleware = (storeApi) => (next) => (action) => {
   const before = storeApi.getState() as Record<string, unknown>;
   const result = next(action);

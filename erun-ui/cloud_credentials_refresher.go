@@ -10,25 +10,14 @@ import (
 )
 
 const (
-	// credentialRefreshInterval caps how long the refresher sleeps between
-	// pushes. AWS hands out temp creds with ~1h TTL by default; refreshing
-	// every 45 min leaves comfortable headroom even when the SDK in the pod
-	// holds creds in memory for a few minutes before re-reading the file.
+	// AWS temp creds default to a ~1h TTL; 45 min leaves headroom even when
+	// the pod's SDK caches creds in memory before re-reading the file.
 	credentialRefreshInterval = 45 * time.Minute
 
-	// credentialRefreshLeadTime is the safety margin before the recorded
-	// expiration when scheduling the next refresh.
 	credentialRefreshLeadTime = 5 * time.Minute
 
-	// credentialRefreshBackoff is how long the refresher waits after a
-	// transient failure (network blip, MCP port not yet ready) before
-	// retrying. A persistent failure surfaces a notification once and then
-	// falls back to the regular interval, so the user is not spammed.
 	credentialRefreshBackoff = 30 * time.Second
 
-	// credentialMCPReadyTimeout caps how long the refresher waits for the
-	// runtime pod's MCP port-forward to become reachable before giving up
-	// on this push cycle and retrying later.
 	credentialMCPReadyTimeout = 5 * time.Minute
 )
 
@@ -41,13 +30,10 @@ func (a *App) cloudCredentialsRefresherKey(selection uiSelection) string {
 	return strings.TrimSpace(selection.Tenant) + "/" + strings.TrimSpace(selection.Environment)
 }
 
-// startCloudCredentialsRefresherForSelection arms a background goroutine that
-// keeps the runtime pod's ~/.aws/credentials seeded with temporary credentials
-// derived from the host profile picked by the env's CloudProviderAlias. It
-// applies whenever an AWS cloud alias is attached to a remote env — attaching
-// the alias is the operator opting the env into acting on their behalf, so no
-// separate toggle gates it. Idempotent: a second call for the same selection
-// is a no-op.
+// startCloudCredentialsRefresherForSelection seeds a remote AWS env with
+// temporary host credentials on the operator's behalf. Attaching an AWS cloud
+// alias is itself the opt-in, so no separate toggle gates it. Idempotent per
+// selection.
 func (a *App) startCloudCredentialsRefresherForSelection(selection uiSelection) {
 	selection = normalizeSelection(selection)
 	alias, result, ok := a.resolveCloudCredentialsRefreshTarget(selection)
@@ -75,12 +61,6 @@ func (a *App) startCloudCredentialsRefresherForSelection(selection uiSelection) 
 	}()
 }
 
-// resolveCloudCredentialsRefreshTarget evaluates the per-env preconditions that
-// gate the host-credential refresher: a non-empty tenant/env, a remote worktree,
-// a configured AWS-backed cloud provider alias, and a resolvable open target. It
-// returns the provider alias and resolved OpenResult plus ok=true only when every
-// precondition holds; any failing check returns ok=false so the caller becomes a
-// no-op.
 func (a *App) resolveCloudCredentialsRefreshTarget(selection uiSelection) (string, eruncommon.OpenResult, bool) {
 	if selection.Tenant == "" || selection.Environment == "" {
 		return "", eruncommon.OpenResult{}, false
@@ -92,12 +72,10 @@ func (a *App) resolveCloudCredentialsRefreshTarget(selection uiSelection) (strin
 	if !envConfig.RemoteWorktree() {
 		return "", eruncommon.OpenResult{}, false
 	}
-	// CloudProviderAlias is the legacy scalar that always holds the env's AWS
-	// alias; non-AWS aliases (Cloudflare) live in EnvConfig.CloudProviderAliases
-	// and never reach this scalar. So a Cloudflare-attached env that carries no
-	// AWS alias reads as "" here and the refresher no-ops — exactly the desired
-	// behavior. Cloudflare credentials are delivered at deploy time via a chart
-	// Secret minted by the erun binary, not pushed by this host-credential timer.
+	// CloudProviderAlias is the legacy scalar that only ever holds an AWS alias;
+	// non-AWS aliases (Cloudflare) live in CloudProviderAliases, so a
+	// Cloudflare-only env correctly reads empty here. Cloudflare credentials ship
+	// at deploy time via a chart Secret minted by the erun binary, not this timer.
 	if strings.TrimSpace(envConfig.CloudProviderAlias) == "" {
 		return "", eruncommon.OpenResult{}, false
 	}
@@ -118,9 +96,9 @@ func (a *App) resolveCloudCredentialsRefreshTarget(selection uiSelection) (strin
 	return envConfig.CloudProviderAlias, result, true
 }
 
-// stopCloudCredentialsRefresherForSelection signals the refresher to exit and
-// pushes one best-effort clear so the remote ~/.aws/credentials no longer
-// carries the erun-host profile. Safe to call when no refresher is running.
+// stopCloudCredentialsRefresherForSelection stops the refresher and clears the
+// remote credentials so they do not linger after opt-out. Safe to call when
+// none is running.
 func (a *App) stopCloudCredentialsRefresherForSelection(selection uiSelection) {
 	selection = normalizeSelection(selection)
 	key := a.cloudCredentialsRefresherKey(selection)
@@ -155,10 +133,8 @@ func (a *App) stopAllCloudCredentialsRefreshersLocked() {
 	}
 }
 
-// reconcileCloudCredentialsRefresherForSelection ensures the refresher matches
-// the latest env config: turning the toggle off stops a running refresher;
-// turning it on (with the env open) starts one. Called from
-// SaveEnvironmentConfig so the change takes effect without re-opening.
+// reconcileCloudCredentialsRefresherForSelection restarts the refresher to match
+// a saved setting so the change takes effect without re-opening the env.
 func (a *App) reconcileCloudCredentialsRefresherForSelection(selection uiSelection, enabled bool) {
 	a.stopCloudCredentialsRefresherForSelection(selection)
 	if enabled {

@@ -15,9 +15,8 @@ export const submitManageDeploy = (): AppThunk<Promise<void>> => async (dispatch
     return;
   }
   const version = normalizeDialogValue(dialog.version);
-  // Thread the checklist's working selection as the one-shot deploy set so what
-  // rolls out is exactly what the operator sees checked (opt-in-only). Empty
-  // leaves deploy to resolve the env's saved default.
+  // Deploys exactly what the operator checked (opt-in only); an empty set leaves
+  // deploy to fall back to the env's saved default.
   const components = [...dialog.deployComponentSelection];
   dispatch(closeManageDialog());
   await dispatch(

@@ -16,9 +16,8 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// tenantEchoHandler is a stub the auth middleware wraps; reaching it means the
-// request was authorized, and it echoes the resolved auth tenant so a test can
-// assert per-URL tenant identification.
+// tenantEchoHandler is reached only after the middleware authorizes; it echoes
+// the resolved tenant so tests can assert which tenant a request resolved to.
 func tenantEchoHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -26,8 +25,6 @@ func tenantEchoHandler() http.Handler {
 	})
 }
 
-// identityWithToken generates an Ed25519 identity, writes its public key to a
-// temp file, and returns the file:// issuer plus a signed bearer token.
 func identityWithToken(t *testing.T) (issuer, token string) {
 	t.Helper()
 	priv, pub, err := eruncommon.GenerateDesktopIdentity()
@@ -89,8 +86,8 @@ func TestAuthMiddleware(t *testing.T) {
 	}
 }
 
-// TestAuthMiddlewareMultiTenant locks the key/value model: two issuers map to
-// two tenants, and a token from one issuer resolves that issuer's tenant.
+// TestAuthMiddlewareMultiTenant locks the invariant that each trusted issuer
+// resolves to its own tenant.
 func TestAuthMiddlewareMultiTenant(t *testing.T) {
 	issuerA, tokenA := identityWithToken(t)
 	issuerB, tokenB := identityWithToken(t)
@@ -144,11 +141,9 @@ func TestMCPAuthConfigFromEnv(t *testing.T) {
 	})
 }
 
-// mockOIDCProvider is a self-contained OIDC issuer for the dispatch test: an
-// httptest server publishing a discovery doc + JWKS, plus the RSA key used to
-// mint RS256 tokens. It stands in for a real Zitadel/AWS issuer so the test can
-// prove the middleware routes https:// issuers through the shared OIDC verifier
-// without a network dependency.
+// mockOIDCProvider stands in for a real OIDC issuer so the dispatch test can
+// verify https:// issuer routing through the shared OIDC verifier without a
+// network dependency.
 type mockOIDCProvider struct {
 	server *httptest.Server
 	key    *rsa.PrivateKey
@@ -222,11 +217,8 @@ func oidcClaims(issuer, audience string) map[string]any {
 	}
 }
 
-// TestAuthMiddlewareOIDCDispatch proves the #656 dispatch end-to-end through the
-// middleware: an https:// OIDC issuer in the trusted map verifies its RS256
-// token against the issuer's JWKS and resolves the tenant, while wrong issuer,
-// bad signature, and wrong audience are all rejected. The file:// path is still
-// exercised by the tests above.
+// TestAuthMiddlewareOIDCDispatch proves the middleware routes https:// OIDC
+// issuers through the shared OIDC verifier end-to-end.
 func TestAuthMiddlewareOIDCDispatch(t *testing.T) {
 	provider := newMockOIDCProvider(t)
 	const audience = "erun-mcp:acme/prod"

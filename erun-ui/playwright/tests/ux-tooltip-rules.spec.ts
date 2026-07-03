@@ -1,21 +1,12 @@
 import { expect, test } from '../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
-// ux-tooltip-rules covers AGENTS.md L104 — "Native `title` is only
-// acceptable for non-essential truncation hints" — for the controls that
-// previously used native title= for meaningful product info. The fix
-// either:
-//   - drops `title=` entirely and lets the new aria-label carry the
-//     accessible name (sidebar rows), or
-//   - wraps the trigger in the app Tooltip primitive (activity drawer
-//     clear-all button, activity-card dismiss button).
-//
-// The spec asserts the negative invariant the headless harness CAN
-// reach: the targeted buttons no longer set the HTML `title` attribute.
-// Hover-driven Tooltip visibility for individual cards depends on
-// real backend state the harness does not stage; the negative invariant
-// is the part most likely to regress mechanically (someone reaches for
-// `title=` again because it is shorter than wrapping in Tooltip).
+// Enforces the AGENTS.md tooltip rule — native `title` is only for
+// non-essential truncation hints — on controls that previously used it
+// for meaningful product info. Only the negative invariant is asserted
+// (the buttons set no `title`): hover-driven Tooltip visibility depends
+// on backend state the harness cannot stage, and re-reaching for `title=`
+// is the likeliest mechanical regression.
 
 test.describe('UX tooltip rules', () => {
   test('sidebar env rows carry aria-label and no title attribute', async ({ app }) => {
@@ -40,9 +31,7 @@ test.describe('UX tooltip rules', () => {
   });
 
   test('activity drawer clear-all button uses tooltip primitive', async ({ app, page }) => {
-    // Stage two running activities through the same Wails-event path the
-    // real activity poller uses, then open the drawer. With >1 entry the
-    // "Force dismiss all" clear-all button surfaces in the Now section.
+    // Two running entries — the clear-all button only surfaces with >1.
     await page.evaluate(() => {
       const runtime = (
         window as unknown as { runtime: { EventsEmit: (n: string, ...a: unknown[]) => void } }
@@ -81,9 +70,6 @@ test.describe('UX tooltip rules', () => {
       .locator()
       .getByRole('button', { name: /Force dismiss all/ });
     await expect(clearAll).toBeVisible();
-    // The new ClearAllButton drops the native title attribute and routes
-    // the hint through Tooltip + aria-label, so the title is absent and
-    // aria-label carries the explanatory hint.
     await expect(clearAll).not.toHaveAttribute('title', /.*/);
     await expect(clearAll).toHaveAttribute('aria-label', /Force dismiss all/);
     await expect(clearAll).toHaveAttribute('aria-label', /Underlying processes are not killed/);
@@ -113,9 +99,6 @@ test.describe('UX tooltip rules', () => {
     await app.activityDrawer.open();
     await expect(app.activityDrawer.locator()).toBeVisible();
 
-    // The dismiss button carries the same aria-label as the previous
-    // implementation (Dismiss for finished entries); verify the redundant
-    // native title is gone.
     const dismissButton = app.activityDrawer
       .locator()
       .getByRole('button', { name: 'Dismiss', exact: true })

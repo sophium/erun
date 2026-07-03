@@ -6,12 +6,9 @@ import (
 	"testing"
 )
 
-// TestAISessionLaunchCommand pins the AI tab's pod-side launcher (relocated from
-// erun-ui): a bare/claude tool is wrapped in the cwd-guarded
-// resume with the env effort injected into both branches; any other tool, or
-// claude with explicit flags, launches verbatim. The <tenant>/<env> Remote
-// Control naming that every managed launch also carries is pinned separately by
-// TestAISessionLaunchRemoteControl; these cases pass a fixed team/dev.
+// TestAISessionLaunchCommand pins which AI-tab launches wrap in the cwd guard
+// (bare or claude) versus launch verbatim (other tools, or claude with explicit
+// flags). Remote Control naming is pinned separately by TestAISessionLaunchRemoteControl.
 func TestAISessionLaunchCommand(t *testing.T) {
 	effort := func(level string) EnvironmentClaudeConfig {
 		l := level
@@ -44,10 +41,8 @@ func TestAISessionLaunchCommand(t *testing.T) {
 		assertEffortResolvesToUltracode(t, effort)
 	})
 
-	// ultracode is not a `claude --effort` value: it launches through the
-	// settings mechanism. The five --effort levels are untouched,
-	// and the settings JSON appears in both branches of the cwd-guarded
-	// resume, composing after --continue.
+	// ultracode is not a `claude --effort` value; it launches through the
+	// --settings mechanism instead.
 	t.Run("ultracode launches via --settings in both guard branches", func(t *testing.T) {
 		assertUltracodeInBothBranches(t, effort("ultracode"))
 	})
@@ -60,9 +55,6 @@ func TestAISessionLaunchCommand(t *testing.T) {
 	})
 }
 
-// assertDefaultClaudeGuardAtEffort checks a default claude launch wraps in the
-// cwd guard at the env effort in both branches and, with no model chosen,
-// starts on the first available model rather than the agent's own default.
 func assertDefaultClaudeGuardAtEffort(t *testing.T, config EnvironmentClaudeConfig) {
 	t.Helper()
 	got := AISessionLaunchCommand("", config, "team", "dev")
@@ -78,8 +70,6 @@ func assertDefaultClaudeGuardAtEffort(t *testing.T, config EnvironmentClaudeConf
 	}
 }
 
-// assertEffortResolvesToUltracode pins that both an unset and an invalid effort
-// fall back to the ultracode --settings launch, never a bad --effort flag.
 func assertEffortResolvesToUltracode(t *testing.T, effort func(string) EnvironmentClaudeConfig) {
 	t.Helper()
 	got := AISessionLaunchCommand("", EnvironmentClaudeConfig{}, "team", "dev")
@@ -94,8 +84,6 @@ func assertEffortResolvesToUltracode(t *testing.T, effort func(string) Environme
 	}
 }
 
-// assertUltracodeInBothBranches pins that ultracode injects the --settings JSON
-// (never --effort) into both guard branches and composes after --continue.
 func assertUltracodeInBothBranches(t *testing.T, config EnvironmentClaudeConfig) {
 	t.Helper()
 	got := AISessionLaunchCommand("", config, "team", "dev")
@@ -107,10 +95,8 @@ func assertUltracodeInBothBranches(t *testing.T, config EnvironmentClaudeConfig)
 	}
 }
 
-// TestAISessionLaunchCommandModelAndDebugFlags pins the per-env default model
-// and verbose+debug launch flags: both compose after
-// --effort in both branches of the cwd-guarded resume, and each injects
-// independently of the other.
+// TestAISessionLaunchCommandModelAndDebugFlags pins that the per-env default
+// model and verbose+debug launch flags each inject independently of the other.
 func TestAISessionLaunchCommandModelAndDebugFlags(t *testing.T) {
 	t.Run("default model and verbose debug inject into both guard branches", func(t *testing.T) {
 		model := "fable"
@@ -128,8 +114,6 @@ func TestAISessionLaunchCommandModelAndDebugFlags(t *testing.T) {
 	})
 
 	t.Run("verbose debug composes with the resolved default model", func(t *testing.T) {
-		// No model chosen: the launch starts on the first available model,
-		// with verbose+debug after it.
 		got := AISessionLaunchCommand("", EnvironmentClaudeConfig{VerboseDebug: true}, "team", "dev")
 		if strings.Count(got, "--model opus --verbose --debug") != 2 {
 			t.Fatalf("expected --model opus --verbose --debug in both branches, got %q", got)
@@ -137,11 +121,9 @@ func TestAISessionLaunchCommandModelAndDebugFlags(t *testing.T) {
 	})
 }
 
-// TestAISessionLaunchSubagentModelPrefix pins the CLAUDE_CODE_SUBAGENT_MODEL
-// mirror: whatever model is passed to --model is also exported as
-// the subagent model via a command-string env prefix on both guard branches
-// and the resume line, and nothing is exported when no model resolves or the
-// tool is not claude.
+// TestAISessionLaunchSubagentModelPrefix pins that the subagent model mirrors
+// the launch model (CLAUDE_CODE_SUBAGENT_MODEL is set from --model), and is
+// absent when no model resolves or the tool is not claude.
 func TestAISessionLaunchSubagentModelPrefix(t *testing.T) {
 	model := func(v string) *string { return &v }
 
@@ -153,8 +135,6 @@ func TestAISessionLaunchSubagentModelPrefix(t *testing.T) {
 		if strings.Count(got, "CLAUDE_CODE_SUBAGENT_MODEL=fable claude") != 2 {
 			t.Fatalf("expected the subagent-model prefix on both guard branches, got %q", got)
 		}
-		// The prefix must sit before claude and leave the single-quoted
-		// ultracode --settings JSON intact.
 		if !strings.Contains(got, `CLAUDE_CODE_SUBAGENT_MODEL=fable claude --continue --settings '{"ultracode":true}' --model fable`) {
 			t.Fatalf("prefix must precede claude and compose with --settings/--model, got %q", got)
 		}
@@ -193,14 +173,13 @@ func TestAISessionLaunchSubagentModelPrefix(t *testing.T) {
 	})
 }
 
-// TestAISessionLaunchRemoteControl pins the default Remote Control launch:
-// the managed claude session enables --remote-control named <tenant>/<env> so
-// the operator can drive it from the Claude iOS app. It is
-// gated off for the Bedrock/Mantle gateway auth modes — the claude.ai account
-// relay Remote Control pairs through cannot authenticate those gateways — and
+// TestAISessionLaunchRemoteControl pins the default Remote Control launch: the
+// managed claude session is named <tenant>/<env> so the operator can drive it
+// from the Claude iOS app. It is gated off for the Bedrock/Mantle gateways —
+// the claude.ai account relay it pairs through cannot authenticate those — and
 // for a non-claude tool, and falls back to the unnamed flag (Claude Code then
-// names the session from the pod hostname) when a tenant/env is not a token
-// safe to inline into the launch one-liner.
+// names the session from the pod hostname) when the tenant/env is not safe to
+// inline.
 func TestAISessionLaunchRemoteControl(t *testing.T) {
 	yes := func() *bool { b := true; return &b }
 
@@ -226,8 +205,6 @@ func TestAISessionLaunchRemoteControl(t *testing.T) {
 	})
 
 	t.Run("an unsafe tenant/env falls back to the unnamed flag", func(t *testing.T) {
-		// A "/"-free unsafe token can never inline safely; the flag stays
-		// unnamed (no trailing "--remote-control <name>") in both branches.
 		got := AISessionLaunchCommand("", EnvironmentClaudeConfig{}, "a b; rm", "dev")
 		if strings.Count(got, "--remote-control") != 2 || strings.Contains(got, "--remote-control ") {
 			t.Fatalf("unsafe tenant must yield the unnamed flag in both branches, got %q", got)
@@ -258,9 +235,9 @@ func TestAISessionLaunchRemoteControl(t *testing.T) {
 }
 
 // TestResolveClaudeLaunchModel covers launch-model resolution: a chosen default
-// wins while it is available and usable, else the launch falls back to the
-// first available model — never the agent's own default, and fable only when
-// the env both lists and selects it. An all-unusable set resolves to none.
+// wins when available, else the first available model — never the agent's own
+// default. fable is opt-in (the env must both list and select it), and an
+// all-unusable set resolves to none.
 func TestResolveClaudeLaunchModel(t *testing.T) {
 	model := func(v string) *string { return &v }
 	cases := []struct {
@@ -315,13 +292,11 @@ func TestResolveClaudeEffort(t *testing.T) {
 	}
 }
 
-// TestAISessionLaunchLines pins the AI session's exit wrapper:
-// the tool's exit must never silently fall through to the trailing shell —
-// the wrapper captures the exit status, names it (137 with the OOM hint),
-// and prints the exact resume command. A real claude exit can't be staged in
-// the headless Playwright harness, so these script-content assertions own
-// the contract; the launcher composition into the dtach
-// script is locked by the open --ai dry-run goldens.
+// TestAISessionLaunchLines pins the AI session's exit wrapper: the tool's exit
+// must never silently fall through to the trailing shell. A real claude exit
+// can't be staged in the headless Playwright harness, so these script-content
+// assertions own the contract; the launcher's composition into the dtach script
+// is locked by the open --ai dry-run goldens.
 func TestAISessionLaunchLines(t *testing.T) {
 	t.Run("claude guard wraps with status capture, OOM hint, and quoted resume", func(t *testing.T) {
 		script := strings.Join(AISessionLaunchLines("", EnvironmentClaudeConfig{}, "team", "dev"), "\n")
@@ -338,10 +313,8 @@ func TestAISessionLaunchLines(t *testing.T) {
 				t.Fatalf("wrapper missing %q:\n%s", want, script)
 			}
 		}
-		// The resume is shell-quoted because it carries single quotes itself
-		// (the ultracode settings JSON); with a model now chosen it also carries
-		// the subagent-model prefix and the model flag, and the trailing
-		// --remote-control name for the AI-tab session.
+		// The resume is shell-quoted because it embeds single quotes itself
+		// (the ultracode settings JSON).
 		if !strings.Contains(script, `'CLAUDE_CODE_SUBAGENT_MODEL=opus claude --continue --settings '"'"'{"ultracode":true}'"'"' --model opus --remote-control team/dev'`) {
 			t.Fatalf("resume command not safely shell-quoted:\n%s", script)
 		}
@@ -349,10 +322,9 @@ func TestAISessionLaunchLines(t *testing.T) {
 
 	t.Run("the wrapper executes: 137 yields the OOM marker and the intact resume", func(t *testing.T) {
 		lines := AISessionLaunchLines("", EnvironmentClaudeConfig{}, "team", "dev")
-		// Swap the launch (line index 1 by construction) for a bare 137
-		// exit, simulating the OOM kill; everything after is the wrapper
-		// under test, run through a real sh so the printf escapes and the
-		// shell-quoted resume are verified end to end.
+		// Swap the launch (line index 1 by construction) for a bare 137 exit to
+		// simulate the OOM kill; running the rest through a real sh verifies the
+		// printf escapes and shell-quoted resume end to end.
 		lines[1] = "(exit 137) || ai_status=$?"
 		out, err := exec.Command("sh", "-c", strings.Join(lines, "\n")).CombinedOutput()
 		if err != nil {

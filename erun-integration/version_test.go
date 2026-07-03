@@ -40,10 +40,7 @@ func TestVersion(t *testing.T) {
 	})
 
 	t.Run("time_flag_prints_elapsed", func(t *testing.T) {
-		// Exercises feedback_render.go printElapsedTime: the --time flag must
-		// emit an "elapsed:" line on stderr after a successful run. The
-		// golden's normalize rule turns the variable duration into
-		// `elapsed: <ELAPSED>`, locking both presence and format.
+		// --time must emit an elapsed line on stderr after a successful run.
 		setup := env.New(t)
 		result := erun.Run(t, []string{"version", "--no-registry", "--time"}, erun.RunOptions{
 			Cwd: setup.Cwd,
@@ -56,12 +53,7 @@ func TestVersion(t *testing.T) {
 	})
 
 	t.Run("version_file_in_cwd_overrides_build_info", func(t *testing.T) {
-		// Exercises version.go resolveBuildInfo: when a VERSION file lives
-		// in the current working directory, its contents must replace the
-		// compiled-in version string in the output. The golden captures
-		// `erun <VERSION>` (normalized from "9.9.9"); without VERSION the
-		// compiled "dev" doesn't match the VERSION pattern and the diff
-		// fails loudly.
+		// A VERSION file in the working directory overrides the compiled-in version string.
 		setup := env.New(t)
 		if err := os.WriteFile(filepath.Join(setup.Cwd, "VERSION"), []byte("9.9.9\n"), 0o644); err != nil {
 			t.Fatalf("write VERSION: %v", err)
@@ -77,11 +69,7 @@ func TestVersion(t *testing.T) {
 	})
 
 	t.Run("registry_dockerhub_stub_returns_latest_stable_and_snapshot", func(t *testing.T) {
-		// Exercises eruncommon.ResolveDockerHubRuntimeRegistryVersions and
-		// the tag-page pagination + tag classification helpers. A single
-		// httptest.Server returns two paginated pages that include both
-		// stable releases and a snapshot, and the version command must
-		// surface the latest of each on stdout.
+		// version must surface the latest stable and latest snapshot across paginated Docker Hub tags.
 		page1Path := "/v2/repositories/acme/erun-devops/tags?page_size=100"
 		var page2Path string
 		var stableLatest, snapshotLatest string
@@ -112,10 +100,8 @@ func TestVersion(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		// These are substring-asserted (not golden-locked) because the
-		// surrounding normalize rules collapse 1.4.0 / 1.5.0-snapshot-...
-		// to <VERSION>, which would erase the actual stub-driven values
-		// the test cares about.
+		// Substring-asserted, not golden-locked: normalization collapses these
+		// versions to <VERSION>, which would erase the stub-driven values under test.
 		if !strings.Contains(result.Stdout, "latest stable: "+stableLatest) {
 			t.Errorf("expected stdout to include latest stable %q, got:\n%s", stableLatest, result.Stdout)
 		}
@@ -125,11 +111,7 @@ func TestVersion(t *testing.T) {
 	})
 
 	t.Run("registry_ghcr_stub_returns_latest_stable", func(t *testing.T) {
-		// Exercises eruncommon.ResolveGHCRRuntimeRegistryVersions: a fake
-		// GHCR token endpoint hands out a token; the v2 tags/list endpoint
-		// returns paginated JSON; nextLinkFromHeader parses the rel="next"
-		// link to drive a second page. Asserts the parsed latest stable
-		// is surfaced on stdout.
+		// version must follow the GHCR rel="next" Link header across pages and surface the latest stable.
 		var server *httptest.Server
 		var requested []string
 		server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -164,9 +146,7 @@ func TestVersion(t *testing.T) {
 		if !strings.Contains(result.Stdout, "latest stable: 1.4.1") {
 			t.Errorf("expected stdout to include latest stable 1.4.1 from paginated GHCR response, got:\n%s", result.Stdout)
 		}
-		// Sanity: confirm the runner actually exercised the token + both
-		// pages so the test fails informatively if the pagination link
-		// parser regresses.
+		// A pagination-parser regression should fail here explicitly, not only via the stdout assertion.
 		expected := map[string]bool{
 			"/token?service=ghcr.io&scope=repository:acme/erun-devops:pull": false,
 			"/v2/acme/erun-devops/tags/list?":                               false,
@@ -183,10 +163,7 @@ func TestVersion(t *testing.T) {
 	})
 
 	t.Run("registry_defaults_namespace_and_repository", func(t *testing.T) {
-		// Exercises RuntimeRegistryConfig.Resolved()'s namespace/repository
-		// defaulting: a config that only overrides baseurl+tokenurl must
-		// fall back to the canonical ghcr.io/sophium + erun-devops image,
-		// which routes through the GHCR flow against the local stub.
+		// A registry config that overrides only the URLs must default to the canonical ghcr.io/sophium/erun-devops image.
 		var server *httptest.Server
 		var requested []string
 		server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -223,11 +200,8 @@ func TestVersion(t *testing.T) {
 	})
 
 	t.Run("registry_dockerhub_error_is_debug_logged_not_fatal", func(t *testing.T) {
-		// Exercises the registry failure contract of `erun version`: a
-		// Docker Hub tags request that fails (HTTP 500) must not fail the
-		// command — writeRegistryVersions logs the resolver error at debug
-		// and the build-info line still prints. -v makes the debug log
-		// visible so the golden locks both halves of the contract.
+		// A registry lookup failure must not fail erun version: the error is
+		// debug-logged and the build-info line still prints.
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "boom", http.StatusInternalServerError)
 		}))
@@ -246,10 +220,7 @@ func TestVersion(t *testing.T) {
 	})
 
 	t.Run("registry_ghcr_token_error_is_debug_logged_not_fatal", func(t *testing.T) {
-		// Exercises fetchGHCRPullToken's non-2xx branch: when the token
-		// endpoint refuses, the GHCR resolver fails before any tags request
-		// and `erun version` degrades to the same debug-logged, zero-exit
-		// behavior as every other registry failure.
+		// A GHCR token-endpoint failure degrades to the same non-fatal, debug-logged behavior as any other registry failure.
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "denied", http.StatusForbidden)
 		}))
@@ -269,9 +240,7 @@ func TestVersion(t *testing.T) {
 	})
 
 	t.Run("registry_ghcr_tags_error_is_debug_logged_not_fatal", func(t *testing.T) {
-		// Exercises fetchGHCRTagPage's non-2xx branch: the token resolves
-		// but the tags/list request fails, so the resolver error must carry
-		// the tags request status and the command still exits 0.
+		// When the GHCR token resolves but the tags request fails, erun version still exits 0.
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/token" {
 				w.Header().Set("Content-Type", "application/json")
@@ -296,13 +265,9 @@ func TestVersion(t *testing.T) {
 	})
 
 	t.Run("registry_ghcr_access_token_fallback_and_link_edge_cases", func(t *testing.T) {
-		// Exercises two GHCR parsing residues in one flow: the token
-		// endpoint answers with `access_token` instead of `token`
-		// (fetchGHCRPullToken's fallback field), and the Link headers walk
-		// nextLinkFromHeader's edge branches — a rel="prev" segment to skip,
-		// an absolute rel="next" target returned verbatim (page 1), then a
-		// page 2 Link whose rel="next" segments are malformed (no <>) or
-		// empty (<>), which must terminate pagination instead of looping.
+		// Two GHCR parsing edge cases: the token endpoint may return access_token
+		// instead of token, and malformed or empty rel="next" Link segments must
+		// terminate pagination rather than loop forever.
 		var server *httptest.Server
 		var pages []string
 		server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -343,12 +308,8 @@ func TestVersion(t *testing.T) {
 	})
 
 	t.Run("registry_dockerhub_tag_classification_edge_cases", func(t *testing.T) {
-		// Exercises the tag-classification residues of
-		// latestRuntimeVersionsFromTags: a malformed stable tag with an
-		// empty segment ("1..0") and a negative segment ("1.-1.0") are
-		// ignored, a snapshot tag with a non-digit timestamp is ignored, a
-		// duplicate tag across pages is deduplicated, and two stables
-		// differing in the minor component compare correctly.
+		// Tag classification ignores malformed stable tags and non-digit snapshot
+		// timestamps, dedupes tags across pages, and compares minor versions correctly.
 		var server *httptest.Server
 		server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -381,10 +342,7 @@ func TestVersion(t *testing.T) {
 	})
 
 	t.Run("verbose_flag_prints_audit", func(t *testing.T) {
-		// Exercises feedback_render.go auditCommand: at -vv (trace verbosity)
-		// without --dry-run, the audit trace line must appear on stderr.
-		// At -v (debug verbosity) the audit line is suppressed because trace
-		// output gates on >= VerbosityTrace.
+		// The audit line appears at -vv (trace) but is suppressed at -v (debug).
 		setup := env.New(t)
 		result := erun.Run(t, []string{"version", "--no-registry", "-vv"}, erun.RunOptions{
 			Cwd: setup.Cwd,

@@ -91,20 +91,11 @@ func newActivityStatusCmd(store common.OpenStore) *cobra.Command {
 	return cmd
 }
 
-// newActivityStopReadyCmd drives the grace-period state machine
-// shared with the desktop. The exit-code contract the in-pod monitor
-// (erun-devops/docker/erun-devops/entrypoint.sh) relies on:
-//
-//   - exit 0 only on Fire — the caller may now invoke
-//     `ec2:StopInstances` for this env
-//   - exit non-zero on Skip / Arm / Wait — the env is not (yet) ready
-//     to stop; the action distinguishes "no warning yet" from
-//     "grace armed" from "still in grace"
-//
-// The first eligible call writes the pending file and exits non-zero
-// (Arm). Subsequent eligible calls keep exiting non-zero until the
-// grace window elapses (Wait → Fire). Activity resuming clears the
-// pending file (Skip).
+// newActivityStopReadyCmd drives the idle grace-period decision. Its
+// exit code is a contract with the in-pod monitor's entrypoint.sh:
+// exit 0 only on Fire, meaning the caller may now stop the instance;
+// every other grace state (Skip/Arm/Wait) exits non-zero so the env
+// stays running.
 func newActivityStopReadyCmd(store common.OpenStore) *cobra.Command {
 	var tenant string
 	var environment string
@@ -123,12 +114,6 @@ func newActivityStopReadyCmd(store common.OpenStore) *cobra.Command {
 	return cmd
 }
 
-// runActivityStopReady is the body of `erun activity stop-ready`. It
-// resolves the status, runs the shared decision function, optionally
-// emits the JSON payload for the in-pod monitor's heartbeat log, and
-// maps the result.Action to the exit-code contract documented on
-// newActivityStopReadyCmd. Extracted from the RunE closure to keep
-// the closure under the eslint-style cyclop ceiling.
 func runActivityStopReady(cmd *cobra.Command, store common.OpenStore, tenant, environment, cloudContextName string, jsonOutput bool) error {
 	status, err := resolveActivityStatus(store, tenant, environment)
 	if err != nil {
@@ -153,14 +138,10 @@ func runActivityStopReady(cmd *cobra.Command, store common.OpenStore, tenant, en
 	return stopReadyExitForAction(status, result)
 }
 
-// emitStopReadyJSON serializes the stop-ready decision to stdout in
-// the structured shape consumed by the in-pod monitor's heartbeat
-// log line. On Fire the payload carries the just-cleared pending
-// state under `pendingState` so the entrypoint script can pipe it
-// straight into `record-stop --state-stdin`; the on-disk pending
-// file is gone by this point (Fire clears it for crash safety) so
-// this is the only way the audit record can recover the markers,
-// reason, grace, and policy snapshot it was armed with.
+// emitStopReadyJSON writes the stop-ready decision for the in-pod
+// monitor's heartbeat log. On Fire the pending file is already gone
+// (Fire clears it for crash safety), so this payload is the only way
+// record-stop can recover the pending state for the audit row.
 func emitStopReadyJSON(stdout io.Writer, status common.EnvironmentIdleStatus, result common.MaybeArmOrFireIdleStopResult) error {
 	payload := stopReadyJSON{
 		StopEligible:     status.StopEligible,
@@ -181,11 +162,6 @@ func emitStopReadyJSON(stdout io.Writer, status common.EnvironmentIdleStatus, re
 	return encoder.Encode(payload)
 }
 
-// stopReadyExitForAction maps the shared decision action to the
-// exit-code-bearing error the bash monitor loop checks. Only Fire
-// returns nil — everything else exits non-zero with a message
-// identifying which grace-state branch was taken so an operator
-// reading idle-monitor.log can tell at a glance.
 func stopReadyExitForAction(status common.EnvironmentIdleStatus, result common.MaybeArmOrFireIdleStopResult) error {
 	switch result.Action {
 	case common.IdleStopActionFire:
@@ -202,12 +178,9 @@ func stopReadyExitForAction(status common.EnvironmentIdleStatus, result common.M
 	}
 }
 
-// stopReadyJSON is the structured stdout payload emitted when
-// --json is set. The desktop reads this through the MCP `idle` tool
-// (which surfaces the same fields on EnvironmentIdleStatus); the
-// CLI form is used by the in-pod entrypoint script for monitor.log
-// and (on Fire) is piped straight into `record-stop --state-stdin`
-// so the on-disk audit row preserves the per-marker breakdown.
+// stopReadyJSON is the --json wire contract: the in-pod entrypoint
+// script logs it and, on Fire, pipes it into record-stop --state-stdin
+// so the audit row keeps the per-marker breakdown.
 type stopReadyJSON struct {
 	StopEligible     bool                           `json:"stopEligible"`
 	BlockedReason    string                         `json:"blockedReason,omitempty"`
@@ -219,12 +192,10 @@ type stopReadyJSON struct {
 	PendingState     *common.EnvironmentStopPending `json:"pendingState,omitempty"`
 }
 
-// newActivityCancelStopPendingCmd removes the stop-pending.json file
-// for the named env, dismissing the grace-period warning. Exposed
-// for the desktop's Cancel button (called through the MCP
-// `cancelStopPending` tool, which shells out to this command) and
-// for operator troubleshooting from a remote shell. Idempotent: a
-// missing file is not an error.
+// newActivityCancelStopPendingCmd backs the desktop's Cancel button
+// (via the cancelStopPending MCP tool, which shells out here) and
+// manual operator recovery. Idempotent: a missing pending file is not
+// an error.
 func newActivityCancelStopPendingCmd() *cobra.Command {
 	var tenant string
 	var environment string
@@ -244,25 +215,11 @@ func newActivityCancelStopPendingCmd() *cobra.Command {
 	return cmd
 }
 
-// newActivityRecordStopCmd appends a stop entry to stop-history.json
-// for the named env. Called by the in-pod monitor's entrypoint.sh
-// after `stop_cloud_host` succeeds (--source pod-monitor, piped
-// the stop-ready JSON via --state-stdin) and by the desktop's
-// manual Stop button via the idle_stop_record MCP tool (--source
-// host-manual). The source flag is what distinguishes the two on
-// the History tab.
-//
-// Pending-state recovery falls back in three layers so a History
-// row always has the richest data available:
-//
-//  1. --state-stdin parses a stop-ready --json blob piped on stdin.
-//     This is the in-pod monitor's path: stop-ready's Fire branch
-//     clears the on-disk pending file before record-stop runs, so
-//     stdin is the only way to recover markers/policy/grace.
-//  2. Otherwise, if stop-pending.json still exists on disk (the
-//     manual-stop-during-armed-grace case), use it.
-//  3. Otherwise (manual stop with no grace ever armed) the row
-//     carries just the reason and source.
+// newActivityRecordStopCmd appends a stop entry to the env's audit
+// history. The in-pod monitor calls it after stopping the host
+// (--source pod-monitor); the desktop's manual Stop button calls it
+// via the idle_stop_record MCP tool (--source host-manual). The
+// source flag distinguishes the two on the History tab.
 func newActivityRecordStopCmd() *cobra.Command {
 	var tenant string
 	var environment string
@@ -307,11 +264,10 @@ func runActivityRecordStop(cmd *cobra.Command, tenant, environment, reason, clou
 	return common.ClearEnvironmentStopPending(tenant, environment)
 }
 
-// loadPendingForRecord recovers the pending stop entry from stdin
-// (preferred — survives the Fire branch clearing the on-disk file)
-// or from the on-disk pending file as a fallback. Returns ok=false
-// with no error when neither source is available, which is the
-// expected case for a manual stop without prior grace.
+// loadPendingForRecord prefers stdin over the on-disk pending file
+// because the Fire branch clears that file before record-stop runs.
+// ok=false with no error is the expected case for a manual stop with
+// no prior grace, not a failure.
 func loadPendingForRecord(stdin io.Reader, stateStdin bool, tenant, environment string) (common.EnvironmentStopPending, bool, error) {
 	if stateStdin {
 		body, err := io.ReadAll(stdin)
@@ -337,10 +293,6 @@ func loadPendingForRecord(stdin io.Reader, stateStdin bool, tenant, environment 
 	return pending, ok, nil
 }
 
-// buildStopHistoryEntry assembles the entry from the optional
-// pending state and the flag-supplied overrides. Kept pure so the
-// CLI command can stay a thin Cobra adapter and integration
-// goldens can lock the resulting on-disk shape.
 func buildStopHistoryEntry(now time.Time, source, reason, cloudContextName string, pending common.EnvironmentStopPending, havePending bool) common.EnvironmentStopHistoryEntry {
 	entry := common.EnvironmentStopHistoryEntry{
 		StoppedAt:        now,
@@ -371,10 +323,9 @@ func buildStopHistoryEntry(now time.Time, source, reason, cloudContextName strin
 	return entry
 }
 
-// normalizeStopHistorySource accepts the two stable string values
-// (pod-monitor / host-manual) plus the empty fallback. Any other
-// value is silently coerced to empty so old runtime images writing
-// without a source flag do not crash the audit append.
+// normalizeStopHistorySource coerces any unrecognized value to empty
+// so old runtime images that omit --source do not break the audit
+// append.
 func normalizeStopHistorySource(source string) string {
 	source = strings.TrimSpace(source)
 	switch source {
@@ -385,9 +336,6 @@ func normalizeStopHistorySource(source string) string {
 	}
 }
 
-// secondsIdleForMarker reports how long marker has been idle as of
-// the time the grace window was armed. Returns 0 when the marker's
-// LastActivity timestamp is unset (e.g., never recorded activity).
 func secondsIdleForMarker(marker common.EnvironmentIdleMarker, since time.Time) int64 {
 	if marker.LastActivity.IsZero() {
 		return 0

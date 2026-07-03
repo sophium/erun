@@ -61,9 +61,7 @@ export interface ActivityQueueEntry {
   lastUpdated: string;
   containers?: ActivityQueueContainerStatus[];
   error?: string;
-  // detail holds the captured command output behind a failed entry (the real
-  // helm/kubectl/docker error), surfaced as an expandable section and folded
-  // into the copyable failure report. Empty for non-failed entries.
+  // The underlying helm/kubectl/docker error behind a failed entry; empty for non-failed entries.
   detail?: string;
   source?: ActivityQueueSource;
   sessionId?: string;
@@ -85,9 +83,7 @@ export interface ActivityLockEvent {
 const selectActivityEntries = (state: RootState) => state.activity.entries;
 const selectLocksBySession = (state: RootState) => state.activity.locksBySession;
 
-// Locks live in Redux as a Record keyed by sessionId so reducers stay
-// serializable. Consumers expect a Map for the existing call sites, so we
-// memoize the Map adaptation.
+// Redux state must stay serializable, so locks are stored as a Record and adapted to the Map callers expect.
 const selectLocksMap = createSelector([selectLocksBySession], (locks) => {
   const map = new Map<number, ActivityLockEvent>();
   for (const [key, value] of Object.entries(locks)) {
@@ -180,11 +176,8 @@ export function useTerminalActivityLockState(): Map<number, ActivityLockEvent> {
   return useAppSelector(selectLocksMap);
 }
 
-// formatElapsed renders an ISO start timestamp as a humanized "1m12s"
-// string using the supplied "now" (so callers can drive consistent
-// ticks via state without React.useEffect each second). The output is
-// always 6 chars wide via space-padding so the right-aligned column
-// doesn't shift width on tick (was a flicker source).
+// formatElapsed humanizes elapsed time (e.g. "1m12s"), space-padded to a fixed
+// 6-char width so the right-aligned column doesn't flicker as it ticks.
 export function formatElapsed(startedAt: string, now: number = Date.now()): string {
   const start = Date.parse(startedAt);
   if (Number.isNaN(start)) {

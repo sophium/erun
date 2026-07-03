@@ -5,9 +5,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// newContributeCmd is the parent of the `erun contribute …` subcommands
-// that drive contribute-mode workflows (clone today; further operations
-// can hang off this group as the feature grows).
+// newContributeCmd groups the `erun contribute …` subcommands that drive
+// contribute-mode workflows.
 func newContributeCmd(runGit common.GitCommandRunnerFunc) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "contribute",

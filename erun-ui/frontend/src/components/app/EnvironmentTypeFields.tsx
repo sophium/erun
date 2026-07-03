@@ -9,13 +9,8 @@ import { SelectField } from './SelectField';
 
 type EnvironmentDialog = AppState['environmentDialog'];
 
-// EnvironmentTypeSelect drives the env's `type` (local-agent, remote-agent,
-// runtime) — a fundamental shape choice that controls whether the worktree
-// lives on the host, on a PVC inside the cluster, or doesn't exist at all
-// (deploy-only runtime pod). See erun-common/config.go:EnvironmentType.
-// The trigger shows the short noun so it fits the dialog width; the
-// per-type description renders as helper text below, preserving
-// recognition-over-recall without truncating the trigger label.
+// EnvironmentTypeSelect picks the env's fundamental shape: whether the worktree
+// lives on the host, on a cluster PVC, or not at all (deploy-only runtime pod).
 export function EnvironmentTypeSelect({
   dialog,
 }: {
@@ -57,12 +52,8 @@ function environmentTypeHelper(envType: EnvironmentDialog['envType']): string {
   }
 }
 
-// LocalRepoPathField captures the host path mounted into the agent pod for
-// `local-agent` envs. The CLI passes this through to `--project-root`,
-// which becomes EnvConfig.LocalRepoPath. Only meaningful for local-agent —
-// remote-agent uses a PVC and runtime has no worktree. The Browse button
-// opens a native directory picker (Wails OpenDirectoryDialog) so users do
-// not have to type absolute paths by hand.
+// LocalRepoPathField's path only applies to local-agent envs; remote-agent uses
+// a cluster PVC and runtime has no worktree.
 export function LocalRepoPathField({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
   return (

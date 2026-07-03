@@ -2,13 +2,9 @@ import { environmentTypeIsRemoteWorktree } from '@/app/environmentType';
 import type { AppState } from '@/app/state';
 import type { UIEnvironment, UISelection } from '@/types';
 
-// pendingForTenant returns the optimistic selection that is being
-// created right now, when the matching env is not yet in
-// state.tenants. The sidebar renders a placeholder row for it so
-// Nielsen #1 (visibility of system status) holds during the
-// ~1–2 min init runs. The placeholder disappears once
-// reloadStateAfterEnvironmentChange picks up the new env, or when
-// `environment-init-failed` reverts state.selected.
+// pendingForTenant returns the optimistic selection for an env being created but
+// not yet present in state, so the sidebar can render a placeholder row that
+// keeps system status visible during the ~1–2 min init run.
 export function pendingForTenant(
   tenants: AppState['tenants'],
   selected: AppState['selected'],
@@ -27,12 +23,8 @@ export function pendingForTenant(
   return selected;
 }
 
-// environmentIsLocal reports whether the env's worktree is mounted from this
-// machine, i.e. a local-agent env. It keys off the resolved environment type
-// (erun-common computes `type` via EnvConfig.ResolvedType() and lists it on
-// every env): an env is local exactly when its worktree is not remote. This
-// drives both the LOCAL badge and the `(local)` accessible-label suffix, which
-// share the flag.
+// environmentIsLocal reports whether the env runs against a worktree mounted from
+// this machine (a local-agent env).
 export function environmentIsLocal(environment: UIEnvironment | undefined): boolean {
   return !environmentTypeIsRemoteWorktree(environment?.type);
 }
@@ -58,14 +50,9 @@ export function deriveEnvironmentRow(
 ): EnvironmentRowDerived {
   const selected =
     selectedSelection?.tenant === tenantName && selectedSelection.environment === environmentName;
-  // busy reflects the per-env opening lifecycle AND any running activity
-  // command (deploy, init, sshd init, doctor, ...) queued against the
-  // env, AND the debounced "AI tab is producing output" signal from
-  // recordAIActivity in the Go terminal layer, AND the in-flight
-  // reconnect (review-pane redeploy) scoped to this env. Every source
-  // is independent of which env is currently selected, so concurrent
-  // work on multiple envs surfaces a spinner on every row that's
-  // actually doing something — not just the one in the active terminal.
+  // busy is scoped to this env and independent of which env is selected, so
+  // concurrent work on multiple envs shows a spinner on every row that's actually
+  // doing something — not just the one in the active terminal.
   const busy = isOpening || runningCommand !== '' || aiBusy || reconnecting;
   const busyLabel = environmentRowBusyLabel(
     tenantName,
@@ -142,16 +129,9 @@ export interface CloudAliasRowInputs {
   dashboardTenant: string;
 }
 
-// sidebarCloudAliases returns the cloud aliases the active tenant uses, one per
-// provider type, in a stable order (AWS first, then Cloudflare, then any other
-// type alphabetically). The active tenant is the dashboard tenant when one is
-// open, otherwise the selected env's tenant. Each provider type that the tenant
-// references through its cloudProviderAliases (or its primary alias)
-// contributes exactly one row, so an env wired to both an AWS account and a
-// Cloudflare token shows two independent login rows. The provider type is
-// resolved from the configured cloudProviders; an alias with no matching
-// provider config still surfaces with an empty provider so the operator can see
-// and recover from it.
+// sidebarCloudAliases returns the active tenant's cloud aliases, one per provider
+// type, so an env wired to both an AWS account and a Cloudflare token shows two
+// independent login rows.
 export function sidebarCloudAliases(input: CloudAliasRowInputs): string[] {
   const tenantName = input.dashboardTenant || (input.selected?.tenant ?? '');
   const tenant = input.tenants.find((candidate) => candidate.name === tenantName);
@@ -162,9 +142,8 @@ export function sidebarCloudAliases(input: CloudAliasRowInputs): string[] {
   return orderCloudAliasRows(aliasByType);
 }
 
-// tenantCloudAliases collects the aliases a tenant references: its configured
-// list with the primary alias pulled to the front (so the primary's type wins
-// when two aliases share a type).
+// The primary alias goes first so its type wins when two aliases share a
+// provider type — dedup downstream keeps only the first alias per type.
 function tenantCloudAliases(tenant: AppState['tenants'][number]): string[] {
   const aliases = [...(tenant.cloudProviderAliases ?? [])];
   const primary = tenant.primaryCloudProviderAlias?.trim();
@@ -174,9 +153,6 @@ function tenantCloudAliases(tenant: AppState['tenants'][number]): string[] {
   return aliases;
 }
 
-// firstAliasPerProviderType keeps the first alias seen for each provider type,
-// so each type contributes exactly one row. The type is resolved from the
-// configured cloudProviders, falling back to the alias's "@type" suffix.
 function firstAliasPerProviderType(
   aliases: string[],
   cloudProviders: AppState['cloudProviders'],
@@ -198,9 +174,7 @@ function firstAliasPerProviderType(
   return aliasByType;
 }
 
-// cloudProviderTypeFromAlias mirrors erun-common's fallback: the provider type
-// is the suffix after the last "@", defaulting to AWS for legacy / unparseable
-// aliases.
+// Mirrors erun-common's alias-type fallback; keep the two in sync.
 function cloudProviderTypeFromAlias(alias: string): string {
   const at = alias.lastIndexOf('@');
   if (at <= 0 || at === alias.length - 1) {

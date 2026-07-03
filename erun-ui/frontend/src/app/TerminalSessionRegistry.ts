@@ -12,13 +12,10 @@ import {
 import { store } from './store';
 import { selectionKey } from './versionSuggestions';
 
-// TerminalSessionRegistry is a thin facade. Per-session *metadata* (which
-// sessions are open/sshd/doctor/cloud-init, exit reasons/outputs) lives in
-// the sessions slice — the methods below read/write through the store. Only
-// the raw output buffers
-// (Uint8Array[]) and the display-filtered TerminalWriteData[] arrays still
-// live on this instance, as Maps: they are large, churn frequently, and
-// were excluded from Redux deliberately for perf.
+// The output buffers stay on this instance as Maps rather than in the Redux
+// sessions slice on purpose: they are large and churn on every terminal
+// write, so keeping them in the store would be a perf sink. All other
+// per-session metadata lives in the slice.
 export class TerminalSessionRegistry {
   private readonly sessionBuffers = new Map<number, Uint8Array[]>();
   private readonly sessionDisplayBuffers = new Map<number, TerminalWriteData[]>();

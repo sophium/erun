@@ -26,17 +26,13 @@ const (
 
 // TerraformConfirmFunc gates a mutating operation (apply/destroy) after the plan
 // is produced and before it is applied. The operator confirms by restating the
-// environment name — the guard against applying to the wrong env. The CLI
-// prompts interactively (or reads --confirm-environment); MCP supplies the value
-// explicitly. Returning an error aborts before apply. It is never called for a
-// read-only plan or under dry-run.
+// environment name — the guard against applying to the wrong env. It is never
+// called for a read-only plan or under dry-run.
 type TerraformConfirmFunc func(ctx Context, environment string) error
 
 // TerraformParams are the inputs to running Terraform against a platform's
-// per-env root, terraform-<tenant>/<environment>/. ProjectRoot locates the
-// terraform tree; an empty Tenant/Environment resolves the configured default
-// scope. ExtraArgs are passed through to `terraform plan` (the "$@" of the
-// per-env apply script this replaces).
+// per-env root. An empty Tenant/Environment resolves the configured default
+// scope.
 type TerraformParams struct {
 	Tenant      string
 	Environment string
@@ -45,8 +41,7 @@ type TerraformParams struct {
 	ExtraArgs   []string
 }
 
-// TerraformResult is the resolved Terraform plan: the per-env root it runs in,
-// the var file it found, and the ordered terraform argv it would execute.
+// TerraformResult is the resolved Terraform plan a run would execute.
 type TerraformResult struct {
 	Tenant               string     `json:"tenant"`
 	Environment          string     `json:"environment"`
@@ -58,9 +53,8 @@ type TerraformResult struct {
 	RequiresConfirmation bool       `json:"requiresConfirmation"`
 }
 
-// terraformPlanFile is the saved plan apply/destroy produce then apply, so the
-// applied changes are exactly the reviewed plan (matching the per-env apply
-// script's `plan -out apply.tfplan` / `apply apply.tfplan`).
+// terraformPlanFile holds the plan apply/destroy write and then apply, so the
+// applied changes are exactly the reviewed ones.
 const terraformPlanFile = "apply.tfplan"
 
 type terraformStep struct {
@@ -69,12 +63,8 @@ type terraformStep struct {
 }
 
 // RunTerraform resolves and (unless dry-run) runs Terraform against a platform's
-// per-env root: it resolves terraform-<tenant>/<environment>/ from the current
-// scope, picks up the symlinked common.tf, and applies the env's own main.tf
-// with its <environment>.tfvars. apply does init -> fmt -recursive .. -> plan
-// -out -> confirm -> apply; destroy does init -> plan -destroy -out -> confirm
-// -> apply; plan is read-only (init -> plan). Every command and decision is
-// traced before execution so a dry-run is a complete, side-effect-free plan.
+// per-env root. Every command and decision is traced before execution, so a
+// dry-run is a complete, side-effect-free plan of what a real run would do.
 func RunTerraform(ctx Context, params TerraformParams, store TerraformStore, confirm TerraformConfirmFunc) (TerraformResult, error) {
 	if store == nil {
 		store = ConfigStore{}
@@ -85,8 +75,6 @@ func RunTerraform(ctx Context, params TerraformParams, store TerraformStore, con
 		return TerraformResult{}, err
 	}
 
-	// Trace the resolved root + each terraform command before any execution so a
-	// dry-run is a faithful, side-effect-free plan of what a real run would do.
 	traceTerraformPlan(ctx, result, steps)
 	if ctx.DryRun {
 		return result, nil
@@ -97,9 +85,6 @@ func RunTerraform(ctx Context, params TerraformParams, store TerraformStore, con
 	return result, nil
 }
 
-// traceTerraformPlan emits the resolved root, the var-file decision, the
-// Cloudflare-token forwarding decision, and each terraform command (with the
-// confirm-gate note before apply) — the complete dry-run plan.
 func traceTerraformPlan(ctx Context, result TerraformResult, steps []terraformStep) {
 	ctx.Trace(fmt.Sprintf("terraform: %s in %s (env %s/%s, namespace %s)", result.Operation, result.Directory, result.Tenant, result.Environment, result.Namespace))
 	if result.VarFile != "" {
@@ -118,8 +103,6 @@ func traceTerraformPlan(ctx Context, result TerraformResult, steps []terraformSt
 	}
 }
 
-// executeTerraformSteps runs the resolved steps in order, calling the confirm
-// gate before any step that mutates (apply). Live-only.
 func executeTerraformSteps(ctx Context, result TerraformResult, steps []terraformStep, confirm TerraformConfirmFunc) error {
 	extraEnv := terraformExtraEnv()
 	for _, step := range steps {
@@ -138,9 +121,6 @@ func executeTerraformSteps(ctx Context, result TerraformResult, steps []terrafor
 	return nil
 }
 
-// resolveTerraformPlan validates inputs, resolves the scope and per-env root,
-// and builds the side-effect-free result plus the ordered steps. It does no
-// tracing or mutation, so RunTerraform keeps ownership of the dry-run trace.
 func resolveTerraformPlan(params TerraformParams, store TerraformStore) (TerraformResult, []terraformStep, error) {
 	op := params.Operation
 	if err := validateTerraformOperation(op); err != nil {
@@ -192,8 +172,6 @@ func validateTerraformOperation(op TerraformOperation) error {
 	}
 }
 
-// resolveTerraformDir locates the per-env root and the env's var file. The root
-// must exist (scaffolded by erun-blueprint-platform); the var file is optional.
 func resolveTerraformDir(projectRoot, tenant, environment string) (dir, varFile string, err error) {
 	dir = filepath.Join(projectRoot, "terraform-"+tenant, environment)
 	if info, statErr := os.Stat(dir); statErr != nil || !info.IsDir() {
@@ -206,8 +184,6 @@ func resolveTerraformDir(projectRoot, tenant, environment string) (dir, varFile 
 	return dir, varFile, nil
 }
 
-// resolveTerraformScope fills an empty tenant/environment from the configured
-// default scope, mirroring how deploy/list resolve a default target.
 func resolveTerraformScope(store TerraformStore, params TerraformParams) (tenant, environment string, err error) {
 	tenant = strings.TrimSpace(params.Tenant)
 	environment = strings.TrimSpace(params.Environment)
@@ -234,9 +210,6 @@ func resolveTerraformScope(store TerraformStore, params TerraformParams) (tenant
 	return tenant, environment, nil
 }
 
-// buildTerraformSteps assembles the ordered terraform argv for the operation.
-// apply/destroy save a plan and then apply that exact plan (so the applied
-// changes are the reviewed ones); the apply step carries the confirm gate.
 func buildTerraformSteps(op TerraformOperation, varFile string, extraArgs []string) []terraformStep {
 	initStep := terraformStep{args: []string{"init", "-input=false"}}
 	switch op {
@@ -279,11 +252,9 @@ func cloudflareTokenPresent() bool {
 	return strings.TrimSpace(os.Getenv("CLOUDFLARE_API_TOKEN")) != ""
 }
 
-// terraformExtraEnv injects the Cloudflare token the edge module's cert-manager
-// DNS-01 solver needs as TF_VAR_cloudflare_api_token, sourced from the env's
-// CLOUDFLARE_API_TOKEN (set by a Cloudflare alias). Empty when no token is
-// present, so a plan that doesn't need it still runs. The token never appears in
-// argv (and so never in the trace) — it rides in the environment.
+// terraformExtraEnv supplies the Cloudflare API token the edge module's
+// cert-manager DNS-01 solver needs. It rides in the environment, never in argv,
+// so the token never lands in the trace.
 func terraformExtraEnv() []string {
 	token := strings.TrimSpace(os.Getenv("CLOUDFLARE_API_TOKEN"))
 	if token == "" {
@@ -292,8 +263,6 @@ func terraformExtraEnv() []string {
 	return []string{"TF_VAR_cloudflare_api_token=" + token}
 }
 
-// execTerraformStep runs one terraform command in the per-env root. Live-only:
-// RunTerraform short-circuits before calling it under dry-run.
 func execTerraformStep(ctx Context, dir string, extraEnv, args []string) error {
 	cmd := Command("terraform", args...)
 	cmd.Dir = dir

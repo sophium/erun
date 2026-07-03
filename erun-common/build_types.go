@@ -49,11 +49,10 @@ type DockerImageReference struct {
 	Registry    string
 	ImageName   string
 	Version     string
-	// BaseVersion is the stable semver without any snapshot suffix (e.g. "1.0.51").
-	// Set only for local snapshot builds where Version differs from BaseVersion.
-	// Used as the ERUN_VERSION build arg and as an additional local tag so that
-	// downstream images (FROM …:${ERUN_VERSION}) can resolve from the local Docker
-	// cache instead of pulling from the registry.
+	// BaseVersion is the stable semver without the snapshot suffix, set only for
+	// local snapshot builds where it differs from Version. It exists so downstream
+	// images (FROM …:${ERUN_VERSION}) resolve from the local Docker cache instead
+	// of the registry.
 	BaseVersion         string
 	Tag                 string
 	VersionFilePath     string
@@ -67,29 +66,22 @@ type DockerBuildSpec struct {
 	Platforms      []string
 	Push           bool
 	Verbosity      int
-	// Fingerprint is a content hash over the Dockerfile and every COPY source
-	// resolved against ContextDir, honoring .dockerignore. Set during incremental
-	// resolution. After a successful build, the image is locally tagged with
-	// fingerprintTag(...) so subsequent builds with the same Fingerprint can
-	// skip the build and promote (re-tag + push) instead.
+	// Fingerprint is a content hash of the Dockerfile and its COPY sources. A
+	// matching fingerprint lets a later build skip rebuilding and promote the
+	// existing image (re-tag + push) instead.
 	Fingerprint string
-	// Promote indicates the build should be skipped because a local image already
-	// exists at fingerprintTag(...) for this Fingerprint. Instead of running
-	// docker build, the executor re-tags the existing fp-tagged image as the
-	// target tag (and per-platform tags + manifest assembly for multi-platform)
-	// and pushes it.
+	// Promote indicates a local image already matches this Fingerprint, so the
+	// build is skipped and the existing image is re-tagged and pushed instead of
+	// rebuilt.
 	Promote bool
-	// MissingFingerprintPlatforms lists platforms whose fp-tag was absent from
-	// the local Docker store when applyIncrementalPromotion ran. Empty when
-	// all expected fp-tags were present or when incremental did not run.
-	// Used by traceIncrementalDecision to explain why a build is rebuilding.
-	// For non-multi-platform builds the slot is the empty string.
+	// MissingFingerprintPlatforms lists platforms that lacked a matching
+	// fingerprint tag, so the trace can explain why a build is rebuilding rather
+	// than promoting. For non-multi-platform builds the slot is the empty string.
 	MissingFingerprintPlatforms []string
-	// CascadeRebuildFromTag is set when this build's own fingerprint matched
-	// (its fp-tags were present) but a local FROM dependency is rebuilding,
-	// forcing this build to rebuild too. The value is the dependency's image
-	// tag. Captured so the trace can say "rebuilding because <dep> is
-	// rebuilding" instead of the misleading "fingerprint image is missing".
+	// CascadeRebuildFromTag holds a local FROM dependency's image tag when this
+	// build must rebuild only because that dependency is rebuilding, even though
+	// its own fingerprint matched. It lets the trace name the real cause instead
+	// of the misleading "fingerprint image is missing".
 	CascadeRebuildFromTag string
 }
 
@@ -126,21 +118,15 @@ type DockerCommandTarget struct {
 	Release         bool
 	Force           bool
 	Deploy          bool
-	// Build is the `erun push --build` operator shortcut: build the current
-	// source first (minting a snapshot version), then push that version. It is
-	// orchestration policy that lives in the CLI caller, not in any primitive —
-	// the shared resolvers never read it. See root AGENTS.md § "Command
+	// Build is the `erun push --build` operator shortcut: build the current source
+	// first, then push that version. It is orchestration policy owned by the CLI
+	// caller — the shared resolvers never read it. See root AGENTS.md § "Command
 	// primitives vs orchestration".
 	Build bool
-	// NoIncremental disables the default fingerprint-based incremental build
-	// caching. When false (the default), each docker build context is fingerprinted
-	// from its Dockerfile and COPY sources; if a local image with the matching
-	// fingerprint tag already exists, the build is skipped and the existing image
-	// is re-tagged and pushed instead of being rebuilt.
+	// NoIncremental disables the default fingerprint-based incremental build cache.
 	NoIncremental bool
-	// DisableBuildScriptDiscovery suppresses project build.sh discovery (root
-	// and nested) for this build, so builds resolve docker/release contexts
-	// directly. Populated from the env's EnvConfig.DisableBuildScript.
+	// DisableBuildScriptDiscovery skips project build.sh discovery so builds
+	// resolve docker/release contexts directly.
 	DisableBuildScriptDiscovery bool
 }
 

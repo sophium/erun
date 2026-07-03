@@ -7,21 +7,12 @@ import { confirmReconnect, dismissReconnect } from '@/app/reviewThunks';
 import { setSelected } from '@/app/slices/selectionSlice';
 import { Button } from '@/components/ui/button';
 
-// Pixel threshold (in scrollTop terms) for "user is at the bottom of the
-// scroll buffer". A small fudge factor avoids us refusing to auto-scroll when
-// the layout settles one or two pixels short of perfect alignment.
+// Fudge factor so a layout that settles a pixel or two short of perfect
+// alignment still counts as "at the bottom" for auto-scroll.
 const STICK_TO_BOTTOM_PX = 16;
 
-// ReconnectStatusPanel renders the in-flight ("running") and failure ("error")
-// states of the reconnect flow as a non-modal floating panel anchored to the
-// bottom-right of the app. It is scoped to the env recorded in
-// state.review.reconnect.{tenant,environment} so other environments stay
-// fully interactive while one is being reconnected.
-//
-// The line buffer renders as a scrollable monospace list; long redeploy
-// output (e.g. docker build paths) wraps via [overflow-wrap:anywhere], and
-// the panel auto-scrolls to the bottom on each new line unless the user has
-// scrolled up to inspect history.
+// Non-modal panel for the reconnect flow, scoped to a single env so the
+// operator keeps full use of every other environment while one reconnects.
 export function ReconnectStatusPanel(): React.ReactElement | null {
   const status = useAppSelector((state) => state.review.reconnect.status);
   const tenant = useAppSelector((state) => state.review.reconnect.tenant);
@@ -104,9 +95,8 @@ function ReconnectStatusHeader({
 
 function ReconnectStatusLines({ lines }: { lines: readonly string[] }): React.ReactElement {
   const scrollerRef = React.useRef<HTMLDivElement>(null);
-  // Tracks whether the user has scrolled away from the bottom. We only
-  // auto-scroll on new output while the user is at the bottom — otherwise
-  // the panel would yank them back every time the redeploy emits a line.
+  // Don't auto-scroll while the user has scrolled up to read history — new
+  // output would otherwise yank them back to the bottom.
   const stickToBottomRef = React.useRef(true);
 
   const handleScroll = React.useCallback(() => {
@@ -130,9 +120,8 @@ function ReconnectStatusLines({ lines }: { lines: readonly string[] }): React.Re
     <div
       ref={scrollerRef}
       onScroll={handleScroll}
-      // max-h gives roughly 6 lines of monospace 12px text; min-h reserves
-      // space for at least three lines so the panel never collapses to a
-      // single-line strip when the buffer is short.
+      // min-h keeps the panel from collapsing to a single-line strip when
+      // the buffer is short.
       className="min-h-[3.75rem] max-h-40 overflow-y-auto bg-muted/40 px-3 py-2 font-mono text-[12px] leading-[1.4]"
     >
       {lines.length === 0 ? (

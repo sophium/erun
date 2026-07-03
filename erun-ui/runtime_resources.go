@@ -87,12 +87,6 @@ func runtimeResourceStatusFromKubernetes(input uiRuntimeResourceInput, nodes kub
 	return result
 }
 
-// accumulateRuntimePodUsage walks the non-terminal scheduled pods and sums each
-// node's container resource limits, splitting out the target runtime's own
-// containers into targetUsage and reporting the node the target landed on.
-// Extracted from runtimeResourceStatusFromKubernetes so that function stays
-// under the cyclomatic limit; the per-container target/non-target split is
-// unchanged.
 func accumulateRuntimePodUsage(pods kubernetesPodList, target runtimeResourceTargetSpec) (usage, targetUsage map[string]runtimeResourceTotals, targetNode string) {
 	usage = make(map[string]runtimeResourceTotals)
 	targetUsage = make(map[string]runtimeResourceTotals)
@@ -118,9 +112,6 @@ func accumulateRuntimePodUsage(pods kubernetesPodList, target runtimeResourceTar
 	return usage, targetUsage, targetNode
 }
 
-// addContainerLimits adds a container's parseable CPU and memory limits to the
-// running totals, ignoring limits that fail to parse (the same tolerance the
-// inline accumulation used).
 func addContainerLimits(totals runtimeResourceTotals, container kubernetesContainer) runtimeResourceTotals {
 	if cpu, err := eruncommon.ParseKubernetesCPUToMilli(container.Resources.Limits.CPU); err == nil {
 		totals.CPUMilli += cpu
@@ -152,14 +143,10 @@ func runtimeResourceTarget(input uiRuntimeResourceInput) runtimeResourceTargetSp
 	}
 	return runtimeResourceTargetSpec{
 		namespace: eruncommon.KubernetesNamespaceName(input.Tenant, input.Environment),
-		// Match the runtime container by its name, which is the component name
-		// (DevopsComponentName, "erun-devops") for every tenant — only the
-		// Deployment/release is named <tenant>-devops. Using the release name
-		// here missed the env's own pod for every non-erun tenant, so its
-		// allocation counted against the node and the capacity check reported a
-		// false "no node has capacity" error that disabled Save in the manage
-		// dialog. It only worked for the erun tenant, where the release name
-		// happens to equal the container name.
+		// The runtime container is named for the component, identical across
+		// tenants; only the Deployment/release is <tenant>-devops. Match on the
+		// container name, not the release name, or the capacity check misses the
+		// env's own pod for every non-erun tenant.
 		container: eruncommon.DevopsComponentName,
 	}
 }

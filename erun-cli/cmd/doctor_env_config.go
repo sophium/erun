@@ -8,12 +8,8 @@ import (
 	common "github.com/sophium/erun/erun-common"
 )
 
-// runEnvConfigRestoreFromArgs restores the target environment's config.yaml
-// from a dated backup (or an absolute path). It runs before resolveOpen so a
-// config that was changed or corrupted — for example a type that resolved to
-// the wrong value and was persisted — can be recovered before the rest of
-// doctor tries to load it. Returns true when a restore (or its --dry-run
-// trace) was performed.
+// runEnvConfigRestoreFromArgs recovers a changed or corrupted env config before
+// the rest of doctor tries to load it.
 func runEnvConfigRestoreFromArgs(ctx common.Context, args []string, selector string) (bool, error) {
 	params, err := common.OpenParamsForArgs(args)
 	if err != nil {
@@ -37,9 +33,6 @@ func runEnvConfigRestoreFromArgs(ctx common.Context, args []string, selector str
 	return runEnvConfigRestore(ctx, tenant, environment, backup)
 }
 
-// availableEnvBackupDates returns the env's dated backups as a newest-first
-// comma list for the no-match error, so the user can pick a real date
-// (recognition over recall). Empty when none exist or listing fails.
 func availableEnvBackupDates(tenant, environment string) string {
 	backups, err := common.ListEnvConfigBackups(tenant, environment)
 	if err != nil || len(backups) == 0 {
@@ -52,9 +45,6 @@ func availableEnvBackupDates(tenant, environment string) string {
 	return strings.Join(dates, ", ")
 }
 
-// resolveEnvConfigBackupSelector maps a user-supplied selector to a backup:
-// an absolute/relative path is taken verbatim; otherwise it must be a
-// YYYY-MM-DD stamp resolved against the env's dated backups.
 func resolveEnvConfigBackupSelector(tenant, environment, selector string) (common.ConfigBackup, bool, error) {
 	if strings.ContainsAny(selector, "/\\") {
 		return common.ConfigBackup{Path: selector}, true, nil
@@ -65,9 +55,6 @@ func resolveEnvConfigBackupSelector(tenant, environment, selector string) (commo
 	return common.FindEnvConfigBackupByDate(tenant, environment, selector)
 }
 
-// runEnvConfigRestore traces the copy for the --dry-run contract and, when not
-// dry-running, restores the env config (validating it deserializes into an
-// EnvConfig before overwriting the live file).
 func runEnvConfigRestore(ctx common.Context, tenant, environment string, backup common.ConfigBackup) (bool, error) {
 	livePath, err := common.EnvConfigPath(tenant, environment)
 	if err != nil {

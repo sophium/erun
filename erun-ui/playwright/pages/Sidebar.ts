@@ -1,12 +1,5 @@
 import type { Locator, Page } from '@playwright/test';
 
-// Sidebar POM. The sidebar is rendered as <aside> (implicit ARIA
-// complementary) and exposes:
-//  - tenant rows whose toggle button is labelled
-//    "Expand <tenant>"  when collapsed
-//    "Collapse <tenant>" when expanded
-//  - environment rows reachable through the per-env manage button labelled
-//    "Edit <tenant> / <env> settings".
 export class Sidebar {
   constructor(public readonly page: Page) {}
 
@@ -18,13 +11,10 @@ export class Sidebar {
     await this.page.getByRole('button', { name: 'Open ERun settings' }).click();
   }
 
-  // openUpgradeAll clicks the "Upgrade all environments" header button, which
-  // resolves the cross-env upgrade plan and opens the preview dialog.
   async openUpgradeAll(): Promise<void> {
     await this.page.getByRole('button', { name: 'Upgrade all environments' }).click();
   }
 
-  // upgradeAllDialog targets the Upgrade-all preview dialog.
   upgradeAllDialog(): Locator {
     return this.page.getByRole('dialog', { name: 'Upgrade all environments' });
   }
@@ -63,9 +53,7 @@ export class Sidebar {
   }
 
   async openEnvironment(tenant: string, env: string): Promise<void> {
-    // The env-row button is labelled with "<tenant> / <env>" (plus a
-    // "(local)" suffix for local envs). Match the aria-label prefix so
-    // either the plain or local-suffixed variant resolves.
+    // Prefix-match the label: local envs append a "(local)" suffix, so an exact match would miss them.
     await this.page.locator(`button[aria-label^="${tenant} / ${env}"]`).first().click();
   }
 
@@ -73,25 +61,18 @@ export class Sidebar {
     await this.environmentRow(tenant, env).click();
   }
 
-  // openOutputs reveals the row's hover actions and clicks the Outputs button,
-  // which opens the Agent outputs dialog for the env. The button stops
-  // propagation, so this never opens the env itself.
+  // The Outputs button stops propagation, so opening outputs never also opens the env itself.
   async openOutputs(tenant: string, env: string): Promise<void> {
     await this.hoverEnvironmentRow(tenant, env);
     await this.page.getByRole('button', { name: `Outputs for ${tenant} / ${env}` }).click();
   }
 
-  // openManageDialogViaKeyboard activates the row's edit button with the
-  // keyboard instead of the mouse. The button is pointer-events-none until the
-  // row is hovered/selected/focused; focusing flips group-focus-within so it
-  // becomes interactive, and Enter fires the handler without a hover (a hover
-  // opens the row's IconTooltip, whose popper intercepts a mouse click). Works
-  // regardless of whether the env is the effective selection.
+  // Drive the edit button by keyboard, not mouse: a hover opens the row's
+  // IconTooltip whose popper would intercept the click. Focusing the row makes
+  // the pointer-events-none button interactive; Enter fires it without a hover.
   //
-  // Retries: when the backend boot-reattaches a previously open env, the
-  // restored terminal steals focus asynchronously and can swallow the Enter
-  // between our focus and the keydown. Re-press until the manage dialog
-  // (identified by its General tab, mirroring ManageDialog.locator) opens.
+  // Retry the Enter: a boot-reattached env restores its terminal, which steals
+  // focus asynchronously and can swallow the keydown before the dialog opens.
   async openManageDialogViaKeyboard(tenant: string, env: string): Promise<void> {
     const dialog = this.page
       .getByRole('dialog')
@@ -110,44 +91,31 @@ export class Sidebar {
     throw new Error(`manage dialog did not open for ${tenant} / ${env} via keyboard`);
   }
 
-  // envRowButton targets the clickable env-row button (the one whose
-  // aria-label is "<tenant> / <env>" plus an optional "(local)" suffix).
-  // Distinct from environmentRow(), which targets the row's edit button.
+  // Targets the clickable env-row button, not the edit button environmentRow() returns.
   envRowButton(tenant: string, env: string): Locator {
     return this.page.locator(`button[aria-label^="${tenant} / ${env}"]`).first();
   }
 
-  // hoverEnvironmentRow moves the pointer over the env row, which opens the
-  // env hover card (issue #437). Hovering the inner row button enters the row
-  // container that carries the open handler.
   async hoverEnvironmentRow(tenant: string, env: string): Promise<void> {
     await this.envRowButton(tenant, env).hover();
   }
 
-  // envHoverCard targets the hover card popover for an env row. Its
-  // aria-label is "<tenant> / <env> details".
   envHoverCard(tenant: string, env: string): Locator {
     return this.page.getByRole('dialog', { name: `${tenant} / ${env} details` });
   }
 
-  // envOpenDot targets the env row's open indicator (issue #470): a button
-  // whose data-env-state attribute carries the env's real condition
-  // (running / stopped / failed) and whose click closes the env's tabs. The
-  // row container is the row button's parent, so the lookup stays scoped to
-  // one env even when several are open.
+  // Scoped through the row button's parent so it resolves one env's dot even
+  // when several are open; clicking the dot closes that env's tabs.
   envOpenDot(tenant: string, env: string): Locator {
     return this.envRowButton(tenant, env).locator('..').getByTestId('env-open-dot');
   }
 
-  // hasLocalBadge reports whether the env row renders the LOCAL pill
-  // (the <span aria-label="Local environment"> inside the row button).
   async hasLocalBadge(tenant: string, env: string): Promise<boolean> {
     const badge = this.envRowButton(tenant, env).locator('[aria-label="Local environment"]');
     return (await badge.count()) > 0;
   }
 
-  // rowHasLocalSuffix reports whether the env row's accessible label carries
-  // the "(local)" suffix. Both this and the LOCAL pill are driven by the same
+  // The "(local)" label suffix and the LOCAL pill are both driven by the same
   // isLocal flag, so they must always agree.
   async rowHasLocalSuffix(tenant: string, env: string): Promise<boolean> {
     const label = (await this.envRowButton(tenant, env).getAttribute('aria-label')) ?? '';
@@ -155,22 +123,15 @@ export class Sidebar {
   }
 
   cloudAliasButton(): Locator {
-    // The bottom-of-sidebar control is a popover trigger labelled with the
-    // user's cloud identity; it's the last button in the aside.
+    // Matched by position: its label is the user's variable cloud identity, so there is no stable name to query.
     return this.locator().getByRole('button').last();
   }
 
-  // --- Per-provider-type cloud-alias rows (issue #630) ---
-
-  // cloudAliasRowTrigger targets one bottom-of-sidebar cloud-status row by its
-  // alias. Each provider type the active tenant uses gets its own row, labelled
-  // "<alias> cloud status".
   cloudAliasRowTrigger(alias: string): Locator {
     return this.locator().getByRole('button', { name: `${alias} cloud status` });
   }
 
-  // cloudAliasRowCount reports how many cloud-status rows render — one per
-  // provider type the active tenant references.
+  // One cloud-status row renders per provider type the active tenant references.
   async cloudAliasRowCount(): Promise<number> {
     return this.locator()
       .getByRole('button', { name: /cloud status$/ })
@@ -181,9 +142,7 @@ export class Sidebar {
     await this.cloudAliasRowTrigger(alias).click();
   }
 
-  // cloudAliasPopover targets the open popover for a cloud-alias row. The
-  // popover is portal'd to the document body, so it is queried at the page
-  // root. Scoping by the alias text inside it keeps the right one selected.
+  // The popover is portal'd to document.body, so query it at the page root, not inside the aside.
   cloudAliasPopover(): Locator {
     return this.page.locator('[data-radix-popper-content-wrapper]').first();
   }
@@ -193,8 +152,6 @@ export class Sidebar {
   }
 
   async tenants(): Promise<string[]> {
-    // The toggle button's aria-label is "Collapse <name>" or "Expand
-    // <name>"; strip the prefix to recover the tenant name in DOM order.
     const buttons = this.page.locator(
       'button[aria-label^="Collapse "], button[aria-label^="Expand "]',
     );

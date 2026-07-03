@@ -15,12 +15,6 @@ import { loadReviewDiff } from './reviewThunks';
 import type { AppThunk } from './store';
 import { requireController } from './thunkExtra';
 
-// layoutThunks own the user-facing layout commands (toggle panels, drag
-// resizers, double-click the titlebar to maximize). They use
-// requireController() because the resize handlers need live DOM rect refs
-// (terminalPane, reviewView) that the controller exposes and because every
-// resize must re-fit the xterm viewport.
-
 export const toggleSidebar = (): AppThunk => (dispatch, getState, extra) => {
   const controller = requireController(extra);
   toggleSidebarPanel(dispatch, getState, controller.layoutCallbacks());

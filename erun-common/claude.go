@@ -27,25 +27,17 @@ type EnvironmentClaudeConfig struct {
 	UseBedrock      *bool    `yaml:"usebedrock,omitempty" json:"useBedrock,omitempty"`
 	Models          []string `yaml:"models,omitempty" json:"models,omitempty"`
 	MaxOutputTokens *int     `yaml:"maxoutputtokens,omitempty" json:"maxOutputTokens,omitempty"`
-	// Effort is the per-env Claude Code session effort level (one of
-	// low|medium|high|xhigh|max|ultracode) applied when the desktop launches
-	// the env's AI tab: the first five as `claude --effort <level>`,
-	// ultracode as `--settings '{"ultracode":true}'` (it is not an --effort
-	// value — it enables xhigh effort plus standing workflow orchestration).
-	// Unset means the default (ultracode). The level only influences the
-	// AI-tab launch; this shared field exists so the value round-trips
-	// through the same env config the UI reads and writes.
+	// Effort is the per-env Claude Code session effort level, one of
+	// low|medium|high|xhigh|max|ultracode. ultracode is not an --effort value:
+	// it enables xhigh effort plus standing workflow orchestration. Unset means
+	// the default, ultracode.
 	Effort *string `yaml:"effort,omitempty" json:"effort,omitempty"`
-	// DefaultModel is the model the env's AI session starts on, while it is one
-	// of the env's available models; unset or no longer available falls back to
-	// the first available model rather than the agent's own default. Named
-	// DefaultModel to stay distinct from the chart's claude.model pod slot,
-	// which this field does not touch.
+	// DefaultModel is the model the env's AI session starts on when it is one of
+	// the env's available models; unset or no-longer-available falls back to the
+	// first available model, not the agent's own default. It does not touch the
+	// chart's claude.model pod slot.
 	DefaultModel *string `yaml:"defaultmodel,omitempty" json:"defaultModel,omitempty"`
-	// VerboseDebug launches the AI tab's Claude with `--verbose --debug` so
-	// Claude's own diagnostics stream into the tab (issue #477). A plain bool,
-	// not *bool: unlike UseMantle/UseBedrock it has no global-default/inherit
-	// semantics — absent means off with no information lost.
+	// VerboseDebug streams Claude's own verbose diagnostics into the AI tab.
 	VerboseDebug bool `yaml:"verbosedebug,omitempty" json:"verboseDebug,omitempty"`
 }
 

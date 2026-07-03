@@ -42,10 +42,8 @@ func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 				return err
 			}
 			deployTarget.Components = components
-			// Version is required: deploy installs a content identity by
-			// reference, it does not mint one. With no explicit --version,
-			// --current redeploys the env's persisted version; otherwise the
-			// operator has not said what to deploy.
+			// deploy consumes a version by reference and never mints one, so it
+			// must be told which to install.
 			if strings.TrimSpace(deployTarget.VersionOverride) == "" && !useCurrent {
 				return fmt.Errorf("deploy requires a version: pass --version <version> produced by `erun build`/`erun push`, or --current to redeploy the version this environment already runs")
 			}
@@ -56,11 +54,9 @@ func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 				deployTarget.Tenant, deployTarget.Environment, deployTarget.VersionOverride,
 				components, deployTarget.Force, useCurrent))
 			if err := runDeploy(ctx, store, saveEnvConfig, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployHelmChart, deployTarget); err != nil {
-				// Emit a structured, env-tagged terminal failure so any transport
-				// watching the trace stream (the desktop's activity queue / toolbar)
-				// registers a failed deploy even when it fails *before* rollout —
-				// e.g. spec resolution. Without this the desktop, which reacts only
-				// to `==> ...` lines, sees no signal and surfaces nothing (#713).
+				// Transports that react only to `==> ...` trace lines (the desktop
+				// activity queue) need one for a deploy that fails before rollout,
+				// or they surface nothing.
 				ctx.Trace(fmt.Sprintf("==> Deploy failed %s/%s: %s", deployTarget.Tenant, deployTarget.Environment, err.Error()))
 				return err
 			}
@@ -75,10 +71,6 @@ func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 	return cmd
 }
 
-// runDeploy resolves the deploy specs for the target and installs them, then
-// persists the runtime version. Kept as a named function so the RunE closure
-// stays thin (erun-cli/AGENTS.md) and every failure path funnels through one
-// return the caller tags with the structured `==> Deploy failed` trace.
 func runDeploy(ctx common.Context, store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, deployHelmChart common.HelmChartDeployerFunc, deployTarget common.DeployTarget) error {
 	deploySpecs, err := common.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
 	if err != nil {

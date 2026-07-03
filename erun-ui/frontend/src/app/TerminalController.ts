@@ -65,8 +65,7 @@ const REVIEW_DIFF_REFRESH_INTERVAL_MS = 5000;
 export class TerminalController {
   readonly sessions = new TerminalSessionRegistry();
   // Tracks the source session of each in-flight xterm write so terminal query
-  // replies route back to the asking session, not the currently-selected one
-  // (issue #347). See TerminalWriteSourceQueue and writeToTerminal().
+  // replies route back to the asking session, not the currently-selected one.
   private readonly writeSources = new TerminalWriteSourceQueue();
   private terminal: Terminal | null = null;
   private fitAddon: FitAddon | null = null;
@@ -97,12 +96,10 @@ export class TerminalController {
   private aiActivityOff: (() => void) | null = null;
   private envStatusOff: (() => void) | null = null;
   private pasteHandler: ((event: ClipboardEvent) => void) | null = null;
-  // Track DECTCEM (`?25`) and alt-screen state across the bytes
-  // written to xterm for the active session. When the active session
-  // ends in "main screen + cursor hidden" with no further output, we
-  // restore `?25h` so an unmatched hide leaked by `erun open`, helm,
-  // kubectl, or a remote-side spinner doesn't strand the prompt with
-  // no visible cursor. Alt-screen TUIs are exempt by design.
+  // When the active session ends in "main screen + cursor hidden" with no
+  // further output, restore the cursor so an unmatched hide leaked by
+  // `erun open`, helm, kubectl, or a remote-side spinner doesn't strand the
+  // prompt with no visible cursor. Alt-screen TUIs are exempt by design.
   private liveCursorState: CursorVisibilityState = { altScreen: false, cursorHidden: false };
   private cursorRestoreTimer = 0;
   private static readonly CURSOR_RESTORE_DELAY_MS = 250;
@@ -111,9 +108,6 @@ export class TerminalController {
     thunkExtra.controller = this;
   }
 
-  // Public ref accessors used by layoutThunks/reviewThunks. These point to the
-  // live DOM elements registered in mount(); their nullability matches the
-  // pre-mount state.
   get terminalPane(): HTMLElement | null {
     return this._terminalPane;
   }
@@ -126,12 +120,10 @@ export class TerminalController {
     return this._diffList;
   }
 
-  // setTreeContainer registers the changed-files tree's scroll container so the
-  // diff→tree scrollspy can keep the active node visible (#547). It is a
-  // callback ref, not part of mount(): the tree container is conditionally
-  // rendered (only while the Changed files section is open), so it mounts and
-  // unmounts independently of the one-time controller mount — passing null on
-  // unmount keeps the reference from going stale.
+  // A callback ref rather than part of mount(): the changed-files tree is only
+  // rendered while its section is open, so it mounts and unmounts independently
+  // of the one-time controller mount — passing null on unmount avoids a stale
+  // reference that would break the diff→tree scrollspy.
   setTreeContainer(element: HTMLDivElement | null): void {
     this.treeContainer = element;
   }
@@ -153,9 +145,6 @@ export class TerminalController {
     this.terminalRoot.dataset.terminalRows = String(this.terminal.rows);
   }
 
-  // subscribeEnvironmentLifecycleEvents wires the create/deploy lifecycle
-  // signals the backend emits from the activity trace handler: init success,
-  // init failure, and deploy success (the create→deploy→open gate, issue #644).
   private subscribeEnvironmentLifecycleEvents(): void {
     this.environmentInitializedOff = EventsOn(
       'environment-initialized',
@@ -209,10 +198,9 @@ export class TerminalController {
 
     this.terminalQueryResponseDisposables = registerTerminalQueryResponseHandlers(
       this.terminal,
-      // Address the reply to the session whose output xterm is parsing right
-      // now (writeSources head), falling back to the current selection when no
-      // write is in flight. Reading the live selection here would misroute the
-      // reply if the user switched sessions during a deferred parse (#347).
+      // Reply to the session whose output xterm is parsing right now, not the
+      // live selection: the user may have switched sessions during a deferred
+      // parse, which would misroute the reply.
       (data) =>
         SendSessionInput(this.writeSources.current(store.getState().terminal.sessionId), data),
       (error) => {
@@ -220,7 +208,7 @@ export class TerminalController {
       },
       // Suppress replies to queries re-parsed from a replayed display buffer:
       // the asking tool consumed the live reply long ago, so a second reply
-      // would land on the session's shell as typed input (#484).
+      // would land on the session's shell as typed input.
       () => this.writeSources.currentIsReplay(),
     );
     this.terminalDataDisposable = this.terminal.onData((data) => {
@@ -335,9 +323,6 @@ export class TerminalController {
     }, 0);
   }
 
-  // scheduleIdleStatusPoll holds the setTimeout cancellation handle for
-  // the recursive idle-status poll. The state-touching part lives in the
-  // refreshIdleStatus thunk; this method just arms the timer.
   scheduleIdleStatusPoll(delay = 1000): void {
     window.clearTimeout(this.idleStatusTimer);
     this.idleStatusTimer = window.setTimeout(() => {
@@ -374,10 +359,6 @@ export class TerminalController {
     }, TerminalController.CURSOR_RESTORE_DELAY_MS);
   }
 
-  // handleTerminalOutput stays on the controller because it does the
-  // imperative xterm write and appends to the registry's per-session
-  // buffer Maps (which are the perf-carveout that justifies the registry
-  // existing at all). State-side effects are dispatched as thunks.
   private handleTerminalOutput(payload: TerminalOutputPayload): void {
     const data = decodeBase64Bytes(payload.data);
     this.sessions.appendSessionBuffer(payload.sessionId, data);
@@ -393,12 +374,6 @@ export class TerminalController {
     this.scheduleCursorRestoreIfStuck();
   }
 
-  // writeToTerminal is the single seam for every xterm write. It tags the write
-  // with its source session via the write-source queue and hands xterm the
-  // matching completion callback, so terminal query replies fired while xterm
-  // parses this chunk route back to sessionId (issue #347). replay marks
-  // chunks re-rendered from the saved display buffer, whose stale queries must
-  // be consumed without replying (issue #484).
   private writeToTerminal(sessionId: number, data: TerminalWriteData, replay = false): void {
     const terminal = this.terminal;
     if (!terminal) {
@@ -470,14 +445,12 @@ export class TerminalController {
     }, 40);
   };
 
-  // flushTerminalResize fits the terminal on the next animation frame
-  // and resizes the PTY immediately, bypassing the 40 ms debounce that
-  // queueTerminalResize uses to coalesce drag/ResizeObserver bursts.
-  // One-shot layout toggles (review/sidebar/debug) call this so the
-  // shell sees the new cols before its next prompt redraw — the gap
-  // that caused issue #433 (review-open squashes the terminal and only
-  // partially un-squashes when closed because the PTY was still on the
-  // narrow cols when the next prompt was emitted).
+  // One-shot layout toggles (review/sidebar/debug) call this so the shell sees
+  // the new cols before its next prompt redraw, rather than waiting on the
+  // debounce queueTerminalResize uses to coalesce drag bursts. Otherwise an
+  // opened review squashes the terminal and only partially un-squashes on
+  // close, because the PTY was still on the narrow cols when the next prompt
+  // was emitted.
   flushTerminalResize = (): void => {
     window.clearTimeout(this.resizeTimer);
     this.resizeTimer = 0;
@@ -516,15 +489,13 @@ export class TerminalController {
       return;
     }
     store.dispatch(setSelectedDiffPath(path));
-    // Keep the now-active node visible in the changed-files tree (#547). Only
+    // Keep the now-active node visible in the changed-files tree. Only
     // the diff→tree direction drives this, and it scrolls the tree container,
     // never the diff — so it can't feed back into visibleDiffPath above (which
     // reads the diff/reviewMain scroll position) and re-trigger selection.
     scrollSelectedTreeNodeIntoView(this.treeContainer, path);
   }
 
-  // Review-diff refresh timer accessors. reviewThunks owns the polling logic
-  // but the timer field stays here so unmountTerminal() can clear it.
   stopReviewDiffRefresh(): void {
     window.clearTimeout(this.reviewDiffRefreshTimer);
     this.reviewDiffRefreshTimer = 0;
@@ -587,21 +558,15 @@ export class TerminalController {
     for (const chunk of chunks) {
       this.writeToTerminal(sessionId, chunk, true);
     }
-    // Rehydrate live cursor state from the replayed buffer.
-    // rebuildTerminalDisplayBuffer already appended `?25h` if the live
-    // state would have been "main + hidden", so under normal flow this
-    // ends at { altScreen: false, cursorHidden: false }. Scanning keeps
-    // the live tracking accurate when a TUI in alt-screen left the
-    // buffer in its own intentional state.
+    // Rehydrate live cursor tracking from the replayed buffer so an alt-screen
+    // TUI that left the buffer in its own intentional cursor state stays
+    // tracked accurately, rather than assuming main-screen + cursor-visible.
     this.liveCursorState = bufferCursorVisibility(chunks);
     this.cancelCursorRestoreTimer();
-    // After resetTerminal() + bulk replay, the viewport can settle
-    // mid-scrollback because xterm parses write() calls asynchronously on its
-    // own timer, so a synchronous scroll here would run before the chunks are
-    // laid out. Enqueue an empty write whose completion callback fires only
-    // after every replayed chunk has flushed (xterm runs write callbacks in
-    // order), then scroll to the live prompt — so switching sessions always
-    // lands at the bottom rather than in the middle of history (issue #438).
+    // xterm parses write() calls asynchronously, so a synchronous scroll would
+    // run before the replayed chunks are laid out. The empty write's callback
+    // fires only after every replayed chunk has flushed, so switching sessions
+    // lands at the live prompt rather than mid-history.
     this.terminal?.write('', () => {
       this.terminal?.scrollToBottom();
     });

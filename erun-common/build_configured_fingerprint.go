@@ -6,25 +6,10 @@ import (
 	"strings"
 )
 
-// materializeConfiguredFingerprints inspects each build's image name against
-// the project's docker.fingerprints map for the build's environment and, when
-// a configured fingerprint is found, ensures the local Docker store holds the
-// fp-tagged image so applyIncrementalPromotion can promote the build instead
-// of rebuilding it on a fresh checkout.
-//
-// For each build with a configured fingerprint, for each platform:
-//   - if <image>:fp-<configured>-<arch> already exists locally → record it as
-//     materialized; no docker work needed.
-//   - otherwise → trace `docker manifest inspect`, `docker pull --platform`,
-//     `docker tag` for the per-platform pull+tag sequence. In real run the
-//     commands execute; in dry-run they are traced only and the resulting
-//     fp-tag is still recorded as materialized so the downstream incremental
-//     trace reflects the would-be promote path.
-//
-// Failures (registry not reachable, manifest missing, malformed configured
-// hash, unknown image name) fall through silently: the fp-tag is not added to
-// the materialized set and applyIncrementalPromotion will mark the build for
-// rebuild as it would today.
+// materializeConfiguredFingerprints seeds the local Docker store with the
+// fp-tagged images a project's configured fingerprints point at, so a fresh
+// checkout can promote those builds instead of rebuilding them. Failures fall
+// through silently, leaving the build to rebuild as it would without this step.
 func materializeConfiguredFingerprints(ctx Context, builds []DockerBuildSpec) (map[string]struct{}, error) {
 	materialized := make(map[string]struct{})
 	configuredByEnv := make(map[string]map[string]string)
@@ -57,11 +42,6 @@ func materializeConfiguredFingerprints(ctx Context, builds []DockerBuildSpec) (m
 	return materialized, nil
 }
 
-// loadConfiguredFingerprints returns the docker.fingerprints map for the
-// build's environment, caching the per-(projectRoot, environment) result in
-// cache so repeated builds avoid re-reading the config. An uninitialized
-// project caches a nil entry rather than erroring; any other config error
-// propagates.
 func loadConfiguredFingerprints(projectRoot, environment string, cache map[string]map[string]string) (map[string]string, error) {
 	key := projectRoot + "\x00" + environment
 	if configured, loaded := cache[key]; loaded {
@@ -80,11 +60,6 @@ func loadConfiguredFingerprints(projectRoot, environment string, cache map[strin
 	return configured, nil
 }
 
-// materializeBuildFingerprints ensures the local Docker store holds the
-// fp-tagged image for each of the build's platforms at the configured hash,
-// recording each materialized fp-tag. An fp-tag already present is recorded
-// directly; otherwise the pull+tag sequence runs (or is traced in dry-run).
-// Per-platform failures fall through silently so the build rebuilds as today.
 func materializeBuildFingerprints(ctx Context, build DockerBuildSpec, hash string, materialized map[string]struct{}) {
 	for _, platform := range build.Platforms {
 		fpTag := fingerprintTag(build.Image, hash, platform)
@@ -100,10 +75,6 @@ func materializeBuildFingerprints(ctx Context, build DockerBuildSpec, hash strin
 	}
 }
 
-// pullAndTagConfiguredFingerprint pulls sourceTag for platform and tags the
-// pulled image locally as fpTag. In dry-run the docker commands are traced
-// but not executed, and a nil error is returned so the caller treats the
-// fp-tag as materialized for the rest of the resolution.
 func pullAndTagConfiguredFingerprint(ctx Context, sourceTag, fpTag, platform string) error {
 	ctx.TraceCommand("", "docker", "manifest", "inspect", sourceTag)
 	if !ctx.DryRun {
@@ -131,9 +102,8 @@ func pullAndTagConfiguredFingerprint(ctx Context, sourceTag, fpTag, platform str
 	return nil
 }
 
-// isValidFingerprintHash mirrors computeBuildFingerprint's output shape: a
-// 16-character lowercase hex digest. Anything else is treated as a config
-// typo and skipped (with a trace) rather than promoted.
+// isValidFingerprintHash mirrors computeBuildFingerprint's output shape, so a
+// mistyped configured hash is rejected rather than promoted as if it were real.
 func isValidFingerprintHash(value string) bool {
 	value = strings.TrimSpace(value)
 	if len(value) != 16 {

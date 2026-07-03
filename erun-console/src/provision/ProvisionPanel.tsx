@@ -3,12 +3,6 @@ import * as React from 'react';
 import type { AliasState, ProvisionState } from './controller';
 import { useProvisionController } from './controller';
 
-// "Provision a cloud context" panel: a thin render layer over the provisioning
-// controller. It collects the BYO-cloud alias credentials and the create-context
-// fields, then surfaces the live provisioning status (the controller polls
-// GET /v1/contexts until running/failed). No business logic lives here — every
-// request goes through the controller, which calls the typed client.
-
 const DEFAULT_PROVIDER = 'aws';
 
 function AliasFeedback({ alias }: { alias: AliasState }): React.ReactElement | null {

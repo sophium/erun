@@ -13,12 +13,9 @@ export function scrollSelectedDiffIntoView(
     ?.scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
 
-// scrollSelectedTreeNodeIntoView keeps the changed-files tree's active node
-// visible as the diff is scrolled (#547). It scrolls the tree's own scroll
-// container only when the node is currently out of view (scroll-into-view-if-
-// needed, nearest edge), so it never fights the diff→tree scrollspy or yanks
-// the tree on every scroll tick. Driven solely by the diff→tree direction; it
-// acts on the tree container, never on the diff container.
+// scrollSelectedTreeNodeIntoView keeps the tree's active node visible as the
+// diff scrolls, moving it only when it is off-screen so it never fights the
+// diff→tree scrollspy or jerks the tree on every scroll tick.
 export function scrollSelectedTreeNodeIntoView(
   treeContainer: HTMLDivElement | null,
   selectedDiffPath: string,

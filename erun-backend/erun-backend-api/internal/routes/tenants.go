@@ -20,10 +20,9 @@ type TenantRoutes struct {
 	tenants TenantRepository
 }
 
-// createTenantRequest is the operations-only tenant-registration body. It carries
-// the tenant identity plus the OIDC issuer mapping that resolves tokens to the
-// new tenant. orgFieldKey/orgFieldValue are set only for an org-scoped (shared)
-// issuer; a single-tenant issuer leaves both empty.
+// createTenantRequest is the operations-only tenant-registration body.
+// orgFieldKey/orgFieldValue are set only for an org-scoped (shared) issuer;
+// a single-tenant issuer leaves both empty.
 type createTenantRequest struct {
 	Name          string `json:"name"`
 	Type          string `json:"type"`
@@ -38,12 +37,9 @@ func RegisterTenantRoutes(register ProtectedRouteRegistrar, tenants TenantReposi
 	register(http.MethodPost, "/v1/tenants", http.HandlerFunc(routes.createTenant))
 }
 
-// createTenant registers a new tenant plus its OIDC issuer mapping. Beyond the
-// broad WriteAll permission that authorization middleware enforces for POST, this
-// handler adds an explicit operations gate: the caller's resolved tenant must be
-// an OPERATIONS tenant, because tenants/issuers/tenant_issuers are root
-// resolution tables writable only by erun_operations. A non-OPERATIONS caller is
-// rejected with 403 here, before any write is attempted.
+// createTenant gates on an OPERATIONS tenant beyond the WriteAll permission POST
+// already requires, because tenants/issuers/tenant_issuers are root resolution
+// tables writable only by erun_operations.
 func (r TenantRoutes) createTenant(w http.ResponseWriter, req *http.Request) {
 	securityContext, ok := security.FromContext(req.Context())
 	if !ok {
@@ -66,11 +62,11 @@ func (r TenantRoutes) createTenant(w http.ResponseWriter, req *http.Request) {
 
 	name := strings.TrimSpace(body.Name)
 	issuer := strings.TrimSpace(body.Issuer)
-	// Enforce the no-hyphen tenant-name rule (#605 mandatory guardrail): the
-	// runtime namespace is <tenant>-<env>, so a hyphen in the tenant would make
-	// the mapping non-injective (a-b + c and a + b-c both collapse to a-b-c), a
-	// cross-tenant namespace-collision/takeover vector on a public provisioning
-	// surface. ValidateTenantName allows only lowercase letters and digits.
+	// Enforce the no-hyphen tenant-name rule: the runtime namespace is
+	// <tenant>-<env>, so a hyphen in the tenant would make the mapping
+	// non-injective (a-b + c and a + b-c both collapse to a-b-c), a
+	// cross-tenant namespace-collision/takeover vector on a public
+	// provisioning surface.
 	if err := eruncommon.ValidateTenantName(name); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

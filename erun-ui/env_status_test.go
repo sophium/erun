@@ -9,12 +9,8 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// These tests lock the env-status event contract behind the sidebar's open
-// dot (issue #470): tab presence alone is not running-ness, so the desktop
-// flags the row "stopped" when reconnect is refused because the linked cloud
-// context is not running, "failed" when reconnect gives up (deploy failure /
-// loop guard), and clears the flag on every fresh open attempt and every
-// successful respawn.
+// Tab presence alone is not running-ness: these tests lock when the sidebar's
+// open dot flags a row stopped or failed versus clears it.
 
 func envStatusTestApp(t *testing.T, emits *capturedEmits, sessionsMu *sync.Mutex, sessions *[]*stubTerminalSession) *App {
 	t.Helper()
@@ -50,7 +46,6 @@ func envStatusTestApp(t *testing.T, emits *capturedEmits, sessionsMu *sync.Mutex
 	return app
 }
 
-// envStatuses decodes the captured env-status payloads in emission order.
 func envStatuses(emits *capturedEmits) []envStatusPayload {
 	var out []envStatusPayload
 	for _, raw := range emits.events(envStatusEvent) {
@@ -88,8 +83,7 @@ func TestEnvStatusStoppedWhenReconnectRefusedForStoppedContext(t *testing.T) {
 	// The fresh open attempt clears any stale flag.
 	waitForEnvStatus(t, emits, "", 2*time.Second)
 
-	// An explicit Stop marks the env's cloud context intentionally stopped;
-	// the session exit that follows must flag the row, not respawn.
+	// After an intentional Stop, the session exit must flag the row, not respawn.
 	app.markIntentionalStopForCloudContext("managed-cloud")
 	sessionsMu.Lock()
 	current := sessions[0]
@@ -98,7 +92,6 @@ func TestEnvStatusStoppedWhenReconnectRefusedForStoppedContext(t *testing.T) {
 
 	waitForEnvStatus(t, emits, envStatusStopped, 2*time.Second)
 
-	// No respawn happened for the stopped env.
 	sessionsMu.Lock()
 	got := len(sessions)
 	sessionsMu.Unlock()
@@ -138,7 +131,6 @@ func TestEnvStatusFailedAfterReconnectLoopCapAndClearedByRespawns(t *testing.T) 
 	if last.Tenant != "erun" || last.Environment != "remote" {
 		t.Fatalf("env-status carries the wrong selection: %+v", last)
 	}
-	// Each successful respawn before the cap cleared the flag.
 	clears := 0
 	for _, payload := range statuses {
 		if payload.Status == "" {
@@ -150,11 +142,9 @@ func TestEnvStatusFailedAfterReconnectLoopCapAndClearedByRespawns(t *testing.T) 
 	}
 }
 
-// TestEnvStatusClearedByLaterSuccessfulDeploy locks the recovery path from
-// issue #498: an env flagged 'failed' (amber dot, refused ERun-tab respawn)
-// must drop the flag the moment a later deploy for it succeeds through the
-// activity queue — e.g. an `erun upgrade` run — instead of keeping a stale
-// failure on the row until the next manual row click.
+// TestEnvStatusClearedByLaterSuccessfulDeploy locks the recovery path: an env
+// flagged failed must drop the flag as soon as a later deploy for it succeeds,
+// not keep a stale failure on the row until the next manual row click.
 func TestEnvStatusClearedByLaterSuccessfulDeploy(t *testing.T) {
 	var sessionsMu sync.Mutex
 	var sessions []*stubTerminalSession

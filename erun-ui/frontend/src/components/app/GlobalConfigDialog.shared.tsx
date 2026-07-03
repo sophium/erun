@@ -31,9 +31,8 @@ export function CloudAliasAction({
   busy: boolean;
   loading: boolean;
   onLogin: () => void;
-  // loginLabel / loadingLabel let a provider type relabel the action without a
-  // second component: Cloudflare re-verifies a stored token rather than running
-  // a browser SSO, so its button reads "Verify token" / "Verifying...".
+  // Cloudflare re-verifies a stored token instead of running a browser SSO, so
+  // it relabels this action ("Verify token" / "Verifying...").
   loginLabel?: string;
   loadingLabel?: string;
 }): React.ReactElement {

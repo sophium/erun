@@ -21,9 +21,7 @@ function compareTabs(a: TerminalTab, b: TerminalTab): number {
   return TAB_KIND_ORDER[a.kind] - TAB_KIND_ORDER[b.kind] || a.slot - b.slot;
 }
 
-// recordTab inserts (or replaces) a tab for an env. The list stays sorted by
-// kind then slot so the strip layout matches user expectations across
-// re-renders.
+// Keeps the tab list sorted so the strip layout stays stable across re-renders.
 export const recordTab =
   (key: string, sessionId: number, slot: number, kind: TerminalTabKind, label: string): AppThunk =>
   (dispatch, getState) => {
@@ -39,9 +37,7 @@ export const recordTab =
     dispatch(setTabsForEnv({ key, tabs }));
   };
 
-// removeTab drops a session from the strip and clears its remembered-slot
-// pointer if needed. Returns the remaining tabs so callers can pick a new
-// active session.
+// Returns the remaining tabs so the caller can pick a new active session.
 export const removeTab =
   (key: string, sessionId: number): AppThunk<TerminalTab[]> =>
   (dispatch, getState) => {
@@ -62,8 +58,7 @@ export const removeTab =
     return remaining;
   };
 
-// rememberSelectedTab pins the active session for the currently-selected env
-// so re-opening it later switches back to the tab the user last viewed.
+// Remembers the last-viewed tab so re-opening the env restores it.
 export const rememberSelectedTab =
   (sessionId: number): AppThunk =>
   (dispatch, getState) => {

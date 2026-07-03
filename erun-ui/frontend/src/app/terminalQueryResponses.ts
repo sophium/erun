@@ -23,40 +23,19 @@ export function registerTerminalQueryResponseHandlers(
     return true;
   };
 
-  // xterm.js ships built-in OSC 10/11/12 handlers that answer fg/bg/cursor
-  // color queries with the current theme, built-in CSI DA1/DA2 handlers
-  // that answer terminal device-attribute probes, and we used to answer
-  // DECRQSS (`DCS $ q … ST`) status-string queries here too. All of these
-  // replies travel through SendSessionInput -> PTY, which is async — so
-  // when the asking process (claude, codex, an interactive ssh, …) exits
-  // between query and reply, OR a query reaches xterm on reattach while
-  // the session is back at a bare bash prompt, the reply lands on the
-  // shell's stdin and bash interprets it as user input. Most visible
-  // manifestations: a bare `1;2c1;2c…` after claude exits (DA), and a
-  // `1$r0"q␛\` tail at the prompt on reattach (DECRQSS) — bash then tries
-  // to run them as commands.
+  // No-op handlers swallow xterm's built-in color/device-attribute/status
+  // query replies. Replies route back through the PTY asynchronously, so
+  // once the asking process (claude, codex, ssh, …) has exited — or a query
+  // reaches xterm on reattach at a bare bash prompt — the reply lands on the
+  // shell's stdin and bash runs it as a command. Querying tools instead time
+  // out to the same xterm defaults a hardcoded reply would have given.
   //
-  // Suppress every reply by registering no-op handlers that consume the
-  // query and return true so the built-in handler does not run. Querying
-  // tools time out (typical timeout ~100ms) and fall back to xterm
-  // defaults — the same defaults a hardcoded reply gave anyway. The
-  // display strip in terminalBuffers.ts catches partially-consumed tails
-  // as a backstop.
+  // Cursor-position reports (DSR) stay answered: tools genuinely need the
+  // cursor location and there is no sane default to time out to.
   //
-  // Cursor-position reports (CSI DSR `n` / DEC DSR `?n`) are the one query
-  // we still answer: tools genuinely need the cursor location and there is
-  // no sane default to time out to. Those replies still route to the
-  // asking session via the writeSources queue (issue #347).
-  //
-  // …but only for live parses. Query bytes are saved verbatim in the
-  // per-session buffer, so re-rendering a tab (setSessionId →
-  // terminalDisplayMiddleware → writeTerminalBuffer) re-parses every query a
-  // tool ever emitted in that session — BuildKit's tty progress and claude
-  // both probe with `ESC[6n`. The asking tool is long gone by then, so the
-  // re-answered report lands on the shell's stdin and readline echoes its
-  // printable tail as typed junk (`1;64R1;69R…` at the prompt, issue #484).
-  // isReplayParse (backed by the writeSources queue) identifies those
-  // replayed chunks; their queries are consumed without a reply.
+  // Answer only live parses. Re-rendering a tab re-parses every query a tool
+  // ever emitted, but the asking tool is long gone, so a replayed reply
+  // becomes typed junk at the prompt; isReplayParse gates those out.
   const suppressQuery = (): boolean => true;
 
   return [

@@ -8,9 +8,6 @@ import (
 	"time"
 )
 
-// helmReleaseSnapshot mirrors the relevant fields of `helm list -o json`
-// output. Helm emits more, but the desktop only needs name, namespace,
-// status, and chart info to map a release back to a tenant/env entry.
 type helmReleaseSnapshot struct {
 	Name       string `json:"name"`
 	Namespace  string `json:"namespace"`
@@ -21,9 +18,6 @@ type helmReleaseSnapshot struct {
 	Updated    string `json:"updated"`
 }
 
-// runHelmReleasePoller is the long-running goroutine that reconciles
-// the activity queue's deploy entries with helm's live release state.
-// Exits when stop is closed.
 func (a *App) runHelmReleasePoller(stop <-chan struct{}) {
 	ticker := time.NewTicker(activityPollerInterval)
 	defer ticker.Stop()
@@ -38,10 +32,8 @@ func (a *App) runHelmReleasePoller(stop <-chan struct{}) {
 	}
 }
 
-// reconcileHelmReleasesOnce queries every watched kube context and
-// applies the resulting release snapshots to the activity queue. Errors
-// from a single context are swallowed so a misconfigured context does
-// not stall reconciliation for the others.
+// A single context's errors are swallowed so one misconfigured context
+// does not stall reconciliation for the rest.
 func (a *App) reconcileHelmReleasesOnce() {
 	if a.activityQueue == nil {
 		return
@@ -65,16 +57,10 @@ func (a *App) reconcileHelmReleasesOnce() {
 	}
 }
 
-// helmListTenantDevopsArgs is the argv we pass to `helm list` to
-// enumerate `<tenant>-devops` releases across the cluster.
-//
-// We pass the explicit status flags (`--deployed --pending --failed
-// --uninstalling`) instead of the older `--all` umbrella flag because
-// helm v4 dropped `--all`. An erroring `helm list` would silently take
-// down the whole reconciliation channel: finalization on "deployed"
-// plus pending-state upserts both stop firing, leaving entries stuck
-// at "running" in the activity panel. The explicit flags are accepted
-// on both helm v3 and v4.
+// Uses explicit status flags instead of `--all` (dropped in helm v4; the
+// explicit flags work on both v3 and v4). If `helm list` errors,
+// reconciliation silently stalls and deploy entries stay stuck at
+// "running" in the activity panel, so the flag choice is load-bearing.
 func helmListTenantDevopsArgs(kubeContext string) []string {
 	args := []string{
 		"list",
@@ -92,10 +78,6 @@ func helmListTenantDevopsArgs(kubeContext string) []string {
 	return args
 }
 
-// listTenantDevopsHelmReleases runs `helm list` filtered to releases
-// whose name ends in "-devops" — the canonical tenant-devops chart name
-// the runtime uses. Restricting at the helm side keeps payload size
-// bounded even on clusters with many unrelated releases.
 func listTenantDevopsHelmReleases(ctx context.Context, kubeContext string) ([]helmReleaseSnapshot, error) {
 	cmd := exec.CommandContext(ctx, "helm", helmListTenantDevopsArgs(kubeContext)...)
 	out, err := cmd.Output()
@@ -113,10 +95,6 @@ func listTenantDevopsHelmReleases(ctx context.Context, kubeContext string) ([]he
 	return releases, nil
 }
 
-// applyHelmReleaseSnapshot converts a helm release status into an
-// activity-queue transition. Pending statuses upsert a running entry;
-// terminal statuses finalize the matching active entry idempotently.
-// Releases that don't decode to a tenant/env pair are ignored.
 func (a *App) applyHelmReleaseSnapshot(kubeContext string, release helmReleaseSnapshot) {
 	tenant, environment, ok := splitTenantDevopsRelease(release.Name, release.Namespace)
 	if !ok {
@@ -132,35 +110,17 @@ func (a *App) applyHelmReleaseSnapshot(kubeContext string, release helmReleaseSn
 	}
 }
 
-// helmDeployedFreshnessSkew is the tolerance applied when comparing a
-// helm release's Updated timestamp against the entry's StartedAt. It
-// covers the realistic gap between helm marking a release Updated and
-// the desktop registering the corresponding entry — a few poller
-// intervals plus modest clock skew — without being so loose that a
-// stale prior deploy from minutes ago slips through.
+// Tolerance for matching a "deployed" release to a just-registered entry:
+// wide enough to absorb a few poller intervals plus clock skew, tight
+// enough that a stale prior deploy from minutes ago can't slip through.
 const helmDeployedFreshnessSkew = 60 * time.Second
 
-// finishHelmDeployedIfActive finalizes an active deploy entry when helm
-// reports the release as "deployed", but only when the snapshot
-// describes the deploy this entry is tracking.
-//
-// Two checks gate finalization:
-//
-//   - Version match: helm's release.AppVersion must equal entry.Version.
-//     A "deployed" status with the previous deploy's AppVersion is the
-//     stale state we're racing — finalizing on it would mark the
-//     activity done with the user's new version still rolling out.
-//   - Updated freshness: release.Updated must be within
-//     helmDeployedFreshnessSkew of (or after) entry.StartedAt. This
-//     catches same-version redeploys (common in snapshot workflows)
-//     where AppVersion alone can't distinguish the prior "deployed"
-//     from the new one.
-//
-// Either check missing data (unparseable Updated, empty AppVersion or
-// Version) is treated as inconclusive and we defer to the trace
-// handler's `==> Deployed` line and the pod-readiness watchdog. Helm
-// "failed" still finalizes unconditionally so a PTY that dies mid-deploy
-// cannot leave an entry stuck running.
+// finishHelmDeployedIfActive finalizes a deploy entry on helm "deployed",
+// but only for the deploy this entry is tracking: a version match guards
+// against a stale prior "deployed", and timestamp freshness catches
+// same-version redeploys a version match alone can't tell apart. When the
+// evidence is inconclusive it defers to the `==> Deployed` trace line and
+// the pod-readiness watchdog rather than finalizing.
 func (a *App) finishHelmDeployedIfActive(tenant, environment string, release helmReleaseSnapshot) {
 	if a.activityQueue == nil {
 		return
@@ -177,12 +137,6 @@ func (a *App) finishHelmDeployedIfActive(tenant, environment string, release hel
 	}
 }
 
-// helmDeployedSnapshotMatchesEntry reports whether a "deployed" helm
-// release snapshot describes the deploy that the supplied entry is
-// tracking, by checking version match and Updated freshness. Returns
-// false (defer finalization) whenever evidence is missing — a missing
-// AppVersion, an unparseable Updated, or an Updated older than the
-// entry's StartedAt by more than the skew tolerance.
 func helmDeployedSnapshotMatchesEntry(release helmReleaseSnapshot, entry activityQueueEntry) bool {
 	expected := strings.TrimSpace(entry.Version)
 	observed := strings.TrimSpace(release.AppVersion)
@@ -199,11 +153,9 @@ func helmDeployedSnapshotMatchesEntry(release helmReleaseSnapshot, entry activit
 	return true
 }
 
-// helmUpdatedLayouts lists the timestamp formats `helm list -o json`
-// has been observed to emit. Helm v3+ uses Go's default
-// time.Time.String() shape ("2006-01-02 15:04:05.999999999 -0700 MST");
-// some versions trim sub-second precision or omit the timezone
-// abbreviation. We try each in order and accept the first that parses.
+// Timestamp shapes `helm list -o json` has been seen to emit across helm
+// versions: Go's default time.Time.String() form, sometimes with
+// sub-second precision trimmed or the timezone abbreviation dropped.
 var helmUpdatedLayouts = []string{
 	"2006-01-02 15:04:05.999999999 -0700 MST",
 	"2006-01-02 15:04:05 -0700 MST",
@@ -213,9 +165,6 @@ var helmUpdatedLayouts = []string{
 	time.RFC3339,
 }
 
-// parseHelmUpdated parses the `updated` field from `helm list -o json`.
-// The string is the Go default time.Time format; we accept a few
-// variants for robustness across helm versions.
 func parseHelmUpdated(value string) (time.Time, bool) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -229,10 +178,9 @@ func parseHelmUpdated(value string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-// upsertHelmActivity registers a new running entry for a pending helm
-// release, or refreshes the namespace/context on an existing one. The
-// entry's ID is fully determined by tenant/env/version, so the helm
-// poller and the PTY trace handler converge on the same record.
+// The entry ID is derived from tenant/env/version, so the helm poller and
+// the PTY trace handler converge on one record instead of creating
+// duplicate deploy entries.
 func (a *App) upsertHelmActivity(tenant, environment, kubeContext string, release helmReleaseSnapshot) {
 	if a.activityQueue == nil {
 		return
@@ -260,10 +208,9 @@ func (a *App) upsertHelmActivity(tenant, environment, kubeContext string, releas
 	}
 }
 
-// finishHelmActivityIfActive transitions an active deploy entry to a
-// terminal status when helm reports a final release state. Idempotent:
-// when no active entry matches (the trace handler or pod-readiness path
-// may have finalized it first), the call is a no-op.
+// Idempotent by design: the trace handler or pod-readiness path may
+// finalize the entry first, so no matching active entry is expected here,
+// not an error.
 func (a *App) finishHelmActivityIfActive(tenant, environment string, status activityQueueStatus, errMsg string) {
 	if a.activityQueue == nil {
 		return
@@ -298,9 +245,9 @@ func (a *App) finalizeMissingHelmReleasesForContext(kubeContext string, seen map
 		if _, ok := seen[helmReleaseKey(entry.Namespace, entry.Release)]; ok {
 			continue
 		}
-		// Grace period: a freshly-registered helm-source entry may
-		// race the next `helm list` invocation. Skip finalize for
-		// the first few seconds to let the release surface.
+		// A freshly-registered helm-source entry may race the next
+		// `helm list`; give the release a moment to surface before
+		// treating it as gone.
 		if time.Since(entry.StartedAt) < 2*activityPollerInterval {
 			continue
 		}
@@ -310,9 +257,8 @@ func (a *App) finalizeMissingHelmReleasesForContext(kubeContext string, seen map
 	}
 }
 
-// splitTenantDevopsRelease pulls (tenant, environment) out of a
-// `<tenant>-devops` release deployed in a `<tenant>-<env>` namespace.
-// Returns ok=false for any release that doesn't follow the convention.
+// Encodes the release/namespace naming convention: a `<tenant>-devops`
+// release lives in a `<tenant>-<env>` namespace.
 func splitTenantDevopsRelease(release, namespace string) (string, string, bool) {
 	release = strings.TrimSpace(release)
 	namespace = strings.TrimSpace(namespace)

@@ -13,18 +13,16 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// outputsListing is the canned `find` output the stubbed kubectl returns for
-// list scenarios: type, size, mtime epoch, basename. The resolver sorts these
-// newest-first, so the golden order (results, report.pdf, notes.txt) proves the
-// sort regardless of the input order here.
+// outputsListing is the canned `find` output the stubbed kubectl returns. Its
+// input order deliberately differs from the golden's newest-first order, so the
+// golden proves the resolver sorts.
 const outputsListing = "f\t1024\t1700000200.0\treport.pdf\n" +
 	"d\t4096\t1700000300.5\tresults\n" +
 	"f\t512\t1700000100.0\tnotes.txt\n"
 
-// stubKubectlPrints stubs kubectl to print stdout and exit 0 regardless of
-// args. The only kubectl call the outputs commands make is the remote
-// find/tar/base64 exec, so a fixed stdout makes the listing/download
-// deterministic without a cluster.
+// stubKubectlPrints makes the outputs commands deterministic without a cluster:
+// their only kubectl call is the remote find/tar/base64 exec, so one fixed
+// stdout regardless of args is enough.
 func stubKubectlPrints(t *testing.T, stubs, stdout string) {
 	t.Helper()
 	fixture.StubBinaryWithScript(t, stubs, "kubectl", "cat <<'EOF'\n"+stdout+"EOF\n")
@@ -59,8 +57,6 @@ func TestOutputs(t *testing.T) {
 	})
 
 	t.Run("list_dry_run", func(t *testing.T) {
-		// Dry-run traces the kubectl exec (script redacted) and the listing
-		// script, then contacts no pod. -vv surfaces the argv + script block.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"outputs", "list", "--dry-run", "-vv"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -71,8 +67,6 @@ func TestOutputs(t *testing.T) {
 	})
 
 	t.Run("list_dry_run_json", func(t *testing.T) {
-		// JSON dry-run emits the resolved-dir result on stdout (no entries,
-		// nothing listed) while the trace stays on stderr.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"outputs", "list", "--dry-run", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -83,9 +77,6 @@ func TestOutputs(t *testing.T) {
 	})
 
 	t.Run("list_real_run", func(t *testing.T) {
-		// Real run: the stubbed kubectl returns a fixed listing; the resolver
-		// parses it, sorts newest-first, and the table renders. The find epoch
-		// mtimes normalize to <TS>; the order is the assertion.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		stubs := setup.Cwd + "/stubs"
@@ -112,8 +103,6 @@ func TestOutputs(t *testing.T) {
 	})
 
 	t.Run("download_dry_run", func(t *testing.T) {
-		// Dry-run traces the kubectl exec + the transfer script and the planned
-		// local destination, then transfers nothing.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"outputs", "download", "report.pdf", "--dry-run", "-vv"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -124,10 +113,8 @@ func TestOutputs(t *testing.T) {
 	})
 
 	t.Run("download_real_run_file", func(t *testing.T) {
-		// Real run: the stub returns the file marker + base64("hello"); the
-		// command writes the bytes locally and reports size + sha256. The
-		// checksum normalizes to <HEX>, so a side-effect read of the file
-		// confirms the actual bytes round-tripped.
+		// The reported sha256 normalizes to <HEX>, so the golden can't prove the
+		// bytes; the file read is what confirms "hello" round-tripped.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		stubs := setup.Cwd + "/stubs"
@@ -148,8 +135,6 @@ func TestOutputs(t *testing.T) {
 	})
 
 	t.Run("download_real_run_dir", func(t *testing.T) {
-		// Real run, directory: the stub returns the dir marker + base64 payload;
-		// the command saves it as <name>.tar.gz.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		stubs := setup.Cwd + "/stubs"
@@ -166,19 +151,16 @@ func TestOutputs(t *testing.T) {
 	})
 
 	t.Run("download_traversal_neutralized", func(t *testing.T) {
-		// A crafted entry name with parent-traversal is reduced to its base
-		// segment, so the resolved target stays inside the outputs dir and can
-		// never reach /etc/passwd.
+		// A parent-traversal entry name must resolve inside the outputs dir and
+		// can never reach /etc/passwd.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"outputs", "download", "../../etc/passwd", "--dry-run", "-vv"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		// The golden is the ground truth: the resolved target is
-		// <HOME>/.erun/outputs/passwd, never /etc/passwd. (The audit line still
-		// echoes the raw arg the operator typed; that is input, not the
-		// resolved path.)
+		// The audit line echoes the raw arg the operator typed — that is input,
+		// not the resolved target — so /etc/passwd in the golden is expected.
 		golden.Equal(t, "outputs/download_traversal_neutralized", normalize.Apply(result.Combined))
 	})
 

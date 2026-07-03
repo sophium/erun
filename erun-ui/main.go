@@ -18,10 +18,8 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
 )
 
-// defaultHeadlessPort is the listen port for `erun-app --headless` when the
-// caller omits --port. 34123 is picked to stay clear of 34115, which the
-// `wails dev` toolchain claims for its asset server, so a developer can run
-// both side-by-side without colliding.
+// defaultHeadlessPort stays clear of 34115, which `wails dev` claims for its
+// asset server, so the headless build and `wails dev` can run side-by-side.
 const defaultHeadlessPort = 34123
 
 func main() {
@@ -57,11 +55,6 @@ func main() {
 	runWails(app)
 }
 
-// parseHeadlessFlags strips --headless and --port from args without
-// disturbing any other flags the Wails toolchain might want to see. Both long
-// (`--headless`) and short (`-headless`) prefixes are accepted, as are the
-// `--flag=value` and `--flag value` forms. Anything else is returned in
-// leftover untouched.
 func parseHeadlessFlags(args []string) (headless bool, port int, leftover []string) {
 	port = defaultHeadlessPort
 	leftover = make([]string, 0, len(args))
@@ -71,8 +64,6 @@ func parseHeadlessFlags(args []string) (headless bool, port int, leftover []stri
 		switch {
 		case matchHeadlessFlag(a, &headless):
 		case isPortFlag(a):
-			// --port value: consume the following arg only when it parses
-			// into port; otherwise the next arg flows through normally.
 			if consumePortFlagValue(args, i, &port) {
 				i++
 			}
@@ -85,8 +76,6 @@ func parseHeadlessFlags(args []string) (headless bool, port int, leftover []stri
 	return headless, port, leftover
 }
 
-// matchHeadlessFlag reports whether arg is a --headless flag (bare or
-// =value form) and, when it is, updates headless accordingly.
 func matchHeadlessFlag(arg string, headless *bool) bool {
 	switch {
 	case arg == "--headless" || arg == "-headless":
@@ -100,16 +89,10 @@ func matchHeadlessFlag(arg string, headless *bool) bool {
 	}
 }
 
-// isPortFlag reports whether arg is the bare `--port`/`-port` form, whose
-// value is the following argument.
 func isPortFlag(arg string) bool {
 	return arg == "--port" || arg == "-port"
 }
 
-// consumePortFlagValue parses the argument following a bare --port flag. When
-// it parses as a positive int, port is updated and true is returned so the
-// caller skips the consumed value; otherwise port is left untouched and the
-// following arg flows through to leftover, matching the prior behavior.
 func consumePortFlagValue(args []string, i int, port *int) bool {
 	if i+1 >= len(args) {
 		return false
@@ -122,8 +105,6 @@ func consumePortFlagValue(args []string, i int, port *int) bool {
 	return true
 }
 
-// matchPortAssignFlag reports whether arg is the `--port=value` form and, when
-// the value parses as a positive int, updates port.
 func matchPortAssignFlag(arg string, port *int) bool {
 	if !strings.HasPrefix(arg, "--port=") && !strings.HasPrefix(arg, "-port=") {
 		return false
@@ -135,7 +116,6 @@ func matchPortAssignFlag(arg string, port *int) bool {
 }
 
 func stripFlagPrefix(arg, name string) string {
-	// Accept both --name=value and -name=value.
 	for _, prefix := range []string{"--" + name, "-" + name} {
 		if strings.HasPrefix(arg, prefix) {
 			return strings.TrimPrefix(arg, prefix)
@@ -187,9 +167,8 @@ func runWails(app *App) {
 
 func runHeadless(app *App, port int) error {
 	server := headlessserver.New(app, frontendDistFS())
-	// Replace the Wails event emitter with the SSE fan-out so the existing
-	// runtime.EventsEmit call sites reach the headless browser without any
-	// Wails dependency.
+	// Headless has no Wails, so the app's existing event-emit call sites reach
+	// the browser through the SSE fan-out instead.
 	app.SetEmitter(func(name string, args ...any) {
 		server.Emit(name, args...)
 	})
@@ -197,10 +176,8 @@ func runHeadless(app *App, port int) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Match the Wails lifecycle: startup runs once with the long-lived
-	// context, beforeClose + shutdown run with the same context on
-	// teardown. The desktop module's PTY/session code assumes a non-nil
-	// a.ctx, so we wire it through manually here.
+	// The desktop PTY/session code assumes a non-nil a.ctx, which Wails would
+	// normally supply, so mirror its startup/teardown lifecycle by hand here.
 	app.startup(ctx)
 
 	addr := fmt.Sprintf("127.0.0.1:%d", port)

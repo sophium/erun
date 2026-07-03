@@ -197,10 +197,9 @@ func acquireHelmDeploySingleFlight(ctx Context, deploy HelmDeploySpec, deps helm
 	return HelmDeploySingleFlightProceed, nil, fmt.Errorf("could not acquire deploy in-flight marker after retries")
 }
 
-// writeFreshInflightMarker writes our claim record into the freshly created
-// (O_EXCL) marker file and returns the owning handle. On any failure it closes
-// and removes the partial marker so a retry or a later acquire is not blocked
-// by a half-written file.
+// writeFreshInflightMarker cleans up the marker if writing or closing fails.
+// A leftover marker carries our own still-alive PID, so it would block later
+// deploys until the max-age reclaim rather than being seen as stale.
 func writeFreshInflightMarker(ctx Context, f *os.File, path string, record deployInflightRecord, releaseKey, paramsHash string) (*HelmDeploySingleFlightHandle, error) {
 	if writeErr := writeInflightRecord(f, record); writeErr != nil {
 		_ = f.Close()
@@ -215,8 +214,8 @@ func writeFreshInflightMarker(ctx Context, f *os.File, path string, record deplo
 	return &HelmDeploySingleFlightHandle{path: path}, nil
 }
 
-// removeInflightMarker deletes a marker file, treating an already-absent file
-// as success so a concurrent reclaim does not turn into an error.
+// removeInflightMarker tolerates an already-absent marker so a concurrent reclaim
+// does not surface as an error.
 func removeInflightMarker(path string) error {
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -224,14 +223,9 @@ func removeInflightMarker(path string) error {
 	return nil
 }
 
-// reconcileExistingInflightMarker inspects the marker that blocked our O_EXCL
-// claim and decides the outcome: reclaim it (reclaim=true, the caller retries
-// the claim), skip as an identical duplicate, or fail with a concurrent-deploy
-// error. Every reclaim path removes the marker first. PID liveness alone is not
-// sufficient inside containers — a pod restart resets the PID namespace and a
-// coincidentally-alive new PID can shadow the dead deploy's recorded PID — so a
-// max-age check reclaims any marker older than a sensible deploy ceiling
-// regardless of what PID the kernel hands out.
+// reconcileExistingInflightMarker decides how to handle the marker that blocked
+// our claim. A true first return means it reclaimed the marker and the caller
+// should retry the exclusive create.
 func reconcileExistingInflightMarker(ctx Context, deps helmDeploySingleFlightDeps, deploy HelmDeploySpec, path, releaseKey, paramsHash string) (bool, HelmDeploySingleFlightOutcome, error) {
 	existing, readErr := readInflightRecord(path)
 	if readErr != nil {
@@ -271,10 +265,8 @@ func reconcileExistingInflightMarker(ctx Context, deps helmDeploySingleFlightDep
 	}
 }
 
-// reportHelmDeploySingleFlightDryRun previews the dedup decision without
-// touching the filesystem. It reads the marker if one exists so dry-run output
-// reflects what a real run would do, but never creates, replaces, or removes
-// it.
+// reportHelmDeploySingleFlightDryRun mirrors the dedup decision a real run would
+// make but never mutates the on-disk marker, so dry-run stays side-effect free.
 func reportHelmDeploySingleFlightDryRun(ctx Context, deploy HelmDeploySpec, deps helmDeploySingleFlightDeps, releaseKey, paramsHash, path string) (HelmDeploySingleFlightOutcome, *HelmDeploySingleFlightHandle, error) {
 	existing, readErr := readInflightRecord(path)
 	if errors.Is(readErr, os.ErrNotExist) {

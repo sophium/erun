@@ -15,13 +15,10 @@ import (
 	"time"
 )
 
-// Tests in this file pin the respawn-on-early-exit contract that
-// fixes #407 (kubectl port-forward died before the in-pod listener
-// bound, so the contribute-app open flow gave up before the headless
-// erun-app finished its CLI rebuild). They exercise
-// waitForContributeAppReachable with a fake spawn that emits
-// short-lived `sh -c` subprocesses, which keeps the exec.Cmd /
-// ProcessState integration honest without needing a real kubectl.
+// These tests pin the respawn-on-early-exit contract: kubectl port-forward can
+// die before the in-pod listener binds during the CLI rebuild window, and the
+// contribute-app open flow must respawn rather than give up before the headless
+// erun-app finishes.
 
 func skipIfNoSh(t *testing.T) {
 	t.Helper()
@@ -30,9 +27,8 @@ func skipIfNoSh(t *testing.T) {
 	}
 }
 
-// freeTCPPort returns a port that was bindable a moment ago. Tests
-// re-bind it on demand for the fake HTTP server; the race window
-// between this call and the re-bind is acceptable for local/CI use.
+// freeTCPPort returns a port that was bindable a moment ago; the race between
+// this call and a later re-bind is acceptable for test use.
 func freeTCPPort(t *testing.T) int {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -44,11 +40,6 @@ func freeTCPPort(t *testing.T) int {
 	return port
 }
 
-// startTinyHTTPServerOn binds an HTTP server on the requested port
-// that answers `200 OK` to every request. It models the in-pod
-// `erun app --headless` server becoming reachable through the fake
-// kubectl port-forward so the HTTP probe in
-// canReachLocalContributeAppEndpoint succeeds.
 func startTinyHTTPServerOn(t *testing.T, port int) func() {
 	t.Helper()
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
@@ -64,8 +55,6 @@ func startTinyHTTPServerOn(t *testing.T, port int) func() {
 	return func() { _ = srv.Close() }
 }
 
-// shrinkContributeAppTimings replaces the package's reach deadline +
-// poll interval with test-fast values, restoring originals on cleanup.
 func shrinkContributeAppTimings(t *testing.T, deadline, poll time.Duration) {
 	t.Helper()
 	origDeadline := contributeAppPortReachableTimeout
@@ -78,28 +67,14 @@ func shrinkContributeAppTimings(t *testing.T, deadline, poll time.Duration) {
 	})
 }
 
-// spawnPlan is the per-call recipe a test supplies to the fake
-// spawnContributeAppForwardCmd.
 type spawnPlan struct {
-	// script runs under `sh -c`. Use `exit 1` to simulate kubectl
-	// dying after a connection-refused inside the pod, or `sleep N`
-	// to simulate a live forward.
 	script string
-	// stderr is the buffer contents exitedWithError will surface for
-	// this spawn. The real kubectl writes to its captured buffer
-	// while running; the test pre-populates it because the fake
-	// subprocess doesn't.
-	stderr string
-	// onSpawn, if non-nil, runs synchronously before the cmd starts.
-	// Used to bring up the fake HTTP server on the respawn that
-	// should make the wait succeed.
+	// The real kubectl streams stderr while running; the fake subprocess does
+	// not, so the test pre-populates what exitedWithError will surface.
+	stderr  string
 	onSpawn func()
 }
 
-// installFakeContributeSpawn replaces spawnContributeAppForwardCmd
-// with a counter-aware stub driven by `plan`. The counter is bumped
-// before each call so tests can assert how many times kubectl was
-// spawned overall.
 func installFakeContributeSpawn(t *testing.T, plan func(n int) spawnPlan, counter *int32) {
 	t.Helper()
 	orig := spawnContributeAppForwardCmd
@@ -122,9 +97,6 @@ func installFakeContributeSpawn(t *testing.T, plan func(n int) spawnPlan, counte
 	t.Cleanup(func() { spawnContributeAppForwardCmd = orig })
 }
 
-// initialContributeSpawn does the first spawn the same way
-// startContributeAppForward would, returning a forward + canned args
-// the wait loop can use to respawn.
 func initialContributeSpawn(t *testing.T, port int) (*contributeAppForward, []string) {
 	t.Helper()
 	args := []string{"port-forward", "deployment/test", fmt.Sprintf("%d:%d", port, port)}
@@ -150,7 +122,7 @@ func TestWaitForContributeAppReachableSucceedsWhenAlreadyServing(t *testing.T) {
 }
 
 // TestWaitForContributeAppReachableRespawnsKubectlOnEarlyExit locks
-// the bug from #407. The first kubectl spawn dies immediately
+// the bug. The first kubectl spawn dies immediately
 // (simulating kubectl's "lost connection to pod" when the in-pod
 // listener has not yet bound during the CLI rebuild window). The
 // loop must respawn and succeed once the in-pod side is up.

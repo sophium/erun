@@ -19,20 +19,14 @@ import (
 )
 
 // DefaultRuntimeOutputsDir is the canonical agent outputs directory inside the
-// runtime pod. Agents and skills write deliverables there; `erun outputs
-// list`/`download` read from it. The runtime chart exports ERUN_OUTPUTS_DIR
-// with this value and the image creates it; this constant is the host-side
-// default when no --path override is given (the CLI runs off the pod and can't
-// read the pod's env).
+// runtime pod. The CLI runs off the pod and can't read the pod's env, so this
+// host-side constant must stay in sync with the value the runtime chart exports.
 const DefaultRuntimeOutputsDir = "/home/erun/.erun/outputs"
 
-// MaxRuntimeOutputBytes caps a single download. The transfer base64-encodes the
-// whole payload over one `kubectl exec` and buffers it in memory, so an
-// unbounded download could exhaust memory; reject larger entries with a clear
-// error instead.
+// MaxRuntimeOutputBytes caps a single download: the whole payload is buffered in
+// memory, so an unbounded download could exhaust it.
 const MaxRuntimeOutputBytes = 100 * 1024 * 1024
 
-// outputDownloadArchiveFormat is the archive format directories download as.
 const outputDownloadArchiveFormat = "tar.gz"
 
 // OutputEntry is one file or directory in the agent outputs directory.
@@ -53,10 +47,10 @@ type RuntimeOutputsListResult struct {
 	Truncated bool          `json:"truncated"`
 }
 
-// RuntimeOutputResult is the result of `outputs download`: one entry's bytes,
-// plus the metadata a caller needs to save them. For a directory the bytes are
-// a gzip-compressed tarball (IsArchive=true). Bytes is excluded from JSON; a
-// transport that returns the payload inline (MCP) base64-encodes it separately.
+// RuntimeOutputResult is the result of `outputs download`: one entry's bytes plus
+// the metadata a caller needs to save them. A directory arrives as a gzip tarball
+// (IsArchive=true). Bytes stays out of JSON so a transport returning the payload
+// inline can base64-encode it separately.
 type RuntimeOutputResult struct {
 	Name          string `json:"name"`
 	IsArchive     bool   `json:"isArchive"`
@@ -84,13 +78,9 @@ type RuntimeOutputDownloadParams struct {
 }
 
 // RuntimeOutputsRunner runs a /bin/sh script in the env's runtime pod and
-// returns its captured output. RunRemoteCommand is the production implementation;
-// it is a parameter so the CLI and tests can inject a seam.
+// returns its captured output.
 type RuntimeOutputsRunner func(req ShellLaunchParams, script string) (RemoteCommandResult, error)
 
-// resolveOutputsDir returns the directory to operate on, defaulting to the
-// canonical outputs dir, and validates it is a clean absolute path with no
-// parent-traversal segments.
 func resolveOutputsDir(dir string) (string, error) {
 	dir = strings.TrimSpace(dir)
 	if dir == "" {
@@ -106,9 +96,8 @@ func resolveOutputsDir(dir string) (string, error) {
 	return cleaned, nil
 }
 
-// sanitizeOutputEntryName reduces an entry name to a single safe path segment:
-// directory components (POSIX or Windows) are stripped and "."/".."/empty are
-// rejected, so path.Join with it can never escape the base directory.
+// sanitizeOutputEntryName reduces an entry name to a single path segment so
+// path.Join with it can never escape the base directory.
 func sanitizeOutputEntryName(name string) (string, error) {
 	trimmed := strings.TrimSpace(name)
 	if i := strings.LastIndexAny(trimmed, "/\\"); i >= 0 {
@@ -122,9 +111,8 @@ func sanitizeOutputEntryName(name string) (string, error) {
 }
 
 // ResolveRuntimeOutputs lists one directory in the env's runtime pod,
-// newest-first. A missing directory yields an empty result, not an error. In
-// dry-run it traces the kubectl exec and the listing script and returns an
-// empty result without contacting the pod.
+// newest-first. A missing directory yields an empty result, not an error, and
+// dry-run returns an empty result without contacting the pod.
 func ResolveRuntimeOutputs(ctx Context, req ShellLaunchParams, params RuntimeOutputsParams, run RuntimeOutputsRunner) (RuntimeOutputsListResult, error) {
 	dir, err := resolveOutputsDir(params.Dir)
 	if err != nil {
@@ -157,11 +145,9 @@ func ResolveRuntimeOutputs(ctx Context, req ShellLaunchParams, params RuntimeOut
 	return result, nil
 }
 
-// DownloadRuntimeOutput fetches one entry from the env's runtime pod as bytes.
-// A file is base64-streamed; a directory is gzip-tarred then base64-streamed
-// (IsArchive=true). The payload is SHA-256'd and size-capped. In dry-run it
-// traces the kubectl exec and the transfer script and returns a preview result
-// (no bytes, no transfer).
+// DownloadRuntimeOutput fetches one entry from the env's runtime pod as bytes;
+// a directory arrives as a gzip tarball (IsArchive=true). Dry-run returns a
+// preview result with no bytes and no transfer.
 func DownloadRuntimeOutput(ctx Context, req ShellLaunchParams, params RuntimeOutputDownloadParams, run RuntimeOutputsRunner) (RuntimeOutputResult, error) {
 	dir, err := resolveOutputsDir(params.Dir)
 	if err != nil {
@@ -187,9 +173,8 @@ func DownloadRuntimeOutput(ctx Context, req ShellLaunchParams, params RuntimeOut
 	return parseRuntimeOutputDownload(name, out.Stdout)
 }
 
-// parseRuntimeOutputDownload decodes the download script's response: a single
-// type-marker line ("dir"/"file") followed by the base64 payload. It enforces
-// the size cap and builds the result.
+// parseRuntimeOutputDownload decodes the download script's response: a type-marker
+// line ("dir"/"file") followed by the base64 payload.
 func parseRuntimeOutputDownload(name, stdout string) (RuntimeOutputResult, error) {
 	kind, encoded, ok := strings.Cut(strings.TrimSpace(stdout), "\n")
 	if !ok && kind == "" {
@@ -205,9 +190,6 @@ func parseRuntimeOutputDownload(name, stdout string) (RuntimeOutputResult, error
 	return newRuntimeOutputResult(name, strings.TrimSpace(kind) == "dir", data), nil
 }
 
-// newRuntimeOutputResult builds a download result from the decoded bytes,
-// SHA-256'ing the payload and renaming a directory entry to its <name>.tar.gz
-// archive. Shared by the kubectl-exec and in-pod local download paths.
 func newRuntimeOutputResult(name string, isDir bool, data []byte) RuntimeOutputResult {
 	sum := sha256.Sum256(data)
 	result := RuntimeOutputResult{
@@ -224,9 +206,7 @@ func newRuntimeOutputResult(name string, isDir bool, data []byte) RuntimeOutputR
 	return result
 }
 
-// traceRuntimeOutputsScript traces the kubectl exec argv (with the script body
-// redacted to a placeholder) plus the script itself, mirroring the bootstrap
-// remote-script trace. It returns true when the context is in dry-run, in which
+// traceRuntimeOutputsScript returns true when the context is in dry-run, in which
 // case the caller must not run the command.
 func traceRuntimeOutputsScript(ctx Context, req ShellLaunchParams, label, script string) bool {
 	traceArgs := append([]string{}, kubectlRemoteExecArgs(req, script)...)
@@ -238,9 +218,8 @@ func traceRuntimeOutputsScript(ctx Context, req ShellLaunchParams, label, script
 	return ctx.DryRun
 }
 
-// runtimeOutputsListScript lists one directory one level deep, emitting a
-// tab-separated record per entry: type (f/d), size, mtime epoch, basename. A
-// missing directory prints nothing (empty result, not an error).
+// runtimeOutputsListScript emits one tab-separated record per entry: type (f/d),
+// size, mtime epoch, basename. A missing directory prints nothing.
 func runtimeOutputsListScript(dir string) string {
 	quoted := shellQuote(dir)
 	return fmt.Sprintf("if [ -d %s ]; then find %s -mindepth 1 -maxdepth 1 -printf '%%y\\t%%s\\t%%T@\\t%%f\\n'; fi", quoted, quoted)
@@ -271,8 +250,8 @@ func runtimeOutputDownloadScript(dir, name string) string {
 	}, "\n")
 }
 
-// parseRuntimeOutputsListing parses the tab-separated find output into entries.
-// Malformed lines are skipped rather than failing the whole listing.
+// parseRuntimeOutputsListing skips malformed lines rather than failing the whole
+// listing.
 func parseRuntimeOutputsListing(stdout string) []OutputEntry {
 	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
 	entries := make([]OutputEntry, 0, len(lines))
@@ -298,9 +277,8 @@ func parseRuntimeOutputsListing(stdout string) []OutputEntry {
 
 // ResolveLocalOutputs lists one directory on the local filesystem, newest-first.
 // It is the in-pod counterpart of ResolveRuntimeOutputs: the MCP server runs
-// inside the runtime pod, co-located with the files, so it reads the directory
-// directly instead of exec-ing into it. A missing directory yields an empty
-// result, not an error.
+// inside the runtime pod, so it reads the files directly instead of exec-ing in.
+// A missing directory yields an empty result, not an error.
 func ResolveLocalOutputs(params RuntimeOutputsParams) (RuntimeOutputsListResult, error) {
 	dir, err := resolveOutputsDir(params.Dir)
 	if err != nil {
@@ -364,8 +342,8 @@ func StatLocalOutput(params RuntimeOutputDownloadParams) (RuntimeOutputResult, e
 }
 
 // DownloadLocalOutput reads one local entry into memory — the in-pod counterpart
-// of DownloadRuntimeOutput. A file is read raw; a directory becomes an in-memory
-// gzip tarball (IsArchive=true). The payload is SHA-256'd and size-capped.
+// of DownloadRuntimeOutput. A directory becomes an in-memory gzip tarball
+// (IsArchive=true).
 func DownloadLocalOutput(params RuntimeOutputDownloadParams) (RuntimeOutputResult, error) {
 	dir, name, target, err := resolveLocalOutputTarget(params)
 	if err != nil {
@@ -419,8 +397,7 @@ func statLocalTarget(target, name string) (os.FileInfo, error) {
 }
 
 // tarGzLocalDir builds an in-memory gzip tarball of one directory, with entry
-// names relative to its parent so the archive unpacks as <name>/…. Symlinks are
-// stored as links; only regular files carry content.
+// names relative to its parent so the archive unpacks as <name>/….
 func tarGzLocalDir(parent, name string) ([]byte, error) {
 	root := filepath.Join(parent, name)
 	var buf bytes.Buffer
@@ -444,9 +421,6 @@ func tarGzLocalDir(parent, name string) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// tarGzWriteEntry writes one filesystem entry into the tar stream, with its name
-// relative to parent. Symlinks are stored as links; only regular files carry
-// content.
 func tarGzWriteEntry(tw *tar.Writer, parent, p string, info os.FileInfo) error {
 	rel, err := filepath.Rel(parent, p)
 	if err != nil {

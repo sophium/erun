@@ -16,9 +16,6 @@ import (
 
 func TestIdle(t *testing.T) {
 	t.Run("invalid_working_hours_format_errors", func(t *testing.T) {
-		// Exercises EnvironmentIdleConfig.Resolve → parseWorkingHours: a
-		// working-hours value without the HH:MM-HH:MM shape must fail the
-		// status command with the format error.
 		setup := env.New(t)
 		seedIdleEnvWithIdleBlock(t, setup, "idle:\n  workinghours: 9to5\n")
 		result := erun.Run(t, []string{"idle", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -29,8 +26,8 @@ func TestIdle(t *testing.T) {
 	})
 
 	t.Run("equal_working_hours_bounds_errors", func(t *testing.T) {
-		// Exercises validateWorkingHours' start==end guard: a zero-width
-		// working window is a configuration error, not "always outside".
+		// A zero-width working window (start==end) is a configuration error,
+		// not "always outside".
 		setup := env.New(t)
 		seedIdleEnvWithIdleBlock(t, setup, "idle:\n  workinghours: 08:00-08:00\n")
 		result := erun.Run(t, []string{"idle", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -41,8 +38,6 @@ func TestIdle(t *testing.T) {
 	})
 
 	t.Run("invalid_timezone_errors", func(t *testing.T) {
-		// Exercises Resolve's timezone validation: an unknown IANA zone
-		// must fail with "invalid environment idle timezone".
 		setup := env.New(t)
 		seedIdleEnvWithIdleBlock(t, setup, "idle:\n  workinghours: 08:00-20:00\n  timezone: Mars/Olympus\n")
 		result := erun.Run(t, []string{"idle", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -53,13 +48,10 @@ func TestIdle(t *testing.T) {
 	})
 
 	t.Run("overnight_working_hours_with_timezone", func(t *testing.T) {
-		// Exercises workingHoursStatus' overnight arm (start > end wraps
-		// past midnight) and the explicit-timezone conversion. The window
-		// 23:59-23:58 is "within" for every wall-clock minute except 23:58,
-		// so the marker reliably reads active; the remaining seconds are
-		// wall-clock dependent, hence the structural assertion instead of a
-		// golden (the value cannot be normalized away without erasing the
-		// marker's meaning).
+		// The window 23:59-23:58 is "within" for every wall-clock minute
+		// except 23:58, so the marker reliably reads active; the remaining
+		// seconds are wall-clock dependent, so this asserts the marker's shape
+		// rather than a golden the normalizer would have to erase.
 		setup := env.New(t)
 		seedIdleEnvWithIdleBlock(t, setup, "idle:\n  workinghours: 23:59-23:58\n  timezone: UTC\n")
 		result := erun.Run(t, []string{"idle", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -82,10 +74,8 @@ func TestIdle(t *testing.T) {
 	})
 
 	t.Run("status_for_seeded_env", func(t *testing.T) {
-		// Exercises eruncommon.ResolveStoredEnvironmentIdleStatus and
-		// erun-cli/cmd/idle.go's writeIdleStatus / idleMarkerValue. The
-		// working-hours marker is wall-clock-dependent so we assert the
-		// stable lines exactly and the variable lines structurally.
+		// The working-hours marker is wall-clock-dependent, so the stable
+		// lines are asserted exactly and the variable line structurally.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"idle", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -108,8 +98,6 @@ func TestIdle(t *testing.T) {
 				t.Errorf("expected stdout to contain %q, got:\n%s", line, result.Stdout)
 			}
 		}
-		// working-hours: idle (when wall clock is outside 08:00-20:00) OR
-		// active (12345s) (when inside). Either form is acceptable.
 		workingHours := regexp.MustCompile(`(?m)^\s*working-hours: (idle|active \(\d+s\))\s*$`)
 		if !workingHours.MatchString(result.Stdout) {
 			t.Errorf("expected working-hours marker line, got:\n%s", result.Stdout)
@@ -117,10 +105,6 @@ func TestIdle(t *testing.T) {
 	})
 
 	t.Run("status_json_output", func(t *testing.T) {
-		// Exercises idle.go --json branch: instead of writeIdleStatus's
-		// labeled-value output, the status should be emitted as JSON via
-		// json.NewEncoder. The structured fields (timeout, markers) must
-		// parse cleanly back into common.EnvironmentIdleStatus.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"idle", "team", "dev", "--json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -140,14 +124,11 @@ func TestIdle(t *testing.T) {
 	})
 
 	t.Run("json_overlays_pending_grace_window", func(t *testing.T) {
-		// eruncommon.overlayStopPending: with a stop-pending.json on disk
-		// for a cloud-managed, stop-eligible env, the resolved status must
-		// surface stopPendingSince / gracePeriodSeconds /
-		// secondsUntilForcedStop. A Since in the far future clamps elapsed
-		// to 0, so secondsUntilForcedStop deterministically equals the full
-		// grace (600) for decades without sleeping. Whole-stream golden is
-		// impossible: the working-hours marker varies by wall clock, so the
-		// overlay fields are asserted directly on the JSON stream.
+		// A far-future "since" clamps elapsed to 0, so secondsUntilForcedStop
+		// deterministically equals the full grace (600) for decades without
+		// sleeping. The working-hours marker varies by wall clock, so the
+		// overlay fields are asserted directly on the JSON stream rather than
+		// via a whole-stream golden.
 		setup := env.New(t)
 		seedManagedCloudTenantEnv(t, setup, "team", "dev")
 		seedStopPending(t, setup.Home, "team", "dev", `{"since": "2099-01-01T00:00:00Z", "graceSeconds": 600}
@@ -170,12 +151,10 @@ func TestIdle(t *testing.T) {
 	})
 
 	t.Run("reports_stop_error_tail_from_env_log", func(t *testing.T) {
-		// eruncommon.loadEnvironmentIdleStopError: the per-env
-		// ~/.erun/<tenant>/<env>/idle-stop.log surfaces as `stop error:` and
-		// only its last 4000 bytes are kept, so a repeatedly-failing stop
-		// loop cannot flood the status output. Whole-stream golden is
-		// impossible (working-hours line varies by wall clock), so the
-		// truncation contract is asserted via head/tail markers.
+		// Only the last 4000 bytes of the stop log are kept, so a
+		// repeatedly-failing stop loop cannot flood the status output. The
+		// working-hours line varies by wall clock, so the truncation contract
+		// is asserted via head/tail markers rather than a whole-stream golden.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		logDir := filepath.Join(setup.Home, ".erun", "team", "dev")
@@ -202,9 +181,8 @@ func TestIdle(t *testing.T) {
 	})
 
 	t.Run("reports_stop_error_from_legacy_log_location", func(t *testing.T) {
-		// loadEnvironmentIdleStopError's legacy fallback: when the per-env
-		// log is absent, the shared ~/.erun/idle-stop.log written by older
-		// runtime images is read instead.
+		// Older runtime images wrote a single shared idle-stop.log, so an
+		// absent per-env log falls back to that legacy location.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		legacyDir := filepath.Join(setup.Home, ".erun")
@@ -224,9 +202,6 @@ func TestIdle(t *testing.T) {
 	})
 }
 
-// seedIdleEnvWithIdleBlock seeds the standard tenant/env tree and appends the
-// given idle: YAML block to the env config so idle scenarios can stage
-// arbitrary working-hours/timezone shapes.
 func seedIdleEnvWithIdleBlock(t *testing.T, setup env.Setup, idleBlock string) {
 	t.Helper()
 	fixture.SeedTenantEnv(t, setup, "team", "dev")

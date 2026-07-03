@@ -58,19 +58,11 @@ type CloudContextConfig struct {
 	UpdatedAt           string `json:"updatedAt,omitempty" yaml:"updatedat,omitempty"`
 }
 
-// CloudContextStatus pairs the persisted config with the live AWS-
-// observed Status. The Status field is in-memory only: it is never
-// written back to disk by any of the helpers in this package. Producers
-// fill it from a Refresh* call or from the result of Init/Start/Stop;
-// consumers that need a current value must ask AWS or read a cache that
-// does.
-//
-// StopProtectionKnown / StopProtection are filled only on the
-// dedicated stop-protection read/write paths
-// (DescribeCloudContextStopProtection,
-// SetCloudContextStopProtection) — the bulk RefreshCloudContextStatuses
-// path deliberately does not fetch them so it stays one AWS call per
-// (alias,region) group.
+// CloudContextStatus pairs the persisted config with a live, in-memory
+// Status this package never writes to disk, so a consumer needing a current
+// value must reach a live source rather than a cached one. The StopProtection
+// fields are filled only on the dedicated stop-protection paths; the bulk
+// refresh skips them to stay one AWS call per (alias,region) group.
 type CloudContextStatus struct {
 	CloudContextConfig  `json:",inline" yaml:",inline"`
 	Status              string `json:"status,omitempty" yaml:"status,omitempty"`
@@ -185,11 +177,9 @@ func ListCloudContextStatuses(store CloudReadStore) ([]CloudContextStatus, error
 	return statuses, nil
 }
 
-// RefreshCloudContextStatuses returns the locally configured cloud contexts
-// with their Status field overwritten by the live AWS instance state. If the
-// AWS describe-instances call fails for a given provider+region group, the
-// affected contexts keep their cached Status and receive a Message that
-// explains why the refresh did not happen.
+// RefreshCloudContextStatuses returns the configured cloud contexts with
+// Status set from live AWS state; a group whose AWS call fails is marked
+// Unknown rather than reported with a stale value.
 func RefreshCloudContextStatuses(ctx Context, store CloudReadStore, deps CloudContextDependencies) ([]CloudContextStatus, error) {
 	statuses, err := ListCloudContextStatuses(store)
 	if err != nil {
@@ -215,10 +205,6 @@ func refreshCloudContextStatusesFromAWS(ctx Context, store CloudReadStore, deps 
 	}
 }
 
-// groupCloudContextRefreshIndices buckets the status entries by
-// (alias,region) so each bucket can be refreshed with a single AWS
-// describe-instances call. Entries without an instance ID, alias, or
-// region keep their cached Status and are excluded from any group.
 func groupCloudContextRefreshIndices(statuses []CloudContextStatus) map[cloudContextRefreshKey][]int {
 	groups := make(map[cloudContextRefreshKey][]int)
 	for i, status := range statuses {
@@ -236,12 +222,6 @@ func groupCloudContextRefreshIndices(statuses []CloudContextStatus) map[cloudCon
 	return groups
 }
 
-// refreshCloudContextRefreshGroup resolves the provider for one
-// (alias,region) group, describes its instances in a single AWS call,
-// and overwrites each grouped status with the observed state. Any
-// provider-resolution or describe failure downgrades the whole group to
-// Unknown via applyCloudContextRefreshError so a stale "running" is not
-// surfaced as authoritative.
 func refreshCloudContextRefreshGroup(ctx Context, store CloudReadStore, deps CloudContextDependencies, statuses []CloudContextStatus, key cloudContextRefreshKey, indices []int) {
 	provider, err := ResolveCloudProvider(store, key.alias)
 	if err != nil {
@@ -262,11 +242,6 @@ func refreshCloudContextRefreshGroup(ctx Context, store CloudReadStore, deps Clo
 	}
 }
 
-// applyCloudContextRefreshState overwrites a single status's Status and
-// Message from the AWS-observed instance state map. A missing instance
-// reads as Unknown/"instance not found in AWS"; an unrecognized state
-// reads as Unknown with the raw state in the Message; a recognized state
-// clears the Message.
 func applyCloudContextRefreshState(status *CloudContextStatus, states map[string]string) {
 	awsState, ok := states[status.InstanceID]
 	if !ok {
@@ -283,11 +258,8 @@ func applyCloudContextRefreshState(status *CloudContextStatus, states map[string
 }
 
 func applyCloudContextRefreshError(statuses []CloudContextStatus, indices []int, err error) {
-	// The cached Status on disk reflects the last write at create / start /
-	// stop time and is not invalidated when the underlying instance is
-	// changed out-of-band (AWS console, expired SSO blocking refresh, etc).
-	// Downgrading to Unknown when AWS cannot be reached keeps the UI from
-	// surfacing a stale "running" as authoritative.
+	// When AWS cannot be reached, downgrade to Unknown so the UI never
+	// surfaces a stale "running" as authoritative.
 	message := "status refresh failed: " + err.Error()
 	for _, i := range indices {
 		statuses[i].Status = CloudContextStatusUnknown
@@ -372,11 +344,6 @@ func InitCloudContext(ctx Context, store CloudContextStore, params InitCloudCont
 	if err := finalizeInitCloudContext(ctx, deps, provider, &config); err != nil {
 		return CloudContextStatus{}, err
 	}
-	// finalizeInitCloudContext invokes `aws ec2 wait instance-running`
-	// before returning, so a successful return means the instance is
-	// running. In dry-run mode the wait is stubbed but the intent of
-	// the command is the same — report the resolved end-state to the
-	// caller.
 	status := CloudContextStatusRunning
 	if ctx.DryRun {
 		return CloudContextStatus{CloudContextConfig: NormalizeCloudContextConfig(config), Status: status}, nil
@@ -445,13 +412,11 @@ func initCloudContextSecurityGroup(ctx Context, deps CloudContextDependencies, p
 }
 
 func runInitCloudContextInstance(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, params InitCloudContextParams, config *CloudContextConfig) (string, error) {
-	// Idempotency (issue #605): a re-run — a durable provisioning workflow
-	// resuming after a crash, or a re-issued `erun context init` — must not
-	// launch a duplicate instance. Reuse the instance already tagged for this
-	// context, if one is still pending/running. The admin token comes from
-	// deps.NewToken(); when the caller derives it deterministically (the hosted
-	// provisioner does, from the context id), the reused instance's baked token
-	// and the re-resolved token agree.
+	// Idempotency: a re-run (a provisioner resuming after a crash, or a
+	// re-issued init) reuses the instance already tagged for this context
+	// instead of launching a duplicate. When the caller derives the admin
+	// token deterministically from the context id, the reused instance's
+	// baked token still matches the re-resolved one.
 	existingID, err := findRunningCloudContextInstance(ctx, deps, provider, config.Region, config.Name)
 	if err != nil {
 		return "", err
@@ -474,11 +439,6 @@ func runInitCloudContextInstance(ctx Context, deps CloudContextDependencies, pro
 	return runAWSWithIAMConsistencyRetry(ctx, deps, provider, config.Region, args)
 }
 
-// findRunningCloudContextInstance returns the id of an instance already tagged
-// for this context and still pending/running, or "" when none exists. It makes
-// InitCloudContext idempotent: a re-run reuses the instance instead of launching
-// a duplicate. In dry-run the traced query returns empty, so the plan proceeds
-// to the launch step unchanged (aside from the new query trace line).
 func findRunningCloudContextInstance(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region, name string) (string, error) {
 	out, err := deps.RunAWS(ctx, provider, region, []string{
 		"ec2", "describe-instances",
@@ -633,26 +593,16 @@ func StopCloudContext(ctx Context, store CloudContextStore, params CloudContextP
 	if err != nil {
 		return CloudContextStatus{}, err
 	}
-	// stop-instances accepts the action but the EC2 then transitions
-	// running → stopping → stopped over ~30-60 s. Until #361, this
-	// helper returned the instant AWS acknowledged stop-instances,
-	// which lied about the live state: a follow-up `cloud-context
-	// start` issued in the next few seconds would race the
-	// transition and AWS would reply IncorrectInstanceState. Wait
-	// for the observed end state before reporting success so callers
-	// (the desktop's idle stopper notification, `erun open` preflight,
-	// delete-env teardown) only see "stopped" once the instance has
-	// actually got there.
+	// stop-instances returns as soon as AWS accepts it, but the instance
+	// takes ~30-60 s to reach "stopped". Wait for the observed end state so a
+	// follow-up start does not race the transition and hit
+	// IncorrectInstanceState.
 	if _, err := deps.RunAWS(ctx, provider, status.Region, []string{"ec2", "wait", "instance-stopped", "--instance-ids", status.InstanceID}); err != nil {
 		return CloudContextStatus{}, fmt.Errorf("cloud context %q: stop was accepted but the instance was not observed stopped — it may still be transitioning; check its state in the AWS console and retry: %w", status.Name, classifyCloudContextPowerError("stop-instances", status.CloudContextConfig, err))
 	}
 	return status, nil
 }
 
-// resolveCloudContextStatusForName re-reads the persisted config so
-// StopCloudContext can recover the InstanceID/Region/Alias needed to
-// run `aws ec2 wait instance-stopped` when the initial stop-instances
-// call short-circuited with IncorrectInstanceState.
 func resolveCloudContextStatusForName(store CloudContextStore, name string) (CloudContextStatus, error) {
 	config, ok, err := findCloudContext(store, name)
 	if err != nil {
@@ -667,14 +617,10 @@ func resolveCloudContextStatusForName(store CloudContextStore, name string) (Clo
 	}, nil
 }
 
-// isAWSIncorrectInstanceStateError reports whether err is the AWS
-// IncorrectInstanceState response that stop-instances and
-// start-instances return when the target instance is in a state the
-// requested transition cannot apply to (e.g. starting a stopping
-// instance, stopping an already-stopped instance). The default
-// RunAWS wraps the underlying CLI error in a "aws ec2 ...: ..."
-// string, so a substring check on the raw stderr is the most stable
-// signal across AWS CLI versions.
+// isAWSIncorrectInstanceStateError reports whether err is AWS's
+// IncorrectInstanceState rejection — a transition the instance's current
+// state cannot accept. Substring-matching the wrapped stderr is the most
+// stable signal across AWS CLI versions.
 func isAWSIncorrectInstanceStateError(err error) bool {
 	if err == nil {
 		return false
@@ -682,11 +628,9 @@ func isAWSIncorrectInstanceStateError(err error) bool {
 	return strings.Contains(err.Error(), "IncorrectInstanceState")
 }
 
-// awsExpiredCredentialsMarkers are the stderr signatures the AWS CLI emits
-// when the call failed for authentication rather than the requested
-// operation: an expired/invalid SSO session, expired STS credentials, or no
-// credentials at all. Substring matching on the wrapped error mirrors
-// isAWSIncorrectInstanceStateError.
+// awsExpiredCredentialsMarkers are the AWS CLI stderr signatures that mean
+// the call failed on authentication (expired SSO/STS or missing credentials),
+// not on the requested operation.
 var awsExpiredCredentialsMarkers = []string{
 	"Token has expired",
 	"SSO session associated with this profile has expired",
@@ -710,20 +654,11 @@ func isAWSExpiredCredentialsError(err error) bool {
 	return false
 }
 
-// classifyCloudContextPowerError translates a raw start-instances /
-// stop-instances failure into the actionable reason the operator needs
-// (issue #456: a failed Stop surfaced as a bare exit 1 while the instance
-// kept running). The two failure families with a known next step:
-//
-//   - OperationNotPermitted on stop — stop protection (DisableApiStop) is
-//     on, the deliberate repair-time lock; the fix is unlocking it, not
-//     retrying.
-//   - Expired/missing AWS credentials — the call never reached the
-//     instance; the fix is signing in again.
-//
-// Anything else passes through unchanged so callers (including the
-// IncorrectInstanceState absorption in StopCloudContext/StartCloudContext)
-// keep seeing the raw AWS text.
+// classifyCloudContextPowerError turns a raw start/stop-instances failure
+// into an actionable operator message for the two failures with a known fix
+// — stop protection (unlock it) and expired credentials (sign in again) —
+// and passes everything else through unchanged, so callers that key off the
+// raw AWS text (the IncorrectInstanceState absorption) still see it.
 func classifyCloudContextPowerError(awsAction string, config CloudContextConfig, err error) error {
 	switch {
 	case err == nil:
@@ -755,12 +690,6 @@ func StartCloudContext(ctx Context, store CloudContextStore, params CloudContext
 	return finalizeStartedCloudContext(ctx, store, deps, status)
 }
 
-// finalizeStartedCloudContext brings a just-started instance fully up
-// and persists the result: it waits for instance-running, refreshes the
-// public IP, reconfigures the kube context, stamps UpdatedAt, and saves
-// the config (skipping the save in dry-run). This is Start's own
-// follow-up save that changeCloudContextPowerState deliberately leaves
-// to the caller.
 func finalizeStartedCloudContext(ctx Context, store CloudContextStore, deps CloudContextDependencies, status CloudContextStatus) (CloudContextStatus, error) {
 	deps = normalizeCloudContextDependencies(deps)
 	provider, err := ResolveCloudProvider(store, status.CloudProviderAlias)
@@ -788,11 +717,6 @@ func finalizeStartedCloudContext(ctx Context, store CloudContextStore, deps Clou
 	return status, nil
 }
 
-// enforceCloudContextStartWorkingHoursGate applies the per-environment
-// working-hours gate before a start. force=true bypasses it; a store
-// that does not implement CloudContextEnvLookup skips it. When every
-// attached environment is outside its working hours the start is
-// rejected with the force-to-override hint.
 func enforceCloudContextStartWorkingHoursGate(ctx Context, store CloudContextStore, params CloudContextParams, deps CloudContextDependencies) error {
 	if params.Force {
 		ctx.Trace("cloud-context start: force=true bypasses working-hours gate")
@@ -815,15 +739,11 @@ func enforceCloudContextStartWorkingHoursGate(ctx Context, store CloudContextSto
 	return nil
 }
 
-// recoverCloudContextStartFromTransitionalState handles a failed
-// start-instances. A non-IncorrectInstanceState failure is returned
-// unchanged. IncorrectInstanceState means the instance is in a
-// transitional state — almost always `stopping`, sometimes `pending`
-// or `shutting-down`. start-instances only accepts fully-stopped
-// instances. Wait for the transition to settle and retry once. Without
-// this recovery the user's click on an env whose linked context just
-// auto-stopped fails with a confusing AWS error and the desktop's
-// reconnect loop spins pointlessly. See issue #361.
+// recoverCloudContextStartFromTransitionalState retries a start that AWS
+// rejected because the instance is still transitional (usually stopping):
+// start-instances only accepts fully-stopped instances. Without it, a click
+// on an env whose linked context just auto-stopped fails with a confusing
+// AWS error while the desktop's reconnect loop spins pointlessly.
 func recoverCloudContextStartFromTransitionalState(ctx Context, store CloudContextStore, params CloudContextParams, deps CloudContextDependencies, startErr error) (CloudContextStatus, error) {
 	if !isAWSIncorrectInstanceStateError(startErr) {
 		return CloudContextStatus{}, startErr
@@ -843,28 +763,20 @@ func recoverCloudContextStartFromTransitionalState(ctx Context, store CloudConte
 	return changeCloudContextPowerState(ctx, store, params, deps, "start-instances", CloudContextStatusRunning)
 }
 
-// CloudContextStopProtectionParams identifies the cloud context whose
-// AWS DisableApiStop attribute should be flipped. Enabled=true sets
-// DisableApiStop=true (the instance cannot be stopped by any caller
-// until the attribute is cleared), Enabled=false reverses it.
+// CloudContextStopProtectionParams identifies the cloud context whose stop
+// protection to flip. Enabled=true makes the instance unstoppable by any
+// caller until it is cleared again.
 type CloudContextStopProtectionParams struct {
 	Name    string
 	Enabled bool
 }
 
-// SetCloudContextStopProtection toggles the EC2 DisableApiStop attribute
-// for the named cloud context. When Enabled=true, every subsequent
-// ec2:StopInstances call (the in-pod idle monitor, the desktop Stop
-// button, any external script) returns OperationNotPermitted until the
-// attribute is cleared. This is the recovery lever used when an env's
-// in-pod components are unhealthy and the user needs to keep the
-// underlying EC2 up long enough to repair them.
-//
-// The function does not gate on the instance's current power state —
-// DisableApiStop is settable on running and stopped instances. The
-// returned status carries StopProtectionKnown=true and StopProtection
-// reflects the new value so callers can render the result without an
-// extra describe round-trip.
+// SetCloudContextStopProtection is the recovery lever for keeping an env's
+// underlying EC2 up long enough to repair unhealthy in-pod components: with
+// Enabled=true every subsequent stop (idle monitor, desktop button, external
+// script) is refused until it is cleared. It works on running or stopped
+// instances, and the returned status reflects the new value so callers can
+// render it without a follow-up describe.
 func SetCloudContextStopProtection(ctx Context, store CloudContextStore, params CloudContextStopProtectionParams, deps CloudContextDependencies) (CloudContextStatus, error) {
 	if store == nil {
 		return CloudContextStatus{}, fmt.Errorf("store is required")
@@ -903,14 +815,10 @@ func SetCloudContextStopProtection(ctx Context, store CloudContextStore, params 
 	}, nil
 }
 
-// DescribeCloudContextStopProtection reads the live DisableApiStop
-// attribute for the named cloud context. It is a separate call from
-// the bulk RefreshCloudContextStatuses path because the AWS attribute
-// is read via describe-instance-attribute (one call per instance),
-// not describe-instances; calling it for every context on every
-// refresh would multiply the AWS round-trip count by the number of
-// configured envs. The desktop calls it lazily for the env whose
-// detail view is open.
+// DescribeCloudContextStopProtection reads the live stop-protection state for
+// one context. It is kept out of the bulk refresh because it costs one AWS
+// call per instance; the desktop calls it lazily for the env whose detail
+// view is open.
 func DescribeCloudContextStopProtection(ctx Context, store CloudContextStore, name string, deps CloudContextDependencies) (CloudContextStatus, error) {
 	if store == nil {
 		return CloudContextStatus{}, fmt.Errorf("store is required")
@@ -948,12 +856,9 @@ func DescribeCloudContextStopProtection(ctx Context, store CloudContextStore, na
 	}, nil
 }
 
-// parseCloudContextStopProtectionOutput reads the `aws ec2
-// describe-instance-attribute --query DisableApiStop.Value --output text`
-// response. AWS returns "True" / "False" (capitalized) for the boolean
-// attribute, or an empty string when --dry-run short-circuits the call.
-// Anything other than a recognized "true" reads as disabled so the
-// failure mode of an unknown response is the safer of the two.
+// parseCloudContextStopProtectionOutput treats anything but a recognized
+// "true" as disabled, so an unknown or empty response fails to the safer
+// side.
 func parseCloudContextStopProtectionOutput(out string) bool {
 	switch strings.ToLower(strings.TrimSpace(out)) {
 	case "true":
@@ -1123,11 +1028,6 @@ func replaceCloudContextInstanceProfileAssociation(ctx Context, deps CloudContex
 	return err
 }
 
-// refreshSingleCloudContextStatus runs RefreshCloudContextStatuses and
-// returns the entry matching the supplied seed's name. Used by paths
-// that need a current AWS-observed Status for a known context — the
-// persisted config does not carry Status, so callers cannot fall back
-// to a cached value on disk.
 func refreshSingleCloudContextStatus(ctx Context, store CloudReadStore, deps CloudContextDependencies, seed CloudContextStatus) (CloudContextStatus, error) {
 	statuses, err := RefreshCloudContextStatuses(ctx, store, deps)
 	if err != nil {
@@ -1162,12 +1062,9 @@ func CloudContextPreflight(store CloudContextStore, deps CloudContextDependencie
 		if err != nil || !ok {
 			return err
 		}
-		// Persisted config no longer carries Status, so reach AWS for
-		// the authoritative current state before deciding whether to
-		// start. CloudContextPreflight is invoked at most once per
-		// context per CLI run (see the in-closure `started` cache), so
-		// one describe-instances call here is the right cost-quality
-		// trade.
+		// Reach AWS for the authoritative state before deciding to start.
+		// Preflight runs at most once per context per CLI run (the started
+		// cache), so the extra describe call is a fair cost-quality trade.
 		live, err := refreshSingleCloudContextStatus(ctx, store, deps, status)
 		if err != nil {
 			return err
@@ -1225,12 +1122,10 @@ func cloudContextStartBlockedByWorkingHours(store CloudReadStore, lookup CloudCo
 	return blockedReason, nil
 }
 
-// resolveCloudContextWorkingHoursKubeContext loads the named cloud
-// context and returns the kube-context name the working-hours gate
-// matches environments against (falling back to the context's own Name).
-// ok=false (with a nil error) means there is nothing to gate — a blank
-// name, an unknown context, or a context with no resolvable kube-context
-// — and the caller should treat the gate as not engaged.
+// resolveCloudContextWorkingHoursKubeContext returns the kube-context the
+// working-hours gate matches envs against. ok=false with a nil error means
+// there is nothing to gate (blank or unknown context), and the caller should
+// treat the gate as not engaged.
 func resolveCloudContextWorkingHoursKubeContext(store CloudReadStore, contextName string) (string, bool, error) {
 	contextName = strings.TrimSpace(contextName)
 	if contextName == "" {
@@ -1253,14 +1148,6 @@ func resolveCloudContextWorkingHoursKubeContext(store CloudReadStore, contextNam
 	return kubeContext, true, nil
 }
 
-// evaluateTenantWorkingHoursGate inspects every environment in one
-// tenant that is attached to kubeContext. It sets *hasAttachedEnv when
-// it finds any attached env, returns permitsStart=true the moment an
-// attached env is inside its working hours (the caller treats that as
-// "gate clear" and stops), and otherwise returns the first
-// outside-working-hours reason it observed. Environments whose idle
-// policy or working-hours status cannot be resolved are skipped, matching
-// the original inline behavior.
 func evaluateTenantWorkingHoursGate(tenant TenantConfig, envs []EnvConfig, kubeContext string, now time.Time, hasAttachedEnv *bool) (bool, string) {
 	var blockedReason string
 	for _, env := range envs {
@@ -1304,12 +1191,10 @@ func findCloudContextForKubernetesContext(store CloudReadStore, kubernetesContex
 	return CloudContextStatus{}, false, nil
 }
 
-// changeCloudContextPowerState runs the AWS power-state mutation and
-// returns a CloudContextStatus whose Status field reflects the intended
-// new state. It does not persist the config: the persisted shape no
-// longer carries Status, so a Stop has nothing to write. Start performs
-// its own follow-up save (PublicIP refresh + UpdatedAt) after this
-// helper returns.
+// changeCloudContextPowerState runs the power-state mutation and returns the
+// intended new Status without persisting: the persisted shape carries no
+// Status, so Stop has nothing to write and Start does its own follow-up save
+// after this returns.
 func changeCloudContextPowerState(ctx Context, store CloudContextStore, params CloudContextParams, deps CloudContextDependencies, awsAction, status string) (CloudContextStatus, error) {
 	if store == nil {
 		return CloudContextStatus{}, fmt.Errorf("store is required")
@@ -2081,12 +1966,9 @@ func dryRunAWSOutput(args []string) string {
 	case strings.Contains(joined, "ec2 run-instances"):
 		return "i-<new-instance>\n"
 	case strings.Contains(joined, "ec2 describe-instances"):
-		// Two describe-instances callers in the cloud-context code:
-		// one queries [InstanceId,State.Name] (status refresh, parsed
-		// as two-column text), the other queries PublicIpAddress.
-		// Default the status-refresh output to "running" so dry-run
-		// callers see the common-case end-state; tests that want to
-		// trace the stopped path should supply a custom RunAWS.
+		// Two describe-instances callers share this path: the status
+		// refresh (queried as [InstanceId,State.Name]) and the public-IP
+		// lookup.
 		if strings.Contains(joined, "[InstanceId,State.Name]") {
 			return dryRunDescribeInstanceStateOutput(joined)
 		}
@@ -2096,12 +1978,10 @@ func dryRunAWSOutput(args []string) string {
 	}
 }
 
-// dryRunDescribeInstanceStateOutput renders a `--query
-// [InstanceId,State.Name]` response for each --filters Values=...
-// argument the caller supplied. Defaulting every instance to "running"
-// keeps the dry-run preflight from spuriously starting a context that
-// in real life would already be up. Tests that need to exercise the
-// start path should supply a custom RunAWS that returns "stopped".
+// dryRunDescribeInstanceStateOutput defaults every instance to "running" so
+// the dry-run preflight does not spuriously plan a start for a context that
+// in real life would already be up; a test that needs the start path supplies
+// a RunAWS returning "stopped".
 func dryRunDescribeInstanceStateOutput(joined string) string {
 	const marker = "Values="
 	idx := strings.Index(joined, marker)

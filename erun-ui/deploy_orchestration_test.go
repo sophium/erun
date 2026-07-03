@@ -7,10 +7,8 @@ import (
 )
 
 // TestDeployNeedsBuildOrchestration locks the desktop's per-env-type deploy
-// policy (root AGENTS.md § "Command primitives vs orchestration"). This is the
-// decision the Playwright harness cannot drive end-to-end: it has no cluster or
-// Docker daemon to run a real build -> push -> deploy, so the policy that
-// chooses that path lives here as a pure predicate with table coverage.
+// policy here because the Playwright harness has no cluster or Docker daemon to
+// drive the real build -> push -> deploy end-to-end.
 func TestDeployNeedsBuildOrchestration(t *testing.T) {
 	openOf := func(envType eruncommon.EnvironmentType) eruncommon.OpenResult {
 		return eruncommon.OpenResult{EnvConfig: eruncommon.EnvConfig{Type: envType}}
@@ -40,9 +38,8 @@ func TestDeployNeedsBuildOrchestration(t *testing.T) {
 	}
 }
 
-// TestParseBuildResultVersion covers extracting the version build mints from
-// `erun build --output json` stdout, including the case where unexpected stderr
-// noise leaked onto stdout around the JSON object.
+// TestParseBuildResultVersion covers pulling the minted version out of
+// `erun build --output json` stdout even when it carries surrounding noise.
 func TestParseBuildResultVersion(t *testing.T) {
 	cases := []struct {
 		name   string

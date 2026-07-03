@@ -35,9 +35,8 @@ func TestDelete(t *testing.T) {
 	})
 
 	t.Run("dry_run_with_runtime_type_traces_namespace_delete", func(t *testing.T) {
-		// Exercises delete.go on a runtime-type env (explicit type=runtime
-		// in YAML). RemoteWorktree() returns true via Type, so delete must
-		// trace the kubectl namespace delete the same as a remote=true env.
+		// A runtime-type env counts as remote for delete: it must trace the
+		// kubectl namespace delete like a remote=true env.
 		setup := env.New(t)
 		seedExplicitTypeEnv(t, setup, "team", "prod", "runtime")
 		result := erun.Run(t, []string{"delete", "team", "prod", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -48,10 +47,8 @@ func TestDelete(t *testing.T) {
 	})
 
 	t.Run("dry_run_with_remote_env_traces_namespace_delete", func(t *testing.T) {
-		// Exercises delete.go on a remote environment: --dry-run must
-		// trace the kubectl namespace delete command (with --ignore-not-found)
-		// in addition to the local config rm trace, without touching the
-		// cluster or prompting for confirmation.
+		// A remote env's dry-run traces the kubectl namespace delete
+		// alongside the local config removal, without touching the cluster.
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"delete", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -62,12 +59,9 @@ func TestDelete(t *testing.T) {
 	})
 
 	t.Run("rejects_remote_env_without_kubernetes_context", func(t *testing.T) {
-		// Regression: a remote env whose config lost its kubernetescontext
-		// field used to silently delete the namespace from whatever
-		// `kubectl config current-context` was on the host (orbstack on a
-		// developer machine), because Context.EnsureKubernetesContext is
-		// a no-op on empty input. The mutating call now goes through
-		// RequireKubernetesContext, which errors up front.
+		// Regression: a remote env missing its kubernetescontext field used
+		// to silently delete the namespace from the host's current kubectl
+		// context (e.g. a developer's orbstack). Delete now errors up front.
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 		envCfgPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
@@ -99,13 +93,10 @@ func TestDelete(t *testing.T) {
 	})
 
 	t.Run("real_run_confirmation_prompt_accepts_matching_input", func(t *testing.T) {
-		// Exercises cmd/delete.go confirmDeleteCommand's happy path: without
-		// --yes the command prompts for the literal "<tenant>-<environment>"
-		// string; typing it proceeds with the delete. The env is local
-		// (no remote worktree) so no kubectl is involved, and it is the
-		// tenant's last env, so the tenant config and the root default
-		// tenant are cleared too. The typed confirm is the run's single
-		// interactive prompt (readline read-ahead).
+		// Happy path without --yes: the prompt requires the literal
+		// "<tenant>-<environment>" string to proceed. Deleting the tenant's
+		// last (local) env cascades to clearing the tenant config and the
+		// root default tenant.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		envDir := filepath.Join(setup.ConfigHome, "erun", "team", "dev")
@@ -124,9 +115,8 @@ func TestDelete(t *testing.T) {
 	})
 
 	t.Run("real_run_confirmation_mismatch_aborts", func(t *testing.T) {
-		// Exercises confirmDeleteCommand's mismatch branch: typing anything
-		// other than "<tenant>-<environment>" must abort before any state
-		// is touched — non-zero exit, config tree intact.
+		// A mismatched confirmation (anything but "<tenant>-<environment>")
+		// must abort before any state is touched — config tree stays intact.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		envDir := filepath.Join(setup.ConfigHome, "erun", "team", "dev")
@@ -145,10 +135,9 @@ func TestDelete(t *testing.T) {
 	})
 
 	t.Run("real_run_default_env_reassigned_when_other_envs_remain", func(t *testing.T) {
-		// Exercises erun-common/delete.go clearDeletedDefaultEnvironment:
-		// deleting the tenant's default environment while another env
-		// remains must keep the tenant and promote the next remaining env
-		// to default instead of leaving a dangling reference.
+		// Deleting the tenant's default env while another env remains must
+		// keep the tenant and promote the next env to default, not leave a
+		// dangling default reference.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		stagingDir := filepath.Join(setup.ConfigHome, "erun", "team", "staging")
@@ -177,9 +166,9 @@ func TestDelete(t *testing.T) {
 	})
 
 	t.Run("real_run_last_env_of_non_default_tenant_keeps_root_default", func(t *testing.T) {
-		// Exercises clearDeletedDefaultTenant's not-the-default branch:
-		// removing the last env of a secondary tenant deletes that tenant's
-		// config but must leave the root defaulttenant (team) untouched.
+		// Removing the last env of a secondary (non-default) tenant deletes
+		// that tenant's config but must leave the root default tenant
+		// untouched.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedSecondaryTenantEnv(t, setup, "other", "staging", 0)
@@ -201,11 +190,8 @@ func TestDelete(t *testing.T) {
 	})
 
 	t.Run("real_run_namespace_delete_failure_warns_and_continues", func(t *testing.T) {
-		// Exercises deleteRemoteEnvironmentNamespace's real-run failure arm
-		// plus runDeleteCommand's warning print: when kubectl cannot delete
-		// the namespace, the error is surfaced as a warning on stderr and
-		// the local config delete still proceeds. The kubectl stub's
-		// non-zero exit is the decision input driving the failure branch.
+		// A failed namespace delete is non-fatal: kubectl's error is surfaced
+		// as a warning on stderr and the local config delete still proceeds.
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 		stubs := setup.Cwd + "/stubs"
@@ -226,11 +212,8 @@ func TestDelete(t *testing.T) {
 	})
 
 	t.Run("real_run_with_yes_flag_skips_confirmation_and_removes_config", func(t *testing.T) {
-		// Exercises delete.go runDeleteCommand real-run path with --yes:
-		// the confirmation prompt is bypassed, the env config tree is
-		// physically removed, and the "deleted environment" line shows on
-		// stdout. Stubs kubectl so the namespace delete succeeds without
-		// touching a cluster.
+		// --yes bypasses the confirmation prompt and really removes the env
+		// config tree.
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 		envDir := filepath.Join(setup.ConfigHome, "erun", "team", "dev")

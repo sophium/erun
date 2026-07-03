@@ -9,19 +9,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// remoteInitMarkerBaseDir is the directory (relative to $HOME) under
-// which per-tenant/per-environment bootstrap markers live. `erun init
-// --remote` records the intended bootstrap outcome here so `erun
-// doctor` running later can distinguish "init was deliberately run
-// with --no-git" from "init was interrupted before the git checkout
-// finished", and recover the repository URL when offering to finish
-// unfinished work. Scoping the path per tenant/env avoids collisions
-// when multiple tenants share one $HOME, on a runtime host or a
-// developer machine.
+// remoteInitMarkerBaseDir roots the per-tenant/env bootstrap markers that let a
+// later `erun doctor` tell a deliberate --no-git init from one interrupted before
+// the git checkout finished, and recover the repository URL to finish that work.
+// Per-tenant/env scoping avoids marker collisions when tenants share one $HOME.
 const remoteInitMarkerBaseDir = ".erun"
 
-// remoteInitMarkerFilename is the leaf filename of the bootstrap
-// marker inside its per-tenant/per-environment directory.
 const remoteInitMarkerFilename = "bootstrap.yaml"
 
 // RemoteInitMarker captures the intent of `erun init --remote` so a
@@ -38,18 +31,14 @@ type RemoteInitMarker struct {
 	BootstrapComplete  bool   `yaml:"bootstrap_complete"`
 }
 
-// RemoteInitMarkerPath returns the absolute marker path for the given
-// tenant/environment under homeDir. It does not check whether the file
-// exists.
+// RemoteInitMarkerPath returns the marker path for the given tenant/environment under homeDir.
 func RemoteInitMarkerPath(homeDir, tenant, environment string) string {
 	return filepath.Join(homeDir, remoteInitMarkerBaseDir, tenant, environment, remoteInitMarkerFilename)
 }
 
-// LoadRemoteInitMarker reads the marker file for the given
-// tenant/environment from homeDir. The found return value
-// distinguishes "no marker on disk" from a read/parse failure;
-// callers in doctor treat the former as "init never ran or was
-// interrupted before its first write".
+// LoadRemoteInitMarker reads the tenant/environment marker under homeDir. The found
+// flag distinguishes an absent marker — init never ran, or was interrupted before its
+// first write — from a read/parse failure.
 func LoadRemoteInitMarker(homeDir, tenant, environment string) (RemoteInitMarker, bool, error) {
 	path := RemoteInitMarkerPath(homeDir, tenant, environment)
 	return readRemoteInitMarker(path)
@@ -70,11 +59,9 @@ func readRemoteInitMarker(path string) (RemoteInitMarker, bool, error) {
 	return marker, true, nil
 }
 
-// SaveRemoteInitMarker writes the marker to its per-tenant/per-environment
-// path under homeDir. Used by in-runtime doctor recovery after a
-// successful finish; the regular init flow writes the marker remotely
-// via remoteInitMarkerWriteScript. The marker's Tenant and Environment
-// fields determine the destination path and must be set.
+// SaveRemoteInitMarker persists the marker locally, as in-runtime doctor recovery does
+// after finishing an interrupted init; the normal init flow writes it remotely instead.
+// Tenant and Environment must be set.
 func SaveRemoteInitMarker(homeDir string, marker RemoteInitMarker) error {
 	if marker.Tenant == "" || marker.Environment == "" {
 		return fmt.Errorf("save remote init marker: tenant and environment are required")
@@ -90,19 +77,13 @@ func SaveRemoteInitMarker(homeDir string, marker RemoteInitMarker) error {
 	return os.WriteFile(path, data, 0o600)
 }
 
-// remoteInitMarkerWriteScript renders a POSIX-shell snippet that writes
-// the marker to $HOME/<base>/<tenant>/<environment>/<file> inside the
-// runtime pod. The body is emitted via cat <<'EOF' so YAML special
-// characters are preserved verbatim; the marker fields are validated
-// upstream so a stray EOF sentinel in user-provided values is not a
-// concern (tenant, environment, and repository URLs are all already
-// constrained to a narrow character set by parseRemoteRepositorySpec
-// and the bootstrap validators).
+// remoteInitMarkerWriteScript renders the shell snippet that writes the marker inside
+// the runtime pod. No heredoc escaping is needed: tenant, environment, and repository
+// values are constrained to a narrow character set upstream (parseRemoteRepositorySpec
+// and the bootstrap validators), so none can forge the closing sentinel.
 func remoteInitMarkerWriteScript(marker RemoteInitMarker) string {
 	data, err := yaml.Marshal(&marker)
 	if err != nil {
-		// yaml.Marshal on a fixed struct cannot fail in practice; fall
-		// back to a minimal serialization so the script remains valid.
 		data = []byte(fmt.Sprintf("bootstrap_complete: %t\n", marker.BootstrapComplete))
 	}
 	relativeDir := filepath.Join(remoteInitMarkerBaseDir, marker.Tenant, marker.Environment)

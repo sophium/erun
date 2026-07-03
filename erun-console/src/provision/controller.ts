@@ -8,27 +8,17 @@ import {
 } from '../config/client';
 import type { CloudContext } from '../config/types';
 
-// Thin controller for the provisioning panel: it owns the request/poll state and
-// calls the typed client (setCloudProviderAlias / createContext / getContext).
-// It holds no business logic beyond sequencing those calls — the render layer
-// (ProvisionPanel) shows whatever state this hook exposes.
-
-// How often the create-context flow polls GET /v1/contexts/{id} while the
-// context is still `provisioning`.
 const POLL_INTERVAL_MS = 2000;
 
-// State of the alias-registration request.
 export type AliasState =
   | { status: 'idle' }
   | { status: 'saving' }
   | { status: 'saved' }
   | { status: 'error'; message: string };
 
-// State of the create-context + poll flow.
 export type ProvisionState =
   | { status: 'idle' }
   | { status: 'creating' }
-  // Registered (202) and polling getContext; `context` carries the latest poll.
   | { status: 'polling'; context: CloudContext }
   | { status: 'running'; context: CloudContext }
   | { status: 'failed'; context: CloudContext }

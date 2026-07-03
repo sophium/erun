@@ -5,10 +5,8 @@ import (
 	"strings"
 )
 
-// shimHeader is the prelude of the injected runtime: it sets up window.runtime
-// and window.go.main.App so the main bundle can import wailsjs files without
-// rewriting them. The companion shimBindingsTemplate fills in the actual
-// method bindings reflected from the App at startup.
+// shimHeader stands in for Wails' injected runtime so the headless React bundle
+// can import wailsjs files unchanged.
 const shimHeader = `(function(){
   if (window.__erunHeadlessInstalled) { return; }
   window.__erunHeadlessInstalled = true;
@@ -190,16 +188,10 @@ const shimFooter = `
   ensureEventSource();
 })();`
 
-// buildShimJS produces the JS prelude that runs before the React bundle in
-// headless mode. Each exported method on the target gets a thin window.go
-// binding that forwards to /__erun_invoke; the rest of the prelude wires up
-// window.runtime with EventSource-backed event dispatch.
 func buildShimJS(methods []string) string {
 	var b strings.Builder
 	b.WriteString(shimHeader)
 	for _, m := range methods {
-		// Escape the method name in case of unusual characters. Method
-		// names are Go identifiers so this is defensive only.
 		safe := strings.ReplaceAll(m, `"`, `\"`)
 		fmt.Fprintf(&b, `  window.go.main.App["%s"] = bind("%s");`+"\n", safe, safe)
 	}
@@ -207,10 +199,8 @@ func buildShimJS(methods []string) string {
 	return b.String()
 }
 
-// injectShim returns html with a <script> tag containing shim inserted as
-// early as possible inside <head>. Wails normally injects its bindings before
-// the bundle runs; doing the same here means modules importing
-// wailsjs/runtime/runtime resolve to our shim with no extra rewriting.
+// injectShim inserts the shim before the app bundle runs so modules importing
+// wailsjs resolve to our shim with no rewriting.
 func injectShim(html, shim string) string {
 	tag := "<script>" + shim + "</script>"
 	lower := strings.ToLower(html)
@@ -219,7 +209,6 @@ func injectShim(html, shim string) string {
 		return html[:insertAt] + tag + html[insertAt:]
 	}
 	if idx := strings.Index(lower, "<html"); idx >= 0 {
-		// Append after <html ...> opening tag.
 		end := strings.Index(html[idx:], ">")
 		if end >= 0 {
 			insertAt := idx + end + 1

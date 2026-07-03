@@ -20,9 +20,8 @@ type ContextRepository interface {
 }
 
 // ContextProvisioner starts the durable live provisioning of a freshly-created
-// context (issue #605/#676). Optional: when nil, POST /v1/contexts only
-// registers the row and returns the bootstrap plan (no live cluster bootstrap),
-// the pre-#676 behaviour.
+// context. Optional: when nil, POST /v1/contexts only registers the row and
+// returns the bootstrap plan (no live cluster bootstrap).
 type ContextProvisioner interface {
 	Start(provision.ProvisionInput) error
 }
@@ -32,10 +31,8 @@ type ContextRoutes struct {
 	provisioner ContextProvisioner
 }
 
-// createContextRequest is the BYO-cloud registration body: the operator-authored
-// fields needed to bootstrap a managed cluster (cloud context) via the tenant's
-// AWS alias. preview=true returns the bootstrap plan only, with no DB write and
-// no execution.
+// createContextRequest is the BYO-cloud registration body for bootstrapping a
+// managed cluster on the tenant's own AWS account.
 type createContextRequest struct {
 	Name               string `json:"name"`
 	CloudProviderAlias string `json:"cloudProviderAlias"`
@@ -46,9 +43,6 @@ type createContextRequest struct {
 	Preview            bool   `json:"preview"`
 }
 
-// createContextResponse pairs the persisted context row with the cluster-
-// bootstrap plan (the EC2/k3s commands the real bootstrap would run). On a
-// preview-only request Context is omitted and only Plan is returned.
 type createContextResponse struct {
 	Context *model.Context `json:"context,omitempty"`
 	Plan    []string       `json:"plan"`
@@ -79,11 +73,6 @@ func (r ContextRoutes) getContext(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, cloudContext)
 }
 
-// createContext registers a cloud context (cluster) for the caller's tenant and
-// returns the cluster-bootstrap plan. It always builds the plan via the
-// eruncommon.InitCloudContext dry-run; when preview=true it returns the plan
-// only, otherwise it persists a pending-status context row and returns
-// {context, plan}.
 func (r ContextRoutes) createContext(w http.ResponseWriter, req *http.Request) {
 	var body createContextRequest
 	if err := decodeJSON(req, &body); err != nil {
@@ -127,12 +116,9 @@ func (r ContextRoutes) createContext(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// The row persists at status='provisioning' (the DB default). When a
-	// provisioner is wired, kick off the durable live bootstrap (InitCloudContext
-	// with DryRun=false + token custody) asynchronously — it runs for minutes, so
-	// the handler must not block — and return 202 Accepted; the caller polls
-	// GET /v1/contexts/{id} for status. Without a provisioner (no DBOS/secrets
-	// configured) the row is registered as before and returned 201.
+	// Live bootstrap runs for minutes: when a provisioner is wired, start it
+	// durably and return 202 so the caller can poll GET /v1/contexts/{id};
+	// otherwise the context is only registered (201).
 	if r.provisioner == nil {
 		writeJSON(w, http.StatusCreated, createContextResponse{Context: &created, Plan: plan})
 		return
@@ -161,12 +147,8 @@ func (r ContextRoutes) createContext(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusAccepted, createContextResponse{Context: &created, Plan: plan})
 }
 
-// buildContextBootstrapPlan runs eruncommon.InitCloudContext in dry-run mode and
-// returns the captured trace lines — the EC2/k3s commands the real bootstrap
-// would execute. The dry-run never reaches AWS: it is driven by an in-memory
-// CloudStore seeded with a matching AWS alias (InitCloudContext resolves the
-// provider from the store before emitting any plan) and zero-value
-// dependencies, so the helpers fall back to their deterministic dry-run output.
+// buildContextBootstrapPlan returns the cluster-bootstrap plan — the commands the
+// real bootstrap would run — via a dry-run that never reaches AWS.
 func buildContextBootstrapPlan(body createContextRequest, name, alias, region string) ([]string, error) {
 	var trace bytes.Buffer
 	logger := eruncommon.NewLoggerWithWriters(eruncommon.VerbosityInfo, io.Discard, io.Discard).WithTraceSink(&trace)
@@ -206,10 +188,9 @@ func splitTraceLines(trace string) []string {
 	return lines
 }
 
-// inMemoryCloudStore is a minimal eruncommon.CloudStore backed by an in-memory
-// ERunConfig. It exists only so the dry-run InitCloudContext can resolve the
-// caller's AWS alias and accumulate the plan without touching disk or AWS; the
-// dry-run never persists, so SaveERunConfig is retained in memory and not used.
+// inMemoryCloudStore lets the dry-run InitCloudContext resolve the caller's AWS
+// alias without touching disk or AWS; the dry-run never persists, so
+// SaveERunConfig is unused.
 type inMemoryCloudStore struct {
 	config eruncommon.ERunConfig
 }

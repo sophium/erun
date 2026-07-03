@@ -89,8 +89,6 @@ func runTerraformCommand(ctx common.Context, store common.TerraformStore, findPr
 	return nil
 }
 
-// terraformArgOrFlag prefers the explicit flag, then the positional arg, then
-// empty (which RunTerraform fills from the configured default scope).
 func terraformArgOrFlag(flag string, args []string, index int) string {
 	if v := strings.TrimSpace(flag); v != "" {
 		return v
@@ -101,10 +99,8 @@ func terraformArgOrFlag(flag string, args []string, index int) string {
 	return ""
 }
 
-// terraformConfirmer returns the gate RunTerraform calls before apply/destroy.
-// plan never mutates, so it needs no confirmation. For apply/destroy the
-// operator restates the environment name: via --confirm-environment for
-// non-interactive use, otherwise by typing it at the prompt.
+// terraformConfirmer guards apply/destroy against hitting the wrong env; plan
+// never mutates, so it needs no confirmation.
 func terraformConfirmer(op common.TerraformOperation, confirmEnvironment string) common.TerraformConfirmFunc {
 	if op == common.TerraformPlan {
 		return nil

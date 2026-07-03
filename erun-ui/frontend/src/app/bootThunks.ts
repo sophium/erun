@@ -7,12 +7,8 @@ import { setCloudProviders, setTenants, setVersionSuggestions } from './slices/t
 import type { AppThunk } from './store';
 import { normalizeVersionSuggestions } from './versionSuggestions';
 
-// boot loads initial app state from the backend, hydrates the tenants /
-// cloud-providers / version-suggestions slices, and either re-opens the
-// previously-selected env or surfaces a "choose an env" hint. Controller
-// mount dispatches it once per app instance. The env-init dialog manages
-// its own kubectl context list (openInitializeDialog →
-// refreshKubernetesContexts); boot does not seed it.
+// boot deliberately does not seed the env-init dialog's kubectl context
+// list — that dialog owns and refreshes its own.
 export const boot = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
   try {
     dispatch(showTerminalMessage('Loading environments...', true));
@@ -40,20 +36,17 @@ export const boot = (): AppThunk<Promise<void>> => async (dispatch, getState) =>
   }
 };
 
-// reloadStateAfterEnvironmentChange refetches initial state after backend
-// signals an env was created/removed (config watcher, environment-init
-// completion). Preserves the user's existing tenants / cloudProviders /
-// versionSuggestions if the new payload omits them, since this is a delta
-// refresh — boot() is the authoritative initial load. Does NOT touch the
-// env-init dialog's kubernetes-context list: a stale environments-changed
-// tick used to wipe a populated dropdown because uiState never carried
-// contexts to seed from.
+// This is a delta refresh, not the authoritative initial load (boot() is),
+// so it preserves existing cloudProviders / versionSuggestions when the new
+// payload omits them. It must not touch the env-init dialog's
+// kubernetes-context list: a stale environments-changed tick used to wipe a
+// populated dropdown.
 export const reloadStateAfterEnvironmentChange =
   (): AppThunk<Promise<void>> => async (dispatch, getState) => {
     // initiate() registers a cache subscription that must be released, or
     // repeated reloads (e.g. handleEnvironmentInitialized's retry loop) leak
     // subscriptions and eventually stall RTK Query so a later refetch never
-    // resolves. Hold the request handle and unsubscribe in finally.
+    // resolves.
     const request = dispatch(
       stateApi.endpoints.getInitialState.initiate(undefined, { forceRefetch: true }),
     );
@@ -70,10 +63,9 @@ export const reloadStateAfterEnvironmentChange =
     } catch (error) {
       // Env-change reloads are best-effort, but swallowing the failure
       // silently used to leave the sidebar stale after a successful
-      // `erun init` with no diagnostic at all. Log it so a failed refresh is
-      // visible in the dev console / ErrorBoundary diagnostics; callers that
-      // depend on the new env surfacing (handleEnvironmentInitialized) retry
-      // rather than trusting a single best-effort pass.
+      // `erun init`. Log it so the failure is visible; callers that depend on
+      // the new env surfacing (handleEnvironmentInitialized) retry rather than
+      // trusting a single best-effort pass.
       console.error('reloadStateAfterEnvironmentChange failed:', error);
     } finally {
       request.unsubscribe();

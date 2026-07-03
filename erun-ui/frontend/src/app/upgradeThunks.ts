@@ -14,11 +14,9 @@ import { recordTab } from './tabsThunks';
 import { requireController } from './thunkExtra';
 import { selectionKey } from './versionSuggestions';
 
-// openUpgradeAll opens the Upgrade-all preview dialog and resolves the plan
-// (every opted-in env, its channel, current → target). Read-only — nothing
-// deploys until the user confirms. The plan resolver is the same one the
-// per-env runs use (issue #497), so the preview never promises an upgrade
-// the run would refuse.
+// openUpgradeAll shows the read-only Upgrade-all preview: nothing deploys until
+// the user confirms, and it resolves the plan with the same resolver the per-env
+// runs use, so the preview never promises an upgrade the run would refuse.
 export const openUpgradeAll = (): AppThunk<Promise<void>> => async (dispatch) => {
   dispatch(openUpgradeAllDialog());
   try {
@@ -29,17 +27,11 @@ export const openUpgradeAll = (): AppThunk<Promise<void>> => async (dispatch) =>
   }
 };
 
-// confirmUpgradeAll fans the upgrade out per member (issue #497): every
-// lagging plan member runs `erun upgrade --tenant <t> --environment <e>` in
-// its OWN Local shell, so members upgrade in parallel and output, activity
-// entries, and failures land on the env they belong to — not on one host
-// env's terminal. The fan-out deliberately does not change the selection or
-// ensure any env's default tabs: selecting an env subjects it to the
-// selected-env machinery (which keeps its tab set — including the AI tab —
-// alive), and confirming an upgrade is not an open intent; a Claude session
-// must never launch as a side effect of clicking Upgrade. Progress is
-// visible through each member's Local tab, sidebar row, and activity entry,
-// announced by the confirmation toast (Nielsen #1).
+// confirmUpgradeAll runs each member's upgrade in its OWN Local shell so members
+// upgrade in parallel and each env's output, activity, and failures stay on the
+// env they belong to. It deliberately does not select the env or ensure its
+// default tabs: confirming an upgrade is not an open intent, so a Claude session
+// must never launch as a side effect of clicking Upgrade.
 export const confirmUpgradeAll =
   (): AppThunk<Promise<void>> => async (dispatch, getState, extra) => {
     const state = getState();
@@ -69,8 +61,6 @@ export const confirmUpgradeAll =
           cols,
           rows,
         )) as StartSessionResult;
-        // Register the Local session the run lives in so its tab renders,
-        // WITHOUT ensuring the env's default tab set.
         dispatch(
           recordTab(selectionKey(selection), result.sessionId, result.slot ?? 0, 'local', 'Local'),
         );
@@ -107,17 +97,15 @@ export const confirmUpgradeAll =
 
 // UpgradeMember is one environment the confirmed Upgrade-all run will redeploy:
 // a lagging env (no version — the CLI resolves its single channel target) or an
-// ambiguous env the operator picked a version for (issue #527).
+// ambiguous env the operator picked a version for.
 interface UpgradeMember {
   tenant: string;
   environment: string;
   version?: string;
 }
 
-// upgradeMembers is the set Upgrade redeploys: every lagging env, plus every
-// env with more than one newer candidate the operator has picked a version
-// for. Mirrors the dialog's enable/count logic so what runs matches what the
-// button promised.
+// upgradeMembers must mirror the dialog's enable/count logic so what runs
+// matches what the Upgrade button promised.
 function upgradeMembers(
   items: UIUpgradePlanItem[],
   choices: Record<string, string>,

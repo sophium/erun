@@ -376,9 +376,8 @@ func TestAuthMiddlewareExpiresFailedExternalUserResolutionCache(t *testing.T) {
 
 // TestAuthMiddlewareKeepsOrgScopedTenantsDistinctInCache guards the cross-tenant
 // RLS hole: under a shared org-scoped issuer the same (issuer, subject) resolves
-// to different tenants per org claim, so the identity cache must key on the
-// resolved org too. It also asserts the resolved org reaches the audit event as
-// external_org_id.
+// to a different tenant per org, so the identity cache must key on the resolved
+// org, which must also surface on the audit event.
 func TestAuthMiddlewareKeepsOrgScopedTenantsDistinctInCache(t *testing.T) {
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	cache := NewIdentityResolutionCache(IdentityCacheOptions{
@@ -391,8 +390,6 @@ func TestAuthMiddlewareKeepsOrgScopedTenantsDistinctInCache(t *testing.T) {
 	}
 	var event AuditEvent
 	middleware, err := NewAuthMiddleware(AuthMiddlewareOptions{
-		// The bearer token carries the org claim; issuer and subject are identical
-		// across orgs (one Zitadel user acting in different orgs).
 		TokenVerifier: TokenVerifierFunc(func(ctx context.Context, token string) (Claims, error) {
 			return Claims{Issuer: "https://shared.example", Subject: "user-1", Raw: map[string]any{"org": token}}, nil
 		}),
@@ -472,9 +469,6 @@ func TestAuthMiddlewareBypassesIdentityCacheWhenOrgDerivationFails(t *testing.T)
 		TokenVerifier: TokenVerifierFunc(func(ctx context.Context, token string) (Claims, error) {
 			return Claims{Issuer: "https://shared.example", Subject: "user-1", Raw: map[string]any{"org": token}}, nil
 		}),
-		// Org derivation keeps failing (e.g. a transient read of the issuer's
-		// org-scoping mode); the request must bypass the cache instead of keying a
-		// resolved tenant under org="".
 		OrgResolver: OrgResolverFunc(func(ctx context.Context, claims Claims) (string, error) {
 			return "", errors.New("transient org lookup failure")
 		}),

@@ -10,11 +10,9 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// TestIdleStopRecordToolWritesHostManualEntry covers the happy path
-// the desktop's Stop button takes: no prior idle grace armed, plain
-// reason text, single tenant/env. The recorded row must carry the
-// host-manual source so the History tab renders it under the
-// "Desktop manual stop" label.
+// TestIdleStopRecordToolWritesHostManualEntry covers the desktop Stop
+// button's happy path: the recorded row must be host-manual so the
+// History tab labels it "Desktop manual stop".
 func TestIdleStopRecordToolWritesHostManualEntry(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -49,13 +47,10 @@ func TestIdleStopRecordToolWritesHostManualEntry(t *testing.T) {
 	}
 }
 
-// TestIdleStopRecordToolFoldsPendingArmedGrace covers the
-// manual-stop-during-armed-grace case: when the user clicks Stop
-// while the in-pod monitor has already armed a grace window, the
-// recorded row should still be host-manual but include the marker
-// breakdown, the armed-at timestamp, and the policy snapshot. That
-// lets the History tab show what *would* have fired alongside the
-// fact that the user pre-empted it.
+// TestIdleStopRecordToolFoldsPendingArmedGrace covers a manual Stop
+// while the in-pod monitor has already armed a grace window: the row
+// stays host-manual but folds in the pending grace so History can show
+// what would have fired and that the user pre-empted it.
 func TestIdleStopRecordToolFoldsPendingArmedGrace(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -107,9 +102,8 @@ func TestIdleStopRecordToolFoldsPendingArmedGrace(t *testing.T) {
 	if len(entry.Markers) != 2 {
 		t.Fatalf("expected 2 markers, got %d", len(entry.Markers))
 	}
-	// The pending file should be cleared after the record so a
-	// follow-up stop-ready tick arms a fresh grace from scratch, and it
-	// must genuinely live under the temp HOME, not the developer's.
+	// Cleared so a follow-up stop-ready tick re-arms a fresh grace; the
+	// path check also guards against writing under the developer's real HOME.
 	assertStopPendingCleared(t, "tenant-a", "dev", home)
 }
 
@@ -123,8 +117,6 @@ func TestIdleStopRecordToolRequiresTenantAndEnvironment(t *testing.T) {
 	}
 }
 
-// assertRecentStopTarget checks the recorded result echoes the resolved
-// tenant/environment and stamps StoppedAt at roughly time.Now().
 func assertRecentStopTarget(t *testing.T, result IdleStopRecordResult, tenant, env string) {
 	t.Helper()
 	if result.Tenant != tenant || result.Environment != env {
@@ -135,8 +127,6 @@ func assertRecentStopTarget(t *testing.T, result IdleStopRecordResult, tenant, e
 	}
 }
 
-// loadSingleStopHistoryEntry loads the env's stop history and fails unless
-// exactly one entry is present, returning it.
 func loadSingleStopHistoryEntry(t *testing.T, tenant, env string) eruncommon.EnvironmentStopHistoryEntry {
 	t.Helper()
 	entries, err := eruncommon.LoadEnvironmentStopHistory(tenant, env)
@@ -149,10 +139,6 @@ func loadSingleStopHistoryEntry(t *testing.T, tenant, env string) eruncommon.Env
 	return entries[0]
 }
 
-// assertStopPendingCleared fails unless the env's pending-stop file is gone and
-// its resolved path sits under home (catching a path that escapes the temp
-// HOME). Uses filepath.IsLocal for the boundary check rather than the
-// deprecated filepath.HasPrefix.
 func assertStopPendingCleared(t *testing.T, tenant, env, home string) {
 	t.Helper()
 	pendingPath, err := eruncommon.EnvironmentStopPendingPath(tenant, env)

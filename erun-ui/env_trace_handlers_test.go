@@ -10,9 +10,6 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// envTraceApp builds an App for the Diagnostics console read paths (issue
-// #466), hermetic per the #492 rule: reachability and the pod runner are
-// always injected.
 func envTraceApp(t *testing.T, env eruncommon.EnvConfig, reachable bool, podOut string, podErr error) *App {
 	t.Helper()
 	store := stubUIStore{
@@ -73,7 +70,7 @@ func TestLoadEnvTraceHostFileMissing(t *testing.T) {
 	}
 }
 
-// TestLoadEnvTraceRemoteUnreachableKeepsHostTrace pins the #516 fix: a
+// TestLoadEnvTraceRemoteUnreachableKeepsHostTrace pins the fix: a
 // remote env's operator-driven commands trace on the host, so an
 // unreachable pod must degrade to a notice — not blank the pane.
 func TestLoadEnvTraceRemoteUnreachableKeepsHostTrace(t *testing.T) {
@@ -127,8 +124,6 @@ func TestLoadEnvTraceRemoteMergesHostAndPod(t *testing.T) {
 	}
 }
 
-// TestLoadEnvTraceRemotePodOnly covers the inverse vantage: nothing ran on
-// this host yet (fresh laptop), the pod carries the history.
 func TestLoadEnvTraceRemotePodOnly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	app := envTraceApp(t, eruncommon.EnvConfig{
@@ -144,8 +139,6 @@ func TestLoadEnvTraceRemotePodOnly(t *testing.T) {
 	}
 }
 
-// TestLoadEnvTraceRemoteBothEmpty keeps the honest empty state when neither
-// vantage point has anything.
 func TestLoadEnvTraceRemoteBothEmpty(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	app := envTraceApp(t, eruncommon.EnvConfig{

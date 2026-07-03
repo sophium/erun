@@ -60,11 +60,6 @@ func (a *App) LoadTenantDashboard(input uiTenantDashboardInput) (uiTenantDashboa
 	return dashboard, nil
 }
 
-// loadTenantDashboardData fetches the whoami, reviews, merge-queue, and build
-// sections in sequence and writes them onto dashboard. The first failing
-// section records its error in dashboard.APIError and stops further loads,
-// matching the prior fail-fast behavior where each section's error short-
-// circuited the rest while keeping already-loaded sections.
 func loadTenantDashboardData(ctx context.Context, client *http.Client, apiURL, bearer, usernameHint string, dashboard *uiTenantDashboard) {
 	user, err := loadTenantDashboardJSON[uiTenantDashboardUser](ctx, client, apiURL, "/v1/whoami", bearer, usernameHint)
 	if err != nil {

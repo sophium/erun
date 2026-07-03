@@ -11,12 +11,10 @@ const (
 	claudeMDCloseMarker = "<!-- /erun-agents-md-hook -->"
 )
 
-// claudeMDBlock is erun's managed agent-instructions region for the global
-// CLAUDE.md / Codex instructions file. It is delimited by the open/close markers
-// so it can be rewritten in place on every run: editing this constant updates
-// existing files the next time the CLI runs, not only freshly created ones. Keep
-// it byte-aligned with the in-pod copy in
-// erun-devops/docker/erun-devops/entrypoint.sh.
+// claudeMDBlock is erun's managed agent-instructions block. It is re-applied to
+// existing CLAUDE.md / Codex files on every run, not only freshly created ones,
+// so editing this constant updates already-deployed files. Keep it byte-aligned
+// with the in-pod copy in erun-devops/docker/erun-devops/entrypoint.sh.
 const claudeMDBlock = claudeMDOpenMarker + "\n" +
 	"# Agent Instructions\n" +
 	"\n" +
@@ -62,11 +60,8 @@ func ensureAgentInstructionsFile(dir, filename string) error {
 	return os.WriteFile(path, []byte(updated), 0o600)
 }
 
-// upsertAgentInstructionsBlock returns content with erun's managed
-// agent-instructions block present and current. An existing block — delimited by
-// the open/close markers — is replaced in place; otherwise the block is appended,
-// separated from any preceding content by one blank line. The result is stable:
-// applying the function to its own output returns it unchanged.
+// upsertAgentInstructionsBlock is idempotent: applying it to its own output
+// returns that output unchanged.
 func upsertAgentInstructionsBlock(content string) string {
 	body := strings.TrimRight(stripAgentInstructionsBlock(content), "\n")
 	if body == "" {
@@ -75,9 +70,8 @@ func upsertAgentInstructionsBlock(content string) string {
 	return body + "\n\n" + claudeMDBlock
 }
 
-// stripAgentInstructionsBlock removes erun's managed block (markers inclusive)
-// from content, leaving everything outside it untouched. A dangling open marker
-// with no matching close drops everything from the open marker onward so the
+// stripAgentInstructionsBlock treats a dangling open marker with no matching
+// close as corrupt, dropping everything from the open marker onward so the
 // caller can re-append a clean block.
 func stripAgentInstructionsBlock(content string) string {
 	open := strings.Index(content, claudeMDOpenMarker)

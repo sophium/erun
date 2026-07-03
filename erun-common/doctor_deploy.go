@@ -6,11 +6,7 @@ import (
 	"strings"
 )
 
-// DeployDiagnosisResult holds the captured output of the deploy-failure
-// diagnosis: the helm release status and the pod listing for the runtime
-// release's namespace. Rendering and interpretation are left to the caller
-// (and to the desktop's one-click fixes) so the probe itself stays a
-// transparent, side-effect-free read.
+// DeployDiagnosisResult holds the deploy-failure diagnosis for the caller to interpret.
 type DeployDiagnosisResult struct {
 	HelmStatus string
 	Pods       string
@@ -32,12 +28,9 @@ func deployDiagnosisPodArgs(req ShellLaunchParams) []string {
 	return append(args, "get", "pods", "-o", "wide")
 }
 
-// RunDeployDiagnosis probes why a deploy may have failed by reporting the helm
-// release status and the runtime namespace's pods. It is strictly read-only —
-// it never mutates the release or the cluster — so it is safe to run on every
-// `erun doctor`. The commands are traced for --dry-run; on a real run it
-// captures their output (best effort: a missing release or unreachable cluster
-// is part of the diagnosis, not a hard error) for the caller to render.
+// RunDeployDiagnosis probes why a deploy may have failed. It is strictly
+// read-only, so it is safe to run on every `erun doctor`; a missing release or
+// unreachable cluster is itself part of the diagnosis, not a hard error.
 func RunDeployDiagnosis(ctx Context, req ShellLaunchParams) DeployDiagnosisResult {
 	helmArgs := helmStatusArgs(req)
 	ctx.TraceCommand("", "helm", helmArgs...)
@@ -52,9 +45,8 @@ func RunDeployDiagnosis(ctx Context, req ShellLaunchParams) DeployDiagnosisResul
 	}
 }
 
-// runDoctorDiagnosisCommand runs a read-only diagnosis command and returns its
-// combined output. Errors are folded into the output (the stderr of `helm
-// status` on a missing release, for instance, is itself diagnostic), so the
+// runDoctorDiagnosisCommand folds command errors into the returned output —
+// `helm status` stderr on a missing release is itself diagnostic — so the
 // caller always has something to show.
 func runDoctorDiagnosisCommand(name string, args []string) string {
 	cmd := Command(name, args...)
@@ -65,10 +57,9 @@ func runDoctorDiagnosisCommand(name string, args []string) string {
 	return strings.TrimSpace(out.String())
 }
 
-// DeployRecoveryAction names a recovery `erun doctor` can run against a failing
-// runtime release once the diagnosis surfaces a problem. These mutate the live
-// release, so callers gate them behind a prompt/flag; the commands are traced
-// for --dry-run so the exact helm/kubectl call is auditable before it runs.
+// DeployRecoveryAction names a mutating recovery `erun doctor` can run against a
+// failing runtime release; because these mutate the live release, callers gate
+// them behind a prompt or flag.
 type DeployRecoveryAction string
 
 const (
@@ -93,20 +84,16 @@ func RecommendedDeployRecovery(diagnosis DeployDiagnosisResult) (DeployRecoveryA
 	status := strings.ToLower(strings.TrimSpace(diagnosis.HelmStatus))
 	switch {
 	case status == "":
-		// No helm output at all (cluster unreachable / nothing to read).
 		return "", false
 	case strings.Contains(status, "not found"):
-		// `helm status` on a release that was never installed: deploy, not roll back.
 		return "", false
 	case strings.Contains(status, "pending-install"),
 		strings.Contains(status, "pending-upgrade"),
 		strings.Contains(status, "pending-rollback"):
 		return DeployRecoveryClearPendingHelm, true
 	case strings.Contains(status, "status: deployed"):
-		// Helm considers the release healthy; offer no destructive recovery.
 		return "", false
 	default:
-		// Release exists but is failed/superseded/unknown: roll back to the last good revision.
 		return DeployRecoveryRollback, true
 	}
 }
@@ -151,9 +138,7 @@ func helmRollbackArgs(req ShellLaunchParams) []string {
 }
 
 // RunDeployRecovery runs the chosen helm-level recovery against the runtime
-// release. It traces the exact command for --dry-run and only mutates the
-// cluster on a real run. The combined command output (helm/kubectl stdout +
-// stderr) is returned so the caller can render what happened.
+// release, mutating the cluster only on a real (non-dry-run) run.
 func RunDeployRecovery(ctx Context, req ShellLaunchParams, action DeployRecoveryAction) (string, error) {
 	switch action {
 	case DeployRecoveryClearPendingHelm:

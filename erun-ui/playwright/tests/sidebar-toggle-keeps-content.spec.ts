@@ -1,17 +1,13 @@
 import { test, expect } from '../fixtures/erunApp.js';
 
-// Regression: issue #436 — toggling the left sidebar sometimes blanked the
-// entire content area to white (only the titlebar survived), unrecoverable
-// until reload. The fix wraps the content region in an ErrorBoundary so an
-// uncaught render error shows a recoverable surface instead of a blank screen.
+// Regression: toggling the sidebar sometimes blanked the whole content area to
+// white until reload. The content region is now wrapped in an ErrorBoundary so
+// an uncaught render error surfaces a recoverable fallback instead of a blank
+// screen — that recovery is the user-facing contract this spec guards.
 //
-// The intermittent xterm paint trigger cannot be reproduced deterministically
-// in the headless harness (the DOM-rendered terminal isn't fully painted off
-// screen), so this spec locks the reachable negative invariant: across both
-// toggle directions the content pane (<main>) stays mounted and non-empty,
-// and the ErrorBoundary fallback never replaces it. The ErrorBoundary's own
-// rendering (fallback + retry/reload actions) is exercised by being present
-// in the tree; the blank-screen recovery is the user-facing contract.
+// The intermittent xterm paint that triggered the blanking can't be reproduced
+// deterministically in the headless harness, so this spec locks the reachable
+// negative invariant instead of the real trigger.
 test.describe('sidebar toggle keeps content rendered', () => {
   test('content pane stays mounted and non-blank across both toggle directions', async ({
     app,
@@ -23,14 +19,12 @@ test.describe('sidebar toggle keeps content rendered', () => {
     await expect(mainPane).toBeVisible();
     await expect(errorFallback).toHaveCount(0);
 
-    // Hide the sidebar.
     await app.titlebar.toggleSidebar();
     await expect.poll(() => readSidebarWidth(page)).toBe('0px');
     await expect(mainPane).toBeVisible();
     await expect(mainPane).not.toBeEmpty();
     await expect(errorFallback).toHaveCount(0);
 
-    // Show it again.
     await app.titlebar.toggleSidebar();
     await expect.poll(() => readSidebarWidth(page)).not.toBe('0px');
     await expect(mainPane).toBeVisible();

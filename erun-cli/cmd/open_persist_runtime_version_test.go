@@ -7,22 +7,18 @@ import (
 	common "github.com/sophium/erun/erun-common"
 )
 
-// TestDeployRuntimeHealsPersistedVersionOnCachedNoOp pins the open-flow twin of
-// the deploy-command guard in PersistRuntimeVersionFromDeploySpecs (#475). When
-// the runtime deploy promoted every image from the fingerprint cache (SkipHelm:
-// RunDeploySpec rebuilt, pushed, and rolled out nothing), execution.Deploy.Version
-// is a freshly minted snapshot that was never pushed. Persisting it left the env
-// config — and the desktop Manage dialog's "Runtime version" — pointing at a
-// phantom the deploy picker can never offer. The open flow now heals the
-// persisted version to what the release is actually running (guaranteed pushed),
-// and leaves it untouched when that can't be read.
+// TestDeployRuntimeHealsPersistedVersionOnCachedNoOp guards a real gotcha: a
+// cached no-op deploy mints a runtime version that was never pushed, so
+// persisting it would point the env config at a phantom the deploy picker can
+// never offer. The open flow instead heals to what the release is actually
+// running, and leaves the persisted value untouched when that can't be read.
 //
-// persistRuntimeVersion is a non-dry-run side effect, unreachable from the
-// dry-run integration binary; this white-box test owns the contract.
+// This side effect is unreachable from the dry-run integration binary, so this
+// white-box test owns the contract.
 func TestDeployRuntimeHealsPersistedVersionOnCachedNoOp(t *testing.T) {
 	const tenant = "erun"
-	const mintedVersion = "1.0.86-snapshot-20260608164914"  // minted by the cached resolve; never pushed
-	const runningVersion = "1.0.86-snapshot-20260605090000" // what the release is actually running
+	const mintedVersion = "1.0.86-snapshot-20260608164914" // minted by the cached resolve; never pushed
+	const runningVersion = "1.0.86-snapshot-20260605090000"
 	const stalePersisted = "1.0.86-snapshot-00000000000000"
 	const registry = "ghcr.io/sophium"
 

@@ -15,11 +15,9 @@ import (
 // refresh transfers — enough scrollback to diagnose, small enough to poll.
 const envTraceTailBytes = 64 * 1024
 
-// uiEnvTrace is the Diagnostics console's "erun trace" read model (issues
-// #466/#508/#516): the tail of the env's persistent trace log — capture is
-// always on — or an honest reason why there is nothing to show. Notice
-// carries a non-fatal caveat about the shown content (e.g. the in-pod side
-// could not be included).
+// uiEnvTrace is the Diagnostics console's "erun trace" read model: the tail
+// of the env's always-on trace log, or an honest reason there is nothing to
+// show.
 type uiEnvTrace struct {
 	Available bool   `json:"available"`
 	Content   string `json:"content,omitempty"`
@@ -29,15 +27,10 @@ type uiEnvTrace struct {
 }
 
 // LoadEnvTrace reads the selected env's trace log for the Diagnostics
-// console. A remote env has two vantage points (issue #516): the host file
-// holds the operator-driven commands the desktop and CLI run from this
-// machine (open, deploy preflight, doctor, upgrade), while the in-pod file
-// holds agent-driven MCP actions and in-pod CLI runs. Both are read — the
-// pod side over the env's MCP port-forward, gated on reachability — and
-// merged into one timeline by their per-line timestamps, with pod-origin
-// lines marked "[pod]". Read-only and side-effect free — reading
-// diagnostics must never mutate the env or hold it awake (the pod read
-// carries the idle-probe header).
+// console. A remote env is merged from two vantage points: the host log
+// records operator-driven commands run from this machine, the in-pod log
+// records agent-driven MCP actions. Reading diagnostics must never mutate
+// the env or hold it awake.
 func (a *App) LoadEnvTrace(selection uiSelection) (uiEnvTrace, error) {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
@@ -70,10 +63,9 @@ func (a *App) LoadEnvTrace(selection uiSelection) (uiEnvTrace, error) {
 	return trace, nil
 }
 
-// hostEnvTraceTail reads the host-side log tail. A missing file is the
-// normal "nothing ran yet" state, not an issue; real read failures come
-// back as the issue string so the caller can surface them without blanking
-// content from the other vantage point.
+// A missing file is the normal "nothing ran yet" state, not an error; only
+// real read failures return an issue string, so a failed host read never
+// blanks the pod vantage point.
 func hostEnvTraceTail(result eruncommon.OpenResult) (string, string) {
 	path, err := eruncommon.EnvTraceLogPath(result.Tenant, result.Environment)
 	if err != nil {
@@ -89,9 +81,8 @@ func hostEnvTraceTail(result eruncommon.OpenResult) (string, string) {
 	return content, ""
 }
 
-// podEnvTraceTail reads the in-pod log tail when the env is reachable.
-// Unreachable or failed reads degrade to a notice — the host side still
-// renders — instead of blanking the pane.
+// Unreachable or failed pod reads degrade to a notice instead of blanking
+// the pane, so the host side still renders.
 func (a *App) podEnvTraceTail(result eruncommon.OpenResult) (string, string) {
 	mcpPort := eruncommon.MCPPortForResult(result)
 	if mcpPort <= 0 || !a.deps.canConnectLocalPort(mcpPort) {
@@ -109,11 +100,10 @@ func (a *App) podEnvTraceTail(result eruncommon.OpenResult) (string, string) {
 	return out, ""
 }
 
-// mergeStampedTraces interleaves the host and pod tails into one timeline.
-// Every tee'd line starts with an RFC3339 UTC stamp (stampedLineWriter), so
-// lexicographic stamp order is chronological; a line without a parseable
-// stamp inherits its predecessor's so it stays attached. Pod lines carry a
-// "[pod]" marker after the stamp so the vantage point stays attributable.
+// RFC3339 UTC stamps make lexicographic order chronological, so comparing
+// stamps as strings interleaves the host and pod tails in time order; an
+// unstamped continuation line inherits its predecessor's stamp to stay
+// attached.
 func mergeStampedTraces(host, pod string) string {
 	hostLines := splitTraceLines(host)
 	podLines := splitTraceLines(pod)
@@ -200,8 +190,6 @@ func joinTraceNotices(notices ...string) string {
 	return strings.Join(parts, "; ")
 }
 
-// tailFile returns up to maxBytes from the end of path, starting at the
-// first complete line when the file was truncated mid-line.
 func tailFile(path string, maxBytes int64) (string, error) {
 	file, err := os.Open(path)
 	if err != nil {

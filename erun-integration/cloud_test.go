@@ -14,12 +14,6 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// stubAWSCallerIdentityAndJWT writes an `aws` stub that branches on argv:
-// `aws sts get-caller-identity` returns canned identity JSON;
-// `aws sts get-web-identity-token` returns a minimal 3-part JWT whose
-// payload encodes an issuer claim;
-// every other invocation (configure set, sso login, ...) exits 0 silently.
-// The bearer token issuer is exposed so callers can assert against it.
 func stubAWSCallerIdentityAndJWT(t testing.TB, setup env.Setup) (envVars []string, issuer string) {
 	t.Helper()
 	stubs := setup.Cwd + "/stubs"
@@ -112,15 +106,6 @@ func TestCloud(t *testing.T) {
 	})
 
 	t.Run("init_cloudflare_dry_run_redacts_token_and_traces_alias_write", func(t *testing.T) {
-		// Exercises cloud.go runCloudInitCloudflareCommand and
-		// eruncommon.InitCloudflareCloudProvider in --dry-run: the command
-		// must trace the cloudflare init line with the api token REDACTED
-		// (never the literal value), trace the tokens/verify GET (which
-		// short-circuits in dry-run without touching the network), and trace
-		// the secret-store-ref + alias write — then print the dry-run summary
-		// without persisting anything. The redaction contract is the point of
-		// this scenario, so it is asserted directly against the un-normalized
-		// capture in addition to the snapshot.
 		setup := env.New(t)
 		args := []string{
 			"cloud", "init", "cloudflare",
@@ -148,12 +133,8 @@ func TestCloud(t *testing.T) {
 	})
 
 	t.Run("init_cloudflare_dry_run_auto_resolves_account", func(t *testing.T) {
-		// Same guided setup, but the operator answers only the token and label
-		// (no --account-id). The command runs the wizard's account step
-		// non-interactively: it traces the GET /accounts lookup (short-circuited
-		// in dry-run, no network), resolves the single synthetic account, and
-		// threads it into the alias write. Locks the "options answer the wizard
-		// questions" dry-run contract for the auto-resolve path.
+		// Without --account-id, the wizard's account step auto-resolves the
+		// single available account non-interactively.
 		setup := env.New(t)
 		args := []string{
 			"cloud", "init", "cloudflare",
@@ -172,14 +153,10 @@ func TestCloud(t *testing.T) {
 	})
 
 	t.Run("init_cloudflare_dry_run_honors_api_base_url_seam", func(t *testing.T) {
-		// Exercises the ERUN_CLOUDFLARE_API_BASE_URL subprocess-reachable seam
-		// (issue #646): when set, every Cloudflare API call targets the override
-		// base instead of api.cloudflare.com. The seam is what lets a desktop /
-		// real-run e2e point the `erun cloud init cloudflare` subprocess at a
-		// mock. In --dry-run the GET trace fires before the network short-circuit,
-		// so the override base is observable here without any network call. The
-		// trailing slash on the override is intentional: the golden's single
-		// `/client/v4/...` (no double slash) locks the base-URL trim too.
+		// The ERUN_CLOUDFLARE_API_BASE_URL seam lets an e2e run point the
+		// subprocess at a mock Cloudflare API. The trailing slash on the
+		// override is deliberate: the golden's single `/client/v4/...` (no
+		// double slash) locks the base-URL trim.
 		setup := env.New(t)
 		args := []string{
 			"cloud", "init", "cloudflare",
@@ -197,10 +174,6 @@ func TestCloud(t *testing.T) {
 	})
 
 	t.Run("init_aws_dry_run_traces_sso_setup_and_oidc_persistence", func(t *testing.T) {
-		// Exercises cloud.go runCloudInitAWSCommand: --dry-run must trace
-		// the aws configure sso plan, the sso login command, the sts
-		// get-caller-identity command, the bearer-token resolution, and
-		// the alias / OIDC issuer write — without invoking aws.
 		setup := env.New(t)
 		args := []string{
 			"cloud", "init", "aws",
@@ -216,12 +189,8 @@ func TestCloud(t *testing.T) {
 	})
 
 	t.Run("init_aws_prompts_missing_region_via_stdin", func(t *testing.T) {
-		// Exercises requiredCloudPrompt (via promptCloudValueIfEmpty):
-		// every AWS init param except --region is provided, so the command
-		// asks exactly one prompt — "Default AWS region", defaulting to the
-		// SSO region — and the typed value flows into the traced
-		// `aws configure set region` plan. One prompt per subprocess
-		// (readline read-ahead), which is why only --region is omitted.
+		// Provides every AWS init param except --region because the prompt
+		// reader buffers ahead — one interactive prompt per subprocess.
 		setup := env.New(t)
 		args := []string{
 			"cloud", "init", "aws",
@@ -243,12 +212,6 @@ func TestCloud(t *testing.T) {
 	})
 
 	t.Run("init_aws_real_run_persists_alias_and_issuer", func(t *testing.T) {
-		// Exercises eruncommon.InitAWSCloudProvider end-to-end without
-		// --dry-run: drives initAWSProfile (configure-set + sso login),
-		// ResolveAWSIdentity (sts get-caller-identity → JSON), the
-		// SaveCloudProviderConfig write into XDG, and SetupCloudProviderOIDC
-		// (sts get-web-identity-token → JWT → issuer extraction). All AWS
-		// calls go through a single stub that branches on argv.
 		setup := env.New(t)
 		envVars, issuer := stubAWSCallerIdentityAndJWT(t, setup)
 		args := []string{
@@ -263,8 +226,6 @@ func TestCloud(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		// The persisted root config must contain the resolved alias plus
-		// the issuer extracted from the stubbed bearer token.
 		raw, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", "config.yaml"))
 		if err != nil {
 			t.Fatalf("read root config: %v", err)
@@ -284,10 +245,6 @@ func TestCloud(t *testing.T) {
 	})
 
 	t.Run("login_real_run_invokes_aws_sso_login_via_stub", func(t *testing.T) {
-		// Exercises eruncommon.LoginCloudProviderAlias real-run path:
-		// resolves the seeded provider, calls deps.RunAWSLogin which
-		// shells out to `aws sso login` via the stub, then returns the
-		// status. Locks the trace and confirms the stub was reached.
 		setup := env.New(t)
 		seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
 		envVars, _ := stubAWSCallerIdentityAndJWT(t, setup)
@@ -299,9 +256,6 @@ func TestCloud(t *testing.T) {
 	})
 
 	t.Run("login_dry_run_traces_aws_sso_login", func(t *testing.T) {
-		// Exercises cloud.go runCloudLoginCommand: --dry-run must trace
-		// the aws sso login command for the resolved provider alias
-		// without invoking aws or prompting.
 		setup := env.New(t)
 		seedCloudProviderAlias(t, setup, "rihards+123456789012@aws", "test-profile")
 		result := erun.Run(t, []string{"cloud", "login", "--alias", "rihards+123456789012@aws", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -312,9 +266,6 @@ func TestCloud(t *testing.T) {
 	})
 
 	t.Run("oidc_dry_run_traces_bearer_token_command", func(t *testing.T) {
-		// Exercises cloud.go runCloudOIDCCommand: --dry-run must trace
-		// the bearer-token resolution command with the resolved profile
-		// and audience without invoking aws.
 		setup := env.New(t)
 		seedCloudProviderAlias(t, setup, "rihards+123456789012@aws", "test-profile")
 		args := []string{"cloud", "oidc", "--alias", "rihards+123456789012@aws", "--audience", "https://api.example", "--dry-run"}
@@ -326,13 +277,10 @@ func TestCloud(t *testing.T) {
 	})
 
 	t.Run("login_select_prompt_resolves_active_alias", func(t *testing.T) {
-		// Exercises cloud.go selectCloudAliasPrompt: `cloud login` without
-		// --alias must list the configured aliases in a Select prompt;
-		// "\r" confirms the single (highlighted) entry. The aws stub answers
-		// `sts get-caller-identity` with exit 0, so defaultCheckAWSStatus
-		// classifies the token as active and runCloudLoginCommand returns
-		// the status without a login round-trip. The Select is the run's
-		// single interactive prompt (readline read-ahead).
+		// Without --alias, `cloud login` shows a Select of configured aliases;
+		// "\r" confirms the single highlighted entry (the run's one interactive
+		// prompt — readline read-ahead). The stub's exit-0 get-caller-identity
+		// classifies the token active, so no login round-trip runs.
 		setup := env.New(t)
 		seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
 		envVars, _ := stubAWSCallerIdentityAndJWT(t, setup)
@@ -348,13 +296,8 @@ func TestCloud(t *testing.T) {
 	})
 
 	t.Run("login_expired_confirms_relogin_via_stub", func(t *testing.T) {
-		// Exercises eruncommon.LoginCloudProviderAlias end to end on the
-		// expired-token path: defaultCheckAWSStatus classifies the stubbed
-		// `sts get-caller-identity` failure as expired, the confirm prompt
-		// is accepted ("y"), the forced login shells out to `aws sso login`
-		// via the stub (defaultRunAWSLogin real arm), and the post-login
-		// status is printed. The stub's stderr message is the decision
-		// input driving the expired classification.
+		// The stub's stderr message is the decision input that classifies the
+		// session expired; "y" confirms the forced `aws sso login` re-login.
 		setup := env.New(t)
 		seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
 		stubs := setup.Cwd + "/stubs"
@@ -381,10 +324,9 @@ func TestCloud(t *testing.T) {
 	})
 
 	t.Run("login_not_configured_declines_relogin", func(t *testing.T) {
-		// Exercises defaultCheckAWSStatus's "could not be found" →
-		// not_configured classification plus runCloudLoginCommand's decline
-		// branch: answering "n" to the login confirm must print the current
-		// status without invoking `aws sso login`.
+		// The stub's "could not be found" stderr classifies the provider
+		// not_configured; answering "n" must decline without running
+		// `aws sso login` (the stub's login arm fails loudly if it does).
 		setup := env.New(t)
 		seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
 		stubs := setup.Cwd + "/stubs"
@@ -414,14 +356,11 @@ func TestCloud(t *testing.T) {
 	})
 
 	t.Run("oidc_real_run_enables_federation_and_persists_issuer", func(t *testing.T) {
-		// Exercises CloudProviderBearerToken's federation-disabled recovery
-		// end to end: the first `sts get-web-identity-token` fails with
-		// OutboundWebIdentityFederationDisabledException, the command runs
-		// `iam enable-outbound-web-identity-federation` (defaultRunAWSEnableOIDC
-		// real arm), and the retried token call succeeds — a stateful aws
-		// stub flips behavior via a marker file once the enable call runs.
-		// The issuer extracted from the JWT must be persisted to the root
-		// config (side effect outside the captured streams).
+		// Federation-disabled recovery: the first token call fails with
+		// OutboundWebIdentityFederationDisabledException, the command enables
+		// federation and retries. A marker file makes the stub stateful so it
+		// fails then succeeds across the two token calls. Issuer persistence is
+		// a side effect outside the captured streams, so it is read from disk.
 		setup := env.New(t)
 		seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
 		stubs := setup.Cwd + "/stubs"
@@ -464,14 +403,10 @@ func TestCloud(t *testing.T) {
 	})
 
 	t.Run("oidc_real_run_tolerates_already_enabled_federation", func(t *testing.T) {
-		// Exercises defaultRunAWSEnableOIDC's already-enabled tolerance:
-		// when the enable call itself fails with the "FeatureEnabled /
-		// already enabled" message (another principal enabled federation
-		// between the failed token call and the recovery), the command must
-		// treat it as success and retry the bearer token. The stub fails
-		// the first token call with the disabled exception, fails the
-		// enable call with the already-enabled message (while flipping the
-		// marker), and serves the JWT afterwards.
+		// Already-enabled tolerance: if the enable call fails with
+		// "FeatureEnabled / already enabled" — a race where another principal
+		// enabled federation first — the command treats it as success and
+		// retries the token.
 		setup := env.New(t)
 		seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
 		stubs := setup.Cwd + "/stubs"
@@ -508,11 +443,10 @@ func TestCloud(t *testing.T) {
 	})
 
 	t.Run("set_real_run_same_alias_heals_managed_cloud", func(t *testing.T) {
-		// Exercises saveManagedCloudAliasIfNeeded: `cloud set` with the
-		// alias the remote env already carries takes the no-change path,
-		// which must still backfill managedcloud=true for a remote worktree
-		// that predates the flag (side effect outside the captured
-		// streams).
+		// `cloud set` with the alias the env already carries takes the
+		// no-change path but must still backfill managedcloud=true for a
+		// remote worktree that predates the flag (a side effect read from
+		// disk, not the captured streams).
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 		envCfgPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
@@ -541,11 +475,8 @@ func TestCloud(t *testing.T) {
 	})
 
 	t.Run("init_aws_real_run_identity_failure_fails", func(t *testing.T) {
-		// Exercises InitAWSCloudProvider's identity-resolution failure:
-		// profile setup and sso login succeed, but `sts get-caller-identity`
-		// fails, so the command must trace the failure and exit non-zero
-		// (defaultResolveAWSIdentity error path). Dry-run cannot reach this:
-		// the failure is the aws CLI's real exit status.
+		// Dry-run cannot reach this: the failure is the aws CLI's real exit
+		// status. `sts get-caller-identity` fails, so init must exit non-zero.
 		setup := env.New(t)
 		stubs := setup.Cwd + "/stubs"
 		script := strings.Join([]string{
@@ -575,11 +506,9 @@ func TestCloud(t *testing.T) {
 	})
 
 	t.Run("init_aws_real_run_unresolvable_alias_fails", func(t *testing.T) {
-		// Exercises the alias fallbacks in InitAWSCloudProvider: an identity
-		// response with no Account/Arn forces both the username and account
-		// params fallbacks, and with no username available the resolved
-		// alias is empty, which must fail with "cloud provider alias cannot
-		// be resolved" instead of persisting a nameless provider.
+		// An empty identity ({}) leaves no derivable alias; the command must
+		// fail with "cloud provider alias cannot be resolved" rather than
+		// persist a nameless provider.
 		setup := env.New(t)
 		stubs := setup.Cwd + "/stubs"
 		script := strings.Join([]string{
@@ -607,9 +536,8 @@ func TestCloud(t *testing.T) {
 	})
 
 	t.Run("init_aws_real_run_root_arn_username_fallback", func(t *testing.T) {
-		// Exercises AWSUsernameFromARN's colon fallback: a root-account ARN
-		// has no "/" segment, so the username derives from the last ":"
-		// segment ("root") and the persisted alias must reflect it.
+		// A root-account ARN has no "/" segment, so the username falls back to
+		// the last ":" segment ("root"); the persisted alias must reflect it.
 		setup := env.New(t)
 		stubs := setup.Cwd + "/stubs"
 		identityJSON := `{"UserId":"123456789012","Account":"123456789012","Arn":"arn:aws:iam::123456789012:root"}`
@@ -647,10 +575,6 @@ func TestCloud(t *testing.T) {
 	})
 
 	t.Run("init_aws_real_run_configure_set_failure_fails", func(t *testing.T) {
-		// Exercises initAWSProfile's configure failure: the first
-		// `aws configure set` fails, defaultRunAWSConfigureSSO wraps the
-		// stderr into "aws configure set sso_start_url: ...", and the init
-		// traces "profile setup failed" before exiting non-zero.
 		setup := env.New(t)
 		stubs := setup.Cwd + "/stubs"
 		script := strings.Join([]string{
@@ -680,11 +604,9 @@ func TestCloud(t *testing.T) {
 	})
 
 	t.Run("login_real_run_unsupported_provider_fails", func(t *testing.T) {
-		// Exercises LoginCloudProviderAlias's unsupported-provider arm plus
-		// CloudProviderTokenStatus's non-AWS classification: a provider
-		// stored with provider=gcp reports status unknown, and confirming
-		// the login must fail with "unsupported cloud provider" instead of
-		// shelling out to a CLI that does not exist.
+		// A provider stored as provider=gcp reports status unknown; confirming
+		// the login must fail with "unsupported cloud provider" rather than
+		// shell out to a CLI that does not exist.
 		setup := env.New(t)
 		root := filepath.Join(setup.ConfigHome, "erun")
 		if err := os.MkdirAll(root, 0o755); err != nil {
@@ -709,10 +631,6 @@ func TestCloud(t *testing.T) {
 	})
 
 	t.Run("login_real_run_sso_login_failure_fails", func(t *testing.T) {
-		// Exercises LoginCloudProviderAlias's login failure arm plus
-		// defaultRunAWSLogin's error wrap: the token reads expired, the
-		// user confirms a re-login, and the stubbed `aws sso login` fails,
-		// so the command must surface "aws sso login: <stderr>".
 		setup := env.New(t)
 		seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
 		stubs := setup.Cwd + "/stubs"
@@ -742,11 +660,9 @@ func TestCloud(t *testing.T) {
 	})
 
 	t.Run("oidc_real_run_token_access_denied_fails", func(t *testing.T) {
-		// Exercises CloudProviderBearerToken's non-recoverable token
-		// failure: the session is active, but `sts get-web-identity-token`
-		// fails with AccessDenied — not the federation-disabled exception —
-		// so the command must fail without attempting the enable-federation
-		// recovery (SetupCloudProviderOIDC's bearer-failure trace).
+		// AccessDenied on `sts get-web-identity-token` — not the
+		// federation-disabled exception — must fail without attempting the
+		// enable-federation recovery (the stub's enable arm guards against it).
 		setup := env.New(t)
 		seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
 		stubs := setup.Cwd + "/stubs"
@@ -773,11 +689,10 @@ func TestCloud(t *testing.T) {
 	})
 
 	t.Run("oidc_real_run_expired_session_logs_in_before_token", func(t *testing.T) {
-		// Exercises CloudProviderBearerToken's inactive-session branch: the
-		// status check classifies the session as expired, so the flow must
-		// run `aws sso login` before requesting the web identity token. The
-		// stub records the login call via a marker file (side effect outside
-		// the captured streams) and serves the JWT either way.
+		// When the session is expired the flow must run `aws sso login` before
+		// requesting the web identity token. A marker file records the login
+		// (a side effect outside the captured streams) so the ordering can be
+		// asserted.
 		setup := env.New(t)
 		seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
 		stubs := setup.Cwd + "/stubs"
@@ -811,9 +726,8 @@ func TestCloud(t *testing.T) {
 	})
 
 	t.Run("oidc_real_run_non_jwt_token_fails", func(t *testing.T) {
-		// Exercises issuerFromJWT's shape validation: a token without the
-		// three JWT segments must fail with "bearer token is not a JWT"
-		// instead of persisting a bogus issuer.
+		// A token without the three JWT segments must fail with "bearer token
+		// is not a JWT" rather than persist a bogus issuer.
 		setup := env.New(t)
 		seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
 		stubs := setup.Cwd + "/stubs"
@@ -835,10 +749,9 @@ func TestCloud(t *testing.T) {
 	})
 
 	t.Run("oidc_real_run_enable_federation_failure_fails", func(t *testing.T) {
-		// Exercises CloudProviderBearerToken's enable-recovery failure arm:
-		// the token call reports federation disabled, the enable call then
-		// fails with a real error (not "already enabled"), and that enable
-		// failure must be the command's error.
+		// When the enable-federation call fails with a real error (not
+		// "already enabled"), that failure must surface as the command's error
+		// — contrast the already-enabled tolerance path.
 		setup := env.New(t)
 		seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
 		stubs := setup.Cwd + "/stubs"
@@ -865,11 +778,10 @@ func TestCloud(t *testing.T) {
 	})
 
 	t.Run("set_real_run_new_alias_marks_managed_cloud", func(t *testing.T) {
-		// Exercises the alias-change path of SetEnvironmentCloudProviderAlias
-		// on a remote env: assigning a new alias must set managedcloud=true
-		// (remote worktree implies a managed cloud runtime) and persist both
-		// fields. The env config deliberately omits `name:` so the
-		// environment-name backfill branch runs too.
+		// Assigning a new alias to a remote env must set managedcloud=true (a
+		// remote worktree implies a managed cloud runtime) and persist both
+		// fields. The config deliberately omits `name:` so the
+		// environment-name backfill branch also runs.
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 		envCfgPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
@@ -898,9 +810,6 @@ func TestCloud(t *testing.T) {
 	})
 
 	t.Run("set_missing_environment_fails", func(t *testing.T) {
-		// Exercises SetEnvironmentCloudProviderAlias's not-found arm: the
-		// tenant exists but the environment does not, so the command must
-		// fail with the environment-not-found error.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"cloud", "set", "team", "ghost", "--alias", "team-cloud"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -911,9 +820,8 @@ func TestCloud(t *testing.T) {
 	})
 
 	t.Run("set_empty_alias_fails", func(t *testing.T) {
-		// Exercises normalizeEnvironmentCloudProviderAliasParams: --alias is
-		// flag-required by cobra, but an explicitly empty value must still
-		// be rejected by the shared params validation.
+		// --alias is cobra-required, but an explicitly empty value still passes
+		// cobra's presence check and must be rejected by the params validation.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"cloud", "set", "team", "dev", "--alias", ""}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -924,9 +832,6 @@ func TestCloud(t *testing.T) {
 	})
 
 	t.Run("set_dry_run_traces_env_alias_write", func(t *testing.T) {
-		// Exercises cloud.go runCloudSetCommand: --dry-run must trace the
-		// env-config write that updates the cloudProviderAlias without
-		// actually persisting it.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"cloud", "set", "team", "dev", "--alias", "team-cloud", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})

@@ -17,11 +17,6 @@ import {
 import type { AppNotification, TerminalStatusAction } from './state';
 import type { AppThunk } from './store';
 
-// notificationThunks own the titlebar terminal-status message lifecycle and
-// the toast-style notification slot. Timer handles for clearing the toast
-// stay module-local — they are setTimeout cancellation tokens, not state
-// the UI renders.
-
 let notificationTimer = 0;
 let terminalCopyStatusTimer = 0;
 
@@ -54,12 +49,9 @@ export const showTerminalFailure =
         actionKind: action,
       }),
     );
-    // When the caller has no terminal output to attach (e.g. AWS API errors
-    // that arrive as a single descriptive string), fall back to copying the
-    // message + detail itself. Without this, the titlebar pill truncates
-    // long errors with `…` and offers no copy affordance — the user can
-    // read the full text via the tooltip but cannot paste it into a bug
-    // report. Nielsen #9 (recovery from errors).
+    // Some errors (e.g. AWS API strings) arrive with no terminal output; copy
+    // the message itself so the operator can paste the full error — which the
+    // titlebar pill truncates — into a bug report. Nielsen #9 (recovery from errors).
     const effectiveCopy = copyOutput || joinMessageForCopy(message, detail);
     dispatch(setTerminalCopyOutput(effectiveCopy));
     dispatch(setTerminalCopyStatus(''));

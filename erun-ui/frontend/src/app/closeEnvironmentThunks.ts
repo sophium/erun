@@ -9,21 +9,12 @@ import { clearSelectedSessionForEnv, clearTabsForEnv, setSessionId } from './sli
 import type { AppThunk } from './store';
 import { selectionKey } from './versionSuggestions';
 
-// closeEnvironment closes every PTY session bound to (tenant, env)
-// on the Go side, then drops the env's tab strip + remembered tab
-// + in-flight opening marker on the frontend, and clears
-// state.selection.selected when it points at this env. Used by the
-// sidebar's "open env" dot — clicking the dot tears down the env's
-// Local / ERun / AI tabs and stops the desktop from tracking the
-// env in its session state.
-//
-// Independent of the cloud-context Stop button: closing the env's
-// tabs is a desktop-only operation and does NOT touch AWS state.
-// Per-session bookkeeping (selectionToSessionId, openSelections)
-// is cleared by handleTerminalExit as the Go-side
-// Close() fires terminalExitEvent for each session — the thunk
-// only handles env-scoped state that the per-session exit chain
-// would not unwind.
+// closeEnvironment tears down an env's desktop tabs and session
+// state (the sidebar's "open env" dot). Desktop-only — it does NOT
+// touch cloud state, unlike the cloud-context Stop button.
+// Per-session bookkeeping is unwound separately by handleTerminalExit
+// as each closed session fires its exit event; this thunk owns only
+// the env-scoped state that chain leaves behind.
 export const closeEnvironment =
   (selection: UISelection): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {

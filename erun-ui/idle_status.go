@@ -97,14 +97,8 @@ func idleStatusToUI(status eruncommon.EnvironmentIdleStatus) uiIdleStatus {
 		StopBlockedReason:   strings.TrimSpace(status.StopBlockedReason),
 		StopError:           strings.TrimSpace(status.StopError),
 		Markers:             markers,
-		// Pending-stop fields are owned by the shared
-		// `MaybeArmOrFireIdleStop` decision function, written into
-		// the env's stop-pending.json on the pod's shared PVC by the
-		// in-pod monitor, and surfaced through
-		// `ResolveStoredEnvironmentIdleStatus`. The desktop only
-		// observes them — no local map, no clock injection — so the
-		// pill renders the same state whether the in-pod monitor or
-		// any other client armed it.
+		// The desktop only observes the pending-stop fields, never computing
+		// them, so the pill renders the same state whichever client armed the stop.
 		StopPendingSince:       strings.TrimSpace(status.StopPendingSince),
 		SecondsUntilForcedStop: status.SecondsUntilForcedStop,
 		GracePeriodSeconds:     status.GracePeriodSeconds,
@@ -214,17 +208,9 @@ func uiStopBlockedReason(markers []eruncommon.EnvironmentIdleMarker) string {
 	return ""
 }
 
-// maybeStopIdleCloudEnvironment used to fire the auto-stop from the
-// desktop side. That responsibility now lives entirely in the in-pod
-// idle monitor (erun-devops/docker/erun-devops/entrypoint.sh ->
-// `erun activity stop-ready` -> `MaybeArmOrFireIdleStop` in
-// erun-common), so the desktop only needs to clear the post-fire
-// `idleStops` latch when an env reappears as running — that keeps
-// `StartCloudContext` callers from latching the "we already fired"
-// flag forever and matches the historical behavior the existing
-// tests pin down. All grace-period state lives on the pod's shared
-// PVC and is surfaced through the MCP `idle` tool response, so the
-// desktop is now a pure observer.
+// The desktop no longer fires auto-stop — the in-pod idle monitor owns that.
+// This only clears the post-fire latch when an env reappears as running, so a
+// stale "already fired" flag never sticks forever for future start callers.
 func (a *App) maybeStopIdleCloudEnvironment(result eruncommon.OpenResult, _ eruncommon.EnvironmentIdleStatus) {
 	cloudContext, ok, err := a.linkedCloudContext(result.EnvConfig)
 	if err != nil || !ok {
@@ -235,13 +221,9 @@ func (a *App) maybeStopIdleCloudEnvironment(result eruncommon.OpenResult, _ erun
 	}
 }
 
-// CancelPendingIdleStop dismisses the grace-period warning for the
-// supplied env by calling the in-pod MCP `idle_stop_cancel` tool.
-// Cleared state lives on the pod's PVC so any subsequent client
-// (the in-pod monitor's next tick, another desktop, the History
-// tab) sees the dismissal. Returns an error when MCP is unreachable
-// (e.g., the env is mid-stop or the port-forward is broken); the UI
-// surfaces the error verbatim.
+// CancelPendingIdleStop dismisses the grace-period auto-stop warning for the
+// env. The dismissal is shared state, so the in-pod monitor and any other
+// client observe it too.
 func (a *App) CancelPendingIdleStop(selection uiSelection) error {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
@@ -267,19 +249,12 @@ func (a *App) CancelPendingIdleStop(selection uiSelection) error {
 	return nil
 }
 
-// recordManualStopForCloudContext writes a host-manual entry to
-// stop-history.json for every env linked to the supplied cloud
-// context. Called from StopCloudContext after the AWS stop
-// succeeds, so the History tab also explains "you clicked Stop"
-// alongside the in-pod monitor's auto-stops.
+// recordManualStopForCloudContext records a manual-stop audit entry for every
+// env linked to the cloud context, so the History tab explains operator-clicked
+// stops alongside the monitor's auto-stops.
 //
-// Best-effort by design: AWS stop-instances has already succeeded
-// by the time we get here, so the user's intent ("stop this env")
-// is complete. A failure to record the audit row is reported to
-// the in-app activity queue and otherwise ignored — manual stops
-// must not appear to fail because a side audit channel did. Older
-// runtime images that do not yet register `idle_stop_record`
-// surface a single "rebuild runtime image" notification per env.
+// Best-effort by design: the stop has already succeeded by the time we get here,
+// so a failed audit write must not make the manual stop look failed.
 func (a *App) recordManualStopForCloudContext(ctx context.Context, cloudContextName string) {
 	selections := a.selectionsForCloudContext(cloudContextName)
 	for _, selection := range selections {
@@ -293,10 +268,8 @@ func (a *App) recordManualStopForCloudContext(ctx context.Context, cloudContextN
 		}
 		mcpPort := eruncommon.MCPPortForResult(result)
 		if !a.deps.canConnectLocalPort(mcpPort) {
-			// No live port-forward: nothing we can do from the
-			// host side. The audit row would have been welcome
-			// but is not load-bearing — the user clicked Stop
-			// and that already succeeded.
+			// Best-effort audit: no port-forward to reach the tool, and the
+			// stop already succeeded, so skip silently.
 			continue
 		}
 		endpoint := mcpEndpointForOpenResult(result)
@@ -307,10 +280,8 @@ func (a *App) recordManualStopForCloudContext(ctx context.Context, cloudContextN
 	}
 }
 
-// LoadStopHistory returns the env's last N auto-stop audit records,
-// newest first. Reads through the in-pod MCP `idle_stop_history`
-// tool so the canonical history (the one the in-pod monitor wrote
-// after each `stop_cloud_host` call) is what the desktop renders.
+// LoadStopHistory returns the env's stop audit records newest first, reading the
+// canonical history the in-pod monitor records rather than any local copy.
 func (a *App) LoadStopHistory(selection uiSelection) ([]uiLastStopEvent, error) {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
@@ -373,11 +344,9 @@ func idlePolicyIsZero(p eruncommon.EnvironmentIdlePolicy) bool {
 	return p.Timeout == 0 && strings.TrimSpace(p.WorkingHours) == "" && strings.TrimSpace(p.Timezone) == "" && p.IdleTrafficBytes == 0
 }
 
-// clearIdleStopsForCloudContext removes any latched auto-stop flag
-// for environments linked to the supplied cloud context name. Returns
-// true when at least one flag was actually removed, so callers can
-// distinguish "we just observed an externally-restarted context" from
-// "nothing to clear, already in sync."
+// clearIdleStopsForCloudContext returns true when a latched auto-stop flag was
+// actually removed, letting callers distinguish an externally-restarted context
+// from one that was already in sync.
 func (a *App) clearIdleStopsForCloudContext(name string) bool {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -399,10 +368,6 @@ func (a *App) clearIdleStopsForCloudContext(name string) bool {
 	return removed
 }
 
-// selectionKeysForCloudContext returns the selection keys for every configured
-// environment linked to the supplied cloud context name. Extracted from
-// clearIdleStopsForCloudContext so the config scan and the latched-flag removal
-// stay independently simple; the matching rules are unchanged.
 func (a *App) selectionKeysForCloudContext(name string) []string {
 	tenants, err := a.deps.store.ListTenantConfigs()
 	if err != nil {

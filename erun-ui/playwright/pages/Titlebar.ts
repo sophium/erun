@@ -1,7 +1,5 @@
 import type { Locator, Page } from '@playwright/test';
 
-// Titlebar POM. The titlebar exposes layout-toggle controls and the
-// long-running status banner (Nielsen #1 visibility-of-system-status).
 export class Titlebar {
   constructor(public readonly page: Page) {}
 
@@ -22,8 +20,7 @@ export class Titlebar {
   }
 
   async openVSCode(): Promise<void> {
-    // The aria-label is computed from the active selection so we match by
-    // role + name-startsWith via a regex.
+    // The aria-label is computed from the active selection, so there is no fixed name to match exactly.
     await this.page
       .getByRole('button', { name: /VS Code/i })
       .first()
@@ -45,17 +42,13 @@ export class Titlebar {
   }
 
   statusMessage(): Locator {
-    // role="status" or role="alert" with aria-live, depending on the
-    // terminalMessage kind. The titlebar wraps both in the same banner.
+    // One banner rendered as status or alert depending on the terminalMessage kind, so match either.
     return this.page
       .locator('[role="status"][aria-live="polite"], [role="alert"][aria-live="assertive"]')
       .first();
   }
 
-  // idleStatusBadge targets the idle-status pill in the titlebar. The
-  // component only mounts when state.idle.idleStatus is non-null, which
-  // happens after the first idle-status poll completes for the selected
-  // env, so callers should wait for visibility before driving it.
+  // The pill only mounts after the first idle-status poll completes for the selected env, so callers must wait for visibility before driving it.
   idleStatusBadge(): Locator {
     return this.page.getByRole('button', { name: /^Idle timeout/ });
   }

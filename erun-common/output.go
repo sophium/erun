@@ -5,10 +5,8 @@ import (
 	"strings"
 )
 
-// OutputMode selects how a command renders its result. It is set from the
-// universal `--output` CLI flag (and the equivalent MCP/UI plumbing) and read
-// by Context.WriteResult. Text is the default human stream; JSON emits a
-// single structured result object on stdout for orchestrators to capture.
+// OutputMode selects how a command renders its result: Text is the default
+// human stream, JSON a structured result for orchestrators to capture.
 type OutputMode string
 
 const (
@@ -29,8 +27,8 @@ func ParseOutputMode(raw string) (OutputMode, error) {
 	}
 }
 
-// BuildResultImage is one image produced by a build, named by its image name
-// with the registry-qualified tag an orchestrator would push or reference.
+// BuildResultImage is one image produced by a build: its name and the
+// registry-qualified tag an orchestrator would push or reference.
 type BuildResultImage struct {
 	Name string `json:"name"`
 	Tag  string `json:"tag"`
@@ -46,9 +44,7 @@ type BuildResult struct {
 	Images      []BuildResultImage `json:"images,omitempty"`
 }
 
-// NewBuildResult extracts the structured result from a resolved build
-// execution: the minted version (release version when releasing, else the
-// resolved docker build version) and the images it produces.
+// NewBuildResult extracts the structured result from a resolved build execution.
 func NewBuildResult(execution BuildExecutionSpec) BuildResult {
 	result := BuildResult{}
 	if execution.release != nil {

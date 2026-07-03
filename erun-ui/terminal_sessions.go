@@ -15,13 +15,10 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// StartSession spawns the ERun tab's `erun open` PTY for (selection,
-// slot). The work is queued through the per-(tenant,env) desktop action
-// runner so a parallel AI tab open for the same env doesn't race a
-// duplicate build+deploy. The Wails caller blocks until the session is
-// created (or fails); the runner gate is released when the underlying
-// `erun open` reaches its ready marker (==> Deployed / Defaulted
-// container) or exits.
+// StartSession spawns the ERun tab's `erun open` PTY, queued through the
+// per-(tenant,env) action runner so a parallel AI-tab open for the same env
+// cannot race a duplicate build+deploy. The Wails caller blocks until the
+// session is created or fails.
 func (a *App) StartSession(selection uiSelection, slot, cols, rows int) (startSessionResult, error) {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
@@ -32,9 +29,6 @@ func (a *App) StartSession(selection uiSelection, slot, cols, rows int) (startSe
 	})
 }
 
-// clampTerminalSize substitutes the default PTY geometry (120x34) for
-// any non-positive cols/rows the Wails caller passed, so every session
-// start path shares one fallback instead of repeating the guards.
 func clampTerminalSize(cols, rows int) (int, int) {
 	if cols <= 0 {
 		cols = 120
@@ -45,10 +39,6 @@ func clampTerminalSize(cols, rows int) (int, int) {
 	return cols, rows
 }
 
-// runOpenSession is the original spawn logic for the ERun tab,
-// wrapped so the desktop action runner can call it on its turn.
-// Returns the result the Wails caller wants and the managedTerminal so
-// the runner can wait on its ready signal.
 func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, cols, rows int) (startSessionResult, *managedTerminal, error) {
 	cols, rows = clampTerminalSize(cols, rows)
 
@@ -76,10 +66,9 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 	}
 	a.mu.Unlock()
 
-	// open is a pure primitive now: the tab just opens the shell
-	// and binds the forwarders against the already-deployed runtime. One thin
-	// reconnect per env (re)start window (re)binds the shared
-	// MCP/API forwarders; deploy is the caller's job (create / Deploy button).
+	// open is a pure primitive: the tab opens the shell against the
+	// already-deployed runtime. Deploy is the caller's job (create / Deploy
+	// button), never a side effect of opening a tab.
 	a.ensureEnvRuntimeOnce(selection)
 	openParams := startTerminalSessionParams{
 		Dir:        resolveTerminalStartDir(result.RepoPath),
@@ -208,10 +197,9 @@ func (a *App) StartLocalSession(selection uiSelection, slot, cols, rows int) (st
 	}, nil
 }
 
-// StartAISession spawns the AI tab's `erun open` PTY and pipes the
-// configured AI tool's startup command into stdin. Same per-env queue
-// gating as StartSession so an AI tab opened alongside an ERun tab
-// doesn't trigger a duplicate build+deploy.
+// StartAISession spawns the AI tab's `erun open` PTY under the same per-env
+// queue gating as StartSession, so an AI tab opened alongside an ERun tab
+// cannot trigger a duplicate build+deploy.
 func (a *App) StartAISession(selection uiSelection, slot, cols, rows int) (startSessionResult, error) {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
@@ -247,16 +235,13 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 	}
 	a.mu.Unlock()
 
-	// Shared per-env ensure — see StartSession.
 	a.ensureEnvRuntimeOnce(selection)
 	params := startTerminalSessionParams{
 		Dir:        resolveTerminalStartDir(result.RepoPath),
 		Executable: a.deps.resolveCLIPath(),
-		// The AI tab runs `erun open --app-session ai --ai`: the persistent
-		// remote session launches the AI tool itself (the cwd-guarded claude
-		// resume at the env effort), once on create. Reopening reconnects to the
-		// running claude rather than typing it in again or spawning a parallel
-		// one.
+		// The persistent pod session launches the AI tool itself, once on
+		// create; reopening reattaches to the running tool rather than launching
+		// a parallel one.
 		Args: withAppSession(buildOpenArgs(result.Tenant, result.Environment), "ai", true, false),
 		Env:  []string{appSessionEnvVar + "=1"},
 		Cols: cols,
@@ -305,26 +290,20 @@ func (a *App) StartInitSession(selection uiSelection, cols, rows int) (startSess
 }
 
 func (a *App) StartDeploySession(selection uiSelection, cols, rows int) (startSessionResult, error) {
-	// Agent envs (builds-here, source on this machine) deploy fresh code: the
-	// desktop composes the pure primitives — build -> push -> deploy, threading
-	// the minted version — rather than the `build --deploy` operator shortcut
-	// (erun-ui/AGENTS.md). Runtime/published-chart envs install a version by
-	// reference and keep the in-shell `erun deploy` path below.
+	// Agent envs build fresh code, so the desktop composes the pure primitives
+	// (build -> push -> deploy) itself rather than the `build --deploy` operator
+	// shortcut (erun-ui/AGENTS.md). Runtime/published-chart envs install a
+	// version by reference via the in-shell `erun deploy` path below.
 	if result, ok := a.maybeStartDeployOrchestration(selection, false); ok {
 		return result, nil
 	}
-	// The PTY trace handler picks up `==> Deploying tenant/env <ver>`
-	// from the Local tab and registers a deploy entry within milliseconds.
-	// The helm release poller converges onto the same record by ID once
-	// the cluster sees the pending release.
 	return a.runErunCommandInLocal(selection, cols, rows, a.appendMCPAuthPublicKeyFlag(buildDeployArgs(selection)))
 }
 
-// StartForceDeploySession runs `erun deploy --force` in the Local tab.
-// Wails-exposed: bound to the "Rebuild & redeploy" affordance shown next
-// to a failing container in the activity drawer when the kubelet error
-// looks like a missing-image case (the registry doesn't have the chart's
-// referenced tag yet, so a forced rebuild + push is the recovery path).
+// StartForceDeploySession runs `erun deploy --force`, the "Rebuild & redeploy"
+// recovery offered when a failing container looks like a missing-image case:
+// the registry lacks the chart's referenced tag, so a forced rebuild + push is
+// what fixes it.
 func (a *App) StartForceDeploySession(selection uiSelection, cols, rows int) (startSessionResult, error) {
 	if result, ok := a.maybeStartDeployOrchestration(selection, true); ok {
 		return result, nil
@@ -333,13 +312,9 @@ func (a *App) StartForceDeploySession(selection uiSelection, cols, rows int) (st
 	return a.runErunCommandInLocal(selection, cols, rows, args)
 }
 
-// StartUpgradeEnvironmentSession runs `erun upgrade --tenant <t>
-// --environment <e>` in that environment's own Local shell, so each
-// Upgrade-all member upgrades in its respective env — output, activity
-// entry, and any failure land on the env they belong to, and members run in
-// parallel across envs. The deploy emits the same
-// `==> Deploying tenant/env` traces the activity-queue parser turns into
-// entries, exactly like StartDeploySession.
+// StartUpgradeEnvironmentSession runs `erun upgrade` in each environment's own
+// Local shell, so an Upgrade-all fans out across envs in parallel and each
+// env's output, activity entry, and failures land on the env they belong to.
 func (a *App) StartUpgradeEnvironmentSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
 	return a.runErunCommandInLocal(selection, cols, rows, buildUpgradeArgs(selection))
 }
@@ -433,12 +408,8 @@ func shellQuoteIfNeeded(value string) string {
 	return value
 }
 
-// shellQuoteSafePunct lists the punctuation runes that are safe to leave
-// unquoted in a shell command word alongside alphanumerics.
 const shellQuoteSafePunct = "-_./=+:@,"
 
-// shellQuoteSafeRune reports whether r can appear unquoted in a shell
-// command word. Anything outside this allow-list forces shellQuote.
 func shellQuoteSafeRune(r rune) bool {
 	switch {
 	case r >= 'A' && r <= 'Z':
@@ -477,9 +448,6 @@ func (a *App) OpenIDE(selection uiSelection, ide string) error {
 	return formatOpenIDEError(ide, output, err)
 }
 
-// resolveOpenIDEParams resolves the open target and builds the launch
-// params for `open <ide>`. Local repos launch the IDE directly; remote
-// repos go through `erun open` and require an sshd-enabled environment.
 func (a *App) resolveOpenIDEParams(selection uiSelection, ide string) (startTerminalSessionParams, error) {
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 		Tenant:      selection.Tenant,
@@ -508,8 +476,6 @@ func (a *App) resolveOpenIDEParams(selection uiSelection, ide string) (startTerm
 	return params, nil
 }
 
-// formatOpenIDEError wraps a non-nil runIDECommand error with the IDE
-// name, appending the trimmed command output as detail when present.
 func formatOpenIDEError(ide, output string, err error) error {
 	if detail := strings.TrimSpace(output); detail != "" {
 		return fmt.Errorf("open %s: %w: %s", ide, err, detail)
@@ -560,12 +526,9 @@ func (a *App) StartCloudInitAWSSession(cols, rows int) (startSessionResult, erro
 	return startSessionResult{SessionID: serial}, nil
 }
 
-// StartCloudInitCloudflareSession opens an interactive PTY running
-// `erun cloud init cloudflare`, mirroring StartCloudInitAWSSession. The CLI
-// owns Cloudflare alias creation end-to-end: it prompts for the scoped token,
-// verifies it against the Cloudflare API, auto-resolves the account, and
-// defaults a label. The desktop only launches the guided flow and hands the
-// terminal over to it; there is no in-app form.
+// StartCloudInitCloudflareSession opens a PTY running `erun cloud init
+// cloudflare`. The CLI owns Cloudflare alias creation end-to-end; the desktop
+// only launches the guided flow, so there is no in-app form.
 func (a *App) StartCloudInitCloudflareSession(cols, rows int) (startSessionResult, error) {
 	cols, rows = clampTerminalSize(cols, rows)
 	key := "cloud/init/cloudflare"
@@ -677,9 +640,6 @@ func (a *App) SendSessionInput(sessionID int, data string) error {
 	return nil
 }
 
-// clearAwaitingPostRespawnInput marks the managed session as having
-// received real user input, so subsequent output once again counts as
-// activity in streamSession's 2s ticker.
 func (a *App) clearAwaitingPostRespawnInput(managed *managedTerminal) {
 	if managed == nil {
 		return
@@ -689,8 +649,6 @@ func (a *App) clearAwaitingPostRespawnInput(managed *managedTerminal) {
 	a.mu.Unlock()
 }
 
-// isAwaitingPostRespawnInput reports whether the managed session was
-// just respawned and has not yet received user input.
 func (a *App) isAwaitingPostRespawnInput(managed *managedTerminal) bool {
 	if managed == nil {
 		return false
@@ -712,10 +670,9 @@ func (a *App) recordTerminalActivity(selection uiSelection) {
 	})
 }
 
-// SavePastedFile copies a file pasted into the desktop terminal into the
-// current env's runtime pod and returns its in-pod path, which the caller types
-// into the shell. Any file type is accepted (not just images); the runtime copy
-// is content-agnostic.
+// SavePastedFile copies a file pasted into the desktop terminal into the env's
+// runtime pod and returns its in-pod path. Any file type is accepted, not just
+// images.
 func (a *App) SavePastedFile(sessionID int, payload pastedFilePayload) (pastedFileResult, error) {
 	data, mimeType, err := decodePastedFilePayload(payload)
 	if err != nil {
@@ -792,14 +749,11 @@ func (a *App) ensureMCPAvailable(ctx context.Context, result eruncommon.OpenResu
 	return nil
 }
 
-// ReconnectMCP runs `erun open --no-shell` for the selected environment so
-// the local MCP port-forward (and, if the runtime pod is missing, the
-// runtime itself) gets re-established. This is the only desktop path that
-// may invoke the open command implicitly on the user's behalf, and it is
-// gated on an explicit user click in the review panel's unreachable state.
-//
-// Stdout/stderr lines are streamed to the frontend via the
-// mcpReconnectLineEvent so a long-running deploy does not look frozen.
+// ReconnectMCP runs `erun open --no-shell` to re-establish the env's MCP
+// port-forward (and the runtime pod itself if it is gone). This is the only
+// desktop path that opens implicitly on the user's behalf, and it is gated on
+// an explicit click in the review panel's unreachable state. Output is streamed
+// to the frontend so a long-running deploy does not look frozen.
 func (a *App) ReconnectMCP(selection uiSelection) error {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
@@ -870,22 +824,15 @@ func (a *App) CloseSession(sessionID int) error {
 	return managed.session.Close()
 }
 
-// CloseEnvironmentSessions tears down every managed PTY session
-// bound to the supplied (tenant, environment) pair, regardless of
-// the per-session debug flag, and returns the serial IDs that were
-// closed so the frontend can drop them from tabsByEnv and related
-// session bookkeeping in one round-trip.
+// CloseEnvironmentSessions tears down every managed PTY bound to the
+// (tenant, environment) pair and returns the closed serial IDs so the frontend
+// can drop them in one round-trip. Backs the sidebar's "close env" affordance;
+// it is desktop-only and does NOT touch the cloud context's AWS state (see
+// StopCloudContext).
 //
-// Used by the sidebar's "close env" affordance (the green dot next
-// to an env name): the user clicked the dot to tear down the env's
-// Local/ERun/AI tabs and stop the desktop from tracking the env.
-// This is a desktop-only operation — it does NOT touch the cloud
-// context's AWS state. See StopCloudContext for that.
-//
-// Collect targets under a.mu, release the lock, then call Close on
-// each — session.Close may block on I/O and can call back into
-// session bookkeeping that re-acquires a.mu, so holding the lock
-// across the close would deadlock.
+// Targets are collected under a.mu and closed after releasing it: session.Close
+// can call back into bookkeeping that re-acquires a.mu, so closing under the
+// lock would deadlock.
 func (a *App) CloseEnvironmentSessions(selection uiSelection) ([]int, error) {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
@@ -895,10 +842,6 @@ func (a *App) CloseEnvironmentSessions(selection uiSelection) ([]int, error) {
 	return closeManagedTerminals(targets)
 }
 
-// collectLiveSessionsForSelection gathers, under a.mu, every live
-// (non-nil, not-yet-closed) managed PTY bound to the supplied
-// (tenant, environment) pair. The lock is released before the caller
-// closes them — see CloseEnvironmentSessions for the deadlock rationale.
 func (a *App) collectLiveSessionsForSelection(selection uiSelection) []*managedTerminal {
 	var targets []*managedTerminal
 	a.mu.Lock()
@@ -918,9 +861,6 @@ func (a *App) collectLiveSessionsForSelection(selection uiSelection) []*managedT
 	return targets
 }
 
-// closeManagedTerminals closes each target's underlying session and
-// returns the serial IDs that closed cleanly along with the first close
-// error encountered (if any). Targets with no session are skipped.
 func closeManagedTerminals(targets []*managedTerminal) ([]int, error) {
 	closed := make([]int, 0, len(targets))
 	var firstErr error
@@ -1002,9 +942,6 @@ func (a *App) EndAISessions(selection uiSelection) (bool, error) {
 	return true, nil
 }
 
-// managedAITabFor reports whether the managed session is one of the env's
-// live AI tabs (env AI tab or contribute AI tab) that EndAISessions tears
-// down for a Claude launch-flag change.
 func managedAITabFor(managed *managedTerminal, selection uiSelection) bool {
 	if managed == nil || managed.closed || managed.session == nil {
 		return false
@@ -1080,11 +1017,6 @@ func (a *App) streamSession(managed *managedTerminal) {
 	}
 }
 
-// handleSessionOutput forwards one PTY read to the frontend, feeds the
-// activity-trace parser and the AI-activity debounce, releases the idle
-// block on first output, and refreshes the idle-activity marker no more
-// than once every 2s. lastOutputActivity is advanced in place when the
-// marker is refreshed.
 func (a *App) handleSessionOutput(managed *managedTerminal, chunk []byte, lastOutputActivity *time.Time) {
 	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
 		SessionID: managed.serial,
@@ -1099,13 +1031,8 @@ func (a *App) handleSessionOutput(managed *managedTerminal, chunk []byte, lastOu
 		a.mu.Unlock()
 	}
 	if time.Since(*lastOutputActivity) >= 2*time.Second {
-		// While the session is waiting for the first user
-		// input after a respawn, ignore the output ticker.
-		// Reconnect noise (audit lines, "── reconnecting ──"
-		// banners, the output of a respawned `erun open`
-		// that fails again) must not refresh the idle
-		// marker — only real interaction does. A real
-		// keystroke clears the flag in SendSessionInput.
+		// Reconnect noise must not refresh the idle marker; only real
+		// interaction (which clears the flag in SendSessionInput) does.
 		if !a.isAwaitingPostRespawnInput(managed) {
 			a.recordTerminalActivity(managed.selection)
 			*lastOutputActivity = time.Now()
@@ -1113,37 +1040,31 @@ func (a *App) handleSessionOutput(managed *managedTerminal, chunk []byte, lastOu
 	}
 }
 
-// aiRepaintNudgeDelay is how long maybeNudgeAIRepaint waits after the
-// attach marker before resizing, so the bootstrap's `dtach -A` (which runs
-// immediately after the marker) has reattached the client to Claude and
-// Claude is listening for the WINCH. aiRepaintNudgeSettle is the gap between
-// the shrink and the restore so the two SIGWINCHes are not coalesced.
-// Vars, not consts, so tests can shrink them; production keeps the defaults.
+// aiRepaintNudgeDelay waits after the attach marker so the bootstrap's
+// `dtach -A` has reattached the client to Claude and Claude is listening for
+// the WINCH; aiRepaintNudgeSettle spaces the shrink and restore so the two
+// SIGWINCHes are not coalesced.
 var (
 	aiRepaintNudgeDelay  = 400 * time.Millisecond
 	aiRepaintNudgeSettle = 150 * time.Millisecond
 )
 
 // aiAttachMarker is the window-title escape (OSC 0) the open bootstrap prints
-// immediately before `dtach -A` reattaches the client to the running program.
-// It is the precise "Claude is about to be (re)attached" signal — unlike the
-// first output overall, which is the `erun open` audit trace emitted well
-// before the pod-side attach, so nudging on it would fire too early.
+// immediately before `dtach -A` reattaches to the running program — the precise
+// "about-to-reattach" signal. Nudging on the first output overall instead would
+// fire too early, before the pod-side attach.
 var aiAttachMarker = []byte("\x1b]0;")
 
-// isAITabKind reports whether the session is one of the AI-tab kinds (env AI
-// tab or contribute AI tab) whose program is the managed Claude.
 func isAITabKind(managed *managedTerminal) bool {
 	return managed != nil &&
 		(managed.kind == sessionKindAI || managed.kind == sessionKindContributeAI)
 }
 
-// maybeNudgeAIRepaint fires the once-per-attach AI repaint nudge when the
-// attach marker first appears in the output. dtach hands a reattached client a
-// cleared screen and signals the program to redraw, but Claude is a main-screen
-// TUI (Ink) that only does a full repaint on an actual geometry change — a
-// same-size reattach raises no effective WINCH, so the tab renders
-// blank. The nudge below forces that geometry change once Claude is attached.
+// maybeNudgeAIRepaint fires the AI repaint nudge when the attach marker first
+// appears. dtach hands a reattached client a cleared screen, but Claude (an Ink
+// main-screen TUI) only fully repaints on an actual geometry change — a
+// same-size reattach raises no effective WINCH, so the tab would render blank.
+// The nudge forces that geometry change once Claude is attached.
 func (a *App) maybeNudgeAIRepaint(managed *managedTerminal, chunk []byte) {
 	if !isAITabKind(managed) || !bytes.Contains(chunk, aiAttachMarker) {
 		return
@@ -1159,12 +1080,10 @@ func (a *App) maybeNudgeAIRepaint(managed *managedTerminal, chunk []byte) {
 	go a.nudgeAIRepaint(managed, cols, rows)
 }
 
-// nudgeAIRepaint briefly tells the backend pty it is one row shorter, then
-// restores it. The size change crosses kubectl exec -> dtach master -> Claude
-// as a real WINCH and forces a full repaint after a same-size reattach. The
-// local xterm is never resized, so the user sees no reflow — only the AI
-// tab's content appearing. No-op when the session has no usable size or has
-// already closed.
+// nudgeAIRepaint briefly shrinks the backend pty by one row and restores it:
+// the change reaches Claude as a real WINCH and forces the full repaint a
+// same-size reattach cannot. The local xterm is never resized, so the user sees
+// the tab's content appear with no visible reflow.
 func (a *App) nudgeAIRepaint(managed *managedTerminal, cols, rows int) {
 	if cols <= 0 || rows <= 1 {
 		return
@@ -1177,9 +1096,8 @@ func (a *App) nudgeAIRepaint(managed *managedTerminal, cols, rows int) {
 	a.resizeSessionIfLive(managed, cols, rows)
 }
 
-// resizeSessionIfLive resizes the managed pty unless it has closed, reporting
-// whether the resize was attempted. Used by the AI repaint nudge so a session
-// that exits mid-nudge does not panic on a nil/closed pty.
+// resizeSessionIfLive guards the AI repaint nudge: a session that exits
+// mid-nudge must not panic on a nil/closed pty.
 func (a *App) resizeSessionIfLive(managed *managedTerminal, cols, rows int) bool {
 	a.mu.Lock()
 	session := managed.session
@@ -1192,11 +1110,6 @@ func (a *App) resizeSessionIfLive(managed *managedTerminal, cols, rows int) bool
 	return true
 }
 
-// finalizeSessionExit tears down a managed PTY that streamSession could
-// not reconnect: it flips the AI busy latch off, removes the session
-// from the registry, releases its idle block, emits the exit event,
-// releases any action runner blocked on the ready signal, and kicks off
-// the post-sshd-init workspace sync on a clean exit.
 func (a *App) finalizeSessionExit(managed *managedTerminal, reason string) {
 	a.finalizeAIActivity(managed)
 	a.mu.Lock()
@@ -1233,14 +1146,11 @@ func (a *App) currentSessionFor(managed *managedTerminal) terminalSession {
 	return managed.session
 }
 
-// reconnectRefused reports whether tryReconnect should decline to
-// respawn the managed PTY, emitting the matching terminal marker and env
-// status as a side effect. Each guard is a terminal condition (handover,
-// stopped cloud context, deploy failure, or a fast-exit loop) where an
-// automatic respawn would fight another actor or storm a broken env; the
-// user's recovery affordance is named in the emitted marker. A false
-// return means none of the terminal conditions apply and the caller may
-// respawn.
+// reconnectRefused decides whether tryReconnect should decline to respawn,
+// emitting the matching terminal marker and env status as a side effect. Each
+// guard is a terminal condition — handover, stopped cloud context, deploy
+// failure, fast-exit loop — where an automatic respawn would fight another
+// actor or storm a broken env; the recovery affordance is named in the marker.
 func (a *App) reconnectRefused(managed *managedTerminal) bool {
 	// Another ERun window re-attached this persistent session — a
 	// deliberate handover, not a transient drop. Respawning would run
@@ -1362,15 +1272,12 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	return true
 }
 
-// shouldRespawnForCloudContext returns true when the managed PTY can be
-// safely relaunched. A managed terminal whose env has no linked cloud
-// context (local envs) always reconnects; a managed cloud env reconnects
-// only when the last-known context status is "running" or "pending"
-// (start in flight). Anything else means the context is stopped or
-// transitioning toward stopped, and an immediate respawn would fight
-// the desktop's auto-stop. Best-effort: any error reading the store is
-// treated as "allow respawn" so a transient store failure does not
-// permanently break reconnect.
+// shouldRespawnForCloudContext reports whether the managed PTY can be safely
+// relaunched. Local envs (no linked cloud context) always may; a cloud env may
+// only while its context is running or starting, because respawning against a
+// stopped or stopping context would fight the desktop's auto-stop. A store read
+// error is treated as "allow" so a transient failure does not permanently break
+// reconnect.
 func (a *App) shouldRespawnForCloudContext(managed *managedTerminal) bool {
 	if managed == nil || a.deps.store == nil {
 		return true
@@ -1448,14 +1355,10 @@ func (a *App) emitReconnectMarker(sessionID int, exitReason string) {
 	})
 }
 
-// reconnectLoopWindow and reconnectLoopMaxExits define the fast-exit
-// loop guard: once the managed PTY has logged more than
-// reconnectLoopMaxExits exits inside reconnectLoopWindow,
-// tryReconnect stops respawning and surfaces the retry marker
-// instead. The numbers are picked to absorb a couple of legitimate
-// transient blips (an `erun open` retrying past a momentary AWS
-// describe-instances error, for example) without leaving the user
-// staring at a terminal of stacked reconnect noise.
+// reconnectLoopWindow and reconnectLoopMaxExits tune the fast-exit loop guard:
+// large enough to absorb a couple of legitimate transient blips (an `erun open`
+// retrying past a momentary AWS describe-instances error) without leaving the
+// user staring at stacked reconnect noise.
 const (
 	reconnectLoopWindow     = 30 * time.Second
 	reconnectLoopMaxExits   = 2
@@ -1464,11 +1367,6 @@ const (
 	takenOverMarkerANSI     = "\r\n\x1b[2;33m── session re-attached in another ERun window — click the environment in the sidebar to attach it here ──\x1b[0m\r\n"
 )
 
-// trackExitForLoopGuard records the moment the managed PTY exited
-// and reports whether the recent-exit count has crossed the cap.
-// Returns true when the caller (tryReconnect) should refuse respawn.
-// Entries older than reconnectLoopWindow are pruned on each call so
-// a single exit after a long-running session does not trip the cap.
 func (a *App) trackExitForLoopGuard(managed *managedTerminal) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -1488,12 +1386,8 @@ func (a *App) trackExitForLoopGuard(managed *managedTerminal) bool {
 	return len(kept) > reconnectLoopMaxExits
 }
 
-// emitReconnectLoopMarker writes a single diagnostic line when
-// tryReconnect refuses to respawn because the managed PTY has been
-// failing repeatedly in a short window. The dim-yellow style matches
-// the reconnecting and stopped-context markers so the user reads them
-// as the same status channel. The recovery action is named in the
-// line — re-click the env in the sidebar to retry.
+// emitReconnectLoopMarker's dim-yellow style matches the reconnecting and
+// stopped-context markers so the user reads them all as one status channel.
 func (a *App) emitReconnectLoopMarker(sessionID int) {
 	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
 		SessionID: sessionID,
@@ -1501,9 +1395,6 @@ func (a *App) emitReconnectLoopMarker(sessionID int) {
 	})
 }
 
-// emitDeployFailedMarker writes a single diagnostic line when tryReconnect
-// refuses to respawn because the env's deploy failed (rather than a transient
-// drop). See tryReconnect.
 func (a *App) emitDeployFailedMarker(sessionID int) {
 	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
 		SessionID: sessionID,
@@ -1511,10 +1402,6 @@ func (a *App) emitDeployFailedMarker(sessionID int) {
 	})
 }
 
-// emitTakenOverMarker writes a single diagnostic line when tryReconnect
-// refuses to respawn because another ERun window re-attached the session.
-// The named recovery action mirrors the other markers: clicking the env in
-// the sidebar deliberately takes the session back.
 func (a *App) emitTakenOverMarker(sessionID int) {
 	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
 		SessionID: sessionID,
@@ -1522,9 +1409,6 @@ func (a *App) emitTakenOverMarker(sessionID int) {
 	})
 }
 
-// markSessionTakenOver flags the managed PTY whose output carried the CLI's
-// taken-over notice (eruncommon.ShellSessionTakenOverNotice); see the
-// takenOver field for the semantics.
 func (a *App) markSessionTakenOver(managed *managedTerminal) {
 	if managed == nil {
 		return
@@ -1543,11 +1427,9 @@ func (a *App) sessionTakenOver(managed *managedTerminal) bool {
 	return managed.takenOver
 }
 
-// reconnectBlockedByDeployFailure reports whether the managed PTY's open
-// ended in a deploy failure — signalReady was called with an error from the
-// `==> Deploy failed` trace line — as opposed to a healthy ready that later
-// dropped. tryReconnect uses it to avoid re-deploying a broken env (and the
-// parallel re-deploy storm that results when every tab reconnects at once).
+// reconnectBlockedByDeployFailure reports whether this open ended in a deploy
+// failure (signalReady got the `==> Deploy failed` readyErr) rather than a
+// healthy ready that later dropped — the latter still reconnects.
 func (a *App) reconnectBlockedByDeployFailure(managed *managedTerminal) bool {
 	if managed == nil {
 		return false
@@ -1557,13 +1439,9 @@ func (a *App) reconnectBlockedByDeployFailure(managed *managedTerminal) bool {
 	return managed.readyClosed && managed.readyErr != nil
 }
 
-// reconnectBlockedByActivityDeployFailure reports whether the managed PTY's env
-// has a failed deploy recorded in the activity queue. Unlike
-// reconnectBlockedByDeployFailure (which keys on this open's own
-// `==> Deploy failed` readyErr), this catches the case where the deploy failed
-// in a separate activity and the current open merely can't reach the resulting
-// pod — so reconnect still stops hammering the broken env. Cleared once a later
-// deploy succeeds (recovery), letting reconnect resume.
+// reconnectBlockedByActivityDeployFailure reports whether the env's latest
+// deploy failed in a separate activity — the case reconnectBlockedByDeployFailure
+// misses because this open has no deploy-failed readyErr of its own.
 func (a *App) reconnectBlockedByActivityDeployFailure(managed *managedTerminal) bool {
 	if managed == nil || a.activityQueue == nil {
 		return false
@@ -1571,12 +1449,9 @@ func (a *App) reconnectBlockedByActivityDeployFailure(managed *managedTerminal) 
 	return a.activityQueue.latestDeployFailed(managed.selection.Tenant, managed.selection.Environment)
 }
 
-// emitStoppedContextMarker writes a single diagnostic line when
-// tryReconnect refuses to respawn because the env's cloud context is
-// not running. The dim-yellow style matches the reconnecting marker so
-// the user reads them as the same status channel; the recovery path
-// (titlebar Play button) is named in the line so no separate UI
-// element is needed.
+// emitStoppedContextMarker's dim-yellow style matches the reconnecting marker
+// so the user reads them as one status channel; naming the recovery (titlebar
+// Play button) in the line itself means no separate UI element is needed.
 func (a *App) emitStoppedContextMarker(sessionID int) {
 	marker := "\r\n\x1b[2;33m── environment stopped — click the start button in the titlebar to resume ──\x1b[0m\r\n"
 	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
@@ -1654,11 +1529,10 @@ func (a *App) recordAIActivity(managed *managedTerminal) {
 	}
 }
 
-// clearAIActivityIfQuiet fires from the AfterFunc scheduled by
-// recordAIActivity. If no new output has arrived in the meantime it
-// clears the busy latch and emits ai-activity busy=false. If new output
-// did arrive, the more recent recordAIActivity call already reset the
-// timer; this firing is stale and a no-op.
+// clearAIActivityIfQuiet fires from recordAIActivity's AfterFunc and clears the
+// busy latch only if the session has stayed quiet. If newer output arrived, a
+// later recordAIActivity already reset the timer, so this firing is stale and a
+// no-op.
 func (a *App) clearAIActivityIfQuiet(managed *managedTerminal) {
 	if managed == nil {
 		return
@@ -1799,10 +1673,9 @@ type managedTerminal struct {
 	activityTraceBuffer    string
 	startedAt              time.Time
 
-	// lastCols/lastRows track the most recent pty size (seeded from the
-	// spawn params, refreshed on every ResizeSession). The AI-tab repaint
-	// nudge needs a known size to resize to; the session itself does not
-	// expose its current geometry.
+	// lastCols/lastRows track the most recent pty size: the AI-tab repaint
+	// nudge needs a size to resize to, and the session does not expose its own
+	// geometry.
 	lastCols int
 	lastRows int
 
@@ -1863,11 +1736,8 @@ type managedTerminal struct {
 	readyClosed bool
 }
 
-// waitReady blocks until the session signals it has reached an
-// interactive-ready state, the underlying process exits, ctx is
-// cancelled, or `timeout` elapses (use 0 for "no timeout"). Returns
-// nil on success, ctx.Err() on cancellation, the session's exit error
-// on premature close, or context.DeadlineExceeded on timeout.
+// waitReady blocks until the session reaches ready, its process exits, ctx is
+// cancelled, or timeout elapses (0 means no timeout).
 func (m *managedTerminal) waitReady(ctx context.Context, timeout time.Duration) error {
 	if m == nil {
 		return nil
@@ -1901,9 +1771,8 @@ func (m *managedTerminal) waitReady(ctx context.Context, timeout time.Duration) 
 	}
 }
 
-// signalReady marks the session ready exactly once. Subsequent calls
-// are no-ops, which is the right behaviour: the first observed
-// terminal-state line is authoritative.
+// signalReady marks the session ready exactly once; later calls are no-ops
+// because the first observed terminal-state line is authoritative.
 func (m *managedTerminal) signalReady(err error) {
 	if m == nil {
 		return

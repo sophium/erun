@@ -8,11 +8,8 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// TestUpgradeToolPreviewResolvesPlan exercises the MCP upgrade tool's
-// preview/plan path: with the runtime's env opted in and already at its
-// channel target (supplied via the version-override test seam so no registry
-// call happens), preview resolves the plan and reports the env up to date,
-// without attempting a deploy.
+// TestUpgradeToolPreviewResolvesPlan verifies the upgrade preview path resolves
+// the plan without deploying, so callers can inspect the work with no side effects.
 func TestUpgradeToolPreviewResolvesPlan(t *testing.T) {
 	t.Setenv(eruncommon.UpgradeVersionsOverrideEnv, "stable=3.0.0")
 	projectRoot := t.TempDir()

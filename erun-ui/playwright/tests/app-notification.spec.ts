@@ -1,18 +1,10 @@
 import { expect, test } from '../fixtures/erunApp.js';
 
-// app-notification covers the new Go-side `app-notification` Wails
-// event that surfaces one-shot info/success events as transient,
-// auto-dismissing toasts. The canonical caller is the idle auto-stop
-// success line in erun-ui/idle_status.go: before issue #361 it rode on
-// the persistent `app-status` channel, which latched the message into
-// the titlebar pill long after the cloud context had been restarted
-// elsewhere — see the issue body for the user-facing symptom.
-//
-// The Go side is covered by erun-ui/notifications_test.go. This spec
-// drives the same React path the production event ends up using: emit
-// the Wails event directly and verify the titlebar pill renders the
-// notification with the matching kind, then auto-dismisses after the
-// 3.2 s timer in notificationThunks.ts.
+// The `app-notification` event surfaces one-shot info/success events as
+// transient, auto-dismissing toasts. It exists because the idle auto-stop
+// success previously rode the persistent `app-status` channel, which latched
+// the message into the titlebar pill long after its cloud context had been
+// restarted elsewhere.
 
 test.describe('app-notification toast', () => {
   test('info notification renders in the titlebar then auto-dismisses', async ({
@@ -36,19 +28,14 @@ test.describe('app-notification toast', () => {
     const pill = page.getByRole('status').filter({ hasText: message });
     await expect(pill).toBeVisible();
 
-    // notificationThunks.ts auto-dismisses success/info after 3.2 s.
-    // Give the timer 5 s headroom so we are not racing with it; if the
-    // pill is still up at that point the auto-dismiss broke.
     await expect(pill).toHaveCount(0);
   });
 
   test('error notification persists (no auto-dismiss)', async ({ app: _app, page }) => {
     const message = 'Backend pinned a problem you should read.';
-    // Take over the page clock so the 3.2 s success/info auto-dismiss timer can
-    // be advanced deterministically instead of slept through. The notification
-    // slot is single-occupancy (notificationThunks.showNotification replaces the
-    // one toast), so a sibling info toast would race the error rather than time
-    // alongside it — the clock is the reliable signal that the window elapsed.
+    // The notification slot is single-occupancy, so the error toast can't be
+    // timed against a sibling info toast — advance the clock past the
+    // auto-dismiss window instead of racing a second toast.
     await page.clock.install();
     await page.evaluate(
       (payload) => {
@@ -65,26 +52,21 @@ test.describe('app-notification toast', () => {
     const pill = page.getByRole('alert').filter({ hasText: message });
     await expect(pill).toBeVisible();
 
-    // Advance well past the 3.2 s window that auto-dismisses success/info
-    // toasts. An error toast sets no timer, so it must still be visible.
     await page.clock.fastForward(5_000);
     await expect(pill).toBeVisible();
   });
 
   test('payload with empty message is ignored', async ({ app: _app, page }) => {
-    // An empty payload must add no notification toast. Compare the
-    // role=status / role=alert counts before and after rather than
-    // asserting an absolute zero: the titlebar idle-status widget also
-    // carries role=status whenever an env with a managed cloud context is
-    // active, so a global count of 0 is not a future-proof invariant. A
-    // no-op dispatch must leave the counts unchanged.
+    // The titlebar idle-status widget also carries role=status when an env with
+    // a managed cloud context is active, so an ignored payload can't be checked
+    // against an absolute count of zero — compare before/after instead.
     const statusBefore = await page.locator('[role="status"]').count();
     const alertBefore = await page.locator('[role="alert"]').count();
     const sentinel = 'Sentinel error toast proving the empty payload was processed.';
-    // Emit the empty payload, then a valid error sentinel. Events are ordered,
-    // so once the sentinel renders the empty dispatch has provably been
-    // processed — bounding the no-op window with a real event, not a sleep. The
-    // sentinel is an error toast so it persists (no auto-dismiss race).
+    // Events are ordered, so once this error sentinel renders the empty dispatch
+    // has provably been processed — a real event bounds the "nothing happened"
+    // assertion instead of a sleep. Error kind so the sentinel never
+    // auto-dismisses mid-assertion.
     await page.evaluate((msg) => {
       const runtime = (
         window as unknown as {
@@ -95,8 +77,6 @@ test.describe('app-notification toast', () => {
       runtime.EventsEmit('app-notification', { kind: 'error', message: msg });
     }, sentinel);
     await expect(page.getByRole('alert').filter({ hasText: sentinel })).toBeVisible();
-    // The empty payload added no toast: the status count is unchanged and only
-    // the sentinel raised the alert count.
     await expect(page.locator('[role="status"]')).toHaveCount(statusBefore);
     await expect(page.locator('[role="alert"]')).toHaveCount(alertBefore + 1);
   });

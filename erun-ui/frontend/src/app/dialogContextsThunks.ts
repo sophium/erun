@@ -6,16 +6,6 @@ import { patchEnvironmentDialog } from './slices/environmentDialogSlice';
 import type { AppThunk } from './store';
 import { normalizeDialogValue } from './versionSuggestions';
 
-// dialogContextsThunks own the env-init dialog's "available kubernetes
-// contexts" + "selected context runtime resources" flows. The user-driven
-// refresh (kubernetesContext field changes) lives in
-// environmentDialogThunks; this module covers dialog-open seeding and the
-// user-triggered "rescan k8s contexts" button.
-
-// refreshDialogRuntimeResources hits the runtime-resources endpoint for
-// the dialog's currently-selected k8s context and patches the dialog with
-// the resulting CPU/memory totals. Internal helper; not exported because
-// callers should drive it via refreshKubernetesContexts.
 const refreshDialogRuntimeResources =
   (kubernetesContext: string): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
@@ -70,13 +60,9 @@ const refreshDialogRuntimeResources =
     }
   };
 
-// refreshKubernetesContexts re-scans kubeconfig for available contexts and
-// patches the dialog. Triggered by the "rescan k8s contexts" button and
-// after cloud-context power changes that may have rewritten kubeconfig.
-// forceRefetch is required: without it RTK Query returns the cached
-// result of the previous LoadKubernetesContexts call, so a transient
-// empty result (or simply a need to re-scan after a kubeconfig edit) gets
-// pinned to the dialog and Rescan can never recover.
+// forceRefetch is required: without it RTK Query pins the previous
+// (possibly transient-empty) context list to the dialog, so Rescan can
+// never recover after a kubeconfig change.
 export const refreshKubernetesContexts =
   (): AppThunk<Promise<void>> => async (dispatch, getState) => {
     try {

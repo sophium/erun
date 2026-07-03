@@ -75,9 +75,8 @@ export function EditableComboField({
   onValueChange: (value: string) => void;
 }): React.ReactElement {
   const [open, setOpen] = React.useState(false);
-  // dirty=true once the user types; before that, the popover shows
-  // ALL suggestions instead of filtering by the prefilled value
-  // (Nielsen #6 recognition-over-recall). Resets when popover opens.
+  // Show all suggestions until the user types, rather than filtering by the
+  // prefilled value, so the full option set stays visible (recognition over recall).
   const [dirty, setDirty] = React.useState(false);
   const visibleSuggestions = dirty ? filterSuggestions(suggestions, value) : suggestions;
   const openPopover = (next: boolean) => {

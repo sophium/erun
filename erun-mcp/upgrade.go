@@ -16,10 +16,9 @@ type UpgradeInput struct {
 	Verbosity int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
 
-// upgradeTool resolves the upgrade plan for the runtime's environment and, when
-// it is opted in (autoupgrade) and lags its channel latest, redeploys it. The
-// in-pod runtime serves a single tenant/environment, so the plan is scoped to
-// it; preview gates execution like --dry-run.
+// upgradeTool redeploys the runtime's environment only when it is opted into
+// autoupgrade and lags its channel latest. The in-pod runtime serves one
+// tenant/environment, so the plan is scoped to that single target.
 func upgradeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, UpgradeInput) (*mcp.CallToolResult, CommandOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input UpgradeInput) (*mcp.CallToolResult, CommandOutput, error) {
 		output, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, func(runCtx eruncommon.Context, workDir string) error {

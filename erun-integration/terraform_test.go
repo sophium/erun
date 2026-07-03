@@ -31,10 +31,8 @@ func TestTerraform(t *testing.T) {
 	})
 
 	t.Run("apply_dry_run", func(t *testing.T) {
-		// With the env configured and its per-env Terraform root present, apply
-		// resolves terraform-team/dev/, finds dev.tfvars, and traces the full
-		// sequence: init -> fmt -recursive .. -> plan -var-file -out -> the
-		// type-the-env-name confirm gate -> apply the saved plan. No side effects.
+		// apply's full plan runs behind a type-the-env-name confirm gate and
+		// performs no side effects in dry-run.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedGitRepo(t, setup.Cwd)
@@ -44,9 +42,7 @@ func TestTerraform(t *testing.T) {
 	})
 
 	t.Run("apply_dry_run_default_scope", func(t *testing.T) {
-		// No tenant/environment args: the command resolves the configured default
-		// scope (team/dev) and runs against terraform-team/dev/ — the "run in the
-		// relevant folder automatically" path.
+		// With no tenant/environment args, apply resolves the configured default scope.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedGitRepo(t, setup.Cwd)
@@ -56,8 +52,8 @@ func TestTerraform(t *testing.T) {
 	})
 
 	t.Run("apply_dry_run_no_tfvars", func(t *testing.T) {
-		// A per-env root without <environment>.tfvars: the plan runs without
-		// -var-file and the trace says so, rather than passing a missing file.
+		// A missing <environment>.tfvars makes plan run without it rather than
+		// pass a path that doesn't exist.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedGitRepo(t, setup.Cwd)
@@ -70,9 +66,8 @@ func TestTerraform(t *testing.T) {
 	})
 
 	t.Run("apply_dry_run_with_cloudflare_token", func(t *testing.T) {
-		// When the env injects CLOUDFLARE_API_TOKEN (a Cloudflare alias), the plan
-		// traces that it forwards it as TF_VAR_cloudflare_api_token — the value
-		// itself never appears (it rides in the environment, not argv).
+		// A Cloudflare token is forwarded to terraform but its value never appears
+		// in the trace — it rides in the environment, not argv.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedGitRepo(t, setup.Cwd)
@@ -83,7 +78,7 @@ func TestTerraform(t *testing.T) {
 	})
 
 	t.Run("plan_dry_run", func(t *testing.T) {
-		// plan is read-only: init -> plan. No fmt mutation, no -out, no confirm gate.
+		// plan is read-only: no fmt mutation and no confirm gate, unlike apply.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedGitRepo(t, setup.Cwd)
@@ -93,8 +88,7 @@ func TestTerraform(t *testing.T) {
 	})
 
 	t.Run("destroy_dry_run", func(t *testing.T) {
-		// destroy plans a -destroy then applies the saved plan, behind the same
-		// type-the-env-name confirm gate as apply.
+		// destroy is gated behind the same type-the-env-name confirm as apply.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedGitRepo(t, setup.Cwd)
@@ -104,8 +98,8 @@ func TestTerraform(t *testing.T) {
 	})
 
 	t.Run("missing_root", func(t *testing.T) {
-		// The env is configured but has no terraform-team/dev/ root: fail with an
-		// actionable error pointing at the blueprint skill, not an opaque stat error.
+		// With no terraform root present, fail with an actionable error pointing at
+		// the blueprint skill, not an opaque stat error.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedGitRepo(t, setup.Cwd)
@@ -117,9 +111,8 @@ func TestTerraform(t *testing.T) {
 	})
 
 	t.Run("apply_real_run_via_stub", func(t *testing.T) {
-		// Real run (no --dry-run): stub terraform so init/fmt/plan/apply all
-		// succeed, and confirm via --confirm-environment (no interactive prompt).
-		// Locks the execution path + the confirm gate + the success line.
+		// The real (non-dry-run) path locks the execution sequence, the confirm
+		// gate, and the success line.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedGitRepo(t, setup.Cwd)
@@ -135,8 +128,8 @@ func TestTerraform(t *testing.T) {
 	})
 
 	t.Run("apply_confirm_mismatch", func(t *testing.T) {
-		// A --confirm-environment that doesn't match the target env aborts before
-		// apply (init/fmt/plan still ran against the stub; the apply is gated).
+		// A confirm value that doesn't match the target env aborts before the
+		// mutating apply.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedGitRepo(t, setup.Cwd)

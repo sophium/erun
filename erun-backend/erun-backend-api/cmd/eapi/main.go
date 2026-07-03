@@ -70,9 +70,7 @@ func run(args []string) error {
 		return err
 	}
 
-	// NewHandler registered the provisioning workflow (if DBOS+cipher are set);
-	// Launch must follow registration. Launch returns (it starts DBOS's recovery
-	// + queue workers in the background, alongside the HTTP server).
+	// Launch must run after NewHandler, which registers the provisioning workflow.
 	if dbosCtx != nil {
 		if err := dbos.Launch(dbosCtx); err != nil {
 			return err
@@ -128,11 +126,10 @@ type apiConfig struct {
 	DatabaseURL          string
 	AllowedIssuers       string
 	DesktopPublicKeyPath string
-	// SecretsKey + DBOSDatabaseURL enable live context provisioning (#605/#676).
-	// SecretsKey is a base64 32-byte AES key for the credential tables;
-	// DBOSDatabaseURL is the DBOS durable-workflow system database (a separate
-	// database from ERUN_DATABASE_URL). AWSEndpoint pins provisioning's aws calls
-	// at a local emulator for verification (empty = real AWS).
+	// These enable optional live context provisioning; it stays disabled unless
+	// SecretsKey and DBOSDatabaseURL are both set. DBOSDatabaseURL is a separate
+	// database from ERUN_DATABASE_URL. AWSEndpoint targets a local emulator for
+	// verification (empty = real AWS).
 	SecretsKey      string
 	DBOSDatabaseURL string
 	AWSEndpoint     string
@@ -151,8 +148,6 @@ func configFromEnv() apiConfig {
 	}
 }
 
-// optionalCipher builds the secrets cipher when ERUN_SECRETS_KEY is set; nil
-// (provisioning disabled) when absent.
 func optionalCipher(key string) (*secrets.Cipher, error) {
 	if key == "" {
 		return nil, nil
@@ -160,8 +155,6 @@ func optionalCipher(key string) (*secrets.Cipher, error) {
 	return secrets.NewCipher(key)
 }
 
-// optionalDBOS builds the DBOS durable-workflow context when
-// DBOS_SYSTEM_DATABASE_URL is set; nil (provisioning disabled) when absent.
 func optionalDBOS(databaseURL string) (dbos.DBOSContext, error) {
 	if databaseURL == "" {
 		return nil, nil

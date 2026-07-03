@@ -67,8 +67,8 @@ export function App(): React.ReactElement {
               children. A `display:none` grid item is removed from grid flow,
               so when the sidebar is hidden the resize handle is dropped — keep
               it in the template (a 3rd `0` track) and MainPane backfills into
-              the empty 0-width middle track, blanking the whole content area
-              (issue #436). Render the handle only while the sidebar is shown
+              the empty 0-width middle track, blanking the whole content area.
+              Render the handle only while the sidebar is shown
               and use a matching 2-track template when hidden, so MainPane
               always occupies the trailing `1fr` track.
             */}

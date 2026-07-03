@@ -87,15 +87,11 @@ function parsedRuntimeErrorMessage(error: string, status: UIRuntimeResourceStatu
   return error;
 }
 
-// RuntimeResourceValidation splits a runtime-pod request into two distinct
-// outcomes so the UI can treat them differently (Nielsen heuristics #5 error
-// prevention, #9 help users recover):
-//   - blockingError: the request is invalid (unparseable or below the floor)
-//     and must not be persisted. Save/Create stay disabled until it is fixed.
-//   - capacityWarning: the request is valid but no node can currently schedule
-//     it. That is a deploy-time concern, not a config-validity one, so it must
-//     not block saving the config — a deploy simply stays pending until
-//     capacity frees up or the request is lowered.
+// RuntimeResourceValidation splits a runtime-pod request into a blockingError
+// (invalid config that must not be persisted) and a capacityWarning (valid
+// config that still saves, leaving a deploy pending until capacity frees up).
+// The split exists so a scheduling shortfall never blocks saving an otherwise
+// valid config.
 export interface RuntimeResourceValidation {
   blockingError: string;
   capacityWarning: string;
@@ -124,8 +120,8 @@ export function runtimeResourceValidation(
   return { blockingError: '', capacityWarning: '' };
 }
 
-// runtimeResourceLimitMessage returns the single most relevant message for
-// callers that treat any resource problem as blocking (the create/init dialog).
+// runtimeResourceLimitMessage collapses both outcomes into one message for
+// callers (the create/init dialog) that treat any resource problem as blocking.
 export function runtimeResourceLimitMessage(
   config: UIRuntimePodConfig,
   status: UIRuntimeResourceStatus | null,

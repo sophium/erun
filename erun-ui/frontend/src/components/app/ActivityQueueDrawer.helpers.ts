@@ -5,11 +5,8 @@ import {
 } from '@/app/activityQueueState';
 import type { UISelection } from '@/types';
 
-// deployUiSelection builds the uiSelection a deploy-oriented recovery action
-// (force redeploy, doctor) needs from an activity entry. Only the fields those
-// flows read are populated from the entry; the rest are left empty so the
-// backend resolves them from the env config, matching how the container-status
-// recovery action constructs its selection.
+// deployUiSelection builds the uiSelection a deploy recovery action needs from an
+// activity entry; fields left empty are resolved by the backend from the env config.
 export function deployUiSelection(entry: ActivityQueueEntry): UISelection {
   return {
     tenant: entry.tenant,
@@ -82,23 +79,17 @@ export function shellSessionIdFromEntry(entry: ActivityQueueEntry): number {
 export function commandBadgeClassName(command: string): string {
   switch (command) {
     case 'deploy':
-      // Primary mutating operation — saturated blue stands out as the
-      // most consequential card type.
       return 'bg-blue-500/15 text-blue-700';
     case 'build':
-      // Long-running prep — amber differentiates from deploy without
-      // implying status (success/failure has its own border + icon).
+      // Amber is build's badge color, not a status warning — status has its own border + icon.
       return 'bg-amber-500/15 text-amber-700';
     case 'release':
-      // Rare and high-stakes — distinct purple keeps it visually
-      // separate from the routine commands.
       return 'bg-purple-500/15 text-purple-700';
     case 'open':
       // Long-running session, not a success — sky avoids the green/READY
       // collision that made open shells look like succeeded deploys.
       return 'bg-sky-500/15 text-sky-700';
     case 'init':
-      // One-shot bootstrap — neutral slate.
       return 'bg-slate-500/15 text-slate-700';
     default:
       return 'bg-muted text-muted-foreground';
@@ -181,11 +172,8 @@ export function containerPhaseLabel(container: ActivityQueueContainerStatus): st
   }
 }
 
-// failingContainerReasons are kubelet-reported reasons that mean the
-// container is stuck in a failure mode rather than legitimately waiting
-// (e.g. ContainerCreating). They render red so the user spots the bad
-// container at a glance instead of mistaking IMAGEPULLBACKOFF for normal
-// progress.
+// Kubelet reasons that mean the container is stuck in a failure, not
+// legitimately waiting (e.g. ContainerCreating), so the UI can flag them.
 const failingContainerReasons = new Set([
   'ImagePullBackOff',
   'ErrImagePull',
@@ -291,12 +279,8 @@ function failureReportContainerLines(entry: ActivityQueueEntry): string[] {
   return ['', 'Containers:', ...entry.containers.map(failureReportContainerLine)];
 }
 
-// buildFailureReport assembles a complete, paste-ready plain-text report for a
-// failed activity: the structured context the user cannot easily retype
-// (target, version, namespace, Kubernetes context, timing, container states)
-// plus the captured command output. It is the payload of the "Copy failure
-// report" action, so a user can hand a deploy failure to developers/admins
-// without scraping the terminal. Sections with no data are omitted.
+// buildFailureReport assembles a paste-ready report so a user can hand a deploy
+// failure to developers/admins without scraping the terminal.
 export function buildFailureReport(entry: ActivityQueueEntry): string {
   const lines = [...failureReportContextLines(entry), ...failureReportContainerLines(entry)];
   if (entry.error) lines.push('', `Error: ${entry.error}`);
@@ -306,13 +290,12 @@ export function buildFailureReport(entry: ActivityQueueEntry): string {
 
 export async function copyToClipboard(text: string): Promise<void> {
   try {
-    // The Clipboard API may not be wired in some Wails embeddings; the cast
-    // makes the property optional so the runtime guard below stays honest.
+    // navigator.clipboard is typed as always-present but can be missing in Wails embeddings.
     const nav = navigator as Omit<Navigator, 'clipboard'> & { clipboard?: Clipboard };
     if (nav.clipboard !== undefined) {
       await nav.clipboard.writeText(text);
     }
   } catch {
-    /* clipboard API may not be available in some Wails wraps; ignore */
+    /* best-effort copy; ignore failures */
   }
 }

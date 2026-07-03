@@ -81,10 +81,7 @@ func ensureAPIPortForwardDryRun(ctx common.Context, result common.OpenResult, lo
 	return localPort, nil
 }
 
-// adoptForeignAPIPortForward mirrors adoptForeignMCPPortForward for the
-// erun-api service forward (target shape is service/erun-api rather than
-// deployment/<release>-devops). See adoptForeignMCPPortForward for the
-// contract.
+// adoptForeignAPIPortForward mirrors adoptForeignMCPPortForward; see it for the adoption contract.
 func adoptForeignAPIPortForward(ctx common.Context, statePath string, expected mcpPortForwardState, expectedArgs []string, localPort int) (bool, error) {
 	pid, argv, ok := findLocalPortHolder(localPort)
 	if !ok {

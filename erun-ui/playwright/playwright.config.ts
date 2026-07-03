@@ -1,30 +1,23 @@
 import { defineConfig, devices } from '@playwright/test';
 import { backendEnv, e2eK3dEnabled, isolatedRoot } from './fixtures/seedRoot.js';
 
-// Single shared erun-app --headless instance backs every spec. The headless
-// backend is a singleton (one process, one set of session state), so tests
-// must serialise — fullyParallel is off and workers is pinned to 1.
+// The headless backend is a singleton (one process, one session-state set),
+// so specs must serialise rather than run in parallel.
 //
-// run.sh exports ERUN_PLAYWRIGHT_PORT so the wrapper script and this config
-// stay in sync when callers override the port. Falls back to 34123 (clear
-// of wails dev's 34115) when invoked directly.
+// run.sh and this config share ERUN_PLAYWRIGHT_PORT so an overridden port
+// reaches both; the default stays clear of wails dev's 34115.
 const HEADLESS_PORT = Number(process.env.ERUN_PLAYWRIGHT_PORT) || 34123;
 
-// Resolve (and, when launched without run.sh, create) the suite-owned
-// isolated config root at config-load time, before workers fork, so every
-// process in the run agrees on ERUN_PLAYWRIGHT_HOME. global-setup seeds the
-// deterministic baseline under it; the webServer env below points the
-// backend at it. See fixtures/seedRoot.ts.
+// Resolve (and, without run.sh, create) the isolated config root at
+// config-load time, before workers fork, so every process in the run agrees
+// on one ERUN_PLAYWRIGHT_HOME. See fixtures/seedRoot.ts.
 isolatedRoot();
 
 export default defineConfig({
   testDir: './tests',
-  // The opt-in k3d e2e specs (tests/e2e/, issue #647) need a real Docker + k3d
-  // cluster and use the un-stubbed backend, so they must never run in the
-  // default inert mode. Excluding them here (rather than per-spec test.skip)
-  // keeps the default suite clean — they are not collected at all — while
-  // ERUN_E2E_K3D=1 includes them; `run.sh --e2e-k3d` then targets tests/e2e so
-  // the inert specs (which assume stubs) don't run against the real backend.
+  // The k3d e2e specs need a real cluster and the un-stubbed backend, so they
+  // must never run in the default inert mode. Excluding the dir here (not
+  // per-spec test.skip) keeps the default suite from ever collecting them.
   testIgnore: e2eK3dEnabled() ? [] : ['**/tests/e2e/**'],
   globalSetup: './global-setup',
   globalTeardown: './global-teardown',
@@ -56,9 +49,8 @@ export default defineConfig({
       name: 'chromium',
       use: {
         ...devices['Desktop Chrome'],
-        // Override devices['Desktop Chrome']'s viewport so the env-init
-        // and manage dialogs' footer buttons stay reachable without
-        // scrolling tricks. See top-level `use.viewport` for the rationale.
+        // devices['Desktop Chrome'] resets the viewport, so re-apply the tall
+        // one (see top-level use.viewport) to keep dialog footer buttons reachable.
         viewport: { width: 1440, height: 1200 },
       },
     },
@@ -74,9 +66,6 @@ export default defineConfig({
     timeout: 30_000,
     stdout: 'pipe',
     stderr: 'pipe',
-    // HOME + XDG_* redirect the backend's config and runtime-state roots
-    // into the isolated root; the PATH prepend routes external binaries to
-    // the inert stubs. Merged over process.env by Playwright.
     env: backendEnv(),
   },
 });

@@ -17,17 +17,13 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// netDialTimeout aliases net.DialTimeout for skipIfErunPortsBusy.
 func netDialTimeout(network, address string, timeout time.Duration) (net.Conn, error) {
 	return net.DialTimeout(network, address, timeout)
 }
 
-// skipIfPortsBusy short-circuits a real-run open scenario when something on
-// the host already listens on one of the scenario's fixed local ports.
-// Real-run fixtures persist localportrangestart=26100 (far from erun's
-// default 17000 range) precisely so this never fires on a developer machine
-// with a live erun session; the guard remains as a last line of defense
-// against an unrelated process squatting on the high range.
+// skipIfPortsBusy is a last-resort guard for real-run scenarios: fixtures pin
+// ports to the 26100 range, far from erun's default 17000, so this never
+// fires on a developer machine with a live erun session.
 func skipIfPortsBusy(t *testing.T, ports ...int) {
 	t.Helper()
 	for _, port := range ports {
@@ -39,18 +35,9 @@ func skipIfPortsBusy(t *testing.T, ports ...int) {
 	}
 }
 
-// stubKubectlNotFound writes a `kubectl` stub at <stubsDir>/kubectl that mimics
-// the response real kubectl returns for a deployment that does not exist:
-// non-zero exit code with "Error from server (NotFound)" in the output.
-//
-// Why a stub matters for --dry-run: open's runtime-deploy short-circuit (in
-// CheckKubernetesDeployment via erun-common/deploy.go) reads kubectl output
-// to decide whether to redeploy. Without a stub the real kubectl on the
-// developer's PATH runs against the test-context that doesn't exist, leaks
-// "exit status 1" into the trace, and the chosen branch ends up driven by
-// whichever local kubectl happens to be installed. The stub turns the check
-// into a deterministic decision input — the dry-run output then reflects the
-// open command's branching, not the host's kubectl.
+// stubKubectlNotFound makes the deployment check a deterministic decision
+// input. Without it, dry-run's redeploy branch is driven by whatever kubectl
+// sits on the developer's PATH, leaking its "exit status 1" into the trace.
 func stubKubectlNotFound(t *testing.T, setup env.Setup) []string {
 	t.Helper()
 	stubs := setup.Cwd + "/stubs"
@@ -62,13 +49,9 @@ func stubKubectlNotFound(t *testing.T, setup env.Setup) []string {
 	return append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "lsof", "ps")...)
 }
 
-// portForwardStateFile returns where the erun binary persists a port-forward
-// state file inside the scenario's isolated root. Production resolves the
-// directory via os.UserConfigDir(), which follows the real host OS — HOME's
-// Library/Application Support on darwin, XDG_CONFIG_HOME elsewhere — and is
-// not affected by ERUN_HOST_OS_OVERRIDE. Asserting on setup.ConfigHome alone
-// only passes on Linux; the suite's gate runs on macOS too, so mirror the
-// per-OS split here.
+// portForwardStateFile mirrors production's os.UserConfigDir() layout, which
+// follows the real host OS and is not affected by ERUN_HOST_OS_OVERRIDE — so
+// the assertion must split per-OS or it only passes on Linux.
 func portForwardStateFile(setup env.Setup, kind, tenant, environment string) string {
 	base := setup.ConfigHome
 	if runtime.GOOS == "darwin" {
@@ -85,15 +68,10 @@ type adoptHolder struct {
 	argv string
 }
 
-// stubAdoptHolderProbes overwrites the lsof + ps stubs in the scenario's
-// stub dir with versions that present a fake port holder per configured
-// port. The lsof stub returns the holder's PID only when the queried
-// -iTCP:<port> matches; for every other port it exits 1 (no holder), so
-// probes for sibling ports stay silent. The ps stub returns the configured
-// argv only for the matching PID.
-//
-// Returns nothing — the env vars are already wired by the kubectl helper
-// because the stubs live in the same directory.
+// stubAdoptHolderProbes presents a fake holder per configured port to
+// production's adopt-or-conflict probe; unqueried ports report no holder so
+// sibling-port probes stay silent. It returns nothing — the env vars are
+// already wired by the kubectl helper since the stubs share its directory.
 func stubAdoptHolderProbes(t *testing.T, setup env.Setup, holders ...adoptHolder) {
 	t.Helper()
 	stubs := setup.Cwd + "/stubs"
@@ -131,8 +109,7 @@ func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }
 
-// waitForFile polls for path until it exists and has content, failing the
-// test at the deadline. Used for side effects written by detached
+// waitForFile polls because the side effects it reads are written by detached
 // subprocesses (Start+Release launchers) that may outlive the erun run.
 func waitForFile(t *testing.T, path string, timeout time.Duration) string {
 	t.Helper()
@@ -149,11 +126,9 @@ func waitForFile(t *testing.T, path string, timeout time.Duration) string {
 	}
 }
 
-// stubKubectlGenericError writes a kubectl stub that exits non-zero with a
-// message that does not match the "NotFound" / "no resources found" tokens
-// CheckKubernetesDeployment treats as an absent deployment. Used to lock the
-// dry-run "kubernetes deployment check failed, assuming not deployed"
-// fallback in shouldDeployRuntime (open.go:407-410).
+// stubKubectlGenericError returns an error that does NOT match the NotFound
+// tokens, exercising the "check failed, assuming not deployed" fallback
+// rather than the clean not-deployed branch.
 func stubKubectlGenericError(t *testing.T, setup env.Setup) []string {
 	t.Helper()
 	stubs := setup.Cwd + "/stubs"
@@ -165,12 +140,9 @@ func stubKubectlGenericError(t *testing.T, setup env.Setup) []string {
 	return append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "lsof", "ps")...)
 }
 
-// stubLsofNoHolder writes lsof + ps stubs that report no holder for any
-// queried port. Integration scenarios that don't intentionally drive the
-// adopt-or-conflict probe install these stubs to keep the probe silent and
-// the resulting golden host-independent: without them, a developer with a
-// leftover `kubectl port-forward` on one of erun's default ports causes
-// the probe to fire mid-scenario and corrupt the captured trace.
+// stubLsofNoHolder keeps the adopt-or-conflict probe silent in scenarios that
+// don't drive it, so a developer's leftover `kubectl port-forward` on an erun
+// default port can't fire the probe mid-scenario and corrupt the golden.
 func stubLsofNoHolder(t *testing.T, stubsDir string) {
 	t.Helper()
 	fixture.StubBinaryAdvanced(t, stubsDir, "lsof", fixture.StubBinarySpec{
@@ -192,9 +164,6 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("no_shell_dry_run", func(t *testing.T) {
-		// Default --dry-run: deployment is not yet present, so the runner
-		// resolves the runtime helm chart, traces the namespace+helm
-		// upgrade, and emits the no-shell setup script for the caller.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		envVars := stubKubectlNotFound(t, setup)
@@ -202,21 +171,16 @@ func TestOpen(t *testing.T) {
 		golden.Equal(t, "open/no_shell_dry_run", normalize.Apply(result.Combined))
 	})
 
-	// zshAliasLine is the POSIX alias maybeConfigureOpenNoShellAlias appends
-	// for team/dev when the user accepts the prompt with SHELL=/bin/zsh.
+	// zshAliasLine is the exact alias production appends for team/dev under
+	// zsh; the tests assert the startup file gains this line verbatim.
 	const zshAliasLine = `alias team-dev='eval "$(erun open team dev --no-shell)"'`
 
 	t.Run("alias_prompt_dry_run_accept_traces_append", func(t *testing.T) {
-		// ERUN_FORCE_TTY=1 is the deliberate test seam (mirroring
-		// ERUN_HOST_OS_OVERRIDE) that lifts the stdout-TTY gate so the
-		// alias-setup flow (maybeConfigureOpenNoShellAlias) runs in the piped
-		// harness. SHELL=/bin/zsh pins detectOpenNoShellAliasStartupFile to
-		// ~/.zshrc. Accepting the confirm in --dry-run must trace
-		// "open: append team-dev alias to ~/.zshrc" and leave the startup
-		// file untouched — locks the dry-run-contract fix from b01e323 that
-		// gated appendOpenNoShellAlias behind the trace. The alias confirm is
-		// the run's single interactive prompt (readline read-ahead would
-		// starve a second one).
+		// ERUN_FORCE_TTY=1 lifts the stdout-TTY gate so the alias-setup flow
+		// runs in the piped harness; SHELL=/bin/zsh pins the startup file to
+		// ~/.zshrc. Accepting in --dry-run must trace the append but leave
+		// ~/.zshrc untouched. The alias confirm must stay the run's only
+		// prompt — readline read-ahead would starve a second one.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		zshrc := filepath.Join(setup.Home, ".zshrc")
@@ -225,7 +189,7 @@ func TestOpen(t *testing.T) {
 		}
 		envVars := append(stubKubectlNotFound(t, setup), "ERUN_FORCE_TTY=1", "SHELL=/bin/zsh")
 		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars, Stdin: "y\n"})
-		golden.Equal(t, "open/alias_prompt_dry_run_accept_traces_append", normalize.Apply(result.Combined))
+		golden.Equal(t, "open/alias_prompt_dry_run_accept_traces_append", normalize.PromptConfirm(result.Combined))
 		// Dry-run must not mutate the startup file (side effect outside the
 		// captured streams).
 		body, err := os.ReadFile(zshrc)
@@ -238,10 +202,8 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("alias_prompt_decline_prints_hint", func(t *testing.T) {
-		// Declining the alias confirm ("n") must fall back to
-		// writeOpenNoShellHintLines: the one-liner alias hint on stderr, no
-		// file write. ERUN_FORCE_TTY=1 lifts the TTY gate; SHELL=/bin/zsh
-		// pins the POSIX dialect and ~/.zshrc startup file.
+		// Declining ("n") must print the alias hint and write no file.
+		// ERUN_FORCE_TTY=1 lifts the TTY gate; SHELL=/bin/zsh pins ~/.zshrc.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		zshrc := filepath.Join(setup.Home, ".zshrc")
@@ -250,7 +212,7 @@ func TestOpen(t *testing.T) {
 		}
 		envVars := append(stubKubectlNotFound(t, setup), "ERUN_FORCE_TTY=1", "SHELL=/bin/zsh")
 		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars, Stdin: "n\n"})
-		golden.Equal(t, "open/alias_prompt_decline_prints_hint", normalize.Apply(result.Combined))
+		golden.Equal(t, "open/alias_prompt_decline_prints_hint", normalize.PromptConfirm(result.Combined))
 		body, err := os.ReadFile(zshrc)
 		if err != nil {
 			t.Fatalf("read ~/.zshrc: %v", err)
@@ -261,15 +223,12 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("alias_prompt_accept_appends_alias_real_run", func(t *testing.T) {
-		// Real-run arm of the alias setup: accepting the confirm must append
-		// the alias line to ~/.zshrc (appendOpenNoShellAlias) and print the
-		// "added team-dev to ..." stderr lines locked by the golden. The
-		// kubectl stub reports the runtime deployment as deployed-and-matching
-		// so no helm deploy runs; the port-forward simulators come up on the
-		// pinned 26100 range (same shape as shell_real_run_single_pass).
-		// SeedDevopsRepo keeps the runtime spec off the default chart path so
-		// the "create team-devops chart?" prompt never fires — the alias
-		// confirm stays the subprocess's single prompt (readline read-ahead).
+		// Real-run: accepting the confirm must append the alias line to
+		// ~/.zshrc. The kubectl stub reports deployed-and-matching so no helm
+		// deploy runs. SeedDevopsRepo keeps the runtime spec off the default
+		// chart path so the "create team-devops chart?" prompt never fires —
+		// the alias confirm must stay the subprocess's single prompt
+		// (readline read-ahead).
 		skipIfPortsBusy(t, 26100, 26133)
 		setup := env.New(t)
 		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
@@ -291,7 +250,7 @@ func TestOpen(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		golden.Equal(t, "open/alias_prompt_accept_appends_alias_real_run", normalize.Apply(result.Combined))
+		golden.Equal(t, "open/alias_prompt_accept_appends_alias_real_run", normalize.PromptConfirm(result.Combined))
 		// The append is a side effect outside the captured streams: the
 		// seeded content must survive and the alias line must follow it.
 		body, err := os.ReadFile(zshrc)
@@ -345,8 +304,6 @@ func TestOpen(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(setup.Cwd, "team-devops")); !os.IsNotExist(err) {
 			t.Errorf("expected no devops scaffold in the tenant repo, stat err=%v", err)
 		}
-		// persistOpenRuntimeVersion stamped the deployed version into the
-		// env config.
 		envCfg, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml"))
 		if err != nil {
 			t.Fatalf("read env config: %v", err)
@@ -417,7 +374,7 @@ func TestOpen(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		golden.Equal(t, "open/alias_prompt_bash_accept_creates_bashrc", normalize.Apply(result.Combined))
+		golden.Equal(t, "open/alias_prompt_bash_accept_creates_bashrc", normalize.PromptConfirm(result.Combined))
 		body, err := os.ReadFile(filepath.Join(setup.Home, ".bashrc"))
 		if err != nil {
 			t.Fatalf("read ~/.bashrc (append must create the missing file): %v", err)
@@ -837,7 +794,6 @@ func TestOpen(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(optionsDir, "sshRecentConnections.v2.xml")); err != nil {
 			t.Errorf("expected sshRecentConnections.v2.xml to be written: %v", err)
 		}
-		// The flow invokes `open -a 'IntelliJ IDEA'` after the writes.
 		ideArgs, err := os.ReadFile(ideLog)
 		if err != nil {
 			t.Fatalf("read ide-launcher.log: %v", err)
@@ -984,7 +940,6 @@ func TestOpen(t *testing.T) {
 			t.Fatalf("run 3 exit %d: %s", run3.ExitCode, run3.Combined)
 		}
 		golden.Equal(t, "open/intellij_gateway_real_run_adopts_and_launches", normalize.Apply(run3.Combined))
-		// Adoption rewrote both state files claiming the holder PIDs.
 		for kind, wantPID := range map[string]int{"mcp": 4242, "sshd": 4243} {
 			stateBody, err := os.ReadFile(portForwardStateFile(setup, kind, "team", "dev"))
 			if err != nil {
@@ -994,7 +949,6 @@ func TestOpen(t *testing.T) {
 				t.Errorf("expected adopted %s state to claim PID %d, got:\n%s", kind, wantPID, stateBody)
 			}
 		}
-		// The Gateway launch went through the java shim with the connect URI.
 		javaArgs := waitForFile(t, javaLog, 5*time.Second)
 		if !strings.Contains(javaArgs, "jetbrains-gateway://connect#") {
 			t.Errorf("expected java shim to receive a jetbrains-gateway connect URI, got:\n%s", javaArgs)
@@ -1405,12 +1359,10 @@ func TestOpen(t *testing.T) {
 		if !strings.Contains(string(seeded), "FAKEKEYMATERIAL") {
 			t.Errorf("expected the private key material on the seed exec's stdin, got:\n%s", seeded)
 		}
-		// The interactive shell exec ran exactly once.
 		execCalls := waitForFile(t, filepath.Join(stubsDir, "exec-calls"), 2*time.Second)
 		if got := strings.Count(execCalls, "call"); got != 1 {
 			t.Errorf("expected 1 interactive exec call, got %d", got)
 		}
-		// recordActivity persisted the CLI activity marker for the env.
 		if _, err := os.Stat(filepath.Join(setup.CacheHome, "erun", "activity", "team", "dev", "cli.json")); err != nil {
 			t.Errorf("expected RecordEnvironmentActivity to write cli.json: %v", err)
 		}

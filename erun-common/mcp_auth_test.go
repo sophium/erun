@@ -13,8 +13,6 @@ import (
 	"time"
 )
 
-// writeTrustedPublicKey writes a generated public key to a temp file and returns
-// the key pair PEMs plus the file:// issuer the MCP server would trust.
 func writeTrustedPublicKey(t *testing.T) (privatePEM []byte, issuer string) {
 	t.Helper()
 	priv, pub, err := GenerateDesktopIdentity()
@@ -99,8 +97,8 @@ func TestMCPTokenVerifyRejections(t *testing.T) {
 	t.Run("tampered signature", func(t *testing.T) {
 		token := signTestToken(t, priv, good)
 		segments := strings.Split(token, ".")
-		// Decode → flip a byte → re-encode so the signature is deterministically
-		// different (flipping a base64url char alone can change only padding bits).
+		// A flipped base64url char can change only padding bits; mutate a decoded
+		// byte instead so the signature is guaranteed to differ.
 		sig, err := base64.RawURLEncoding.DecodeString(segments[2])
 		if err != nil {
 			t.Fatalf("decode signature: %v", err)
@@ -113,7 +111,6 @@ func TestMCPTokenVerifyRejections(t *testing.T) {
 	})
 
 	t.Run("wrong signing key", func(t *testing.T) {
-		// Trusted issuer holds identity A's public key; sign with identity B.
 		otherPriv, _, err := GenerateDesktopIdentity()
 		if err != nil {
 			t.Fatalf("generate other identity: %v", err)
@@ -146,8 +143,8 @@ func TestMCPTokenVerifyRejections(t *testing.T) {
 	})
 
 	t.Run("alg confusion rejected", func(t *testing.T) {
-		// Forge a token with alg=none and an empty signature: a verifier that
-		// honoured the header's alg would accept it. Ours must not.
+		// A verifier that honoured the header's alg would accept an alg=none
+		// token; ours must reject it.
 		header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
 		payload, _ := json.Marshal(good)
 		forged := header + "." + base64.RawURLEncoding.EncodeToString(payload) + "."
@@ -164,10 +161,8 @@ func TestMCPTokenVerifyRejections(t *testing.T) {
 	})
 }
 
-// TestVerifyMCPTokenOIDCDispatch locks the #656 dispatch: when the trusted issuer
-// is an https:// OIDC issuer, VerifyMCPToken verifies the RS256 token against the
-// issuer's JWKS via the shared OIDC verifier and enforces the same per-env
-// audience contract, while a file:// trusted issuer keeps the Ed25519 path.
+// TestVerifyMCPTokenOIDCDispatch locks that VerifyMCPToken routes on the trusted
+// issuer's scheme: https:// verifies via OIDC/JWKS, file:// keeps the Ed25519 path.
 func TestVerifyMCPTokenOIDCDispatch(t *testing.T) {
 	provider := newMockOIDCProvider(t)
 	now := time.Now()
@@ -206,8 +201,6 @@ func TestVerifyMCPTokenOIDCDispatch(t *testing.T) {
 	t.Run("OIDC token whose iss differs from the trusted issuer rejected", func(t *testing.T) {
 		other := newMockOIDCProvider(t)
 		token := other.sign(t, standardClaims(other.issuer(), now))
-		// Trust provider, present a token from `other`: go-oidc fetches provider's
-		// JWKS, the signature does not match, so it is rejected.
 		if _, err := VerifyMCPToken(context.Background(), verifier, token, provider.issuer(), audience, now); err == nil {
 			t.Fatal("expected a token from a different issuer to be rejected")
 		}

@@ -6,9 +6,8 @@ import (
 )
 
 // registryCopy is one image mirrored from the FROM registry to a TO registry
-// before the cluster pulls it from the DEPLOY registry. The copy is
-// manifest-list-aware (docker buildx imagetools create) so the runtime image's
-// multi-arch manifest survives the mirror.
+// before the cluster pulls it from the DEPLOY registry, preserving the image's
+// multi-arch manifest list through the mirror.
 type registryCopy struct {
 	From  string
 	To    string
@@ -30,11 +29,9 @@ func joinRegistryImage(registry, image string) string {
 	return strings.TrimRight(strings.TrimSpace(registry), "/") + "/" + strings.TrimSpace(image)
 }
 
-// runDeployRegistryCopies mirrors every image the deploy references from the
-// FROM registry to each TO registry, when the environment's registry list
-// marks both. Each copy is traced (so --dry-run is a complete audit) and the
-// push is gated behind ctx.DryRun. A copy is skipped when no FROM/TO is marked
-// — the common single-registry case emits nothing.
+// runDeployRegistryCopies mirrors the deploy's images from the FROM registry to
+// each TO registry. Every copy is traced even under --dry-run so a dry-run is a
+// complete audit of what a real deploy would push.
 func runDeployRegistryCopies(ctx Context, execution DeploySpec) error {
 	copies, err := resolveDeployRegistryCopies(execution)
 	if err != nil {
@@ -60,10 +57,6 @@ func runDeployRegistryCopies(ctx Context, execution DeploySpec) error {
 	return nil
 }
 
-// resolveDeployRegistryCopies builds the copy list for a resolved deploy: every
-// image the chart pulls (the runtime devops image and any locally-built
-// component images) mirrored from FROM to each TO. Returns nil when the
-// environment marks no FROM/TO pair.
 func resolveDeployRegistryCopies(execution DeploySpec) ([]registryCopy, error) {
 	list, err := deployTargetContainerRegistries(execution.Target)
 	if err != nil {
@@ -90,9 +83,6 @@ func resolveDeployRegistryCopies(execution DeploySpec) ([]registryCopy, error) {
 	return copies, nil
 }
 
-// deployCopyImages collects the "name:version" of every image the cluster
-// pulls for this deploy: the runtime devops image (when the spec owns the
-// runtime chart) plus each locally-built component image.
 func deployCopyImages(execution DeploySpec) []string {
 	seen := make(map[string]struct{})
 	images := make([]string, 0, 2)
@@ -113,9 +103,8 @@ func deployCopyImages(execution DeploySpec) []string {
 		name, version := runtimeCopyImage(execution)
 		add(name, version)
 	}
-	// The chart's own images at the deploy version (a pure deploy installs by
-	// reference, so there are no local builds to enumerate; the chart names the
-	// images the cluster pulls).
+	// A pure deploy installs by reference and never builds, so the chart itself
+	// names the images the cluster pulls.
 	chartImages, err := findDockerImagesInChart(execution.DeployContext.ChartPath, execution.Deploy.Version)
 	if err == nil {
 		for _, image := range chartImages {
@@ -125,9 +114,6 @@ func deployCopyImages(execution DeploySpec) []string {
 	return images
 }
 
-// runtimeCopyImage returns the name and version of the runtime devops image the
-// chart pulls — the imageOverrides entry when set, otherwise the default
-// erun-devops image at the deploy version.
 func runtimeCopyImage(execution DeploySpec) (string, string) {
 	if override := strings.TrimSpace(execution.Deploy.ImageOverrides[DevopsComponentName]); override != "" {
 		return imageNameVersion(override)
@@ -135,9 +121,6 @@ func runtimeCopyImage(execution DeploySpec) (string, string) {
 	return DevopsComponentName, execution.Deploy.Version
 }
 
-// imageNameVersion splits a full image reference into its name and version,
-// dropping the registry prefix. "ghcr.io/sophium/erun-devops:1.0.0" →
-// ("erun-devops", "1.0.0").
 func imageNameVersion(reference string) (string, string) {
 	reference = strings.TrimSpace(reference)
 	nameTag := reference

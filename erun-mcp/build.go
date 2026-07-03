@@ -25,11 +25,6 @@ type PushInput struct {
 	Verbosity int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
 
-// errMissingPushVersion is returned when the push tool is called without a
-// version. push is a pure primitive: it publishes the content identity the
-// build tool minted and never mints one (root AGENTS.md § "Command primitives
-// vs orchestration"; erun-mcp/AGENTS.md). An Agent captures the version from
-// the build tool's result and threads it here.
 var errMissingPushVersion = fmt.Errorf("push requires a version: it publishes a built version's images and chart (capture the version from the build tool's result) and never mints one — set the version input")
 
 func buildTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, BuildInput) (*mcp.CallToolResult, CommandOutput, error) {
@@ -42,12 +37,8 @@ func buildTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest
 			if err != nil {
 				return err
 			}
-			// build is a pure primitive: it builds images and mints the version,
-			// nothing more. MCP is a programmatic orchestration layer (erun-mcp
-			// /AGENTS.md), so an agent that wants a deploy composes the primitives
-			// itself — it captures the minted version from this tool's result
-			// (output.Build.version), then calls push and deploy with it, rather
-			// than a one-shot convenience switch.
+			// build is a pure primitive that only builds and mints the version;
+			// MCP composes primitives itself rather than exposing a deploy switch.
 			if err := eruncommon.RunBuildExecution(runCtx, execution, runtime.BuildScriptRunner, runtime.BuildDockerImage, runtimePushFunc(runtime)); err != nil {
 				return err
 			}
@@ -152,8 +143,6 @@ func resolveRuntimePushExecution(ctx eruncommon.Context, runtime RuntimeConfig, 
 		return eruncommon.DockerPushExecutionSpecFromSpecs(builds, []eruncommon.DockerPushSpec{pushInput}), nil
 	}
 
-	// push builds the component image from source and pushes its multi-arch
-	// manifest; it does not push a bare prebuilt tag.
 	build, err := eruncommon.ResolveDockerBuildForComponent(runtime.Store, findProjectRoot, resolveBuildContext, nil, projectRoot, target.Environment, component, strings.TrimSpace(target.VersionOverride))
 	if err != nil {
 		return eruncommon.DockerPushExecutionSpec{}, err

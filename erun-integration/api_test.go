@@ -12,11 +12,9 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// emptyPathDir creates an empty directory and returns a PATH= env entry
-// pointing at it. os/exec deduplicates Env keeping the last value, so
-// appending the entry after setup.Env() overrides the inherited PATH and
-// makes "binary not on PATH" deterministic regardless of what the host has
-// installed.
+// emptyPathDir yields a PATH override that makes "binary not on PATH"
+// deterministic: os/exec keeps the last duplicate Env value, so appending
+// it after setup.Env() reliably shadows whatever the host has installed.
 func emptyPathDir(t *testing.T, root string) string {
 	t.Helper()
 	dir := filepath.Join(root, "empty-path")
@@ -37,9 +35,8 @@ func TestAPI(t *testing.T) {
 	})
 
 	t.Run("dry_run_traces_eapi_launch", func(t *testing.T) {
-		// Exercises api.go: --dry-run must trace the exact eapi command line
-		// (host, port, database-url, redacting only secrets) without
-		// starting the server.
+		// --dry-run must trace the eapi command line and redact only
+		// secrets, never starting the server.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		args := []string{
@@ -59,11 +56,10 @@ func TestAPI(t *testing.T) {
 	})
 
 	t.Run("dry_run_uses_environment_local_port_by_default", func(t *testing.T) {
-		// Exercises api.go default-port resolution: when invoked with a
-		// tenant/environment but no --port, the trace must show the
-		// environment-scoped local API port. Two tenants force "team" to
-		// index 1, so the API port is 17000 + 100 + APIServicePortOffset
-		// (33) = 17133 rather than the index-0 17033.
+		// With no --port, the default is the environment-scoped local API
+		// port. Seeding a second tenant ("alpha") forces "team" to index 1,
+		// so the port is 17000 + 100 + APIServicePortOffset (33) = 17133, not
+		// the index-0 17033.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "alpha", "dev")
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -75,14 +71,10 @@ func TestAPI(t *testing.T) {
 	})
 
 	t.Run("real_run_launches_eapi_stub", func(t *testing.T) {
-		// Exercises launchAPIProcess + resolveAPIExecutable's bare-name
-		// fallthrough: no eapi sibling exists next to the harness-built erun
-		// binary, so resolution falls through to "eapi" and
-		// eruncommon.Command routes the spawn to the stub via ERUN_EAPI_BIN.
-		// Real-run (no --dry-run) because the launcher body only executes
-		// past the dry-run gate; the stub echoes its argv so the golden
-		// locks the launched command line next to the -vv trace of the same
-		// argv.
+		// Real-run (no --dry-run) because eapi is only spawned past the
+		// dry-run gate. With no eapi sibling next to the harness binary,
+		// resolution falls through to the bare name; the stub echoes its
+		// argv so the golden locks the resolved command line.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		stubs := setup.Cwd + "/stubs"
@@ -97,10 +89,8 @@ exit 0`)
 	})
 
 	t.Run("real_run_errors_when_eapi_missing", func(t *testing.T) {
-		// launchAPIProcess's exec.ErrNotFound branch: with no ERUN_EAPI_BIN
-		// override and PATH pointing at an empty directory, the lookup fails
-		// and the launcher must surface the friendly "build or install it
-		// first" message instead of a raw exec error.
+		// A missing eapi must surface the friendly "build or install it
+		// first" message, not a raw exec error.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		envVars := append(setup.Env(), emptyPathDir(t, setup.Cwd))
@@ -112,9 +102,8 @@ exit 0`)
 	})
 
 	t.Run("real_run_propagates_eapi_exit_failure", func(t *testing.T) {
-		// launchAPIProcess's generic error branch: a launched eapi that
-		// exits non-zero is not exec.ErrNotFound, so the raw "exit status"
-		// error must propagate to the user together with the tool's stderr.
+		// A non-zero eapi exit (not a not-found) must propagate the raw exit
+		// error along with the tool's stderr.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		stubs := setup.Cwd + "/stubs"

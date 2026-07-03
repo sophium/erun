@@ -106,8 +106,7 @@ func (s *windowsTerminalSession) Close() error {
 		// Kill the whole child tree, not just `erun open`: its kubectl exec
 		// child otherwise survives as an orphan that holds the exec stream
 		// open, leaving a stale dtach client attached in the pod after every
-		// close. taskkill /T is the Windows counterpart of the Unix
-		// process-group kill; Process.Kill stays as the fallback.
+		// close.
 		if s.process.Pid > 0 {
 			_ = exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(s.process.Pid)).Run()
 		}

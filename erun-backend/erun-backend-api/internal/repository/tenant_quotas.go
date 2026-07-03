@@ -8,9 +8,8 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// DefaultMaxEnvironments is the environment-count cap applied to a tenant that
-// has no tenant_quotas row. The per-tenant override is set out-of-band today;
-// until a row exists the guardrail uses this default.
+// DefaultMaxEnvironments is the environment cap for a tenant that has no
+// per-tenant override configured yet.
 const DefaultMaxEnvironments = 10
 
 type TenantQuotaRepository struct {
@@ -21,9 +20,8 @@ func NewTenantQuotaRepository(txs *TxManager) *TenantQuotaRepository {
 	return &TenantQuotaRepository{txs: txs}
 }
 
-// MaxEnvironments returns the caller's environment-count cap. It reads the
-// caller's tenant_quotas row (RLS scopes the read to the caller's tenant); when
-// no row exists the tenant is unconfigured and the default cap applies.
+// MaxEnvironments returns the caller's environment cap; the unfiltered read
+// returns only the caller's row because RLS scopes it to the caller's tenant.
 func (r *TenantQuotaRepository) MaxEnvironments(ctx context.Context) (int, error) {
 	var quota model.TenantQuota
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
@@ -42,11 +40,9 @@ func (r *TenantQuotaRepository) MaxEnvironments(ctx context.Context) (int, error
 	return quota.MaxEnvironments, nil
 }
 
-// Set upserts a tenant's environment-count cap and returns the stored row. It is
-// operations-only at the route layer; the operations role's RLS policy lets it
-// write any tenant's row, and tenant_id is set explicitly to the target — not
-// the erun_current_tenant_id() column default, which would be the operations
-// caller's own tenant.
+// Set upserts a tenant's environment cap. It is operations-only: RLS lets the
+// operations role write any tenant's row, so tenant_id is passed explicitly
+// rather than defaulting to the caller's own tenant.
 func (r *TenantQuotaRepository) Set(ctx context.Context, tenantID string, maxEnvironments int) (model.TenantQuota, error) {
 	var quota model.TenantQuota
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {

@@ -376,7 +376,6 @@ func TestDoctor(t *testing.T) {
 		// without prompting (dry-run is non-interactive).
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		// Overwrite the tenant config to reference an orphan alias.
 		tenantPath := filepath.Join(setup.ConfigHome, "erun", "team", "config.yaml")
 		body := "projectroot: " + setup.Cwd + "\n" +
 			"name: team\n" +
@@ -932,7 +931,7 @@ func TestDoctor(t *testing.T) {
 	})
 
 	t.Run("restore_env_config_from_backup_dry_run", func(t *testing.T) {
-		// Per-env restore (issue #614): a dated backup sits next to the
+		// Per-env restore: a dated backup sits next to the
 		// env's config.yaml. Doctor team dev --restore-env-config-from-backup
 		// 2026-05-19 --dry-run must trace the planned cp and stop without
 		// touching the live file.
@@ -1331,7 +1330,7 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/real_run_namespace_listed_but_api_failing_error", normalize.Apply(result.Combined))
 	})
 
-	// --- erun doctor --sync-config (#548): in-pod config reconciliation ---
+	// --- erun doctor --sync-config: in-pod config reconciliation ---
 
 	t.Run("in_runtime_sync_config_in_sync_dry_run", func(t *testing.T) {
 		// The on-disk projection already matches the injected env, so the only
@@ -1364,7 +1363,7 @@ func TestDoctor(t *testing.T) {
 	})
 
 	t.Run("in_runtime_sync_config_legacy_remote_key_dry_run", func(t *testing.T) {
-		// A pre-#376 `remote: true` key on disk is detected as legacy drift for
+		// A `remote: true` key on disk is detected as legacy drift for
 		// `type` even though a struct decode would migrate it away, and the
 		// rewrite drops it in favour of the canonical type.
 		setup := env.New(t)
@@ -1474,9 +1473,8 @@ func TestDoctor(t *testing.T) {
 	})
 }
 
-// seedRuntimeEnvConfig writes an in-pod env config file (and a minimal root
-// config) under the suite's isolated config home, mirroring what the entrypoint
-// would have written, so the --sync-config scenarios can drive reconciliation.
+// seedRuntimeEnvConfig mirrors what the entrypoint would have written on disk so
+// the --sync-config scenarios can drive reconciliation.
 func seedRuntimeEnvConfig(t *testing.T, setup env.Setup, tenant, environment, envYAML string) {
 	t.Helper()
 	envDir := filepath.Join(setup.ConfigHome, "erun", tenant, environment)
@@ -1491,12 +1489,9 @@ func seedRuntimeEnvConfig(t *testing.T, setup env.Setup, tenant, environment, en
 	}
 }
 
-// seedOrphanedCloudContextEnv reshapes an already-seeded tenant/env so
-// the env names a cloud-managed kubernetes context the root config does
-// not list (the orphaned-context inspection input): the tenant carries
-// the alias, the env references context erun-001-020362606330-eu-west-2
-// with that alias, and the root config registers the provider only —
-// keeping the alias side of the inspection clean.
+// seedOrphanedCloudContextEnv shapes the orphaned-context inspection input: the
+// env names a cloud-managed kubernetes context the root config does not list,
+// while the root still registers the provider so only the context orphan surfaces.
 func seedOrphanedCloudContextEnv(t *testing.T, setup env.Setup, tenant, environment, alias string) {
 	t.Helper()
 	tenantPath := filepath.Join(setup.ConfigHome, "erun", tenant, "config.yaml")
@@ -1648,11 +1643,9 @@ func stubDoctorKubectl(t *testing.T, stubsDir, waitArm string) {
 	fixture.StubBinaryWithScript(t, stubsDir, "kubectl", script)
 }
 
-// jetBrainsStableConfigID mirrors the deterministic UUID derivation in
-// erun-cli/internal/jetbrainsconfig.StableConfigID (an internal package
-// of another module, so the test cannot import it): sha1 of the SSH
-// host alias shaped into a v5-style UUID. The seeded XML must carry the
-// same configId production computes or FindRecentProject never matches.
+// jetBrainsStableConfigID duplicates jetbrainsconfig.StableConfigID because that
+// internal package cannot be imported across modules; the seeded XML must carry
+// the same configId or FindRecentProject never matches.
 func jetBrainsStableConfigID(hostAlias string) string {
 	sum := sha1.Sum([]byte(strings.TrimSpace(hostAlias)))
 	b := sum[:16]
@@ -1715,8 +1708,6 @@ func seedJetBrainsRecentProject(t *testing.T, setup env.Setup, configID, project
 	return path
 }
 
-// readFileForTest reads a file the scenario asserts on, failing the
-// test on error.
 func readFileForTest(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -1726,8 +1717,6 @@ func readFileForTest(t *testing.T, path string) string {
 	return string(data)
 }
 
-// assertFileMode asserts the permission bits production chmod'ed onto a
-// generated key file.
 func assertFileMode(t *testing.T, path string, want os.FileMode) {
 	t.Helper()
 	info, err := os.Stat(path)

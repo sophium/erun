@@ -13,11 +13,9 @@ test.describe('sidebar', () => {
 
   test('opening an environment surfaces status feedback', async ({ app, page }) => {
     await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
-    // Opening an env dispatches showTerminalMessage(..., busy=true). When
-    // busy+message coexist the titlebar status banner is suppressed in
-    // favour of a TerminalBusyOverlay rendered over the terminal pane.
-    // Either surface is acceptable — assert the "Opening <tenant> /
-    // <env>" string appears anywhere on the page.
+    // The opening status can surface in either the titlebar banner or a busy
+    // overlay depending on busy state, so assert the text appears anywhere
+    // rather than scoping to one surface.
     await expect(
       page.getByText(`Opening ${SEED_TENANT} / ${SEED_ENV_ALPHA}`, { exact: false }),
     ).toBeVisible({

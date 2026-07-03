@@ -18,8 +18,6 @@ func postCreateEnvironment(t *testing.T, environments *stubEnvironmentRepository
 	return rec
 }
 
-// underCapQuota is a quota that always admits another environment, so tests that
-// are not exercising the guardrail itself get past the quota check.
 var underCapQuota = stubTenantQuotaRepository{maxEnvironments: 10}
 
 func TestCreateEnvironmentRejectsInvalidInput(t *testing.T) {
@@ -65,8 +63,7 @@ func TestCreateEnvironmentPersistsAndReturnsRow(t *testing.T) {
 			if environments.createCalls != 1 {
 				t.Fatalf("expected exactly one Create call, got %d", environments.createCalls)
 			}
-			// The handler must thread the operator-authored fields into the
-			// persisted model; tenant binding is left to RLS, not the body.
+			// Tenant binding comes from RLS, not the request body.
 			if environments.createInput.ContextID != "ctx-1" || environments.createInput.RuntimeVersion != "1.2.3" {
 				t.Fatalf("unexpected create input: %+v", environments.createInput)
 			}
@@ -95,9 +92,7 @@ func TestCreateEnvironmentSurfacesRepositoryError(t *testing.T) {
 	}
 }
 
-// TestCreateEnvironmentRejectsAtQuota proves the environment-count guardrail:
-// once the tenant is at its cap (count == max), registration is rejected with
-// 409 and Create never runs. The input is valid, so only the quota stops it.
+// TestCreateEnvironmentRejectsAtQuota enforces the per-tenant environment-count cap.
 func TestCreateEnvironmentRejectsAtQuota(t *testing.T) {
 	environments := &stubEnvironmentRepository{count: 10}
 	rec := postCreateEnvironment(t, environments, stubTenantQuotaRepository{maxEnvironments: 10}, `{"name":"prod","type":"runtime"}`)
@@ -109,8 +104,7 @@ func TestCreateEnvironmentRejectsAtQuota(t *testing.T) {
 	}
 }
 
-// TestCreateEnvironmentAllowsUnderQuota proves that with room under the cap
-// (count < max) registration proceeds and Create runs exactly once.
+// TestCreateEnvironmentAllowsUnderQuota lets registration proceed below the environment cap.
 func TestCreateEnvironmentAllowsUnderQuota(t *testing.T) {
 	environments := &stubEnvironmentRepository{count: 9}
 	rec := postCreateEnvironment(t, environments, stubTenantQuotaRepository{maxEnvironments: 10}, `{"name":"prod","type":"runtime"}`)
@@ -122,8 +116,6 @@ func TestCreateEnvironmentAllowsUnderQuota(t *testing.T) {
 	}
 }
 
-// errForeignKey stands in for a database foreign-key-violation error returned by
-// the repository when the referenced context is not the caller's.
 type errForeignKey struct{}
 
 func (errForeignKey) Error() string { return "foreign key violation" }

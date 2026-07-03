@@ -8,22 +8,19 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// activityRecoveryResult is the JSON payload returned to the frontend
-// after a recovery action runs. The frontend renders Output verbatim in
-// a recovery dialog so the user sees what happened (e.g. helm's stdout
-// and any deletion confirmations) regardless of success.
+// activityRecoveryResult carries a recovery action's outcome to the
+// frontend, which renders Output verbatim even on failure so the operator
+// always sees what the recovery did.
 type activityRecoveryResult struct {
 	OK     bool   `json:"ok"`
 	Output string `json:"output"`
 	Error  string `json:"error,omitempty"`
 }
 
-// RecoverPendingHelmRelease deletes the helm pending-operation lock for
-// the activity entry's release. Used when a CLI deploy crashed (or was
-// kill -9'd) leaving the helm secret tagged
-// status=pending-install/upgrade/rollback so subsequent deploys cannot
-// proceed. The entry is force-dismissed after the recovery so the
-// drawer reflects the cluster state again. Wails-exported.
+// RecoverPendingHelmRelease clears the pending-operation lock a killed
+// deploy leaves behind, which otherwise blocks every later deploy on that
+// release. The entry is force-dismissed so the drawer re-syncs with the
+// actual cluster state.
 func (a *App) RecoverPendingHelmRelease(id string) activityRecoveryResult {
 	entry, errResult := a.resolveRecoverableHelmEntry(id)
 	if errResult != nil {
@@ -53,11 +50,6 @@ func (a *App) RecoverPendingHelmRelease(id string) activityRecoveryResult {
 	return activityRecoveryResult{OK: true, Output: combined}
 }
 
-// resolveRecoverableHelmEntry validates the recovery preconditions and
-// returns the matching helm-source entry. On any precondition failure it
-// returns a non-nil error result the caller should hand back verbatim, so
-// RecoverPendingHelmRelease stays under the cyclomatic-complexity limit
-// without changing any of the error messages.
 func (a *App) resolveRecoverableHelmEntry(id string) (activityQueueEntry, *activityRecoveryResult) {
 	if a.activityQueue == nil {
 		return activityQueueEntry{}, &activityRecoveryResult{OK: false, Error: "activity queue is not initialized"}
@@ -85,10 +77,6 @@ func (a *App) resolveRecoverableHelmEntry(id string) (activityQueueEntry, *activ
 	return entry, nil
 }
 
-// combineRecoveryOutput concatenates the helm recovery command's stdout and
-// stderr into the single Output blob the frontend renders, joining them with
-// a newline only when both are non-empty. Behavior matches the inline
-// combination it replaced.
 func combineRecoveryOutput(stdout, stderr string) string {
 	combined := strings.TrimSpace(stdout)
 	if errOut := strings.TrimSpace(stderr); errOut != "" {

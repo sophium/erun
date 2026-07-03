@@ -34,22 +34,13 @@ func ResolvePublishedDevopsDeploySpec(ctx Context, target OpenResult, versionOve
 	return resolvePublishedDevopsDeploySpec(ctx, target, versionOverride)
 }
 
-// resolvePublishedDevopsDeploySpec builds the runtime deploy spec for an
-// environment with no local runtime chart: the published erun-devops chart,
-// addressed by OCI reference and pinned to the env's runtime version (one
-// version covers chart and image — they are published together at release).
-// The env's RuntimeRegistry provenance wins over the published default so a
-// reopen keeps addressing the registry the env was deployed from (#363); a
-// custom EnvConfig.RuntimeImage rides in as imageOverrides.erun-devops.
-//
-// This replaces the embedded default-devops-chart copy that init used to
-// scaffold per tenant — the copy had already drifted from the canonical
-// chart (#510); the published chart is the single contract (#505).
+// resolvePublishedDevopsDeploySpec builds the deploy spec for an environment
+// with no local runtime chart, using the published erun-devops chart pinned to
+// the env's runtime version (one version covers both chart and image, published
+// together at release). The published chart is the single contract, replacing
+// the per-tenant embedded chart copy init once scaffolded, which had drifted
+// from canonical.
 func resolvePublishedDevopsDeploySpec(ctx Context, target OpenResult, versionOverride string) (DeploySpec, error) {
-	// "no local runtime chart" is the reason the published chart is used on the
-	// usual callers (remote envs, envs with no <tenant>-devops chart). The
-	// runtime-image override caller passes its own reason, since the env there
-	// does have a local chart it is deliberately bypassing (#697).
 	return resolvePublishedDevopsDeploySpecWithReason(ctx, target, versionOverride, "no local runtime chart")
 }
 
@@ -60,10 +51,8 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, 
 		version = strings.TrimSpace(target.EnvConfig.RuntimeVersion)
 	}
 	if version == "" {
-		// Bailout trace (dry-run contract): name the decision that stops the
-		// plan before returning. This is the fresh-env path — no local chart
-		// and no persisted/overridden runtime version — that a desktop create
-		// must avoid by composing deploy at a built version (issue #644).
+		// Dry-run contract: the decision that stops the plan must surface as a
+		// trace line before the error return.
 		ctx.Trace("deploy: " + reason + " and no runtime version resolved; cannot deploy the published " + DevopsComponentName + " chart")
 		return DeploySpec{}, fmt.Errorf("runtime version is required to deploy the published %s chart: pass --version or persist runtimeversion in the env config", DevopsComponentName)
 	}
@@ -95,13 +84,11 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, 
 	}, nil
 }
 
-// publishedDevopsValuesOverlayPath looks for the env's operator values
-// overlay next to its config (<ERunConfigDir>/<tenant>/<environment>/
-// values.yaml). Repo-local charts carry their overlay as
-// values.<env>.yaml in the chart directory; a published chart has no local
-// chart directory, so the env config dir is the overlay's home. Absent file
-// means no -f flag — the published chart's defaults plus erun's --set list
-// fully describe the deploy.
+// publishedDevopsValuesOverlayPath finds the env's operator values overlay.
+// A published chart has no local chart directory to hold the usual
+// values.<env>.yaml, so the overlay lives beside the env config instead; its
+// absence just means chart defaults and erun's --set list fully describe the
+// deploy.
 func publishedDevopsValuesOverlayPath(ctx Context, target OpenResult) string {
 	configDir, err := ERunConfigDir()
 	if err != nil {
@@ -115,10 +102,8 @@ func publishedDevopsValuesOverlayPath(ctx Context, target OpenResult) string {
 	return overlayPath
 }
 
-// publishedDevopsChartRegistry picks the registry the published chart (and
-// default image) is pulled from: the env's recorded RuntimeRegistry
-// provenance, then the DEPLOY-marked registry of the project's registry list,
-// then the public default.
+// publishedDevopsChartRegistry prefers the env's recorded RuntimeRegistry so a
+// reopen keeps addressing the registry the env was deployed from.
 func publishedDevopsChartRegistry(target OpenResult) string {
 	if registry := strings.TrimSpace(target.EnvConfig.RuntimeRegistry); registry != "" {
 		return registry
@@ -164,13 +149,9 @@ func (e *PublishedChartNotFoundError) Error() string {
 func (e *PublishedChartNotFoundError) Unwrap() error { return e.Err }
 
 // resolveRuntimeImageOverride normalizes a custom runtime image. A reference
-// that already pins a tag or digest is complete and used verbatim. A reference
-// without a tag is NOT complete — a registry path alone (e.g.
-// ghcr.io/sophium/erun-devops) made the old code return it verbatim, so
-// Kubernetes defaulted the pull to :latest, a tag the release flow never
-// publishes (ImagePullBackOff). A tagless reference is therefore pinned to the
-// env's runtime version, qualifying a bare image name (the historical
-// `--runtime-image <name>` shape) against the env's registry first.
+// that already pins a tag or digest is used verbatim; a tagless one is pinned
+// to the env's runtime version, because a bare registry path would otherwise
+// default to :latest — a tag the release flow never publishes (ImagePullBackOff).
 func resolveRuntimeImageOverride(registry, version, raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -185,10 +166,9 @@ func resolveRuntimeImageOverride(registry, version, raw string) string {
 	return raw + ":" + strings.TrimSpace(version)
 }
 
-// imageReferenceHasTagOrDigest reports whether an image reference already pins
-// a tag (a ":" in the final path segment) or a digest ("@sha256:..."). A ":"
-// in the registry host (a port, e.g. localhost:5000/img) is not a tag, so the
-// check looks only at the segment after the last "/".
+// imageReferenceHasTagOrDigest reports whether an image reference already pins a
+// tag or digest. A ":" in the registry host is a port, not a tag (e.g.
+// localhost:5000/img), so only the segment after the last "/" is inspected.
 func imageReferenceHasTagOrDigest(ref string) bool {
 	if strings.Contains(ref, "@") {
 		return true

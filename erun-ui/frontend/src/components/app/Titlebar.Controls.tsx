@@ -23,20 +23,13 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { UISelection } from '@/types';
 
-// Each titlebar button used to set its own absolute position with a
-// hardcoded `right-[Npx]` offset; that coupled the layout to the rendered
-// width of every other button in three files. After the flex refactor the
-// buttons just declare their visual state and the parent flex row owns
-// spacing.
 const titlebarButtonClassName =
   'size-7 flex-none cursor-pointer rounded-[var(--radius)] border-0 bg-transparent text-muted-foreground [--wails-draggable:no-drag] hover:bg-accent hover:text-accent-foreground [&_svg]:size-[18px]';
 
 const activeTitlebarButtonClassName =
   'bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground';
 
-// TitlebarLeftControls renders the leftmost cluster: a sidebar-only toggle.
-// The cluster sits on a positioned wrapper so it stacks above the drag
-// bedrock without the button needing its own z-index.
+// TitlebarLeftControls renders the leftmost titlebar cluster: the sidebar toggle.
 export function TitlebarLeftControls(): React.ReactElement {
   const dispatch = useAppDispatch();
   const sidebarHidden = useAppSelector((state) => state.layout.sidebarHidden);
@@ -62,11 +55,7 @@ export function TitlebarLeftControls(): React.ReactElement {
   );
 }
 
-// TitlebarRightControls renders the right cluster: the two IDE launchers,
-// the diff-panel toggle, and the files-list toggle. Their visibility,
-// disabled state, and accessible labels are unchanged from the absolute
-// layout; the only difference is they now flow inside their parent flex
-// row instead of stacking with right-pixel offsets.
+// TitlebarRightControls renders the right titlebar cluster of IDE and panel controls.
 export function TitlebarRightControls(): React.ReactElement {
   const dispatch = useAppDispatch();
   const reviewOpen = useAppSelector((state) => state.layout.reviewOpen);
@@ -76,10 +65,8 @@ export function TitlebarRightControls(): React.ReactElement {
   const idleStatus = useAppSelector((state) => state.idle.idleStatus);
   const ReviewIcon = reviewOpen ? PanelRightClose : PanelRightOpen;
   const envRunning = isEnvOpenedAndRunning(selected, idleStatus, tenants);
-  // The IDE buttons need both a usable selection (sshd configured, env
-  // selected) and a running cloud env. The diff/files toggles are pure
-  // UI state and stay enabled — the user may want to hide a stale
-  // panel even while the env is starting back up.
+  // Diff/files toggles stay enabled even while the env is down, so the user
+  // can still hide a stale panel.
   const ideDisabled = isIdeDisabled(selected, tenants) || !envRunning;
   const vscodeTooltip = ideTooltipLabel('VS Code', selected, ideDisabled, !envRunning);
   const intellijTooltip = ideTooltipLabel('IntelliJ IDEA', selected, ideDisabled, !envRunning);

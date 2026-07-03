@@ -1,7 +1,6 @@
-// Package env builds an isolated execution environment (HOME, XDG dirs, PATH,
-// cwd) for a single erun integration scenario. Tests construct one Setup per
-// run so subprocesses see deterministic paths and don't collide with each
-// other or with the developer's real config.
+// Package env builds an isolated execution environment for a single erun
+// integration scenario, so subprocesses see deterministic paths and don't
+// collide with each other or with the developer's real config.
 package env
 
 import (
@@ -19,8 +18,8 @@ type Setup struct {
 	Cwd        string
 }
 
-// Env returns the environment variable list to pass to the subprocess.
-// The returned slice is fresh each call so tests can append further vars.
+// Env returns the subprocess environment as a fresh slice each call, so
+// callers can append scenario-specific vars.
 func (s Setup) Env() []string {
 	path := os.Getenv("PATH")
 	return []string{
@@ -36,31 +35,24 @@ func (s Setup) Env() []string {
 		// goldens.
 		"TERM=dumb",
 		"NO_COLOR=1",
-		// Isolate the agent-skills source. The runtime image bakes skills
-		// into /etc/erun/skills, which doctor's remote-init skills check
-		// (bakedSkillsRoot) reads when ERUN_SKILLS_DIR is unset. On a host
-		// that has that directory (a runtime image, or a box that installed
-		// one) the unset seam leaks the host's baked skills into doctor
-		// output and the in_runtime_* goldens drift. Default the seam to an
-		// isolated, non-existent path so the "no baked skills → row omitted"
-		// branch is deterministic everywhere; scenarios that test the skills
-		// row append their own ERUN_SKILLS_DIR after Env() (the last value
-		// for a duplicated key wins).
+		// Point the agent-skills seam at a non-existent path so a host that
+		// bakes skills into its image can't leak them into doctor output and
+		// drift the in_runtime_* goldens. Scenarios that exercise the skills
+		// row append their own ERUN_SKILLS_DIR after Env() (the later
+		// duplicate wins).
 		"ERUN_SKILLS_DIR=" + filepath.Join(s.Home, ".no-baked-skills"),
 	}
 }
 
-// New creates a fresh Setup rooted at a temp directory unique to the test.
-// The temp directory is auto-cleaned by t.TempDir on test completion.
+// New creates a fresh Setup rooted at a per-test temp directory.
 func New(t testing.TB) Setup {
 	t.Helper()
 	root := t.TempDir()
-	// Canonicalize to the physical path. macOS hands out $TMPDIR under
-	// /var/folders, a symlink into /private/var, and t.TempDir inherits
-	// whichever spelling the invoking shell used — while the binary under
-	// test always reports physical paths (os.Getwd has no PWD hint here).
-	// Without this, path-equality checks such as tenant projectroot
-	// matching pass or fail depending on the shell's TMPDIR spelling.
+	// Canonicalize to the physical path: macOS $TMPDIR lives under
+	// /var/folders, a symlink into /private/var, while the binary under test
+	// always reports physical paths. Without this, path-equality checks (e.g.
+	// tenant projectroot matching) flake on whichever TMPDIR spelling the
+	// invoking shell used.
 	if resolved, err := filepath.EvalSymlinks(root); err == nil {
 		root = resolved
 	}
