@@ -1,6 +1,6 @@
 ---
 name: erun-blueprint-platform
-description: Blueprint the deploy artifacts for a hosted erun platform — a per-env Terraform tree (terraform-<tenant>/) whose modules wrap erun's published Terraform modules, and the per-env Helm values overlays plus thin umbrella charts that reference erun's published OCI charts — all version-pinned to the erun release the environment runs. Use when the user says "blueprint the platform", "scaffold the platform terraform", "set up the platform helm charts and terraform", "create the terraform-<tenant> structure", "blueprint erun platform deploy", "set up platform deploy artifacts", or any similar request to lay down the Terraform + Helm wiring an operator applies to stand up a hosted erun platform.
+description: Blueprint the deploy artifacts for a hosted erun platform — a per-env Terraform tree (terraform-<tenant>/) whose modules wrap erun's published Terraform modules, and the per-env Helm values overlays plus thin umbrella charts that reference erun's published OCI charts — all version-pinned to the erun release the environment runs; also maintains, repairs, and upgrades an existing terraform-<tenant>/ tree and its <tenant>-<component> umbrellas in place, re-pinning every erun reference to the target version and filling gaps against this contract. Use when the user says "blueprint the platform", "scaffold the platform terraform", "set up the platform helm charts and terraform", "create the terraform-<tenant> structure", "blueprint erun platform deploy", "set up platform deploy artifacts", "upgrade the platform terraform", "repair the platform charts", "reconcile the terraform-<tenant> tree", "bump the platform to <version>", "maintain the platform deploy artifacts", or any similar request to lay down or update the Terraform + Helm wiring an operator applies to stand up a hosted erun platform.
 ---
 
 # Blueprint a hosted erun platform's deploy artifacts
@@ -55,11 +55,13 @@ platform the env will run.
 
 ```sh
 if [ -n "${ERUN_TENANT:-}" ]; then
-    # Inside a deployed env: the running version is the one to pin.
-    erun_version=$(erun version | head -n 1 | tr -d '[:space:]' | sed 's/^v//')
+    # Inside a deployed env: the running version is the one to pin. The first
+    # line is "erun <version> (<commit> built <date>)" — take the 2nd field;
+    # --no-registry skips the remote version lookup.
+    erun_version=$(erun version --no-registry | head -n 1 | awk '{print $2}')
 else
-    # On a laptop: read the env's pinned runtimeversion.
-    grep 'runtimeversion' ~/.config/erun/<tenant>/<environment>/config.yaml
+    # On a laptop: pull the value out of the env's "runtimeversion: <ver>" line.
+    erun_version=$(grep 'runtimeversion' ~/.config/erun/<tenant>/<environment>/config.yaml | awk '{print $2}')
 fi
 ref="v${erun_version}"          # Terraform module ref + Helm chart version
 ```
@@ -340,11 +342,59 @@ done
 Commit the tree with `git` so the team shares the wiring. These are repo files,
 not deliverables — they belong in the git worktree, not `${ERUN_OUTPUTS_DIR}`.
 
+## Maintenance, repair & upgrade
+
+This skill owns the artifacts for their whole life, not just day one. **If
+`terraform-<tenant>/` or any `<tenant>-<component>` umbrella already exists, do
+not stop — enter maintenance mode** and reconcile the existing tree to the
+target erun version in place. First scaffold and ongoing maintenance are the
+same skill.
+
+**Target version.** Same resolution as Step 1: the env's `runtimeversion`
+(which moves with `erun upgrade`), or an explicit version the operator names.
+One erun version pins every reference on both sides — the Terraform `?ref` and
+every Helm chart `version` — so bump them together, never piecemeal.
+
+**Detect, then reconcile against this skill's own contract:**
+
+- **Repair gaps** — fill what the contract requires but the tree lacks: absent
+  `common.tf`/`variables.tf` symlinks, a missing per-env `values.<env>.yaml`
+  (including `values.local.yaml` for the agent env), a missing
+  `**/charts/*.tgz` entry in the repo `.gitignore`, an uncommitted
+  `Chart.lock`. Add only what's missing; never clobber the project's own
+  content (env-specific tfvars, values overrides, extra tenant modules).
+- **Upgrade the pins** — re-pin **every** erun reference to `<ref>`/`<version>`:
+  the terraform module `source = "…?ref=v<version>"` in each
+  `modules/terraform-<tenant>-*/main.tf`, and each `<tenant>-<component>`
+  umbrella `Chart.yaml` dependency `version:`.
+- **Refresh derived artifacts** — after re-pinning, run `helm dependency update`
+  on each umbrella to regenerate `Chart.lock` + `charts/` for the new versions,
+  and commit the updated `Chart.lock`. (`helm dependency build` only rebuilds
+  `charts/` from an *in-sync* lock and errors on a stale one — it fits a fresh
+  scaffold with no lock and `erun deploy`'s pre-install step, not a re-pin.) Then
+  re-apply terraform (`erun terraform apply`, Step 4) so the tree carries the
+  upgraded module.
+
+**Idempotent, in-place, preview first.** Safe to re-run; edit files where they
+live; **show the diff/plan before writing** — the pin changes and the files
+you'd add — and let the operator confirm. Touch only version pins and genuine
+gaps; never rewrite working project content, and never regenerate a file just
+to reformat it.
+
+**Confirm the tenant on a loose match.** If the existing `terraform-<tenant>/`
+looks unrelated to the tenant you were asked about, confirm before reconciling
+rather than assuming.
+
+Maintenance does not relax the exclusions: still **never** wrap the runtime
+`erun-devops` chart or add an `erun-devops`/`<tenant>-devops` umbrella (see What
+this is not), and the runtime chart still deploys on its own with an empty
+selection.
+
 ## Error behaviour
 
 | Failure mode | Recovery |
 |---|---|
-| `terraform-<tenant>/` already exists | Stop. Do not overwrite. Offer to add a new `<env>/` folder into the existing tree, or confirm a different tenant. |
+| `terraform-<tenant>/` already exists | Not a stop — enter maintenance mode (see Maintenance, repair & upgrade): reconcile and upgrade the existing tree in place — re-pin every erun reference to the target version, fill gaps against the contract, refresh derived artifacts — after showing the diff/plan first. Offer to add a new `<env>/` folder if that's the ask. Confirm the tenant first only when the match looks unrelated. |
 | The erun version can't be resolved (no `erun version`, no `runtimeversion`) | Stop and ask which erun version to pin to. Never default to `main` for production wiring — the edge and charts must match the deployed platform. |
 | `terraform-erun-cluster-edge?ref=v<ver>` doesn't resolve on `terraform init` | The version has no matching git tag yet. Confirm the erun release exists; pin to the latest released `vX.Y.Z`. |
 | `helm dependency build` 404s on the OCI chart | That version's chart isn't published. `erun push`/`erun release` publishes image + chart together — pin to a version that has been pushed. |

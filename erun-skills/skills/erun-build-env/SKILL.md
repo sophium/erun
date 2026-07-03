@@ -1,6 +1,6 @@
 ---
 name: erun-build-env
-description: Create a custom build environment by extending ERun's published runtime image with the project's own toolchain, then pointing the environment at the result. Use when the user says "init build environment", "init erun build environment", "create a custom build environment", "customize the runtime image", or any similar request to add tools to the image an environment's runtime pod runs.
+description: Create a custom build environment by extending ERun's published runtime image with the project's own toolchain, then pointing the environment at the result, and maintain, repair, or upgrade an existing custom build environment in place by re-pinning it to the target runtime version and filling any gaps against this skill's contract. Use when the user says "init build environment", "init erun build environment", "create a custom build environment", "customize the runtime image", "upgrade the build environment", "upgrade the custom runtime image", "repair the build environment", "reconcile the <tenant>-devops module", "bump the runtime image to <version>", "maintain the build environment", or any similar request to add tools to, or keep current, the image an environment's runtime pod runs.
 ---
 
 # Custom build environment
@@ -21,13 +21,14 @@ The custom image must extend the same version the environment runs.
 
 ```sh
 if [ -n "${ERUN_TENANT:-}" ]; then
-    # Inside a deployed env: the running version is the one to extend.
-    runtime_version=$(erun version | head -n 1 | tr -d '[:space:]' | sed 's/^v//')
+    # Inside a deployed env: the running version is the one to extend. The first
+    # line is "erun <version> (<commit> built <date>)" — take the 2nd field;
+    # --no-registry skips the remote version lookup.
+    runtime_version=$(erun version --no-registry | head -n 1 | awk '{print $2}')
 else
-    # On a laptop: read the env's pinned runtimeversion.
-    grep 'runtimeversion' ~/.config/erun/<tenant>/<environment>/config.yaml
-    # or inspect the per-env block of:
-    erun list
+    # On a laptop: pull the value out of the env's "runtimeversion: <ver>" line
+    # (or inspect the per-env block of `erun list`).
+    runtime_version=$(grep 'runtimeversion' ~/.config/erun/<tenant>/<environment>/config.yaml | awk '{print $2}')
 fi
 ```
 
@@ -171,6 +172,41 @@ name), `helm dependency build`s it, and **re-scopes every runtime value it sets
 image from Step 5 — under the `erun-devops.` subchart key**, so the wrapped
 runtime is wired exactly as the published chart would be. Track `Chart.lock`
 (committed) and gitignore `charts/*.tgz`, as the platform umbrellas do.
+
+## Maintenance, repair & upgrade
+
+This skill also maintains a `<tenant>-devops` module a prior run already
+produced. If the module exists, do **not** stop — reconcile it in place. Preview
+the diff before writing; touch only version pins and genuine gaps, never the
+project's own Dockerfile toolchain layers.
+
+**Detect.** Look for `<tenant>-devops/` with a Dockerfile and `VERSION`. Present →
+maintenance mode; absent → the scaffold flow above.
+
+**Repair** against this skill's contract, without clobbering project content:
+
+- Missing `VERSION` at the module root → add one (Step 3).
+- Wrong module/dir naming → the outer dir and the `docker/<image>/` dir must both
+  be `<tenant>-devops` (Step 2); rename to match so `erun build` discovers it.
+- Dockerfile not `FROM ghcr.io/sophium/erun-devops:…` → repoint the base (Step 2);
+  keep the project's added toolchain layers as-is.
+- If the Step 6 umbrella is present, backfill a missing per-env
+  `values.<env>.yaml`, a committed `Chart.lock`, or the gitignored `charts/*.tgz`.
+
+**Upgrade** to one erun version across every pin — the env's current
+`runtimeversion` (it moves with `erun upgrade`) or an explicit target (Step 1):
+
+- Re-pin the Dockerfile `FROM ghcr.io/sophium/erun-devops:<version>`.
+- Re-pin the module `VERSION` to that version.
+- If the Step 6 umbrella is present, re-pin its `erun-devops` dependency
+  `version:` in `Chart.yaml` to the same version, then `helm dependency update` to
+  regenerate `Chart.lock` for the new version (`helm dependency build` errors on a
+  stale lock); commit the updated lock.
+- `erun build` to rebuild and push both arches, then confirm the env's
+  `runtimeimage` still points at the module (Step 5).
+
+Bump every pin together — the whole module rides one erun version. Re-running is
+safe: it edits in place and only moves version pins and fills gaps.
 
 ## Important
 

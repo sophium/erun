@@ -1,6 +1,6 @@
 ---
 name: erun-blueprint-rls-db
-description: Build a multi-tenant PostgreSQL database module following ERun's blueprint — row-level security, Atlas migrations, UUIDv7 surrogate keys, shared timestamp trigger, separate erun_tenant / erun_operations PostgreSQL roles, and the canonical tenant/issuer/user bootstrap that erun-backend-db captures. Use when the user says "build a multi-tenant postgres database", "create a tenant-scoped postgres schema with row-level security", "set up multi-tenant postgres migrations", "I need an erun-backend-db-shaped module", "build a multi-tenant rls db", or any similar request for a new tenant-scoped PostgreSQL project.
+description: Build a multi-tenant PostgreSQL database module following ERun's blueprint — row-level security, Atlas migrations, UUIDv7 surrogate keys, shared timestamp trigger, separate erun_tenant / erun_operations PostgreSQL roles, and the canonical tenant/issuer/user bootstrap that erun-backend-db captures — and maintain, repair, and upgrade a module it previously produced by detecting existing artifacts and entering maintenance mode instead of stopping, filling blueprint gaps without clobbering the project's own tables or committed migrations, and re-pinning the module's own version axes — the PostgreSQL major and Atlas toolchain — to their targets (it has no erun-version coupling). Use when the user says "build a multi-tenant postgres database", "create a tenant-scoped postgres schema with row-level security", "set up multi-tenant postgres migrations", "I need an erun-backend-db-shaped module", "build a multi-tenant rls db", "upgrade the multi-tenant postgres module", "repair the rls db module", "reconcile the tenant database schema to the blueprint", "bump the db module's postgres version", "maintain the erun-backend-db-shaped module", or any similar request for a new or existing tenant-scoped PostgreSQL project.
 ---
 
 # Build a multi-tenant RLS database module
@@ -243,11 +243,52 @@ rule that this only happens once — after the first tenant exists,
 unknown issuers and subjects must remain unauthorized until explicitly
 configured.
 
+## Maintenance, repair & upgrade
+
+This skill owns the module for its whole life — first scaffold **and**
+ongoing upkeep of what it produced. If the target already holds a
+blueprint module, do not stop: enter maintenance mode.
+
+**Detect.** An `atlas.hcl` plus `schema/roles.sql` (or any `schema/`
+tree) means the module exists. Treat the run as reconcile-in-place, not
+first scaffold.
+
+**Preview first.** Diff the on-disk module against the blueprint and the
+target erun version, print the resolved plan — files to add, `atlas.hcl`
+`src` entries to insert, pins to bump, `atlas migrate diff` to run — and
+only write after showing it. Idempotent and in-place: safe to re-run,
+touching only gaps and version pins, never genuine project content.
+
+**Repair (fill gaps, never clobber).** Re-align the module to the
+current `erun-backend-db` blueprint. Add any missing required artifact —
+bootstrap tables (`tenants`, `tenant_issuers`, `users`,
+`user_external_ids`), `roles.sql`, `rls/context.sql`,
+`erun_set_timestamps.sql`, per-table timestamp triggers, indexes — and
+fix drifted structure: absent `ENABLE`/`FORCE ROW LEVEL SECURITY`, a
+missing `_tenant_policy` / `_operations_policy` pair (or a forbidden
+`OR`-branch policy), missing `tenant_id` scoping or composite unique
+keys, and any `atlas.hcl` `src` entry out of canonical order. Leave the
+project's own tables, columns, and domain SQL untouched. **Never edit a
+migration already committed under `migrations/default/`** — correct drift
+with a new forward migration (`atlas migrate diff <name> --env default`),
+never by rewriting an applied one.
+
+**Upgrade (re-pin the module's own version axes).** This module has **no
+erun version coupling** — it scaffolds only `atlas.hcl`, schema SQL, and
+`AGENTS.md` (no chart, terraform, Dockerfile, or `VERSION`), so nothing
+here pins to the env `runtimeversion` (PG 18 is not erun 1.0.x). Its
+version axes are the **PostgreSQL major** (`docker://postgres/<N>/dev` in
+`atlas.hcl`, and the PG version note in `AGENTS.md`) and the **Atlas
+toolchain hint** — bump those to their targets, and realign to the
+current `erun-backend-db` blueprint (see Repair). Then refresh derived
+state: `atlas migrate diff <name> --env default` → commit the new forward
+migration → `atlas migrate apply`.
+
 ## Error behaviour
 
 | Failure mode | Recovery |
 |---|---|
-| Target dir already contains an `atlas.hcl` | Stop. Offer `--force` (rewrite) or a new module name. Do not silently overwrite. |
+| Target dir already contains an `atlas.hcl` | Not an error. Enter maintenance mode (see § "Maintenance, repair & upgrade"): reconcile gaps and re-pin in place, preview before writing, and never clobber the project's tables or committed migrations. |
 | PostgreSQL < 18 detected | Stop. Explain `uuidv7()` requires PG 18+ natively; do not silently emit a custom UUIDv7 implementation. |
 | `atlas` binary not on PATH at validate time | Skip validate, surface install hint, continue. The produced files are valid even without local Atlas. |
 | User-supplied table name collides with a bootstrap table (`tenants`, `tenant_issuers`, `users`, `user_external_ids`) | Stop. The bootstrap names are reserved; ask the user to rename. |
