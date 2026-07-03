@@ -1,6 +1,6 @@
 ---
 name: erun-blueprint-docs
-description: Scaffold a product documentation site following ERun's blueprint — a Docusaurus 3.x site published to Cloudflare Pages through a Kubernetes Job, the exact shape erun-docs captures. Use when the user says "set up product docs site", "scaffold a docusaurus docs site", "build erun-docs-shaped documentation", "create a docs site deployed to cloudflare pages", "add a documentation site for this project", or any similar request for a new project documentation site.
+description: Scaffold a product documentation site following ERun's blueprint — a Docusaurus 3.x site published to Cloudflare Pages through a Kubernetes Job, the exact shape erun-docs captures — and also maintain, repair, and upgrade an already-scaffolded docs site in place, reconciling it with the current blueprint and re-pinning its versions without clobbering the project's own content pages. Use when the user says "set up product docs site", "scaffold a docusaurus docs site", "build erun-docs-shaped documentation", "create a docs site deployed to cloudflare pages", "add a documentation site for this project", "upgrade the docs site", "repair the docs deploy wiring", "reconcile the docusaurus site with the blueprint", "bump the docs site to <version>", "maintain the docs site", or any similar request for a new or existing project documentation site.
 ---
 
 # Build an erun-docs-shaped documentation site
@@ -202,11 +202,51 @@ When authoring pages, split by audience (mirrors `erun-docs/AGENTS.md`):
 Add every new page id to `sidebars.ts` under the section that matches
 its **audience**, not its topic.
 
+## Maintenance, repair & upgrade
+
+This skill owns the site for its whole life: first-time scaffold **and**
+ongoing upkeep of what it produced. If the artifacts already exist
+(`<module-name>/docusaurus.config.ts`,
+`erun-devops/docker/<module-name>/`, `erun-devops/k8s/<module-name>/`),
+do **not** stop — enter maintenance mode. It is idempotent and in-place:
+safe to re-run, **show the diff/plan before writing**, and touch only
+version pins and genuine gaps, never the project's own content pages.
+
+- **Detect.** Probe for the blueprint's artifacts. Any present means
+  maintenance, not a fresh scaffold.
+- **Repair.** Re-align the site to `erun-docs`'s current blueprint — the
+  Docusaurus 3.x classic layout, the Cloudflare-Pages-deploy-via-k8s-Job
+  contract, and the chart wiring. Fill gaps against this skill's own
+  contract: a missing `values.<env>.yaml` (especially the required
+  `values.local.yaml`), a missing `Chart.yaml` / `templates/docs.yaml` /
+  `entrypoint.sh`, `onBrokenLinks: 'throw'` turned off, a Git-connected
+  Pages project, or drifted deploy plumbing. Repair the deploy wiring
+  **without clobbering the operator's `docs/` pages, `sidebars.ts` tree,
+  or `src/css/custom.css`** — those are project content, not blueprint.
+- **Upgrade.** Two independent version axes — don't conflate them:
+  - **erun release axis** — `ERUN_VERSION` in the `Dockerfile` and the
+    `Chart.yaml` `version`/`appVersion` track the erun release (the docs
+    chart is an erun component chart); re-pin them to the env's
+    `runtimeversion` (moved by `erun upgrade`) or an explicit erun target.
+  - **docs toolchain axis** — the `node` and `wrangler` tags in the
+    `Dockerfile` and the `@docusaurus/*` 3.x pins in `package.json` are the
+    site's own toolchain; bump them to current recommended versions,
+    independently of the erun release.
+  Then refresh derived state: `yarn install` to re-resolve `yarn.lock`,
+  `yarn build` to re-prove the site (link checker included), and rebuild the
+  image. The chart is a leaf (no `Chart.lock`) unless it later gains
+  dependencies, in which case `helm dependency update` regenerates it.
+- **Clean up.** Remove only superseded deploy-wiring the blueprint no longer
+  emits (a renamed `templates/` file, an obsolete chart file), after previewing.
+  Never delete the operator's `docs/` pages, `sidebars.ts`, `src/css/custom.css`,
+  or static assets — those are content, not blueprint. A stale Cloudflare Pages
+  project or deployment is the operator's to remove, not this skill's.
+
 ## Error behaviour
 
 | Failure mode | Recovery |
 |---|---|
-| Target dir already contains `<module-name>/docusaurus.config.ts` | Stop. Offer a new module name or explicit overwrite; do not clobber an existing site. |
+| Target dir already contains `<module-name>/docusaurus.config.ts` | Do **not** stop — enter maintenance mode (see § "Maintenance, repair & upgrade"): reconcile the deploy wiring against the blueprint and re-pin versions in place, preserving the existing `docs/` content. Do not clobber the operator's pages. |
 | `yarn build` fails on a broken link | Fix the link or page id; do not disable `onBrokenLinks`. The throw is the link checker working. |
 | `npx create-docusaurus` unavailable (offline) | Fall back to the `templates/` scaffold; the produced files are valid without the generator. |
 | Cloudflare Pages project / Secret missing | Scaffold still succeeds; surface that the first `erun deploy` Job will fail until the Direct-Upload project, custom domain, token, and Secret exist. |

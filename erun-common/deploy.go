@@ -99,6 +99,7 @@ type HelmDeployParams struct {
 	ReleaseName        string
 	ChartPath          string
 	ValuesFilePath     string
+	RuntimeSubchartKey string
 	Tenant             string
 	Environment        string
 	Namespace          string
@@ -132,9 +133,16 @@ type HelmDeployParams struct {
 }
 
 type HelmDeploySpec struct {
-	ReleaseName        string
-	ChartPath          string
-	ValuesFilePath     string
+	ReleaseName    string
+	ChartPath      string
+	ValuesFilePath string
+	// RuntimeSubchartKey is set when the runtime chart is a repo-local umbrella
+	// wrapping the published erun-devops chart as a subchart. helm does not pass
+	// top-level --set values into subchart scope, so command() prefixes every
+	// runtime --set key with this key (the erun-devops dependency's alias/name).
+	// Empty for the published chart, a forked top-level runtime chart, and
+	// component charts — those keep byte-identical top-level --sets.
+	RuntimeSubchartKey string
 	Tenant             string
 	Environment        string
 	Namespace          string
@@ -1419,10 +1427,22 @@ func newHelmDeploySpecWithValues(target OpenResult, deployContext KubernetesDepl
 		return HelmDeploySpec{}, err
 	}
 
+	// A repo-local runtime umbrella wraps the published erun-devops chart as a
+	// subchart; helm won't pass the runtime --sets into subchart scope, so record
+	// the subchart key and let command() prefix every runtime value with it.
+	runtimeSubchartKey := ""
+	if deployContextOwnsRuntimeChart(deployContext, target.Tenant) && !isOCIChartReference(deployContext.ChartPath) {
+		runtimeSubchartKey, err = helmChartRuntimeSubchartKey(deployContext.ChartPath)
+		if err != nil {
+			return HelmDeploySpec{}, err
+		}
+	}
+
 	return HelmDeploySpec{
 		ReleaseName:         deployContext.ComponentName,
 		ChartPath:           deployContext.ChartPath,
 		ValuesFilePath:      valuesFilePath,
+		RuntimeSubchartKey:  runtimeSubchartKey,
 		Tenant:              target.Tenant,
 		Environment:         target.Environment,
 		Namespace:           KubernetesNamespaceName(target.Tenant, target.Environment),
@@ -1613,6 +1633,7 @@ func (d HelmDeploySpec) Params(stdout, stderr io.Writer) HelmDeployParams {
 		ReleaseName:        d.ReleaseName,
 		ChartPath:          d.ChartPath,
 		ValuesFilePath:     d.ValuesFilePath,
+		RuntimeSubchartKey: d.RuntimeSubchartKey,
 		Tenant:             d.Tenant,
 		Environment:        d.Environment,
 		Namespace:          d.Namespace,
@@ -1727,6 +1748,10 @@ func (d HelmDeploySpec) command() commandSpec {
 		"--set-string", "runtime.resources.limits.memory="+NormalizeRuntimePodResources(d.RuntimePod).Memory,
 	)
 	args = append(args, helmClaudeSetArgs(d.Claude)...)
+	// When the runtime chart is a local umbrella wrapping erun-devops, every
+	// runtime --set targets the wrapped subchart's value scope, so prefix each
+	// key with the subchart key. No-op (empty prefix) for every other chart.
+	prefixHelmSetKeys(args, d.RuntimeSubchartKey)
 	args = append(args,
 		d.ReleaseName,
 		d.ChartPath,
@@ -1749,6 +1774,26 @@ func (d HelmDeploySpec) command() commandSpec {
 
 func isOCIChartReference(chartPath string) bool {
 	return strings.HasPrefix(strings.TrimSpace(chartPath), "oci://")
+}
+
+// prefixHelmSetKeys nests every helm --set/--set-string/--set-json key under
+// prefix (a wrapped runtime umbrella's subchart key), rewriting `key=value` to
+// `prefix.key=value` in place. An empty prefix is a no-op, so a non-wrapped
+// runtime keeps byte-identical top-level --sets. Only --set* value args are
+// touched; base flags, -f, the release name, chart path, and --version are not.
+func prefixHelmSetKeys(args []string, prefix string) {
+	if strings.TrimSpace(prefix) == "" {
+		return
+	}
+	for i := 0; i+1 < len(args); i++ {
+		if !strings.HasPrefix(args[i], "--set") {
+			continue
+		}
+		if !strings.Contains(args[i+1], "=") {
+			continue
+		}
+		args[i+1] = prefix + "." + args[i+1]
+	}
 }
 
 func (p HelmReleaseRecoveryParams) command() commandSpec {
@@ -2289,6 +2334,7 @@ func helmDeployCommandSpec(params HelmDeployParams, chartPath string) commandSpe
 		ReleaseName:        params.ReleaseName,
 		ChartPath:          chartPath,
 		ValuesFilePath:     params.ValuesFilePath,
+		RuntimeSubchartKey: params.RuntimeSubchartKey,
 		Tenant:             params.Tenant,
 		Environment:        params.Environment,
 		Namespace:          params.Namespace,

@@ -1,6 +1,6 @@
 ---
 name: erun-blueprint-api
-description: Build a multi-tenant Go HTTP API service following ERun's blueprint — OIDC bearer authentication, tenant resolution from the token issuer, layered model / repository / service / routes structure, transaction-scoped PostgreSQL security context, identity resolution cache, and audit logging. Captures the patterns that erun-backend-api packages. Use when the user says "build a multi-tenant http api", "create an erun-backend-api-shaped service", "I need a multi-tenant Go api with oidc auth and tenant rls", "build a multi-tenant backend api", or any similar request for a new multi-tenant Go API.
+description: Build or maintain a multi-tenant Go HTTP API service following ERun's blueprint — OIDC bearer authentication, tenant resolution from the token issuer, layered model / repository / service / routes structure, transaction-scoped PostgreSQL security context, identity resolution cache, and audit logging — and reconcile, repair, and upgrade a previously scaffolded service in place by realigning it to the current blueprint and refreshing the service's own dependency pins, without clobbering the project's own business logic (it is a standalone Go module with no erun-version coupling). Captures the patterns that erun-backend-api packages. Use when the user says "build a multi-tenant http api", "create an erun-backend-api-shaped service", "I need a multi-tenant Go api with oidc auth and tenant rls", "build a multi-tenant backend api", "upgrade the multi-tenant api", "repair the erun-backend-api-shaped service", "reconcile the api to the blueprint", "bump the api's dependencies", "maintain the multi-tenant api", or any similar request for a new or existing multi-tenant Go API.
 ---
 
 # Build a multi-tenant API service
@@ -305,11 +305,65 @@ the matching `erun-backend-db`-shaped schema. Confirm:
 - A second valid request from a different `(iss, sub)` on a freshly
   bootstrapped database is rejected (no implicit user creation).
 
+## Maintenance, repair & upgrade
+
+This skill owns the service after first scaffold too. When the target
+already carries an erun-backend-api-shaped module, do not stop — enter
+maintenance mode and reconcile it in place. Idempotent, in-place,
+preview-first: safe to re-run, edit in place, and show the diff/plan
+(files to add, layers to restore, version pins old→new) before writing.
+Touch only version pins and blueprint gaps — never genuine project
+content.
+
+### Detect
+
+- Existing artifacts (`go.mod`, `server.go`,
+  `internal/repository/tx.go`) mean maintain, not scaffold.
+- Read the current layout, the Go module path, the `go` toolchain line,
+  and the service's dependency `require` pins in `go.mod`.
+
+### Repair (reconcile to the current blueprint)
+
+- Re-align structural drift against `erun-backend-api`'s current shape:
+  a missing layer (`model` / `repository` / `service` / `routes`),
+  absent OIDC/authentication, authorization, or audit middleware,
+  missing tenant-from-issuer resolution, a dropped
+  `TxManager.WithTx` security-context wiring (RLS `SET LOCAL ROLE` /
+  `erun.tenant_id`), a missing identity-resolution cache, or a missing
+  audit hook.
+- Fill each gap with the blueprint's shape from `templates/`. Never
+  clobber the project's own domain entities, handlers, or business
+  logic — restore the missing plumbing around them.
+- Add missing scaffolding files (`.gitignore` entries, module
+  metadata) without rewriting project content.
+
+### Upgrade (refresh to the current blueprint)
+
+- This is a **standalone** Go module — it carries no erun/`erun-common`
+  dependency and no `VERSION` marker, so there is no erun version to pin
+  it to. "Upgrade" means realigning it to `erun-backend-api`'s *current*
+  blueprint shape (see Repair) and refreshing the service's **own**
+  dependency pins.
+- Bump the `require` pins the service carries (`go-oidc`, `bun`, `uuid`,
+  `oauth2`, …) and the `go` toolchain line to current, and adopt any
+  structural change the blueprint has made since scaffold.
+- Refresh derived state: `go mod tidy`, then `go build ./...` and
+  `go test ./...` to confirm the bump is clean.
+
+### Clean up
+
+- Remove only scaffolding this blueprint previously emitted but no longer
+  does — a renamed or merged generated file (e.g. an old `oidc.go`/`auth.go`
+  split the blueprint has since combined) — after previewing the deletion.
+  Never delete the project's own domain entities, handlers, or business
+  logic; when a file mixes generated plumbing with the project's code, leave
+  it and flag the drift rather than removing it.
+
 ## Error behaviour
 
 | Failure mode | Recovery |
 |---|---|
-| Target dir already contains a `go.mod` | Stop. Offer `--force` (rewrite) or a new module name. Do not silently overwrite. |
+| Target dir already contains a `go.mod` | Do not stop. Enter maintenance mode (see "Maintenance, repair & upgrade") — reconcile against the blueprint and re-pin versions in place. Do not clobber the project's own content. |
 | User-supplied entity name is singular plural-form ambiguous | Ask for both singular (`invoice`) and plural (`invoices`) explicitly. Do not guess. |
 | User-supplied route prefix doesn't start with `/v1/` | Surface the convention and ask the user to confirm or change. |
 | OIDC issuer list is empty | Stop. Ask for at least one issuer; no point producing an unauthenticated API. |
