@@ -150,6 +150,37 @@ func helmChartDeclaresDependencies(chartPath string) (bool, error) {
 	return len(chart.Dependencies) > 0, nil
 }
 
+// helmChartRuntimeSubchartKey returns the value-scope key of a local runtime
+// umbrella's wrapped erun-devops subchart — its dependency alias, else its name
+// — or "" when the chart declares no erun-devops dependency (a forked top-level
+// runtime chart, or not a runtime chart at all). erun deploy nests the runtime
+// --sets under this key so a wrapped erun-devops receives its wiring.
+func helmChartRuntimeSubchartKey(chartPath string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(chartPath, "Chart.yaml"))
+	if err != nil {
+		return "", fmt.Errorf("read Chart.yaml at %s: %w", chartPath, err)
+	}
+	var chart struct {
+		Dependencies []struct {
+			Name  string `yaml:"name"`
+			Alias string `yaml:"alias"`
+		} `yaml:"dependencies"`
+	}
+	if err := yaml.Unmarshal(data, &chart); err != nil {
+		return "", fmt.Errorf("parse Chart.yaml at %s: %w", chartPath, err)
+	}
+	for _, dep := range chart.Dependencies {
+		if strings.TrimSpace(dep.Name) != DevopsComponentName {
+			continue
+		}
+		if alias := strings.TrimSpace(dep.Alias); alias != "" {
+			return alias, nil
+		}
+		return DevopsComponentName, nil
+	}
+	return "", nil
+}
+
 // resolveHelmChartPublishSpec keeps every erun chart under the registry's
 // /charts path so a chart never collides with its component's same-named image
 // repo at the same ref.

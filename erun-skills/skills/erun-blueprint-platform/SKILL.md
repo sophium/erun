@@ -17,6 +17,12 @@ copy them, pinned to the erun version the environment runs:
   consumes, plus thin umbrella `Chart.yaml` wrappers that depend on erun's
   published **OCI** charts.
 
+This skill is for the tenant that **deploys the erun platform itself**
+(erunpaas) — its umbrellas wrap erun's *own* component charts (`erun-backend-*`,
+`erun-powerdns`, `erun-docs`). A regular tenant that only runs agent envs never
+uses it, and it never wraps the runtime `erun-devops` chart (see What this is
+not).
+
 The reusable charts and modules stay erun's; the tenant owns only the thin
 wrappers and the env-specific values. This skill packages ERun's accumulated
 best practices for platform deploy wiring — the conventions encoded here are
@@ -34,6 +40,13 @@ namespace `frs-prod`). The worked paths below use `frs` / `prod`.
 - It does **not** build the runtime image — that is `erun-build-env`, which
   produces the `<tenant>-devops` Dockerfile that bakes these artifacts + the
   deploy skills into the custom image.
+- It does **not** own the runtime `erun-devops` chart. The runtime pod is a
+  universal per-env concern (every tenant has one, platform or not); it deploys
+  from the published `erun-devops` chart with the image swapped via
+  `imageOverrides.erun-devops` (customised by `erun-build-env`). Never add an
+  `erun-devops` or `<tenant>-devops` umbrella under `<tenant>-devops/k8s/` here —
+  `erun deploy` matches the runtime release name and would install it as the
+  runtime chart, shadowing the published one.
 
 ## Step 1 — resolve the erun version and registry to pin to
 
@@ -233,10 +246,12 @@ erun-backend-api:
   # add genuinely prod-specific overrides here
 ```
 
-Do this for **every** component you deploy — one `<tenant>-<component>` umbrella
-dir per wrapped erun chart (`erun-backend-api`, `erun-backend-postgres`,
-`erun-backend-db`, `erun-powerdns`, `erun-docs`, …), e.g. `frs-backend-api/`
-wrapping `erun-backend-api`. Keep each values file to genuinely env-specific
+Do this for **every** platform component you deploy — one `<tenant>-<component>`
+umbrella dir per wrapped erun chart. This is the closed set of the erun
+platform's components (`erun-backend-api`, `erun-backend-postgres`,
+`erun-backend-db`, `erun-powerdns`, `erun-docs`) — **never** the runtime
+`erun-devops` chart (see What this is not). E.g. `frs-backend-api/` wraps
+`erun-backend-api`. Keep each values file to genuinely env-specific
 overrides; the published charts carry the defaults.
 
 **Track `Chart.lock`, ignore the built `charts/`.** Resolving an umbrella's
@@ -335,6 +350,7 @@ not deliverables — they belong in the git worktree, not `${ERUN_OUTPUTS_DIR}`.
 | `helm dependency build` 404s on the OCI chart | That version's chart isn't published. `erun push`/`erun release` publishes image + chart together — pin to a version that has been pushed. |
 | `erun deploy` fails: `values file not found for environment "<env>": …/<component>/values.<env>.yaml` | That umbrella chart has no per-env values file for the env being deployed. Create `<component>/values.<env>.yaml` (an empty/comment-only file is valid). Remember the agent env: `values.local.yaml` is required too, since the desktop deploys `<tenant>-local`. |
 | Operator asks to put the Cloudflare token in `<env>.tfvars` | Refuse. The token is a secret injected as `TF_VAR_cloudflare_api_token` from `CLOUDFLARE_API_TOKEN` at apply time — it must not be committed. |
+| An `erun-devops`/`<tenant>-devops` umbrella appears under `<tenant>-devops/k8s/` | That is the runtime chart, not this skill's concern. Remove it: the runtime deploys from the published `erun-devops` chart + `imageOverrides` (customise the image with `erun-build-env`, which may add pod shape via a runtime umbrella it owns). `erun deploy` matches the runtime release name and would otherwise install this umbrella as the runtime chart, shadowing the published one. |
 
 ## Important
 

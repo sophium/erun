@@ -116,9 +116,68 @@ On deploy, the image rides into the published `erun-devops` chart as
 runtime container's image changes. The next `erun deploy` or `erun open`
 rolls the custom image out.
 
+## Step 6 — customise the runtime pod shape (optional)
+
+The image customises **what's installed**; some needs are **pod-shape** and a
+Dockerfile can't express them — a sidecar container, an extra volume/mount, extra
+env, or the cluster RBAC a sidecar needs. For those, wrap the published
+`erun-devops` chart in a `<tenant>-devops` umbrella — **reference it, never fork
+it**. Skip this step unless you have such a need; image-only via `imageOverrides`
+(Step 5) is the default and adds no chart.
+
+Create `<tenant>-devops/k8s/<tenant>-devops/` — the dir name, the `Chart.yaml`
+`name:`, and the helm release are all `<tenant>-devops` (the runtime release
+name):
+
+```yaml
+# acme-devops/k8s/acme-devops/Chart.yaml
+apiVersion: v2
+name: acme-devops
+version: 0.1.0
+dependencies:
+  - name: erun-devops
+    version: "1.0.0"                 # the runtime version from Step 1
+    repository: "oci://ghcr.io/sophium/charts"
+```
+
+Supply the pod shape through the published chart's extension hooks, nested under
+the `erun-devops` subchart key, in a **per-env** `values.<env>.yaml` (one for
+every env this env deploys to — a missing one fails `erun deploy`):
+
+```yaml
+# acme-devops/k8s/acme-devops/values.prod.yaml
+erun-devops:
+  extraContainers:                   # sidecars added to the runtime pod
+    - name: cache
+      image: redis:7
+  extraVolumes:
+    - name: scratch
+      emptyDir: {}
+  extraVolumeMounts:                 # mounted on the erun-devops container
+    - name: scratch
+      mountPath: /scratch
+  extraEnv:                          # extra env on the erun-devops container
+    - name: FOO
+      value: bar
+  extraRules:                        # extra cluster RBAC for the pod's SA
+    - apiGroups: [""]
+      resources: ["nodes"]
+      verbs: ["get", "list"]
+```
+
+`erun deploy` picks this up as the runtime chart (it matches the runtime release
+name), `helm dependency build`s it, and **re-scopes every runtime value it sets
+— tenant, ports, cloud context, MCP auth, and the `imageOverrides.erun-devops`
+image from Step 5 — under the `erun-devops.` subchart key**, so the wrapped
+runtime is wired exactly as the published chart would be. Track `Chart.lock`
+(committed) and gitignore `charts/*.tgz`, as the platform umbrellas do.
+
 ## Important
 
 - Always extend `erun-devops`; do not replace it with an unrelated base —
   the entrypoint, agents, and in-pod tooling live in that image.
 - Keep the `FROM` version aligned with the env's `runtimeversion`. After
   an `erun upgrade`, rebuild the custom image against the new version.
+- The optional runtime umbrella (Step 6) **references** the published
+  `erun-devops` chart as a subchart; never fork its templates. A knob you need
+  that the chart doesn't expose is a change to `erun-devops`, not a copy here.
