@@ -1,6 +1,6 @@
 ---
 name: erun-enable-hosting-edge
-description: Stand up the public hosting edge for an erun cluster — a Traefik ingress controller, cert-manager, and a Cloudflare DNS-01 ClusterIssuer that issues wildcard TLS for the services zone — by applying the terraform-erun-cluster-edge module. Use when the user says "enable the hosting edge", "enable public hosting", "set up TLS ingress for erun", "apply the cluster edge", "set up cert-manager and traefik", "issue wildcard TLS for the services zone", or any similar request to make a cluster's services reachable at public HTTPS hostnames.
+description: Stand up the public hosting edge for an erun cluster — a Traefik ingress controller, cert-manager, and a Cloudflare DNS-01 ClusterIssuer that issues wildcard TLS for the services zone — by applying the terraform-erun-cluster-edge module, and maintain, repair, and upgrade that edge afterwards by re-pinning the module ?ref to the env's erun version and re-applying to reconcile drift. Use when the user says "enable the hosting edge", "enable public hosting", "set up TLS ingress for erun", "apply the cluster edge", "set up cert-manager and traefik", "issue wildcard TLS for the services zone", "upgrade the hosting edge", "repair the cluster edge", "reconcile cert-manager and traefik", "bump the cluster edge to <version>", "maintain the public hosting edge", or any similar request to make a cluster's services reachable at public HTTPS hostnames.
 ---
 
 # Enable the public hosting edge
@@ -39,7 +39,7 @@ token rides in `TF_VAR_cloudflare_api_token`, never on the command line.
 
 ```sh
 # Pin to the running erun version; off-pod, fall back to main.
-version=$(erun version 2>/dev/null | head -n1 | tr -d '[:space:]' | sed 's/^v//')
+version=$(erun version --no-registry 2>/dev/null | head -n1 | awk '{print $2}')
 ref="v${version:-main}"; [ "$ref" = "vmain" ] && ref="main"
 
 workdir=$(mktemp -d); cd "$workdir"
@@ -102,6 +102,31 @@ A `Ready` ClusterIssuer + a `Ready` wildcard Certificate means the edge can
 terminate TLS for `*.<services-zone>`. Route an env's service through it with
 `erun expose` (which writes the PowerDNS record and the Host-routing Ingress);
 reference the issuer on the Ingress as `cert-manager.io/cluster-issuer: erun-cloudflare`.
+
+## Maintenance, repair & upgrade
+
+This is an idempotent **apply** skill, not a scaffolder: it writes no durable local
+files to drift — the only artifact is cluster state, and every run reconciles it. So
+re-running *is* the maintenance path, not an error.
+
+- **Detect.** If the edge is already applied (`kubectl get clusterissuer erun-cloudflare`
+  succeeds), do not stop — enter maintenance mode and reconcile in place.
+- **Upgrade.** Re-pin the module to the env's erun version, then re-apply. Recompute
+  `ref` from the running `erun version` (the pin moves with `erun upgrade`, or an explicit
+  target), set the module `source = "…terraform-erun-cluster-edge?ref=v<version>"` to that
+  one version, then re-run the **Apply** flow above: `terraform init` fetches the new ref
+  and `terraform apply` rolls it out. One erun version across the pin; bump it after
+  `erun upgrade`.
+- **Repair.** The apply already reconciles cert-manager, Traefik, and the Cloudflare
+  DNS-01 `ClusterIssuer`, so healing drift is the same re-apply — no separate repair path,
+  no new scaffold artifacts. Preview with `terraform plan` first and apply only the version
+  pin + reconciliation; never let a re-apply clobber operator-owned cluster content.
+- **Clean up.** Nothing local to prune (each run uses a throwaway `mktemp -d`), and
+  re-apply reconciles rather than accumulates — so cleanup isn't part of the normal
+  path. Tearing the edge down (removing cert-manager, Traefik, the `ClusterIssuer`)
+  is `erun terraform destroy` — a deliberate, high-blast-radius operator action that
+  drops TLS for the whole services zone; point the operator at it, never run it as a
+  side effect of maintenance.
 
 ## If issuance stalls
 

@@ -740,6 +740,27 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_umbrella_component_builds_helm_dependencies", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_runtime_umbrella_rescopes_set_values", func(t *testing.T) {
+		// The repo-local runtime chart (team-devops) is an umbrella that wraps
+		// the published erun-devops chart as a subchart. helm does not pass
+		// top-level --set values into subchart scope, so deploy nests every
+		// runtime value under the erun-devops.* subchart key (--set, --set-string,
+		// and --set-json alike) and helm-dependency-builds the umbrella before the
+		// upgrade. Any imageOverrides.erun-devops a custom build env contributes
+		// rides the same --set-string path and is nested identically. A plain
+		// (non-umbrella) runtime chart keeps top-level --sets; see
+		// dry_run_from_devops_cwd.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsUmbrellaChart(t, setup, "team", "dev", "team-devops", "erun-devops")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.0",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "deploy/dry_run_runtime_umbrella_rescopes_set_values", normalize.Apply(result.Combined))
+	})
+
 	t.Run("project_k8s_plan_groups_parallel_step", func(t *testing.T) {
 		// When .erun/config.yaml declares a k8s.deployments plan with a
 		// parallel-group step (a list as the item), deploy must group those

@@ -1,6 +1,6 @@
 ---
 name: erun-blueprint-platform
-description: Blueprint the deploy artifacts for a hosted erun platform — a per-env Terraform tree (terraform-<tenant>/) whose modules wrap erun's published Terraform modules, and the per-env Helm values overlays plus thin umbrella charts that reference erun's published OCI charts — all version-pinned to the erun release the environment runs. Use when the user says "blueprint the platform", "scaffold the platform terraform", "set up the platform helm charts and terraform", "create the terraform-<tenant> structure", "blueprint erun platform deploy", "set up platform deploy artifacts", or any similar request to lay down the Terraform + Helm wiring an operator applies to stand up a hosted erun platform.
+description: Blueprint the deploy artifacts for a hosted erun platform — a per-env Terraform tree (terraform-<tenant>/) whose modules wrap erun's published Terraform modules, and the per-env Helm values overlays plus thin umbrella charts that reference erun's published OCI charts — all version-pinned to the erun release the environment runs; also maintains, repairs, and upgrades an existing terraform-<tenant>/ tree and its <tenant>-<component> umbrellas in place, re-pinning every erun reference to the target version and filling gaps against this contract. Use when the user says "blueprint the platform", "scaffold the platform terraform", "set up the platform helm charts and terraform", "create the terraform-<tenant> structure", "blueprint erun platform deploy", "set up platform deploy artifacts", "upgrade the platform terraform", "repair the platform charts", "reconcile the terraform-<tenant> tree", "bump the platform to <version>", "maintain the platform deploy artifacts", or any similar request to lay down or update the Terraform + Helm wiring an operator applies to stand up a hosted erun platform.
 ---
 
 # Blueprint a hosted erun platform's deploy artifacts
@@ -17,14 +17,20 @@ copy them, pinned to the erun version the environment runs:
   consumes, plus thin umbrella `Chart.yaml` wrappers that depend on erun's
   published **OCI** charts.
 
+This skill is for the tenant that **deploys the erun platform itself**
+(erunpaas) — its umbrellas wrap erun's *own* component charts (`erun-backend-*`,
+`erun-powerdns`, `erun-docs`). A regular tenant that only runs agent envs never
+uses it, and it never wraps the runtime `erun-devops` chart (see What this is
+not).
+
 The reusable charts and modules stay erun's; the tenant owns only the thin
 wrappers and the env-specific values. This skill packages ERun's accumulated
 best practices for platform deploy wiring — the conventions encoded here are
 the contract; do not freelance them.
 
 Throughout, `<tenant>` is the env's tenant and `<env>` is the **short**
-environment name (e.g. tenant `frs`, env `prod` → `terraform-frs/prod/`,
-namespace `frs-prod`). The worked paths below use `frs` / `prod`.
+environment name (e.g. tenant `acme`, env `prod` → `terraform-acme/prod/`,
+namespace `acme-prod`). The worked paths below use `acme` / `prod`.
 
 ## What this is not
 
@@ -34,6 +40,13 @@ namespace `frs-prod`). The worked paths below use `frs` / `prod`.
 - It does **not** build the runtime image — that is `erun-build-env`, which
   produces the `<tenant>-devops` Dockerfile that bakes these artifacts + the
   deploy skills into the custom image.
+- It does **not** own the runtime `erun-devops` chart. The runtime pod is a
+  universal per-env concern (every tenant has one, platform or not); it deploys
+  from the published `erun-devops` chart with the image swapped via
+  `imageOverrides.erun-devops` (customised by `erun-build-env`). Never add an
+  `erun-devops` or `<tenant>-devops` umbrella under `<tenant>-devops/k8s/` here —
+  `erun deploy` matches the runtime release name and would install it as the
+  runtime chart, shadowing the published one.
 
 ## Step 1 — resolve the erun version and registry to pin to
 
@@ -42,11 +55,13 @@ platform the env will run.
 
 ```sh
 if [ -n "${ERUN_TENANT:-}" ]; then
-    # Inside a deployed env: the running version is the one to pin.
-    erun_version=$(erun version | head -n 1 | tr -d '[:space:]' | sed 's/^v//')
+    # Inside a deployed env: the running version is the one to pin. The first
+    # line is "erun <version> (<commit> built <date>)" — take the 2nd field;
+    # --no-registry skips the remote version lookup.
+    erun_version=$(erun version --no-registry | head -n 1 | awk '{print $2}')
 else
-    # On a laptop: read the env's pinned runtimeversion.
-    grep 'runtimeversion' ~/.config/erun/<tenant>/<environment>/config.yaml
+    # On a laptop: pull the value out of the env's "runtimeversion: <ver>" line.
+    erun_version=$(grep 'runtimeversion' ~/.config/erun/<tenant>/<environment>/config.yaml | awk '{print $2}')
 fi
 ref="v${erun_version}"          # Terraform module ref + Helm chart version
 ```
@@ -63,12 +78,12 @@ env's services via the folder's own `main.tf`, with values from `<env>.tfvars`.
 The tenant modules in `modules/` wrap erun's published modules.
 
 ```
-terraform-frs/
+terraform-acme/
 ├── common.tf                       # providers + shared locals — CANONICAL
 ├── variables.tf                    # shared variable declarations — CANONICAL
 ├── .gitignore                      # .terraform/, *.tfplan, *.tfstate*
 ├── modules/
-│   └── terraform-frs-cluster-edge/ # wraps erun's terraform-erun-cluster-edge
+│   └── terraform-acme-cluster-edge/ # wraps erun's terraform-erun-cluster-edge
 │       ├── main.tf
 │       ├── variables.tf
 │       └── outputs.tf
@@ -82,7 +97,7 @@ terraform-frs/
 There is **no `run.tf`** and **no per-env `apply.sh`/`setup.sh`/`confirm.sh`** —
 `erun terraform apply` provides that workflow (Step 4).
 
-**`terraform-frs/common.tf`** (canonical; symlinked into each env):
+**`terraform-acme/common.tf`** (canonical; symlinked into each env):
 
 ```hcl
 terraform {
@@ -100,7 +115,7 @@ provider "helm" {
 }
 ```
 
-**`terraform-frs/variables.tf`** (canonical; symlinked into each env). The
+**`terraform-acme/variables.tf`** (canonical; symlinked into each env). The
 Cloudflare token is **not** a tfvar — it is a secret injected at apply time as
 `TF_VAR_cloudflare_api_token` from the env's `CLOUDFLARE_API_TOKEN`:
 
@@ -113,7 +128,7 @@ variable "acme_email" { type = string }
 variable "services_zone" { type = string }
 ```
 
-**`terraform-frs/modules/terraform-frs-cluster-edge/main.tf`** — the tenant
+**`terraform-acme/modules/terraform-acme-cluster-edge/main.tf`** — the tenant
 module that wraps erun's published module, pinned to `<ref>`:
 
 ```hcl
@@ -138,12 +153,12 @@ Substitute the real `?ref=v<erun_version>` from Step 1. Add `variables.tf` /
 publishes more platform modules (e.g. `terraform-erun-cloudflare-services`),
 add a sibling tenant module under `modules/` the same way.
 
-**`terraform-frs/prod/main.tf`** — instantiates the tenant module(s) for this
+**`terraform-acme/prod/main.tf`** — instantiates the tenant module(s) for this
 env:
 
 ```hcl
 module "cluster_edge" {
-  source = "../modules/terraform-frs-cluster-edge"
+  source = "../modules/terraform-acme-cluster-edge"
 
   cloudflare_api_token = var.cloudflare_api_token
   acme_email           = var.acme_email
@@ -151,7 +166,7 @@ module "cluster_edge" {
 }
 ```
 
-**`terraform-frs/prod/prod.tfvars`** — env-specific values (no secrets):
+**`terraform-acme/prod/prod.tfvars`** — env-specific values (no secrets):
 
 ```hcl
 services_zone = "services.erunpaas.com"
@@ -162,20 +177,20 @@ Create the env folder's `common.tf` and `variables.tf` as **relative symlinks**
 to the root, so every env runs identical providers + var declarations:
 
 ```sh
-mkdir -p terraform-frs/prod
-ln -s ../common.tf    terraform-frs/prod/common.tf
-ln -s ../variables.tf terraform-frs/prod/variables.tf
+mkdir -p terraform-acme/prod
+ln -s ../common.tf    terraform-acme/prod/common.tf
+ln -s ../variables.tf terraform-acme/prod/variables.tf
 ```
 
 ## Step 3 — the Helm side
 
 Each platform component is a thin umbrella chart under
 `<tenant>-devops/k8s/<tenant>-<component>/` — the directory name, the `Chart.yaml`
-`name:`, and the Helm release are all `<tenant>-<component>` (e.g. `frs-docs`,
-`frs-backend-api`) — that **depends on** erun's published OCI chart
+`name:`, and the Helm release are all `<tenant>-<component>` (e.g. `acme-docs`,
+`acme-backend-api`) — that **depends on** erun's published OCI chart
 `erun-<component>` (never a copy), with its **per-env values** beside it. Name the
 directory for the tenant, not for the erun chart it wraps: `erun deploy` keys the
-component name off the directory, so `frs-docs/` deploys as `frs-docs` (wrapping
+component name off the directory, so `acme-docs/` deploys as `acme-docs` (wrapping
 `erun-docs`), not as `erun-docs`.
 
 Component selection is **opt-in**: `erun deploy` rolls out exactly the charts you
@@ -206,9 +221,9 @@ in.)
 So each component gets three files:
 
 ```yaml
-# <tenant>-devops/k8s/frs-backend-api/Chart.yaml   (dir name == chart name == <tenant>-<component>)
+# <tenant>-devops/k8s/acme-backend-api/Chart.yaml   (dir name == chart name == <tenant>-<component>)
 apiVersion: v2
-name: frs-backend-api
+name: acme-backend-api
 version: 0.1.0
 dependencies:
   - name: erun-backend-api
@@ -217,26 +232,28 @@ dependencies:
 ```
 
 ```yaml
-# <tenant>-devops/k8s/frs-backend-api/values.local.yaml
+# <tenant>-devops/k8s/acme-backend-api/values.local.yaml
 # Subchart values nest under the dependency name. Forward tenant + environment
 # (see note below); the published chart carries every other default.
 erun-backend-api:
-  tenant: <tenant>          # e.g. frs
+  tenant: <tenant>          # e.g. acme
   environment: <env>        # the short env name, e.g. local
 ```
 
 ```yaml
-# <tenant>-devops/k8s/frs-backend-api/values.prod.yaml
+# <tenant>-devops/k8s/acme-backend-api/values.prod.yaml
 erun-backend-api:
   tenant: <tenant>
   environment: <env>        # e.g. prod
   # add genuinely prod-specific overrides here
 ```
 
-Do this for **every** component you deploy — one `<tenant>-<component>` umbrella
-dir per wrapped erun chart (`erun-backend-api`, `erun-backend-postgres`,
-`erun-backend-db`, `erun-powerdns`, `erun-docs`, …), e.g. `frs-backend-api/`
-wrapping `erun-backend-api`. Keep each values file to genuinely env-specific
+Do this for **every** platform component you deploy — one `<tenant>-<component>`
+umbrella dir per wrapped erun chart. This is the closed set of the erun
+platform's components (`erun-backend-api`, `erun-backend-postgres`,
+`erun-backend-db`, `erun-powerdns`, `erun-docs`) — **never** the runtime
+`erun-devops` chart (see What this is not). E.g. `acme-backend-api/` wraps
+`erun-backend-api`. Keep each values file to genuinely env-specific
 overrides; the published charts carry the defaults.
 
 **Track `Chart.lock`, ignore the built `charts/`.** Resolving an umbrella's
@@ -304,12 +321,12 @@ or `kubectl`:
 
 ```sh
 # Terraform: formatting + per-env structure are valid (init needs network for the module).
-terraform -chdir=terraform-frs/prod fmt -check -recursive ..
-terraform -chdir=terraform-frs/prod validate || true   # validate after `init` resolves the module
+terraform -chdir=terraform-acme/prod fmt -check -recursive ..
+terraform -chdir=terraform-acme/prod validate || true   # validate after `init` resolves the module
 
 # Symlinks resolve and point at the canonical root files.
-readlink terraform-frs/prod/common.tf      # -> ../common.tf
-readlink terraform-frs/prod/variables.tf   # -> ../variables.tf
+readlink terraform-acme/prod/common.tf      # -> ../common.tf
+readlink terraform-acme/prod/variables.tf   # -> ../variables.tf
 
 # Helm umbrellas: dependencies resolve from OCI, and every chart has a values
 # file for every env it deploys to (missing one fails erun deploy — see below).
@@ -325,16 +342,79 @@ done
 Commit the tree with `git` so the team shares the wiring. These are repo files,
 not deliverables — they belong in the git worktree, not `${ERUN_OUTPUTS_DIR}`.
 
+## Maintenance, repair & upgrade
+
+This skill owns the artifacts for their whole life, not just day one. **If
+`terraform-<tenant>/` or any `<tenant>-<component>` umbrella already exists, do
+not stop — enter maintenance mode** and reconcile the existing tree to the
+target erun version in place. First scaffold and ongoing maintenance are the
+same skill.
+
+**Target version.** Same resolution as Step 1: the env's `runtimeversion`
+(which moves with `erun upgrade`), or an explicit version the operator names.
+One erun version pins every reference on both sides — the Terraform `?ref` and
+every Helm chart `version` — so bump them together, never piecemeal.
+
+**Detect, then reconcile against this skill's own contract:**
+
+- **Repair gaps** — fill what the contract requires but the tree lacks: absent
+  `common.tf`/`variables.tf` symlinks, a missing per-env `values.<env>.yaml`
+  (including `values.local.yaml` for the agent env), a missing
+  `**/charts/*.tgz` entry in the repo `.gitignore`, an uncommitted
+  `Chart.lock`. Add only what's missing; never clobber the project's own
+  content (env-specific tfvars, values overrides, extra tenant modules).
+- **Upgrade the pins** — re-pin **every** erun reference to `<ref>`/`<version>`:
+  the terraform module `source = "…?ref=v<version>"` in each
+  `modules/terraform-<tenant>-*/main.tf`, and each `<tenant>-<component>`
+  umbrella `Chart.yaml` dependency `version:`.
+- **Refresh derived artifacts** — after re-pinning, run `helm dependency update`
+  on each umbrella to regenerate `Chart.lock` + `charts/` for the new versions,
+  and commit the updated `Chart.lock`. (`helm dependency build` only rebuilds
+  `charts/` from an *in-sync* lock and errors on a stale one — it fits a fresh
+  scaffold with no lock and `erun deploy`'s pre-install step, not a re-pin.) Then
+  re-apply terraform (`erun terraform apply`, Step 4) so the tree carries the
+  upgraded module.
+- **Clean up what the reconcile supersedes** — after previewing, remove only what
+  no longer belongs: a `<tenant>-<component>` umbrella dir dropped from the plan
+  (repo side), and in the env's namespace a deployed release the new set replaces —
+  a hand-deployed release whose name doesn't match the `<tenant>-<component>`
+  convention (e.g. `erun-backend-api`, now owned by the umbrella as
+  `acme-backend-api`), or a component release no longer selected (`helm
+  --kube-context <ctx> -n <ns> list` finds them). Uninstall a superseded release so
+  the new one can adopt its resources — **but only when it is stateless.** A
+  stateful release (postgres, or anything owning a data PVC) must not be casually
+  `helm uninstall`ed: that can delete the PVC and the data with it (a chart-templated
+  PVC — like postgres's — is removed on uninstall). Preserve the volume
+  (retain it, let the new release adopt it) or **stop and flag it for explicit
+  operator action** — never drop data, `/home/erun`, or a Secret as a side effect of
+  a rename. When in doubt, leave it and report it.
+
+**Idempotent, in-place, preview first.** Safe to re-run; edit files where they
+live; **show the diff/plan before writing** — the pin changes and the files
+you'd add — and let the operator confirm. Touch only version pins and genuine
+gaps; never rewrite working project content, and never regenerate a file just
+to reformat it.
+
+**Confirm the tenant on a loose match.** If the existing `terraform-<tenant>/`
+looks unrelated to the tenant you were asked about, confirm before reconciling
+rather than assuming.
+
+Maintenance does not relax the exclusions: still **never** wrap the runtime
+`erun-devops` chart or add an `erun-devops`/`<tenant>-devops` umbrella (see What
+this is not), and the runtime chart still deploys on its own with an empty
+selection.
+
 ## Error behaviour
 
 | Failure mode | Recovery |
 |---|---|
-| `terraform-<tenant>/` already exists | Stop. Do not overwrite. Offer to add a new `<env>/` folder into the existing tree, or confirm a different tenant. |
+| `terraform-<tenant>/` already exists | Not a stop — enter maintenance mode (see Maintenance, repair & upgrade): reconcile and upgrade the existing tree in place — re-pin every erun reference to the target version, fill gaps against the contract, refresh derived artifacts — after showing the diff/plan first. Offer to add a new `<env>/` folder if that's the ask. Confirm the tenant first only when the match looks unrelated. |
 | The erun version can't be resolved (no `erun version`, no `runtimeversion`) | Stop and ask which erun version to pin to. Never default to `main` for production wiring — the edge and charts must match the deployed platform. |
 | `terraform-erun-cluster-edge?ref=v<ver>` doesn't resolve on `terraform init` | The version has no matching git tag yet. Confirm the erun release exists; pin to the latest released `vX.Y.Z`. |
 | `helm dependency build` 404s on the OCI chart | That version's chart isn't published. `erun push`/`erun release` publishes image + chart together — pin to a version that has been pushed. |
 | `erun deploy` fails: `values file not found for environment "<env>": …/<component>/values.<env>.yaml` | That umbrella chart has no per-env values file for the env being deployed. Create `<component>/values.<env>.yaml` (an empty/comment-only file is valid). Remember the agent env: `values.local.yaml` is required too, since the desktop deploys `<tenant>-local`. |
 | Operator asks to put the Cloudflare token in `<env>.tfvars` | Refuse. The token is a secret injected as `TF_VAR_cloudflare_api_token` from `CLOUDFLARE_API_TOKEN` at apply time — it must not be committed. |
+| An `erun-devops`/`<tenant>-devops` umbrella appears under `<tenant>-devops/k8s/` | That is the runtime chart, not this skill's concern. Remove it: the runtime deploys from the published `erun-devops` chart + `imageOverrides` (customise the image with `erun-build-env`, which may add pod shape via a runtime umbrella it owns). `erun deploy` matches the runtime release name and would otherwise install this umbrella as the runtime chart, shadowing the published one. |
 
 ## Important
 

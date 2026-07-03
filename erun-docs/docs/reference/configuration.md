@@ -195,6 +195,20 @@ Request overrides are invisible to `erun open`'s redeploy drift detection — it
 
 `imageOverrides.erun-devops` is a supported public value of the runtime chart: it replaces the image the `erun-devops` container runs while keeping the rest of the chart canonical. The supported way to set it is the [`EnvConfig.runtimeimage`](#envconfig) field (`erun init --runtime-image`), which erun passes as `--set-string imageOverrides.erun-devops=<image>` on every deploy of the published chart — the intended path for custom toolchain images built `FROM` the published `erun-devops` image (the `erun-build-env` [skill](/concepts/skills) walks through it). When `runtimeimage` is unset, erun passes no override and the overlay may set the value directly.
 
+### Runtime pod shape extensions {#advanced-pod-shape}
+
+The runtime chart exposes five additive, no-op-by-default extension points for build environments that need pod shape the [image override](#advanced-image-overrides) cannot express — a sidecar, an extra volume/mount, extra env, or the cluster RBAC a sidecar needs:
+
+| Value | Merges into |
+|---|---|
+| `extraContainers` | the pod's `containers` list (sidecars) |
+| `extraVolumes` | the pod's `volumes` list |
+| `extraVolumeMounts` | the `erun-devops` container's `volumeMounts` |
+| `extraEnv` | the `erun-devops` container's `env` |
+| `extraRules` | an extra ClusterRole (`<release>-extra`) bound to the runtime ServiceAccount, for cluster-scoped RBAC a sidecar needs; namespaced access already comes from the built-in admin binding |
+
+Set them through the env's values overlay. Deployed as the published chart directly, they sit at the top level. When a `<tenant>-devops` umbrella **wraps** the published chart as a subchart (the `erun-build-env` [skill](/concepts/skills) Step 6), nest them under the `erun-devops` key — and `erun deploy` **re-scopes every runtime value it sets** (tenant, ports, cloud context, MCP auth, and the `imageOverrides.erun-devops` image) under that same `erun-devops.` subchart key, so the wrapped runtime is wired exactly as the published chart would be. A plain (non-wrapped) runtime keeps top-level values.
+
 An example overlay:
 
 ```yaml
