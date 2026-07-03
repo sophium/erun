@@ -84,6 +84,32 @@ var defaultRules = []Replacement{
 	{regexp.MustCompile(`[ \t]+\n`), "\n"},
 }
 
+// PromptConfirm normalizes output that contains a promptui "[Y/n]" confirm,
+// for scenarios that force the promptui TTY branch. The readline repaints the
+// confirm line an unpredictable number of times — and, under the slower
+// coverage-instrumented binary, leaks partial repaint fragments after the
+// committed answer and re-emits the answer line — so the prompt render is not a
+// stable contract. Every repaint frame or fragment carries the readline cursor
+// block or the "[Y/n]" marker, which the committed answer and the action lines
+// never do; drop those, collapse the re-emitted answer line, and keep the
+// deterministic remainder as the golden. It runs the default rules first, so
+// callers use it in place of Apply, not alongside it.
+func PromptConfirm(s string) string {
+	s = strings.ReplaceAll(Apply(s), "\r", "")
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if strings.Contains(line, "█") || strings.Contains(line, "[Y/n]") {
+			continue
+		}
+		if len(out) > 0 && out[len(out)-1] == line {
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n") + "\n"
+}
+
 // Apply runs the default rule set over the given output. Use this for the
 // majority of scenarios; the optional extra rules are appended after the
 // defaults so they can override or further normalize the result.

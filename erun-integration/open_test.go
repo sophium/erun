@@ -225,7 +225,7 @@ func TestOpen(t *testing.T) {
 		}
 		envVars := append(stubKubectlNotFound(t, setup), "ERUN_FORCE_TTY=1", "SHELL=/bin/zsh")
 		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars, Stdin: "y\n"})
-		golden.Equal(t, "open/alias_prompt_dry_run_accept_traces_append", normalize.Apply(result.Combined))
+		golden.Equal(t, "open/alias_prompt_dry_run_accept_traces_append", normalize.PromptConfirm(result.Combined))
 		// Dry-run must not mutate the startup file (side effect outside the
 		// captured streams).
 		body, err := os.ReadFile(zshrc)
@@ -250,7 +250,7 @@ func TestOpen(t *testing.T) {
 		}
 		envVars := append(stubKubectlNotFound(t, setup), "ERUN_FORCE_TTY=1", "SHELL=/bin/zsh")
 		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars, Stdin: "n\n"})
-		golden.Equal(t, "open/alias_prompt_decline_prints_hint", normalize.Apply(result.Combined))
+		golden.Equal(t, "open/alias_prompt_decline_prints_hint", normalize.PromptConfirm(result.Combined))
 		body, err := os.ReadFile(zshrc)
 		if err != nil {
 			t.Fatalf("read ~/.zshrc: %v", err)
@@ -291,7 +291,7 @@ func TestOpen(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		golden.Equal(t, "open/alias_prompt_accept_appends_alias_real_run", normalize.Apply(result.Combined))
+		golden.Equal(t, "open/alias_prompt_accept_appends_alias_real_run", normalize.PromptConfirm(result.Combined))
 		// The append is a side effect outside the captured streams: the
 		// seeded content must survive and the alias line must follow it.
 		body, err := os.ReadFile(zshrc)
@@ -417,7 +417,7 @@ func TestOpen(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		golden.Equal(t, "open/alias_prompt_bash_accept_creates_bashrc", normalize.Apply(result.Combined))
+		golden.Equal(t, "open/alias_prompt_bash_accept_creates_bashrc", normalize.PromptConfirm(result.Combined))
 		body, err := os.ReadFile(filepath.Join(setup.Home, ".bashrc"))
 		if err != nil {
 			t.Fatalf("read ~/.bashrc (append must create the missing file): %v", err)

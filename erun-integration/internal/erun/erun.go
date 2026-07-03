@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -192,21 +193,31 @@ func Run(t testing.TB, args []string, opts RunOptions) Result {
 
 	timeout := opts.Timeout
 	if timeout == 0 {
-		timeout = 30 * time.Second
+		// This cap is a hang-net, not a latency SLA: a --dry-run command is
+		// normally sub-second, but a real command can wall-clock for tens of
+		// seconds on transient host name-service latency (a cold macOS resolver
+		// stalls a name lookup ~15-30s) without the command being wrong. Keep
+		// the cap well above that environmental variance so it fails only a
+		// genuine deadlock, not a slow-but-correct run. If it ever fires, the
+		// goroutine dump below names the blocked call.
+		timeout = 120 * time.Second
 	}
 
 	cmd := exec.Command(bin, args...)
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
-	env := make([]string, 0, len(opts.Env)+1)
+	env := make([]string, 0, len(opts.Env)+2)
 	env = append(env, opts.Env...)
 	env = append(env, CoverDirEnv+"="+coverDir)
+	// So a SIGQUIT on timeout dumps every goroutine's stack, not just the
+	// current one — turning an opaque hang into a report of where it stuck.
+	env = append(env, "GOTRACEBACK=all")
 	cmd.Env = env
 	// Always feed stdin from a buffer (empty when the scenario passes no
 	// Stdin) so the subprocess never inherits the developer's terminal. This
 	// keeps stdin a non-terminal pipe locally, matching CI's /dev/null stdin,
-	// so stdin-TTY-gated branches (e.g. the #587 interactive-gh-auth gate)
+	// so stdin-TTY-gated branches (e.g. the interactive-gh-auth gate)
 	// behave the same everywhere. Scenarios that need the interactive branch
 	// opt in explicitly via the ERUN_FORCE_TTY seam.
 	cmd.Stdin = bytes.NewBufferString(opts.Stdin)
@@ -232,9 +243,17 @@ func Run(t testing.TB, args []string, opts RunOptions) Result {
 			}
 		}
 	case <-time.After(timeout):
-		_ = cmd.Process.Kill()
-		<-done
-		t.Fatalf("erun timed out after %s; args=%v", timeout, args)
+		// SIGQUIT makes the Go runtime print all goroutine stacks to stderr
+		// before dying; give it a moment to flush so the failure names the
+		// blocked call. Fall back to Kill if it ignores the signal.
+		_ = cmd.Process.Signal(syscall.SIGQUIT)
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			_ = cmd.Process.Kill()
+			<-done
+		}
+		t.Fatalf("erun timed out after %s; args=%v\n--- subprocess goroutine dump (stderr) ---\n%s", timeout, args, stderr.String())
 	}
 
 	return Result{
