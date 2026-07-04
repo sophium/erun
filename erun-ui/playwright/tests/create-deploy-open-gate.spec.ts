@@ -42,7 +42,7 @@ test.describe('create → deploy → open gate (#644)', () => {
       const deployStarted = app.page.waitForResponse(
         (response) =>
           response.url().includes('/__erun_invoke') &&
-          (response.request().postData() ?? '').includes('StartDeploySession'),
+          (response.request().postData() ?? '').includes('StartInitialDeploySession'),
       );
       await emitWailsEvent(app.page, 'environment-initialized', { tenant, environment });
 
@@ -76,7 +76,7 @@ test.describe('create → deploy → open gate (#644)', () => {
       const deployStarted = app.page.waitForResponse(
         (response) =>
           response.url().includes('/__erun_invoke') &&
-          (response.request().postData() ?? '').includes('StartDeploySession'),
+          (response.request().postData() ?? '').includes('StartInitialDeploySession'),
       );
       await emitWailsEvent(app.page, 'environment-initialized', { tenant, environment });
       await expect(app.titlebar.statusMessage()).toContainText(

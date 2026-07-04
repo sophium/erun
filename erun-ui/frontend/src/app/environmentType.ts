@@ -15,6 +15,15 @@ export function environmentTypeIsRuntime(type: string | undefined): boolean {
   return type === 'runtime';
 }
 
+// environmentTypeBuildsHereLocally reports whether the env builds its runtime
+// image from source on THIS machine — a local-agent env. Only such an env can
+// "create & deploy a new version" from the desktop (a remote-agent env builds in
+// its own pod; a runtime env consumes published versions). Mirrors the
+// BuildsHere() && !RemoteWorktree() pair in erun-common.
+export function environmentTypeBuildsHereLocally(type: string | undefined): boolean {
+  return type === 'local-agent';
+}
+
 // environmentTypeBuildsHere reports whether the env builds its own runtime
 // image rather than consuming a published one. An empty/unset type is treated
 // as building so an unresolved env keeps today's behaviour.

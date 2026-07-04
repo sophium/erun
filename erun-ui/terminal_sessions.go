@@ -289,11 +289,50 @@ func (a *App) StartInitSession(selection uiSelection, cols, rows int) (startSess
 	return a.runErunCommandInLocal(selection, cols, rows, buildInitArgs(selection))
 }
 
+// StartDeploySession runs the pure `erun deploy` primitive: it installs an
+// already-published version by reference and NEVER builds. Producing a new
+// version from working-tree source is the explicit StartCreateVersionSession
+// action — the Deploy button consumes a version, it does not produce one
+// (erun-ui/AGENTS.md: the desktop composes pure primitives). With no picked
+// version buildDeployArgs uses --current, i.e. redeploy the env's current
+// version.
 func (a *App) StartDeploySession(selection uiSelection, cols, rows int) (startSessionResult, error) {
-	// Agent envs build fresh code, so the desktop composes the pure primitives
-	// (build -> push -> deploy) itself rather than the `build --deploy` operator
-	// shortcut (erun-ui/AGENTS.md). Runtime/published-chart envs install a
-	// version by reference via the in-shell `erun deploy` path below.
+	return a.runErunCommandInLocal(selection, cols, rows, a.appendMCPAuthPublicKeyFlag(buildDeployArgs(selection)))
+}
+
+// StartCreateVersionSession is the explicit "create & deploy new version"
+// action: it builds the env's working tree into a fresh version, pushes it, and
+// deploys it (build -> push -> deploy). Only a local-agent env has local source
+// to build; a runtime/consumer env produces nothing, so this errors and the
+// operator deploys a published version instead. The env-create flow's first
+// deploy runs through here too.
+func (a *App) StartCreateVersionSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
+	selection = normalizeSelection(selection)
+	if a.ctx == nil || strings.TrimSpace(selection.Tenant) == "" || strings.TrimSpace(selection.Environment) == "" {
+		return startSessionResult{}, fmt.Errorf("tenant and environment are required")
+	}
+	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+		Tenant:      selection.Tenant,
+		Environment: selection.Environment,
+	})
+	if err != nil {
+		return startSessionResult{}, err
+	}
+	if !result.EnvConfig.BuildsHere() || result.RemoteRepo() {
+		return startSessionResult{}, fmt.Errorf("%s/%s has no local source to build; deploy a published version instead", selection.Tenant, selection.Environment)
+	}
+	go func() {
+		_ = a.runDeployOrchestration(a.activityWatcherCtx(), selection, result, false)
+	}()
+	return startSessionResult{Selection: normalizeSelection(selection), Orchestrated: true}, nil
+}
+
+// StartInitialDeploySession stands a freshly-created env up in one step: a
+// builds-here env builds+pushes+deploys its first version, while a
+// runtime/consumer env installs its configured version by reference. Creating an
+// env is itself the explicit "produce a version" act, so building here is not
+// the implicit-build the plain Deploy button avoids.
+func (a *App) StartInitialDeploySession(selection uiSelection, cols, rows int) (startSessionResult, error) {
 	if result, ok := a.maybeStartDeployOrchestration(selection, false); ok {
 		return result, nil
 	}

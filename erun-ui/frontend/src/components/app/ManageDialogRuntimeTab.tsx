@@ -1,19 +1,18 @@
-import { Check, ChevronsUpDown, Rocket } from 'lucide-react';
+import { Check, ChevronsUpDown, Plus, Rocket } from 'lucide-react';
 import * as React from 'react';
 
 import {
-  deployComponentLabel,
-  deployComponentSelectionChanged,
-} from '@/app/deployComponentsSelection';
-import { environmentTypeIsRemoteWorktree, environmentTypeIsRuntime } from '@/app/environmentType';
+  environmentTypeBuildsHereLocally,
+  environmentTypeIsRemoteWorktree,
+  environmentTypeIsRuntime,
+} from '@/app/environmentType';
 import { readError } from '@/app/errors';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import {
-  saveManageDeployComponents,
   selectManageVersionSuggestion,
   setManageVersionChoicesOpen,
+  submitCreateVersion,
   submitManageDeploy,
-  toggleManageDeployComponent,
   updateManageConfig,
   updateManageDialog,
 } from '@/app/manageEnvironmentThunks';
@@ -26,6 +25,7 @@ import {
 } from '@/app/versionSuggestions';
 import { CheckboxField, TextField } from '@/components/app/ManageDialog.fields';
 import { parseIdleTrafficBytes } from '@/components/app/ManageDialog.helpers';
+import { DeployComponentsField } from '@/components/app/ManageDialogDeployComponents';
 import { RuntimeResourceControls } from '@/components/app/RuntimeResourceControls';
 import { SelectField } from '@/components/app/SelectField';
 import { Button } from '@/components/ui/button';
@@ -51,11 +51,13 @@ export function RuntimeTab(): React.ReactElement {
   return (
     <>
       <RuntimeDeployField
+        dialog={dialog}
         configuredVersion={dialog.config.runtimeVersion}
         overrideVersion={dialog.version}
         suggestions={versionSuggestions}
         choicesOpen={dialog.choicesOpen}
         disabled={dialog.busy || dialog.configLoading}
+        showCreateVersion={environmentTypeBuildsHereLocally(dialog.config.type)}
         onValueChange={(version) => {
           dispatch(updateManageDialog({ version }));
         }}
@@ -70,69 +72,15 @@ export function RuntimeTab(): React.ReactElement {
             dispatch(showTerminalMessage(readError(error)));
           })
         }
+        onCreateVersion={() =>
+          void dispatch(submitCreateVersion()).catch((error: unknown) => {
+            dispatch(showTerminalMessage(readError(error)));
+          })
+        }
       />
-      <DeployComponentsField dialog={dialog} />
       <RuntimePodFields dialog={dialog} />
       <IdleStopFields dialog={dialog} />
     </>
-  );
-}
-
-// Toggling changes only the one-shot selection the next Deploy uses; it becomes
-// this env's saved default only when the operator clicks "Set as default".
-function DeployComponentsField({ dialog }: { dialog: ManageDialog }): React.ReactElement {
-  const dispatch = useAppDispatch();
-  const { deployComponents, deployComponentSelection, deployComponentsLoading } = dialog;
-  const selectionSet = new Set(deployComponentSelection);
-  const changed = deployComponentSelectionChanged(deployComponents, deployComponentSelection);
-  return (
-    <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
-      <div className="flex items-center justify-between gap-2">
-        <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">
-          Components to deploy
-        </div>
-        <Button
-          id="environment-config-save-deploy-components"
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={dialog.busy || dialog.configLoading || deployComponentsLoading || !changed}
-          onClick={() =>
-            void dispatch(saveManageDeployComponents()).catch((error: unknown) => {
-              dispatch(showTerminalMessage(readError(error)));
-            })
-          }
-        >
-          Set as default
-        </Button>
-      </div>
-      <p className="text-xs leading-[1.35] text-muted-foreground">
-        Deploy rolls out exactly the checked charts. The runtime is checked by default; set them as
-        the default for this environment on this machine.
-      </p>
-      {deployComponentsLoading ? (
-        <div className="text-sm leading-[1.35] text-muted-foreground">Loading components…</div>
-      ) : deployComponents.length === 0 ? (
-        <div className="text-sm leading-[1.35] text-muted-foreground">
-          No deployable components found for this environment.
-        </div>
-      ) : (
-        <div className="grid gap-2">
-          {deployComponents.map((component) => (
-            <CheckboxField
-              key={component.name}
-              id={`environment-config-deploy-component-${component.name}`}
-              label={deployComponentLabel(component)}
-              checked={selectionSet.has(component.name)}
-              disabled={dialog.busy || dialog.configLoading}
-              onChange={(checked) => {
-                dispatch(toggleManageDeployComponent(component.name, checked));
-              }}
-            />
-          ))}
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -320,25 +268,31 @@ function parseAutoStartMode(mode: string): boolean | undefined {
 }
 
 function RuntimeDeployField({
+  dialog,
   configuredVersion,
   overrideVersion,
   suggestions,
   choicesOpen,
   disabled,
+  showCreateVersion,
   onValueChange,
   onChoicesOpenChange,
   onSelect,
   onDeploy,
+  onCreateVersion,
 }: {
+  dialog: ManageDialog;
   configuredVersion: string;
   overrideVersion: string;
   suggestions: UIVersionSuggestion[];
   choicesOpen: boolean;
   disabled?: boolean;
+  showCreateVersion: boolean;
   onValueChange: (version: string) => void;
   onChoicesOpenChange: (open: boolean) => void;
   onSelect: (suggestion: UIVersionSuggestion | undefined) => void;
   onDeploy: () => void;
+  onCreateVersion: () => void;
 }): React.ReactElement {
   return (
     <div className="grid gap-2">
@@ -351,6 +305,7 @@ function RuntimeDeployField({
           {configuredVersion || 'Not configured'}
         </div>
         <RuntimeDeployVersionPicker
+          dialog={dialog}
           overrideVersion={overrideVersion}
           suggestions={suggestions}
           choicesOpen={choicesOpen}
@@ -359,16 +314,46 @@ function RuntimeDeployField({
           onChoicesOpenChange={onChoicesOpenChange}
           onSelect={onSelect}
         />
-        <Button type="button" size="sm" disabled={disabled} onClick={onDeploy}>
+        <Button
+          id="environment-config-deploy"
+          type="button"
+          size="sm"
+          // Deploy installs a chosen version by reference, so it stays disabled
+          // until the operator picks one — never a build, never a guess — and
+          // until that version's component charts have been probed, so it can't
+          // fire the new version with the previous version's chart selection.
+          disabled={
+            disabled === true || overrideVersion.trim() === '' || dialog.deployComponentsLoading
+          }
+          onClick={onDeploy}
+        >
           <Rocket aria-hidden="true" />
           Deploy
         </Button>
       </div>
+      {/* Deploy above installs an existing published version by reference and never
+          builds. Producing a new version from this env's source is this explicit,
+          separate action (local-agent envs only). */}
+      {showCreateVersion && (
+        <Button
+          id="environment-config-create-version"
+          type="button"
+          size="sm"
+          variant="outline"
+          className="justify-self-start"
+          disabled={disabled}
+          onClick={onCreateVersion}
+        >
+          <Plus aria-hidden="true" />
+          Create &amp; deploy new version
+        </Button>
+      )}
     </div>
   );
 }
 
 function RuntimeDeployVersionPicker({
+  dialog,
   overrideVersion,
   suggestions,
   choicesOpen,
@@ -377,6 +362,7 @@ function RuntimeDeployVersionPicker({
   onChoicesOpenChange,
   onSelect,
 }: {
+  dialog: ManageDialog;
   overrideVersion: string;
   suggestions: UIVersionSuggestion[];
   choicesOpen: boolean;
@@ -413,12 +399,12 @@ function RuntimeDeployVersionPicker({
             <ChevronsUpDown />
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-80 p-0" align="start">
+        <PopoverContent className="w-[26rem] max-w-[calc(100vw-2rem)] p-0" align="start">
           <Command>
             <CommandInput placeholder="Search versions..." />
             <CommandList>
               <CommandEmpty>No version found.</CommandEmpty>
-              <CommandGroup>
+              <CommandGroup heading="Version to deploy">
                 {suggestions.map((suggestion) => (
                   <RuntimeDeploySuggestionItem
                     key={`${suggestion.version}:${suggestion.image ?? ''}:${suggestion.source ?? ''}:${suggestion.label}`}
@@ -430,6 +416,11 @@ function RuntimeDeployVersionPicker({
               </CommandGroup>
             </CommandList>
           </Command>
+          {/* Pick a version above, then choose which of its charts to roll out:
+              one panel so the component list always reads as that version's. */}
+          <div className="max-h-64 overflow-y-auto border-t border-border p-3">
+            <DeployComponentsField dialog={dialog} />
+          </div>
         </PopoverContent>
       </Popover>
     </div>

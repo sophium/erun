@@ -73,29 +73,78 @@ export class ManageDialog {
     return this.locator().locator('#environment-config-idle-timeout');
   }
 
-  // "Version to deploy": empty means deploy the current code (a builds-here
-  // env orchestrates build → push → deploy); a typed version installs that
-  // published version by reference.
+  // "Version to deploy": the version the Deploy button installs by reference
+  // (empty = the env's current version). Deploy never builds — producing a new
+  // version is the separate "Create & deploy new version" action.
   runtimeVersionInput(): Locator {
     return this.locator().locator('#manage-version');
   }
 
+  // The version + components live in one popover: the chevron beside the version
+  // field opens the version list and, below it, that version's component
+  // checklist. Idempotent — a no-op when the panel is already open.
+  async openVersionPicker(): Promise<void> {
+    if (
+      await this.deployComponentsHeading()
+        .isVisible()
+        .catch(() => false)
+    ) {
+      return;
+    }
+    await this.locator().getByRole('button', { name: 'Show version choices' }).click();
+    await this.deployComponentsHeading().waitFor({ state: 'visible' });
+  }
+
+  // Picks a version from the picker's suggestion list, which keeps the panel
+  // open so the version-scoped component checklist is reachable in one flow.
+  async pickVersion(version: string): Promise<void> {
+    await this.openVersionPicker();
+    const escaped = version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    await this.page.getByRole('option', { name: new RegExp(escaped) }).click();
+  }
+
+  // Deploy installs the selected version by reference (never builds), so it is
+  // disabled until a version is chosen.
+  deployButton(): Locator {
+    return this.locator().locator('#environment-config-deploy');
+  }
+
+  // "Create & deploy new version" (build → push → deploy) — shown only for a
+  // local-agent env, which owns source to build.
+  createVersionButton(): Locator {
+    return this.locator().locator('#environment-config-create-version');
+  }
+
   async deploy(): Promise<void> {
-    const button = this.locator().getByRole('button', { name: 'Deploy' });
+    const button = this.deployButton();
     await button.scrollIntoViewIfNeeded();
     await button.click();
   }
 
+  // The checklist lives in the version-picker popover, which Radix portals to
+  // the document root — so these query at page level, not inside the dialog.
   // `name` is the component's canonical name: a chart dir name, or the runtime
   // release name <tenant>-devops for the runtime item.
   deployComponentCheckbox(name: string): Locator {
-    return this.locator().locator(`#environment-config-deploy-component-${name}`);
+    return this.page.locator(`#environment-config-deploy-component-${name}`);
+  }
+
+  // Version-scoped ("Components in <version> to deploy") only for sourceless
+  // envs; a local env's charts aren't version-filtered, so it stays plain.
+  deployComponentsHeading(): Locator {
+    return this.page.locator('#environment-config-deploy-components-heading');
+  }
+
+  // Shown in place of the checklist until a version is picked — the charts are
+  // that version's, so there's nothing to choose before one is selected.
+  deployComponentsHint(): Locator {
+    return this.page.locator('#environment-config-deploy-components-hint');
   }
 
   // Enabled only when the selection differs from the saved default. Matched by
   // id, not name, so it never collides with the dialog footer's Save.
   saveDeployComponentsButton(): Locator {
-    return this.locator().locator('#environment-config-save-deploy-components');
+    return this.page.locator('#environment-config-save-deploy-components');
   }
 
   async selectTab(name: ManageTab): Promise<void> {

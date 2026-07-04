@@ -3,7 +3,9 @@ import type { StartSessionResult, UISelection } from '@/types';
 import {
   CloseSession,
   StartAISession,
+  StartCreateVersionSession,
   StartDeploySession,
+  StartInitialDeploySession,
   StartInitSession,
   StartLocalSession,
   StartSession,
@@ -448,25 +450,57 @@ export const startInitSelection =
     await dispatch(activateLocalAfterCommand(selection, result));
   };
 
-export const startDeploySelection =
-  (selection: UISelection): AppThunk<Promise<void>> =>
+// runDeploySessionSelection is the shared body for the deploy-family thunks:
+// surface the deploy status, size the terminal, invoke the given Start*Session
+// binding, then activate Local. Only the Wails method and the status message
+// differ across the three.
+const runDeploySessionSelection =
+  (
+    selection: UISelection,
+    start: (runSelection: UISelection, cols: number, rows: number) => Promise<unknown>,
+    message: string,
+  ): AppThunk<Promise<void>> =>
   async (dispatch, _getState, extra) => {
     const controller = requireController(extra);
     const runSelection = { ...selection };
     dispatch(setSelected(selection));
     dispatch(setTerminalCopyOutput(''));
     dispatch(setTerminalCopyStatus(''));
-    dispatch(
-      showTerminalMessage(
-        `Deploying runtime for ${selection.tenant} / ${selection.environment}...`,
-        true,
-      ),
-    );
+    dispatch(showTerminalMessage(message, true));
     controller.fitTerminal();
     const { cols, rows } = controller.terminalSize();
-    const result = (await StartDeploySession(runSelection, cols, rows)) as StartSessionResult;
+    const result = (await start(runSelection, cols, rows)) as StartSessionResult;
     await dispatch(activateLocalAfterCommand(selection, result));
   };
+
+// startDeploySelection installs an already-published version by reference — the
+// Deploy button. It never builds.
+export const startDeploySelection = (selection: UISelection): AppThunk<Promise<void>> =>
+  runDeploySessionSelection(
+    selection,
+    StartDeploySession,
+    `Deploying runtime for ${selection.tenant} / ${selection.environment}...`,
+  );
+
+// startInitialDeploySelection stands a freshly-created env up: build+push+deploy
+// for a builds-here env, install-by-reference for a runtime env (the env-create
+// flow's first deploy — the explicit act of producing the env's first version).
+export const startInitialDeploySelection = (selection: UISelection): AppThunk<Promise<void>> =>
+  runDeploySessionSelection(
+    selection,
+    StartInitialDeploySession,
+    `Deploying runtime for ${selection.tenant} / ${selection.environment}...`,
+  );
+
+// startCreateVersionSelection is the explicit "create & deploy new version":
+// build this env's working tree into a fresh version, push it, and deploy it —
+// local-agent envs only.
+export const startCreateVersionSelection = (selection: UISelection): AppThunk<Promise<void>> =>
+  runDeploySessionSelection(
+    selection,
+    StartCreateVersionSession,
+    `Building & deploying a new version for ${selection.tenant} / ${selection.environment}...`,
+  );
 
 export const addTerminalTab = (): AppThunk<Promise<void>> => async (dispatch, getState, extra) => {
   const controller = requireController(extra);

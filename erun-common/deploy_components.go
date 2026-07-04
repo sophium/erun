@@ -230,15 +230,14 @@ type DeployableComponent struct {
 	Selected bool `json:"selected"`
 }
 
-const (
-	deployComponentSourceLocal     = "local-chart"
-	deployComponentSourcePublished = "published-chart"
-)
+const deployComponentSourcePublished = "published-chart"
 
-// ResolveDeployableComponents lists an environment's deployable components with
-// Selected reflecting what a plain `erun deploy` would roll out, so a transport can
-// render the checklist pre-populated. It reads only: it never builds, pushes, or
-// requires a version, and is the single source both CLI help and the desktop consume.
+// ResolveDeployableComponents lists the published component charts a deploy of a
+// chosen version can roll out — the canonical platform components plus the runtime,
+// installed by reference — so a transport can render the checklist. The list is the
+// same for every env type because the deploy version, not the env's local source,
+// decides which charts exist; a transport filters it to those actually published at
+// the selected version. It reads only: it never builds, pushes, or requires a version.
 func ResolveDeployableComponents(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DeployTarget) ([]DeployableComponent, error) {
 	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	now = freezeNow(now)
@@ -250,64 +249,16 @@ func ResolveDeployableComponents(store DeployStore, findProjectRoot ProjectFinde
 	tenant := resolvedTarget.Tenant
 	runtimeName := RuntimeReleaseName(tenant)
 
-	var contexts []KubernetesDeployContext
-	if !resolvedTarget.RemoteRepo() {
-		contexts, err = ResolveCurrentKubernetesDeployContexts(findProjectRoot, resolveKubernetesDeployContext, resolvedTarget.RepoPath)
-		if err != nil && !isNoLocalDeployChartsError(err) {
-			return nil, err
-		}
-	}
-
-	plan, err := loadProjectK8sPlanForRepo(resolvedTarget.RepoPath, resolvedTarget.Environment)
-	if err != nil {
-		return nil, err
-	}
-	selected, _ := resolveSelectedDeployComponents(target.Components, resolvedTarget.EnvConfig.Deploy.Components, plan)
-	sortDeployContextsByDeployOrder(contexts, plan)
+	// The checklist lists what deploying a chosen version rolls out — the published
+	// component charts (installed by reference) plus the runtime — the same for every
+	// env type, because the version (not the env's local source) decides which charts
+	// exist. A transport then filters this to the charts actually published at the
+	// selected version. Deploying local working-tree charts by name stays available
+	// to an operator via the CLI; the desktop checklist is a published-version view.
+	selected, _ := resolveSelectedDeployComponents(target.Components, resolvedTarget.EnvConfig.Deploy.Components, ProjectK8sConfig{})
 	runtimeSelected := deploySelectionIncludesRuntime(selected, tenant)
 
-	components := make([]DeployableComponent, 0, len(contexts)+1)
-	hasLocalRuntime := false
-	for _, deployContext := range contexts {
-		if deployContextOwnsRuntimeChart(deployContext, tenant) {
-			hasLocalRuntime = true
-			components = append(components, DeployableComponent{
-				Name:     runtimeName,
-				Runtime:  true,
-				Source:   deployComponentSourceLocal,
-				Selected: runtimeSelected,
-			})
-			continue
-		}
-		name := strings.TrimSpace(deployContext.ComponentName)
-		components = append(components, DeployableComponent{
-			Name:     name,
-			Source:   deployComponentSourceLocal,
-			Selected: slices.Contains(selected, name),
-		})
-	}
-	components = appendSourcelessPublishableComponents(components, resolvedTarget, selected)
-	if !hasLocalRuntime {
-		// No repo-local runtime chart: offer the published erun-devops chart as the
-		// runtime item so the operator can still bootstrap/heal the env.
-		components = append(components, DeployableComponent{
-			Name:     runtimeName,
-			Runtime:  true,
-			Source:   deployComponentSourcePublished,
-			Selected: runtimeSelected,
-		})
-	}
-	return components, nil
-}
-
-// appendSourcelessPublishableComponents adds the publishable platform components
-// (deployed by reference, in default-rank order) to a sourceless env's checklist,
-// so the operator can select them even though there is no local umbrella chart.
-// A no-op for a local-repo env, which lists its local charts instead.
-func appendSourcelessPublishableComponents(components []DeployableComponent, target OpenResult, selected []string) []DeployableComponent {
-	if !target.RemoteRepo() {
-		return components
-	}
+	components := make([]DeployableComponent, 0, len(publishablePlatformComponentNames())+1)
 	for _, name := range publishablePlatformComponentNames() {
 		components = append(components, DeployableComponent{
 			Name:     name,
@@ -315,7 +266,13 @@ func appendSourcelessPublishableComponents(components []DeployableComponent, tar
 			Selected: slices.Contains(selected, name),
 		})
 	}
-	return components
+	components = append(components, DeployableComponent{
+		Name:     runtimeName,
+		Runtime:  true,
+		Source:   deployComponentSourcePublished,
+		Selected: runtimeSelected,
+	})
+	return components, nil
 }
 
 // sortDeployContextsByDeployOrder ranks contexts by the k8s plan (hardcoded fallback
