@@ -319,8 +319,12 @@ function RuntimeDeployField({
           type="button"
           size="sm"
           // Deploy installs a chosen version by reference, so it stays disabled
-          // until the operator picks one — never a build, never a guess.
-          disabled={disabled === true || overrideVersion.trim() === ''}
+          // until the operator picks one — never a build, never a guess — and
+          // until that version's component charts have been probed, so it can't
+          // fire the new version with the previous version's chart selection.
+          disabled={
+            disabled === true || overrideVersion.trim() === '' || dialog.deployComponentsLoading
+          }
           onClick={onDeploy}
         >
           <Rocket aria-hidden="true" />

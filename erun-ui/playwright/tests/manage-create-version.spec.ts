@@ -22,14 +22,19 @@ test.describe('manage dialog — deploy vs create new version (#739)', () => {
     await expect(createVersion).toBeVisible();
     await expect(createVersion).toContainText('Create & deploy new version');
 
-    // Capture the two-action layout, then the open picker so the version list +
-    // component checklist one-panel is visible for review. Freeze animations so
-    // the popover is captured fully faded-in (not mid-transition).
+    // Capture the two-action layout, then the open picker. A local-agent env's
+    // checklist is not version-gated (its charts come from the working tree and
+    // the create-version flow uses the selection), so the charts show straight
+    // away. Freeze animations so the popover is captured fully faded-in.
     await page.screenshot({
       path: 'test-results/runtime-tab-local-agent.png',
       animations: 'disabled',
     });
     await app.manageDialog.openVersionPicker();
+    await expect(
+      app.manageDialog.deployComponentCheckbox(`${seededEnv.tenant}-devops`),
+    ).toBeVisible();
+    await expect(app.manageDialog.deployComponentsHint()).toHaveCount(0);
     await page.screenshot({
       path: 'test-results/runtime-tab-version-picker.png',
       animations: 'disabled',

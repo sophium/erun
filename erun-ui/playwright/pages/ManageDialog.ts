@@ -135,6 +135,12 @@ export class ManageDialog {
     return this.page.locator('#environment-config-deploy-components-heading');
   }
 
+  // Shown in place of the checklist until a version is picked — the charts are
+  // that version's, so there's nothing to choose before one is selected.
+  deployComponentsHint(): Locator {
+    return this.page.locator('#environment-config-deploy-components-hint');
+  }
+
   // Enabled only when the selection differs from the saved default. Matched by
   // id, not name, so it never collides with the dialog footer's Save.
   saveDeployComponentsButton(): Locator {

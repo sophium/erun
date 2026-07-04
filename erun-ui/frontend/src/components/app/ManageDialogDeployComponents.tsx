@@ -47,7 +47,16 @@ export function DeployComponentsField({ dialog }: { dialog: ManageDialog }): Rea
   const changed = deployComponentSelectionChanged(deployComponents, deployComponentSelection);
   // Only a sourceless env's checklist is version-scoped (see deployComponentsCopy).
   const versioned = environmentTypeIsRemoteWorktree(dialog.config.type);
-  const deployVersion = (dialog.version || dialog.config.runtimeVersion).trim();
+  // The checklist follows the version chosen in the picker above — never the
+  // env's current version. For a version-scoped env there is nothing to choose
+  // until one is picked (the charts are that version's), so the list is gated
+  // exactly like Deploy. A local-agent env's charts come from the working tree,
+  // not the registry: they don't depend on the version and the create-new-version
+  // flow (which mints its own version) still uses the selection, so its checklist
+  // is never gated.
+  const deployVersion = dialog.version.trim();
+  const versionPicked = deployVersion !== '';
+  const gated = versioned && !versionPicked;
   const { heading, helper, loadingText } = deployComponentsCopy(versioned, deployVersion);
   return (
     // No border of its own: it nests in the version-picker popover (RuntimeTab),
@@ -65,7 +74,9 @@ export function DeployComponentsField({ dialog }: { dialog: ManageDialog }): Rea
           type="button"
           size="sm"
           variant="outline"
-          disabled={dialog.busy || dialog.configLoading || deployComponentsLoading || !changed}
+          disabled={
+            dialog.busy || dialog.configLoading || deployComponentsLoading || gated || !changed
+          }
           onClick={() =>
             void dispatch(saveManageDeployComponents()).catch((error: unknown) => {
               dispatch(showTerminalMessage(readError(error)));
@@ -75,28 +86,39 @@ export function DeployComponentsField({ dialog }: { dialog: ManageDialog }): Rea
           Set as default
         </Button>
       </div>
-      <p className="text-xs leading-[1.35] text-muted-foreground">{helper}</p>
-      {deployComponentsLoading ? (
-        <div className="text-sm leading-[1.35] text-muted-foreground">{loadingText}</div>
-      ) : deployComponents.length === 0 ? (
-        <div className="text-sm leading-[1.35] text-muted-foreground">
-          No deployable components found for this environment.
-        </div>
+      {gated ? (
+        <p
+          id="environment-config-deploy-components-hint"
+          className="text-sm leading-[1.35] text-muted-foreground"
+        >
+          Pick a version to deploy above, then choose which of its charts to roll out.
+        </p>
       ) : (
-        <div className="grid gap-2">
-          {deployComponents.map((component) => (
-            <CheckboxField
-              key={component.name}
-              id={`environment-config-deploy-component-${component.name}`}
-              label={deployComponentLabel(component)}
-              checked={selectionSet.has(component.name)}
-              disabled={dialog.busy || dialog.configLoading}
-              onChange={(checked) => {
-                dispatch(toggleManageDeployComponent(component.name, checked));
-              }}
-            />
-          ))}
-        </div>
+        <>
+          <p className="text-xs leading-[1.35] text-muted-foreground">{helper}</p>
+          {deployComponentsLoading ? (
+            <div className="text-sm leading-[1.35] text-muted-foreground">{loadingText}</div>
+          ) : deployComponents.length === 0 ? (
+            <div className="text-sm leading-[1.35] text-muted-foreground">
+              No deployable components found for this environment.
+            </div>
+          ) : (
+            <div className="grid gap-2">
+              {deployComponents.map((component) => (
+                <CheckboxField
+                  key={component.name}
+                  id={`environment-config-deploy-component-${component.name}`}
+                  label={deployComponentLabel(component)}
+                  checked={selectionSet.has(component.name)}
+                  disabled={dialog.busy || dialog.configLoading}
+                  onChange={(checked) => {
+                    dispatch(toggleManageDeployComponent(component.name, checked));
+                  }}
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

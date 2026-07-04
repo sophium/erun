@@ -97,7 +97,12 @@ export const updateManageDialog =
       patchManageDialog({
         ...values,
         error: values.error ?? '',
-        ...(versionReset ? { versionImage: '', choicesOpen: false } : {}),
+        // Mark the checklist loading now (not just when the debounced probe
+        // fires) so reopening the picker mid-debounce shows the loading state
+        // for the new version, never the previous version's charts.
+        ...(versionReset
+          ? { versionImage: '', choicesOpen: false, deployComponentsLoading: true }
+          : {}),
       }),
     );
     // A changed deploy version changes which component charts are published, so
