@@ -40,15 +40,15 @@ func (a *App) LoadDeployComponents(selection uiSelection) ([]eruncommon.Deployab
 }
 
 // filterDeployComponentsByChartAvailability drops published component charts the
-// registry has not published at the version this deploy would use, so a
-// sourceless env's checklist offers only charts a deploy could actually pull. It
-// applies only to sourceless (RemoteRepo) envs — a local-repo env deploys its
-// own charts, always available — and always keeps the runtime item, whose chart
+// registry has not published at the version this deploy would use, so the
+// checklist offers only charts a deploy could actually pull at that version. It
+// applies to every env type — the deploy version, not the env's local source,
+// decides which charts exist — and always keeps the runtime item, whose chart
 // exists at every deployable version (a genuinely missing one surfaces at deploy
 // time as PublishedChartNotFoundError, not here).
 func (a *App) filterDeployComponentsByChartAvailability(tenant, environment, version string, components []eruncommon.DeployableComponent) []eruncommon.DeployableComponent {
 	env, _, err := a.deps.store.LoadEnvConfig(tenant, environment)
-	if err != nil || !env.RemoteWorktree() {
+	if err != nil {
 		return components
 	}
 	version = strings.TrimSpace(version)

@@ -4,7 +4,7 @@ export {
   saveManageDeployComponents,
   toggleManageDeployComponent,
 } from './manageDeployComponentsThunks';
-export { submitManageDeploy } from './manageDeployThunks';
+export { submitCreateVersion, submitManageDeploy } from './manageDeployThunks';
 export { manageDialogTabHasUnsavedChanges } from './manageDialogHelpers';
 export {
   chooseWorkspaceSyncLocalFolder,
