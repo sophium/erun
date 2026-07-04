@@ -85,11 +85,14 @@ function DeployComponentsField({ dialog }: { dialog: ManageDialog }): React.Reac
   const { deployComponents, deployComponentSelection, deployComponentsLoading } = dialog;
   const selectionSet = new Set(deployComponentSelection);
   const changed = deployComponentSelectionChanged(deployComponents, deployComponentSelection);
+  // The offered charts depend on the version this deploy would use: the picked
+  // version-to-deploy, else the env's current runtime version.
+  const deployVersion = (dialog.version || dialog.config.runtimeVersion).trim();
   return (
     <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
       <div className="flex items-center justify-between gap-2">
         <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">
-          Components to deploy
+          {deployVersion ? `Components in ${deployVersion} to deploy` : 'Components to deploy'}
         </div>
         <Button
           id="environment-config-save-deploy-components"
@@ -107,11 +110,14 @@ function DeployComponentsField({ dialog }: { dialog: ManageDialog }): React.Reac
         </Button>
       </div>
       <p className="text-xs leading-[1.35] text-muted-foreground">
-        Deploy rolls out exactly the checked charts. The runtime is checked by default; set them as
-        the default for this environment on this machine.
+        Deploy rolls out exactly the checked charts. Only charts published at the selected version
+        are offered; the runtime is checked by default. Set them as the default for this environment
+        on this machine.
       </p>
       {deployComponentsLoading ? (
-        <div className="text-sm leading-[1.35] text-muted-foreground">Loading components…</div>
+        <div className="text-sm leading-[1.35] text-muted-foreground">
+          {deployVersion ? `Checking charts published at ${deployVersion}…` : 'Loading components…'}
+        </div>
       ) : deployComponents.length === 0 ? (
         <div className="text-sm leading-[1.35] text-muted-foreground">
           No deployable components found for this environment.

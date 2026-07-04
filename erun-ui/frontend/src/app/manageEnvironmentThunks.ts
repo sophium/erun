@@ -1,5 +1,9 @@
 export { startManageCloudContext, stopManageCloudContext } from './manageCloudContextThunks';
 export { submitManageDelete } from './manageDeleteThunks';
+export {
+  saveManageDeployComponents,
+  toggleManageDeployComponent,
+} from './manageDeployComponentsThunks';
 export { submitManageDeploy } from './manageDeployThunks';
 export { manageDialogTabHasUnsavedChanges } from './manageDialogHelpers';
 export {
@@ -7,12 +11,10 @@ export {
   closeManageDialog,
   loadManageConfig,
   openManageDialog,
-  saveManageDeployComponents,
   selectManageVersionSuggestion,
   setManageTab,
   setManageVersionChoicesOpen,
   submitManageConfig,
-  toggleManageDeployComponent,
   toggleManageVersionChoices,
   updateManageClaudeConfig,
   updateManageCloudAliasSlot,

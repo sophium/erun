@@ -80,6 +80,12 @@ export class ManageDialog {
     return this.locator().locator('#manage-version');
   }
 
+  // Typing a version drives the version-aware Components checklist (which charts
+  // are published at that version).
+  async setVersionToDeploy(version: string): Promise<void> {
+    await this.runtimeVersionInput().fill(version);
+  }
+
   async deploy(): Promise<void> {
     const button = this.locator().getByRole('button', { name: 'Deploy' });
     await button.scrollIntoViewIfNeeded();
