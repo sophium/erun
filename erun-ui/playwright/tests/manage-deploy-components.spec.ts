@@ -71,6 +71,20 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     await expect(runtime).toBeChecked();
     await expect(saveDefault).toBeDisabled();
 
+    // The checklist is a published-version view: a local-agent env shows the same
+    // canonical component charts published at 1.0.0 as a runtime env would (#737),
+    // never its local working-tree chart directories. The version, not the env's
+    // source, decides which charts exist.
+    for (const component of [
+      'erun-backend-postgres',
+      'erun-backend-db',
+      'erun-backend-api',
+      'erun-powerdns',
+      'erun-docs',
+    ]) {
+      await expect(app.manageDialog.deployComponentCheckbox(component)).toBeVisible();
+    }
+
     // The label must name the published erun-devops chart and present <tenant>-devops
     // only as the release name, never as a chart of its own — keeping the checklist
     // consistent with the versions the "Version to deploy" picker offers.
