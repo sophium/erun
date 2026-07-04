@@ -50,9 +50,9 @@ export function DeployComponentsField({ dialog }: { dialog: ManageDialog }): Rea
   const deployVersion = (dialog.version || dialog.config.runtimeVersion).trim();
   const { heading, helper, loadingText } = deployComponentsCopy(versioned, deployVersion);
   return (
-    // No border of its own: it nests inside the version-picker card (RuntimeTab),
-    // set off by a divider so it reads as that version's charts.
-    <div className="grid gap-3 border-t border-border pt-3">
+    // No border of its own: it nests in the version-picker popover (RuntimeTab),
+    // whose wrapper draws the divider so this reads as the chosen version's charts.
+    <div className="grid gap-3">
       <div className="flex items-center justify-between gap-2">
         <div
           id="environment-config-deploy-components-heading"

@@ -15,6 +15,13 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     await app.manageDialog.waitForOpen();
     await app.manageDialog.selectTab('Runtime');
 
+    // Deploy installs a chosen version by reference, so with no version picked
+    // yet it stays disabled — never an implicit build.
+    await expect(app.manageDialog.deployButton()).toBeDisabled();
+
+    // The component checklist lives inside the "Version to deploy" picker.
+    await app.manageDialog.openVersionPicker();
+
     const runtime = app.manageDialog.deployComponentCheckbox(runtimeName);
     const saveDefault = app.manageDialog.saveDeployComponentsButton();
 
@@ -63,6 +70,11 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     );
     await app.manageDialog.waitForOpen();
     await app.manageDialog.selectTab('Runtime');
+
+    // No version picked yet, so Deploy is disabled until the operator chooses one.
+    await expect(app.manageDialog.deployButton()).toBeDisabled();
+
+    await app.manageDialog.openVersionPicker();
 
     for (const component of [
       'erun-backend-postgres',
@@ -125,9 +137,16 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     await app.manageDialog.waitForOpen();
     await app.manageDialog.selectTab('Runtime');
 
-    // 1.0.0 published every component chart. A sourceless env version-scopes the
-    // heading (contrast the local env above, which stays plain).
-    await app.manageDialog.setVersionToDeploy('1.0.0');
+    // No version picked yet, so Deploy is disabled.
+    await expect(app.manageDialog.deployButton()).toBeDisabled();
+
+    // 1.0.0 published every component chart. Picking a version from the picker
+    // keeps the panel open so its component checklist is reachable in one flow,
+    // and a sourceless env version-scopes the heading (contrast the local env
+    // above, which stays plain).
+    await app.manageDialog.pickVersion('1.0.0');
+    // A chosen version enables Deploy (installs that version by reference).
+    await expect(app.manageDialog.deployButton()).toBeEnabled();
     await expect(app.manageDialog.deployComponentsHeading()).toHaveText(
       'Components in 1.0.0 to deploy',
     );
@@ -137,7 +156,7 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     await expect(app.manageDialog.deployComponentCheckbox(runtimeName)).toBeVisible();
 
     // 1.0.90 published only postgres + db; the other three drop off, runtime stays.
-    await app.manageDialog.setVersionToDeploy('1.0.90');
+    await app.manageDialog.pickVersion('1.0.90');
     await expect(app.manageDialog.deployComponentCheckbox('erun-backend-api')).toHaveCount(0);
     await expect(app.manageDialog.deployComponentCheckbox('erun-powerdns')).toHaveCount(0);
     await expect(app.manageDialog.deployComponentCheckbox('erun-docs')).toHaveCount(0);
@@ -146,7 +165,7 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     await expect(app.manageDialog.deployComponentCheckbox(runtimeName)).toBeVisible();
 
     // 1.0.50 published no component charts; only the runtime item remains.
-    await app.manageDialog.setVersionToDeploy('1.0.50');
+    await app.manageDialog.pickVersion('1.0.50');
     for (const component of platform) {
       await expect(app.manageDialog.deployComponentCheckbox(component)).toHaveCount(0);
     }

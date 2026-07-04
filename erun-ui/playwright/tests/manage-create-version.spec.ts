@@ -14,13 +14,26 @@ test.describe('manage dialog — deploy vs create new version (#739)', () => {
     await app.manageDialog.waitForOpen();
     await app.manageDialog.selectTab('Runtime');
 
+    // Deploy is visible but disabled until a version is chosen (it installs a
+    // version by reference, never an implicit build).
     await expect(app.manageDialog.deployButton()).toBeVisible();
+    await expect(app.manageDialog.deployButton()).toBeDisabled();
     const createVersion = app.manageDialog.createVersionButton();
     await expect(createVersion).toBeVisible();
     await expect(createVersion).toContainText('Create & deploy new version');
 
-    // Capture the rendered tab for visual review of the two-action layout.
-    await page.screenshot({ path: 'test-results/runtime-tab-local-agent.png' });
+    // Capture the two-action layout, then the open picker so the version list +
+    // component checklist one-panel is visible for review. Freeze animations so
+    // the popover is captured fully faded-in (not mid-transition).
+    await page.screenshot({
+      path: 'test-results/runtime-tab-local-agent.png',
+      animations: 'disabled',
+    });
+    await app.manageDialog.openVersionPicker();
+    await page.screenshot({
+      path: 'test-results/runtime-tab-version-picker.png',
+      animations: 'disabled',
+    });
 
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();

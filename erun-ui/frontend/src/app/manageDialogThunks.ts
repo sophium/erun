@@ -118,11 +118,9 @@ export const setManageVersionChoicesOpen =
     if (state.manageDialog.busy) {
       return;
     }
-    dispatch(
-      patchManageDialog({
-        choicesOpen: open && state.tenants.versionSuggestions.length > 0,
-      }),
-    );
+    // The popover is one panel — versions and that version's components — so it
+    // opens on request even before any version suggestion has loaded.
+    dispatch(patchManageDialog({ choicesOpen: open }));
   };
 
 export const selectManageVersionSuggestion =
@@ -131,11 +129,13 @@ export const selectManageVersionSuggestion =
     if (getState().manageDialog.busy) {
       return;
     }
+    // Keep the popover open after a pick so the operator continues to the chosen
+    // version's component checklist in the same panel.
     dispatch(
       patchManageDialog({
         version: suggestion?.version ?? '',
         versionImage: suggestion?.image ?? '',
-        choicesOpen: false,
+        choicesOpen: true,
       }),
     );
     // Picking a version is discrete, so re-probe the checklist immediately.

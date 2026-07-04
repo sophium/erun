@@ -50,38 +50,34 @@ export function RuntimeTab(): React.ReactElement {
   const versionSuggestions = useAppSelector((state) => state.tenants.versionSuggestions);
   return (
     <>
-      {/* Version + components are one control: pick a version, then choose which
-          of that version's charts to roll out. */}
-      <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
-        <RuntimeDeployField
-          configuredVersion={dialog.config.runtimeVersion}
-          overrideVersion={dialog.version}
-          suggestions={versionSuggestions}
-          choicesOpen={dialog.choicesOpen}
-          disabled={dialog.busy || dialog.configLoading}
-          showCreateVersion={environmentTypeBuildsHereLocally(dialog.config.type)}
-          onValueChange={(version) => {
-            dispatch(updateManageDialog({ version }));
-          }}
-          onChoicesOpenChange={(open) => {
-            dispatch(setManageVersionChoicesOpen(open));
-          }}
-          onSelect={(suggestion) => {
-            dispatch(selectManageVersionSuggestion(suggestion));
-          }}
-          onDeploy={() =>
-            void dispatch(submitManageDeploy()).catch((error: unknown) => {
-              dispatch(showTerminalMessage(readError(error)));
-            })
-          }
-          onCreateVersion={() =>
-            void dispatch(submitCreateVersion()).catch((error: unknown) => {
-              dispatch(showTerminalMessage(readError(error)));
-            })
-          }
-        />
-        <DeployComponentsField dialog={dialog} />
-      </div>
+      <RuntimeDeployField
+        dialog={dialog}
+        configuredVersion={dialog.config.runtimeVersion}
+        overrideVersion={dialog.version}
+        suggestions={versionSuggestions}
+        choicesOpen={dialog.choicesOpen}
+        disabled={dialog.busy || dialog.configLoading}
+        showCreateVersion={environmentTypeBuildsHereLocally(dialog.config.type)}
+        onValueChange={(version) => {
+          dispatch(updateManageDialog({ version }));
+        }}
+        onChoicesOpenChange={(open) => {
+          dispatch(setManageVersionChoicesOpen(open));
+        }}
+        onSelect={(suggestion) => {
+          dispatch(selectManageVersionSuggestion(suggestion));
+        }}
+        onDeploy={() =>
+          void dispatch(submitManageDeploy()).catch((error: unknown) => {
+            dispatch(showTerminalMessage(readError(error)));
+          })
+        }
+        onCreateVersion={() =>
+          void dispatch(submitCreateVersion()).catch((error: unknown) => {
+            dispatch(showTerminalMessage(readError(error)));
+          })
+        }
+      />
       <RuntimePodFields dialog={dialog} />
       <IdleStopFields dialog={dialog} />
     </>
@@ -272,6 +268,7 @@ function parseAutoStartMode(mode: string): boolean | undefined {
 }
 
 function RuntimeDeployField({
+  dialog,
   configuredVersion,
   overrideVersion,
   suggestions,
@@ -284,6 +281,7 @@ function RuntimeDeployField({
   onDeploy,
   onCreateVersion,
 }: {
+  dialog: ManageDialog;
   configuredVersion: string;
   overrideVersion: string;
   suggestions: UIVersionSuggestion[];
@@ -307,6 +305,7 @@ function RuntimeDeployField({
           {configuredVersion || 'Not configured'}
         </div>
         <RuntimeDeployVersionPicker
+          dialog={dialog}
           overrideVersion={overrideVersion}
           suggestions={suggestions}
           choicesOpen={choicesOpen}
@@ -319,7 +318,9 @@ function RuntimeDeployField({
           id="environment-config-deploy"
           type="button"
           size="sm"
-          disabled={disabled}
+          // Deploy installs a chosen version by reference, so it stays disabled
+          // until the operator picks one — never a build, never a guess.
+          disabled={disabled === true || overrideVersion.trim() === ''}
           onClick={onDeploy}
         >
           <Rocket aria-hidden="true" />
@@ -348,6 +349,7 @@ function RuntimeDeployField({
 }
 
 function RuntimeDeployVersionPicker({
+  dialog,
   overrideVersion,
   suggestions,
   choicesOpen,
@@ -356,6 +358,7 @@ function RuntimeDeployVersionPicker({
   onChoicesOpenChange,
   onSelect,
 }: {
+  dialog: ManageDialog;
   overrideVersion: string;
   suggestions: UIVersionSuggestion[];
   choicesOpen: boolean;
@@ -392,12 +395,12 @@ function RuntimeDeployVersionPicker({
             <ChevronsUpDown />
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-80 p-0" align="start">
+        <PopoverContent className="w-[26rem] max-w-[calc(100vw-2rem)] p-0" align="start">
           <Command>
             <CommandInput placeholder="Search versions..." />
             <CommandList>
               <CommandEmpty>No version found.</CommandEmpty>
-              <CommandGroup>
+              <CommandGroup heading="Version to deploy">
                 {suggestions.map((suggestion) => (
                   <RuntimeDeploySuggestionItem
                     key={`${suggestion.version}:${suggestion.image ?? ''}:${suggestion.source ?? ''}:${suggestion.label}`}
@@ -409,6 +412,11 @@ function RuntimeDeployVersionPicker({
               </CommandGroup>
             </CommandList>
           </Command>
+          {/* Pick a version above, then choose which of its charts to roll out:
+              one panel so the component list always reads as that version's. */}
+          <div className="max-h-64 overflow-y-auto border-t border-border p-3">
+            <DeployComponentsField dialog={dialog} />
+          </div>
         </PopoverContent>
       </Popover>
     </div>
