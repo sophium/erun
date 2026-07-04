@@ -5,7 +5,7 @@ import {
   deployComponentLabel,
   deployComponentSelectionChanged,
 } from '@/app/deployComponentsSelection';
-import { environmentTypeIsRemoteWorktree } from '@/app/environmentType';
+import { environmentTypeIsRemoteWorktree, environmentTypeIsRuntime } from '@/app/environmentType';
 import { readError } from '@/app/errors';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import {
@@ -245,7 +245,46 @@ function IdleStopFields({ dialog }: { dialog: ManageDialog }): React.ReactElemen
           dispatch(updateManageConfig({ disableBuildScript }));
         }}
       />
+      <MountSourceFields dialog={dialog} />
     </div>
+  );
+}
+
+// MountSourceFields renders the runtime-only opt-in for a mutable source
+// worktree: a toggle, and — once on — the git remote to clone. Extracted from
+// IdleStopFields to keep that function within its size/complexity budget.
+function MountSourceFields({ dialog }: { dialog: ManageDialog }): React.ReactElement | null {
+  const dispatch = useAppDispatch();
+  const config = dialog.config;
+  if (!environmentTypeIsRuntime(config.type)) {
+    return null;
+  }
+  return (
+    <>
+      <CheckboxField
+        id="environment-config-mountsource"
+        label="Mount source code"
+        helper="Clone the repository into a writable worktree in the runtime pod, checked out at the deployed release, so you can patch it live. Off by default — a runtime env deploys published charts and images by reference and needs no source."
+        checked={config.mountSource}
+        disabled={dialog.busy || dialog.configLoading}
+        onChange={(mountSource) => {
+          dispatch(updateManageConfig({ mountSource }));
+        }}
+      />
+      {config.mountSource && (
+        <TextField
+          id="environment-config-repourl"
+          label="Repository URL"
+          value={config.repoURL}
+          disabled={dialog.busy || dialog.configLoading}
+          placeholder="e.g. https://github.com/sophium/erun.git"
+          helper="Git remote cloned into the runtime pod at the deployed release tag. Required to mount source."
+          onChange={(repoURL) => {
+            dispatch(updateManageConfig({ repoURL }));
+          }}
+        />
+      )}
+    </>
   );
 }
 

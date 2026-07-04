@@ -107,6 +107,12 @@ type HelmDeployParams struct {
 	WorktreeStorage    string
 	WorktreeRepoName   string
 	WorktreeHostPath   string
+	// RepoURL / RepoRef drive the runtime pod's clone-at-boot of a mutable
+	// source worktree for a runtime env that opted into MountSource. RepoRef is
+	// the release tag (v<version>) the checkout starts from. Both empty for
+	// every other env.
+	RepoURL            string
+	RepoRef            string
 	SSHDEnabled        bool
 	MCPPort            int
 	APIPort            int
@@ -150,6 +156,11 @@ type HelmDeploySpec struct {
 	WorktreeStorage    string
 	WorktreeRepoName   string
 	WorktreeHostPath   string
+	// RepoURL / RepoRef mirror the HelmDeployParams fields of the same name; see
+	// their doc comment there. They surface as chart repoUrl/repoRef --sets only
+	// for a mount-source runtime deploy.
+	RepoURL            string
+	RepoRef            string
 	SSHDEnabled        bool
 	MCPPort            int
 	APIPort            int
@@ -1633,6 +1644,11 @@ func resolveWorktreeStorage(target OpenResult) string {
 	if target.EnvConfig.Type.IsValid() {
 		switch target.EnvConfig.Type {
 		case EnvironmentTypeRuntime:
+			// A runtime env is sourceless by default; opting into a mutable
+			// source worktree gives it a PVC checkout the pod clones at boot.
+			if target.EnvConfig.MountsRuntimeSource() {
+				return WorktreeStoragePVC
+			}
 			return WorktreeStorageNone
 		case EnvironmentTypeRemoteAgent:
 			return WorktreeStoragePVC
@@ -1681,6 +1697,8 @@ func (d HelmDeploySpec) Params(stdout, stderr io.Writer) HelmDeployParams {
 		WorktreeStorage:    d.WorktreeStorage,
 		WorktreeRepoName:   d.WorktreeRepoName,
 		WorktreeHostPath:   d.WorktreeHostPath,
+		RepoURL:            d.RepoURL,
+		RepoRef:            d.RepoRef,
 		SSHDEnabled:        d.SSHDEnabled,
 		MCPPort:            d.MCPPort,
 		APIPort:            d.APIPort,
@@ -1747,6 +1765,16 @@ func (d HelmDeploySpec) command() commandSpec {
 		"--set-string", "api.oidcAllowedIssuers="+escapeHelmSetValue(d.OIDCAllowedIssuers),
 		"--set", "api.postgres.reset="+formatHelmBool(d.ResetDatabase),
 	)
+	// Runtime source mount: only a runtime env that opted into MountSource
+	// carries a repo URL, so these --sets are absent for every other deploy and
+	// existing plans stay byte-for-byte unchanged. The pod clones repoUrl at
+	// repoRef into the PVC worktree on first boot.
+	if strings.TrimSpace(d.RepoURL) != "" {
+		args = append(args,
+			"--set-string", "repoUrl="+d.RepoURL,
+			"--set-string", "repoRef="+d.RepoRef,
+		)
+	}
 	// Cloudflare credential wiring is appended only when an env attached a
 	// Cloudflare alias, so existing (AWS-only / no-cloud) deploy plans are
 	// byte-for-byte unchanged. The token is never a --set value — it is
@@ -2382,6 +2410,8 @@ func helmDeployCommandSpec(params HelmDeployParams, chartPath string) commandSpe
 		WorktreeStorage:    params.WorktreeStorage,
 		WorktreeRepoName:   params.WorktreeRepoName,
 		WorktreeHostPath:   params.WorktreeHostPath,
+		RepoURL:            params.RepoURL,
+		RepoRef:            params.RepoRef,
 		SSHDEnabled:        params.SSHDEnabled,
 		MCPPort:            params.MCPPort,
 		APIPort:            params.APIPort,

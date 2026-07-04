@@ -431,6 +431,12 @@ export interface UIEnvironmentConfig {
   // images directly. Changes how a redeploy rebuilds the runtime image, so
   // saving it raises the pending-redeploy banner.
   disableBuildScript: boolean;
+  // mountSource opts a runtime env into a writable source worktree the pod clones
+  // at the deployed release ref; repoURL is the git remote it clones. Runtime
+  // envs only, and a no-op without repoURL. Changing either alters what a
+  // redeploy provisions, so saving raises the pending-redeploy banner.
+  mountSource: boolean;
+  repoURL: string;
   // The per-machine saved deploy selection; empty means "no saved selection".
   deployComponents?: string[];
 }

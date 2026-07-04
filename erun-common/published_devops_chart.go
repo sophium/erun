@@ -76,6 +76,14 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, 
 		ctx.Trace("deploy: runtime image override " + image + " (imageOverrides." + DevopsComponentName + ")")
 		deployInput.ImageOverrides = map[string]string{DevopsComponentName: image}
 	}
+	// A runtime env that opted into a mutable source worktree clones this repo
+	// at the deployed release tag on first boot; resolveWorktreeStorage already
+	// put the worktree on a PVC for it.
+	if target.EnvConfig.MountsRuntimeSource() {
+		deployInput.RepoURL = strings.TrimSpace(target.EnvConfig.RepoURL)
+		deployInput.RepoRef = "v" + version
+		ctx.Trace("deploy: mounting mutable source " + deployInput.RepoURL + " at " + deployInput.RepoRef + " on a PVC worktree")
+	}
 
 	return DeploySpec{
 		Target:        target,

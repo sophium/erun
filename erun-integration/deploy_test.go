@@ -604,6 +604,35 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_remote_env_deploys_published_components", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_runtime_env_mount_source_clones_at_release_ref", func(t *testing.T) {
+		// A runtime env is sourceless by default (worktreeStorage=none). Opting
+		// into MountSource (with a RepoURL) flips its runtime worktree to a PVC
+		// checkout the pod clones at boot: the runtime deploy carries
+		// worktreeStorage=pvc plus repoUrl and repoRef=v<version> (the release
+		// tag), and the trace names the mutable-source decision. This is the
+		// opt-in real-time-patching path; a plain runtime deploy is unaffected.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnvNoVersion(t, setup, "team", "dev")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"mountsource: true\nrepourl: https://github.com/sophium/erun.git\n")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		// The ref is the release TAG v<version>, but normalize.Apply collapses
+		// both "1.0.0" and "v1.0.0" to <VERSION>, so the snapshot cannot prove
+		// the "v" prefix survived — assert it on the raw output (the value is
+		// masked by normalization, per erun-integration/AGENTS.md).
+		if !strings.Contains(result.Combined, "repoRef=v1.0.0") {
+			t.Fatalf("expected repoRef=v1.0.0 (the release tag) in deploy command; got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_runtime_env_mount_source_clones_at_release_ref", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_remote_env_custom_runtime_image", func(t *testing.T) {
 		// A persisted EnvConfig.RuntimeImage must ride into the published
 		// chart deploy as imageOverrides.erun-devops: the trace
