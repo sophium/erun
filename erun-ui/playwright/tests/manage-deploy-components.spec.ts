@@ -61,9 +61,11 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     const runtime = app.manageDialog.deployComponentCheckbox(runtimeName);
     const saveDefault = app.manageDialog.saveDeployComponentsButton();
 
-    // A local env deploys its working-tree charts, not version-scoped ones, so
-    // the heading stays version-free (unlike a sourceless env — see #737 below).
-    await expect(app.manageDialog.deployComponentsHeading()).toHaveText('Components to deploy');
+    // The heading is version-scoped for every env type — the experience matches a
+    // runtime env (see #737 below), not a version-free local-only variant.
+    await expect(app.manageDialog.deployComponentsHeading()).toHaveText(
+      'Components in 1.0.0 to deploy',
+    );
 
     await expect(runtime).toBeVisible();
     await expect(runtime).toBeChecked();

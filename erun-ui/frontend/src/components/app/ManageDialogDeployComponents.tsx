@@ -4,7 +4,6 @@ import {
   deployComponentLabel,
   deployComponentSelectionChanged,
 } from '@/app/deployComponentsSelection';
-import { environmentTypeIsRemoteWorktree } from '@/app/environmentType';
 import { readError } from '@/app/errors';
 import { useAppDispatch } from '@/app/hooks';
 import {
@@ -18,23 +17,20 @@ import { Button } from '@/components/ui/button';
 
 type ManageDialog = AppState['manageDialog'];
 
-// deployComponentsCopy computes the checklist's version-dependent labels. Only a
-// sourceless env's charts come from the registry by reference (filtered by the
-// deploy version); a local env deploys its own working-tree charts, so the
-// version neither filters them nor belongs in the heading.
-function deployComponentsCopy(
-  versioned: boolean,
-  deployVersion: string,
-): { heading: string; helper: string; loadingText: string } {
-  const versionScoped = versioned && deployVersion !== '';
+// deployComponentsCopy computes the checklist's labels. The experience is the
+// same for every env type: the checklist only shows once a version is picked
+// (see the gate below), so it is always scoped to that version — the wording
+// never branches on whether the env deploys published or working-tree charts.
+function deployComponentsCopy(deployVersion: string): {
+  heading: string;
+  helper: string;
+  loadingText: string;
+} {
   return {
-    heading: versionScoped ? `Components in ${deployVersion} to deploy` : 'Components to deploy',
-    helper: versioned
-      ? 'Deploy rolls out exactly the checked charts. Only charts published at the selected version are offered; the runtime is checked by default. Set them as the default for this environment on this machine.'
-      : 'Deploy rolls out exactly the checked charts. The runtime is checked by default; set them as the default for this environment on this machine.',
-    loadingText: versionScoped
-      ? `Checking charts published at ${deployVersion}…`
-      : 'Loading components…',
+    heading: `Components in ${deployVersion} to deploy`,
+    helper:
+      'Deploy rolls out exactly the checked charts for the selected version. The runtime is checked by default; set them as the default for this environment on this machine.',
+    loadingText: `Checking components for ${deployVersion}…`,
   };
 }
 
@@ -45,8 +41,6 @@ export function DeployComponentsField({ dialog }: { dialog: ManageDialog }): Rea
   const { deployComponents, deployComponentSelection, deployComponentsLoading } = dialog;
   const selectionSet = new Set(deployComponentSelection);
   const changed = deployComponentSelectionChanged(deployComponents, deployComponentSelection);
-  // Only a sourceless env's heading is version-scoped (see deployComponentsCopy).
-  const versioned = environmentTypeIsRemoteWorktree(dialog.config.type);
   // The checklist follows the version chosen in the picker above — never the
   // env's current version — and is gated on a pick for every env type: the panel
   // is strictly sequential (pick a version, then choose which charts roll out),
@@ -56,7 +50,7 @@ export function DeployComponentsField({ dialog }: { dialog: ManageDialog }): Rea
   const deployVersion = dialog.version.trim();
   const versionPicked = deployVersion !== '';
   const gated = !versionPicked;
-  const { heading, helper, loadingText } = deployComponentsCopy(versioned, deployVersion);
+  const { heading, helper, loadingText } = deployComponentsCopy(deployVersion);
   return (
     // No border of its own: it nests in the version-picker popover (RuntimeTab),
     // whose wrapper draws the divider so this reads as the chosen version's charts.
