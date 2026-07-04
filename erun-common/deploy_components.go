@@ -286,6 +286,7 @@ func ResolveDeployableComponents(store DeployStore, findProjectRoot ProjectFinde
 			Selected: slices.Contains(selected, name),
 		})
 	}
+	components = appendSourcelessPublishableComponents(components, resolvedTarget, selected)
 	if !hasLocalRuntime {
 		// No repo-local runtime chart: offer the published erun-devops chart as the
 		// runtime item so the operator can still bootstrap/heal the env.
@@ -297,6 +298,24 @@ func ResolveDeployableComponents(store DeployStore, findProjectRoot ProjectFinde
 		})
 	}
 	return components, nil
+}
+
+// appendSourcelessPublishableComponents adds the publishable platform components
+// (deployed by reference, in default-rank order) to a sourceless env's checklist,
+// so the operator can select them even though there is no local umbrella chart.
+// A no-op for a local-repo env, which lists its local charts instead.
+func appendSourcelessPublishableComponents(components []DeployableComponent, target OpenResult, selected []string) []DeployableComponent {
+	if !target.RemoteRepo() {
+		return components
+	}
+	for _, name := range publishablePlatformComponentNames() {
+		components = append(components, DeployableComponent{
+			Name:     name,
+			Source:   deployComponentSourcePublished,
+			Selected: slices.Contains(selected, name),
+		})
+	}
+	return components
 }
 
 // sortDeployContextsByDeployOrder ranks contexts by the k8s plan (hardcoded fallback
