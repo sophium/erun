@@ -50,32 +50,56 @@ export function RuntimeTab(): React.ReactElement {
   const versionSuggestions = useAppSelector((state) => state.tenants.versionSuggestions);
   return (
     <>
-      <RuntimeDeployField
-        configuredVersion={dialog.config.runtimeVersion}
-        overrideVersion={dialog.version}
-        suggestions={versionSuggestions}
-        choicesOpen={dialog.choicesOpen}
-        disabled={dialog.busy || dialog.configLoading}
-        onValueChange={(version) => {
-          dispatch(updateManageDialog({ version }));
-        }}
-        onChoicesOpenChange={(open) => {
-          dispatch(setManageVersionChoicesOpen(open));
-        }}
-        onSelect={(suggestion) => {
-          dispatch(selectManageVersionSuggestion(suggestion));
-        }}
-        onDeploy={() =>
-          void dispatch(submitManageDeploy()).catch((error: unknown) => {
-            dispatch(showTerminalMessage(readError(error)));
-          })
-        }
-      />
-      <DeployComponentsField dialog={dialog} />
+      {/* Version + components are one control: pick a version, then choose which
+          of that version's charts to roll out. */}
+      <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
+        <RuntimeDeployField
+          configuredVersion={dialog.config.runtimeVersion}
+          overrideVersion={dialog.version}
+          suggestions={versionSuggestions}
+          choicesOpen={dialog.choicesOpen}
+          disabled={dialog.busy || dialog.configLoading}
+          onValueChange={(version) => {
+            dispatch(updateManageDialog({ version }));
+          }}
+          onChoicesOpenChange={(open) => {
+            dispatch(setManageVersionChoicesOpen(open));
+          }}
+          onSelect={(suggestion) => {
+            dispatch(selectManageVersionSuggestion(suggestion));
+          }}
+          onDeploy={() =>
+            void dispatch(submitManageDeploy()).catch((error: unknown) => {
+              dispatch(showTerminalMessage(readError(error)));
+            })
+          }
+        />
+        <DeployComponentsField dialog={dialog} />
+      </div>
       <RuntimePodFields dialog={dialog} />
       <IdleStopFields dialog={dialog} />
     </>
   );
+}
+
+// deployComponentsCopy computes the checklist's version-dependent labels. Only a
+// sourceless env's charts come from the registry by reference (filtered by the
+// deploy version); a local env deploys its own working-tree charts, so the
+// version neither filters them nor belongs in the heading.
+function deployComponentsCopy(
+  versioned: boolean,
+  deployVersion: string,
+): { heading: string; helper: string; loadingText: string } {
+  const versionScoped = versioned && deployVersion !== '';
+  return {
+    heading: versionScoped ? `Components in ${deployVersion} to deploy` : 'Components to deploy',
+    helper: versioned
+      ? 'Deploy rolls out exactly the checked charts. Only charts published at the selected version are offered; the runtime is checked by default. Set them as the default for this environment on this machine.'
+      : 'Deploy rolls out exactly the checked charts. The runtime is checked by default; set them as the default for this environment on this machine.',
+    loadingText: versionScoped
+      ? `Checking charts published at ${deployVersion}…`
+      : 'Loading components…',
+  };
 }
 
 // Toggling changes only the one-shot selection the next Deploy uses; it becomes
@@ -85,11 +109,20 @@ function DeployComponentsField({ dialog }: { dialog: ManageDialog }): React.Reac
   const { deployComponents, deployComponentSelection, deployComponentsLoading } = dialog;
   const selectionSet = new Set(deployComponentSelection);
   const changed = deployComponentSelectionChanged(deployComponents, deployComponentSelection);
+  // Only a sourceless env's checklist is version-scoped (see deployComponentsCopy).
+  const versioned = environmentTypeIsRemoteWorktree(dialog.config.type);
+  const deployVersion = (dialog.version || dialog.config.runtimeVersion).trim();
+  const { heading, helper, loadingText } = deployComponentsCopy(versioned, deployVersion);
   return (
-    <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
+    // No border of its own: it nests inside the version-picker card (RuntimeTab),
+    // set off by a divider so it reads as that version's charts.
+    <div className="grid gap-3 border-t border-border pt-3">
       <div className="flex items-center justify-between gap-2">
-        <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">
-          Components to deploy
+        <div
+          id="environment-config-deploy-components-heading"
+          className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase"
+        >
+          {heading}
         </div>
         <Button
           id="environment-config-save-deploy-components"
@@ -106,12 +139,9 @@ function DeployComponentsField({ dialog }: { dialog: ManageDialog }): React.Reac
           Set as default
         </Button>
       </div>
-      <p className="text-xs leading-[1.35] text-muted-foreground">
-        Deploy rolls out exactly the checked charts. The runtime is checked by default; set them as
-        the default for this environment on this machine.
-      </p>
+      <p className="text-xs leading-[1.35] text-muted-foreground">{helper}</p>
       {deployComponentsLoading ? (
-        <div className="text-sm leading-[1.35] text-muted-foreground">Loading components…</div>
+        <div className="text-sm leading-[1.35] text-muted-foreground">{loadingText}</div>
       ) : deployComponents.length === 0 ? (
         <div className="text-sm leading-[1.35] text-muted-foreground">
           No deployable components found for this environment.

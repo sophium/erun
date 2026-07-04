@@ -80,6 +80,12 @@ export class ManageDialog {
     return this.locator().locator('#manage-version');
   }
 
+  // Typing a version drives the version-aware Components checklist (which charts
+  // are published at that version).
+  async setVersionToDeploy(version: string): Promise<void> {
+    await this.runtimeVersionInput().fill(version);
+  }
+
   async deploy(): Promise<void> {
     const button = this.locator().getByRole('button', { name: 'Deploy' });
     await button.scrollIntoViewIfNeeded();
@@ -90,6 +96,12 @@ export class ManageDialog {
   // release name <tenant>-devops for the runtime item.
   deployComponentCheckbox(name: string): Locator {
     return this.locator().locator(`#environment-config-deploy-component-${name}`);
+  }
+
+  // Version-scoped ("Components in <version> to deploy") only for sourceless
+  // envs; a local env's charts aren't version-filtered, so it stays plain.
+  deployComponentsHeading(): Locator {
+    return this.locator().locator('#environment-config-deploy-components-heading');
   }
 
   // Enabled only when the selection differs from the saved default. Matched by

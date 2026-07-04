@@ -156,7 +156,7 @@ func resolveGHCRRuntimeRegistryVersionsAt(ctx context.Context, client *http.Clie
 	baseURL = normalizeGHCRBaseURL(baseURL)
 	tokenURL = normalizeGHCRBaseURL(tokenURL)
 
-	repoPath := strings.ToLower(url.PathEscape(owner) + "/" + url.PathEscape(repository))
+	repoPath := strings.ToLower(escapeRegistryPathSegments(owner) + "/" + escapeRegistryPathSegments(repository))
 	token, err := fetchGHCRPullToken(ctx, client, repoPath, tokenURL)
 	if err != nil {
 		return RuntimeRegistryVersions{}, err
@@ -170,6 +170,19 @@ func resolveGHCRRuntimeRegistryVersionsAt(ctx context.Context, client *http.Clie
 	versions := latestRuntimeVersionsFromTags(tags)
 	versions.Image = "ghcr.io/" + strings.ToLower(owner+"/"+repository)
 	return versions, nil
+}
+
+// escapeRegistryPathSegments percent-escapes each slash-separated segment of a
+// registry repo path while preserving the slashes, so a multi-segment path like
+// charts/erun-backend-postgres addresses /v2/<owner>/charts/erun-backend-postgres
+// instead of collapsing the slash into %2F. A single-segment path (the runtime
+// image repo) is escaped identically to url.PathEscape.
+func escapeRegistryPathSegments(path string) string {
+	segments := strings.Split(path, "/")
+	for i, segment := range segments {
+		segments[i] = url.PathEscape(segment)
+	}
+	return strings.Join(segments, "/")
 }
 
 func normalizeGHCRBaseURL(rawURL string) string {

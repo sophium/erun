@@ -2026,6 +2026,71 @@ func TestLoadDeployComponentsRuntimeOnlyWhenNoLocalCharts(t *testing.T) {
 	}
 }
 
+// TestLoadDeployComponentsVersionAwareFiltersUnavailableCharts covers the
+// version-aware checklist for a sourceless (runtime) env: only component charts
+// the registry publishes at the deploy version are offered, and the runtime item
+// is always kept. The registry probe cannot be driven from the headless
+// Playwright suite (it stubs the network), so the filtering is asserted here.
+func TestLoadDeployComponentsVersionAwareFiltersUnavailableCharts(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		config:  &eruncommon.ERunConfig{},
+		tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs"}},
+		envs: map[string]eruncommon.EnvConfig{
+			"frs/prod": {
+				Name:              "prod",
+				LocalRepoPath:     projectRoot,
+				KubernetesContext: "test-context",
+				RuntimeVersion:    "1.0.106",
+				Type:              eruncommon.EnvironmentTypeRuntime,
+			},
+		},
+	}
+	// charts/<component> tags per registry repo: postgres + api are published at
+	// 1.0.112 only; db, powerdns, docs are published nowhere in this fixture.
+	chartTags := map[string][]string{
+		"charts/erun-backend-postgres": {"1.0.112"},
+		"charts/erun-backend-api":      {"1.0.112"},
+	}
+	app := NewApp(erunUIDeps{
+		store: store,
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
+			if namespace != eruncommon.DefaultContainerRegistry {
+				t.Fatalf("unexpected chart registry namespace: %s", namespace)
+			}
+			return eruncommon.RuntimeRegistryVersions{Tags: chartTags[repository]}, nil
+		},
+	})
+
+	names := func(components []eruncommon.DeployableComponent) []string {
+		out := make([]string, 0, len(components))
+		for _, component := range components {
+			out = append(out, component.Name)
+		}
+		return out
+	}
+
+	// At 1.0.112 only postgres + api charts exist, so only those (in rank order)
+	// plus the always-kept runtime are offered.
+	at112, err := app.LoadDeployComponents(uiSelection{Tenant: "frs", Environment: "prod", Version: "1.0.112"})
+	if err != nil {
+		t.Fatalf("LoadDeployComponents(1.0.112) failed: %v", err)
+	}
+	if got, want := names(at112), []string{"erun-backend-postgres", "erun-backend-api", "frs-devops"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("components at 1.0.112 = %v, want %v (unpublished db/powerdns/docs filtered out)", got, want)
+	}
+
+	// With no version-to-deploy the list uses the env's current runtime version
+	// (1.0.106), which has no published component charts here — runtime only.
+	atCurrent, err := app.LoadDeployComponents(uiSelection{Tenant: "frs", Environment: "prod"})
+	if err != nil {
+		t.Fatalf("LoadDeployComponents(current) failed: %v", err)
+	}
+	if got, want := names(atCurrent), []string{"frs-devops"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("components at current version 1.0.106 = %v, want %v (runtime only)", got, want)
+	}
+}
+
 func assertLoadedEnvironmentConfig(t *testing.T, loaded uiEnvironmentConfig, projectRoot string) {
 	t.Helper()
 
