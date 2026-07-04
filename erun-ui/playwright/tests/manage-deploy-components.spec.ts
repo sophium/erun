@@ -36,8 +36,10 @@ async function stubVersionSuggestions(page: Page): Promise<void> {
 test.describe('manage dialog — components to deploy (#718)', () => {
   test('runtime is pre-checked, toggling gates Set as default, and it persists', async ({
     app,
+    page,
     seededEnv,
   }) => {
+    await stubVersionSuggestions(page);
     const runtimeName = `${seededEnv.tenant}-devops`;
     await app.sidebar.openManageDialogViaKeyboard(seededEnv.tenant, seededEnv.environment);
     await app.manageDialog.waitForOpen();
@@ -47,12 +49,14 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     // yet it stays disabled — never an implicit build.
     await expect(app.manageDialog.deployButton()).toBeDisabled();
 
-    // A local-agent env deploys its working-tree charts, which are NOT
-    // version-scoped, and the create-new-version flow uses this selection — so
-    // its checklist is reachable straight away, with no version gate and no
-    // prompt (unlike a sourceless env — see #737 below).
+    // The checklist is gated on a picked version for every env type (uniform):
+    // before one is chosen it shows the prompt, not selectable charts.
     await app.manageDialog.openVersionPicker();
-    await expect(app.manageDialog.deployComponentsHint()).toHaveCount(0);
+    await expect(app.manageDialog.deployComponentsHint()).toBeVisible();
+    await expect(app.manageDialog.deployComponentCheckbox(runtimeName)).toHaveCount(0);
+    await expect(app.manageDialog.saveDeployComponentsButton()).toBeDisabled();
+
+    await app.manageDialog.pickVersion('1.0.0');
 
     const runtime = app.manageDialog.deployComponentCheckbox(runtimeName);
     const saveDefault = app.manageDialog.saveDeployComponentsButton();
