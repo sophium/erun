@@ -18,6 +18,8 @@ kubectl port-forward -n <tenant>-<env> svc/<service> <localPort>:<port>
 
 Lifetime: bound to the calling process. No reconnection on cluster-side restart.
 
+`<localPort>` is per-env (from `EnvConfig.localportrangestart`) so concurrent forwards for different envs don't collide on the laptop. `<port>` is the **in-cluster** port, which differs by channel: the `erun-api` service is a standalone component chart published on the canonical `APIServicePort` (`17033`) in **every** namespace, so its forward maps `<perEnvLocalApi>:17033`; MCP and SSH forward to the runtime pod, which is deployed on the env's per-env ports, so those map the same per-env number on both sides. Using the per-env number for the API's remote side would target a port the service never exposes.
+
 ## Pattern 2 — `hostPort` (local clusters only)
 
 For local Kubernetes (Docker Desktop, OrbStack, k3d), set `hostPort` on the container spec. The Kubernetes node binds the port on the host network namespace, so `localhost:<hostPort>` reaches the pod.
@@ -231,7 +233,7 @@ This is a per-env decision: agent envs typically need broad outbound (image pull
 
 ## Port-forward state files
 
-The CLI owns the local port-forwards: `erun open` starts one detached `kubectl port-forward` process per channel (MCP, SSH, API) and records each in a state file at `<UserConfigDir>/erun/portforward/{mcp,sshd,api}/<tenant>/<env>.json`. The desktop app does not write these files — it reads the convention (that is how the local MCP port reaches laptop-side Agent clients) and re-runs `erun open --no-shell` when a forward needs re-establishing.
+The CLI owns the local port-forwards: `erun open` starts one detached `kubectl port-forward` process per channel (MCP, SSH, API) and records each in a state file at `<UserConfigDir>/erun/portforward/{mcp,sshd,api}/<tenant>/<env>.json`. They are **best-effort**: the shell/AI session runs in-pod via `kubectl exec` and does not use them, so a forward that cannot bind is logged as a warning and skipped rather than aborting `open`. The desktop app does not write these files — it reads the convention (that is how the local MCP port reaches laptop-side Agent clients) and re-runs `erun open --no-shell` when a forward needs re-establishing; because that re-run only fails when the runtime is genuinely undeployed (not on a forward that can't bind), the "deploy this environment" prompt it drives stays accurate.
 
 ```json
 {

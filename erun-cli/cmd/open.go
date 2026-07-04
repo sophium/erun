@@ -322,10 +322,11 @@ func (r *resolvedOpenRunner) run() error {
 		}
 	} else {
 		r.ctx.Trace("open: pure primitive — not deploying (run `erun deploy` first, or pass --deploy to deploy before opening)")
+		if err := r.ensureRuntimeDeployed(); err != nil {
+			return err
+		}
 	}
-	if err := r.activateForwarders(); err != nil {
-		return err
-	}
+	r.activateForwarders()
 	if launched, err := r.maybeLaunchIDE(); launched || err != nil {
 		return err
 	}
@@ -513,25 +514,76 @@ func (r *resolvedOpenRunner) resolveRunningRuntimeVersion(execution common.Deplo
 	return strings.TrimSpace(version)
 }
 
-func (r *resolvedOpenRunner) activateForwarders() error {
-	if r.activateSSHD != nil && r.result.EnvConfig.SSHD.Enabled {
-		if err := r.activateSSHD(r.ctx, r.result); err != nil {
-			return err
-		}
-	}
-	if r.activateMCP == nil {
-		if r.activateAPI == nil {
-			return nil
-		}
-		return r.activateAPI(r.ctx, r.result)
-	}
-	if err := r.activateMCP(r.ctx, r.result); err != nil {
-		return err
-	}
-	if r.activateAPI == nil {
+// ensureRuntimeDeployed fails a pure `open` when the env's runtime is not
+// deployed. Because a port-forward that cannot bind is no longer fatal, a
+// genuinely undeployed runtime is detected here by deployment presence rather
+// than inferred from a downstream forward timeout — this is the accurate signal
+// the desktop surfaces as "deploy this environment".
+func (r *resolvedOpenRunner) ensureRuntimeDeployed() error {
+	release := common.RuntimeReleaseName(r.result.Tenant)
+	namespace := common.KubernetesNamespaceName(r.result.Tenant, r.result.Environment)
+	if r.ctx.DryRun {
+		// Show the check in the dry-run plan, then assume present so the rest of
+		// the plan still renders. CheckKubernetesDeployment emits this same line
+		// itself in real mode.
+		r.ctx.TraceCommand("", "kubectl", runtimeDeploymentPresenceArgs(r.result.EnvConfig.KubernetesContext, namespace, release)...)
 		return nil
 	}
-	return r.activateAPI(r.ctx, r.result)
+	if r.checkKubernetesDeployment == nil {
+		return nil
+	}
+	present, err := r.checkKubernetesDeployment(r.ctx, common.KubernetesDeploymentCheckParams{
+		Name:              release,
+		Namespace:         namespace,
+		KubernetesContext: r.result.EnvConfig.KubernetesContext,
+	})
+	if err != nil {
+		return err
+	}
+	if !present {
+		return fmt.Errorf("runtime for %s/%s is not deployed (deployment %q not found in namespace %q); run `erun deploy %s %s` first",
+			r.result.Tenant, r.result.Environment, release, namespace, r.result.Tenant, r.result.Environment)
+	}
+	return nil
+}
+
+func runtimeDeploymentPresenceArgs(kubernetesContext, namespace, release string) []string {
+	args := make([]string, 0, 7)
+	if strings.TrimSpace(kubernetesContext) != "" {
+		args = append(args, "--context", kubernetesContext)
+	}
+	if strings.TrimSpace(namespace) != "" {
+		args = append(args, "--namespace", namespace)
+	}
+	return append(args, "get", "deployment", release, "-o", "name")
+}
+
+// activateForwarders binds the env's laptop-side port-forwards (SSHD, MCP, API)
+// as best-effort conveniences. None is a prerequisite for the session being
+// opened: the remote shell/AI session runs in-pod via `kubectl exec` and never
+// uses these forwards — they only back local tooling (the desktop app's panels,
+// `erun api`, `erun mcp`). A forward that cannot bind is surfaced as a warning
+// and skipped so a laptop-side convenience never aborts the in-pod session.
+func (r *resolvedOpenRunner) activateForwarders() {
+	if r.activateSSHD != nil && r.result.EnvConfig.SSHD.Enabled {
+		if err := r.activateSSHD(r.ctx, r.result); err != nil {
+			r.warnForwarderUnavailable("SSH", err)
+		}
+	}
+	if r.activateMCP != nil {
+		if err := r.activateMCP(r.ctx, r.result); err != nil {
+			r.warnForwarderUnavailable("MCP", err)
+		}
+	}
+	if r.activateAPI != nil {
+		if err := r.activateAPI(r.ctx, r.result); err != nil {
+			r.warnForwarderUnavailable("API", err)
+		}
+	}
+}
+
+func (r *resolvedOpenRunner) warnForwarderUnavailable(name string, err error) {
+	r.ctx.Trace(fmt.Sprintf("open: %s port-forward unavailable; continuing without it (local %s-backed tooling will be degraded): %s", name, name, strings.TrimSpace(err.Error())))
 }
 
 func (r *resolvedOpenRunner) maybeLaunchIDE() (bool, error) {
