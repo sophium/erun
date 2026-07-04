@@ -584,6 +584,26 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_remote_env_uses_published_chart", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_remote_env_deploys_published_components", func(t *testing.T) {
+		// A remote/runtime env has no local checkout, yet --components selects
+		// platform components: each resolves to its PUBLISHED erun-<component>
+		// chart by reference (oci://<registry>/charts/erun-<component>) and
+		// installs directly with top-level --set tenant/environment — no local
+		// umbrella, no source. Components are emitted in default-rank order
+		// (postgres → db → api), not the scrambled --components input order, and
+		// the runtime (team-devops selected) resolves to the published erun-devops
+		// chart. This is the sourceless deploy path.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.0",
+			"--components", "erun-backend-api,erun-backend-postgres,erun-backend-db,team-devops",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		golden.Equal(t, "deploy/dry_run_remote_env_deploys_published_components", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_remote_env_custom_runtime_image", func(t *testing.T) {
 		// A persisted EnvConfig.RuntimeImage must ride into the published
 		// chart deploy as imageOverrides.erun-devops: the trace

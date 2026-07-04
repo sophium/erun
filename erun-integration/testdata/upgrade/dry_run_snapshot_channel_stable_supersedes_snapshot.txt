@@ -6,6 +6,7 @@ upgrade: team/dev <VERSION> -> <VERSION>
 ==> Upgrade plan: 1 member(s), 1 lagging
     team/dev [snapshot] <VERSION> -> <VERSION>  (will upgrade)
 ==> Upgrading team/dev <VERSION> -> <VERSION> (snapshot)
+deploy: component selection source default (runtime only); deploying the runtime chart alone
 deploy: no local runtime chart; using published chart oci://registry.example/test/charts/erun-devops version <VERSION>
 kubectl --context test-context get namespace team-dev -o name
 kubectl --context test-context create namespace team-dev

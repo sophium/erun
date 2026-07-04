@@ -13,13 +13,69 @@ const postgresComponentName = "erun-backend-postgres"
 // erun-backend-postgres instance as its backend store.
 const powerdnsComponentName = "erun-powerdns"
 
-// defaultDeployComponentOrder orders backend charts before their dependents;
-// it governs ordering only, not which components deploy.
+// docsComponentName publishes the docs site via a one-shot Job with no
+// in-cluster dependency, so it orders last.
+const docsComponentName = "erun-docs"
+
+// defaultDeployComponentOrder orders backend charts before their dependents; it
+// governs ordering only, not which components deploy. It doubles as the set of
+// publishable platform components a sourceless env can install by reference.
 var defaultDeployComponentOrder = []string{
 	postgresComponentName,
 	"erun-backend-db",
 	"erun-backend-api",
 	powerdnsComponentName,
+	docsComponentName,
+}
+
+// publishablePlatformComponentNames are the erun component charts published to
+// the registry (oci://<registry>/charts/<name>) that a sourceless env — one
+// with no local repo, i.e. a runtime or remote-agent env — can deploy by
+// reference, no local umbrella chart required.
+func publishablePlatformComponentNames() []string {
+	return defaultDeployComponentOrder
+}
+
+// validatePublishedSelection rejects a selected name that is neither a
+// publishable platform component nor a runtime alias. The sourceless
+// by-reference deploy path uses it because it has no local charts to validate
+// the selection against.
+func validatePublishedSelection(selected []string, tenant string) error {
+	if len(selected) == 0 {
+		return nil
+	}
+	valid := make(map[string]struct{})
+	for _, name := range publishablePlatformComponentNames() {
+		valid[name] = struct{}{}
+	}
+	for _, alias := range runtimeComponentNames(tenant) {
+		valid[alias] = struct{}{}
+	}
+	for _, name := range selected {
+		if _, ok := valid[name]; !ok {
+			return fmt.Errorf("unknown deploy component %q; publishable components are: %s (plus the runtime %s)", name, strings.Join(publishablePlatformComponentNames(), ", "), RuntimeReleaseName(tenant))
+		}
+	}
+	return nil
+}
+
+// selectedPublishableComponents returns the selected non-runtime components in
+// default-rank order (postgres → db → api → powerdns → docs) for the sourceless
+// by-reference deploy path; the runtime is resolved separately.
+func selectedPublishableComponents(selected []string, tenant string) []string {
+	runtimeAliases := runtimeComponentNames(tenant)
+	out := make([]string, 0, len(selected))
+	for _, name := range selected {
+		if slices.Contains(runtimeAliases, name) {
+			continue
+		}
+		out = append(out, name)
+	}
+	rank := componentRankByPlan(ProjectK8sConfig{})
+	sort.SliceStable(out, func(i, j int) bool {
+		return rank(out[i]) < rank(out[j])
+	})
+	return out
 }
 
 const (

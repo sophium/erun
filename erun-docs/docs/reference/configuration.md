@@ -264,6 +264,10 @@ A `deploy` registry need not also carry `build` or `to`: the image it serves may
 
 **Migration:** a legacy single `containerregistry: X` scalar (project or env config) is read once as a one-entry list `[{registry: X, roles: [build, deploy]}]` and rewritten in the list shape on the next save.
 
+### Deploy chart source {#deploy-chart-source}
+
+`erun deploy` installs charts **by reference from the published registry** — the runtime chart (`oci://<registry>/charts/erun-devops` + `imageOverrides.erun-devops`) and each selected platform component (`oci://<registry>/charts/erun-<component>`), threading `tenant`/`environment` and the env's config as top-level `--set`. A **runtime env needs no local source**: its worktree is `none`, and components deploy by reference (release-named `<tenant>-<component>`, in default-rank order), so the deploy runs from anywhere — the operator's machine or the control plane. When the env's repo *is* local (an agent env, or an in-pod checkout for real-time patching) and carries a chart for a selected component, that local chart is used instead — the optional patch path.
+
 ### Kubernetes context
 
 1. `EnvConfig.kubernetescontext` (per-env explicit).

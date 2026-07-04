@@ -223,3 +223,7 @@ the operator's to remove, not this skill's; note it rather than deleting it.
 - The optional runtime umbrella (Step 6) **references** the published
   `erun-devops` chart as a subchart; never fork its templates. A knob you need
   that the chart doesn't expose is a change to `erun-devops`, not a copy here.
+- This skill produces the runtime **image** only. Platform component charts
+  (`erun-backend-*`, `erun-powerdns`, `erun-docs`) deploy **by reference** from the
+  published registry (`erun deploy … --components …`), so a runtime env needs no
+  local source — don't bake platform artifacts into the image.

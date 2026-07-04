@@ -722,7 +722,7 @@ func resolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 	}
 
 	if resolvedTarget.RemoteRepo() {
-		return resolvePublishedDevopsDeploySpecs(ctx, store, resolvedTarget, target.VersionOverride)
+		return resolvePublishedDeploySpecs(ctx, store, resolvedTarget, target)
 	}
 
 	return resolveSelectedLocalDeploySpecs(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, resolvedTarget, target, buildOrchestration, runtimeImageOverride)
@@ -782,6 +782,46 @@ func traceDeployComponentSelection(ctx Context, selected []string, source string
 		return
 	}
 	ctx.Trace("deploy: component selection source " + source + "; components " + strings.Join(selected, ", "))
+}
+
+// resolvePublishedDeploySpecs resolves a sourceless deploy for a target whose
+// repo is not local (a runtime or remote-agent env): every selected chart is
+// installed by reference from the published registry — each platform component
+// via its published erun-<component> chart (top-level, no local umbrella) and
+// the runtime via the published erun-devops chart. Selection comes from
+// --components or the env's saved deploy.components; the repo k8s.deployments
+// plan needs local source, so ordering falls back to the default component
+// rank. An empty selection deploys the runtime alone (bootstrap/heal), matching
+// the prior published-runtime-only behaviour.
+func resolvePublishedDeploySpecs(ctx Context, store DeployStore, resolvedTarget OpenResult, target DeployTarget) ([]DeploySpec, error) {
+	selected, selectionSource := resolveSelectedDeployComponents(target.Components, resolvedTarget.EnvConfig.Deploy.Components, ProjectK8sConfig{})
+	traceDeployComponentSelection(ctx, selected, selectionSource)
+	if err := validatePublishedSelection(selected, resolvedTarget.Tenant); err != nil {
+		return nil, err
+	}
+
+	specs := make([]DeploySpec, 0, len(selected)+1)
+	for _, component := range selectedPublishableComponents(selected, resolvedTarget.Tenant) {
+		spec, err := resolvePublishedComponentDeploySpec(ctx, resolvedTarget, component, target.VersionOverride)
+		if err != nil {
+			return nil, err
+		}
+		if err := configureDeployInputMetadata(store, resolvedTarget, &spec.Deploy); err != nil {
+			return nil, err
+		}
+		specs = append(specs, spec)
+	}
+	if deploySelectionIncludesRuntime(selected, resolvedTarget.Tenant) {
+		runtimeSpecs, err := resolvePublishedDevopsDeploySpecs(ctx, store, resolvedTarget, target.VersionOverride)
+		if err != nil {
+			return nil, err
+		}
+		specs = append(specs, runtimeSpecs...)
+	}
+	if len(specs) == 0 {
+		return nil, fmt.Errorf("deploy: no components selected for %s/%s — pass --components with a publishable component, save a default selection, or select the runtime to bootstrap the environment", resolvedTarget.Tenant, resolvedTarget.Environment)
+	}
+	return specs, nil
 }
 
 // appendRuntimeFallbackSpecs appends the published erun-devops runtime spec when
