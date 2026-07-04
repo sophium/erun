@@ -99,6 +99,35 @@ runtime_repo_is_remote() {
     return 1
 }
 
+# ensure_runtime_source clones the env's git remote into the worktree at boot
+# when a runtime env opted into a mutable source mount (the chart sets
+# ERUN_REPO_URL). It clones only into an empty worktree — a populated one is
+# left untouched so live patches survive pod restarts — then checks out
+# ERUN_REPO_REF, the deployed release tag. Every failure is non-fatal: the pod
+# still serves without mounted source. Only the main runtime container runs
+# this; the MCP container shares the resulting checkout over the /home/erun PVC.
+ensure_runtime_source() {
+    repo_url="${ERUN_REPO_URL:-}"
+    [ -n "${repo_url}" ] || return 0
+
+    repo_dir=$(runtime_repo_dir)
+    if [ -d "${repo_dir}/.git" ]; then
+        return 0
+    fi
+
+    mkdir -p "$(dirname "${repo_dir}")"
+    if ! git clone "${repo_url}" "${repo_dir}" >/dev/null 2>&1; then
+        echo "erun: failed to clone runtime source from ${repo_url}; continuing without mounted source" >&2
+        return 0
+    fi
+
+    repo_ref="${ERUN_REPO_REF:-}"
+    if [ -n "${repo_ref}" ]; then
+        ( cd "${repo_dir}" && git checkout -q "${repo_ref}" ) >/dev/null 2>&1 \
+            || echo "erun: could not check out ${repo_ref}; runtime source left at the default branch" >&2
+    fi
+}
+
 runtime_cloud_environment() {
     case "${ERUN_CLOUD_ENVIRONMENT:-}" in
         1|true|TRUE|True|yes|YES|on|ON)
@@ -931,6 +960,7 @@ start_environment_idle_monitor
 
 if [ "${1:-}" = "shell" ]; then
     shift
+    ensure_runtime_source
     initialize_erun_config
     initialize_codex_config
     initialize_claude_config
@@ -964,6 +994,7 @@ if [ "${1:-}" = "mcp" ]; then
 fi
 
 if [ "${1:-}" = "devops" ] || [ "$#" -eq 0 ]; then
+    ensure_runtime_source
     initialize_erun_config
     initialize_codex_config
     initialize_claude_config

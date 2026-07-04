@@ -347,6 +347,12 @@ spec:
               value: /home/erun/.erun/outputs
             - name: ERUN_REPO_REMOTE
               value: {{ if eq $worktreeStorage "pvc" }}"true"{{ else }}"false"{{ end }}
+            {{- if .Values.repoUrl }}
+            - name: ERUN_REPO_URL
+              value: {{ .Values.repoUrl | quote }}
+            - name: ERUN_REPO_REF
+              value: {{ default "" .Values.repoRef | quote }}
+            {{- end }}
             - name: ERUN_ENV_TYPE
               value: {{ $envType | quote }}
             - name: ERUN_CLOUD_ENVIRONMENT

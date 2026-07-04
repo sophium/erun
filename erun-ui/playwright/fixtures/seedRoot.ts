@@ -296,6 +296,26 @@ export function seedEnvironment(tenant: string, environment: string, extraYaml =
   );
 }
 
+// seedRuntimeEnvironment writes an inert runtime-type env config. A runtime env
+// is RemoteRepo (its worktree lives outside the local filesystem), so
+// ResolveDeployableComponents offers the publishable platform components by
+// reference — the sourceless deploy path — instead of local charts.
+export function seedRuntimeEnvironment(tenant: string, environment: string, extraYaml = ''): void {
+  const envDir = path.join(erunConfigDir(), tenant, environment);
+  fs.mkdirSync(envDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(envDir, 'config.yaml'),
+    `name: ${environment}\n` +
+      `repopath: /home/erun/git/${tenant}\n` +
+      'kubernetescontext: test-context\n' +
+      'containerregistry: registry.example/test\n' +
+      'runtimeversion: 1.0.0\n' +
+      'type: runtime\n' +
+      'aitool: sh\n' +
+      extraYaml,
+  );
+}
+
 // removeEnvironment deletes a previously seeded env config dir. The
 // backend's fsnotify config watcher picks the deletion up and drops the
 // sidebar row.

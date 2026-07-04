@@ -8,6 +8,13 @@ export function environmentTypeIsRemoteWorktree(type: string | undefined): boole
   return type === 'remote-agent' || type === 'runtime';
 }
 
+// environmentTypeIsRuntime reports whether the env is a runtime (serving) env —
+// the only type that can opt into a mounted source worktree. Mirrors
+// EnvironmentTypeRuntime in erun-common/config.go.
+export function environmentTypeIsRuntime(type: string | undefined): boolean {
+  return type === 'runtime';
+}
+
 // environmentTypeBuildsHere reports whether the env builds its own runtime
 // image rather than consuming a published one. An empty/unset type is treated
 // as building so an unresolved env keeps today's behaviour.

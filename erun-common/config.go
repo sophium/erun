@@ -93,9 +93,17 @@ type TenantConfig struct {
 }
 
 type EnvConfig struct {
-	Name               string
-	Type               EnvironmentType `yaml:"type,omitempty" json:"type,omitempty"`
-	LocalRepoPath      string          `yaml:"localrepopath,omitempty" json:"localRepoPath,omitempty"`
+	Name          string
+	Type          EnvironmentType `yaml:"type,omitempty" json:"type,omitempty"`
+	LocalRepoPath string          `yaml:"localrepopath,omitempty" json:"localRepoPath,omitempty"`
+	// MountSource opts a runtime env into a mutable source worktree: the runtime
+	// pod clones RepoURL at the deployed release ref (v<version>) into a
+	// PVC-backed worktree on first boot, for real-time patching. It is a no-op
+	// without RepoURL, and ignored for agent envs (which already carry source).
+	// Default false keeps a runtime env sourceless (deploy-by-reference only).
+	MountSource bool `yaml:"mountsource,omitempty" json:"mountSource,omitempty"`
+	// RepoURL is the git remote the runtime pod clones when MountSource is set.
+	RepoURL            string `yaml:"repourl,omitempty" json:"repoURL,omitempty"`
 	KubernetesContext  string
 	CloudProviderAlias string `yaml:"cloudprovideralias,omitempty"`
 	// CloudProviderAliases attaches one cloud alias per provider type. The legacy
@@ -183,6 +191,15 @@ func (c EnvConfig) BuildsHere() bool {
 // unresolved is treated as not having a remote worktree.
 func (c EnvConfig) RemoteWorktree() bool {
 	return c.Type.IsValid() && c.Type != EnvironmentTypeLocalAgent
+}
+
+// MountsRuntimeSource reports whether this runtime env opts into a mutable
+// source worktree — MountSource set together with a RepoURL to clone. Only
+// runtime envs consult it; agent envs already carry source, so it is ignored
+// for them. It gates both the PVC-backed worktree and the clone-at-release-ref
+// wiring, so the two can never disagree.
+func (c EnvConfig) MountsRuntimeSource() bool {
+	return c.Type == EnvironmentTypeRuntime && c.MountSource && strings.TrimSpace(c.RepoURL) != ""
 }
 
 // HasAWSCloudAlias reports whether the env has an AWS cloud alias attached.

@@ -321,6 +321,8 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 		AutoUpgrade:        config.AutoUpgrade,
 		UpgradeChannel:     config.ResolvedUpgradeChannel(),
 		DisableBuildScript: config.DisableBuildScript,
+		MountSource:        config.MountSource,
+		RepoURL:            strings.TrimSpace(config.RepoURL),
 		DeployComponents:   append([]string(nil), config.Deploy.Components...),
 	}
 	if cloudContext, ok, err := a.linkedCloudContext(config); err != nil {
@@ -557,6 +559,8 @@ func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.Env
 	existing.AutoStart = copyBoolPtr(config.AutoStart)
 	existing.AutoUpgrade = config.AutoUpgrade
 	existing.DisableBuildScript = config.DisableBuildScript
+	existing.MountSource = config.MountSource
+	existing.RepoURL = strings.TrimSpace(config.RepoURL)
 	// Preserve the sibling deploy.timeout; only the saved component selection is
 	// edited here. An empty slice clears the saved default (omitempty), reverting
 	// the env to the repo plan / runtime-only default.

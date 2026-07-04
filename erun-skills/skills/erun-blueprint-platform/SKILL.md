@@ -23,6 +23,15 @@ This skill is for the tenant that **deploys the erun platform itself**
 uses it, and it never wraps the runtime `erun-devops` chart (see What this is
 not).
 
+**Deploy is sourceless; the Helm umbrellas are optional.** A runtime env deploys
+the platform **by reference**: `erun deploy <tenant> <env> --components erun-backend-…`
+installs each published `oci://<registry>/charts/erun-<component>` chart directly,
+threading `tenant`/`environment` + the env's config as `--set`, with **no local
+checkout** (a runtime env has no worktree). Produce the `<tenant>-<component>`
+umbrella charts below **only** for the optional cases — real-time patching, or a
+genuine per-env chart-value override the env config can't express. The Terraform
+tree (the edge) is the part every hosted platform still needs; the umbrellas are not.
+
 The reusable charts and modules stay erun's; the tenant owns only the thin
 wrappers and the env-specific values. This skill packages ERun's accumulated
 best practices for platform deploy wiring — the conventions encoded here are
@@ -38,8 +47,10 @@ namespace `acme-prod`). The worked paths below use `acme` / `prod`.
   supplied only in the runtime env at apply time; the apply itself is
   `erun terraform apply` (see below) and `erun deploy`.
 - It does **not** build the runtime image — that is `erun-build-env`, which
-  produces the `<tenant>-devops` Dockerfile that bakes these artifacts + the
-  deploy skills into the custom image.
+  produces the `<tenant>-devops` Dockerfile for a custom runtime image (swapped in
+  via `imageOverrides.erun-devops`). It does **not** bake these platform artifacts
+  into any image, and needn't: `erun deploy` installs the platform components **by
+  reference** from the published registry, so a runtime env needs no local source.
 - It does **not** own the runtime `erun-devops` chart. The runtime pod is a
   universal per-env concern (every tenant has one, platform or not); it deploys
   from the published `erun-devops` chart with the image swapped via
@@ -182,9 +193,12 @@ ln -s ../common.tf    terraform-acme/prod/common.tf
 ln -s ../variables.tf terraform-acme/prod/variables.tf
 ```
 
-## Step 3 — the Helm side
+## Step 3 — the Helm side (optional — the patch/override path)
 
-Each platform component is a thin umbrella chart under
+`erun deploy` installs the published component charts **by reference** from the
+env's config selection, so you need these umbrella charts only for real-time
+patching or a per-env chart-value override the config can't express. When you do,
+each platform component is a thin umbrella chart under
 `<tenant>-devops/k8s/<tenant>-<component>/` — the directory name, the `Chart.yaml`
 `name:`, and the Helm release are all `<tenant>-<component>` (e.g. `acme-docs`,
 `acme-backend-api`) — that **depends on** erun's published OCI chart

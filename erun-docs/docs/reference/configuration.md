@@ -61,6 +61,8 @@ One per environment. This is the most-edited file.
 | `runtimeversion` | string | `erun open`, `erun deploy`, chart appVersion | Pins the version of the runtime image used by this env. |
 | `runtimeregistry` | string | `erun open`, `erun deploy` | Overrides the registry the runtime image is pulled from (per-env). |
 | `runtimeimage` | string | `erun open`, `erun deploy` | Points the env's runtime pod at a custom image instead of the published `<registry>/erun-devops:<version>` default. A full reference (`ghcr.io/acme/acme-runtime:1.2.3`) is used verbatim; a bare name resolves to `<registry>/<name>:<runtime version>`. Set by `erun init --runtime-image`; carried to the published chart as `imageOverrides.erun-devops` on every deploy (see [Advanced chart values](#advanced-chart-values)). |
+| `mountsource` | bool | `erun deploy` (runtime worktree storage + clone wiring), helm chart | Runtime-only opt-in for real-time patching: when true (together with `repourl`), the runtime pod gets a PVC-backed worktree it clones from `repourl` at the deployed release tag on first boot. A no-op without `repourl`, and ignored for agent envs (which already carry source). Default false keeps a runtime env sourceless (deploy-by-reference). Set from the desktop's Runtime tab → **Mount source code**. See [Environment types → Hotfix pattern](/concepts/environment-types#hotfix-pattern). |
+| `repourl` | string | `erun deploy`, helm chart (`ERUN_REPO_URL`) | Git remote the runtime pod clones when `mountsource` is set. Cloned into the in-pod worktree and checked out at `v<runtimeversion>` (the deployed release tag). |
 | `autoupgrade` | bool | [`erun upgrade`](/cli/upgrade), desktop Upgrade all | When true, this env joins the Upgrade-all set: `erun upgrade` redeploys it to the latest version for its channel when `runtimeversion` lags. |
 | `disablebuildscript` | bool | [`erun build`](/cli/build), `erun build --deploy` | When true, erun ignores any project `build.sh` for this env and resolves docker/release builds directly; if there is no docker build context either, the build errors with no buildable context. Default false. |
 | `upgradechannel` | string (enum) | [`erun upgrade`](/cli/upgrade) | Release channel an upgrade targets: `stable` (semver releases) or `snapshot` (latest snapshot build, or the stable release once one is published on top of it — see [`erun upgrade`](/cli/upgrade#what-opted-in-means)). Orthogonal to `type`. When unset, defaults from `type` — runtime → `stable`, agent → `snapshot`. |
@@ -263,6 +265,10 @@ A `deploy` registry need not also carry `build` or `to`: the image it serves may
 - **Deploy** copies each image the cluster needs (the runtime image and any locally-built component) from `from` to every `to` with `docker buildx imagetools create` (manifest-aware), then the cluster pulls from the `deploy` registry. The copy runs only when both `from` and `to` are set.
 
 **Migration:** a legacy single `containerregistry: X` scalar (project or env config) is read once as a one-entry list `[{registry: X, roles: [build, deploy]}]` and rewritten in the list shape on the next save.
+
+### Deploy chart source {#deploy-chart-source}
+
+`erun deploy` installs charts **by reference from the published registry** — the runtime chart (`oci://<registry>/charts/erun-devops` + `imageOverrides.erun-devops`) and each selected platform component (`oci://<registry>/charts/erun-<component>`), threading `tenant`/`environment` and the env's config as top-level `--set`. A **runtime env needs no local source**: its worktree is `none`, and components deploy by reference (release-named `<tenant>-<component>`, in default-rank order), so the deploy runs from anywhere — the operator's machine or the control plane. When the env's repo *is* local (an agent env, or an in-pod checkout for real-time patching) and carries a chart for a selected component, that local chart is used instead — the optional patch path.
 
 ### Kubernetes context
 

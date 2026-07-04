@@ -246,6 +246,11 @@ type uiEnvironmentConfig struct {
 	AutoUpgrade           bool                       `json:"autoUpgrade"`
 	UpgradeChannel        string                     `json:"upgradeChannel,omitempty"`
 	DisableBuildScript    bool                       `json:"disableBuildScript"`
+	// MountSource opts a runtime env into a mutable source worktree the pod clones
+	// at the deployed release ref; RepoURL is the git remote it clones. Runtime
+	// envs only, and a no-op without RepoURL. See EnvConfig.MountsRuntimeSource.
+	MountSource bool   `json:"mountSource"`
+	RepoURL     string `json:"repoURL"`
 	// DeployComponents is the per-machine saved deploy selection: the charts
 	// `erun deploy` rolls out for this env by default. Empty means no saved
 	// selection — deploy falls back to the repo plan, then the runtime chart

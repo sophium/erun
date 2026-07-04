@@ -45,4 +45,32 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     await expect(app.manageDialog.redeployBanner()).toBeVisible();
     await expect(saveDefault).toBeDisabled();
   });
+
+  test('a sourceless (runtime) env offers the publishable platform components by reference', async ({
+    app,
+    seededRuntimeEnv,
+  }) => {
+    // A runtime env has no local charts (RemoteRepo), so the checklist offers
+    // each published platform component (deployed by reference) plus the
+    // runtime — the operator can select them without any local umbrella.
+    await app.sidebar.openManageDialogViaKeyboard(
+      seededRuntimeEnv.tenant,
+      seededRuntimeEnv.environment,
+    );
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.selectTab('Runtime');
+
+    for (const component of [
+      'erun-backend-postgres',
+      'erun-backend-db',
+      'erun-backend-api',
+      'erun-powerdns',
+      'erun-docs',
+    ]) {
+      await expect(app.manageDialog.deployComponentCheckbox(component)).toBeVisible();
+    }
+    await expect(
+      app.manageDialog.deployComponentCheckbox(`${seededRuntimeEnv.tenant}-devops`),
+    ).toBeVisible();
+  });
 });

@@ -76,12 +76,68 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, 
 		ctx.Trace("deploy: runtime image override " + image + " (imageOverrides." + DevopsComponentName + ")")
 		deployInput.ImageOverrides = map[string]string{DevopsComponentName: image}
 	}
+	// A runtime env that opted into a mutable source worktree clones this repo
+	// at the deployed release tag on first boot; resolveWorktreeStorage already
+	// put the worktree on a PVC for it.
+	if target.EnvConfig.MountsRuntimeSource() {
+		deployInput.RepoURL = strings.TrimSpace(target.EnvConfig.RepoURL)
+		deployInput.RepoRef = "v" + version
+		ctx.Trace("deploy: mounting mutable source " + deployInput.RepoURL + " at " + deployInput.RepoRef + " on a PVC worktree")
+	}
 
 	return DeploySpec{
 		Target:        target,
 		DeployContext: deployContext,
 		Deploy:        deployInput,
 	}, nil
+}
+
+// resolvePublishedComponentDeploySpec builds a deploy spec that installs a
+// published platform component chart (erun-backend-*, erun-powerdns, erun-docs)
+// by reference — the sourceless analogue of resolvePublishedDevopsDeploySpec.
+// The chart installs directly (top-level, not wrapped as a subchart), so erun
+// deploy's top-level --set tenant/environment reach it: no local umbrella and
+// no repo source are needed. The release is named <tenant>-<component> so it is
+// tenant-clear and matches the umbrella (patch-path) naming.
+func resolvePublishedComponentDeploySpec(ctx Context, target OpenResult, componentName, versionOverride string) (DeploySpec, error) {
+	registry := publishedDevopsChartRegistry(target)
+	version := strings.TrimSpace(versionOverride)
+	if version == "" {
+		version = strings.TrimSpace(target.EnvConfig.RuntimeVersion)
+	}
+	if version == "" {
+		// Dry-run contract: trace the stopping decision before the error return.
+		ctx.Trace("deploy: no version resolved for component " + componentName + "; cannot deploy its published chart")
+		return DeploySpec{}, fmt.Errorf("version is required to deploy the published %s chart: pass --version or persist runtimeversion in the env config", componentName)
+	}
+
+	chartReference := PublishedDevopsChartOCIRepo(registry) + "/" + componentName
+	ctx.Trace("deploy: no local chart for " + componentName + "; using published chart " + chartReference + " version " + version)
+
+	deployContext := KubernetesDeployContext{
+		ComponentName: componentName,
+		ChartPath:     chartReference,
+	}
+	deployInput, err := newHelmDeploySpecWithValues(target, deployContext, version, "")
+	if err != nil {
+		return DeploySpec{}, err
+	}
+	deployInput.ReleaseName = publishedComponentReleaseName(target.Tenant, componentName)
+	deployInput.ContainerRegistry = registry
+	deployInput.UseHostCredentials = target.EnvConfig.HasAWSCloudAlias()
+
+	return DeploySpec{
+		Target:        target,
+		DeployContext: deployContext,
+		Deploy:        deployInput,
+	}, nil
+}
+
+// publishedComponentReleaseName maps a published component chart to its release
+// name: <tenant>-<component-suffix> (e.g. erun-backend-api → frs-backend-api).
+func publishedComponentReleaseName(tenant, component string) string {
+	suffix := strings.TrimPrefix(strings.TrimSpace(component), "erun-")
+	return strings.TrimSpace(tenant) + "-" + suffix
 }
 
 // publishedDevopsValuesOverlayPath finds the env's operator values overlay.
