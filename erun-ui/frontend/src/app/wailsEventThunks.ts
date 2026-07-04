@@ -21,7 +21,7 @@ import {
   selectPendingOpenAfterDeploy,
   selectSelectedIsPendingFor,
 } from './selectors';
-import { openSelection, selectTerminalTab, startDeploySelection } from './sessionThunks';
+import { openSelection, selectTerminalTab, startInitialDeploySelection } from './sessionThunks';
 import { setAIBusyForEnv } from './slices/aiActivitySlice';
 import { setDoctorAll } from './slices/doctorSlice';
 import { setEnvStatusForEnv } from './slices/envStatusSlice';
@@ -167,7 +167,7 @@ export const handleEnvironmentInitialized =
     dispatch(showNotification('success', `Created ${tenant} / ${environment}.`));
     dispatch(setPendingOpenAfterDeploy({ tenant, environment }));
     try {
-      await dispatch(startDeploySelection({ tenant, environment }));
+      await dispatch(startInitialDeploySelection({ tenant, environment }));
     } catch (error) {
       dispatch(clearPendingOpenAfterDeploy());
       dispatch(showTerminalMessage(readError(error)));

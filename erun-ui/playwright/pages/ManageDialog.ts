@@ -73,9 +73,9 @@ export class ManageDialog {
     return this.locator().locator('#environment-config-idle-timeout');
   }
 
-  // "Version to deploy": empty means deploy the current code (a builds-here
-  // env orchestrates build → push → deploy); a typed version installs that
-  // published version by reference.
+  // "Version to deploy": the version the Deploy button installs by reference
+  // (empty = the env's current version). Deploy never builds — producing a new
+  // version is the separate "Create & deploy new version" action.
   runtimeVersionInput(): Locator {
     return this.locator().locator('#manage-version');
   }
@@ -86,8 +86,19 @@ export class ManageDialog {
     await this.runtimeVersionInput().fill(version);
   }
 
+  // Deploy installs the selected version by reference (never builds).
+  deployButton(): Locator {
+    return this.locator().locator('#environment-config-deploy');
+  }
+
+  // "Create & deploy new version" (build → push → deploy) — shown only for a
+  // local-agent env, which owns source to build.
+  createVersionButton(): Locator {
+    return this.locator().locator('#environment-config-create-version');
+  }
+
   async deploy(): Promise<void> {
-    const button = this.locator().getByRole('button', { name: 'Deploy' });
+    const button = this.deployButton();
     await button.scrollIntoViewIfNeeded();
     await button.click();
   }
