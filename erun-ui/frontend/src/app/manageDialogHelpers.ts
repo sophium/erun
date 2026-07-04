@@ -69,6 +69,10 @@ function deployRelevantSignature(config: UIEnvironmentConfig): string {
     localRepoPath: config.localRepoPath,
     containerRegistries: config.containerRegistries,
     disableBuildScript: config.disableBuildScript,
+    // Mounting source flips a runtime env's worktree onto a PVC and makes the pod
+    // clone repoURL at the release ref, so both change what a redeploy provisions.
+    mountSource: config.mountSource,
+    repoURL: config.repoURL,
     cloudProviderAlias: config.cloudProviderAlias,
     // Cloudflare (and any non-AWS) alias attachments are delivered into the pod
     // at deploy time via a chart Secret, so changing a slot is deploy-relevant.
@@ -113,6 +117,8 @@ export function manageDialogTabHasUnsavedChanges(
         'autoUpgrade',
         'upgradeChannel',
         'disableBuildScript',
+        'mountSource',
+        'repoURL',
       );
     case 'ai':
       return compare('claude');

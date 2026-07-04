@@ -62,13 +62,13 @@ The type describes the **environment** — where its worktree comes from and wha
 | Editor / IDE attach | Yes (SSH + MCP) | Yes (SSH + MCP) | Not the normal pattern |
 | Per-env helm overlay | Defaults are fine | Defaults are fine | Yes — each runtime env wants its own |
 
-A runtime env has no worktree, so there's no source for `build` to act on and no reason to build there — you deploy a version into it that was built and pushed elsewhere. An agent env has source, so it's where the iterate loop runs. The desktop app reads the env's type to decide *which* primitives to run on the Operator's behalf, but the primitives themselves stay the same everywhere (see [Command primitives](/concepts/command-primitives)).
+A runtime env has no worktree by default, so there's no source for `build` to act on and no reason to build there — you deploy a version into it that was built and pushed elsewhere. (You can opt one into a mutable source worktree for live patching; see [Hotfix pattern](#hotfix-pattern).) An agent env has source, so it's where the iterate loop runs. The desktop app reads the env's type to decide *which* primitives to run on the Operator's behalf, but the primitives themselves stay the same everywhere (see [Command primitives](/concepts/command-primitives)).
 
 The exact snapshot tag format and how `erun build` resolves it lives at [Build path resolution](/reference/configuration-build-paths).
 
 ## Hotfix pattern
 
-Patching a runtime env "in real time" isn't supported — runtime envs have no editable source. The pattern is to spin up a local-agent env beside it, on the same cluster:
+A runtime env has no editable source by default. You *can* opt one into a mutable source worktree — the desktop's env settings (Runtime tab → **Mount source code**, backed by [`EnvConfig.mountsource`](/reference/configuration#envconfig) + `repourl`) clone the repository into the pod at the deployed release, checked out for live edits — when you genuinely need to patch the running release in place. The lower-risk pattern, and the default, is to spin up a local-agent env beside it, on the same cluster:
 
 <figure className="erun-hero-figure">
   <img src="/img/hotfix-pattern.svg" alt="Hotfix pattern. Inside one Kubernetes cluster, two cyan-stroked environment cards sit side by side. The left card is labelled LOCAL-AGENT ENV with name erun-prod-local, worktree ~/code/erun-prod, branch hotfix/urgent, and Operator + Agent pills working on edit · build · push. The right card is labelled RUNTIME ENV with name erun-prod and two service mini-boxes inside: backend-api :1.0.76 and postgres. A cyan arrow between the two cards is labelled 'erun deploy v1.0.77'. The strapline reads: 'Same cluster, two envs, two roles — erun-prod-local develops; erun-prod serves.'" />

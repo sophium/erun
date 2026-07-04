@@ -58,6 +58,16 @@ export class ManageDialog {
     return this.locator().locator('#environment-config-disablebuildscript');
   }
 
+  // The runtime-only "Mount source code" toggle and the git remote it reveals.
+  // The URL field is rendered only while the toggle is on.
+  mountSourceCheckbox(): Locator {
+    return this.locator().locator('#environment-config-mountsource');
+  }
+
+  repoURLInput(): Locator {
+    return this.locator().locator('input#environment-config-repourl');
+  }
+
   // The Idle-stop "Timeout" is a pod-shaping value.
   idleTimeoutInput(): Locator {
     return this.locator().locator('#environment-config-idle-timeout');

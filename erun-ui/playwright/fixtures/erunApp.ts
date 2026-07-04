@@ -4,6 +4,7 @@ import {
   SEED_TENANT,
   removeEnvironment,
   seedEnvironment,
+  seedRuntimeEnvironment,
   uniqueEnvironmentName,
 } from './seedRoot.js';
 
@@ -16,7 +17,11 @@ export interface SeededEnvironment {
 // Use the `seededEnv` fixture in specs that mutate per-env state (open/close,
 // tab churn, status injection) so the shared baseline rows stay quiet for
 // other specs.
-export const test = base.extend<{ app: AppShell; seededEnv: SeededEnvironment }>({
+export const test = base.extend<{
+  app: AppShell;
+  seededEnv: SeededEnvironment;
+  seededRuntimeEnv: SeededEnvironment;
+}>({
   app: async ({ page }, use) => {
     const app = new AppShell(page);
     await app.open();
@@ -32,6 +37,19 @@ export const test = base.extend<{ app: AppShell; seededEnv: SeededEnvironment }>
     // after boot). The config file is already on disk (synchronous write), and
     // the backend reads config fresh on each state refetch, so a forced reload
     // surfaces the row deterministically, independent of fsnotify timing.
+    await app.reloadEnvironments();
+    await app.sidebar
+      .envRowButton(SEED_TENANT, environment)
+      .waitFor({ state: 'visible', timeout: 15_000 });
+    await use({ tenant: SEED_TENANT, environment });
+    removeEnvironment(SEED_TENANT, environment);
+  },
+  // A per-test inert runtime-type env (RemoteRepo), for specs that exercise the
+  // sourceless deploy path — where the Components checklist offers the published
+  // platform components by reference rather than local charts.
+  seededRuntimeEnv: async ({ app }, use, testInfo) => {
+    const environment = uniqueEnvironmentName(testInfo.title);
+    seedRuntimeEnvironment(SEED_TENANT, environment);
     await app.reloadEnvironments();
     await app.sidebar
       .envRowButton(SEED_TENANT, environment)

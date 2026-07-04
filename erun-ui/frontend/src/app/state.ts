@@ -407,6 +407,8 @@ export const defaultEnvironmentConfig = (): UIEnvironmentConfig => ({
   autoUpgrade: false,
   upgradeChannel: 'stable',
   disableBuildScript: false,
+  mountSource: false,
+  repoURL: '',
 });
 
 export const defaultRuntimePodConfig = (): { cpu: string; memory: string } => ({
