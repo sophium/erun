@@ -98,6 +98,12 @@ export class ManageDialog {
     return this.locator().locator(`#environment-config-deploy-component-${name}`);
   }
 
+  // Version-scoped ("Components in <version> to deploy") only for sourceless
+  // envs; a local env's charts aren't version-filtered, so it stays plain.
+  deployComponentsHeading(): Locator {
+    return this.locator().locator('#environment-config-deploy-components-heading');
+  }
+
   // Enabled only when the selection differs from the saved default. Matched by
   // id, not name, so it never collides with the dialog footer's Save.
   saveDeployComponentsButton(): Locator {
