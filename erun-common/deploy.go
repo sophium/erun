@@ -807,9 +807,11 @@ func traceDeployComponentSelection(ctx Context, selected []string, source string
 func resolvePublishedDeploySpecs(ctx Context, store DeployStore, resolvedTarget OpenResult, target DeployTarget) ([]DeploySpec, error) {
 	selected, selectionSource := resolveSelectedDeployComponents(target.Components, resolvedTarget.EnvConfig.Deploy.Components, ProjectK8sConfig{})
 	traceDeployComponentSelection(ctx, selected, selectionSource)
-	if err := validatePublishedSelection(selected, resolvedTarget.Tenant); err != nil {
-		return nil, err
-	}
+	// The sourceless path installs any published chart by reference. A tenant
+	// publishes its own component charts (e.g. frs-backend-api) beyond the fixed
+	// platform set, and there are no local charts to validate the selection
+	// against, so the names are trusted here; one whose chart was never published
+	// at the version surfaces at deploy time as PublishedChartNotFoundError.
 
 	specs := make([]DeploySpec, 0, len(selected)+1)
 	for _, component := range selectedPublishableComponents(selected, resolvedTarget.Tenant) {
@@ -3100,6 +3102,44 @@ func findComponentHelmChartPath(projectRoot, componentName string) (string, erro
 		return "", fmt.Errorf("multiple Helm charts found for component %q", componentName)
 	}
 	return matches[0], nil
+}
+
+// discoverComponentChartDirs walks projectRoot for every chart directory whose
+// parent is a k8s/ directory (**/k8s/<chart>/Chart.yaml) — the same places the
+// per-image lookup found charts, but returning all of them regardless of image
+// name so a module's image-less component charts (a tenant's wrappers) are
+// included. It skips .git; vendored subcharts under charts/ are excluded by the
+// parent-is-k8s check.
+func discoverComponentChartDirs(projectRoot string) ([]KubernetesDeployContext, error) {
+	var contexts []KubernetesDeployContext
+	err := filepath.WalkDir(projectRoot, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			if d.Name() == ".git" {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if d.Name() != "Chart.yaml" {
+			return nil
+		}
+		chartPath := filepath.Dir(path)
+		if filepath.Base(filepath.Dir(chartPath)) != "k8s" {
+			return nil
+		}
+		contexts = append(contexts, KubernetesDeployContext{
+			Dir:           filepath.Dir(chartPath),
+			ComponentName: filepath.Base(chartPath),
+			ChartPath:     chartPath,
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return contexts, nil
 }
 
 func componentHelmChartCandidate(path string, d fs.DirEntry, componentName string, err error) (string, bool, error) {

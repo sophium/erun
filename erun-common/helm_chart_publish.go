@@ -46,7 +46,74 @@ func (p HelmChartPublishSpec) pushCommand() commandSpec {
 	}
 }
 
-// RunHelmChartPublish traces and executes the chart package-then-push pair.
+// dependencyBuildCommand vendors an umbrella chart's declared subcharts into
+// charts/ so `helm package` (and later `helm upgrade --install`) can find them.
+func (p HelmChartPublishSpec) dependencyBuildCommand() commandSpec {
+	return commandSpec{
+		Name: "helm",
+		Args: []string{"dependency", "build", p.ChartPath},
+	}
+}
+
+func (p HelmChartPublishSpec) tgzPath() string {
+	return filepath.Join(filepath.Dir(p.ChartPath), p.ChartName+"-"+p.Version+".tgz")
+}
+
+// traceChartPackage traces the package sequence: `helm dependency build` first
+// for umbrella charts, then `helm package`. runChartPackage executes it.
+func traceChartPackage(ctx Context, spec HelmChartPublishSpec, declaresDeps bool) {
+	if declaresDeps {
+		dep := spec.dependencyBuildCommand()
+		ctx.TraceCommand(dep.Dir, dep.Name, dep.Args...)
+	}
+	pkg := spec.packageCommand()
+	ctx.TraceCommand(pkg.Dir, pkg.Name, pkg.Args...)
+}
+
+func runChartPackage(ctx Context, spec HelmChartPublishSpec, declaresDeps bool) error {
+	if declaresDeps {
+		// `helm dependency build` vendors declared subcharts into <chart>/charts/.
+		// The packaged .tgz is self-contained, so remove a charts/ we vendored to
+		// keep the working tree pristine (build --release is worktree-clean-gated).
+		chartsDir := filepath.Join(spec.ChartPath, "charts")
+		if _, err := os.Stat(chartsDir); os.IsNotExist(err) {
+			defer func() { _ = os.RemoveAll(chartsDir) }()
+		}
+		if err := runHelmCommand(ctx, spec.dependencyBuildCommand()); err != nil {
+			return fmt.Errorf("helm dependency build %s: %w", spec.ChartName, err)
+		}
+	}
+	if err := runHelmCommand(ctx, spec.packageCommand()); err != nil {
+		return fmt.Errorf("helm package %s: %w", spec.ChartName, err)
+	}
+	return nil
+}
+
+// PackageResolvedChart packages a resolved chart spec to validate it builds and
+// record its identity as a build artifact — the chart-side analogue of building
+// an image. It runs `helm dependency build` first for umbrella charts, then
+// removes the .tgz so the working tree stays clean; publishing to OCI is push's
+// job (RunHelmChartPublish).
+func PackageResolvedChart(ctx Context, spec HelmChartPublishSpec) error {
+	spec.Verbosity = ctx.Verbosity
+	declaresDeps, err := helmChartDeclaresDependencies(spec.ChartPath)
+	if err != nil {
+		return err
+	}
+	traceChartPackage(ctx, spec, declaresDeps)
+	if ctx.DryRun {
+		return nil
+	}
+	ctx.Info("==> Packaging " + spec.ChartName + " " + spec.Version)
+	if err := runChartPackage(ctx, spec, declaresDeps); err != nil {
+		return err
+	}
+	_ = os.Remove(spec.tgzPath())
+	return nil
+}
+
+// RunHelmChartPublish traces and executes the chart package-then-push sequence
+// (dependency build for umbrella charts, package, push).
 func RunHelmChartPublish(ctx Context, spec HelmChartPublishSpec) error {
 	if strings.TrimSpace(spec.ChartName) == "" {
 		return errors.New("publish: chart name is required")
@@ -58,20 +125,22 @@ func RunHelmChartPublish(ctx Context, spec HelmChartPublishSpec) error {
 		return fmt.Errorf("publish %s: oci repo is required", spec.ChartName)
 	}
 
-	pkg := spec.packageCommand()
+	declaresDeps, err := helmChartDeclaresDependencies(spec.ChartPath)
+	if err != nil {
+		return err
+	}
 	push := spec.pushCommand()
-	ctx.TraceCommand(pkg.Dir, pkg.Name, pkg.Args...)
+	traceChartPackage(ctx, spec, declaresDeps)
 	ctx.TraceCommand(push.Dir, push.Name, push.Args...)
 	if ctx.DryRun {
 		return nil
 	}
 
 	ctx.Info("==> Publishing " + spec.ChartName + " " + spec.Version + " to " + spec.OCIRepo)
-	if err := runHelmCommand(ctx, pkg); err != nil {
-		return fmt.Errorf("helm package %s: %w", spec.ChartName, err)
+	if err := runChartPackage(ctx, spec, declaresDeps); err != nil {
+		return err
 	}
-	tgzPath := filepath.Join(pkg.Dir, spec.ChartName+"-"+spec.Version+".tgz")
-	defer func() { _ = os.Remove(tgzPath) }()
+	defer func() { _ = os.Remove(spec.tgzPath()) }()
 	if err := runHelmCommand(ctx, push); err != nil {
 		return fmt.Errorf("helm push %s: %w", spec.ChartName, err)
 	}

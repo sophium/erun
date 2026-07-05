@@ -202,6 +202,7 @@ func TestBuild(t *testing.T) {
 			`esac`,
 		}, "\n"))
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		envVars = append(envVars, stubHelmSilent(t, setup)...)
 		result := erun.Run(t, []string{"build", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -230,6 +231,7 @@ func TestBuild(t *testing.T) {
 			`esac`,
 		}, "\n"))
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		envVars = append(envVars, stubHelmSilent(t, setup)...)
 		result := erun.Run(t, []string{"build", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected build to fail when the daemon cannot build a required platform; got exit 0:\n%s", result.Combined)
@@ -344,6 +346,7 @@ func TestBuild(t *testing.T) {
 			`esac`,
 		}, "\n"))
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		envVars = append(envVars, stubHelmSilent(t, setup)...)
 		result := erun.Run(t, []string{"build", "-v", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -442,6 +445,7 @@ func TestBuild(t *testing.T) {
 		stubs := setup.Cwd + "/stubs"
 		fixture.StubBinary(t, stubs, "docker", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		envVars = append(envVars, stubHelmSilent(t, setup)...)
 		result := erun.Run(t, []string{"build", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -470,6 +474,7 @@ func TestBuild(t *testing.T) {
 		// release stage succeeds without touching a real remote.
 		fixture.StubBinary(t, stubs, "git", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		envVars = append(envVars, stubHelmSilent(t, setup)...)
 		// The repo already exists from the seed's real git; the stub covers only
 		// erun's own release git operations (tag/push).
 		fixture.StubBinary(t, stubs, "helm", "")
@@ -694,6 +699,7 @@ func TestBuild(t *testing.T) {
 			`esac`,
 		}, "\n"))
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		envVars = append(envVars, stubHelmSilent(t, setup)...)
 		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -761,6 +767,7 @@ func TestBuild(t *testing.T) {
 			`esac`,
 		}, "\n"))
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		envVars = append(envVars, stubHelmSilent(t, setup)...)
 		result := erun.Run(t, []string{"build", "-v", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -859,4 +866,14 @@ func stubDockerNoLocalImages(t *testing.T, setup env.Setup) []string {
 	stubs := filepath.Join(setup.Cwd, "stubs")
 	fixture.StubBinaryAdvanced(t, stubs, "docker", fixture.StubBinarySpec{ExitCode: 1})
 	return fixture.StubEnv(stubs, "docker")
+}
+
+// stubHelmSilent adds a no-op helm stub so a real-run build that packages the
+// repo's k8s/* charts does not shell out to a real helm; returns the
+// ERUN_HELM_BIN env pair to append to the scenario's env.
+func stubHelmSilent(t *testing.T, setup env.Setup) []string {
+	t.Helper()
+	stubs := filepath.Join(setup.Cwd, "stubs")
+	fixture.StubBinary(t, stubs, "helm", "")
+	return fixture.StubEnv(stubs, "helm")
 }

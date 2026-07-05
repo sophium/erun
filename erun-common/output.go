@@ -34,6 +34,13 @@ type BuildResultImage struct {
 	Tag  string `json:"tag"`
 }
 
+// BuildResultChart is one Helm chart the build packaged from <tenant>-devops/k8s/*,
+// with the version it was packaged at (the value push publishes it to OCI under).
+type BuildResultChart struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
 // BuildResult is the structured result of `erun build`. Version is the content
 // identity the build minted — the value an orchestrator threads into
 // `erun push <version>` / `erun deploy <version>`. BaseVersion is the stable
@@ -42,6 +49,7 @@ type BuildResult struct {
 	Version     string             `json:"version"`
 	BaseVersion string             `json:"baseVersion,omitempty"`
 	Images      []BuildResultImage `json:"images,omitempty"`
+	Charts      []BuildResultChart `json:"charts,omitempty"`
 }
 
 // NewBuildResult extracts the structured result from a resolved build execution.
@@ -58,6 +66,12 @@ func NewBuildResult(execution BuildExecutionSpec) BuildResult {
 		result.Images = append(result.Images, BuildResultImage{
 			Name: strings.TrimSpace(build.Image.ImageName),
 			Tag:  strings.TrimSpace(build.Image.Tag),
+		})
+	}
+	for _, chart := range execution.componentCharts {
+		result.Charts = append(result.Charts, BuildResultChart{
+			Name:    strings.TrimSpace(chart.ChartName),
+			Version: strings.TrimSpace(chart.Version),
 		})
 	}
 	if result.BaseVersion == result.Version {
