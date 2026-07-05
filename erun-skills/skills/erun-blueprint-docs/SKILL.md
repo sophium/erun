@@ -256,6 +256,9 @@ version pins and genuine gaps, never the project's own content pages.
 
 ## Important
 
+- Give the repo root agent guidance. If the repository root has no
+  `AGENTS.md`/`CLAUDE.md`, also apply the `erun-blueprint-agents` skill so any
+  agent — or human — landing in the repo gets erun-environment orientation.
 - Do not connect the Cloudflare Pages project to a Git source. Direct
   Upload + the wrangler Job is the contract; a Git connection causes
   duplicate deploys.
