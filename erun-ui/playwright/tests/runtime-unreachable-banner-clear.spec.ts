@@ -9,7 +9,7 @@ import type { Page } from '@playwright/test';
 // events are covered by env_ensure_test.go and activity_queue_app_test.go.
 test.describe('runtime-unreachable banner clears with the deploy lifecycle (#713)', () => {
   const message =
-    'Could not reach the runtime for frs/prod: timed out waiting for API port-forward. Deploy the environment to bring it up.';
+    'Could not reach the runtime for frs/prod: runtime for frs/prod is not deployed. Deploy the environment to bring it up.';
   const banner = (page: Page) => page.getByText(/Could not reach the runtime for frs\/prod/);
 
   test('a matching clear dismisses the warning; a mismatched one does not', async ({ app }) => {
@@ -46,9 +46,8 @@ test.describe('runtime-unreachable banner clears with the deploy lifecycle (#713
     // stretch the header past the viewport so nothing truncated and the dismiss X
     // was pushed off-screen, leaving the banner un-dismissable.
     const longMessage =
-      'Could not reach the runtime for frs/prod: activate MCP port-forward: exit status 1: ' +
-      'timed out waiting for API port-forward on 127.0.0.1:17333; see ' +
-      '/Users/example/Library/Application Support/erun/portforward/api/frs/prod.log. ' +
+      'Could not reach the runtime for frs/prod: runtime for frs/prod is not deployed ' +
+      '(deployment "frs-devops" not found in namespace "frs-prod"); run `erun deploy frs prod` first. ' +
       'Deploy the environment to bring it up.';
     await emitRuntimeUnreachable(page, longMessage);
     await expect(banner(page)).toBeVisible();

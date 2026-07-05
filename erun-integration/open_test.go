@@ -332,6 +332,24 @@ func TestOpen(t *testing.T) {
 		golden.Equal(t, "open/vscode_real_run_with_deploy_requires_shell_deploy_errors", normalize.Apply(result.Combined))
 	})
 
+	t.Run("no_shell_real_run_not_deployed_errors", func(t *testing.T) {
+		// open is a pure primitive and does not deploy. A port-forward that
+		// can't bind is no longer fatal, so a genuinely undeployed runtime is
+		// caught up front by deployment presence — the run fails fast with an
+		// actionable "run `erun deploy`" error before any forward starts, rather
+		// than being inferred from a downstream port-forward timeout. The kubectl
+		// NotFound stub is the decision input; no ports are needed because the
+		// run errors before the forwards.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envVars := stubKubectlNotFound(t, setup)
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when the runtime is not deployed, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "open/no_shell_real_run_not_deployed_errors", normalize.Apply(result.Combined))
+	})
+
 	t.Run("alias_prompt_skipped_when_alias_configured", func(t *testing.T) {
 		// When ~/.zshrc already carries the team-dev alias,
 		// detectOpenNoShellAliasStartupFile reports it configured

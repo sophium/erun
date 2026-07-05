@@ -10,6 +10,7 @@ config: would assign localportrangestart=17000 to team/dev
 trace-log: would append the full trace to <TMP>
 open: tenant=team environment=dev kubernetes-context=test-context remote=true no-shell=false ide=intellij
 open: pure primitive — not deploying (run `erun deploy` first, or pass --deploy to deploy before opening)
+kubectl --context test-context --namespace team-dev get deployment team-devops -o name
 sshd: dry-run: no SSH public key found; use --public-key to choose one; using placeholder key for trace
 kubectl --context test-context --namespace team-dev exec deployment/team-devops -- /bin/sh -lc '<remote-script>'
 remote-ssh-authorized-keys:
