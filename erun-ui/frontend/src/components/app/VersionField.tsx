@@ -19,7 +19,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
-import type { UIVersionSuggestion } from '@/types';
+import type { UIVersionSuggestion, UIVersionSuggestionNotice } from '@/types';
+
+import { VersionNotices } from './VersionNotices';
 
 export function VersionField({
   id,
@@ -27,6 +29,7 @@ export function VersionField({
   value,
   sourceText,
   suggestions,
+  notices,
   choicesOpen,
   required,
   disabled,
@@ -39,6 +42,7 @@ export function VersionField({
   value: string;
   sourceText: string;
   suggestions: UIVersionSuggestion[];
+  notices: UIVersionSuggestionNotice[];
   choicesOpen: boolean;
   required?: boolean;
   disabled?: boolean;
@@ -83,40 +87,52 @@ export function VersionField({
               <CommandList>
                 <CommandEmpty>No version found.</CommandEmpty>
                 <CommandGroup>
-                  {suggestions.map((suggestion) => {
-                    const selected = suggestion.version === value;
-                    return (
-                      <CommandItem
-                        className="min-w-0"
-                        key={`${suggestion.version}:${suggestion.image ?? ''}:${suggestion.source ?? ''}:${suggestion.label}`}
-                        value={versionChoiceLabel(suggestion)}
-                        onSelect={() => {
-                          onSelect(suggestion);
-                        }}
-                      >
-                        <Check
-                          className={cn('size-4 shrink-0 opacity-0', selected && 'opacity-100')}
-                        />
-                        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                          <span className="truncate text-sm font-medium leading-tight">
-                            {suggestion.version}
-                          </span>
-                          <span className="truncate text-xs leading-tight text-muted-foreground">
-                            {[versionChoiceImage(suggestion), versionChoiceKind(suggestion)]
-                              .filter(Boolean)
-                              .join(' | ')}
-                          </span>
-                        </span>
-                      </CommandItem>
-                    );
-                  })}
+                  {suggestions.map((suggestion) => (
+                    <VersionSuggestionItem
+                      key={`${suggestion.version}:${suggestion.image ?? ''}:${suggestion.source ?? ''}:${suggestion.label}`}
+                      suggestion={suggestion}
+                      selected={suggestion.version === value}
+                      onSelect={onSelect}
+                    />
+                  ))}
                 </CommandGroup>
               </CommandList>
             </Command>
+            <VersionNotices notices={notices} />
           </PopoverContent>
         </Popover>
       </div>
       <p className="min-h-4 text-xs text-muted-foreground">{sourceText}</p>
     </div>
+  );
+}
+
+function VersionSuggestionItem({
+  suggestion,
+  selected,
+  onSelect,
+}: {
+  suggestion: UIVersionSuggestion;
+  selected: boolean;
+  onSelect: (suggestion: UIVersionSuggestion | undefined) => void;
+}): React.ReactElement {
+  return (
+    <CommandItem
+      className="min-w-0"
+      value={versionChoiceLabel(suggestion)}
+      onSelect={() => {
+        onSelect(suggestion);
+      }}
+    >
+      <Check className={cn('size-4 shrink-0 opacity-0', selected && 'opacity-100')} />
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="truncate text-sm font-medium leading-tight">{suggestion.version}</span>
+        <span className="truncate text-xs leading-tight text-muted-foreground">
+          {[versionChoiceImage(suggestion), versionChoiceKind(suggestion)]
+            .filter(Boolean)
+            .join(' | ')}
+        </span>
+      </span>
+    </CommandItem>
   );
 }

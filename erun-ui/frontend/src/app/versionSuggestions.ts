@@ -1,4 +1,4 @@
-import type { UISelection, UIVersionSuggestion } from '@/types';
+import type { UISelection, UIVersionSuggestion, UIVersionSuggestionNotice } from '@/types';
 
 export function findVersionSuggestion(
   suggestions: UIVersionSuggestion[],
@@ -46,6 +46,30 @@ export function normalizeVersionSuggestions(values: UIVersionSuggestion[]): UIVe
     }
   }
   return suggestions;
+}
+
+// versionNoticeMessage turns a source failure into an actionable, user-language
+// line: a private image tells the operator how to authenticate; an unreachable
+// registry names the failure.
+export function versionNoticeMessage(notice: UIVersionSuggestionNotice): string {
+  if (notice.kind === 'auth') {
+    return `${notice.image} is private — run docker login ghcr.io (or gh auth login) to list its versions.`;
+  }
+  return `${notice.image} — couldn't reach the registry to list its versions.`;
+}
+
+export function normalizeVersionSuggestionNotices(
+  values: UIVersionSuggestionNotice[],
+): UIVersionSuggestionNotice[] {
+  const notices: UIVersionSuggestionNotice[] = [];
+  for (const value of values) {
+    const image = normalizeDialogValue(value.image);
+    const kind = normalizeDialogValue(value.kind);
+    if (image && !notices.some((notice) => notice.image === image && notice.kind === kind)) {
+      notices.push({ image, kind });
+    }
+  }
+  return notices;
 }
 
 export function versionChoiceLabel(suggestion: UIVersionSuggestion): string {

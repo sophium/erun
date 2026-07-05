@@ -14,11 +14,14 @@ async function stubVersionSuggestions(page: Page): Promise<void> {
       return route.fulfill({
         contentType: 'application/json',
         body: JSON.stringify({
-          data: [
-            { label: 'Current', version: '1.0.0' },
-            { label: 'Has a subset', version: '1.0.90' },
-            { label: 'No charts', version: '1.0.50' },
-          ],
+          data: {
+            suggestions: [
+              { label: 'Current', version: '1.0.0' },
+              { label: 'Has a subset', version: '1.0.90' },
+              { label: 'No charts', version: '1.0.50' },
+            ],
+            notices: [],
+          },
         }),
       });
     }
@@ -76,11 +79,11 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     // never its local working-tree chart directories. The version, not the env's
     // source, decides which charts exist.
     for (const component of [
-      'erun-backend-postgres',
-      'erun-backend-db',
-      'erun-backend-api',
-      'erun-powerdns',
-      'erun-docs',
+      'pw-backend-postgres',
+      'pw-backend-db',
+      'pw-backend-api',
+      'pw-powerdns',
+      'pw-docs',
     ]) {
       await expect(app.manageDialog.deployComponentCheckbox(component)).toBeVisible();
     }
@@ -130,16 +133,16 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     await expect(app.manageDialog.deployButton()).toBeDisabled();
     await app.manageDialog.openVersionPicker();
     await expect(app.manageDialog.deployComponentsHint()).toBeVisible();
-    await expect(app.manageDialog.deployComponentCheckbox('erun-backend-api')).toHaveCount(0);
+    await expect(app.manageDialog.deployComponentCheckbox('pw-backend-api')).toHaveCount(0);
 
     await app.manageDialog.pickVersion('1.0.0');
 
     for (const component of [
-      'erun-backend-postgres',
-      'erun-backend-db',
-      'erun-backend-api',
-      'erun-powerdns',
-      'erun-docs',
+      'pw-backend-postgres',
+      'pw-backend-db',
+      'pw-backend-api',
+      'pw-powerdns',
+      'pw-docs',
     ]) {
       await expect(app.manageDialog.deployComponentCheckbox(component)).toBeVisible();
     }
@@ -161,11 +164,11 @@ test.describe('manage dialog — components to deploy (#718)', () => {
 
     const runtimeName = `${seededRuntimeEnv.tenant}-devops`;
     const platform = [
-      'erun-backend-postgres',
-      'erun-backend-db',
-      'erun-backend-api',
-      'erun-powerdns',
-      'erun-docs',
+      'pw-backend-postgres',
+      'pw-backend-db',
+      'pw-backend-api',
+      'pw-powerdns',
+      'pw-docs',
     ];
     await app.sidebar.openManageDialogViaKeyboard(
       seededRuntimeEnv.tenant,
@@ -207,11 +210,11 @@ test.describe('manage dialog — components to deploy (#718)', () => {
 
     // 1.0.90 published only postgres + db; the other three drop off, runtime stays.
     await app.manageDialog.pickVersion('1.0.90');
-    await expect(app.manageDialog.deployComponentCheckbox('erun-backend-api')).toHaveCount(0);
-    await expect(app.manageDialog.deployComponentCheckbox('erun-powerdns')).toHaveCount(0);
-    await expect(app.manageDialog.deployComponentCheckbox('erun-docs')).toHaveCount(0);
-    await expect(app.manageDialog.deployComponentCheckbox('erun-backend-postgres')).toBeVisible();
-    await expect(app.manageDialog.deployComponentCheckbox('erun-backend-db')).toBeVisible();
+    await expect(app.manageDialog.deployComponentCheckbox('pw-backend-api')).toHaveCount(0);
+    await expect(app.manageDialog.deployComponentCheckbox('pw-powerdns')).toHaveCount(0);
+    await expect(app.manageDialog.deployComponentCheckbox('pw-docs')).toHaveCount(0);
+    await expect(app.manageDialog.deployComponentCheckbox('pw-backend-postgres')).toBeVisible();
+    await expect(app.manageDialog.deployComponentCheckbox('pw-backend-db')).toBeVisible();
     await expect(app.manageDialog.deployComponentCheckbox(runtimeName)).toBeVisible();
 
     // 1.0.50 published no component charts; only the runtime item remains.
@@ -220,5 +223,74 @@ test.describe('manage dialog — components to deploy (#718)', () => {
       await expect(app.manageDialog.deployComponentCheckbox(component)).toHaveCount(0);
     }
     await expect(app.manageDialog.deployComponentCheckbox(runtimeName)).toBeVisible();
+  });
+
+  test('a private runtime image surfaces an actionable auth notice in the picker (#749)', async ({
+    app,
+    seededEnv,
+    page,
+  }) => {
+    // The offline harness can't make ghcr return a real 401, so stub the RPC to
+    // carry a notice. The auth-vs-unreachable classification is owned by Go unit
+    // tests (TestLoadVersionSuggestionsSurfacesAuthNoticeForPrivateImage /
+    // TestLoadVersionSuggestionsMarksUnreachableRegistry in erun-ui/app_test.go);
+    // this locks the rendered, actionable affordance the operator sees.
+    await page.route('**/__erun_invoke', async (route, request) => {
+      const body = JSON.parse(request.postData() ?? '{}') as { method: string };
+      if (body.method === 'LoadVersionSuggestions') {
+        return route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              suggestions: [{ label: 'ERun latest stable', version: '1.0.0' }],
+              notices: [{ image: 'ghcr.io/sophium/frs-devops', kind: 'auth' }],
+            },
+          }),
+        });
+      }
+      await route.continue();
+    });
+    await app.sidebar.openManageDialogViaKeyboard(seededEnv.tenant, seededEnv.environment);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.selectTab('Runtime');
+    await app.manageDialog.openVersionPicker();
+
+    const notices = app.manageDialog.versionSourceNotices();
+    await expect(notices).toBeVisible();
+    await expect(notices).toContainText('ghcr.io/sophium/frs-devops is private');
+    await expect(notices).toContainText('docker login ghcr.io');
+  });
+
+  test('the picker stays within the viewport and scrolls to every component', async ({
+    app,
+    page,
+    seededRuntimeEnv,
+  }) => {
+    // A shorter window forces the version list + full component checklist to
+    // exceed the viewport; the popover must cap to the visible height and scroll
+    // rather than clip the last components off-screen.
+    await stubVersionSuggestions(page);
+    await page.setViewportSize({ width: 1440, height: 720 });
+    await app.sidebar.openManageDialogViaKeyboard(
+      seededRuntimeEnv.tenant,
+      seededRuntimeEnv.environment,
+    );
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.selectTab('Runtime');
+    await app.manageDialog.openVersionPicker();
+    await app.manageDialog.pickVersion('1.0.0');
+
+    // The popover fits: its bottom edge stays on-screen.
+    const box = await app.manageDialog.versionPickerPopover().boundingBox();
+    const viewport = page.viewportSize();
+    expect(box).not.toBeNull();
+    if (box && viewport) {
+      expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
+    }
+
+    // The last component (runtime is first now) is reachable by scrolling the popover.
+    const lastComponent = app.manageDialog.deployComponentCheckbox('pw-docs');
+    await lastComponent.scrollIntoViewIfNeeded();
+    await expect(lastComponent).toBeInViewport();
   });
 });

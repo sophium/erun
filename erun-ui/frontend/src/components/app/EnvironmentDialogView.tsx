@@ -131,6 +131,7 @@ function EnvironmentDialogFields({
   const dispatch = useAppDispatch();
   const dialog = useAppSelector((state) => state.environmentDialog);
   const versionSuggestions = useAppSelector((state) => state.tenants.versionSuggestions);
+  const versionNotices = useAppSelector((state) => state.tenants.versionSuggestionNotices);
   return (
     <>
       <EnvironmentNameFields tenantRef={tenantRef} environmentRef={environmentRef} />
@@ -141,6 +142,7 @@ function EnvironmentDialogFields({
           findVersionSuggestion(versionSuggestions, dialog.version, dialog.versionImage),
         )}
         suggestions={versionSuggestions}
+        notices={versionNotices}
         choicesOpen={dialog.choicesOpen}
         disabled={dialog.busy}
         onValueChange={(version) => {

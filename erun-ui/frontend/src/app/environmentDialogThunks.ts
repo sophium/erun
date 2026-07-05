@@ -17,12 +17,16 @@ import {
   bumpEnvironmentDialogVersion,
 } from './slices/requestCountersSlice';
 import { setSelected } from './slices/selectionSlice';
-import { setVersionSuggestions } from './slices/tenantsSlice';
+import { setVersionSuggestionNotices, setVersionSuggestions } from './slices/tenantsSlice';
 import { defaultEnvironmentDialog, type EnvironmentDialogState } from './state';
 import { loadSavedPastContainerRegistries } from './storage';
 import type { AppThunk } from './store';
 import { requireController } from './thunkExtra';
-import { normalizeDialogValue, normalizeVersionSuggestions } from './versionSuggestions';
+import {
+  normalizeDialogValue,
+  normalizeVersionSuggestionNotices,
+  normalizeVersionSuggestions,
+} from './versionSuggestions';
 
 let versionSuggestionTimer = 0;
 
@@ -257,7 +261,8 @@ export const refreshDialogVersionSuggestions =
     const raw = await dispatch(
       environmentApi.endpoints.getVersionSuggestions.initiate(selection, { forceRefetch: true }),
     ).unwrap();
-    const suggestions = normalizeVersionSuggestions(raw);
+    const suggestions = normalizeVersionSuggestions(raw.suggestions);
+    const notices = normalizeVersionSuggestionNotices(raw.notices ?? []);
     if (
       request !== getState().requestCounters.environmentDialogVersion ||
       !getState().environmentDialog.open
@@ -265,6 +270,7 @@ export const refreshDialogVersionSuggestions =
       return;
     }
     dispatch(setVersionSuggestions(suggestions));
+    dispatch(setVersionSuggestionNotices(notices));
     const currentVersion = normalizeDialogValue(getState().environmentDialog.version);
     if (selectDefault || !suggestions.some((suggestion) => suggestion.version === currentVersion)) {
       dispatch(selectEnvironmentVersionSuggestion(suggestions[0]));

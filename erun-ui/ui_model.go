@@ -3,12 +3,13 @@ package main
 import eruncommon "github.com/sophium/erun/erun-common"
 
 type uiState struct {
-	Tenants            []uiTenant              `json:"tenants"`
-	Selected           *uiSelection            `json:"selected,omitempty"`
-	Message            string                  `json:"message,omitempty"`
-	Build              uiBuildDetails          `json:"build"`
-	VersionSuggestions []uiVersion             `json:"versionSuggestions,omitempty"`
-	CloudProviders     []uiCloudProviderStatus `json:"cloudProviders,omitempty"`
+	Tenants                  []uiTenant              `json:"tenants"`
+	Selected                 *uiSelection            `json:"selected,omitempty"`
+	Message                  string                  `json:"message,omitempty"`
+	Build                    uiBuildDetails          `json:"build"`
+	VersionSuggestions       []uiVersion             `json:"versionSuggestions,omitempty"`
+	VersionSuggestionNotices []uiVersionNotice       `json:"versionSuggestionNotices,omitempty"`
+	CloudProviders           []uiCloudProviderStatus `json:"cloudProviders,omitempty"`
 }
 
 type uiTenant struct {
@@ -96,6 +97,22 @@ type uiBuildDetails struct {
 }
 
 type uiVersion = eruncommon.RuntimeVersionSuggestion
+
+// uiVersionNotice explains why a runtime-image source produced no version
+// suggestions, so the picker shows an actionable line instead of rendering
+// nothing. Kind is "auth" (private/unauthorized — the operator must log in) or
+// "unreachable" (registry or network failure).
+type uiVersionNotice struct {
+	Image string `json:"image"`
+	Kind  string `json:"kind"`
+}
+
+// uiVersionSuggestions is the version picker's read model: the deployable
+// version choices plus per-source notices for images that could not be listed.
+type uiVersionSuggestions struct {
+	Suggestions []uiVersion       `json:"suggestions"`
+	Notices     []uiVersionNotice `json:"notices,omitempty"`
+}
 
 type uiERunConfig struct {
 	DefaultTenant  string                  `json:"defaultTenant"`

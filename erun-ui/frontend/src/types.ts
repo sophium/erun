@@ -122,6 +122,7 @@ export interface UIState {
   message?: string;
   build?: UIBuildDetails;
   versionSuggestions?: UIVersionSuggestion[];
+  versionSuggestionNotices?: UIVersionSuggestionNotice[];
   cloudProviders?: UICloudProviderStatus[];
 }
 
@@ -270,6 +271,21 @@ export interface UIVersionSuggestion {
   version: string;
   source?: string;
   image?: string;
+}
+
+// UIVersionSuggestionNotice explains why a runtime-image source produced no
+// version suggestions. kind is 'auth' (private image — the operator must log in)
+// or 'unreachable' (registry/network failure).
+export interface UIVersionSuggestionNotice {
+  image: string;
+  kind: string;
+}
+
+// UIVersionSuggestions is the version picker read model returned by
+// LoadVersionSuggestions: deployable choices plus per-source notices.
+export interface UIVersionSuggestions {
+  suggestions: UIVersionSuggestion[];
+  notices?: UIVersionSuggestionNotice[];
 }
 
 export interface UIERunConfig {
