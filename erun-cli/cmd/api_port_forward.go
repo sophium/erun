@@ -182,7 +182,12 @@ func kubectlAPIPortForwardArgs(result common.OpenResult, localPort int) []string
 	args = append(args,
 		"port-forward",
 		"service/erun-api",
-		fmt.Sprintf("%d:%d", localPort, common.APIPortForResult(result)),
+		// The erun-api service is a standalone component chart, published on the
+		// canonical APIServicePort in every namespace; only the local side is
+		// per-env, so concurrent forwards for different environments don't collide
+		// on the laptop. (MCP/SSH forward to the runtime pod, which is deployed on
+		// per-env ports, so those map per-env on both sides.)
+		fmt.Sprintf("%d:%d", localPort, common.APIServicePort),
 		"--address", "127.0.0.1",
 	)
 	return args
