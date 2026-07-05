@@ -22,13 +22,14 @@ type IngressApplierFunc func(params IngressApplyParams) error
 // DNSRecordUpsertParams is the per-env wildcard A-record write the exposure flow
 // performs against the platform's PowerDNS singleton, which owns the services zone.
 type DNSRecordUpsertParams struct {
-	Zone              string
-	Name              string
-	Type              string
-	TTL               int
-	Value             string
-	PlatformNamespace string
-	KubernetesContext string
+	Zone               string
+	Name               string
+	Type               string
+	TTL                int
+	Value              string
+	PlatformNamespace  string
+	PowerDNSDeployment string
+	KubernetesContext  string
 }
 
 // IngressApplyParams is the Host-routing Ingress the exposure flow applies into
@@ -72,6 +73,11 @@ type ExposeServiceResult struct {
 	// PlatformNamespace is the namespace the platform's PowerDNS singleton runs
 	// in, where the per-env wildcard record is written.
 	PlatformNamespace string `json:"platformNamespace"`
+	// PlatformPowerDNSDeployment is the PowerDNS Deployment name the DNS-record
+	// exec targets. The chart scopes it to the platform env's tenant
+	// (<tenant>-powerdns), so it is derived from platform.Env rather than
+	// hardcoded to erun-powerdns.
+	PlatformPowerDNSDeployment string `json:"platformPowerdnsDeployment"`
 	// PlatformContext is the kube context of the platform env's own cluster,
 	// which the DNS write must target — it may differ from KubernetesContext (the
 	// target env's cluster). Empty when the platform env declares no explicit
@@ -134,13 +140,14 @@ func RunExposeService(ctx Context, params ExposeServiceParams, store ExposeStore
 
 func exposeDNSParams(result ExposeServiceResult) DNSRecordUpsertParams {
 	return DNSRecordUpsertParams{
-		Zone:              result.ServicesZone,
-		Name:              result.WildcardName,
-		Type:              "A",
-		TTL:               defaultExposeWildcardTTL,
-		Value:             result.TargetIP,
-		PlatformNamespace: result.PlatformNamespace,
-		KubernetesContext: result.PlatformContext,
+		Zone:               result.ServicesZone,
+		Name:               result.WildcardName,
+		Type:               "A",
+		TTL:                defaultExposeWildcardTTL,
+		Value:              result.TargetIP,
+		PlatformNamespace:  result.PlatformNamespace,
+		PowerDNSDeployment: result.PlatformPowerDNSDeployment,
+		KubernetesContext:  result.PlatformContext,
 	}
 }
 
@@ -209,20 +216,26 @@ func resolveExposeServicePlan(params ExposeServiceParams, store ExposeStore) (Ex
 		servicePort = defaultExposeServicePort
 	}
 	envLabel := KubernetesNamespaceName(tenant, environment)
+	// The PowerDNS Deployment is scoped to the platform env's tenant by its chart
+	// (<tenant>-powerdns); platform.Env is that env's "<tenant>-<env>" namespace
+	// label, so its tenant prefix gives the Deployment name the exec targets.
+	platTenant, _, _ := splitTenantEnv(platform.Env)
+	platformPowerDNS := TenantResourcePrefix(platTenant) + "-powerdns"
 	result := ExposeServiceResult{
-		Tenant:            tenant,
-		Environment:       environment,
-		Service:           service,
-		Namespace:         envLabel,
-		KubernetesContext: strings.TrimSpace(envConfig.KubernetesContext),
-		Hostname:          fmt.Sprintf("%s.%s.%s", service, envLabel, platform.ServicesZone),
-		ServicesZone:      platform.ServicesZone,
-		WildcardName:      fmt.Sprintf("*.%s.%s", envLabel, platform.ServicesZone),
-		TargetIP:          targetIP,
-		IngressName:       fmt.Sprintf("expose-%s", service),
-		ServicePort:       servicePort,
-		PlatformNamespace: normalizeNamespaceName(platform.Env),
-		PlatformContext:   resolvePlatformContext(store, platform.Env),
+		Tenant:                     tenant,
+		Environment:                environment,
+		Service:                    service,
+		Namespace:                  envLabel,
+		KubernetesContext:          strings.TrimSpace(envConfig.KubernetesContext),
+		Hostname:                   fmt.Sprintf("%s.%s.%s", service, envLabel, platform.ServicesZone),
+		ServicesZone:               platform.ServicesZone,
+		WildcardName:               fmt.Sprintf("*.%s.%s", envLabel, platform.ServicesZone),
+		TargetIP:                   targetIP,
+		IngressName:                fmt.Sprintf("expose-%s", service),
+		ServicePort:                servicePort,
+		PlatformNamespace:          normalizeNamespaceName(platform.Env),
+		PlatformPowerDNSDeployment: platformPowerDNS,
+		PlatformContext:            resolvePlatformContext(store, platform.Env),
 	}
 	return result, nil
 }

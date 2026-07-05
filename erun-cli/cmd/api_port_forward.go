@@ -35,7 +35,8 @@ func ensureAPIPortForward(ctx common.Context, result common.OpenResult) (int, er
 		LocalPort:         localPort,
 	}
 
-	checkArgs := kubectlAPIDeploymentCheckArgs(expectedState.KubernetesContext, expectedState.Namespace)
+	apiDeployment := common.TenantResourcePrefix(result.Tenant) + "-api"
+	checkArgs := kubectlAPIDeploymentCheckArgs(expectedState.KubernetesContext, expectedState.Namespace, apiDeployment)
 	ctx.TraceCommand("", "kubectl", checkArgs...)
 
 	if ctx.DryRun {
@@ -47,7 +48,7 @@ func ensureAPIPortForward(ctx common.Context, result common.OpenResult) (int, er
 		return 0, err
 	}
 	if !exists {
-		ctx.Trace(fmt.Sprintf("open: erun-api deployment not present in %s; skipping API port-forward", expectedState.Namespace))
+		ctx.Trace(fmt.Sprintf("open: %s deployment not present in %s; skipping API port-forward", apiDeployment, expectedState.Namespace))
 		stopStaleMCPPortForward(state, expectedState, localPort)
 		return 0, nil
 	}
@@ -100,7 +101,7 @@ func adoptForeignAPIPortForward(ctx common.Context, statePath string, expected m
 	return true, nil
 }
 
-func kubectlAPIDeploymentCheckArgs(kubernetesContext, namespace string) []string {
+func kubectlAPIDeploymentCheckArgs(kubernetesContext, namespace, apiDeployment string) []string {
 	args := make([]string, 0, 7)
 	if strings.TrimSpace(kubernetesContext) != "" {
 		args = append(args, "--context", kubernetesContext)
@@ -108,7 +109,7 @@ func kubectlAPIDeploymentCheckArgs(kubernetesContext, namespace string) []string
 	if strings.TrimSpace(namespace) != "" {
 		args = append(args, "--namespace", namespace)
 	}
-	return append(args, "get", "deployment", "erun-api", "-o", "name")
+	return append(args, "get", "deployment", apiDeployment, "-o", "name")
 }
 
 func checkAPIDeploymentPresent(args []string) (bool, error) {
@@ -122,7 +123,7 @@ func checkAPIDeploymentPresent(args []string) (bool, error) {
 		strings.Contains(message, "no resources found") {
 		return false, nil
 	}
-	return false, fmt.Errorf("failed to check deployment erun-api: %w: %s", err, strings.TrimSpace(string(output)))
+	return false, fmt.Errorf("failed to check API deployment: %w: %s", err, strings.TrimSpace(string(output)))
 }
 
 func startAPIPortForward(statePath string, expectedState mcpPortForwardState, args []string, localPort int) (int, error) {
@@ -181,8 +182,8 @@ func kubectlAPIPortForwardArgs(result common.OpenResult, localPort int) []string
 	}
 	args = append(args,
 		"port-forward",
-		"service/erun-api",
-		// The erun-api service is a standalone component chart, published on the
+		fmt.Sprintf("service/%s-api", common.TenantResourcePrefix(result.Tenant)),
+		// The API service is a standalone component chart, published on the
 		// canonical APIServicePort in every namespace; only the local side is
 		// per-env, so concurrent forwards for different environments don't collide
 		// on the laptop. (MCP/SSH forward to the runtime pod, which is deployed on

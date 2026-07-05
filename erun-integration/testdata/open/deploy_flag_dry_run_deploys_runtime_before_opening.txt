@@ -15,8 +15,8 @@ deploy: watching pods in team-dev on context test-context for early container fa
 kubectl --context test-context --namespace team-dev get pods -o json
 dedup: ready (release=test-context-team-dev-team-devops, hash=<HASH>)
 kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 17000:17000 --address <LOOPBACK>
-kubectl --context test-context --namespace team-dev get deployment erun-api -o name
-kubectl --context test-context --namespace team-dev port-forward service/erun-api 17033:17033 --address <LOOPBACK>
+kubectl --context test-context --namespace team-dev get deployment team-api -o name
+kubectl --context test-context --namespace team-dev port-forward service/team-api 17033:17033 --address <LOOPBACK>
 open: --no-shell selected, emitting setup commands instead of launching shell
 kubectl config use-context test-context
 kubectl config set-context --current --namespace=team-dev

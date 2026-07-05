@@ -18,7 +18,7 @@ kubectl port-forward -n <tenant>-<env> svc/<service> <localPort>:<port>
 
 Lifetime: bound to the calling process. No reconnection on cluster-side restart.
 
-`<localPort>` is per-env (from `EnvConfig.localportrangestart`) so concurrent forwards for different envs don't collide on the laptop. `<port>` is the **in-cluster** port, which differs by channel: the `erun-api` service is a standalone component chart published on the canonical `APIServicePort` (`17033`) in **every** namespace, so its forward maps `<perEnvLocalApi>:17033`; MCP and SSH forward to the runtime pod, which is deployed on the env's per-env ports, so those map the same per-env number on both sides. Using the per-env number for the API's remote side would target a port the service never exposes.
+`<localPort>` is per-env (from `EnvConfig.localportrangestart`) so concurrent forwards for different envs don't collide on the laptop. `<port>` is the **in-cluster** port, which differs by channel: the tenant's `<tenant>-api` service (`erun-api` for the `erun` tenant) is a standalone component chart published on the canonical `APIServicePort` (`17033`) in **every** namespace, so its forward maps `<perEnvLocalApi>:17033`; MCP and SSH forward to the runtime pod, which is deployed on the env's per-env ports, so those map the same per-env number on both sides. Using the per-env number for the API's remote side would target a port the service never exposes.
 
 ## Pattern 2 — `hostPort` (local clusters only)
 
@@ -141,7 +141,7 @@ For the public form, each segment must match:
 
 **Execution.** Two side effects, in order:
 
-1. **DNS write.** `kubectl [--context <platform-ctx>] -n <platform-namespace> exec deploy/erun-powerdns -- pdnsutil --config-dir=/etc/pdns-shared replace-rrset <zone> <rel-name> A 60 <ip>`. The platform namespace is `platform.env` normalised to a namespace label; the **platform** env's own kube context is resolved from its env config (`platform.env` is a `<tenant>-<env>` label — tenant names carry no hyphen, so the first hyphen splits it). This is distinct from the target env's context — the DNS write lands on the cluster PowerDNS runs on, the Ingress on the target env's cluster, which may differ. If the platform env config is not loadable, the platform context is empty and `kubectl` falls back to the current context.
+1. **DNS write.** `kubectl [--context <platform-ctx>] -n <platform-namespace> exec deploy/<platform-tenant>-powerdns -- pdnsutil --config-dir=/etc/pdns-shared replace-rrset <zone> <rel-name> A 60 <ip>`. The PowerDNS Deployment is tenant-scoped (`<platform-tenant>-powerdns`, e.g. `erun-powerdns` for the `erun` tenant). The platform namespace is `platform.env` normalised to a namespace label; the **platform** env's own kube context and tenant are resolved from `platform.env` (a `<tenant>-<env>` label — tenant names carry no hyphen, so the first hyphen splits it). This is distinct from the target env's context — the DNS write lands on the cluster PowerDNS runs on, the Ingress on the target env's cluster, which may differ. If the platform env config is not loadable, the platform context is empty and `kubectl` falls back to the current context.
 2. **Ingress apply.** `kubectl [--context <env-ctx>] -n <tenant>-<env> apply -f -` with a `networking.k8s.io/v1` Ingress (`app.kubernetes.io/managed-by: erun-expose`), manifest piped on stdin.
 
 The dry-run trace prints both `kubectl` commands verbatim (including the TTL) plus the resolved hostname, wildcard, and platform namespace — no synthetic verbs, no side effects.

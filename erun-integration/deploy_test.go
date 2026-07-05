@@ -584,6 +584,22 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_remote_env_uses_published_chart", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_remote_env_prefers_tenant_published_runtime_chart", func(t *testing.T) {
+		// Self-contained tenant: when the tenant publishes its own runtime
+		// chart (charts/team-devops) at the deploy version, published runtime
+		// resolution prefers it over the shared charts/erun-devops — the
+		// published analogue of the local <tenant>-devops-first order. The
+		// probe's answer is supplied deterministically via the
+		// ERUN_PUBLISHED_CHART_PROBE_OVERRIDE decision-input seam (real deploys
+		// read the registry); the sibling dry_run_remote_env_uses_published_chart
+		// locks the fallback to charts/erun-devops when the tenant chart is absent.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		golden.Equal(t, "deploy/dry_run_remote_env_prefers_tenant_published_runtime_chart", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_remote_env_deploys_published_components", func(t *testing.T) {
 		// A remote/runtime env has no local checkout, yet --components selects
 		// platform components: each resolves to its PUBLISHED erun-<component>
