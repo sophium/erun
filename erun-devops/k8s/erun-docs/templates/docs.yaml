@@ -1,3 +1,4 @@
+{{- $tenant := default "erun" .Values.tenant -}}
 {{- $docs := default dict .Values.docs -}}
 {{- $enabled := default false $docs.enabled -}}
 {{- $project := default "erun-docs" $docs.project -}}
@@ -10,16 +11,16 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: erun-docs-deployer
+  name: {{ $tenant }}-docs-deployer
   labels:
-    app: erun-docs
+    app: {{ $tenant }}-docs
 ---
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: erun-docs-deploy
+  name: {{ $tenant }}-docs-deploy
   labels:
-    app: erun-docs
+    app: {{ $tenant }}-docs
   annotations:
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
@@ -30,10 +31,10 @@ spec:
   template:
     metadata:
       labels:
-        app: erun-docs
+        app: {{ $tenant }}-docs
     spec:
       restartPolicy: Never
-      serviceAccountName: erun-docs-deployer
+      serviceAccountName: {{ $tenant }}-docs-deployer
       containers:
         - name: deploy
           image: {{ $docsImage }}

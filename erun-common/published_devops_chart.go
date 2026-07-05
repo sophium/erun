@@ -1,6 +1,7 @@
 package eruncommon
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,6 +18,57 @@ func PublishedDevopsChartOCIRepo(containerRegistry string) string {
 
 func publishedDevopsChartReference(containerRegistry string) string {
 	return PublishedDevopsChartOCIRepo(containerRegistry) + "/" + DevopsComponentName
+}
+
+// resolvePublishedRuntimeChartReference prefers the tenant's own published
+// <tenant>-devops chart (typically a thin umbrella wrapping erun-devops, per the
+// erun-build-env skill) and falls back to the canonical charts/erun-devops when
+// the tenant publishes none — the published analogue of the local
+// runtimeComponentNames order. The tenant chart is used
+// only when it actually publishes the deploy version, probed against the chart
+// repo (authenticated like every registry read); any probe failure or miss
+// falls back, so an offline resolve and a tenant that rides the shared chart
+// both behave exactly as before. The erun tenant's release name is erun-devops,
+// so no probe runs for it and its resolution is unchanged.
+func resolvePublishedRuntimeChartReference(ctx context.Context, containerRegistry, tenant, version string) string {
+	tenantChart := RuntimeReleaseName(tenant)
+	if tenantChart != DevopsComponentName && publishedChartHasVersion(ctx, containerRegistry, tenantChart, version) {
+		return PublishedDevopsChartOCIRepo(containerRegistry) + "/" + tenantChart
+	}
+	return publishedDevopsChartReference(containerRegistry)
+}
+
+func publishedChartHasVersion(ctx context.Context, containerRegistry, chartName, version string) bool {
+	if override, ok := os.LookupEnv(publishedChartProbeOverrideEnv); ok {
+		return publishedChartOverrideHasVersion(override, chartName, version)
+	}
+	versions, err := ResolveRuntimeImageRegistryVersions(ctx, containerRegistry, "charts/"+chartName)
+	if err != nil {
+		return false
+	}
+	return versions.HasVersion(version)
+}
+
+// publishedChartProbeOverrideEnv is a test-only seam that answers the "does
+// charts/<name>:<version> exist?" registry probe from a static list instead of
+// a live registry read, so integration goldens never depend on a real
+// registry's contents. Not a production knob: when the variable is unset the
+// probe performs the real authenticated registry read. Format:
+// comma-separated "<chart>:<version>" entries treated as published; anything
+// absent (including an empty value) is treated as unpublished.
+const publishedChartProbeOverrideEnv = "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE"
+
+func publishedChartOverrideHasVersion(override, chartName, version string) bool {
+	for _, entry := range strings.Split(override, ",") {
+		name, ver, ok := strings.Cut(strings.TrimSpace(entry), ":")
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(name) == chartName && strings.TrimSpace(ver) == version {
+			return true
+		}
+	}
+	return false
 }
 
 // IsOCIChartReference reports whether the chart path addresses a published
@@ -57,7 +109,7 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, 
 		return DeploySpec{}, fmt.Errorf("runtime version is required to deploy the published %s chart: pass --version or persist runtimeversion in the env config", DevopsComponentName)
 	}
 
-	chartReference := publishedDevopsChartReference(registry)
+	chartReference := resolvePublishedRuntimeChartReference(context.Background(), registry, target.Tenant, version)
 	ctx.Trace("deploy: " + reason + "; using published chart " + chartReference + " version " + version)
 
 	deployContext := KubernetesDeployContext{

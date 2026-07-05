@@ -1,8 +1,9 @@
+{{- $tenant := default "erun" .Values.tenant -}}
 {{- $postgres := default dict (default dict .Values.api).postgres -}}
 {{- $postgresDatabase := default "erun" $postgres.database -}}
 {{- $postgresUser := default "erun" $postgres.user -}}
 {{- $postgresPort := default 5432 $postgres.port -}}
-{{- $postgresPasswordSecretName := default "erun-backend-postgres" $postgres.passwordSecretName -}}
+{{- $postgresPasswordSecretName := default (printf "%s-backend-postgres" $tenant) $postgres.passwordSecretName -}}
 {{- $postgresPasswordSecretKey := default "password" $postgres.passwordSecretKey -}}
 {{- $postgresStorage := default "10Gi" $postgres.storage -}}
 {{- $postgresReset := default false $postgres.reset -}}
@@ -22,7 +23,7 @@ kind: Secret
 metadata:
   name: {{ $postgresPasswordSecretName }}
   labels:
-    app: erun-postgres
+    app: {{ $tenant }}-postgres
 type: Opaque
 stringData:
   {{ $postgresPasswordSecretKey }}: {{ $postgresPassword | quote }}
@@ -30,9 +31,9 @@ stringData:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: erun-postgres-data
+  name: {{ $tenant }}-postgres-data
   labels:
-    app: erun-postgres
+    app: {{ $tenant }}-postgres
 spec:
   accessModes:
     - ReadWriteOnce
@@ -43,13 +44,13 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: erun-postgres
+  name: {{ $tenant }}-postgres
   labels:
-    app: erun-postgres
+    app: {{ $tenant }}-postgres
 spec:
   type: ClusterIP
   selector:
-    app: erun-postgres
+    app: {{ $tenant }}-postgres
   ports:
     - name: postgres
       port: {{ $postgresPort }}
@@ -58,20 +59,20 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: erun-postgres
+  name: {{ $tenant }}-postgres
   labels:
-    app: erun-postgres
+    app: {{ $tenant }}-postgres
 spec:
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      app: erun-postgres
+      app: {{ $tenant }}-postgres
   replicas: 1
   template:
     metadata:
       labels:
-        app: erun-postgres
+        app: {{ $tenant }}-postgres
       {{- if $postgresReset }}
       annotations:
         # Carries the per-deploy version mint so every snapshot deploy rolls
@@ -137,5 +138,5 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: erun-postgres-data
+            claimName: {{ $tenant }}-postgres-data
       restartPolicy: Always

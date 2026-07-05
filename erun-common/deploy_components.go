@@ -27,7 +27,7 @@ var deployComponentBaseOrder = []string{
 // for a tenant that publishes its own charts (e.g. frs). Derived from
 // RuntimeReleaseName so it stays in lockstep with the runtime chart naming.
 func componentChartPrefix(tenant string) string {
-	return strings.TrimSuffix(RuntimeReleaseName(tenant), "-devops")
+	return TenantResourcePrefix(tenant)
 }
 
 // publishablePlatformComponentNames are the component charts published to the

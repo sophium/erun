@@ -41,6 +41,13 @@ func (s Setup) Env() []string {
 		// row append their own ERUN_SKILLS_DIR after Env() (the later
 		// duplicate wins).
 		"ERUN_SKILLS_DIR=" + filepath.Join(s.Home, ".no-baked-skills"),
+		// Answer the published-runtime-chart existence probe from a static
+		// (empty) list so deploy never reaches a real registry and drifts a
+		// golden by whatever charts happen to be published there. Scenarios
+		// that exercise the tenant-preferred branch append their own
+		// ERUN_PUBLISHED_CHART_PROBE_OVERRIDE after Env() (the later duplicate
+		// wins).
+		"ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=",
 	}
 }
 

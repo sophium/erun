@@ -8,7 +8,7 @@
 
   - :53 is bound on the node via hostNetwork so the public glue record
     (ns1.<base-domain> -> <authoritativeIP>) resolves to this pod. dnsPolicy
-    ClusterFirstWithHostNet keeps cluster DNS so `erun-postgres` still resolves.
+    ClusterFirstWithHostNet keeps cluster DNS so the postgres Service still resolves.
     The container runs as the image's non-root `pdns` user, so it carries
     NET_BIND_SERVICE to bind the privileged :53 portably (k8s does not relax
     ip_unprivileged_port_start the way the local Docker default does).
@@ -31,16 +31,17 @@
   imageOverrides.erun-powerdns (default <registry>/erun-powerdns:<VERSION>); the
   schema-load step reuses the erun-backend-postgres image for psql/createdb.
 */}}
+{{- $tenant := default "erun" .Values.tenant -}}
 {{- $postgres := default dict (default dict .Values.api).postgres -}}
 {{- $postgresUser := default "erun" $postgres.user -}}
 {{- $postgresPort := default 5432 $postgres.port -}}
-{{- $postgresHost := default "erun-postgres" $postgres.host -}}
-{{- $postgresPasswordSecretName := default "erun-backend-postgres" $postgres.passwordSecretName -}}
+{{- $postgresHost := default (printf "%s-postgres" $tenant) $postgres.host -}}
+{{- $postgresPasswordSecretName := default (printf "%s-backend-postgres" $tenant) $postgres.passwordSecretName -}}
 {{- $postgresPasswordSecretKey := default "password" $postgres.passwordSecretKey -}}
 {{- $powerdns := default dict .Values.powerdns -}}
 {{- $powerdnsDatabase := default "powerdns" $powerdns.database -}}
 {{- $apiPort := default 8081 $powerdns.apiPort -}}
-{{- $apiKeySecretName := default "erun-powerdns-api" $powerdns.apiKeySecretName -}}
+{{- $apiKeySecretName := default (printf "%s-powerdns-api" $tenant) $powerdns.apiKeySecretName -}}
 {{- $apiKeySecretKey := default "api-key" $powerdns.apiKeySecretKey -}}
 {{- $apiKey := default "" $powerdns.apiKey -}}
 {{- $existingAPISecret := lookup "v1" "Secret" .Release.Namespace $apiKeySecretName -}}
@@ -71,7 +72,7 @@ kind: Secret
 metadata:
   name: {{ $apiKeySecretName }}
   labels:
-    app: erun-powerdns
+    app: {{ $tenant }}-powerdns
 type: Opaque
 stringData:
   {{ $apiKeySecretKey }}: {{ $apiKey | quote }}
@@ -79,20 +80,20 @@ stringData:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: erun-powerdns
+  name: {{ $tenant }}-powerdns
   labels:
-    app: erun-powerdns
+    app: {{ $tenant }}-powerdns
 spec:
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      app: erun-powerdns
+      app: {{ $tenant }}-powerdns
   replicas: 1
   template:
     metadata:
       labels:
-        app: erun-powerdns
+        app: {{ $tenant }}-powerdns
     spec:
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet

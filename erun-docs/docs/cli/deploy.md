@@ -24,10 +24,10 @@ The deployment plan also sets ordering: steps run in order, and a list within a 
 
 ## Where the runtime chart comes from
 
-When the project repo carries its own runtime chart (`<tenant>-devops/k8s/<tenant>-devops/`), that repo-local chart is what gets deployed — nothing changes for projects that have one. Environments **without** a repo-local runtime chart — every remote env, and any env whose project has no `<tenant>-devops` chart — deploy the published chart directly:
+When the project repo carries its own runtime chart (`<tenant>-devops/k8s/<tenant>-devops/`), that repo-local chart is what gets deployed — nothing changes for projects that have one. Environments **without** a repo-local runtime chart — every remote env, and any env whose project has no `<tenant>-devops` chart — deploy the published chart directly. Deploy prefers the tenant's own published `charts/<tenant>-devops` — a thin umbrella that wraps `erun-devops` (added by `erun-build-env` only when the pod shape needs a sidecar, extra volume, or RBAC) — when that version exists in the registry, and falls back to the shared `charts/erun-devops` when the tenant publishes none — the published mirror of the repo-local `<tenant>-devops`-first lookup:
 
 ```
-helm upgrade --install <tenant>-devops oci://<registry>/charts/erun-devops --version <runtime version> …
+helm upgrade --install <tenant>-devops oci://<registry>/charts/<tenant>-devops --version <runtime version> …
 ```
 
 Component charts resolve the same way. On a sourceless env (a remote/runtime env), a selected component chart with no repo-local copy installs by reference from the registry — `helm upgrade --install <chart> oci://<registry>/charts/<chart> --version <v>` — including a tenant's own charts (`frs-backend-api`, `frs-powerdns`, …) that [`erun push`](/cli/push) published. The sourceless path trusts the selection (there are no local charts to validate against); a name whose chart was never published surfaces at deploy time as an actionable "that version has no published chart" error rather than being rejected up front.
