@@ -216,6 +216,9 @@ the operator's to remove, not this skill's; note it rather than deleting it.
 
 ## Important
 
+- Give the repo root agent guidance. If the repository root has no
+  `AGENTS.md`/`CLAUDE.md`, also apply the `erun-blueprint-agents` skill so any
+  agent — or human — landing in the repo gets erun-environment orientation.
 - Always extend `erun-devops`; do not replace it with an unrelated base —
   the entrypoint, agents, and in-pod tooling live in that image.
 - Keep the `FROM` version aligned with the env's `runtimeversion`. After

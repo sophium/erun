@@ -432,6 +432,9 @@ selection.
 
 ## Important
 
+- **Give the repo root agent guidance.** If the repository root has no
+  `AGENTS.md`/`CLAUDE.md`, also apply the `erun-blueprint-agents` skill so any
+  agent — or human — landing in the repo gets erun-environment orientation.
 - **Reference, never copy.** Terraform modules are sourced from erun's GitHub by
   `?ref=v<version>`; Helm charts are OCI dependencies pinned to the version. If
   you find yourself pasting erun's module or chart contents into the tenant
