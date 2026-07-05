@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -28,11 +29,20 @@ func useDockerConfigDir(t *testing.T, dir string) {
 	t.Cleanup(func() { dockerConfigDir = prev })
 }
 
-func useCredentialHelper(t *testing.T, fn func(helper, serverURL string) ([]byte, error)) {
+func useCredentialHelper(t *testing.T, fn func(binaryPath, serverURL string) ([]byte, error)) {
 	t.Helper()
 	prev := runDockerCredentialHelper
 	runDockerCredentialHelper = fn
 	t.Cleanup(func() { runDockerCredentialHelper = prev })
+}
+
+// useCredentialHelperPaths pins the candidate helper binaries so tests don't
+// depend on which container runtimes are installed on the host.
+func useCredentialHelperPaths(t *testing.T, fn func(helper string) []string) {
+	t.Helper()
+	prev := dockerCredentialHelperPaths
+	dockerCredentialHelperPaths = fn
+	t.Cleanup(func() { dockerCredentialHelperPaths = prev })
 }
 
 func useGHToken(t *testing.T, fn func(owner string) (string, bool)) {
@@ -60,10 +70,13 @@ func TestResolveRegistryBasicAuthCredsStore(t *testing.T) {
 	// osxkeychain-style store: inline auth is empty; the secret lives in the helper.
 	dir := writeDockerConfig(t, `{"auths":{"ghcr.io":{}},"credsStore":"osxkeychain"}`)
 	useDockerConfigDir(t, dir)
-	useCredentialHelper(t, func(helper, serverURL string) ([]byte, error) {
+	useCredentialHelperPaths(t, func(helper string) []string {
 		if helper != "osxkeychain" {
 			t.Fatalf("helper = %q, want osxkeychain", helper)
 		}
+		return []string{"docker-credential-osxkeychain"}
+	})
+	useCredentialHelper(t, func(string, string) ([]byte, error) {
 		return []byte(`{"ServerURL":"ghcr.io","Username":"sophium","Secret":"tok"}`), nil
 	})
 
@@ -77,8 +90,11 @@ func TestResolveRegistryBasicAuthCredHelperOverridesStore(t *testing.T) {
 	dir := writeDockerConfig(t, `{"credsStore":"store","credHelpers":{"ghcr.io":"perhost"}}`)
 	useDockerConfigDir(t, dir)
 	var gotHelper string
-	useCredentialHelper(t, func(helper, serverURL string) ([]byte, error) {
+	useCredentialHelperPaths(t, func(helper string) []string {
 		gotHelper = helper
+		return []string{"docker-credential-" + helper}
+	})
+	useCredentialHelper(t, func(string, string) ([]byte, error) {
 		return []byte(`{"Username":"u","Secret":"p"}`), nil
 	})
 
@@ -93,6 +109,7 @@ func TestResolveRegistryBasicAuthCredHelperOverridesStore(t *testing.T) {
 func TestResolveRegistryBasicAuthHelperMissFallsBackToInline(t *testing.T) {
 	dir := writeDockerConfig(t, fmt.Sprintf(`{"auths":{"ghcr.io":{"auth":%q}},"credsStore":"store"}`, b64Auth("bob:pw")))
 	useDockerConfigDir(t, dir)
+	useCredentialHelperPaths(t, func(string) []string { return []string{"docker-credential-store"} })
 	useCredentialHelper(t, func(string, string) ([]byte, error) {
 		return nil, fmt.Errorf("credentials not found in native keychain")
 	})
@@ -100,6 +117,27 @@ func TestResolveRegistryBasicAuthHelperMissFallsBackToInline(t *testing.T) {
 	auth, ok := resolveRegistryBasicAuth("ghcr.io")
 	if !ok || auth.username != "bob" || auth.secret != "pw" {
 		t.Fatalf("got %+v ok=%v, want bob/pw", auth, ok)
+	}
+}
+
+// The key GUI-launch fix: several runtimes ship docker-credential-<helper> and
+// only one holds the credential; resolution must try each, not stop at the first.
+func TestCredentialFromHelperTriesAllBinaries(t *testing.T) {
+	dir := writeDockerConfig(t, `{"auths":{"ghcr.io":{}},"credsStore":"osxkeychain"}`)
+	useDockerConfigDir(t, dir)
+	useCredentialHelperPaths(t, func(string) []string {
+		return []string{"/dud/docker-credential-osxkeychain", "/works/docker-credential-osxkeychain"}
+	})
+	useCredentialHelper(t, func(binaryPath, _ string) ([]byte, error) {
+		if strings.Contains(binaryPath, "/works/") {
+			return []byte(`{"Username":"sophium","Secret":"tok"}`), nil
+		}
+		return []byte(`{}`), nil // the other runtime's helper: no secret for this host
+	})
+
+	auth, ok := resolveRegistryBasicAuth("ghcr.io")
+	if !ok || auth.username != "sophium" || auth.secret != "tok" {
+		t.Fatalf("got %+v ok=%v, want the credential from the second (working) helper", auth, ok)
 	}
 }
 

@@ -20,9 +20,10 @@ type registryBasicAuth struct {
 // Seams so tests exercise the resolution logic without a real docker config, a
 // live credential keychain, or the gh CLI. Mirrors the aws_sso_config.go style.
 var (
-	dockerConfigDir           = defaultDockerConfigDir
-	runDockerCredentialHelper = execDockerCredentialHelper
-	resolveGHCRTokenViaGH     = ghAuthToken
+	dockerConfigDir             = defaultDockerConfigDir
+	dockerCredentialHelperPaths = defaultDockerCredentialHelperPaths
+	runDockerCredentialHelper   = execDockerCredentialHelper
+	resolveGHCRTokenViaGH       = ghAuthToken
 )
 
 type dockerConfig struct {
@@ -108,23 +109,30 @@ func dockerCredentialHelperFor(cfg dockerConfig, host string) string {
 	return strings.TrimSpace(cfg.CredsStore)
 }
 
+// credentialFromHelper tries every docker-credential-<helper> binary it can find
+// until one returns a credential. Multiple container runtimes (Rancher Desktop,
+// OrbStack, Docker Desktop) each ship a helper of the same name, but only the one
+// holding the login keychain item returns a secret — the others return empty — so
+// stopping at the first found binary can miss the working credential.
 func credentialFromHelper(helper, host string) (registryBasicAuth, bool) {
-	for _, server := range hostLookupKeys(host) {
-		out, err := runDockerCredentialHelper(helper, server)
-		if err != nil {
-			continue
+	for _, bin := range dockerCredentialHelperPaths(helper) {
+		for _, server := range hostLookupKeys(host) {
+			out, err := runDockerCredentialHelper(bin, server)
+			if err != nil {
+				continue
+			}
+			var creds struct {
+				Username string `json:"Username"`
+				Secret   string `json:"Secret"`
+			}
+			if err := json.Unmarshal(out, &creds); err != nil {
+				continue
+			}
+			if strings.TrimSpace(creds.Secret) == "" {
+				continue
+			}
+			return registryBasicAuth{username: strings.TrimSpace(creds.Username), secret: strings.TrimSpace(creds.Secret)}, true
 		}
-		var creds struct {
-			Username string `json:"Username"`
-			Secret   string `json:"Secret"`
-		}
-		if err := json.Unmarshal(out, &creds); err != nil {
-			continue
-		}
-		if strings.TrimSpace(creds.Secret) == "" {
-			continue
-		}
-		return registryBasicAuth{username: strings.TrimSpace(creds.Username), secret: strings.TrimSpace(creds.Secret)}, true
 	}
 	return registryBasicAuth{}, false
 }
@@ -170,10 +178,56 @@ func hostLookupKeys(host string) []string {
 	return keys
 }
 
-func execDockerCredentialHelper(helper, serverURL string) ([]byte, error) {
-	cmd := Command("docker-credential-"+helper, "get")
+func execDockerCredentialHelper(binaryPath, serverURL string) ([]byte, error) {
+	cmd := Command(binaryPath, "get")
 	cmd.Stdin = strings.NewReader(serverURL)
 	return cmd.Output()
+}
+
+// defaultDockerCredentialHelperPaths lists docker-credential-<helper> binaries to
+// try, in priority order: the one on PATH first, then well-known install dirs. The
+// dir search is what lets a macOS GUI app launched from Finder/Dock — which starts
+// with a stripped PATH, or a login-shell PATH that resolves the wrong runtime's
+// helper — still reach the helper binary that actually holds the credential.
+func defaultDockerCredentialHelperPaths(helper string) []string {
+	bin := "docker-credential-" + helper
+	seen := make(map[string]struct{}, 4)
+	paths := make([]string, 0, 4)
+	add := func(p string) {
+		if p == "" {
+			return
+		}
+		if _, dup := seen[p]; dup {
+			return
+		}
+		seen[p] = struct{}{}
+		paths = append(paths, p)
+	}
+	if p, err := exec.LookPath(bin); err == nil {
+		add(p)
+	}
+	for _, dir := range dockerToolDirs() {
+		candidate := filepath.Join(dir, bin)
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			add(candidate)
+		}
+	}
+	if len(paths) == 0 {
+		add(bin) // bare name; Command re-searches PATH or fails cleanly
+	}
+	return paths
+}
+
+func dockerToolDirs() []string {
+	dirs := []string{"/usr/local/bin", "/opt/homebrew/bin"}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		dirs = append(dirs,
+			filepath.Join(home, ".rd", "bin"),
+			filepath.Join(home, ".orbstack", "bin"),
+			filepath.Join(home, ".docker", "bin"),
+		)
+	}
+	return append(dirs, "/Applications/Docker.app/Contents/Resources/bin", "/opt/podman/bin")
 }
 
 func ghAuthToken(owner string) (string, bool) {

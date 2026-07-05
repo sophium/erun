@@ -2106,13 +2106,13 @@ func TestLoadDeployComponentsLocalAgentShowsPublishedVersionView(t *testing.T) {
 		t.Fatalf("LoadDeployComponents(1.0.0) failed: %v", err)
 	}
 	wantAt100 := []string{
-		"frs-backend-postgres", "frs-backend-db", "frs-backend-api",
-		"frs-powerdns", "frs-docs", "frs-devops",
+		"frs-devops", "frs-backend-postgres", "frs-backend-db",
+		"frs-backend-api", "frs-powerdns", "frs-docs",
 	}
 	if got := names(at100); !reflect.DeepEqual(got, wantAt100) {
-		t.Fatalf("components at 1.0.0 = %v, want %v (published-version view, not local charts)", got, wantAt100)
+		t.Fatalf("components at 1.0.0 = %v, want %v (published-version view, runtime first)", got, wantAt100)
 	}
-	runtime := at100[len(at100)-1]
+	runtime := at100[0]
 	if !runtime.Runtime || !runtime.Selected || runtime.Source != "published-chart" {
 		t.Fatalf("runtime item = %+v, want {frs-devops runtime selected published-chart}", runtime)
 	}
@@ -2179,8 +2179,8 @@ func TestLoadDeployComponentsVersionAwareFiltersUnavailableCharts(t *testing.T) 
 	if err != nil {
 		t.Fatalf("LoadDeployComponents(1.0.112) failed: %v", err)
 	}
-	if got, want := names(at112), []string{"frs-backend-postgres", "frs-backend-api", "frs-devops"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("components at 1.0.112 = %v, want %v (unpublished db/powerdns/docs filtered out)", got, want)
+	if got, want := names(at112), []string{"frs-devops", "frs-backend-postgres", "frs-backend-api"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("components at 1.0.112 = %v, want %v (runtime first; unpublished db/powerdns/docs filtered out)", got, want)
 	}
 
 	// With no version-to-deploy the list uses the env's current runtime version

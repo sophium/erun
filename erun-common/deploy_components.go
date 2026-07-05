@@ -256,6 +256,15 @@ func ResolveDeployableComponents(store DeployStore, findProjectRoot ProjectFinde
 	platformNames := publishablePlatformComponentNames(tenant)
 	platform := make(map[string]struct{}, len(platformNames))
 	components := make([]DeployableComponent, 0, len(platformNames)+len(selected)+1)
+	// Runtime first: it is the default-checked, primary deploy target, so it must
+	// head the checklist rather than sit below the optional component charts (where
+	// a scrollable picker can hide it).
+	components = append(components, DeployableComponent{
+		Name:     runtimeName,
+		Runtime:  true,
+		Source:   deployComponentSourcePublished,
+		Selected: runtimeSelected,
+	})
 	for _, name := range platformNames {
 		platform[name] = struct{}{}
 		components = append(components, DeployableComponent{
@@ -282,12 +291,6 @@ func ResolveDeployableComponents(store DeployStore, findProjectRoot ProjectFinde
 			Selected: true,
 		})
 	}
-	components = append(components, DeployableComponent{
-		Name:     runtimeName,
-		Runtime:  true,
-		Source:   deployComponentSourcePublished,
-		Selected: runtimeSelected,
-	})
 	return components, nil
 }
 
