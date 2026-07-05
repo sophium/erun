@@ -20,10 +20,11 @@ func publishedDevopsChartReference(containerRegistry string) string {
 	return PublishedDevopsChartOCIRepo(containerRegistry) + "/" + DevopsComponentName
 }
 
-// resolvePublishedRuntimeChartReference prefers a self-contained tenant's own
-// published runtime chart (charts/<tenant>-devops) and falls back to the
-// canonical charts/erun-devops when the tenant publishes none — the published
-// analogue of the local runtimeComponentNames order. The tenant chart is used
+// resolvePublishedRuntimeChartReference prefers the tenant's own published
+// <tenant>-devops chart (typically a thin umbrella wrapping erun-devops, per the
+// erun-build-env skill) and falls back to the canonical charts/erun-devops when
+// the tenant publishes none — the published analogue of the local
+// runtimeComponentNames order. The tenant chart is used
 // only when it actually publishes the deploy version, probed against the chart
 // repo (authenticated like every registry read); any probe failure or miss
 // falls back, so an offline resolve and a tenant that rides the shared chart
