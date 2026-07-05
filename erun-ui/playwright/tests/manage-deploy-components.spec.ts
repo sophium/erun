@@ -79,11 +79,11 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     // never its local working-tree chart directories. The version, not the env's
     // source, decides which charts exist.
     for (const component of [
-      'erun-backend-postgres',
-      'erun-backend-db',
-      'erun-backend-api',
-      'erun-powerdns',
-      'erun-docs',
+      'pw-backend-postgres',
+      'pw-backend-db',
+      'pw-backend-api',
+      'pw-powerdns',
+      'pw-docs',
     ]) {
       await expect(app.manageDialog.deployComponentCheckbox(component)).toBeVisible();
     }
@@ -133,16 +133,16 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     await expect(app.manageDialog.deployButton()).toBeDisabled();
     await app.manageDialog.openVersionPicker();
     await expect(app.manageDialog.deployComponentsHint()).toBeVisible();
-    await expect(app.manageDialog.deployComponentCheckbox('erun-backend-api')).toHaveCount(0);
+    await expect(app.manageDialog.deployComponentCheckbox('pw-backend-api')).toHaveCount(0);
 
     await app.manageDialog.pickVersion('1.0.0');
 
     for (const component of [
-      'erun-backend-postgres',
-      'erun-backend-db',
-      'erun-backend-api',
-      'erun-powerdns',
-      'erun-docs',
+      'pw-backend-postgres',
+      'pw-backend-db',
+      'pw-backend-api',
+      'pw-powerdns',
+      'pw-docs',
     ]) {
       await expect(app.manageDialog.deployComponentCheckbox(component)).toBeVisible();
     }
@@ -164,11 +164,11 @@ test.describe('manage dialog — components to deploy (#718)', () => {
 
     const runtimeName = `${seededRuntimeEnv.tenant}-devops`;
     const platform = [
-      'erun-backend-postgres',
-      'erun-backend-db',
-      'erun-backend-api',
-      'erun-powerdns',
-      'erun-docs',
+      'pw-backend-postgres',
+      'pw-backend-db',
+      'pw-backend-api',
+      'pw-powerdns',
+      'pw-docs',
     ];
     await app.sidebar.openManageDialogViaKeyboard(
       seededRuntimeEnv.tenant,
@@ -210,11 +210,11 @@ test.describe('manage dialog — components to deploy (#718)', () => {
 
     // 1.0.90 published only postgres + db; the other three drop off, runtime stays.
     await app.manageDialog.pickVersion('1.0.90');
-    await expect(app.manageDialog.deployComponentCheckbox('erun-backend-api')).toHaveCount(0);
-    await expect(app.manageDialog.deployComponentCheckbox('erun-powerdns')).toHaveCount(0);
-    await expect(app.manageDialog.deployComponentCheckbox('erun-docs')).toHaveCount(0);
-    await expect(app.manageDialog.deployComponentCheckbox('erun-backend-postgres')).toBeVisible();
-    await expect(app.manageDialog.deployComponentCheckbox('erun-backend-db')).toBeVisible();
+    await expect(app.manageDialog.deployComponentCheckbox('pw-backend-api')).toHaveCount(0);
+    await expect(app.manageDialog.deployComponentCheckbox('pw-powerdns')).toHaveCount(0);
+    await expect(app.manageDialog.deployComponentCheckbox('pw-docs')).toHaveCount(0);
+    await expect(app.manageDialog.deployComponentCheckbox('pw-backend-postgres')).toBeVisible();
+    await expect(app.manageDialog.deployComponentCheckbox('pw-backend-db')).toBeVisible();
     await expect(app.manageDialog.deployComponentCheckbox(runtimeName)).toBeVisible();
 
     // 1.0.50 published no component charts; only the runtime item remains.

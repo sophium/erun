@@ -7,33 +7,51 @@ import (
 	"strings"
 )
 
-const postgresComponentName = "erun-backend-postgres"
-
-// powerdnsComponentName must deploy after postgres: PowerDNS uses the shared
-// erun-backend-postgres instance as its backend store.
-const powerdnsComponentName = "erun-powerdns"
-
-// docsComponentName publishes the docs site via a one-shot Job with no
-// in-cluster dependency, so it orders last.
-const docsComponentName = "erun-docs"
-
-// defaultDeployComponentOrder orders backend charts before their dependents; it
-// governs ordering only, not which components deploy. It doubles as the set of
-// publishable platform components a sourceless env can install by reference.
-var defaultDeployComponentOrder = []string{
-	postgresComponentName,
-	"erun-backend-db",
-	"erun-backend-api",
-	powerdnsComponentName,
-	docsComponentName,
+// deployComponentBaseOrder is the tenant-agnostic base of each platform
+// component chart, ordered so backend charts precede their dependents: powerdns
+// deploys after backend-postgres (its backend store), and docs — a one-shot Job
+// with no in-cluster dependency — orders last. A component's published chart is
+// named <prefix>-<base> where prefix is the tenant's release base (see
+// componentChartPrefix), e.g. erun-backend-postgres or frs-backend-api. Governs
+// ordering only, not which components deploy.
+var deployComponentBaseOrder = []string{
+	"backend-postgres",
+	"backend-db",
+	"backend-api",
+	"powerdns",
+	"docs",
 }
 
-// publishablePlatformComponentNames are the erun component charts published to
-// the registry (oci://<registry>/charts/<name>) that a sourceless env — one
-// with no local repo, i.e. a runtime or remote-agent env — can deploy by
-// reference, no local umbrella chart required.
-func publishablePlatformComponentNames() []string {
-	return defaultDeployComponentOrder
+// componentChartPrefix is the registry prefix a tenant's component charts carry,
+// matching the runtime release base: erun for the canonical product, <tenant>
+// for a tenant that publishes its own charts (e.g. frs). Derived from
+// RuntimeReleaseName so it stays in lockstep with the runtime chart naming.
+func componentChartPrefix(tenant string) string {
+	return strings.TrimSuffix(RuntimeReleaseName(tenant), "-devops")
+}
+
+// publishablePlatformComponentNames are the component charts published to the
+// registry (oci://<registry>/charts/<name>) that a sourceless env — one with no
+// local repo, i.e. a runtime or remote-agent env — can deploy by reference, no
+// local umbrella chart required. The names are tenant-prefixed so a tenant that
+// publishes its own charts (frs-backend-api) is offered them, not the canonical
+// erun set; a transport filters to those actually published at the deploy version.
+func publishablePlatformComponentNames(tenant string) []string {
+	prefix := componentChartPrefix(tenant)
+	names := make([]string, len(deployComponentBaseOrder))
+	for i, base := range deployComponentBaseOrder {
+		names[i] = prefix + "-" + base
+	}
+	return names
+}
+
+// componentBaseName strips the tenant/product prefix (the first "-" segment) so
+// ordering ranks erun-backend-api and frs-backend-api by the same base.
+func componentBaseName(name string) string {
+	if _, base, ok := strings.Cut(strings.TrimSpace(name), "-"); ok {
+		return base
+	}
+	return strings.TrimSpace(name)
 }
 
 // selectedPublishableComponents returns the selected non-runtime components in
@@ -235,9 +253,10 @@ func ResolveDeployableComponents(store DeployStore, findProjectRoot ProjectFinde
 	selected, _ := resolveSelectedDeployComponents(target.Components, resolvedTarget.EnvConfig.Deploy.Components, ProjectK8sConfig{})
 	runtimeSelected := deploySelectionIncludesRuntime(selected, tenant)
 
-	platform := make(map[string]struct{}, len(publishablePlatformComponentNames()))
-	components := make([]DeployableComponent, 0, len(publishablePlatformComponentNames())+len(selected)+1)
-	for _, name := range publishablePlatformComponentNames() {
+	platformNames := publishablePlatformComponentNames(tenant)
+	platform := make(map[string]struct{}, len(platformNames))
+	components := make([]DeployableComponent, 0, len(platformNames)+len(selected)+1)
+	for _, name := range platformNames {
 		platform[name] = struct{}{}
 		components = append(components, DeployableComponent{
 			Name:     name,
@@ -284,13 +303,15 @@ func sortDeployContextsByDeployOrder(contexts []KubernetesDeployContext, plan Pr
 
 func componentRankByPlan(plan ProjectK8sConfig) func(name string) int {
 	if len(plan.Deployments) == 0 {
-		rank := make(map[string]int, len(defaultDeployComponentOrder))
-		for i, name := range defaultDeployComponentOrder {
-			rank[name] = i
+		// Rank by tenant-agnostic base so erun-backend-api and frs-backend-api
+		// share ordering; a name with no known base sorts last.
+		rank := make(map[string]int, len(deployComponentBaseOrder))
+		for i, base := range deployComponentBaseOrder {
+			rank[base] = i
 		}
-		fallback := len(defaultDeployComponentOrder)
+		fallback := len(deployComponentBaseOrder)
 		return func(name string) int {
-			if r, ok := rank[strings.TrimSpace(name)]; ok {
+			if r, ok := rank[componentBaseName(name)]; ok {
 				return r
 			}
 			return fallback

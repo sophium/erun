@@ -2072,13 +2072,14 @@ func TestLoadDeployComponentsLocalAgentShowsPublishedVersionView(t *testing.T) {
 			},
 		},
 	}
-	// All five component charts are published at 1.0.0; none at 1.0.106.
+	// All five component charts are published at 1.0.0; none at 1.0.106. The frs
+	// tenant publishes its own charts (frs-backend-*), not the canonical erun set.
 	chartTags := map[string][]string{
-		"charts/erun-backend-postgres": {"1.0.0"},
-		"charts/erun-backend-db":       {"1.0.0"},
-		"charts/erun-backend-api":      {"1.0.0"},
-		"charts/erun-powerdns":         {"1.0.0"},
-		"charts/erun-docs":             {"1.0.0"},
+		"charts/frs-backend-postgres": {"1.0.0"},
+		"charts/frs-backend-db":       {"1.0.0"},
+		"charts/frs-backend-api":      {"1.0.0"},
+		"charts/frs-powerdns":         {"1.0.0"},
+		"charts/frs-docs":             {"1.0.0"},
 	}
 	app := NewApp(erunUIDeps{
 		store: store,
@@ -2105,8 +2106,8 @@ func TestLoadDeployComponentsLocalAgentShowsPublishedVersionView(t *testing.T) {
 		t.Fatalf("LoadDeployComponents(1.0.0) failed: %v", err)
 	}
 	wantAt100 := []string{
-		"erun-backend-postgres", "erun-backend-db", "erun-backend-api",
-		"erun-powerdns", "erun-docs", "frs-devops",
+		"frs-backend-postgres", "frs-backend-db", "frs-backend-api",
+		"frs-powerdns", "frs-docs", "frs-devops",
 	}
 	if got := names(at100); !reflect.DeepEqual(got, wantAt100) {
 		t.Fatalf("components at 1.0.0 = %v, want %v (published-version view, not local charts)", got, wantAt100)
@@ -2148,10 +2149,11 @@ func TestLoadDeployComponentsVersionAwareFiltersUnavailableCharts(t *testing.T) 
 		},
 	}
 	// charts/<component> tags per registry repo: postgres + api are published at
-	// 1.0.112 only; db, powerdns, docs are published nowhere in this fixture.
+	// 1.0.112 only; db, powerdns, docs are published nowhere in this fixture. The
+	// frs tenant publishes its own charts (frs-backend-*).
 	chartTags := map[string][]string{
-		"charts/erun-backend-postgres": {"1.0.112"},
-		"charts/erun-backend-api":      {"1.0.112"},
+		"charts/frs-backend-postgres": {"1.0.112"},
+		"charts/frs-backend-api":      {"1.0.112"},
 	}
 	app := NewApp(erunUIDeps{
 		store: store,
@@ -2177,7 +2179,7 @@ func TestLoadDeployComponentsVersionAwareFiltersUnavailableCharts(t *testing.T) 
 	if err != nil {
 		t.Fatalf("LoadDeployComponents(1.0.112) failed: %v", err)
 	}
-	if got, want := names(at112), []string{"erun-backend-postgres", "erun-backend-api", "frs-devops"}; !reflect.DeepEqual(got, want) {
+	if got, want := names(at112), []string{"frs-backend-postgres", "frs-backend-api", "frs-devops"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("components at 1.0.112 = %v, want %v (unpublished db/powerdns/docs filtered out)", got, want)
 	}
 

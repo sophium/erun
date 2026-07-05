@@ -120,11 +120,13 @@ export function backendEnv(): Record<string, string> {
     // Pin which component charts are "published" per version so the Runtime
     // tab's version-aware Components checklist is deterministic offline (the
     // real path probes the registry). 1.0.0 (the seeded runtime env's version)
-    // has all charts; 1.0.90 has a subset; 1.0.50 has none. See
-    // erun-ui/deploy_components.go chartAvailabilityOverride.
+    // has all charts; 1.0.90 has a subset; 1.0.50 has none. Names are
+    // tenant-prefixed (the pw seed tenant publishes pw-* charts), matching
+    // ResolveDeployableComponents. See erun-ui/deploy_components.go
+    // chartAvailabilityOverride.
     ERUN_CHART_AVAILABILITY_OVERRIDE:
-      '1.0.0=erun-backend-postgres,erun-backend-db,erun-backend-api,erun-powerdns,erun-docs;' +
-      '1.0.90=erun-backend-postgres,erun-backend-db;1.0.50=',
+      '1.0.0=pw-backend-postgres,pw-backend-db,pw-backend-api,pw-powerdns,pw-docs;' +
+      '1.0.90=pw-backend-postgres,pw-backend-db;1.0.50=',
   };
 }
 
