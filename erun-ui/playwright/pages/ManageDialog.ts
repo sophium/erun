@@ -141,6 +141,12 @@ export class ManageDialog {
     return this.page.getByRole('list', { name: 'Version source notices' });
   }
 
+  // The version-picker popover itself (portaled to the document root), used to
+  // assert it stays within the viewport rather than overflowing off-screen.
+  versionPickerPopover(): Locator {
+    return this.page.locator('[data-slot="popover-content"]');
+  }
+
   // Shown in place of the checklist until a version is picked — the charts are
   // that version's, so there's nothing to choose before one is selected.
   deployComponentsHint(): Locator {

@@ -407,7 +407,13 @@ function RuntimeDeployVersionPicker({
             <ChevronsUpDown />
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-[26rem] max-w-[calc(100vw-2rem)] p-0" align="start">
+        <PopoverContent
+          // Cap to the viewport's available height and scroll, so the version
+          // list plus the components checklist never overflow off-screen (which
+          // clipped the last components and the dialog buttons on shorter windows).
+          className="max-h-[var(--radix-popover-content-available-height)] w-[26rem] max-w-[calc(100vw-2rem)] overflow-y-auto p-0"
+          align="start"
+        >
           <Command>
             <CommandInput placeholder="Search versions..." />
             <CommandList>
@@ -426,8 +432,9 @@ function RuntimeDeployVersionPicker({
           </Command>
           <VersionNotices notices={notices} />
           {/* Pick a version above, then choose which of its charts to roll out:
-              one panel so the component list always reads as that version's. */}
-          <div className="max-h-64 overflow-y-auto border-t border-border p-3">
+              one panel so the component list always reads as that version's. The
+              whole popover scrolls (capped to the viewport), so no nested scroll. */}
+          <div className="border-t border-border p-3">
             <DeployComponentsField dialog={dialog} />
           </div>
         </PopoverContent>

@@ -260,4 +260,37 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     await expect(notices).toContainText('ghcr.io/sophium/frs-devops is private');
     await expect(notices).toContainText('docker login ghcr.io');
   });
+
+  test('the picker stays within the viewport and scrolls to every component', async ({
+    app,
+    page,
+    seededRuntimeEnv,
+  }) => {
+    // A shorter window forces the version list + full component checklist to
+    // exceed the viewport; the popover must cap to the visible height and scroll
+    // rather than clip the last components off-screen.
+    await stubVersionSuggestions(page);
+    await page.setViewportSize({ width: 1440, height: 720 });
+    await app.sidebar.openManageDialogViaKeyboard(
+      seededRuntimeEnv.tenant,
+      seededRuntimeEnv.environment,
+    );
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.selectTab('Runtime');
+    await app.manageDialog.openVersionPicker();
+    await app.manageDialog.pickVersion('1.0.0');
+
+    // The popover fits: its bottom edge stays on-screen.
+    const box = await app.manageDialog.versionPickerPopover().boundingBox();
+    const viewport = page.viewportSize();
+    expect(box).not.toBeNull();
+    if (box && viewport) {
+      expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
+    }
+
+    // The last component (runtime is first now) is reachable by scrolling the popover.
+    const lastComponent = app.manageDialog.deployComponentCheckbox('pw-docs');
+    await lastComponent.scrollIntoViewIfNeeded();
+    await expect(lastComponent).toBeInViewport();
+  });
 });
