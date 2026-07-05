@@ -46,6 +46,7 @@ Skills come in two kinds: *Blueprint* (ERun's accumulated best practices for ind
 
 | Skill | Kind | What it does |
 |---|---|---|
+| `erun-blueprint-agents` | Blueprint | Give a tenant repo its root agent-guidance file — a canonical `AGENTS.md` plus a `CLAUDE.md` symlink, pre-filled with erun-environment orientation — idempotently, without clobbering hand-authored guidance ([spec](/agent-reference/skills-spec#erun-blueprint-agents)). |
 | `erun-blueprint-rls-db` | Blueprint | Build a multi-tenant PostgreSQL schema with row-level security, modelled on `erun-backend-db` — and maintain, repair, or upgrade one it built. |
 | `erun-blueprint-api` | Blueprint | Build a multi-tenant Go HTTP API service modelled on `erun-backend-api` — and maintain, repair, or upgrade one it built. |
 | `erun-blueprint-docs` | Blueprint | Scaffold a Docusaurus docs site that publishes to Cloudflare Pages, modelled on `erun-docs` — and maintain, repair, or upgrade one it built. |

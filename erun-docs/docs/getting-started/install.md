@@ -42,7 +42,7 @@ Once `erun` is installed, you can add the ERun plugin to your laptop Claude Code
 /plugin install erun-tools@sophium/erun
 ```
 
-The plugin gives Claude Code four skills: `erun-file-issue`, `erun-contribute`, `erun-blueprint-rls-db`, and `erun-blueprint-api`. See [Skills](/collaboration/skills) for what each one does and when to use it.
+The plugin gives Claude Code the same erun skills your env has — issue-filing, contribution, and the blueprint skills for building and deploying. See [Skills](/collaboration/skills) for what each one does and when to use it.
 
 Codex doesn't have an analogous marketplace yet; inside a deployed env you get the skills automatically.
 

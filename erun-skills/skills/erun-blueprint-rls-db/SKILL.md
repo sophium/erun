@@ -303,6 +303,9 @@ not in a cleanup pass. Flag the drift; don't act on it.
 
 ## Important
 
+- Give the repo root agent guidance. If the repository root has no
+  `AGENTS.md`/`CLAUDE.md`, also apply the `erun-blueprint-agents` skill so any
+  agent — or human — landing in the repo gets erun-environment orientation.
 - Do not skip the role separation. Do not emit a single RLS policy
   with an `OR` branch for ops access. That pattern is explicitly
   forbidden in `erun-backend-db/AGENTS.md` § "Row-Level Security".
