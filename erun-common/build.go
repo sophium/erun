@@ -62,7 +62,23 @@ func ResolveBuildExecution(ctx Context, store DockerStore, findProjectRoot Proje
 	if releaseSpec != nil {
 		execution = BuildExecutionSpecWithRelease(execution, *releaseSpec)
 	}
-	return ApplyIncrementalToBuildExecution(ctx, execution, target.NoIncremental)
+	return finalizeBuildExecution(ctx, execution, target.NoIncremental)
+}
+
+// finalizeBuildExecution applies incremental promotion, then resolves the
+// component chart source off the final builds so their release/snapshot version
+// and registry drive the chart specs.
+func finalizeBuildExecution(ctx Context, execution BuildExecutionSpec, noIncremental bool) (BuildExecutionSpec, error) {
+	execution, err := ApplyIncrementalToBuildExecution(ctx, execution, noIncremental)
+	if err != nil {
+		return BuildExecutionSpec{}, err
+	}
+	charts, err := resolveComponentChartSpecs(execution.dockerBuilds)
+	if err != nil {
+		return BuildExecutionSpec{}, err
+	}
+	execution.componentCharts = charts
+	return execution, nil
 }
 
 func buildEnvDisablesBuildScript(store DockerStore, findProjectRoot ProjectFinderFunc, target DockerCommandTarget) bool {

@@ -2,11 +2,52 @@ package eruncommon
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
 func DockerPushExecutionSpecFromSpecs(builds []DockerBuildSpec, pushes []DockerPushSpec) DockerPushExecutionSpec {
 	return DockerPushExecutionSpec{builds: builds, pushes: pushes}
+}
+
+// resolveComponentChartSpecs discovers every Helm chart under a k8s/ directory in
+// the project and resolves a publish spec for each at the build's version and
+// registry. Charts are module-level source: a chart publishes whether or not a
+// same-named image exists. The version and registry come from the resolved builds
+// (componentChartPublishVersion / the first build's registry+root); a project with
+// charts but no image build yields no specs.
+func resolveComponentChartSpecs(builds []DockerBuildSpec) ([]HelmChartPublishSpec, error) {
+	version := componentChartPublishVersion(builds)
+	registry, projectRoot := componentChartRegistryAndRoot(builds)
+	if version == "" || registry == "" || projectRoot == "" {
+		return nil, nil
+	}
+	contexts, err := discoverComponentChartDirs(projectRoot)
+	if err != nil {
+		return nil, err
+	}
+	specs := make([]HelmChartPublishSpec, 0, len(contexts))
+	for _, context := range contexts {
+		spec, err := resolveHelmChartPublishSpec(context.ChartPath, version, registry)
+		if err != nil {
+			return nil, err
+		}
+		specs = append(specs, spec)
+	}
+	sort.Slice(specs, func(i, j int) bool { return specs[i].ChartName < specs[j].ChartName })
+	return specs, nil
+}
+
+func componentChartRegistryAndRoot(builds []DockerBuildSpec) (registry, projectRoot string) {
+	for _, build := range builds {
+		if registry == "" {
+			registry = strings.TrimSpace(build.Image.Registry)
+		}
+		if projectRoot == "" {
+			projectRoot = strings.TrimSpace(build.Image.ProjectRoot)
+		}
+	}
+	return registry, projectRoot
 }
 
 func ResolveDockerPushExecution(ctx Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) (DockerPushExecutionSpec, error) {
@@ -37,7 +78,12 @@ func ResolveDockerPushExecution(ctx Context, store DockerStore, findProjectRoot 
 		return DockerPushExecutionSpec{}, err
 	}
 
-	return DockerPushExecutionSpec{builds: builds, pushes: pushes}, nil
+	charts, err := resolveComponentChartSpecs(builds)
+	if err != nil {
+		return DockerPushExecutionSpec{}, err
+	}
+
+	return DockerPushExecutionSpec{builds: builds, pushes: pushes, componentCharts: charts}, nil
 }
 
 func ResolveDockerPushSpec(ctx Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) (DockerPushSpec, *DockerBuildSpec, error) {

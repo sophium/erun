@@ -6,4 +6,6 @@ promoting from cached fingerprint image: ghcr.io/sophium/api:<VERSION>
 fingerprint image present locally: ghcr.io/sophium/base:fp-<HEX16>-amd64
 fingerprint image present locally: ghcr.io/sophium/base:fp-<HEX16>-arm64
 promoting from cached fingerprint image: ghcr.io/sophium/base:<VERSION>
+==> Packaging api <VERSION>
+==> Packaging base <VERSION>
 ==> Built in <ELAPSED>

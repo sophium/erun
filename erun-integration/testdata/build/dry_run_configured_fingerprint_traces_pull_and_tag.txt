@@ -27,3 +27,5 @@ cd <TMP> && docker build --platform linux/amd64 --provenance=false --progress=pl
 cd <TMP> && docker tag ghcr.io/sophium/base:<VERSION> ghcr.io/sophium/base:fp-<HEX16>-amd64
 cd <TMP> && docker build --platform linux/arm64 --provenance=false --progress=plain -t ghcr.io/sophium/base:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
 cd <TMP> && docker tag ghcr.io/sophium/base:<VERSION> ghcr.io/sophium/base:fp-<HEX16>-arm64
+cd <TMP> && helm package api --version <VERSION> --app-version <VERSION>
+cd <TMP> && helm package base --version <VERSION> --app-version <VERSION>

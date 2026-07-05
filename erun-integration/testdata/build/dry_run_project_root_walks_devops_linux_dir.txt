@@ -12,3 +12,4 @@ cd <TMP> && docker build --platform linux/arm64 --provenance=false --progress=pl
 cd <TMP> && docker tag ghcr.io/sophium/team-devops:<VERSION> ghcr.io/sophium/team-devops:fp-<HEX16>-arm64
 cd <TMP> && docker tag ghcr.io/sophium/team-devops:<VERSION> ghcr.io/sophium/team-devops:<VERSION>
 cd <TMP> && docker tag ghcr.io/sophium/team-devops:<VERSION> ghcr.io/sophium/team-devops:<VERSION>
+cd <TMP> && helm package team-devops --version <VERSION> --app-version <VERSION>
