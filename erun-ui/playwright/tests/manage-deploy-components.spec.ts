@@ -14,11 +14,14 @@ async function stubVersionSuggestions(page: Page): Promise<void> {
       return route.fulfill({
         contentType: 'application/json',
         body: JSON.stringify({
-          data: [
-            { label: 'Current', version: '1.0.0' },
-            { label: 'Has a subset', version: '1.0.90' },
-            { label: 'No charts', version: '1.0.50' },
-          ],
+          data: {
+            suggestions: [
+              { label: 'Current', version: '1.0.0' },
+              { label: 'Has a subset', version: '1.0.90' },
+              { label: 'No charts', version: '1.0.50' },
+            ],
+            notices: [],
+          },
         }),
       });
     }
@@ -220,5 +223,41 @@ test.describe('manage dialog — components to deploy (#718)', () => {
       await expect(app.manageDialog.deployComponentCheckbox(component)).toHaveCount(0);
     }
     await expect(app.manageDialog.deployComponentCheckbox(runtimeName)).toBeVisible();
+  });
+
+  test('a private runtime image surfaces an actionable auth notice in the picker (#749)', async ({
+    app,
+    seededEnv,
+    page,
+  }) => {
+    // The offline harness can't make ghcr return a real 401, so stub the RPC to
+    // carry a notice. The auth-vs-unreachable classification is owned by Go unit
+    // tests (TestLoadVersionSuggestionsSurfacesAuthNoticeForPrivateImage /
+    // TestLoadVersionSuggestionsMarksUnreachableRegistry in erun-ui/app_test.go);
+    // this locks the rendered, actionable affordance the operator sees.
+    await page.route('**/__erun_invoke', async (route, request) => {
+      const body = JSON.parse(request.postData() ?? '{}') as { method: string };
+      if (body.method === 'LoadVersionSuggestions') {
+        return route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              suggestions: [{ label: 'ERun latest stable', version: '1.0.0' }],
+              notices: [{ image: 'ghcr.io/sophium/frs-devops', kind: 'auth' }],
+            },
+          }),
+        });
+      }
+      await route.continue();
+    });
+    await app.sidebar.openManageDialogViaKeyboard(seededEnv.tenant, seededEnv.environment);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.selectTab('Runtime');
+    await app.manageDialog.openVersionPicker();
+
+    const notices = app.manageDialog.versionSourceNotices();
+    await expect(notices).toBeVisible();
+    await expect(notices).toContainText('ghcr.io/sophium/frs-devops is private');
+    await expect(notices).toContainText('docker login ghcr.io');
   });
 });

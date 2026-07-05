@@ -10,7 +10,9 @@ async function stubVersionSuggestions(page: Page): Promise<void> {
     if (body.method === 'LoadVersionSuggestions') {
       return route.fulfill({
         contentType: 'application/json',
-        body: JSON.stringify({ data: [{ label: 'Current', version: '1.0.0' }] }),
+        body: JSON.stringify({
+          data: { suggestions: [{ label: 'Current', version: '1.0.0' }], notices: [] },
+        }),
       });
     }
     await route.continue();

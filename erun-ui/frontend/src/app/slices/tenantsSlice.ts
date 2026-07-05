@@ -1,17 +1,24 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 
-import type { UICloudProviderStatus, UITenant, UIVersionSuggestion } from '@/types';
+import type {
+  UICloudProviderStatus,
+  UITenant,
+  UIVersionSuggestion,
+  UIVersionSuggestionNotice,
+} from '@/types';
 
 export interface TenantsState {
   tenants: UITenant[];
   cloudProviders: UICloudProviderStatus[];
   versionSuggestions: UIVersionSuggestion[];
+  versionSuggestionNotices: UIVersionSuggestionNotice[];
 }
 
 const initialState: TenantsState = {
   tenants: [],
   cloudProviders: [],
   versionSuggestions: [],
+  versionSuggestionNotices: [],
 };
 
 export const tenantsSlice = createSlice({
@@ -26,6 +33,9 @@ export const tenantsSlice = createSlice({
     },
     setVersionSuggestions(state, action: PayloadAction<UIVersionSuggestion[]>) {
       state.versionSuggestions = action.payload;
+    },
+    setVersionSuggestionNotices(state, action: PayloadAction<UIVersionSuggestionNotice[]>) {
+      state.versionSuggestionNotices = action.payload;
     },
     // Optimistically reflect a persisted AutoStart change so the next env-open
     // uses the new policy without waiting for a full state reload.
@@ -54,6 +64,7 @@ export const {
   setTenants,
   setCloudProviders,
   setVersionSuggestions,
+  setVersionSuggestionNotices,
   patchTenantEnvironmentAutoStart,
 } = tenantsSlice.actions;
 export default tenantsSlice.reducer;

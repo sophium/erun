@@ -60,6 +60,8 @@ The copy is manifest-aware, so the runtime image's `linux/amd64` + `linux/arm64`
 
 When the desktop offers versions to deploy or upgrade, it asks only the environment's listed registries — not a global default — and labels each offered version with the registry it came from. If two registries publish different newer versions, the deploy picker and the Upgrade-all dialog let you pick which one; `erun upgrade` on the command line skips such an environment as ambiguous until you pass `--version`. See [`erun upgrade`](/cli/upgrade).
 
+Version discovery uses the same local registry credentials as build and deploy (see [Authentication](#authentication)), so a **private** runtime image's versions appear only once you are logged in to its registry. When the desktop cannot list an image — a private one you have not authenticated to, or an unreachable registry — it shows a notice under the version picker naming the image and how to sign in, instead of silently offering nothing.
+
 ## Multi-architecture builds
 
 Every `erun build`, `erun build --release`, and `erun deploy` produces both `linux/amd64` and `linux/arm64`. There is no single-arch code path — that avoids developer-machine builds that work locally but fail on a foreign-arch cluster. The cluster runs binfmt/qemu so the foreign arch builds inside the dind sidecar.

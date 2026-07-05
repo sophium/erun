@@ -28,6 +28,7 @@ import { parseIdleTrafficBytes } from '@/components/app/ManageDialog.helpers';
 import { DeployComponentsField } from '@/components/app/ManageDialogDeployComponents';
 import { RuntimeResourceControls } from '@/components/app/RuntimeResourceControls';
 import { SelectField } from '@/components/app/SelectField';
+import { VersionNotices } from '@/components/app/VersionNotices';
 import { Button } from '@/components/ui/button';
 import {
   Command,
@@ -40,7 +41,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
-import type { UIVersionSuggestion } from '@/types';
+import type { UIVersionSuggestion, UIVersionSuggestionNotice } from '@/types';
 
 type ManageDialog = AppState['manageDialog'];
 
@@ -48,6 +49,7 @@ export function RuntimeTab(): React.ReactElement {
   const dispatch = useAppDispatch();
   const dialog = useAppSelector((state) => state.manageDialog);
   const versionSuggestions = useAppSelector((state) => state.tenants.versionSuggestions);
+  const versionNotices = useAppSelector((state) => state.tenants.versionSuggestionNotices);
   return (
     <>
       <RuntimeDeployField
@@ -55,6 +57,7 @@ export function RuntimeTab(): React.ReactElement {
         configuredVersion={dialog.config.runtimeVersion}
         overrideVersion={dialog.version}
         suggestions={versionSuggestions}
+        notices={versionNotices}
         choicesOpen={dialog.choicesOpen}
         disabled={dialog.busy || dialog.configLoading}
         showCreateVersion={environmentTypeBuildsHereLocally(dialog.config.type)}
@@ -272,6 +275,7 @@ function RuntimeDeployField({
   configuredVersion,
   overrideVersion,
   suggestions,
+  notices,
   choicesOpen,
   disabled,
   showCreateVersion,
@@ -285,6 +289,7 @@ function RuntimeDeployField({
   configuredVersion: string;
   overrideVersion: string;
   suggestions: UIVersionSuggestion[];
+  notices: UIVersionSuggestionNotice[];
   choicesOpen: boolean;
   disabled?: boolean;
   showCreateVersion: boolean;
@@ -308,6 +313,7 @@ function RuntimeDeployField({
           dialog={dialog}
           overrideVersion={overrideVersion}
           suggestions={suggestions}
+          notices={notices}
           choicesOpen={choicesOpen}
           disabled={disabled}
           onValueChange={onValueChange}
@@ -356,6 +362,7 @@ function RuntimeDeployVersionPicker({
   dialog,
   overrideVersion,
   suggestions,
+  notices,
   choicesOpen,
   disabled,
   onValueChange,
@@ -365,6 +372,7 @@ function RuntimeDeployVersionPicker({
   dialog: ManageDialog;
   overrideVersion: string;
   suggestions: UIVersionSuggestion[];
+  notices: UIVersionSuggestionNotice[];
   choicesOpen: boolean;
   disabled?: boolean;
   onValueChange: (version: string) => void;
@@ -416,6 +424,7 @@ function RuntimeDeployVersionPicker({
               </CommandGroup>
             </CommandList>
           </Command>
+          <VersionNotices notices={notices} />
           {/* Pick a version above, then choose which of its charts to roll out:
               one panel so the component list always reads as that version's. */}
           <div className="max-h-64 overflow-y-auto border-t border-border p-3">

@@ -135,6 +135,12 @@ export class ManageDialog {
     return this.page.locator('#environment-config-deploy-components-heading');
   }
 
+  // Source-failure notices below the version list (a private or unreachable
+  // runtime image). Portaled with the popover, so query at page level.
+  versionSourceNotices(): Locator {
+    return this.page.getByRole('list', { name: 'Version source notices' });
+  }
+
   // Shown in place of the checklist until a version is picked — the charts are
   // that version's, so there's nothing to choose before one is selected.
   deployComponentsHint(): Locator {

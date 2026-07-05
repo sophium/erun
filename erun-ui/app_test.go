@@ -149,10 +149,11 @@ func TestLoadVersionSuggestionsFiltersOutMissingTenantImageTags(t *testing.T) {
 		resolveImageRegistry: missingTenantImageRegistry(t),
 	})
 
-	suggestions, err := app.LoadVersionSuggestions(uiSelection{Tenant: " frs "})
+	result, err := app.LoadVersionSuggestions(uiSelection{Tenant: " frs "})
 	if err != nil {
 		t.Fatalf("LoadVersionSuggestions failed: %v", err)
 	}
+	suggestions := result.Suggestions
 	got := versionValues(suggestions)
 	want := []string{"1.0.11", "1.0.10", "1.0.12-snapshot-20260414165809", "1.0.50", "1.0.49"}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
@@ -292,10 +293,11 @@ func TestLoadVersionSuggestionsDoesNotDuplicateDefaultRuntimeForErunTenant(t *te
 		},
 	})
 
-	suggestions, err := app.LoadVersionSuggestions(uiSelection{Tenant: " erun "})
+	result, err := app.LoadVersionSuggestions(uiSelection{Tenant: " erun "})
 	if err != nil {
 		t.Fatalf("LoadVersionSuggestions failed: %v", err)
 	}
+	suggestions := result.Suggestions
 	got := versionValues(suggestions)
 	want := []string{"1.0.48", "1.0.47", "1.0.50-snapshot-20260426090832"}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
@@ -331,10 +333,11 @@ func TestLoadVersionSuggestionsFallsBackToDefaultRuntimeTagsWhenTenantImageMissi
 		},
 	})
 
-	suggestions, err := app.LoadVersionSuggestions(uiSelection{Tenant: " test "})
+	result, err := app.LoadVersionSuggestions(uiSelection{Tenant: " test "})
 	if err != nil {
 		t.Fatalf("LoadVersionSuggestions failed: %v", err)
 	}
+	suggestions := result.Suggestions
 	got := versionValues(suggestions)
 	want := []string{"1.0.50", "1.0.49", "1.0.51-snapshot-20260414165809"}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
@@ -369,10 +372,11 @@ func TestLoadVersionSuggestionsForInitUsesAvailableRuntimeImageTags(t *testing.T
 		},
 	})
 
-	suggestions, err := app.LoadVersionSuggestions(uiSelection{Tenant: " test "})
+	result, err := app.LoadVersionSuggestions(uiSelection{Tenant: " test "})
 	if err != nil {
 		t.Fatalf("LoadVersionSuggestions failed: %v", err)
 	}
+	suggestions := result.Suggestions
 	got := versionValues(suggestions)
 	want := []string{"1.0.48", "1.0.50", "1.0.49", "1.0.51-snapshot-20260414165809"}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
@@ -380,6 +384,60 @@ func TestLoadVersionSuggestionsForInitUsesAvailableRuntimeImageTags(t *testing.T
 	}
 	if suggestions[0].Image != eruncommon.DefaultContainerRegistry+"/test-devops" || suggestions[1].Image != eruncommon.DefaultContainerRegistry+"/"+eruncommon.DefaultRuntimeImageName {
 		t.Fatalf("unexpected suggestion metadata: %+v", suggestions)
+	}
+}
+
+func TestLoadVersionSuggestionsSurfacesAuthNoticeForPrivateImage(t *testing.T) {
+	app := NewApp(erunUIDeps{
+		store:            stubUIStore{},
+		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
+			if repository == "frs-devops" {
+				return eruncommon.RuntimeRegistryVersions{}, fmt.Errorf("ghcr tags request failed: 401 Unauthorized: %w", eruncommon.ErrRegistryAuthRequired)
+			}
+			return eruncommon.RuntimeRegistryVersions{
+				Image:        namespace + "/" + repository,
+				Tags:         []string{"1.0.50", "1.0.49"},
+				LatestStable: "1.0.50",
+			}, nil
+		},
+	})
+
+	result, err := app.LoadVersionSuggestions(uiSelection{Tenant: "frs"})
+	if err != nil {
+		t.Fatalf("LoadVersionSuggestions failed: %v", err)
+	}
+	// The private tenant image contributes an auth notice; the canonical ERun
+	// image still lists its versions.
+	if got := versionValues(result.Suggestions); strings.Join(got, "\n") != strings.Join([]string{"1.0.50", "1.0.49"}, "\n") {
+		t.Fatalf("unexpected suggestions: %+v", result.Suggestions)
+	}
+	if len(result.Notices) != 1 {
+		t.Fatalf("expected one notice, got %+v", result.Notices)
+	}
+	if notice := result.Notices[0]; notice.Kind != "auth" || notice.Image != eruncommon.DefaultContainerRegistry+"/frs-devops" {
+		t.Fatalf("unexpected notice: %+v", notice)
+	}
+}
+
+func TestLoadVersionSuggestionsMarksUnreachableRegistry(t *testing.T) {
+	app := NewApp(erunUIDeps{
+		store:            stubUIStore{},
+		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
+			if repository == "frs-devops" {
+				return eruncommon.RuntimeRegistryVersions{}, fmt.Errorf("dial tcp: connection refused")
+			}
+			return eruncommon.RuntimeRegistryVersions{Image: namespace + "/" + repository, Tags: []string{"1.0.50"}, LatestStable: "1.0.50"}, nil
+		},
+	})
+
+	result, err := app.LoadVersionSuggestions(uiSelection{Tenant: "frs"})
+	if err != nil {
+		t.Fatalf("LoadVersionSuggestions failed: %v", err)
+	}
+	if len(result.Notices) != 1 || result.Notices[0].Kind != "unreachable" {
+		t.Fatalf("expected one unreachable notice, got %+v", result.Notices)
 	}
 }
 
