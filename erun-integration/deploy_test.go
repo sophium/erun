@@ -604,6 +604,25 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_remote_env_deploys_published_components", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_remote_env_deploys_tenant_component_charts_by_reference", func(t *testing.T) {
+		// A tenant publishes its own component charts (team-backend-api) beyond the
+		// fixed erun-* platform set. On a sourceless remote env --components selects
+		// them by their published name: each resolves to oci://<registry>/charts/
+		// <chart> --version and installs under the release name <chart> — not
+		// double-prefixed to team-team-backend-api. The selection is trusted (no
+		// local charts to validate against); an unpublished name would surface at
+		// deploy time as PublishedChartNotFoundError.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.0",
+			"--components", "team-backend-api,team-powerdns",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		golden.Equal(t, "deploy/dry_run_remote_env_deploys_tenant_component_charts_by_reference", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_runtime_env_mount_source_clones_at_release_ref", func(t *testing.T) {
 		// A runtime env is sourceless by default (worktreeStorage=none). Opting
 		// into MountSource (with a RepoURL) flips its runtime worktree to a PVC

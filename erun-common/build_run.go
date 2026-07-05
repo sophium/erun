@@ -165,16 +165,24 @@ func runBuildExecutionBuilds(ctx Context, execution BuildExecutionSpec, deploySp
 
 func runDockerBuildExecutionPhase(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, build DockerImageBuilderFunc, push DockerPushFunc, pushedTags map[string]struct{}) (map[string]struct{}, error) {
 	if len(execution.dockerPushes) > 0 {
-		err := RunDockerPushExecution(ctx, DockerPushExecutionSpec{builds: execution.dockerBuilds, pushes: execution.dockerPushes}, build, push)
+		err := RunDockerPushExecution(ctx, DockerPushExecutionSpec{builds: execution.dockerBuilds, pushes: execution.dockerPushes, componentCharts: execution.componentCharts}, build, push)
 		if err != nil {
 			return pushedTags, err
 		}
 		return recordDockerPushTags(pushedTags, execution.dockerPushes), nil
 	}
 	if len(deploySpecs) > 0 {
-		return pushedTags, buildAndPushDeployDockerImages(ctx, execution.dockerBuilds, build, push, pushedTags)
+		if err := buildAndPushDeployDockerImages(ctx, execution.dockerBuilds, build, push, pushedTags); err != nil {
+			return pushedTags, err
+		}
+		// A builds-here --deploy pushes images but deploys charts from the working
+		// tree, so package (validate) the charts rather than publish them.
+		return pushedTags, packageComponentCharts(ctx, execution.componentCharts)
 	}
-	return pushedTags, RunDockerBuilds(ctx, execution.dockerBuilds, build)
+	if err := RunDockerBuilds(ctx, execution.dockerBuilds, build); err != nil {
+		return pushedTags, err
+	}
+	return pushedTags, packageComponentCharts(ctx, execution.componentCharts)
 }
 
 func recordDockerPushTags(tags map[string]struct{}, pushes []DockerPushSpec) map[string]struct{} {
@@ -278,19 +286,10 @@ func RunDockerPushExecution(ctx Context, execution DockerPushExecutionSpec, buil
 	if err := RunDockerBuilds(ctx, execution.builds, build); err != nil {
 		return err
 	}
-	// Every component chart publishes at the push/release version regardless of
-	// whether its image was re-pushed: version-pinned bases (erun-powerdns,
-	// erun-backend-postgres) keep their upstream image pin but their chart must
-	// still publish at the release version so platform deploys and wrapper charts
-	// resolve it.
-	chartVersion := componentChartPublishVersion(execution.builds)
 	builtAndPushedTags := make(map[string]struct{}, len(execution.builds))
 	for _, buildInput := range execution.builds {
 		if buildInput.Push {
 			builtAndPushedTags[buildInput.Image.Tag] = struct{}{}
-		}
-		if err := publishComponentChart(ctx, buildInput.Image, chartVersion); err != nil {
-			return err
 		}
 	}
 	for _, pushInput := range execution.pushes {
@@ -298,6 +297,35 @@ func RunDockerPushExecution(ctx Context, execution DockerPushExecutionSpec, buil
 			continue
 		}
 		if err := RunDockerPushSpec(ctx, pushInput, nil, build, push); err != nil {
+			return err
+		}
+	}
+	// Publish every chart under <tenant>-devops/k8s/* at the push/release version,
+	// discovered by directory scan rather than keyed to same-named images, so
+	// image-less component charts (a tenant's wrappers) publish too.
+	return publishComponentCharts(ctx, execution.componentCharts)
+}
+
+// publishComponentCharts packages+pushes then verifies each resolved chart.
+func publishComponentCharts(ctx Context, specs []HelmChartPublishSpec) error {
+	for _, spec := range specs {
+		spec.Verbosity = ctx.Verbosity
+		if err := RunHelmChartPublish(ctx, spec); err != nil {
+			return err
+		}
+		if err := VerifyPublishedHelmChart(ctx, spec.OCIRepo, spec.ChartName, spec.Version); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// packageComponentCharts packages each resolved chart locally (validate + record
+// identity) without publishing — the build-only counterpart of
+// publishComponentCharts.
+func packageComponentCharts(ctx Context, specs []HelmChartPublishSpec) error {
+	for _, spec := range specs {
+		if err := PackageResolvedChart(ctx, spec); err != nil {
 			return err
 		}
 	}

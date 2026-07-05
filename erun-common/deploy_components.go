@@ -36,29 +36,6 @@ func publishablePlatformComponentNames() []string {
 	return defaultDeployComponentOrder
 }
 
-// validatePublishedSelection rejects a selected name that is neither a
-// publishable platform component nor a runtime alias. The sourceless
-// by-reference deploy path uses it because it has no local charts to validate
-// the selection against.
-func validatePublishedSelection(selected []string, tenant string) error {
-	if len(selected) == 0 {
-		return nil
-	}
-	valid := make(map[string]struct{})
-	for _, name := range publishablePlatformComponentNames() {
-		valid[name] = struct{}{}
-	}
-	for _, alias := range runtimeComponentNames(tenant) {
-		valid[alias] = struct{}{}
-	}
-	for _, name := range selected {
-		if _, ok := valid[name]; !ok {
-			return fmt.Errorf("unknown deploy component %q; publishable components are: %s (plus the runtime %s)", name, strings.Join(publishablePlatformComponentNames(), ", "), RuntimeReleaseName(tenant))
-		}
-	}
-	return nil
-}
-
 // selectedPublishableComponents returns the selected non-runtime components in
 // default-rank order (postgres → db → api → powerdns → docs) for the sourceless
 // by-reference deploy path; the runtime is resolved separately.
@@ -258,12 +235,32 @@ func ResolveDeployableComponents(store DeployStore, findProjectRoot ProjectFinde
 	selected, _ := resolveSelectedDeployComponents(target.Components, resolvedTarget.EnvConfig.Deploy.Components, ProjectK8sConfig{})
 	runtimeSelected := deploySelectionIncludesRuntime(selected, tenant)
 
-	components := make([]DeployableComponent, 0, len(publishablePlatformComponentNames())+1)
+	platform := make(map[string]struct{}, len(publishablePlatformComponentNames()))
+	components := make([]DeployableComponent, 0, len(publishablePlatformComponentNames())+len(selected)+1)
 	for _, name := range publishablePlatformComponentNames() {
+		platform[name] = struct{}{}
 		components = append(components, DeployableComponent{
 			Name:     name,
 			Source:   deployComponentSourcePublished,
 			Selected: slices.Contains(selected, name),
+		})
+	}
+	// A tenant publishes its own component charts (e.g. frs-backend-api) beyond the
+	// fixed platform set; surface any this env selects so the checklist reflects
+	// what deploying it rolls out. A transport filters to those actually published
+	// at the chosen version.
+	runtimeAliases := runtimeComponentNames(tenant)
+	for _, name := range selected {
+		if _, ok := platform[name]; ok {
+			continue
+		}
+		if slices.Contains(runtimeAliases, name) {
+			continue
+		}
+		components = append(components, DeployableComponent{
+			Name:     name,
+			Source:   deployComponentSourcePublished,
+			Selected: true,
 		})
 	}
 	components = append(components, DeployableComponent{

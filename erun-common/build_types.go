@@ -103,12 +103,19 @@ type BuildExecutionSpec struct {
 	linuxBuilds  []scriptSpec
 	dockerBuilds []DockerBuildSpec
 	dockerPushes []DockerPushSpec
-	skippedLinux bool
+	// componentCharts are the Helm charts under <tenant>-devops/k8s/*, resolved as
+	// first-class build source independent of images. A plain build packages them
+	// (validate); a build that pushes publishes them.
+	componentCharts []HelmChartPublishSpec
+	skippedLinux    bool
 }
 
 type DockerPushExecutionSpec struct {
 	builds []DockerBuildSpec
 	pushes []DockerPushSpec
+	// componentCharts are the <tenant>-devops/k8s/* charts this push publishes,
+	// discovered by directory scan rather than keyed to same-named images.
+	componentCharts []HelmChartPublishSpec
 }
 
 type DockerCommandTarget struct {

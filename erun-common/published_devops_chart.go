@@ -134,10 +134,17 @@ func resolvePublishedComponentDeploySpec(ctx Context, target OpenResult, compone
 }
 
 // publishedComponentReleaseName maps a published component chart to its release
-// name: <tenant>-<component-suffix> (e.g. erun-backend-api → frs-backend-api).
+// name: <tenant>-<component-suffix> (e.g. erun-backend-api → frs-backend-api). A
+// chart already named for this tenant (a tenant's own frs-backend-api) is its
+// own release name — don't double-prefix it to frs-frs-backend-api.
 func publishedComponentReleaseName(tenant, component string) string {
-	suffix := strings.TrimPrefix(strings.TrimSpace(component), "erun-")
-	return strings.TrimSpace(tenant) + "-" + suffix
+	tenant = strings.TrimSpace(tenant)
+	component = strings.TrimSpace(component)
+	if tenant != "" && strings.HasPrefix(component, tenant+"-") {
+		return component
+	}
+	suffix := strings.TrimPrefix(component, "erun-")
+	return tenant + "-" + suffix
 }
 
 // publishedDevopsValuesOverlayPath finds the env's operator values overlay.

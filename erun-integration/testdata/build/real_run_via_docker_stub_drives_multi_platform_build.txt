@@ -6,4 +6,6 @@ rebuilding ghcr.io/sophium/api:<VERSION> because fingerprint image is missing fo
 fingerprint image not found locally: ghcr.io/sophium/base:fp-<HEX16>-amd64
 fingerprint image not found locally: ghcr.io/sophium/base:fp-<HEX16>-arm64
 rebuilding ghcr.io/sophium/base:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
+==> Packaging api <VERSION>
+==> Packaging base <VERSION>
 ==> Built in <ELAPSED>
