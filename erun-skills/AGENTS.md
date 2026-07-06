@@ -56,7 +56,7 @@ erun-skills/
   - Runtime image: triggers a rebuild of `erun-devops` via the standard fingerprint check. No `.erun/config.yaml` fingerprint bump needed; `erun-devops` isn't pinned by base fingerprint.
   - Marketplace: users see the update when the release flow bumps `source.sha` in `/.claude-plugin/marketplace.json`. Bump the SHA in the same commit that publishes the skill change.
 - Do not edit the baked copy at `/etc/erun/skills/<name>/SKILL.md` inside a runtime container. That copy is overwritten on every image rebuild. Edit the source here.
-- The entrypoint's `[ ! -e ]` guard means user edits to `~/.claude/skills/<name>/SKILL.md` inside a running pod survive pod restarts. That's intentional; do not change it.
+- The entrypoint installs a baked skill when absent and **refreshes** it when the image's copy changed, but **preserves in-pod edits**: an installed `~/.claude/skills/<name>/SKILL.md` that no longer matches the baked hash recorded in its `.erun-skill-baked-sha256` marker was edited in the pod and is left untouched (see `erun-devops/docker/erun-devops/skills-install.sh`). So in-pod edits survive restarts and upgrades, while an un-edited skill tracks the image — this is what lets a skill change here actually reach existing envs on their next boot with a rebuilt image. (A skill edited in-pod *before* this marker mechanism existed has no marker to prove it was edited, so it is refreshed to the baked version once, on the first boot after the change ships.)
 
 ## Validation
 
