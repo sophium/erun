@@ -19,6 +19,7 @@ import {
 import { showTerminalMessage } from '@/app/notificationThunks';
 import type { AppState } from '@/app/state';
 import {
+  groupVersionSuggestionsBySource,
   versionChoiceImage,
   versionChoiceKind,
   versionChoiceLabel,
@@ -379,6 +380,12 @@ function RuntimeDeployVersionPicker({
   onChoicesOpenChange: (open: boolean) => void;
   onSelect: (suggestion: UIVersionSuggestion | undefined) => void;
 }): React.ReactElement {
+  // Group by source so a tenant env's two same-labelled lines — its own
+  // <tenant>-devops runtime and the upstream erun-devops fallback — are told
+  // apart. Headings only appear when there is more than one source; a single-line
+  // picker keeps the plain "Version to deploy" heading.
+  const suggestionGroups = groupVersionSuggestionsBySource(suggestions);
+  const showSourceHeadings = suggestionGroups.length > 1;
   return (
     <div className="relative min-w-0">
       <Input
@@ -418,16 +425,21 @@ function RuntimeDeployVersionPicker({
             <CommandInput placeholder="Search versions..." />
             <CommandList>
               <CommandEmpty>No version found.</CommandEmpty>
-              <CommandGroup heading="Version to deploy">
-                {suggestions.map((suggestion) => (
-                  <RuntimeDeploySuggestionItem
-                    key={`${suggestion.version}:${suggestion.image ?? ''}:${suggestion.source ?? ''}:${suggestion.label}`}
-                    suggestion={suggestion}
-                    selected={suggestion.version === overrideVersion}
-                    onSelect={onSelect}
-                  />
-                ))}
-              </CommandGroup>
+              {suggestionGroups.map((group) => (
+                <CommandGroup
+                  key={group.source || 'default'}
+                  heading={showSourceHeadings ? group.heading : 'Version to deploy'}
+                >
+                  {group.suggestions.map((suggestion) => (
+                    <RuntimeDeploySuggestionItem
+                      key={`${suggestion.version}:${suggestion.image ?? ''}:${suggestion.source ?? ''}:${suggestion.label}`}
+                      suggestion={suggestion}
+                      selected={suggestion.version === overrideVersion}
+                      onSelect={onSelect}
+                    />
+                  ))}
+                </CommandGroup>
+              ))}
             </CommandList>
           </Command>
           <VersionNotices notices={notices} />

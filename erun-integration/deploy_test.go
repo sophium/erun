@@ -607,16 +607,25 @@ func TestDeploy(t *testing.T) {
 		// installs directly with top-level --set tenant/environment — no local
 		// umbrella, no source. Components are emitted in default-rank order
 		// (postgres → db → api), not the scrambled --components input order, and
-		// the runtime (team-devops selected) resolves to the published erun-devops
-		// chart. This is the sourceless deploy path.
+		// the runtime (team-devops selected) resolves to the tenant's own published
+		// team-devops chart — the mandate keeps it on the tenant version line rather
+		// than the erun-devops fallback. This is the sourceless deploy path.
+		//
+		// Selecting tenant components binds the deploy to the tenant version line, so
+		// the coherence check verifies the runtime and every component chart is
+		// published at the version. The ERUN_PUBLISHED_CHART_PROBE_OVERRIDE seam
+		// stands in for the registry read that check performs (real deploys read the
+		// registry); here every selected chart is published at 1.0.0.
 		setup := env.New(t)
 		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envVars := append(setup.Env(),
+			"ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-devops:1.0.0,erun-backend-api:1.0.0,erun-backend-postgres:1.0.0,erun-backend-db:1.0.0")
 		result := erun.Run(t, []string{
 			"deploy", "team", "dev",
 			"--version", "1.0.0",
 			"--components", "erun-backend-api,erun-backend-postgres,erun-backend-db,team-devops",
 			"--dry-run",
-		}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
 		golden.Equal(t, "deploy/dry_run_remote_env_deploys_published_components", normalize.Apply(result.Combined))
 	})
 
@@ -625,18 +634,43 @@ func TestDeploy(t *testing.T) {
 		// fixed erun-* platform set. On a sourceless remote env --components selects
 		// them by their published name: each resolves to oci://<registry>/charts/
 		// <chart> --version and installs under the release name <chart> — not
-		// double-prefixed to team-team-backend-api. The selection is trusted (no
-		// local charts to validate against); an unpublished name would surface at
-		// deploy time as PublishedChartNotFoundError.
+		// double-prefixed to team-team-backend-api. Selecting tenant components binds
+		// the deploy to the tenant version line, so the coherence check verifies each
+		// is published at the version; the ERUN_PUBLISHED_CHART_PROBE_OVERRIDE seam
+		// stands in for that registry read (both charts published at 1.0.0 here).
 		setup := env.New(t)
 		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envVars := append(setup.Env(),
+			"ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-backend-api:1.0.0,team-powerdns:1.0.0")
 		result := erun.Run(t, []string{
 			"deploy", "team", "dev",
 			"--version", "1.0.0",
 			"--components", "team-backend-api,team-powerdns",
 			"--dry-run",
-		}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
 		golden.Equal(t, "deploy/dry_run_remote_env_deploys_tenant_component_charts_by_reference", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_remote_env_tenant_artifacts_require_published_charts", func(t *testing.T) {
+		// The tenant-chart mandate: deploying the tenant's own component charts binds
+		// the deploy to the tenant's version line, so the tenant runtime chart and
+		// every selected component chart must be published at the version. Here
+		// team-powerdns is not published at 1.0.0 (the probe override lists only
+		// team-backend-api), so the coherence check fails fast — before any spec is
+		// built — instead of the runtime silently falling back to erun-devops or a
+		// half-applied rollout dying on a mid-deploy chart pull. The override seam
+		// stands in for the registry read (real deploys read the registry).
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envVars := append(setup.Env(),
+			"ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-backend-api:1.0.0")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.0",
+			"--components", "team-backend-api,team-powerdns",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		golden.Equal(t, "deploy/dry_run_remote_env_tenant_artifacts_require_published_charts", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_runtime_env_mount_source_clones_at_release_ref", func(t *testing.T) {

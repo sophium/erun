@@ -807,14 +807,25 @@ func traceDeployComponentSelection(ctx Context, selected []string, source string
 func resolvePublishedDeploySpecs(ctx Context, store DeployStore, resolvedTarget OpenResult, target DeployTarget) ([]DeploySpec, error) {
 	selected, selectionSource := resolveSelectedDeployComponents(target.Components, resolvedTarget.EnvConfig.Deploy.Components, ProjectK8sConfig{})
 	traceDeployComponentSelection(ctx, selected, selectionSource)
-	// The sourceless path installs any published chart by reference. A tenant
-	// publishes its own component charts (e.g. frs-backend-api) beyond the fixed
-	// platform set, and there are no local charts to validate the selection
-	// against, so the names are trusted here; one whose chart was never published
-	// at the version surfaces at deploy time as PublishedChartNotFoundError.
 
-	specs := make([]DeploySpec, 0, len(selected)+1)
-	for _, component := range selectedPublishableComponents(selected, resolvedTarget.Tenant) {
+	tenantComponents := selectedPublishableComponents(selected, resolvedTarget.Tenant)
+	runtimeSelected := deploySelectionIncludesRuntime(selected, resolvedTarget.Tenant)
+
+	// Deploying the tenant's own component charts binds the whole deploy to the
+	// tenant's version line: the tenant runtime chart (<tenant>-devops) and every
+	// selected component chart must be published at this version. Verify up front so
+	// an incoherent version fails fast — the runtime must not silently fall back to
+	// the shared erun-devops chart, and a component missing at the version must not
+	// half-apply before a mid-rollout chart pull aborts the deploy. An erun-only /
+	// bootstrap deploy (no tenant components) keeps the published-fallback path.
+	if len(tenantComponents) > 0 {
+		if err := ensureTenantChartsPublished(ctx, resolvedTarget, target.VersionOverride, runtimeSelected, tenantComponents); err != nil {
+			return nil, err
+		}
+	}
+
+	specs := make([]DeploySpec, 0, len(tenantComponents)+1)
+	for _, component := range tenantComponents {
 		spec, err := resolvePublishedComponentDeploySpec(ctx, resolvedTarget, component, target.VersionOverride)
 		if err != nil {
 			return nil, err
@@ -824,7 +835,7 @@ func resolvePublishedDeploySpecs(ctx Context, store DeployStore, resolvedTarget 
 		}
 		specs = append(specs, spec)
 	}
-	if deploySelectionIncludesRuntime(selected, resolvedTarget.Tenant) {
+	if runtimeSelected {
 		runtimeSpecs, err := resolvePublishedDevopsDeploySpecs(ctx, store, resolvedTarget, target.VersionOverride)
 		if err != nil {
 			return nil, err

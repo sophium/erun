@@ -51,13 +51,17 @@ namespace `acme-prod`). The worked paths below use `acme` / `prod`.
   via `imageOverrides.erun-devops`). It does **not** bake these platform artifacts
   into any image, and needn't: `erun deploy` installs the platform components **by
   reference** from the published registry, so a runtime env needs no local source.
-- It does **not** own the runtime `erun-devops` chart. The runtime pod is a
-  universal per-env concern (every tenant has one, platform or not); it deploys
-  from the published `erun-devops` chart with the image swapped via
-  `imageOverrides.erun-devops` (customised by `erun-build-env`). Never add an
-  `erun-devops` or `<tenant>-devops` umbrella under `<tenant>-devops/k8s/` here —
-  `erun deploy` matches the runtime release name and would install it as the
-  runtime chart, shadowing the published one.
+- It does **not** own the runtime `<tenant>-devops` chart — `erun-build-env` does.
+  The runtime pod is a universal per-env concern (every tenant has one, platform or
+  not). A tenant that ships the platform components this skill produces runs them on
+  its own version line, so its runtime must too: `erun-build-env` publishes a
+  `<tenant>-devops` chart at the tenant version (its Step 6, **required** for such a
+  tenant), and `erun deploy` rejects deploying tenant components against the shared
+  `erun-devops` runtime. A bootstrap/erun-only env that deploys no components of its
+  own may still ride the shared `erun-devops` chart (image swapped via
+  `imageOverrides.erun-devops`). Either way, never add a runtime umbrella under
+  `<tenant>-devops/k8s/` **from this skill** — the runtime chart is
+  `erun-build-env`'s to own; adding one here would shadow it.
 
 ## Step 1 — resolve the erun version and registry to pin to
 
@@ -428,7 +432,7 @@ selection.
 | `helm dependency build` 404s on the OCI chart | That version's chart isn't published. `erun push`/`erun release` publishes image + chart together — pin to a version that has been pushed. |
 | `erun deploy` fails: `values file not found for environment "<env>": …/<component>/values.<env>.yaml` | That umbrella chart has no per-env values file for the env being deployed. Create `<component>/values.<env>.yaml` (an empty/comment-only file is valid). Remember the agent env: `values.local.yaml` is required too, since the desktop deploys `<tenant>-local`. |
 | Operator asks to put the Cloudflare token in `<env>.tfvars` | Refuse. The token is a secret injected as `TF_VAR_cloudflare_api_token` from `CLOUDFLARE_API_TOKEN` at apply time — it must not be committed. |
-| An `erun-devops`/`<tenant>-devops` umbrella appears under `<tenant>-devops/k8s/` | That is the runtime chart, not this skill's concern. Remove it: the runtime deploys from the published `erun-devops` chart + `imageOverrides` (customise the image with `erun-build-env`, which may add pod shape via a runtime umbrella it owns). `erun deploy` matches the runtime release name and would otherwise install this umbrella as the runtime chart, shadowing the published one. |
+| An `erun-devops`/`<tenant>-devops` umbrella appears under `<tenant>-devops/k8s/` | That is the runtime chart — `erun-build-env`'s concern, not this skill's. Don't create or edit it here. A `<tenant>-devops` chart is legitimate (and **required** once the tenant ships its own components, so the runtime rides the tenant version line) and owned by `erun-build-env`; leave it to that skill. Only remove a stray one this skill created by mistake — `erun deploy` matches the runtime release name and would otherwise install a duplicate as the runtime chart. |
 
 ## Important
 

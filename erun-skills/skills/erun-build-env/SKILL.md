@@ -117,14 +117,28 @@ On deploy, the image rides into the published `erun-devops` chart as
 runtime container's image changes. The next `erun deploy` or `erun open`
 rolls the custom image out.
 
-## Step 6 — customise the runtime pod shape (optional)
+## Step 6 — publish a `<tenant>-devops` runtime chart
 
-The image customises **what's installed**; some needs are **pod-shape** and a
-Dockerfile can't express them — a sidecar container, an extra volume/mount, extra
-env, or the cluster RBAC a sidecar needs. For those, wrap the published
-`erun-devops` chart in a `<tenant>-devops` umbrella — **reference it, never fork
-it**. Skip this step unless you have such a need; image-only via `imageOverrides`
-(Step 5) is the default and adds no chart.
+Two things pull the tenant into owning its own runtime chart:
+
+- **The tenant runs on its own version line (mandatory once it ships components).**
+  When this tenant publishes its own platform component charts (`<tenant>-backend-*`,
+  `<tenant>-powerdns`, … via `erun-blueprint-platform`), the runtime and those
+  components must deploy together on the tenant's own version line. Riding the
+  shared `erun-devops` chart would pin the runtime to erun's version line while the
+  components sit on the tenant's — a split `erun deploy` now rejects (it requires a
+  published `<tenant>-devops` chart at the deploy version once the deploy includes
+  tenant components). So a tenant that ships its own artifacts **must** publish its
+  own `<tenant>-devops` chart.
+- **Pod shape.** Some needs are **pod-shape** a Dockerfile can't express — a
+  sidecar, an extra volume/mount, extra env, or the cluster RBAC a sidecar needs.
+
+If neither applies — the tenant customises only the runtime image and deploys no
+components of its own (bootstrap / erun-only) — skip this step: image-only via
+`imageOverrides` (Step 5) rides the published `erun-devops` chart and adds no
+chart. Otherwise wrap the published `erun-devops` chart in a `<tenant>-devops`
+umbrella — **reference it, never fork it** — which `erun push`/`erun release`
+publishes at the tenant version alongside the component charts.
 
 Create `<tenant>-devops/k8s/<tenant>-devops/` — the dir name, the `Chart.yaml`
 `name:`, and the helm release are all `<tenant>-devops` (the runtime release
@@ -223,10 +237,13 @@ the operator's to remove, not this skill's; note it rather than deleting it.
   the entrypoint, agents, and in-pod tooling live in that image.
 - Keep the `FROM` version aligned with the env's `runtimeversion`. After
   an `erun upgrade`, rebuild the custom image against the new version.
-- The optional runtime umbrella (Step 6) **references** the published
-  `erun-devops` chart as a subchart; never fork its templates. A knob you need
-  that the chart doesn't expose is a change to `erun-devops`, not a copy here.
-- This skill produces the runtime **image** only. Platform component charts
-  (`erun-backend-*`, `erun-powerdns`, `erun-docs`) deploy **by reference** from the
+- The runtime umbrella (Step 6) **references** the published `erun-devops` chart
+  as a subchart; never fork its templates. A knob you need that the chart doesn't
+  expose is a change to `erun-devops`, not a copy here. It is **required** once the
+  tenant ships its own component charts (so the runtime rides the tenant's version
+  line), and optional otherwise.
+- This skill produces the runtime **image**, plus the `<tenant>-devops` runtime
+  chart when Step 6 applies. The platform component charts are
+  `erun-blueprint-platform`'s concern and deploy **by reference** from the
   published registry (`erun deploy … --components …`), so a runtime env needs no
   local source — don't bake platform artifacts into the image.

@@ -28,7 +28,6 @@ import type { AppThunk } from './store';
 import { relaunchAISessionsForLaunchChange } from './tabRespawnThunks';
 import { requireController } from './thunkExtra';
 import {
-  normalizeDialogValue,
   normalizeVersionSuggestionNotices,
   normalizeVersionSuggestions,
 } from './versionSuggestions';
@@ -415,12 +414,15 @@ const refreshManageVersionSuggestions =
     }
     dispatch(setVersionSuggestions(suggestions));
     dispatch(setVersionSuggestionNotices(notices));
-    const currentVersion = normalizeDialogValue(getState().manageDialog.version);
-    if (
-      selectDefault ||
-      (currentVersion && !suggestions.some((suggestion) => suggestion.version === currentVersion))
-    ) {
-      dispatch(selectManageVersionSuggestion(suggestions[0]));
+    // Only auto-select a default when explicitly asked. Never override a version
+    // the operator picked or typed: the dialog opens at '', so any non-empty
+    // version when this async fetch resolves is a fresh operator action, and an
+    // in-flight suggestions load landing a beat later must not clobber it — doing
+    // so reset the version and collapsed the "Components to deploy" panel back to
+    // its gated hint with no error shown.
+    const defaultSuggestion = suggestions[0];
+    if (selectDefault && defaultSuggestion) {
+      dispatch(selectManageVersionSuggestion(defaultSuggestion));
     }
   };
 
