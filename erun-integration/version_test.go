@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/sophium/erun/erun-integration/internal/env"
 	"github.com/sophium/erun/erun-integration/internal/erun"
+	"github.com/sophium/erun/erun-integration/internal/fixture"
 	"github.com/sophium/erun/erun-integration/internal/golden"
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
@@ -159,6 +161,122 @@ func TestVersion(t *testing.T) {
 			if !hit {
 				t.Errorf("expected stub to receive %q, got requests:\n%v", path, requested)
 			}
+		}
+	})
+
+	t.Run("registry_ghcr_authenticates_with_docker_config_inline_auth", func(t *testing.T) {
+		// #750: registry version listing authenticates the GHCR token exchange with
+		// the credential docker itself pulls with, so private tenant images list
+		// their tags instead of failing anonymously. Seed an isolated docker config
+		// with an inline ghcr.io auth entry and assert the token request carries HTTP
+		// Basic auth — the credential-resolution logic is otherwise only unit-tested
+		// via package-var seams the integration gate cannot reach.
+		const dockerUser, dockerSecret = "erunbot", "s3cr3t-inline-token"
+		var tokenAuthHeader string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/token":
+				tokenAuthHeader = r.Header.Get("Authorization")
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprintf(w, `{"token":"stub-token"}`)
+			case "/v2/acme/erun-devops/tags/list":
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprintf(w, `{"name":"acme/erun-devops","tags":["1.3.9","1.4.0","latest"]}`)
+			default:
+				http.Error(w, "unexpected request "+r.URL.String(), http.StatusNotFound)
+			}
+		}))
+		t.Cleanup(server.Close)
+
+		setup := env.New(t)
+		writeRuntimeRegistryConfig(t, setup, "runtimeregistry:\n"+
+			"  namespace: ghcr.io/acme\n"+
+			"  repository: erun-devops\n"+
+			"  baseurl: "+server.URL+"\n"+
+			"  tokenurl: "+server.URL+"\n")
+
+		// An inline auths entry keyed by the bare host is what docker stores for
+		// `docker login ghcr.io`; DOCKER_CONFIG points the resolver at this isolated
+		// dir instead of the developer's ~/.docker.
+		dockerCfgDir := filepath.Join(setup.Cwd, "docker-inline")
+		if err := os.MkdirAll(dockerCfgDir, 0o755); err != nil {
+			t.Fatalf("mkdir docker config dir: %v", err)
+		}
+		encoded := base64.StdEncoding.EncodeToString([]byte(dockerUser + ":" + dockerSecret))
+		dockerCfg := fmt.Sprintf(`{"auths":{"ghcr.io":{"auth":%q}}}`, encoded)
+		if err := os.WriteFile(filepath.Join(dockerCfgDir, "config.json"), []byte(dockerCfg), 0o644); err != nil {
+			t.Fatalf("write docker config: %v", err)
+		}
+
+		envVars := append(setup.Env(), "DOCKER_CONFIG="+dockerCfgDir)
+		result := erun.Run(t, []string{"version"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Stdout, "latest stable: 1.4.0") {
+			t.Errorf("expected stdout to include latest stable 1.4.0, got:\n%s", result.Stdout)
+		}
+		wantAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte(dockerUser+":"+dockerSecret))
+		if tokenAuthHeader != wantAuth {
+			t.Errorf("expected GHCR token request to carry inline docker-config Basic auth %q, got %q", wantAuth, tokenAuthHeader)
+		}
+	})
+
+	t.Run("registry_ghcr_authenticates_via_docker_credential_helper", func(t *testing.T) {
+		// #750, credential-helper arm: docker keeps most registry credentials in a
+		// per-host credential helper (Docker Desktop/OrbStack keychains), not inline.
+		// A credHelpers entry routes ghcr.io to `docker-credential-<helper> get`; the
+		// resolver must run it and Basic-authenticate the token exchange with what it
+		// returns. The helper name is deliberately absent from PATH so the resolution
+		// is deterministic, and the stub is routed via ERUN_DOCKER_CREDENTIAL_ERUNSTUB_BIN.
+		const dockerUser, dockerSecret = "helperbot", "s3cr3t-helper-token"
+		var tokenAuthHeader string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/token":
+				tokenAuthHeader = r.Header.Get("Authorization")
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprintf(w, `{"token":"stub-token"}`)
+			case "/v2/acme/erun-devops/tags/list":
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprintf(w, `{"name":"acme/erun-devops","tags":["1.4.0","1.4.2","latest"]}`)
+			default:
+				http.Error(w, "unexpected request "+r.URL.String(), http.StatusNotFound)
+			}
+		}))
+		t.Cleanup(server.Close)
+
+		setup := env.New(t)
+		writeRuntimeRegistryConfig(t, setup, "runtimeregistry:\n"+
+			"  namespace: ghcr.io/acme\n"+
+			"  repository: erun-devops\n"+
+			"  baseurl: "+server.URL+"\n"+
+			"  tokenurl: "+server.URL+"\n")
+
+		dockerCfgDir := filepath.Join(setup.Cwd, "docker-helper")
+		if err := os.MkdirAll(dockerCfgDir, 0o755); err != nil {
+			t.Fatalf("mkdir docker config dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dockerCfgDir, "config.json"), []byte(`{"credHelpers":{"ghcr.io":"erunstub"}}`), 0o644); err != nil {
+			t.Fatalf("write docker config: %v", err)
+		}
+
+		// docker-credential-erunstub get prints the credential docker would hand back
+		// on stdin lookup; the resolver Basic-authenticates the token request with it.
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		fixture.StubBinary(t, stubs, "docker-credential-erunstub", fmt.Sprintf(`{"Username":%q,"Secret":%q}`, dockerUser, dockerSecret))
+		envVars := append(setup.Env(), "DOCKER_CONFIG="+dockerCfgDir)
+		envVars = append(envVars, fixture.StubEnv(stubs, "docker-credential-erunstub")...)
+		result := erun.Run(t, []string{"version"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Stdout, "latest stable: 1.4.2") {
+			t.Errorf("expected stdout to include latest stable 1.4.2, got:\n%s", result.Stdout)
+		}
+		wantAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte(dockerUser+":"+dockerSecret))
+		if tokenAuthHeader != wantAuth {
+			t.Errorf("expected GHCR token request to carry credential-helper Basic auth %q, got %q", wantAuth, tokenAuthHeader)
 		}
 	})
 
