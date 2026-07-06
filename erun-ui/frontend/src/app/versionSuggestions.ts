@@ -128,6 +128,43 @@ export function versionChoiceImage(suggestion: UIVersionSuggestion): string {
   return `${source}-devops`;
 }
 
+export interface VersionSuggestionGroup {
+  source: string;
+  heading: string;
+  suggestions: UIVersionSuggestion[];
+}
+
+// groupVersionSuggestionsBySource splits the flat picker list into per-source
+// groups — this environment's own tenant runtime line vs the upstream ERun line —
+// preserving first-seen order (a tenant env lists its own line first, then the
+// upstream fallback). It lets the picker label the two otherwise-identical
+// "latest stable" rows so the operator can tell the tenant's own stack from the
+// vanilla ERun runtime.
+export function groupVersionSuggestionsBySource(
+  suggestions: UIVersionSuggestion[],
+): VersionSuggestionGroup[] {
+  const groups: VersionSuggestionGroup[] = [];
+  for (const suggestion of suggestions) {
+    const source = versionChoiceSource(suggestion);
+    const existing = groups.find((group) => group.source === source);
+    if (existing) {
+      existing.suggestions.push(suggestion);
+      continue;
+    }
+    groups.push({ source, heading: versionSourceHeading(source), suggestions: [suggestion] });
+  }
+  return groups;
+}
+
+// versionSourceHeading names a picker group in operator language: the upstream
+// ERun runtime vs this environment's own tenant runtime line.
+export function versionSourceHeading(source: string): string {
+  if (!source || source === 'ERun') {
+    return 'Upstream ERun';
+  }
+  return `This environment (${source})`;
+}
+
 export function selectedVersionSourceText(suggestion: UIVersionSuggestion | undefined): string {
   if (!suggestion) {
     return '';

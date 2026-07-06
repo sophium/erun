@@ -38,6 +38,46 @@ func resolvePublishedRuntimeChartReference(ctx context.Context, containerRegistr
 	return publishedDevopsChartReference(containerRegistry)
 }
 
+// ensureTenantChartsPublished verifies, before any spec is built, that a
+// tenant-artifact deploy's charts all exist at the resolved version. A tenant
+// runs its runtime and components together on its own version line (independent
+// of the shared erun-devops line), so once a deploy rolls out the tenant's own
+// component charts the tenant runtime chart (<tenant>-devops) and every selected
+// component chart must be published at the version. Failing here keeps the deploy
+// from silently installing the vanilla erun-devops runtime via the chart fallback,
+// or half-applying before a missing chart aborts the rollout.
+func ensureTenantChartsPublished(ctx Context, target OpenResult, versionOverride string, runtimeSelected bool, components []string) error {
+	version := strings.TrimSpace(versionOverride)
+	if version == "" {
+		version = strings.TrimSpace(target.EnvConfig.RuntimeVersion)
+	}
+	if version == "" {
+		ctx.Trace("deploy: no version resolved; cannot verify the tenant's charts are published")
+		return fmt.Errorf("version is required to deploy the tenant's charts: pass --version or persist runtimeversion in the env config")
+	}
+	registry := publishedDevopsChartRegistry(target)
+
+	required := make([]string, 0, len(components)+1)
+	runtimeChart := RuntimeReleaseName(target.Tenant)
+	if runtimeSelected && runtimeChart != DevopsComponentName {
+		required = append(required, runtimeChart)
+	}
+	required = append(required, components...)
+
+	ctx.Trace("deploy: deploying tenant artifacts; verifying charts published at " + version + " in " + registry + ": " + strings.Join(required, ", "))
+
+	missing := make([]string, 0, len(required))
+	for _, chart := range required {
+		if !publishedChartHasVersion(context.Background(), registry, chart, version) {
+			missing = append(missing, chart)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("deploy rolls out the tenant's own artifacts, which run on the tenant's version line, but these charts are not published at version %s in %s: %s; `erun push --version %s` (or `erun release`) publishes the tenant's runtime and component charts together, so publish the missing chart(s) then deploy", version, registry, strings.Join(missing, ", "), version)
+	}
+	return nil
+}
+
 func publishedChartHasVersion(ctx context.Context, containerRegistry, chartName, version string) bool {
 	if override, ok := os.LookupEnv(publishedChartProbeOverrideEnv); ok {
 		return publishedChartOverrideHasVersion(override, chartName, version)
