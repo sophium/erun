@@ -117,6 +117,17 @@ On deploy, the image rides into the published `erun-devops` chart as
 runtime container's image changes. The next `erun deploy` or `erun open`
 rolls the custom image out.
 
+**Suggest the graduation step to the operator.** Riding the shared `erun-devops`
+chart with an image override is the right call at **inception** — a fresh env runs
+the stock runtime plus your toolchain and needs no chart of its own. But it's a
+starting point, not the destination. As soon as the tenant owns anything of its
+own — its own component charts, its own release cadence, or custom pod shape —
+recommend it graduate to its **own** published `<tenant>-devops` chart (Step 6)
+instead of riding the shared one. Make this an explicit suggestion, not a silent
+default: the operator should decide to own the runtime, not discover later that
+`erun deploy` requires the `<tenant>-devops` chart once a deploy includes the
+tenant's own components.
+
 ## Step 6 — publish a `<tenant>-devops` runtime chart
 
 Two things pull the tenant into owning its own runtime chart:
