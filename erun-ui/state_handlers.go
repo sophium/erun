@@ -18,10 +18,12 @@ func (a *App) LoadState() (uiState, error) {
 	if err != nil {
 		if errors.Is(err, eruncommon.ErrNotInitialized) {
 			info := a.deps.resolveBuildInfo()
+			suggestions, notices := a.runtimeVersionSuggestions(info, "", "")
 			return uiState{
-				Message:            "ERun is not initialized yet. Run `erun init` first.",
-				Build:              buildDetailsFrom(info),
-				VersionSuggestions: a.runtimeVersionSuggestions(info, "", ""),
+				Message:                  "ERun is not initialized yet. Run `erun init` first.",
+				Build:                    buildDetailsFrom(info),
+				VersionSuggestions:       suggestions,
+				VersionSuggestionNotices: notices,
 			}, nil
 		}
 		return uiState{}, err
@@ -36,11 +38,11 @@ func (a *App) LoadState() (uiState, error) {
 	} else if len(state.Tenants) > 0 {
 		suggestionTenant = state.Tenants[0].Name
 	}
-	state.VersionSuggestions = a.runtimeVersionSuggestions(info, suggestionTenant, suggestionEnv)
+	state.VersionSuggestions, state.VersionSuggestionNotices = a.runtimeVersionSuggestions(info, suggestionTenant, suggestionEnv)
 	return state, nil
 }
 
-func (a *App) resolveRuntimeRegistryVersionsForTenant(namespace, tenant string) eruncommon.RuntimeRegistryVersions {
+func (a *App) resolveRuntimeRegistryVersionsForTenant(namespace, tenant string) (eruncommon.RuntimeRegistryVersions, error) {
 	ctx := a.ctx
 	if ctx == nil {
 		ctx = context.Background()
@@ -52,11 +54,7 @@ func (a *App) resolveRuntimeRegistryVersionsForTenant(namespace, tenant string) 
 	if tenant = strings.TrimSpace(tenant); tenant != "" {
 		repository = eruncommon.RuntimeReleaseName(tenant)
 	}
-	versions, err := a.deps.resolveImageRegistry(ctx, namespace, repository)
-	if err != nil {
-		return eruncommon.RuntimeRegistryVersions{}
-	}
-	return versions
+	return a.deps.resolveImageRegistry(ctx, namespace, repository)
 }
 
 // runtimeRegistryNamespace resolves the registry an env's runtime image was
@@ -87,25 +85,61 @@ func (a *App) runtimeRegistryNamespace(tenant, environment string) string {
 	return ""
 }
 
-func (a *App) runtimeVersionSuggestions(info eruncommon.BuildInfo, tenant, environment string) []uiVersion {
+func (a *App) runtimeVersionSuggestions(info eruncommon.BuildInfo, tenant, environment string) ([]uiVersion, []uiVersionNotice) {
 	tenant = strings.TrimSpace(tenant)
+	defaultImage := eruncommon.DefaultContainerRegistry + "/" + eruncommon.DefaultRuntimeImageName
 	if tenant == "" {
-		return labelRuntimeVersionSuggestions("ERun", eruncommon.DefaultContainerRegistry+"/"+eruncommon.DefaultRuntimeImageName, eruncommon.RuntimeDeployVersionSuggestions(info, a.resolveRuntimeRegistryVersionsForTenant("", "")))
+		suggestions, notice := a.suggestionsForImage(info, "ERun", defaultImage, "", "")
+		return suggestions, appendVersionNotice(nil, notice)
 	}
 
 	tenantImage := eruncommon.RuntimeReleaseName(tenant)
 	suggestions := make([]uiVersion, 0, 8)
+	notices := make([]uiVersionNotice, 0, 4)
 	for _, registry := range a.environmentDiscoveryRegistries(tenant, environment) {
-		versions := a.resolveRuntimeRegistryVersionsForTenant(registry, tenant)
 		image := strings.TrimRight(strings.TrimSpace(registry), "/") + "/" + tenantImage
-		suggestions = append(suggestions, labelRuntimeVersionSuggestions(tenant, image, eruncommon.RuntimeDeployVersionSuggestions(info, versions))...)
+		got, notice := a.suggestionsForImage(info, tenant, image, registry, tenant)
+		suggestions = append(suggestions, got...)
+		notices = appendVersionNotice(notices, notice)
 	}
 	// Tenant images are thin wrappers rebuilt from the canonical ERun image, so
 	// its channel-latest is also a valid deploy target for the env.
 	if tenantImage != eruncommon.DefaultRuntimeImageName {
-		suggestions = append(suggestions, labelRuntimeVersionSuggestions("ERun", eruncommon.DefaultContainerRegistry+"/"+eruncommon.DefaultRuntimeImageName, eruncommon.RuntimeDeployVersionSuggestions(info, a.resolveRuntimeRegistryVersionsForTenant("", "")))...)
+		got, notice := a.suggestionsForImage(info, "ERun", defaultImage, "", "")
+		suggestions = append(suggestions, got...)
+		notices = appendVersionNotice(notices, notice)
 	}
-	return suggestions
+	return suggestions, notices
+}
+
+// suggestionsForImage resolves one image's deployable versions, returning a
+// notice instead of silently dropping the source when listing fails (private
+// image needs auth, or the registry is unreachable).
+func (a *App) suggestionsForImage(info eruncommon.BuildInfo, source, image, namespace, tenant string) ([]uiVersion, *uiVersionNotice) {
+	versions, err := a.resolveRuntimeRegistryVersionsForTenant(namespace, tenant)
+	if err != nil {
+		return nil, &uiVersionNotice{Image: image, Kind: versionNoticeKind(err)}
+	}
+	return labelRuntimeVersionSuggestions(source, image, eruncommon.RuntimeDeployVersionSuggestions(info, versions)), nil
+}
+
+func versionNoticeKind(err error) string {
+	if errors.Is(err, eruncommon.ErrRegistryAuthRequired) {
+		return "auth"
+	}
+	return "unreachable"
+}
+
+func appendVersionNotice(notices []uiVersionNotice, notice *uiVersionNotice) []uiVersionNotice {
+	if notice == nil {
+		return notices
+	}
+	for _, existing := range notices {
+		if existing.Image == notice.Image && existing.Kind == notice.Kind {
+			return notices
+		}
+	}
+	return append(notices, *notice)
 }
 
 // environmentDiscoveryRegistries lists the registries the version picker offers
@@ -155,9 +189,10 @@ func (a *App) lookupEnvConfig(tenant, environment string) (eruncommon.EnvConfig,
 	return eruncommon.EnvConfig{}, false
 }
 
-func (a *App) LoadVersionSuggestions(selection uiSelection) ([]uiVersion, error) {
+func (a *App) LoadVersionSuggestions(selection uiSelection) (uiVersionSuggestions, error) {
 	selection = normalizeSelection(selection)
-	return a.runtimeVersionSuggestions(a.deps.resolveBuildInfo(), selection.Tenant, selection.Environment), nil
+	suggestions, notices := a.runtimeVersionSuggestions(a.deps.resolveBuildInfo(), selection.Tenant, selection.Environment)
+	return uiVersionSuggestions{Suggestions: suggestions, Notices: notices}, nil
 }
 
 func (a *App) LoadKubernetesContexts() ([]string, error) {

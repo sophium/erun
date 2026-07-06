@@ -3,6 +3,7 @@ package eruncommon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -13,6 +14,20 @@ import (
 )
 
 const DefaultRuntimeImageName = "erun-devops"
+
+// ErrRegistryAuthRequired marks a version listing that failed because the caller
+// is not authorized to read the (private) repository, so callers can tell
+// "log in to see this image" apart from a genuine registry/network failure.
+var ErrRegistryAuthRequired = errors.New("registry authentication required")
+
+// registryStatusError wraps a non-2xx registry response, tagging 401/403 with
+// ErrRegistryAuthRequired so callers can surface an actionable "authenticate" hint.
+func registryStatusError(kind, status string, code int) error {
+	if code == http.StatusUnauthorized || code == http.StatusForbidden {
+		return fmt.Errorf("%s failed: %s: %w", kind, status, ErrRegistryAuthRequired)
+	}
+	return fmt.Errorf("%s failed: %s", kind, status)
+}
 
 type RuntimeRegistryVersions struct {
 	Image          string
@@ -157,7 +172,10 @@ func resolveGHCRRuntimeRegistryVersionsAt(ctx context.Context, client *http.Clie
 	tokenURL = normalizeGHCRBaseURL(tokenURL)
 
 	repoPath := strings.ToLower(escapeRegistryPathSegments(owner) + "/" + escapeRegistryPathSegments(repository))
-	token, err := fetchGHCRPullToken(ctx, client, repoPath, tokenURL)
+	// Authenticate with the credential docker pulls with (falling back to gh) so
+	// private tenant images list their tags instead of failing anonymously.
+	auth, hasAuth := resolveGHCRBasicAuth(owner)
+	token, err := fetchGHCRPullToken(ctx, client, repoPath, tokenURL, auth, hasAuth)
 	if err != nil {
 		return RuntimeRegistryVersions{}, err
 	}
@@ -210,7 +228,7 @@ func collectGHCRTags(ctx context.Context, client *http.Client, endpoint, token s
 	return tags, nil
 }
 
-func fetchGHCRPullToken(ctx context.Context, client *http.Client, repoPath, tokenBaseURL string) (string, error) {
+func fetchGHCRPullToken(ctx context.Context, client *http.Client, repoPath, tokenBaseURL string, auth registryBasicAuth, hasAuth bool) (string, error) {
 	tokenBaseURL = strings.TrimRight(strings.TrimSpace(tokenBaseURL), "/")
 	if tokenBaseURL == "" {
 		tokenBaseURL = defaultGHCRRegistryBaseURL
@@ -219,6 +237,11 @@ func fetchGHCRPullToken(ctx context.Context, client *http.Client, repoPath, toke
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, tokenURL, nil)
 	if err != nil {
 		return "", err
+	}
+	// Basic auth on the token exchange makes GHCR mint a bearer token scoped with
+	// pull access to a private repo; without it the token grants anonymous access only.
+	if hasAuth {
+		req.SetBasicAuth(auth.username, auth.secret)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -229,7 +252,7 @@ func fetchGHCRPullToken(ctx context.Context, client *http.Client, repoPath, toke
 	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("ghcr token request failed: %s", resp.Status)
+		return "", registryStatusError("ghcr token request", resp.Status, resp.StatusCode)
 	}
 
 	var payload struct {
@@ -268,7 +291,7 @@ func fetchGHCRTagPage(ctx context.Context, client *http.Client, endpoint, token 
 	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return ghcrTagPage{}, "", fmt.Errorf("ghcr tags request failed: %s", resp.Status)
+		return ghcrTagPage{}, "", registryStatusError("ghcr tags request", resp.Status, resp.StatusCode)
 	}
 
 	var page ghcrTagPage
@@ -342,7 +365,7 @@ func fetchDockerHubTagPage(ctx context.Context, client *http.Client, endpoint st
 	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return dockerHubTagPage{}, fmt.Errorf("docker hub tags request failed: %s", resp.Status)
+		return dockerHubTagPage{}, registryStatusError("docker hub tags request", resp.Status, resp.StatusCode)
 	}
 
 	var page dockerHubTagPage

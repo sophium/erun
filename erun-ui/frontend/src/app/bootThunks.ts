@@ -3,9 +3,17 @@ import { readError } from './errors';
 import { showTerminalMessage } from './notificationThunks';
 import { openSelection } from './sessionThunks';
 import { setSelected } from './slices/selectionSlice';
-import { setCloudProviders, setTenants, setVersionSuggestions } from './slices/tenantsSlice';
+import {
+  setCloudProviders,
+  setTenants,
+  setVersionSuggestionNotices,
+  setVersionSuggestions,
+} from './slices/tenantsSlice';
 import type { AppThunk } from './store';
-import { normalizeVersionSuggestions } from './versionSuggestions';
+import {
+  normalizeVersionSuggestionNotices,
+  normalizeVersionSuggestions,
+} from './versionSuggestions';
 
 // boot deliberately does not seed the env-init dialog's kubectl context
 // list — that dialog owns and refreshes its own.
@@ -19,6 +27,11 @@ export const boot = (): AppThunk<Promise<void>> => async (dispatch, getState) =>
     dispatch(setCloudProviders(loaded.cloudProviders ?? []));
     dispatch(setSelected(loaded.selected ?? null));
     dispatch(setVersionSuggestions(normalizeVersionSuggestions(loaded.versionSuggestions ?? [])));
+    dispatch(
+      setVersionSuggestionNotices(
+        normalizeVersionSuggestionNotices(loaded.versionSuggestionNotices ?? []),
+      ),
+    );
     if (loaded.message !== undefined && loaded.message !== '') {
       dispatch(showTerminalMessage(loaded.message));
       return;
@@ -58,6 +71,13 @@ export const reloadStateAfterEnvironmentChange =
       dispatch(
         setVersionSuggestions(
           normalizeVersionSuggestions(loaded.versionSuggestions ?? current.versionSuggestions),
+        ),
+      );
+      dispatch(
+        setVersionSuggestionNotices(
+          normalizeVersionSuggestionNotices(
+            loaded.versionSuggestionNotices ?? current.versionSuggestionNotices,
+          ),
         ),
       );
     } catch (error) {

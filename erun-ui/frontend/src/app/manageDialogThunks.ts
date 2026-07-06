@@ -21,13 +21,17 @@ import {
 } from './runtimeResources';
 import { patchManageDialog, setManageDialog } from './slices/manageDialogSlice';
 import { bumpManageDialogVersion } from './slices/requestCountersSlice';
-import { setVersionSuggestions } from './slices/tenantsSlice';
+import { setVersionSuggestionNotices, setVersionSuggestions } from './slices/tenantsSlice';
 import { defaultEnvironmentConfig, defaultManageDialog, type ManageDialogState } from './state';
 import { rememberPastContainerRegistry } from './storage';
 import type { AppThunk } from './store';
 import { relaunchAISessionsForLaunchChange } from './tabRespawnThunks';
 import { requireController } from './thunkExtra';
-import { normalizeDialogValue, normalizeVersionSuggestions } from './versionSuggestions';
+import {
+  normalizeDialogValue,
+  normalizeVersionSuggestionNotices,
+  normalizeVersionSuggestions,
+} from './versionSuggestions';
 
 export const openManageDialog =
   (selection: UISelection): AppThunk =>
@@ -401,7 +405,8 @@ const refreshManageVersionSuggestions =
     const raw = await dispatch(
       environmentApi.endpoints.getVersionSuggestions.initiate(selection, { forceRefetch: true }),
     ).unwrap();
-    const suggestions = normalizeVersionSuggestions(raw);
+    const suggestions = normalizeVersionSuggestions(raw.suggestions);
+    const notices = normalizeVersionSuggestionNotices(raw.notices ?? []);
     if (
       request !== getState().requestCounters.manageDialogVersion ||
       !getState().manageDialog.open
@@ -409,6 +414,7 @@ const refreshManageVersionSuggestions =
       return;
     }
     dispatch(setVersionSuggestions(suggestions));
+    dispatch(setVersionSuggestionNotices(notices));
     const currentVersion = normalizeDialogValue(getState().manageDialog.version);
     if (
       selectDefault ||

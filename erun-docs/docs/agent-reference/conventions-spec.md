@@ -77,7 +77,7 @@ The language skills (`go-service`, `node-service`, `python-service`, `java-servi
 
 | Name | Reservation |
 |---|---|
-| `<tenant>-devops` | The runtime-pod chart's component name. Every env deploys it — from the repo-local chart at `<tenant>-devops/k8s/<tenant>-devops/` when the project carries one, otherwise from the published `erun-devops` chart (see [`erun deploy`](/cli/deploy#where-the-runtime-chart-comes-from)). Bears the runtime image and the env's `erun-devops` / `erun-mcp` / `erun-dind` containers. Application components must not collide with this name. |
+| `<tenant>-devops` | The runtime-pod chart's component name. Every env deploys it — from the repo-local chart at `<tenant>-devops/k8s/<tenant>-devops/` when the project carries one, otherwise from the tenant's own published `charts/<tenant>-devops` chart when it publishes one, else the shared `charts/erun-devops` (see [`erun deploy`](/cli/deploy#where-the-runtime-chart-comes-from)). Bears the runtime image and the env's `erun-devops` / `erun-mcp` / `erun-dind` containers. Application components must not collide with this name. |
 
 ### `Service` DNS implications
 

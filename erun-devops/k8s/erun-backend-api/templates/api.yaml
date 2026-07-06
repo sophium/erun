@@ -1,3 +1,4 @@
+{{- $tenant := default "erun" .Values.tenant -}}
 {{- $apiPort := default 17033 .Values.apiPort -}}
 {{- $api := default dict .Values.api -}}
 {{- $oidcAllowedIssuers := default "" $api.oidcAllowedIssuers -}}
@@ -7,22 +8,22 @@
 {{- $postgresDatabase := default "erun" $postgres.database -}}
 {{- $postgresUser := default "erun" $postgres.user -}}
 {{- $postgresPort := default 5432 $postgres.port -}}
-{{- $postgresPasswordSecretName := default "erun-backend-postgres" $postgres.passwordSecretName -}}
+{{- $postgresPasswordSecretName := default (printf "%s-backend-postgres" $tenant) $postgres.passwordSecretName -}}
 {{- $postgresPasswordSecretKey := default "password" $postgres.passwordSecretKey -}}
-{{- $databaseURL := default (printf "postgres://%s:$(ERUN_POSTGRES_PASSWORD)@erun-postgres:%v/%s?sslmode=disable" $postgresUser $postgresPort $postgresDatabase) $api.databaseURL -}}
+{{- $databaseURL := default (printf "postgres://%s:$(ERUN_POSTGRES_PASSWORD)@%s-postgres:%v/%s?sslmode=disable" $postgresUser $tenant $postgresPort $postgresDatabase) $api.databaseURL -}}
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
 {{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
 {{- $backendAPIImage := default (printf "%s/erun-backend-api:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-backend-api") -}}
 apiVersion: v1
 kind: Service
 metadata:
-  name: erun-api
+  name: {{ $tenant }}-api
   labels:
-    app: erun-api
+    app: {{ $tenant }}-api
 spec:
   type: ClusterIP
   selector:
-    app: erun-api
+    app: {{ $tenant }}-api
   ports:
     - name: api
       port: {{ $apiPort }}
@@ -31,20 +32,20 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: erun-api
+  name: {{ $tenant }}-api
   labels:
-    app: erun-api
+    app: {{ $tenant }}-api
 spec:
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      app: erun-api
+      app: {{ $tenant }}-api
   replicas: 1
   template:
     metadata:
       labels:
-        app: erun-api
+        app: {{ $tenant }}-api
     spec:
       containers:
         - image: {{ $backendAPIImage }}

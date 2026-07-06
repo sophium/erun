@@ -2,7 +2,7 @@ import type {
   UIEnvironmentConfig,
   UIRuntimeResourceStatus,
   UISelection,
-  UIVersionSuggestion,
+  UIVersionSuggestions,
 } from '@/types';
 
 import {
@@ -71,8 +71,8 @@ export const environmentApi = wailsApi.injectEndpoints({
     chooseLocalRepoPath: builder.mutation<string, string>({
       queryFn: wailsQueryFn<string, string>((current) => ChooseLocalRepoPath(current)),
     }),
-    getVersionSuggestions: builder.query<UIVersionSuggestion[], UISelection>({
-      queryFn: wailsQueryFn<UISelection, UIVersionSuggestion[]>((selection) =>
+    getVersionSuggestions: builder.query<UIVersionSuggestions, UISelection>({
+      queryFn: wailsQueryFn<UISelection, UIVersionSuggestions>((selection) =>
         LoadVersionSuggestions(selection),
       ),
       providesTags: ['VersionSuggestions'],

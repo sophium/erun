@@ -9,8 +9,8 @@ open: pure primitive — not deploying (run `erun deploy` first, or pass --deplo
 kubectl --context test-context --namespace team-dev get deployment team-devops -o name
 kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 17000:17000 --address <LOOPBACK>
 mcp: would refuse to bind <LOOPBACK>:17000 — held by PID 88888: /usr/local/bin/some-foreign-process --bind <LOOPBACK>:17000
-kubectl --context test-context --namespace team-dev get deployment erun-api -o name
-kubectl --context test-context --namespace team-dev port-forward service/erun-api 17033:17033 --address <LOOPBACK>
+kubectl --context test-context --namespace team-dev get deployment team-api -o name
+kubectl --context test-context --namespace team-dev port-forward service/team-api 17033:17033 --address <LOOPBACK>
 open: --no-shell selected, emitting setup commands instead of launching shell
 kubectl config use-context test-context
 kubectl config set-context --current --namespace=team-dev

@@ -1,20 +1,21 @@
+{{- $tenant := default "erun" .Values.tenant -}}
 {{- $api := default dict .Values.api -}}
 {{- $postgres := default dict $api.postgres -}}
 {{- $postgresDatabase := default "erun" $postgres.database -}}
 {{- $postgresUser := default "erun" $postgres.user -}}
 {{- $postgresPort := default 5432 $postgres.port -}}
-{{- $postgresPasswordSecretName := default "erun-backend-postgres" $postgres.passwordSecretName -}}
+{{- $postgresPasswordSecretName := default (printf "%s-backend-postgres" $tenant) $postgres.passwordSecretName -}}
 {{- $postgresPasswordSecretKey := default "password" $postgres.passwordSecretKey -}}
-{{- $databaseURL := default (printf "postgres://%s:$(ERUN_POSTGRES_PASSWORD)@erun-postgres:%v/%s?sslmode=disable" $postgresUser $postgresPort $postgresDatabase) $api.databaseURL -}}
+{{- $databaseURL := default (printf "postgres://%s:$(ERUN_POSTGRES_PASSWORD)@%s-postgres:%v/%s?sslmode=disable" $postgresUser $tenant $postgresPort $postgresDatabase) $api.databaseURL -}}
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
 {{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
 {{- $backendDBImage := default (printf "%s/erun-backend-db:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-backend-db") -}}
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: erun-backend-db-migrate
+  name: {{ $tenant }}-backend-db-migrate
   labels:
-    app: erun-backend-db-migrate
+    app: {{ $tenant }}-backend-db-migrate
   annotations:
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-delete-policy": before-hook-creation
@@ -23,7 +24,7 @@ spec:
   template:
     metadata:
       labels:
-        app: erun-backend-db-migrate
+        app: {{ $tenant }}-backend-db-migrate
     spec:
       restartPolicy: Never
       containers:

@@ -19,7 +19,11 @@ func powerDNSUpsertArgs(params DNSRecordUpsertParams) []string {
 	if ctxName := strings.TrimSpace(params.KubernetesContext); ctxName != "" {
 		args = append(args, "--context", ctxName)
 	}
-	args = append(args, "-n", params.PlatformNamespace, "exec", "deploy/erun-powerdns", "--",
+	deployment := strings.TrimSpace(params.PowerDNSDeployment)
+	if deployment == "" {
+		deployment = TenantResourcePrefix("") + "-powerdns"
+	}
+	args = append(args, "-n", params.PlatformNamespace, "exec", "deploy/"+deployment, "--",
 		"pdnsutil", "--config-dir="+powerDNSConfigDir, "replace-rrset",
 		params.Zone, relName, params.Type, strconv.Itoa(params.TTL), params.Value)
 	return args

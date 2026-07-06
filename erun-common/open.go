@@ -627,6 +627,16 @@ func RuntimeReleaseName(tenant string) string {
 	return tenant + "-devops"
 }
 
+// TenantResourcePrefix is the prefix a tenant's component-chart Kubernetes
+// resources carry (<prefix>-postgres, <prefix>-api, <prefix>-powerdns, ...),
+// matching the charts' `{{ .Values.tenant | default "erun" }}` scoping: the
+// tenant name, or "erun" for the canonical product (empty tenant). Code that
+// addresses those resources by name (API port-forward, PowerDNS exec) derives
+// the name through this so it stays in lockstep with the charts.
+func TenantResourcePrefix(tenant string) string {
+	return strings.TrimSuffix(RuntimeReleaseName(tenant), "-devops")
+}
+
 func kubectlDeploymentWaitArgs(req ShellLaunchParams) []string {
 	args := kubectlTargetArgs(req)
 	args = append(args, "wait", "--for=condition=Available", "--timeout", defaultShellLaunchWaitTimeout, "deployment/"+RuntimeReleaseName(req.Tenant))

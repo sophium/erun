@@ -149,10 +149,11 @@ func TestLoadVersionSuggestionsFiltersOutMissingTenantImageTags(t *testing.T) {
 		resolveImageRegistry: missingTenantImageRegistry(t),
 	})
 
-	suggestions, err := app.LoadVersionSuggestions(uiSelection{Tenant: " frs "})
+	result, err := app.LoadVersionSuggestions(uiSelection{Tenant: " frs "})
 	if err != nil {
 		t.Fatalf("LoadVersionSuggestions failed: %v", err)
 	}
+	suggestions := result.Suggestions
 	got := versionValues(suggestions)
 	want := []string{"1.0.11", "1.0.10", "1.0.12-snapshot-20260414165809", "1.0.50", "1.0.49"}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
@@ -292,10 +293,11 @@ func TestLoadVersionSuggestionsDoesNotDuplicateDefaultRuntimeForErunTenant(t *te
 		},
 	})
 
-	suggestions, err := app.LoadVersionSuggestions(uiSelection{Tenant: " erun "})
+	result, err := app.LoadVersionSuggestions(uiSelection{Tenant: " erun "})
 	if err != nil {
 		t.Fatalf("LoadVersionSuggestions failed: %v", err)
 	}
+	suggestions := result.Suggestions
 	got := versionValues(suggestions)
 	want := []string{"1.0.48", "1.0.47", "1.0.50-snapshot-20260426090832"}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
@@ -331,10 +333,11 @@ func TestLoadVersionSuggestionsFallsBackToDefaultRuntimeTagsWhenTenantImageMissi
 		},
 	})
 
-	suggestions, err := app.LoadVersionSuggestions(uiSelection{Tenant: " test "})
+	result, err := app.LoadVersionSuggestions(uiSelection{Tenant: " test "})
 	if err != nil {
 		t.Fatalf("LoadVersionSuggestions failed: %v", err)
 	}
+	suggestions := result.Suggestions
 	got := versionValues(suggestions)
 	want := []string{"1.0.50", "1.0.49", "1.0.51-snapshot-20260414165809"}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
@@ -369,10 +372,11 @@ func TestLoadVersionSuggestionsForInitUsesAvailableRuntimeImageTags(t *testing.T
 		},
 	})
 
-	suggestions, err := app.LoadVersionSuggestions(uiSelection{Tenant: " test "})
+	result, err := app.LoadVersionSuggestions(uiSelection{Tenant: " test "})
 	if err != nil {
 		t.Fatalf("LoadVersionSuggestions failed: %v", err)
 	}
+	suggestions := result.Suggestions
 	got := versionValues(suggestions)
 	want := []string{"1.0.48", "1.0.50", "1.0.49", "1.0.51-snapshot-20260414165809"}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
@@ -380,6 +384,60 @@ func TestLoadVersionSuggestionsForInitUsesAvailableRuntimeImageTags(t *testing.T
 	}
 	if suggestions[0].Image != eruncommon.DefaultContainerRegistry+"/test-devops" || suggestions[1].Image != eruncommon.DefaultContainerRegistry+"/"+eruncommon.DefaultRuntimeImageName {
 		t.Fatalf("unexpected suggestion metadata: %+v", suggestions)
+	}
+}
+
+func TestLoadVersionSuggestionsSurfacesAuthNoticeForPrivateImage(t *testing.T) {
+	app := NewApp(erunUIDeps{
+		store:            stubUIStore{},
+		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
+			if repository == "frs-devops" {
+				return eruncommon.RuntimeRegistryVersions{}, fmt.Errorf("ghcr tags request failed: 401 Unauthorized: %w", eruncommon.ErrRegistryAuthRequired)
+			}
+			return eruncommon.RuntimeRegistryVersions{
+				Image:        namespace + "/" + repository,
+				Tags:         []string{"1.0.50", "1.0.49"},
+				LatestStable: "1.0.50",
+			}, nil
+		},
+	})
+
+	result, err := app.LoadVersionSuggestions(uiSelection{Tenant: "frs"})
+	if err != nil {
+		t.Fatalf("LoadVersionSuggestions failed: %v", err)
+	}
+	// The private tenant image contributes an auth notice; the canonical ERun
+	// image still lists its versions.
+	if got := versionValues(result.Suggestions); strings.Join(got, "\n") != strings.Join([]string{"1.0.50", "1.0.49"}, "\n") {
+		t.Fatalf("unexpected suggestions: %+v", result.Suggestions)
+	}
+	if len(result.Notices) != 1 {
+		t.Fatalf("expected one notice, got %+v", result.Notices)
+	}
+	if notice := result.Notices[0]; notice.Kind != "auth" || notice.Image != eruncommon.DefaultContainerRegistry+"/frs-devops" {
+		t.Fatalf("unexpected notice: %+v", notice)
+	}
+}
+
+func TestLoadVersionSuggestionsMarksUnreachableRegistry(t *testing.T) {
+	app := NewApp(erunUIDeps{
+		store:            stubUIStore{},
+		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
+			if repository == "frs-devops" {
+				return eruncommon.RuntimeRegistryVersions{}, fmt.Errorf("dial tcp: connection refused")
+			}
+			return eruncommon.RuntimeRegistryVersions{Image: namespace + "/" + repository, Tags: []string{"1.0.50"}, LatestStable: "1.0.50"}, nil
+		},
+	})
+
+	result, err := app.LoadVersionSuggestions(uiSelection{Tenant: "frs"})
+	if err != nil {
+		t.Fatalf("LoadVersionSuggestions failed: %v", err)
+	}
+	if len(result.Notices) != 1 || result.Notices[0].Kind != "unreachable" {
+		t.Fatalf("expected one unreachable notice, got %+v", result.Notices)
 	}
 }
 
@@ -2014,13 +2072,14 @@ func TestLoadDeployComponentsLocalAgentShowsPublishedVersionView(t *testing.T) {
 			},
 		},
 	}
-	// All five component charts are published at 1.0.0; none at 1.0.106.
+	// All five component charts are published at 1.0.0; none at 1.0.106. The frs
+	// tenant publishes its own charts (frs-backend-*), not the canonical erun set.
 	chartTags := map[string][]string{
-		"charts/erun-backend-postgres": {"1.0.0"},
-		"charts/erun-backend-db":       {"1.0.0"},
-		"charts/erun-backend-api":      {"1.0.0"},
-		"charts/erun-powerdns":         {"1.0.0"},
-		"charts/erun-docs":             {"1.0.0"},
+		"charts/frs-backend-postgres": {"1.0.0"},
+		"charts/frs-backend-db":       {"1.0.0"},
+		"charts/frs-backend-api":      {"1.0.0"},
+		"charts/frs-powerdns":         {"1.0.0"},
+		"charts/frs-docs":             {"1.0.0"},
 	}
 	app := NewApp(erunUIDeps{
 		store: store,
@@ -2047,13 +2106,13 @@ func TestLoadDeployComponentsLocalAgentShowsPublishedVersionView(t *testing.T) {
 		t.Fatalf("LoadDeployComponents(1.0.0) failed: %v", err)
 	}
 	wantAt100 := []string{
-		"erun-backend-postgres", "erun-backend-db", "erun-backend-api",
-		"erun-powerdns", "erun-docs", "frs-devops",
+		"frs-devops", "frs-backend-postgres", "frs-backend-db",
+		"frs-backend-api", "frs-powerdns", "frs-docs",
 	}
 	if got := names(at100); !reflect.DeepEqual(got, wantAt100) {
-		t.Fatalf("components at 1.0.0 = %v, want %v (published-version view, not local charts)", got, wantAt100)
+		t.Fatalf("components at 1.0.0 = %v, want %v (published-version view, runtime first)", got, wantAt100)
 	}
-	runtime := at100[len(at100)-1]
+	runtime := at100[0]
 	if !runtime.Runtime || !runtime.Selected || runtime.Source != "published-chart" {
 		t.Fatalf("runtime item = %+v, want {frs-devops runtime selected published-chart}", runtime)
 	}
@@ -2090,10 +2149,11 @@ func TestLoadDeployComponentsVersionAwareFiltersUnavailableCharts(t *testing.T) 
 		},
 	}
 	// charts/<component> tags per registry repo: postgres + api are published at
-	// 1.0.112 only; db, powerdns, docs are published nowhere in this fixture.
+	// 1.0.112 only; db, powerdns, docs are published nowhere in this fixture. The
+	// frs tenant publishes its own charts (frs-backend-*).
 	chartTags := map[string][]string{
-		"charts/erun-backend-postgres": {"1.0.112"},
-		"charts/erun-backend-api":      {"1.0.112"},
+		"charts/frs-backend-postgres": {"1.0.112"},
+		"charts/frs-backend-api":      {"1.0.112"},
 	}
 	app := NewApp(erunUIDeps{
 		store: store,
@@ -2119,8 +2179,8 @@ func TestLoadDeployComponentsVersionAwareFiltersUnavailableCharts(t *testing.T) 
 	if err != nil {
 		t.Fatalf("LoadDeployComponents(1.0.112) failed: %v", err)
 	}
-	if got, want := names(at112), []string{"erun-backend-postgres", "erun-backend-api", "frs-devops"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("components at 1.0.112 = %v, want %v (unpublished db/powerdns/docs filtered out)", got, want)
+	if got, want := names(at112), []string{"frs-devops", "frs-backend-postgres", "frs-backend-api"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("components at 1.0.112 = %v, want %v (runtime first; unpublished db/powerdns/docs filtered out)", got, want)
 	}
 
 	// With no version-to-deploy the list uses the env's current runtime version
