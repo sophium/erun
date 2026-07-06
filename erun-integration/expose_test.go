@@ -72,6 +72,25 @@ func TestExpose(t *testing.T) {
 		golden.Equal(t, "expose/requires_platform_env", normalize.Apply(result.Combined))
 	})
 
+	t.Run("real_run_via_stubs", func(t *testing.T) {
+		// Drive the live expose path (the block RunExposeService reaches only after
+		// the dry-run short-circuit: RequireKubernetesContext, the pdnsutil
+		// replace-rrset exec, and the Host-routing Ingress apply) via a kubectl stub
+		// so the real-run execution branch gets covered, not just the dry-run trace.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectK8sConfig(t, setup, "platform:\n  basedomain: erunpaas.com\n  env: frs-prod\n  authoritativeip: 203.0.113.10\n")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		result := erun.Run(t, []string{"expose", "team", "dev", "api", "--ip", "203.0.113.10"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "expose/real_run_via_stubs", normalize.Apply(result.Combined))
+	})
+
 	t.Run("requires_ip", func(t *testing.T) {
 		// The per-env wildcard record needs a target IP (the env's ingress IP);
 		// omitting --ip fails clearly instead of writing an empty record.
