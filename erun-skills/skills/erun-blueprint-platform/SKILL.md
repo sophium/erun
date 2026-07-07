@@ -290,16 +290,20 @@ to the repo's `.gitignore` so it doesn't land as an untracked file:
 Commit the tgz (vendor it) only for an air-gapped install where the OCI registry
 is unreachable at deploy time.
 
-**Forward `tenant`/`environment` into each subchart.** `erun deploy` passes
-`tenant`/`environment` (and the runtime `--set`s) at the **top level**, which
-reaches a chart deployed directly but **not** a wrapped subchart — a subchart
-reads them in its own scope. Components that `{{ required }}` them
-(`erun-backend-api`, `erun-docs`) fail at helm time with `tenant is required`
-unless the umbrella forwards them nested, as above. Components that don't require
-them (`erun-backend-postgres`, `erun-backend-db`, `erun-powerdns`) can use `{}` —
-but forward them anyway if the component reads them for labels/config. A
-comment-only file is still valid for the latter; the file just has to exist so
-`helm -f` resolves.
+**Forward `tenant`/`environment` into each subchart.** helm does not pass
+top-level values into a wrapped subchart, so a subchart that `{{ required }}`s
+them (`erun-backend-api`, `erun-docs`) reads them in its **own** scope. Author
+them nested under the subchart key in each `values.<env>.yaml`, as above — and
+`erun deploy` satisfies the subchart on either path: a **worktree** deploy `-f`s
+that file directly, and a **by-reference** deploy (a runtime env with no
+worktree) both re-scopes deploy's threaded `--set`s under the subchart key *and*
+`helm pull`s the published chart to `-f` this same bundled file. So a wrapped
+subchart no longer fails with `tenant is required` by reference — but keep the
+nested values: the worktree path depends on them, and the by-reference path
+applies them. Components that don't require them (`erun-backend-postgres`,
+`erun-backend-db`, `erun-powerdns`) can use `{}` — but forward them anyway if the
+component reads them for labels/config. A comment-only file is still valid for
+the latter; the file just has to exist so `helm -f` resolves.
 
 **Deploy only env-appropriate components.** Selection is opt-in and per env, so a
 component that can't run in an env is simply left unselected — never forced. Use

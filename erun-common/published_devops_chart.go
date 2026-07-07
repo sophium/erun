@@ -29,13 +29,40 @@ func publishedDevopsChartReference(containerRegistry string) string {
 // repo (authenticated like every registry read); any probe failure or miss
 // falls back, so an offline resolve and a tenant that rides the shared chart
 // both behave exactly as before. The erun tenant's release name is erun-devops,
-// so no probe runs for it and its resolution is unchanged.
-func resolvePublishedRuntimeChartReference(ctx context.Context, containerRegistry, tenant, version string) string {
+// so no probe runs for it and its resolution is unchanged. It returns the
+// resolved chart name alongside the reference so the caller can decide whether
+// the chart is a wrapped umbrella that needs subchart re-scoping.
+func resolvePublishedRuntimeChartReference(ctx context.Context, containerRegistry, tenant, version string) (reference, chartName string) {
 	tenantChart := RuntimeReleaseName(tenant)
 	if tenantChart != DevopsComponentName && publishedChartHasVersion(ctx, containerRegistry, tenantChart, version) {
-		return PublishedDevopsChartOCIRepo(containerRegistry) + "/" + tenantChart
+		return PublishedDevopsChartOCIRepo(containerRegistry) + "/" + tenantChart, tenantChart
 	}
-	return publishedDevopsChartReference(containerRegistry)
+	return publishedDevopsChartReference(containerRegistry), DevopsComponentName
+}
+
+// publishedUmbrellaSubchartKey returns the value-scope key of the canonical
+// erun-<base> chart that a tenant's published umbrella wraps as a subchart, or
+// "" when the chart is a canonical erun-<base> chart installed directly (no
+// wrapper). A tenant that ships its own artifacts publishes <tenant>-<base>
+// umbrellas — the runtime <tenant>-devops and each <tenant>-<component> — that
+// reference the canonical erun-<base> chart as a subchart (per erun-build-env /
+// erun-blueprint-platform: the dependency is named erun-<base>, no alias). helm
+// does not pass a by-reference deploy's top-level --set values into subchart
+// scope, so deploy nests them under this key (command -> prefixHelmSetKeys) —
+// the by-reference analogue of the local runtime umbrella's
+// helmChartRuntimeSubchartKey. The erun product tenant's charts ARE the
+// canonical charts, installed directly, so they resolve to "".
+func publishedUmbrellaSubchartKey(tenant, chartName string) string {
+	chartName = strings.TrimSpace(chartName)
+	base, ok := strings.CutPrefix(chartName, TenantResourcePrefix(tenant)+"-")
+	if !ok {
+		return ""
+	}
+	canonical := canonicalChartPrefix + "-" + base
+	if chartName == canonical {
+		return ""
+	}
+	return canonical
 }
 
 // ensureTenantChartsPublished verifies, before any spec is built, that a
@@ -149,7 +176,7 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, 
 		return DeploySpec{}, fmt.Errorf("runtime version is required to deploy the published %s chart: pass --version or persist runtimeversion in the env config", DevopsComponentName)
 	}
 
-	chartReference := resolvePublishedRuntimeChartReference(context.Background(), registry, target.Tenant, version)
+	chartReference, chartName := resolvePublishedRuntimeChartReference(context.Background(), registry, target.Tenant, version)
 	ctx.Trace("deploy: " + reason + "; using published chart " + chartReference + " version " + version)
 
 	deployContext := KubernetesDeployContext{
@@ -161,6 +188,11 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, 
 	if err != nil {
 		return DeploySpec{}, err
 	}
+	// A tenant's own <tenant>-devops chart wraps the canonical erun-devops as a
+	// subchart; helm won't pass this by-reference deploy's top-level --sets into
+	// subchart scope, so re-scope them under erun-devops. Empty (no re-scope) when
+	// the tenant rides the shared erun-devops chart.
+	deployInput.SubchartKey = publishedUmbrellaSubchartKey(target.Tenant, chartName)
 	deployInput.ReleaseName = RuntimeReleaseName(target.Tenant)
 	deployInput.UseHostCredentials = target.EnvConfig.HasAWSCloudAlias()
 	deployInput.ContainerRegistry = registry
@@ -185,12 +217,14 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, 
 }
 
 // resolvePublishedComponentDeploySpec builds a deploy spec that installs a
-// published platform component chart (erun-backend-*, erun-powerdns, erun-docs)
-// by reference — the sourceless analogue of resolvePublishedDevopsDeploySpec.
-// The chart installs directly (top-level, not wrapped as a subchart), so erun
-// deploy's top-level --set tenant/environment reach it: no local umbrella and
-// no repo source are needed. The release is named <tenant>-<component> so it is
-// tenant-clear and matches the umbrella (patch-path) naming.
+// published platform component chart by reference — the sourceless analogue of
+// resolvePublishedDevopsDeploySpec. A canonical erun-<component> chart installs
+// directly (top-level), so erun deploy's top-level --set tenant/environment
+// reach it. A tenant's own <tenant>-<component> chart is an umbrella wrapping
+// the canonical erun-<component> as a subchart, which those top-level --sets do
+// not reach; publishedUmbrellaSubchartKey resolves the erun-<component> scope so
+// command() re-scopes them and the subchart's required tenant/environment are
+// satisfied. The release is named <tenant>-<component> so it is tenant-clear.
 func resolvePublishedComponentDeploySpec(ctx Context, target OpenResult, componentName, versionOverride string) (DeploySpec, error) {
 	registry := publishedDevopsChartRegistry(target)
 	version := strings.TrimSpace(versionOverride)
@@ -214,6 +248,7 @@ func resolvePublishedComponentDeploySpec(ctx Context, target OpenResult, compone
 	if err != nil {
 		return DeploySpec{}, err
 	}
+	deployInput.SubchartKey = publishedUmbrellaSubchartKey(target.Tenant, componentName)
 	deployInput.ReleaseName = publishedComponentReleaseName(target.Tenant, componentName)
 	deployInput.ContainerRegistry = registry
 	deployInput.UseHostCredentials = target.EnvConfig.HasAWSCloudAlias()

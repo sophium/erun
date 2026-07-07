@@ -195,8 +195,11 @@ erun-devops:
 name), `helm dependency build`s it, and **re-scopes every runtime value it sets
 — tenant, ports, cloud context, MCP auth, and the `imageOverrides.erun-devops`
 image from Step 5 — under the `erun-devops.` subchart key**, so the wrapped
-runtime is wired exactly as the published chart would be. Track `Chart.lock`
-(committed) and gitignore `charts/*.tgz`, as the platform umbrellas do.
+runtime is wired exactly as the published chart would be. A **runtime env** has
+no worktree, so `erun deploy` installs this chart **by reference** — it re-scopes
+the same way and `helm pull`s the published chart to `-f` this `values.<env>.yaml`,
+so your pod-shape (the `erun-devops.extra*` above) lands there too. Track
+`Chart.lock` (committed) and gitignore `charts/*.tgz`, as the platform umbrellas do.
 
 ## Maintenance, repair & upgrade
 
