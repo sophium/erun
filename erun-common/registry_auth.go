@@ -38,21 +38,48 @@ type dockerAuthEntry struct {
 
 // resolveGHCRBasicAuth resolves a pull credential for ghcr.io, preferring the
 // credential docker itself pulls with (so "if docker can pull it, the picker
-// lists it") and falling back to a gh-issued token. owner scopes the gh token
-// to the account that owns the namespace.
+// lists it"), then a gh-issued token, then an explicit GH_TOKEN/GITHUB_TOKEN.
+// The env-var path is last but load-bearing: it needs no credential-helper or gh
+// subprocess, so it stays reachable when a desktop app's subprocess or keychain
+// access is intermittently blocked (endpoint security, a locked keychain) — the
+// failure that otherwise strands the picker on anonymous access. owner scopes the
+// credential to the account that owns the namespace.
 func resolveGHCRBasicAuth(owner string) (registryBasicAuth, bool) {
 	if auth, ok := resolveRegistryBasicAuth("ghcr.io"); ok {
 		return auth, true
 	}
-	token, ok := resolveGHCRTokenViaGH(owner)
-	if !ok {
-		return registryBasicAuth{}, false
+	if token, ok := resolveGHCRTokenViaGH(owner); ok {
+		return ghcrTokenBasicAuth(owner, token), true
 	}
+	if token, ok := ghcrTokenFromEnv(); ok {
+		return ghcrTokenBasicAuth(owner, token), true
+	}
+	return registryBasicAuth{}, false
+}
+
+// ghcrTokenEnvVars are the token env vars honored for ghcr.io, in gh's own
+// precedence order, so an operator's existing GitHub token authenticates the
+// picker with no keychain or subprocess dependency.
+var ghcrTokenEnvVars = []string{"GH_TOKEN", "GITHUB_TOKEN"}
+
+func ghcrTokenFromEnv() (string, bool) {
+	for _, name := range ghcrTokenEnvVars {
+		if token := strings.TrimSpace(os.Getenv(name)); token != "" {
+			return token, true
+		}
+	}
+	return "", false
+}
+
+// ghcrTokenBasicAuth pairs a bearer token with the namespace owner as the basic-
+// auth username; GHCR ignores the username on a token exchange but requires one,
+// so an empty owner uses the conventional token placeholder.
+func ghcrTokenBasicAuth(owner, token string) registryBasicAuth {
 	user := strings.TrimSpace(owner)
 	if user == "" {
 		user = "x-access-token"
 	}
-	return registryBasicAuth{username: user, secret: token}, true
+	return registryBasicAuth{username: user, secret: token}
 }
 
 // resolveRegistryBasicAuth looks up a host's credential the way docker does: a
