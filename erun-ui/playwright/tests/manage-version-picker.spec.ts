@@ -133,4 +133,85 @@ test.describe('manage dialog — version picker (#756)', () => {
     await expect(app.manageDialog.deployComponentsHint()).toHaveCount(0);
     await expect(app.manageDialog.runtimeVersionInput()).toHaveValue('1.0.0');
   });
+
+  test('an environments-changed reload does not clobber the open picker (#767)', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    // Regression: version suggestions used to live in the shared tenants slice, which
+    // every environments-changed delta (fired constantly while a tenant builds)
+    // rewrote from LoadState's suggestions for the sidebar-selected env — clobbering
+    // an open picker down to the upstream fallback so a tenant env showed no tenant
+    // versions or charts. The dialog now owns its suggestions and the delta no longer
+    // touches them. Here the dialog resolves the tenant's pw-devops 1.0.16; the
+    // reload returns a distinct 9.9.9 that must NOT reach the picker.
+    await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+      const body = JSON.parse(request.postData() ?? '{}') as { method: string };
+      if (body.method === 'LoadVersionSuggestions') {
+        return route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              suggestions: [
+                {
+                  label: 'Latest stable',
+                  version: '1.0.16',
+                  source: 'pw',
+                  image: 'ghcr.io/sophium/pw-devops',
+                },
+              ],
+              notices: [],
+            },
+          }),
+        });
+      }
+      if (body.method === 'LoadState') {
+        // The delta reload recomputes suggestions for the selected env; return a
+        // distinct value the pre-fix code would have pushed into the shared slice.
+        const original = await route.fetch();
+        const payload = (await original.json()) as {
+          data?: { versionSuggestions?: unknown; versionSuggestionNotices?: unknown };
+        };
+        if (payload.data) {
+          payload.data.versionSuggestions = [
+            {
+              label: 'Latest stable',
+              version: '9.9.9',
+              source: 'ERun',
+              image: 'ghcr.io/sophium/erun-devops',
+            },
+          ];
+          payload.data.versionSuggestionNotices = [];
+        }
+        return route.fulfill({ contentType: 'application/json', body: JSON.stringify(payload) });
+      }
+      await route.continue();
+    });
+
+    await app.sidebar.openManageDialogViaKeyboard(seededEnv.tenant, seededEnv.environment);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.selectTab('Runtime');
+    await app.manageDialog.openVersionPicker();
+    await expect(page.getByRole('option', { name: /1\.0\.16/ })).toBeVisible();
+
+    // Fire the exact event a build/deploy fires, and wait for the reload it triggers
+    // to actually complete (a real signal, not a wall-clock guess) before asserting.
+    const reloadDone = page.waitForResponse(
+      (resp) =>
+        resp.url().includes('__erun_invoke') &&
+        (JSON.parse(resp.request().postData() ?? '{}') as { method?: string }).method ===
+          'LoadState',
+    );
+    await page.evaluate(() => {
+      (
+        window as unknown as { runtime: { EventsEmit: (name: string, ...a: unknown[]) => void } }
+      ).runtime.EventsEmit('environments-changed');
+    });
+    await reloadDone;
+
+    // The tenant version survives; the reload's 9.9.9 never reaches this picker.
+    await expect(page.getByRole('option', { name: /1\.0\.16/ })).toBeVisible();
+    await expect(page.getByRole('option', { name: /9\.9\.9/ })).toHaveCount(0);
+  });
 });

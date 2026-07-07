@@ -14,6 +14,7 @@ import type {
   UITenantConfig,
   UITenantDashboard,
   UIVersionSuggestion,
+  UIVersionSuggestionNotice,
 } from '@/types';
 
 export const MIN_SIDEBAR_WIDTH = 248;
@@ -95,6 +96,12 @@ export interface ManageDialogState {
   choicesOpen: boolean;
   error: string;
   pendingRedeploy: boolean;
+  // Version suggestions are dialog-owned, not read from the shared tenants slice:
+  // that slice is (re)written by boot and every environment-change delta for the
+  // sidebar-selected env, which would clobber this dialog's env-specific picker
+  // (e.g. showing only the upstream fallback while a tenant build fires deltas).
+  versionSuggestions: UIVersionSuggestion[];
+  versionSuggestionNotices: UIVersionSuggestionNotice[];
   deployComponents: UIDeployableComponent[];
   deployComponentSelection: string[];
   deployComponentsLoading: boolean;
@@ -288,6 +295,8 @@ export const defaultManageDialog = (): ManageDialogState => ({
   choicesOpen: false,
   error: '',
   pendingRedeploy: false,
+  versionSuggestions: [],
+  versionSuggestionNotices: [],
   deployComponents: [],
   deployComponentSelection: [],
   deployComponentsLoading: false,
