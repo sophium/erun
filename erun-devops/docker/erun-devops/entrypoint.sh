@@ -427,18 +427,9 @@ codex_tmp="${codex_instructions}.tmp.$$"
     printf '<!-- erun-agents-md-hook -->\n# Agent Instructions\n\nIMPORTANT: Before doing anything else, read `AGENTS.md` in the project root. This is mandatory — do not skip it.\nAlso read `AGENTS.md` in any subdirectory relevant to the task at hand,\nas subdirectories may contain more specific guidance.\n\nWhen the project'\''s structure is explicit — AGENTS.md, documented module boundaries, a named file or function — read the source directly instead of spawning sub-agent searches to rediscover it. Answer the operator'\''s questions before acting; a question is not authorization to begin the work it hints at.\n<!-- /erun-agents-md-hook -->\n'
 } > "${codex_tmp}" && mv "${codex_tmp}" "${codex_instructions}"
 
-if [ -d /etc/erun/skills ]; then
-    for src_dir in /etc/erun/skills/*/; do
-        [ -d "${src_dir}" ] || continue
-        skill_name=$(basename "${src_dir}")
-        dst_dir="${codex_dir}/skills/${skill_name}"
-        if [ ! -e "${dst_dir}/SKILL.md" ]; then
-            mkdir -p "${dst_dir}"
-            cp -R "${src_dir}." "${dst_dir}/"
-            find "${dst_dir}" -type f -exec chmod 0644 {} +
-        fi
-    done
-fi
+# Install baked skills, refreshing an unmodified one when the image's copy
+# changed; in-pod edits are preserved (see /usr/local/bin/erun-install-skills).
+erun-install-skills /etc/erun/skills "${codex_dir}/skills"
 
 touch "${codex_config}"
 
@@ -548,18 +539,9 @@ claude_md_tmp="${claude_md}.tmp.$$"
     printf '<!-- erun-agents-md-hook -->\n# Agent Instructions\n\nIMPORTANT: Before doing anything else, read `AGENTS.md` in the project root. This is mandatory — do not skip it.\nAlso read `AGENTS.md` in any subdirectory relevant to the task at hand,\nas subdirectories may contain more specific guidance.\n\nWhen the project'\''s structure is explicit — AGENTS.md, documented module boundaries, a named file or function — read the source directly instead of spawning sub-agent searches to rediscover it. Answer the operator'\''s questions before acting; a question is not authorization to begin the work it hints at.\n<!-- /erun-agents-md-hook -->\n'
 } > "${claude_md_tmp}" && mv "${claude_md_tmp}" "${claude_md}"
 
-if [ -d /etc/erun/skills ]; then
-    for src_dir in /etc/erun/skills/*/; do
-        [ -d "${src_dir}" ] || continue
-        skill_name=$(basename "${src_dir}")
-        dst_dir="${claude_dir}/skills/${skill_name}"
-        if [ ! -e "${dst_dir}/SKILL.md" ]; then
-            mkdir -p "${dst_dir}"
-            cp -R "${src_dir}." "${dst_dir}/"
-            find "${dst_dir}" -type f -exec chmod 0644 {} +
-        fi
-    done
-fi
+# Install baked skills, refreshing an unmodified one when the image's copy
+# changed; in-pod edits are preserved (see /usr/local/bin/erun-install-skills).
+erun-install-skills /etc/erun/skills "${claude_dir}/skills"
 
 CLAUDE_SETTINGS_PATH="${claude_settings}" \
 CLAUDE_STATE_PATH="${claude_state}" \

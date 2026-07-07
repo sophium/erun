@@ -194,6 +194,7 @@ COPY --from=builder --chmod=0755 /out/erun /usr/local/bin/erun
 COPY --from=builder --chmod=0755 /out/emcp /usr/local/bin/emcp
 COPY --from=builder --chmod=0755 /out/golangci-lint /usr/local/bin/golangci-lint
 COPY --chmod=0755 erun-devops/docker/erun-devops/entrypoint.sh /usr/local/bin/erun-devops-entrypoint
+COPY --chmod=0755 erun-devops/docker/erun-devops/skills-install.sh /usr/local/bin/erun-install-skills
 COPY --chmod=0755 erun-devops/docker/erun-devops/codex-wrapper.sh /usr/local/bin/codex
 COPY --chmod=0755 erun-devops/docker/erun-devops/claude-wrapper.sh /usr/local/bin/claude
 COPY --chmod=0644 erun-devops/docker/erun-devops/bash_prompt.sh /etc/erun/bash_prompt.sh
