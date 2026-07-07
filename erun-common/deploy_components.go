@@ -22,6 +22,12 @@ var deployComponentBaseOrder = []string{
 	"docs",
 }
 
+// canonicalChartPrefix is the registry prefix of erun's own published charts
+// (erun-devops, erun-backend-api, ...). A tenant's <tenant>-<base> umbrella
+// wraps the same-base canonical chart erun-<base>, so this is also the subchart
+// value-scope prefix a by-reference umbrella deploy re-scopes under.
+const canonicalChartPrefix = "erun"
+
 // componentChartPrefix is the registry prefix a tenant's component charts carry,
 // matching the runtime release base: erun for the canonical product, <tenant>
 // for a tenant that publishes its own charts (e.g. frs). Derived from

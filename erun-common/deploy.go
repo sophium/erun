@@ -96,17 +96,18 @@ type KubernetesDeployContext struct {
 }
 
 type HelmDeployParams struct {
-	ReleaseName        string
-	ChartPath          string
-	ValuesFilePath     string
-	RuntimeSubchartKey string
-	Tenant             string
-	Environment        string
-	Namespace          string
-	KubernetesContext  string
-	WorktreeStorage    string
-	WorktreeRepoName   string
-	WorktreeHostPath   string
+	ReleaseName          string
+	ChartPath            string
+	ValuesFilePath       string
+	PulledValuesFilePath string
+	SubchartKey          string
+	Tenant               string
+	Environment          string
+	Namespace            string
+	KubernetesContext    string
+	WorktreeStorage      string
+	WorktreeRepoName     string
+	WorktreeHostPath     string
 	// RepoURL / RepoRef drive the runtime pod's clone-at-boot of a mutable
 	// source worktree for a runtime env that opted into MountSource. RepoRef is
 	// the release tag (v<version>) the checkout starts from. Both empty for
@@ -142,20 +143,30 @@ type HelmDeploySpec struct {
 	ReleaseName    string
 	ChartPath      string
 	ValuesFilePath string
-	// RuntimeSubchartKey is set when the runtime chart is a repo-local umbrella
-	// wrapping the published erun-devops chart as a subchart. helm does not pass
+	// PulledValuesFilePath is the local path to a by-reference umbrella's bundled
+	// values.<env>.yaml, extracted from the published chart by a deploy-time
+	// `helm pull --untar`. helm applies only a chart's default values.yaml, so a
+	// tenant umbrella's per-env subchart values (pod-shape and overrides authored
+	// under the subchart key) never reach a by-reference deploy otherwise. It is
+	// -f'd before ValuesFilePath so an operator's config-dir overlay still wins.
+	// Empty for local charts (their values.<env>.yaml is ValuesFilePath) and for a
+	// canonical chart installed directly. Set by RunHelmDeploy, not at resolve.
+	PulledValuesFilePath string
+	// SubchartKey is set when the chart is an umbrella wrapping a canonical
+	// erun-<base> chart as a subchart — the repo-local runtime umbrella (the
+	// erun-devops dependency's alias/name) or a tenant's published <tenant>-<base>
+	// umbrella deployed by reference (the wrapped erun-<base>). helm does not pass
 	// top-level --set values into subchart scope, so command() prefixes every
-	// runtime --set key with this key (the erun-devops dependency's alias/name).
-	// Empty for the published chart, a forked top-level runtime chart, and
-	// component charts — those keep byte-identical top-level --sets.
-	RuntimeSubchartKey string
-	Tenant             string
-	Environment        string
-	Namespace          string
-	KubernetesContext  string
-	WorktreeStorage    string
-	WorktreeRepoName   string
-	WorktreeHostPath   string
+	// --set key with this key. Empty for a canonical chart installed directly and
+	// a forked top-level chart — those keep byte-identical top-level --sets.
+	SubchartKey       string
+	Tenant            string
+	Environment       string
+	Namespace         string
+	KubernetesContext string
+	WorktreeStorage   string
+	WorktreeRepoName  string
+	WorktreeHostPath  string
 	// RepoURL / RepoRef mirror the HelmDeployParams fields of the same name; see
 	// their doc comment there. They surface as chart repoUrl/repoRef --sets only
 	// for a mount-source runtime deploy.
@@ -534,6 +545,60 @@ func runChartDependencyBuild(ctx Context, deployInput HelmDeploySpec, build *com
 	return nil
 }
 
+// publishedValuesPull is a planned deploy-time `helm pull --untar` of a
+// by-reference umbrella, plus the temp dir it unpacks into (removed after the
+// rollout).
+type publishedValuesPull struct {
+	command commandSpec
+	dest    string
+}
+
+// planPublishedValuesPull plans the pull of a by-reference umbrella's bundled
+// values.<env>.yaml and records the local path on deployInput so command() -f's
+// it. A tenant's published <tenant>-<base> umbrella ships its per-env subchart
+// values (pod-shape, overrides authored under the subchart key) inside the chart,
+// but helm applies only the default values.yaml — so those never reach a
+// by-reference deploy. This unpacks the published chart to a temp dir and points
+// -f at the bundled file, the by-reference analogue of a worktree deploy's local
+// values.<env>.yaml. Returns nil for a canonical chart installed directly (no
+// wrapper, no bundled per-env values) and every local chart (which already -f
+// their worktree values.<env>.yaml). The dest path is deterministic so a deduped
+// or repeated deploy traces byte-identically.
+func planPublishedValuesPull(ctx Context, deployInput *HelmDeploySpec) *publishedValuesPull {
+	ref := strings.TrimSpace(deployInput.ChartPath)
+	if !isOCIChartReference(ref) || strings.TrimSpace(deployInput.SubchartKey) == "" {
+		return nil
+	}
+	chartName := ref[strings.LastIndex(ref, "/")+1:]
+	dest := filepath.Join(os.TempDir(), "erun-deploy-values-"+chartName)
+	envSlug := strings.ToLower(strings.TrimSpace(deployInput.Environment))
+	deployInput.PulledValuesFilePath = filepath.Join(dest, chartName, "values."+envSlug+".yaml")
+	pull := commandSpec{Name: "helm", Args: []string{"pull", ref, "--version", deployInput.Version, "--untar", "--untardir", dest}}
+	ctx.TraceCommand(pull.Dir, pull.Name, pull.Args...)
+	return &publishedValuesPull{command: pull, dest: dest}
+}
+
+// runPublishedValuesPull executes the planned chart-values pull and returns a
+// cleanup that removes the temp dir. The dest is cleared first so a stale
+// extraction from a prior deploy never masks the current version's values.
+func runPublishedValuesPull(ctx Context, pull *publishedValuesPull, target string) (func(), error) {
+	if pull == nil {
+		return func() {}, nil
+	}
+	cleanup := func() { _ = os.RemoveAll(pull.dest) }
+	if err := os.RemoveAll(pull.dest); err != nil {
+		return cleanup, fmt.Errorf("prepare chart-values dir: %w", err)
+	}
+	if err := os.MkdirAll(pull.dest, 0o755); err != nil {
+		return cleanup, fmt.Errorf("prepare chart-values dir: %w", err)
+	}
+	ctx.Info("==> Fetching " + target + " chart values")
+	if err := runHelmCommand(ctx, pull.command); err != nil {
+		return cleanup, fmt.Errorf("helm pull chart values: %w", err)
+	}
+	return cleanup, nil
+}
+
 func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDeployerFunc) error {
 	if deploy == nil {
 		return fmt.Errorf("helm deployer is required")
@@ -553,6 +618,10 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 	if err != nil {
 		return fmt.Errorf("deploy %s: %w", deployInput.ReleaseName, err)
 	}
+	// A by-reference umbrella's bundled values.<env>.yaml is pulled before the
+	// rollout; planning it here sets deployInput.PulledValuesFilePath so the
+	// upgrade command below -f's it.
+	valuesPull := planPublishedValuesPull(ctx, &deployInput)
 	command := deployInput.command()
 	ctx.TraceCommand(command.Dir, command.Name, command.Args...)
 	tracePodWatchAction(ctx, deployInput.ReleaseName, deployInput.Namespace, deployInput.KubernetesContext)
@@ -571,6 +640,19 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 	if ctx.DryRun {
 		return nil
 	}
+	return runHelmDeployExecute(ctx, deployInput, valuesPull, depBuild, deploy, target)
+}
+
+// runHelmDeployExecute performs the real-run pre-rollout steps and the rollout:
+// pull a by-reference umbrella's bundled values, build a local umbrella's
+// dependencies, then upgrade. Split out of RunHelmDeploy so the orchestrator
+// stays a thin trace-then-execute shell.
+func runHelmDeployExecute(ctx Context, deployInput HelmDeploySpec, valuesPull *publishedValuesPull, depBuild *commandSpec, deploy HelmChartDeployerFunc, target string) error {
+	cleanupValues, err := runPublishedValuesPull(ctx, valuesPull, target)
+	if err != nil {
+		return fmt.Errorf("deploy %s: %w", deployInput.ReleaseName, err)
+	}
+	defer cleanupValues()
 	if err := runChartDependencyBuild(ctx, deployInput, depBuild, target); err != nil {
 		return err
 	}
@@ -1493,10 +1575,12 @@ func newHelmDeploySpecWithValues(target OpenResult, deployContext KubernetesDepl
 
 	// A repo-local runtime umbrella wraps the published erun-devops chart as a
 	// subchart; helm won't pass the runtime --sets into subchart scope, so record
-	// the subchart key and let command() prefix every runtime value with it.
-	runtimeSubchartKey := ""
+	// the subchart key and let command() prefix every runtime value with it. A
+	// by-reference umbrella (published OCI chart) has no local Chart.yaml to read,
+	// so its key is set by the published-spec resolvers instead.
+	subchartKey := ""
 	if deployContextOwnsRuntimeChart(deployContext, target.Tenant) && !isOCIChartReference(deployContext.ChartPath) {
-		runtimeSubchartKey, err = helmChartRuntimeSubchartKey(deployContext.ChartPath)
+		subchartKey, err = helmChartRuntimeSubchartKey(deployContext.ChartPath)
 		if err != nil {
 			return HelmDeploySpec{}, err
 		}
@@ -1506,7 +1590,7 @@ func newHelmDeploySpecWithValues(target OpenResult, deployContext KubernetesDepl
 		ReleaseName:         deployContext.ComponentName,
 		ChartPath:           deployContext.ChartPath,
 		ValuesFilePath:      valuesFilePath,
-		RuntimeSubchartKey:  runtimeSubchartKey,
+		SubchartKey:         subchartKey,
 		Tenant:              target.Tenant,
 		Environment:         target.Environment,
 		Namespace:           KubernetesNamespaceName(target.Tenant, target.Environment),
@@ -1699,42 +1783,43 @@ func resolveWorktreeHostPath(repoPath string) string {
 
 func (d HelmDeploySpec) Params(stdout, stderr io.Writer) HelmDeployParams {
 	return HelmDeployParams{
-		ReleaseName:        d.ReleaseName,
-		ChartPath:          d.ChartPath,
-		ValuesFilePath:     d.ValuesFilePath,
-		RuntimeSubchartKey: d.RuntimeSubchartKey,
-		Tenant:             d.Tenant,
-		Environment:        d.Environment,
-		Namespace:          d.Namespace,
-		KubernetesContext:  d.KubernetesContext,
-		WorktreeStorage:    d.WorktreeStorage,
-		WorktreeRepoName:   d.WorktreeRepoName,
-		WorktreeHostPath:   d.WorktreeHostPath,
-		RepoURL:            d.RepoURL,
-		RepoRef:            d.RepoRef,
-		SSHDEnabled:        d.SSHDEnabled,
-		MCPPort:            d.MCPPort,
-		APIPort:            d.APIPort,
-		SSHPort:            d.SSHPort,
-		ManagedCloud:       d.ManagedCloud,
-		CloudContextName:   d.CloudContextName,
-		CloudProvider:      d.CloudProvider,
-		CloudProviderAlias: d.CloudProviderAlias,
-		CloudRegion:        d.CloudRegion,
-		CloudInstanceID:    d.CloudInstanceID,
-		UseHostCredentials: d.UseHostCredentials,
-		OIDCAllowedIssuers: d.OIDCAllowedIssuers,
-		ContainerRegistry:  d.ContainerRegistry,
-		ImageOverrides:     cloneStringMap(d.ImageOverrides),
-		ResetDatabase:      d.ResetDatabase,
-		Idle:               d.Idle,
-		Claude:             d.Claude,
-		RuntimePod:         NormalizeRuntimePodResources(d.RuntimePod),
-		Version:            d.Version,
-		Timeout:            d.Timeout,
-		Verbosity:          d.Verbosity,
-		Stdout:             stdout,
-		Stderr:             stderr,
+		ReleaseName:          d.ReleaseName,
+		ChartPath:            d.ChartPath,
+		ValuesFilePath:       d.ValuesFilePath,
+		PulledValuesFilePath: d.PulledValuesFilePath,
+		SubchartKey:          d.SubchartKey,
+		Tenant:               d.Tenant,
+		Environment:          d.Environment,
+		Namespace:            d.Namespace,
+		KubernetesContext:    d.KubernetesContext,
+		WorktreeStorage:      d.WorktreeStorage,
+		WorktreeRepoName:     d.WorktreeRepoName,
+		WorktreeHostPath:     d.WorktreeHostPath,
+		RepoURL:              d.RepoURL,
+		RepoRef:              d.RepoRef,
+		SSHDEnabled:          d.SSHDEnabled,
+		MCPPort:              d.MCPPort,
+		APIPort:              d.APIPort,
+		SSHPort:              d.SSHPort,
+		ManagedCloud:         d.ManagedCloud,
+		CloudContextName:     d.CloudContextName,
+		CloudProvider:        d.CloudProvider,
+		CloudProviderAlias:   d.CloudProviderAlias,
+		CloudRegion:          d.CloudRegion,
+		CloudInstanceID:      d.CloudInstanceID,
+		UseHostCredentials:   d.UseHostCredentials,
+		OIDCAllowedIssuers:   d.OIDCAllowedIssuers,
+		ContainerRegistry:    d.ContainerRegistry,
+		ImageOverrides:       cloneStringMap(d.ImageOverrides),
+		ResetDatabase:        d.ResetDatabase,
+		Idle:                 d.Idle,
+		Claude:               d.Claude,
+		RuntimePod:           NormalizeRuntimePodResources(d.RuntimePod),
+		Version:              d.Version,
+		Timeout:              d.Timeout,
+		Verbosity:            d.Verbosity,
+		Stdout:               stdout,
+		Stderr:               stderr,
 	}
 }
 
@@ -1752,6 +1837,13 @@ func (d HelmDeploySpec) command() commandSpec {
 	}
 	if strings.TrimSpace(d.KubernetesContext) != "" {
 		args = append(args, "--kube-context", d.KubernetesContext)
+	}
+	// A by-reference umbrella's bundled values.<env>.yaml (pulled from the
+	// published chart) forwards the tenant's authored subchart values; it is
+	// applied first so an operator's config-dir overlay (ValuesFilePath) layered
+	// next still wins, and the re-scoped --sets below win over both.
+	if strings.TrimSpace(d.PulledValuesFilePath) != "" {
+		args = append(args, "-f", d.PulledValuesFilePath)
 	}
 	// A published OCI chart has no local values overlay file; every other
 	// chart resolves one (possibly empty) next to its templates.
@@ -1829,10 +1921,10 @@ func (d HelmDeploySpec) command() commandSpec {
 		"--set-string", "runtime.resources.limits.memory="+NormalizeRuntimePodResources(d.RuntimePod).Memory,
 	)
 	args = append(args, helmClaudeSetArgs(d.Claude)...)
-	// When the runtime chart is a local umbrella wrapping erun-devops, every
-	// runtime --set targets the wrapped subchart's value scope, so prefix each
-	// key with the subchart key. No-op (empty prefix) for every other chart.
-	prefixHelmSetKeys(args, d.RuntimeSubchartKey)
+	// When the chart is an umbrella wrapping a canonical erun-<base> chart, every
+	// --set targets the wrapped subchart's value scope, so prefix each key with
+	// the subchart key. No-op (empty prefix) for a chart installed directly.
+	prefixHelmSetKeys(args, d.SubchartKey)
 	args = append(args,
 		d.ReleaseName,
 		d.ChartPath,
@@ -1858,9 +1950,9 @@ func isOCIChartReference(chartPath string) bool {
 }
 
 // prefixHelmSetKeys nests every helm --set/--set-string/--set-json key under
-// prefix (a wrapped runtime umbrella's subchart key), rewriting `key=value` to
-// `prefix.key=value` in place. An empty prefix is a no-op, so a non-wrapped
-// runtime keeps byte-identical top-level --sets. Only --set* value args are
+// prefix (a wrapped umbrella's subchart key), rewriting `key=value` to
+// `prefix.key=value` in place. An empty prefix is a no-op, so a chart installed
+// directly keeps byte-identical top-level --sets. Only --set* value args are
 // touched; base flags, -f, the release name, chart path, and --version are not.
 func prefixHelmSetKeys(args []string, prefix string) {
 	if strings.TrimSpace(prefix) == "" {
@@ -2412,40 +2504,41 @@ func resolveHelmDeployChartPath(params HelmDeployParams) (string, func(), error)
 
 func helmDeployCommandSpec(params HelmDeployParams, chartPath string) commandSpec {
 	return HelmDeploySpec{
-		ReleaseName:        params.ReleaseName,
-		ChartPath:          chartPath,
-		ValuesFilePath:     params.ValuesFilePath,
-		RuntimeSubchartKey: params.RuntimeSubchartKey,
-		Tenant:             params.Tenant,
-		Environment:        params.Environment,
-		Namespace:          params.Namespace,
-		KubernetesContext:  params.KubernetesContext,
-		WorktreeStorage:    params.WorktreeStorage,
-		WorktreeRepoName:   params.WorktreeRepoName,
-		WorktreeHostPath:   params.WorktreeHostPath,
-		RepoURL:            params.RepoURL,
-		RepoRef:            params.RepoRef,
-		SSHDEnabled:        params.SSHDEnabled,
-		MCPPort:            params.MCPPort,
-		APIPort:            params.APIPort,
-		SSHPort:            params.SSHPort,
-		ManagedCloud:       params.ManagedCloud,
-		CloudContextName:   params.CloudContextName,
-		CloudProvider:      params.CloudProvider,
-		CloudProviderAlias: params.CloudProviderAlias,
-		CloudRegion:        params.CloudRegion,
-		CloudInstanceID:    params.CloudInstanceID,
-		UseHostCredentials: params.UseHostCredentials,
-		OIDCAllowedIssuers: params.OIDCAllowedIssuers,
-		ContainerRegistry:  params.ContainerRegistry,
-		ImageOverrides:     cloneStringMap(params.ImageOverrides),
-		ResetDatabase:      params.ResetDatabase,
-		Idle:               params.Idle,
-		Claude:             params.Claude,
-		RuntimePod:         params.RuntimePod,
-		Version:            params.Version,
-		Timeout:            params.Timeout,
-		Verbosity:          params.Verbosity,
+		ReleaseName:          params.ReleaseName,
+		ChartPath:            chartPath,
+		ValuesFilePath:       params.ValuesFilePath,
+		PulledValuesFilePath: params.PulledValuesFilePath,
+		SubchartKey:          params.SubchartKey,
+		Tenant:               params.Tenant,
+		Environment:          params.Environment,
+		Namespace:            params.Namespace,
+		KubernetesContext:    params.KubernetesContext,
+		WorktreeStorage:      params.WorktreeStorage,
+		WorktreeRepoName:     params.WorktreeRepoName,
+		WorktreeHostPath:     params.WorktreeHostPath,
+		RepoURL:              params.RepoURL,
+		RepoRef:              params.RepoRef,
+		SSHDEnabled:          params.SSHDEnabled,
+		MCPPort:              params.MCPPort,
+		APIPort:              params.APIPort,
+		SSHPort:              params.SSHPort,
+		ManagedCloud:         params.ManagedCloud,
+		CloudContextName:     params.CloudContextName,
+		CloudProvider:        params.CloudProvider,
+		CloudProviderAlias:   params.CloudProviderAlias,
+		CloudRegion:          params.CloudRegion,
+		CloudInstanceID:      params.CloudInstanceID,
+		UseHostCredentials:   params.UseHostCredentials,
+		OIDCAllowedIssuers:   params.OIDCAllowedIssuers,
+		ContainerRegistry:    params.ContainerRegistry,
+		ImageOverrides:       cloneStringMap(params.ImageOverrides),
+		ResetDatabase:        params.ResetDatabase,
+		Idle:                 params.Idle,
+		Claude:               params.Claude,
+		RuntimePod:           params.RuntimePod,
+		Version:              params.Version,
+		Timeout:              params.Timeout,
+		Verbosity:            params.Verbosity,
 	}.command()
 }
 
