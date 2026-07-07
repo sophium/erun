@@ -61,11 +61,14 @@
 {{- /* pdns listen address. Under hostNetwork a 0.0.0.0:53 bind collides with
        systemd-resolved's 127.0.0.53:53 stub on nodes that run it, and the public
        authoritative IP is typically a NAT'd address that is not a local
-       interface (so it can't be bound directly). Set powerdns.localAddress to
-       the node's own interface IP (the one the public IP NATs to) to bind a
-       specific local address and coexist with the node resolver. Defaults to
-       0.0.0.0 for nodes where :53 is already free. */ -}}
-{{- $localAddress := default "0.0.0.0" $powerdns.localAddress -}}
+       interface (so it can't be bound directly). So bind the node's own
+       interface IP: it coexists with the node resolver's loopback stub and still
+       receives traffic DNAT'd from the public authoritative IP. Default to the
+       node's hostIP (injected into config-gen via the downward API as HOST_IP),
+       which is the interface the public IP NATs to; an explicit
+       powerdns.localAddress overrides it — e.g. 0.0.0.0 on a node where :53 is
+       free, or a specific address on a multi-homed node. */ -}}
+{{- $localAddress := default "" $powerdns.localAddress -}}
 {{- $configDir := "/etc/pdns-shared" -}}
 apiVersion: v1
 kind: Secret
@@ -116,6 +119,12 @@ spec:
                 secretKeyRef:
                   name: {{ $apiKeySecretName }}
                   key: {{ $apiKeySecretKey }}
+            # The node's own interface IP, so local-address can bind it instead
+            # of 0.0.0.0 and coexist with a systemd-resolved loopback stub.
+            - name: HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
           command:
             - sh
             - -c
@@ -129,7 +138,7 @@ spec:
               gpgsql-dbname={{ $powerdnsDatabase }}
               gpgsql-user={{ $postgresUser }}
               gpgsql-password=$PDNS_GPGSQL_PASSWORD
-              local-address={{ $localAddress }}
+              local-address={{ $localAddress | default "$HOST_IP" }}
               local-port=53
               api=yes
               api-key=$PDNS_API_KEY
