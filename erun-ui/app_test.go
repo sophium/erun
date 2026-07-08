@@ -2194,6 +2194,58 @@ func TestLoadDeployComponentsVersionAwareFiltersUnavailableCharts(t *testing.T) 
 	}
 }
 
+// TestLoadDeployComponentsRuntimeChartReflectsTenantChart asserts the runtime row
+// reports the chart a by-reference deploy actually installs: the tenant's own
+// <tenant>-devops chart when it is published at the version, else the canonical
+// erun-devops fallback. The picker labels the row from PublishedChart, so it must
+// match what resolvePublishedRuntimeChartReference installs.
+func TestLoadDeployComponentsRuntimeChartReflectsTenantChart(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		config:  &eruncommon.ERunConfig{},
+		tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs"}},
+		envs: map[string]eruncommon.EnvConfig{
+			"frs/prod": {
+				Name:              "prod",
+				LocalRepoPath:     projectRoot,
+				KubernetesContext: "test-context",
+				RuntimeVersion:    "1.0.20",
+				Type:              eruncommon.EnvironmentTypeRuntime,
+			},
+		},
+	}
+	runtimePublishedChart := func(t *testing.T, tags map[string][]string) string {
+		t.Helper()
+		app := NewApp(erunUIDeps{
+			store: store,
+			resolveImageRegistry: func(_ context.Context, _, repository string) (eruncommon.RuntimeRegistryVersions, error) {
+				return eruncommon.RuntimeRegistryVersions{Tags: tags[repository]}, nil
+			},
+		})
+		components, err := app.LoadDeployComponents(uiSelection{Tenant: "frs", Environment: "prod", Version: "1.0.20"})
+		if err != nil {
+			t.Fatalf("LoadDeployComponents failed: %v", err)
+		}
+		for _, component := range components {
+			if component.Runtime {
+				return component.PublishedChart
+			}
+		}
+		t.Fatal("no runtime component returned")
+		return ""
+	}
+
+	// The tenant publishes its own frs-devops chart at the version → the runtime
+	// installs (and the picker names) frs-devops, not the canonical fallback.
+	if got := runtimePublishedChart(t, map[string][]string{"charts/frs-devops": {"1.0.20"}}); got != "frs-devops" {
+		t.Fatalf("runtime PublishedChart with tenant chart published = %q, want frs-devops", got)
+	}
+	// No tenant runtime chart at the version → the deploy falls back to erun-devops.
+	if got := runtimePublishedChart(t, map[string][]string{}); got != "erun-devops" {
+		t.Fatalf("runtime PublishedChart with no tenant chart = %q, want erun-devops (fallback)", got)
+	}
+}
+
 func assertLoadedEnvironmentConfig(t *testing.T, loaded uiEnvironmentConfig, projectRoot string) {
 	t.Helper()
 

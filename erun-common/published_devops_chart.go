@@ -16,10 +16,6 @@ func PublishedDevopsChartOCIRepo(containerRegistry string) string {
 	return "oci://" + strings.TrimSpace(containerRegistry) + "/charts"
 }
 
-func publishedDevopsChartReference(containerRegistry string) string {
-	return PublishedDevopsChartOCIRepo(containerRegistry) + "/" + DevopsComponentName
-}
-
 // resolvePublishedRuntimeChartReference prefers the tenant's own published
 // <tenant>-devops chart (typically a thin umbrella wrapping erun-devops, per the
 // erun-build-env skill) and falls back to the canonical charts/erun-devops when
@@ -34,10 +30,10 @@ func publishedDevopsChartReference(containerRegistry string) string {
 // the chart is a wrapped umbrella that needs subchart re-scoping.
 func resolvePublishedRuntimeChartReference(ctx context.Context, containerRegistry, tenant, version string) (reference, chartName string) {
 	tenantChart := RuntimeReleaseName(tenant)
-	if tenantChart != DevopsComponentName && publishedChartHasVersion(ctx, containerRegistry, tenantChart, version) {
-		return PublishedDevopsChartOCIRepo(containerRegistry) + "/" + tenantChart, tenantChart
-	}
-	return publishedDevopsChartReference(containerRegistry), DevopsComponentName
+	tenantChartPublished := tenantChart != DevopsComponentName &&
+		publishedChartHasVersion(ctx, containerRegistry, tenantChart, version)
+	chartName = ResolvedRuntimeChartName(tenant, tenantChartPublished)
+	return PublishedDevopsChartOCIRepo(containerRegistry) + "/" + chartName, chartName
 }
 
 // publishedUmbrellaSubchartKey returns the value-scope key of the canonical

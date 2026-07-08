@@ -108,6 +108,11 @@ export interface UIDeployableComponent {
   // The env's current resolved default selection: saved deploy.components, else
   // the repo plan, else the runtime alone.
   selected: boolean;
+  // The chart a by-reference deploy installs for this item at the chosen version.
+  // For the runtime it is the tenant's own <tenant>-devops chart when published,
+  // else the canonical erun-devops fallback; empty until the version-aware backend
+  // resolves it.
+  publishedChart?: string;
 }
 
 export interface UIBuildDetails {
