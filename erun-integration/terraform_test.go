@@ -105,7 +105,7 @@ func TestTerraform(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedGitRepo(t, setup.Cwd)
-		fixture.SeedProjectPathsConfig(t, setup, "", "", "infra/tf", "")
+		fixture.SeedProjectPathsConfig(t, setup, "", "", "", "infra/tf", "")
 		fixture.SeedTerraformEnvRootAt(t, filepath.Join(setup.Cwd, "infra", "tf"), "dev")
 		result := erun.Run(t, []string{"terraform", "plan", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
@@ -121,7 +121,7 @@ func TestTerraform(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedGitRepo(t, setup.Cwd)
-		fixture.SeedProjectPathsConfig(t, setup, "", "", "infra/tf", "")
+		fixture.SeedProjectPathsConfig(t, setup, "", "", "", "infra/tf", "")
 		result := erun.Run(t, []string{"terraform", "plan", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit for a missing configured terraform root, got 0:\n%s", result.Combined)

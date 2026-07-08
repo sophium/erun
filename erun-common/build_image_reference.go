@@ -25,11 +25,55 @@ func resolveDockerBuildRegistryForEnvironment(projectRoot, environment string) (
 	return registry, nil
 }
 
-func ResolveDockerBuildContextDirForProject(buildDir, projectRoot string) string {
-	if shouldUseProjectRootAsDockerContext(buildDir, projectRoot) {
-		return projectRoot
+// dockerContextRepoRoot / dockerContextComponent are the accepted
+// paths.dockercontext values selecting the Docker build context root.
+const (
+	dockerContextRepoRoot  = "repo-root"
+	dockerContextComponent = "component"
+)
+
+// ResolveDockerBuildContextDirForProject picks the Docker build context root. A
+// configured paths.dockercontext wins over the positional heuristic; unset keeps
+// the heuristic, which returns the repo root only for the conventional
+// <devops-root>/docker/<component> layout.
+func ResolveDockerBuildContextDirForProject(buildDir, projectRoot string) (string, error) {
+	mode, ok, err := configuredDockerContext(projectRoot)
+	if err != nil {
+		return "", err
 	}
-	return buildDir
+	if ok {
+		switch mode {
+		case dockerContextRepoRoot:
+			return projectRoot, nil
+		case dockerContextComponent:
+			return buildDir, nil
+		}
+	}
+	if shouldUseProjectRootAsDockerContext(buildDir, projectRoot) {
+		return projectRoot, nil
+	}
+	return buildDir, nil
+}
+
+// configuredDockerContext resolves the project-global paths.dockercontext
+// override. It returns (mode, true, nil) for a valid value, (,false,nil) when
+// unset, and a loud error for any other value — a misconfigured override fails
+// the build rather than silently falling back to the positional heuristic.
+func configuredDockerContext(projectRoot string) (string, bool, error) {
+	paths, err := loadProjectPaths(projectRoot)
+	if err != nil {
+		return "", false, err
+	}
+	mode := strings.TrimSpace(paths.DockerContext)
+	if mode == "" {
+		return "", false, nil
+	}
+	switch mode {
+	case dockerContextRepoRoot, dockerContextComponent:
+		return mode, true, nil
+	default:
+		return "", false, fmt.Errorf("invalid docker context %q (.erun/config.yaml paths.dockercontext): expected %q or %q", mode, dockerContextRepoRoot, dockerContextComponent)
+	}
 }
 
 func ResolveDockerBuildVersion(buildDir, projectRoot string) (string, bool, string, error) {

@@ -1,0 +1,5 @@
+audit: erun build --dry-run
+build: docker build root configured as build/docker (.erun/config.yaml paths.docker)
+build: docker build context configured as bogus (.erun/config.yaml paths.dockercontext)
+build: version file configured as build/VERSION (.erun/config.yaml paths.version)
+invalid docker context "bogus" (.erun/config.yaml paths.dockercontext): expected "repo-root" or "component"

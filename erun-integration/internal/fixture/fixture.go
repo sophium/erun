@@ -779,14 +779,16 @@ func SeedTerraformEnvRootAt(t testing.TB, root, environment string) {
 
 // SeedProjectPathsConfig writes the project .erun/config.yaml paths: block so
 // build/deploy/terraform resolve the docker/, k8s/, terraform, and VERSION
-// locations from config instead of the <tenant>-devops convention. Empty fields
-// are omitted.
-func SeedProjectPathsConfig(t testing.TB, setup env.Setup, docker, k8s, terraform, version string) {
+// locations from config instead of the <tenant>-devops convention. dockerContext
+// sets paths.dockercontext (repo-root|component) to override the build-context
+// heuristic. Empty fields are omitted.
+func SeedProjectPathsConfig(t testing.TB, setup env.Setup, docker, dockerContext, k8s, terraform, version string) {
 	t.Helper()
 	var b strings.Builder
 	b.WriteString("paths:\n")
 	for _, kv := range []struct{ key, value string }{
 		{"docker", docker},
+		{"dockercontext", dockerContext},
 		{"k8s", k8s},
 		{"terraform", terraform},
 		{"version", version},
