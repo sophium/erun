@@ -759,7 +759,14 @@ func SeedProjectK8sConfig(t testing.TB, setup env.Setup, body string) {
 // resolve, so the fixture writes plain files.
 func SeedTerraformEnvRoot(t testing.TB, setup env.Setup, tenant, environment string) {
 	t.Helper()
-	root := filepath.Join(setup.Cwd, "terraform-"+tenant)
+	SeedTerraformEnvRootAt(t, filepath.Join(setup.Cwd, "terraform-"+tenant), environment)
+}
+
+// SeedTerraformEnvRootAt is SeedTerraformEnvRoot with an explicit base dir, for
+// scenarios that relocate the Terraform base via .erun/config.yaml paths.terraform
+// instead of using the conventional terraform-<tenant>/ root.
+func SeedTerraformEnvRootAt(t testing.TB, root, environment string) {
+	t.Helper()
 	envDir := filepath.Join(root, environment)
 	if err := os.MkdirAll(envDir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", envDir, err)
@@ -768,6 +775,53 @@ func SeedTerraformEnvRoot(t testing.TB, setup env.Setup, tenant, environment str
 	mustWrite(t, filepath.Join(root, "variables.tf"), "variable \"base_domain\" {\n  type = string\n}\n")
 	mustWrite(t, filepath.Join(envDir, "main.tf"), "# "+environment+" services\n")
 	mustWrite(t, filepath.Join(envDir, environment+".tfvars"), "base_domain = \"erunpaas.com\"\n")
+}
+
+// SeedProjectPathsConfig writes the project .erun/config.yaml paths: block so
+// build/deploy/terraform resolve the docker/, k8s/, terraform, and VERSION
+// locations from config instead of the <tenant>-devops convention. Empty fields
+// are omitted.
+func SeedProjectPathsConfig(t testing.TB, setup env.Setup, docker, k8s, terraform, version string) {
+	t.Helper()
+	var b strings.Builder
+	b.WriteString("paths:\n")
+	for _, kv := range []struct{ key, value string }{
+		{"docker", docker},
+		{"k8s", k8s},
+		{"terraform", terraform},
+		{"version", version},
+	} {
+		if strings.TrimSpace(kv.value) != "" {
+			b.WriteString("    " + kv.key + ": " + kv.value + "\n")
+		}
+	}
+	SeedProjectK8sConfig(t, setup, b.String())
+}
+
+// SeedDockerComponentAt writes <dockerDir>/<component>/Dockerfile so a build
+// resolves a component build context at a caller-chosen docker root. dockerDir
+// must be named "docker" — the standard-layout checks key off the folder name.
+func SeedDockerComponentAt(t testing.TB, dockerDir, component string) {
+	t.Helper()
+	dir := filepath.Join(dockerDir, component)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	mustWrite(t, filepath.Join(dir, "Dockerfile"), "FROM alpine:3.22\n")
+}
+
+// SeedK8sChartAt writes <k8sDir>/<chartName>/Chart.yaml (plus values files) so a
+// deploy resolves a chart at a caller-chosen k8s root. k8sDir must be named
+// "k8s" — the chart-discovery checks key off the folder name.
+func SeedK8sChartAt(t testing.TB, k8sDir, chartName, tenant, environment string) {
+	t.Helper()
+	chart := filepath.Join(k8sDir, chartName)
+	if err := os.MkdirAll(chart, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", chart, err)
+	}
+	mustWrite(t, filepath.Join(chart, "Chart.yaml"), "apiVersion: v2\nname: "+chartName+"\nversion: 0.0.1\n")
+	mustWrite(t, filepath.Join(chart, "values.yaml"), "tenant: "+tenant+"\n")
+	mustWrite(t, filepath.Join(chart, "values."+strings.ToLower(strings.TrimSpace(environment))+".yaml"), "environment: "+environment+"\n")
 }
 
 // SeedDevopsBackendCharts seeds the three opt-in backend charts

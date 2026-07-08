@@ -33,7 +33,21 @@ func ResolveDockerBuildContextDirForProject(buildDir, projectRoot string) string
 }
 
 func ResolveDockerBuildVersion(buildDir, projectRoot string) (string, bool, string, error) {
-	for _, candidate := range dockerBuildVersionCandidates(buildDir, projectRoot) {
+	configured, hasConfigured, err := configuredVersionFile(projectRoot)
+	if err != nil {
+		return "", false, "", err
+	}
+
+	candidates := dockerBuildVersionCandidates(buildDir, projectRoot)
+	if hasConfigured {
+		// paths.version relocates the project-level VERSION: it stands in for the
+		// project-root candidate, so a component's own VERSION and any intermediate
+		// <module>/VERSION still take precedence (most-specific first). This keeps
+		// version-pinned base components (VERSION in their own build dir) pinned.
+		candidates = replaceProjectRootVersionCandidate(candidates, projectRoot, configured)
+	}
+
+	for _, candidate := range candidates {
 		version, ok, err := loadVersionValue(candidate)
 		if err != nil {
 			return "", false, "", err
@@ -43,7 +57,49 @@ func ResolveDockerBuildVersion(buildDir, projectRoot string) (string, bool, stri
 		}
 	}
 
+	if hasConfigured {
+		return "", false, "", fmt.Errorf("configured version file %s (.erun/config.yaml paths.version) not found", configured)
+	}
 	return "", false, "", ErrVersionFileNotFound
+}
+
+// replaceProjectRootVersionCandidate swaps the project-root VERSION candidate for
+// the configured paths.version file, leaving the more specific component and
+// module candidates ahead of it so the most-specific VERSION still wins.
+func replaceProjectRootVersionCandidate(candidates []string, projectRoot, configured string) []string {
+	rootVersion := filepath.Clean(filepath.Join(projectRoot, "VERSION"))
+	out := make([]string, 0, len(candidates)+1)
+	replaced := false
+	for _, candidate := range candidates {
+		if !replaced && filepath.Clean(candidate) == rootVersion {
+			out = append(out, configured)
+			replaced = true
+			continue
+		}
+		out = append(out, candidate)
+	}
+	if !replaced {
+		out = append(out, configured)
+	}
+	return out
+}
+
+// configuredVersionFile resolves the project-global paths.version override to
+// the VERSION file path. A configured directory resolves to <dir>/VERSION.
+// Returns (path, true, nil) when set, (,false,nil) when unset.
+func configuredVersionFile(projectRoot string) (string, bool, error) {
+	paths, err := loadProjectPaths(projectRoot)
+	if err != nil {
+		return "", false, err
+	}
+	versionPath := resolveProjectPath(projectRoot, paths.Version)
+	if versionPath == "" {
+		return "", false, nil
+	}
+	if info, statErr := os.Stat(versionPath); statErr == nil && info.IsDir() {
+		versionPath = filepath.Join(versionPath, "VERSION")
+	}
+	return filepath.Clean(versionPath), true, nil
 }
 
 func dockerBuildVersionCandidates(buildDir, projectRoot string) []string {

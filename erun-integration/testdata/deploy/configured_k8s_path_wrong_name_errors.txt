@@ -1,0 +1,8 @@
+audit: erun deploy --dry-run --version <VERSION> team dev
+trace-log: would append the full trace to <TMP>
+deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=false current=false
+deploy: component selection source default (runtime only); deploying the runtime chart alone
+deploy: k8s chart root configured as charts (.erun/config.yaml paths.k8s)
+deploy: spec resolution failed: configured k8s path "charts" (.erun/config.yaml paths.k8s) is not a Helm chart module: expected a directory named "k8s" holding per-component charts
+==> Deploy failed team/dev: configured k8s path "charts" (.erun/config.yaml paths.k8s) is not a Helm chart module: expected a directory named "k8s" holding per-component charts
+configured k8s path "charts" (.erun/config.yaml paths.k8s) is not a Helm chart module: expected a directory named "k8s" holding per-component charts

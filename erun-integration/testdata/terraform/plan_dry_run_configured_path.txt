@@ -1,0 +1,6 @@
+audit: erun terraform plan --dry-run team dev
+terraform: plan in <TMP> (env team/dev, namespace team-dev)
+terraform: base infra/tf from .erun/config.yaml paths.terraform
+terraform: var file dev.tfvars
+cd <TMP> && terraform init -input=false
+cd <TMP> && terraform plan -input=false -var-file=dev.tfvars

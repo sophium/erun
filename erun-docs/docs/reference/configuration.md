@@ -113,6 +113,35 @@ Committed to the repo, applies to anyone who checks it out.
 | `release.mainbranch` | string | `erun release` | Main branch name (default `main`). |
 | `release.developbranch` | string | `erun release` | Develop branch name (default `develop`). |
 | `platform` | map | `erun deploy` (PowerDNS), `erun expose` | Per-instance platform deployment config. Absent for non-platform projects. See [`platform:` block](#platform-block). |
+| `paths` | map | `erun build`, `erun push`, `erun deploy`, `erun terraform` | Overrides where erun discovers the devops assets — the `docker/` and `k8s/` folders, the `terraform-<tenant>` root, and the `VERSION` file. Absent → the conventional layout. See [`paths:` block](#paths-block). |
+
+#### `paths:` block {#paths-block}
+
+The `paths:` block relocates the devops assets erun otherwise discovers by convention: the `docker/` build contexts and `k8s/` Helm charts under `<tenant>-devops/`, the per-environment Terraform roots at `terraform-<tenant>/`, and the `VERSION` file. It is project-global (not per-environment). Reach for it when a repo does not nest these under a `<tenant>-devops/` module — for example a devops repo whose root carries `docker/`, `k8s/`, `terraform-<tenant>/`, and `VERSION` as top-level siblings.
+
+Every field is optional; an unset field keeps the conventional location. A configured path resolves relative to the project root (an absolute path is used as-is). The override **relocates** the canonical folders, it does not rename them: the `docker/` and `k8s/` directories keep those exact names (erun's build and deploy machinery keys off the folder name), so a configured `docker`/`k8s` path must end in a `docker`/`k8s` segment.
+
+| Field | Type | Default | Effect |
+|---|---|---|---|
+| `docker` | string | `<tenant>-devops/docker` | Directory (named `docker`) whose subdirectories are the per-component build contexts (`<docker>/<component>/Dockerfile`). Read by `erun build` / `erun push`. |
+| `k8s` | string | `<tenant>-devops/k8s` | Directory (named `k8s`) whose subdirectories are the per-component Helm charts (`<k8s>/<component>/Chart.yaml`). Read by `erun deploy`, and by `erun build` for chart packaging. |
+| `terraform` | string | `terraform-<tenant>` | Base directory under which the per-environment Terraform roots live; erun still appends `/<environment>`. Read by `erun terraform`. |
+| `version` | string | walk up from the build dir to the project root | Path to the `VERSION` file that mints the build version. A directory resolves to `<dir>/VERSION`. Read by `erun build` / `erun push` / `erun release`. |
+
+```yaml
+# <repo>/.erun/config.yaml — a devops repo that holds the folders at its root
+paths:
+  docker: docker
+  k8s: k8s
+  terraform: terraform-frs
+  version: VERSION
+```
+
+**Error behaviour.** A configured override that does not resolve fails the command (exit code 1) rather than silently falling back to convention:
+
+- `paths.docker` / `paths.k8s` pointing at a directory that is missing, not named `docker`/`k8s`, or holding no build contexts / charts → `configured docker path "<p>" (.erun/config.yaml paths.docker) is not a docker build module: …` (and the `k8s` analogue).
+- `paths.terraform` with no `<base>/<environment>/` directory → `no Terraform root at <dir> … the .erun/config.yaml paths.terraform base "<p>" must contain a <env>/ dir …`.
+- `paths.version` pointing at a missing file → `configured version file <p> (.erun/config.yaml paths.version) not found`.
 
 #### `platform:` block {#platform-block}
 

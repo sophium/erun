@@ -1,0 +1,3 @@
+audit: erun build --dry-run
+build: docker build root configured as images (.erun/config.yaml paths.docker)
+configured docker path "images" (.erun/config.yaml paths.docker) is not a docker build module: expected a directory named "docker" holding per-component build contexts

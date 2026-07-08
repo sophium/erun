@@ -219,11 +219,27 @@ func componentChartDirForBuild(buildInput DockerBuildSpec) string {
 	if filepath.Base(filepath.Dir(dockerDir)) != "docker" {
 		return ""
 	}
-	chartDir := filepath.Join(filepath.Dir(filepath.Dir(dockerDir)), "k8s", filepath.Base(dockerDir))
+	chartDir := componentChartDirCandidate(buildInput.Image.ProjectRoot, dockerDir)
 	if _, err := os.Stat(filepath.Join(chartDir, "Chart.yaml")); err != nil {
 		return ""
 	}
 	return chartDir
+}
+
+// componentChartDirCandidate resolves the component's chart dir the same way
+// deploy resolves it — the paths.k8s override, else the -devops convention — so
+// the chart folded into the image fingerprint is always the chart that ships,
+// preserving the image+chart one-version contract even when paths.docker
+// relocates the build root away from the k8s tree. It falls back to the
+// sibling-of-docker convention only for layouts the deploy resolver cannot
+// anchor (no git-detected tenant, or an ambiguous set of modules), and never
+// fails the build on a resolver error.
+func componentChartDirCandidate(projectRoot, dockerDir string) string {
+	component := filepath.Base(dockerDir)
+	if k8sDir, ok, err := resolveCurrentDevopsK8sDir(FindProjectRoot, projectRoot, projectRoot); err == nil && ok {
+		return filepath.Join(k8sDir, component)
+	}
+	return filepath.Join(filepath.Dir(filepath.Dir(dockerDir)), "k8s", component)
 }
 
 func collectFingerprintFiles(contextDir string, sources []string, ignored *ignoreSet) ([]string, error) {
