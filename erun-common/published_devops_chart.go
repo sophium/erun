@@ -192,8 +192,7 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, 
 	deployInput.ReleaseName = RuntimeReleaseName(target.Tenant)
 	deployInput.UseHostCredentials = target.EnvConfig.HasAWSCloudAlias()
 	deployInput.ContainerRegistry = registry
-	if image := resolveRuntimeImageOverride(registry, version, target.EnvConfig.RuntimeImage); image != "" {
-		ctx.Trace("deploy: runtime image override " + image + " (imageOverrides." + DevopsComponentName + ")")
+	if image := resolveDeployRuntimeImage(ctx, registry, version, chartName, target.EnvConfig.RuntimeImage); image != "" {
 		deployInput.ImageOverrides = map[string]string{DevopsComponentName: image}
 	}
 	// A runtime env that opted into a mutable source worktree clones this repo
@@ -333,6 +332,32 @@ func (e *PublishedChartNotFoundError) Error() string {
 }
 
 func (e *PublishedChartNotFoundError) Unwrap() error { return e.Err }
+
+// resolveDeployRuntimeImage resolves the image the runtime pod's erun-devops
+// container runs, as the imageOverrides.erun-devops the deploy sets. An explicit
+// runtimeimage (the operator's choice) always wins. Otherwise, when the tenant
+// deploys its own <tenant>-devops umbrella (chartName != erun-devops), the
+// chart's identity already names the image: erun push publishes the
+// <tenant>-devops image and chart together on the tenant's version line, so the
+// runtime image is <registry>/<tenant>-devops:<version> — default to it. Building
+// the custom image then suffices; a mis/unset runtimeimage no longer silently
+// falls back to the stock erun-devops:<version>, a tag the tenant's line never
+// publishes (the ImagePullBackOff this fixes). The shared erun-devops chart
+// carries no such signal, so it returns "" — the erun product tenant and an
+// image-only bootstrap keep the chart's own default unless runtimeimage is set.
+func resolveDeployRuntimeImage(ctx Context, registry, version, chartName, runtimeImage string) string {
+	if image := resolveRuntimeImageOverride(registry, version, runtimeImage); image != "" {
+		ctx.Trace("deploy: runtime image override " + image + " (imageOverrides." + DevopsComponentName + ")")
+		return image
+	}
+	chartName = strings.TrimSpace(chartName)
+	if chartName == "" || chartName == DevopsComponentName {
+		return ""
+	}
+	image := strings.TrimSpace(registry) + "/" + chartName + ":" + strings.TrimSpace(version)
+	ctx.Trace("deploy: defaulting runtime image to the " + chartName + " chart's own image " + image + " (imageOverrides." + DevopsComponentName + ")")
+	return image
+}
 
 // resolveRuntimeImageOverride normalizes a custom runtime image. A reference
 // that already pins a tag or digest is used verbatim; a tagless one is pinned
