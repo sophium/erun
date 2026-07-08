@@ -194,11 +194,17 @@ erun-devops:
 `erun deploy` picks this up as the runtime chart (it matches the runtime release
 name), `helm dependency build`s it, and **re-scopes every runtime value it sets
 — tenant, ports, cloud context, MCP auth, and the `imageOverrides.erun-devops`
-image from Step 5 — under the `erun-devops.` subchart key**, so the wrapped
-runtime is wired exactly as the published chart would be. A **runtime env** has
-no worktree, so `erun deploy` installs this chart **by reference** — it re-scopes
-the same way and `helm pull`s the published chart to `-f` this `values.<env>.yaml`,
-so your pod-shape (the `erun-devops.extra*` above) lands there too. Track
+image — under the `erun-devops.` subchart key**, so the wrapped runtime is wired
+exactly as the published chart would be. Because `erun push` publishes this
+umbrella and your `<tenant>-devops` image together at one version, the chart's
+identity already names the image: deploy **defaults `imageOverrides.erun-devops`
+to the umbrella's own `<registry>/<tenant>-devops:<version>`**. So once the
+umbrella is published, **Step 5's `runtimeimage` is optional** — building and
+pushing the image is enough for the deploy to run it; set `runtimeimage` only to
+pin a *different* image than the umbrella's own. A **runtime env** has no
+worktree, so `erun deploy` installs this chart **by reference** — it re-scopes the
+same way and `helm pull`s the published chart to `-f` this `values.<env>.yaml`, so
+your pod-shape (the `erun-devops.extra*` above) lands there too. Track
 `Chart.lock` (committed) and gitignore `charts/*.tgz`, as the platform umbrellas do.
 
 ## Maintenance, repair & upgrade

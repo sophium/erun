@@ -50,7 +50,7 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 | `--remote` | bool | `false` | Conflicts with a `--type` whose value disagrees (e.g. `--type=local-agent --remote`). | Deprecated alias for `--type=remote-agent`: sets `EnvConfig.type = remote-agent`. Init then writes the in-pod bootstrap marker. |
 | `--no-git` | bool | `false` | Only meaningful with `--remote` / `--type=remote-agent`. | Skips the in-pod `git clone` step. |
 | `--version <version>` | string (semver) | The CLI's built-in `ERUN_VERSION`. | Must satisfy `^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$`. | `EnvConfig.runtimeversion`. |
-| `--runtime-image <ref>` | string | unset (the published `<registry>/erun-devops:<version>` image). | A full OCI reference (registry path and/or tag present) is used verbatim; a bare name resolves to `<registry>/<name>:<runtime version>` at deploy time. | `EnvConfig.runtimeimage`; applied as `imageOverrides.erun-devops` on every published-chart deploy. |
+| `--runtime-image <ref>` | string | unset — deploy then [defaults the image](#deploy-runtime-image-default) from the chart (a `<tenant>-devops` umbrella → its own image; the shared `erun-devops` chart → no override). | A full OCI reference (registry path and/or tag present) is used verbatim; a bare name resolves to `<registry>/<name>:<runtime version>` at deploy time. | `EnvConfig.runtimeimage`; applied as `imageOverrides.erun-devops` on every published-chart deploy. |
 | `--bootstrap` | bool | `false` | — | **Deprecated, ignored.** Prints a deprecation warning; `init` no longer scaffolds a `<tenant>-devops/` module — envs deploy the published `erun-devops` chart. |
 | `--runtime-cpu <value>` | Kubernetes quantity | `4` | Must match the Kubernetes `Quantity` grammar (`m`, plain integer, decimal). | `EnvConfig.runtimepod.cpu`. |
 | `--runtime-memory <value>` | Kubernetes quantity | `8916Mi` | Must match the Kubernetes `Quantity` grammar (`Ki`, `Mi`, `Gi`, …). | `EnvConfig.runtimepod.memory`. |
@@ -285,9 +285,18 @@ The dry-run trace shows the `helm pull … --untar` line before the `helm upgrad
 
 | Flag | Type | Default | Validation | Persists to |
 |---|---|---|---|---|
-| `--runtime-image <ref>` | string (OCI image ref) | unset → the env's resolved runtime image (repo-local chart, or `EnvConfig.runtimeimage`). | Same reference rules as [`erun init --runtime-image`](#erun-init): a full reference (registry path and/or tag present) is used verbatim; a bare/tagless reference is qualified against the env's registry and pinned to `<version>` (never `:latest`). | `EnvConfig.runtimeimage`, so a later `open`/redeploy addresses the same image. |
+| `--runtime-image <ref>` | string (OCI image ref) | unset → the env's resolved runtime image (repo-local chart, `EnvConfig.runtimeimage`, or the [tenant-umbrella default](#deploy-runtime-image-default)). | Same reference rules as [`erun init --runtime-image`](#erun-init): a full reference (registry path and/or tag present) is used verbatim; a bare/tagless reference is qualified against the env's registry and pinned to `<version>` (never `:latest`). | `EnvConfig.runtimeimage`, so a later `open`/redeploy addresses the same image. |
 
 The dry-run trace names the decision: `deploy: bypassing the repo-local runtime chart for the runtime image override <ref>; using published chart <chart> version <v>`, followed by `deploy: runtime image override <ref>:<v> (imageOverrides.erun-devops)`. The desktop runtime dialog threads this flag automatically when the operator picks the ERun-base entry in the version picker (#697); picking the env's own `<tenant>-devops` image deploys the env's own chart with no override.
+
+#### Default runtime image for a tenant umbrella {#deploy-runtime-image-default}
+
+With **no** `--runtime-image` and **no** `EnvConfig.runtimeimage`, deploy resolves `imageOverrides.erun-devops` from the published chart it is installing:
+
+- Deploying the tenant's own `charts/<tenant>-devops` umbrella (the [tenant-preferred runtime chart](#deploy-subchart-forwarding)) → deploy **defaults the image to the umbrella's own** `<registry>/<tenant>-devops:<version>`. `erun push` publishes the umbrella and its `<tenant>-devops` image together on the tenant version line, so the chart's identity names the image; building and pushing it is sufficient. Trace: `deploy: defaulting runtime image to the <tenant>-devops chart's own image <ref> (imageOverrides.erun-devops)`, re-scoped into the deploy as `--set-string erun-devops.imageOverrides.erun-devops=<ref>`.
+- Deploying the shared `charts/erun-devops` chart (no tenant umbrella published) → **no override** is set; the chart's own default image runs. An image-only build env therefore still points at its image through `runtimeimage`.
+
+An explicit `runtimeimage` (or `--runtime-image`) always wins over this default — so a tenant that publishes its own umbrella can still pin a *different* image (e.g. a hotfix build) by setting the field, which traces the `runtime image override` line above rather than the `defaulting` line. This default is why a `<tenant>-devops` umbrella deploy runs the tenant's own image without any `runtimeimage`, instead of silently falling back to a stock `erun-devops:<tenant-version>` the tenant line never published (which would `ImagePullBackOff`).
 
 ### `--components` value set and selection precedence {#components-value-set}
 
