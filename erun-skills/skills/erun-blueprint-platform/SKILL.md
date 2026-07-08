@@ -317,6 +317,26 @@ add `<tenant>-powerdns` only where `:53` + the pull secret exist. The runtime
 chart deploys on its own with an empty selection, so a bare `erun deploy <tenant>
 <env>` bootstraps or heals the runtime without touching the components.
 
+**Set the PowerDNS bind address per env, before deploying.** `<tenant>-powerdns`
+binds `:53` on the node via `hostNetwork`, at `powerdns.localAddress`. Leave it
+empty to bind the node's own interface IP — the default on current erun,
+injected via the downward API, which coexists with a node's systemd-resolved
+`127.0.0.53:53` stub. Binding `0.0.0.0` collides with that stub on any node that
+runs one, so `pdns_server` can't bind and the pod CrashLoops. Pin it in the
+umbrella's `values.<env>.yaml` up front rather than hand-patching a failed
+deploy — a literal node IP where you must (a multi-homed node, or an older erun
+pin whose default is still `0.0.0.0`), or `0.0.0.0` only where `:53` is free:
+
+```yaml
+# <tenant>-devops/k8s/acme-powerdns/values.prod.yaml
+erun-powerdns:
+  powerdns:
+    localAddress: ""      # empty → node interface IP; a literal IP pins one bind
+```
+
+The override is honored on every erun-powerdns version; only the empty-value
+default differs (node IP on current erun, `0.0.0.0` on pre-hostIP pins).
+
 **Every** erun chart — the runtime `erun-devops` chart *and* every component
 chart (`erun-powerdns`, `erun-backend-*`, `erun-docs`) — publishes under the
 registry's `/charts` path, kept separate from the same-named image repo

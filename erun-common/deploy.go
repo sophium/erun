@@ -1829,6 +1829,12 @@ func (d HelmDeploySpec) command() commandSpec {
 		"--install",
 		"--wait",
 		"--wait-for-jobs",
+		// The chart is the source of truth for a deploy. Under Helm's
+		// server-side apply, an out-of-band `kubectl` edit takes ownership of the
+		// fields it touched, and a later deploy that sets those same fields is
+		// otherwise rejected as a conflict — even when the value is unchanged.
+		// Force conflicts so the release always reclaims its own fields.
+		"--force-conflicts",
 		"--timeout", d.Timeout,
 		"--namespace", d.Namespace,
 	}
