@@ -47,6 +47,69 @@ func TestBuild(t *testing.T) {
 		golden.Equal(t, "build/dry_run_from_devops_cwd", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_configured_docker_and_version_paths", func(t *testing.T) {
+		// paths.docker and paths.version in .erun/config.yaml relocate the docker
+		// build root and VERSION file out of the <tenant>-devops convention: the
+		// build discovers the component context under build/docker, mints the
+		// version from build/VERSION, and traces both decisions. No -devops module
+		// exists, yet the build-env advisory is suppressed because paths.docker is set.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectPathsConfig(t, setup, "build/docker", "", "", "build/VERSION")
+		fixture.SeedDockerComponentAt(t, filepath.Join(setup.Cwd, "build", "docker"), "api")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "build", "VERSION"), "2.3.4\n")
+		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_configured_docker_and_version_paths", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_paths_version_keeps_pinned_base", func(t *testing.T) {
+		// Regression: a project-global paths.version is the project-level default and
+		// must NOT clobber a component's own in-build-dir VERSION. The pinned base
+		// keeps its 9.9.9 tag; a component without its own VERSION takes the
+		// configured project version (snapshotted, since it is not build-dir-local).
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectPathsConfig(t, setup, "build/docker", "", "", "VERSION")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "VERSION"), "1.0.0\n")
+		fixture.SeedDockerComponentAt(t, filepath.Join(setup.Cwd, "build", "docker"), "api")
+		fixture.SeedDockerComponentAt(t, filepath.Join(setup.Cwd, "build", "docker"), "pinnedbase")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "build", "docker", "pinnedbase", "VERSION"), "9.9.9\n")
+		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		// Versions normalize to <VERSION> in the golden, so assert on the raw output
+		// that the pinned base kept 9.9.9 and was not snapshotted by paths.version.
+		if !strings.Contains(result.Combined, "ghcr.io/sophium/pinnedbase:9.9.9 ") {
+			t.Errorf("expected pinned base image ghcr.io/sophium/pinnedbase:9.9.9 in output:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "pinnedbase:9.9.9-snapshot") {
+			t.Errorf("pinned base was snapshotted despite its own VERSION file:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_paths_version_keeps_pinned_base", normalize.Apply(result.Combined))
+	})
+
+	t.Run("configured_docker_path_wrong_name_errors", func(t *testing.T) {
+		// A paths.docker override pointing at a directory not named "docker" fails
+		// with an error explaining the naming constraint, rather than silently
+		// falling back to convention discovery.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectPathsConfig(t, setup, "images", "", "", "")
+		fixture.SeedDockerComponentAt(t, filepath.Join(setup.Cwd, "images"), "api")
+		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a misnamed configured docker path, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/configured_docker_path_wrong_name_errors", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_no_devops_recommends_build_env_skill", func(t *testing.T) {
 		// A build in a project with no <tenant>-devops module emits the
 		// erun-build-env skill advisory — even when the build itself succeeds via

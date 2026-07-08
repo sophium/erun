@@ -1,0 +1,2 @@
+audit: erun terraform plan --dry-run team dev
+no Terraform root at <TMP> for team/dev — the .erun/config.yaml paths.terraform base "infra/tf" must contain a dev/ dir with its main.tf and dev.tfvars

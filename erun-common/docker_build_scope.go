@@ -59,6 +59,27 @@ func resolveCurrentDevopsDockerDir(findProjectRoot ProjectFinderFunc, dir string
 		return "", false, nil
 	}
 
+	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
+	if err != nil {
+		return "", false, err
+	}
+
+	// A configured paths.docker override is authoritative: it wins over the
+	// -devops cwd shortcut and the project-root convention scan, and applies
+	// from any cwd inside the project.
+	if projectRoot != "" {
+		if configured, ok, err := configuredDockerDir(projectRoot); err != nil || ok {
+			return configured, ok, err
+		}
+	}
+
+	return resolveConventionDevopsDockerDir(findProjectRoot, dir, projectRoot)
+}
+
+// resolveConventionDevopsDockerDir is the convention discovery used when no
+// paths.docker override applies: the cwd -devops shortcut, then the project-root
+// <tenant>-devops/docker scan (only when cwd is the project root).
+func resolveConventionDevopsDockerDir(findProjectRoot ProjectFinderFunc, dir, projectRoot string) (string, bool, error) {
 	dockerDir := filepath.Join(dir, "docker")
 	if strings.HasSuffix(filepath.Base(dir), "-devops") {
 		if ok, err := isDockerBuildModuleDir(dockerDir); err != nil {
@@ -68,15 +89,35 @@ func resolveCurrentDevopsDockerDir(findProjectRoot ProjectFinderFunc, dir string
 		}
 	}
 
-	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
-	if err != nil {
-		return "", false, err
-	}
 	if projectRoot == "" || dir != filepath.Clean(projectRoot) {
 		return "", false, nil
 	}
 
 	return resolveProjectRootDevopsDockerDir(findProjectRoot, projectRoot)
+}
+
+// configuredDockerDir resolves the project-global paths.docker override. It
+// returns (dir, true, nil) when configured and a usable docker build module,
+// (,false,nil) when unset, and an error when configured but not a docker build
+// module — a misconfigured override fails loudly rather than silently falling
+// back to convention.
+func configuredDockerDir(projectRoot string) (string, bool, error) {
+	paths, err := loadProjectPaths(projectRoot)
+	if err != nil {
+		return "", false, err
+	}
+	dockerDir := resolveProjectPath(projectRoot, paths.Docker)
+	if dockerDir == "" {
+		return "", false, nil
+	}
+	ok, err := isDockerBuildModuleDir(dockerDir)
+	if err != nil {
+		return "", false, err
+	}
+	if !ok {
+		return "", false, fmt.Errorf("configured docker path %q (.erun/config.yaml paths.docker) is not a docker build module: expected a directory named \"docker\" holding per-component build contexts", strings.TrimSpace(paths.Docker))
+	}
+	return dockerDir, true, nil
 }
 
 func resolveProjectRootDevopsDockerDir(findProjectRoot ProjectFinderFunc, projectRoot string) (string, bool, error) {

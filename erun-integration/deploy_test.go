@@ -142,6 +142,40 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_from_k8s_dir", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_configured_k8s_path", func(t *testing.T) {
+		// A paths.k8s override in .erun/config.yaml relocates the chart tree out of
+		// <tenant>-devops/k8s: deploy resolves the runtime chart from deploy/k8s
+		// and traces the configured dir as a decision line. No <tenant>-devops
+		// module exists, so without the override deploy would fall back to the
+		// published runtime chart.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectPathsConfig(t, setup, "", "deploy/k8s", "", "")
+		fixture.SeedK8sChartAt(t, filepath.Join(setup.Cwd, "deploy", "k8s"), "team-devops", "team", "dev")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_configured_k8s_path", normalize.Apply(result.Combined))
+	})
+
+	t.Run("configured_k8s_path_wrong_name_errors", func(t *testing.T) {
+		// A paths.k8s override pointing at a directory not named "k8s" fails with an
+		// error explaining the naming constraint, rather than silently falling back
+		// to convention discovery.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectPathsConfig(t, setup, "", "charts", "", "")
+		fixture.SeedK8sChartAt(t, filepath.Join(setup.Cwd, "charts"), "team-devops", "team", "dev")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a misnamed configured k8s path, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/configured_k8s_path_wrong_name_errors", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_from_git_project_root_detects_tenant_devops", func(t *testing.T) {
 		// Exercises detectedProjectRootDevopsK8sDir: from a git project root
 		// whose repo name equals the tenant, chart discovery must go straight

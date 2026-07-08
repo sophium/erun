@@ -300,6 +300,9 @@ type ProjectConfig struct {
 	// Platform holds the per-instance erunpaas platform configuration; empty for
 	// projects that do not run a platform deployment.
 	Platform PlatformConfig `yaml:"platform,omitempty"`
+	// Paths overrides where erun discovers the project's devops assets (docker/,
+	// k8s/, terraform-<tenant>/, VERSION); empty keeps the conventional layout.
+	Paths ProjectPathsConfig `yaml:"paths,omitempty"`
 }
 
 // K8sForEnvironment returns the k8s deploy plan declared for the given

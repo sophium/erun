@@ -158,6 +158,8 @@ Algorithm:
 
 The standard layout (`<module>/docker/<image>/Dockerfile`) is ERun's convention for project Dockerfiles; the flat layout is the fallback for hand-built contexts.
 
+The `docker/` root the algorithm scans is the convention default (`<tenant>-devops/docker`) unless a project relocates it — along with the `k8s/` chart root, the `terraform-<tenant>` base, and the `VERSION` file — via the [`paths:` block](/reference/configuration#paths-block) in `.erun/config.yaml`. A configured `docker`/`k8s` path must still end in a `docker`/`k8s` segment, so the regex above is evaluated against the configured root.
+
 ## Multi-architecture build contract
 
 Every `erun build` produces both `linux/amd64` and `linux/arm64`. The build-graph order:

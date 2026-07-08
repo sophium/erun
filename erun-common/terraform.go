@@ -43,14 +43,18 @@ type TerraformParams struct {
 
 // TerraformResult is the resolved Terraform plan a run would execute.
 type TerraformResult struct {
-	Tenant               string     `json:"tenant"`
-	Environment          string     `json:"environment"`
-	Operation            string     `json:"operation"`
-	Namespace            string     `json:"namespace"`
-	Directory            string     `json:"directory"`
-	VarFile              string     `json:"varFile,omitempty"`
-	Commands             [][]string `json:"commands"`
-	RequiresConfirmation bool       `json:"requiresConfirmation"`
+	Tenant      string `json:"tenant"`
+	Environment string `json:"environment"`
+	Operation   string `json:"operation"`
+	Namespace   string `json:"namespace"`
+	Directory   string `json:"directory"`
+	// ConfiguredTerraformBase is the relative paths.terraform override from the
+	// project's .erun/config.yaml when set; empty when the default
+	// terraform-<tenant> base is used. Surfaced so the resolved base is auditable.
+	ConfiguredTerraformBase string     `json:"configuredTerraformBase,omitempty"`
+	VarFile                 string     `json:"varFile,omitempty"`
+	Commands                [][]string `json:"commands"`
+	RequiresConfirmation    bool       `json:"requiresConfirmation"`
 }
 
 // terraformPlanFile holds the plan apply/destroy write and then apply, so the
@@ -87,6 +91,9 @@ func RunTerraform(ctx Context, params TerraformParams, store TerraformStore, con
 
 func traceTerraformPlan(ctx Context, result TerraformResult, steps []terraformStep) {
 	ctx.Trace(fmt.Sprintf("terraform: %s in %s (env %s/%s, namespace %s)", result.Operation, result.Directory, result.Tenant, result.Environment, result.Namespace))
+	if result.ConfiguredTerraformBase != "" {
+		ctx.Trace("terraform: base " + result.ConfiguredTerraformBase + " from .erun/config.yaml paths.terraform")
+	}
 	if result.VarFile != "" {
 		ctx.Trace("terraform: var file " + result.VarFile)
 	} else {
@@ -144,21 +151,28 @@ func resolveTerraformPlan(params TerraformParams, store TerraformStore) (Terrafo
 		return TerraformResult{}, nil, err
 	}
 
-	dir, varFile, err := resolveTerraformDir(projectRoot, tenant, environment)
+	paths, err := loadProjectPaths(projectRoot)
+	if err != nil {
+		return TerraformResult{}, nil, err
+	}
+	configuredBase := strings.TrimSpace(paths.Terraform)
+
+	dir, varFile, err := resolveTerraformDir(projectRoot, tenant, environment, configuredBase)
 	if err != nil {
 		return TerraformResult{}, nil, err
 	}
 
 	steps := buildTerraformSteps(op, varFile, params.ExtraArgs)
 	result := TerraformResult{
-		Tenant:               tenant,
-		Environment:          environment,
-		Operation:            string(op),
-		Namespace:            KubernetesNamespaceName(tenant, environment),
-		Directory:            dir,
-		VarFile:              varFile,
-		Commands:             terraformStepCommands(steps),
-		RequiresConfirmation: op == TerraformApply || op == TerraformDestroy,
+		Tenant:                  tenant,
+		Environment:             environment,
+		Operation:               string(op),
+		Namespace:               KubernetesNamespaceName(tenant, environment),
+		Directory:               dir,
+		ConfiguredTerraformBase: configuredBase,
+		VarFile:                 varFile,
+		Commands:                terraformStepCommands(steps),
+		RequiresConfirmation:    op == TerraformApply || op == TerraformDestroy,
 	}
 	return result, steps, nil
 }
@@ -172,16 +186,32 @@ func validateTerraformOperation(op TerraformOperation) error {
 	}
 }
 
-func resolveTerraformDir(projectRoot, tenant, environment string) (dir, varFile string, err error) {
-	dir = filepath.Join(projectRoot, "terraform-"+tenant, environment)
+// resolveTerraformDir resolves the per-env Terraform root. The base defaults to
+// terraform-<tenant> under the project root but is replaced by a configured
+// paths.terraform override; either way erun still appends /<environment>.
+func resolveTerraformDir(projectRoot, tenant, environment, configuredBase string) (dir, varFile string, err error) {
+	base := resolveProjectPath(projectRoot, configuredBase)
+	if base == "" {
+		base = filepath.Join(projectRoot, "terraform-"+tenant)
+	}
+	dir = filepath.Join(base, environment)
 	if info, statErr := os.Stat(dir); statErr != nil || !info.IsDir() {
-		return "", "", fmt.Errorf("no Terraform root at %s for %s/%s — scaffold it with the erun-blueprint-platform skill, or create terraform-%s/%s/ with its main.tf and %s.tfvars", dir, tenant, environment, tenant, environment, environment)
+		return "", "", terraformRootNotFoundError(dir, tenant, environment, configuredBase)
 	}
 	candidate := environment + ".tfvars"
 	if st, statErr := os.Stat(filepath.Join(dir, candidate)); statErr == nil && !st.IsDir() {
 		varFile = candidate
 	}
 	return dir, varFile, nil
+}
+
+// terraformRootNotFoundError explains where erun looked and how to scaffold it,
+// tailoring the hint to whether a paths.terraform override is in effect.
+func terraformRootNotFoundError(dir, tenant, environment, configuredBase string) error {
+	if strings.TrimSpace(configuredBase) != "" {
+		return fmt.Errorf("no Terraform root at %s for %s/%s — the .erun/config.yaml paths.terraform base %q must contain a %s/ dir with its main.tf and %s.tfvars", dir, tenant, environment, strings.TrimSpace(configuredBase), environment, environment)
+	}
+	return fmt.Errorf("no Terraform root at %s for %s/%s — scaffold it with the erun-blueprint-platform skill, or create terraform-%s/%s/ with its main.tf and %s.tfvars", dir, tenant, environment, tenant, environment, environment)
 }
 
 func resolveTerraformScope(store TerraformStore, params TerraformParams) (tenant, environment string, err error) {

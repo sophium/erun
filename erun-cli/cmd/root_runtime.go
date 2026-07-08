@@ -175,7 +175,14 @@ func hasOptionalBuildCmd(findProjectRoot common.ProjectFinderFunc, resolveBuildC
 	}
 
 	buildContexts, err := common.ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, common.DockerCommandTarget{})
-	return err == nil && len(buildContexts) > 0
+	if err != nil {
+		// A misconfigured build setup (e.g. a paths.docker override pointing at a
+		// non-docker directory) is a hard error, not "no build here": attach the
+		// command so `erun build` surfaces the error instead of the root printing
+		// "unknown command". Only a genuine not-found means no build command.
+		return !errors.Is(err, common.ErrDockerBuildContextNotFound)
+	}
+	return len(buildContexts) > 0
 }
 
 func hasOptionalPushCmd(findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc) bool {
@@ -183,13 +190,14 @@ func hasOptionalPushCmd(findProjectRoot common.ProjectFinderFunc, resolveBuildCo
 	if err == nil && strings.TrimSpace(buildContext.DockerfilePath) != "" {
 		return true
 	}
-	// Also register push at the project root so that "erun push" works alongside
-	// "erun build" when multiple docker contexts exist.
-	if currentBuildContextIsProjectRoot(findProjectRoot, buildContext) {
-		buildContexts, contextErr := common.ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, common.DockerCommandTarget{})
-		return contextErr == nil && len(buildContexts) > 0
+	// Register push wherever build attaches — the same context resolution, so the
+	// two primitives stay symmetric (both work from the project root, and both
+	// work from any cwd once a paths.docker override resolves the build root).
+	buildContexts, contextErr := common.ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, common.DockerCommandTarget{})
+	if contextErr != nil {
+		return !errors.Is(contextErr, common.ErrDockerBuildContextNotFound)
 	}
-	return false
+	return len(buildContexts) > 0
 }
 
 // buildShortTarget honours an env's build.sh opt-out so the build command's short

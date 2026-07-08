@@ -13,8 +13,8 @@ func newTerraformCmd(store common.TerraformStore, findProjectRoot common.Project
 	cmd := &cobra.Command{
 		Use:   "terraform",
 		Short: "Run a platform's per-env Terraform from the right folder automatically",
-		Long: "Run Terraform against a hosted platform's per-environment root (terraform-<tenant>/<environment>/) " +
-			"without hand-running terraform or cd-ing into the folder.\n\n" +
+		Long: "Run Terraform against a hosted platform's per-environment root (terraform-<tenant>/<environment>/, " +
+			"or the paths.terraform base from .erun/config.yaml) without hand-running terraform or cd-ing into the folder.\n\n" +
 			"erun resolves the env's folder from the current scope, picks up the symlinked common.tf, and runs that " +
 			"env's main.tf with its <environment>.tfvars. Use a subcommand: `apply`, `plan`, or `destroy`.",
 		SilenceUsage: true,

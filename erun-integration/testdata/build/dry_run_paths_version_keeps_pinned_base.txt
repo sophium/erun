@@ -1,0 +1,25 @@
+audit: erun build --dry-run
+build: docker build root configured as build/docker (.erun/config.yaml paths.docker)
+build: version file configured as VERSION (.erun/config.yaml paths.version)
+docker image inspect ghcr.io/sophium/api:fp-<HEX16>-amd64
+fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
+docker image inspect ghcr.io/sophium/api:fp-<HEX16>-arm64
+fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-arm64
+rebuilding ghcr.io/sophium/api:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
+cd <TMP> && docker build --platform linux/amd64 --provenance=false --progress=plain -t ghcr.io/sophium/api:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
+cd <TMP> && docker tag ghcr.io/sophium/api:<VERSION> ghcr.io/sophium/api:fp-<HEX16>-amd64
+cd <TMP> && docker tag ghcr.io/sophium/api:<VERSION> ghcr.io/sophium/api:<VERSION>
+cd <TMP> && docker tag ghcr.io/sophium/api:<VERSION> ghcr.io/sophium/api:<VERSION>
+cd <TMP> && docker build --platform linux/arm64 --provenance=false --progress=plain -t ghcr.io/sophium/api:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
+cd <TMP> && docker tag ghcr.io/sophium/api:<VERSION> ghcr.io/sophium/api:fp-<HEX16>-arm64
+cd <TMP> && docker tag ghcr.io/sophium/api:<VERSION> ghcr.io/sophium/api:<VERSION>
+cd <TMP> && docker tag ghcr.io/sophium/api:<VERSION> ghcr.io/sophium/api:<VERSION>
+docker image inspect ghcr.io/sophium/pinnedbase:fp-<HEX16>-amd64
+fingerprint image not found locally: ghcr.io/sophium/pinnedbase:fp-<HEX16>-amd64
+docker image inspect ghcr.io/sophium/pinnedbase:fp-<HEX16>-arm64
+fingerprint image not found locally: ghcr.io/sophium/pinnedbase:fp-<HEX16>-arm64
+rebuilding ghcr.io/sophium/pinnedbase:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
+cd <TMP> && docker build --platform linux/amd64 --provenance=false --progress=plain -t ghcr.io/sophium/pinnedbase:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
+cd <TMP> && docker tag ghcr.io/sophium/pinnedbase:<VERSION> ghcr.io/sophium/pinnedbase:fp-<HEX16>-amd64
+cd <TMP> && docker build --platform linux/arm64 --provenance=false --progress=plain -t ghcr.io/sophium/pinnedbase:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
+cd <TMP> && docker tag ghcr.io/sophium/pinnedbase:<VERSION> ghcr.io/sophium/pinnedbase:fp-<HEX16>-arm64
