@@ -119,11 +119,12 @@ Committed to the repo, applies to anyone who checks it out.
 
 The `paths:` block relocates the devops assets erun otherwise discovers by convention: the `docker/` build contexts and `k8s/` Helm charts under `<tenant>-devops/`, the per-environment Terraform roots at `terraform-<tenant>/`, and the `VERSION` file. It is project-global (not per-environment). Reach for it when a repo does not nest these under a `<tenant>-devops/` module — for example a devops repo whose root carries `docker/`, `k8s/`, `terraform-<tenant>/`, and `VERSION` as top-level siblings.
 
-Every field is optional; an unset field keeps the conventional location. A configured path resolves relative to the project root (an absolute path is used as-is). The override **relocates** the canonical folders, it does not rename them: the `docker/` and `k8s/` directories keep those exact names (erun's build and deploy machinery keys off the folder name), so a configured `docker`/`k8s` path must end in a `docker`/`k8s` segment.
+Every field is optional; an unset field keeps the conventional location. A configured path resolves relative to the project root (an absolute path is used as-is). The override **relocates** the canonical folders, it does not rename them: the `docker/` and `k8s/` directories keep those exact names (erun's build and deploy machinery keys off the folder name), so a configured `docker`/`k8s` path must end in a `docker`/`k8s` segment. One field, `dockercontext`, is not a path but a mode selector for how the Docker build context is chosen.
 
 | Field | Type | Default | Effect |
 |---|---|---|---|
 | `docker` | string | `<tenant>-devops/docker` | Directory (named `docker`) whose subdirectories are the per-component build contexts (`<docker>/<component>/Dockerfile`). Read by `erun build` / `erun push`. |
+| `dockercontext` | `repo-root` \| `component` | positional heuristic | Selects the Docker build **context** root, overriding the positional heuristic (see [Build context directory](/reference/configuration-build-paths#3-build-context-directory)). `repo-root` → context is the project root (so a Dockerfile can `COPY` from anywhere in the repo); `component` → context is the component build dir. Unset keeps the heuristic. Read by `erun build` / `erun push` / `erun release`. |
 | `k8s` | string | `<tenant>-devops/k8s` | Directory (named `k8s`) whose subdirectories are the per-component Helm charts (`<k8s>/<component>/Chart.yaml`). Read by `erun deploy`, and by `erun build` for chart packaging. |
 | `terraform` | string | `terraform-<tenant>` | Base directory under which the per-environment Terraform roots live; erun still appends `/<environment>`. Read by `erun terraform`. |
 | `version` | string | walk up from the build dir to the project root | Path to the `VERSION` file that mints the build version. A directory resolves to `<dir>/VERSION`. Read by `erun build` / `erun push` / `erun release`. |
@@ -142,6 +143,7 @@ paths:
 - `paths.docker` / `paths.k8s` pointing at a directory that is missing, not named `docker`/`k8s`, or holding no build contexts / charts → `configured docker path "<p>" (.erun/config.yaml paths.docker) is not a docker build module: …` (and the `k8s` analogue).
 - `paths.terraform` with no `<base>/<environment>/` directory → `no Terraform root at <dir> … the .erun/config.yaml paths.terraform base "<p>" must contain a <env>/ dir …`.
 - `paths.version` pointing at a missing file → `configured version file <p> (.erun/config.yaml paths.version) not found`.
+- `paths.dockercontext` set to anything other than `repo-root` or `component` → `invalid docker context "<v>" (.erun/config.yaml paths.dockercontext): expected "repo-root" or "component"`.
 
 #### `platform:` block {#platform-block}
 

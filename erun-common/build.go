@@ -108,9 +108,10 @@ func recommendBuildEnvIfMissing(ctx Context, findProjectRoot ProjectFinderFunc, 
 	ctx.Info(`build: this project has no <tenant>-devops build environment — ask Claude to "init erun build environment" to set one up with the erun-build-env skill`)
 }
 
-// traceConfiguredBuildPaths surfaces configured paths.docker/paths.version
-// overrides as dry-run decision lines so the build plan shows the docker build
-// root and version file were resolved from config rather than convention.
+// traceConfiguredBuildPaths surfaces configured paths.docker/paths.dockercontext/
+// paths.version overrides as dry-run decision lines so the build plan shows the
+// docker build root, build context, and version file were resolved from config
+// rather than convention.
 func traceConfiguredBuildPaths(ctx Context, findProjectRoot ProjectFinderFunc, target DockerCommandTarget) {
 	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil || strings.TrimSpace(projectRoot) == "" {
@@ -122,6 +123,9 @@ func traceConfiguredBuildPaths(ctx Context, findProjectRoot ProjectFinderFunc, t
 	}
 	if v := strings.TrimSpace(paths.Docker); v != "" {
 		ctx.Trace("build: docker build root configured as " + v + " (.erun/config.yaml paths.docker)")
+	}
+	if v := strings.TrimSpace(paths.DockerContext); v != "" {
+		ctx.Trace("build: docker build context configured as " + v + " (.erun/config.yaml paths.dockercontext)")
 	}
 	if v := strings.TrimSpace(paths.Version); v != "" {
 		ctx.Trace("build: version file configured as " + v + " (.erun/config.yaml paths.version)")

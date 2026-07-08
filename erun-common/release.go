@@ -942,8 +942,12 @@ func discoverReleaseDockerImages(projectRoot, releaseRoot, versionFilePath, vers
 		if strings.TrimSpace(registry) != "" {
 			tag = strings.TrimRight(registry, "/") + "/" + tag
 		}
+		contextDir, err := ResolveDockerBuildContextDirForProject(buildContext.Dir, releaseRoot)
+		if err != nil {
+			return nil, err
+		}
 		images = append(images, ReleaseDockerImageSpec{
-			ContextDir:     ResolveDockerBuildContextDirForProject(buildContext.Dir, releaseRoot),
+			ContextDir:     contextDir,
 			DockerfilePath: buildContext.DockerfilePath,
 			ImageName:      imageName,
 			Registry:       registry,
