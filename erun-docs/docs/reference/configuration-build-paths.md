@@ -49,6 +49,17 @@ The image name is `filepath.Base(buildDir)` — the directory containing the Doc
 
 The `docker/` root walked here is `<tenant>-devops/docker` by convention, or the [`paths.docker`](/reference/configuration#paths-block) override from `.erun/config.yaml` when set (it must still be a directory named `docker`); the standard-layout match is computed against the configured root.
 
+### Overriding the context: `paths.dockercontext`
+
+The standard-layout match above is purely positional — it keys off `docker/` being exactly one segment below the project root. A component nested deeper (e.g. `harnesses/pv/docker/<component>/Dockerfile`, where `docker/` is the **third** segment) does not match, so its context defaults to the component dir and repo-root-relative `COPY`s fail even though `docker build .` from the repo root would work.
+
+Set [`paths.dockercontext`](/reference/configuration#paths-block) in `.erun/config.yaml` to choose the context explicitly, independent of path depth:
+
+- `repo-root` — context = `<projectRoot>`. Use this to let a deeply nested Dockerfile `COPY` from anywhere in the repo.
+- `component` — context = the component build dir, even at the standard layout where the heuristic would pick the repo root.
+
+Unset keeps the positional heuristic. An unrecognized value fails the build (see the [`paths:` error behaviour](/reference/configuration#paths-block)).
+
 | Error code | Cause |
 |---|---|
 | `NO_BUILDABLE_CONTEXT` | The walk found no `Dockerfile` under any `<tenant>-devops/docker/<component>/` and the cwd is not itself a buildable context. |

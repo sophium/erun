@@ -127,8 +127,13 @@ func ResolveDockerBuildForImageReference(store DockerStore, findProjectRoot Proj
 		Tag:         tag,
 	}
 
+	contextDir, err := ResolveDockerBuildContextDirForProject(buildContext.Dir, projectRoot)
+	if err != nil {
+		return DockerBuildSpec{}, false, err
+	}
+
 	return DockerBuildSpec{
-		ContextDir:     ResolveDockerBuildContextDirForProject(buildContext.Dir, projectRoot),
+		ContextDir:     contextDir,
 		DockerfilePath: buildContext.DockerfilePath,
 		Image:          imageRef,
 		Platforms:      slices.Clone(multiPlatformDockerBuilds),
@@ -213,7 +218,10 @@ func newDockerBuildSpec(now NowFunc, projectRoot, environment string, buildConte
 		}
 	}
 
-	contextDir := ResolveDockerBuildContextDirForProject(buildContext.Dir, projectRoot)
+	contextDir, err := ResolveDockerBuildContextDirForProject(buildContext.Dir, projectRoot)
+	if err != nil {
+		return DockerBuildSpec{}, err
+	}
 	imageRef, err := resolveDockerImageReferenceForProject(now, projectRoot, environment, buildContext.Dir, versionOverride)
 	if err != nil {
 		return DockerBuildSpec{}, err

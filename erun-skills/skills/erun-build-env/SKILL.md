@@ -248,6 +248,26 @@ second `docker/<oldname>/` under it), remove the superseded copy after previewin
 layers alone, and don't prune pushed images — an unreferenced tag in the registry is
 the operator's to remove, not this skill's; note it rather than deleting it.
 
+## Non-conventional layout — build context
+
+The steps above put the module at the repo root (`<tenant>-devops/docker/<tenant>-devops/`),
+where `erun build` discovers it by convention and the Docker build context is the
+**repo root** — so the Dockerfile can `COPY` from anywhere in the repo. If the
+project must nest the build module deeper (e.g. `harnesses/<name>/docker/<image>/`,
+where `docker/` is more than one segment below the repo root), set two keys in the
+project's `.erun/config.yaml` `paths:` block:
+
+- `paths.docker: <path-to-the-docker-dir>` — relocates where `erun build` discovers
+  the build module (the path must still end in a `docker` segment).
+- `paths.dockercontext: repo-root` — a deeper `docker/` no longer gets repo-root
+  context automatically, so opt in here or repo-root-relative `COPY`s fail with
+  `"…": not found`. Use `component` to force the component dir instead; unset keeps
+  the positional heuristic.
+
+The full field reference lives in the erun docs Configuration → Build path resolution
+page. Prefer the conventional root layout when you can; reach for these only when the
+repo can't nest the module there.
+
 ## Important
 
 - Give the repo root agent guidance. If the repository root has no
