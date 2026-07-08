@@ -194,11 +194,17 @@ erun-devops:
 `erun deploy` picks this up as the runtime chart (it matches the runtime release
 name), `helm dependency build`s it, and **re-scopes every runtime value it sets
 — tenant, ports, cloud context, MCP auth, and the `imageOverrides.erun-devops`
-image from Step 5 — under the `erun-devops.` subchart key**, so the wrapped
-runtime is wired exactly as the published chart would be. A **runtime env** has
-no worktree, so `erun deploy` installs this chart **by reference** — it re-scopes
-the same way and `helm pull`s the published chart to `-f` this `values.<env>.yaml`,
-so your pod-shape (the `erun-devops.extra*` above) lands there too. Track
+image — under the `erun-devops.` subchart key**, so the wrapped runtime is wired
+exactly as the published chart would be. Because `erun push` publishes this
+umbrella and your `<tenant>-devops` image together at one version, the chart's
+identity already names the image: deploy **defaults `imageOverrides.erun-devops`
+to the umbrella's own `<registry>/<tenant>-devops:<version>`**. So once the
+umbrella is published, **Step 5's `runtimeimage` is optional** — building and
+pushing the image is enough for the deploy to run it; set `runtimeimage` only to
+pin a *different* image than the umbrella's own. A **runtime env** has no
+worktree, so `erun deploy` installs this chart **by reference** — it re-scopes the
+same way and `helm pull`s the published chart to `-f` this `values.<env>.yaml`, so
+your pod-shape (the `erun-devops.extra*` above) lands there too. Track
 `Chart.lock` (committed) and gitignore `charts/*.tgz`, as the platform umbrellas do.
 
 ## Maintenance, repair & upgrade
@@ -241,6 +247,26 @@ second `docker/<oldname>/` under it), remove the superseded copy after previewin
 `erun build` discovers exactly one runtime module. Leave the project's toolchain
 layers alone, and don't prune pushed images — an unreferenced tag in the registry is
 the operator's to remove, not this skill's; note it rather than deleting it.
+
+## Non-conventional layout — build context
+
+The steps above put the module at the repo root (`<tenant>-devops/docker/<tenant>-devops/`),
+where `erun build` discovers it by convention and the Docker build context is the
+**repo root** — so the Dockerfile can `COPY` from anywhere in the repo. If the
+project must nest the build module deeper (e.g. `harnesses/<name>/docker/<image>/`,
+where `docker/` is more than one segment below the repo root), set two keys in the
+project's `.erun/config.yaml` `paths:` block:
+
+- `paths.docker: <path-to-the-docker-dir>` — relocates where `erun build` discovers
+  the build module (the path must still end in a `docker` segment).
+- `paths.dockercontext: repo-root` — a deeper `docker/` no longer gets repo-root
+  context automatically, so opt in here or repo-root-relative `COPY`s fail with
+  `"…": not found`. Use `component` to force the component dir instead; unset keeps
+  the positional heuristic.
+
+The full field reference lives in the erun docs Configuration → Build path resolution
+page. Prefer the conventional root layout when you can; reach for these only when the
+repo can't nest the module there.
 
 ## Important
 

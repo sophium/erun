@@ -21,6 +21,13 @@ type ProjectPathsConfig struct {
 	// Docker is the directory (named "docker") whose subdirectories are the
 	// per-component build contexts. Default <tenant>-devops/docker.
 	Docker string `yaml:"docker,omitempty"`
+	// DockerContext selects the Docker build context root, overriding the
+	// positional heuristic that only picks the repo root for the conventional
+	// <devops-root>/docker/<component> layout. Values: "repo-root" (context =
+	// project root) or "component" (context = the component build dir). Empty
+	// keeps the heuristic. Lets a Dockerfile nested at a non-conventional depth
+	// COPY from elsewhere in the repo by opting into repo-root context.
+	DockerContext string `yaml:"dockercontext,omitempty"`
 	// K8s is the directory (named "k8s") whose subdirectories are the
 	// per-component Helm charts. Default <tenant>-devops/k8s.
 	K8s string `yaml:"k8s,omitempty"`
@@ -36,6 +43,7 @@ type ProjectPathsConfig struct {
 // conventional location.
 func (c ProjectPathsConfig) IsZero() bool {
 	return strings.TrimSpace(c.Docker) == "" &&
+		strings.TrimSpace(c.DockerContext) == "" &&
 		strings.TrimSpace(c.K8s) == "" &&
 		strings.TrimSpace(c.Terraform) == "" &&
 		strings.TrimSpace(c.Version) == ""

@@ -56,7 +56,7 @@ func TestBuild(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedGitRepo(t, setup.Cwd)
-		fixture.SeedProjectPathsConfig(t, setup, "build/docker", "", "", "build/VERSION")
+		fixture.SeedProjectPathsConfig(t, setup, "build/docker", "", "", "", "build/VERSION")
 		fixture.SeedDockerComponentAt(t, filepath.Join(setup.Cwd, "build", "docker"), "api")
 		mustWriteFile(t, filepath.Join(setup.Cwd, "build", "VERSION"), "2.3.4\n")
 		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
@@ -74,7 +74,7 @@ func TestBuild(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedGitRepo(t, setup.Cwd)
-		fixture.SeedProjectPathsConfig(t, setup, "build/docker", "", "", "VERSION")
+		fixture.SeedProjectPathsConfig(t, setup, "build/docker", "", "", "", "VERSION")
 		mustWriteFile(t, filepath.Join(setup.Cwd, "VERSION"), "1.0.0\n")
 		fixture.SeedDockerComponentAt(t, filepath.Join(setup.Cwd, "build", "docker"), "api")
 		fixture.SeedDockerComponentAt(t, filepath.Join(setup.Cwd, "build", "docker"), "pinnedbase")
@@ -101,13 +101,86 @@ func TestBuild(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedGitRepo(t, setup.Cwd)
-		fixture.SeedProjectPathsConfig(t, setup, "images", "", "", "")
+		fixture.SeedProjectPathsConfig(t, setup, "images", "", "", "", "")
 		fixture.SeedDockerComponentAt(t, filepath.Join(setup.Cwd, "images"), "api")
 		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit for a misnamed configured docker path, got 0:\n%s", result.Combined)
 		}
 		golden.Equal(t, "build/configured_docker_path_wrong_name_errors", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_docker_context_repo_root", func(t *testing.T) {
+		// paths.dockercontext: repo-root forces the docker build context to the
+		// project root for a component nested deeper than the conventional
+		// <devops>/docker/<component> layout (here docker is the 3rd path segment),
+		// where the positional heuristic would otherwise pick the component dir.
+		// This lets the Dockerfile COPY sibling repo paths. The context dir
+		// normalizes to <TMP> in the golden, so the raw assert below proves the
+		// resolved context is the project root.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		dockerDir := filepath.Join(setup.Cwd, "harnesses", "pv", "docker")
+		fixture.SeedProjectPathsConfig(t, setup, "harnesses/pv/docker", "repo-root", "", "", "")
+		fixture.SeedDockerComponentAt(t, dockerDir, "web")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "VERSION"), "2.3.4\n")
+		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		// The context dir is masked by <TMP> normalization; assert on the raw
+		// output that docker build runs from the project root, not the component dir.
+		if !strings.Contains(result.Combined, "cd "+setup.Cwd+" && docker build") {
+			t.Errorf("expected docker build context at project root %q:\n%s", setup.Cwd, result.Combined)
+		}
+		if strings.Contains(result.Combined, "cd "+filepath.Join(dockerDir, "web")+" && docker build") {
+			t.Errorf("docker build ran from the component dir despite paths.dockercontext: repo-root:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_docker_context_repo_root", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_docker_context_component", func(t *testing.T) {
+		// paths.dockercontext: component forces the docker build context to the
+		// component dir even at the conventional <devops>/docker/<component> layout,
+		// where the positional heuristic would otherwise pick the repo root. This is
+		// the reverse override. The context dir normalizes to <TMP>, so the raw
+		// assert below proves the resolved context is the component dir.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		dockerDir := filepath.Join(setup.Cwd, "build", "docker")
+		fixture.SeedProjectPathsConfig(t, setup, "build/docker", "component", "", "", "build/VERSION")
+		fixture.SeedDockerComponentAt(t, dockerDir, "api")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "build", "VERSION"), "2.3.4\n")
+		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		componentDir := filepath.Join(dockerDir, "api")
+		if !strings.Contains(result.Combined, "cd "+componentDir+" && docker build") {
+			t.Errorf("expected docker build context at component dir %q:\n%s", componentDir, result.Combined)
+		}
+		if strings.Contains(result.Combined, "cd "+setup.Cwd+" && docker build") {
+			t.Errorf("docker build ran from the project root despite paths.dockercontext: component:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_docker_context_component", normalize.Apply(result.Combined))
+	})
+
+	t.Run("configured_docker_context_invalid_errors", func(t *testing.T) {
+		// An unrecognized paths.dockercontext value fails the build loudly rather
+		// than silently falling back to the positional heuristic.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectPathsConfig(t, setup, "build/docker", "bogus", "", "", "build/VERSION")
+		fixture.SeedDockerComponentAt(t, filepath.Join(setup.Cwd, "build", "docker"), "api")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "build", "VERSION"), "2.3.4\n")
+		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for an invalid docker context value, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/configured_docker_context_invalid_errors", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_no_devops_recommends_build_env_skill", func(t *testing.T) {

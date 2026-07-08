@@ -104,8 +104,12 @@ func resolveRuntimeBuildExecution(ctx eruncommon.Context, runtime RuntimeConfig,
 		if err != nil {
 			return eruncommon.BuildExecutionSpec{}, err
 		}
+		contextDir, err := eruncommon.ResolveDockerBuildContextDirForProject(buildContext.Dir, projectRoot)
+		if err != nil {
+			return eruncommon.BuildExecutionSpec{}, err
+		}
 		execution := eruncommon.BuildExecutionSpecFromDockerBuilds([]eruncommon.DockerBuildSpec{{
-			ContextDir:     eruncommon.ResolveDockerBuildContextDirForProject(buildContext.Dir, projectRoot),
+			ContextDir:     contextDir,
 			DockerfilePath: buildContext.DockerfilePath,
 			Image:          imageRef,
 		}})

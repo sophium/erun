@@ -588,6 +588,53 @@ func TestBuildToolRunsProjectBuildScriptWhenPresent(t *testing.T) {
 	}
 }
 
+// TestBuildToolSurfacesInvalidDockerContext locks that a misconfigured
+// paths.dockercontext fails the MCP build tool loudly for a component build,
+// rather than being swallowed — the erun-common resolver's error must propagate
+// through the MCP transport. The shared behaviour is gated by the erun-cli
+// integration suite, which never enters this MCP wrapper, so the propagation is
+// covered here in the owning module.
+func TestBuildToolSurfacesInvalidDockerContext(t *testing.T) {
+	projectRoot := t.TempDir()
+	componentDir := filepath.Join(projectRoot, "acme-devops", "docker", "web")
+	if err := os.MkdirAll(componentDir, 0o755); err != nil {
+		t.Fatalf("mkdir component dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(componentDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
+		t.Fatalf("write VERSION: %v", err)
+	}
+	erunDir := filepath.Join(projectRoot, ".erun")
+	if err := os.MkdirAll(erunDir, 0o755); err != nil {
+		t.Fatalf("mkdir .erun: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(erunDir, "config.yaml"), []byte("paths:\n  dockercontext: bogus\n"), 0o644); err != nil {
+		t.Fatalf("write project config: %v", err)
+	}
+
+	handler := buildTool(normalizeRuntimeConfig(RuntimeConfig{
+		Context: RuntimeContext{
+			Environment: "dev",
+			RepoPath:    projectRoot,
+		},
+		BuildDockerImage: func(eruncommon.DockerBuildSpec, io.Writer, io.Writer) error {
+			t.Fatal("unexpected docker build: resolution must fail before execution")
+			return nil
+		},
+	}))
+
+	_, _, err := handler(context.Background(), nil, BuildInput{Component: "web", Preview: true})
+	if err == nil {
+		t.Fatal("expected an error for an invalid paths.dockercontext value")
+	}
+	want := `invalid docker context "bogus" (.erun/config.yaml paths.dockercontext): expected "repo-root" or "component"`
+	if err.Error() != want {
+		t.Fatalf("unexpected error:\n got: %v\nwant: %s", err, want)
+	}
+}
+
 func TestInitToolReturnsInteractionWhenSharedInitNeedsInput(t *testing.T) {
 	projectRoot := t.TempDir()
 

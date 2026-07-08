@@ -151,7 +151,7 @@ func TestDeploy(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedGitRepo(t, setup.Cwd)
-		fixture.SeedProjectPathsConfig(t, setup, "", "deploy/k8s", "", "")
+		fixture.SeedProjectPathsConfig(t, setup, "", "", "deploy/k8s", "", "")
 		fixture.SeedK8sChartAt(t, filepath.Join(setup.Cwd, "deploy", "k8s"), "team-devops", "team", "dev")
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
@@ -167,7 +167,7 @@ func TestDeploy(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedGitRepo(t, setup.Cwd)
-		fixture.SeedProjectPathsConfig(t, setup, "", "charts", "", "")
+		fixture.SeedProjectPathsConfig(t, setup, "", "", "charts", "", "")
 		fixture.SeedK8sChartAt(t, filepath.Join(setup.Cwd, "charts"), "team-devops", "team", "dev")
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode == 0 {
@@ -655,11 +655,43 @@ func TestDeploy(t *testing.T) {
 		// ERUN_PUBLISHED_CHART_PROBE_OVERRIDE decision-input seam (real deploys
 		// read the registry); the sibling dry_run_remote_env_uses_published_chart
 		// locks the fallback to charts/erun-devops when the tenant chart is absent.
+		//
+		// With no runtimeimage set, preferring the umbrella also defaults the
+		// runtime image to the umbrella's own image: erun push publishes the
+		// team-devops image and chart together on the tenant version line, so
+		// imageOverrides.erun-devops resolves to <registry>/team-devops:<version>.
+		// Building the custom image is then sufficient — the deploy no longer
+		// silently falls back to the stock erun-devops:<tenant-version>, a tag the
+		// tenant line never publishes (the ImagePullBackOff this fixes). The trace
+		// names the default and the helm command carries the re-scoped --set-string.
 		setup := env.New(t)
 		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-devops:1.0.0")
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
 		golden.Equal(t, "deploy/dry_run_remote_env_prefers_tenant_published_runtime_chart", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_remote_env_tenant_umbrella_explicit_runtime_image_wins", func(t *testing.T) {
+		// Precedence: an explicit runtimeimage overrides the umbrella's own-image
+		// default. A tenant that publishes team-devops but points the env at a
+		// specific image (e.g. a hotfix build) must get that image as
+		// imageOverrides.erun-devops, NOT the umbrella default — the operator's
+		// choice always wins. The trace names the override (not the default) and
+		// the helm command re-scopes it under the erun-devops subchart key.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"runtimeimage: registry.example/acme/hotfix-devops:9.9.9\n")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_tenant_umbrella_explicit_runtime_image_wins", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_remote_env_deploys_published_components", func(t *testing.T) {
