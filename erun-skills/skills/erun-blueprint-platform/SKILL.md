@@ -290,16 +290,20 @@ to the repo's `.gitignore` so it doesn't land as an untracked file:
 Commit the tgz (vendor it) only for an air-gapped install where the OCI registry
 is unreachable at deploy time.
 
-**Forward `tenant`/`environment` into each subchart.** `erun deploy` passes
-`tenant`/`environment` (and the runtime `--set`s) at the **top level**, which
-reaches a chart deployed directly but **not** a wrapped subchart — a subchart
-reads them in its own scope. Components that `{{ required }}` them
-(`erun-backend-api`, `erun-docs`) fail at helm time with `tenant is required`
-unless the umbrella forwards them nested, as above. Components that don't require
-them (`erun-backend-postgres`, `erun-backend-db`, `erun-powerdns`) can use `{}` —
-but forward them anyway if the component reads them for labels/config. A
-comment-only file is still valid for the latter; the file just has to exist so
-`helm -f` resolves.
+**Forward `tenant`/`environment` into each subchart.** helm does not pass
+top-level values into a wrapped subchart, so a subchart that `{{ required }}`s
+them (`erun-backend-api`, `erun-docs`) reads them in its **own** scope. Author
+them nested under the subchart key in each `values.<env>.yaml`, as above — and
+`erun deploy` satisfies the subchart on either path: a **worktree** deploy `-f`s
+that file directly, and a **by-reference** deploy (a runtime env with no
+worktree) both re-scopes deploy's threaded `--set`s under the subchart key *and*
+`helm pull`s the published chart to `-f` this same bundled file. So a wrapped
+subchart no longer fails with `tenant is required` by reference — but keep the
+nested values: the worktree path depends on them, and the by-reference path
+applies them. Components that don't require them (`erun-backend-postgres`,
+`erun-backend-db`, `erun-powerdns`) can use `{}` — but forward them anyway if the
+component reads them for labels/config. A comment-only file is still valid for
+the latter; the file just has to exist so `helm -f` resolves.
 
 **Deploy only env-appropriate components.** Selection is opt-in and per env, so a
 component that can't run in an env is simply left unselected — never forced. Use
@@ -312,6 +316,26 @@ backend trio (`--components <tenant>-backend-postgres,<tenant>-backend-db,<tenan
 add `<tenant>-powerdns` only where `:53` + the pull secret exist. The runtime
 chart deploys on its own with an empty selection, so a bare `erun deploy <tenant>
 <env>` bootstraps or heals the runtime without touching the components.
+
+**Set the PowerDNS bind address per env, before deploying.** `<tenant>-powerdns`
+binds `:53` on the node via `hostNetwork`, at `powerdns.localAddress`. Leave it
+empty to bind the node's own interface IP — the default on current erun,
+injected via the downward API, which coexists with a node's systemd-resolved
+`127.0.0.53:53` stub. Binding `0.0.0.0` collides with that stub on any node that
+runs one, so `pdns_server` can't bind and the pod CrashLoops. Pin it in the
+umbrella's `values.<env>.yaml` up front rather than hand-patching a failed
+deploy — a literal node IP where you must (a multi-homed node, or an older erun
+pin whose default is still `0.0.0.0`), or `0.0.0.0` only where `:53` is free:
+
+```yaml
+# <tenant>-devops/k8s/acme-powerdns/values.prod.yaml
+erun-powerdns:
+  powerdns:
+    localAddress: ""      # empty → node interface IP; a literal IP pins one bind
+```
+
+The override is honored on every erun-powerdns version; only the empty-value
+default differs (node IP on current erun, `0.0.0.0` on pre-hostIP pins).
 
 **Every** erun chart — the runtime `erun-devops` chart *and* every component
 chart (`erun-powerdns`, `erun-backend-*`, `erun-docs`) — publishes under the

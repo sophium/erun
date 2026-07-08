@@ -316,6 +316,34 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/real_run_remote_env_published_chart_via_stubs", normalize.Apply(result.Combined))
 	})
 
+	t.Run("real_run_remote_env_tenant_umbrella_pulls_bundled_values", func(t *testing.T) {
+		// Real-run deploy of a tenant's own published umbrella (team-backend-api,
+		// which wraps erun-backend-api as a subchart). Because top-level --sets do
+		// not reach a wrapped subchart, deploy re-scopes them under erun-backend-api
+		// AND pulls the published chart to -f its bundled values.<env>.yaml. Only a
+		// real run exercises runPublishedValuesPull (the helm pull + temp-dir
+		// prep); the helm/kubectl stubs exit 0 so the pull and rollout complete. The
+		// ERUN_PUBLISHED_CHART_PROBE_OVERRIDE seam marks the chart published so the
+		// coherence check passes without a live registry.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		fixture.StubBinary(t, stubs, "helm", "")
+		envVars := append(setup.Env(),
+			"ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-backend-api:1.0.0")
+		envVars = append(envVars, fixture.StubEnv(stubs, "kubectl", "helm")...)
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.0",
+			"--components", "team-backend-api",
+		}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/real_run_remote_env_tenant_umbrella_pulls_bundled_values", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_recreates_deployment_on_immutable_selector_change", func(t *testing.T) {
 		// Real-run deploy where the installed Deployment's immutable
 		// spec.selector differs from the chart's: helm aborts the first

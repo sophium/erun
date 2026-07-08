@@ -22,6 +22,12 @@ var deployComponentBaseOrder = []string{
 	"docs",
 }
 
+// canonicalChartPrefix is the registry prefix of erun's own published charts
+// (erun-devops, erun-backend-api, ...). A tenant's <tenant>-<base> umbrella
+// wraps the same-base canonical chart erun-<base>, so this is also the subchart
+// value-scope prefix a by-reference umbrella deploy re-scopes under.
+const canonicalChartPrefix = "erun"
+
 // componentChartPrefix is the registry prefix a tenant's component charts carry,
 // matching the runtime release base: erun for the canonical product, <tenant>
 // for a tenant that publishes its own charts (e.g. frs). Derived from
@@ -223,9 +229,31 @@ type DeployableComponent struct {
 	// default selection (saved deploy.components, else the repo plan, else —
 	// when both are empty — the runtime alone).
 	Selected bool `json:"selected"`
+	// PublishedChart is the chart repo a by-reference deploy actually installs for
+	// this item at the chosen version. For the runtime it is the tenant's own
+	// <tenant>-devops chart when that is published at the version, else the
+	// canonical erun-devops fallback — so the picker can name the chart the deploy
+	// will install rather than assuming the fallback. Empty until a version-aware
+	// transport resolves it (see ResolvedRuntimeChartName); non-runtime items are
+	// their own chart (Name).
+	PublishedChart string `json:"publishedChart,omitempty"`
 }
 
 const deployComponentSourcePublished = "published-chart"
+
+// ResolvedRuntimeChartName returns the published chart a by-reference runtime
+// deploy installs: the tenant's own <tenant>-devops chart when it is published at
+// the deploy version (tenantChartPublished), else the canonical erun-devops. The
+// erun product tenant's runtime release name IS erun-devops, so it always resolves
+// there. This is the single source of truth shared by the deploy path
+// (resolvePublishedRuntimeChartReference) and the desktop picker label.
+func ResolvedRuntimeChartName(tenant string, tenantChartPublished bool) string {
+	chart := RuntimeReleaseName(tenant)
+	if chart != DevopsComponentName && tenantChartPublished {
+		return chart
+	}
+	return DevopsComponentName
+}
 
 // ResolveDeployableComponents lists the published component charts a deploy of a
 // chosen version can roll out — the canonical platform components plus the runtime,

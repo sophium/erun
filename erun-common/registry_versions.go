@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"slices"
@@ -27,6 +28,26 @@ func registryStatusError(kind, status string, code int) error {
 		return fmt.Errorf("%s failed: %s: %w", kind, status, ErrRegistryAuthRequired)
 	}
 	return fmt.Errorf("%s failed: %s", kind, status)
+}
+
+// isTransientRegistryError reports whether err is a momentary transport failure
+// (connection reset, DNS blip) worth retrying. A timeout is terminal: it means a
+// slow or hung registry, and retrying only multiplies the wait a blocking caller
+// (erun version) already paid. Auth failures, a cancelled context, and definitive
+// HTTP status responses are terminal too — a listing that reached the registry and
+// got an answer surfaces as an actionable notice rather than being retried.
+func isTransientRegistryError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, ErrRegistryAuthRequired) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return !netErr.Timeout()
+	}
+	return false
 }
 
 type RuntimeRegistryVersions struct {
@@ -82,13 +103,67 @@ func ResolveDefaultRuntimeRegistryVersions(ctx context.Context) (RuntimeRegistry
 	return ResolveConfiguredRuntimeRegistryVersions(ctx, config.RuntimeRegistry)
 }
 
+// registryListMaxAttempts bounds retries of a transient transport failure;
+// registryListRetryBase is the linear backoff step (a var so tests can zero it).
+// A few fast attempts clear a momentary network blip without making a real outage
+// crawl — a persistent failure still surfaces as the picker's authenticate/unreachable
+// notice rather than silently degrading to the anonymous/upstream fallback.
+const registryListMaxAttempts = 3
+
+var registryListRetryBase = 200 * time.Millisecond
+
 func ResolveConfiguredRuntimeRegistryVersions(ctx context.Context, cfg RuntimeRegistryConfig) (RuntimeRegistryVersions, error) {
 	resolved := cfg.Resolved()
+	return resolveRegistryVersionsWithRetry(ctx, func() (RuntimeRegistryVersions, error) {
+		return resolveConfiguredRuntimeRegistryVersionsOnce(ctx, resolved)
+	})
+}
+
+func resolveConfiguredRuntimeRegistryVersionsOnce(ctx context.Context, resolved RuntimeRegistryConfig) (RuntimeRegistryVersions, error) {
 	client := &http.Client{Timeout: 5 * time.Second}
 	if owner, ok := ghcrOwnerFromNamespace(resolved.Namespace); ok {
 		return resolveGHCRRuntimeRegistryVersionsAt(ctx, client, owner, resolved.Repository, resolved.BaseURL, resolved.TokenURL)
 	}
 	return resolveDockerHubRuntimeRegistryVersionsAt(ctx, client, resolved.Namespace, resolved.Repository, resolved.BaseURL)
+}
+
+// resolveRegistryVersionsWithRetry re-runs resolve on a transient transport
+// failure with a short linear backoff, so a momentary network blip does not
+// immediately degrade to anonymous/upstream access. Auth failures, timeouts, and
+// any definitive HTTP status response return on the first try.
+func resolveRegistryVersionsWithRetry(ctx context.Context, resolve func() (RuntimeRegistryVersions, error)) (RuntimeRegistryVersions, error) {
+	var lastErr error
+	for attempt := 0; attempt < registryListMaxAttempts; attempt++ {
+		if attempt > 0 {
+			if err := sleepWithContext(ctx, registryListRetryBase*time.Duration(attempt)); err != nil {
+				return RuntimeRegistryVersions{}, err
+			}
+		}
+		versions, err := resolve()
+		if err == nil || !isTransientRegistryError(err) {
+			return versions, err
+		}
+		lastErr = err
+	}
+	return RuntimeRegistryVersions{}, lastErr
+}
+
+func sleepWithContext(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	if ctx == nil {
+		<-timer.C
+		return nil
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // ResolveRuntimeImageRegistryVersions is a compatibility overload for callers that pass an explicit namespace/repository pair.
