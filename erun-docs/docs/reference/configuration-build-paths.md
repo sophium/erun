@@ -47,6 +47,8 @@ Exactly one path segment between `<projectRoot>` and `docker/`, and exactly one 
 
 The image name is `filepath.Base(buildDir)` — the directory containing the Dockerfile.
 
+The `docker/` root walked here is `<tenant>-devops/docker` by convention, or the [`paths.docker`](/reference/configuration#paths-block) override from `.erun/config.yaml` when set (it must still be a directory named `docker`); the standard-layout match is computed against the configured root.
+
 | Error code | Cause |
 |---|---|
 | `NO_BUILDABLE_CONTEXT` | The walk found no `Dockerfile` under any `<tenant>-devops/docker/<component>/` and the cwd is not itself a buildable context. |

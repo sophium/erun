@@ -4,7 +4,7 @@ title: erun terraform
 
 # erun terraform
 
-Run a hosted platform's per-environment Terraform without hand-running `terraform` or `cd`-ing into a folder. `erun terraform` is for [platform deployments](/deployment/deploy-platform) whose Terraform is laid out per environment — one folder per env under `terraform-<tenant>/`, scaffolded by the [`erun-blueprint-platform`](/agent-reference/skills-spec#erun-blueprint-platform) skill. erun resolves `terraform-<tenant>/<environment>/` from the current scope, picks up the symlinked `common.tf`, and runs that env's own `main.tf` with its `<environment>.tfvars`.
+Run a hosted platform's per-environment Terraform without hand-running `terraform` or `cd`-ing into a folder. `erun terraform` is for [platform deployments](/deployment/deploy-platform) whose Terraform is laid out per environment — one folder per env under `terraform-<tenant>/`, scaffolded by the [`erun-blueprint-platform`](/agent-reference/skills-spec#erun-blueprint-platform) skill. erun resolves `terraform-<tenant>/<environment>/` from the current scope, picks up the symlinked `common.tf`, and runs that env's own `main.tf` with its `<environment>.tfvars`. The `terraform-<tenant>` base is the default; relocate it with [`paths.terraform`](/reference/configuration#paths-block) in `.erun/config.yaml` (erun still appends `/<environment>`).
 
 ```bash
 erun terraform apply frs prod              # init → fmt → plan → confirm → apply

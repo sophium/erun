@@ -835,6 +835,7 @@ func resolveSelectedLocalDeploySpecs(ctx Context, store DeployStore, findProject
 	}
 	selected, selectionSource := resolveSelectedDeployComponents(target.Components, resolvedTarget.EnvConfig.Deploy.Components, plan)
 	traceDeployComponentSelection(ctx, selected, selectionSource)
+	traceConfiguredDeployPaths(ctx, resolvedTarget.RepoPath)
 
 	deployContexts, err := resolveCurrentLocalDeployContexts(findProjectRoot, resolveKubernetesDeployContext, resolvedTarget, selected, plan)
 	if err != nil {
@@ -2347,6 +2348,19 @@ func resolveCurrentDevopsK8sDir(findProjectRoot ProjectFinderFunc, dir, projectR
 		return "", false, nil
 	}
 
+	// A configured paths.k8s override is authoritative over the -devops
+	// convention discovery, and applies from any cwd inside the project.
+	if k8sDir, ok, err := configuredK8sDirForDeploy(findProjectRoot, projectRootOverride); err != nil || ok {
+		return k8sDir, ok, err
+	}
+
+	return resolveConventionDevopsK8sDir(findProjectRoot, dir, projectRootOverride)
+}
+
+// resolveConventionDevopsK8sDir is the convention discovery used when no
+// paths.k8s override applies: the cwd -devops dir, an ancestor -devops dir, then
+// the project-root <tenant>-devops/k8s scan.
+func resolveConventionDevopsK8sDir(findProjectRoot ProjectFinderFunc, dir, projectRootOverride string) (string, bool, error) {
 	if k8sDir, ok, err := resolveDirDevopsK8sDir(dir); err != nil || ok {
 		return k8sDir, ok, err
 	}
@@ -2368,6 +2382,61 @@ func resolveCurrentDevopsK8sDir(findProjectRoot ProjectFinderFunc, dir, projectR
 	}
 
 	return resolveProjectRootDevopsK8sDir(findProjectRoot, projectRoot)
+}
+
+// configuredK8sDirForDeploy resolves the project root from the deploy chain's
+// override (or the git root) and returns the configured paths.k8s directory
+// when set. It is the deploy-side entry to the shared configuredK8sDir check.
+func configuredK8sDirForDeploy(findProjectRoot ProjectFinderFunc, projectRootOverride string) (string, bool, error) {
+	projectRoot := strings.TrimSpace(projectRootOverride)
+	if projectRoot == "" {
+		resolved, err := resolveDockerBuildProjectRoot(findProjectRoot, DockerCommandTarget{})
+		if err != nil {
+			return "", false, err
+		}
+		projectRoot = resolved
+	}
+	if projectRoot == "" {
+		return "", false, nil
+	}
+	return configuredK8sDir(projectRoot)
+}
+
+// configuredK8sDir resolves the project-global paths.k8s override. It returns
+// (dir, true, nil) when configured and a usable Helm chart module, (,false,nil)
+// when unset, and an error when configured but not a chart module — a
+// misconfigured override fails loudly rather than silently falling back to
+// convention.
+func configuredK8sDir(projectRoot string) (string, bool, error) {
+	paths, err := loadProjectPaths(projectRoot)
+	if err != nil {
+		return "", false, err
+	}
+	k8sDir := resolveProjectPath(projectRoot, paths.K8s)
+	if k8sDir == "" {
+		return "", false, nil
+	}
+	ok, err := isKubernetesDeployModuleDir(k8sDir)
+	if err != nil {
+		return "", false, err
+	}
+	if !ok {
+		return "", false, fmt.Errorf("configured k8s path %q (.erun/config.yaml paths.k8s) is not a Helm chart module: expected a directory named \"k8s\" holding per-component charts", strings.TrimSpace(paths.K8s))
+	}
+	return k8sDir, true, nil
+}
+
+// traceConfiguredDeployPaths surfaces a configured paths.k8s override as a
+// dry-run decision line so the deploy plan shows the chart dir was resolved from
+// config rather than the -devops convention.
+func traceConfiguredDeployPaths(ctx Context, repoPath string) {
+	paths, err := loadProjectPaths(repoPath)
+	if err != nil {
+		return
+	}
+	if v := strings.TrimSpace(paths.K8s); v != "" {
+		ctx.Trace("deploy: k8s chart root configured as " + v + " (.erun/config.yaml paths.k8s)")
+	}
 }
 
 // resolveDirDevopsK8sDir returns dir/k8s when dir is itself a "-devops" module

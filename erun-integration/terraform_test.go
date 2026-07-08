@@ -2,6 +2,7 @@ package integration
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/sophium/erun/erun-integration/internal/env"
@@ -95,6 +96,37 @@ func TestTerraform(t *testing.T) {
 		fixture.SeedTerraformEnvRoot(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"terraform", "destroy", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		golden.Equal(t, "terraform/destroy_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("plan_dry_run_configured_path", func(t *testing.T) {
+		// A paths.terraform override in .erun/config.yaml relocates the Terraform
+		// base: erun resolves <base>/<environment> (no terraform-<tenant> dir
+		// exists) and traces the configured base as a decision line.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectPathsConfig(t, setup, "", "", "infra/tf", "")
+		fixture.SeedTerraformEnvRootAt(t, filepath.Join(setup.Cwd, "infra", "tf"), "dev")
+		result := erun.Run(t, []string{"terraform", "plan", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "terraform/plan_dry_run_configured_path", normalize.Apply(result.Combined))
+	})
+
+	t.Run("configured_path_missing_root", func(t *testing.T) {
+		// A paths.terraform override with no resolvable <base>/<environment> dir
+		// fails with an error naming the configured base, not the terraform-<tenant>
+		// scaffold hint.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectPathsConfig(t, setup, "", "", "infra/tf", "")
+		result := erun.Run(t, []string{"terraform", "plan", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a missing configured terraform root, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "terraform/configured_path_missing_root", normalize.Apply(result.Combined))
 	})
 
 	t.Run("missing_root", func(t *testing.T) {

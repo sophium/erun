@@ -30,6 +30,7 @@ func ResolveBuildExecution(ctx Context, store DockerStore, findProjectRoot Proje
 	store, findProjectRoot, resolveBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
 	recommendBuildEnvIfMissing(ctx, findProjectRoot, target)
+	traceConfiguredBuildPaths(ctx, findProjectRoot, target)
 
 	if buildEnvDisablesBuildScript(store, findProjectRoot, target) {
 		target.DisableBuildScriptDiscovery = true
@@ -95,11 +96,36 @@ func recommendBuildEnvIfMissing(ctx Context, findProjectRoot ProjectFinderFunc, 
 	if err != nil || strings.TrimSpace(projectRoot) == "" {
 		return
 	}
+	// A configured paths.docker override means the project has a build
+	// environment at a non-conventional location, so the advisory would be wrong.
+	if paths, err := loadProjectPaths(projectRoot); err == nil && strings.TrimSpace(paths.Docker) != "" {
+		return
+	}
 	hasDevops, err := projectHasDevopsFolder(projectRoot)
 	if err != nil || hasDevops {
 		return
 	}
 	ctx.Info(`build: this project has no <tenant>-devops build environment — ask Claude to "init erun build environment" to set one up with the erun-build-env skill`)
+}
+
+// traceConfiguredBuildPaths surfaces configured paths.docker/paths.version
+// overrides as dry-run decision lines so the build plan shows the docker build
+// root and version file were resolved from config rather than convention.
+func traceConfiguredBuildPaths(ctx Context, findProjectRoot ProjectFinderFunc, target DockerCommandTarget) {
+	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
+	if err != nil || strings.TrimSpace(projectRoot) == "" {
+		return
+	}
+	paths, err := loadProjectPaths(projectRoot)
+	if err != nil {
+		return
+	}
+	if v := strings.TrimSpace(paths.Docker); v != "" {
+		ctx.Trace("build: docker build root configured as " + v + " (.erun/config.yaml paths.docker)")
+	}
+	if v := strings.TrimSpace(paths.Version); v != "" {
+		ctx.Trace("build: version file configured as " + v + " (.erun/config.yaml paths.version)")
+	}
 }
 
 func resolveBuildExecutionTargetAndScript(findProjectRoot ProjectFinderFunc, target DockerCommandTarget) (DockerCommandTarget, *ReleaseSpec, *scriptSpec, error) {

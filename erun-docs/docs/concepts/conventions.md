@@ -124,6 +124,8 @@ Each image lives at `<tenant>-devops/docker/<component>/Dockerfile`. In the stan
 
 If a Dockerfile sits somewhere else, ERun degrades to a flat layout (context = Dockerfile's directory). For the exact decision rule and the trade-offs, see [Conventions spec · Docker build context resolution](/agent-reference/conventions-spec#docker-build-context-resolution).
 
+These default locations — the `docker/`, `k8s/`, and `terraform-<tenant>` folders, and the `VERSION` file — are overridable per project via the [`paths:` block](/reference/configuration#paths-block) in `.erun/config.yaml`, for repos that don't nest them under a `<tenant>-devops/` module.
+
 ## VERSION files
 
 ERun walks up from the build directory looking for the first `VERSION` file — image-specific overrides the devops-module default, which overrides the project default. Contents are just the semver string (e.g., `1.0.76`); agent envs append a `-snapshot-<timestamp>` suffix automatically.
