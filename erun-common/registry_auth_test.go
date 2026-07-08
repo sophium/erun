@@ -185,3 +185,53 @@ func TestResolveGHCRBasicAuthPrefersDockerOverGH(t *testing.T) {
 		t.Fatalf("got %+v ok=%v, want docker credential", auth, ok)
 	}
 }
+
+func TestResolveGHCRBasicAuthFallsBackToEnvTokenWhenSubprocessAuthUnavailable(t *testing.T) {
+	useDockerConfigDir(t, t.TempDir()) // no docker cred
+	useGHToken(t, func(string) (string, bool) { return "", false })
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GH_TOKEN", "envtok")
+
+	auth, ok := resolveGHCRBasicAuth("sophium")
+	if !ok || auth.username != "sophium" || auth.secret != "envtok" {
+		t.Fatalf("got %+v ok=%v, want sophium/envtok", auth, ok)
+	}
+}
+
+func TestResolveGHCRBasicAuthUsesGithubTokenWhenGhTokenEmpty(t *testing.T) {
+	useDockerConfigDir(t, t.TempDir())
+	useGHToken(t, func(string) (string, bool) { return "", false })
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "ghenv")
+
+	auth, ok := resolveGHCRBasicAuth("")
+	if !ok || auth.username != "x-access-token" || auth.secret != "ghenv" {
+		t.Fatalf("got %+v ok=%v, want x-access-token/ghenv", auth, ok)
+	}
+}
+
+func TestResolveGHCRBasicAuthPrefersDockerOverEnvToken(t *testing.T) {
+	dir := writeDockerConfig(t, fmt.Sprintf(`{"auths":{"ghcr.io":{"auth":%q}}}`, b64Auth("dockeruser:dockerpw")))
+	useDockerConfigDir(t, dir)
+	useGHToken(t, func(string) (string, bool) {
+		t.Fatal("gh fallback must not run when docker has a credential")
+		return "", false
+	})
+	t.Setenv("GH_TOKEN", "envtok")
+
+	auth, ok := resolveGHCRBasicAuth("sophium")
+	if !ok || auth.username != "dockeruser" {
+		t.Fatalf("got %+v ok=%v, want docker credential", auth, ok)
+	}
+}
+
+func TestResolveGHCRBasicAuthNoneAvailable(t *testing.T) {
+	useDockerConfigDir(t, t.TempDir())
+	useGHToken(t, func(string) (string, bool) { return "", false })
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "")
+
+	if _, ok := resolveGHCRBasicAuth("sophium"); ok {
+		t.Fatal("expected no credential when docker, gh, and env are all empty")
+	}
+}

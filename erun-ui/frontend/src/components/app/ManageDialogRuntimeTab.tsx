@@ -49,8 +49,11 @@ type ManageDialog = AppState['manageDialog'];
 export function RuntimeTab(): React.ReactElement {
   const dispatch = useAppDispatch();
   const dialog = useAppSelector((state) => state.manageDialog);
-  const versionSuggestions = useAppSelector((state) => state.tenants.versionSuggestions);
-  const versionNotices = useAppSelector((state) => state.tenants.versionSuggestionNotices);
+  // Dialog-owned (not the shared tenants slice): this dialog resolves versions for
+  // its own env; boot/env-change deltas rewrite the tenants slice for the selected
+  // env and must not clobber this picker.
+  const versionSuggestions = dialog.versionSuggestions;
+  const versionNotices = dialog.versionSuggestionNotices;
   return (
     <>
       <RuntimeDeployField

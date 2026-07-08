@@ -61,19 +61,16 @@ test.describe('manage dialog — version picker (#756)', () => {
     await expect(page.getByRole('option', { name: /1\.0\.0/ })).toBeVisible();
   });
 
-  test('a version picked during an in-flight suggestions fetch is not clobbered', async ({
+  test("reopening the picker resets to the env's own suggestions, not a prior open's (#767)", async ({
     app,
     page,
     seededEnv,
   }) => {
-    // Regression: the dialog opens at version '' and fires the ~1s suggestions
-    // fetch; the global suggestions list still holds the previous open's versions,
-    // so the operator can pick one before this open's fetch lands. Before the fix,
-    // that fetch's post-processing auto-reselected suggestions[0] — undefined for an
-    // unlistable registry — which reset the version to '' and collapsed the
-    // "Components to deploy" panel to its gated hint with no error. The fix never
-    // overrides an operator's pick.
-    const runtimeName = `${seededEnv.tenant}-devops`;
+    // Regression: version suggestions are dialog-owned and reset on open, so a
+    // reopen never shows a previous open's versions while its own fetch is in
+    // flight. That stale carryover in the shared store was what a build's
+    // environments-changed delta rewrote, clobbering the picker to the upstream
+    // fallback.
     let calls = 0;
     let releaseSecond: () => void = () => undefined;
     const secondHeld = new Promise<void>((resolve) => {
@@ -84,17 +81,15 @@ test.describe('manage dialog — version picker (#756)', () => {
       if (body.method === 'LoadVersionSuggestions') {
         calls += 1;
         if (calls === 1) {
-          // First open populates the global suggestions store with 1.0.0.
           return route.fulfill({
             contentType: 'application/json',
             body: JSON.stringify({
-              data: { suggestions: [{ label: 'Current', version: '1.0.0' }], notices: [] },
+              data: { suggestions: [{ label: 'Latest stable', version: '2.0.0' }], notices: [] },
             }),
           });
         }
-        // Second open: hold the fetch so the stale 1.0.0 can be picked while it is
-        // in flight, then resolve it with an empty list (an unlistable registry) —
-        // the exact case that reset the version before the fix.
+        // Second open: hold the fetch so the picker's pre-fetch state is
+        // observable — it must show none of the first open's 2.0.0.
         await secondHeld;
         return route.fulfill({
           contentType: 'application/json',
@@ -104,33 +99,113 @@ test.describe('manage dialog — version picker (#756)', () => {
       await route.continue();
     });
 
-    // First open resolves suggestions into the global store, then closes.
+    // First open resolves 2.0.0 into this dialog's own suggestions.
     await app.sidebar.openManageDialogViaKeyboard(seededEnv.tenant, seededEnv.environment);
     await app.manageDialog.waitForOpen();
     await app.manageDialog.selectTab('Runtime');
     await app.manageDialog.openVersionPicker();
-    await expect(page.getByRole('option', { name: /1\.0\.0/ })).toBeVisible();
+    await expect(page.getByRole('option', { name: /2\.0\.0/ })).toBeVisible();
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();
 
-    // Second open: its suggestions fetch is held, so the picker shows the stale
-    // 1.0.0. Pick it and confirm the components panel populates.
+    // Reopen with the suggestions fetch held: the picker is open (heading shown)
+    // but shows none of the prior open's 2.0.0 — the dialog reset its own state.
     await app.sidebar.openManageDialogViaKeyboard(seededEnv.tenant, seededEnv.environment);
     await app.manageDialog.waitForOpen();
     await app.manageDialog.selectTab('Runtime');
     await app.manageDialog.openVersionPicker();
-    await app.manageDialog.pickVersion('1.0.0');
-    await expect(app.manageDialog.deployComponentCheckbox(runtimeName)).toBeVisible();
+    await expect(page.getByRole('option', { name: /2\.0\.0/ })).toHaveCount(0);
 
-    // Release the held fetch, which returns an empty list; wait for it to apply
-    // (the stale 1.0.0 option drops out of the picker) — a real completion signal,
-    // not a wall-clock guess.
+    // Releasing the held (empty) fetch keeps it empty — still no stale 2.0.0.
+    const suggestionsDone = page.waitForResponse(
+      (resp) =>
+        resp.url().includes('__erun_invoke') &&
+        (JSON.parse(resp.request().postData() ?? '{}') as { method?: string }).method ===
+          'LoadVersionSuggestions',
+    );
     releaseSecond();
-    await expect(page.getByRole('option', { name: /1\.0\.0/ })).toHaveCount(0);
+    await suggestionsDone;
+    await expect(page.getByRole('option', { name: /2\.0\.0/ })).toHaveCount(0);
+  });
 
-    // The operator's pick survives: the panel stays populated and never re-gates.
-    await expect(app.manageDialog.deployComponentCheckbox(runtimeName)).toBeVisible();
-    await expect(app.manageDialog.deployComponentsHint()).toHaveCount(0);
-    await expect(app.manageDialog.runtimeVersionInput()).toHaveValue('1.0.0');
+  test('an environments-changed reload does not clobber the open picker (#767)', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    // Regression: version suggestions used to live in the shared tenants slice, which
+    // every environments-changed delta (fired constantly while a tenant builds)
+    // rewrote from LoadState's suggestions for the sidebar-selected env — clobbering
+    // an open picker down to the upstream fallback so a tenant env showed no tenant
+    // versions or charts. The dialog now owns its suggestions and the delta no longer
+    // touches them. Here the dialog resolves the tenant's pw-devops 1.0.16; the
+    // reload returns a distinct 9.9.9 that must NOT reach the picker.
+    await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+      const body = JSON.parse(request.postData() ?? '{}') as { method: string };
+      if (body.method === 'LoadVersionSuggestions') {
+        return route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              suggestions: [
+                {
+                  label: 'Latest stable',
+                  version: '1.0.16',
+                  source: 'pw',
+                  image: 'ghcr.io/sophium/pw-devops',
+                },
+              ],
+              notices: [],
+            },
+          }),
+        });
+      }
+      if (body.method === 'LoadState') {
+        // The delta reload recomputes suggestions for the selected env; return a
+        // distinct value the pre-fix code would have pushed into the shared slice.
+        const original = await route.fetch();
+        const payload = (await original.json()) as {
+          data?: { versionSuggestions?: unknown; versionSuggestionNotices?: unknown };
+        };
+        if (payload.data) {
+          payload.data.versionSuggestions = [
+            {
+              label: 'Latest stable',
+              version: '9.9.9',
+              source: 'ERun',
+              image: 'ghcr.io/sophium/erun-devops',
+            },
+          ];
+          payload.data.versionSuggestionNotices = [];
+        }
+        return route.fulfill({ contentType: 'application/json', body: JSON.stringify(payload) });
+      }
+      await route.continue();
+    });
+
+    await app.sidebar.openManageDialogViaKeyboard(seededEnv.tenant, seededEnv.environment);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.selectTab('Runtime');
+    await app.manageDialog.openVersionPicker();
+    await expect(page.getByRole('option', { name: /1\.0\.16/ })).toBeVisible();
+
+    // Fire the exact event a build/deploy fires, and wait for the reload it triggers
+    // to actually complete (a real signal, not a wall-clock guess) before asserting.
+    const reloadDone = page.waitForResponse(
+      (resp) =>
+        resp.url().includes('__erun_invoke') &&
+        (JSON.parse(resp.request().postData() ?? '{}') as { method?: string }).method ===
+          'LoadState',
+    );
+    await page.evaluate(() => {
+      (
+        window as unknown as { runtime: { EventsEmit: (name: string, ...a: unknown[]) => void } }
+      ).runtime.EventsEmit('environments-changed');
+    });
+    await reloadDone;
+
+    // The tenant version survives; the reload's 9.9.9 never reaches this picker.
+    await expect(page.getByRole('option', { name: /1\.0\.16/ })).toBeVisible();
+    await expect(page.getByRole('option', { name: /9\.9\.9/ })).toHaveCount(0);
   });
 });

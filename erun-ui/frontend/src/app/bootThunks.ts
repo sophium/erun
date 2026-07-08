@@ -49,9 +49,14 @@ export const boot = (): AppThunk<Promise<void>> => async (dispatch, getState) =>
   }
 };
 
-// This is a delta refresh, not the authoritative initial load (boot() is),
-// so it preserves existing cloudProviders / versionSuggestions when the new
-// payload omits them. It must not touch the env-init dialog's
+// This is a delta refresh of the sidebar/tenants, not the authoritative initial
+// load (boot() is), so it preserves existing cloudProviders when the new payload
+// omits them. It deliberately does NOT touch version suggestions: those are
+// resolved per-env by whichever dialog is open (each owns/refreshes its own), and
+// getInitialState always recomputes them for the sidebar-selected env — so writing
+// them here clobbered an open picker with the wrong env's versions on every
+// environment-change tick (e.g. leaving only the upstream fallback while a tenant
+// build fired deltas). It must also not touch the env-init dialog's
 // kubernetes-context list: a stale environments-changed tick used to wipe a
 // populated dropdown.
 export const reloadStateAfterEnvironmentChange =
@@ -68,18 +73,6 @@ export const reloadStateAfterEnvironmentChange =
       const current = getState().tenants;
       dispatch(setTenants(loaded.tenants));
       dispatch(setCloudProviders(loaded.cloudProviders ?? current.cloudProviders));
-      dispatch(
-        setVersionSuggestions(
-          normalizeVersionSuggestions(loaded.versionSuggestions ?? current.versionSuggestions),
-        ),
-      );
-      dispatch(
-        setVersionSuggestionNotices(
-          normalizeVersionSuggestionNotices(
-            loaded.versionSuggestionNotices ?? current.versionSuggestionNotices,
-          ),
-        ),
-      );
     } catch (error) {
       // Env-change reloads are best-effort, but swallowing the failure
       // silently used to leave the sidebar stale after a successful

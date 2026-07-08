@@ -21,7 +21,6 @@ import {
 } from './runtimeResources';
 import { patchManageDialog, setManageDialog } from './slices/manageDialogSlice';
 import { bumpManageDialogVersion } from './slices/requestCountersSlice';
-import { setVersionSuggestionNotices, setVersionSuggestions } from './slices/tenantsSlice';
 import { defaultEnvironmentConfig, defaultManageDialog, type ManageDialogState } from './state';
 import { rememberPastContainerRegistry } from './storage';
 import type { AppThunk } from './store';
@@ -54,6 +53,8 @@ export const openManageDialog =
         choicesOpen: false,
         error: '',
         pendingRedeploy: false,
+        versionSuggestions: [],
+        versionSuggestionNotices: [],
         deployComponents: [],
         deployComponentSelection: [],
         deployComponentsLoading: true,
@@ -412,8 +413,9 @@ const refreshManageVersionSuggestions =
     ) {
       return;
     }
-    dispatch(setVersionSuggestions(suggestions));
-    dispatch(setVersionSuggestionNotices(notices));
+    dispatch(
+      patchManageDialog({ versionSuggestions: suggestions, versionSuggestionNotices: notices }),
+    );
     // Only auto-select a default when explicitly asked. Never override a version
     // the operator picked or typed: the dialog opens at '', so any non-empty
     // version when this async fetch resolves is a fresh operator action, and an

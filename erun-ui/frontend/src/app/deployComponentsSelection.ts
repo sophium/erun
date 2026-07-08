@@ -10,6 +10,7 @@ export function normalizeDeployComponents(
     runtime: component.runtime,
     source: component.source,
     selected: component.selected,
+    publishedChart: component.publishedChart,
   }));
 }
 
@@ -57,18 +58,25 @@ const PUBLISHED_RUNTIME_CHART_NAME = 'erun-devops';
 
 // deployComponentLabel builds the user-facing label for a deploy row.
 //
-// For a published runtime, component.name is only the Helm release name
-// (<tenant>-devops), not a published chart, so the label names the real
-// erun-devops chart — otherwise it would imply a published <tenant>-devops
-// chart that does not exist. A local chart's name is a real repo-local chart
+// For a published runtime, publishedChart is the chart the deploy actually
+// installs: the tenant's own <tenant>-devops chart when it is published at the
+// chosen version (name it directly), else the canonical erun-devops fallback
+// (name it, noting the <tenant>-devops release name it installs under). The erun
+// tenant's chart IS erun-devops. A local chart's name is a real repo-local chart
 // directory, shown as-is.
 export function deployComponentLabel(component: UIDeployableComponent): string {
   if (component.runtime) {
     if (component.source === 'published-chart') {
-      if (component.name === PUBLISHED_RUNTIME_CHART_NAME) {
-        return `Runtime — published ${PUBLISHED_RUNTIME_CHART_NAME} chart`;
+      const chart = component.publishedChart?.trim() ?? PUBLISHED_RUNTIME_CHART_NAME;
+      // Falling back to the canonical chart under a different release name: the
+      // env's own <tenant>-devops chart is not published at this version.
+      if (
+        chart === PUBLISHED_RUNTIME_CHART_NAME &&
+        component.name !== PUBLISHED_RUNTIME_CHART_NAME
+      ) {
+        return `Runtime — published ${PUBLISHED_RUNTIME_CHART_NAME} chart (released as ${component.name})`;
       }
-      return `Runtime — published ${PUBLISHED_RUNTIME_CHART_NAME} chart (released as ${component.name})`;
+      return `Runtime — published ${chart} chart`;
     }
     return `Runtime — ${component.name}`;
   }

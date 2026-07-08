@@ -293,4 +293,78 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     await lastComponent.scrollIntoViewIfNeeded();
     await expect(lastComponent).toBeInViewport();
   });
+
+  // Stub the picker plus a single runtime deploy row whose publishedChart is fixed,
+  // so the runtime row's label reflects the chart the deploy actually installs.
+  async function stubRuntimeDeployRow(page: Page, publishedChart: string): Promise<void> {
+    await page.route('**/__erun_invoke', async (route, request) => {
+      const body = JSON.parse(request.postData() ?? '{}') as { method: string };
+      if (body.method === 'LoadVersionSuggestions') {
+        return route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: { suggestions: [{ label: 'Latest stable', version: '1.0.20' }], notices: [] },
+          }),
+        });
+      }
+      if (body.method === 'LoadDeployComponents') {
+        return route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: [
+              {
+                name: 'pw-devops',
+                runtime: true,
+                source: 'published-chart',
+                selected: true,
+                publishedChart,
+              },
+            ],
+          }),
+        });
+      }
+      await route.continue();
+    });
+  }
+
+  test('runtime row names the tenant chart the deploy installs (#767)', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    // The tenant's own pw-devops chart is published at the version, so the runtime
+    // row names it — the label must reflect the chart the deploy installs, not the
+    // canonical erun-devops fallback it used to always claim.
+    await stubRuntimeDeployRow(page, 'pw-devops');
+    await app.sidebar.openManageDialogViaKeyboard(seededEnv.tenant, seededEnv.environment);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.selectTab('Runtime');
+    await app.manageDialog.pickVersion('1.0.20');
+    await expect(
+      app.manageDialog
+        .versionPickerPopover()
+        .getByText('Runtime — published pw-devops chart', { exact: true }),
+    ).toBeVisible();
+  });
+
+  test('runtime row shows the erun-devops fallback when the tenant chart is unpublished (#767)', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    // No tenant chart at the version → the deploy falls back to the canonical
+    // erun-devops chart, installed under the pw-devops release name; the label says so.
+    await stubRuntimeDeployRow(page, 'erun-devops');
+    await app.sidebar.openManageDialogViaKeyboard(seededEnv.tenant, seededEnv.environment);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.selectTab('Runtime');
+    await app.manageDialog.pickVersion('1.0.20');
+    await expect(
+      app.manageDialog
+        .versionPickerPopover()
+        .getByText('Runtime — published erun-devops chart (released as pw-devops)', {
+          exact: true,
+        }),
+    ).toBeVisible();
+  });
 });
