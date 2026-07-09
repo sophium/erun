@@ -10,7 +10,7 @@ ERun reads a small number of `ERUN_*` variables, mostly when running inside a ru
 
 | Variable | Type | Default | Purpose | Source |
 |---|---|---|---|---|
-| `ERUN_REPO_PATH` | absolute path | `/home/erun/git/<repo>` | Project checkout inside the pod. | Helm chart (`worktreeHostPath` template). |
+| `ERUN_REPO_PATH` | absolute path | `/home/erun/git/<repo>` | Project checkout inside the pod. In-pod `erun` resolves the project root from it (so `erun terraform` and the MCP repo-path find the tree); a sourceless runtime env's release tree is symlinked here with no `.git`, so the host's git-repo walk can't apply. | Helm chart (`worktreeHostPath` template). |
 | `ERUN_OUTPUTS_DIR` | absolute path | `/home/erun/.erun/outputs` | Canonical agent outputs directory: where agents/skills write deliverables that [`erun outputs`](/cli/outputs) lists and downloads. On the home PVC, so it persists across pod restarts. | Helm chart (literal on the runtime + MCP containers); created by the image and the entrypoint. |
 | `ERUN_REPO_REMOTE` | bool literal `true`/`false` | unset on host; `true` in pod | Marks the pod as a runtime pod. Used by `IsInRuntimeEnvironment`. | Helm chart, only when env type is `remote-agent` or `runtime`. |
 | `ERUN_REPO_URL` | git remote URL | unset unless mounting source | Git remote the runtime pod clones into `ERUN_REPO_PATH` on first boot, for a runtime env that opted into a mutable source worktree. The entrypoint clones only into an empty worktree, so live edits survive restarts. | Helm chart, only when [`EnvConfig.mountsource`](/reference/configuration#envconfig) is set with a `repourl`. |

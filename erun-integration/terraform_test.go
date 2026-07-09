@@ -3,6 +3,7 @@ package integration
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-integration/internal/env"
@@ -140,6 +141,44 @@ func TestTerraform(t *testing.T) {
 			t.Fatalf("expected non-zero exit without a terraform root, got 0:\n%s", result.Combined)
 		}
 		golden.Equal(t, "terraform/missing_root", normalize.Apply(result.Combined))
+	})
+
+	t.Run("apply_dry_run_repo_path_env", func(t *testing.T) {
+		// A sourceless runtime pod has no .git: the image-baked release tree is
+		// surfaced at ERUN_REPO_PATH. Root resolution must come from that env var
+		// (not the cwd .git walk), so terraform runs against
+		// <ERUN_REPO_PATH>/terraform-team/dev even though neither the cwd nor the
+		// repo dir is a git repository.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		repoDir := filepath.Join(setup.Home, "git", "team")
+		fixture.SeedTerraformEnvRootAt(t, filepath.Join(repoDir, "terraform-team"), "dev")
+		envVars := append(setup.Env(), "ERUN_REPO_PATH="+repoDir)
+		result := erun.Run(t, []string{"terraform", "apply", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		// The resolved dir normalizes to <TMP>, so the snapshot alone can't prove
+		// resolution came from ERUN_REPO_PATH rather than the cwd. Assert on the
+		// un-normalized path (the masked-value case) to lock that the repo-dir
+		// tree — distinct from the cwd — drove the plan.
+		if terraformDir := filepath.Join(repoDir, "terraform-team", "dev"); !strings.Contains(result.Combined, terraformDir) {
+			t.Fatalf("expected terraform to resolve %s from ERUN_REPO_PATH, got:\n%s", terraformDir, result.Combined)
+		}
+		golden.Equal(t, "terraform/apply_dry_run_repo_path_env", normalize.Apply(result.Combined))
+	})
+
+	t.Run("not_in_git_without_repo_path", func(t *testing.T) {
+		// The laptop fallback is unchanged: with no .git up the tree and
+		// ERUN_REPO_PATH unset, root resolution still fails with "cannot find git
+		// project" before any terraform work.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"terraform", "apply", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit without a git repo or ERUN_REPO_PATH, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "terraform/not_in_git_without_repo_path", normalize.Apply(result.Combined))
 	})
 
 	t.Run("apply_real_run_via_stub", func(t *testing.T) {
