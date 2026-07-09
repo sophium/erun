@@ -86,6 +86,12 @@ To hotfix `erun-backend-api` in `erun-prod`:
    ```
 5. `erun-prod-local` stays as your active development surface against prod.
 
+## Baked release artifacts
+
+Mount source (above) is for *editable* source. When a runtime env instead needs *read-only* artifacts present — a platform Terraform tree, seed data, fixtures the deployed services expect — a tenant's `<tenant>-devops` image can **bake** them into the image and have them appear in the pod's git folder.
+
+The one rule: bake them into **`/opt/erun/release/`**, never under `/home/erun`. A runtime pod mounts a persistent PVC over `/home/erun`, which shadows anything baked beneath it — so a `COPY` into `/home/erun/git/<repo>/…` silently never appears. Artifacts baked into `/opt/erun/release` (outside that PVC) survive, and on boot a sourceless runtime env symlinks its git folder (`~/git/<repo>`) at `/opt/erun/release`. The result shows through as `~/git/<repo>/…`, always matching the deployed image — no copy step, nothing to keep in sync. `erun terraform` and other repo-rooted commands then resolve the tree there. Unlike a mounted worktree, this content is read-only image state: to change it, rebuild and redeploy the image.
+
 ## Mapping to configuration
 
 Set `EnvConfig.type` to one of `local-agent`, `remote-agent`, or `runtime`. When `type` is set it is the source of truth for the env's shape — its worktree storage (`worktreeStorage=host|pvc|none`) and the `ERUN_ENV_TYPE` the helm chart wires in. The `build` / `push` / `deploy` commands do **not** branch on it; the caller (the desktop app, or an Operator) decides which primitives to run for a given env.
