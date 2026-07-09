@@ -48,9 +48,14 @@ namespace `acme-prod`). The worked paths below use `acme` / `prod`.
   `erun terraform apply` (see below) and `erun deploy`.
 - It does **not** build the runtime image — that is `erun-build-env`, which
   produces the `<tenant>-devops` Dockerfile for a custom runtime image (swapped in
-  via `imageOverrides.erun-devops`). It does **not** bake these platform artifacts
-  into any image, and needn't: `erun deploy` installs the platform components **by
-  reference** from the published registry, so a runtime env needs no local source.
+  via `imageOverrides.erun-devops`). Platform component **charts** install **by
+  reference** from the published registry (`erun deploy … --components …`), so they
+  are never baked. The **Terraform tree** is different: it is a repo file tree that
+  `erun terraform apply` reads from the project root, and a sourceless runtime env
+  has no worktree — so for the apply to find it in the runtime env, the tree must be
+  **baked into the runtime image** via `erun-build-env`'s `/opt/erun/release`
+  convention (it surfaces at `~/git/<tenant>/`). Agent envs read it from the
+  worktree and bake nothing.
 - It does **not** own the runtime `<tenant>-devops` chart — `erun-build-env` does.
   The runtime pod is a universal per-env concern (every tenant has one, platform or
   not). A tenant that ships the platform components this skill produces runs them on
