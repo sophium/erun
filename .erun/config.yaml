@@ -1,14 +1,19 @@
 environments:
     local:
-        containerregistry: ghcr.io/sophium
+        containerregistries:
+            - registry: ghcr.io/sophium
+              roles:
+                - build
+                - deploy
         docker:
             fingerprints:
-                erun-ubuntu: 6ffef71a59498123
-                erun-dind: 13446de55f7ffdc8
                 erun-backend-postgres: cb6d9b701f4ad75b
+                erun-dind: 13446de55f7ffdc8
                 erun-powerdns: 28aba123cf9f7c73
+                erun-ubuntu: 6ffef71a59498123
         k8s:
             deployments:
-                - [erun-devops, erun-backend-postgres]
+                - - erun-devops
+                  - erun-backend-postgres
                 - erun-backend-db
                 - erun-backend-api
