@@ -73,6 +73,26 @@ Guide the user on what to add: keep layers small, pin versions, clean
 package caches in the same `RUN`. Commit the module with `git` so the team
 shares the toolchain.
 
+**Baking files a sourceless runtime env must carry on disk.** Toolchain aside, a
+runtime env has no worktree, so anything the deployed pod needs as *files* — a
+platform Terraform tree (`terraform-<tenant>/`), seed data, fixtures — is carried
+by baking it into this image. Bake it into **`/opt/erun/release/`**, laid out
+relative to the repo root, and **never under `/home/erun`**: the runtime pod
+mounts a persistent PVC over `/home/erun` that shadows anything baked beneath it,
+so a `COPY … /home/erun/git/<tenant>/…` silently never appears in the pod. On a
+runtime env the entrypoint symlinks the git folder (`~/git/<tenant>`) at
+`/opt/erun/release`, so the baked tree shows through there — e.g.
+
+```dockerfile
+# build context is the repo root; bake outside /home/erun so the home PVC
+# can't shadow it. Surfaces at ~/git/<tenant>/<tenant>-devops/terraform-<tenant>/.
+COPY <tenant>-devops/terraform-<tenant>/ /opt/erun/release/<tenant>-devops/terraform-<tenant>/
+```
+
+resolves for `erun terraform` (which reads `terraform-<tenant>/<env>/` under the
+repo root). Agent envs keep their real worktree and ignore the symlink. This is
+read-only image state — rebuild and redeploy to change it.
+
 ## Step 3 — add the module's VERSION file
 
 `erun build` mints the image version from a `VERSION` file and fails with
@@ -283,7 +303,9 @@ repo can't nest the module there.
   tenant ships its own component charts (so the runtime rides the tenant's version
   line), and optional otherwise.
 - This skill produces the runtime **image**, plus the `<tenant>-devops` runtime
-  chart when Step 6 applies. The platform component charts are
+  chart when Step 6 applies. Platform component **charts** are
   `erun-blueprint-platform`'s concern and deploy **by reference** from the
-  published registry (`erun deploy … --components …`), so a runtime env needs no
-  local source — don't bake platform artifacts into the image.
+  published registry (`erun deploy … --components …`) — never bake a chart. But
+  files the deployed pod must read from disk (a platform Terraform tree, seed
+  data) **are** baked, into `/opt/erun/release/` (Step 2) — never under
+  `/home/erun`, which the runtime pod's PVC shadows.

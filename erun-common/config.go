@@ -121,7 +121,13 @@ type EnvConfig struct {
 	// RuntimeImage points the env's runtime pod at a custom image instead of the
 	// published <registry>/erun-devops:<version> default. A full reference is used
 	// verbatim; a bare name resolves against the env's registry and runtime version.
-	RuntimeImage        string                  `yaml:"runtimeimage,omitempty" json:"runtimeImage,omitempty"`
+	RuntimeImage string `yaml:"runtimeimage,omitempty" json:"runtimeImage,omitempty"`
+	// ImagePullSecrets names Kubernetes dockerconfigjson secrets the runtime pod
+	// uses to pull private images (e.g. a private <tenant>-devops umbrella image).
+	// Empty leaves the pod pulling anonymously, so envs on public images (the erun
+	// product tenant's own) are unaffected. erun references an operator-provisioned
+	// secret by name; it does not create the credential.
+	ImagePullSecrets    []string                `yaml:"imagepullsecrets,omitempty" json:"imagePullSecrets,omitempty"`
 	RuntimePod          RuntimePodResources     `yaml:"runtimepod,omitempty"`
 	SSHD                SSHDConfig              `yaml:"sshd,omitempty"`
 	Idle                EnvironmentIdleConfig   `yaml:"idle,omitempty"`

@@ -1,5 +1,40 @@
+import type { Page } from '@playwright/test';
+
 import { test, expect } from '../fixtures/erunApp.js';
 import { SEED_TENANT } from '../fixtures/seedRoot.js';
+
+// stubDialogCluster makes the env-init dialog behave as if a real cluster were
+// reachable: the kubectl stub in the isolated harness reports no contexts (the
+// deterministic empty state), so without this the context blocker masks every
+// other gate reason. One context lets the dialog auto-select it, and an
+// available resource status clears the capacity blocker, leaving the value
+// requirements (environment name, container registry) as the only blockers —
+// which is exactly what this spec exercises.
+async function stubDialogCluster(page: Page): Promise<void> {
+  await page.route('**/__erun_invoke', async (route, request) => {
+    const body = JSON.parse(request.postData() ?? '{}') as { method: string };
+    if (body.method === 'LoadKubernetesContexts') {
+      return route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ data: ['orbstack'] }),
+      });
+    }
+    if (body.method === 'LoadRuntimeResourceStatus') {
+      return route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: {
+            kubernetesContext: 'orbstack',
+            available: true,
+            cpu: { total: 8, used: 0, free: 8, unit: 'cores', formatted: '8' },
+            memory: { total: 16, used: 0, free: 16, unit: 'GiB', formatted: '16' },
+          },
+        }),
+      });
+    }
+    await route.continue();
+  });
+}
 
 test.describe('environment init dialog', () => {
   test('opens with tenant pre-populated and cancels', async ({ app }) => {
@@ -114,6 +149,60 @@ test.describe('environment init dialog', () => {
 
     await expect(emptyState).toBeVisible();
     await expect(select).toBeHidden();
+
+    await app.envInitDialog.cancel();
+    await app.envInitDialog.waitForClosed();
+  });
+
+  test('keeps Create disabled with a visible reason until every required value is provided', async ({
+    app,
+    page,
+  }) => {
+    // Regression (the reported bug): the submit gate only checked that the
+    // Kubernetes-context *list* was non-empty — never that a context was actually
+    // selected or a container registry chosen. A context can be available yet
+    // unselected (the reported state), so the button looked active, but clicking
+    // hit the invalid-selection branch whose only feedback was a native validity
+    // bubble the Wails WebView does not render — Create silently did nothing. The
+    // gate now derives from the same required-field rules submit enforces and
+    // surfaces the first missing value, walking the fields as the user fills them.
+    await stubDialogCluster(page);
+    await app.sidebar.openInitDialog();
+    await app.envInitDialog.waitForOpen();
+
+    const createButton = app.envInitDialog.createButton();
+    const reason = app.envInitDialog.submitReason();
+
+    // The stub populates one context but the dialog does not preselect it — the
+    // trigger sits on its placeholder, reproducing the reported state.
+    await expect(app.envInitDialog.locator().getByText('No Kubernetes contexts found')).toHaveCount(
+      0,
+    );
+    await expect(app.envInitDialog.kubernetesContextTrigger()).toContainText(
+      'Select Kubernetes context',
+    );
+
+    // Empty environment name is the first blocker; Create is disabled and says why.
+    await expect(createButton).toBeDisabled();
+    await expect(reason).toHaveText('Enter a tenant and environment name.');
+
+    // Name provided, context still unselected: the button stays disabled and now
+    // names the missing selection instead of silently doing nothing on click.
+    await app.envInitDialog.fillEnvironment('review');
+    await expect(createButton).toBeDisabled();
+    await expect(reason).toHaveText('Select a Kubernetes context.');
+
+    // Selecting the context advances to the container registry — the required
+    // field the old gate never checked, which is what left Create wrongly active.
+    await app.envInitDialog.selectKubernetesContext('orbstack');
+    await expect(createButton).toBeDisabled();
+    await expect(reason).toHaveText('Select a container registry.');
+
+    // Providing the registry clears the last value blocker, so Create activates
+    // and the reason line goes quiet.
+    await app.envInitDialog.fillContainerRegistry('ghcr.io/sophium');
+    await expect(createButton).toBeEnabled();
+    await expect(reason).toHaveText('');
 
     await app.envInitDialog.cancel();
     await app.envInitDialog.waitForClosed();

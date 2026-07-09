@@ -346,17 +346,36 @@ func (e *PublishedChartNotFoundError) Unwrap() error { return e.Err }
 // carries no such signal, so it returns "" — the erun product tenant and an
 // image-only bootstrap keep the chart's own default unless runtimeimage is set.
 func resolveDeployRuntimeImage(ctx Context, registry, version, chartName, runtimeImage string) string {
-	if image := resolveRuntimeImageOverride(registry, version, runtimeImage); image != "" {
-		ctx.Trace("deploy: runtime image override " + image + " (imageOverrides." + DevopsComponentName + ")")
-		return image
-	}
 	chartName = strings.TrimSpace(chartName)
-	if chartName == "" || chartName == DevopsComponentName {
+	umbrella := chartName != "" && chartName != DevopsComponentName
+	if image := resolveRuntimeImageOverride(registry, version, runtimeImage); image != "" {
+		// A <tenant>-devops umbrella publishes its own image on the tenant's version
+		// line, never the stock erun-devops image — so a runtimeimage that resolves
+		// to erun-devops here is a stale leftover from when the env rode the shared
+		// chart, and honoring it pins a tag this line never published (ImagePullBackOff).
+		// Ignore it and fall through to the umbrella's own image.
+		if umbrella && runtimeImageIsStockDevops(image) {
+			ctx.Trace("deploy: ignoring stale runtimeimage " + image + " on the " + chartName + " umbrella deploy (the stock " + DevopsComponentName + " image is not published on this version line); defaulting to the umbrella's own image")
+		} else {
+			ctx.Trace("deploy: runtime image override " + image + " (imageOverrides." + DevopsComponentName + ")")
+			return image
+		}
+	}
+	if !umbrella {
 		return ""
 	}
 	image := strings.TrimSpace(registry) + "/" + chartName + ":" + strings.TrimSpace(version)
 	ctx.Trace("deploy: defaulting runtime image to the " + chartName + " chart's own image " + image + " (imageOverrides." + DevopsComponentName + ")")
 	return image
+}
+
+// runtimeImageIsStockDevops reports whether a resolved runtime image reference
+// names the stock erun-devops image (regardless of registry). A tenant umbrella
+// deploy uses it to detect a stale runtimeimage pin left over from the shared
+// erun-devops chart, which its own version line never publishes.
+func runtimeImageIsStockDevops(image string) bool {
+	_, name, _, ok := parseDockerImageReference(image)
+	return ok && name == DefaultRuntimeImageName
 }
 
 // resolveRuntimeImageOverride normalizes a custom runtime image. A reference

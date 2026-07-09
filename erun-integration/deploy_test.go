@@ -694,6 +694,52 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_remote_env_tenant_umbrella_explicit_runtime_image_wins", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_remote_env_image_pull_secrets", func(t *testing.T) {
+		// A tenant umbrella image can be a private ghcr package. The env's
+		// imagepullsecrets list rides into the runtime deploy as
+		// imagePullSecrets[i].name, re-scoped under the erun-devops subchart key so
+		// the runtime pod authenticates the pull. Orthogonal to the umbrella's
+		// own-image default (both appear); an env with no list emits nothing.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"imagepullsecrets:\n    - ghcr-pull\n")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_image_pull_secrets", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_remote_env_umbrella_ignores_stale_stock_runtimeimage", func(t *testing.T) {
+		// Migration hardening: when a tenant rode the shared erun-devops chart and
+		// later moved to its own team-devops umbrella, a leftover
+		// runtimeimage pointing at the stock erun-devops image would (as an explicit
+		// override) win over the umbrella default and pin erun-devops:<tenant-version>
+		// — a tag the tenant line never publishes (ImagePullBackOff). resolveDeployRuntimeImage
+		// detects the stock name on an umbrella deploy, traces that it is ignoring the
+		// stale pin, and defaults to the umbrella's own image instead.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"runtimeimage: ghcr.io/sophium/erun-devops\n")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_umbrella_ignores_stale_stock_runtimeimage", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_remote_env_deploys_published_components", func(t *testing.T) {
 		// A remote/runtime env has no local checkout, yet --components selects
 		// platform components: each resolves to its PUBLISHED erun-<component>

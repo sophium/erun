@@ -128,6 +128,22 @@ ensure_runtime_source() {
     fi
 }
 
+# link_runtime_release surfaces the image-baked /opt/erun/release tree through
+# the git folder on a sourceless runtime env, which has no worktree of its own.
+# A tenant devops image bakes release artifacts there (outside /home/erun, so the
+# home PVC can't shadow them); the symlink lets them show through the repo dir.
+# Agent envs and mount-source runtime envs carry a real worktree, so they are
+# skipped and their source is left untouched.
+link_runtime_release() {
+    if [ "${ERUN_ENV_TYPE:-}" != "runtime" ]; then
+        return 0
+    fi
+    if runtime_repo_is_remote; then
+        return 0
+    fi
+    erun-link-release "$(runtime_repo_dir)" /opt/erun/release || true
+}
+
 runtime_cloud_environment() {
     case "${ERUN_CLOUD_ENVIRONMENT:-}" in
         1|true|TRUE|True|yes|YES|on|ON)
@@ -943,6 +959,7 @@ start_environment_idle_monitor
 if [ "${1:-}" = "shell" ]; then
     shift
     ensure_runtime_source
+    link_runtime_release
     initialize_erun_config
     initialize_codex_config
     initialize_claude_config
@@ -977,6 +994,7 @@ fi
 
 if [ "${1:-}" = "devops" ] || [ "$#" -eq 0 ]; then
     ensure_runtime_source
+    link_runtime_release
     initialize_erun_config
     initialize_codex_config
     initialize_claude_config

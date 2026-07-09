@@ -3,6 +3,7 @@ trace-log: would append the full trace to <TMP>
 deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=false current=false
 deploy: component selection source default (runtime only); deploying the runtime chart alone
 deploy: no local runtime chart; using published chart oci://registry.example/test/charts/team-devops version <VERSION>
+deploy: ignoring stale runtimeimage ghcr.io/sophium/erun-devops:<VERSION> on the team-devops umbrella deploy (the stock erun-devops image is not published on this version line); defaulting to the umbrella's own image
 deploy: defaulting runtime image to the team-devops chart's own image registry.example/test/team-devops:<VERSION> (imageOverrides.erun-devops)
 deploy: resolved 1 spec(s)
 kubectl --context test-context get namespace team-dev -o name

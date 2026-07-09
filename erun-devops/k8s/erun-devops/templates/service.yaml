@@ -21,9 +21,20 @@ docs/concepts/environment-types for the type→storage mapping.
 {{- if and (eq $worktreeStorage "host") (eq $worktreeRepoName "") -}}
   {{- $worktreeRepoName = base (required "worktreeHostPath is required when worktreeStorage is host" .Values.worktreeHostPath) -}}
 {{- end -}}
+{{- /*
+repoPath is the in-pod git folder for this env's repo, derived from the repo
+name regardless of worktree storage. A sourceless runtime env (storage "none",
+no worktree volume) still gets ERUN_REPO_PATH set to it — the entrypoint
+symlinks that folder at the image-baked /opt/erun/release, and erun resolves the
+project root there. worktreePath stays gated on a mounted worktree (host/pvc).
+*/ -}}
+{{- $repoPath := "" -}}
+{{- if ne $worktreeRepoName "" -}}
+  {{- $repoPath = printf "/home/erun/git/%s" $worktreeRepoName -}}
+{{- end -}}
 {{- $worktreePath := "" -}}
 {{- if ne $worktreeStorage "none" -}}
-  {{- $worktreePath = printf "/home/erun/git/%s" (required "worktreeRepoName is required when worktreeStorage is set" $worktreeRepoName) -}}
+  {{- $worktreePath = required "worktreeRepoName is required when worktreeStorage is set" $repoPath -}}
 {{- end -}}
 {{- /*
 envType is the canonical environment type written into the in-pod erun config
@@ -317,6 +328,10 @@ spec:
     spec:
       automountServiceAccountToken: true
       serviceAccountName: {{ .Release.Name }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       securityContext:
         fsGroup: 1000
       initContainers:
@@ -342,7 +357,7 @@ spec:
             - name: DOCKER_BUILDKIT
               value: "1"
             - name: ERUN_REPO_PATH
-              value: {{ $worktreePath | quote }}
+              value: {{ $repoPath | quote }}
             - name: ERUN_OUTPUTS_DIR
               value: /home/erun/.erun/outputs
             - name: ERUN_REPO_REMOTE
@@ -516,7 +531,7 @@ spec:
             - name: DOCKER_BUILDKIT
               value: "1"
             - name: ERUN_REPO_PATH
-              value: {{ $worktreePath | quote }}
+              value: {{ $repoPath | quote }}
             - name: ERUN_OUTPUTS_DIR
               value: /home/erun/.erun/outputs
             - name: ERUN_REPO_REMOTE

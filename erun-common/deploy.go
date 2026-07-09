@@ -128,6 +128,7 @@ type HelmDeployParams struct {
 	OIDCAllowedIssuers string
 	ContainerRegistry  string
 	ImageOverrides     map[string]string
+	ImagePullSecrets   []string
 	ResetDatabase      bool
 	Idle               EnvironmentIdleConfig
 	Claude             EnvironmentClaudeConfig
@@ -186,13 +187,17 @@ type HelmDeploySpec struct {
 	OIDCAllowedIssuers string
 	ContainerRegistry  string
 	ImageOverrides     map[string]string
-	ResetDatabase      bool
-	Idle               EnvironmentIdleConfig
-	Claude             EnvironmentClaudeConfig
-	RuntimePod         RuntimePodResources
-	Version            string
-	Timeout            string
-	Verbosity          int
+	// ImagePullSecrets names dockerconfigjson secrets the runtime pod pulls with,
+	// threaded to the chart as imagePullSecrets[i].name. Empty renders nothing, so
+	// public-image envs are byte-for-byte unchanged. Mirrors EnvConfig.ImagePullSecrets.
+	ImagePullSecrets []string
+	ResetDatabase    bool
+	Idle             EnvironmentIdleConfig
+	Claude           EnvironmentClaudeConfig
+	RuntimePod       RuntimePodResources
+	Version          string
+	Timeout          string
+	Verbosity        int
 	// Cloudflare* deliver a delegated Cloudflare token to the runtime pod.
 	// CloudflareTokenRef is a handle into the secret store, never the token
 	// itself, resolved at execution time.
@@ -1609,6 +1614,7 @@ func newHelmDeploySpecWithValues(target OpenResult, deployContext KubernetesDepl
 		ContainerRegistries: containerRegistries,
 		Platform:            resolveProjectPlatform(target.RepoPath),
 		DisableBuildScript:  target.EnvConfig.DisableBuildScript,
+		ImagePullSecrets:    append([]string(nil), target.EnvConfig.ImagePullSecrets...),
 		Idle:                target.EnvConfig.Idle,
 		Claude:              target.EnvConfig.Claude,
 		RuntimePod:          NormalizeRuntimePodResources(target.EnvConfig.RuntimePod),
@@ -1812,6 +1818,7 @@ func (d HelmDeploySpec) Params(stdout, stderr io.Writer) HelmDeployParams {
 		OIDCAllowedIssuers:   d.OIDCAllowedIssuers,
 		ContainerRegistry:    d.ContainerRegistry,
 		ImageOverrides:       cloneStringMap(d.ImageOverrides),
+		ImagePullSecrets:     append([]string(nil), d.ImagePullSecrets...),
 		ResetDatabase:        d.ResetDatabase,
 		Idle:                 d.Idle,
 		Claude:               d.Claude,
@@ -1830,11 +1837,15 @@ func (d HelmDeploySpec) command() commandSpec {
 		"--install",
 		"--wait",
 		"--wait-for-jobs",
-		// The chart is the source of truth for a deploy. Under Helm's
+		// The chart is the source of truth for a deploy. Pin server-side apply on
+		// explicitly: Helm's default (`--server-side=auto`) inherits the previous
+		// release's method, so a release first created under client-side apply keeps
+		// using it, and the --force-conflicts below is then rejected outright. With
 		// server-side apply, an out-of-band `kubectl` edit takes ownership of the
 		// fields it touched, and a later deploy that sets those same fields is
 		// otherwise rejected as a conflict — even when the value is unchanged.
 		// Force conflicts so the release always reclaims its own fields.
+		"--server-side", "true",
 		"--force-conflicts",
 		"--timeout", d.Timeout,
 		"--namespace", d.Namespace,
@@ -1918,6 +1929,7 @@ func (d HelmDeploySpec) command() commandSpec {
 	for _, key := range sortedStringMapKeys(d.ImageOverrides) {
 		args = append(args, "--set-string", "imageOverrides."+key+"="+d.ImageOverrides[key])
 	}
+	args = append(args, helmImagePullSecretSetArgs(d.ImagePullSecrets)...)
 	args = append(args, helmPlatformSetArgs(d.Platform)...)
 	args = append(args,
 		"--set-string", "idle.timeout="+helmIdleTimeout(d.Idle),
@@ -2181,6 +2193,22 @@ func helmPlatformSetArgs(p PlatformConfig) []string {
 		if encoded, marshalErr := json.Marshal(p.Nameservers); marshalErr == nil {
 			args = append(args, "--set-json", "platform.nameservers="+string(encoded))
 		}
+	}
+	return args
+}
+
+// helmImagePullSecretSetArgs renders the runtime pod's imagePullSecrets as
+// indexed helm --set keys, skipping blank names. Empty input yields no args, so
+// a public-image env passes nothing and its deploy is byte-for-byte unchanged.
+func helmImagePullSecretSetArgs(secrets []string) []string {
+	args := make([]string, 0, len(secrets)*2)
+	idx := 0
+	for _, name := range secrets {
+		if name = strings.TrimSpace(name); name == "" {
+			continue
+		}
+		args = append(args, "--set-string", fmt.Sprintf("imagePullSecrets[%d].name=%s", idx, name))
+		idx++
 	}
 	return args
 }
@@ -2607,6 +2635,7 @@ func helmDeployCommandSpec(params HelmDeployParams, chartPath string) commandSpe
 		OIDCAllowedIssuers:   params.OIDCAllowedIssuers,
 		ContainerRegistry:    params.ContainerRegistry,
 		ImageOverrides:       cloneStringMap(params.ImageOverrides),
+		ImagePullSecrets:     append([]string(nil), params.ImagePullSecrets...),
 		ResetDatabase:        params.ResetDatabase,
 		Idle:                 params.Idle,
 		Claude:               params.Claude,
