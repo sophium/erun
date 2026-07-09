@@ -1837,11 +1837,15 @@ func (d HelmDeploySpec) command() commandSpec {
 		"--install",
 		"--wait",
 		"--wait-for-jobs",
-		// The chart is the source of truth for a deploy. Under Helm's
+		// The chart is the source of truth for a deploy. Pin server-side apply on
+		// explicitly: Helm's default (`--server-side=auto`) inherits the previous
+		// release's method, so a release first created under client-side apply keeps
+		// using it, and the --force-conflicts below is then rejected outright. With
 		// server-side apply, an out-of-band `kubectl` edit takes ownership of the
 		// fields it touched, and a later deploy that sets those same fields is
 		// otherwise rejected as a conflict — even when the value is unchanged.
 		// Force conflicts so the release always reclaims its own fields.
+		"--server-side", "true",
 		"--force-conflicts",
 		"--timeout", d.Timeout,
 		"--namespace", d.Namespace,
