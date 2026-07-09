@@ -28,6 +28,37 @@ export class EnvironmentInitDialog {
     return this.page.locator('#environment-version');
   }
 
+  containerRegistryInput(): Locator {
+    return this.page.locator('#environment-container-registry');
+  }
+
+  kubernetesContextTrigger(): Locator {
+    return this.page.locator('#environment-kubernetes-context');
+  }
+
+  // createButton matches the submit button in both its idle ("Create") and
+  // in-flight ("Creating...") copy so callers can assert its enabled state.
+  createButton(): Locator {
+    return this.locator().getByRole('button', { name: /^(Create|Creating)/ });
+  }
+
+  // submitReason is the live-region status line that explains why Create is
+  // blocked; it stays mounted (empty) when the dialog is submittable.
+  submitReason(): Locator {
+    return this.page.locator('#environment-dialog-submit-reason');
+  }
+
+  async fillContainerRegistry(value: string): Promise<void> {
+    await this.containerRegistryInput().fill(value);
+  }
+
+  // selectKubernetesContext opens the context dropdown and picks an option by
+  // its label (the context name).
+  async selectKubernetesContext(name: string): Promise<void> {
+    await this.kubernetesContextTrigger().click();
+    await this.page.getByRole('option', { name, exact: true }).click();
+  }
+
   async fillTenant(name: string): Promise<void> {
     await this.tenantInput().fill(name);
   }

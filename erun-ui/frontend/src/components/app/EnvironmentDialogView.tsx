@@ -1,6 +1,7 @@
 import { FolderPlus, LoaderCircle } from 'lucide-react';
 import * as React from 'react';
 
+import { missingRequiredFieldReason } from '@/app/environmentDialogState';
 import {
   closeEnvironmentDialog,
   selectEnvironmentVersionSuggestion,
@@ -354,21 +355,17 @@ function environmentDialogSubmitGate(dialog: EnvironmentDialog): EnvironmentSubm
   if (dialog.busy) {
     return { disabled: true, reason: '' };
   }
+  // kubernetesContextBlocker (contexts loading / none discovered) is an
+  // environmental blocker and must win over missingRequiredFieldReason, which
+  // would otherwise say "Select a Kubernetes context" when there are none to
+  // select. missingRequiredFieldReason then covers the value requirements —
+  // including a context that is available but not yet selected — so the button's
+  // enabled state matches exactly what submitEnvironmentDialog will accept.
   const blocker =
-    localRepoPathBlocker(dialog) ??
     kubernetesContextBlocker(dialog) ??
+    missingRequiredFieldReason(dialog) ??
     runtimeCapacityBlocker(dialog);
   return blocker ? { disabled: true, reason: blocker } : { disabled: false, reason: '' };
-}
-
-function localRepoPathBlocker(dialog: EnvironmentDialog): string | null {
-  if (dialog.envType !== 'local-agent') {
-    return null;
-  }
-  if (dialog.localRepoPath.trim() === '') {
-    return 'Local repo path is required for local-agent envs.';
-  }
-  return null;
 }
 
 function kubernetesContextBlocker(dialog: EnvironmentDialog): string | null {
