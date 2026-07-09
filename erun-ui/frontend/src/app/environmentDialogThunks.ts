@@ -3,9 +3,9 @@ import type { UISelection, UIVersionSuggestion } from '@/types';
 import { environmentApi } from './api/environmentApi';
 import { refreshKubernetesContexts } from './dialogContextsThunks';
 import {
+  missingRequiredFieldReason,
   normalizedEnvironmentDialogValues,
   rememberEnvironmentDialogSelection,
-  validEnvironmentDialogValues,
 } from './environmentDialogState';
 import { readError } from './errors';
 import { showTerminalMessage } from './notificationThunks';
@@ -136,7 +136,11 @@ export const submitEnvironmentDialog =
     }
     const selection = environmentDialogSelection(dialog, state.tenants.versionSuggestions);
     if (!selection) {
-      dispatch(patchEnvironmentDialog({ error: '' }));
+      // The submit gate keeps the Create button disabled while a required field
+      // is missing, but Enter-key submits bypass the button — surface the reason
+      // as a visible error rather than only the native validity bubble, which the
+      // Wails WebView does not reliably render.
+      dispatch(patchEnvironmentDialog({ error: missingRequiredFieldReason(dialog) ?? '' }));
       form.reportValidity();
       return;
     }
@@ -170,10 +174,10 @@ function environmentDialogSelection(
   dialog: EnvironmentDialogState,
   versionSuggestions: UIVersionSuggestion[],
 ): UISelection | null {
-  const values = normalizedEnvironmentDialogValues(dialog);
-  if (!validEnvironmentDialogValues(values)) {
+  if (missingRequiredFieldReason(dialog)) {
     return null;
   }
+  const values = normalizedEnvironmentDialogValues(dialog);
   // noGit only affects the remote-worktree init path; local-agent has no
   // remote repo, so ignore any stale noGit left by a previous type selection.
   const noGit = dialog.envType === 'local-agent' ? false : dialog.noGit;
