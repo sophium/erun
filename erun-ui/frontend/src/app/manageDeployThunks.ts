@@ -18,12 +18,18 @@ export const submitManageDeploy = (): AppThunk<Promise<void>> => async (dispatch
   // Deploys exactly what the operator checked (opt-in only); an empty set leaves
   // deploy to fall back to the env's saved default.
   const components = [...dialog.deployComponentSelection];
+  // Resolve the runtime image while the dialog is still open: closeManageDialog
+  // resets the dialog slice (including its version suggestions), and the image is
+  // resolved from those dialog-owned suggestions. Resolving after close would read
+  // an empty list, drop the --runtime-image flag, and silently deploy the local
+  // umbrella's pinned erun-devops version instead of the one the operator targeted.
+  const runtimeImage = version ? selectManageRuntimeImage(getState(), version) : '';
   dispatch(closeManageDialog());
   await dispatch(
     startDeploySelection({
       ...selection,
       version,
-      runtimeImage: version ? selectManageRuntimeImage(getState(), version) : '',
+      runtimeImage,
       components,
     }),
   );

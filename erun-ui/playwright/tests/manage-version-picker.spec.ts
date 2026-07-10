@@ -208,4 +208,61 @@ test.describe('manage dialog — version picker (#756)', () => {
     await expect(page.getByRole('option', { name: /1\.0\.16/ })).toBeVisible();
     await expect(page.getByRole('option', { name: /9\.9\.9/ })).toHaveCount(0);
   });
+
+  test('deploying a version sends its runtime image so the deploy targets that erun-devops version (#792)', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    // Regression: the runtime image for the deployed version must resolve from the
+    // dialog-owned suggestion list the picker renders, not the shared tenants
+    // slice (written for the sidebar-selected env, clobbered by env-change deltas).
+    // Editing the version field clears the picked image, so if resolution fell
+    // back to the shared slice the deploy would omit --runtime-image and silently
+    // install the local umbrella's pinned erun-devops version instead of the one
+    // the operator targeted. The image reaching StartDeploySession is the proof it
+    // resolved from the dialog list.
+    await page.route('**/__erun_invoke', async (route, request) => {
+      const body = JSON.parse(request.postData() ?? '{}') as { method: string };
+      if (body.method === 'LoadVersionSuggestions') {
+        return route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              suggestions: [
+                {
+                  label: 'Upstream ERun',
+                  version: '1.0.134',
+                  source: 'ERun',
+                  image: 'ghcr.io/sophium/erun-devops',
+                },
+              ],
+              notices: [],
+            },
+          }),
+        });
+      }
+      await route.continue();
+    });
+
+    await app.sidebar.openManageDialogViaKeyboard(seededEnv.tenant, seededEnv.environment);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.selectTab('Runtime');
+    await app.manageDialog.openVersionPicker();
+    // Edit the version field directly — the operator's path — which clears the
+    // picked image; resolution must still find it in the dialog's own list.
+    await app.manageDialog.runtimeVersionInput().fill('1.0.134');
+    await expect(app.manageDialog.deployButton()).toBeEnabled();
+
+    const deployRequest = page.waitForRequest(
+      (req) =>
+        req.url().includes('/__erun_invoke') &&
+        (req.postData() ?? '').includes('StartDeploySession'),
+    );
+    await app.manageDialog.deploy();
+    const payload = (await deployRequest).postData() ?? '';
+    // Carries the erun-devops image → buildDeployArgs adds --runtime-image → the
+    // deploy routes to the published erun-devops chart at the targeted version.
+    expect(payload).toContain('ghcr.io/sophium/erun-devops');
+  });
 });

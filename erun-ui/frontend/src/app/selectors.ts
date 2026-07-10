@@ -1,7 +1,7 @@
 import type { UISelection } from '@/types';
 
 import type { RootState } from './store';
-import { normalizeDialogValue, selectionKey } from './versionSuggestions';
+import { findVersionSuggestion, normalizeDialogValue, selectionKey } from './versionSuggestions';
 
 export const selectEnvironmentExists = (
   state: RootState,
@@ -58,11 +58,22 @@ export const selectActiveSlotForSelection = (state: RootState, selection: UISele
   return (active ?? first).slot;
 };
 
+// selectManageRuntimeImage resolves the runtime image for the version being
+// deployed. It resolves against the dialog-owned suggestion list — the same one
+// the picker renders (dialog.versionSuggestions), NOT the shared tenants slice,
+// which is written for the sidebar-selected env and clobbered by env-change
+// deltas, so the picked version is often absent from it. It must come from a
+// real suggestion for that version, not the stored versionImage on its own: a
+// stale/mismatched versionImage (or an absent one) would otherwise drop the
+// --runtime-image flag, silently deploying the local umbrella's pinned
+// erun-devops version instead of the version the operator targeted. Prefer the
+// exact (version, image) suggestion so lines that share a version stay distinct,
+// then fall back to the first suggestion for the version.
 export const selectManageRuntimeImage = (state: RootState, version: string): string => {
-  if (state.manageDialog.versionImage) {
-    return state.manageDialog.versionImage;
-  }
-  const suggestion = state.tenants.versionSuggestions.find((value) => value.version === version);
+  const suggestions = state.manageDialog.versionSuggestions;
+  const suggestion =
+    findVersionSuggestion(suggestions, version, state.manageDialog.versionImage) ??
+    findVersionSuggestion(suggestions, version, '');
   return suggestion?.image ?? '';
 };
 
