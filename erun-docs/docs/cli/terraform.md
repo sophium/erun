@@ -42,6 +42,7 @@ When the env has a Cloudflare alias, its `CLOUDFLARE_API_TOKEN` is forwarded to 
 
 | Condition | What happens | Recover |
 |---|---|---|
+| Not in a project (no git repo found on the host) | Aborts: `cannot find git project`; exit 1. | Run from inside your project checkout. This doesn't occur inside a runtime pod, where erun resolves the project tree automatically even though it has no `.git`. |
 | No `terraform-<tenant>/<env>/` folder | Aborts: `no Terraform root at … — scaffold it with the erun-blueprint-platform skill …`; exit 1. | Scaffold the per-env root with [`erun-blueprint-platform`](/agent-reference/skills-spec#erun-blueprint-platform), or create `terraform-<tenant>/<env>/` with its `main.tf` and `<env>.tfvars`. |
 | Environment not configured | Surfaces the config load error; exit 1. | Create the env (`erun init`) or fix the tenant/env name. |
 | No default tenant/environment and none passed | Aborts: default tenant/environment not configured; exit 1. | Pass `TENANT ENVIRONMENT` (or set a default scope). |

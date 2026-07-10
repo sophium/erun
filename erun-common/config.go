@@ -813,7 +813,20 @@ func LoadProjectConfig(projectRoot string) (ProjectConfig, string, error) {
 	return config, configFilePath, nil
 }
 
+// FindProjectRoot resolves the project root, preferring ERUN_REPO_PATH when it
+// is set and names an existing directory. A sourceless runtime pod surfaces the
+// image-baked release tree at that path (a symlink into /opt/erun/release, with
+// no .git), so the cwd .git walk would fail there; honoring the env var lets
+// in-pod commands like `erun terraform` resolve the tree the same way the MCP
+// server does. The var is set only inside the pod, so laptop behavior (walk up
+// from cwd to the nearest .git) is unchanged.
 func FindProjectRoot() (string, string, error) {
+	if root := strings.TrimSpace(os.Getenv("ERUN_REPO_PATH")); root != "" {
+		root = filepath.Clean(root)
+		if info, err := os.Stat(root); err == nil && info.IsDir() {
+			return filepath.Base(root), root, nil
+		}
+	}
 	dir, err := os.Getwd()
 	if err != nil {
 		return "", "", err
