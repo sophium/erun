@@ -1,6 +1,6 @@
 apiVersion: v2
-appVersion: 1.0.133
+appVersion: 1.0.134
 description: cert-manager ClusterIssuer (Cloudflare DNS-01) + optional wildcard Certificate for the erun services edge. Applied by the terraform-erun-cluster-edge module after cert-manager's CRDs exist.
 name: erun-cluster-edge-issuer
 type: application
-version: 1.0.133
+version: 1.0.134
