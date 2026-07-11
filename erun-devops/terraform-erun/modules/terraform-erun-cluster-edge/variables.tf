@@ -72,9 +72,9 @@ variable "issuer_name" {
 }
 
 variable "cert_manager_chart_version" {
-  description = "Pinned cert-manager Helm chart version."
+  description = "Pinned cert-manager Helm chart version. Keep >= v1.17.2: earlier versions delete the DNS-01 _acme-challenge TXT with an empty Cloudflare zone id, orphaning records and wedging issuance/renewal."
   type        = string
-  default     = "v1.16.2"
+  default     = "v1.20.3"
 }
 
 variable "traefik_chart_version" {
