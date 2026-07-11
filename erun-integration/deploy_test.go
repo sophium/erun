@@ -50,6 +50,29 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_from_devops_cwd", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_platform_account_binds_cluster_admin", func(t *testing.T) {
+		// An env flagged platformaccount:true threads --set platformAccount=true
+		// into the runtime helm command, so the chart binds the env's SA to
+		// cluster-admin (the <release>-platform ClusterRoleBinding) — the grant
+		// that lets in-pod `erun terraform apply` of the cluster edge create
+		// namespaces and CRDs. An off-by-default env emits no such --set (the
+		// sibling dry_run_from_devops_cwd golden shows its absence).
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"platformaccount: true\n")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_platform_account_binds_cluster_admin", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_with_mcp_auth_public_key", func(t *testing.T) {
 		// --mcp-auth-public-key makes the runtime deploy require the per-env MCP
 		// edge to authenticate bearer tokens signed by the desktop public key:

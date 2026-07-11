@@ -264,6 +264,9 @@ func environmentDetailLines(env common.ListEnvironmentResult) []string {
 	if env.DisableBuildScript {
 		lines = append(lines, indent+"disable-build-script: enabled")
 	}
+	if env.PlatformAccount {
+		lines = append(lines, indent+"platform-account: enabled")
+	}
 	if env.SSH.Enabled {
 		lines = append(lines, environmentSSHDetailLines(env.SSH, indent)...)
 	} else {

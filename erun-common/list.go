@@ -71,6 +71,7 @@ type ListEnvironmentResult struct {
 	RuntimePod          RuntimePodResources     `json:"runtimePod,omitempty"`
 	ManagedCloud        bool                    `json:"managedCloud,omitempty"`
 	DisableBuildScript  bool                    `json:"disableBuildScript,omitempty"`
+	PlatformAccount     bool                    `json:"platformAccount,omitempty"`
 	AITool              string                  `json:"aiTool,omitempty"`
 	Claude              EnvironmentClaudeConfig `json:"claude,omitempty"`
 	Idle                EnvironmentIdleConfig   `json:"idle,omitempty"`
@@ -210,6 +211,7 @@ func listEnvironmentResult(store ListStore, tenant TenantConfig, env EnvConfig, 
 		RuntimePod:          env.RuntimePod,
 		ManagedCloud:        env.ManagedCloud,
 		DisableBuildScript:  env.DisableBuildScript,
+		PlatformAccount:     env.PlatformAccount,
 		AITool:              strings.TrimSpace(env.AITool),
 		Claude:              env.Claude,
 		Idle:                env.Idle,
