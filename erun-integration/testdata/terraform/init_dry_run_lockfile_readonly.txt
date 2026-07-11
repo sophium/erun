@@ -1,0 +1,7 @@
+audit: erun terraform init --dry-run team dev
+terraform: init in <TMP> (env team/dev, namespace team-dev)
+terraform: state <STATE_ROOT>/team/dev/terraform.tfstate (local backend on the home PVC — survives pod restarts)
+terraform: TF_DATA_DIR <STATE_ROOT>/team/dev/data
+terraform: committed .terraform.lock.hcl found — init runs -lockfile=readonly and never rewrites the tree
+mkdir -p <STATE_ROOT>/team/dev
+cd <TMP> && terraform init -input=false -backend-config=path=<STATE_ROOT>/team/dev/terraform.tfstate -lockfile=readonly

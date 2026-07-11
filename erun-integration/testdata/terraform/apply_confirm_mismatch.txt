@@ -3,5 +3,5 @@ terraform: apply in <TMP> (env team/dev, namespace team-dev)
 terraform: var file dev.tfvars
 terraform: state <STATE_ROOT>/team/dev/terraform.tfstate (local backend on the home PVC — survives pod restarts)
 terraform: TF_DATA_DIR <STATE_ROOT>/team/dev/data
-terraform: apply requires typing the environment name (dev) to confirm before apply
+terraform: confirmation gate — the apply below runs only after you type the environment name "dev"; a mismatch or empty entry aborts before anything is applied
 confirmation "wrong" does not match environment "dev"; aborting apply

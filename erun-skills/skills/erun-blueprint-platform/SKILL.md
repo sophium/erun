@@ -122,6 +122,11 @@ There is **no `run.tf`** and **no per-env `apply.sh`/`setup.sh`/`confirm.sh`** �
 ```hcl
 terraform {
   required_version = ">= 1.3"
+  # Required so `erun terraform init -backend-config=path=` persists the state
+  # location to plan/apply. erun points it at ~/.erun/terraform/<tenant>/<env>/
+  # on the durable home PVC; without this block Terraform silently keeps state in
+  # ./terraform.tfstate inside the (read-only) playbook tree and apply fails there.
+  backend "local" {}
   required_providers {
     kubernetes = { source = "hashicorp/kubernetes", version = "~> 2.30" }
     helm       = { source = "hashicorp/helm", version = "~> 2.17" }
@@ -134,6 +139,8 @@ provider "helm" {
   kubernetes {}
 }
 ```
+
+Run `erun terraform init <tenant> <env>` once on a **writable** checkout (e.g. `<tenant>-local`) after scaffolding: it downloads providers and generates `.terraform.lock.hcl` covering `linux/amd64` + `linux/arm64`. **Commit that lock** — a read-only runtime env can only `init` from a committed lock (it runs `-lockfile=readonly`), and one cross-arch lock initializes on any env. Re-run `init` and re-commit after changing providers.
 
 **`terraform-acme/variables.tf`** (canonical; symlinked into each env). The
 Cloudflare token is **not** a tfvar — it is a secret injected at apply time as
@@ -354,16 +361,18 @@ dependency `version` is pinned to the erun release from Step 1.
 The operator applies these in the runtime env, never by hand-running `terraform`
 or `kubectl`:
 
-- **Terraform:** `erun terraform apply` resolves `terraform-<tenant>/<env>/`
-  (or `<tenant>-devops/terraform-<tenant>/<env>/` — the same `-devops` convention
-  `build`/`deploy` use, so a tree baked under `<tenant>-devops/` needs no
-  `paths.terraform` override) from the active cloud context and runs
-  `init → fmt → plan → confirm → apply`, injecting `TF_VAR_cloudflare_api_token`
-  from `CLOUDFLARE_API_TOKEN`. State and the provider cache live on the durable
-  home directory (`~/.erun/terraform/<tenant>/<env>/` on the `/home/erun` PVC),
-  off the read-only playbook tree, so they survive a pod restart. The confirm
-  step prompts the operator to **type the environment name** before applying, so
-  changes can't land in the wrong env. Preview with
+- **Terraform:** `erun terraform init` once (downloads providers, records the
+  committed cross-arch lock), then `erun terraform apply` resolves
+  `terraform-<tenant>/<env>/` (or `<tenant>-devops/terraform-<tenant>/<env>/` — the
+  same `-devops` convention `build`/`deploy` use, so a tree baked under
+  `<tenant>-devops/` needs no `paths.terraform` override) from the active cloud
+  context and runs `fmt → plan → confirm → apply` (no implicit init), injecting
+  `TF_VAR_cloudflare_api_token` from `CLOUDFLARE_API_TOKEN`. State and the provider
+  cache live on the durable home directory (`~/.erun/terraform/<tenant>/<env>/` on
+  the `/home/erun` PVC), off the read-only playbook tree, so they survive a pod
+  restart — this relies on the `backend "local" {}` block in `common.tf`. The
+  confirm step prompts the operator to **type the environment name** before
+  applying, so changes can't land in the wrong env. Preview with
   `erun terraform apply --dry-run`.
 - **Helm:** `erun deploy --version <version> --components=…` (with the `values.<env>.yaml`
   overlay), then the `erun-enable-hosting-edge` skill / `erun terraform apply`

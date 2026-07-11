@@ -1,0 +1,21 @@
+Initialize the env's Terraform root before plan/apply/destroy.
+
+Downloads providers into the durable home directory and points the local backend at the env's state file. On a writable checkout it generates .terraform.lock.hcl and records provider hashes for linux/amd64 and linux/arm64 (erun's deploy targets) — commit that lock so read-only runtime envs can initialize without rewriting their baked tree. On a tree that already has a committed lock it runs -lockfile=readonly and only refreshes the provider cache. Run this once, and again after changing providers; plan/apply/destroy no longer init implicitly.
+
+Usage:
+  erun terraform init [TENANT] [ENVIRONMENT] [flags]
+
+Examples:
+  erun terraform init frs local
+  erun terraform init frs prod --dry-run
+
+Flags:
+      --dry-run              Resolve and trace mutating actions without executing them.
+      --environment string   Target a specific environment (defaults to the tenant's default)
+  -h, --help                 help for init
+      --tenant string        Target a specific tenant (defaults to the current scope)
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

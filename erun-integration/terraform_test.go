@@ -32,6 +32,81 @@ func TestTerraform(t *testing.T) {
 		golden.Equal(t, "terraform/help_apply", normalize.Apply(result.Combined))
 	})
 
+	t.Run("help_init", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"terraform", "init", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "terraform/help_init", normalize.Apply(result.Combined))
+	})
+
+	t.Run("init_dry_run", func(t *testing.T) {
+		// init is its own operation now (apply/plan/destroy no longer init). With no
+		// committed lock yet, init generates one and records provider hashes for both
+		// deploy arches via `providers lock`, so a single committed lock initializes
+		// on any env's architecture.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTerraformEnvRoot(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"terraform", "init", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "terraform/init_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("init_dry_run_lockfile_readonly", func(t *testing.T) {
+		// A committed .terraform.lock.hcl in the (read-only) playbook tree pins
+		// providers, so init runs -lockfile=readonly and only refreshes the PVC
+		// provider cache — it never rewrites the tree and skips `providers lock`.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTerraformEnvRoot(t, setup, "team", "dev")
+		lock := filepath.Join(setup.Cwd, "terraform-team", "dev", ".terraform.lock.hcl")
+		if err := os.WriteFile(lock, []byte("# pinned providers\n"), 0o644); err != nil {
+			t.Fatalf("write lock: %v", err)
+		}
+		result := erun.Run(t, []string{"terraform", "init", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "terraform/init_dry_run_lockfile_readonly", normalize.Apply(result.Combined))
+	})
+
+	t.Run("init_real_run_via_stub", func(t *testing.T) {
+		// The real (non-dry-run) init path locks the writability pre-check, the init
+		// step, the cross-arch `providers lock` step, and the success line.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTerraformEnvRoot(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "terraform", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "terraform")...)
+		result := erun.Run(t, []string{"terraform", "init", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "terraform/init_real_run_via_stub", normalize.Apply(result.Combined))
+	})
+
+	t.Run("apply_dry_run_no_backend_warns", func(t *testing.T) {
+		// Without a `backend "local"` block, terraform's -backend-config=path override
+		// doesn't persist, so state would land in ./terraform.tfstate inside the
+		// (read-only) tree. erun warns so the operator adds the block before apply
+		// fails on a read-only tree.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTerraformEnvRoot(t, setup, "team", "dev")
+		common := filepath.Join(setup.Cwd, "terraform-team", "common.tf")
+		if err := os.WriteFile(common, []byte("terraform {\n  required_version = \">= 1.3\"\n}\n"), 0o644); err != nil {
+			t.Fatalf("rewrite common.tf: %v", err)
+		}
+		result := erun.Run(t, []string{"terraform", "apply", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "terraform/apply_dry_run_no_backend_warns", normalize.Apply(result.Combined))
+	})
+
 	t.Run("apply_dry_run", func(t *testing.T) {
 		// apply's full plan runs behind a type-the-env-name confirm gate and
 		// performs no side effects in dry-run.
@@ -92,21 +167,6 @@ func TestTerraform(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "terraform/apply_dry_run_under_devops", normalize.Apply(result.Combined))
-	})
-
-	t.Run("apply_dry_run_lockfile_readonly", func(t *testing.T) {
-		// A baked .terraform.lock.hcl in the (read-only) playbook tree pins providers,
-		// so init runs -lockfile=readonly and never rewrites the tree.
-		setup := env.New(t)
-		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		fixture.SeedGitRepo(t, setup.Cwd)
-		fixture.SeedTerraformEnvRoot(t, setup, "team", "dev")
-		lock := filepath.Join(setup.Cwd, "terraform-team", "dev", ".terraform.lock.hcl")
-		if err := os.WriteFile(lock, []byte("# pinned providers\n"), 0o644); err != nil {
-			t.Fatalf("write lock: %v", err)
-		}
-		result := erun.Run(t, []string{"terraform", "apply", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		golden.Equal(t, "terraform/apply_dry_run_lockfile_readonly", normalize.Apply(result.Combined))
 	})
 
 	t.Run("apply_dry_run_legacy_state_warning", func(t *testing.T) {

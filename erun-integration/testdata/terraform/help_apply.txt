@@ -1,6 +1,6 @@
 Plan and apply the env's Terraform root.
 
-Resolves the env's Terraform root (terraform-<tenant>/<environment>/ or <tenant>-devops/terraform-<tenant>/<environment>/), runs init -> fmt -> plan, then prompts you to type the environment name before applying — a guard against applying to the wrong env. It mutates real cloud and cluster state (DNS, TLS, ingress, workloads); state is kept on the durable home directory. Pass --confirm-environment <env> for non-interactive use, or --dry-run to preview the resolved terraform commands.
+Resolves the env's Terraform root (terraform-<tenant>/<environment>/ or <tenant>-devops/terraform-<tenant>/<environment>/), runs fmt -> plan, then prompts you to type the environment name before applying — a guard against applying to the wrong env. Run `erun terraform init` first (once) so providers are available. It mutates real cloud and cluster state (DNS, TLS, ingress, workloads); state is kept on the durable home directory. Pass --confirm-environment <env> for non-interactive use, or --dry-run to preview the resolved terraform commands.
 
 Usage:
   erun terraform apply [TENANT] [ENVIRONMENT] [flags]
