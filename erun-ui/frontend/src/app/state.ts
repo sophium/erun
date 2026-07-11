@@ -416,6 +416,7 @@ export const defaultEnvironmentConfig = (): UIEnvironmentConfig => ({
   autoUpgrade: false,
   upgradeChannel: 'stable',
   disableBuildScript: false,
+  platformAccount: false,
   mountSource: false,
   repoURL: '',
 });
