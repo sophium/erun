@@ -40,6 +40,7 @@ func TestHelmDeployParamsPreservesCommand(t *testing.T) {
 		RuntimeRegistry:      "ghcr.io/sophium",
 		ContainerRegistries:  ContainerRegistries{{Registry: "ghcr.io/sophium", Roles: []RegistryRole{"deploy"}}},
 		DisableBuildScript:   true,
+		PlatformAccount:      true,
 		Platform:             PlatformConfig{BaseDomain: "erunpaas.com", Env: "frs-prod", ServicesZone: "frs.erunpaas.com"},
 	}
 
@@ -59,6 +60,7 @@ func TestHelmDeployParamsPreservesCommand(t *testing.T) {
 		"mcpAuth.enabled=true",
 		"runtimeRegistry=ghcr.io/sophium",
 		"containerRegistries=",
+		"platformAccount=true",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("executed command missing %q; got %v", want, executed.Args)

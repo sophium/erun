@@ -278,8 +278,33 @@ roleRef:
   name: {{ .Release.Name }}-self-deploy
 ---
 {{- end }}
-{{- with .Values.extraRules }}
+{{- if .Values.platformAccount }}
+# Opt-in platform account: this env's runtime ServiceAccount is the cluster's
+# erun platform admin, so in-pod `erun terraform apply` of the cluster edge and
+# platform component installs (cert-manager, Traefik, PowerDNS) can create the
+# cluster-scoped resources they require — namespaces, CRDs, cluster RBAC,
+# webhooks. Bound to the built-in cluster-admin because the platform charts'
+# cluster-scoped surface evolves and a curated role would need endless upkeep.
+# The first bind is created by the admin-capable context that runs the initial
+# deploy: the apiserver's escalation check requires the creator already hold
+# everything it grants, so an in-pod self-deploy cannot bootstrap this itself.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Name }}-platform
+  labels:
+    app: {{ .Release.Name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Release.Name }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
 ---
+{{- end }}
+{{- with .Values.extraRules }}
 # Extra cluster-scoped RBAC for the runtime ServiceAccount, supplied by a wrapper
 # (e.g. a build env that adds a sidecar needing permissions the built-in admin
 # binding does not grant). No-op unless set; namespaced access already comes from
@@ -307,6 +332,7 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: {{ $.Release.Name }}-extra
+---
 {{- end }}
 apiVersion: apps/v1
 kind: Deployment

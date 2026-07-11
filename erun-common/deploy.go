@@ -184,6 +184,10 @@ type HelmDeploySpec struct {
 	// DisableBuildScript mirrors EnvConfig.DisableBuildScript so a remote-agent
 	// pod's in-pod build honours the operator's build.sh-discovery choice.
 	DisableBuildScript bool
+	// PlatformAccount mirrors EnvConfig.PlatformAccount: when set, the runtime
+	// chart binds this env's SA to cluster-admin so in-pod platform terraform
+	// and component installs can manage cluster-scoped resources.
+	PlatformAccount bool
 	// Platform is the resolved per-instance platform config. Zero for
 	// non-platform projects; when set, deploy threads it to every chart as
 	// platform.* values so the PowerDNS singleton can bootstrap its authoritative
@@ -1581,6 +1585,7 @@ func newHelmDeploySpecWithValues(target OpenResult, deployContext KubernetesDepl
 		ContainerRegistries: containerRegistries,
 		Platform:            resolveProjectPlatform(target.RepoPath),
 		DisableBuildScript:  target.EnvConfig.DisableBuildScript,
+		PlatformAccount:     target.EnvConfig.PlatformAccount,
 		ImagePullSecrets:    append([]string(nil), target.EnvConfig.ImagePullSecrets...),
 		Idle:                target.EnvConfig.Idle,
 		Claude:              target.EnvConfig.Claude,
@@ -1857,6 +1862,7 @@ func (d HelmDeploySpec) command() commandSpec {
 	// reconcile a flip in either direction, so the chart always receives the
 	// actual value.
 	args = append(args, "--set", "disableBuildScript="+formatHelmBool(d.DisableBuildScript))
+	args = append(args, helmPlatformAccountSetArgs(d.PlatformAccount)...)
 	for _, key := range sortedStringMapKeys(d.ImageOverrides) {
 		args = append(args, "--set-string", "imageOverrides."+key+"="+d.ImageOverrides[key])
 	}
@@ -2098,6 +2104,20 @@ func helmRegistrySetArgs(d HelmDeploySpec) []string {
 // guarded on presence so non-platform deploys (every existing env) render none.
 // Threaded to every chart; only the PowerDNS singleton reads them (to bootstrap
 // its services zone).
+// helmPlatformAccountSetArgs appends the platform-account switch only when the
+// env opted in, so every other deploy plan stays byte-for-byte unchanged. When
+// set, the runtime chart binds the env's SA to cluster-admin (a
+// <release>-platform ClusterRoleBinding) so in-pod platform terraform and
+// component installs can manage cluster-scoped resources. Absent on a later
+// deploy, the chart default (false) prunes the binding on upgrade, so a flip in
+// either direction reconciles.
+func helmPlatformAccountSetArgs(platformAccount bool) []string {
+	if !platformAccount {
+		return nil
+	}
+	return []string{"--set", "platformAccount=true"}
+}
+
 func helmPlatformSetArgs(p PlatformConfig) []string {
 	if p.IsZero() {
 		return nil

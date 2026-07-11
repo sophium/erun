@@ -151,6 +151,13 @@ type EnvConfig struct {
 	// DisableBuildScript makes erun ignore any project build.sh for this env and
 	// build docker/release directly. Default false keeps build.sh shadowing docker.
 	DisableBuildScript bool `yaml:"disablebuildscript,omitempty" json:"disableBuildScript,omitempty"`
+	// PlatformAccount designates this env's runtime ServiceAccount as the
+	// cluster's erun platform admin: deploy binds it to the built-in
+	// cluster-admin ClusterRole so in-pod `erun terraform apply` (the cluster
+	// edge) and platform component installs (cert-manager, Traefik, PowerDNS)
+	// can create the cluster-scoped resources they require. Default false leaves
+	// the SA with namespaced admin only.
+	PlatformAccount bool `yaml:"platformaccount,omitempty" json:"platformAccount,omitempty"`
 }
 
 // ResolvedCloudAliases returns the env's attached cloud aliases keyed by provider

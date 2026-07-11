@@ -89,6 +89,7 @@ type BootstrapInitParams struct {
 	AutoApprove             bool
 	ResolveTenant           bool
 	DisableBuildScript      bool
+	PlatformAccount         bool
 }
 
 // ResolvedType returns the new env's type: an explicit Type wins, otherwise it
@@ -782,6 +783,7 @@ func (s *bootstrapRunState) createEnvConfig() error {
 		RuntimeImage:       strings.TrimSpace(s.params.RuntimeImage),
 		RuntimePod:         NormalizeRuntimePodResources(s.params.RuntimePod),
 		DisableBuildScript: s.params.DisableBuildScript,
+		PlatformAccount:    s.params.PlatformAccount,
 	}
 	if err := saveEnvConfig(s.runner.Store, s.tenant, s.envConfig); err != nil {
 		return err
