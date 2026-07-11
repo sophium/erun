@@ -452,6 +452,11 @@ export interface UIEnvironmentConfig {
   // images directly. Changes how a redeploy rebuilds the runtime image, so
   // saving it raises the pending-redeploy banner.
   disableBuildScript: boolean;
+  // platformAccount binds the env's runtime ServiceAccount to cluster-admin so
+  // in-pod platform Terraform (the cluster edge) and component installs can
+  // manage cluster-scoped resources. Changing it changes the RBAC a redeploy
+  // renders, so saving raises the pending-redeploy banner.
+  platformAccount: boolean;
   // mountSource opts a runtime env into a writable source worktree the pod clones
   // at the deployed release ref; repoURL is the git remote it clones. Runtime
   // envs only, and a no-op without repoURL. Changing either alters what a

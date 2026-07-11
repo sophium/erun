@@ -69,6 +69,9 @@ function deployRelevantSignature(config: UIEnvironmentConfig): string {
     localRepoPath: config.localRepoPath,
     containerRegistries: config.containerRegistries,
     disableBuildScript: config.disableBuildScript,
+    // Platform account flips the runtime SA's cluster RBAC (a <release>-platform
+    // ClusterRoleBinding to cluster-admin), which the next deploy renders/prunes.
+    platformAccount: config.platformAccount,
     // Mounting source flips a runtime env's worktree onto a PVC and makes the pod
     // clone repoURL at the release ref, so both change what a redeploy provisions.
     mountSource: config.mountSource,
@@ -117,6 +120,7 @@ export function manageDialogTabHasUnsavedChanges(
         'autoUpgrade',
         'upgradeChannel',
         'disableBuildScript',
+        'platformAccount',
         'mountSource',
         'repoURL',
       );
