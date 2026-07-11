@@ -4,7 +4,9 @@ title: erun terraform
 
 # erun terraform
 
-Run a hosted platform's per-environment Terraform without hand-running `terraform` or `cd`-ing into a folder. `erun terraform` is for [platform deployments](/deployment/deploy-platform) whose Terraform is laid out per environment — one folder per env under `terraform-<tenant>/`, scaffolded by the [`erun-blueprint-platform`](/agent-reference/skills-spec#erun-blueprint-platform) skill. erun resolves `terraform-<tenant>/<environment>/` from the current scope, picks up the symlinked `common.tf`, and runs that env's own `main.tf` with its `<environment>.tfvars`. The `terraform-<tenant>` base is the default; relocate it with [`paths.terraform`](/reference/configuration#paths-block) in `.erun/config.yaml` (erun still appends `/<environment>`).
+Run a hosted platform's per-environment Terraform without hand-running `terraform` or `cd`-ing into a folder. `erun terraform` is for [platform deployments](/deployment/deploy-platform) whose Terraform is laid out per environment — one folder per env under `terraform-<tenant>/`, scaffolded by the [`erun-blueprint-platform`](/agent-reference/skills-spec#erun-blueprint-platform) skill. erun resolves the env's root from the current scope — `terraform-<tenant>/<environment>/` at the project root, or `<tenant>-devops/terraform-<tenant>/<environment>/` when the tenant keeps its whole devops footprint (`docker/`, `k8s/`, `terraform-<tenant>/`) under `<tenant>-devops/` (the same `-devops` convention `build`/`deploy` use) — picks up the symlinked `common.tf`, and runs that env's own `main.tf` with its `<environment>.tfvars`. The `terraform-<tenant>` base is the default; relocate it with [`paths.terraform`](/reference/configuration#paths-block) in `.erun/config.yaml` (erun still appends `/<environment>`).
+
+Terraform's mutable artifacts live **off** the playbook tree: erun keeps the local-backend state file, the plan file, and `TF_DATA_DIR` (downloaded providers/modules) under `~/.erun/terraform/<tenant>/<environment>/` on the durable home directory (the `/home/erun` PVC in a runtime pod). State and the provider cache therefore survive a pod restart, while the image-baked playbooks stay read-only.
 
 ```bash
 erun terraform apply frs prod              # init → fmt → plan → confirm → apply
@@ -17,13 +19,13 @@ With no `TENANT`/`ENVIRONMENT` arguments, the command resolves the configured de
 
 ## What it does
 
-For `erun terraform apply <tenant> <env>`, it resolves `terraform-<tenant>/<env>/` under the project root and runs Terraform **in that folder**, so the env picks up its symlinked `common.tf` and adds its own services via `main.tf`:
+For `erun terraform apply <tenant> <env>`, it resolves the env's root (see above) and runs Terraform **in that folder**, so the env picks up its symlinked `common.tf` and adds its own services via `main.tf`. `TF_DATA_DIR` is set to `~/.erun/terraform/<tenant>/<env>/data` for every step, so downloaded providers and modules persist on the durable home directory across runs and restarts:
 
-1. `terraform init -input=false`
-2. `terraform fmt -recursive ..` — normalises the whole `terraform-<tenant>/` tree before planning, so HCL drift doesn't accumulate.
-3. `terraform plan -input=false -var-file=<env>.tfvars -out apply.tfplan` — using the env's var file when present.
+1. `terraform init -input=false -backend-config=path=~/.erun/terraform/<tenant>/<env>/terraform.tfstate` — points the local backend at the durable state file. When a baked `.terraform.lock.hcl` pins providers, erun adds `-lockfile=readonly` so init never rewrites the read-only tree.
+2. `terraform fmt -check -recursive ..` — **verifies** formatting across the tree without rewriting it (the playbooks are read-only in a runtime release); a formatting drift fails the step.
+3. `terraform plan -input=false -var-file=<env>.tfvars -out ~/.erun/terraform/<tenant>/<env>/apply.tfplan` — using the env's var file when present.
 4. **Confirm:** you are prompted to **type the environment name** before anything is applied — the guard against applying to the wrong environment.
-5. `terraform apply -input=false apply.tfplan` — applies the exact plan you reviewed.
+5. `terraform apply -input=false ~/.erun/terraform/<tenant>/<env>/apply.tfplan` — applies the exact plan you reviewed.
 
 `plan` stops after step 3 (read-only — no `fmt`, no `-out`, no confirm). `destroy` plans a `-destroy` and applies it behind the same confirm gate.
 
@@ -43,7 +45,7 @@ When the env has a Cloudflare alias, its `CLOUDFLARE_API_TOKEN` is forwarded to 
 | Condition | What happens | Recover |
 |---|---|---|
 | Not in a project (no git repo found on the host) | Aborts: `cannot find git project`; exit 1. | Run from inside your project checkout. This doesn't occur inside a runtime pod, where erun resolves the project tree automatically even though it has no `.git`. |
-| No `terraform-<tenant>/<env>/` folder | Aborts: `no Terraform root at … — scaffold it with the erun-blueprint-platform skill …`; exit 1. | Scaffold the per-env root with [`erun-blueprint-platform`](/agent-reference/skills-spec#erun-blueprint-platform), or create `terraform-<tenant>/<env>/` with its `main.tf` and `<env>.tfvars`. |
+| No Terraform root at either candidate | Aborts: `no Terraform root for <tenant>/<env> — looked under terraform-<tenant>/<env>/ and <tenant>-devops/terraform-<tenant>/<env>/ …`; exit 1. | Scaffold the per-env root with [`erun-blueprint-platform`](/agent-reference/skills-spec#erun-blueprint-platform), or create it at either location with its `main.tf` and `<env>.tfvars`. |
 | Environment not configured | Surfaces the config load error; exit 1. | Create the env (`erun init`) or fix the tenant/env name. |
 | No default tenant/environment and none passed | Aborts: default tenant/environment not configured; exit 1. | Pass `TENANT ENVIRONMENT` (or set a default scope). |
 | Confirmation doesn't match the env name | Aborts before the apply step: `confirmation "…" does not match environment "…"; aborting <operation>`; exit 1. The earlier read-only steps (`init`, `plan`, plus `fmt` for `apply`) have already run; only the apply is gated. | Re-run and type the exact environment name (or pass `--confirm-environment <env>`). |

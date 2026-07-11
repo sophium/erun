@@ -355,10 +355,15 @@ The operator applies these in the runtime env, never by hand-running `terraform`
 or `kubectl`:
 
 - **Terraform:** `erun terraform apply` resolves `terraform-<tenant>/<env>/`
-  from the active cloud context and runs `init → fmt → plan → confirm → apply`,
-  injecting `TF_VAR_cloudflare_api_token` from `CLOUDFLARE_API_TOKEN`. The
-  confirm step prompts the operator to **type the environment name** before
-  applying, so changes can't land in the wrong env. Preview with
+  (or `<tenant>-devops/terraform-<tenant>/<env>/` — the same `-devops` convention
+  `build`/`deploy` use, so a tree baked under `<tenant>-devops/` needs no
+  `paths.terraform` override) from the active cloud context and runs
+  `init → fmt → plan → confirm → apply`, injecting `TF_VAR_cloudflare_api_token`
+  from `CLOUDFLARE_API_TOKEN`. State and the provider cache live on the durable
+  home directory (`~/.erun/terraform/<tenant>/<env>/` on the `/home/erun` PVC),
+  off the read-only playbook tree, so they survive a pod restart. The confirm
+  step prompts the operator to **type the environment name** before applying, so
+  changes can't land in the wrong env. Preview with
   `erun terraform apply --dry-run`.
 - **Helm:** `erun deploy --version <version> --components=…` (with the `values.<env>.yaml`
   overlay), then the `erun-enable-hosting-edge` skill / `erun terraform apply`

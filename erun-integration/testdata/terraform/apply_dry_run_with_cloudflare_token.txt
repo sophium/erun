@@ -1,9 +1,12 @@
 audit: erun terraform apply --dry-run team dev
 terraform: apply in <TMP> (env team/dev, namespace team-dev)
 terraform: var file dev.tfvars
+terraform: state <STATE_ROOT>/team/dev/terraform.tfstate (local backend on the home PVC — survives pod restarts)
+terraform: TF_DATA_DIR <STATE_ROOT>/team/dev/data
 terraform: injecting TF_VAR_cloudflare_api_token from CLOUDFLARE_API_TOKEN
-cd <TMP> && terraform init -input=false
-cd <TMP> && terraform fmt -recursive ..
-cd <TMP> && terraform plan -input=false -var-file=dev.tfvars -out apply.tfplan
+mkdir -p <STATE_ROOT>/team/dev
+cd <TMP> && terraform init -input=false -backend-config=path=<STATE_ROOT>/team/dev/terraform.tfstate
+cd <TMP> && terraform fmt -check -recursive ..
+cd <TMP> && terraform plan -input=false -var-file=dev.tfvars -out <STATE_ROOT>/team/dev/apply.tfplan
 terraform: apply requires typing the environment name (dev) to confirm before apply
-cd <TMP> && terraform apply -input=false apply.tfplan
+cd <TMP> && terraform apply -input=false <STATE_ROOT>/team/dev/apply.tfplan

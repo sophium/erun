@@ -13,7 +13,7 @@ type TerraformInput struct {
 	Operation   string   `json:"operation" jsonschema:"required terraform operation: apply (init/fmt/plan/apply), plan (read-only), or destroy"`
 	Tenant      string   `json:"tenant,omitempty" jsonschema:"tenant name; defaults to the MCP runtime context tenant"`
 	Environment string   `json:"environment,omitempty" jsonschema:"environment name; defaults to the MCP runtime context environment"`
-	ProjectRoot string   `json:"projectRoot,omitempty" jsonschema:"project root holding terraform-<tenant>/ (or the paths.terraform base from .erun/config.yaml); defaults to the runtime repo path"`
+	ProjectRoot string   `json:"projectRoot,omitempty" jsonschema:"project root holding terraform-<tenant>/ or <tenant>-devops/terraform-<tenant>/ (or the paths.terraform base from .erun/config.yaml); defaults to the runtime repo path"`
 	Confirm     string   `json:"confirm,omitempty" jsonschema:"for apply/destroy: restate the environment name to confirm the mutation; required to apply, ignored for plan and preview"`
 	ExtraArgs   []string `json:"extraArgs,omitempty" jsonschema:"extra args passed through to terraform plan"`
 	Preview     bool     `json:"preview,omitempty" jsonschema:"when true, resolve and print the terraform commands without executing them"`
