@@ -79,6 +79,51 @@ func TestTerraform(t *testing.T) {
 		golden.Equal(t, "terraform/apply_dry_run_with_cloudflare_token", normalize.Apply(result.Combined))
 	})
 
+	t.Run("apply_dry_run_under_devops", func(t *testing.T) {
+		// A tenant that keeps its whole devops footprint under <tenant>-devops/
+		// (docker/, k8s/, terraform-<tenant>/) resolves via the -devops convention
+		// when no repo-root terraform-<tenant>/ exists — the sourceless-pod layout.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTerraformEnvRootAt(t, filepath.Join(setup.Cwd, "team-devops", "terraform-team"), "dev")
+		result := erun.Run(t, []string{"terraform", "apply", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "terraform/apply_dry_run_under_devops", normalize.Apply(result.Combined))
+	})
+
+	t.Run("apply_dry_run_lockfile_readonly", func(t *testing.T) {
+		// A baked .terraform.lock.hcl in the (read-only) playbook tree pins providers,
+		// so init runs -lockfile=readonly and never rewrites the tree.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTerraformEnvRoot(t, setup, "team", "dev")
+		lock := filepath.Join(setup.Cwd, "terraform-team", "dev", ".terraform.lock.hcl")
+		if err := os.WriteFile(lock, []byte("# pinned providers\n"), 0o644); err != nil {
+			t.Fatalf("write lock: %v", err)
+		}
+		result := erun.Run(t, []string{"terraform", "apply", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "terraform/apply_dry_run_lockfile_readonly", normalize.Apply(result.Combined))
+	})
+
+	t.Run("apply_dry_run_legacy_state_warning", func(t *testing.T) {
+		// A pre-relocation terraform.tfstate left in the tree is ignored (state now
+		// lives on the PVC) and surfaced as a warning so old state isn't orphaned silently.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTerraformEnvRoot(t, setup, "team", "dev")
+		legacy := filepath.Join(setup.Cwd, "terraform-team", "dev", "terraform.tfstate")
+		if err := os.WriteFile(legacy, []byte("{}\n"), 0o644); err != nil {
+			t.Fatalf("write legacy state: %v", err)
+		}
+		result := erun.Run(t, []string{"terraform", "apply", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "terraform/apply_dry_run_legacy_state_warning", normalize.Apply(result.Combined))
+	})
+
 	t.Run("plan_dry_run", func(t *testing.T) {
 		// plan is read-only: no fmt mutation and no confirm gate, unlike apply.
 		setup := env.New(t)
