@@ -321,6 +321,7 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 		AutoUpgrade:        config.AutoUpgrade,
 		UpgradeChannel:     config.ResolvedUpgradeChannel(),
 		DisableBuildScript: config.DisableBuildScript,
+		PlatformAccount:    config.PlatformAccount,
 		MountSource:        config.MountSource,
 		RepoURL:            strings.TrimSpace(config.RepoURL),
 		DeployComponents:   append([]string(nil), config.Deploy.Components...),
@@ -559,6 +560,7 @@ func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.Env
 	existing.AutoStart = copyBoolPtr(config.AutoStart)
 	existing.AutoUpgrade = config.AutoUpgrade
 	existing.DisableBuildScript = config.DisableBuildScript
+	existing.PlatformAccount = config.PlatformAccount
 	existing.MountSource = config.MountSource
 	existing.RepoURL = strings.TrimSpace(config.RepoURL)
 	// Preserve the sibling deploy.timeout; only the saved component selection is

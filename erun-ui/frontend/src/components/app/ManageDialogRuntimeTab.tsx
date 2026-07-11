@@ -200,8 +200,32 @@ function IdleStopFields({ dialog }: { dialog: ManageDialog }): React.ReactElemen
           dispatch(updateManageConfig({ disableBuildScript }));
         }}
       />
+      <PlatformAccountField dialog={dialog} />
       <MountSourceFields dialog={dialog} />
     </div>
+  );
+}
+
+// PlatformAccountField renders the opt-in that binds this env's runtime
+// ServiceAccount to cluster-admin, so in-pod platform Terraform (the cluster
+// edge) and component installs can create cluster-scoped resources. Env-type
+// agnostic — a hosted runtime platform env or a cluster-provisioning agent env
+// can both be a platform account — so it renders for every type. Extracted to
+// keep IdleStopFields within its size/complexity budget.
+function PlatformAccountField({ dialog }: { dialog: ManageDialog }): React.ReactElement {
+  const dispatch = useAppDispatch();
+  const config = dialog.config;
+  return (
+    <CheckboxField
+      id="environment-config-platformaccount"
+      label="Platform account"
+      helper="Bind this environment's runtime ServiceAccount to cluster-admin so in-pod platform Terraform (the cluster edge) and component installs can create cluster-scoped resources — namespaces, CRDs, cluster RBAC. Off by default; the first deploy that grants it must run from a cluster-admin context."
+      checked={config.platformAccount}
+      disabled={dialog.busy || dialog.configLoading}
+      onChange={(platformAccount) => {
+        dispatch(updateManageConfig({ platformAccount }));
+      }}
+    />
   );
 }
 

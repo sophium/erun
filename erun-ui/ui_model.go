@@ -263,6 +263,10 @@ type uiEnvironmentConfig struct {
 	AutoUpgrade           bool                       `json:"autoUpgrade"`
 	UpgradeChannel        string                     `json:"upgradeChannel,omitempty"`
 	DisableBuildScript    bool                       `json:"disableBuildScript"`
+	// PlatformAccount binds the env's runtime ServiceAccount to cluster-admin so
+	// in-pod platform Terraform (the cluster edge) and component installs can
+	// manage cluster-scoped resources. See EnvConfig.PlatformAccount.
+	PlatformAccount bool `json:"platformAccount"`
 	// MountSource opts a runtime env into a mutable source worktree the pod clones
 	// at the deployed release ref; RepoURL is the git remote it clones. Runtime
 	// envs only, and a no-op without RepoURL. See EnvConfig.MountsRuntimeSource.

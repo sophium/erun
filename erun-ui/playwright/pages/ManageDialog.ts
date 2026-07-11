@@ -58,6 +58,12 @@ export class ManageDialog {
     return this.locator().locator('#environment-config-disablebuildscript');
   }
 
+  // The "Platform account" toggle binds the env's runtime SA to cluster-admin;
+  // env-type agnostic, so it renders for every environment type.
+  platformAccountCheckbox(): Locator {
+    return this.locator().locator('#environment-config-platformaccount');
+  }
+
   // The runtime-only "Mount source code" toggle and the git remote it reveals.
   // The URL field is rendered only while the toggle is on.
   mountSourceCheckbox(): Locator {
