@@ -24,6 +24,13 @@ zone. It's idempotent — re-running reconciles.
    command -v terraform >/dev/null && command -v kubectl >/dev/null || { echo "terraform + kubectl required"; exit 1; }
    kubectl cluster-info >/dev/null || { echo "kubectl is not pointed at a reachable cluster"; exit 1; }
    ```
+   In a deployed env the apply runs as the pod's ServiceAccount, which needs
+   cluster-scoped rights (create namespaces + CRDs). Confirm this env is a
+   **platform account** — its SA bound to `cluster-admin`:
+   ```sh
+   kubectl auth can-i create namespaces >/dev/null && kubectl auth can-i create customresourcedefinitions >/dev/null \
+     || { echo "SA lacks cluster-scoped rights. Make this env a platform account: erun init --platform-account (or set platformaccount: true), then redeploy from an admin-capable context so the chart binds the SA to cluster-admin."; exit 1; }
+   ```
 3. **The services zone and ACME email** — from the platform config
    (`platform.serviceszone` / `platform.acmeemail`), e.g. `services.example.com`
    and `ops@example.com`. Ask the operator if they aren't already known.

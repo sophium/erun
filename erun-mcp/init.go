@@ -32,6 +32,7 @@ type InitInput struct {
 	ConfirmRemoteKeyImport   *bool  `json:"confirmRemoteKeyImport,omitempty" jsonschema:"response to a prior remote SSH key import confirmation interaction"`
 	AutoApprove              bool   `json:"autoApprove,omitempty" jsonschema:"when true, automatically approve initialization prompts"`
 	DisableBuildScript       bool   `json:"disableBuildScript,omitempty" jsonschema:"when true, ignore any project build.sh for this env; erun build resolves docker/release contexts directly"`
+	PlatformAccount          bool   `json:"platformAccount,omitempty" jsonschema:"when true, make this env a cluster platform account: deploy binds its runtime ServiceAccount to cluster-admin so in-pod platform terraform (cluster edge) and component installs can manage cluster-scoped resources"`
 	Preview                  bool   `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
 	Verbosity                int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
@@ -76,6 +77,7 @@ func initTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 			ConfirmRemoteHostConfig: input.ConfirmRemoteHostConfig,
 			AutoApprove:             input.AutoApprove,
 			DisableBuildScript:      input.DisableBuildScript,
+			PlatformAccount:         input.PlatformAccount,
 		}
 
 		if envType := eruncommon.EnvironmentType(strings.TrimSpace(input.Type)); envType.IsValid() {

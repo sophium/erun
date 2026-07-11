@@ -361,6 +361,14 @@ dependency `version` is pinned to the erun release from Step 1.
 The operator applies these in the runtime env, never by hand-running `terraform`
 or `kubectl`:
 
+- **Platform account (once, up front).** A Terraform tree that stands up the
+  cluster edge or other cluster-scoped platform resources runs in-pod as the
+  runtime ServiceAccount, which by default holds namespaced admin only. Make the
+  platform env a **platform account** — `erun init --platform-account` (or
+  `platformaccount: true`) — so `erun deploy` binds its SA to `cluster-admin`;
+  the first such deploy must run from an admin-capable context. Without it the
+  apply is denied (`namespaces is forbidden` / `customresourcedefinitions … is
+  forbidden`).
 - **Terraform:** `erun terraform init` once (downloads providers, records the
   committed cross-arch lock), then `erun terraform apply` resolves
   `terraform-<tenant>/<env>/` (or `<tenant>-devops/terraform-<tenant>/<env>/` — the
