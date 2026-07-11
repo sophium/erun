@@ -1,8 +1,9 @@
 # Production overlay: publish to the live Cloudflare Pages project on the
 # `main` branch alias. The branch alias controls which Cloudflare Pages
 # deployment is mapped to the production custom domain (docs.erunpaas.com).
+# credentialsSecretName is left unset so it defaults to the <release>-cloudflare
+# Secret erun deploy mints from the Cloudflare cloud alias.
 docs:
   enabled: true
   project: erun-docs
   branch: main
-  credentialsSecretName: cf-creds
