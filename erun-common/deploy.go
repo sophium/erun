@@ -95,49 +95,16 @@ type KubernetesDeployContext struct {
 	ChartPath     string
 }
 
+// HelmDeployParams is the execution view of a resolved deploy: the full
+// HelmDeploySpec (the single source of truth for the helm command) plus the
+// output writers the rollout wires. It embeds the spec rather than copying a
+// hand-maintained field list — a copy list silently dropped
+// Cloudflare/MCP-auth/registry/platform values from real deploys while the
+// traced command (built from the full spec) still showed them.
 type HelmDeployParams struct {
-	ReleaseName          string
-	ChartPath            string
-	ValuesFilePath       string
-	PulledValuesFilePath string
-	SubchartKey          string
-	Tenant               string
-	Environment          string
-	Namespace            string
-	KubernetesContext    string
-	WorktreeStorage      string
-	WorktreeRepoName     string
-	WorktreeHostPath     string
-	// RepoURL / RepoRef drive the runtime pod's clone-at-boot of a mutable
-	// source worktree for a runtime env that opted into MountSource. RepoRef is
-	// the release tag (v<version>) the checkout starts from. Both empty for
-	// every other env.
-	RepoURL            string
-	RepoRef            string
-	SSHDEnabled        bool
-	MCPPort            int
-	APIPort            int
-	SSHPort            int
-	ManagedCloud       bool
-	CloudContextName   string
-	CloudProvider      string
-	CloudProviderAlias string
-	CloudRegion        string
-	CloudInstanceID    string
-	UseHostCredentials bool
-	OIDCAllowedIssuers string
-	ContainerRegistry  string
-	ImageOverrides     map[string]string
-	ImagePullSecrets   []string
-	ResetDatabase      bool
-	Idle               EnvironmentIdleConfig
-	Claude             EnvironmentClaudeConfig
-	RuntimePod         RuntimePodResources
-	Version            string
-	Timeout            string
-	Verbosity          int
-	Stdout             io.Writer
-	Stderr             io.Writer
+	HelmDeploySpec
+	Stdout io.Writer
+	Stderr io.Writer
 }
 
 type HelmDeploySpec struct {
@@ -1788,47 +1755,11 @@ func resolveWorktreeHostPath(repoPath string) string {
 	return resolved
 }
 
+// Params pairs the full deploy spec with the rollout's output writers. The whole
+// spec rides along, so the executed command (built from it in helmDeployCommandSpec)
+// stays identical to the traced one — no field can be dropped in transit.
 func (d HelmDeploySpec) Params(stdout, stderr io.Writer) HelmDeployParams {
-	return HelmDeployParams{
-		ReleaseName:          d.ReleaseName,
-		ChartPath:            d.ChartPath,
-		ValuesFilePath:       d.ValuesFilePath,
-		PulledValuesFilePath: d.PulledValuesFilePath,
-		SubchartKey:          d.SubchartKey,
-		Tenant:               d.Tenant,
-		Environment:          d.Environment,
-		Namespace:            d.Namespace,
-		KubernetesContext:    d.KubernetesContext,
-		WorktreeStorage:      d.WorktreeStorage,
-		WorktreeRepoName:     d.WorktreeRepoName,
-		WorktreeHostPath:     d.WorktreeHostPath,
-		RepoURL:              d.RepoURL,
-		RepoRef:              d.RepoRef,
-		SSHDEnabled:          d.SSHDEnabled,
-		MCPPort:              d.MCPPort,
-		APIPort:              d.APIPort,
-		SSHPort:              d.SSHPort,
-		ManagedCloud:         d.ManagedCloud,
-		CloudContextName:     d.CloudContextName,
-		CloudProvider:        d.CloudProvider,
-		CloudProviderAlias:   d.CloudProviderAlias,
-		CloudRegion:          d.CloudRegion,
-		CloudInstanceID:      d.CloudInstanceID,
-		UseHostCredentials:   d.UseHostCredentials,
-		OIDCAllowedIssuers:   d.OIDCAllowedIssuers,
-		ContainerRegistry:    d.ContainerRegistry,
-		ImageOverrides:       cloneStringMap(d.ImageOverrides),
-		ImagePullSecrets:     append([]string(nil), d.ImagePullSecrets...),
-		ResetDatabase:        d.ResetDatabase,
-		Idle:                 d.Idle,
-		Claude:               d.Claude,
-		RuntimePod:           NormalizeRuntimePodResources(d.RuntimePod),
-		Version:              d.Version,
-		Timeout:              d.Timeout,
-		Verbosity:            d.Verbosity,
-		Stdout:               stdout,
-		Stderr:               stderr,
-	}
+	return HelmDeployParams{HelmDeploySpec: d, Stdout: stdout, Stderr: stderr}
 }
 
 func (d HelmDeploySpec) command() commandSpec {
@@ -2101,17 +2032,6 @@ func formatHelmPort(value, fallback int) string {
 
 func formatHelmInt64(value int64) string {
 	return fmt.Sprintf("%d", value)
-}
-
-func cloneStringMap(values map[string]string) map[string]string {
-	if len(values) == 0 {
-		return nil
-	}
-	clone := make(map[string]string, len(values))
-	for key, value := range values {
-		clone[key] = value
-	}
-	return clone
 }
 
 func sortedStringMapKeys(values map[string]string) []string {
@@ -2606,44 +2526,12 @@ func resolveHelmDeployChartPath(params HelmDeployParams) (string, func(), error)
 }
 
 func helmDeployCommandSpec(params HelmDeployParams, chartPath string) commandSpec {
-	return HelmDeploySpec{
-		ReleaseName:          params.ReleaseName,
-		ChartPath:            chartPath,
-		ValuesFilePath:       params.ValuesFilePath,
-		PulledValuesFilePath: params.PulledValuesFilePath,
-		SubchartKey:          params.SubchartKey,
-		Tenant:               params.Tenant,
-		Environment:          params.Environment,
-		Namespace:            params.Namespace,
-		KubernetesContext:    params.KubernetesContext,
-		WorktreeStorage:      params.WorktreeStorage,
-		WorktreeRepoName:     params.WorktreeRepoName,
-		WorktreeHostPath:     params.WorktreeHostPath,
-		RepoURL:              params.RepoURL,
-		RepoRef:              params.RepoRef,
-		SSHDEnabled:          params.SSHDEnabled,
-		MCPPort:              params.MCPPort,
-		APIPort:              params.APIPort,
-		SSHPort:              params.SSHPort,
-		ManagedCloud:         params.ManagedCloud,
-		CloudContextName:     params.CloudContextName,
-		CloudProvider:        params.CloudProvider,
-		CloudProviderAlias:   params.CloudProviderAlias,
-		CloudRegion:          params.CloudRegion,
-		CloudInstanceID:      params.CloudInstanceID,
-		UseHostCredentials:   params.UseHostCredentials,
-		OIDCAllowedIssuers:   params.OIDCAllowedIssuers,
-		ContainerRegistry:    params.ContainerRegistry,
-		ImageOverrides:       cloneStringMap(params.ImageOverrides),
-		ImagePullSecrets:     append([]string(nil), params.ImagePullSecrets...),
-		ResetDatabase:        params.ResetDatabase,
-		Idle:                 params.Idle,
-		Claude:               params.Claude,
-		RuntimePod:           params.RuntimePod,
-		Version:              params.Version,
-		Timeout:              params.Timeout,
-		Verbosity:            params.Verbosity,
-	}.command()
+	// The embedded spec is the traced spec verbatim; only the resolved chart path
+	// differs (a local umbrella unpacks to a temp dir). Building the command from
+	// it guarantees the executed helm command matches what RunHelmDeploy traced.
+	spec := params.HelmDeploySpec
+	spec.ChartPath = chartPath
+	return spec.command()
 }
 
 // configureHelmDeployCmdOutput wires the command's stdout/stderr and returns
