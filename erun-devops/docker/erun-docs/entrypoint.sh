@@ -22,6 +22,20 @@ if [ ! -d "$SITE_DIR" ]; then
   exit 1
 fi
 
+# Ensure the Direct-Upload Pages project exists — `wrangler pages deploy` errors
+# if it is missing. Create it on first run; a re-run tolerates "already exists"
+# but still surfaces real failures (e.g. a token without Pages:Edit).
+echo "ensuring Cloudflare Pages project '$CF_PAGES_PROJECT' exists"
+if ! create_out="$(wrangler pages project create "$CF_PAGES_PROJECT" --production-branch="$CF_PAGES_BRANCH" 2>&1)"; then
+  if printf '%s' "$create_out" | grep -qi 'already exists'; then
+    echo "Cloudflare Pages project '$CF_PAGES_PROJECT' already exists"
+  else
+    printf '%s\n' "$create_out" >&2
+    echo "error: failed to create Cloudflare Pages project '$CF_PAGES_PROJECT'" >&2
+    exit 1
+  fi
+fi
+
 echo "publishing $SITE_DIR to Cloudflare Pages project=$CF_PAGES_PROJECT branch=$CF_PAGES_BRANCH"
 exec wrangler pages deploy "$SITE_DIR" \
   --project-name="$CF_PAGES_PROJECT" \

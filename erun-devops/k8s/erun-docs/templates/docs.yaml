@@ -3,7 +3,11 @@
 {{- $enabled := default false $docs.enabled -}}
 {{- $project := default "erun-docs" $docs.project -}}
 {{- $branch := default "preview" $docs.branch -}}
-{{- $credentialsSecret := default "cf-creds" $docs.credentialsSecretName -}}
+{{/* Default the publish token to the <release>-cloudflare Secret erun deploy already
+     mints from the Cloudflare cloud alias, and read the (non-secret) account id from
+     the cloudContext value it already threads — so docs needs no hand-provisioned secret. */}}
+{{- $credentialsSecret := default (printf "%s-cloudflare" .Release.Name) $docs.credentialsSecretName -}}
+{{- $accountId := default (dig "cloudflare" "accountId" "" (default dict .Values.cloudContext)) $docs.accountId -}}
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
 {{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
 {{- $docsImage := default (printf "%s/erun-docs:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-docs") -}}
@@ -50,10 +54,7 @@ spec:
                   name: {{ $credentialsSecret }}
                   key: CLOUDFLARE_API_TOKEN
             - name: CLOUDFLARE_ACCOUNT_ID
-              valueFrom:
-                secretKeyRef:
-                  name: {{ $credentialsSecret }}
-                  key: CLOUDFLARE_ACCOUNT_ID
+              value: {{ required "erun-docs: no Cloudflare account id — attach a Cloudflare cloud alias (cloudContext.cloudflare.accountId) or set docs.accountId" $accountId | quote }}
             - name: ERUN_TENANT
               value: {{ required "tenant is required" .Values.tenant | quote }}
             - name: ERUN_ENVIRONMENT

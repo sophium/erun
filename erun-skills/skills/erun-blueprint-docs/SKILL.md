@@ -94,7 +94,9 @@ This is the load-bearing part of the blueprint. It mirrors
 - **Two-stage image.** Stage 1 (`node:20-alpine`) runs
   `yarn install --frozen-lockfile` then `yarn build` to produce
   `/build`. Stage 2 installs a pinned `wrangler` and bakes the built
-  site at `$SITE_DIR=/site`. The entrypoint runs
+  site at `$SITE_DIR=/site`. The entrypoint ensures the Direct-Upload
+  Pages project exists (`wrangler pages project create`, tolerating
+  "already exists") then runs
   `wrangler pages deploy "$SITE_DIR" --project-name="$CF_PAGES_PROJECT" --branch="$CF_PAGES_BRANCH" --commit-dirty=true`.
 - **Deploy as a Helm hook Job.** The chart renders a `Job` annotated
   `helm.sh/hook: post-install,post-upgrade` with
@@ -102,31 +104,31 @@ This is the load-bearing part of the blueprint. It mirrors
   `erun deploy` runs a fresh Job; success deletes it. `restartPolicy:
   Never`, small `backoffLimit`, `ttlSecondsAfterFinished` so failed Jobs
   self-clean.
-- **Credentials via Secret + values.** The Job reads
-  `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` from a Secret
-  (`credentialsSecretName`, e.g. `cf-creds`) and `CF_PAGES_PROJECT` /
-  `CF_PAGES_BRANCH` from chart values. The entrypoint refuses to run if
-  any of the four is missing — surface that as the contract, not a
-  surprise.
+- **Credentials from the Cloudflare alias.** The Job reads
+  `CLOUDFLARE_API_TOKEN` from the `<release>-cloudflare` Secret `erun deploy`
+  mints from the env's Cloudflare alias (default `credentialsSecretName`),
+  `CLOUDFLARE_ACCOUNT_ID` from the threaded `cloudContext.cloudflare.accountId`
+  value, and `CF_PAGES_PROJECT` / `CF_PAGES_BRANCH` from chart values — so no
+  hand-created `cf-creds`, just an alias whose token has `Pages:Edit`. The
+  entrypoint refuses to run if any of the four is missing — surface that as
+  the contract, not a surprise.
 - **Image pinning.** Pin both `node` and `wrangler` versions in the
   Dockerfile so deploys stay reproducible (per repo release rules on
   release-critical infra images).
 
-## External prerequisites (must exist before the first deploy)
+## External prerequisites
 
-These are external to the repository and a deploy will fail without
-them. State them to the user up front; do not pretend the scaffold alone
-publishes a site.
+A **Cloudflare cloud alias** attached to the env, whose token has `Pages:Edit`
+(alongside the `Zone:Read + DNS:Edit` the edge uses). Given that, the rest is
+automatic: `erun deploy` mints the `<release>-cloudflare` Secret and threads the
+account id, and the Job creates the Direct-Upload Pages project on first run. Do
+**not** hand-create a `cf-creds` Secret or the Pages project.
 
-1. A **Cloudflare Pages project** of type **Direct Upload** named after
-   `CF_PAGES_PROJECT`. Do **not** connect a Git source — the Job uploads
-   directly via wrangler.
-2. The **custom domain** attached to that Pages project.
-3. A **Cloudflare API token** scoped `Pages:Edit`, plus the **account
-   id**.
-4. A Kubernetes **Secret** (e.g. `cf-creds`) in the deploy namespace
-   holding `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
-5. **DNS** for the domain proxied through Cloudflare so TLS is automatic.
+Still manual — and a deploy's *custom-domain* URL stays dark until these exist,
+so state them up front; do not pretend the scaffold serves a public domain alone:
+
+1. The **custom domain** attached to the Pages project.
+2. **DNS** for the domain proxied through Cloudflare so TLS is automatic.
 
 ## Step-by-step
 
@@ -187,8 +189,9 @@ A clean `yarn build` is the gate. Fix broken links before moving on.
 ### Step 5 — wire into the deploy flow
 
 Document (in the module's `AGENTS.md`) that the site deploys via
-`erun deploy` once the Secret + Pages project exist. Do not run
-`kubectl`/`helm` from a laptop; the runtime executes the deploy.
+`erun deploy` once a Cloudflare alias with `Pages:Edit` is attached — the
+publish Secret and the Pages project are then provisioned automatically. Do not
+run `kubectl`/`helm` from a laptop; the runtime executes the deploy.
 
 ## Audience: keep Operator and Agent docs separate
 
@@ -249,7 +252,7 @@ version pins and genuine gaps, never the project's own content pages.
 | Target dir already contains `<module-name>/docusaurus.config.ts` | Do **not** stop — enter maintenance mode (see § "Maintenance, repair & upgrade"): reconcile the deploy wiring against the blueprint and re-pin versions in place, preserving the existing `docs/` content. Do not clobber the operator's pages. |
 | `yarn build` fails on a broken link | Fix the link or page id; do not disable `onBrokenLinks`. The throw is the link checker working. |
 | `npx create-docusaurus` unavailable (offline) | Fall back to the `templates/` scaffold; the produced files are valid without the generator. |
-| Cloudflare Pages project / Secret missing | Scaffold still succeeds; surface that the first `erun deploy` Job will fail until the Direct-Upload project, custom domain, token, and Secret exist. |
+| No Cloudflare alias (or its token lacks `Pages:Edit`) | Scaffold still succeeds; surface that the first `erun deploy` Job fails to create the Pages project / read credentials until a Cloudflare alias whose token has `Pages:Edit` is attached. The custom domain + DNS stay manual. |
 | `erun deploy` fails: `values file not found for environment "<env>"` | The chart is missing `values.<env>.yaml`. erun requires one per chart per env with no fallback; the agent env (`<module>`'s `<tenant>-local`) needs `values.local.yaml` too. Create the missing file (an empty/comment-only file is valid). |
 | User asks for a Git-connected Pages project | Stop. The Job uploads directly (`wrangler pages deploy`); a Git-connected project double-deploys. Use Direct Upload. |
 | PostgreSQL/other backend coupling requested | Out of scope — this skill is the static docs site only. Point at `erun-blueprint-api` / `erun-blueprint-rls-db` for backend modules. |
