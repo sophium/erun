@@ -54,6 +54,7 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 	cmd.Flags().BoolVar(&confirmEnvironment, "confirm-environment", false, "Confirm environment initialization without prompting")
 	cmd.Flags().BoolVarP(&params.AutoApprove, "yes", "y", false, "Automatically approve initialization prompts")
 	cmd.Flags().BoolVar(&params.DisableBuildScript, "disable-build-script", false, "Ignore any project build.sh for this env; erun build resolves docker/release contexts directly")
+	cmd.Flags().BoolVar(&params.PlatformAccount, "platform-account", false, "Make this env a cluster platform account: deploy binds its runtime ServiceAccount to cluster-admin so in-pod platform terraform (cluster edge) and component installs can manage cluster-scoped resources")
 	addDryRunFlag(cmd)
 	return cmd
 }

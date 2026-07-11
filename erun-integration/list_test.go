@@ -38,6 +38,24 @@ func TestList(t *testing.T) {
 		golden.Equal(t, "list/with_seeded_tenant_env", normalize.Apply(result.Combined))
 	})
 
+	t.Run("platform_account_env_shows_enabled", func(t *testing.T) {
+		// An env flagged platformaccount:true surfaces `platform-account: enabled`
+		// in its detail block, so an operator can see the env holds cluster-admin.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"platformaccount: true\n")
+		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/platform_account_env_shows_enabled", normalize.Apply(result.Combined))
+	})
+
 	t.Run("corrupted_env_config_errors", func(t *testing.T) {
 		// A corrupted env config.yaml must fail list outright, not be silently skipped.
 		setup := env.New(t)
