@@ -27,6 +27,11 @@ var defaultRules = []Replacement{
 	{regexp.MustCompile(`(?:\bv|\b)\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.\-]+)?`), "<VERSION>"},
 	{regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?`), "<TS>"},
 	{regexp.MustCompile(`\b20\d{12}\b`), "<TS_COMPACT>"},
+	// The Terraform durable work dir (local-backend state + TF_DATA_DIR) lives
+	// under the test HOME temp dir. Collapse just its temp-path prefix to a stable
+	// token — before the generic <TMP> rule below would swallow the whole path — so
+	// goldens still show that state lives off the (project <TMP>) playbook tree.
+	{regexp.MustCompile(`/(?:private/)?(?:var/folders|var/tmp|tmp)/[^\s'"]*?/\.erun/terraform`), "<STATE_ROOT>"},
 	{regexp.MustCompile(`/(?:private/)?(?:var/folders|var/tmp|tmp)/[^\s'"]+`), "<TMP>"},
 	// A separate rule for temp paths whose separators are percent-escaped,
 	// which the plain-path rule above cannot match.

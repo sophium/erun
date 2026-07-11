@@ -14,26 +14,30 @@ func newTerraformCmd(store common.TerraformStore, findProjectRoot common.Project
 		Use:   "terraform",
 		Short: "Run a platform's per-env Terraform from the right folder automatically",
 		Long: "Run Terraform against a hosted platform's per-environment root (terraform-<tenant>/<environment>/, " +
-			"or the paths.terraform base from .erun/config.yaml) without hand-running terraform or cd-ing into the folder.\n\n" +
+			"<tenant>-devops/terraform-<tenant>/<environment>/, or the paths.terraform base from .erun/config.yaml) " +
+			"without hand-running terraform or cd-ing into the folder.\n\n" +
 			"erun resolves the env's folder from the current scope, picks up the symlinked common.tf, and runs that " +
-			"env's main.tf with its <environment>.tfvars. Use a subcommand: `apply`, `plan`, or `destroy`.",
+			"env's main.tf with its <environment>.tfvars. State and the provider cache live on the durable home " +
+			"directory (not in the playbook tree), so they survive a runtime pod restart. Use a subcommand: " +
+			"`apply`, `plan`, or `destroy`.",
 		SilenceUsage: true,
 	}
 	cmd.AddCommand(
 		newTerraformOperationCmd(store, findProjectRoot, common.TerraformApply, "apply [TENANT] [ENVIRONMENT]",
 			"Plan and apply the env's Terraform (prompts for the environment name)",
 			"Plan and apply the env's Terraform root.\n\n"+
-				"Resolves terraform-<tenant>/<environment>/, runs init -> fmt -> plan, then prompts you to type the "+
-				"environment name before applying — a guard against applying to the wrong env. It mutates real cloud "+
-				"and cluster state (DNS, TLS, ingress, workloads). Pass --confirm-environment <env> for non-interactive "+
-				"use, or --dry-run to preview the resolved terraform commands.",
+				"Resolves the env's Terraform root (terraform-<tenant>/<environment>/ or "+
+				"<tenant>-devops/terraform-<tenant>/<environment>/), runs init -> fmt -> plan, then prompts you to type "+
+				"the environment name before applying — a guard against applying to the wrong env. It mutates real cloud "+
+				"and cluster state (DNS, TLS, ingress, workloads); state is kept on the durable home directory. Pass "+
+				"--confirm-environment <env> for non-interactive use, or --dry-run to preview the resolved terraform commands.",
 			"  erun terraform apply frs prod\n  erun terraform apply frs prod --dry-run"),
 		newTerraformOperationCmd(store, findProjectRoot, common.TerraformPlan, "plan [TENANT] [ENVIRONMENT]",
 			"Show the env's Terraform plan without applying", "", "  erun terraform plan frs prod"),
 		newTerraformOperationCmd(store, findProjectRoot, common.TerraformDestroy, "destroy [TENANT] [ENVIRONMENT]",
 			"Plan and apply a destroy of the env's Terraform (prompts for the environment name)",
 			"Plan and apply a destroy of the env's Terraform root.\n\n"+
-				"Resolves terraform-<tenant>/<environment>/, plans a destroy, then prompts you to type the environment "+
+				"Resolves the env's Terraform root (terraform-<tenant>/ or <tenant>-devops/terraform-<tenant>/), plans a destroy, then prompts you to type the environment "+
 				"name before applying. This tears down the env's Terraform-managed cloud and cluster resources — "+
 				"irreversible. Pass --confirm-environment <env> for non-interactive use, or --dry-run to preview.",
 			"  erun terraform destroy frs prod --dry-run"),
