@@ -1,6 +1,6 @@
 Run Terraform against a hosted platform's per-environment root (terraform-<tenant>/<environment>/, <tenant>-devops/terraform-<tenant>/<environment>/, or the paths.terraform base from .erun/config.yaml) without hand-running terraform or cd-ing into the folder.
 
-erun resolves the env's folder from the current scope, picks up the symlinked common.tf, and runs that env's main.tf with its <environment>.tfvars. State and the provider cache live on the durable home directory (not in the playbook tree), so they survive a runtime pod restart. Use a subcommand: `apply`, `plan`, or `destroy`.
+erun resolves the env's folder from the current scope, picks up the symlinked common.tf, and runs that env's main.tf with its <environment>.tfvars. State and the provider cache live on the durable home directory (not in the playbook tree), so they survive a runtime pod restart. Use a subcommand: run `init` once (and after changing providers) to download providers and record the lock, then `plan`, `apply`, or `destroy`.
 
 Usage:
   erun terraform [command]
@@ -8,6 +8,7 @@ Usage:
 Available Commands:
   apply       Plan and apply the env's Terraform (prompts for the environment name)
   destroy     Plan and apply a destroy of the env's Terraform (prompts for the environment name)
+  init        Initialize the env's Terraform: download providers, wire state, and record the provider lock
   plan        Show the env's Terraform plan without applying
 
 Flags:

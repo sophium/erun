@@ -771,7 +771,7 @@ func SeedTerraformEnvRootAt(t testing.TB, root, environment string) {
 	if err := os.MkdirAll(envDir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", envDir, err)
 	}
-	mustWrite(t, filepath.Join(root, "common.tf"), "terraform {\n  required_version = \">= 1.3\"\n}\n")
+	mustWrite(t, filepath.Join(root, "common.tf"), "terraform {\n  required_version = \">= 1.3\"\n  backend \"local\" {}\n}\n")
 	mustWrite(t, filepath.Join(root, "variables.tf"), "variable \"base_domain\" {\n  type = string\n}\n")
 	mustWrite(t, filepath.Join(envDir, "main.tf"), "# "+environment+" services\n")
 	mustWrite(t, filepath.Join(envDir, environment+".tfvars"), "base_domain = \"erunpaas.com\"\n")
