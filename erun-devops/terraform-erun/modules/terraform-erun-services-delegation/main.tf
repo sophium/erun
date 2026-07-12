@@ -28,6 +28,13 @@ resource "cloudflare_dns_record" "delegation" {
   ttl     = var.delegation_ttl
   content = each.value
   comment = var.comment
+
+  lifecycle {
+    precondition {
+      condition     = local.parent_zone_id != ""
+      error_message = "Could not resolve the parent zone id: pass parent_zone_id, or set cloudflare_account_id so base_domain_name can be looked up."
+    }
+  }
 }
 
 # Glue A records for in-bailiwick nameservers, so a resolver following the

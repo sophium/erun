@@ -58,13 +58,23 @@ variable "comment" {
 }
 
 variable "delegation_ttl" {
-  description = "TTL in seconds for the NS delegation records in the parent zone."
+  description = "TTL in seconds for the NS delegation records in the parent zone. Cloudflare accepts 60–86400 (a day, its maximum, suits a delegation that changes rarely)."
   type        = number
-  default     = 172800
+  default     = 86400
+
+  validation {
+    condition     = var.delegation_ttl >= 60 && var.delegation_ttl <= 86400
+    error_message = "delegation_ttl must be between 60 and 86400 (Cloudflare's DNS-record TTL range)."
+  }
 }
 
 variable "glue_ttl" {
-  description = "TTL in seconds for the glue A records in the parent zone."
+  description = "TTL in seconds for the glue A records in the parent zone. Cloudflare accepts 60–86400."
   type        = number
   default     = 300
+
+  validation {
+    condition     = var.glue_ttl >= 60 && var.glue_ttl <= 86400
+    error_message = "glue_ttl must be between 60 and 86400 (Cloudflare's DNS-record TTL range)."
+  }
 }
