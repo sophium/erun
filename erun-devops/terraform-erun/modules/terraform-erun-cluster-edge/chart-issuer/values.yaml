@@ -12,3 +12,19 @@ certNamespace: cert-manager
 wildcardCertificateEnabled: "true"
 wildcardCertName: erun-cloudflare-wildcard
 wildcardSecretName: erun-cloudflare-wildcard-tls
+# DNS-01 solver provider: "cloudflare" (default) or "powerdns-rfc2136" (DNS
+# UPDATE + TSIG direct to the self-hosted PowerDNS authoritative for a delegated
+# services zone). The RFC2136 fields are set by the module only in that mode.
+dns01Provider: cloudflare
+rfc2136Nameserver: ""
+rfc2136TsigKeyName: ""
+rfc2136TsigAlgorithm: HMACSHA256
+rfc2136TsigSecretName: ""
+rfc2136TsigSecretKey: tsig-secret
+# Per-env wildcard cert *.<envLabel>.<servicesZone> issued into the env namespace;
+# its Secret is what `erun expose` references. Off by default.
+perEnvCertificateEnabled: "false"
+perEnvCertName: ""
+perEnvCertNamespace: ""
+perEnvSecretName: ""
+envLabel: ""

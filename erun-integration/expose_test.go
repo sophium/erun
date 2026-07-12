@@ -30,6 +30,17 @@ func TestExpose(t *testing.T) {
 		golden.Equal(t, "expose/dry_run", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_no_tls", func(t *testing.T) {
+		// --no-tls takes the http branch: the plan traces "http-only" and the
+		// rendered Ingress carries no tls block, only ingressClassName.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectK8sConfig(t, setup, "platform:\n  basedomain: erunpaas.com\n  env: frs-prod\n  authoritativeip: 203.0.113.10\n")
+		result := erun.Run(t, []string{"expose", "team", "dev", "api", "--ip", "203.0.113.10", "--no-tls", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "expose/dry_run_no_tls", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_cross_cluster", func(t *testing.T) {
 		// The platform env that owns PowerDNS sits on a different cluster than the
 		// target env: the wildcard DNS write must exec against the platform env's

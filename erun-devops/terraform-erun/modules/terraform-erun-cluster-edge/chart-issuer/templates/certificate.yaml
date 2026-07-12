@@ -16,3 +16,25 @@ spec:
     - {{ printf "*.%s" .Values.servicesZone | quote }}
     - {{ .Values.servicesZone | quote }}
 {{- end }}
+{{- /* Per-env wildcard cert *.<envLabel>.<servicesZone> (e.g.
+       *.frs-prod.services.erunpaas.com) issued INTO the env namespace, whose
+       Secret `erun expose` references from its Ingress `tls.secretName`. One
+       cert per env covers every exposed service — no per-host issuance. A single
+       DNS-label wildcard can't reach two labels deep, so this is distinct from
+       the apex *.<servicesZone> cert above. */ -}}
+{{- if eq (toString .Values.perEnvCertificateEnabled) "true" }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ required "perEnvCertName is required" .Values.perEnvCertName }}
+  namespace: {{ required "perEnvCertNamespace is required" .Values.perEnvCertNamespace }}
+spec:
+  secretName: {{ required "perEnvSecretName is required" .Values.perEnvSecretName }}
+  issuerRef:
+    name: {{ required "issuerName is required" .Values.issuerName }}
+    kind: ClusterIssuer
+  commonName: {{ printf "*.%s.%s" .Values.envLabel .Values.servicesZone | quote }}
+  dnsNames:
+    - {{ printf "*.%s.%s" .Values.envLabel .Values.servicesZone | quote }}
+{{- end }}
