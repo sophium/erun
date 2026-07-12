@@ -17,19 +17,19 @@ Module-specific guidance for `erun-docs`. Follow the repository root `AGENTS.md`
 - The Job is wired as a Helm `post-install,post-upgrade` hook with `helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded`. Each `erun deploy` runs a fresh Job; success cleans it up.
 - Cloudflare Pages handles CDN, TLS, custom domain (`docs.erunpaas.com`), and per-deploy preview URLs. There is no in-cluster Service, Ingress, or long-running pod.
 
-## One-time external setup
+## Provisioning
 
-These must exist before the first deploy succeeds. They are external to this repository:
+Docs publishing is self-provisioning from a **Cloudflare cloud alias** whose token can manage Pages. Attach the alias to the env (`erun cloud set <tenant>/<env> --alias <name>@cloudflare`) with a token that has **`Pages:Edit`** (alongside the `Zone:Read + DNS:Edit` the edge already needs); `erun deploy` and the deploy Job wire the rest:
 
-1. **Cloudflare Pages project** named `erun-docs` (Direct Upload type — do **not** connect a Git source, the Job uploads directly).
-2. **Custom domain** `docs.erunpaas.com` attached to the Pages project. **(Planned.)** The DNS record is not cut over yet, so `https://docs.erunpaas.com` is not live; until it is, the site is reachable only at its Cloudflare Pages preview URL. Treat the custom-domain URL as aspirational wherever it appears above.
-3. **Cloudflare API token** with `Pages:Edit` scope, plus the Cloudflare account id.
-4. **Kubernetes Secret** named `cf-creds` (configurable via `docs.credentialsSecretName`) in the target tenant/env namespace, with keys:
-   - `CLOUDFLARE_API_TOKEN`
-   - `CLOUDFLARE_ACCOUNT_ID`
-5. **DNS** for `erunpaas.com` proxied through Cloudflare so the custom domain serves TLS automatically.
+1. **Publish credentials — automatic.** `erun deploy` mints the `<release>-cloudflare` Secret from the alias (holding `CLOUDFLARE_API_TOKEN`) and threads the account id as the `cloudContext.cloudflare.accountId` value. The chart defaults `docs.credentialsSecretName` to that Secret and reads the account id from that value, so **no hand-created `cf-creds` is needed**. Override the secret name via `docs.credentialsSecretName` and the account id via `docs.accountId` only for a setup with no Cloudflare alias.
+2. **Pages project — automatic.** The deploy Job creates the Direct-Upload Pages project named `docs.project` (default `erun-docs`) on first run if it is missing (`wrangler pages project create`, tolerating "already exists"; a token without `Pages:Edit` fails here with a clear error), then uploads.
 
-The Job will refuse to run if `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `CF_PAGES_PROJECT`, or `CF_PAGES_BRANCH` are missing.
+Still external / manual:
+
+3. **Custom domain** `docs.erunpaas.com` attached to the Pages project. **(Planned.)** The DNS record is not cut over yet, so `https://docs.erunpaas.com` is not live; until it is, the site is reachable only at its Cloudflare Pages preview URL. Treat the custom-domain URL as aspirational wherever it appears above.
+4. **DNS** for `erunpaas.com` proxied through Cloudflare so the custom domain serves TLS automatically.
+
+The Job refuses to run if `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `CF_PAGES_PROJECT`, or `CF_PAGES_BRANCH` are missing — which now only happens when no Cloudflare alias is attached to the env.
 
 ## Local development
 

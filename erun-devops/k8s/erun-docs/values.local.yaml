@@ -5,4 +5,3 @@ docs:
   enabled: false
   project: erun-docs
   branch: preview
-  credentialsSecretName: cf-creds
