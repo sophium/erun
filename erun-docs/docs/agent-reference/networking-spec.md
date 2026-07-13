@@ -128,16 +128,17 @@ For the public form, each segment must match:
 
 `erun expose <tenant> <env> <service>` (CLI and the `expose` MCP tool) automates Pattern 3 for a platform deployment — an install that runs the `erun-powerdns` singleton and declares a [`platform:` block](/reference/configuration#platform-block). For the Operator view see [Networking · Platform service exposure](/concepts/networking#platform-service-exposure).
 
-**Inputs.** `tenant`, `env`, `service` (positional); `--ip` (the env's ingress IP the wildcard record points at; required); `--port` (Service port, default `80`); `--dry-run`.
+**Inputs.** `tenant`, `env`, `service` (positional — the **logical** service name: the hostname label, resolved to the tenant-scoped backend Service `<tenant>-<service>`); `--ip` (the env's ingress IP the wildcard record points at; required); `--port` (Service port, default `80`); `--dry-run`.
 
 **Resolved plan.**
 
 | Field | Value |
 |---|---|
 | Public hostname | `<service>.<tenant>-<env>.<servicesZone>` |
+| Backend Service | `<tenant>-<service>` (the name the service's component chart renders, e.g. `api` → `frs-api`) |
 | Per-env wildcard record | `*.<tenant>-<env>.<servicesZone>` `A` `<ip>`, TTL `60` |
 | Services zone | `platform.serviceszone` (defaults to `services.<platform.basedomain>`) |
-| Ingress | `expose-<service>` in namespace `<tenant>-<env>`, Host-routing the hostname to `<service>:<port>` |
+| Ingress | `expose-<service>` in namespace `<tenant>-<env>`, Host-routing the hostname to `<tenant>-<service>:<port>` |
 
 **Execution.** Two side effects, in order:
 
