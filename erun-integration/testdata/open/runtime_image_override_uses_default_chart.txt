@@ -6,6 +6,7 @@ config: would assign localportrangestart=17000 to team/dev
 trace-log: would append the full trace to <TMP>
 open: tenant=team environment=dev kubernetes-context=test-context remote=false no-shell=true ide=shell
 deploy: no local runtime chart; using published chart oci://registry.example/test/charts/erun-devops version <VERSION>
+deploy: defaulting runtime image to the tenant's team-devops image registry.example/test/team-devops:<VERSION> (imageOverrides.erun-devops)
 deploy: no local runtime chart; using published chart oci://registry.example/test/charts/erun-devops version <VERSION>
 deploy: runtime image override ghcr.io/example/custom-runtime:<VERSION> (imageOverrides.erun-devops)
 deploying the devops runtime before opening the shell
