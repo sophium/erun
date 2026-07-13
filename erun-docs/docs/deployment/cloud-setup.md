@@ -99,7 +99,7 @@ When that environment's runtime pod comes up, ERun injects the token as `CLOUDFL
 
 ### Enabling the public hosting edge
 
-The injected token is what the **`terraform-erun-cluster-edge`** module (in `erun-devops/terraform-erun/modules/`) applies to stand up the public HTTPS edge: it installs a Traefik ingress controller and cert-manager, and creates a **Cloudflare DNS-01 `ClusterIssuer`** (using the token + the platform config's `acmeemail`) that issues a wildcard certificate for `*.<services-zone>`. The `erun-enable-hosting-edge` skill drives it end to end (apply + verify the issuer and wildcard cert). Wiring `erun expose`'s Ingress to that issuer and hosting the console behind the edge are the remaining follow-ups.
+The injected token is what the **`terraform-erun-cluster-edge`** module (in `erun-devops/terraform-erun/modules/`) applies to stand up the public HTTPS edge: it installs a Traefik ingress controller and cert-manager, and creates a **namespaced DNS-01 `Issuer`** (Cloudflare, using the token + the platform config's `acmeemail`) that issues a wildcard certificate for `*.<services-zone>`. The `erun-enable-hosting-edge` skill drives it end to end (apply + verify the issuer and wildcard cert). Wiring `erun expose`'s Ingress to that issuer and hosting the console behind the edge are the remaining follow-ups.
 
 ### Delegating the services zone to PowerDNS
 

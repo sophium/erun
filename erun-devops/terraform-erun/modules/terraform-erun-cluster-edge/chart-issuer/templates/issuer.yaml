@@ -1,7 +1,14 @@
+{{- /* A namespaced Issuer, not a cluster-scoped ClusterIssuer: a Certificate can
+       only reference an Issuer in its own namespace, so an env can never use
+       another env's issuer. This is the multi-tenant-safe shape (#818) and
+       avoids the confusing cluster-scoped resource. The issuer, its certs, and
+       the DNS-01 credential Secret all live in issuerNamespace (the env
+       namespace). */ -}}
 apiVersion: cert-manager.io/v1
-kind: ClusterIssuer
+kind: Issuer
 metadata:
   name: {{ required "issuerName is required" .Values.issuerName }}
+  namespace: {{ required "issuerNamespace is required" .Values.issuerNamespace }}
 spec:
   acme:
     email: {{ required "acmeEmail is required" .Values.acmeEmail | quote }}
@@ -13,7 +20,8 @@ spec:
       # RFC2136 (DNS UPDATE + TSIG) direct to the self-hosted PowerDNS that is
       # authoritative for the delegated services zone. Used where the delegation
       # moved authority off Cloudflare; the TSIG key is minted by the erun-powerdns
-      # chart and wired in by the module.
+      # chart and wired in by the module. The Secret it references lives in this
+      # Issuer's namespace (namespaced Issuers resolve secretRefs locally).
       - dns01:
           rfc2136:
             nameserver: {{ required "rfc2136Nameserver is required" .Values.rfc2136Nameserver | quote }}

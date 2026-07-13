@@ -1,6 +1,11 @@
-output "cluster_issuer_name" {
-  description = "Name of the cert-manager ClusterIssuer that issues TLS certs via the Cloudflare DNS-01 challenge. Reference it from an Ingress/Certificate as `cert-manager.io/cluster-issuer`."
+output "issuer_name" {
+  description = "Name of the namespaced cert-manager Issuer (in issuer_namespace) that issues TLS certs via the DNS-01 challenge. Reference it from a same-namespace Certificate as `issuerRef: {kind: Issuer, name: <this>}` (or the `cert-manager.io/issuer` annotation)."
   value       = var.issuer_name
+}
+
+output "issuer_namespace" {
+  description = "Namespace the Issuer, its DNS-01 credential Secret, and the edge's certs live in (the env namespace, or the cert-manager namespace for an apex-only edge)."
+  value       = local.issuer_namespace
 }
 
 output "wildcard_certificate_secret" {
