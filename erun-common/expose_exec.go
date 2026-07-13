@@ -61,6 +61,17 @@ func applyHostRoutingIngress(params IngressApplyParams) error {
 }
 
 func renderHostRoutingIngress(params IngressApplyParams) string {
+	classBlock := ""
+	if c := strings.TrimSpace(params.IngressClass); c != "" {
+		classBlock = fmt.Sprintf("\n  ingressClassName: %s", c)
+	}
+	// TLS references the pre-issued per-env wildcard cert Secret (one cert per env
+	// covers every exposed host) — no cert-manager annotation, so expose triggers
+	// no per-host issuance.
+	tlsBlock := ""
+	if s := strings.TrimSpace(params.TLSSecretName); s != "" {
+		tlsBlock = fmt.Sprintf("\n  tls:\n    - hosts:\n        - %s\n      secretName: %s", params.Host, s)
+	}
 	return fmt.Sprintf(`apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -68,7 +79,7 @@ metadata:
   namespace: %s
   labels:
     app.kubernetes.io/managed-by: erun-expose
-spec:
+spec:%s%s
   rules:
     - host: %s
       http:
@@ -80,5 +91,5 @@ spec:
                 name: %s
                 port:
                   number: %d
-`, params.Name, params.Namespace, params.Host, params.ServiceName, params.ServicePort)
+`, params.Name, params.Namespace, classBlock, tlsBlock, params.Host, params.ServiceName, params.ServicePort)
 }

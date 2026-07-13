@@ -41,6 +41,10 @@ type IngressApplyParams struct {
 	Host              string
 	ServiceName       string
 	ServicePort       int
+	IngressClass      string
+	// TLSSecretName, when set, adds a tls: block referencing the per-env wildcard
+	// cert Secret so the host serves https. Empty leaves the Ingress http-only.
+	TLSSecretName string
 }
 
 // ExposeServiceParams are the inputs to exposing one in-namespace Service at a
@@ -54,6 +58,15 @@ type ExposeServiceParams struct {
 	ProjectRoot string
 	TargetIP    string
 	ServicePort int
+	// NoTLS serves http instead of https. TLS is on by default: the Ingress
+	// references the env's per-env wildcard cert Secret.
+	NoTLS bool
+	// IngressClass is the ingress controller class (default "traefik").
+	IngressClass string
+	// TLSSecretName overrides the per-env wildcard cert Secret name (default
+	// "<tenant>-<env>-wildcard-tls", the name the cluster-edge module issues into
+	// the env namespace).
+	TLSSecretName string
 }
 
 // ExposeServiceResult is the resolved exposure plan: the public hostname, the
@@ -70,6 +83,12 @@ type ExposeServiceResult struct {
 	TargetIP          string `json:"targetIP"`
 	IngressName       string `json:"ingressName"`
 	ServicePort       int    `json:"servicePort"`
+	// Scheme is "https" when the Ingress references a per-env TLS secret, else
+	// "http". IngressClass + TLSSecretName are the resolved Ingress wiring.
+	Scheme        string `json:"scheme"`
+	IngressClass  string `json:"ingressClass"`
+	TLSSecretName string `json:"tlsSecretName,omitempty"`
+	TLSEnabled    bool   `json:"tlsEnabled"`
 	// PlatformNamespace is the namespace the platform's PowerDNS singleton runs
 	// in, where the per-env wildcard record is written.
 	PlatformNamespace string `json:"platformNamespace"`
@@ -86,6 +105,10 @@ type ExposeServiceResult struct {
 }
 
 const defaultExposeServicePort = 80
+
+// defaultExposeIngressClass is the ingress controller class the Host-routing
+// Ingress binds to. k3s (which frs clusters run) ships Traefik.
+const defaultExposeIngressClass = "traefik"
 
 // defaultExposeWildcardTTL is the TTL for the per-env wildcard A record. Short
 // enough that re-pointing an env (IP change) propagates quickly.
@@ -113,6 +136,12 @@ func RunExposeService(ctx Context, params ExposeServiceParams, store ExposeStore
 	// faithful to the live run.
 	ctx.Trace(fmt.Sprintf("expose: %s -> service %s.%s.svc:%d", result.Hostname, result.Service, result.Namespace, result.ServicePort))
 	ctx.Trace(fmt.Sprintf("expose: per-env wildcard %s A %s ttl %d (zone %s)", result.WildcardName, result.TargetIP, dnsParams.TTL, result.ServicesZone))
+	ctx.Trace(fmt.Sprintf("expose: ingress class %s", result.IngressClass))
+	if result.TLSEnabled {
+		ctx.Trace(fmt.Sprintf("expose: tls secret %s (namespace %s) -> https", result.TLSSecretName, result.Namespace))
+	} else {
+		ctx.Trace("expose: http-only (--no-tls)")
+	}
 	ctx.Trace(fmt.Sprintf("expose: platform powerdns namespace %s", result.PlatformNamespace))
 	ctx.TraceCommand("", "kubectl", powerDNSUpsertArgs(dnsParams)...)
 	ctx.TraceCommand("", "kubectl", ingressApplyArgs(ingressParams)...)
@@ -152,14 +181,19 @@ func exposeDNSParams(result ExposeServiceResult) DNSRecordUpsertParams {
 }
 
 func exposeIngressParams(result ExposeServiceResult) IngressApplyParams {
-	return IngressApplyParams{
+	p := IngressApplyParams{
 		KubernetesContext: result.KubernetesContext,
 		Namespace:         result.Namespace,
 		Name:              result.IngressName,
 		Host:              result.Hostname,
 		ServiceName:       result.Service,
 		ServicePort:       result.ServicePort,
+		IngressClass:      result.IngressClass,
 	}
+	if result.TLSEnabled {
+		p.TLSSecretName = result.TLSSecretName
+	}
+	return p
 }
 
 func validateExposeTarget(params ExposeServiceParams) (tenant, environment, service string, err error) {
@@ -221,6 +255,7 @@ func resolveExposeServicePlan(params ExposeServiceParams, store ExposeStore) (Ex
 	// label, so its tenant prefix gives the Deployment name the exec targets.
 	platTenant, _, _ := splitTenantEnv(platform.Env)
 	platformPowerDNS := TenantResourcePrefix(platTenant) + "-powerdns"
+	tlsEnabled, ingressClass, tlsSecret, scheme := resolveExposeTLSPlan(params, envLabel)
 	result := ExposeServiceResult{
 		Tenant:                     tenant,
 		Environment:                environment,
@@ -233,11 +268,36 @@ func resolveExposeServicePlan(params ExposeServiceParams, store ExposeStore) (Ex
 		TargetIP:                   targetIP,
 		IngressName:                fmt.Sprintf("expose-%s", service),
 		ServicePort:                servicePort,
+		Scheme:                     scheme,
+		IngressClass:               ingressClass,
+		TLSSecretName:              tlsSecret,
+		TLSEnabled:                 tlsEnabled,
 		PlatformNamespace:          normalizeNamespaceName(platform.Env),
 		PlatformPowerDNSDeployment: platformPowerDNS,
 		PlatformContext:            resolvePlatformContext(store, platform.Env),
 	}
 	return result, nil
+}
+
+// resolveExposeTLSPlan resolves the Ingress TLS wiring: https by default,
+// referencing the env's per-env wildcard cert Secret
+// ("<tenant>-<env>-wildcard-tls" the cluster-edge module issues). No env-type
+// branching — the primitive always resolves the same way.
+func resolveExposeTLSPlan(params ExposeServiceParams, envLabel string) (tlsEnabled bool, ingressClass, tlsSecret, scheme string) {
+	tlsEnabled = !params.NoTLS
+	ingressClass = strings.TrimSpace(params.IngressClass)
+	if ingressClass == "" {
+		ingressClass = defaultExposeIngressClass
+	}
+	tlsSecret = strings.TrimSpace(params.TLSSecretName)
+	if tlsSecret == "" {
+		tlsSecret = fmt.Sprintf("%s-wildcard-tls", envLabel)
+	}
+	scheme = "http"
+	if tlsEnabled {
+		scheme = "https"
+	}
+	return tlsEnabled, ingressClass, tlsSecret, scheme
 }
 
 // resolvePlatformContext finds the kube context of the platform env's own
