@@ -1,10 +1,16 @@
 # Defaults; the terraform-erun-cluster-edge module overrides every field via
 # helm `set`. Listed here so the chart renders standalone (e.g. `helm template`).
 issuerName: erun-cloudflare
+# Namespace the (namespaced) Issuer, its certs, and the DNS-01 credential Secret
+# live in — the env namespace. The module sets this; the default keeps the chart
+# renderable standalone.
+issuerNamespace: cert-manager
 acmeEmail: ""
 acmeServer: https://acme-v02.api.letsencrypt.org/directory
 servicesZone: ""
 cloudflareTokenSecret: erun-cloudflare-cloudflare-token
+# Apex-wildcard cert namespace — must equal issuerNamespace so it can reference
+# the namespaced Issuer (a Certificate can only use an Issuer in its own namespace).
 certNamespace: cert-manager
 # Pass-through as a string ("true"/"false"): the Terraform helm provider's
 # `set.value` is always a string, and Go templates treat any non-empty string

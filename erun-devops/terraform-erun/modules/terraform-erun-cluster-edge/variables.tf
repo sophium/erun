@@ -38,13 +38,13 @@ variable "install_ingress_controller" {
 }
 
 variable "install_cert_manager" {
-  description = "Install cert-manager (and its CRDs). Set false on a cluster that already runs it; the ClusterIssuer is still created."
+  description = "Install cert-manager (and its CRDs). Set false on a cluster that already runs it; the Issuer is still created."
   type        = bool
   default     = true
 }
 
 variable "wildcard_certificate_enabled" {
-  description = "Issue a wildcard Certificate for *.<services_zone> from the ClusterIssuer. Leave true in production; set false for a local apply with no real Cloudflare zone (the ClusterIssuer is still created, it just issues nothing)."
+  description = "Issue a wildcard Certificate for *.<services_zone> from the namespaced Issuer. Leave true in production; set false for a local apply with no real DNS zone (the Issuer is still created, it just issues nothing)."
   type        = bool
   default     = true
 }
@@ -62,7 +62,7 @@ variable "ingress_namespace" {
 }
 
 variable "issuer_name" {
-  description = "Name of the cert-manager ClusterIssuer this module creates."
+  description = "Name of the namespaced cert-manager Issuer this module creates."
   type        = string
   default     = "erun-cloudflare"
 }

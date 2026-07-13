@@ -10,7 +10,7 @@ spec:
   secretName: {{ required "wildcardSecretName is required" .Values.wildcardSecretName }}
   issuerRef:
     name: {{ required "issuerName is required" .Values.issuerName }}
-    kind: ClusterIssuer
+    kind: Issuer
   commonName: {{ printf "*.%s" .Values.servicesZone | quote }}
   dnsNames:
     - {{ printf "*.%s" .Values.servicesZone | quote }}
@@ -33,7 +33,7 @@ spec:
   secretName: {{ required "perEnvSecretName is required" .Values.perEnvSecretName }}
   issuerRef:
     name: {{ required "issuerName is required" .Values.issuerName }}
-    kind: ClusterIssuer
+    kind: Issuer
   commonName: {{ printf "*.%s.%s" .Values.envLabel .Values.servicesZone | quote }}
   dnsNames:
     - {{ printf "*.%s.%s" .Values.envLabel .Values.servicesZone | quote }}
