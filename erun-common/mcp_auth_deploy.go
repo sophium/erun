@@ -34,9 +34,30 @@ func applyMCPAuthToRuntimeSpec(target DeployTarget, spec *DeploySpec) error {
 		return err
 	}
 	if ok {
+		// Desktop path: a local public key → trust a file:// issuer.
 		applyMCPAuthDeployMetadata(&spec.Deploy, pem)
+		return nil
 	}
+	// Hosted path: trust the tenant's registered OIDC issuer (https://). No local
+	// key — the MCP edge fetches the issuer's JWKS. Mutually exclusive with the
+	// desktop key above; empty issuer leaves the deploy unauthenticated.
+	applyMCPAuthOIDCMetadata(&spec.Deploy, spec.Target.EnvConfig.MCPAuthIssuer)
 	return nil
+}
+
+// applyMCPAuthOIDCMetadata configures the runtime MCP edge to trust the tenant's
+// registered OIDC issuer, with the per-env audience from the shared convention.
+// No Secret is applied (the edge verifies against the issuer's published JWKS),
+// which is why the chart mounts the desktop key only when a secretName is set.
+// A blank issuer is a no-op, leaving a non-desktop deploy unauthenticated.
+func applyMCPAuthOIDCMetadata(deployInput *HelmDeploySpec, issuer string) {
+	issuer = strings.TrimSpace(issuer)
+	if deployInput == nil || issuer == "" {
+		return
+	}
+	deployInput.MCPAuthEnabled = true
+	deployInput.MCPAuthIssuer = issuer
+	deployInput.MCPAuthAudience = MCPTokenAudience(deployInput.Tenant, deployInput.Environment)
 }
 
 // mcpAuthSecretName derives the per-release Secret that carries the desktop
