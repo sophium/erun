@@ -21,7 +21,7 @@ For `erun expose <tenant> <env> <service>`, `<service>` is the **logical service
 
 The DNS write targets the **platform** environment's cluster (where PowerDNS runs); the Ingress is applied to the **target** env's cluster. These can be different clusters — `expose` resolves each context independently.
 
-The exposed URL is **HTTPS** by default: the Ingress references the env's per-env wildcard cert Secret (`<tenant>-<env>-wildcard-tls`, issued once per env by the cluster edge) and sets `ingressClassName`, so the host serves `https://` with no per-service cert step. Pass `--no-tls` for http, `--ingress-class` / `--tls-secret` to override. The cert is issued via the edge's DNS-01 `ClusterIssuer` (Cloudflare, or PowerDNS RFC2136 once the services zone is delegated) — see [Networking spec · Platform service exposure](/agent-reference/networking-spec#platform-service-exposure).
+The exposed URL is **HTTPS** by default: the Ingress references the env's per-env wildcard cert Secret (`<tenant>-<env>-wildcard-tls`, issued once per env by the cluster edge) and sets `ingressClassName`, so the host serves `https://` with no per-service cert step. Pass `--no-tls` for http, `--ingress-class` / `--tls-secret` to override. The cert is issued via the edge's namespaced DNS-01 `Issuer` (Cloudflare, or PowerDNS RFC2136 once the services zone is delegated) — see [Networking spec · Platform service exposure](/agent-reference/networking-spec#platform-service-exposure).
 
 ## Flags
 

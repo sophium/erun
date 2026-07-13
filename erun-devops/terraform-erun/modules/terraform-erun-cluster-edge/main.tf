@@ -9,12 +9,19 @@ locals {
   env_namespace       = var.env_namespace != "" ? var.env_namespace : var.env_label
   per_env_cert_name   = var.env_label != "" ? "${var.env_label}-wildcard" : ""
   per_env_secret_name = var.env_label != "" ? "${var.env_label}-wildcard-tls" : ""
+  # The namespaced Issuer, its DNS-01 credential Secret, and the apex wildcard
+  # cert all live here. A namespaced Issuer only serves Certificates in its own
+  # namespace, so this is the env namespace (co-locating the per-env cert with
+  # its issuer); it falls back to the cert-manager namespace for an apex-only
+  # edge with no env.
+  issuer_namespace = local.env_namespace != "" ? local.env_namespace : var.namespace
 }
 
-# Namespace that holds cert-manager, the Cloudflare token Secret, the
-# ClusterIssuer's ACME account key, and the wildcard Certificate. Created here
-# (not via helm create_namespace) so the Secret + issuer chart have a home even
-# when install_cert_manager is false (an existing cert-manager elsewhere).
+# Namespace cert-manager itself runs in. The Issuer, its DNS-01 credential
+# Secret, its ACME account key, and the edge's certs live in issuer_namespace
+# (the env namespace), not here. Created explicitly (not via helm
+# create_namespace) so it has a home even when install_cert_manager is false (an
+# existing cert-manager elsewhere).
 resource "kubernetes_namespace" "cert_manager" {
   metadata {
     name = var.namespace
@@ -51,13 +58,14 @@ resource "helm_release" "cert_manager" {
 
 # The Cloudflare API token cert-manager's DNS-01 solver reads. Materialized into
 # a Secret because cert-manager (unlike the cloudflare Terraform provider) needs
-# it in-cluster; the ClusterIssuer references it by name + key.
+# it in-cluster; the namespaced Issuer references it by name + key from its own
+# namespace.
 resource "kubernetes_secret" "cloudflare_api_token" {
   count = local.use_rfc2136 ? 0 : 1
 
   metadata {
     name      = local.cloudflare_token_secret
-    namespace = kubernetes_namespace.cert_manager.metadata[0].name
+    namespace = local.issuer_namespace
   }
   data = {
     "api-token" = var.cloudflare_api_token
@@ -73,14 +81,14 @@ resource "kubernetes_secret" "cloudflare_api_token" {
 }
 
 # TSIG key material cert-manager's rfc2136 solver signs DNS UPDATE with. Minted by
-# the erun-powerdns chart, read back, and passed in; materialized here so the
-# ClusterIssuer can reference it by name in the cert-manager namespace.
+# the erun-powerdns chart, read back, and passed in; materialized in the Issuer's
+# namespace so the namespaced Issuer can reference it by name there.
 resource "kubernetes_secret" "rfc2136_tsig" {
   count = local.use_rfc2136 ? 1 : 0
 
   metadata {
     name      = local.tsig_secret_name
-    namespace = kubernetes_namespace.cert_manager.metadata[0].name
+    namespace = local.issuer_namespace
   }
   data = {
     "tsig-secret" = var.rfc2136_tsig_secret
@@ -95,11 +103,13 @@ resource "kubernetes_secret" "rfc2136_tsig" {
   }
 }
 
-# The ClusterIssuer (and optional wildcard Certificate) ride in as a tiny local
-# chart rather than kubernetes_manifest: the cert-manager CRDs do not exist at
-# plan time on a first apply, which kubernetes_manifest cannot tolerate, whereas
-# helm renders + applies the CRs after cert-manager (depends_on) has installed
-# the CRDs. First-party providers only — no kubectl provider.
+# The Issuer (and optional wildcard Certificate) ride in as a tiny local chart
+# rather than kubernetes_manifest: the cert-manager CRDs do not exist at plan
+# time on a first apply, which kubernetes_manifest cannot tolerate, whereas helm
+# renders + applies the CRs after cert-manager (depends_on) has installed the
+# CRDs. First-party providers only — no kubectl provider. The Helm release lives
+# in the cert-manager namespace, but the Issuer and its certs set their own
+# metadata.namespace (issuerNamespace) so they land in the env namespace.
 resource "helm_release" "issuer" {
   name      = "${var.issuer_name}-issuer"
   chart     = "${path.module}/chart-issuer"
@@ -108,6 +118,10 @@ resource "helm_release" "issuer" {
   set {
     name  = "issuerName"
     value = var.issuer_name
+  }
+  set {
+    name  = "issuerNamespace"
+    value = local.issuer_namespace
   }
   set {
     name  = "acmeEmail"
@@ -127,7 +141,7 @@ resource "helm_release" "issuer" {
   }
   set {
     name  = "certNamespace"
-    value = kubernetes_namespace.cert_manager.metadata[0].name
+    value = local.issuer_namespace
   }
   set {
     name  = "wildcardCertificateEnabled"
