@@ -192,7 +192,7 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, 
 	deployInput.ReleaseName = RuntimeReleaseName(target.Tenant)
 	deployInput.UseHostCredentials = target.EnvConfig.HasAWSCloudAlias()
 	deployInput.ContainerRegistry = registry
-	if image := resolveDeployRuntimeImage(ctx, registry, version, chartName, target.EnvConfig.RuntimeImage); image != "" {
+	if image := resolveDeployRuntimeImage(ctx, registry, version, target.Tenant, chartName, target.EnvConfig.RuntimeImage); image != "" {
 		deployInput.ImageOverrides = map[string]string{DevopsComponentName: image}
 	}
 	// A runtime env that opted into a mutable source worktree clones this repo
@@ -345,7 +345,7 @@ func (e *PublishedChartNotFoundError) Unwrap() error { return e.Err }
 // publishes (the ImagePullBackOff this fixes). The shared erun-devops chart
 // carries no such signal, so it returns "" — the erun product tenant and an
 // image-only bootstrap keep the chart's own default unless runtimeimage is set.
-func resolveDeployRuntimeImage(ctx Context, registry, version, chartName, runtimeImage string) string {
+func resolveDeployRuntimeImage(ctx Context, registry, version, tenant, chartName, runtimeImage string) string {
 	chartName = strings.TrimSpace(chartName)
 	umbrella := chartName != "" && chartName != DevopsComponentName
 	if image := resolveRuntimeImageOverride(registry, version, runtimeImage); image != "" {
@@ -362,6 +362,19 @@ func resolveDeployRuntimeImage(ctx Context, registry, version, chartName, runtim
 		}
 	}
 	if !umbrella {
+		// Image-only: the env rides the shared erun-devops chart. A non-erun tenant's
+		// runtime image is its own <tenant>-devops (built + published by erun-build-env
+		// on the tenant's version line), so default to it — otherwise a deploy with no
+		// explicit runtimeimage falls back to the stock erun-devops, which carries none
+		// of the tenant's customizations (baked terraform tree, toolchain). The erun
+		// product tenant rides the stock image itself, so emit no override (the chart
+		// default wins). Same convention the umbrella case below uses.
+		tenantImage := RuntimeReleaseName(strings.TrimSpace(tenant))
+		if strings.TrimSpace(tenant) != "" && tenantImage != DevopsComponentName {
+			image := strings.TrimSpace(registry) + "/" + tenantImage + ":" + strings.TrimSpace(version)
+			ctx.Trace("deploy: defaulting runtime image to the tenant's " + tenantImage + " image " + image + " (imageOverrides." + DevopsComponentName + ")")
+			return image
+		}
 		return ""
 	}
 	image := strings.TrimSpace(registry) + "/" + chartName + ":" + strings.TrimSpace(version)
