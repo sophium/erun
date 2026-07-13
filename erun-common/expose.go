@@ -72,9 +72,16 @@ type ExposeServiceParams struct {
 // ExposeServiceResult is the resolved exposure plan: the public hostname, the
 // per-env wildcard record, and the ingress that will front the Service.
 type ExposeServiceResult struct {
-	Tenant            string `json:"tenant"`
-	Environment       string `json:"environment"`
-	Service           string `json:"service"`
+	Tenant      string `json:"tenant"`
+	Environment string `json:"environment"`
+	// Service is the logical service name — the DNS label in the public hostname.
+	Service string `json:"service"`
+	// BackendService is the in-namespace Service the Ingress routes to. Platform
+	// Services are tenant-scoped by their component charts (<tenant>-<service>,
+	// e.g. frs-api), so the backend is derived that way rather than assuming the
+	// public label names the Service. This lets the public host stay the clean
+	// logical label (api.frs-prod.…) while routing to the real Service (frs-api).
+	BackendService    string `json:"backendService"`
 	Namespace         string `json:"namespace"`
 	KubernetesContext string `json:"kubernetesContext,omitempty"`
 	Hostname          string `json:"hostname"`
@@ -134,7 +141,7 @@ func RunExposeService(ctx Context, params ExposeServiceParams, store ExposeStore
 
 	// Trace the real commands, not synthetic verbs, so the dry-run plan is
 	// faithful to the live run.
-	ctx.Trace(fmt.Sprintf("expose: %s -> service %s.%s.svc:%d", result.Hostname, result.Service, result.Namespace, result.ServicePort))
+	ctx.Trace(fmt.Sprintf("expose: %s -> service %s.%s.svc:%d", result.Hostname, result.BackendService, result.Namespace, result.ServicePort))
 	ctx.Trace(fmt.Sprintf("expose: per-env wildcard %s A %s ttl %d (zone %s)", result.WildcardName, result.TargetIP, dnsParams.TTL, result.ServicesZone))
 	ctx.Trace(fmt.Sprintf("expose: ingress class %s", result.IngressClass))
 	if result.TLSEnabled {
@@ -186,7 +193,7 @@ func exposeIngressParams(result ExposeServiceResult) IngressApplyParams {
 		Namespace:         result.Namespace,
 		Name:              result.IngressName,
 		Host:              result.Hostname,
-		ServiceName:       result.Service,
+		ServiceName:       result.BackendService,
 		ServicePort:       result.ServicePort,
 		IngressClass:      result.IngressClass,
 	}
@@ -260,6 +267,7 @@ func resolveExposeServicePlan(params ExposeServiceParams, store ExposeStore) (Ex
 		Tenant:                     tenant,
 		Environment:                environment,
 		Service:                    service,
+		BackendService:             fmt.Sprintf("%s-%s", TenantResourcePrefix(tenant), service),
 		Namespace:                  envLabel,
 		KubernetesContext:          strings.TrimSpace(envConfig.KubernetesContext),
 		Hostname:                   fmt.Sprintf("%s.%s.%s", service, envLabel, platform.ServicesZone),

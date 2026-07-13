@@ -58,6 +58,21 @@
        (hmac-sha256); cert-manager uses its own uppercase form (HMACSHA256), wired
        separately in terraform-erun-cluster-edge. */ -}}
 {{- $dnsUpdateEnabled := default true $powerdns.dnsUpdateEnabled -}}
+{{- /* The generated config deliberately omits gpgsql-dnssec. The services zone
+       is an INSECURE delegation (the parent writes NS + glue but no DS), so it
+       is unsigned. Enabling dnssec makes PowerDNS take the NSEC negative-answer
+       path on an unsigned, unrectified zone and SERVFAIL on CAA lookups (failing
+       Let's Encrypt's pre-issuance CAA check) and stop serving freshly-written
+       records until the zone is manually rectified. TSIG key retrieval for DNS
+       UPDATE is independent of the dnssec query set, so leaving it off keeps
+       dynamic updates working. Do not add gpgsql-dnssec back for this zone. */ -}}
+{{- /* PowerDNS gates DNS UPDATE on the source IP FIRST (allow-dnsupdate-from /
+       per-zone ALLOW-DNSUPDATE-FROM); an empty list REFUSES every update even
+       with a valid TSIG. The TSIG key stays the real authorization — this list
+       is the coarse IP gate. Default to RFC1918 so any in-cluster cert-manager
+       (its pod IP) can reach it while public sources are refused at the IP gate;
+       it is generic (no instance-specific value). */ -}}
+{{- $dnsUpdateAllowFrom := default "10.0.0.0/8 172.16.0.0/12 192.168.0.0/16" $powerdns.dnsUpdateAllowFrom -}}
 {{- $tsigSecretName := default (printf "%s-powerdns-tsig" $tenant) $powerdns.tsigSecretName -}}
 {{- $tsigSecretKey := default "tsig-secret" $powerdns.tsigSecretKey -}}
 {{- $tsigKeyName := default (printf "%s-dnsupdate" $tenant) $powerdns.tsigKeyName -}}
@@ -186,8 +201,7 @@ spec:
               webserver-allow-from=127.0.0.1
               {{- if $dnsUpdateEnabled }}
               dnsupdate=yes
-              gpgsql-dnssec=yes
-              allow-dnsupdate-from=
+              allow-dnsupdate-from={{ $dnsUpdateAllowFrom }}
               {{- end }}
               EOF
           volumeMounts:

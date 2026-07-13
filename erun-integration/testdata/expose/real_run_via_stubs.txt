@@ -1,6 +1,6 @@
 exposed team/dev service api at https://api.team-dev.services.erunpaas.com
 audit: erun expose --ip <VERSION>.10 team dev api
-expose: api.team-dev.services.erunpaas.com -> service api.team-dev.svc:80
+expose: api.team-dev.services.erunpaas.com -> service team-api.team-dev.svc:80
 expose: per-env wildcard *.team-dev.services.erunpaas.com A <VERSION>.10 ttl 60 (zone services.erunpaas.com)
 expose: ingress class traefik
 expose: tls secret team-dev-wildcard-tls (namespace team-dev) -> https
