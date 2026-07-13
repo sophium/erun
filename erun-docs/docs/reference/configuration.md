@@ -162,6 +162,7 @@ The whole block is optional. An empty block means the project runs no platform d
 | `nameservers` | list | no | The NS hostnames the parent zone delegates `serviceszone` to. Default `[ns1.<basedomain>, ns2.<basedomain>]`. |
 | `authhost` | string | no | The hosted-IdP host, served from the apex zone (not `serviceszone`). Default `auth.<basedomain>`. Must be a valid domain at or under `basedomain`. |
 | `acmeemail` | string | no | The account email for this deployment's Let's Encrypt registration (LE rate limits are per registered domain, so each deployment uses its own account). |
+| `caaissuer` | string | no | CA domain the services zone authorizes via apex `CAA` records (`issue` + `issuewild`), e.g. `letsencrypt.org`. Empty (default) writes no CAA — any CA may issue. Opt-in because it must match the CA the cluster edge's ACME server uses; a mismatched CAA blocks issuance. When set, the `erun-powerdns` zone-bootstrap also gives per-env empty-non-terminal names a definitive CAA answer instead of an ambiguous `NODATA`. |
 
 ```yaml
 # <repo>/.erun/config.yaml
@@ -169,6 +170,7 @@ platform:
   basedomain: erunpaas.com
   env: frs-prod
   authoritativeip: 203.0.113.10
+  caaissuer: letsencrypt.org   # optional; authorizes only this CA on the zone
   # serviceszone, authhost, and nameservers default from basedomain:
   #   serviceszone: services.erunpaas.com
   #   authhost:     auth.erunpaas.com

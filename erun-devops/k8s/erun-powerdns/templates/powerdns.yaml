@@ -92,6 +92,11 @@
 {{- $platform := default dict .Values.platform -}}
 {{- $servicesZone := default "" $platform.servicesZone -}}
 {{- $nameservers := default (list) $platform.nameservers -}}
+{{- /* CAA issuer (e.g. "letsencrypt.org"); empty = no CAA (any CA may issue).
+       When set, the zone-bootstrap writes apex issue+issuewild CAA so the CA is
+       authorized and a per-env empty-non-terminal CAA lookup resolves to a
+       definitive answer instead of an ambiguous NODATA. */ -}}
+{{- $caaIssuer := default "" $platform.caaIssuer -}}
 {{- /* pdns listen address. Under hostNetwork a 0.0.0.0:53 bind collides with
        systemd-resolved's 127.0.0.53:53 stub on nodes that run it, and the public
        authoritative IP is typically a NAT'd address that is not a local
@@ -273,7 +278,19 @@ spec:
                 {{- range $ns := (rest $nameservers) }}
                 pdnsutil --config-dir={{ $configDir }} add-record {{ $servicesZone | quote }} @ NS {{ $ns | quote }}
                 {{- end }}
+                {{- with (first $nameservers) }}
+                # create-zone leaves a placeholder SOA MNAME
+                # (a.misconfigured.dns.server.invalid); set it to the primary NS.
+                pdnsutil --config-dir={{ $configDir }} replace-rrset {{ $servicesZone | quote }} @ SOA 3600 {{ printf "%s. hostmaster.%s. 1 10800 3600 604800 3600" . $servicesZone | quote }}
+                {{- end }}
               fi
+              {{- if $caaIssuer }}
+              # Authorize the platform's ACME CA on the services zone (idempotent).
+              # Apex issue+issuewild so a per-env empty-non-terminal CAA lookup
+              # resolves to a definitive answer, not an ambiguous NODATA that trips
+              # up multi-perspective validators.
+              pdnsutil --config-dir={{ $configDir }} replace-rrset {{ $servicesZone | quote }} @ CAA 3600 {{ printf "0 issue \"%s\"" $caaIssuer | quote }} {{ printf "0 issuewild \"%s\"" $caaIssuer | quote }}
+              {{- end }}
               {{- if $dnsUpdateEnabled }}
               # Import the TSIG key and authorize it for dynamic updates on the
               # services zone (idempotent) so cert-manager's rfc2136 DNS-01 solver
