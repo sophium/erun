@@ -596,7 +596,10 @@ spec:
             {{- end }}
             - name: docker-socket
               mountPath: /var/run
-            {{- if $mcpAuthEnabled }}
+            {{- /* Mount the desktop key only when there is one (file:// issuer).
+                   The OIDC-issuer path (hosted) sets issuer+audience but no
+                   secret, so gate the mount on secretName, not mcpAuthEnabled. */ -}}
+            {{- if $mcpAuthSecretName }}
             - name: mcp-auth
               mountPath: {{ $mcpAuthMountDir | quote }}
               readOnly: true
@@ -649,7 +652,7 @@ spec:
         {{- end }}
         - name: docker-socket
           emptyDir: {}
-        {{- if $mcpAuthEnabled }}
+        {{- if $mcpAuthSecretName }}
         - name: mcp-auth
           secret:
             secretName: {{ $mcpAuthSecretName | quote }}

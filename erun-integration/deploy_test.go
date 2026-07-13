@@ -93,6 +93,30 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_with_mcp_auth_public_key", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_mcp_auth_oidc_issuer", func(t *testing.T) {
+		// A hosted env with mcpauthissuer set (the tenant's OIDC issuer) threads
+		// mcpAuth.{enabled,issuer,audience} onto the runtime (team-devops) chart
+		// so its erun-mcp edge trusts bearer tokens from that issuer with the
+		// per-env audience erun-mcp:team/dev. Distinct from the desktop
+		// --mcp-auth-public-key path: no local key, so no <release>-mcp-auth
+		// Secret is applied and secretName stays empty (the chart mounts the
+		// desktop key only when secretName is set).
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"mcpauthissuer: https://auth.example.com/oidc\n")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_mcp_auth_oidc_issuer", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_copies_images_from_to_before_deploy", func(t *testing.T) {
 		// When the project registry list marks a FROM source and a TO
 		// destination, deploy mirrors every image the cluster pulls (the
