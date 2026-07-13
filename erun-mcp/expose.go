@@ -11,7 +11,7 @@ import (
 type ExposeInput struct {
 	Tenant       string `json:"tenant,omitempty" jsonschema:"tenant name; defaults to the MCP runtime context tenant"`
 	Environment  string `json:"environment,omitempty" jsonschema:"environment name; defaults to the MCP runtime context environment"`
-	Service      string `json:"service" jsonschema:"required name of the in-namespace Service to expose at a public hostname"`
+	Service      string `json:"service" jsonschema:"required logical service name; becomes the hostname label and routes to the tenant-scoped in-namespace Service <tenant>-<service> (e.g. api -> frs-api)"`
 	ProjectRoot  string `json:"projectRoot,omitempty" jsonschema:"project root holding the platform config (.erun/config.yaml); defaults to the runtime repo path"`
 	IP           string `json:"ip" jsonschema:"required ingress IP the per-env wildcard record points at (e.g. 127.0.0.1 for a local cluster, the public LB IP for remote)"`
 	Port         int    `json:"port,omitempty" jsonschema:"Service port to route to (default 80)"`

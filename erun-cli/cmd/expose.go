@@ -18,7 +18,10 @@ func newExposeCmd(store common.ExposeStore, findProjectRoot common.ProjectFinder
 		Use:   "expose TENANT ENVIRONMENT SERVICE",
 		Short: "Expose an environment's Service at a public HTTPS hostname",
 		Long: "Expose an in-namespace Service at a stable public hostname under the platform's services zone.\n\n" +
-			"Ensures the per-environment wildcard DNS record points at the env's ingress IP and applies a " +
+			"SERVICE is the logical service name: it becomes the hostname label and routes to the tenant-scoped " +
+			"in-namespace Service <tenant>-<service> (the name its component chart renders, e.g. `api` -> `frs-api`), " +
+			"so the public host stays a clean label (api.frs-prod.services.erunpaas.com) while the Ingress targets the " +
+			"real Service. Ensures the per-environment wildcard DNS record points at the env's ingress IP and applies a " +
 			"Host-routing Ingress for the Service. TLS is on by default: the Ingress references the env's per-env " +
 			"wildcard cert Secret (<tenant>-<env>-wildcard-tls, issued by the cluster edge), so the host serves https " +
 			"with no per-service cert step. Pass --no-tls for http. Requires a platform block in .erun/config.yaml; it " +

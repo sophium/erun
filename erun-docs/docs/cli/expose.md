@@ -14,10 +14,10 @@ erun expose team dev api --ip 127.0.0.1 --dry-run     # preview, no side effects
 
 ## What it does
 
-For `erun expose <tenant> <env> <service>`, the public hostname is `<service>.<tenant>-<env>.<servicesZone>` (the services zone comes from the platform config — e.g. `api.team-dev.services.erunpaas.com`). The flow:
+For `erun expose <tenant> <env> <service>`, `<service>` is the **logical service name**: it becomes the DNS label in the public hostname `<service>.<tenant>-<env>.<servicesZone>` (the services zone comes from the platform config — e.g. `api.team-dev.services.erunpaas.com`) and the Ingress routes it to the tenant-scoped in-namespace Service `<tenant>-<service>` — the name that service's component chart renders (e.g. `api` → `team-api`). The public host stays a clean label while the Ingress targets the real Service. The flow:
 
 1. **Per-env wildcard A record.** It upserts `*.<tenant>-<env>.<servicesZone>` → `--ip` (TTL 60) in the platform's authoritative zone by exec'ing `pdnsutil` inside the platform's PowerDNS pod. The wildcard covers *every* service in that env, so exposing additional services later only adds an Ingress — the DNS record is written once.
-2. **Host-routing Ingress.** It applies an Ingress named `expose-<service>` into the env's namespace, routing the hostname to the in-namespace Service on `--port` (default `80`).
+2. **Host-routing Ingress.** It applies an Ingress named `expose-<service>` into the env's namespace, routing the hostname to the tenant-scoped Service `<tenant>-<service>` on `--port` (default `80`).
 
 The DNS write targets the **platform** environment's cluster (where PowerDNS runs); the Ingress is applied to the **target** env's cluster. These can be different clusters — `expose` resolves each context independently.
 
