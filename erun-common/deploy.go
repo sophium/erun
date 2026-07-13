@@ -2128,6 +2128,7 @@ func helmPlatformSetArgs(p PlatformConfig) []string {
 		"--set-string", "platform.servicesZone=" + escapeHelmSetValue(p.ServicesZone),
 		"--set-string", "platform.authoritativeIP=" + escapeHelmSetValue(p.AuthoritativeIP),
 		"--set-string", "platform.authHost=" + escapeHelmSetValue(p.AuthHost),
+		"--set-string", "platform.caaIssuer=" + escapeHelmSetValue(p.CAAIssuer),
 	}
 	if len(p.Nameservers) > 0 {
 		if encoded, marshalErr := json.Marshal(p.Nameservers); marshalErr == nil {

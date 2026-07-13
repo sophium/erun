@@ -45,6 +45,11 @@ type PlatformConfig struct {
 	// registration. LE rate limits are per registered domain, so each
 	// deployment uses its own account.
 	ACMEEmail string `yaml:"acmeemail,omitempty"`
+	// CAAIssuer, when set, is the CA domain the services zone authorizes via
+	// apex CAA records (issue + issuewild), e.g. "letsencrypt.org". Empty means
+	// no CAA (any CA may issue). Opt-in because the value must match the CA the
+	// cluster edge's ACME server actually uses — a mismatched CAA blocks issuance.
+	CAAIssuer string `yaml:"caaissuer,omitempty"`
 }
 
 // IsZero reports whether no platform configuration is set, i.e. the project
@@ -56,7 +61,8 @@ func (c PlatformConfig) IsZero() bool {
 		strings.TrimSpace(c.AuthoritativeIP) == "" &&
 		len(c.Nameservers) == 0 &&
 		strings.TrimSpace(c.AuthHost) == "" &&
-		strings.TrimSpace(c.ACMEEmail) == ""
+		strings.TrimSpace(c.ACMEEmail) == "" &&
+		strings.TrimSpace(c.CAAIssuer) == ""
 }
 
 // Resolve returns a copy with defaults derived from BaseDomain. It never invents
@@ -69,6 +75,7 @@ func (c PlatformConfig) Resolve() PlatformConfig {
 	resolved.AuthoritativeIP = strings.TrimSpace(c.AuthoritativeIP)
 	resolved.AuthHost = strings.TrimSpace(c.AuthHost)
 	resolved.ACMEEmail = strings.TrimSpace(c.ACMEEmail)
+	resolved.CAAIssuer = strings.TrimSpace(c.CAAIssuer)
 	if resolved.BaseDomain == "" {
 		return resolved
 	}
