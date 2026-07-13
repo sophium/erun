@@ -9,6 +9,23 @@ spec:
     privateKeySecretRef:
       name: {{ .Values.issuerName }}-account-key
     solvers:
+      {{- if eq .Values.dns01Provider "powerdns-rfc2136" }}
+      # RFC2136 (DNS UPDATE + TSIG) direct to the self-hosted PowerDNS that is
+      # authoritative for the delegated services zone. Used where the delegation
+      # moved authority off Cloudflare; the TSIG key is minted by the erun-powerdns
+      # chart and wired in by the module.
+      - dns01:
+          rfc2136:
+            nameserver: {{ required "rfc2136Nameserver is required" .Values.rfc2136Nameserver | quote }}
+            tsigKeyName: {{ required "rfc2136TsigKeyName is required" .Values.rfc2136TsigKeyName | quote }}
+            tsigAlgorithm: {{ required "rfc2136TsigAlgorithm is required" .Values.rfc2136TsigAlgorithm | quote }}
+            tsigSecretSecretRef:
+              name: {{ required "rfc2136TsigSecretName is required" .Values.rfc2136TsigSecretName }}
+              key: {{ default "tsig-secret" .Values.rfc2136TsigSecretKey }}
+        selector:
+          dnsZones:
+            - {{ required "servicesZone is required" .Values.servicesZone | quote }}
+      {{- else }}
       - dns01:
           cloudflare:
             apiTokenSecretRef:
@@ -17,3 +34,4 @@ spec:
         selector:
           dnsZones:
             - {{ required "servicesZone is required" .Values.servicesZone | quote }}
+      {{- end }}

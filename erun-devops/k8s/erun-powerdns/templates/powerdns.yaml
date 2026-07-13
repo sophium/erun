@@ -51,6 +51,25 @@
 {{- if eq $apiKey "" -}}
 {{- $apiKey = randAlphaNum 40 -}}
 {{- end -}}
+{{- /* RFC2136 dynamic-update (DNS UPDATE + TSIG) so cert-manager's rfc2136 DNS-01
+       solver can write _acme-challenge TXT records into the services zone. On by
+       default for the platform singleton; the TSIG key is auto-generated and
+       lookup-persisted like the api-key. Algorithm string is PowerDNS's form
+       (hmac-sha256); cert-manager uses its own uppercase form (HMACSHA256), wired
+       separately in terraform-erun-cluster-edge. */ -}}
+{{- $dnsUpdateEnabled := default true $powerdns.dnsUpdateEnabled -}}
+{{- $tsigSecretName := default (printf "%s-powerdns-tsig" $tenant) $powerdns.tsigSecretName -}}
+{{- $tsigSecretKey := default "tsig-secret" $powerdns.tsigSecretKey -}}
+{{- $tsigKeyName := default (printf "%s-dnsupdate" $tenant) $powerdns.tsigKeyName -}}
+{{- $tsigAlgorithm := default "hmac-sha256" $powerdns.tsigAlgorithm -}}
+{{- $tsigSecret := default "" $powerdns.tsigSecret -}}
+{{- $existingTSIGSecret := lookup "v1" "Secret" .Release.Namespace $tsigSecretName -}}
+{{- if and (eq $tsigSecret "") $existingTSIGSecret (hasKey $existingTSIGSecret.data $tsigSecretKey) -}}
+{{- $tsigSecret = (index $existingTSIGSecret.data $tsigSecretKey | b64dec) -}}
+{{- end -}}
+{{- if eq $tsigSecret "" -}}
+{{- $tsigSecret = (randAlphaNum 32 | b64enc) -}}
+{{- end -}}
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
 {{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
 {{- $powerdnsImage := default (printf "%s/erun-powerdns:4.9.3" $containerRegistry) (index $imageOverrides "erun-powerdns") -}}
@@ -79,6 +98,25 @@ metadata:
 type: Opaque
 stringData:
   {{ $apiKeySecretKey }}: {{ $apiKey | quote }}
+{{- if $dnsUpdateEnabled }}
+---
+# TSIG key for RFC2136 dynamic updates. Auto-generated + lookup-persisted like
+# the api-key. Consumed two ways on this cluster: imported into PowerDNS by the
+# zone-bootstrap init, and read back by the hosting-edge apply to wire
+# cert-manager's rfc2136 tsigSecretSecretRef. `algorithm`/`key-name` ride along
+# so the edge doesn't have to re-derive them.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $tsigSecretName }}
+  labels:
+    app: {{ $tenant }}-powerdns
+type: Opaque
+stringData:
+  {{ $tsigSecretKey }}: {{ $tsigSecret | quote }}
+  algorithm: {{ $tsigAlgorithm | quote }}
+  key-name: {{ $tsigKeyName | quote }}
+{{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -146,6 +184,11 @@ spec:
               webserver-address=127.0.0.1
               webserver-port={{ $apiPort }}
               webserver-allow-from=127.0.0.1
+              {{- if $dnsUpdateEnabled }}
+              dnsupdate=yes
+              gpgsql-dnssec=yes
+              allow-dnsupdate-from=
+              {{- end }}
               EOF
           volumeMounts:
             - name: config
@@ -217,6 +260,13 @@ spec:
                 pdnsutil --config-dir={{ $configDir }} add-record {{ $servicesZone | quote }} @ NS {{ $ns | quote }}
                 {{- end }}
               fi
+              {{- if $dnsUpdateEnabled }}
+              # Import the TSIG key and authorize it for dynamic updates on the
+              # services zone (idempotent) so cert-manager's rfc2136 DNS-01 solver
+              # can write _acme-challenge TXT records.
+              pdnsutil --config-dir={{ $configDir }} import-tsig-key {{ $tsigKeyName | quote }} {{ $tsigAlgorithm | quote }} {{ $tsigSecret | quote }} 2>/dev/null || true
+              pdnsutil --config-dir={{ $configDir }} set-meta {{ $servicesZone | quote }} TSIG-ALLOW-DNSUPDATE {{ $tsigKeyName | quote }}
+              {{- end }}
           volumeMounts:
             - name: config
               mountPath: {{ $configDir }}
@@ -269,3 +319,29 @@ spec:
         - name: config
           emptyDir: {}
       restartPolicy: Always
+{{- if $dnsUpdateEnabled }}
+---
+# In-cluster nameserver Service, so cert-manager's rfc2136 solver has a stable
+# endpoint to send DNS UPDATE to. The pod is hostNetwork, so the Service's
+# endpoint resolves to the node IP where PowerDNS binds :53; both protocols are
+# required. Not the public NAT'd authoritative IP (which may not accept inbound
+# in-cluster UPDATE) — this Service targets the pod/node directly.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $tenant }}-powerdns
+  labels:
+    app: {{ $tenant }}-powerdns
+spec:
+  selector:
+    app: {{ $tenant }}-powerdns
+  ports:
+    - name: dns-udp
+      port: 53
+      targetPort: 53
+      protocol: UDP
+    - name: dns-tcp
+      port: 53
+      targetPort: 53
+      protocol: TCP
+{{- end }}

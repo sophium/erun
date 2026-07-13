@@ -92,6 +92,27 @@ Let's Encrypt production rate limits, then re-apply without it for real certs. O
 cluster that already runs Traefik or cert-manager, add
 `-var install_ingress_controller=false` and/or `-var install_cert_manager=false`.
 
+**Delegated services zone (PowerDNS DNS-01).** Once the services zone is delegated
+off Cloudflare to the platform's own PowerDNS, the Cloudflare DNS-01 solver can no
+longer prove control of it — switch the solver to RFC2136 (DNS UPDATE + TSIG) and
+add a per-env wildcard cert. The TSIG key is minted by the `erun-powerdns` chart;
+read it back and pass it in:
+
+```sh
+NS="<tenant>-powerdns"; TNS="<platform-namespace>"   # e.g. frs-powerdns / frs-prod
+TSIG=$(kubectl -n "$TNS" get secret "$NS-tsig" -o jsonpath='{.data.tsig-secret}' | base64 -d)
+KEYNAME=$(kubectl -n "$TNS" get secret "$NS-tsig" -o jsonpath='{.data.key-name}' | base64 -d)
+export TF_VAR_rfc2136_tsig_secret="$TSIG"
+terraform apply -input=false -auto-approve \
+  -var "services_zone=<services-zone>" -var "acme_email=<acme-email>" \
+  -var dns01_provider=powerdns-rfc2136 \
+  -var "powerdns_nameserver=$NS.$TNS.svc.cluster.local:53" \
+  -var "rfc2136_tsig_key_name=$KEYNAME" \
+  -var per_env_certificate_enabled=true -var "env_label=<tenant>-<env>"
+```
+
+`cloudflare_api_token` is not needed in this mode.
+
 ## Verify
 
 ```sh
@@ -106,9 +127,12 @@ kubectl wait --for=condition=Ready certificate/erun-cloudflare-wildcard -n cert-
 ```
 
 A `Ready` ClusterIssuer + a `Ready` wildcard Certificate means the edge can
-terminate TLS for `*.<services-zone>`. Route an env's service through it with
-`erun expose` (which writes the PowerDNS record and the Host-routing Ingress);
-reference the issuer on the Ingress as `cert-manager.io/cluster-issuer: erun-cloudflare`.
+terminate TLS. Route an env's service through it with `erun expose` — it writes the
+PowerDNS record and applies a Host-routing Ingress that serves `https` by default,
+referencing the **per-env wildcard cert Secret** (`<tenant>-<env>-wildcard-tls`)
+directly. It sets no `cert-manager.io/cluster-issuer` annotation: the per-env cert
+is pre-issued (`per_env_certificate_enabled`), so one cert covers every exposed
+service and exposing another adds only an Ingress.
 
 ## Maintenance, repair & upgrade
 

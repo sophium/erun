@@ -1,12 +1,8 @@
 variable "cloudflare_api_token" {
-  description = "Cloudflare API token cert-manager's DNS-01 solver uses to prove control of the services zone. In production this is the same account-scoped token erun injects into the runtime pod as CLOUDFLARE_API_TOKEN (Zone:Read + DNS:Edit); pass it through as TF_VAR_cloudflare_api_token. Unlike the cloudflare provider (which reads the env var directly), cert-manager needs it materialized into a Kubernetes Secret, so it is an explicit sensitive input here."
+  description = "Cloudflare API token cert-manager's DNS-01 solver uses to prove control of the services zone, when dns01_provider is \"cloudflare\". The same account-scoped token erun injects as CLOUDFLARE_API_TOKEN (Zone:Read + DNS:Edit); pass it as TF_VAR_cloudflare_api_token. Materialized into a Kubernetes Secret because cert-manager needs it in-cluster. Leave empty when dns01_provider is \"powerdns-rfc2136\" (a precondition still requires it for the cloudflare provider)."
   type        = string
   sensitive   = true
-
-  validation {
-    condition     = length(var.cloudflare_api_token) > 0
-    error_message = "cloudflare_api_token must not be empty."
-  }
+  default     = ""
 }
 
 variable "acme_email" {
@@ -81,4 +77,58 @@ variable "traefik_chart_version" {
   description = "Pinned Traefik Helm chart version."
   type        = string
   default     = "33.2.1"
+}
+
+variable "dns01_provider" {
+  description = "cert-manager DNS-01 solver provider. \"cloudflare\" (default, back-compat) solves in the Cloudflare zone; \"powerdns-rfc2136\" solves via DNS UPDATE + TSIG directly against the self-hosted PowerDNS authoritative for the delegated services zone — use it once the zone is delegated off Cloudflare."
+  type        = string
+  default     = "cloudflare"
+
+  validation {
+    condition     = contains(["cloudflare", "powerdns-rfc2136"], var.dns01_provider)
+    error_message = "dns01_provider must be \"cloudflare\" or \"powerdns-rfc2136\"."
+  }
+}
+
+variable "powerdns_nameserver" {
+  description = "host:port of the PowerDNS the RFC2136 solver sends DNS UPDATE to (e.g. \"erun-powerdns.frs-prod.svc.cluster.local:53\"). Required when dns01_provider is \"powerdns-rfc2136\"."
+  type        = string
+  default     = ""
+}
+
+variable "rfc2136_tsig_key_name" {
+  description = "TSIG key name authorized for dynamic updates on the services zone (the erun-powerdns chart's tsig key-name). Required for powerdns-rfc2136."
+  type        = string
+  default     = ""
+}
+
+variable "rfc2136_tsig_algorithm" {
+  description = "TSIG algorithm in cert-manager's form (e.g. HMACSHA256). PowerDNS uses its own lowercase form (hmac-sha256) internally; keep them the same algorithm."
+  type        = string
+  default     = "HMACSHA256"
+}
+
+variable "rfc2136_tsig_secret" {
+  description = "Base64 TSIG key material (the erun-powerdns chart's tsig-secret, read back from its Secret). Materialized into a Secret cert-manager's rfc2136 solver references. Required for powerdns-rfc2136."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "per_env_certificate_enabled" {
+  description = "Issue a per-env wildcard Certificate *.<env_label>.<services_zone> into the env namespace, whose Secret `erun expose` references for TLS. Enable in the platform/serving env."
+  type        = bool
+  default     = false
+}
+
+variable "env_label" {
+  description = "The <tenant>-<env> label the per-env wildcard covers (e.g. \"frs-prod\" → *.frs-prod.<services_zone>). Required when per_env_certificate_enabled."
+  type        = string
+  default     = ""
+}
+
+variable "env_namespace" {
+  description = "Namespace the per-env wildcard Certificate + its Secret live in (the env's own namespace, e.g. frs-prod), so a co-located Ingress can reference the Secret. Defaults to env_label when unset."
+  type        = string
+  default     = ""
 }
