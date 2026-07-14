@@ -1,0 +1,10 @@
+apiVersion: v2
+name: erun-dns01-webhook
+description: >-
+  cert-manager ACME DNS-01 webhook (per-cluster singleton) that forwards
+  present/cleanup to the erun DNS-01 broker, carrying each challenge's env-scoped
+  token. The broker authorizes the write against the token's tenant subzone, so
+  per-tenant cert issuance is safe on a shared cluster.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

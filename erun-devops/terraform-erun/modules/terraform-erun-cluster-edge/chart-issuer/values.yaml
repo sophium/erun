@@ -18,15 +18,25 @@ certNamespace: cert-manager
 wildcardCertificateEnabled: "true"
 wildcardCertName: erun-cloudflare-wildcard
 wildcardSecretName: erun-cloudflare-wildcard-tls
-# DNS-01 solver provider: "cloudflare" (default) or "powerdns-rfc2136" (DNS
-# UPDATE + TSIG direct to the self-hosted PowerDNS authoritative for a delegated
-# services zone). The RFC2136 fields are set by the module only in that mode.
+# DNS-01 solver provider: "cloudflare" (default), "powerdns-rfc2136" (DNS UPDATE
+# + TSIG direct to the self-hosted PowerDNS), or "powerdns-broker" (the
+# multi-tenant-safe path: a per-tenant Issuer whose challenges are brokered
+# through the DNS-01 broker via the cluster's webhook shim, authorized against
+# this env's subzone). The provider-specific fields are set by the module only
+# in the matching mode.
 dns01Provider: cloudflare
 rfc2136Nameserver: ""
 rfc2136TsigKeyName: ""
 rfc2136TsigAlgorithm: HMACSHA256
 rfc2136TsigSecretName: ""
 rfc2136TsigSecretKey: tsig-secret
+# powerdns-broker: the webhook API group the cluster's shim registers under, the
+# broker base URL the shim forwards to, and the Secret (in this Issuer's
+# namespace) holding this env's DNS-01 token the broker authenticates.
+dns01WebhookGroupName: acme.erun.io
+brokerURL: ""
+dns01TokenSecretName: ""
+dns01TokenSecretKey: token
 # Per-env wildcard cert *.<envLabel>.<servicesZone> issued into the env namespace;
 # its Secret is what `erun expose` references. Off by default.
 perEnvCertificateEnabled: "false"

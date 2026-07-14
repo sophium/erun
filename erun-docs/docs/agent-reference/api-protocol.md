@@ -99,6 +99,7 @@ The `(iss, org) → tenant` resolution model and first-identity bootstrap above 
 | `POST` | `/v1/environments` | Register an environment in the caller's tenant, bound to a referenced context. Body below. | Tenant member (write) |
 | `GET` | `/v1/environments/{environment_id}` | Fetch one environment by id. | Tenant member |
 | `POST` | `/v1/environments/{environment_id}/mcp-token` | Mint a per-env MCP bearer token (`{token, audience}`) for the caller to present to the env's `erun-mcp` edge. Body-less. Response below. | Tenant member (write) |
+| `POST` | `/v1/environments/{environment_id}/dns01-token` | Mint a per-env DNS-01 broker token (`{token, audience}`), the credential the cluster's cert-manager DNS-01 webhook presents to the [DNS-01 broker](#dns01-broker). Body-less. Response below. | Tenant member (write) |
 | `GET` | `/v1/contexts` | List the tenant's cloud contexts (managed clusters). | Tenant member |
 | `POST` | `/v1/contexts` | Register a cloud context (managed cluster) and, when provisioning is configured, start its durable live bootstrap (`202`). Body below. | Tenant member (write) |
 | `GET` | `/v1/contexts/{context_id}` | Fetch one cloud context by id, including its provisioning `status`. | Tenant member |
@@ -232,6 +233,43 @@ The endpoint takes **no body**. On success it returns HTTP `200`:
 | `404` | No environment with `{environment_id}` in the caller's tenant (row-level security returns not-found for another tenant's env, never leaking its existence). | Mint for an environment id the caller's tenant owns. |
 | `501` | No backend MCP signing key is configured (`ERUN_API_MCP_SIGNING_KEY_PATH` unset). | Configure the signing key on the backend, or use the desktop `file://` path. |
 | `500` | The tenant read or the signing failed (e.g. missing request-scoped security context — an internal wiring error, never a client fault). | Retry; if it persists, it is a server bug. |
+
+### `POST /v1/environments/{environment_id}/dns01-token` {#dns01-token-endpoint}
+
+Mints a per-env **DNS-01 broker token** — the long-lived, backend-signed credential the cluster's cert-manager DNS-01 webhook presents to the [broker](#dns01-broker) to solve ACME challenges within the env's own subzone. Same signing key as the [mcp-token](#mcp-token-endpoint) but a **distinct audience** (`erun-dns01:<tenant>/<environment>`), so the two capabilities cannot be replayed against each other. The environment is resolved from `{environment_id}` under row-level security, so a token can only be minted for the caller's own tenant. Body-less; on success HTTP `200`:
+
+```jsonc
+// 200 response
+{
+  "token": "<eddsa-jwt>",          // long-lived (survives cert renewals); store as the env's dns01-token Secret
+  "audience": "erun-dns01:acme/prod"
+}
+```
+
+The operator lands this token as the Secret the per-tenant Issuer's webhook solver references (see the `erun-enable-hosting-edge` skill). Enabled by the same `ERUN_API_MCP_SIGNING_KEY_PATH` as the mcp-token endpoint; unset → `501`.
+
+**Error behaviour.** Bare HTTP status, plain-text body:
+
+| Status | Condition | Recovery |
+|---|---|---|
+| `401` / `403` | Standard auth failures (see [Errors](#errors)). `WriteAll` covers this write. | Send a valid token whose roles permit the write. |
+| `404` | No environment with `{environment_id}` in the caller's tenant (RLS returns not-found for another tenant's env). | Mint for an environment id the caller's tenant owns. |
+| `501` | No backend signing key is configured (`ERUN_API_MCP_SIGNING_KEY_PATH` unset). | Configure the signing key on the backend. |
+| `500` | The tenant read or signing failed (internal wiring error). | Retry; if it persists, it is a server bug. |
+
+### DNS-01 broker: `POST /v1/dns01/present` · `POST /v1/dns01/cleanup` {#dns01-broker}
+
+The DNS-01 broker makes per-tenant cert issuance safe on a **multi-tenant** cluster (issue #818). A shared cluster-scoped `ClusterIssuer` plus one zone-wide TSIG key is an impersonation hole — any namespace could issue any tenant's cert. Instead, each tenant runs a per-tenant namespaced `Issuer` whose DNS-01 challenges route (via a per-cluster cert-manager webhook shim) to this broker, which holds the one TSIG key centrally and **authorizes every write against the caller's own subzone**.
+
+These are **machine-to-machine** endpoints — authenticated by the per-env DNS-01 token (not a user OIDC token), so they sit outside the user-auth middleware. Each request body is `{ "fqdn": "_acme-challenge.…", "value": "<challenge>" }`; the webhook shim marshals cert-manager's `ChallengeRequest` into it and sends the env token as `Authorization: Bearer <jwt>`.
+
+A request succeeds (`204`) only when:
+
+1. `Authorization: Bearer <jwt>` is present and verifies against the backend's DNS-01 signing key — missing/invalid → `401`. The token's audience yields the `(tenant, environment)`; an MCP-audience token is rejected here (wrong audience).
+2. The challenge FQDN is an `_acme-challenge` name **within** that env's subzone `<tenant>-<environment>.<services-zone>` — anything else (another tenant's or env's name, a foreign zone, a non-challenge record) → `403`, no write. This is the impersonation guard: `(tenant, environment)` come only from the verified token, never the FQDN.
+3. The `_acme-challenge` TXT write to PowerDNS (RFC2136 DNS UPDATE + central TSIG) succeeds — a DNS failure → `502`. Every authorized write is audited.
+
+`present` adds the challenge TXT; `cleanup` removes it. The broker is only registered when the platform env configures the PowerDNS write path (`ERUN_DNS01_*`); otherwise the endpoints are absent. Driving this against a **live** two-tenant cluster (staging then production ACME, with the negative cross-tenant test) is the issue's end-to-end acceptance — `(Planned.)` until a second tenant is stood up on the platform cluster.
 
 ### `POST /v1/contexts`
 

@@ -113,6 +113,38 @@ terraform apply -input=false -auto-approve \
 
 `cloudflare_api_token` is not needed in this mode.
 
+**Brokered DNS-01 (multi-tenant clusters).** RFC2136 above hands the cluster one
+zone-wide TSIG key — safe only on the single-tenant platform cluster. On a cluster
+shared by multiple tenants that key is an impersonation hole (any namespace could
+issue any tenant's cert). Use `powerdns-broker` instead: a per-tenant namespaced
+Issuer whose challenges route through a per-cluster cert-manager webhook shim to the
+DNS-01 broker (`erun-backend-api`), which authorizes each challenge against the
+caller's own subzone. The env presents a scoped token, not a DNS credential.
+
+Per env (tenant), mint the env's DNS-01 token from the backend and land it as the
+Secret the Issuer's webhook solver reads, then apply in broker mode:
+
+```sh
+# Mint the per-env DNS-01 token (caller must hold a token for <tenant>/<env>).
+TOKEN=$(curl -fsS -X POST -H "Authorization: Bearer $ERUN_API_TOKEN" \
+  "$ERUN_API_URL/v1/environments/$ENV_ID/dns01-token" | jq -r .token)
+kubectl -n "<tenant>-<env>" create secret generic "<tenant>-<env>-dns01-token" \
+  --from-literal=token="$TOKEN" --dry-run=client -o yaml | kubectl apply -f -
+
+version=$(erun version --no-registry 2>/dev/null | head -n1 | awk '{print $2}')
+terraform apply -input=false -auto-approve \
+  -var "services_zone=<services-zone>" -var "acme_email=<acme-email>" \
+  -var dns01_provider=powerdns-broker \
+  -var "broker_url=https://api.<platform-tenant>-<platform-env>.services.<services-zone>/v1/dns01" \
+  -var "dns01_webhook_image=ghcr.io/sophium/erun-dns01-webhook:${version:-latest}" \
+  -var "dns01_token_secret_name=<tenant>-<env>-dns01-token" \
+  -var per_env_certificate_enabled=true -var "env_label=<tenant>-<env>" \
+  -var "env_namespace=<tenant>-<env>"
+```
+
+The webhook shim installs once per cluster; each tenant adds only its own Issuer +
+token Secret. Neither `cloudflare_api_token` nor the TSIG key is needed here.
+
 ## Verify
 
 ```sh

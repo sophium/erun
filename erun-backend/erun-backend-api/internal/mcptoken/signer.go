@@ -6,30 +6,58 @@
 package mcptoken
 
 import (
+	"crypto/ed25519"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"time"
 
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// tokenTTL bounds a minted token's lifetime. The per-env edge is RCE-sensitive,
-// so the window stays short; it is long enough for an interactive console
-// session, and the console re-mints on demand.
+// tokenTTL bounds a minted MCP token's lifetime. The per-env edge is
+// RCE-sensitive, so the window stays short; it is long enough for an interactive
+// console session, and the console re-mints on demand.
 const tokenTTL = time.Hour
 
-// Signer holds the backend's Ed25519 MCP-signing identity and mints per-env
-// tokens against the fixed in-pod file:// issuer the edge resolves its key from.
+// Signer holds the backend's Ed25519 MCP-signing identity. It mints per-env MCP
+// tokens against the fixed in-pod file:// issuer the edge resolves its key from,
+// and also mints and self-verifies per-env DNS-01 broker tokens (see dns01.go),
+// which the backend both signs and checks with its own public half.
 type Signer struct {
 	privatePEM []byte
+	publicKey  ed25519.PublicKey
 }
 
 // NewSigner validates the PEM parses as an Ed25519 private key so a misconfigured
-// key fails at construction, not on the first mint.
+// key fails at construction, not on the first mint, and caches the public half
+// for self-verifying tokens the backend both signs and checks (DNS-01).
 func NewSigner(privatePEM []byte) (*Signer, error) {
-	if _, err := eruncommon.DesktopPublicKeyPEM(privatePEM); err != nil {
+	publicPEM, err := eruncommon.DesktopPublicKeyPEM(privatePEM)
+	if err != nil {
 		return nil, fmt.Errorf("mcp signing key: %w", err)
 	}
-	return &Signer{privatePEM: privatePEM}, nil
+	publicKey, err := parseEd25519PublicKey(publicPEM)
+	if err != nil {
+		return nil, fmt.Errorf("mcp signing key: %w", err)
+	}
+	return &Signer{privatePEM: privatePEM, publicKey: publicKey}, nil
+}
+
+func parseEd25519PublicKey(publicPEM []byte) (ed25519.PublicKey, error) {
+	block, _ := pem.Decode(publicPEM)
+	if block == nil {
+		return nil, fmt.Errorf("public key is not valid PEM")
+	}
+	parsed, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse public key: %w", err)
+	}
+	publicKey, ok := parsed.(ed25519.PublicKey)
+	if !ok {
+		return nil, fmt.Errorf("public key is not Ed25519")
+	}
+	return publicKey, nil
 }
 
 // Sign mints a token whose sub is the ERun user, aud is the per-env audience,
