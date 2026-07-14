@@ -15,6 +15,7 @@ import (
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 
 	backendapi "github.com/sophium/erun/erun-backend/erun-backend-api"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/dns01broker"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/mcptoken"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/secrets"
@@ -59,6 +60,10 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	dns01Broker, err := optionalDNS01Broker(cfg, mcpSigner)
+	if err != nil {
+		return err
+	}
 
 	handler, err := backendapi.NewHandler(backendapi.HandlerOptions{
 		TokenVerifier: backendapi.NewBearerTokenVerifier(backendapi.BearerTokenVerifierOptions{
@@ -72,6 +77,7 @@ func run(args []string) error {
 		Cipher:        cipher,
 		AWSEndpoint:   cfg.AWSEndpoint,
 		MCPSigner:     mcpSigner,
+		DNS01Broker:   dns01Broker,
 	})
 	if err != nil {
 		return err
@@ -134,6 +140,14 @@ type apiConfig struct {
 	AllowedIssuers       string
 	DesktopPublicKeyPath string
 	MCPSigningKeyPath    string
+	// DNS-01 broker write path, injected at deploy from the platform env's
+	// erun-powerdns TSIG Secret. Absent → the broker is disabled (its endpoints
+	// are not registered).
+	DNS01ServicesZone  string
+	DNS01Nameserver    string
+	DNS01TSIGKeyName   string
+	DNS01TSIGAlgorithm string
+	DNS01TSIGSecret    string
 	// These enable optional live context provisioning; it stays disabled unless
 	// SecretsKey and DBOSDatabaseURL are both set. DBOSDatabaseURL is a separate
 	// database from ERUN_DATABASE_URL. AWSEndpoint targets a local emulator for
@@ -154,6 +168,11 @@ func configFromEnv() apiConfig {
 		SecretsKey:           strings.TrimSpace(os.Getenv("ERUN_SECRETS_KEY")),
 		DBOSDatabaseURL:      strings.TrimSpace(os.Getenv("DBOS_SYSTEM_DATABASE_URL")),
 		AWSEndpoint:          strings.TrimSpace(os.Getenv("ERUN_AWS_ENDPOINT_URL")),
+		DNS01ServicesZone:    strings.TrimSpace(os.Getenv("ERUN_DNS01_SERVICES_ZONE")),
+		DNS01Nameserver:      strings.TrimSpace(os.Getenv("ERUN_DNS01_POWERDNS_NAMESERVER")),
+		DNS01TSIGKeyName:     strings.TrimSpace(os.Getenv("ERUN_DNS01_TSIG_KEY_NAME")),
+		DNS01TSIGAlgorithm:   strings.TrimSpace(os.Getenv("ERUN_DNS01_TSIG_ALGORITHM")),
+		DNS01TSIGSecret:      strings.TrimSpace(os.Getenv("ERUN_DNS01_TSIG_SECRET")),
 	}
 }
 
@@ -177,6 +196,25 @@ func optionalMCPSigner(path string) (*mcptoken.Signer, error) {
 		return nil, fmt.Errorf("read mcp signing key %s: %w", path, err)
 	}
 	return mcptoken.NewSigner(privatePEM)
+}
+
+// optionalDNS01Broker builds the DNS-01 broker when both the signing key (to
+// verify per-env tokens) and the PowerDNS write path are configured. Any missing
+// piece leaves the broker disabled — its endpoints are not registered — rather
+// than a half-wired broker; a bad TSIG algorithm is a hard misconfiguration.
+func optionalDNS01Broker(cfg apiConfig, signer *mcptoken.Signer) (*dns01broker.Broker, error) {
+	if signer == nil || cfg.DNS01ServicesZone == "" || cfg.DNS01Nameserver == "" || cfg.DNS01TSIGKeyName == "" || cfg.DNS01TSIGSecret == "" {
+		return nil, nil
+	}
+	algorithm := cfg.DNS01TSIGAlgorithm
+	if algorithm == "" {
+		algorithm = "hmac-sha256"
+	}
+	writer, err := dns01broker.NewPowerDNSWriter(cfg.DNS01Nameserver, cfg.DNS01ServicesZone, cfg.DNS01TSIGKeyName, algorithm, cfg.DNS01TSIGSecret)
+	if err != nil {
+		return nil, fmt.Errorf("dns01 broker: %w", err)
+	}
+	return dns01broker.NewBroker(signer, writer, cfg.DNS01ServicesZone, nil), nil
 }
 
 func optionalDBOS(databaseURL string) (dbos.DBOSContext, error) {
