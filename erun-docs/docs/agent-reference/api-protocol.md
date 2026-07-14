@@ -221,7 +221,7 @@ The endpoint takes **no body**. On success it returns HTTP `200`:
 }
 ```
 
-**Backend signing key.** The signer is enabled by pointing `ERUN_API_MCP_SIGNING_KEY_PATH` at the backend's Ed25519 private key (PKCS#8 PEM). Unset, the endpoint reports `501` and mints nothing. The matching public key is what a deploy injects into the env (`erun deploy --mcp-auth-public-key`), so the edge trusts backend-signed tokens.
+**Backend signing key.** The signer is enabled by pointing `ERUN_API_MCP_SIGNING_KEY_PATH` at the backend's Ed25519 private key (PKCS#8 PEM) — on a hosted deploy, the `erun-backend-api` chart's `api.mcpSigning.secretName` value mounts that key Secret and sets the path (opt-in; unset leaves the endpoint at `501`). The matching public key is what a deploy injects into the env (`erun deploy --mcp-auth-public-key`), so the edge trusts backend-signed tokens.
 
 **Usable once the env is deployed.** A minted token only authenticates against a **deployed** env whose edge already carries the backend's public key. A dedicated `409`-until-deployed guard is `(Planned.)` — the backend does not yet track per-env deploy state (server-side deploy is itself `(Planned.)`; see [`POST /v1/environments`](#post-v1environments)); until then the endpoint mints whenever the signer is configured and the environment exists.
 
@@ -269,7 +269,7 @@ A request succeeds (`204`) only when:
 2. The challenge FQDN is an `_acme-challenge` name **within** that env's subzone `<tenant>-<environment>.<services-zone>` — anything else (another tenant's or env's name, a foreign zone, a non-challenge record) → `403`, no write. This is the impersonation guard: `(tenant, environment)` come only from the verified token, never the FQDN.
 3. The `_acme-challenge` TXT write to PowerDNS (RFC2136 DNS UPDATE + central TSIG) succeeds — a DNS failure → `502`. Every authorized write is audited.
 
-`present` adds the challenge TXT; `cleanup` removes it. The broker is only registered when the platform env configures the PowerDNS write path (`ERUN_DNS01_*`); otherwise the endpoints are absent. Driving this against a **live** two-tenant cluster (staging then production ACME, with the negative cross-tenant test) is the issue's end-to-end acceptance — `(Planned.)` until a second tenant is stood up on the platform cluster.
+`present` adds the challenge TXT; `cleanup` removes it. The broker is only registered when the platform env configures the PowerDNS write path (`ERUN_DNS01_*`); otherwise the endpoints are absent. On a hosted deploy those are set (opt-in) by the `erun-backend-api` chart's `api.dns01.{enabled,servicesZone}` values — the TSIG key, algorithm, and PowerDNS `:53` endpoint default to the co-located `erun-powerdns` chart's conventions, so enabling the broker needs only `enabled` + the services zone. Driving this against a **live** two-tenant cluster (staging then production ACME, with the negative cross-tenant test) is the issue's end-to-end acceptance — `(Planned.)` until a second tenant is stood up on the platform cluster.
 
 ### `POST /v1/contexts`
 
