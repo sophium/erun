@@ -1,6 +1,13 @@
 import type * as React from 'react';
 
-import type { CloudContext, ContextStatus, Environment, Tenant, TenantConfigView } from './types';
+import type {
+  CloudContext,
+  ContextStatus,
+  Environment,
+  EnvironmentStatus,
+  Tenant,
+  TenantConfigView,
+} from './types';
 
 // A pure render of the read model the parent fetched; the fetch/auth lifecycle
 // lives in App. Empty collections render an empty-state line, never an empty
@@ -28,6 +35,12 @@ function EnvironmentRow({ env }: { env: Environment }): React.ReactElement {
       <td>{env.type}</td>
       <td>{placeholder(env.kubernetesContext)}</td>
       <td>{placeholder(env.runtimeVersion)}</td>
+      <td>
+        <StatusBadge status={env.status} labels={ENV_STATUS_LABELS} />
+        {env.status === 'failed' && env.provisionError !== undefined && (
+          <span className="context-error">{env.provisionError}</span>
+        )}
+      </td>
     </tr>
   );
 }
@@ -50,6 +63,7 @@ function EnvironmentsSection({
               <th scope="col">Type</th>
               <th scope="col">Kubernetes context</th>
               <th scope="col">Runtime version</th>
+              <th scope="col">Status</th>
             </tr>
           </thead>
           <tbody>
@@ -69,14 +83,28 @@ const STATUS_LABELS: Record<ContextStatus, string> = {
   failed: 'Failed',
 };
 
+const ENV_STATUS_LABELS: Record<EnvironmentStatus, string> = {
+  registered: 'Registered',
+  provisioning: 'Provisioning',
+  running: 'Running',
+  failed: 'Failed',
+};
+
 // The badge pairs color with a text label so it reads for color-blind and
-// screen-reader users, not color alone. A context registered before
-// provisioning existed has no status and renders no badge.
-function StatusBadge({ status }: { status: ContextStatus | undefined }): React.ReactElement | null {
+// screen-reader users, not color alone. A resource with no status (registered
+// before provisioning existed) renders no badge. Generic over the status label
+// map so contexts and environments share one badge.
+function StatusBadge<T extends string>({
+  status,
+  labels,
+}: {
+  status: T | undefined;
+  labels: Record<T, string>;
+}): React.ReactElement | null {
   if (status === undefined) {
     return null;
   }
-  return <span className={`status-badge status-badge--${status}`}>{STATUS_LABELS[status]}</span>;
+  return <span className={`status-badge status-badge--${status}`}>{labels[status]}</span>;
 }
 
 function ContextItem({ context }: { context: CloudContext }): React.ReactElement {
@@ -87,7 +115,7 @@ function ContextItem({ context }: { context: CloudContext }): React.ReactElement
         {context.provider} · {context.region}
       </span>
       <span className="context-status">
-        <StatusBadge status={context.status} />
+        <StatusBadge status={context.status} labels={STATUS_LABELS} />
         {context.status === 'failed' && context.provisionError !== undefined && (
           // The failure reason is essential, so it is visible inline rather
           // than hidden in a title tooltip.

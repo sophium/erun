@@ -17,11 +17,14 @@ const SAMPLE_CONFIG = {
       kubernetesContext: 'primary',
       contextId: 'ctx-1',
       runtimeVersion: '1.2.3',
+      status: 'running',
     },
     {
       environmentId: 'env-2',
       name: 'dev',
       type: 'remote-agent',
+      status: 'failed',
+      provisionError: 'deploy job did not succeed',
     },
   ],
   contexts: [
@@ -109,6 +112,17 @@ describe('ConfigView via App', () => {
     // The provision error is visible text, not hidden behind a bare title tooltip.
     expect(contexts.getByText('Failed')).toBeInTheDocument();
     expect(contexts.getByText('run-instances: InsufficientInstanceCapacity')).toBeInTheDocument();
+  });
+
+  it('renders environment provisioning status badges, scoped to the environments table', async () => {
+    mockFetch(jsonResponse(SAMPLE_CONFIG));
+    render(<App />);
+
+    const envs = within(await screen.findByRole('region', { name: 'Environments' }));
+    expect(envs.getByText('Running')).toBeInTheDocument();
+    expect(envs.getByText('Failed')).toBeInTheDocument();
+    // A failed env surfaces its provision error inline, like a failed context.
+    expect(envs.getByText('deploy job did not succeed')).toBeInTheDocument();
   });
 
   it('renders empty states for an empty payload', async () => {
