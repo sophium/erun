@@ -189,10 +189,13 @@ On success the endpoint persists the row and returns it with HTTP `201`:
   "kubernetesContext": "primary",
   "contextId": "019a7fa5-c2c0-7c55-bc70-714873a71f20",
   "runtimeVersion": "1.2.3",
+  "status": "registered",       // provisioning lifecycle: registered → provisioning → running/failed
   "createdAt": "2026-06-24T10:00:00Z",
   "updatedAt": "2026-06-24T10:00:00Z"
 }
 ```
+
+A newly-registered environment is `registered` — the row exists but nothing is deployed. The server-side deploy executor (#605) moves it `provisioning` → `running`/`failed` and sets `provisionError` on failure; the same `status`/`provisionError` appear on `GET /v1/environments/{id}` and in the `GET /v1/config` read model. Until the executor lands, an environment stays `registered`.
 
 **Per-tenant environment-count quota.** After validating the body and before persisting, the endpoint enforces the tenant's environment-count cap: it compares how many environments the tenant already has against the cap and rejects the registration with HTTP `409` once the tenant is at or over it. The cap defaults to **10** and is overridden per tenant by a `tenant_quotas.max_environments` row. That override row is set by the operations-only [`PUT /v1/tenants/{tenant_id}/quota`](#put-v1tenantstenant_idquota) endpoint (below). Both the count and the cap are read under row-level security, so each is scoped to the caller's own tenant.
 
