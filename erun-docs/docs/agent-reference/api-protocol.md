@@ -76,8 +76,10 @@ The runtime chart configures each edge with a set of trusted issuers mapping eac
 
 An edge can trust **multiple issuers at once**, of two kinds, dispatched by the *configured* issuer's scheme (not the token's claimed `iss`, so the verification path can't be attacker-chosen):
 
-- **`https://` OIDC issuer** (the platform's Zitadel, AWS) — verified via the issuer's JWKS through provider discovery, using the same shared verifier the REST API uses (so the API and every MCP edge verify identically). Hosted/console callers present their OIDC token directly. A hosted deploy wires this by setting the env's [`mcpauthissuer`](/reference/configuration#envconfig) to the tenant's registered OIDC issuer; `erun deploy` threads it into the chart as `mcpAuth.{enabled,issuer,audience}` — the issuer verbatim, the audience derived as `erun-mcp:<tenant>/<environment>` — and injects **no** key, since the edge fetches the issuer's JWKS. Mutually exclusive with the `file://` key below; the desktop `--mcp-auth-public-key` flag wins when both are present (issue #685).
-- **`file://` desktop key** (issue #655) — a self-contained local trust anchor for the **desktop** case, instead of an OIDC IdP: the desktop generates an Ed25519 key (`desktopid.key`) once, signs an EdDSA JWT whose `iss` is a `file://<path>` URL naming the public key, and injects that public key into the runtime pod on deploy (`erun deploy --mcp-auth-public-key`). The edge loads the key from that `file://` path and verifies the signature against it; `alg` is hard-locked to `EdDSA` for `file://` issuers, closing the alg-confusion class.
+- **`https://` OIDC issuer** (the platform's Zitadel, AWS) — verified via the issuer's JWKS through provider discovery, using the same shared verifier the REST API uses (so the API and every MCP edge verify identically). A caller that already holds an `erun-mcp`-audience OIDC token presents it directly. A deploy trusts an OIDC issuer by setting the env's [`mcpauthissuer`](/reference/configuration#envconfig) to it; `erun deploy` threads it into the chart as `mcpAuth.{enabled,issuer,audience}` — issuer verbatim, audience derived as `erun-mcp:<tenant>/<environment>` — and injects **no** key, since the edge fetches the issuer's JWKS. Mutually exclusive with the `file://` key below; the `--mcp-auth-public-key` flag wins when both are set. The **console does not use this path** — a browser SPA cannot obtain an `erun-mcp`-audience OIDC token — it uses the backend-signed `file://` path below (issue #685).
+- **`file://` key** (issues #655, #686) — a self-contained trust anchor instead of an OIDC IdP: an Ed25519 public key injected into the runtime pod on deploy (`erun deploy --mcp-auth-public-key <key>`). The signer stamps a `file://<path>` `iss` naming that public key; the edge loads the key from that path and verifies the EdDSA signature, with `alg` hard-locked to `EdDSA` (closing the alg-confusion class). Two signers use it, and each env picks exactly one:
+  - **Desktop** — the desktop generates the key (`desktopid.key`) once and signs each token locally.
+  - **Hosted (console)** — the **backend** is the signer, the hosted twin of the desktop: it holds the MCP signing key (`ERUN_API_MCP_SIGNING_KEY_PATH`) and mints a per-env token on the console's behalf via [`POST /v1/environments/{id}/mcp-token`](#mcp-token-endpoint), while the deploy injects the backend's public key — so the console never holds a signing key. This supersedes the OIDC-issuer path for the console.
 
 When no trust anchor is configured the edge stays loopback-only (legacy, unauthenticated) — a desktop or hosted deploy always configures one. Capability/scope-gated authorization of *individual* tools (e.g. restricting the RCE-capable `raw` to admin-scoped tokens, while a read-only token sees only the read tools) is `(Planned.)` — it rides on the hosted role source (issue #606).
 
@@ -96,6 +98,7 @@ The `(iss, org) → tenant` resolution model and first-identity bootstrap above 
 | `GET` | `/v1/environments` | List the tenant's environments. | Tenant member |
 | `POST` | `/v1/environments` | Register an environment in the caller's tenant, bound to a referenced context. Body below. | Tenant member (write) |
 | `GET` | `/v1/environments/{environment_id}` | Fetch one environment by id. | Tenant member |
+| `POST` | `/v1/environments/{environment_id}/mcp-token` | Mint a per-env MCP bearer token (`{token, audience}`) for the caller to present to the env's `erun-mcp` edge. Body-less. Response below. | Tenant member (write) |
 | `GET` | `/v1/contexts` | List the tenant's cloud contexts (managed clusters). | Tenant member |
 | `POST` | `/v1/contexts` | Register a cloud context (managed cluster) and, when provisioning is configured, start its durable live bootstrap (`202`). Body below. | Tenant member (write) |
 | `GET` | `/v1/contexts/{context_id}` | Fetch one cloud context by id, including its provisioning `status`. | Tenant member |
@@ -202,6 +205,33 @@ On success the endpoint persists the row and returns it with HTTP `201`:
 | `401` / `403` | Standard auth failures (see [Errors](#errors)). The `WriteAll` permission covers `POST /v1/environments`. | Send a valid token whose roles permit the write. |
 | `409` | The tenant is at its environment-count cap (default `10` unless a `tenant_quotas` row overrides it); the body is `environment quota reached: this tenant already has N of N environments`. | Delete an unused environment, or raise the tenant's cap via [`PUT /v1/tenants/{tenant_id}/quota`](#put-v1tenantstenant_idquota) (operations-only). |
 | `500` | Persistence failed — e.g. `contextId` references a context that is not the caller's (the composite `(tenant_id, context_id)` foreign key is violated), or the request-scoped security context is missing (an internal wiring error). | Reference a context owned by the caller's tenant; if it persists with a valid context, it is a server bug. |
+
+### `POST /v1/environments/{environment_id}/mcp-token` {#mcp-token-endpoint}
+
+Mints a per-env MCP bearer token the caller presents to that environment's `erun-mcp` edge (at `mcp.<tenant>-<env>.services.<base-domain>`). The **backend** signs the token — the hosted twin of the desktop signing locally — so a browser console needs no signing key. The environment is resolved from `{environment_id}` under row-level security, so a token can only mint for its own tenant's environments. The minted token's `sub` is the caller's ERun user, `aud` is the per-env `erun-mcp:<tenant>/<environment>`, and `iss` is the fixed in-pod `file://` path the deploy injects the backend's public key at, so the edge verifies it (see [Per-env MCP edge authentication](#mcp-edge)). It is short-lived (~1 hour); mint a fresh one when it lapses.
+
+The endpoint takes **no body**. On success it returns HTTP `200`:
+
+```jsonc
+// 200 response
+{
+  "token": "<eddsa-jwt>",
+  "audience": "erun-mcp:acme/prod"
+}
+```
+
+**Backend signing key.** The signer is enabled by pointing `ERUN_API_MCP_SIGNING_KEY_PATH` at the backend's Ed25519 private key (PKCS#8 PEM). Unset, the endpoint reports `501` and mints nothing. The matching public key is what a deploy injects into the env (`erun deploy --mcp-auth-public-key`), so the edge trusts backend-signed tokens.
+
+**Usable once the env is deployed.** A minted token only authenticates against a **deployed** env whose edge already carries the backend's public key. A dedicated `409`-until-deployed guard is `(Planned.)` — the backend does not yet track per-env deploy state (server-side deploy is itself `(Planned.)`; see [`POST /v1/environments`](#post-v1environments)); until then the endpoint mints whenever the signer is configured and the environment exists.
+
+**Error behaviour.** Bare HTTP status with a plain-text body (no JSON envelope):
+
+| Status | Condition | Recovery |
+|---|---|---|
+| `401` / `403` | Standard auth failures (see [Errors](#errors)). The `WriteAll` permission covers this write. | Send a valid token whose roles permit the write. |
+| `404` | No environment with `{environment_id}` in the caller's tenant (row-level security returns not-found for another tenant's env, never leaking its existence). | Mint for an environment id the caller's tenant owns. |
+| `501` | No backend MCP signing key is configured (`ERUN_API_MCP_SIGNING_KEY_PATH` unset). | Configure the signing key on the backend, or use the desktop `file://` path. |
+| `500` | The tenant read or the signing failed (e.g. missing request-scoped security context — an internal wiring error, never a client fault). | Retry; if it persists, it is a server bug. |
 
 ### `POST /v1/contexts`
 
