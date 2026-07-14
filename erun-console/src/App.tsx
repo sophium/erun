@@ -4,6 +4,7 @@ import { devBearerToken } from './auth/auth';
 import { ConfigFetchError, fetchConfig } from './config/client';
 import { ConfigView } from './config/ConfigView';
 import type { TenantConfigView } from './config/types';
+import { MCPAccessPanel } from './mcp/MCPAccessPanel';
 import { ProvisionPanel } from './provision/ProvisionPanel';
 
 type LoadState =
@@ -78,6 +79,9 @@ export function App(): React.ReactElement {
       {state.status === 'error' && <ErrorMessage message={state.message} />}
       {state.status === 'ready' && <ConfigView config={state.config} />}
       {token !== undefined && state.status === 'ready' && <ProvisionPanel token={token} />}
+      {token !== undefined && state.status === 'ready' && (
+        <MCPAccessPanel token={token} environments={state.config.environments} />
+      )}
     </main>
   );
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/mcptoken"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/provision"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/routes"
@@ -31,6 +32,10 @@ type HandlerOptions struct {
 	// AWSEndpoint pins provisioning's aws calls at a local emulator (floci) for
 	// verification; empty means real AWS.
 	AWSEndpoint string
+	// MCPSigner mints per-env MCP bearer tokens for the console. Nil when no
+	// backend MCP signing key is configured; the mcp-token endpoint then reports
+	// 501 rather than minting an unverifiable token.
+	MCPSigner *mcptoken.Signer
 }
 
 func NewHandler(options HandlerOptions) (http.Handler, error) {
@@ -100,6 +105,7 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 		routes.RegisterBuildRoutes(register, builds, buildService)
 		routes.RegisterCommentRoutes(register, comments, commentService)
 		routes.RegisterEnvironmentRoutes(register, environments, tenantQuotas)
+		routes.RegisterMCPTokenRoutes(register, environments, tenants, options.MCPSigner)
 		var contextProvisioner routes.ContextProvisioner
 		if options.Cipher != nil {
 			aliases := repository.NewCloudProviderAliasRepository(txManager, options.Cipher)
