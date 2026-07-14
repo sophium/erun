@@ -16,7 +16,26 @@ spec:
     privateKeySecretRef:
       name: {{ .Values.issuerName }}-account-key
     solvers:
-      {{- if eq .Values.dns01Provider "powerdns-rfc2136" }}
+      {{- if eq .Values.dns01Provider "powerdns-broker" }}
+      # Multi-tenant-safe (#818): a namespaced webhook solver forwards the DNS-01
+      # challenge to the cluster's shim, which carries this env's scoped token to
+      # the broker. The broker authorizes the challenge FQDN against the token's
+      # own subzone, so this per-tenant Issuer can never prove control of another
+      # tenant's names even though PowerDNS holds one zone-wide TSIG key centrally.
+      # No DNS credential lives in this namespace — only the env's token Secret.
+      - dns01:
+          webhook:
+            groupName: {{ required "dns01WebhookGroupName is required" .Values.dns01WebhookGroupName | quote }}
+            solverName: powerdns-broker
+            config:
+              brokerURL: {{ required "brokerURL is required" .Values.brokerURL | quote }}
+              tokenSecretRef:
+                name: {{ required "dns01TokenSecretName is required" .Values.dns01TokenSecretName }}
+                key: {{ default "token" .Values.dns01TokenSecretKey }}
+        selector:
+          dnsZones:
+            - {{ required "servicesZone is required" .Values.servicesZone | quote }}
+      {{- else if eq .Values.dns01Provider "powerdns-rfc2136" }}
       # RFC2136 (DNS UPDATE + TSIG) direct to the self-hosted PowerDNS that is
       # authoritative for the delegated services zone. Used where the delegation
       # moved authority off Cloudflare; the TSIG key is minted by the erun-powerdns

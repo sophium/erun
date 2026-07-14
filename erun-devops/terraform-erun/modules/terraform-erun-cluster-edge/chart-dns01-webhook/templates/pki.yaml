@@ -1,0 +1,49 @@
+{{- /* The webhook is an aggregated apiserver, so it needs serving TLS the kube
+       aggregator trusts. cert-manager itself issues it: a self-signed root mints
+       a CA, the CA issues the serving cert, and the APIService's caBundle is
+       injected from that cert by the cainjector (annotation on apiservice.yaml). */ -}}
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ .Values.name }}-selfsign
+  namespace: {{ .Values.namespace }}
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .Values.name }}-ca
+  namespace: {{ .Values.namespace }}
+spec:
+  secretName: {{ .Values.name }}-ca
+  isCA: true
+  commonName: {{ .Values.name }}-ca
+  duration: 43800h # 5y
+  issuerRef:
+    name: {{ .Values.name }}-selfsign
+    kind: Issuer
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ .Values.name }}-ca
+  namespace: {{ .Values.namespace }}
+spec:
+  ca:
+    secretName: {{ .Values.name }}-ca
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .Values.name }}-webhook-tls
+  namespace: {{ .Values.namespace }}
+spec:
+  secretName: {{ .Values.name }}-webhook-tls
+  duration: 8760h # 1y
+  dnsNames:
+    - {{ .Values.name }}.{{ .Values.namespace }}.svc
+    - {{ .Values.name }}.{{ .Values.namespace }}.svc.cluster.local
+  issuerRef:
+    name: {{ .Values.name }}-ca
+    kind: Issuer
