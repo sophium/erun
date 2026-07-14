@@ -4,8 +4,11 @@
 // (Zitadel); it is deliberately stubbed here because it cannot be built or
 // claimed working without a live IdP to verify against.
 //
-// Driving each env's per-env MCP is a later increment and is RCE-sensitive
-// (its `raw` tool can `kubectl exec`), so it is out of scope here too.
+// The console can now mint and surface a per-env MCP bearer token (the backend
+// signs it; see src/mcp/MCPAccessPanel), but actually driving that env's MCP
+// tools over the live edge (mcp.<tenant>-<env>.services.<base-domain>) stays a
+// later increment: it is RCE-sensitive (its `raw` tool can `kubectl exec`) and
+// needs a deployed env carrying the backend's public key to verify against.
 //
 // Until the real flow exists the token comes from a dev-only stub.
 

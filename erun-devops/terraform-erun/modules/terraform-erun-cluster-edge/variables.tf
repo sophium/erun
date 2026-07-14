@@ -80,14 +80,38 @@ variable "traefik_chart_version" {
 }
 
 variable "dns01_provider" {
-  description = "cert-manager DNS-01 solver provider. \"cloudflare\" (default, back-compat) solves in the Cloudflare zone; \"powerdns-rfc2136\" solves via DNS UPDATE + TSIG directly against the self-hosted PowerDNS authoritative for the delegated services zone — use it once the zone is delegated off Cloudflare."
+  description = "cert-manager DNS-01 solver provider. \"cloudflare\" (default, back-compat) solves in the Cloudflare zone; \"powerdns-rfc2136\" solves via DNS UPDATE + TSIG directly against the self-hosted PowerDNS (single-tenant platform cluster only — the zone-wide TSIG key is an impersonation hole on a shared cluster); \"powerdns-broker\" is the multi-tenant-safe path (#818): a per-tenant namespaced Issuer whose challenges are brokered through the DNS-01 broker via a per-cluster webhook shim, authorized against the env's own subzone."
   type        = string
   default     = "cloudflare"
 
   validation {
-    condition     = contains(["cloudflare", "powerdns-rfc2136"], var.dns01_provider)
-    error_message = "dns01_provider must be \"cloudflare\" or \"powerdns-rfc2136\"."
+    condition     = contains(["cloudflare", "powerdns-rfc2136", "powerdns-broker"], var.dns01_provider)
+    error_message = "dns01_provider must be \"cloudflare\", \"powerdns-rfc2136\", or \"powerdns-broker\"."
   }
+}
+
+variable "broker_url" {
+  description = "Base URL of the DNS-01 broker the webhook shim forwards to (the shim appends /present and /cleanup), e.g. \"https://api.frs-prod.services.example.com/v1/dns01\". Required when dns01_provider is \"powerdns-broker\"."
+  type        = string
+  default     = ""
+}
+
+variable "dns01_token_secret_name" {
+  description = "Name of the Secret, in the env (Issuer) namespace, holding this env's DNS-01 broker token under key \"token\" (minted by the backend's POST /v1/environments/{id}/dns01-token). The per-tenant Issuer's webhook solver references it. Required when dns01_provider is \"powerdns-broker\"."
+  type        = string
+  default     = ""
+}
+
+variable "dns01_webhook_group_name" {
+  description = "API group the per-cluster DNS-01 webhook shim registers under; the per-tenant Issuer's webhook solver selects it. A cluster singleton — keep stable."
+  type        = string
+  default     = "acme.erun.io"
+}
+
+variable "dns01_webhook_image" {
+  description = "Container image (repository:tag) for the DNS-01 webhook shim, e.g. \"ghcr.io/sophium/erun-dns01-webhook:1.0.150\". Required when dns01_provider is \"powerdns-broker\"; pin to the running erun version."
+  type        = string
+  default     = ""
 }
 
 variable "powerdns_nameserver" {

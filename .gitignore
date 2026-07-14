@@ -44,3 +44,11 @@ __debug_bin*
 # Playwright MCP debugging artifacts (console logs, page snapshots) written
 # at the repo root by the local dev tooling, never by tests
 /.playwright-mcp/
+
+# Terraform init artifacts (provider binaries + module lock) written by local
+# `terraform init`/`validate`, never shipped from the reusable modules.
+**/.terraform/
+**/.terraform.lock.hcl
+
+# Compiled DNS-01 webhook binary from a local `go build` in the module dir.
+/erun-devops/dns01-webhook/dns01-webhook

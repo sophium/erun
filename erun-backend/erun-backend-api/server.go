@@ -6,6 +6,8 @@ import (
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/dns01broker"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/mcptoken"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/provision"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/routes"
@@ -31,6 +33,15 @@ type HandlerOptions struct {
 	// AWSEndpoint pins provisioning's aws calls at a local emulator (floci) for
 	// verification; empty means real AWS.
 	AWSEndpoint string
+	// MCPSigner mints per-env MCP bearer tokens for the console. Nil when no
+	// backend MCP signing key is configured; the mcp-token endpoint then reports
+	// 501 rather than minting an unverifiable token. It also signs and verifies
+	// the per-env DNS-01 broker tokens (same key, distinct audience).
+	MCPSigner *mcptoken.Signer
+	// DNS01Broker serves the authenticated DNS-01 present/cleanup endpoints. Nil
+	// when the PowerDNS write path is not configured; the endpoints are then not
+	// registered (a cluster with no brokered DNS-01 solver never calls them).
+	DNS01Broker *dns01broker.Broker
 }
 
 func NewHandler(options HandlerOptions) (http.Handler, error) {
@@ -80,6 +91,12 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 
 	mux := http.NewServeMux()
 	registerHealthRoute(mux)
+	// The DNS-01 broker authenticates its own per-env M2M token (not a user OIDC
+	// token), so it is registered directly on the mux rather than behind the
+	// user-auth/authorize/audit middleware the protected routes use.
+	if options.DNS01Broker != nil {
+		options.DNS01Broker.Register(mux)
+	}
 	register := protectedRouteRegistrar(mux, auth)
 	var users routes.WhoamiUserRepository
 	if txManager != nil {
@@ -100,6 +117,8 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 		routes.RegisterBuildRoutes(register, builds, buildService)
 		routes.RegisterCommentRoutes(register, comments, commentService)
 		routes.RegisterEnvironmentRoutes(register, environments, tenantQuotas)
+		routes.RegisterMCPTokenRoutes(register, environments, tenants, options.MCPSigner)
+		routes.RegisterDNS01TokenRoutes(register, environments, tenants, options.MCPSigner)
 		var contextProvisioner routes.ContextProvisioner
 		if options.Cipher != nil {
 			aliases := repository.NewCloudProviderAliasRepository(txManager, options.Cipher)

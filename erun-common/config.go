@@ -122,6 +122,13 @@ type EnvConfig struct {
 	// published <registry>/erun-devops:<version> default. A full reference is used
 	// verbatim; a bare name resolves against the env's registry and runtime version.
 	RuntimeImage string `yaml:"runtimeimage,omitempty" json:"runtimeImage,omitempty"`
+	// MCPAuthIssuer is the tenant's registered OIDC issuer (an `https://` URL)
+	// the env's erun-mcp edge trusts bearer tokens from. Set on a hosted deploy
+	// so the edge authenticates the console/agent against the tenant IdP; the
+	// per-env audience is derived (MCPTokenAudience). Empty leaves a non-desktop
+	// deploy unauthenticated (loopback-only), preserving back-compat. Distinct
+	// from the desktop `file://` path, which threads a local public key instead.
+	MCPAuthIssuer string `yaml:"mcpauthissuer,omitempty" json:"mcpAuthIssuer,omitempty"`
 	// ImagePullSecrets names Kubernetes dockerconfigjson secrets the runtime pod
 	// uses to pull private images (e.g. a private <tenant>-devops umbrella image).
 	// Empty leaves the pod pulling anonymously, so envs on public images (the erun
