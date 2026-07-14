@@ -10,6 +10,11 @@ export interface Tenant {
   type: string;
 }
 
+// The provisioning lifecycle of a hosted environment: `registered` (row exists,
+// nothing deployed) → `provisioning` → `running` | `failed`. Parsed leniently so
+// an unknown future state renders no badge rather than failing the parse.
+export type EnvironmentStatus = 'registered' | 'provisioning' | 'running' | 'failed';
+
 export interface Environment {
   environmentId: string;
   name: string;
@@ -19,6 +24,8 @@ export interface Environment {
   kubernetesContext?: string;
   contextId?: string;
   runtimeVersion?: string;
+  status?: EnvironmentStatus;
+  provisionError?: string;
 }
 
 // The provisioning lifecycle a context moves through: `provisioning` → `running`
