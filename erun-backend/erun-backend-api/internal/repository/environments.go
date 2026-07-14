@@ -56,6 +56,22 @@ func (r *EnvironmentRepository) Count(ctx context.Context) (int, error) {
 	return count, err
 }
 
+// UpdateProvisioningStatus persists an environment's provisioning-lifecycle
+// transition (registered → provisioning → running/failed), clearing the error
+// on any non-failed state. Mirrors the contexts provisioning-result update; RLS
+// keeps the write scoped to the caller's tenant.
+func (r *EnvironmentRepository) UpdateProvisioningStatus(ctx context.Context, environmentID, status, provisionError string) error {
+	return r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		_, err := tx.NewRaw(`
+			UPDATE environments
+			   SET status = ?,
+			       provision_error = NULLIF(?, '')
+			 WHERE environment_id = ?
+		`, status, provisionError, environmentID).Exec(ctx)
+		return err
+	})
+}
+
 func (r *EnvironmentRepository) Get(ctx context.Context, environmentID string) (model.Environment, error) {
 	var environment model.Environment
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
