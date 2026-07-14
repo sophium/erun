@@ -11,7 +11,7 @@ type EnvironmentRepository struct {
 	txs *TxManager
 }
 
-const environmentColumns = `environment_id, tenant_id, name, type, kubernetes_context, context_id, runtime_version, created_at, updated_at`
+const environmentColumns = `environment_id, tenant_id, name, type, kubernetes_context, context_id, runtime_version, status, provision_error, created_at, updated_at`
 
 func NewEnvironmentRepository(txs *TxManager) *EnvironmentRepository {
 	return &EnvironmentRepository{txs: txs}

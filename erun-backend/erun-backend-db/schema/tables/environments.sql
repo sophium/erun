@@ -6,12 +6,15 @@ CREATE TABLE environments (
   kubernetes_context TEXT,
   context_id UUID,
   runtime_version TEXT,
+  status TEXT NOT NULL DEFAULT 'registered',
+  provision_error TEXT,
   created_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ,
   FOREIGN KEY (tenant_id) REFERENCES tenants (tenant_id),
   FOREIGN KEY (tenant_id, context_id) REFERENCES contexts (tenant_id, context_id),
   CONSTRAINT environments_name_check CHECK (length(trim(name)) > 0),
   CONSTRAINT environments_type_check CHECK (type IN ('local-agent', 'remote-agent', 'runtime')),
+  CONSTRAINT environments_status_check CHECK (status IN ('registered', 'provisioning', 'running', 'failed')),
   CONSTRAINT environments_tenant_environment_key UNIQUE (tenant_id, environment_id),
   CONSTRAINT environments_tenant_name_key UNIQUE (tenant_id, name)
 );
