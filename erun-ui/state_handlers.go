@@ -282,13 +282,17 @@ func buildDetailsFrom(info eruncommon.BuildInfo) uiBuildDetails {
 }
 
 func listKubernetesContexts() ([]string, error) {
-	output, err := exec.Command("kubectl", "config", "get-contexts", "-o=name").Output()
+	contextsCmd := exec.Command("kubectl", "config", "get-contexts", "-o=name")
+	eruncommon.HideConsoleWindow(contextsCmd)
+	output, err := contextsCmd.Output()
 	if err != nil {
 		return nil, wrapKubectlError(err)
 	}
 	contexts := strings.Split(string(output), "\n")
 
-	currentOutput, err := exec.Command("kubectl", "config", "current-context").Output()
+	currentCmd := exec.Command("kubectl", "config", "current-context")
+	eruncommon.HideConsoleWindow(currentCmd)
+	currentOutput, err := currentCmd.Output()
 	if err == nil {
 		contexts = preferCurrentKubernetesContext(contexts, string(currentOutput))
 	}

@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"github.com/ActiveState/termtest/conpty"
+	eruncommon "github.com/sophium/erun/erun-common"
 )
 
 type windowsTerminalSession struct {
@@ -108,7 +109,9 @@ func (s *windowsTerminalSession) Close() error {
 		// open, leaving a stale dtach client attached in the pod after every
 		// close.
 		if s.process.Pid > 0 {
-			_ = exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(s.process.Pid)).Run()
+			killCmd := exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(s.process.Pid))
+			eruncommon.HideConsoleWindow(killCmd)
+			_ = killCmd.Run()
 		}
 		_ = s.process.Kill()
 		_ = s.Wait()
