@@ -10,7 +10,15 @@ import (
 
 // Command wraps exec.Command, honoring an ERUN_<NAME>_BIN override so tests
 // can redirect a named binary to a stub without a live toolchain or account.
+// On Windows it also suppresses the stray console window that a console child
+// of the windowless desktop app would otherwise flash (see HideConsoleWindow).
 func Command(name string, args ...string) *exec.Cmd {
+	cmd := newExecCommand(name, args...)
+	HideConsoleWindow(cmd)
+	return cmd
+}
+
+func newExecCommand(name string, args ...string) *exec.Cmd {
 	if strings.ContainsAny(name, "/\\") {
 		return exec.Command(name, args...)
 	}

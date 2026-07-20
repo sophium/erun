@@ -32,7 +32,9 @@ func resolveCurrentBuildInfo(resolveCLIPath func() string) eruncommon.BuildInfo 
 		return fallback
 	}
 
-	output, err := exec.Command(cliPath, "version", "--no-registry").Output()
+	versionCmd := exec.Command(cliPath, "version", "--no-registry")
+	eruncommon.HideConsoleWindow(versionCmd)
+	output, err := versionCmd.Output()
 	if err != nil {
 		return fallback
 	}
