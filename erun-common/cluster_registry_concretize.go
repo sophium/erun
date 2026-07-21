@@ -40,5 +40,8 @@ func concretizeDeployTargetRegistries(ctx Context, target OpenResult) (OpenResul
 	if pull, ok := concrete.DeployRegistry(); ok {
 		target.ClusterPullRegistry = pull
 	}
+	if entry, ok := list.ClusterEntry(); ok {
+		target.ClusterRegistryInsecure = entry.Insecure
+	}
 	return target, nil
 }

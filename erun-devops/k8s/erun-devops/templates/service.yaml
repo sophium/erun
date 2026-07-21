@@ -607,6 +607,15 @@ spec:
         - image: {{ $dindImage }}
           name: erun-dind
           imagePullPolicy: IfNotPresent
+          {{- /* A context-resolved local cluster registry is plain HTTP at a
+                 non-loopback ClusterIP; the docker:dind entrypoint forwards these
+                 args to dockerd so an in-pod build can push to it. Empty for
+                 hosted (TLS) registries, so those pods are unchanged. */ -}}
+          {{- with .Values.clusterRegistryInsecure }}
+          args:
+            - --insecure-registry
+            - {{ . | quote }}
+          {{- end }}
           env:
             - name: DOCKER_TLS_CERTDIR
               value: ""

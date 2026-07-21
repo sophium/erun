@@ -153,7 +153,11 @@ type HelmDeploySpec struct {
 	UseHostCredentials bool
 	OIDCAllowedIssuers string
 	ContainerRegistry  string
-	ImageOverrides     map[string]string
+	// InsecureRegistry, when set, is a plain-HTTP cluster registry host the in-pod
+	// dind daemon must trust so an in-pod build can push to it. Empty for hosted
+	// (TLS) registries, so those envs render nothing.
+	InsecureRegistry string
+	ImageOverrides   map[string]string
 	// ImagePullSecrets names dockerconfigjson secrets the runtime pod pulls with,
 	// threaded to the chart as imagePullSecrets[i].name. Empty renders nothing, so
 	// public-image envs are byte-for-byte unchanged. Mirrors EnvConfig.ImagePullSecrets.
@@ -1574,6 +1578,10 @@ func newHelmDeploySpecWithValues(target OpenResult, deployContext KubernetesDepl
 	if strings.TrimSpace(target.ClusterPullRegistry) != "" {
 		containerRegistry = target.ClusterPullRegistry
 	}
+	insecureRegistry := ""
+	if target.ClusterRegistryInsecure {
+		insecureRegistry = strings.TrimSpace(target.ClusterPullRegistry)
+	}
 
 	return HelmDeploySpec{
 		ReleaseName:         deployContext.ComponentName,
@@ -1593,6 +1601,7 @@ func newHelmDeploySpecWithValues(target OpenResult, deployContext KubernetesDepl
 		SSHPort:             ports.SSH,
 		CloudProviderAlias:  target.EnvConfig.CloudProviderAlias,
 		ContainerRegistry:   containerRegistry,
+		InsecureRegistry:    insecureRegistry,
 		RuntimeRegistry:     strings.TrimSpace(target.EnvConfig.RuntimeRegistry),
 		ContainerRegistries: containerRegistries,
 		Platform:            resolveProjectPlatform(target.RepoPath),
@@ -2103,6 +2112,9 @@ func helmRegistrySetArgs(d HelmDeploySpec) []string {
 	}
 	if registry := strings.TrimSpace(d.RuntimeRegistry); registry != "" {
 		args = append(args, "--set-string", "runtimeRegistry="+registry)
+	}
+	if registry := strings.TrimSpace(d.InsecureRegistry); registry != "" {
+		args = append(args, "--set-string", "clusterRegistryInsecure="+registry)
 	}
 	if len(d.ContainerRegistries) > 0 {
 		if encoded, marshalErr := json.Marshal(d.ContainerRegistries); marshalErr == nil {
