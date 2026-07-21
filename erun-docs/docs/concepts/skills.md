@@ -56,6 +56,7 @@ Skills come in two kinds: *Blueprint* (ERun's accumulated best practices for ind
 | `erun-contribute` | Workflow | Create a new issue against `sophium/erun`, then drive the full clone → branch → implement → PR motion to share your improvement back. |
 | `erun-build-env` | Workflow | Extend ERun's published runtime image with your project's own toolchain — and publish a `<tenant>-devops` runtime chart when the tenant ships its own components or needs custom pod shape — then point the environment at the result, and maintain or upgrade it in place ([spec](/agent-reference/skills-spec#erun-build-env)). |
 | `erun-browser-session-rest` | Workflow | Call a host's REST API when the org blocks API tokens and gates OAuth, by reusing a saved browser login session ([spec](/agent-reference/skills-spec#erun-browser-session-rest)). |
+| `erun-setup-k3s-cluster` | Workflow | Stand up a durable local Kubernetes cluster on Windows for erun to build and deploy to — real k3s inside WSL2 with an in-cluster registry and a WSL-hosted Docker engine (no Docker Desktop) — and wire a `local-agent` environment at it ([spec](/agent-reference/skills-spec#erun-setup-k3s-cluster)). |
 
 For the SKILL.md contract, the deployment mechanism, the marketplace manifest format, and the per-skill spec, see [Agent reference · Skills spec](/agent-reference/skills-spec).
 
