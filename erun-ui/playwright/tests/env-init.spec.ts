@@ -50,6 +50,38 @@ test.describe('environment init dialog', () => {
     await app.envInitDialog.waitForClosed();
   });
 
+  test('marks mandatory fields with a required indicator (not colour-only)', async ({
+    app,
+    page,
+  }) => {
+    // The reported gap: Create sat disabled with no on-field cue for which values
+    // were mandatory — only a one-at-a-time footer reason. Every required field now
+    // carries a marker, and the requirement folds into the accessible name via the
+    // label's visually-hidden "(required)", so it is conveyed non-visually too.
+    await stubDialogCluster(page);
+    await app.sidebar.openInitDialog();
+    await app.envInitDialog.waitForOpen();
+
+    for (const name of [
+      'Tenant (required)',
+      'Environment (required)',
+      'Environment type (required)',
+      'Kubernetes context (required)',
+      'Container registry (required)',
+    ]) {
+      await expect(page.getByLabel(name, { exact: true })).toBeVisible();
+    }
+
+    // The visible marker is a glyph, present in the label DOM.
+    await expect(page.locator('label[for="environment-container-registry"]')).toContainText('*');
+
+    // Optional fields (e.g. Runtime version) carry no requirement marker.
+    await expect(page.getByLabel('Runtime version (required)', { exact: true })).toHaveCount(0);
+
+    await app.envInitDialog.cancel();
+    await app.envInitDialog.waitForClosed();
+  });
+
   test('init mode shows the "create" description and a submit-reason status line', async ({
     app,
   }) => {

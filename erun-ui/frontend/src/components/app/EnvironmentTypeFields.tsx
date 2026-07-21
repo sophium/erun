@@ -63,6 +63,7 @@ export function LocalRepoPathField({ dialog }: { dialog: EnvironmentDialog }): R
       helper="Absolute path on this machine. Mounted into the agent pod as the worktree."
       value={dialog.localRepoPath}
       disabled={dialog.busy}
+      required
       onChange={(value) => {
         dispatch(updateEnvironmentDialog({ localRepoPath: value }));
       }}

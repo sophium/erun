@@ -1,6 +1,5 @@
 import * as React from 'react';
 
-import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -8,6 +7,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+
+import { FieldLabel } from './FieldLabel';
 
 export interface SelectFieldOption {
   value: string;
@@ -43,7 +44,9 @@ export function SelectField({
   const helperId = helper ? `${id}-helper` : undefined;
   return (
     <div className="grid min-w-0 gap-2">
-      <Label htmlFor={id}>{label}</Label>
+      <FieldLabel htmlFor={id} required={required}>
+        {label}
+      </FieldLabel>
       <Select
         value={value || undefined}
         required={required}
@@ -54,6 +57,7 @@ export function SelectField({
           id={id}
           className="w-full min-w-0 *:data-[slot=select-value]:min-w-0 *:data-[slot=select-value]:overflow-hidden *:data-[slot=select-value]:text-ellipsis"
           aria-describedby={helperId}
+          aria-required={required}
         >
           <SelectValue
             placeholder={noOptions ? (emptyLabel ?? 'No options') : (placeholder ?? '')}
