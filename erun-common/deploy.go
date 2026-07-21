@@ -1004,6 +1004,10 @@ func resolveDeploySpecForContext(ctx Context, store DeployStore, findProjectRoot
 	// dependencies are kept on the signature for the shared resolution contract.
 	store, _, _, _, _ = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	target = applyDeployKubernetesContext(store, target)
+	target, err := concretizeDeployTargetRegistries(ctx, target)
+	if err != nil {
+		return DeploySpec{}, err
+	}
 
 	// Build-orchestration path: a build --deploy / open --deploy / UI run has
 	// already built and pushed the working-tree image and hands it to deploy by
@@ -1563,6 +1567,14 @@ func newHelmDeploySpecWithValues(target OpenResult, deployContext KubernetesDepl
 		}
 	}
 
+	// A context-resolved cluster registry supplies the concrete in-cluster pull
+	// host; a plain registry keeps the on-disk DEPLOY entry, so non-cluster envs
+	// render identically.
+	containerRegistry := resolveProjectContainerRegistry(target.RepoPath, target.Environment)
+	if strings.TrimSpace(target.ClusterPullRegistry) != "" {
+		containerRegistry = target.ClusterPullRegistry
+	}
+
 	return HelmDeploySpec{
 		ReleaseName:         deployContext.ComponentName,
 		ChartPath:           deployContext.ChartPath,
@@ -1580,7 +1592,7 @@ func newHelmDeploySpecWithValues(target OpenResult, deployContext KubernetesDepl
 		APIPort:             ports.API,
 		SSHPort:             ports.SSH,
 		CloudProviderAlias:  target.EnvConfig.CloudProviderAlias,
-		ContainerRegistry:   resolveProjectContainerRegistry(target.RepoPath, target.Environment),
+		ContainerRegistry:   containerRegistry,
 		RuntimeRegistry:     strings.TrimSpace(target.EnvConfig.RuntimeRegistry),
 		ContainerRegistries: containerRegistries,
 		Platform:            resolveProjectPlatform(target.RepoPath),

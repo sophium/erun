@@ -20,6 +20,12 @@ type Context struct {
 	Stdout                     io.Writer
 	Stderr                     io.Writer
 	KubernetesContextPreflight KubernetesContextPreflightFunc
+	// RegistryForwards owns any kubectl port-forwards a cluster registry needs.
+	// It is set once at command entry so the forward's lifetime spans registry
+	// resolution and the build/deploy that uses it; the entry defers its Close.
+	// Nil when no command-level forward lifecycle has been established (tests,
+	// pure resolution) — concretization then forwards on demand into a throwaway.
+	RegistryForwards *ClusterRegistryForwards
 }
 
 // WriteResult emits v as the command's structured result; callers invoke it on

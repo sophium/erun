@@ -91,6 +91,11 @@ type OpenResult struct {
 	LocalPorts   EnvironmentLocalPorts
 	RepoPath     string
 	Title        string
+	// ClusterPullRegistry, when set, is the concrete in-cluster pull host a
+	// context-resolved cluster registry resolved to; deploy renders it as the
+	// chart's containerRegistry in place of the on-disk DEPLOY entry. Empty for a
+	// plain (non-cluster) registry, so those envs are unaffected.
+	ClusterPullRegistry string
 }
 
 func (r OpenResult) RemoteRepo() bool {
