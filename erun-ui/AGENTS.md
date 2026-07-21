@@ -12,6 +12,7 @@ Module-specific guidance for `erun-ui`. Follow the repository root `AGENTS.md` f
 ## Frontend And Backend Split
 
 - Keep Wails startup, native window integration, PTY management, process execution, and session lifecycle in Go.
+- The desktop is linked `-H windowsgui` and owns no console, so every console child it spawns on Windows (`erun`, `kubectl`, `helm`, `git`, `ssh`, `tar`, ...) otherwise gets a brand-new console window that flashes and vanishes. Any non-PTY `exec.Command`/`exec.CommandContext` in this module must call `eruncommon.HideConsoleWindow(cmd)` before running — it is a no-op off Windows. PTY-backed sessions (ConPTY/`creack/pty`) attach to their own pseudo-console and are exempt. This applies transitively: a child the desktop launches windowless whose own children are console apps must suppress them too (see the IDE launcher in `erun-cli/cmd/open_ide.go`).
 - Desktop terminal sessions are one per pod per tab id: opening an env in any window takes over the existing pod session (`screen -d -r`), never mirrors. Preserve this invariant.
 - Diagnostics and error capture must be always-on and bounded — never gated behind an opt-in the user discovers only after an error has happened.
 - Keep layout, interaction behavior, DOM state, and terminal presentation in the frontend source tree.

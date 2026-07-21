@@ -138,6 +138,7 @@ func runErunCaptured(ctx context.Context, cliPath, dir string, onLine func(strin
 		cliPath = "erun"
 	}
 	cmd := exec.CommandContext(ctx, cliPath, args...)
+	eruncommon.HideConsoleWindow(cmd)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), appSessionEnvVar+"=1")
 	stdoutPipe, err := cmd.StdoutPipe()

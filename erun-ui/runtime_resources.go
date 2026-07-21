@@ -254,7 +254,9 @@ func kubectlJSON(ctx context.Context, kubernetesContext string, args ...string) 
 	if kubernetesContext != "" {
 		args = append([]string{"--context", kubernetesContext}, args...)
 	}
-	output, err := exec.CommandContext(ctx, "kubectl", args...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	eruncommon.HideConsoleWindow(cmd)
+	output, err := cmd.CombinedOutput()
 	if err != nil {
 		detail := strings.TrimSpace(string(output))
 		if detail != "" {

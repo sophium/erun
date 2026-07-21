@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	eruncommon "github.com/sophium/erun/erun-common"
 )
 
 type helmReleaseSnapshot struct {
@@ -80,6 +82,7 @@ func helmListTenantDevopsArgs(kubeContext string) []string {
 
 func listTenantDevopsHelmReleases(ctx context.Context, kubeContext string) ([]helmReleaseSnapshot, error) {
 	cmd := exec.CommandContext(ctx, "helm", helmListTenantDevopsArgs(kubeContext)...)
+	eruncommon.HideConsoleWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err

@@ -292,6 +292,7 @@ func workspaceSyncSSHReady(ctx context.Context, hostAlias string) error {
 		return fmt.Errorf("ssh host alias is required")
 	}
 	cmd := exec.CommandContext(ctx, "ssh", workspaceSyncSSHArgs(hostAlias, "true")...)
+	eruncommon.HideConsoleWindow(cmd)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("ssh workspace is not ready: %w: %s", err, strings.TrimSpace(string(output)))
@@ -308,6 +309,7 @@ func ensureLocalWorkspaceSyncTarget(ctx context.Context, localPath string) error
 		return fmt.Errorf("local workspace path is not a directory: %s", localPath)
 	}
 	cmd := exec.CommandContext(ctx, "git", "-C", localPath, "rev-parse", "--is-inside-work-tree")
+	eruncommon.HideConsoleWindow(cmd)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("local workspace is not a Git worktree: %w: %s", err, strings.TrimSpace(string(output)))
@@ -319,7 +321,9 @@ var errRemoteNotGitRepo = errors.New("remote workspace is not a git repository")
 
 func remoteWorkspaceGitVisibleFiles(ctx context.Context, hostAlias, remotePath string) ([]string, error) {
 	script := fmt.Sprintf("cd %s && git ls-files -coz --exclude-standard", shellQuote(remotePath))
-	output, err := exec.CommandContext(ctx, "ssh", workspaceSyncSSHArgs(hostAlias, script)...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, "ssh", workspaceSyncSSHArgs(hostAlias, script)...)
+	eruncommon.HideConsoleWindow(cmd)
+	output, err := cmd.CombinedOutput()
 	if err != nil {
 		detail := strings.TrimSpace(string(output))
 		if strings.Contains(detail, "not a git repository") {
@@ -334,7 +338,9 @@ func remoteWorkspaceGitVisibleFiles(ctx context.Context, hostAlias, remotePath s
 }
 
 func localWorkspaceGitVisibleFiles(ctx context.Context, localPath string) ([]string, error) {
-	output, err := exec.CommandContext(ctx, "git", "-C", localPath, "ls-files", "-coz", "--exclude-standard").Output()
+	cmd := exec.CommandContext(ctx, "git", "-C", localPath, "ls-files", "-coz", "--exclude-standard")
+	eruncommon.HideConsoleWindow(cmd)
+	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("list local Git-visible files: %w", err)
 	}
@@ -346,6 +352,7 @@ func filterLocalIgnoredWorkspaceSyncPaths(ctx context.Context, localPath string,
 		return nil, nil
 	}
 	cmd := exec.CommandContext(ctx, "git", "-C", localPath, "check-ignore", "-z", "--stdin")
+	eruncommon.HideConsoleWindow(cmd)
 	cmd.Stdin = bytes.NewReader(encodeWorkspaceSyncPathList(paths))
 	output, err := cmd.Output()
 	if err != nil {
@@ -368,6 +375,7 @@ func filterLocalIgnoredWorkspaceSyncPaths(ctx context.Context, localPath string,
 func extractRemoteWorkspaceFiles(ctx context.Context, hostAlias, remotePath, localPath string, paths []string) error {
 	script := fmt.Sprintf("cd %s && tar --null --ignore-failed-read -T - -cf -", shellQuote(remotePath))
 	sshCmd := exec.CommandContext(ctx, "ssh", workspaceSyncSSHArgs(hostAlias, script)...)
+	eruncommon.HideConsoleWindow(sshCmd)
 	sshCmd.Stdin = bytes.NewReader(encodeWorkspaceSyncPathList(paths))
 	sshStdout, err := sshCmd.StdoutPipe()
 	if err != nil {
@@ -377,6 +385,7 @@ func extractRemoteWorkspaceFiles(ctx context.Context, hostAlias, remotePath, loc
 	sshCmd.Stderr = &sshStderr
 
 	tarCmd := exec.CommandContext(ctx, "tar", "-xf", "-", "-C", localPath)
+	eruncommon.HideConsoleWindow(tarCmd)
 	tarCmd.Stdin = sshStdout
 	var tarStderr bytes.Buffer
 	tarCmd.Stderr = &tarStderr

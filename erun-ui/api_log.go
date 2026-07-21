@@ -38,7 +38,9 @@ func kubectlText(ctx context.Context, kubernetesContext string, args ...string) 
 	if kubernetesContext != "" {
 		args = append([]string{"--context", kubernetesContext}, args...)
 	}
-	output, err := exec.CommandContext(ctx, "kubectl", args...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	eruncommon.HideConsoleWindow(cmd)
+	output, err := cmd.CombinedOutput()
 	text := strings.TrimRight(string(output), "\n")
 	if err != nil {
 		if strings.TrimSpace(text) != "" {
