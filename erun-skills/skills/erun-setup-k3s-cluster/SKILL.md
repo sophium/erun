@@ -124,13 +124,17 @@ WantedBy=multi-user.target
 EOF
 systemctl daemon-reload && systemctl enable dev-kmsg.service
 
-# containerd: localhost:5000 is plain HTTP
+# containerd: localhost:5000 (host push) and the registry ClusterIP (in-pod
+# push / cluster pull for remote-agent envs) are both plain HTTP.
 mkdir -p /etc/rancher/k3s
 cat > /etc/rancher/k3s/registries.yaml <<'EOF'
 mirrors:
   "localhost:5000":
     endpoint:
       - "http://localhost:5000"
+  "10.43.0.100:5000":
+    endpoint:
+      - "http://10.43.0.100:5000"
 EOF
 
 # in-cluster registry on hostNetwork (binds node :5000 directly), durable hostPath
@@ -162,6 +166,23 @@ spec:
       volumes:
         - name: data
           hostPath: { path: /var/lib/erun-registry, type: DirectoryOrCreate }
+---
+# Pinned ClusterIP Service so a remote-agent env's in-pod build can push to the
+# registry (pods can't reach the node's hostNetwork :5000 as localhost) and the
+# cluster pulls the same address. The ClusterIP is pinned so registries.yaml
+# stays valid across recreation. erun's cluster-registry resolver looks this up
+# by service name, so nothing hardcodes the IP except this manifest + the mirror.
+apiVersion: v1
+kind: Service
+metadata:
+  name: erun-registry
+  namespace: kube-system
+spec:
+  type: ClusterIP
+  clusterIP: 10.43.0.100
+  selector: { app: erun-registry }
+  ports:
+    - { name: registry, port: 5000, targetPort: 5000 }
 EOF
 
 curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--write-kubeconfig-mode=644" sh -
@@ -244,6 +265,42 @@ A correct plan shows `kubectl --context erun-k3s …` and
 `helm upgrade --install … --kube-context erun-k3s … --set-string containerRegistry=localhost:5000 …
 oci://localhost:5000/charts/erun-devops`. A real `erun deploy` first needs `erun build`/`erun push`
 to publish the runtime image + chart to `localhost:5000`.
+
+## Step 6b — Remote-agent envs: the context-resolved cluster registry
+
+`--container-registry localhost:5000` (Step 6) is right for a **local-agent** env,
+where `erun build` runs on the host and pushes over `localhost:5000`. A
+**remote-agent** env builds **inside a pod**, whose `localhost` is its own loopback —
+not the node's registry — so it needs the registry addressed by something a pod can
+reach. Use a **cluster registry** entry, which erun resolves from the env's
+kube-context: the cluster (and the in-pod build) use the registry's ClusterIP; a
+host build gets an automatic `kubectl port-forward`.
+
+```yaml
+# .erun/config.yaml → environments.<env>.containerregistries
+containerregistries:
+  - cluster: { service: erun-registry, namespace: kube-system, port: 5000, insecure: true }
+    roles: [build, deploy]        # in-pod build pushes here; cluster pulls here
+```
+
+- `deploy` resolves to the ClusterIP (`10.43.0.100:5000`) rendered into the chart; the
+  node pulls it via the `registries.yaml` mirror (Step 3).
+- `build` resolves to the ClusterIP directly for an in-pod build, or `localhost:<port>`
+  via a managed port-forward on the host.
+- `insecure: true` makes `erun deploy` pass `--insecure-registry <ClusterIP>:5000` to the
+  in-pod dind daemon so the plain-HTTP push is accepted.
+
+**Publish to a shared registry when done.** Add a `from`+`publish` (`to`) pair and run
+`erun publish <tenant> <env> --version <v>` to mirror the exact tested image from the
+cluster registry to `ghcr.io/<org>` without rebuilding or redeploying:
+
+```yaml
+containerregistries:
+  - cluster: { service: erun-registry, namespace: kube-system, port: 5000, insecure: true }
+    roles: [build, deploy, from]
+  - registry: ghcr.io/<org>
+    roles: [to]
+```
 
 ## Step 7 — Durability across reboots
 
