@@ -56,6 +56,24 @@ flowchart LR
 
 The copy is manifest-aware, so the runtime image's `linux/amd64` + `linux/arm64` manifest survives the mirror. A FROM and a TO must name different registries — copying a registry into itself does nothing — and a copy only runs when both roles are set.
 
+## Cluster registries (resolved from the context)
+
+A registry entry can name an **in-cluster** registry instead of a static host, and ERun resolves its address from the environment's kube-context. This is what lets a **remote-agent** environment — whose build runs inside a pod — use a registry that lives in its own cluster: a pod's `localhost` is its own loopback, not the node, so the registry has to be addressed by something the pod can reach.
+
+```yaml
+# .erun/config.yaml → environments.<env>.containerregistries
+containerregistries:
+  - cluster: { service: erun-registry, namespace: kube-system, port: 5000, insecure: true }
+    roles: [build, deploy]
+```
+
+ERun resolves the entry into two concrete hosts, matching the `build`/`deploy` split above:
+
+- **DEPLOY (pull)** → the registry Service's **ClusterIP**, rendered into the chart as `containerRegistry`. Node containerd pulls it (for a plain-HTTP dev registry, the node must list that address as an insecure mirror in `registries.yaml`).
+- **BUILD (push)** → the **ClusterIP directly** for an in-pod (remote-agent) build, or an automatic `kubectl port-forward` to `localhost:<port>` for a host build. The same registry backend fronts both, so what you push is what the cluster pulls.
+
+`insecure: true` marks the registry as plain HTTP, so `erun deploy` passes `--insecure-registry <ClusterIP>:5000` to the in-pod dind daemon (which otherwise only trusts loopback). The fields default to the `erun-registry`/`kube-system`/`5000` convention, so a bare `cluster: {}` resolves for the standard local setup. The `erun-setup-k3s-cluster` skill provisions the ClusterIP Service and the node mirror.
+
 ## Discovering versions to deploy
 
 When the desktop offers versions to deploy or upgrade, it asks only the environment's listed registries — not a global default — and labels each offered version with the registry it came from. If two registries publish different newer versions, the deploy picker and the Upgrade-all dialog let you pick which one; `erun upgrade` on the command line skips such an environment as ambiguous until you pass `--version`. See [`erun upgrade`](/cli/upgrade).
