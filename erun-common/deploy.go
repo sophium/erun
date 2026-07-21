@@ -826,7 +826,7 @@ func resolveSelectedLocalDeploySpecs(ctx Context, store DeployStore, findProject
 		// explicit --version); deploy references the built image by tag rather
 		// than install-by-reference, which would verify a registry tag the
 		// build has not pushed yet.
-		currentBuild, err = resolveCurrentDockerComponentBuildForDeploy(store, findProjectRoot, resolveDockerBuildContext, now, resolvedTarget.RepoPath, resolvedTarget.Environment, target.VersionOverride)
+		currentBuild, err = resolveCurrentDockerComponentBuildForDeploy(ctx, store, findProjectRoot, resolveDockerBuildContext, now, resolvedTarget.RepoPath, resolvedTarget.Environment, target.VersionOverride)
 		if err != nil {
 			return nil, err
 		}
@@ -1199,7 +1199,7 @@ func resolveDeploySpecForCurrentDockerBuild(store DeployStore, target OpenResult
 // caller gates this on the env being a builds-here type; this helper only
 // requires that the current directory is a docker build context
 // (<module>/docker/<component>). Returns nil when there is no such context.
-func resolveCurrentDockerComponentBuildForDeploy(store DockerStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, now NowFunc, projectRoot, environment, versionOverride string) (*DockerBuildSpec, error) {
+func resolveCurrentDockerComponentBuildForDeploy(ctx Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, now NowFunc, projectRoot, environment, versionOverride string) (*DockerBuildSpec, error) {
 	_, _, resolveDockerBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveDockerBuildContext, now)
 	if resolveDockerBuildContext == nil {
 		return nil, nil
@@ -1213,7 +1213,7 @@ func resolveCurrentDockerComponentBuildForDeploy(store DockerStore, findProjectR
 		return nil, nil
 	}
 
-	build, err := newDockerBuildSpec(now, projectRoot, environment, buildContext, versionOverride)
+	build, err := newDockerBuildSpec(ctx, now, projectRoot, environment, buildContext, versionOverride)
 	if err != nil {
 		return nil, err
 	}

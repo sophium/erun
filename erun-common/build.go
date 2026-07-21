@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-func ResolveCurrentDockerBuildSpecs(store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) ([]DockerBuildSpec, error) {
+func ResolveCurrentDockerBuildSpecs(ctx Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) ([]DockerBuildSpec, error) {
 	store, findProjectRoot, resolveBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
 	buildContexts, err := ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, target)
@@ -16,7 +16,7 @@ func ResolveCurrentDockerBuildSpecs(store DockerStore, findProjectRoot ProjectFi
 
 	builds := make([]DockerBuildSpec, 0, len(buildContexts))
 	for _, buildContext := range buildContexts {
-		build, err := resolveDockerBuildSpec(store, findProjectRoot, resolveBuildContext, now, buildContext, target)
+		build, err := resolveDockerBuildSpec(ctx, store, findProjectRoot, resolveBuildContext, now, buildContext, target)
 		if err != nil {
 			return nil, err
 		}
@@ -50,7 +50,7 @@ func ResolveBuildExecution(ctx Context, store DockerStore, findProjectRoot Proje
 		return BuildExecutionSpec{}, err
 	}
 
-	builds, err := ResolveCurrentDockerBuildSpecs(store, findProjectRoot, resolveBuildContext, now, target)
+	builds, err := ResolveCurrentDockerBuildSpecs(ctx, store, findProjectRoot, resolveBuildContext, now, target)
 	if err != nil && !errors.Is(err, ErrDockerBuildContextNotFound) {
 		return BuildExecutionSpec{}, err
 	}

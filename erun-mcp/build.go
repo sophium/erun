@@ -100,7 +100,7 @@ func resolveRuntimeBuildExecution(ctx eruncommon.Context, runtime RuntimeConfig,
 		if !ok {
 			return eruncommon.BuildExecutionSpec{}, fmt.Errorf("docker build context not found for component %q", component)
 		}
-		imageRef, err := eruncommon.ResolveDockerImageReference(runtime.Store, findProjectRoot, resolveBuildContext, nil, buildContext.Dir, target)
+		imageRef, err := eruncommon.ResolveDockerImageReference(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, buildContext.Dir, target)
 		if err != nil {
 			return eruncommon.BuildExecutionSpec{}, err
 		}
@@ -147,7 +147,7 @@ func resolveRuntimePushExecution(ctx eruncommon.Context, runtime RuntimeConfig, 
 		return eruncommon.DockerPushExecutionSpecFromSpecs(builds, []eruncommon.DockerPushSpec{pushInput}), nil
 	}
 
-	build, err := eruncommon.ResolveDockerBuildForComponent(runtime.Store, findProjectRoot, resolveBuildContext, nil, projectRoot, target.Environment, component, strings.TrimSpace(target.VersionOverride))
+	build, err := eruncommon.ResolveDockerBuildForComponent(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, projectRoot, target.Environment, component, strings.TrimSpace(target.VersionOverride))
 	if err != nil {
 		return eruncommon.DockerPushExecutionSpec{}, err
 	}

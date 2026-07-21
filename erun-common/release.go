@@ -675,7 +675,7 @@ func discoverReleaseArtifacts(ctx Context, inputs releaseInputs) (releaseArtifac
 	if err := discoverStableReleaseArtifacts(ctx, inputs, &artifacts); err != nil {
 		return releaseArtifacts{}, err
 	}
-	images, err := discoverReleaseDockerImages(inputs.ProjectRoot, inputs.ReleaseRoot, inputs.VersionFilePath, inputs.Version)
+	images, err := discoverReleaseDockerImages(ctx, inputs.ProjectRoot, inputs.ReleaseRoot, inputs.VersionFilePath, inputs.Version)
 	if err != nil {
 		return releaseArtifacts{}, err
 	}
@@ -909,7 +909,7 @@ func discoverReleaseCharts(projectRoot, version string) ([]ReleaseChartSpec, []R
 	return charts, updates, nil
 }
 
-func discoverReleaseDockerImages(projectRoot, releaseRoot, versionFilePath, version string) ([]ReleaseDockerImageSpec, error) {
+func discoverReleaseDockerImages(ctx Context, projectRoot, releaseRoot, versionFilePath, version string) ([]ReleaseDockerImageSpec, error) {
 	dockerDir := filepath.Join(releaseRoot, "docker")
 	buildContexts, err := DockerBuildContextsUnderDir(dockerDir)
 	if err != nil {
@@ -922,7 +922,7 @@ func discoverReleaseDockerImages(projectRoot, releaseRoot, versionFilePath, vers
 		return nil, nil
 	}
 
-	registry, err := resolveDockerBuildRegistryForEnvironment(projectRoot, "")
+	registry, err := resolveDockerBuildRegistryForEnvironment(ctx, projectRoot, "")
 	if err != nil {
 		return nil, err
 	}

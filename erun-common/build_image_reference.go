@@ -13,8 +13,16 @@ import (
 // resolveDockerBuildRegistryForEnvironment errors when no registry is marked
 // for the build role; that message is the user-facing contract and must read
 // identically in dry-run and real runs.
-func resolveDockerBuildRegistryForEnvironment(projectRoot, environment string) (string, error) {
+func resolveDockerBuildRegistryForEnvironment(ctx Context, projectRoot, environment string) (string, error) {
 	list, err := effectiveContainerRegistries(projectRoot, environment)
+	if err != nil {
+		return "", err
+	}
+	// A cluster registry resolves to its concrete push host: the ClusterIP
+	// directly for an in-pod build, or a host port-forward otherwise. Build uses
+	// the current kube-context (empty resolves to in-cluster config in-pod, or
+	// kubectl's current-context on the host). Plain lists pass through unchanged.
+	list, err = concretizeRegistriesForContext(ctx, "", list)
 	if err != nil {
 		return "", err
 	}
