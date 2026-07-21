@@ -82,6 +82,7 @@ func resolveCLIExecutableFromPath(goos, appExecutable, executableName string) st
 
 func runIDECommand(ctx context.Context, params startTerminalSessionParams) (string, error) {
 	cmd := exec.CommandContext(ctx, params.Executable, params.Args...)
+	eruncommon.HideConsoleWindow(cmd)
 	cmd.Dir = resolveTerminalStartDir(params.Dir)
 	if len(params.Env) > 0 {
 		cmd.Env = append(os.Environ(), params.Env...)
@@ -217,6 +218,7 @@ func buildOpenNoShellArgs(tenant, environment string) []string {
 func ensureMCPViaOpenCommand(ctx context.Context, cliPath string, result eruncommon.OpenResult) error {
 	args := buildOpenNoShellArgs(result.Tenant, result.Environment)
 	cmd := exec.CommandContext(ctx, cliPath, args...)
+	eruncommon.HideConsoleWindow(cmd)
 	cmd.Env = append(os.Environ(), "ERUN_IDLE_PROBE=1")
 	output, err := cmd.CombinedOutput()
 	if err == nil {
@@ -236,6 +238,7 @@ func ensureMCPViaOpenCommand(ctx context.Context, cliPath string, result eruncom
 func runOpenForReconnect(ctx context.Context, cliPath string, result eruncommon.OpenResult, onLine func(string)) error {
 	args := buildOpenNoShellArgs(result.Tenant, result.Environment)
 	cmd := exec.CommandContext(ctx, cliPath, args...)
+	eruncommon.HideConsoleWindow(cmd)
 	cmd.Env = append(os.Environ(), "ERUN_IDLE_PROBE=1")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -287,6 +290,7 @@ func scanReconnectOutput(reader io.Reader, captureErr bool, onLine func(string),
 func ensureSSHDViaOpenCommand(ctx context.Context, cliPath string, result eruncommon.OpenResult) error {
 	args := buildOpenNoShellArgs(result.Tenant, result.Environment)
 	cmd := exec.CommandContext(ctx, cliPath, args...)
+	eruncommon.HideConsoleWindow(cmd)
 	cmd.Env = append(os.Environ(), "ERUN_IDLE_PROBE=1")
 	output, err := cmd.CombinedOutput()
 	if err == nil {

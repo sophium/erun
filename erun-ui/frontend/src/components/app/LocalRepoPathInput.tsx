@@ -6,7 +6,8 @@ import { useAppDispatch } from '@/app/hooks';
 import { showTerminalMessage } from '@/app/notificationThunks';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+
+import { FieldLabel } from './FieldLabel';
 
 // LocalRepoPathInput is the shared host-worktree-path field for the init dialog
 // and the env-settings General tab, so both edit the path identically. Free-text
@@ -18,6 +19,7 @@ export function LocalRepoPathInput({
   helper,
   value,
   disabled,
+  required,
   onChange,
 }: {
   id: string;
@@ -25,6 +27,7 @@ export function LocalRepoPathInput({
   helper: string;
   value: string;
   disabled?: boolean;
+  required?: boolean;
   onChange: (value: string) => void;
 }): React.ReactElement {
   const dispatch = useAppDispatch();
@@ -43,7 +46,9 @@ export function LocalRepoPathInput({
   };
   return (
     <div className="grid gap-2">
-      <Label htmlFor={id}>{label}</Label>
+      <FieldLabel htmlFor={id} required={required}>
+        {label}
+      </FieldLabel>
       <div className="flex items-stretch gap-2">
         <Input
           id={id}
@@ -53,6 +58,7 @@ export function LocalRepoPathInput({
           spellCheck={false}
           placeholder="/Users/you/code/your-project"
           aria-describedby={helperId}
+          required={required}
           disabled={disabled}
           onChange={(event) => {
             onChange(event.target.value);

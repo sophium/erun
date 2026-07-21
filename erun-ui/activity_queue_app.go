@@ -798,6 +798,7 @@ func (a *App) fetchActivityContainerStatuses(ctx context.Context, entry activity
 		args = append(args, "--namespace", entry.Namespace)
 	}
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	eruncommon.HideConsoleWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err

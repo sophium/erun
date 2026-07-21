@@ -106,6 +106,7 @@ var (
 // timeout. Reaping is owned by the forward, so this must not call Wait().
 var spawnContributeAppForwardCmd = func(ctx context.Context, args []string) (*exec.Cmd, *bytes.Buffer, error) {
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	eruncommon.HideConsoleWindow(cmd)
 	stderr := new(bytes.Buffer)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = stderr
