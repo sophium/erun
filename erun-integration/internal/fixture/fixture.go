@@ -914,10 +914,6 @@ type StubBinarySpec struct {
 // StubBinary for the env-var routing contract.
 func StubBinaryAdvanced(t testing.TB, dir, name string, spec StubBinarySpec) string {
 	t.Helper()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("mkdir %s: %v", dir, err)
-	}
-	path := filepath.Join(dir, name)
 	body := "#!/bin/sh\n" +
 		"# erun integration stub for " + name + "\n"
 	if spec.Stdout != "" {
@@ -927,10 +923,44 @@ func StubBinaryAdvanced(t testing.TB, dir, name string, spec StubBinarySpec) str
 		body += "printf '%s\\n' " + shellSingleQuote(spec.Stderr) + " >&2\n"
 	}
 	body += "exit " + strconv.Itoa(spec.ExitCode) + "\n"
-	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
-		t.Fatalf("write stub %s: %v", path, err)
+	return writeStub(t, dir, name, body)
+}
+
+// stubExecPath is the path erun should exec for the stub, and the path StubEnv
+// routes ERUN_<NAME>_BIN to. On Windows it is a `.bat` launcher (Windows can't
+// exec a shebang script by name); everywhere else it is the sh script itself.
+func stubExecPath(dir, name string) string {
+	path := filepath.Join(dir, name)
+	if runtime.GOOS == "windows" {
+		return path + ".bat"
 	}
 	return path
+}
+
+// writeStub writes the sh-script body to dir/<name> and returns the path erun
+// should exec. On Windows it also writes a dir/<name>.bat launcher that runs the
+// sh body through sh.exe (Git Bash), forwarding argv — so a stub erun execs by
+// name works even though Windows cannot launch a shebang script directly. The
+// returned path matches stubExecPath, so StubEnv routes to the same place.
+func writeStub(t testing.TB, dir, name, body string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	scriptPath := filepath.Join(dir, name)
+	if err := os.WriteFile(scriptPath, []byte(body), 0o755); err != nil {
+		t.Fatalf("write stub %s: %v", scriptPath, err)
+	}
+	if runtime.GOOS != "windows" {
+		return scriptPath
+	}
+	batPath := scriptPath + ".bat"
+	// %~dp0<name> is the sh script beside this launcher; %* forwards argv.
+	launcher := "@sh \"%~dp0" + name + "\" %*\r\n"
+	if err := os.WriteFile(batPath, []byte(launcher), 0o755); err != nil {
+		t.Fatalf("write stub launcher %s: %v", batPath, err)
+	}
+	return batPath
 }
 
 func shellSingleQuote(value string) string {
@@ -947,18 +977,11 @@ func shellSingleQuote(value string) string {
 // the production code passed. The body should end with an explicit exit.
 func StubBinaryWithScript(t testing.TB, dir, name, scriptBody string) string {
 	t.Helper()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("mkdir %s: %v", dir, err)
-	}
-	path := filepath.Join(dir, name)
 	body := "#!/bin/sh\n# erun integration stub for " + name + "\n" + scriptBody
 	if !strings.HasSuffix(body, "\n") {
 		body += "\n"
 	}
-	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
-		t.Fatalf("write stub %s: %v", path, err)
-	}
-	return path
+	return writeStub(t, dir, name, body)
 }
 
 // StubBinaryFailFirstThenSucceed writes a stub that fails on its first
@@ -986,7 +1009,7 @@ func StubEnv(dir string, names ...string) []string {
 	out := make([]string, 0, len(names))
 	for _, name := range names {
 		envName := "ERUN_" + strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + "_BIN"
-		out = append(out, envName+"="+filepath.Join(dir, name))
+		out = append(out, envName+"="+stubExecPath(dir, name))
 	}
 	return out
 }
