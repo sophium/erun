@@ -22,7 +22,10 @@ func newExecCommand(name string, args ...string) *exec.Cmd {
 	if strings.ContainsAny(name, "/\\") {
 		return exec.Command(name, args...)
 	}
-	envName := "ERUN_" + strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + "_BIN"
+	// Derive the override var from the base tool name so a Windows .exe suffix
+	// (erun-app.exe) resolves to the same ERUN_ERUN_APP_BIN seam as erun-app.
+	base := strings.TrimSuffix(name, ".exe")
+	envName := "ERUN_" + strings.ToUpper(strings.ReplaceAll(base, "-", "_")) + "_BIN"
 	if override := strings.TrimSpace(os.Getenv(envName)); override != "" {
 		return exec.Command(override, args...)
 	}
