@@ -81,7 +81,7 @@ export function VersionField({
               <ChevronsUpDown />
             </Button>
           </PopoverTrigger>
-          <PopoverContent className="w-80 p-0" align="start">
+          <PopoverContent className="w-80 p-0" align="start" collisionPadding={12}>
             <Command>
               <CommandInput placeholder="Search versions..." />
               <CommandList>

@@ -81,14 +81,19 @@ export function EnvironmentDialogView(): React.ReactElement {
       }}
     >
       <DialogContent
-        className="sm:max-w-md"
+        // Bound the panel to the viewport and let the field region scroll, so the
+        // top fields (Tenant/Environment) stay reachable and the footer stays
+        // visible on short windows — a plain centered grid overflowed off both
+        // edges with nothing scrollable. Overrides the shadcn base grid/gap/p via
+        // tailwind-merge; no generated ui/dialog.tsx edit needed.
+        className="flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-md"
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           controller.focusTerminalSoon();
         }}
       >
         <form
-          className="grid gap-4"
+          className="flex min-h-0 flex-1 flex-col"
           onSubmit={(event) => {
             event.preventDefault();
             void dispatch(submitEnvironmentDialog(event.currentTarget)).catch((error: unknown) => {
@@ -96,10 +101,16 @@ export function EnvironmentDialogView(): React.ReactElement {
             });
           }}
         >
-          <EnvironmentDialogHeader dialog={dialog} />
-          <EnvironmentDialogFields tenantRef={tenantRef} environmentRef={environmentRef} />
-          <DialogError error={dialog.error} />
-          <EnvironmentDialogFooter dialog={dialog} />
+          <div className="shrink-0 px-6 pt-6 pb-4">
+            <EnvironmentDialogHeader dialog={dialog} />
+          </div>
+          <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto px-6 pb-1">
+            <EnvironmentDialogFields tenantRef={tenantRef} environmentRef={environmentRef} />
+            <DialogError error={dialog.error} />
+          </div>
+          <div className="shrink-0 border-t px-6 pt-4 pb-6">
+            <EnvironmentDialogFooter dialog={dialog} />
+          </div>
         </form>
       </DialogContent>
     </Dialog>

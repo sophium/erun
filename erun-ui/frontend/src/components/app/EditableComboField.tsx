@@ -26,6 +26,7 @@ function EditableComboChoices({
       id={`${id}-choices`}
       className="w-96 max-w-[calc(100vw-4rem)] p-1"
       align="start"
+      collisionPadding={12}
     >
       {visibleSuggestions.length === 0 ? (
         <div className="px-2 py-6 text-center text-sm text-muted-foreground">
