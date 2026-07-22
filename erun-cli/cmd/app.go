@@ -70,7 +70,11 @@ func launchAppProcess(stdout, stderr io.Writer, args []string) error {
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
-		if errors.Is(err, exec.ErrNotFound) {
+		// The build-or-install hint is for the default lookup finding nothing. When
+		// the operator set an explicit override, surface the raw error so the bad
+		// path stays visible — on Windows a missing extensionless path is itself
+		// ErrNotFound, which the hint would otherwise mask.
+		if errors.Is(err, exec.ErrNotFound) && strings.TrimSpace(os.Getenv("ERUN_ERUN_APP_BIN")) == "" {
 			return fmt.Errorf("erun-app executable not found; build or install it first")
 		}
 		return err

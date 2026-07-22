@@ -27,6 +27,13 @@ func (s Setup) Env() []string {
 		"XDG_CONFIG_HOME=" + s.ConfigHome,
 		"XDG_CACHE_HOME=" + s.CacheHome,
 		"XDG_DATA_HOME=" + s.DataHome,
+		// Windows home resolution reads %USERPROFILE%/%LOCALAPPDATA%, not HOME/XDG,
+		// so isolate them too — otherwise erun resolves the real user profile (e.g.
+		// the trace-log path fails with "%userprofile% is not defined"). Inert on
+		// Unix, where erun ignores these, so macOS/Linux goldens are unaffected.
+		"USERPROFILE=" + s.Home,
+		"LOCALAPPDATA=" + s.ConfigHome,
+		"APPDATA=" + s.ConfigHome,
 		"PATH=" + path,
 		// LANG is required by some path-handling code that calls into glibc.
 		"LANG=C.UTF-8",

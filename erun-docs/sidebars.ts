@@ -38,6 +38,7 @@ const sidebars: SidebarsConfig = {
         'cli/release',
         'cli/push',
         'cli/deploy',
+        'cli/publish',
         'cli/expose',
         'cli/terraform',
         'cli/upgrade',

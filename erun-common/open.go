@@ -91,6 +91,15 @@ type OpenResult struct {
 	LocalPorts   EnvironmentLocalPorts
 	RepoPath     string
 	Title        string
+	// ClusterPullRegistry, when set, is the concrete in-cluster pull host a
+	// context-resolved cluster registry resolved to; deploy renders it as the
+	// chart's containerRegistry in place of the on-disk DEPLOY entry. Empty for a
+	// plain (non-cluster) registry, so those envs are unaffected.
+	ClusterPullRegistry string
+	// ClusterRegistryInsecure marks the resolved cluster registry as plain HTTP,
+	// so deploy tells the in-pod dind daemon to trust it (an in-pod build pushes
+	// to this non-loopback host, which dind would otherwise reject as needing TLS).
+	ClusterRegistryInsecure bool
 }
 
 func (r OpenResult) RemoteRepo() bool {

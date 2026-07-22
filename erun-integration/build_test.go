@@ -656,7 +656,7 @@ func TestBuild(t *testing.T) {
 		stubs := setup.Cwd + "/stubs"
 		fixture.StubBinary(t, stubs, "dpkg-deb", "")
 		envVars := append(setup.Env(), "ERUN_HOST_OS_OVERRIDE=linux")
-		envVars = append(envVars, "PATH="+stubs+":"+os.Getenv("PATH"))
+		envVars = append(envVars, "PATH="+stubs+string(os.PathListSeparator)+os.Getenv("PATH"))
 		result := erun.Run(t, []string{"build", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: pkgDir, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -683,7 +683,7 @@ func TestBuild(t *testing.T) {
 		stubs := setup.Cwd + "/stubs"
 		fixture.StubBinary(t, stubs, "dpkg-deb", "")
 		envVars := append(setup.Env(), "ERUN_HOST_OS_OVERRIDE=linux")
-		envVars = append(envVars, "PATH="+stubs+":"+os.Getenv("PATH"))
+		envVars = append(envVars, "PATH="+stubs+string(os.PathListSeparator)+os.Getenv("PATH"))
 		result := erun.Run(t, []string{"build", "--version", "1.0.0"}, erun.RunOptions{Cwd: linuxDir, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -718,7 +718,7 @@ func TestBuild(t *testing.T) {
 		fixture.StubBinary(t, stubs, "dpkg-deb", "")
 		envVars := append(setup.Env(), stubDockerNoLocalImages(t, setup)...)
 		envVars = append(envVars, "ERUN_HOST_OS_OVERRIDE=linux")
-		envVars = append(envVars, "PATH="+stubs+":"+os.Getenv("PATH"))
+		envVars = append(envVars, "PATH="+stubs+string(os.PathListSeparator)+os.Getenv("PATH"))
 		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -956,7 +956,7 @@ func TestBuild(t *testing.T) {
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "gh", "git", "helm")...)
 		// tryGHCRLoginViaGH gates on exec.LookPath("gh"), which reads PATH
 		// rather than the ERUN_<NAME>_BIN override.
-		envVars = append(envVars, "PATH="+stubs+":"+os.Getenv("PATH"))
+		envVars = append(envVars, "PATH="+stubs+string(os.PathListSeparator)+os.Getenv("PATH"))
 		envVars = append(envVars, "ERUN_AUTO_LOGIN_ON_PUSH=1")
 		// -vv so the `docker login ghcr.io` TraceCommand that gates the
 		// retry is locked in the golden; at lower verbosity the retry is

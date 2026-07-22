@@ -327,7 +327,7 @@ func TestPush(t *testing.T) {
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "gh")...)
 		// Force PATH so `exec.LookPath("gh")` finds our stub (production
 		// uses LookPath directly, not the ERUN_<NAME>_BIN override).
-		envVars = append(envVars, "PATH="+stubs+":"+os.Getenv("PATH"))
+		envVars = append(envVars, "PATH="+stubs+string(os.PathListSeparator)+os.Getenv("PATH"))
 		envVars = append(envVars, "ERUN_AUTO_LOGIN_ON_PUSH=1")
 		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode == 0 {
@@ -384,7 +384,7 @@ func TestPush(t *testing.T) {
 		}, "\n"))
 		fixture.StubBinary(t, stubs, "helm", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "gh", "helm")...)
-		envVars = append(envVars, "PATH="+stubs+":"+os.Getenv("PATH"))
+		envVars = append(envVars, "PATH="+stubs+string(os.PathListSeparator)+os.Getenv("PATH"))
 		envVars = append(envVars, "ERUN_AUTO_LOGIN_ON_PUSH=1", "ERUN_FORCE_TTY=1")
 		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
@@ -424,7 +424,7 @@ func TestPush(t *testing.T) {
 			`esac`,
 		}, "\n"))
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "gh")...)
-		envVars = append(envVars, "PATH="+stubs+":"+os.Getenv("PATH"))
+		envVars = append(envVars, "PATH="+stubs+string(os.PathListSeparator)+os.Getenv("PATH"))
 		envVars = append(envVars, "ERUN_AUTO_LOGIN_ON_PUSH=1")
 		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode == 0 {
@@ -464,7 +464,7 @@ func TestPush(t *testing.T) {
 			`esac`,
 		}, "\n"))
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "gh")...)
-		envVars = append(envVars, "PATH="+stubs+":"+os.Getenv("PATH"))
+		envVars = append(envVars, "PATH="+stubs+string(os.PathListSeparator)+os.Getenv("PATH"))
 		envVars = append(envVars, "ERUN_AUTO_LOGIN_ON_PUSH=1", "ERUN_FORCE_TTY=1")
 		envVars = append(envVars, "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev")
 		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})

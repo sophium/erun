@@ -10,8 +10,10 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -153,7 +155,11 @@ type HelmDeploySpec struct {
 	UseHostCredentials bool
 	OIDCAllowedIssuers string
 	ContainerRegistry  string
-	ImageOverrides     map[string]string
+	// InsecureRegistry, when set, is a plain-HTTP cluster registry host the in-pod
+	// dind daemon must trust so an in-pod build can push to it. Empty for hosted
+	// (TLS) registries, so those envs render nothing.
+	InsecureRegistry string
+	ImageOverrides   map[string]string
 	// ImagePullSecrets names dockerconfigjson secrets the runtime pod pulls with,
 	// threaded to the chart as imagePullSecrets[i].name. Empty renders nothing, so
 	// public-image envs are byte-for-byte unchanged. Mirrors EnvConfig.ImagePullSecrets.
@@ -826,7 +832,7 @@ func resolveSelectedLocalDeploySpecs(ctx Context, store DeployStore, findProject
 		// explicit --version); deploy references the built image by tag rather
 		// than install-by-reference, which would verify a registry tag the
 		// build has not pushed yet.
-		currentBuild, err = resolveCurrentDockerComponentBuildForDeploy(store, findProjectRoot, resolveDockerBuildContext, now, resolvedTarget.RepoPath, resolvedTarget.Environment, target.VersionOverride)
+		currentBuild, err = resolveCurrentDockerComponentBuildForDeploy(ctx, store, findProjectRoot, resolveDockerBuildContext, now, resolvedTarget.RepoPath, resolvedTarget.Environment, target.VersionOverride)
 		if err != nil {
 			return nil, err
 		}
@@ -1004,6 +1010,10 @@ func resolveDeploySpecForContext(ctx Context, store DeployStore, findProjectRoot
 	// dependencies are kept on the signature for the shared resolution contract.
 	store, _, _, _, _ = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	target = applyDeployKubernetesContext(store, target)
+	target, err := concretizeDeployTargetRegistries(ctx, target)
+	if err != nil {
+		return DeploySpec{}, err
+	}
 
 	// Build-orchestration path: a build --deploy / open --deploy / UI run has
 	// already built and pushed the working-tree image and hands it to deploy by
@@ -1195,7 +1205,7 @@ func resolveDeploySpecForCurrentDockerBuild(store DeployStore, target OpenResult
 // caller gates this on the env being a builds-here type; this helper only
 // requires that the current directory is a docker build context
 // (<module>/docker/<component>). Returns nil when there is no such context.
-func resolveCurrentDockerComponentBuildForDeploy(store DockerStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, now NowFunc, projectRoot, environment, versionOverride string) (*DockerBuildSpec, error) {
+func resolveCurrentDockerComponentBuildForDeploy(ctx Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, now NowFunc, projectRoot, environment, versionOverride string) (*DockerBuildSpec, error) {
 	_, _, resolveDockerBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveDockerBuildContext, now)
 	if resolveDockerBuildContext == nil {
 		return nil, nil
@@ -1209,7 +1219,7 @@ func resolveCurrentDockerComponentBuildForDeploy(store DockerStore, findProjectR
 		return nil, nil
 	}
 
-	build, err := newDockerBuildSpec(now, projectRoot, environment, buildContext, versionOverride)
+	build, err := newDockerBuildSpec(ctx, now, projectRoot, environment, buildContext, versionOverride)
 	if err != nil {
 		return nil, err
 	}
@@ -1563,6 +1573,18 @@ func newHelmDeploySpecWithValues(target OpenResult, deployContext KubernetesDepl
 		}
 	}
 
+	// A context-resolved cluster registry supplies the concrete in-cluster pull
+	// host; a plain registry keeps the on-disk DEPLOY entry, so non-cluster envs
+	// render identically.
+	containerRegistry := resolveProjectContainerRegistry(target.RepoPath, target.Environment)
+	if strings.TrimSpace(target.ClusterPullRegistry) != "" {
+		containerRegistry = target.ClusterPullRegistry
+	}
+	insecureRegistry := ""
+	if target.ClusterRegistryInsecure {
+		insecureRegistry = strings.TrimSpace(target.ClusterPullRegistry)
+	}
+
 	return HelmDeploySpec{
 		ReleaseName:         deployContext.ComponentName,
 		ChartPath:           deployContext.ChartPath,
@@ -1580,7 +1602,8 @@ func newHelmDeploySpecWithValues(target OpenResult, deployContext KubernetesDepl
 		APIPort:             ports.API,
 		SSHPort:             ports.SSH,
 		CloudProviderAlias:  target.EnvConfig.CloudProviderAlias,
-		ContainerRegistry:   resolveProjectContainerRegistry(target.RepoPath, target.Environment),
+		ContainerRegistry:   containerRegistry,
+		InsecureRegistry:    insecureRegistry,
 		RuntimeRegistry:     strings.TrimSpace(target.EnvConfig.RuntimeRegistry),
 		ContainerRegistries: containerRegistries,
 		Platform:            resolveProjectPlatform(target.RepoPath),
@@ -1751,6 +1774,17 @@ func resolveWorktreeHostPath(repoPath string) string {
 		return ""
 	}
 
+	// A remote/PVC env's repo path is a Linux path on the pod's filesystem (e.g.
+	// /home/erun/git/<repo>); it must never be run through the host's OS-native
+	// filepath, which on Windows rewrites it to \home\erun\git\<repo> (and it may
+	// already have been mangled upstream). On Windows a rooted path with no drive
+	// letter is never a real local path, so treat it as the remote Linux path it
+	// is and normalize to forward slashes. Local Windows paths (C:\...) and every
+	// Unix path keep the existing clean-and-resolve, so Unix output is unchanged.
+	if runtime.GOOS == "windows" && rootedWithoutDrive(repoPath) {
+		return path.Clean(filepath.ToSlash(repoPath))
+	}
+
 	cleaned := filepath.Clean(repoPath)
 	resolved, err := filepath.EvalSymlinks(cleaned)
 	if err != nil || strings.TrimSpace(resolved) == "" {
@@ -1758,6 +1792,16 @@ func resolveWorktreeHostPath(repoPath string) string {
 	}
 
 	return resolved
+}
+
+// rootedWithoutDrive reports whether a path is absolute (rooted at / or \) but
+// carries no Windows drive letter — the shape of a remote Linux path, never a
+// real local Windows path.
+func rootedWithoutDrive(p string) bool {
+	if len(p) >= 2 && p[1] == ':' {
+		return false
+	}
+	return strings.HasPrefix(p, "/") || strings.HasPrefix(p, `\`)
 }
 
 // Params pairs the full deploy spec with the rollout's output writers. The whole
@@ -2091,6 +2135,9 @@ func helmRegistrySetArgs(d HelmDeploySpec) []string {
 	}
 	if registry := strings.TrimSpace(d.RuntimeRegistry); registry != "" {
 		args = append(args, "--set-string", "runtimeRegistry="+registry)
+	}
+	if registry := strings.TrimSpace(d.InsecureRegistry); registry != "" {
+		args = append(args, "--set-string", "clusterRegistryInsecure="+registry)
 	}
 	if len(d.ContainerRegistries) > 0 {
 		if encoded, marshalErr := json.Marshal(d.ContainerRegistries); marshalErr == nil {

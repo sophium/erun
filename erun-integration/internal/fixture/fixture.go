@@ -914,10 +914,6 @@ type StubBinarySpec struct {
 // StubBinary for the env-var routing contract.
 func StubBinaryAdvanced(t testing.TB, dir, name string, spec StubBinarySpec) string {
 	t.Helper()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("mkdir %s: %v", dir, err)
-	}
-	path := filepath.Join(dir, name)
 	body := "#!/bin/sh\n" +
 		"# erun integration stub for " + name + "\n"
 	if spec.Stdout != "" {
@@ -927,10 +923,93 @@ func StubBinaryAdvanced(t testing.TB, dir, name string, spec StubBinarySpec) str
 		body += "printf '%s\\n' " + shellSingleQuote(spec.Stderr) + " >&2\n"
 	}
 	body += "exit " + strconv.Itoa(spec.ExitCode) + "\n"
-	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
-		t.Fatalf("write stub %s: %v", path, err)
+	return writeStub(t, dir, name, body)
+}
+
+// stubExecPath is the path erun should exec for the stub, and the path StubEnv
+// routes ERUN_<NAME>_BIN to. On Windows it is a compiled runner `.exe` (Windows
+// can't exec a shebang script by name, and a .bat launcher mangles complex
+// argv); everywhere else it is the sh script itself.
+func stubExecPath(dir, name string) string {
+	path := filepath.Join(dir, name)
+	if runtime.GOOS == "windows" {
+		return path + ".exe"
 	}
 	return path
+}
+
+// stubArgvPreamble rebuilds "$@" from the NUL-delimited file the Windows stub
+// runner writes, so a stub that branches on "$*"/"$1" sees the exact argv erun
+// passed — which a Windows command line cannot preserve through sh. Inert
+// everywhere else: with ERUN_STUB_ARGV_FILE unset the script keeps its real argv.
+const stubArgvPreamble = "if [ -n \"${ERUN_STUB_ARGV_FILE:-}\" ]; then set --; while IFS= read -r -d '' __erun_arg; do set -- \"$@\" \"$__erun_arg\"; done < \"$ERUN_STUB_ARGV_FILE\"; fi\n"
+
+// writeStub writes the sh-script body (with the argv preamble injected after the
+// shebang) to dir/<name> and returns the path erun should exec. On Windows it
+// also drops a dir/<name>.exe copy of the stub runner, which forwards argv
+// faithfully to the sh script — so a stub erun execs by name works even though
+// Windows can't launch a shebang script and a .bat can't preserve complex argv.
+func writeStub(t testing.TB, dir, name, body string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	if i := strings.IndexByte(body, '\n'); i >= 0 {
+		body = body[:i+1] + stubArgvPreamble + body[i+1:]
+	}
+	scriptPath := filepath.Join(dir, name)
+	if err := os.WriteFile(scriptPath, []byte(body), 0o755); err != nil {
+		t.Fatalf("write stub %s: %v", scriptPath, err)
+	}
+	if runtime.GOOS != "windows" {
+		return scriptPath
+	}
+	exePath := scriptPath + ".exe"
+	runner, err := os.ReadFile(stubRunnerExe(t))
+	if err != nil {
+		t.Fatalf("read stub runner: %v", err)
+	}
+	if err := os.WriteFile(exePath, runner, 0o755); err != nil {
+		t.Fatalf("write stub runner copy %s: %v", exePath, err)
+	}
+	return exePath
+}
+
+var (
+	stubRunnerOnce sync.Once
+	stubRunnerPath string
+	stubRunnerErr  error
+)
+
+// stubRunnerExe builds the argv-faithful stub runner once per test process and
+// returns its path. Only used on Windows.
+func stubRunnerExe(t testing.TB) string {
+	t.Helper()
+	stubRunnerOnce.Do(func() {
+		_, thisFile, _, ok := runtime.Caller(0)
+		if !ok {
+			stubRunnerErr = fmt.Errorf("cannot locate fixture source to build stub runner")
+			return
+		}
+		moduleRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
+		outDir, err := os.MkdirTemp("", "erun-stub-runner")
+		if err != nil {
+			stubRunnerErr = err
+			return
+		}
+		out := filepath.Join(outDir, "erun-stub-runner.exe")
+		cmd := osexec.Command("go", "build", "-o", out, "./internal/fixture/stubrunner")
+		cmd.Dir = moduleRoot
+		if output, err := cmd.CombinedOutput(); err != nil {
+			stubRunnerErr = fmt.Errorf("build stub runner: %v\n%s", err, output)
+			return
+		}
+		stubRunnerPath = out
+	})
+	if stubRunnerErr != nil {
+		t.Fatalf("stub runner: %v", stubRunnerErr)
+	}
+	return stubRunnerPath
 }
 
 func shellSingleQuote(value string) string {
@@ -947,18 +1026,11 @@ func shellSingleQuote(value string) string {
 // the production code passed. The body should end with an explicit exit.
 func StubBinaryWithScript(t testing.TB, dir, name, scriptBody string) string {
 	t.Helper()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("mkdir %s: %v", dir, err)
-	}
-	path := filepath.Join(dir, name)
 	body := "#!/bin/sh\n# erun integration stub for " + name + "\n" + scriptBody
 	if !strings.HasSuffix(body, "\n") {
 		body += "\n"
 	}
-	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
-		t.Fatalf("write stub %s: %v", path, err)
-	}
-	return path
+	return writeStub(t, dir, name, body)
 }
 
 // StubBinaryFailFirstThenSucceed writes a stub that fails on its first
@@ -970,7 +1042,9 @@ func StubBinaryWithScript(t testing.TB, dir, name, scriptBody string) string {
 // scoped to the scenario's stub directory and reset per scenario by env.New.
 func StubBinaryFailFirstThenSucceed(t testing.TB, dir, name, stderrFirst string, exitCode int) string {
 	t.Helper()
-	marker := shellSingleQuote(filepath.Join(dir, name+"-failed-once"))
+	// Forward slashes: embedded in the sh stub, where Git Bash handles a
+	// backslash Windows path unreliably.
+	marker := shellSingleQuote(filepath.ToSlash(filepath.Join(dir, name+"-failed-once")))
 	script := "if [ ! -f " + marker + " ]; then\n" +
 		"  : > " + marker + "\n" +
 		"  printf '%s\\n' " + shellSingleQuote(stderrFirst) + " >&2\n" +
@@ -986,7 +1060,7 @@ func StubEnv(dir string, names ...string) []string {
 	out := make([]string, 0, len(names))
 	for _, name := range names {
 		envName := "ERUN_" + strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + "_BIN"
-		out = append(out, envName+"="+filepath.Join(dir, name))
+		out = append(out, envName+"="+stubExecPath(dir, name))
 	}
 	return out
 }

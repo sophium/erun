@@ -4,6 +4,7 @@ package normalize
 
 import (
 	"regexp"
+	"runtime"
 	"strings"
 )
 
@@ -36,6 +37,17 @@ var defaultRules = []Replacement{
 	// A separate rule for temp paths whose separators are percent-escaped,
 	// which the plain-path rule above cannot match.
 	{regexp.MustCompile(`%2F(?:private%2F)?(?:var%2Ffolders|var%2Ftmp|tmp)%2F[A-Za-z0-9._%+-]*`), "<TMP>"},
+	// Windows path roots (either separator): t.TempDir() lands under
+	// <drive>:\Users\<user>\AppData\Local\Temp\<test>. Mirror the Unix rules —
+	// STATE_ROOT terraform variant first, then the generic temp dir — so a golden
+	// recorded on either OS normalizes to the same token. Inert on Unix output
+	// (no drive letter), so existing macOS/Linux goldens are unaffected.
+	{regexp.MustCompile(`(?i)[A-Za-z]:[\\/](?:[^\\/\s'"]+[\\/])*?temp[\\/][^\s'"]*?[\\/]\.erun[\\/]terraform`), "<STATE_ROOT>"},
+	{regexp.MustCompile(`(?i)[A-Za-z]:[\\/](?:[^\\/\s'"]+[\\/])*?temp[\\/][^\s'"]*`), "<TMP>"},
+	// Windows home dir. Before the Unix /Users rule below, so C:/Users/<user>
+	// (after backslash canonicalization) collapses whole rather than leaving the
+	// drive prefix. Inert on Unix output.
+	{regexp.MustCompile(`(?i)[A-Za-z]:[\\/]Users[\\/][^\\/\s'"]+`), "<HOME>"},
 	// Also collapses deterministic UUIDs (e.g. JetBrains ssh config IDs) on
 	// purpose; both shapes are opaque tokens, so no coverage signal is lost.
 	{regexp.MustCompile(`\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`), "<UUID>"},
@@ -57,8 +69,25 @@ var defaultRules = []Replacement{
 	// Safety net for a real home path that leaks despite the test HOME override.
 	{regexp.MustCompile(`/Users/[^/\s'"]+`), "<HOME>"},
 	{regexp.MustCompile(`/home/[^/\s'"]+`), "<HOME>"},
+	// Drop the Windows executable suffix so a traced binary name matches the Unix
+	// golden (erun-app.exe -> erun-app). Inert on Unix output, which has no .exe.
+	{regexp.MustCompile(`\.exe\b`), ""},
+	// A failed exec of a missing path reads differently per platform — Unix
+	// `fork/exec <TMP> no such file or directory`, Windows `exec: "<TMP>":
+	// executable file not found in %PATH%` — so collapse either whole message to
+	// one token (the path is already <TMP>) for an OS-invariant golden.
+	{regexp.MustCompile(`(?:fork/exec|exec:)[^\n]*<TMP>[^\n]*`), "<EXEC_ERROR>"},
 	{regexp.MustCompile(`[ \t]+\n`), "\n"},
 }
+
+// windowsDrivePath matches a drive-letter-rooted Windows path (C:\...), the only
+// unambiguous Windows path shape: it starts with a drive letter and colon, so it
+// can never match a shell escape sequence (\n, \033, \,) that also uses
+// backslashes. Its separators are forward-slashed for golden parity. Paths
+// without a drive letter (a Linux path erun mangled via filepath) are fixed at
+// the source instead — the normalizer must not touch bare backslashes, which are
+// escapes far more often than separators.
+var windowsDrivePath = regexp.MustCompile(`[A-Za-z]:\\[^\s'"]*`)
 
 // PromptConfirm normalizes output containing a promptui "[Y/n]" confirm.
 // readline repaints the confirm line an unpredictable number of times (and,
@@ -85,6 +114,13 @@ func PromptConfirm(s string) string {
 // Apply runs the default rule set over the output. Extra rules run after the
 // defaults, so a caller can override or further normalize the result.
 func Apply(s string, extra ...Replacement) string {
+	// Windows-only: forward-slash path separators BEFORE the token rules so a
+	// path like `\home\erun\git\team` becomes `/home/erun/git/team` and the
+	// /home, /Users, temp rules can collapse it to a token. Gated on GOOS so
+	// macOS/Linux output — already canonical — is provably untouched.
+	if runtime.GOOS == "windows" {
+		s = forwardSlashWindowsPaths(s)
+	}
 	rules := append([]Replacement(nil), defaultRules...)
 	rules = append(rules, extra...)
 	for _, r := range rules {
@@ -94,3 +130,23 @@ func Apply(s string, extra ...Replacement) string {
 	s = strings.TrimRight(s, "\n") + "\n"
 	return s
 }
+
+// forwardSlashWindowsPaths rewrites backslash separators in drive-letter Windows
+// paths (C:\...) to forward slashes so the downstream token rules — recorded in
+// the Unix goldens' forward-slash shape — match. It deliberately touches only
+// drive-rooted paths: a bare backslash is an escape sequence (\n, \033, \,) in a
+// traced script body far more often than a separator, and quoting parity is
+// handled at the tracer instead (isShellSafe treats backslash as safe, matching
+// Unix's bare forward-slash args). Exported-free so the cross-OS unit test can
+// drive it on any host.
+func forwardSlashWindowsPaths(s string) string {
+	return windowsDrivePath.ReplaceAllStringFunc(s, func(m string) string {
+		m = strings.ReplaceAll(m, `\`, "/")
+		// A %q-quoted path arrives with escaped separators (C:\\Users\\...), which
+		// become // here; collapse runs to a single slash so the path matches the
+		// Unix golden. Safe within a drive path — it contains no :// URL.
+		return multiSlash.ReplaceAllString(m, "/")
+	})
+}
+
+var multiSlash = regexp.MustCompile(`/{2,}`)

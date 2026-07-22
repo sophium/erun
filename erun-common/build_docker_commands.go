@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 )
 
@@ -379,7 +380,12 @@ func dockerImageTagVersion(tag string) string {
 }
 
 func BuildScriptRunner(dir, scriptPath string, env []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	// Project build scripts are POSIX shell; Windows can't exec a shebang script
+	// by name ("%1 is not a valid Win32 application"), so run it through sh.
 	cmd := Command(scriptPath)
+	if runtime.GOOS == "windows" {
+		cmd = Command("sh", scriptPath)
+	}
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), env...)
 	cmd.Stdin = stdin

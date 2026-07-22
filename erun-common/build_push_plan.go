@@ -64,7 +64,7 @@ func ResolveDockerPushExecution(ctx Context, store DockerStore, findProjectRoot 
 		// A multi-arch image has no arch-less version tag to `docker push`, so the
 		// build itself publishes the per-arch manifest list; the separate push
 		// entry is skipped once the build is marked pushed.
-		build, err := resolveDockerBuildSpec(store, findProjectRoot, resolveBuildContext, now, buildContext, target)
+		build, err := resolveDockerBuildSpec(ctx, store, findProjectRoot, resolveBuildContext, now, buildContext, target)
 		if err != nil {
 			return DockerPushExecutionSpec{}, err
 		}
@@ -100,7 +100,7 @@ func ResolveDockerPushSpec(ctx Context, store DockerStore, findProjectRoot Proje
 	// A multi-arch image has no arch-less version tag to `docker push`, so the
 	// build itself publishes the manifest; the single-tag push is skipped once
 	// Push is set.
-	resolvedBuild, err := resolveDockerBuildSpec(store, findProjectRoot, resolveBuildContext, now, buildContext, target)
+	resolvedBuild, err := resolveDockerBuildSpec(ctx, store, findProjectRoot, resolveBuildContext, now, buildContext, target)
 	if err != nil {
 		return DockerPushSpec{}, nil, err
 	}

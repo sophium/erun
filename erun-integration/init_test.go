@@ -116,7 +116,9 @@ func stubRemoteInitKubectl(t *testing.T, dir string, spec remoteInitKubectlStub)
 		)
 	}
 	if spec.LsRemoteFailures > 0 {
-		counter := filepath.Join(dir, "ls-remote-calls")
+		// Forward slashes: this path is embedded in the sh stub, and Git Bash's sh
+		// handles a backslash Windows path in redirections unreliably.
+		counter := filepath.ToSlash(filepath.Join(dir, "ls-remote-calls"))
 		lines = append(lines,
 			`  *ls-remote*)`,
 			`    count=0`,
