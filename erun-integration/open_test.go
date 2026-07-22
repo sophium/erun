@@ -716,7 +716,7 @@ func TestOpen(t *testing.T) {
 		ideLog := filepath.Join(setup.Cwd, "ide-launcher.log")
 		fixture.StubBinaryWithScript(t, stubsDir, "open",
 			`printf '%s\n' "$*" > '`+ideLog+`'`+"\n"+`exit 0`+"\n")
-		envVars = append(envVars, "PATH="+stubsDir+":"+os.Getenv("PATH"))
+		envVars = append(envVars, "PATH="+stubsDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 		// Pin darwin so the IDE launcher resolves to the stubbed macOS
 		// `open` command. On a Linux host production calls xdg-open, which
 		// this scenario does not stub. (erun-integration/AGENTS.md —
@@ -782,7 +782,7 @@ func TestOpen(t *testing.T) {
 		ideLog := filepath.Join(setup.Cwd, "ide-launcher.log")
 		fixture.StubBinaryWithScript(t, stubsDir, "open",
 			`printf '%s\n' "$*" >> '`+ideLog+`'`+"\n"+`exit 0`+"\n")
-		envVars = append(envVars, "PATH="+stubsDir+":"+os.Getenv("PATH"))
+		envVars = append(envVars, "PATH="+stubsDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 		// Pin darwin: this scenario seeds the macOS JetBrains options dir
 		// above and asserts the `open -a 'IntelliJ IDEA'` bootstrap, both
 		// macOS-shaped. Without the pin a Linux host resolves a different
@@ -891,7 +891,7 @@ func TestOpen(t *testing.T) {
 		ideLog := filepath.Join(setup.Cwd, "ide-launcher.log")
 		fixture.StubBinaryWithScript(t, stubsDir, "open",
 			`printf '%s\n' "$*" >> '`+ideLog+`'`+"\n"+`exit 0`+"\n")
-		envVars = append(envVars, "PATH="+stubsDir+":"+os.Getenv("PATH"))
+		envVars = append(envVars, "PATH="+stubsDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 		envVars = append(envVars, "ERUN_HOST_OS_OVERRIDE=darwin")
 
 		run1 := erun.Run(t, []string{"open", "team", "dev", "--intellij", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
@@ -1011,7 +1011,7 @@ func TestOpen(t *testing.T) {
 		ideaLog := filepath.Join(setup.Cwd, "idea-launcher.log")
 		fixture.StubBinaryWithScript(t, stubsDir, "idea",
 			`printf 'idea %s\n' "$*" > '`+ideaLog+`'`+"\n"+`exit 0`+"\n")
-		envVars = append(envVars, "PATH="+stubsDir+":"+os.Getenv("PATH"))
+		envVars = append(envVars, "PATH="+stubsDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 		envVars = append(envVars, "ERUN_HOST_OS_OVERRIDE=linux")
 		result := erun.Run(t, []string{"open", "team", "dev", "--intellij", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {

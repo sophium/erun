@@ -69,6 +69,9 @@ var defaultRules = []Replacement{
 	// Safety net for a real home path that leaks despite the test HOME override.
 	{regexp.MustCompile(`/Users/[^/\s'"]+`), "<HOME>"},
 	{regexp.MustCompile(`/home/[^/\s'"]+`), "<HOME>"},
+	// Drop the Windows executable suffix so a traced binary name matches the Unix
+	// golden (erun-app.exe -> erun-app). Inert on Unix output, which has no .exe.
+	{regexp.MustCompile(`\.exe\b`), ""},
 	{regexp.MustCompile(`[ \t]+\n`), "\n"},
 }
 
