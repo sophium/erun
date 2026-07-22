@@ -1042,7 +1042,9 @@ func StubBinaryWithScript(t testing.TB, dir, name, scriptBody string) string {
 // scoped to the scenario's stub directory and reset per scenario by env.New.
 func StubBinaryFailFirstThenSucceed(t testing.TB, dir, name, stderrFirst string, exitCode int) string {
 	t.Helper()
-	marker := shellSingleQuote(filepath.Join(dir, name+"-failed-once"))
+	// Forward slashes: embedded in the sh stub, where Git Bash handles a
+	// backslash Windows path unreliably.
+	marker := shellSingleQuote(filepath.ToSlash(filepath.Join(dir, name+"-failed-once")))
 	script := "if [ ! -f " + marker + " ]; then\n" +
 		"  : > " + marker + "\n" +
 		"  printf '%s\\n' " + shellSingleQuote(stderrFirst) + " >&2\n" +
