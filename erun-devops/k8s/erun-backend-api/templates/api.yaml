@@ -34,6 +34,78 @@
 {{- $dns01TsigSecretKey := default "tsig-secret" $dns01Tsig.secretKey -}}
 {{- $dns01TsigKeyName := default (printf "%s-dnsupdate" $tenant) $dns01Tsig.keyName -}}
 {{- $dns01TsigAlgorithm := default "hmac-sha256" $dns01Tsig.algorithm -}}
+{{- /* Opt-in server-side env-deploy executor (#605): the API launches an
+       `erun deploy` Job per hosted env. Off by default — the API pod keeps the
+       namespace `default` SA and env creation only registers the row, so
+       existing deploys are byte-for-byte unchanged. Enabling it grants the API
+       pod's own SA namespaced Job management, and a separate cluster-admin
+       deployer SA the Jobs run as (the Job runs `erun deploy`: creates
+       namespaces, installs charts cluster-wide). The first deploy that adds the
+       cluster-admin binding must come from an admin context (apiserver
+       escalation check), same constraint as the runtime chart's platformAccount. */ -}}
+{{- $envDeployer := default dict $api.envDeployer -}}
+{{- $envDeployerEnabled := default false $envDeployer.enabled -}}
+{{- $apiServiceAccount := printf "%s-api" $tenant -}}
+{{- $envDeployerSA := default (printf "%s-env-deployer" $tenant) $envDeployer.serviceAccountName -}}
+{{- if $envDeployerEnabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $apiServiceAccount }}
+  labels:
+    app: {{ $tenant }}-api
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $envDeployerSA }}
+  labels:
+    app: {{ $tenant }}-api
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $tenant }}-api-env-deployer
+  labels:
+    app: {{ $tenant }}-api
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $tenant }}-api-env-deployer
+  labels:
+    app: {{ $tenant }}-api
+subjects:
+  - kind: ServiceAccount
+    name: {{ $apiServiceAccount }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $tenant }}-api-env-deployer
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $envDeployerSA }}
+  labels:
+    app: {{ $tenant }}-api
+subjects:
+  - kind: ServiceAccount
+    name: {{ $envDeployerSA }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+---
+{{- end }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -67,6 +139,9 @@ spec:
       labels:
         app: {{ $tenant }}-api
     spec:
+      {{- if $envDeployerEnabled }}
+      serviceAccountName: {{ $apiServiceAccount }}
+      {{- end }}
       containers:
         - image: {{ $backendAPIImage }}
           name: erun-backend-api
@@ -95,6 +170,16 @@ spec:
               value: {{ required "tenant is required" .Values.tenant | quote }}
             - name: ERUN_ENVIRONMENT
               value: {{ required "environment is required" .Values.environment | quote }}
+            {{- if $envDeployerEnabled }}
+            - name: ERUN_ENV_DEPLOYER_SERVICE_ACCOUNT
+              value: {{ $envDeployerSA | quote }}
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: ERUN_ENV_DEPLOY_REGISTRY
+              value: {{ $containerRegistry | quote }}
+            {{- end }}
             {{- if $mcpSigningSecretName }}
             - name: ERUN_API_MCP_SIGNING_KEY_PATH
               value: {{ printf "%s/%s" $mcpSigningMountDir $mcpSigningSecretKey | quote }}

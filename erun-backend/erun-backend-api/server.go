@@ -5,7 +5,9 @@ import (
 	"net/http"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
+	"k8s.io/client-go/kubernetes"
 
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/deployexec"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/dns01broker"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/mcptoken"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/provision"
@@ -42,6 +44,14 @@ type HandlerOptions struct {
 	// when the PowerDNS write path is not configured; the endpoints are then not
 	// registered (a cluster with no brokered DNS-01 solver never calls them).
 	DNS01Broker *dns01broker.Broker
+	// KubeClient runs the server-side env-deploy Jobs. Nil (the default outside a
+	// cluster) leaves env provisioning off: POST /v1/environments only registers
+	// the row. Set together with EnvDeploy and DBOSContext to enable live deploys.
+	KubeClient kubernetes.Interface
+	// EnvDeploy is the per-instance placement for env-deploy Jobs (image registry,
+	// platform namespace, cluster-admin deployer ServiceAccount). Env provisioning
+	// stays off until all three are set.
+	EnvDeploy provision.EnvDeployConfig
 }
 
 func NewHandler(options HandlerOptions) (http.Handler, error) {
@@ -116,7 +126,13 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 		routes.RegisterReviewRoutes(register, reviews, reviewService)
 		routes.RegisterBuildRoutes(register, builds, buildService)
 		routes.RegisterCommentRoutes(register, comments, commentService)
-		routes.RegisterEnvironmentRoutes(register, environments, tenantQuotas)
+		var environmentProvisioner routes.EnvironmentProvisioner
+		if options.DBOSContext != nil && options.KubeClient != nil &&
+			options.EnvDeploy.DeployerServiceAccount != "" && options.EnvDeploy.PlatformNamespace != "" && options.EnvDeploy.Registry != "" {
+			coordinator := service.NewEnvironmentProvisioner(deployexec.NewLauncher(options.KubeClient), environments)
+			environmentProvisioner = provision.NewEnvProvisioner(options.DBOSContext, coordinator, options.EnvDeploy)
+		}
+		routes.RegisterEnvironmentRoutes(register, environments, tenantQuotas, tenants, environmentProvisioner)
 		routes.RegisterMCPTokenRoutes(register, environments, tenants, options.MCPSigner)
 		routes.RegisterDNS01TokenRoutes(register, environments, tenants, options.MCPSigner)
 		var contextProvisioner routes.ContextProvisioner

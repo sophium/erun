@@ -13,10 +13,13 @@ import (
 	"time"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 
 	backendapi "github.com/sophium/erun/erun-backend/erun-backend-api"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/dns01broker"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/mcptoken"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/provision"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/secrets"
 
@@ -64,6 +67,10 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	kubeClient, err := optionalKubeClient(cfg)
+	if err != nil {
+		return err
+	}
 
 	handler, err := backendapi.NewHandler(backendapi.HandlerOptions{
 		TokenVerifier: backendapi.NewBearerTokenVerifier(backendapi.BearerTokenVerifierOptions{
@@ -78,6 +85,12 @@ func run(args []string) error {
 		AWSEndpoint:   cfg.AWSEndpoint,
 		MCPSigner:     mcpSigner,
 		DNS01Broker:   dns01Broker,
+		KubeClient:    kubeClient,
+		EnvDeploy: provision.EnvDeployConfig{
+			Registry:               cfg.EnvDeployRegistry,
+			PlatformNamespace:      cfg.PlatformNamespace,
+			DeployerServiceAccount: cfg.EnvDeployerServiceAccount,
+		},
 	})
 	if err != nil {
 		return err
@@ -155,6 +168,15 @@ type apiConfig struct {
 	SecretsKey      string
 	DBOSDatabaseURL string
 	AWSEndpoint     string
+	// Server-side env-deploy executor (#605). EnvDeployerServiceAccount is the
+	// cluster-admin SA the deploy Job runs as; setting it enables live env
+	// provisioning (which then also needs an in-cluster kube client and
+	// DBOSContext). PlatformNamespace is the namespace the Jobs run in (the
+	// backend's own, via the downward API). EnvDeployRegistry is the image
+	// registry the tenant's <tenant>-devops runtime image is pulled from.
+	EnvDeployerServiceAccount string
+	PlatformNamespace         string
+	EnvDeployRegistry         string
 }
 
 func configFromEnv() apiConfig {
@@ -173,7 +195,27 @@ func configFromEnv() apiConfig {
 		DNS01TSIGKeyName:     strings.TrimSpace(os.Getenv("ERUN_DNS01_TSIG_KEY_NAME")),
 		DNS01TSIGAlgorithm:   strings.TrimSpace(os.Getenv("ERUN_DNS01_TSIG_ALGORITHM")),
 		DNS01TSIGSecret:      strings.TrimSpace(os.Getenv("ERUN_DNS01_TSIG_SECRET")),
+
+		EnvDeployerServiceAccount: strings.TrimSpace(os.Getenv("ERUN_ENV_DEPLOYER_SERVICE_ACCOUNT")),
+		PlatformNamespace:         strings.TrimSpace(os.Getenv("POD_NAMESPACE")),
+		EnvDeployRegistry:         envOrDefault("ERUN_ENV_DEPLOY_REGISTRY", "ghcr.io/sophium"),
 	}
+}
+
+// optionalKubeClient builds the in-cluster Kubernetes client the env-deploy
+// executor uses. A blank deployer ServiceAccount disables the executor (env
+// creation only registers the row); a set SA outside a cluster is a hard
+// misconfiguration (the SA is only ever set by the in-cluster deploy), so we
+// fail fast rather than silently disabling.
+func optionalKubeClient(cfg apiConfig) (kubernetes.Interface, error) {
+	if cfg.EnvDeployerServiceAccount == "" {
+		return nil, nil
+	}
+	restConfig, err := rest.InClusterConfig()
+	if err != nil {
+		return nil, fmt.Errorf("in-cluster config for env-deploy executor: %w", err)
+	}
+	return kubernetes.NewForConfig(restConfig)
 }
 
 func optionalCipher(key string) (*secrets.Cipher, error) {
