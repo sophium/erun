@@ -10,7 +10,9 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
+	"runtime"
 	"regexp"
 	"slices"
 	"strconv"
@@ -1772,6 +1774,17 @@ func resolveWorktreeHostPath(repoPath string) string {
 		return ""
 	}
 
+	// A remote/PVC env's repo path is a Linux path on the pod's filesystem (e.g.
+	// /home/erun/git/<repo>); it must never be run through the host's OS-native
+	// filepath, which on Windows rewrites it to \home\erun\git\<repo> (and it may
+	// already have been mangled upstream). On Windows a rooted path with no drive
+	// letter is never a real local path, so treat it as the remote Linux path it
+	// is and normalize to forward slashes. Local Windows paths (C:\...) and every
+	// Unix path keep the existing clean-and-resolve, so Unix output is unchanged.
+	if runtime.GOOS == "windows" && rootedWithoutDrive(repoPath) {
+		return path.Clean(filepath.ToSlash(repoPath))
+	}
+
 	cleaned := filepath.Clean(repoPath)
 	resolved, err := filepath.EvalSymlinks(cleaned)
 	if err != nil || strings.TrimSpace(resolved) == "" {
@@ -1779,6 +1792,16 @@ func resolveWorktreeHostPath(repoPath string) string {
 	}
 
 	return resolved
+}
+
+// rootedWithoutDrive reports whether a path is absolute (rooted at / or \) but
+// carries no Windows drive letter — the shape of a remote Linux path, never a
+// real local Windows path.
+func rootedWithoutDrive(p string) bool {
+	if len(p) >= 2 && p[1] == ':' {
+		return false
+	}
+	return strings.HasPrefix(p, "/") || strings.HasPrefix(p, `\`)
 }
 
 // Params pairs the full deploy spec with the rollout's output writers. The whole

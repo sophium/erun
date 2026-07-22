@@ -2,36 +2,22 @@ package normalize
 
 import "testing"
 
-// TestForwardSlashWindowsPaths locks the guarantee that goldens are OS-invariant:
-// Windows backslash path separators canonicalize to the forward-slash shape the
-// goldens are recorded in, while a non-separator backslash (JSON's \") is left
-// alone. Drives the transform directly so it runs on every OS.
+// TestForwardSlashWindowsPaths locks that only unambiguous drive-letter Windows
+// paths are forward-slashed for golden parity, while backslash escape sequences
+// in traced script bodies (\n, \033) and bare-backslash paths (fixed at the erun
+// source, not here) are left untouched. Drives the transform directly so it runs
+// on every OS.
 func TestForwardSlashWindowsPaths(t *testing.T) {
 	cases := []struct{ name, in, want string }{
-		{"remote path arg", `worktreeHostPath=\nonexistent-remote\team`, `worktreeHostPath=/nonexistent-remote/team`},
-		{"linux abs path mangled by filepath", `\home\erun\git\team`, `/home/erun/git/team`},
-		{"windows temp path keeps drive, slashes only", `C:\Users\x\AppData\Local\Temp\T\v.yaml`, `C:/Users/x/AppData/Local/Temp/T/v.yaml`},
-		{"json escaped quote is not a separator", `{"a":"b\"c"}`, `{"a":"b\"c"}`},
+		{"drive path forward-slashed", `C:\Users\x\AppData\Local\Temp\T\v.yaml`, `C:/Users/x/AppData/Local/Temp/T/v.yaml`},
+		{"quoted drive path inner slashed", `-f 'C:\Users\x\repo\values.yaml'`, `-f 'C:/Users/x/repo/values.yaml'`},
+		{"escape sequence in a script body is not a separator", `printf '== usage ==\n'`, `printf '== usage ==\n'`},
+		{"octal escape left alone", `printf '\033]0;title\007'`, `printf '\033]0;title\007'`},
+		{"bare-backslash path is fixed at the source, not here", `mkdir \home\erun\git`, `mkdir \home\erun\git`},
 	}
 	for _, c := range cases {
 		if got := forwardSlashWindowsPaths(c.in); got != c.want {
 			t.Errorf("%s: forwardSlashWindowsPaths(%q) = %q, want %q", c.name, c.in, got, c.want)
-		}
-	}
-}
-
-// TestShellSafeQuotedArgStrip locks that the quotes Windows adds around a
-// now-shell-safe path arg are dropped (Unix leaves such args bare), while a
-// quoted arg with non-shell-safe content (JSON) stays quoted on both OSes.
-func TestShellSafeQuotedArgStrip(t *testing.T) {
-	cases := []struct{ name, in, want string }{
-		{"shell-safe path arg unquotes", `--set-string 'worktreeHostPath=/nonexistent-remote/team'`, `--set-string worktreeHostPath=/nonexistent-remote/team`},
-		{"bare token unquotes", `cd '<TMP>' && helm`, `cd <TMP> && helm`},
-		{"json arg stays quoted", `--set-json 'containerRegistries=[{"registry":"x/y"}]'`, `--set-json 'containerRegistries=[{"registry":"x/y"}]'`},
-	}
-	for _, c := range cases {
-		if got := shellSafeQuotedArg.ReplaceAllString(c.in, "$1"); got != c.want {
-			t.Errorf("%s: strip(%q) = %q, want %q", c.name, c.in, got, c.want)
 		}
 	}
 }

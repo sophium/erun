@@ -72,20 +72,14 @@ var defaultRules = []Replacement{
 	{regexp.MustCompile(`[ \t]+\n`), "\n"},
 }
 
-// windowsPathRun matches a run of path characters containing at least one
-// backslash separator, so it can be forward-slashed. The char class is what
-// erun emits in a path (drive letter/colon, the placeholder tokens, and the
-// usual path chars); a backslash followed by a non-path char (e.g. JSON's \")
-// is not a separator and is left alone.
-var windowsPathRun = regexp.MustCompile(`[A-Za-z0-9_.:=+<>-]*(?:\\[A-Za-z0-9_.<>+-]+)+`)
-
-// shellSafeQuotedArg matches a single-quoted argument whose content is entirely
-// shell-safe (only the chars traceShellQuote leaves unquoted, plus <TOKEN>s).
-// Such an arg is never quoted on Unix — only Windows quotes it, because the raw
-// path had backslashes before normalization — so stripping the quotes makes the
-// two platforms render the same argv. A quoted arg with any other char (JSON,
-// spaces) is quoted on both OSes and is left alone.
-var shellSafeQuotedArg = regexp.MustCompile(`'([A-Za-z0-9/._:=+<>-]+)'`)
+// windowsDrivePath matches a drive-letter-rooted Windows path (C:\...), the only
+// unambiguous Windows path shape: it starts with a drive letter and colon, so it
+// can never match a shell escape sequence (\n, \033, \,) that also uses
+// backslashes. Its separators are forward-slashed for golden parity. Paths
+// without a drive letter (a Linux path erun mangled via filepath) are fixed at
+// the source instead — the normalizer must not touch bare backslashes, which are
+// escapes far more often than separators.
+var windowsDrivePath = regexp.MustCompile(`[A-Za-z]:\\[^\s'"]*`)
 
 // PromptConfirm normalizes output containing a promptui "[Y/n]" confirm.
 // readline repaints the confirm line an unpredictable number of times (and,
@@ -124,24 +118,21 @@ func Apply(s string, extra ...Replacement) string {
 	for _, r := range rules {
 		s = r.Pattern.ReplaceAllString(s, r.Token)
 	}
-	// Windows-only: the tracer quotes a path arg the Unix tracer leaves bare
-	// (the raw arg had backslashes, which aren't shell-safe); once normalized the
-	// content is shell-safe, so drop the quotes to match the Unix golden.
-	if runtime.GOOS == "windows" {
-		s = shellSafeQuotedArg.ReplaceAllString(s, "$1")
-	}
 	// Absorb the jitter in whether the final line ends with a newline.
 	s = strings.TrimRight(s, "\n") + "\n"
 	return s
 }
 
-// forwardSlashWindowsPaths rewrites backslash separators in Windows path runs to
-// forward slashes, so the downstream token rules (recorded in the Unix goldens'
-// forward-slash shape) match. A backslash that isn't a path separator (e.g. the
-// \" inside a JSON arg) is left untouched. Exported-free so the cross-OS unit
-// test can drive it on any host.
+// forwardSlashWindowsPaths rewrites backslash separators in drive-letter Windows
+// paths (C:\...) to forward slashes so the downstream token rules — recorded in
+// the Unix goldens' forward-slash shape — match. It deliberately touches only
+// drive-rooted paths: a bare backslash is an escape sequence (\n, \033, \,) in a
+// traced script body far more often than a separator, and quoting parity is
+// handled at the tracer instead (isShellSafe treats backslash as safe, matching
+// Unix's bare forward-slash args). Exported-free so the cross-OS unit test can
+// drive it on any host.
 func forwardSlashWindowsPaths(s string) string {
-	return windowsPathRun.ReplaceAllStringFunc(s, func(m string) string {
+	return windowsDrivePath.ReplaceAllStringFunc(s, func(m string) string {
 		return strings.ReplaceAll(m, `\`, "/")
 	})
 }
