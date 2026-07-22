@@ -1528,7 +1528,10 @@ func releaseGitPath(projectRoot, path string) string {
 	if err != nil {
 		return path
 	}
-	return filepath.Clean(relative)
+	// git pathspecs use forward slashes on every OS, so emit a slash path rather
+	// than the host-native filepath (which is backslashed on Windows). No-op on
+	// Unix.
+	return filepath.ToSlash(filepath.Clean(relative))
 }
 
 func fileExists(path string) bool {
