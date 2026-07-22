@@ -4,6 +4,7 @@ import (
 	"crypto/sha1"
 	"fmt"
 	"os"
+	"runtime"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -1719,6 +1720,11 @@ func readFileForTest(t *testing.T, path string) string {
 
 func assertFileMode(t *testing.T, path string, want os.FileMode) {
 	t.Helper()
+	// Windows has no Unix permission bits — os.Chmod only toggles the read-only
+	// attribute, so Stat reports 0666/0777. The mode contract is Unix-only.
+	if runtime.GOOS == "windows" {
+		return
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Errorf("stat %s: %v", path, err)

@@ -2,6 +2,7 @@ package integration
 
 import (
 	"os"
+	"runtime"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -2039,7 +2040,12 @@ func isHex(c byte) bool {
 // possible but vanishingly unlikely.
 func reapedChildPID(t *testing.T) int {
 	t.Helper()
+	// Spawn and reap a real child to get a positive, dead PID. Use a shell that
+	// exists on the host OS — /bin/sh is absent on Windows.
 	cmd := exec.Command("/bin/sh", "-c", "exit 0")
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd", "/c", "exit 0")
+	}
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("seed reaped child: %v", err)
 	}
