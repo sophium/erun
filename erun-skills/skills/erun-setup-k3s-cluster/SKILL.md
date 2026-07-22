@@ -307,35 +307,67 @@ containerregistries:
 systemd keeps k3s (and the registry + dockerd) running while the distro is up, but a WSL2 distro only
 runs while a session is open, and it **idle-shuts-down within ~60s of the last session ending** —
 taking k3s with it, so Windows loses `127.0.0.1:6443` (the desktop app shows
-`dial tcp 127.0.0.1:6443: connection refused`). A task that merely *boots* the distro (`--exec
-/bin/true` returns instantly) does not prevent this. Register a logon task that **holds a persistent
-session open** so the VM never idle-shuts-down:
+`dial tcp 127.0.0.1:6443: connection refused`). Two failure modes have to be handled:
+
+- A task that merely *boots* the distro (`--exec /bin/true` returns instantly) holds nothing, so the
+  VM idle-shuts-down anyway.
+- A single `--exec sleep infinity` holder pins the VM, but if that one process ever dies (a WSL update,
+  `wsl --shutdown`, host sleep/resume, memory pressure) the VM goes with it and nothing brings it back.
+
+So use a **self-healing holder daemon** that re-establishes the hold within seconds of any drop.
+Save it as `%LOCALAPPDATA%\erun-k3s\holder.ps1`:
 
 ```powershell
-# sleep infinity holds one WSL session open for as long as the VM lives, which is
-# what pins the VM (and k3s/registry/dockerd) up. Default user avoids the harmless
-# "systemd user session for root" warning; the distro's systemd still autostarts
-# the k3s *system* service on boot.
-$action  = New-ScheduledTaskAction -Execute 'wsl.exe' -Argument '-d Ubuntu --exec sleep infinity'
-$trigger = New-ScheduledTaskTrigger -AtLogOn
-# Resilient settings are ESSENTIAL: Task Scheduler's defaults stop a task after the
-# machine is idle (~10 min) and on battery — either kills the holder and the VM dies.
+$ErrorActionPreference = 'SilentlyContinue'
+# Single-instance guard so multiple launchers can't stack holders.
+$mutex = New-Object System.Threading.Mutex($false, 'Global\erun-k3s-holder')
+if (-not $mutex.WaitOne(0)) { exit 0 }
+while ($true) {
+  # Boot the distro if needed and ensure the k3s *system* service is up.
+  wsl.exe -d Ubuntu -u root bash -lc 'systemctl is-active --quiet k3s || systemctl start k3s' 2>&1 | Out-Null
+  # Hold a session. This BLOCKS while the VM lives (which pins it up); when it
+  # returns the VM went down, so the loop re-ensures k3s and re-holds.
+  wsl.exe -d Ubuntu --exec sleep infinity 2>&1 | Out-Null
+  Start-Sleep -Seconds 3
+}
+```
+
+**Launch it at logon.** A scheduled task is the natural choice, but on locked-down machines Task
+Scheduler is often blocked by AppLocker/WDAC from launching `powershell.exe`/`pwsh.exe` (the task
+fails with `0x80070005` while `wsl.exe` still launches). It *can* always launch the interactive
+Startup folder, so use that as the reliable path and register a scheduler `wsl` holder as an
+independent backup:
+
+**(1) Primary — a hidden Startup-folder launcher** runs the self-healing daemon in the interactive
+session (where pwsh is allowed). Save as `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\erun-k3s-holder.vbs`
+(VBScript embeds a literal quote by doubling it, `""`; window mode `0` = no console flash):
+
+```vbs
+Set sh = CreateObject("WScript.Shell")
+sh.Run """C:\Program Files\PowerShell\7\pwsh.exe"" -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File ""C:\Users\<you>\AppData\Local\erun-k3s\holder.ps1""", 0, False
+```
+
+Launch it now with `wscript "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\erun-k3s-holder.vbs"`;
+it then starts automatically at every logon.
+
+**(2) Backup — an independent scheduler-launched `wsl` holder at logon.** Resilient settings are
+ESSENTIAL: Task Scheduler's defaults stop a task after ~10 min idle and on battery, either of which
+would kill the holder and the VM.
+
+```powershell
+$action = New-ScheduledTaskAction -Execute 'wsl.exe' -Argument '-d Ubuntu --exec sleep infinity'
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-  -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew `
-  -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -StartWhenAvailable
+  -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -StartWhenAvailable `
+  -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
 $settings.IdleSettings.StopOnIdleEnd = $false   # <- the critical one: do not stop when idle
 $settings.IdleSettings.RestartOnIdle = $false
 $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
-Register-ScheduledTask -TaskName 'erun-k3s-boot' -Action $action -Trigger $trigger `
-  -Settings $settings -Principal $principal -Force
-Start-ScheduledTask -TaskName 'erun-k3s-boot'   # bring it up now (also runs at every logon)
+Register-ScheduledTask -TaskName 'erun-k3s-boot' -Action $action `
+  -Trigger (New-ScheduledTaskTrigger -AtLogOn) -Settings $settings -Principal $principal -Force
+schtasks /run /tn erun-k3s-boot   # scheduler launches wsl.exe fine; Start-ScheduledTask may 0x80070005
 ```
 
 After boot, k3s takes ~15–20s to be Ready; the first command after a cold start may need a moment.
-
-> If `Start-ScheduledTask` / a scheduler-initiated trigger returns `0x80070005` (access denied) when
-> starting the task on demand, use `schtasks /run /tn erun-k3s-boot` instead — the `LogonTrigger`
-> itself fires correctly at real logon.
 
 ## Verify (full round-trip)
 
@@ -357,11 +389,12 @@ uses.
 
 - **Detect.** `kubectl --context erun-k3s get nodes` Ready → the cluster exists; reconcile in place.
 - **Unreachable from Windows** (`dial tcp 127.0.0.1:6443: connection refused`) → first check the VM is
-  even up: `wsl --list --running`. If Ubuntu is absent, the holder task died — the usual cause is
-  `erun-k3s-boot` missing the resilient settings from Step 7 (stops on idle/battery) or still using a
-  non-holding action (`--exec /bin/true`); re-register it per Step 7 and `Start-ScheduledTask
-  erun-k3s-boot`. If the VM *is* up but still unreachable, re-check `.wslconfig` has both
-  `networkingMode=mirrored` and `hostAddressLoopback=true`, then `wsl --shutdown` and reboot the distro.
+  even up: `wsl --list --running`. If Ubuntu is absent, no holder is running — confirm the Step 7
+  holder daemon is alive (`Get-Process pwsh | ? { $_.CommandLine -match 'holder.ps1' }`) and the
+  `erun-k3s-boot` backup task exists with the resilient settings (not stopping on idle/battery, and not
+  the old non-holding `--exec /bin/true`); re-run Step 7 to restore them. If the VM *is* up but still
+  unreachable, re-check `.wslconfig` has both `networkingMode=mirrored` and `hostAddressLoopback=true`,
+  then `wsl --shutdown` and reboot the distro.
 - **Registry pulls fail** → re-apply `registries.yaml` + the hostNetwork registry manifest (Step 3),
   `wsl -d Ubuntu -u root systemctl restart k3s`.
 - **Upgrade k3s** → re-run the Step 3 install line inside the distro.
@@ -369,6 +402,8 @@ uses.
   ```powershell
   wsl -d Ubuntu -u root /usr/local/bin/k3s-uninstall.sh
   Unregister-ScheduledTask -TaskName 'erun-k3s-boot' -Confirm:$false
+  Remove-Item "$([Environment]::GetFolderPath('Startup'))\erun-k3s-holder.vbs" -Force -ErrorAction SilentlyContinue
+  Remove-Item "$env:LOCALAPPDATA\erun-k3s\holder.ps1" -Force -ErrorAction SilentlyContinue
   # optional, removes the whole distro: wsl --unregister Ubuntu
   ```
   Point the operator at teardown; never run it as a maintenance side effect.
