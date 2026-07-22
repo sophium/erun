@@ -3,6 +3,7 @@ package eruncommon
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -86,7 +87,10 @@ func remoteInitMarkerWriteScript(marker RemoteInitMarker) string {
 	if err != nil {
 		data = []byte(fmt.Sprintf("bootstrap_complete: %t\n", marker.BootstrapComplete))
 	}
-	relativeDir := filepath.Join(remoteInitMarkerBaseDir, marker.Tenant, marker.Environment)
+	// Pod-side path: this script runs in the Linux runtime pod, so join with the
+	// forward-slash path package, never the host's OS-native filepath (which on
+	// Windows would emit .erun\<tenant>\<env>).
+	relativeDir := path.Join(remoteInitMarkerBaseDir, marker.Tenant, marker.Environment)
 	dir := "$HOME/" + relativeDir
 	target := dir + "/" + remoteInitMarkerFilename
 	return strings.Join([]string{
