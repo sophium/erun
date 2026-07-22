@@ -44,6 +44,10 @@ var defaultRules = []Replacement{
 	// (no drive letter), so existing macOS/Linux goldens are unaffected.
 	{regexp.MustCompile(`(?i)[A-Za-z]:[\\/](?:[^\\/\s'"]+[\\/])*?temp[\\/][^\s'"]*?[\\/]\.erun[\\/]terraform`), "<STATE_ROOT>"},
 	{regexp.MustCompile(`(?i)[A-Za-z]:[\\/](?:[^\\/\s'"]+[\\/])*?temp[\\/][^\s'"]*`), "<TMP>"},
+	// Windows home dir. Before the Unix /Users rule below, so C:/Users/<user>
+	// (after backslash canonicalization) collapses whole rather than leaving the
+	// drive prefix. Inert on Unix output.
+	{regexp.MustCompile(`(?i)[A-Za-z]:[\\/]Users[\\/][^\\/\s'"]+`), "<HOME>"},
 	// Also collapses deterministic UUIDs (e.g. JetBrains ssh config IDs) on
 	// purpose; both shapes are opaque tokens, so no coverage signal is lost.
 	{regexp.MustCompile(`\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`), "<UUID>"},
@@ -65,16 +69,15 @@ var defaultRules = []Replacement{
 	// Safety net for a real home path that leaks despite the test HOME override.
 	{regexp.MustCompile(`/Users/[^/\s'"]+`), "<HOME>"},
 	{regexp.MustCompile(`/home/[^/\s'"]+`), "<HOME>"},
-	// Windows home dir (after the temp rules, so temp paths under it collapsed
-	// first). Inert on Unix output.
-	{regexp.MustCompile(`(?i)[A-Za-z]:[\\/]Users[\\/][^\\/\s'"]+`), "<HOME>"},
 	{regexp.MustCompile(`[ \t]+\n`), "\n"},
 }
 
-// tokenRootedPath matches a path rooted at a normalized token so its tail's
-// separators can be canonicalized; the token itself carries no separator, so
-// backslashes elsewhere in the output are left untouched.
-var tokenRootedPath = regexp.MustCompile(`(?:<TMP>|<HOME>|<STATE_ROOT>)(?:[\\/][^\s'"\\/]+)+`)
+// windowsPathRun matches a run of path characters containing at least one
+// backslash separator, so it can be forward-slashed. The char class is what
+// erun emits in a path (drive letter/colon, the placeholder tokens, and the
+// usual path chars); a backslash followed by a non-path char (e.g. JSON's \")
+// is not a separator and is left alone.
+var windowsPathRun = regexp.MustCompile(`[A-Za-z0-9_.:=+<>-]*(?:\\[A-Za-z0-9_.<>+-]+)+`)
 
 // shellSafeQuotedArg matches a single-quoted argument whose content is entirely
 // shell-safe (only the chars traceShellQuote leaves unquoted, plus <TOKEN>s).
@@ -109,30 +112,36 @@ func PromptConfirm(s string) string {
 // Apply runs the default rule set over the output. Extra rules run after the
 // defaults, so a caller can override or further normalize the result.
 func Apply(s string, extra ...Replacement) string {
+	// Windows-only: forward-slash path separators BEFORE the token rules so a
+	// path like `\home\erun\git\team` becomes `/home/erun/git/team` and the
+	// /home, /Users, temp rules can collapse it to a token. Gated on GOOS so
+	// macOS/Linux output — already canonical — is provably untouched.
+	if runtime.GOOS == "windows" {
+		s = forwardSlashWindowsPaths(s)
+	}
 	rules := append([]Replacement(nil), defaultRules...)
 	rules = append(rules, extra...)
 	for _, r := range rules {
 		s = r.Pattern.ReplaceAllString(s, r.Token)
 	}
-	// Windows-only: the OS-native output uses backslash separators and quotes
-	// path args the Unix tracer leaves bare. Canonicalize to the Unix shape so a
-	// golden recorded on either OS matches. Gated on GOOS so macOS/Linux output —
-	// already canonical — is provably untouched.
+	// Windows-only: the tracer quotes a path arg the Unix tracer leaves bare
+	// (the raw arg had backslashes, which aren't shell-safe); once normalized the
+	// content is shell-safe, so drop the quotes to match the Unix golden.
 	if runtime.GOOS == "windows" {
-		s = canonicalizeWindowsPaths(s)
+		s = shellSafeQuotedArg.ReplaceAllString(s, "$1")
 	}
 	// Absorb the jitter in whether the final line ends with a newline.
 	s = strings.TrimRight(s, "\n") + "\n"
 	return s
 }
 
-// canonicalizeWindowsPaths rewrites Windows path shapes to the Unix form the
-// goldens are recorded in: forward-slash separators within token-rooted paths,
-// then dropping the quotes traceShellQuote added around a now-shell-safe path
-// arg. Exported-free helper so the cross-OS unit test can drive it directly.
-func canonicalizeWindowsPaths(s string) string {
-	s = tokenRootedPath.ReplaceAllStringFunc(s, func(m string) string {
+// forwardSlashWindowsPaths rewrites backslash separators in Windows path runs to
+// forward slashes, so the downstream token rules (recorded in the Unix goldens'
+// forward-slash shape) match. A backslash that isn't a path separator (e.g. the
+// \" inside a JSON arg) is left untouched. Exported-free so the cross-OS unit
+// test can drive it on any host.
+func forwardSlashWindowsPaths(s string) string {
+	return windowsPathRun.ReplaceAllStringFunc(s, func(m string) string {
 		return strings.ReplaceAll(m, `\`, "/")
 	})
-	return shellSafeQuotedArg.ReplaceAllString(s, "$1")
 }
