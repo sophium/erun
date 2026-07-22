@@ -72,6 +72,11 @@ var defaultRules = []Replacement{
 	// Drop the Windows executable suffix so a traced binary name matches the Unix
 	// golden (erun-app.exe -> erun-app). Inert on Unix output, which has no .exe.
 	{regexp.MustCompile(`\.exe\b`), ""},
+	// A failed exec of a missing path reads differently per platform — Unix
+	// `fork/exec <TMP> no such file or directory`, Windows `exec: "<TMP>":
+	// executable file not found in %PATH%` — so collapse either whole message to
+	// one token (the path is already <TMP>) for an OS-invariant golden.
+	{regexp.MustCompile(`(?:fork/exec|exec:)[^\n]*<TMP>[^\n]*`), "<EXEC_ERROR>"},
 	{regexp.MustCompile(`[ \t]+\n`), "\n"},
 }
 
