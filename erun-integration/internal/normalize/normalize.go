@@ -4,6 +4,7 @@ package normalize
 
 import (
 	"regexp"
+	"runtime"
 	"strings"
 )
 
@@ -36,6 +37,13 @@ var defaultRules = []Replacement{
 	// A separate rule for temp paths whose separators are percent-escaped,
 	// which the plain-path rule above cannot match.
 	{regexp.MustCompile(`%2F(?:private%2F)?(?:var%2Ffolders|var%2Ftmp|tmp)%2F[A-Za-z0-9._%+-]*`), "<TMP>"},
+	// Windows path roots (either separator): t.TempDir() lands under
+	// <drive>:\Users\<user>\AppData\Local\Temp\<test>. Mirror the Unix rules —
+	// STATE_ROOT terraform variant first, then the generic temp dir — so a golden
+	// recorded on either OS normalizes to the same token. Inert on Unix output
+	// (no drive letter), so existing macOS/Linux goldens are unaffected.
+	{regexp.MustCompile(`(?i)[A-Za-z]:[\\/](?:[^\\/\s'"]+[\\/])*?temp[\\/][^\s'"]*?[\\/]\.erun[\\/]terraform`), "<STATE_ROOT>"},
+	{regexp.MustCompile(`(?i)[A-Za-z]:[\\/](?:[^\\/\s'"]+[\\/])*?temp[\\/][^\s'"]*`), "<TMP>"},
 	// Also collapses deterministic UUIDs (e.g. JetBrains ssh config IDs) on
 	// purpose; both shapes are opaque tokens, so no coverage signal is lost.
 	{regexp.MustCompile(`\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`), "<UUID>"},
@@ -57,8 +65,24 @@ var defaultRules = []Replacement{
 	// Safety net for a real home path that leaks despite the test HOME override.
 	{regexp.MustCompile(`/Users/[^/\s'"]+`), "<HOME>"},
 	{regexp.MustCompile(`/home/[^/\s'"]+`), "<HOME>"},
+	// Windows home dir (after the temp rules, so temp paths under it collapsed
+	// first). Inert on Unix output.
+	{regexp.MustCompile(`(?i)[A-Za-z]:[\\/]Users[\\/][^\\/\s'"]+`), "<HOME>"},
 	{regexp.MustCompile(`[ \t]+\n`), "\n"},
 }
+
+// tokenRootedPath matches a path rooted at a normalized token so its tail's
+// separators can be canonicalized; the token itself carries no separator, so
+// backslashes elsewhere in the output are left untouched.
+var tokenRootedPath = regexp.MustCompile(`(?:<TMP>|<HOME>|<STATE_ROOT>)(?:[\\/][^\s'"\\/]+)+`)
+
+// shellSafeQuotedArg matches a single-quoted argument whose content is entirely
+// shell-safe (only the chars traceShellQuote leaves unquoted, plus <TOKEN>s).
+// Such an arg is never quoted on Unix — only Windows quotes it, because the raw
+// path had backslashes before normalization — so stripping the quotes makes the
+// two platforms render the same argv. A quoted arg with any other char (JSON,
+// spaces) is quoted on both OSes and is left alone.
+var shellSafeQuotedArg = regexp.MustCompile(`'([A-Za-z0-9/._:=+<>-]+)'`)
 
 // PromptConfirm normalizes output containing a promptui "[Y/n]" confirm.
 // readline repaints the confirm line an unpredictable number of times (and,
@@ -90,7 +114,25 @@ func Apply(s string, extra ...Replacement) string {
 	for _, r := range rules {
 		s = r.Pattern.ReplaceAllString(s, r.Token)
 	}
+	// Windows-only: the OS-native output uses backslash separators and quotes
+	// path args the Unix tracer leaves bare. Canonicalize to the Unix shape so a
+	// golden recorded on either OS matches. Gated on GOOS so macOS/Linux output —
+	// already canonical — is provably untouched.
+	if runtime.GOOS == "windows" {
+		s = canonicalizeWindowsPaths(s)
+	}
 	// Absorb the jitter in whether the final line ends with a newline.
 	s = strings.TrimRight(s, "\n") + "\n"
 	return s
+}
+
+// canonicalizeWindowsPaths rewrites Windows path shapes to the Unix form the
+// goldens are recorded in: forward-slash separators within token-rooted paths,
+// then dropping the quotes traceShellQuote added around a now-shell-safe path
+// arg. Exported-free helper so the cross-OS unit test can drive it directly.
+func canonicalizeWindowsPaths(s string) string {
+	s = tokenRootedPath.ReplaceAllStringFunc(s, func(m string) string {
+		return strings.ReplaceAll(m, `\`, "/")
+	})
+	return shellSafeQuotedArg.ReplaceAllString(s, "$1")
 }
