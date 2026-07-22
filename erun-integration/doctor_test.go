@@ -4,8 +4,8 @@ import (
 	"crypto/sha1"
 	"fmt"
 	"os"
-	"runtime"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -296,7 +296,6 @@ func TestDoctor(t *testing.T) {
 		}
 		golden.Equal(t, "doctor/in_runtime_no_marker_dry_run", normalize.Apply(result.Combined))
 	})
-
 
 	t.Run("in_runtime_multi_tenant_markers_dry_run", func(t *testing.T) {
 		// Two tenants share one $HOME (developer machine or shared runtime

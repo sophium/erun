@@ -2,9 +2,9 @@ package integration
 
 import (
 	"os"
-	"runtime"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
