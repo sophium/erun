@@ -3,8 +3,9 @@
 // creates a Kubernetes Job that runs `erun deploy` inside the erun-devops
 // runtime image — which already carries erun + helm + kubectl — under a
 // cluster-admin ServiceAccount, and watches that Job to completion. This is the
-// executor half of the #605 provisioning control plane; the DBOS workflow that
-// moves the environment's status around it lands in a following increment.
+// executor half of the #605 provisioning control plane; the durable DBOS
+// workflow that moves the environment's status around it lives in the provision
+// package and drives this launcher through the service coordinator.
 package deployexec
 
 import (

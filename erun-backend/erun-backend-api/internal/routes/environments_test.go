@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/provision"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
 func postCreateEnvironment(t *testing.T, environments *stubEnvironmentRepository, quotas stubTenantQuotaRepository, body string) *httptest.ResponseRecorder {
@@ -15,6 +17,37 @@ func postCreateEnvironment(t *testing.T, environments *stubEnvironmentRepository
 	req := httptest.NewRequest(http.MethodPost, "/v1/environments", bytes.NewBufferString(body))
 	rec := httptest.NewRecorder()
 	EnvironmentRoutes{environments: environments, quotas: quotas}.createEnvironment(rec, req)
+	return rec
+}
+
+type stubEnvironmentProvisioner struct {
+	started []provision.EnvProvisionInput
+	err     error
+}
+
+func (s *stubEnvironmentProvisioner) Start(in provision.EnvProvisionInput) error {
+	s.started = append(s.started, in)
+	return s.err
+}
+
+// postCreateEnvironmentWired posts through a fully-wired route (tenant resolver +
+// provisioner) with a request-scoped security context, the shape the live server
+// builds.
+func postCreateEnvironmentWired(t *testing.T, environments *stubEnvironmentRepository, prov *stubEnvironmentProvisioner, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/v1/environments", bytes.NewBufferString(body))
+	req = req.WithContext(security.WithContext(req.Context(), security.Context{
+		TenantID:   "t1",
+		TenantType: string(model.TenantTypeCompany),
+		ErunUserID: "u1",
+	}))
+	rec := httptest.NewRecorder()
+	EnvironmentRoutes{
+		environments: environments,
+		quotas:       underCapQuota,
+		tenants:      stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
+		provisioner:  prov,
+	}.createEnvironment(rec, req)
 	return rec
 }
 
@@ -113,6 +146,62 @@ func TestCreateEnvironmentAllowsUnderQuota(t *testing.T) {
 	}
 	if environments.createCalls != 1 {
 		t.Fatalf("expected exactly one Create call, got %d", environments.createCalls)
+	}
+}
+
+// TestCreateEnvironmentStartsDeployWhenWired: a wired provisioner flips a
+// runtime env with a pinned version from an inline 201 to an async deploy
+// workflow (202 Accepted), threading the tenant name and version to the deploy.
+func TestCreateEnvironmentStartsDeployWhenWired(t *testing.T) {
+	environments := &stubEnvironmentRepository{created: model.Environment{
+		EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime, RuntimeVersion: "1.2.3",
+	}}
+	prov := &stubEnvironmentProvisioner{}
+	rec := postCreateEnvironmentWired(t, environments, prov, `{"name":"prod","type":"runtime","runtimeVersion":"1.2.3"}`)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d (body %s), want 202 Accepted", rec.Code, rec.Body.String())
+	}
+	if len(prov.started) != 1 {
+		t.Fatalf("Start called %d times, want 1", len(prov.started))
+	}
+	if got := prov.started[0]; got.EnvironmentID != "env-1" || got.Tenant != "acme" ||
+		got.Environment != "prod" || got.Version != "1.2.3" || got.TenantID != "t1" {
+		t.Fatalf("provision input = %+v", got)
+	}
+}
+
+// TestCreateEnvironmentRegistersOnlyWithoutVersion: nothing to deploy without a
+// pinned runtime version, so create stays a plain 201 registration.
+func TestCreateEnvironmentRegistersOnlyWithoutVersion(t *testing.T) {
+	environments := &stubEnvironmentRepository{created: model.Environment{
+		EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime,
+	}}
+	prov := &stubEnvironmentProvisioner{}
+	rec := postCreateEnvironmentWired(t, environments, prov, `{"name":"prod","type":"runtime"}`)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", rec.Code)
+	}
+	if len(prov.started) != 0 {
+		t.Fatalf("Start called %d times, want 0 (no version to deploy)", len(prov.started))
+	}
+}
+
+// TestCreateEnvironmentRegistersOnlyForNonRuntime: the deploy executor targets
+// runtime envs; an agent env is registered (201) without a deploy.
+func TestCreateEnvironmentRegistersOnlyForNonRuntime(t *testing.T) {
+	environments := &stubEnvironmentRepository{created: model.Environment{
+		EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRemoteAgent, RuntimeVersion: "1.2.3",
+	}}
+	prov := &stubEnvironmentProvisioner{}
+	rec := postCreateEnvironmentWired(t, environments, prov, `{"name":"prod","type":"remote-agent","runtimeVersion":"1.2.3"}`)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", rec.Code)
+	}
+	if len(prov.started) != 0 {
+		t.Fatalf("Start called %d times, want 0 (non-runtime env)", len(prov.started))
 	}
 }
 

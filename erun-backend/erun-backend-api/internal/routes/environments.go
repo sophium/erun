@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/provision"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
 type EnvironmentRepository interface {
@@ -14,6 +16,13 @@ type EnvironmentRepository interface {
 	Get(ctx context.Context, environmentID string) (model.Environment, error)
 	Create(ctx context.Context, environment model.Environment) (model.Environment, error)
 	Count(ctx context.Context) (int, error)
+}
+
+// EnvironmentProvisioner starts the durable server-side deploy of a
+// freshly-created environment. Optional: when nil, POST /v1/environments only
+// registers the row (no live deploy), matching the pre-executor behavior.
+type EnvironmentProvisioner interface {
+	Start(provision.EnvProvisionInput) error
 }
 
 // TenantQuotaRepository reports the caller's environment-count cap. When the
@@ -26,6 +35,12 @@ type TenantQuotaRepository interface {
 type EnvironmentRoutes struct {
 	environments EnvironmentRepository
 	quotas       TenantQuotaRepository
+	// tenants resolves the caller's tenant name (not UUID) for the deploy, which
+	// forms the <tenant>-<env> namespace and runtime release name.
+	tenants ConfigTenantRepository
+	// provisioner is nil when live env provisioning is not wired; then create
+	// only registers the row.
+	provisioner EnvironmentProvisioner
 }
 
 // createEnvironmentRequest carries only operator-authored fields; the tenant is
@@ -38,8 +53,8 @@ type createEnvironmentRequest struct {
 	RuntimeVersion    string `json:"runtimeVersion"`
 }
 
-func RegisterEnvironmentRoutes(register ProtectedRouteRegistrar, environments EnvironmentRepository, quotas TenantQuotaRepository) {
-	routes := EnvironmentRoutes{environments: environments, quotas: quotas}
+func RegisterEnvironmentRoutes(register ProtectedRouteRegistrar, environments EnvironmentRepository, quotas TenantQuotaRepository, tenants ConfigTenantRepository, provisioner EnvironmentProvisioner) {
+	routes := EnvironmentRoutes{environments: environments, quotas: quotas, tenants: tenants, provisioner: provisioner}
 	register(http.MethodGet, "/v1/environments", http.HandlerFunc(routes.listEnvironments))
 	register(http.MethodPost, "/v1/environments", http.HandlerFunc(routes.createEnvironment))
 	register(http.MethodGet, "/v1/environments/{environment_id}", http.HandlerFunc(routes.getEnvironment))
@@ -134,9 +149,42 @@ func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Re
 		return
 	}
 
-	// TODO(live): provision the <tenant>-<env> namespace and deploy the runtime
-	// chart server-side; needs a live cluster, so for now the row is only
-	// registered config, not a running environment.
+	// A runtime env with a pinned version deploys server-side: when a provisioner
+	// is wired, start the durable deploy and return 202 so the caller polls
+	// GET /v1/environments/{id} to running/failed. Otherwise (no provisioner, a
+	// non-runtime env, or no version to deploy) the row is only registered
+	// config (201).
+	if r.provisioner == nil || envType != model.EnvironmentTypeRuntime || created.RuntimeVersion == "" {
+		writeJSON(w, http.StatusCreated, created)
+		return
+	}
+	if err := r.startProvisioning(req.Context(), created); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start provisioning")
+		return
+	}
+	writeJSON(w, http.StatusAccepted, created)
+}
 
-	writeJSON(w, http.StatusCreated, created)
+// startProvisioning kicks off the durable deploy workflow for a runtime env. The
+// deploy needs the tenant name (RLS-scoped to the caller, so always the caller's
+// own) plus the request-scoped identity so the workflow's status writes rebind
+// to the right tenant.
+func (r EnvironmentRoutes) startProvisioning(ctx context.Context, created model.Environment) error {
+	tenant, err := r.tenants.Current(ctx)
+	if err != nil {
+		return err
+	}
+	securityContext, ok := security.FromContext(ctx)
+	if !ok {
+		return fmt.Errorf("missing security context")
+	}
+	return r.provisioner.Start(provision.EnvProvisionInput{
+		TenantID:      securityContext.TenantID,
+		TenantType:    securityContext.TenantType,
+		ErunUserID:    securityContext.ErunUserID,
+		EnvironmentID: created.EnvironmentID,
+		Tenant:        strings.TrimSpace(tenant.Name),
+		Environment:   created.Name,
+		Version:       created.RuntimeVersion,
+	})
 }
