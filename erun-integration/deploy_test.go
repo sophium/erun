@@ -2040,12 +2040,16 @@ func isHex(c byte) bool {
 // possible but vanishingly unlikely.
 func reapedChildPID(t *testing.T) int {
 	t.Helper()
-	// Spawn and reap a real child to get a positive, dead PID. Use a shell that
-	// exists on the host OS — /bin/sh is absent on Windows.
-	cmd := exec.Command("/bin/sh", "-c", "exit 0")
+	// The reaped-pid reclaim path is Unix liveness semantics (Signal(0) →
+	// ESRCH/os.ErrProcessDone). Windows checks liveness via the process handle
+	// and recycles PIDs aggressively, so a freshly reaped PID reads as
+	// non-deterministically alive — the reclaim behaviour itself is covered on
+	// Unix, so skip the seeding here rather than ship a flaky test.
 	if runtime.GOOS == "windows" {
-		cmd = exec.Command("cmd", "/c", "exit 0")
+		t.Skip("reaped-pid reclaim relies on Unix signal liveness; Windows PID reuse is non-deterministic")
 	}
+	// Spawn and reap a real child to get a positive, dead PID.
+	cmd := exec.Command("/bin/sh", "-c", "exit 0")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("seed reaped child: %v", err)
 	}

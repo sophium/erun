@@ -136,6 +136,12 @@ func Apply(s string, extra ...Replacement) string {
 // drive it on any host.
 func forwardSlashWindowsPaths(s string) string {
 	return windowsDrivePath.ReplaceAllStringFunc(s, func(m string) string {
-		return strings.ReplaceAll(m, `\`, "/")
+		m = strings.ReplaceAll(m, `\`, "/")
+		// A %q-quoted path arrives with escaped separators (C:\\Users\\...), which
+		// become // here; collapse runs to a single slash so the path matches the
+		// Unix golden. Safe within a drive path — it contains no :// URL.
+		return multiSlash.ReplaceAllString(m, "/")
 	})
 }
+
+var multiSlash = regexp.MustCompile(`/{2,}`)
