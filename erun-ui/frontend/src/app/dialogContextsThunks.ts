@@ -11,7 +11,13 @@ const refreshDialogRuntimeResources =
   async (dispatch, getState) => {
     const context = normalizeDialogValue(kubernetesContext);
     let dialog = getState().environmentDialog;
-    if (!dialog.open || !context) {
+    if (!dialog.open) {
+      return;
+    }
+    // No selected context → clear stale capacity rather than leaving a figure from
+    // a previously resolved context showing under an empty selection.
+    if (!context) {
+      dispatch(patchEnvironmentDialog({ resourceStatus: null, resourceStatusLoading: false }));
       return;
     }
     dispatch(

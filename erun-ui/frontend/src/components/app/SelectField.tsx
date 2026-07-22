@@ -64,7 +64,10 @@ export function SelectField({
           />
         </SelectTrigger>
         {!noOptions && (
-          <SelectContent>
+          // popper (not the default item-aligned) anchors the list to the trigger
+          // and flips/clamps with collision detection, so it never renders off the
+          // top of the dialog; collisionPadding keeps it clear of the window edges.
+          <SelectContent position="popper" collisionPadding={12}>
             {options.map((item) => (
               <SelectItem key={item.value} value={item.value} disabled={item.disabled}>
                 {item.label}

@@ -288,7 +288,14 @@ const refreshEnvironmentRuntimeResources =
     const request = getState().requestCounters.environmentDialogResourceStatus;
     const context = normalizeDialogValue(kubernetesContext);
     const dialog = getState().environmentDialog;
-    if (!dialog.open || !context) {
+    if (!dialog.open) {
+      return;
+    }
+    // No selected context → there is no cluster to measure. Clear any capacity
+    // fetched for a previously selected/auto-resolved context so the dialog never
+    // shows a stale "Available on best node" figure under an empty selection.
+    if (!context) {
+      dispatch(patchEnvironmentDialog({ resourceStatus: null, resourceStatusLoading: false }));
       return;
     }
     dispatch(
