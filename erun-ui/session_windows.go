@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"syscall"
@@ -29,9 +30,20 @@ func startTerminalSession(params startTerminalSessionParams) (terminalSession, e
 	}
 
 	env := append(os.Environ(), append(params.Env, "TERM=xterm-256color", "COLORTERM=truecolor")...)
-	args := append([]string{params.Executable}, params.Args...)
 
-	pid, _, err := ptyDevice.Spawn(params.Executable, args, &syscall.ProcAttr{
+	// ConPTY's Spawn resolves a non-absolute executable relative to attr.Dir
+	// rather than searching PATH, so a bare name like "powershell.exe" would be
+	// looked for in the session's start dir and fail with "the system cannot find
+	// the file specified". Resolve it on PATH to an absolute path first.
+	executable := params.Executable
+	if !filepath.IsAbs(executable) {
+		if resolved, lookErr := exec.LookPath(executable); lookErr == nil {
+			executable = resolved
+		}
+	}
+	args := append([]string{executable}, params.Args...)
+
+	pid, _, err := ptyDevice.Spawn(executable, args, &syscall.ProcAttr{
 		Dir: params.Dir,
 		Env: env,
 	})
