@@ -25,9 +25,15 @@ type remoteRepositorySpec struct {
 
 var codeCommitHostPattern = regexp.MustCompile(`^git-codecommit\.[a-z0-9-]+\.amazonaws\.com(?:\.cn)?$`)
 
-func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tenant, envName, kubernetesContext, projectRoot string) (ShellLaunchParams, remoteRepositorySpec, error) {
+func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tenant, envName, kubernetesContext, projectRoot string, registries ContainerRegistries) (ShellLaunchParams, remoteRepositorySpec, error) {
 	target := s.remoteRepositoryOpenResult(tenant, envName, kubernetesContext, projectRoot, params.ResolvedType())
 	target.EnvConfig.RuntimePod = NormalizeRuntimePodResources(params.RuntimePod)
+	// Carry the env's configured registries onto the deploy target so the
+	// init-time runtime deploy renders the same container registry (cluster or
+	// --container-registry) the standalone `erun deploy` does; without this the
+	// target's minimal EnvConfig had no registries and the deploy fell back to the
+	// default, so an in-pod build would target the wrong registry until a redeploy.
+	target.EnvConfig.ContainerRegistries = registries
 	req := ShellLaunchParamsFromResult(target)
 
 	if err := s.ensureRemoteRuntime(target, req, params.RuntimeVersion, params.RuntimeImage); err != nil {
@@ -149,6 +155,15 @@ func (s bootstrapRunner) ensureRemoteWorktree(req ShellLaunchParams, projectRoot
 func (s bootstrapRunner) ensureRemoteRuntime(target OpenResult, req ShellLaunchParams, runtimeVersion, runtimeImage string) error {
 	if runtimeImage = strings.TrimSpace(runtimeImage); runtimeImage != "" && runtimeImage != DevopsComponentName {
 		target.EnvConfig.RuntimeImage = runtimeImage
+	}
+	// Expand a cluster: registry to its concrete hosts (ClusterIP pull address +
+	// the insecure flag for the in-pod dind), exactly as the standalone deploy does
+	// in resolveDeploySpecForContext. The init deploy calls the published-chart spec
+	// directly and would otherwise pass the raw cluster block to the chart. No-op
+	// for envs without a cluster entry.
+	target, err := concretizeDeployTargetRegistries(s.Context, target)
+	if err != nil {
+		return err
 	}
 	spec, err := resolvePublishedDevopsDeploySpec(s.Context, target, runtimeVersion)
 	if err != nil {

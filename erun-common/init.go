@@ -788,12 +788,17 @@ func (s *bootstrapRunState) createEnvConfig() error {
 		RuntimePod:         NormalizeRuntimePodResources(s.params.RuntimePod),
 		DisableBuildScript: s.params.DisableBuildScript,
 		PlatformAccount:    s.params.PlatformAccount,
+		// Seed the registries into the FIRST persisted config. The init-time deploy
+		// (ensureDevopsAssets) reads the env config from disk before
+		// saveEnvConfigIfChanged runs, so registries set only in-memory here were
+		// ignored — the initial deploy fell back to the default registry even with
+		// --container-registry or --cluster-registry. Persisting them up front fixes
+		// that so the new env deploys to the configured registry from the start.
+		ContainerRegistries: seedInitContainerRegistries(s.params, containerRegistry),
 	}
 	if err := saveEnvConfig(s.runner.Store, s.tenant, s.envConfig); err != nil {
 		return err
 	}
-	s.envConfig.ContainerRegistries = seedInitContainerRegistries(s.params, containerRegistry)
-	s.envConfigChanged = s.params.ClusterRegistry != nil || (s.params.Remote && containerRegistry != "")
 	s.result.CreatedEnvConfig = true
 	return nil
 }
@@ -970,7 +975,7 @@ func (s *bootstrapRunState) ensureDevopsAssets() error {
 }
 
 func (s *bootstrapRunState) ensureRemoteDevopsAssets(projectRoot string) error {
-	req, repository, err := s.runner.ensureRemoteRepository(s.params, s.tenant, s.envName, s.envConfig.KubernetesContext, projectRoot)
+	req, repository, err := s.runner.ensureRemoteRepository(s.params, s.tenant, s.envName, s.envConfig.KubernetesContext, projectRoot, s.envConfig.ContainerRegistries)
 	if err != nil {
 		return err
 	}
