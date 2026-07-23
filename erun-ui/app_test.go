@@ -780,6 +780,25 @@ func TestBuildInitArgsClusterRegistryReplacesContainerRegistry(t *testing.T) {
 	}
 }
 
+func TestBuildLocalErunCommandForOSWindowsUsesPowerShell(t *testing.T) {
+	// The Windows local shell is PowerShell: the quoted exe must run via the call
+	// operator and the line must end with CR, or PSReadLine leaves it at ">>" and
+	// the piped init/deploy command never executes.
+	got := buildLocalErunCommandForOS("windows", `C:\erun-cli\bin\erun.exe`, []string{"init", "team", "dev", "--type=remote-agent"})
+	want := "& 'C:\\erun-cli\\bin\\erun.exe' init team dev --type=remote-agent\r"
+	if got != want {
+		t.Fatalf("windows command:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func TestBuildLocalErunCommandForOSUnixUsesPosix(t *testing.T) {
+	got := buildLocalErunCommandForOS("linux", "/usr/local/bin/erun", []string{"init", "team", "dev"})
+	want := "/usr/local/bin/erun init team dev\n"
+	if got != want {
+		t.Fatalf("unix command:\n got: %q\nwant: %q", got, want)
+	}
+}
+
 func TestResolveLocalShellCommandIgnoresPosixShellOnWindows(t *testing.T) {
 	// A Git Bash / MSYS $SHELL is a POSIX path ConPTY cannot launch; on Windows
 	// it must be ignored in favour of a PowerShell command, or starting the local

@@ -423,9 +423,27 @@ func (a *App) ensureLocalSession(selection uiSelection, slot, cols, rows int) (*
 }
 
 func buildLocalErunCommand(cliPath string, args []string) string {
+	return buildLocalErunCommandForOS(goruntime.GOOS, cliPath, args)
+}
+
+func buildLocalErunCommandForOS(goos, cliPath string, args []string) string {
 	cliPath = strings.TrimSpace(cliPath)
 	if cliPath == "" {
 		cliPath = "erun"
+	}
+	if goos == "windows" {
+		// The Windows local shell is PowerShell (see resolveLocalShellCommand), so
+		// the command must be PowerShell syntax: run the quoted exe via the call
+		// operator (&) — a quoted path alone is just a string literal — and submit
+		// with a carriage return. PSReadLine treats a bare LF as a line
+		// continuation, which left the piped command stuck at the ">>" prompt and
+		// never ran (so init/deploy/sshd/doctor silently did nothing).
+		parts := make([]string, 0, len(args)+2)
+		parts = append(parts, "&", powerShellQuoteIfNeeded(cliPath))
+		for _, arg := range args {
+			parts = append(parts, powerShellQuoteIfNeeded(arg))
+		}
+		return strings.Join(parts, " ") + "\r"
 	}
 	parts := make([]string, 0, len(args)+1)
 	parts = append(parts, shellQuoteIfNeeded(cliPath))
@@ -433,6 +451,22 @@ func buildLocalErunCommand(cliPath string, args []string) string {
 		parts = append(parts, shellQuoteIfNeeded(arg))
 	}
 	return strings.Join(parts, " ") + "\n"
+}
+
+// powerShellQuoteIfNeeded quotes value for PowerShell only when it contains a
+// character that isn't safe bare (matching shellQuoteIfNeeded's safe set), so
+// readable tokens like --type=remote-agent stay unquoted while paths with
+// backslashes/colons are single-quoted.
+func powerShellQuoteIfNeeded(value string) string {
+	if value == "" {
+		return "''"
+	}
+	for _, r := range value {
+		if !shellQuoteSafeRune(r) {
+			return powerShellQuote(value)
+		}
+	}
+	return value
 }
 
 func shellQuoteIfNeeded(value string) string {
