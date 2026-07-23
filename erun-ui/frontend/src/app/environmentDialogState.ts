@@ -43,7 +43,9 @@ export function missingRequiredFieldReason(dialog: EnvironmentDialogState): stri
   if (!values.kubernetesContext) {
     return 'Select a Kubernetes context.';
   }
-  if (!values.containerRegistry) {
+  // The in-cluster registry needs no host string — its addresses resolve from the
+  // kube-context — so a container registry is only required when not using it.
+  if (!dialog.useClusterRegistry && !values.containerRegistry) {
     return 'Select a container registry.';
   }
   return null;

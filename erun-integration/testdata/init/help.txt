@@ -4,6 +4,7 @@ Usage:
   erun init [TENANT] [ENVIRONMENT] [flags]
 
 Flags:
+      --cluster-registry               Use the in-cluster erun-registry (addresses resolved from the env's kube-context) instead of --container-registry; mutually exclusive with it
       --codecommit-ssh-key-id string   CodeCommit SSH public key ID to use for remote repository access
       --confirm-environment            Confirm environment initialization without prompting
       --container-registry string      Container registry to associate with the environment

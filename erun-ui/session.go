@@ -331,17 +331,25 @@ func buildInitArgs(selection uiSelection) []string {
 }
 
 func appendInitOptionalFlags(args []string, selection uiSelection) []string {
-	for _, pair := range []struct{ flag, value string }{
+	pairs := []struct{ flag, value string }{
 		{"--version", strings.TrimSpace(selection.Version)},
 		{"--runtime-image", strings.TrimSpace(selection.RuntimeImage)},
 		{"--runtime-cpu", strings.TrimSpace(selection.RuntimeCPU)},
 		{"--runtime-memory", strings.TrimSpace(selection.RuntimeMemory)},
 		{"--kubernetes-context", strings.TrimSpace(selection.KubernetesContext)},
-		{"--container-registry", strings.TrimSpace(selection.ContainerRegistry)},
-	} {
+	}
+	// The cluster registry and a static container registry are mutually exclusive
+	// (`erun init` rejects both); cluster wins when selected.
+	if !selection.ClusterRegistry {
+		pairs = append(pairs, struct{ flag, value string }{"--container-registry", strings.TrimSpace(selection.ContainerRegistry)})
+	}
+	for _, pair := range pairs {
 		if pair.value != "" {
 			args = append(args, pair.flag, pair.value)
 		}
+	}
+	if selection.ClusterRegistry {
+		args = append(args, "--cluster-registry")
 	}
 	return args
 }
