@@ -460,15 +460,24 @@ func resolveDeployStartDir(findProjectRoot eruncommon.ProjectFinderFunc, result 
 const defaultAITool = "claude"
 
 func resolveLocalShellCommand(goos string) (string, []string) {
+	if strings.TrimSpace(goos) == "windows" {
+		// ConPTY resolves a non-absolute executable relative to the session's
+		// start dir (not PATH), so a bare "powershell.exe" becomes
+		// "<startDir>\powershell.exe" and fails with "the system cannot find the
+		// file specified". Return an absolute shell path. $SHELL is ignored on
+		// Windows — it is typically a POSIX path from Git Bash that ConPTY cannot
+		// launch. Prefer PowerShell 7 (pwsh), fall back to Windows PowerShell.
+		for _, name := range []string{"pwsh.exe", "powershell.exe"} {
+			if resolved, err := exec.LookPath(name); err == nil {
+				return resolved, []string{"-NoLogo"}
+			}
+		}
+		return "powershell.exe", []string{"-NoLogo"}
+	}
 	if shell := strings.TrimSpace(os.Getenv("SHELL")); shell != "" {
 		return shell, nil
 	}
-	switch strings.TrimSpace(goos) {
-	case "windows":
-		return "powershell.exe", []string{"-NoLogo"}
-	default:
-		return "/bin/bash", nil
-	}
+	return "/bin/bash", nil
 }
 
 // claudeEffortLevels enumerates the selectable Claude effort levels in ascending

@@ -758,6 +758,28 @@ func TestBuildInitArgsIncludesRuntimeVersion(t *testing.T) {
 	}
 }
 
+func TestResolveLocalShellCommandIgnoresPosixShellOnWindows(t *testing.T) {
+	// A Git Bash / MSYS $SHELL is a POSIX path ConPTY cannot launch; on Windows
+	// it must be ignored in favour of a PowerShell command, or starting the local
+	// shell fails with "the system cannot find the file specified".
+	t.Setenv("SHELL", "/usr/bin/bash")
+	shell, args := resolveLocalShellCommand("windows")
+	if shell == "/usr/bin/bash" {
+		t.Fatalf("windows shell honored POSIX $SHELL: %q", shell)
+	}
+	lower := strings.ToLower(shell)
+	if !strings.Contains(lower, "powershell") && !strings.Contains(lower, "pwsh") {
+		t.Fatalf("windows shell = %q, want a powershell/pwsh command", shell)
+	}
+	if len(args) == 0 || args[0] != "-NoLogo" {
+		t.Fatalf("windows shell args = %v, want -NoLogo", args)
+	}
+	// A non-Windows host still honors an absolute $SHELL.
+	if got, _ := resolveLocalShellCommand("linux"); got != "/usr/bin/bash" {
+		t.Fatalf("unix shell = %q, want /usr/bin/bash from $SHELL", got)
+	}
+}
+
 func TestBuildInitArgsRespectsExplicitType(t *testing.T) {
 	got := buildInitArgs(uiSelection{
 		Tenant:        "erun",
