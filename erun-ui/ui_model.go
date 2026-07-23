@@ -69,7 +69,11 @@ type uiSelection struct {
 	RuntimeMemory     string `json:"runtimeMemory,omitempty"`
 	KubernetesContext string `json:"kubernetesContext,omitempty"`
 	ContainerRegistry string `json:"containerRegistry,omitempty"`
-	Type              string `json:"type,omitempty"`
+	// ClusterRegistry selects the in-cluster erun-registry (resolved from the
+	// env's kube-context) instead of the static ContainerRegistry string; the two
+	// are mutually exclusive and ClusterRegistry wins when set.
+	ClusterRegistry bool   `json:"clusterRegistry,omitempty"`
+	Type            string `json:"type,omitempty"`
 	LocalRepoPath     string `json:"localRepoPath,omitempty"`
 	NoGit             bool   `json:"noGit,omitempty"`
 	SetDefaultTenant  bool   `json:"setDefaultTenant,omitempty"`
@@ -328,6 +332,19 @@ type uiRuntimeResourceMetric struct {
 	Free      float64 `json:"free"`
 	Unit      string  `json:"unit"`
 	Formatted string  `json:"formatted"`
+}
+
+// uiClusterRegistryStatus reports whether the selected Kubernetes context has an
+// in-cluster erun-registry deployed, so the new-environment dialog can default to
+// a resolvable cluster: registry entry instead of a hardcoded host.
+type uiClusterRegistryStatus struct {
+	KubernetesContext string `json:"kubernetesContext"`
+	Deployed          bool   `json:"deployed"`
+	Service           string `json:"service,omitempty"`
+	Namespace         string `json:"namespace,omitempty"`
+	Port              int    `json:"port,omitempty"`
+	Insecure          bool   `json:"insecure"`
+	Message           string `json:"message,omitempty"`
 }
 
 type uiRuntimeResourceNode struct {

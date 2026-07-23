@@ -227,23 +227,61 @@ function EnvironmentNameFields({
 }
 
 function EnvironmentCreateFields({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
-  const dispatch = useAppDispatch();
-  const containerRegistrySuggestions = React.useMemo(
-    () =>
-      uniqueSuggestions([
-        dialog.containerRegistry,
-        ...loadSavedPastContainerRegistries(),
-        'erunpaas',
-      ]),
-    [dialog.containerRegistry],
-  );
-
   return (
     <>
       <EnvironmentTypeSelect dialog={dialog} />
       {dialog.envType === 'local-agent' && <LocalRepoPathField dialog={dialog} />}
       <KubernetesContextSelect dialog={dialog} />
       <RuntimePodFields dialog={dialog} />
+      <ContainerRegistryField dialog={dialog} />
+      <EnvironmentCreateChecks dialog={dialog} />
+    </>
+  );
+}
+
+// ContainerRegistryField offers the in-cluster erun-registry (resolved from the
+// selected Kubernetes context) as the default when one is detected, and falls
+// back to a free-text registry otherwise. There is no hardcoded default host —
+// the deployed cluster registry is the default, not a placeholder like erunpaas.
+function ContainerRegistryField({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
+  const dispatch = useAppDispatch();
+  const containerRegistrySuggestions = React.useMemo(
+    () => uniqueSuggestions([dialog.containerRegistry, ...loadSavedPastContainerRegistries()]),
+    [dialog.containerRegistry],
+  );
+  const cluster = dialog.clusterRegistry;
+  const clusterAvailable = cluster?.deployed === true;
+  const useCluster = clusterAvailable && dialog.useClusterRegistry;
+  const clusterToggle = clusterAvailable ? (
+    <label className="flex items-center gap-2 text-sm font-normal">
+      <Checkbox
+        id="environment-use-cluster-registry"
+        checked={dialog.useClusterRegistry}
+        disabled={dialog.busy}
+        onCheckedChange={(value) => {
+          dispatch(updateEnvironmentDialog({ useClusterRegistry: value === true }));
+        }}
+      />
+      Use in-cluster registry ({cluster.service ?? 'erun-registry'})
+    </label>
+  ) : null;
+
+  if (useCluster) {
+    return (
+      <div className="grid gap-2">
+        <Label htmlFor="environment-use-cluster-registry">Container registry</Label>
+        {clusterToggle}
+        <p className="text-[12px] leading-[1.4] text-muted-foreground">
+          Resolved from {cluster.service}.{cluster.namespace}:{cluster.port} via this
+          environment&apos;s Kubernetes context — pushed and pulled in-cluster, no host address
+          needed.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-2">
       <EditableComboField
         id="environment-container-registry"
         label="Container registry"
@@ -255,8 +293,8 @@ function EnvironmentCreateFields({ dialog }: { dialog: EnvironmentDialog }): Rea
           dispatch(updateEnvironmentDialog({ containerRegistry }));
         }}
       />
-      <EnvironmentCreateChecks dialog={dialog} />
-    </>
+      {clusterToggle}
+    </div>
   );
 }
 

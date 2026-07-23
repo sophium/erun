@@ -19,6 +19,7 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 	params := common.BootstrapInitParams{}
 	setDefaultTenant := false
 	confirmEnvironment := false
+	clusterRegistry := false
 	var envType string
 
 	cmd := &cobra.Command{
@@ -27,7 +28,7 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 		Args:         cobra.MaximumNArgs(2),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			runParams, err := initRunParams(cmd, args, params, setDefaultTenant, confirmEnvironment, envType)
+			runParams, err := initRunParams(cmd, args, params, setDefaultTenant, confirmEnvironment, clusterRegistry, envType)
 			if err != nil {
 				return err
 			}
@@ -44,6 +45,7 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 	cmd.Flags().StringVar(&params.RuntimePod.Memory, "runtime-memory", "", "Runtime pod memory limit")
 	cmd.Flags().StringVar(&params.KubernetesContext, "kubernetes-context", "", "Kubernetes context to associate with the environment")
 	cmd.Flags().StringVar(&params.ContainerRegistry, "container-registry", "", "Container registry to associate with the environment")
+	cmd.Flags().BoolVar(&clusterRegistry, "cluster-registry", false, "Use the in-cluster erun-registry (addresses resolved from the env's kube-context) instead of --container-registry; mutually exclusive with it")
 	cmd.Flags().StringVar(&params.CodeCommitSSHKeyID, "codecommit-ssh-key-id", "", "CodeCommit SSH public key ID to use for remote repository access")
 	cmd.Flags().BoolVar(&params.Bootstrap, "bootstrap", false, "Deprecated: ignored; remote runtimes deploy the published erun-devops chart")
 	_ = cmd.Flags().MarkDeprecated("bootstrap", "remote runtimes deploy the published erun-devops chart; the flag is ignored")
@@ -59,13 +61,21 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 	return cmd
 }
 
-func initRunParams(cmd *cobra.Command, args []string, params common.BootstrapInitParams, setDefaultTenant, confirmEnvironment bool, envType string) (common.BootstrapInitParams, error) {
+func initRunParams(cmd *cobra.Command, args []string, params common.BootstrapInitParams, setDefaultTenant, confirmEnvironment, clusterRegistry bool, envType string) (common.BootstrapInitParams, error) {
 	runParams := params
 	if runParams.Tenant == "" && len(args) > 0 {
 		runParams.Tenant = args[0]
 	}
 	if runParams.Environment == "" && len(args) > 1 {
 		runParams.Environment = args[1]
+	}
+	if clusterRegistry {
+		if strings.TrimSpace(runParams.ContainerRegistry) != "" {
+			return common.BootstrapInitParams{}, fmt.Errorf("--cluster-registry conflicts with --container-registry; pick one")
+		}
+		// The in-cluster erun-registry is plain HTTP, so mark it insecure; the
+		// rest (service/namespace/port) fill from the erun-registry convention.
+		runParams.ClusterRegistry = &common.ClusterRegistry{Insecure: true}
 	}
 	if err := applyInitTypeFlag(cmd, &runParams, envType); err != nil {
 		return common.BootstrapInitParams{}, err

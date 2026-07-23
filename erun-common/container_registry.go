@@ -381,6 +381,19 @@ func SingleContainerRegistries(registry string) ContainerRegistries {
 	}}
 }
 
+// ClusterContainerRegistries builds the one-entry list that seeds a new env from
+// an in-cluster registry (e.g. the erun-registry the local k3s setup deploys),
+// marked build+deploy. Its addresses resolve from the env's kube-context, so the
+// same entry works for an in-pod build (ClusterIP) and a host build (managed
+// port-forward) without hardcoding a host that only one of them can reach.
+func ClusterContainerRegistries(cluster ClusterRegistry) ContainerRegistries {
+	c := cluster.WithDefaults()
+	return ContainerRegistries{{
+		Cluster: &c,
+		Roles:   []RegistryRole{RegistryRoleBuild, RegistryRoleDeploy},
+	}}
+}
+
 // migrateLegacyContainerRegistry folds a legacy `containerregistry` scalar into
 // the marked list. The key is dropped on the next save, so the migration is
 // one-way.

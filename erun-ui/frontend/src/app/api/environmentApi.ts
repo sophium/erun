@@ -1,4 +1,5 @@
 import type {
+  UIClusterRegistryStatus,
   UIEnvironmentConfig,
   UIRuntimeResourceStatus,
   UISelection,
@@ -9,6 +10,7 @@ import {
   ChooseLocalRepoPath,
   ChooseWorkspaceSyncLocalFolder,
   DeleteEnvironment,
+  LoadClusterRegistry,
   LoadEnvironmentConfig,
   LoadRuntimeResourceStatus,
   LoadVersionSuggestions,
@@ -80,6 +82,12 @@ export const environmentApi = wailsApi.injectEndpoints({
     getRuntimeResourceStatus: builder.query<UIRuntimeResourceStatus, RuntimeResourceArgs>({
       queryFn: wailsQueryFn<RuntimeResourceArgs, UIRuntimeResourceStatus>((args) =>
         LoadRuntimeResourceStatus(args),
+      ),
+      providesTags: ['RuntimeResourceStatus'],
+    }),
+    getClusterRegistry: builder.query<UIClusterRegistryStatus, RuntimeResourceArgs>({
+      queryFn: wailsQueryFn<RuntimeResourceArgs, UIClusterRegistryStatus>((args) =>
+        LoadClusterRegistry(args),
       ),
       providesTags: ['RuntimeResourceStatus'],
     }),

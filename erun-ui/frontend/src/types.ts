@@ -85,6 +85,8 @@ export interface UISelection {
   runtimeMemory?: string;
   kubernetesContext?: string;
   containerRegistry?: string;
+  // Selects the in-cluster erun-registry instead of the containerRegistry string.
+  clusterRegistry?: boolean;
   // Bare string to match the Wails binding, which widens the Go EnvironmentType
   // alias; use the EnvironmentType union for narrowed dropdown values.
   type?: string;
@@ -515,6 +517,13 @@ export interface UIRuntimeResourceNode {
   name: string;
   cpu: UIRuntimeResourceMetric;
   memory: UIRuntimeResourceMetric;
+}
+
+export interface UIClusterRegistryStatus {
+  deployed: boolean;
+  service?: string;
+  namespace?: string;
+  port?: number;
 }
 
 export interface StartSessionResult {

@@ -758,6 +758,28 @@ func TestBuildInitArgsIncludesRuntimeVersion(t *testing.T) {
 	}
 }
 
+func TestBuildInitArgsClusterRegistryReplacesContainerRegistry(t *testing.T) {
+	got := buildInitArgs(uiSelection{
+		Tenant:            "erun",
+		Environment:       "remote",
+		KubernetesContext: "erun-k3s",
+		// ContainerRegistry is ignored when ClusterRegistry is selected; the two
+		// are mutually exclusive and cluster wins.
+		ContainerRegistry: "erunpaas",
+		ClusterRegistry:   true,
+		SetDefaultTenant:  true,
+	})
+	want := []string{"init", "erun", "remote", "--type=remote-agent", "--kubernetes-context", "erun-k3s", "--cluster-registry", "--set-default-tenant=true", "--confirm-environment=true"}
+	if len(got) != len(want) {
+		t.Fatalf("unexpected args length: got %+v want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("unexpected arg[%d]: got %q want %q", i, got[i], want[i])
+		}
+	}
+}
+
 func TestBuildInitArgsRespectsExplicitType(t *testing.T) {
 	got := buildInitArgs(uiSelection{
 		Tenant:        "erun",

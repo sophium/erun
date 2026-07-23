@@ -49,6 +49,7 @@ type erunUIDeps struct {
 	deleteNamespace        eruncommon.NamespaceDeleterFunc
 	listKubeContexts       func() ([]string, error)
 	loadResourceStatus     func(context.Context, uiRuntimeResourceInput) (uiRuntimeResourceStatus, error)
+	loadClusterRegistry    func(context.Context, uiRuntimeResourceInput) (uiClusterRegistryStatus, error)
 	ensureMCP              func(context.Context, eruncommon.OpenResult) error
 	reconnectMCP           func(context.Context, eruncommon.OpenResult, func(string)) error
 	ensureSSHD             func(context.Context, eruncommon.OpenResult) error
@@ -231,6 +232,9 @@ func withDefaultRuntimeDeps(deps erunUIDeps) erunUIDeps {
 	}
 	if deps.loadResourceStatus == nil {
 		deps.loadResourceStatus = loadRuntimeResourceStatus
+	}
+	if deps.loadClusterRegistry == nil {
+		deps.loadClusterRegistry = loadClusterRegistry
 	}
 	if deps.ensureMCP == nil {
 		deps.ensureMCP = func(ctx context.Context, result eruncommon.OpenResult) error {

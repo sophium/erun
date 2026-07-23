@@ -4,6 +4,7 @@ import type {
   ManageTab,
   UICloudContextInitInput,
   UICloudProviderStatus,
+  UIClusterRegistryStatus,
   UIDeployableComponent,
   UIEnvironmentConfig,
   UIERunConfig,
@@ -68,6 +69,12 @@ export interface EnvironmentDialogState {
     memory: string;
   };
   containerRegistry: string;
+  // clusterRegistry is the in-cluster erun-registry detected for the selected
+  // Kubernetes context (null when none / not yet resolved). When present and
+  // useClusterRegistry is set, the env is created with a resolvable cluster:
+  // registry entry instead of the containerRegistry string.
+  clusterRegistry: UIClusterRegistryStatus | null;
+  useClusterRegistry: boolean;
   envType: EnvironmentType;
   localRepoPath: string;
   noGit: boolean;
@@ -267,6 +274,8 @@ export const defaultEnvironmentDialog = (): EnvironmentDialogState => ({
   resourceStatusLoading: false,
   runtimePod: defaultRuntimePodConfig(),
   containerRegistry: '',
+  clusterRegistry: null,
+  useClusterRegistry: false,
   envType: 'remote-agent',
   localRepoPath: '',
   noGit: false,
