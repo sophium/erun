@@ -400,6 +400,14 @@ func resolveOpenRepoPath(envConfig EnvConfig) (string, error) {
 	if repoPath == "" {
 		return "", ErrRepoPathNotConfigured
 	}
+	// A remote/PVC-worktree env's repo path is a POSIX path inside the pod, not a
+	// host path. filepath.Clean would rewrite "/home/erun/..." to "\home\erun\..."
+	// on Windows, which then breaks the emitted `cd`/Set-Location (and any in-pod
+	// use). Normalize with forward-slash `path` for remote envs; only local-agent
+	// envs get the OS-native filepath.Clean.
+	if envConfig.RemoteWorktree() {
+		return path.Clean(repoPath), nil
+	}
 	return filepath.Clean(repoPath), nil
 }
 
