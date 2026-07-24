@@ -376,6 +376,7 @@ func extractRemoteWorkspaceFiles(ctx context.Context, hostAlias, remotePath, loc
 	script := fmt.Sprintf("cd %s && tar --null --ignore-failed-read -T - -cf -", shellQuote(remotePath))
 	sshCmd := exec.CommandContext(ctx, "ssh", workspaceSyncSSHArgs(hostAlias, script)...)
 	eruncommon.HideConsoleWindow(sshCmd)
+	eruncommon.BoundCommandWait(sshCmd)
 	sshCmd.Stdin = bytes.NewReader(encodeWorkspaceSyncPathList(paths))
 	sshStdout, err := sshCmd.StdoutPipe()
 	if err != nil {
@@ -386,6 +387,7 @@ func extractRemoteWorkspaceFiles(ctx context.Context, hostAlias, remotePath, loc
 
 	tarCmd := exec.CommandContext(ctx, "tar", "-xf", "-", "-C", localPath)
 	eruncommon.HideConsoleWindow(tarCmd)
+	eruncommon.BoundCommandWait(tarCmd)
 	tarCmd.Stdin = sshStdout
 	var tarStderr bytes.Buffer
 	tarCmd.Stderr = &tarStderr

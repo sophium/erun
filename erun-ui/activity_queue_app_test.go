@@ -507,6 +507,40 @@ func TestActivityTraceLineHandlerFinalizesPushOnFailure(t *testing.T) {
 	}
 }
 
+// TestActivityTraceLineHandlerIgnoresInitFromNonLocalSession guards the fix for
+// the deploy⇄reopen loop: a remote-agent `erun open` re-runs the remote-worktree
+// bootstrap and prints the init lifecycle ("==> Initializing" / "==> Initialized"),
+// but only the Local session that runs `erun init` may own it. Honoring it from an
+// open/ai session made the desktop fire a spurious deploy, which rolled the pod,
+// killed the open shell, respawned it, and re-emitted the line — an endless loop.
+func TestActivityTraceLineHandlerIgnoresInitFromNonLocalSession(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "erun", Environment: "local"}
+
+	openHandler := newActivityTraceLineHandler(app, selection, sessionKindOpen)
+	openHandler("==> Initializing erun/local")
+	openHandler("==> Initialized erun/local")
+	if _, ok := app.activityQueue.findActiveByCommand("init", "erun", "local"); ok {
+		t.Fatal("open-session init trace must not register an init activity")
+	}
+	if got := app.activityQueue.list(); len(got) != 0 {
+		t.Fatalf("open-session init trace must be display-only, got %+v", got)
+	}
+
+	aiHandler := newActivityTraceLineHandler(app, selection, sessionKindAI)
+	aiHandler("==> Initializing erun/local")
+	if got := app.activityQueue.list(); len(got) != 0 {
+		t.Fatalf("ai-session init trace must be display-only, got %+v", got)
+	}
+
+	// The Local session that actually runs `erun init` still owns the lifecycle.
+	localHandler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+	localHandler("==> Initializing erun/local")
+	if _, ok := app.activityQueue.findActiveByCommand("init", "erun", "local"); !ok {
+		t.Fatal("Local-session init trace must register an init activity")
+	}
+}
+
 func TestResolveActivityKubeContextFallsBackToEnvConfig(t *testing.T) {
 	// Without the env-config fallback, a selection-less Local tab emits an empty
 	// KubernetesContext and the container-status poller's kubectl hits the host's

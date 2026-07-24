@@ -1119,8 +1119,23 @@ func (a *App) handleSessionOutput(managed *managedTerminal, chunk []byte, lastOu
 // SIGWINCHes are not coalesced.
 var (
 	aiRepaintNudgeDelay  = 400 * time.Millisecond
-	aiRepaintNudgeSettle = 150 * time.Millisecond
+	aiRepaintNudgeSettle = defaultAIRepaintNudgeSettle()
 )
+
+// defaultAIRepaintNudgeSettle sizes the shrink-hold to the platform's resize
+// delivery. POSIX kubectl exec delivers the resize via SIGWINCH immediately, so
+// a short hold suffices. On Windows there is no SIGWINCH: kubectl exec -it POLLS
+// the terminal size (~250ms), so the shrink must be held past a poll interval or
+// the pod TTY never sees it — and then Claude, a main-screen TUI that only
+// repaints on a real geometry change, stays blank after a reattach until the
+// user types (verified: a held ConPTY resize does reach the pod TTY; a 150ms
+// blip does not).
+func defaultAIRepaintNudgeSettle() time.Duration {
+	if goruntime.GOOS == "windows" {
+		return 600 * time.Millisecond
+	}
+	return 150 * time.Millisecond
+}
 
 // aiAttachMarker is the window-title escape (OSC 0) the open bootstrap prints
 // immediately before `dtach -A` reattaches to the running program — the precise

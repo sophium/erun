@@ -582,7 +582,16 @@ func ExecShell(req ShellLaunchParams) error {
 		return err
 	}
 
-	cmd := Command("kubectl", kubectlExecArgs(req, script)...)
+	// The interactive shell needs kubectl's `exec -it` to allocate a TTY, which
+	// requires inheriting this process's console. Command() applies
+	// CREATE_NO_WINDOW (to stop background children of the windowless desktop app
+	// flashing a console) — but that detaches the child from the console, so
+	// kubectl reports "Unable to use a TTY", falls back to non-interactive, and
+	// the pod shell never renders a prompt (the env looks like it won't open).
+	// erun open already runs inside the ERun tab's ConPTY, so inheriting that
+	// console flashes nothing. Use newExecCommand to keep the ERUN_KUBECTL_BIN
+	// test seam without the console-detaching flag.
+	cmd := newExecCommand("kubectl", kubectlExecArgs(req, script)...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

@@ -12,14 +12,25 @@ test.describe('sidebar', () => {
   });
 
   test('opening an environment surfaces status feedback', async ({ app, page }) => {
-    await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
-    // The opening status can surface in either the titlebar banner or a busy
-    // overlay depending on busy state, so assert the text appears anywhere
-    // rather than scoping to one surface.
+    // The opening status is inherently transient — it lives only for the open
+    // itself (a few hundred ms): the titlebar "Opening …" message clears the
+    // instant the session's first output lands, and the sidebar row's busy
+    // spinner (role=status, its aria-label naming the env) clears when the open
+    // settles. Start asserting CONCURRENTLY with the click rather than after it —
+    // awaiting the click first can consume the whole window on a fast open and
+    // race the feedback away. Match either surface so it is deterministic across
+    // hosts; the spinner's wording varies ("Opening …" before the open action
+    // starts running, "Working on …" once it is), so match it by the env name.
+    const target = `${SEED_TENANT} / ${SEED_ENV_ALPHA}`;
+    const opening = app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
     await expect(
-      page.getByText(`Opening ${SEED_TENANT} / ${SEED_ENV_ALPHA}`, { exact: false }),
+      page
+        .getByText(`Opening ${target}`, { exact: false })
+        .or(page.locator(`[role="status"][aria-label*="${target}"]`))
+        .first(),
     ).toBeVisible({
       timeout: 15_000,
     });
+    await opening;
   });
 });

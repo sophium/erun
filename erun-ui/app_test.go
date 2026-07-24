@@ -4098,6 +4098,15 @@ func (s *stubTerminalSession) Pid() int {
 	return 0
 }
 
+func (s *stubTerminalSession) Alive() bool {
+	select {
+	case <-s.closeCh:
+		return false
+	default:
+		return true
+	}
+}
+
 func (s *stubTerminalSession) Close() error {
 	select {
 	case <-s.closeCh:

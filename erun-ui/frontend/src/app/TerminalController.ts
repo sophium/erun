@@ -5,7 +5,7 @@ import { noop } from '@/lib/utils';
 import type { TerminalExitPayload, TerminalOutputPayload } from '@/types';
 
 import { ResizeSession, SendSessionInput } from '../../wailsjs/go/main/App';
-import { EventsOn } from '../../wailsjs/runtime/runtime';
+import { ClipboardGetText, ClipboardSetText, EventsOn } from '../../wailsjs/runtime/runtime';
 import { sessionApi } from './api/sessionApi';
 import { boot, reloadStateAfterEnvironmentChange } from './bootThunks';
 import { decodeBase64Bytes, fileToBase64, isTerminalPasteTarget, pastedFiles } from './clipboard';
@@ -96,6 +96,7 @@ export class TerminalController {
   private aiActivityOff: (() => void) | null = null;
   private envStatusOff: (() => void) | null = null;
   private pasteHandler: ((event: ClipboardEvent) => void) | null = null;
+  private contextMenuHandler: ((event: MouseEvent) => void) | null = null;
   // When the active session ends in "main screen + cursor hidden" with no
   // further output, restore the cursor so an unmatched hide leaked by
   // `erun open`, helm, kubectl, or a remote-side spinner doesn't strand the
@@ -196,6 +197,44 @@ export class TerminalController {
     this.fitAddon.fit();
     this.publishTerminalDims();
 
+    // Paste on Windows: the WebView2 embedding does not deliver the browser
+    // paste event to xterm's hidden textarea, so Ctrl+V / right-click did
+    // nothing. Intercept the paste keys and read the OS clipboard through the
+    // Wails runtime (reliable, unlike the paste event), then feed it via xterm's
+    // paste path. preventDefault stops the browser also firing a (dead) paste
+    // event. Ctrl+Shift+V and Shift+Insert are accepted as common alternates.
+    this.terminal.attachCustomKeyEventHandler((event: KeyboardEvent): boolean => {
+      if (event.type !== 'keydown') {
+        return true;
+      }
+      const key = event.key.toLowerCase();
+      const isPaste =
+        (event.ctrlKey && !event.altKey && !event.shiftKey && key === 'v') ||
+        (event.ctrlKey && event.shiftKey && !event.altKey && key === 'v') ||
+        (event.shiftKey && !event.ctrlKey && !event.altKey && event.key === 'Insert');
+      if (isPaste) {
+        event.preventDefault();
+        void this.pasteFromClipboard();
+        return false;
+      }
+      // Copy: Ctrl+Shift+C always copies the selection; Ctrl+C copies only when
+      // there is a selection (matching Windows Terminal) and otherwise falls
+      // through so the shell still receives ^C to interrupt.
+      if (event.ctrlKey && !event.altKey && key === 'c') {
+        if (event.shiftKey || this.terminal?.hasSelection()) {
+          if (this.copySelection()) {
+            event.preventDefault();
+            return false;
+          }
+          if (event.shiftKey) {
+            return false;
+          }
+        }
+        return true;
+      }
+      return true;
+    });
+
     this.terminalQueryResponseDisposables = registerTerminalQueryResponseHandlers(
       this.terminal,
       // Reply to the session whose output xterm is parsing right now, not the
@@ -223,6 +262,19 @@ export class TerminalController {
       });
     };
     elements.terminalRoot.addEventListener('paste', this.pasteHandler, true);
+
+    // Right-click copies the selection if there is one, otherwise pastes
+    // (matching Windows Terminal), using the Wails runtime clipboard rather than
+    // the unreliable browser paste event.
+    this.contextMenuHandler = (event: MouseEvent) => {
+      event.preventDefault();
+      if (this.terminal?.hasSelection()) {
+        this.copySelection();
+      } else {
+        void this.pasteFromClipboard();
+      }
+    };
+    elements.terminalRoot.addEventListener('contextmenu', this.contextMenuHandler);
 
     this.resizeObserver = new ResizeObserver(() => {
       this.queueTerminalResize();
@@ -285,6 +337,9 @@ export class TerminalController {
     this.stopReviewDiffRefresh();
     if (this.pasteHandler && this.terminalRoot) {
       this.terminalRoot.removeEventListener('paste', this.pasteHandler, true);
+    }
+    if (this.contextMenuHandler && this.terminalRoot) {
+      this.terminalRoot.removeEventListener('contextmenu', this.contextMenuHandler);
     }
     this.terminalQueryResponseDisposables = [];
     this.terminal?.dispose();
@@ -514,6 +569,37 @@ export class TerminalController {
     this.reviewDiffRefreshTimer = window.setTimeout(callback, delay);
   }
 
+  // pasteFromClipboard reads the OS clipboard via the Wails runtime and feeds it
+  // through xterm's paste path (bracketed-paste aware) -> onData -> the session.
+  // Used by the Ctrl+V / Shift+Insert key handler and right-click, because the
+  // WebView2 embedding does not deliver the browser paste event to xterm.
+  // copySelection writes the terminal's current selection to the OS clipboard
+  // via the Wails runtime and clears it. Returns false when there is nothing
+  // selected, so the caller can fall through (e.g. let Ctrl+C interrupt).
+  private copySelection(): boolean {
+    const text = this.terminal?.getSelection() ?? '';
+    if (!text) {
+      return false;
+    }
+    void ClipboardSetText(text).catch((error: unknown) => {
+      store.dispatch(showTerminalMessage(readError(error)));
+    });
+    this.terminal?.clearSelection();
+    return true;
+  }
+
+  private async pasteFromClipboard(): Promise<void> {
+    try {
+      const text = await ClipboardGetText();
+      if (text) {
+        this.terminal?.paste(text);
+        this.focusTerminalSoon();
+      }
+    } catch (error: unknown) {
+      store.dispatch(showTerminalMessage(readError(error)));
+    }
+  }
+
   private async handleTerminalPaste(event: ClipboardEvent): Promise<void> {
     if (!this.terminalRoot || !isTerminalPasteTarget(this.terminalRoot, event.target)) {
       return;
@@ -521,6 +607,19 @@ export class TerminalController {
 
     const files = pastedFiles(event);
     if (files.length === 0) {
+      // Text paste. In the WebView2 (Windows) embedding the paste does not
+      // reach xterm's hidden textarea, so relying on xterm's own paste made
+      // Ctrl+V / right-click paste silently do nothing. Read the text off the
+      // paste event ourselves and feed it through xterm's paste path
+      // (bracketed-paste aware) -> onData -> the session. stopImmediatePropagation
+      // keeps xterm from also handling it and double-pasting where it does work.
+      const text = event.clipboardData?.getData('text/plain') ?? '';
+      if (text) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        this.terminal?.paste(text);
+        this.focusTerminalSoon();
+      }
       return;
     }
 

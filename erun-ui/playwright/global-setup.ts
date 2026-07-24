@@ -1,4 +1,4 @@
-import { createK3dCluster } from './fixtures/k3dCluster.js';
+import { createK3dCluster, e2eRealClusterContext, useExistingCluster } from './fixtures/k3dCluster.js';
 import {
   createIsolatedLayout,
   e2eK3dEnabled,
@@ -12,7 +12,14 @@ export default function globalSetup(): void {
   createIsolatedLayout();
   if (e2eK3dEnabled()) {
     seedBaselineForK3d();
-    createK3dCluster();
+    const realCtx = e2eRealClusterContext();
+    if (realCtx !== '') {
+      // Drive the developer's already-running cluster (erun-k3s) rather than a
+      // fresh k3d one — the create→deploy loop only reproduces there.
+      useExistingCluster(realCtx);
+    } else {
+      createK3dCluster();
+    }
     return;
   }
   seedBaseline();

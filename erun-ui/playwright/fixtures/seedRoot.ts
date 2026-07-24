@@ -1,6 +1,13 @@
+import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+
+// Windows CreateProcess cannot exec a "#!/bin/sh" file or a .cmd/.bat batch
+// file, so the backend (and every erun/shell child it spawns) needs real PE
+// stubs on PATH. On win32 the stubs are <name>.exe built from fixtures/winstub;
+// on POSIX they stay extensionless shell scripts. See writeStubBinary.
+const isWindows = process.platform === 'win32';
 
 // seedRoot owns the suite's isolated config root: the headless backend and
 // every `erun` child it spawns run against a throwaway HOME under this root, so
@@ -59,6 +66,33 @@ function stubsDir(): string {
   return path.join(isolatedRoot(), 'stubs');
 }
 
+// stubBinPath is the on-disk path of a stub tool. On Windows the backend
+// resolves and execs a real PE (LookPath honours PATHEXT), so stubs carry a
+// .exe extension; POSIX stubs are extensionless shell scripts.
+function stubBinPath(name: string): string {
+  return path.join(stubsDir(), isWindows ? `${name}.exe` : name);
+}
+
+// winStubBinary builds the fixtures/winstub multi-call PE once per run and
+// caches it inside the stub dir; writeStubBinary copies it per tool name.
+let winStubBuilt: string | undefined;
+function winStubBinary(): string {
+  if (winStubBuilt) {
+    return winStubBuilt;
+  }
+  const out = path.join(stubsDir(), '_winstub.exe');
+  const src = path.join(__dirname, 'winstub');
+  // GOWORK=off so a stray erun-ui/go.work (workspace mode) cannot shadow this
+  // nested module — build strictly against fixtures/winstub/go.mod.
+  execFileSync('go', ['build', '-o', out, '.'], {
+    cwd: src,
+    stdio: 'inherit',
+    env: { ...process.env, GOWORK: 'off' },
+  });
+  winStubBuilt = out;
+  return out;
+}
+
 function repoDir(): string {
   return path.join(isolatedRoot(), 'repo');
 }
@@ -104,7 +138,7 @@ export function backendEnv(): Record<string, string> {
       KUBECONFIG: kubeconfigPath(),
       // Route erun-common's aws calls to the stub explicitly, independent of
       // PATH order.
-      ERUN_AWS_BIN: path.join(stubsDir(), 'aws'),
+      ERUN_AWS_BIN: stubBinPath('aws'),
       ERUN_APP_CLI: process.env.ERUN_E2E_ERUN_BIN ?? 'erun',
     };
   }
@@ -116,7 +150,7 @@ export function backendEnv(): Record<string, string> {
     // erun-cli/bin/erun next to the app binary (a dev build artifact) before
     // falling back to PATH, which makes the env-open specs loop red on a
     // developer machine that has that artifact. This seam pins the stub.
-    ERUN_APP_CLI: path.join(stubsDir(), 'erun'),
+    ERUN_APP_CLI: stubBinPath('erun'),
     // Pin which component charts are "published" per version so the Runtime
     // tab's version-aware Components checklist is deterministic offline (the
     // real path probes the registry). 1.0.0 (the seeded runtime env's version)
@@ -177,6 +211,87 @@ export function seedEnvironmentForK3d(
   );
 }
 
+// seedRuntimeForK3d writes a k3d env that installs the published erun-devops
+// runtime BY REFERENCE from ghcr (pinned runtimeversion, no local build): the
+// fast create -> deploy -> open path that reproduces the post-init redeploy
+// loop (#…) without the multi-minute multi-arch build the builds-here e2e pays.
+// The ghcr runtime image + chart are public, so a fresh k3d cluster pulls them
+// with no credentials.
+export function seedRuntimeForK3d(tenant: string, environment: string, context: string): void {
+  const envDir = path.join(erunConfigDir(), tenant, environment);
+  fs.mkdirSync(envDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(envDir, 'config.yaml'),
+    `name: ${environment}\n` +
+      `repopath: ${repoDir()}\n` +
+      `kubernetescontext: ${context}\n` +
+      'type: runtime\n' +
+      'runtimeversion: 1.0.149\n' +
+      'runtimeimage: ghcr.io/sophium/erun-devops\n' +
+      'containerregistry: ghcr.io/sophium\n' +
+      'aitool: sh\n',
+  );
+}
+
+// seedRemoteAgentForK3d seeds the env type that exhibited the redeploy loop in
+// the field: a remote-agent (remote-worktree) env installing the published
+// runtime by reference from ghcr. It diverges from the runtime env only in
+// `type`, so a loop here vs. a clean single-deploy for seedRuntimeForK3d
+// isolates the loop to the remote-agent open path. The worktree is an (empty,
+// init-populated) PVC — no in-pod git clone — so the pod deploys Ready without
+// the SSH/worktree setup the create flow's `erun init` normally does.
+export function seedRemoteAgentForK3d(tenant: string, environment: string, context: string): void {
+  const envDir = path.join(erunConfigDir(), tenant, environment);
+  fs.mkdirSync(envDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(envDir, 'config.yaml'),
+    `name: ${environment}\n` +
+      `repopath: ${repoDir()}\n` +
+      `kubernetescontext: ${context}\n` +
+      'type: remote-agent\n' +
+      'runtimeversion: 1.0.149\n' +
+      'runtimeimage: ghcr.io/sophium/erun-devops\n' +
+      'containerregistry: ghcr.io/sophium\n' +
+      'aitool: sh\n',
+  );
+}
+
+// seedGitRemoteAgentForK3d mirrors EXACTLY the config a real desktop git
+// remote-agent create writes (captured from a live erun-k3s env): the load-bearing
+// difference from seedRemoteAgentForK3d is `localrepopath` (the remote-worktree /
+// git-checkout path) plus the persisted runtimeregistry and cluster registry. This
+// lets a spec reproduce the git-create redeploy loop WITHOUT the per-env SSH-key
+// import that blocks automation — the SSH wait only gates `erun init`; the loop is
+// in the post-init deploy→open cycle, which this config exercises.
+export function seedGitRemoteAgentForK3d(tenant: string, environment: string, context: string): void {
+  const envDir = path.join(erunConfigDir(), tenant, environment);
+  fs.mkdirSync(envDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(envDir, 'config.yaml'),
+    `name: ${environment}\n` +
+      'type: remote-agent\n' +
+      `localrepopath: /home/erun/git/${tenant}\n` +
+      `repopath: ${repoDir()}\n` +
+      `kubernetescontext: ${context}\n` +
+      'runtimeversion: 1.0.149\n' +
+      'runtimeregistry: ghcr.io/sophium\n' +
+      'containerregistries:\n' +
+      '    - cluster:\n' +
+      '        service: erun-registry\n' +
+      '        namespace: kube-system\n' +
+      '        port: 5000\n' +
+      '        insecure: true\n' +
+      '      roles:\n' +
+      '        - build\n' +
+      '        - deploy\n' +
+      'runtimeimage: ghcr.io/sophium/erun-devops\n' +
+      'runtimepod:\n' +
+      '    cpu: "1"\n' +
+      '    memory: 4096Mi\n' +
+      'aitool: sh\n',
+  );
+}
+
 // writeStubBinary writes an inert POSIX stub.
 //
 // - erun: the desktop's ERun/AI tabs run `erun open …` from PATH. The real
@@ -191,6 +306,13 @@ export function seedEnvironmentForK3d(
 //   dialog's deterministic empty state) and reports everything else as
 //   unreachable.
 function writeStubBinary(name: string): void {
+  if (isWindows) {
+    // CreateProcess cannot exec a shell script or a .cmd/.bat file, so copy the
+    // prebuilt PE multi-call stub to <name>.exe. It dispatches on its own base
+    // name — keep its behaviour in lockstep with the POSIX bodies below.
+    fs.copyFileSync(winStubBinary(), stubBinPath(name));
+    return;
+  }
   let body: string;
   if (name === 'erun') {
     body = [
@@ -361,7 +483,37 @@ export function removeIsolatedRoot(): void {
   if (!root || !path.basename(root).startsWith('erun-playwright-home')) {
     return;
   }
-  fs.rmSync(root, { recursive: true, force: true });
+  if (isWindows) {
+    // A ConPTY stub/shell child spawned with its cwd inside the root (or a
+    // still-blocking erun.exe stub from a session the app has not torn down yet)
+    // keeps an OS handle on the tree, and Windows refuses to delete a directory
+    // with open handles. Kill anything whose image lives under the isolated
+    // stubs dir first so the delete below can succeed.
+    try {
+      const like = `${root.replace(/\\/g, '\\\\')}%`;
+      execFileSync(
+        'powershell',
+        [
+          '-NoProfile',
+          '-Command',
+          `Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -like '${like}' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`,
+        ],
+        { stdio: 'ignore' },
+      );
+    } catch {
+      // best effort — the retry/tolerate below is the real backstop
+    }
+  }
+  try {
+    // maxRetries/retryDelay ride out a transient EPERM/EBUSY while a just-killed
+    // handle is released (Windows).
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  } catch (err) {
+    // The root is a throwaway dir under the OS temp dir; run.sh's EXIT trap and
+    // OS temp reclamation are the backstops. A cleanup that loses a race with a
+    // not-yet-torn-down session must not fail an otherwise-green run.
+    console.warn(`removeIsolatedRoot: could not fully remove ${root}: ${(err as Error).message}`);
+  }
 }
 
 // uniqueEnvironmentName derives a per-test env name from the spec title so

@@ -1604,7 +1604,7 @@ func newHelmDeploySpecWithValues(target OpenResult, deployContext KubernetesDepl
 		CloudProviderAlias:  target.EnvConfig.CloudProviderAlias,
 		ContainerRegistry:   containerRegistry,
 		InsecureRegistry:    insecureRegistry,
-		RuntimeRegistry:     strings.TrimSpace(target.EnvConfig.RuntimeRegistry),
+		RuntimeRegistry:     resolveRuntimeRegistry(target.EnvConfig),
 		ContainerRegistries: containerRegistries,
 		Platform:            resolveProjectPlatform(target.RepoPath),
 		DisableBuildScript:  target.EnvConfig.DisableBuildScript,

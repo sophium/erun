@@ -22,6 +22,12 @@ type terminalSession interface {
 	// detector uses it to decide whether a session whose Wait hasn't returned
 	// is still alive.
 	Pid() int
+	// Alive reports whether the backing process is still running. It must not
+	// depend on OpenProcess/os.FindProcess: on locked-down Windows an endpoint
+	// security agent denies OpenProcess, which would make a live shell look dead
+	// and surface a false "shell exited unexpectedly". Implementations use the
+	// process handle they already hold (Windows) or a signal-0 probe (POSIX).
+	Alive() bool
 }
 
 type startTerminalSessionParams struct {
@@ -219,6 +225,7 @@ func ensureMCPViaOpenCommand(ctx context.Context, cliPath string, result eruncom
 	args := buildOpenNoShellArgs(result.Tenant, result.Environment)
 	cmd := exec.CommandContext(ctx, cliPath, args...)
 	eruncommon.HideConsoleWindow(cmd)
+	eruncommon.BoundCommandWait(cmd)
 	cmd.Env = append(os.Environ(), "ERUN_IDLE_PROBE=1")
 	output, err := cmd.CombinedOutput()
 	if err == nil {
@@ -239,6 +246,7 @@ func runOpenForReconnect(ctx context.Context, cliPath string, result eruncommon.
 	args := buildOpenNoShellArgs(result.Tenant, result.Environment)
 	cmd := exec.CommandContext(ctx, cliPath, args...)
 	eruncommon.HideConsoleWindow(cmd)
+	eruncommon.BoundCommandWait(cmd)
 	cmd.Env = append(os.Environ(), "ERUN_IDLE_PROBE=1")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -291,6 +299,7 @@ func ensureSSHDViaOpenCommand(ctx context.Context, cliPath string, result erunco
 	args := buildOpenNoShellArgs(result.Tenant, result.Environment)
 	cmd := exec.CommandContext(ctx, cliPath, args...)
 	eruncommon.HideConsoleWindow(cmd)
+	eruncommon.BoundCommandWait(cmd)
 	cmd.Env = append(os.Environ(), "ERUN_IDLE_PROBE=1")
 	output, err := cmd.CombinedOutput()
 	if err == nil {

@@ -293,6 +293,17 @@ func publishedDevopsChartRegistry(target OpenResult) string {
 	if registry := strings.TrimSpace(target.EnvConfig.RuntimeRegistry); registry != "" {
 		return registry
 	}
+	// The published erun-devops runtime chart and its platform images (erun-devops,
+	// erun-mcp, erun-dind, …) are released together to the runtime image's registry
+	// (e.g. ghcr.io/sophium), NOT to the env's deploy registry. When the env pins a
+	// runtimeimage that carries a registry, resolve the chart from there. This is the
+	// difference between a `--cluster-registry` env — whose deploy registry is the
+	// in-cluster erun-registry holding the tenant's built app images, never the erun
+	// platform — deploying successfully vs. resolving the chart to a registry that
+	// never held it (a chart-pull / ImagePullBackOff failure at every init).
+	if registry := runtimeImageRegistry(target.EnvConfig.RuntimeImage); registry != "" {
+		return registry
+	}
 	if registry, ok := target.EnvConfig.ContainerRegistries.DeployRegistry(); ok {
 		return registry
 	}
@@ -300,6 +311,35 @@ func publishedDevopsChartRegistry(target OpenResult) string {
 		return registry
 	}
 	return DefaultContainerRegistry
+}
+
+// runtimeImageRegistry returns the registry prefix (host and any org path) of a
+// runtime image reference, or "" when the reference is a bare image name with no
+// registry. The image name and any tag/digest live in the segment after the last
+// "/", so everything before it is the registry — e.g. ghcr.io/sophium/erun-devops
+// and ghcr.io/sophium/erun-devops:1.0.149 both yield ghcr.io/sophium, while a bare
+// "erun-devops" yields "".
+func runtimeImageRegistry(runtimeImage string) string {
+	ref := strings.TrimSpace(runtimeImage)
+	lastSlash := strings.LastIndex(ref, "/")
+	if lastSlash < 0 {
+		return ""
+	}
+	return ref[:lastSlash]
+}
+
+// resolveRuntimeRegistry is the registry projected into the runtime pod as
+// RUNTIME_REGISTRY (nested in-pod image resolution). Prefer the persisted
+// runtimeregistry, but when it is empty fall back to the runtime image's own
+// registry — the same precedence publishedDevopsChartRegistry uses — so a mirror
+// env (runtimeimage on a private mirror, runtimeregistry not yet persisted on
+// first deploy) resolves in-pod images to the mirror instead of defaulting to
+// ghcr.io/sophium.
+func resolveRuntimeRegistry(cfg EnvConfig) string {
+	if r := strings.TrimSpace(cfg.RuntimeRegistry); r != "" {
+		return r
+	}
+	return runtimeImageRegistry(cfg.RuntimeImage)
 }
 
 // PublishedChartNotFoundError reports that the published runtime chart a remote

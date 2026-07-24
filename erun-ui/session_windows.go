@@ -95,6 +95,23 @@ func (s *windowsTerminalSession) Pid() int {
 	return s.pid
 }
 
+// Alive checks the CreateProcess handle we already hold via GetExitCodeProcess,
+// so it never calls OpenProcess (which an EDR denies on locked-down machines,
+// see the handle comment above). STILL_ACTIVE (259) means the shell is running;
+// any real exit code means it has ended. If the query itself fails we assume
+// alive rather than falsely flag a live shell as exited.
+func (s *windowsTerminalSession) Alive() bool {
+	if s == nil || s.handle == 0 {
+		return false
+	}
+	const stillActive = 259 // STILL_ACTIVE
+	var code uint32
+	if err := syscall.GetExitCodeProcess(s.handle, &code); err != nil {
+		return true
+	}
+	return code == stillActive
+}
+
 func (s *windowsTerminalSession) Wait() error {
 	if s == nil {
 		return nil
