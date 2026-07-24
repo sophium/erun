@@ -668,6 +668,8 @@ func (a *App) DeleteEnvironment(selection uiSelection, confirmation string) (del
 		return deleteEnvironmentResult{}, err
 	}
 
+	// A later re-create of this env must fire environment-initialized again.
+	a.clearInitEmitted(selection.Tenant, selection.Environment)
 	result, err := eruncommon.RunDeleteEnvironment(eruncommon.Context{}, eruncommon.DeleteEnvironmentParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,

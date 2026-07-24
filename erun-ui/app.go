@@ -106,6 +106,14 @@ type App struct {
 	envEnsureInflight         map[string]struct{}
 	envEnsureDone             map[string]time.Time
 	envEnsureFailNotified     map[string]struct{}
+	// initEmitted dedups the environment-initialized signal per env. `erun init`
+	// emits "==> Initialized" once, but on Windows a ConPTY repaint (triggered by
+	// writing the follow-up deploy command into the same Local shell) re-sends the
+	// buffered line as fresh output, so the trace scanner would re-fire the event —
+	// each re-fire composes another deploy, whose write repaints again: an endless
+	// create→deploy loop. Fire at most once per env; reset on init-failure/delete.
+	initEmittedMu             sync.Mutex
+	initEmitted               map[string]struct{}
 	configWatcher             *configWatcher
 	contribute                *contributeStore
 	contributeApps            *contributeAppForwards

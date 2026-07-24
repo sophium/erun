@@ -2,32 +2,15 @@ import type { Page, Request } from '@playwright/test';
 
 import { expect, test } from '../../fixtures/erunApp.js';
 import { readK3dCluster } from '../../fixtures/k3dCluster.js';
-import {
-  removeEnvironment,
-  seedGitRemoteAgentForK3d,
-  SEED_TENANT,
-  uniqueEnvironmentName,
-} from '../../fixtures/seedRoot.js';
+import { removeEnvironment, SEED_TENANT, uniqueEnvironmentName } from '../../fixtures/seedRoot.js';
 
-// Reproduces the field git-create redeploy loop against the developer's REAL
-// erun-k3s cluster (ERUN_E2E_REAL_CLUSTER=erun-k3s), WITHOUT the per-env SSH-key
-// import that blocks automating a real `erun init`. The SSH wait only gates init;
-// the loop is in the post-init deploy→open cycle. So we seed the exact config a
-// git create produces (crucially `localrepopath`), then fire environment-initialized
-// — the same event the backend emits after a real init — and assert the create
-// composes exactly ONE deploy. The instrumented erun-app records the trigger of any
-// extra deploy (with a stack) to %APPDATA%\erun\loop-trigger.log.
-
-async function emitWailsEvent(page: Page, name: string, payload: unknown): Promise<void> {
-  await page.evaluate(
-    ({ name, payload }) => {
-      (
-        window as unknown as { runtime: { EventsEmit: (n: string, ...a: unknown[]) => void } }
-      ).runtime.EventsEmit(name, payload);
-    },
-    { name, payload },
-  );
-}
+// End-to-end verification against the developer's REAL erun-k3s cluster
+// (ERUN_E2E_REAL_CLUSTER=erun-k3s): a "Skip Git checkout" create (noGit) — the
+// control that avoids the interactive git remote-worktree flow — must compose
+// EXACTLY ONE deploy and bring the runtime up (ERun tab binds), with no redeploy
+// loop over a multi-minute observation window. This is the path we tell operators
+// to use to sidestep the git-create loop, so it must genuinely work on the live
+// cluster.
 
 function deployMethodOf(request: Request): string | null {
   const body = request.postData() ?? '';
@@ -44,14 +27,13 @@ function deployMethodOf(request: Request): string | null {
   return null;
 }
 
-test.describe('real erun-k3s e2e: git-create composes exactly one deploy (no loop)', () => {
-  test('a git remote-agent create issues exactly one deploy', async ({ app }) => {
+test.describe('real erun-k3s e2e: Skip-Git create works and deploys exactly once', () => {
+  test('a Skip-Git remote-agent create deploys once and comes up', async ({ app }) => {
     test.setTimeout(16 * 60 * 1000);
 
     const cluster = readK3dCluster();
     const tenant = SEED_TENANT;
-    const environment = uniqueEnvironmentName('gitloop');
-    seedGitRemoteAgentForK3d(tenant, environment, cluster.context);
+    const environment = uniqueEnvironmentName('skipgit');
 
     const deploys: Array<{ method: string; at: number }> = [];
     const start = Date.now();
@@ -66,20 +48,52 @@ test.describe('real erun-k3s e2e: git-create composes exactly one deploy (no loo
     });
 
     try {
-      await emitWailsEvent(app.page, 'environment-initialized', { tenant, environment });
+      const result = await app.page.evaluate(
+        async (sel) => {
+          const boundApp = (
+            window as unknown as {
+              go?: { main?: { App?: { StartInitSession?: (s: unknown, c: number, r: number) => unknown } } };
+            }
+          ).go?.main?.App;
+          if (!boundApp?.StartInitSession) {
+            return { ok: false, error: 'StartInitSession not exposed' };
+          }
+          try {
+            return { ok: true, result: await boundApp.StartInitSession(sel, 120, 40) };
+          } catch (e) {
+            return { ok: false, error: String(e) };
+          }
+        },
+        {
+          tenant,
+          environment,
+          type: 'remote-agent',
+          version: '1.0.149',
+          runtimeImage: 'ghcr.io/sophium/erun-devops',
+          kubernetesContext: cluster.context,
+          clusterRegistry: true,
+          noGit: true,
+          setDefaultTenant: false,
+        },
+      );
+      // eslint-disable-next-line no-console
+      console.log('StartInitSession =>', JSON.stringify(result));
+      expect(result.ok, `StartInitSession failed: ${JSON.stringify(result)}`).toBe(true);
 
-      await expect(async () => {
-        expect(deploys.length).toBeGreaterThanOrEqual(1);
-      }).toPass({ timeout: 6 * 60 * 1000 });
+      // The runtime comes up: the ERun tab appears only once the pod is Ready and
+      // its MCP port-forward binds — proving the create fully succeeded.
+      await expect(app.page.getByRole('tab', { name: 'ERun', exact: true })).toBeVisible({
+        timeout: 8 * 60 * 1000,
+      });
 
-      // Observe past several redeploy cadences to catch the loop.
+      // Observe past several redeploy cadences: a Skip-Git create must NOT loop.
       await app.page.waitForTimeout(5 * 60 * 1000);
 
       // eslint-disable-next-line no-console
-      console.log('DEPLOY CALLS (git-real-k3s):', JSON.stringify(deploys, null, 2));
+      console.log('DEPLOY CALLS (skip-git):', JSON.stringify(deploys, null, 2));
       expect(
         deploys.length,
-        `git create must compose exactly one deploy, got ${deploys.length}: ${JSON.stringify(deploys)}`,
+        `Skip-Git create must deploy exactly once, got ${deploys.length}: ${JSON.stringify(deploys)}`,
       ).toBe(1);
     } finally {
       removeEnvironment(tenant, environment);

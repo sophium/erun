@@ -541,6 +541,36 @@ func TestActivityTraceLineHandlerIgnoresInitFromNonLocalSession(t *testing.T) {
 	}
 }
 
+// TestEmitEnvironmentInitializedFiresOncePerEnv guards the create→deploy loop
+// fix: a Windows ConPTY repaint re-sends the "==> Initialized" trace as fresh
+// output, so the event must fire at most once per env (each re-fire composed
+// another deploy, an endless loop), and reset for a re-create.
+func TestEmitEnvironmentInitializedFiresOncePerEnv(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	emits := newCapturedEmits()
+	app.SetEmitter(emits.fn())
+
+	app.emitEnvironmentInitialized("frs", "dev")
+	app.emitEnvironmentInitialized("frs", "dev")
+	app.emitEnvironmentInitialized("frs", "dev")
+	if got := len(emits.events(environmentInitializedEvent)); got != 1 {
+		t.Fatalf("environment-initialized fired %d times for one env, want 1 (repaints must not re-fire)", got)
+	}
+
+	// A different env is independent.
+	app.emitEnvironmentInitialized("frs", "other")
+	if got := len(emits.events(environmentInitializedEvent)); got != 2 {
+		t.Fatalf("distinct env total = %d, want 2", got)
+	}
+
+	// Delete/failure resets, so a legitimate re-create fires again.
+	app.clearInitEmitted("frs", "dev")
+	app.emitEnvironmentInitialized("frs", "dev")
+	if got := len(emits.events(environmentInitializedEvent)); got != 3 {
+		t.Fatalf("re-create after reset total = %d, want 3", got)
+	}
+}
+
 func TestResolveActivityKubeContextFallsBackToEnvConfig(t *testing.T) {
 	// Without the env-config fallback, a selection-less Local tab emits an empty
 	// KubernetesContext and the container-status poller's kubectl hits the host's
