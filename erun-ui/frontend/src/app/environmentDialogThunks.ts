@@ -52,7 +52,9 @@ export const openInitializeDialog = (): AppThunk => (dispatch, getState) => {
       envType: 'remote-agent',
       localRepoPath: '',
       noGit: false,
-      setDefaultTenant: true,
+      // Don't pre-check "set as default tenant": creating an environment should
+      // not silently repoint the operator's default tenant. They can opt in.
+      setDefaultTenant: false,
       versionImage: state.tenants.versionSuggestions[0]?.image ?? '',
       choicesOpen: false,
       busy: false,

@@ -276,4 +276,27 @@ test.describe('environment init dialog', () => {
     await app.envInitDialog.cancel();
     await app.envInitDialog.waitForClosed();
   });
+
+  test('does not pre-check default-tenant and offers a skip-Git-checkout option', async ({
+    app,
+    page,
+  }) => {
+    await app.sidebar.openInitDialog();
+    await app.envInitDialog.waitForOpen();
+
+    // "Set as default tenant" is OFF by default — creating an environment must not
+    // silently repoint the operator's default tenant.
+    await expect(page.locator('#environment-default-tenant')).not.toBeChecked();
+
+    // A remote-agent (the default type) offers skipping the Git checkout, off by
+    // default and toggleable — the way to create without the remote-worktree flow.
+    const skipGit = page.locator('#environment-no-git');
+    await expect(skipGit).toBeVisible();
+    await expect(skipGit).not.toBeChecked();
+    await skipGit.click();
+    await expect(skipGit).toBeChecked();
+
+    await app.envInitDialog.cancel();
+    await app.envInitDialog.waitForClosed();
+  });
 });

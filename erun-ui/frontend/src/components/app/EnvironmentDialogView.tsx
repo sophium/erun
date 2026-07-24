@@ -323,6 +323,7 @@ function EnvironmentCreateChecks({ dialog }: { dialog: EnvironmentDialog }): Rea
       <CheckboxField
         id="environment-default-tenant"
         label="Set as default tenant"
+        helper="Off by default — creating an environment won't repoint your default tenant unless you opt in."
         checked={dialog.setDefaultTenant}
         disabled={dialog.busy}
         onCheckedChange={(setDefaultTenant) => {
@@ -332,7 +333,8 @@ function EnvironmentCreateChecks({ dialog }: { dialog: EnvironmentDialog }): Rea
       {!isLocalAgent && (
         <CheckboxField
           id="environment-no-git"
-          label="Initialize without Git checkout"
+          label="Skip Git checkout"
+          helper="Create the environment without cloning a Git repo into it — skips the SSH-key import and remote-worktree setup."
           checked={dialog.noGit}
           disabled={dialog.busy}
           onCheckedChange={(noGit) => {
