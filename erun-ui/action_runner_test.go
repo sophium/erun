@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -26,7 +27,12 @@ func TestRunnerSerializesSameEnv(t *testing.T) {
 	gate := make(chan struct{})
 	for i := 0; i < 3; i++ {
 		i := i
+		// Distinct ids keep the three same-env actions from collapsing onto one
+		// entry: the auto-generated id embeds time.Now().UnixNano(), and the coarse
+		// Windows clock returns the same value for these rapid enqueues, so the
+		// in-flight-duplicate dedup would otherwise drop actions 1 and 2.
 		_, err := app.enqueueDesktopAction(desktopAction{
+			id:        fmt.Sprintf("serialize-%d", i),
 			kind:      "open",
 			selection: uiSelection{Tenant: "erun", Environment: "local"},
 			run: func(ctx context.Context) error {

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"sync"
@@ -77,6 +78,17 @@ func (s *unixTerminalSession) Pid() int {
 		return 0
 	}
 	return s.cmd.Process.Pid
+}
+
+// Alive probes the process with signal 0. POSIX has no EDR OpenProcess block,
+// so a signal-0 send is a reliable liveness check: nil means running, ESRCH
+// means gone. Any other error (e.g. EPERM) means the process exists.
+func (s *unixTerminalSession) Alive() bool {
+	if s == nil || s.cmd == nil || s.cmd.Process == nil {
+		return false
+	}
+	err := s.cmd.Process.Signal(syscall.Signal(0))
+	return !errors.Is(err, syscall.ESRCH)
 }
 
 func (s *unixTerminalSession) Close() error {

@@ -14,6 +14,20 @@ export const selectEnvironmentExists = (
       ?.environments.some((env) => env.name === environment),
   );
 
+// selectEnvironmentType returns the env's declared type (local-agent /
+// remote-agent / runtime), or undefined if the env is not in state. The create
+// flow uses it to decide whether `erun init` already deployed the runtime
+// (remote-worktree envs) or the desktop must still compose the deploy
+// (local-agent, which init does not deploy).
+export const selectEnvironmentType = (
+  state: RootState,
+  tenant: string,
+  environment: string,
+): string | undefined =>
+  state.tenants.tenants
+    .find((entry) => entry.name === tenant)
+    ?.environments.find((env) => env.name === environment)?.type;
+
 export const selectSelectedIsPendingFor = (
   state: RootState,
   tenant: string,
@@ -77,11 +91,18 @@ export const selectManageRuntimeImage = (state: RootState, version: string): str
   return suggestion?.image ?? '';
 };
 
-// selectDialogKubernetesContext picks the env-dialog k8s context to display.
+// selectDialogKubernetesContext resolves the env-dialog's k8s context across a
+// context-list (re)load: it PRESERVES a still-valid prior selection, but must NOT
+// auto-pick a context the user never chose. Auto-picking contexts[0] made the
+// dialog fetch and display "Available on best node" capacity for a cluster the
+// user hadn't selected — while the submit gate still (correctly) required one,
+// so the panel showed capacity with the context dropdown on its placeholder.
+// Return empty when there is no valid current selection so capacity stays hidden
+// until the user picks a context (and the fetch is skipped entirely).
 export const selectDialogKubernetesContext = (state: RootState, contexts: string[]): string => {
   const current = normalizeDialogValue(state.environmentDialog.kubernetesContext);
   if (current && contexts.includes(current)) {
     return current;
   }
-  return contexts[0] ?? '';
+  return '';
 };

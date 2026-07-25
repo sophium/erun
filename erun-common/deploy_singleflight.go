@@ -364,7 +364,14 @@ func isProcessAlive(pid int) bool {
 	}
 	proc, err := os.FindProcess(pid)
 	if err != nil {
-		return false
+		// Can't determine liveness. On Windows os.FindProcess calls OpenProcess,
+		// which an endpoint-security agent denies — returning "dead" here would
+		// make a LIVE concurrent deploy look finished and silently defeat the
+		// single-flight guard, so rapid/duplicate deploys stop being deduped.
+		// Assume alive instead; a genuinely-crashed marker is still reclaimed by
+		// the max-age fallback in reconcileExistingInflightMarker. (Unix
+		// FindProcess never errors, so this path is Windows-only in practice.)
+		return true
 	}
 	signalErr := proc.Signal(syscall.Signal(0))
 	if signalErr == nil {

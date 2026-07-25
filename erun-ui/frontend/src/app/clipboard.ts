@@ -5,6 +5,45 @@ export function isTerminalPasteTarget(
   return target instanceof Node && terminalRoot.contains(target);
 }
 
+export type TerminalClipboardIntent = 'paste' | 'copy' | 'none';
+
+// Ctrl+V, Ctrl+Shift+V, and Shift+Insert paste; each requires exactly those
+// modifiers (no stray Alt/Ctrl/Shift), matching Windows Terminal.
+const PASTE_CHORDS = new Set(['ctrl+v', 'ctrl+shift+v', 'shift+Insert']);
+
+// Canonical modifier+key signature (modifiers in a fixed order) so paste chords
+// can be matched by lookup instead of a wall of boolean combinations.
+function keyChord(event: KeyboardEvent): string {
+  const parts: string[] = [];
+  if (event.ctrlKey) {
+    parts.push('ctrl');
+  }
+  if (event.shiftKey) {
+    parts.push('shift');
+  }
+  if (event.altKey) {
+    parts.push('alt');
+  }
+  parts.push(event.key.length === 1 ? event.key.toLowerCase() : event.key);
+  return parts.join('+');
+}
+
+// Classifies a terminal keydown into a clipboard intent. Copy is Ctrl+C or
+// Ctrl+Shift+C (never with Alt); the caller decides whether a copy actually
+// happens based on the current selection so Ctrl+C can still fall through to ^C.
+export function classifyTerminalClipboardKey(event: KeyboardEvent): TerminalClipboardIntent {
+  if (event.type !== 'keydown') {
+    return 'none';
+  }
+  if (PASTE_CHORDS.has(keyChord(event))) {
+    return 'paste';
+  }
+  if (event.ctrlKey && !event.altKey && event.key.toLowerCase() === 'c') {
+    return 'copy';
+  }
+  return 'none';
+}
+
 // pastedFiles returns clipboard files for upload; plain-text paste is left to
 // the terminal's own paste path, and files with no MIME type are still returned
 // because their name carries the extension the backend uses for the remote name.

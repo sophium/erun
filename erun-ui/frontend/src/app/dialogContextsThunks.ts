@@ -11,7 +11,13 @@ const refreshDialogRuntimeResources =
   async (dispatch, getState) => {
     const context = normalizeDialogValue(kubernetesContext);
     let dialog = getState().environmentDialog;
-    if (!dialog.open || !context) {
+    if (!dialog.open) {
+      return;
+    }
+    // No selected context → clear stale capacity rather than leaving a figure from
+    // a previously resolved context showing under an empty selection.
+    if (!context) {
+      dispatch(patchEnvironmentDialog({ resourceStatus: null, resourceStatusLoading: false }));
       return;
     }
     dispatch(
@@ -60,6 +66,48 @@ const refreshDialogRuntimeResources =
     }
   };
 
+// refreshDialogClusterRegistry detects the in-cluster erun-registry for the
+// selected context and defaults the dialog to using it. Cleared when no context
+// is selected or none is deployed, so the container-registry choice always
+// matches the selected cluster.
+export const refreshDialogClusterRegistry =
+  (kubernetesContext: string): AppThunk<Promise<void>> =>
+  async (dispatch, getState) => {
+    const context = normalizeDialogValue(kubernetesContext);
+    if (!getState().environmentDialog.open) {
+      return;
+    }
+    if (!context) {
+      dispatch(patchEnvironmentDialog({ clusterRegistry: null, useClusterRegistry: false }));
+      return;
+    }
+    try {
+      const status = await dispatch(
+        environmentApi.endpoints.getClusterRegistry.initiate(
+          { kubernetesContext: context },
+          { forceRefetch: true },
+        ),
+      ).unwrap();
+      if (!getState().environmentDialog.open) {
+        return;
+      }
+      const deployed = status.deployed;
+      dispatch(
+        patchEnvironmentDialog({
+          clusterRegistry: deployed ? status : null,
+          // Default to the in-cluster registry whenever one is detected for the
+          // chosen context; the user can still opt out to a static registry.
+          useClusterRegistry: deployed,
+        }),
+      );
+    } catch {
+      if (!getState().environmentDialog.open) {
+        return;
+      }
+      dispatch(patchEnvironmentDialog({ clusterRegistry: null, useClusterRegistry: false }));
+    }
+  };
+
 // forceRefetch is required: without it RTK Query pins the previous
 // (possibly transient-empty) context list to the dialog, so Rescan can
 // never recover after a kubeconfig change.
@@ -85,6 +133,7 @@ export const refreshKubernetesContexts =
         }),
       );
       await dispatch(refreshDialogRuntimeResources(resolved));
+      await dispatch(refreshDialogClusterRegistry(resolved));
     } catch (error) {
       const dialog = getState().environmentDialog;
       if (!dialog.open) {
@@ -95,6 +144,8 @@ export const refreshKubernetesContexts =
           kubernetesContexts: [],
           kubernetesContext: '',
           kubernetesContextsLoading: false,
+          clusterRegistry: null,
+          useClusterRegistry: false,
           error: readError(error),
         }),
       );

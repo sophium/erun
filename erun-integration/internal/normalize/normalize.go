@@ -44,6 +44,11 @@ var defaultRules = []Replacement{
 	// (no drive letter), so existing macOS/Linux goldens are unaffected.
 	{regexp.MustCompile(`(?i)[A-Za-z]:[\\/](?:[^\\/\s'"]+[\\/])*?temp[\\/][^\s'"]*?[\\/]\.erun[\\/]terraform`), "<STATE_ROOT>"},
 	{regexp.MustCompile(`(?i)[A-Za-z]:[\\/](?:[^\\/\s'"]+[\\/])*?temp[\\/][^\s'"]*`), "<TMP>"},
+	// A local-agent env's host worktree renders through the WSL2 mount view of a
+	// Windows temp dir (C:\...\Temp\... -> /mnt/<drive>/.../Temp/...). Collapse it
+	// here, before the /Users and /home rules below would carve the drive prefix
+	// off. Inert on macOS/Linux output, which carries no /mnt/<drive> worktree.
+	{regexp.MustCompile(`(?i)/mnt/[a-z]/(?:[^/\s'"]+/)*?temp/[^\s'"]*`), "<TMP>"},
 	// Windows home dir. Before the Unix /Users rule below, so C:/Users/<user>
 	// (after backslash canonicalization) collapses whole rather than leaving the
 	// drive prefix. Inert on Unix output.
@@ -69,9 +74,16 @@ var defaultRules = []Replacement{
 	// Safety net for a real home path that leaks despite the test HOME override.
 	{regexp.MustCompile(`/Users/[^/\s'"]+`), "<HOME>"},
 	{regexp.MustCompile(`/home/[^/\s'"]+`), "<HOME>"},
-	// Drop the Windows executable suffix so a traced binary name matches the Unix
-	// golden (erun-app.exe -> erun-app). Inert on Unix output, which has no .exe.
-	{regexp.MustCompile(`\.exe\b`), ""},
+	// Drop the Windows executable suffix from a launched erun binary so the trace
+	// matches the Unix golden (erun-app.exe -> erun-app). Anchored to line start
+	// (optionally after the command-quote a -vv trace adds) because that is where
+	// erun prints the executable it invokes — resolveAppExecutable is the only
+	// place erun appends a host .exe. A ".exe" anywhere else on a line is literal
+	// data that must survive: a Scoop manifest's `"erun.exe"` bin entries and its
+	// `\erun.exe` build path, or a `bin must include erun-app.exe` validation
+	// message, are identical on every host and are not host-suffix noise. Inert on
+	// Unix output, which has no .exe.
+	{regexp.MustCompile(`(?m)^('?)(erun-app|erun|emcp|eapi)\.exe\b`), "${1}${2}"},
 	// A failed exec of a missing path reads differently per platform — Unix
 	// `fork/exec <TMP> no such file or directory`, Windows `exec: "<TMP>":
 	// executable file not found in %PATH%` — so collapse either whole message to
@@ -90,13 +102,21 @@ var defaultRules = []Replacement{
 var windowsDrivePath = regexp.MustCompile(`[A-Za-z]:\\[^\s'"]*`)
 
 // PromptConfirm normalizes output containing a promptui "[Y/n]" confirm.
-// readline repaints the confirm line an unpredictable number of times (and,
-// under the slower coverage-instrumented binary, leaks partial fragments), so
-// the prompt render is not a stable contract; it drops the repaint frames and
-// keeps the deterministic remainder. It runs the default rules first, so use it
-// in place of Apply, not alongside it.
+// readline repaints the confirm line an unpredictable number of times, so the
+// prompt render is not a stable contract; this drops every repaint frame that
+// still shows the [Y/n] prompt or the █ cursor and dedups the rest, leaving the
+// one settled render (label plus the typed answer) and the deterministic
+// remainder. Runs the default rules first, so use it in place of Apply, not
+// alongside it.
+//
+// This relies on the confirm owning its output stream: a second writer racing
+// the same stream (as the open alias flow's stdout eval-script write once did)
+// interleaves mid-redraw and leaves marker-less corrupted fragments this cannot
+// recognize. Prompts that share a stream with other output must route the
+// confirm elsewhere at the source (see cmd.confirmPromptTo) rather than lean on
+// this to reconstruct the race.
 func PromptConfirm(s string) string {
-	s = strings.ReplaceAll(Apply(s), "\r", "")
+	s = applyBackspaces(strings.ReplaceAll(Apply(s), "\r", ""))
 	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
 	out := make([]string, 0, len(lines))
 	for _, line := range lines {
@@ -150,3 +170,27 @@ func forwardSlashWindowsPaths(s string) string {
 }
 
 var multiSlash = regexp.MustCompile(`/{2,}`)
+
+// backspacePair matches a printable character immediately followed by a
+// backspace, the byte pair a terminal renders as "erase the previous glyph".
+var backspacePair = regexp.MustCompile("[^\n\x08]\x08")
+
+// applyBackspaces resolves ASCII backspaces (\x08) the way a terminal would, so
+// a confirm repaint that readline draws as "<answer>\b<label>…" collapses to the
+// clean "<label>…" it leaves on screen. Windows readline emits these erase
+// sequences where the unix build does not, and they leak into the piped capture
+// as a spurious "<answer>…" fragment line; resolving them here keeps PromptConfirm
+// deterministic across hosts instead of locking one terminal's repaint bytes.
+func applyBackspaces(s string) string {
+	if !strings.ContainsRune(s, '\x08') {
+		return s
+	}
+	for {
+		next := backspacePair.ReplaceAllString(s, "")
+		if next == s {
+			// Any backspace with nothing left to erase is itself dropped.
+			return strings.ReplaceAll(next, "\x08", "")
+		}
+		s = next
+	}
+}

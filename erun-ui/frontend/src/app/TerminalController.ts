@@ -6,9 +6,8 @@ import type { TerminalExitPayload, TerminalOutputPayload } from '@/types';
 
 import { ResizeSession, SendSessionInput } from '../../wailsjs/go/main/App';
 import { EventsOn } from '../../wailsjs/runtime/runtime';
-import { sessionApi } from './api/sessionApi';
 import { boot, reloadStateAfterEnvironmentChange } from './bootThunks';
-import { decodeBase64Bytes, fileToBase64, isTerminalPasteTarget, pastedFiles } from './clipboard';
+import { decodeBase64Bytes } from './clipboard';
 import { readError } from './errors';
 import { refreshIdleStatus } from './idleThunks';
 import type {
@@ -24,15 +23,6 @@ import type {
 import { showTerminalMessage } from './notificationThunks';
 import { scrollSelectedTreeNodeIntoView, visibleDiffPath } from './reviewDiffNavigation';
 import { setSelectedDiffPath } from './slices/reviewSlice';
-import {
-  computeMaxReviewWidth,
-  MAX_DEBUG_HEIGHT,
-  MAX_FILES_WIDTH,
-  MIN_DEBUG_HEIGHT,
-  MIN_FILES_WIDTH,
-  MIN_REVIEW_WIDTH,
-} from './state';
-import { clamp } from './storage';
 import { store } from './store';
 import {
   bufferCursorVisibility,
@@ -41,6 +31,8 @@ import {
   scanCursorVisibility,
   SHOW_CURSOR_SEQUENCE,
 } from './terminalBuffers';
+import { TerminalClipboard } from './terminalClipboard';
+import { applyTerminalLayoutVars } from './terminalLayoutVars';
 import { registerTerminalQueryResponseHandlers } from './terminalQueryResponses';
 import { TerminalSessionRegistry } from './TerminalSessionRegistry';
 import { decodeTerminalOutput } from './terminalStatus';
@@ -96,6 +88,7 @@ export class TerminalController {
   private aiActivityOff: (() => void) | null = null;
   private envStatusOff: (() => void) | null = null;
   private pasteHandler: ((event: ClipboardEvent) => void) | null = null;
+  private contextMenuHandler: ((event: MouseEvent) => void) | null = null;
   // When the active session ends in "main screen + cursor hidden" with no
   // further output, restore the cursor so an unmatched hide leaked by
   // `erun open`, helm, kubectl, or a remote-side spinner doesn't strand the
@@ -103,6 +96,13 @@ export class TerminalController {
   private liveCursorState: CursorVisibilityState = { altScreen: false, cursorHidden: false };
   private cursorRestoreTimer = 0;
   private static readonly CURSOR_RESTORE_DELAY_MS = 250;
+  private readonly clipboard = new TerminalClipboard({
+    getTerminal: () => this.terminal,
+    getTerminalRoot: () => this.terminalRoot,
+    focusTerminalSoon: () => {
+      this.focusTerminalSoon();
+    },
+  });
 
   constructor() {
     thunkExtra.controller = this;
@@ -166,6 +166,54 @@ export class TerminalController {
     );
   }
 
+  private subscribeWailsEvents(): void {
+    this.terminalOutputOff = EventsOn('terminal-output', (payload: TerminalOutputPayload) => {
+      this.handleTerminalOutput(payload);
+    });
+    this.terminalExitOff = EventsOn('terminal-exit', (payload: TerminalExitPayload) => {
+      void store.dispatch(handleTerminalExit(payload));
+    });
+    this.appStatusOff = EventsOn('app-status', (payload: AppStatusPayload) => {
+      store.dispatch(handleAppStatus(payload));
+    });
+    this.appNotificationOff = EventsOn('app-notification', (payload: AppNotificationPayload) => {
+      store.dispatch(handleAppNotification(payload));
+    });
+    this.reconnectLineOff = EventsOn('mcp-reconnect-line', (line: string) => {
+      store.dispatch(handleReconnectLine(line));
+    });
+    this.subscribeEnvironmentLifecycleEvents();
+    this.environmentsChangedOff = EventsOn('environments-changed', () => {
+      void store.dispatch(reloadStateAfterEnvironmentChange());
+    });
+    this.aiActivityOff = EventsOn('ai-activity', (payload: AIActivityPayload) => {
+      store.dispatch(handleAIActivity(payload));
+    });
+    this.envStatusOff = EventsOn('env-status', (payload: EnvStatusPayload) => {
+      store.dispatch(handleEnvStatus(payload));
+    });
+  }
+
+  // Wires the OS-clipboard copy/paste handlers: the WebView2 embedding does not
+  // deliver the browser paste event to xterm, so Ctrl+V / right-click / paste
+  // route through TerminalClipboard, which reads the OS clipboard via the Wails
+  // runtime and feeds it through xterm's paste path.
+  private installClipboardHandlers(root: HTMLDivElement): void {
+    this.terminal?.attachCustomKeyEventHandler((event: KeyboardEvent): boolean =>
+      this.clipboard.handleKeyEvent(event),
+    );
+    this.pasteHandler = (event: ClipboardEvent) => {
+      void this.clipboard.handlePaste(event).catch((error: unknown) => {
+        store.dispatch(showTerminalMessage(readError(error)));
+      });
+    };
+    root.addEventListener('paste', this.pasteHandler, true);
+    this.contextMenuHandler = (event: MouseEvent) => {
+      this.clipboard.handleContextMenu(event);
+    };
+    root.addEventListener('contextmenu', this.contextMenuHandler);
+  }
+
   mount(elements: MountElements): () => void {
     this.terminalRoot = elements.terminalRoot;
     this._terminalPane = elements.terminalPane;
@@ -196,6 +244,8 @@ export class TerminalController {
     this.fitAddon.fit();
     this.publishTerminalDims();
 
+    this.installClipboardHandlers(elements.terminalRoot);
+
     this.terminalQueryResponseDisposables = registerTerminalQueryResponseHandlers(
       this.terminal,
       // Reply to the session whose output xterm is parsing right now, not the
@@ -217,44 +267,13 @@ export class TerminalController {
       });
     });
 
-    this.pasteHandler = (event: ClipboardEvent) => {
-      void this.handleTerminalPaste(event).catch((error: unknown) => {
-        store.dispatch(showTerminalMessage(readError(error)));
-      });
-    };
-    elements.terminalRoot.addEventListener('paste', this.pasteHandler, true);
-
     this.resizeObserver = new ResizeObserver(() => {
       this.queueTerminalResize();
     });
     this.resizeObserver.observe(elements.terminalRoot);
     window.addEventListener('resize', this.queueTerminalResize);
 
-    this.terminalOutputOff = EventsOn('terminal-output', (payload: TerminalOutputPayload) => {
-      this.handleTerminalOutput(payload);
-    });
-    this.terminalExitOff = EventsOn('terminal-exit', (payload: TerminalExitPayload) => {
-      void store.dispatch(handleTerminalExit(payload));
-    });
-    this.appStatusOff = EventsOn('app-status', (payload: AppStatusPayload) => {
-      store.dispatch(handleAppStatus(payload));
-    });
-    this.appNotificationOff = EventsOn('app-notification', (payload: AppNotificationPayload) => {
-      store.dispatch(handleAppNotification(payload));
-    });
-    this.reconnectLineOff = EventsOn('mcp-reconnect-line', (line: string) => {
-      store.dispatch(handleReconnectLine(line));
-    });
-    this.subscribeEnvironmentLifecycleEvents();
-    this.environmentsChangedOff = EventsOn('environments-changed', () => {
-      void store.dispatch(reloadStateAfterEnvironmentChange());
-    });
-    this.aiActivityOff = EventsOn('ai-activity', (payload: AIActivityPayload) => {
-      store.dispatch(handleAIActivity(payload));
-    });
-    this.envStatusOff = EventsOn('env-status', (payload: EnvStatusPayload) => {
-      store.dispatch(handleEnvStatus(payload));
-    });
+    this.subscribeWailsEvents();
 
     if (!this.bootStarted) {
       this.bootStarted = true;
@@ -285,6 +304,9 @@ export class TerminalController {
     this.stopReviewDiffRefresh();
     if (this.pasteHandler && this.terminalRoot) {
       this.terminalRoot.removeEventListener('paste', this.pasteHandler, true);
+    }
+    if (this.contextMenuHandler && this.terminalRoot) {
+      this.terminalRoot.removeEventListener('contextmenu', this.contextMenuHandler);
     }
     this.terminalQueryResponseDisposables = [];
     this.terminal?.dispose();
@@ -401,41 +423,10 @@ export class TerminalController {
   }
 
   applyLayoutVars(): void {
-    const root = document.documentElement;
-    const layout = store.getState().layout;
-    const sidebarPx = layout.sidebarHidden ? 0 : layout.sidebarWidth;
-    root.style.setProperty('--sidebar-width', `${String(sidebarPx)}px`);
-    root.style.setProperty('--review-width', `${String(this.clampedReviewWidth())}px`);
-    root.style.setProperty('--files-width', `${String(this.clampedFilesWidth())}px`);
-    root.style.setProperty('--debug-height', `${String(this.clampedDebugHeight())}px`);
-  }
-
-  private clampedReviewWidth(): number {
-    const layout = store.getState().layout;
-    const effectiveSidebar = layout.sidebarHidden ? 0 : layout.sidebarWidth;
-    const maxWidth = computeMaxReviewWidth(window.innerWidth, effectiveSidebar);
-    return clamp(layout.reviewWidth, MIN_REVIEW_WIDTH, maxWidth);
-  }
-
-  private clampedFilesWidth(): number {
-    const layout = store.getState().layout;
-    const reviewWidth = this._reviewView?.getBoundingClientRect().width ?? layout.reviewWidth;
-    const maxFilesForReview = reviewWidth > 0 ? reviewWidth - 260 : MAX_FILES_WIDTH;
-    return clamp(
-      layout.filesWidth,
-      MIN_FILES_WIDTH,
-      Math.max(MIN_FILES_WIDTH, Math.min(MAX_FILES_WIDTH, maxFilesForReview)),
-    );
-  }
-
-  private clampedDebugHeight(): number {
-    const paneHeight = this._terminalPane?.getBoundingClientRect().height ?? 0;
-    const maxDebugForPane = paneHeight > 0 ? paneHeight - 120 : MAX_DEBUG_HEIGHT;
-    return clamp(
-      store.getState().layout.debugHeight,
-      MIN_DEBUG_HEIGHT,
-      Math.max(MIN_DEBUG_HEIGHT, Math.min(MAX_DEBUG_HEIGHT, maxDebugForPane)),
-    );
+    applyTerminalLayoutVars({
+      reviewView: this._reviewView,
+      terminalPane: this._terminalPane,
+    });
   }
 
   queueTerminalResize = (): void => {
@@ -512,46 +503,6 @@ export class TerminalController {
   ): void {
     window.clearTimeout(this.reviewDiffRefreshTimer);
     this.reviewDiffRefreshTimer = window.setTimeout(callback, delay);
-  }
-
-  private async handleTerminalPaste(event: ClipboardEvent): Promise<void> {
-    if (!this.terminalRoot || !isTerminalPasteTarget(this.terminalRoot, event.target)) {
-      return;
-    }
-
-    const files = pastedFiles(event);
-    if (files.length === 0) {
-      return;
-    }
-
-    event.preventDefault();
-    const sessionId = store.getState().terminal.sessionId;
-    if (sessionId <= 0) {
-      return;
-    }
-    const paths: string[] = [];
-    for (const file of files) {
-      const result = await store
-        .dispatch(
-          sessionApi.endpoints.savePastedFile.initiate({
-            sessionId,
-            payload: {
-              data: await fileToBase64(file),
-              mimeType: file.type,
-              name: file.name,
-            },
-          }),
-        )
-        .unwrap();
-      if (result.path) {
-        paths.push(result.path);
-      }
-    }
-    if (paths.length === 0) {
-      return;
-    }
-    await SendSessionInput(sessionId, `${paths.join(' ')} `);
-    this.focusTerminalSoon();
   }
 
   writeTerminalBuffer(sessionId: number, chunks: TerminalWriteData[]): void {

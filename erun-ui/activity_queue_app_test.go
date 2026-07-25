@@ -507,6 +507,70 @@ func TestActivityTraceLineHandlerFinalizesPushOnFailure(t *testing.T) {
 	}
 }
 
+// TestActivityTraceLineHandlerIgnoresInitFromNonLocalSession guards the fix for
+// the deploy⇄reopen loop: a remote-agent `erun open` re-runs the remote-worktree
+// bootstrap and prints the init lifecycle ("==> Initializing" / "==> Initialized"),
+// but only the Local session that runs `erun init` may own it. Honoring it from an
+// open/ai session made the desktop fire a spurious deploy, which rolled the pod,
+// killed the open shell, respawned it, and re-emitted the line — an endless loop.
+func TestActivityTraceLineHandlerIgnoresInitFromNonLocalSession(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "erun", Environment: "local"}
+
+	openHandler := newActivityTraceLineHandler(app, selection, sessionKindOpen)
+	openHandler("==> Initializing erun/local")
+	openHandler("==> Initialized erun/local")
+	if _, ok := app.activityQueue.findActiveByCommand("init", "erun", "local"); ok {
+		t.Fatal("open-session init trace must not register an init activity")
+	}
+	if got := app.activityQueue.list(); len(got) != 0 {
+		t.Fatalf("open-session init trace must be display-only, got %+v", got)
+	}
+
+	aiHandler := newActivityTraceLineHandler(app, selection, sessionKindAI)
+	aiHandler("==> Initializing erun/local")
+	if got := app.activityQueue.list(); len(got) != 0 {
+		t.Fatalf("ai-session init trace must be display-only, got %+v", got)
+	}
+
+	// The Local session that actually runs `erun init` still owns the lifecycle.
+	localHandler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+	localHandler("==> Initializing erun/local")
+	if _, ok := app.activityQueue.findActiveByCommand("init", "erun", "local"); !ok {
+		t.Fatal("Local-session init trace must register an init activity")
+	}
+}
+
+// TestEmitEnvironmentInitializedFiresOncePerEnv guards the create→deploy loop
+// fix: a Windows ConPTY repaint re-sends the "==> Initialized" trace as fresh
+// output, so the event must fire at most once per env (each re-fire composed
+// another deploy, an endless loop), and reset for a re-create.
+func TestEmitEnvironmentInitializedFiresOncePerEnv(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	emits := newCapturedEmits()
+	app.SetEmitter(emits.fn())
+
+	app.emitEnvironmentInitialized("frs", "dev")
+	app.emitEnvironmentInitialized("frs", "dev")
+	app.emitEnvironmentInitialized("frs", "dev")
+	if got := len(emits.events(environmentInitializedEvent)); got != 1 {
+		t.Fatalf("environment-initialized fired %d times for one env, want 1 (repaints must not re-fire)", got)
+	}
+
+	// A different env is independent.
+	app.emitEnvironmentInitialized("frs", "other")
+	if got := len(emits.events(environmentInitializedEvent)); got != 2 {
+		t.Fatalf("distinct env total = %d, want 2", got)
+	}
+
+	// Delete/failure resets, so a legitimate re-create fires again.
+	app.clearInitEmitted("frs", "dev")
+	app.emitEnvironmentInitialized("frs", "dev")
+	if got := len(emits.events(environmentInitializedEvent)); got != 3 {
+		t.Fatalf("re-create after reset total = %d, want 3", got)
+	}
+}
+
 func TestResolveActivityKubeContextFallsBackToEnvConfig(t *testing.T) {
 	// Without the env-config fallback, a selection-less Local tab emits an empty
 	// KubernetesContext and the container-status poller's kubectl hits the host's

@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -21,7 +22,9 @@ func TestFileCloudSecretStoreRoundTrip(t *testing.T) {
 		t.Fatalf("load = %q, want tok-value", got)
 	}
 
-	// The secret file must be 0600 so other users on the host cannot read it.
+	// The secret file is created 0600 so other users on the host cannot read it.
+	// Windows has no POSIX mode bits — os.Chmod only toggles the read-only flag —
+	// so a writable file reports 0666 there; assert the best the OS represents.
 	entries, err := os.ReadDir(filepath.Join(dir, "cloud-secrets"))
 	mustNoErr(t, err, "readdir")
 	if len(entries) != 1 {
@@ -29,8 +32,12 @@ func TestFileCloudSecretStoreRoundTrip(t *testing.T) {
 	}
 	info, err := entries[0].Info()
 	mustNoErr(t, err, "stat")
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Fatalf("secret file perm = %o, want 600", perm)
+	wantPerm := os.FileMode(0o600)
+	if runtime.GOOS == "windows" {
+		wantPerm = 0o666
+	}
+	if perm := info.Mode().Perm(); perm != wantPerm {
+		t.Fatalf("secret file perm = %o, want %o", perm, wantPerm)
 	}
 
 	mustNoErr(t, store.DeleteCloudSecret(ref), "delete")

@@ -164,8 +164,13 @@ test.describe('review diff/tree consistency', () => {
       .toBe(30);
 
     // Scrolling the diff drives the scrollspy to a late file; the tree must
-    // follow to keep that node visible.
-    await page.locator('.diff-file[data-path]').last().scrollIntoViewIfNeeded();
+    // follow to keep that node visible. The diff section can still re-render as
+    // it settles (30 tall files), so the last node may detach between resolving
+    // it and scrolling on a loaded host — retry so the locator re-resolves
+    // against the current DOM rather than scrolling a stale, detached node.
+    await expect(async () => {
+      await page.locator('.diff-file[data-path]').last().scrollIntoViewIfNeeded();
+    }).toPass();
 
     const node = review.currentTreeNode();
     await expect(node).toBeVisible();

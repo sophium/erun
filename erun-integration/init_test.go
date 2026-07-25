@@ -286,6 +286,36 @@ func TestInit(t *testing.T) {
 		golden.Equal(t, "init/type_remote_agent_dry_run", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_with_mcp_auth_public_key", func(t *testing.T) {
+		// --mcp-auth-public-key folds the desktop's MCP-auth key into init's single
+		// runtime deploy: the runtime (team-devops) chart carries mcpAuth.* helm
+		// values and the <release>-mcp-auth Secret apply, so no post-init redeploy
+		// is needed to authenticate the env's MCP edge (mirrors the deploy scenario
+		// of the same name).
+		setup := env.New(t)
+		keyPath := filepath.Join(t.TempDir(), "desktopid.pub")
+		if err := os.WriteFile(keyPath, []byte("-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAtestkeytestkeytestkeytestkeytestkeytestke=\n-----END PUBLIC KEY-----\n"), 0o600); err != nil {
+			t.Fatalf("write public key fixture: %v", err)
+		}
+		args := []string{
+			"init", "team", "dev",
+			"--type", "remote-agent",
+			"--version", "1.0.0",
+			"--kubernetes-context", "test-context",
+			"--container-registry", "registry.example/test",
+			"--mcp-auth-public-key", keyPath,
+			"--no-git",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/dry_run_with_mcp_auth_public_key", normalize.Apply(result.Combined))
+	})
+
 	t.Run("type_runtime_dry_run", func(t *testing.T) {
 		// --type runtime feeds downstream chart wiring (worktreeStorage=none);
 		// because runtime envs live in-cluster, init still walks the remote

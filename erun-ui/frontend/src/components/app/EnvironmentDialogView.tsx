@@ -81,14 +81,19 @@ export function EnvironmentDialogView(): React.ReactElement {
       }}
     >
       <DialogContent
-        className="sm:max-w-md"
+        // Bound the panel to the viewport and let the field region scroll, so the
+        // top fields (Tenant/Environment) stay reachable and the footer stays
+        // visible on short windows — a plain centered grid overflowed off both
+        // edges with nothing scrollable. Overrides the shadcn base grid/gap/p via
+        // tailwind-merge; no generated ui/dialog.tsx edit needed.
+        className="flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-md"
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           controller.focusTerminalSoon();
         }}
       >
         <form
-          className="grid gap-4"
+          className="flex min-h-0 flex-1 flex-col"
           onSubmit={(event) => {
             event.preventDefault();
             void dispatch(submitEnvironmentDialog(event.currentTarget)).catch((error: unknown) => {
@@ -96,10 +101,16 @@ export function EnvironmentDialogView(): React.ReactElement {
             });
           }}
         >
-          <EnvironmentDialogHeader dialog={dialog} />
-          <EnvironmentDialogFields tenantRef={tenantRef} environmentRef={environmentRef} />
-          <DialogError error={dialog.error} />
-          <EnvironmentDialogFooter dialog={dialog} />
+          <div className="shrink-0 px-6 pt-6 pb-4">
+            <EnvironmentDialogHeader dialog={dialog} />
+          </div>
+          <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto px-6 pb-1">
+            <EnvironmentDialogFields tenantRef={tenantRef} environmentRef={environmentRef} />
+            <DialogError error={dialog.error} />
+          </div>
+          <div className="shrink-0 border-t px-6 pt-4 pb-6">
+            <EnvironmentDialogFooter dialog={dialog} />
+          </div>
         </form>
       </DialogContent>
     </Dialog>
@@ -216,23 +227,61 @@ function EnvironmentNameFields({
 }
 
 function EnvironmentCreateFields({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
-  const dispatch = useAppDispatch();
-  const containerRegistrySuggestions = React.useMemo(
-    () =>
-      uniqueSuggestions([
-        dialog.containerRegistry,
-        ...loadSavedPastContainerRegistries(),
-        'erunpaas',
-      ]),
-    [dialog.containerRegistry],
-  );
-
   return (
     <>
       <EnvironmentTypeSelect dialog={dialog} />
       {dialog.envType === 'local-agent' && <LocalRepoPathField dialog={dialog} />}
       <KubernetesContextSelect dialog={dialog} />
       <RuntimePodFields dialog={dialog} />
+      <ContainerRegistryField dialog={dialog} />
+      <EnvironmentCreateChecks dialog={dialog} />
+    </>
+  );
+}
+
+// ContainerRegistryField offers the in-cluster erun-registry (resolved from the
+// selected Kubernetes context) as the default when one is detected, and falls
+// back to a free-text registry otherwise. There is no hardcoded default host —
+// the deployed cluster registry is the default, not a placeholder like erunpaas.
+function ContainerRegistryField({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
+  const dispatch = useAppDispatch();
+  const containerRegistrySuggestions = React.useMemo(
+    () => uniqueSuggestions([dialog.containerRegistry, ...loadSavedPastContainerRegistries()]),
+    [dialog.containerRegistry],
+  );
+  const cluster = dialog.clusterRegistry;
+  const clusterAvailable = cluster?.deployed === true;
+  const useCluster = clusterAvailable && dialog.useClusterRegistry;
+  const clusterToggle = clusterAvailable ? (
+    <label className="flex items-center gap-2 text-sm font-normal">
+      <Checkbox
+        id="environment-use-cluster-registry"
+        checked={dialog.useClusterRegistry}
+        disabled={dialog.busy}
+        onCheckedChange={(value) => {
+          dispatch(updateEnvironmentDialog({ useClusterRegistry: value === true }));
+        }}
+      />
+      Use in-cluster registry ({cluster.service ?? 'erun-registry'})
+    </label>
+  ) : null;
+
+  if (useCluster) {
+    return (
+      <div className="grid gap-2">
+        <Label htmlFor="environment-use-cluster-registry">Container registry</Label>
+        {clusterToggle}
+        <p className="text-[12px] leading-[1.4] text-muted-foreground">
+          Resolved from {cluster.service}.{cluster.namespace}:{cluster.port} via this
+          environment&apos;s Kubernetes context — pushed and pulled in-cluster, no host address
+          needed.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-2">
       <EditableComboField
         id="environment-container-registry"
         label="Container registry"
@@ -244,8 +293,8 @@ function EnvironmentCreateFields({ dialog }: { dialog: EnvironmentDialog }): Rea
           dispatch(updateEnvironmentDialog({ containerRegistry }));
         }}
       />
-      <EnvironmentCreateChecks dialog={dialog} />
-    </>
+      {clusterToggle}
+    </div>
   );
 }
 
@@ -274,6 +323,7 @@ function EnvironmentCreateChecks({ dialog }: { dialog: EnvironmentDialog }): Rea
       <CheckboxField
         id="environment-default-tenant"
         label="Set as default tenant"
+        helper="Off by default — creating an environment won't repoint your default tenant unless you opt in."
         checked={dialog.setDefaultTenant}
         disabled={dialog.busy}
         onCheckedChange={(setDefaultTenant) => {
@@ -283,7 +333,8 @@ function EnvironmentCreateChecks({ dialog }: { dialog: EnvironmentDialog }): Rea
       {!isLocalAgent && (
         <CheckboxField
           id="environment-no-git"
-          label="Initialize without Git checkout"
+          label="Skip Git checkout"
+          helper="Create the environment without cloning a Git repo into it — skips the SSH-key import and remote-worktree setup."
           checked={dialog.noGit}
           disabled={dialog.busy}
           onCheckedChange={(noGit) => {

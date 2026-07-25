@@ -84,6 +84,34 @@ function resolveRegistryHostPort(registryName: string): string {
   return `localhost:${port}`;
 }
 
+// e2eRealClusterContext returns the kube-context of an ALREADY-RUNNING cluster to
+// drive (ERUN_E2E_REAL_CLUSTER), or "" to create a fresh k3d cluster. Targeting
+// the developer's live erun-k3s reproduces behaviour that only manifests there —
+// cached images, imported per-env SSH keys, and the WSL2 port-forward the fresh
+// k3d clusters don't exhibit (the create→deploy loop).
+export function e2eRealClusterContext(): string {
+  return (process.env.ERUN_E2E_REAL_CLUSTER ?? '').trim();
+}
+
+// useExistingCluster points the isolated harness at an already-running cluster
+// instead of creating a k3d one: it copies the developer's kubeconfig into the
+// isolated path (so the backend drives the live cluster via KUBECONFIG) and
+// records the context for specs. No cluster is created and none is torn down.
+export function useExistingCluster(context: string): K3dCluster {
+  const kubeconfig = run('kubectl', ['config', 'view', '--raw']);
+  const kubePath = kubeconfigPath();
+  fs.mkdirSync(path.dirname(kubePath), { recursive: true });
+  fs.writeFileSync(kubePath, kubeconfig, { mode: 0o600 });
+  const cluster: K3dCluster = {
+    clusterName: context,
+    registryName: '',
+    context,
+    registry: 'ghcr.io/sophium',
+  };
+  fs.writeFileSync(statePath(), JSON.stringify(cluster, null, 2));
+  return cluster;
+}
+
 // readK3dCluster loads the persisted cluster facts so specs can seed an env at
 // the live cluster.
 export function readK3dCluster(): K3dCluster {
@@ -93,6 +121,10 @@ export function readK3dCluster(): K3dCluster {
 // deleteK3dCluster tears down the cluster + registry. Best-effort: a failure to
 // delete must not fail the run (the EXIT trap in run.sh is the backstop).
 export function deleteK3dCluster(): void {
+  // Never tear down a developer's real, pre-existing cluster (erun-k3s).
+  if (e2eRealClusterContext() !== '') {
+    return;
+  }
   let cluster: K3dCluster | null = null;
   try {
     cluster = readK3dCluster();

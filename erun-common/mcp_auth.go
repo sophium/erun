@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -67,10 +69,37 @@ func GenerateDesktopIdentity() (privatePEM, publicPEM []byte, err error) {
 	return privatePEM, publicPEM, nil
 }
 
-// FileIssuer formats a public-key path as the `file://<path>` issuer the desktop
+// FileIssuer formats a public-key path as the `file://` issuer the desktop
 // stamps in the token's `iss` claim and the MCP server is configured to trust.
+// The path is rendered as a valid RFC 8089 file URL on every OS: a Windows drive
+// path (C:\dir\key.pub) must become file:///C:/dir/key.pub, or url.Parse fails to
+// recognize the file scheme and verification falls through to the OIDC path.
 func FileIssuer(publicKeyPath string) string {
-	return "file://" + publicKeyPath
+	return "file://" + fileURLPath(publicKeyPath)
+}
+
+// fileURLPath renders an OS path as the path component of a file:// URL:
+// forward-slashed with a leading slash, so a Windows drive path (C:\dir) becomes
+// /C:/dir. A Unix absolute path already starts with a slash and is returned
+// unchanged, keeping the in-pod issuer file:///etc/erun/mcp-auth/desktopid.pub.
+func fileURLPath(p string) string {
+	p = filepath.ToSlash(p)
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return p
+}
+
+// fileURLPathToOSPath is the inverse of fileURLPath: it turns a file:// URL path
+// back into an OS path so the key file can be read. On Windows the path arrives as
+// /C:/dir/key.pub; the leading slash before the drive letter is dropped and the
+// separators are flipped back.
+func fileURLPathToOSPath(p string) string {
+	if runtime.GOOS == "windows" && len(p) >= 3 && p[0] == '/' && p[2] == ':' &&
+		((p[1] >= 'A' && p[1] <= 'Z') || (p[1] >= 'a' && p[1] <= 'z')) {
+		p = p[1:]
+	}
+	return filepath.FromSlash(p)
 }
 
 const (
@@ -274,6 +303,7 @@ func loadEd25519PublicKeyFromFileIssuer(issuer string) (ed25519.PublicKey, error
 	if parsed.Host != "" {
 		path = parsed.Host + path
 	}
+	path = fileURLPathToOSPath(path)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read MCP trusted public key %s: %w", path, err)

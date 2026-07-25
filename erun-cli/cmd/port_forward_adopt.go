@@ -148,3 +148,56 @@ func formatHolderForError(pid int, argv []string) string {
 	}
 	return "PID " + strconv.Itoa(pid) + ": " + command
 }
+
+// findLocalPortHolder identifies which process holds a port the caller has
+// already confirmed is held. (0, nil, false) means the holder could not be
+// determined — lsof/ps absent, or a Windows host, since adopting foreign
+// port-forwards is a unix-only feature — not that the port is free; the caller
+// then falls back to the legacy "already in use" plan. The host OS is resolved
+// through common.DetectHost (not build tags) so the probe is a single
+// command-based implementation on every platform and the ERUN_HOST_OS_OVERRIDE
+// test seam can exercise the unix path on any host.
+func findLocalPortHolder(port int) (int, []string, bool) {
+	if port <= 0 || common.DetectHost().OS == common.HostOSWindows {
+		return 0, nil, false
+	}
+	out, err := common.Command("lsof", "-nP", "-iTCP:"+strconv.Itoa(port), "-sTCP:LISTEN", "-t").Output()
+	if err != nil {
+		return 0, nil, false
+	}
+	pidStr := strings.TrimSpace(string(out))
+	if pidStr == "" {
+		return 0, nil, false
+	}
+	// If multiple processes share the listener (rare for TCP listeners but
+	// possible after a fork before bind teardown), keep the first.
+	if newline := strings.IndexAny(pidStr, "\n\r"); newline > 0 {
+		pidStr = pidStr[:newline]
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(pidStr))
+	if err != nil || pid <= 0 {
+		return 0, nil, false
+	}
+	argv, ok := readProcessArgv(pid)
+	if !ok {
+		return 0, nil, false
+	}
+	return pid, argv, true
+}
+
+func readProcessArgv(pid int) ([]string, bool) {
+	if pid <= 0 {
+		return nil, false
+	}
+	out, err := common.Command("ps", "-ww", "-o", "command=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return nil, false
+	}
+	command := strings.TrimSpace(string(out))
+	if command == "" {
+		return nil, false
+	}
+	// kubectl port-forward never embeds spaces in its args (paths can, but
+	// namespaces/contexts/deployments cannot), so a plain whitespace split is safe.
+	return strings.Fields(command), true
+}

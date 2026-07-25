@@ -20,6 +20,34 @@ func TestClusterRegistryWithDefaults(t *testing.T) {
 	}
 }
 
+func TestClusterContainerRegistries(t *testing.T) {
+	list := ClusterContainerRegistries(ClusterRegistry{Insecure: true})
+	if len(list) != 1 {
+		t.Fatalf("len = %d, want 1", len(list))
+	}
+	entry := list[0]
+	if entry.Registry != "" {
+		t.Errorf("registry = %q, want empty (cluster entry)", entry.Registry)
+	}
+	if entry.Cluster == nil {
+		t.Fatal("cluster is nil, want a cluster block")
+	}
+	if entry.Cluster.Service != DefaultClusterRegistryService ||
+		entry.Cluster.Namespace != DefaultClusterRegistryNamespace ||
+		entry.Cluster.Port != DefaultClusterRegistryPort {
+		t.Errorf("cluster defaults not filled: %+v", *entry.Cluster)
+	}
+	if !entry.Cluster.Insecure {
+		t.Error("insecure not preserved")
+	}
+	if !entry.hasRole(RegistryRoleBuild) || !entry.hasRole(RegistryRoleDeploy) {
+		t.Errorf("roles = %v, want build+deploy", entry.Roles)
+	}
+	if err := list.Validate(); err != nil {
+		t.Errorf("validate: %v", err)
+	}
+}
+
 func TestContainerRegistriesValidateRejectsBothRegistryAndCluster(t *testing.T) {
 	list := ContainerRegistries{{
 		Registry: "ghcr.io/sophium",

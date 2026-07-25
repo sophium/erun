@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"syscall"
@@ -17,7 +18,14 @@ import (
 type windowsTerminalSession struct {
 	pty     *conpty.ConPty
 	outPipe *os.File
-	process *os.Process
+	pid     int
+	// handle is the process handle CreateProcess returned via conpty.Spawn. We
+	// keep it instead of re-opening the process with os.FindProcess: on
+	// locked-down machines an EDR blocks OpenProcess (PROCESS_TERMINATE) and
+	// os.FindProcess fails with "OpenProcess: Access is denied.", which used to
+	// abort every PTY spawn (env-create, erun open, ...). CreateProcess already
+	// handed us a full-rights handle, so no OpenProcess is needed.
+	handle  syscall.Handle
 	wait    sync.Once
 	waitErr error
 }
@@ -29,9 +37,20 @@ func startTerminalSession(params startTerminalSessionParams) (terminalSession, e
 	}
 
 	env := append(os.Environ(), append(params.Env, "TERM=xterm-256color", "COLORTERM=truecolor")...)
-	args := append([]string{params.Executable}, params.Args...)
 
-	pid, _, err := ptyDevice.Spawn(params.Executable, args, &syscall.ProcAttr{
+	// ConPTY's Spawn resolves a non-absolute executable relative to attr.Dir
+	// rather than searching PATH, so a bare name like "powershell.exe" would be
+	// looked for in the session's start dir and fail with "the system cannot find
+	// the file specified". Resolve it on PATH to an absolute path first.
+	executable := params.Executable
+	if !filepath.IsAbs(executable) {
+		if resolved, lookErr := exec.LookPath(executable); lookErr == nil {
+			executable = resolved
+		}
+	}
+	args := append([]string{executable}, params.Args...)
+
+	pid, handle, err := ptyDevice.Spawn(executable, args, &syscall.ProcAttr{
 		Dir: params.Dir,
 		Env: env,
 	})
@@ -40,24 +59,18 @@ func startTerminalSession(params startTerminalSessionParams) (terminalSession, e
 		return nil, err
 	}
 
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		_ = ptyDevice.Close()
-		return nil, err
+	session := &windowsTerminalSession{
+		pty:     ptyDevice,
+		outPipe: ptyDevice.OutPipe(),
+		pid:     pid,
+		handle:  syscall.Handle(handle),
 	}
 
 	if len(params.InitialInput) > 0 {
 		if _, writeErr := ptyDevice.Write(params.InitialInput); writeErr != nil {
-			_ = process.Kill()
-			_ = ptyDevice.Close()
+			_ = session.Close()
 			return nil, writeErr
 		}
-	}
-
-	session := &windowsTerminalSession{
-		pty:     ptyDevice,
-		outPipe: ptyDevice.OutPipe(),
-		process: process,
 	}
 	return session, nil
 }
@@ -76,10 +89,27 @@ func (s *windowsTerminalSession) Resize(cols, rows int) error {
 }
 
 func (s *windowsTerminalSession) Pid() int {
-	if s == nil || s.process == nil {
+	if s == nil {
 		return 0
 	}
-	return s.process.Pid
+	return s.pid
+}
+
+// Alive checks the CreateProcess handle we already hold via GetExitCodeProcess,
+// so it never calls OpenProcess (which an EDR denies on locked-down machines,
+// see the handle comment above). STILL_ACTIVE (259) means the shell is running;
+// any real exit code means it has ended. If the query itself fails we assume
+// alive rather than falsely flag a live shell as exited.
+func (s *windowsTerminalSession) Alive() bool {
+	if s == nil || s.handle == 0 {
+		return false
+	}
+	const stillActive = 259 // STILL_ACTIVE
+	var code uint32
+	if err := syscall.GetExitCodeProcess(s.handle, &code); err != nil {
+		return true
+	}
+	return code == stillActive
 }
 
 func (s *windowsTerminalSession) Wait() error {
@@ -87,13 +117,16 @@ func (s *windowsTerminalSession) Wait() error {
 		return nil
 	}
 	s.wait.Do(func() {
-		if s.process != nil {
-			state, err := s.process.Wait()
-			if err != nil {
-				s.waitErr = err
-			} else if state != nil && state.ExitCode() != 0 {
-				s.waitErr = fmt.Errorf("exit status %d", state.ExitCode())
-			}
+		if s.handle == 0 {
+			return
+		}
+		if _, err := syscall.WaitForSingleObject(s.handle, syscall.INFINITE); err != nil {
+			s.waitErr = err
+			return
+		}
+		var code uint32
+		if err := syscall.GetExitCodeProcess(s.handle, &code); err == nil && code != 0 {
+			s.waitErr = fmt.Errorf("exit status %d", code)
 		}
 	})
 	return s.waitErr
@@ -103,18 +136,17 @@ func (s *windowsTerminalSession) Close() error {
 	if s == nil {
 		return nil
 	}
-	if s.process != nil {
-		// Kill the whole child tree, not just `erun open`: its kubectl exec
-		// child otherwise survives as an orphan that holds the exec stream
-		// open, leaving a stale dtach client attached in the pod after every
-		// close.
-		if s.process.Pid > 0 {
-			killCmd := exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(s.process.Pid))
-			eruncommon.HideConsoleWindow(killCmd)
-			_ = killCmd.Run()
-		}
-		_ = s.process.Kill()
-		_ = s.Wait()
+	// Kill the whole child tree, not just the shell: an `erun open`'s kubectl
+	// exec child otherwise survives as an orphan that holds the exec stream open,
+	// leaving a stale dtach client attached in the pod after every close.
+	if s.pid > 0 {
+		killCmd := exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(s.pid))
+		eruncommon.HideConsoleWindow(killCmd)
+		_ = killCmd.Run()
+	}
+	if s.handle != 0 {
+		_ = syscall.CloseHandle(s.handle)
+		s.handle = 0
 	}
 	if s.pty != nil {
 		return s.pty.Close()

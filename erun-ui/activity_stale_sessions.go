@@ -73,7 +73,11 @@ func (a *App) collectStaleSessionSnapshots() []staleSessionSnapshot {
 		if pid <= 0 {
 			continue
 		}
-		if isProcessAliveOrDefault(pid) {
+		// Ask the session (which holds the process handle) rather than probing by
+		// PID: os.FindProcess/OpenProcess is denied by the EDR on locked-down
+		// Windows, which made a live shell look dead and surfaced a false "shell
+		// exited unexpectedly". See terminalSession.Alive.
+		if managed.session.Alive() {
 			continue
 		}
 		out = append(out, staleSessionSnapshot{

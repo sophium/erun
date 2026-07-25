@@ -49,6 +49,8 @@ type erunUIDeps struct {
 	deleteNamespace        eruncommon.NamespaceDeleterFunc
 	listKubeContexts       func() ([]string, error)
 	loadResourceStatus     func(context.Context, uiRuntimeResourceInput) (uiRuntimeResourceStatus, error)
+	loadClusterRegistry    func(context.Context, uiRuntimeResourceInput) (uiClusterRegistryStatus, error)
+	checkRuntimeDeployed   func(context.Context, string, string, string) (bool, error)
 	ensureMCP              func(context.Context, eruncommon.OpenResult) error
 	reconnectMCP           func(context.Context, eruncommon.OpenResult, func(string)) error
 	ensureSSHD             func(context.Context, eruncommon.OpenResult) error
@@ -105,9 +107,17 @@ type App struct {
 	envEnsureInflight         map[string]struct{}
 	envEnsureDone             map[string]time.Time
 	envEnsureFailNotified     map[string]struct{}
-	configWatcher             *configWatcher
-	contribute                *contributeStore
-	contributeApps            *contributeAppForwards
+	// initEmitted dedups the environment-initialized signal per env. `erun init`
+	// emits "==> Initialized" once, but on Windows a ConPTY repaint (triggered by
+	// writing the follow-up deploy command into the same Local shell) re-sends the
+	// buffered line as fresh output, so the trace scanner would re-fire the event —
+	// each re-fire composes another deploy, whose write repaints again: an endless
+	// create→deploy loop. Fire at most once per env; reset on init-failure/delete.
+	initEmittedMu  sync.Mutex
+	initEmitted    map[string]struct{}
+	configWatcher  *configWatcher
+	contribute     *contributeStore
+	contributeApps *contributeAppForwards
 
 	// cloudContextStatuses caches the live AWS-observed power state per cloud
 	// context. The persisted config no longer carries Status (it is operational
@@ -231,6 +241,12 @@ func withDefaultRuntimeDeps(deps erunUIDeps) erunUIDeps {
 	}
 	if deps.loadResourceStatus == nil {
 		deps.loadResourceStatus = loadRuntimeResourceStatus
+	}
+	if deps.loadClusterRegistry == nil {
+		deps.loadClusterRegistry = loadClusterRegistry
+	}
+	if deps.checkRuntimeDeployed == nil {
+		deps.checkRuntimeDeployed = checkRuntimeDeployed
 	}
 	if deps.ensureMCP == nil {
 		deps.ensureMCP = func(ctx context.Context, result eruncommon.OpenResult) error {

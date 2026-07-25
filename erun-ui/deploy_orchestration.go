@@ -125,9 +125,35 @@ func (a *App) maybeStartDeployOrchestration(selection uiSelection, force bool) (
 		return startSessionResult{}, false
 	}
 	go func() {
-		_ = a.runDeployOrchestration(a.activityWatcherCtx(), selection, result, force)
+		ctx := a.activityWatcherCtx()
+		// The orchestration runs detached from any PTY, so a build/push failure —
+		// or a deploy that errors before emitting its "==> Deploy failed" trace —
+		// would otherwise vanish: no pods, no cause, and (for a builds-here create)
+		// an empty Local shell. That was the erun/local create-with-no-pods report.
+		// Surface it as a failed env-status + an actionable notification, unless the
+		// app is shutting down (ctx cancelled), which is not a deploy failure.
+		if err := a.runDeployOrchestration(ctx, selection, result, force); err != nil && ctx.Err() == nil {
+			a.surfaceDeployFailure(selection.Tenant, selection.Environment, deployOrchestrationFailureReason(err))
+		}
 	}()
 	return startSessionResult{Selection: selection, Orchestrated: true}, true
+}
+
+// deployOrchestrationFailureReason condenses a background build/push/deploy error
+// into a single-line notification reason.
+func deployOrchestrationFailureReason(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.TrimSpace(err.Error())
+	if i := strings.IndexByte(msg, '\n'); i >= 0 {
+		msg = strings.TrimSpace(msg[:i])
+	}
+	const maxLen = 300
+	if len(msg) > maxLen {
+		msg = msg[:maxLen] + "..."
+	}
+	return msg
 }
 
 // runErunCaptured runs `erun <args>` in dir and returns its captured stdout. erun
@@ -139,6 +165,7 @@ func runErunCaptured(ctx context.Context, cliPath, dir string, onLine func(strin
 	}
 	cmd := exec.CommandContext(ctx, cliPath, args...)
 	eruncommon.HideConsoleWindow(cmd)
+	eruncommon.BoundCommandWait(cmd)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), appSessionEnvVar+"=1")
 	stdoutPipe, err := cmd.StdoutPipe()

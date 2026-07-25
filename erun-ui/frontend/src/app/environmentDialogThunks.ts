@@ -1,7 +1,7 @@
 import type { UISelection, UIVersionSuggestion } from '@/types';
 
 import { environmentApi } from './api/environmentApi';
-import { refreshKubernetesContexts } from './dialogContextsThunks';
+import { refreshDialogClusterRegistry, refreshKubernetesContexts } from './dialogContextsThunks';
 import {
   missingRequiredFieldReason,
   normalizedEnvironmentDialogValues,
@@ -47,10 +47,14 @@ export const openInitializeDialog = (): AppThunk => (dispatch, getState) => {
       resourceStatusLoading: false,
       runtimePod: defaultEnvironmentDialog().runtimePod,
       containerRegistry: containerRegistryDefault,
+      clusterRegistry: null,
+      useClusterRegistry: false,
       envType: 'remote-agent',
       localRepoPath: '',
       noGit: false,
-      setDefaultTenant: true,
+      // Don't pre-check "set as default tenant": creating an environment should
+      // not silently repoint the operator's default tenant. They can opt in.
+      setDefaultTenant: false,
       versionImage: state.tenants.versionSuggestions[0]?.image ?? '',
       choicesOpen: false,
       busy: false,
@@ -89,6 +93,7 @@ export const updateEnvironmentDialog =
     }
     if (values.kubernetesContext !== undefined) {
       void dispatch(refreshEnvironmentRuntimeResources(values.kubernetesContext));
+      void dispatch(refreshDialogClusterRegistry(values.kubernetesContext));
     }
   };
 
@@ -197,11 +202,15 @@ function environmentDialogInitFields(
 ): Partial<UISelection> {
   const runtimePod = runtimePodConfigToKubernetes(dialog.runtimePod);
   const isLocalAgent = dialog.envType === 'local-agent';
+  // When the in-cluster registry is chosen, seed a resolvable cluster: entry and
+  // omit the static container-registry string (the two are mutually exclusive).
+  const useClusterRegistry = dialog.useClusterRegistry && !!dialog.clusterRegistry?.deployed;
   return {
     runtimeCpu: runtimePod.cpu,
     runtimeMemory: runtimePod.memory,
     kubernetesContext: values.kubernetesContext,
-    containerRegistry: values.containerRegistry,
+    containerRegistry: useClusterRegistry ? '' : values.containerRegistry,
+    clusterRegistry: useClusterRegistry,
     type: dialog.envType,
     localRepoPath: isLocalAgent ? values.localRepoPath : undefined,
     setDefaultTenant: dialog.setDefaultTenant,
@@ -288,7 +297,14 @@ const refreshEnvironmentRuntimeResources =
     const request = getState().requestCounters.environmentDialogResourceStatus;
     const context = normalizeDialogValue(kubernetesContext);
     const dialog = getState().environmentDialog;
-    if (!dialog.open || !context) {
+    if (!dialog.open) {
+      return;
+    }
+    // No selected context → there is no cluster to measure. Clear any capacity
+    // fetched for a previously selected/auto-resolved context so the dialog never
+    // shows a stale "Available on best node" figure under an empty selection.
+    if (!context) {
+      dispatch(patchEnvironmentDialog({ resourceStatus: null, resourceStatusLoading: false }));
       return;
     }
     dispatch(

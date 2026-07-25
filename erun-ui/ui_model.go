@@ -69,10 +69,14 @@ type uiSelection struct {
 	RuntimeMemory     string `json:"runtimeMemory,omitempty"`
 	KubernetesContext string `json:"kubernetesContext,omitempty"`
 	ContainerRegistry string `json:"containerRegistry,omitempty"`
-	Type              string `json:"type,omitempty"`
-	LocalRepoPath     string `json:"localRepoPath,omitempty"`
-	NoGit             bool   `json:"noGit,omitempty"`
-	SetDefaultTenant  bool   `json:"setDefaultTenant,omitempty"`
+	// ClusterRegistry selects the in-cluster erun-registry (resolved from the
+	// env's kube-context) instead of the static ContainerRegistry string; the two
+	// are mutually exclusive and ClusterRegistry wins when set.
+	ClusterRegistry  bool   `json:"clusterRegistry,omitempty"`
+	Type             string `json:"type,omitempty"`
+	LocalRepoPath    string `json:"localRepoPath,omitempty"`
+	NoGit            bool   `json:"noGit,omitempty"`
+	SetDefaultTenant bool   `json:"setDefaultTenant,omitempty"`
 	// Components is the explicit one-shot deploy selection from the Runtime tab's
 	// "Components to deploy" checklist; empty leaves deploy to resolve the env's
 	// saved default. Values are chart directory names (plus the runtime release
@@ -235,34 +239,54 @@ type uiPortStatus struct {
 // but ride as plain strings because RegistryRole is a string alias at the Wails
 // boundary.
 type uiContainerRegistryEntry struct {
-	Registry string   `json:"registry"`
-	Roles    []string `json:"roles"`
+	Registry string `json:"registry"`
+	// Cluster is set for a context-resolved in-cluster registry (a `cluster:`
+	// entry) instead of a static Registry host. It carries a legible Label so the
+	// editor renders it as a readable line rather than a blank text box, and its
+	// concrete fields so the entry round-trips losslessly on save.
+	Cluster *uiContainerRegistryCluster `json:"cluster,omitempty"`
+	Roles   []string                    `json:"roles"`
+}
+
+// uiContainerRegistryCluster mirrors eruncommon.ClusterRegistry for the desktop
+// registry-list editor, plus a Label the frontend shows verbatim.
+type uiContainerRegistryCluster struct {
+	Service   string `json:"service"`
+	Namespace string `json:"namespace"`
+	Port      int    `json:"port"`
+	Insecure  bool   `json:"insecure"`
+	Label     string `json:"label"`
 }
 
 type uiEnvironmentConfig struct {
-	Name                  string                     `json:"name"`
-	Type                  eruncommon.EnvironmentType `json:"type,omitempty"`
-	LocalRepoPath         string                     `json:"localRepoPath,omitempty"`
-	RepoPath              string                     `json:"repoPath"`
-	KubernetesContext     string                     `json:"kubernetesContext"`
-	ContainerRegistries   []uiContainerRegistryEntry `json:"containerRegistries"`
-	CloudProviderAlias    string                     `json:"cloudProviderAlias"`
-	CloudProviderAliases  []string                   `json:"cloudProviderAliases,omitempty"`
-	CloudAliasSlots       []uiEnvironmentCloudAlias  `json:"cloudAliasSlots,omitempty"`
-	CloudContext          *uiCloudContextStatus      `json:"cloudContext,omitempty"`
-	RuntimeVersion        string                     `json:"runtimeVersion"`
-	RuntimePod            uiRuntimePodConfig         `json:"runtimePod"`
-	SSHD                  uiSSHDConfig               `json:"sshd"`
-	Idle                  uiIdleConfig               `json:"idle"`
-	Claude                uiClaudeConfig             `json:"claude"`
-	ClaudeDefaults        uiClaudeDefaults           `json:"claudeDefaults"`
-	AITool                string                     `json:"aiTool,omitempty"`
-	LocalPorts            uiEnvironmentLocalPorts    `json:"localPorts"`
-	AutoStart             *bool                      `json:"autoStart,omitempty"`
-	RemoteHostCredentials bool                       `json:"remoteHostCredentials"`
-	AutoUpgrade           bool                       `json:"autoUpgrade"`
-	UpgradeChannel        string                     `json:"upgradeChannel,omitempty"`
-	DisableBuildScript    bool                       `json:"disableBuildScript"`
+	Name                string                     `json:"name"`
+	Type                eruncommon.EnvironmentType `json:"type,omitempty"`
+	LocalRepoPath       string                     `json:"localRepoPath,omitempty"`
+	RepoPath            string                     `json:"repoPath"`
+	KubernetesContext   string                     `json:"kubernetesContext"`
+	ContainerRegistries []uiContainerRegistryEntry `json:"containerRegistries"`
+	// ContainerRegistriesInherited is true when the shown list is resolved from
+	// the project's .erun/config.yaml (a local-agent env with no env-level
+	// override) rather than carried on the env config. The editor marks it so the
+	// operator sees these are inherited-from-project, not an env override.
+	ContainerRegistriesInherited bool                      `json:"containerRegistriesInherited"`
+	CloudProviderAlias           string                    `json:"cloudProviderAlias"`
+	CloudProviderAliases         []string                  `json:"cloudProviderAliases,omitempty"`
+	CloudAliasSlots              []uiEnvironmentCloudAlias `json:"cloudAliasSlots,omitempty"`
+	CloudContext                 *uiCloudContextStatus     `json:"cloudContext,omitempty"`
+	RuntimeVersion               string                    `json:"runtimeVersion"`
+	RuntimePod                   uiRuntimePodConfig        `json:"runtimePod"`
+	SSHD                         uiSSHDConfig              `json:"sshd"`
+	Idle                         uiIdleConfig              `json:"idle"`
+	Claude                       uiClaudeConfig            `json:"claude"`
+	ClaudeDefaults               uiClaudeDefaults          `json:"claudeDefaults"`
+	AITool                       string                    `json:"aiTool,omitempty"`
+	LocalPorts                   uiEnvironmentLocalPorts   `json:"localPorts"`
+	AutoStart                    *bool                     `json:"autoStart,omitempty"`
+	RemoteHostCredentials        bool                      `json:"remoteHostCredentials"`
+	AutoUpgrade                  bool                      `json:"autoUpgrade"`
+	UpgradeChannel               string                    `json:"upgradeChannel,omitempty"`
+	DisableBuildScript           bool                      `json:"disableBuildScript"`
 	// PlatformAccount binds the env's runtime ServiceAccount to cluster-admin so
 	// in-pod platform Terraform (the cluster edge) and component installs can
 	// manage cluster-scoped resources. See EnvConfig.PlatformAccount.
@@ -330,10 +354,65 @@ type uiRuntimeResourceMetric struct {
 	Formatted string  `json:"formatted"`
 }
 
+// uiClusterRegistryStatus reports whether the selected Kubernetes context has an
+// in-cluster erun-registry deployed, so the new-environment dialog can default to
+// a resolvable cluster: registry entry instead of a hardcoded host.
+type uiClusterRegistryStatus struct {
+	KubernetesContext string `json:"kubernetesContext"`
+	Deployed          bool   `json:"deployed"`
+	Service           string `json:"service,omitempty"`
+	Namespace         string `json:"namespace,omitempty"`
+	Port              int    `json:"port,omitempty"`
+	Insecure          bool   `json:"insecure"`
+	Message           string `json:"message,omitempty"`
+}
+
 type uiRuntimeResourceNode struct {
 	Name   string                  `json:"name"`
 	CPU    uiRuntimeResourceMetric `json:"cpu"`
 	Memory uiRuntimeResourceMetric `json:"memory"`
+}
+
+// Health-check statuses. "ok" is a passing check, "error" a blocking problem
+// the operator must fix before the env can run, "unknown" a check that could
+// not be evaluated (e.g. no kube-context to query).
+const (
+	healthCheckStatusOK      = "ok"
+	healthCheckStatusError   = "error"
+	healthCheckStatusUnknown = "unknown"
+)
+
+// Health-check fix affordances the frontend maps to a recovery action.
+const (
+	healthCheckFixNone        = ""
+	healthCheckFixDeploy      = "deploy"
+	healthCheckFixSetRegistry = "set-registry"
+)
+
+// Stable health-check ids so the frontend can key on the check, not its prose.
+const (
+	healthCheckIDRegistry = "container-registry"
+	healthCheckIDRuntime  = "runtime-deployed"
+)
+
+// uiEnvironmentHealthCheck is one out-of-pod diagnostic result. Title is the
+// user-facing check name; Detail explains the current outcome; Fix names the
+// recovery action the frontend renders (empty when the check passed).
+type uiEnvironmentHealthCheck struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+	Title  string `json:"title"`
+	Detail string `json:"detail"`
+	Fix    string `json:"fix,omitempty"`
+}
+
+// uiEnvironmentHealth is the result of a "Check environment" run: the checks it
+// evaluated and whether every one passed.
+type uiEnvironmentHealth struct {
+	Tenant      string                     `json:"tenant"`
+	Environment string                     `json:"environment"`
+	Healthy     bool                       `json:"healthy"`
+	Checks      []uiEnvironmentHealthCheck `json:"checks"`
 }
 
 type uiIdleConfig struct {

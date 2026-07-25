@@ -28,9 +28,15 @@ export default defineConfig({
   // determinism defect to fix, never to mask (see AGENTS.md "No flaky tests").
   retries: 0,
   reporter: [['list'], ['html', { open: 'never' }]],
-  timeout: 30_000,
+  // Windows runs the heavier full Chromium build (see the chromium project) and
+  // its ConPTY-backed sessions are slower than a unix pty, so under the full
+  // suite's shared-backend load a borderline spec can exceed the POSIX-tuned
+  // budgets. Give the auto-retrying assertions more room on Windows to absorb
+  // the loaded machine (AGENTS.md: raise the wait, never lower it, and never add
+  // retries) — the POSIX budgets are unchanged.
+  timeout: process.platform === 'win32' ? 90_000 : 30_000,
   expect: {
-    timeout: 10_000,
+    timeout: process.platform === 'win32' ? 20_000 : 10_000,
   },
   use: {
     baseURL: `http://127.0.0.1:${HEADLESS_PORT}`,
@@ -52,11 +58,19 @@ export default defineConfig({
         // devices['Desktop Chrome'] resets the viewport, so re-apply the tall
         // one (see top-level use.viewport) to keep dialog footer buttons reachable.
         viewport: { width: 1440, height: 1200 },
+        // On Windows, run the full Chromium build instead of the default minimal
+        // chrome-headless-shell: an endpoint-security agent intermittently
+        // access-violation-crashes the headless-shell process mid-suite
+        // (exitCode 0xC0000005), which the full build does not trigger. Left as
+        // the default (headless shell) elsewhere.
+        ...(process.platform === 'win32' ? { channel: 'chromium' } : {}),
       },
     },
   ],
   webServer: {
-    command: `./bin/erun-app --headless --port ${HEADLESS_PORT}`,
+    // Windows produces bin/erun-app.exe; POSIX produces an extensionless
+    // bin/erun-app. cwd is erun-ui (one level up from this playwright dir).
+    command: `${process.platform === 'win32' ? '.\\bin\\erun-app.exe' : './bin/erun-app'} --headless --port ${HEADLESS_PORT}`,
     url: `http://127.0.0.1:${HEADLESS_PORT}/`,
     cwd: '..',
     // The backend must boot against this run's isolated root. A leftover

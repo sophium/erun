@@ -63,28 +63,31 @@ test.describe('sidebar env hover card', () => {
     const dot = app.sidebar.envOpenDot(tenant, environment);
     await expect(dot).toBeVisible();
 
-    // The open click left the pointer on the row, so hovering it again would
-    // be a no-op (no fresh mouseenter) — park the pointer elsewhere first.
-    await page.mouse.move(0, 0);
-    await app.sidebar.hoverEnvironmentRow(tenant, environment);
     const card = app.sidebar.envHoverCard(tenant, environment);
-    await expect(card).toBeVisible();
-
-    // Let the open settle first: the in-flight open's busy label outranks
-    // the stopped state by design, and the spawn path itself emits a
-    // clearing env-status — an injection raced against it would be
-    // overwritten (which is the production contract, not a flake). The
-    // settled state depends on how far the stub-backed `erun open` gets
-    // (the kubectl stub fails its deploy probe), so accept any terminal
-    // non-busy state before injecting.
     const activity = card.locator('dd').nth(2);
-    await expect(activity).toContainText(/Idle|Stopped|Deploy failed|Not open/, {
-      timeout: 15_000,
-    });
+    // hoverAndRead re-opens the card on each retry: an async row re-render (the
+    // busy→idle transition, or the injected status changing the dot glyph) drops
+    // the pointer and closes the card mid-assert, so a single hover is not stable.
+    // Re-parking the pointer guarantees a fresh mouseenter each time.
+    const activitySettlesTo = async (matcher: RegExp | string): Promise<void> => {
+      await expect(async () => {
+        await page.mouse.move(0, 0);
+        await app.sidebar.hoverEnvironmentRow(tenant, environment);
+        await expect(card).toBeVisible({ timeout: 1_000 });
+        await expect(activity).toContainText(matcher, { timeout: 1_000 });
+      }).toPass();
+    };
+
+    // Wait for the open to FULLY settle before injecting. The busy label outranks
+    // the stopped state by design, and the open/AI spawn actions emit a clearing
+    // env-status as they succeed; injecting before that lands would be overwritten
+    // (the production contract, not a flake). "Idle" is the settled, non-busy
+    // terminal state, after which no further open-settle emission overrides us.
+    await activitySettlesTo('Idle');
 
     await emitEnvStatusEvent(page, tenant, environment, 'stopped');
+    await activitySettlesTo('Stopped');
     await expect(dot).toHaveAttribute('data-env-state', 'stopped');
-    await expect(activity).toContainText('Stopped');
 
     // Reset the injected status and close the env so it doesn't leak into later specs (shared backend).
     await emitEnvStatusEvent(page, tenant, environment, '');
