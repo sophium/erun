@@ -36,7 +36,7 @@ func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tena
 	target.EnvConfig.ContainerRegistries = registries
 	req := ShellLaunchParamsFromResult(target)
 
-	if err := s.ensureRemoteRuntime(target, req, params.RuntimeVersion, params.RuntimeImage); err != nil {
+	if err := s.ensureRemoteRuntime(target, req, params.RuntimeVersion, params.RuntimeImage, params.MCPAuthPublicKeyPath); err != nil {
 		return ShellLaunchParams{}, remoteRepositorySpec{}, err
 	}
 	if params.NoGit {
@@ -152,21 +152,24 @@ func (s bootstrapRunner) ensureRemoteWorktree(req ShellLaunchParams, projectRoot
 	return nil
 }
 
-func (s bootstrapRunner) ensureRemoteRuntime(target OpenResult, req ShellLaunchParams, runtimeVersion, runtimeImage string) error {
+func (s bootstrapRunner) ensureRemoteRuntime(target OpenResult, req ShellLaunchParams, runtimeVersion, runtimeImage, mcpAuthPublicKeyPath string) error {
 	if runtimeImage = strings.TrimSpace(runtimeImage); runtimeImage != "" && runtimeImage != DevopsComponentName {
 		target.EnvConfig.RuntimeImage = runtimeImage
 	}
-	// Expand a cluster: registry to its concrete hosts (ClusterIP pull address +
-	// the insecure flag for the in-pod dind), exactly as the standalone deploy does
-	// in resolveDeploySpecForContext. The init deploy calls the published-chart spec
-	// directly and would otherwise pass the raw cluster block to the chart. No-op
-	// for envs without a cluster entry.
-	target, err := concretizeDeployTargetRegistries(s.Context, target)
+	// Pass the env's registries to the chart as-is: a cluster: entry is expanded
+	// in-pod by the runtime chart, exactly as the standalone `erun deploy` renders
+	// it. Do NOT host-concretize here — that pins the in-pod BUILD registry to a
+	// localhost port-forward the pod cannot reach, so a later deploy that renders
+	// the correct cluster form rolls the pod. The runtime IMAGE still pulls from
+	// its own registry (publishedDevopsChartRegistry, e.g. ghcr), so create works.
+	spec, err := resolvePublishedDevopsDeploySpec(s.Context, target, runtimeVersion)
 	if err != nil {
 		return err
 	}
-	spec, err := resolvePublishedDevopsDeploySpec(s.Context, target, runtimeVersion)
-	if err != nil {
+	// Init owns the env's single deploy, so it must also carry the desktop's
+	// MCP-auth key; otherwise the desktop would redeploy right after init just to
+	// inject it, rolling the pod init just created. A blank path is a no-op.
+	if err := applyMCPAuthToRuntimeSpec(DeployTarget{Tenant: target.Tenant, MCPAuthPublicKeyPath: mcpAuthPublicKeyPath}, &spec); err != nil {
 		return err
 	}
 	if err := RunDeploySpec(s.Context, spec, s.DeployHelmChart); err != nil {

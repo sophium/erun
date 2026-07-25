@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/manifoldco/promptui"
@@ -57,6 +58,7 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 	cmd.Flags().BoolVarP(&params.AutoApprove, "yes", "y", false, "Automatically approve initialization prompts")
 	cmd.Flags().BoolVar(&params.DisableBuildScript, "disable-build-script", false, "Ignore any project build.sh for this env; erun build resolves docker/release contexts directly")
 	cmd.Flags().BoolVar(&params.PlatformAccount, "platform-account", false, "Make this env a cluster platform account: deploy binds its runtime ServiceAccount to cluster-admin so in-pod platform terraform (cluster edge) and component installs can manage cluster-scoped resources")
+	cmd.Flags().StringVar(&params.MCPAuthPublicKeyPath, "mcp-auth-public-key", "", "Require the env's MCP edge to authenticate bearer tokens signed by this PEM public key; empty leaves the edge loopback-only. Folds MCP auth into init's single runtime deploy.")
 	addDryRunFlag(cmd)
 	return cmd
 }
@@ -183,9 +185,21 @@ func codeCommitSSHKeyIDPrompt(run PromptRunner, label string) (string, error) {
 }
 
 func confirmPrompt(run PromptRunner, label string) (bool, error) {
+	return confirmPromptTo(run, label, nil)
+}
+
+// confirmPromptTo renders the confirm to out instead of promptui's default
+// (os.Stdout) when out is non-nil. The open --no-shell alias flow routes it to
+// stderr: promptui repaints the confirm from a readline goroutine, and it prints
+// the eval-able setup script to stdout immediately afterward, so leaving the
+// prompt on stdout lets the two writers interleave non-deterministically (on
+// Windows the repaint frames fused into the first script line ~1 run in 20).
+// Keeping the UI on stderr leaves stdout carrying only the script.
+func confirmPromptTo(run PromptRunner, label string, out io.WriteCloser) (bool, error) {
 	label = strings.TrimRight(strings.TrimSpace(label), "?")
 	prompt := promptui.Prompt{
-		Label: label,
+		Label:  label,
+		Stdout: out,
 		Templates: &promptui.PromptTemplates{
 			Prompt:  `{{ "?" | blue }} {{ . | bold }}? {{ "[Y/n]" | faint }} `,
 			Valid:   `{{ "?" | blue }} {{ . | bold }}? {{ "[Y/n]" | faint }} `,

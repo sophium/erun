@@ -13,6 +13,7 @@ Flags:
       --environment string             Environment name
   -h, --help                           help for init
       --kubernetes-context string      Kubernetes context to associate with the environment
+      --mcp-auth-public-key string     Require the env's MCP edge to authenticate bearer tokens signed by this PEM public key; empty leaves the edge loopback-only. Folds MCP auth into init's single runtime deploy.
       --no-git                         Skip remote Git checkout setup when used with --remote or --type=remote-agent
       --platform-account               Make this env a cluster platform account: deploy binds its runtime ServiceAccount to cluster-admin so in-pod platform terraform (cluster edge) and component installs can manage cluster-scoped resources
       --project-root string            Project root to bind to the tenant

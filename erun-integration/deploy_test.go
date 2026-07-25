@@ -742,6 +742,26 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_remote_env_tenant_umbrella_explicit_runtime_image_wins", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_remote_env_cluster_registry_chart_from_runtime_image", func(t *testing.T) {
+		// The `--cluster-registry` branch of the chart-registry resolver. The env's
+		// deploy registry is the in-cluster erun-registry (a cluster: entry resolved
+		// from the kube-context), which holds the tenant's built app images but never
+		// the erun platform chart. So the runtime chart and RUNTIME_REGISTRY must
+		// resolve from the runtime image's own registry (ghcr.io/sophium), not the
+		// in-cluster pull host — resolving them to the cluster registry would fail
+		// every chart pull. This locks the branch that fix 49f7f92f introduced, the
+		// counterpart to the plain-env branch every other remote deploy golden pins.
+		// The cluster entry is concretized in dry-run via the kubectl svc ClusterIP
+		// lookup, which returns a placeholder without touching a cluster.
+		setup := env.New(t)
+		fixture.SeedClusterRegistryRemoteTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_cluster_registry_chart_from_runtime_image", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_remote_env_image_pull_secrets", func(t *testing.T) {
 		// A tenant umbrella image can be a private ghcr package. The env's
 		// imagepullsecrets list rides into the runtime deploy as

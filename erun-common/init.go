@@ -78,6 +78,12 @@ type BootstrapInitParams struct {
 	// registry entry (addresses resolved from the env's kube-context) instead of
 	// the static ContainerRegistry string. Set by `erun init --cluster-registry`.
 	ClusterRegistry *ClusterRegistry
+	// MCPAuthPublicKeyPath, when set, points at a PEM public key the init-time
+	// runtime deploy trusts so the env's erun-mcp edge requires a bearer signed by
+	// it — mirrors `erun deploy --mcp-auth-public-key`. The desktop sets it so
+	// init's single deploy already carries MCP auth and no post-init redeploy
+	// (which would roll the just-created pod) is needed.
+	MCPAuthPublicKeyPath string
 	// Type is the canonical environment type and takes precedence over the
 	// legacy Remote bool; when unset the type is derived from Remote for
 	// backward compatibility with --remote flag callers.

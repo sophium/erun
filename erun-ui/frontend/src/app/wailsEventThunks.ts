@@ -1,6 +1,7 @@
 import type { TerminalExitPayload, UISelection } from '@/types';
 
 import { reloadStateAfterEnvironmentChange } from './bootThunks';
+import { environmentTypeIsRemoteWorktree } from './environmentType';
 import { readError } from './errors';
 import type {
   AIActivityPayload,
@@ -18,6 +19,7 @@ import {
 } from './notificationThunks';
 import {
   selectEnvironmentExists,
+  selectEnvironmentType,
   selectPendingOpenAfterDeploy,
   selectSelectedIsPendingFor,
 } from './selectors';
@@ -139,16 +141,20 @@ const reloadUntilEnvironmentVisible =
   };
 
 // Fires when the backend observes `==> Initialized <tenant>/<env>` (or the
-// config watcher detects a new env). After reloading, COMPOSE A DEPLOY, not an
-// open: `erun init` does not deploy the runtime and `open` no longer deploys,
-// so opening here would spawn tabs against a runtime that does not exist and
-// fail with an MCP port-forward timeout. The env is recorded pending-open and
-// its tabs open only on the matching `environment-deployed` signal
-// (handleEnvironmentDeployed). See erun-ui/AGENTS.md § "Command Completion
-// And State-Refresh Wiring".
+// config watcher detects a new env). What happens next depends on whether
+// `erun init` already deployed the runtime:
+//   - remote-worktree envs (remote-agent / runtime): init deploys the runtime
+//     itself — carrying MCP-auth + the resolved registry — and waits for it to
+//     become Available before emitting this, so we OPEN directly. Composing a
+//     second deploy here re-rendered the chart (MCP-auth + cluster registry) and
+//     rolled the pod init had just created.
+//   - local-agent (builds-here) envs: init does NOT deploy (no in-pod build), so
+//     the desktop composes the single build→push→deploy and opens the env's tabs
+//     on the matching `environment-deployed` signal (handleEnvironmentDeployed).
+// See erun-ui/AGENTS.md § "Command Completion And State-Refresh Wiring".
 export const handleEnvironmentInitialized =
   (payload: EnvironmentInitializedPayload): AppThunk<Promise<void>> =>
-  async (dispatch) => {
+  async (dispatch, getState) => {
     const tenant = payload.tenant.trim();
     const environment = payload.environment.trim();
     if (!tenant || !environment) {
@@ -165,6 +171,17 @@ export const handleEnvironmentInitialized =
       return;
     }
     dispatch(showNotification('success', `Created ${tenant} / ${environment}.`));
+    if (environmentTypeIsRemoteWorktree(selectEnvironmentType(getState(), tenant, environment))) {
+      // init already deployed + waited; open directly.
+      try {
+        await dispatch(openSelection({ tenant, environment }));
+      } catch (error) {
+        dispatch(showTerminalMessage(readError(error)));
+      }
+      return;
+    }
+    // local-agent: init did not deploy, so compose the single deploy and gate the
+    // open on environment-deployed.
     dispatch(setPendingOpenAfterDeploy({ tenant, environment }));
     try {
       await dispatch(startInitialDeploySelection({ tenant, environment }));

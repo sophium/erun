@@ -14,6 +14,7 @@ import { loadSavedPastContainerRegistries } from '@/app/storage';
 import { ContainerRegistriesField } from '@/components/app/ContainerRegistriesField';
 import { uniqueSuggestions } from '@/components/app/EditableComboField.helpers';
 import { EmptyState } from '@/components/app/EmptyState';
+import { EnvironmentHealthSection } from '@/components/app/EnvironmentHealthSection';
 import { cloudProviderTypeLabel } from '@/components/app/GlobalConfigDialog.helpers';
 import { LocalRepoPathInput } from '@/components/app/LocalRepoPathInput';
 import { ReadonlyField, StatusBadge } from '@/components/app/ManageDialog.fields';
@@ -76,6 +77,7 @@ export function GeneralTab(): React.ReactElement {
       />
       <ContainerRegistriesField
         entries={config.containerRegistries}
+        inherited={config.containerRegistriesInherited}
         suggestions={containerRegistrySuggestions}
         disabled={dialog.busy || dialog.configLoading}
         onChange={(containerRegistries) => {
@@ -101,6 +103,7 @@ export function GeneralTab(): React.ReactElement {
           dispatch(updateManageConfig({ type }));
         }}
       />
+      <EnvironmentHealthSection dialog={dialog} />
     </>
   );
 }

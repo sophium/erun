@@ -8,13 +8,17 @@ import {
   uniqueEnvironmentName,
 } from '../fixtures/seedRoot.js';
 
-// The create flow must compose a deploy and open the env's tabs only once the
-// runtime is up: opening tabs against a not-yet-deployed runtime fails with an
-// MCP port-forward timeout — the regression this spec guards.
+// A local-agent (builds-here) env is NOT deployed by `erun init`, so on
+// environment-initialized the desktop composes the single build→push→deploy and
+// opens the env's tabs only once the runtime is up (the matching
+// environment-deployed signal): opening against a not-yet-deployed runtime fails
+// with an MCP port-forward timeout — the regression this spec guards. The
+// seeded envs here are local-agent (seedRoot: `type: local-agent`). A
+// remote-worktree env is deployed by init itself and opens directly instead;
+// that path is covered by the opt-in k3d e2e suite.
 //
 // The inert harness cannot run a live deploy (kubectl/helm/docker are stubbed),
-// so the gate is exercised by firing the two lifecycle events directly; the
-// real happy path is covered by the opt-in k3d e2e suite.
+// so the gate is exercised by firing the two lifecycle events directly.
 async function emitWailsEvent(page: Page, name: string, payload?: unknown): Promise<void> {
   await page.evaluate(
     ({ name, payload }) => {

@@ -1,3 +1,8 @@
+// Diagnostics read-model types (in-cluster registry block, cluster-registry
+// probe, environment health check) live in ./uiDiagnosticsTypes, imported by
+// name where needed. This file only needs the cluster block for the entry below.
+import type { UIContainerRegistryCluster } from './uiDiagnosticsTypes';
+
 export type EnvironmentType = 'local-agent' | 'remote-agent' | 'runtime' | '';
 
 // EnvironmentTypeValues are the narrowed dropdown options; the `type` field
@@ -406,10 +411,12 @@ export interface UIPortStatus {
   status: string;
 }
 
-// UIContainerRegistryEntry is one registry host plus the roles it carries (any
-// of build/from/to/deploy).
+// UIContainerRegistryEntry is one registry plus the roles it carries (any of
+// build/from/to/deploy). It names its target either as a static `registry`
+// host or as a context-resolved `cluster` block (exactly one is set).
 export interface UIContainerRegistryEntry {
   registry: string;
+  cluster?: UIContainerRegistryCluster;
   roles: string[];
 }
 
@@ -418,6 +425,10 @@ export interface UIEnvironmentConfig {
   repoPath: string;
   kubernetesContext: string;
   containerRegistries: UIContainerRegistryEntry[];
+  // True when the shown registries are resolved from the project's
+  // .erun/config.yaml (a local-agent env with no env-level override) rather than
+  // carried on the env config. The editor marks them inherited-from-project.
+  containerRegistriesInherited: boolean;
   cloudProviderAlias: string;
   cloudProviderAliases?: string[];
   // One entry per provider type (aws, cloudflare) that has a configured alias
@@ -517,13 +528,6 @@ export interface UIRuntimeResourceNode {
   name: string;
   cpu: UIRuntimeResourceMetric;
   memory: UIRuntimeResourceMetric;
-}
-
-export interface UIClusterRegistryStatus {
-  deployed: boolean;
-  service?: string;
-  namespace?: string;
-  port?: number;
 }
 
 export interface StartSessionResult {

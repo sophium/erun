@@ -4,6 +4,7 @@ package eruncommon
 
 import (
 	"os/exec"
+	"strconv"
 	"syscall"
 )
 
@@ -26,4 +27,22 @@ func HideConsoleWindow(cmd *exec.Cmd) {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
 	cmd.SysProcAttr.CreationFlags |= createNoWindow
+}
+
+// terminateProcessTree force-kills cmd's process and every descendant. On
+// Windows cmd.Process.Kill() calls TerminateProcess on the direct child only,
+// which orphans any grandchildren — helm's dind/kubectl children in production,
+// or a stubbed shell's `sleep` in tests. An orphan keeps its inherited working
+// directory and stdio pipes open, wedging the deploy's chart-dir cleanup (and, in
+// the integration harness, the TempDir RemoveAll that then fails with "being used
+// by another process"). taskkill /T walks the tree from the PID and kills every
+// descendant; /F forces termination. Best-effort: a race against a process that
+// already exited just yields a harmless non-zero taskkill exit.
+func terminateProcessTree(cmd *exec.Cmd) {
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	kill := exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(cmd.Process.Pid))
+	HideConsoleWindow(kill)
+	_ = kill.Run()
 }

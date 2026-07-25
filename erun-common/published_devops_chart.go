@@ -295,14 +295,17 @@ func publishedDevopsChartRegistry(target OpenResult) string {
 	}
 	// The published erun-devops runtime chart and its platform images (erun-devops,
 	// erun-mcp, erun-dind, …) are released together to the runtime image's registry
-	// (e.g. ghcr.io/sophium), NOT to the env's deploy registry. When the env pins a
-	// runtimeimage that carries a registry, resolve the chart from there. This is the
-	// difference between a `--cluster-registry` env — whose deploy registry is the
-	// in-cluster erun-registry holding the tenant's built app images, never the erun
-	// platform — deploying successfully vs. resolving the chart to a registry that
-	// never held it (a chart-pull / ImagePullBackOff failure at every init).
-	if registry := runtimeImageRegistry(target.EnvConfig.RuntimeImage); registry != "" {
-		return registry
+	// (e.g. ghcr.io/sophium). A `--cluster-registry` env's deploy registry is the
+	// in-cluster erun-registry that only ever holds the tenant's built app images —
+	// never the erun platform chart — so for that env alone the chart must resolve
+	// from the runtime image's own registry, or every chart pull fails
+	// (ImagePullBackOff at init). A plain env publishes its platform chart to its
+	// deploy registry, so its chart follows where charts are published, never a
+	// runtime-image override (an image-only concern the chart must not inherit).
+	if isClusterRegistryEnv(target) {
+		if registry := runtimeImageRegistry(target.EnvConfig.RuntimeImage); registry != "" {
+			return registry
+		}
 	}
 	if registry, ok := target.EnvConfig.ContainerRegistries.DeployRegistry(); ok {
 		return registry
@@ -330,16 +333,32 @@ func runtimeImageRegistry(runtimeImage string) string {
 
 // resolveRuntimeRegistry is the registry projected into the runtime pod as
 // RUNTIME_REGISTRY (nested in-pod image resolution). Prefer the persisted
-// runtimeregistry, but when it is empty fall back to the runtime image's own
-// registry — the same precedence publishedDevopsChartRegistry uses — so a mirror
-// env (runtimeimage on a private mirror, runtimeregistry not yet persisted on
-// first deploy) resolves in-pod images to the mirror instead of defaulting to
-// ghcr.io/sophium.
-func resolveRuntimeRegistry(cfg EnvConfig) string {
-	if r := strings.TrimSpace(cfg.RuntimeRegistry); r != "" {
+// runtimeregistry; when it is empty a `--cluster-registry` env falls back to the
+// runtime image's own registry — the same precedence publishedDevopsChartRegistry
+// uses — so the pod resolves nested platform images from where they are published
+// (e.g. ghcr) rather than the in-cluster registry that never held them. A plain
+// env projects nothing here: its runtime registry follows the deploy registry the
+// chart already renders, never a runtime-image override.
+func resolveRuntimeRegistry(target OpenResult) string {
+	if r := strings.TrimSpace(target.EnvConfig.RuntimeRegistry); r != "" {
 		return r
 	}
-	return runtimeImageRegistry(cfg.RuntimeImage)
+	if isClusterRegistryEnv(target) {
+		return runtimeImageRegistry(target.EnvConfig.RuntimeImage)
+	}
+	return ""
+}
+
+// isClusterRegistryEnv reports whether the deploy target addresses an in-cluster
+// (`--cluster-registry`) registry — either still as an unresolved cluster: entry
+// (the init path passes it through to the runtime chart) or already concretized to
+// its in-cluster pull host on ClusterPullRegistry (the deploy path resolves it up
+// front). The erun platform chart and images are never published to that in-cluster
+// registry, so only such an env resolves its runtime chart/registry from the runtime
+// image's own registry instead of its deploy registry.
+func isClusterRegistryEnv(target OpenResult) bool {
+	return target.EnvConfig.ContainerRegistries.HasClusterEntry() ||
+		strings.TrimSpace(target.ClusterPullRegistry) != ""
 }
 
 // PublishedChartNotFoundError reports that the published runtime chart a remote

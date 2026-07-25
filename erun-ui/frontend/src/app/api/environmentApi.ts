@@ -1,12 +1,13 @@
 import type {
-  UIClusterRegistryStatus,
   UIEnvironmentConfig,
   UIRuntimeResourceStatus,
   UISelection,
   UIVersionSuggestions,
 } from '@/types';
+import type { UIClusterRegistryStatus, UIEnvironmentHealth } from '@/uiDiagnosticsTypes';
 
 import {
+  CheckEnvironmentHealth,
   ChooseLocalRepoPath,
   ChooseWorkspaceSyncLocalFolder,
   DeleteEnvironment,
@@ -90,6 +91,11 @@ export const environmentApi = wailsApi.injectEndpoints({
         LoadClusterRegistry(args),
       ),
       providesTags: ['RuntimeResourceStatus'],
+    }),
+    checkEnvironmentHealth: builder.mutation<UIEnvironmentHealth, UISelection>({
+      queryFn: wailsQueryFn<UISelection, UIEnvironmentHealth>((selection) =>
+        CheckEnvironmentHealth(selection),
+      ),
     }),
   }),
 });

@@ -4,11 +4,23 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	eruncommon "github.com/sophium/erun/erun-common"
 )
+
+// setTestHomeDir points os.UserHomeDir() at dir on the current OS. Windows reads
+// USERPROFILE, not HOME, so setting HOME alone leaves production resolving the host
+// trace under the real profile while the test staged it under the temp dir.
+func setTestHomeDir(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("HOME", dir)
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", dir)
+	}
+}
 
 func envTraceApp(t *testing.T, env eruncommon.EnvConfig, reachable bool, podOut string, podErr error) *App {
 	t.Helper()
@@ -34,7 +46,7 @@ func envTraceApp(t *testing.T, env eruncommon.EnvConfig, reachable bool, podOut 
 
 func TestLoadEnvTraceHostFile(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHomeDir(t, home)
 	logPath := filepath.Join(home, ".erun", "acme", "dev", "trace.log")
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -56,7 +68,7 @@ func TestLoadEnvTraceHostFile(t *testing.T) {
 }
 
 func TestLoadEnvTraceHostFileMissing(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHomeDir(t, t.TempDir())
 	app := envTraceApp(t, eruncommon.EnvConfig{
 		Name: "dev", LocalRepoPath: t.TempDir(), Type: eruncommon.EnvironmentTypeLocalAgent, KubernetesContext: "ctx",
 	}, false, "", nil)
@@ -75,7 +87,7 @@ func TestLoadEnvTraceHostFileMissing(t *testing.T) {
 // unreachable pod must degrade to a notice — not blank the pane.
 func TestLoadEnvTraceRemoteUnreachableKeepsHostTrace(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHomeDir(t, home)
 	writeHostTrace(t, home, "2026-06-11T00:00:00Z open: tenant=acme environment=dev\n")
 	app := envTraceApp(t, eruncommon.EnvConfig{
 		Name: "dev", LocalRepoPath: "/home/erun/git/acme", Type: eruncommon.EnvironmentTypeRemoteAgent, KubernetesContext: "ctx", LocalPortRangeStart: 17500,
@@ -98,7 +110,7 @@ func TestLoadEnvTraceRemoteUnreachableKeepsHostTrace(t *testing.T) {
 // [pod] marker so the vantage point stays attributable.
 func TestLoadEnvTraceRemoteMergesHostAndPod(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHomeDir(t, home)
 	writeHostTrace(t, home,
 		"2026-06-11T00:00:01Z open: tenant=acme environment=dev\n"+
 			"2026-06-11T00:00:04Z kubectl config use-context ctx\n")
@@ -125,7 +137,7 @@ func TestLoadEnvTraceRemoteMergesHostAndPod(t *testing.T) {
 }
 
 func TestLoadEnvTraceRemotePodOnly(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHomeDir(t, t.TempDir())
 	app := envTraceApp(t, eruncommon.EnvConfig{
 		Name: "dev", LocalRepoPath: "/home/erun/git/acme", Type: eruncommon.EnvironmentTypeRemoteAgent, KubernetesContext: "ctx", LocalPortRangeStart: 17500,
 	}, true, "2026-06-11T00:00:00Z deploy: resolved 1 spec(s)\n", nil)
@@ -140,7 +152,7 @@ func TestLoadEnvTraceRemotePodOnly(t *testing.T) {
 }
 
 func TestLoadEnvTraceRemoteBothEmpty(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHomeDir(t, t.TempDir())
 	app := envTraceApp(t, eruncommon.EnvConfig{
 		Name: "dev", LocalRepoPath: "/home/erun/git/acme", Type: eruncommon.EnvironmentTypeRemoteAgent, KubernetesContext: "ctx", LocalPortRangeStart: 17500,
 	}, true, "", nil)

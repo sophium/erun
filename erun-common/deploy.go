@@ -1604,7 +1604,7 @@ func newHelmDeploySpecWithValues(target OpenResult, deployContext KubernetesDepl
 		CloudProviderAlias:  target.EnvConfig.CloudProviderAlias,
 		ContainerRegistry:   containerRegistry,
 		InsecureRegistry:    insecureRegistry,
-		RuntimeRegistry:     resolveRuntimeRegistry(target.EnvConfig),
+		RuntimeRegistry:     resolveRuntimeRegistry(target),
 		ContainerRegistries: containerRegistries,
 		Platform:            resolveProjectPlatform(target.RepoPath),
 		DisableBuildScript:  target.EnvConfig.DisableBuildScript,
@@ -1774,15 +1774,21 @@ func resolveWorktreeHostPath(repoPath string) string {
 		return ""
 	}
 
-	// A remote/PVC env's repo path is a Linux path on the pod's filesystem (e.g.
-	// /home/erun/git/<repo>); it must never be run through the host's OS-native
-	// filepath, which on Windows rewrites it to \home\erun\git\<repo> (and it may
-	// already have been mangled upstream). On Windows a rooted path with no drive
-	// letter is never a real local path, so treat it as the remote Linux path it
-	// is and normalize to forward slashes. Local Windows paths (C:\...) and every
-	// Unix path keep the existing clean-and-resolve, so Unix output is unchanged.
-	if runtime.GOOS == "windows" && rootedWithoutDrive(repoPath) {
-		return path.Clean(filepath.ToSlash(repoPath))
+	if runtime.GOOS == "windows" {
+		// A remote/PVC env's repo path is a Linux path on the pod's filesystem
+		// (e.g. /home/erun/git/<repo>); it must never be run through the host's
+		// OS-native filepath, which rewrites it to \home\erun\git\<repo>. A rooted
+		// path with no drive letter is never a real local Windows path, so treat
+		// it as the remote Linux path it is and normalize to forward slashes.
+		if rootedWithoutDrive(repoPath) {
+			return path.Clean(filepath.ToSlash(repoPath))
+		}
+		// A local drive path (C:\...) is a local-agent env's host worktree. The
+		// local k3s node runs in WSL2, which exposes each Windows drive under
+		// /mnt/<drive>; the raw C:\... path is both invisible to that Linux node
+		// and mangled by helm --set backslash escaping, so mount it through the
+		// WSL2 view instead.
+		return windowsDrivePathToWSLMount(filepath.Clean(repoPath))
 	}
 
 	cleaned := filepath.Clean(repoPath)
@@ -1792,6 +1798,29 @@ func resolveWorktreeHostPath(repoPath string) string {
 	}
 
 	return resolved
+}
+
+// windowsDrivePathToWSLMount rewrites a Windows drive path to the mount a WSL2
+// node sees it at (C:\Users\me\repo -> /mnt/c/Users/me/repo). Backslashes are
+// converted explicitly rather than via filepath.ToSlash so the translation is
+// correct and testable on any host, not only where the OS separator is "\".
+// A path that does not start with a drive letter passes through slash-normalized,
+// so the transform is inert for anything already POSIX-shaped.
+func windowsDrivePathToWSLMount(p string) string {
+	p = strings.ReplaceAll(p, `\`, "/")
+	if len(p) < 2 || p[1] != ':' {
+		return p
+	}
+	drive := p[0]
+	if !((drive >= 'A' && drive <= 'Z') || (drive >= 'a' && drive <= 'z')) {
+		return p
+	}
+	rest := strings.TrimPrefix(p[2:], "/")
+	mount := "/mnt/" + strings.ToLower(string(drive))
+	if rest == "" {
+		return mount
+	}
+	return mount + "/" + rest
 }
 
 // rootedWithoutDrive reports whether a path is absolute (rooted at / or \) but
@@ -2662,7 +2691,7 @@ func runHelmDeployWithPodWatch(cmd *exec.Cmd, params HelmDeployParams) (podWatch
 				_ = cmd.Process.Signal(os.Interrupt)
 				go func() {
 					time.Sleep(2 * time.Second)
-					_ = cmd.Process.Kill()
+					terminateProcessTree(cmd)
 				}()
 				helmErr = <-helmDone
 				helmFinished = true

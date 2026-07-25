@@ -50,6 +50,7 @@ type erunUIDeps struct {
 	listKubeContexts       func() ([]string, error)
 	loadResourceStatus     func(context.Context, uiRuntimeResourceInput) (uiRuntimeResourceStatus, error)
 	loadClusterRegistry    func(context.Context, uiRuntimeResourceInput) (uiClusterRegistryStatus, error)
+	checkRuntimeDeployed   func(context.Context, string, string, string) (bool, error)
 	ensureMCP              func(context.Context, eruncommon.OpenResult) error
 	reconnectMCP           func(context.Context, eruncommon.OpenResult, func(string)) error
 	ensureSSHD             func(context.Context, eruncommon.OpenResult) error
@@ -112,11 +113,11 @@ type App struct {
 	// buffered line as fresh output, so the trace scanner would re-fire the event —
 	// each re-fire composes another deploy, whose write repaints again: an endless
 	// create→deploy loop. Fire at most once per env; reset on init-failure/delete.
-	initEmittedMu             sync.Mutex
-	initEmitted               map[string]struct{}
-	configWatcher             *configWatcher
-	contribute                *contributeStore
-	contributeApps            *contributeAppForwards
+	initEmittedMu  sync.Mutex
+	initEmitted    map[string]struct{}
+	configWatcher  *configWatcher
+	contribute     *contributeStore
+	contributeApps *contributeAppForwards
 
 	// cloudContextStatuses caches the live AWS-observed power state per cloud
 	// context. The persisted config no longer carries Status (it is operational
@@ -243,6 +244,9 @@ func withDefaultRuntimeDeps(deps erunUIDeps) erunUIDeps {
 	}
 	if deps.loadClusterRegistry == nil {
 		deps.loadClusterRegistry = loadClusterRegistry
+	}
+	if deps.checkRuntimeDeployed == nil {
+		deps.checkRuntimeDeployed = checkRuntimeDeployed
 	}
 	if deps.ensureMCP == nil {
 		deps.ensureMCP = func(ctx context.Context, result eruncommon.OpenResult) error {

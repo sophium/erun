@@ -667,7 +667,12 @@ func TestReconnectMCPRunsOpenAndStreamsLines(t *testing.T) {
 
 func TestBuildOpenCommandQuotesExecutableAndArgs(t *testing.T) {
 	got := buildOpenCommand("/Applications/ERun App/erun", "tenant a", "prod")
+	// The Windows local shell is PowerShell, so buildOpenCommand runs the quoted
+	// exe via the call operator (&); mirror that platform branch here.
 	want := "'/Applications/ERun App/erun' open 'tenant a' 'prod'"
+	if runtime.GOOS == "windows" {
+		want = "& " + want
+	}
 	if got != want {
 		t.Fatalf("unexpected open command: got %q want %q", got, want)
 	}
@@ -1022,7 +1027,10 @@ func TestStartInitSessionPipesCommandToLocal(t *testing.T) {
 		t.Fatalf("expected 1 spawned session (Local), got %d", len(sessions))
 	}
 	written := sessions[0].WrittenString()
-	wantSubstr := "/tmp/erun init erun remote --type=remote-agent --version 1.0.19 --kubernetes-context orbstack --container-registry erunpaas --set-default-tenant=true --confirm-environment=true --no-git\n"
+	// init owns the env's single deploy, so the desktop appends
+	// --mcp-auth-public-key after --no-git; assert up to --no-git without pinning
+	// the trailing newline (or the following flag).
+	wantSubstr := "/tmp/erun init erun remote --type=remote-agent --version 1.0.19 --kubernetes-context orbstack --container-registry erunpaas --set-default-tenant=true --confirm-environment=true --no-git"
 	if !strings.Contains(written, wantSubstr) {
 		t.Fatalf("expected Local pty to receive %q, got %q", wantSubstr, written)
 	}
@@ -1144,8 +1152,12 @@ func TestStartSSHDInitSessionPipesCommandToLocal(t *testing.T) {
 		t.Fatalf("expected local kind, got %q", result.Kind)
 	}
 	written := sessions[0].WrittenString()
-	if !strings.Contains(written, "/tmp/erun sshd init erun remote\n") {
-		t.Fatalf("expected sshd-init command in Local pty, got %q", written)
+	// The piped command carries the platform's shell prefix and line ending
+	// (PowerShell "& …\r" on Windows), so derive the expectation from the same
+	// production builder rather than a POSIX literal.
+	want := buildLocalErunCommand("/tmp/erun", []string{"sshd", "init", "erun", "remote"})
+	if !strings.Contains(written, want) {
+		t.Fatalf("expected sshd-init command %q in Local pty, got %q", want, written)
 	}
 }
 
@@ -1181,8 +1193,9 @@ func TestStartDoctorSessionPipesCommandToLocal(t *testing.T) {
 		t.Fatalf("expected local kind, got %q", result.Kind)
 	}
 	written := sessions[0].WrittenString()
-	if !strings.Contains(written, "/tmp/erun doctor erun remote\n") {
-		t.Fatalf("expected doctor command in Local pty, got %q", written)
+	want := buildLocalErunCommand("/tmp/erun", []string{"doctor", "erun", "remote"})
+	if !strings.Contains(written, want) {
+		t.Fatalf("expected doctor command %q in Local pty, got %q", want, written)
 	}
 }
 
@@ -1221,8 +1234,9 @@ func TestStartDeploySessionPipesCommandToLocal(t *testing.T) {
 		t.Fatalf("expected local kind, got %q", result.Kind)
 	}
 	written := sessions[0].WrittenString()
-	if !strings.Contains(written, "/tmp/erun deploy erun remote --version 1.0.19\n") {
-		t.Fatalf("expected deploy command in Local pty, got %q", written)
+	want := buildLocalErunCommand("/tmp/erun", []string{"deploy", "erun", "remote", "--version", "1.0.19"})
+	if !strings.Contains(written, want) {
+		t.Fatalf("expected deploy command %q in Local pty, got %q", want, written)
 	}
 }
 
@@ -1260,11 +1274,55 @@ func TestStartDeploySessionInjectsMCPAuthPublicKey(t *testing.T) {
 	}
 	wantPath := filepath.Join(identityDir, desktopIdentityPubFile)
 	written := sessions[0].WrittenString()
-	// The temp-dir path is shell-quoted only when it needs it (e.g. spaces), so
-	// assert against the same quoting helper rather than a fixed literal.
+	// Derive the expectation from the production builder so the platform's shell
+	// prefix, per-arg quoting (the temp path needs it on Windows), and line ending
+	// all match rather than a fixed POSIX literal.
+	want := buildLocalErunCommand("/tmp/erun", []string{"deploy", "erun", "remote", "--version", "1.0.19", "--mcp-auth-public-key", wantPath})
+	if !strings.Contains(written, want) {
+		t.Fatalf("expected deploy command to carry %q, got %q", want, written)
+	}
+	if _, err := os.Stat(wantPath); err != nil {
+		t.Fatalf("expected desktop public key written to %q: %v", wantPath, err)
+	}
+}
+
+// TestStartInitSessionInjectsMCPAuthPublicKey covers that init — which now owns
+// the env's single runtime deploy — carries the desktop's MCP-auth key, so no
+// post-init redeploy (which would roll the just-created pod) is needed.
+func TestStartInitSessionInjectsMCPAuthPublicKey(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {Name: "erun", DefaultEnvironment: "remote"},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
+		},
+	}
+
+	var sessions []*stubTerminalSession
+	app := NewApp(erunUIDeps{
+		store:           store,
+		findProjectRoot: func() (string, string, error) { return "erun", projectRoot, nil },
+		resolveCLIPath:  func() string { return "/tmp/erun" },
+		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+			s := newStubTerminalSession()
+			sessions = append(sessions, s)
+			return s, nil
+		},
+	})
+	identityDir := t.TempDir()
+	app.identity = newDesktopIdentity(identityDir)
+	defer app.shutdown(context.Background())
+
+	if _, err := app.StartInitSession(uiSelection{Tenant: "erun", Environment: "remote", Version: "1.0.19", NoGit: true}, 80, 24); err != nil {
+		t.Fatalf("StartInitSession failed: %v", err)
+	}
+	wantPath := filepath.Join(identityDir, desktopIdentityPubFile)
 	wantFlag := "--mcp-auth-public-key " + shellQuoteIfNeeded(wantPath)
-	if !strings.Contains(written, "deploy erun remote --version 1.0.19 "+wantFlag+"\n") {
-		t.Fatalf("expected deploy command to carry %q, got %q", wantFlag, written)
+	written := sessions[0].WrittenString()
+	if !strings.Contains(written, wantFlag) {
+		t.Fatalf("expected init command to carry %q, got %q", wantFlag, written)
 	}
 	if _, err := os.Stat(wantPath); err != nil {
 		t.Fatalf("expected desktop public key written to %q: %v", wantPath, err)
@@ -1801,7 +1859,7 @@ func TestLoadAPILogPrefersKubernetesLogs(t *testing.T) {
 			t.Fatalf("unexpected kubectl args:\n%s", got)
 		}
 		return "api log from pod\n", 0
-	})+":"+os.Getenv("PATH"))
+	})+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	log, err := loadAPILog(context.Background(), uiTenantDashboardInput{
 		Tenant:            "frs",
@@ -1823,15 +1881,7 @@ func fakeKubectl(t *testing.T, handler func([]string) (string, int)) string {
 	argsPath := filepath.Join(dir, "kubectl.args")
 	outputPath := filepath.Join(dir, "kubectl.output")
 	exitPath := filepath.Join(dir, "kubectl.exit")
-	scriptPath := filepath.Join(dir, "kubectl")
-	script := `#!/bin/sh
-printf '%s\n' "$@" >"` + argsPath + `"
-cat "` + outputPath + `"
-exit "$(cat "` + exitPath + `")"
-`
-	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake kubectl failed: %v", err)
-	}
+	writeFakeKubectlStub(t, dir, argsPath, outputPath, exitPath)
 	output, code := handler([]string{"--context", "cluster-dev", "--namespace", "frs-prod", "logs", "deployment/frs-devops", "-c", "erun-backend-api", "--tail", "400"})
 	if err := os.WriteFile(outputPath, []byte(output), 0o644); err != nil {
 		t.Fatalf("write fake kubectl output failed: %v", err)
@@ -1844,9 +1894,45 @@ exit "$(cat "` + exitPath + `")"
 		if err != nil {
 			t.Fatalf("read fake kubectl args failed: %v", err)
 		}
-		handler(strings.Split(strings.TrimSpace(string(data)), "\n"))
+		// The Windows stub records CRLF-terminated lines; normalize so the
+		// recorded args match what production passed.
+		normalized := strings.ReplaceAll(string(data), "\r\n", "\n")
+		handler(strings.Split(strings.TrimSpace(normalized), "\n"))
 	})
 	return dir
+}
+
+// writeFakeKubectlStub drops a `kubectl` on PATH that records its args, replays a
+// captured stdout, and exits with a captured code. On Windows it must be a real
+// .cmd (exec.LookPath only honors PATHEXT extensions, and a #!/bin/sh script is
+// not runnable), with CRLF line endings or cmd.exe mis-parses the label loop.
+func writeFakeKubectlStub(t *testing.T, dir, argsPath, outputPath, exitPath string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		script := "@echo off\r\n" +
+			"type nul > \"" + argsPath + "\"\r\n" +
+			":loop\r\n" +
+			"if \"%~1\"==\"\" goto after\r\n" +
+			">> \"" + argsPath + "\" echo(%~1\r\n" +
+			"shift\r\n" +
+			"goto loop\r\n" +
+			":after\r\n" +
+			"type \"" + outputPath + "\"\r\n" +
+			"set /p code=< \"" + exitPath + "\"\r\n" +
+			"exit /b %code%\r\n"
+		if err := os.WriteFile(filepath.Join(dir, "kubectl.cmd"), []byte(script), 0o755); err != nil {
+			t.Fatalf("write fake kubectl failed: %v", err)
+		}
+		return
+	}
+	script := `#!/bin/sh
+printf '%s\n' "$@" >"` + argsPath + `"
+cat "` + outputPath + `"
+exit "$(cat "` + exitPath + `")"
+`
+	if err := os.WriteFile(filepath.Join(dir, "kubectl"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake kubectl failed: %v", err)
+	}
 }
 
 func TestLoadAndSaveERunConfig(t *testing.T) {

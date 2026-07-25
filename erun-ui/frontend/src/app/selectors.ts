@@ -14,6 +14,20 @@ export const selectEnvironmentExists = (
       ?.environments.some((env) => env.name === environment),
   );
 
+// selectEnvironmentType returns the env's declared type (local-agent /
+// remote-agent / runtime), or undefined if the env is not in state. The create
+// flow uses it to decide whether `erun init` already deployed the runtime
+// (remote-worktree envs) or the desktop must still compose the deploy
+// (local-agent, which init does not deploy).
+export const selectEnvironmentType = (
+  state: RootState,
+  tenant: string,
+  environment: string,
+): string | undefined =>
+  state.tenants.tenants
+    .find((entry) => entry.name === tenant)
+    ?.environments.find((env) => env.name === environment)?.type;
+
 export const selectSelectedIsPendingFor = (
   state: RootState,
   tenant: string,

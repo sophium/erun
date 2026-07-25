@@ -58,6 +58,8 @@ export const openManageDialog =
         deployComponents: [],
         deployComponentSelection: [],
         deployComponentsLoading: true,
+        health: null,
+        healthLoading: false,
       }),
     );
     void dispatch(refreshManageVersionSuggestions(false));
@@ -254,7 +256,11 @@ export const loadManageConfig = (): AppThunk<Promise<void>> => async (dispatch, 
   if (!dialog.open || !selection) {
     return;
   }
-  dispatch(patchManageDialog({ configLoading: true, error: '' }));
+  // A config reload makes any prior health result stale, so clear it; the
+  // operator re-runs "Check environment" against the freshly loaded config.
+  dispatch(
+    patchManageDialog({ configLoading: true, error: '', health: null, healthLoading: false }),
+  );
   try {
     const result = await dispatch(
       environmentApi.endpoints.getEnvironmentConfig.initiate(selection, { forceRefetch: true }),

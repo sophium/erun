@@ -286,7 +286,10 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 }
 
 func (a *App) StartInitSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
-	return a.runErunCommandInLocal(selection, cols, rows, buildInitArgs(selection))
+	// init owns the env's single deploy, so it must carry the desktop's MCP-auth
+	// key like the deploy paths do — otherwise the desktop would have to redeploy
+	// after init to inject it, rolling the pod init just created.
+	return a.runErunCommandInLocal(selection, cols, rows, a.appendMCPAuthPublicKeyFlag(buildInitArgs(selection)))
 }
 
 // StartDeploySession runs the pure `erun deploy` primitive: it installs an

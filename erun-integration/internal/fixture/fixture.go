@@ -527,6 +527,44 @@ func SeedRemoteRepoPathTenantEnv(t testing.TB, setup env.Setup, tenant, environm
 	)
 }
 
+// SeedClusterRegistryRemoteTenantEnv writes a remote-agent env whose registry is
+// an in-cluster (`--cluster-registry`) entry — the erun-registry Service resolved
+// from the kube-context, holding the tenant's built app images but never the erun
+// platform chart. It pins a runtimeimage on ghcr so deploy must resolve the
+// runtime chart/registry from the runtime image's own registry, not the in-cluster
+// pull host. No local <tenant>-devops chart, so deploy takes the published path.
+func SeedClusterRegistryRemoteTenantEnv(t testing.TB, setup env.Setup, tenant, environment, remoteRepoPath string) {
+	t.Helper()
+	root := filepath.Join(setup.ConfigHome, "erun")
+	tenantDir := filepath.Join(root, tenant)
+	envDir := filepath.Join(tenantDir, environment)
+	for _, dir := range []string{root, tenantDir, envDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	mustWrite(t, filepath.Join(root, "config.yaml"), "defaulttenant: "+tenant+"\n")
+	mustWrite(t, filepath.Join(tenantDir, "config.yaml"),
+		"projectroot: "+setup.Cwd+"\n"+
+			"name: "+tenant+"\n"+
+			"defaultenvironment: "+environment+"\n",
+	)
+	mustWrite(t, filepath.Join(envDir, "config.yaml"),
+		"name: "+environment+"\n"+
+			"repopath: "+remoteRepoPath+"\n"+
+			"kubernetescontext: test-context\n"+
+			"runtimeimage: ghcr.io/sophium/erun-devops\n"+
+			"runtimeversion: 1.0.0\n"+
+			"type: remote-agent\n"+
+			"containerregistries:\n"+
+			"    - cluster: {}\n"+
+			"      roles:\n"+
+			"        - build\n"+
+			"        - deploy\n",
+	)
+}
+
 // SeedReleaseRepo materializes the minimal erun-devops layout and a git repo
 // that release scenarios need as a project root.
 func SeedReleaseRepo(t testing.TB, dir, branch string) string {
@@ -1205,8 +1243,13 @@ func StubKubectlDeployed(t testing.TB, stubsDir string, spec KubectlDeployedStub
 	if err := os.MkdirAll(stubsDir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", stubsDir, err)
 	}
-	portsim := PortSimBinary(t)
-	pidFile := filepath.Join(stubsDir, "portsim-pids")
+	// Forward-slash paths embedded into the sh stub body: this script runs
+	// under Git Bash / Cygwin sh on Windows, where an unquoted backslash path
+	// (e.g. the portsim invocation below) is mangled by backslash-as-escape and
+	// the simulator never launches — production's port-forward reachability wait
+	// then times out. Inert on Unix (ToSlash is a no-op).
+	portsim := filepath.ToSlash(PortSimBinary(t))
+	pidFile := filepath.ToSlash(filepath.Join(stubsDir, "portsim-pids"))
 	deploymentJSON := fmt.Sprintf(`{"spec":{"template":{"spec":{"containers":[{"name":%q,"env":[{"name":"ERUN_REPO_PATH","value":%q},{"name":"ERUN_SSHD_ENABLED","value":%q},{"name":"ERUN_MCP_PORT","value":"%d"},{"name":"ERUN_SSHD_PORT","value":"%d"}],"resources":{"limits":{}}}]}}}}`,
 		spec.ContainerName, spec.RepoPath, formatStubBool(spec.SSHDEnabled), spec.MCPPort, spec.SSHPort)
 	script := strings.Join([]string{
@@ -1310,8 +1353,11 @@ func StubKubectlDeployed(t testing.TB, stubsDir string, spec KubectlDeployedStub
 func kubectlDeployedOptionalArms(t testing.TB, stubsDir string, spec KubectlDeployedStubSpec) string {
 	t.Helper()
 	var arms strings.Builder
+	// Forward-slash every path embedded into the sh stub body so Git Bash /
+	// Cygwin sh on Windows reads them as paths, not escape sequences (ToSlash is
+	// a no-op on Unix). See the rationale in StubKubectlDeployed.
 	if len(spec.ExecExitCodes) > 0 {
-		counterFile := filepath.Join(stubsDir, "exec-calls")
+		counterFile := filepath.ToSlash(filepath.Join(stubsDir, "exec-calls"))
 		arms.WriteString(`  *" exec -it "*)` + "\n")
 		arms.WriteString(`    count=0` + "\n")
 		arms.WriteString(`    if [ -f '` + counterFile + `' ]; then count=$(wc -l < '` + counterFile + `' | tr -d '[:space:]'); fi` + "\n")
@@ -1325,7 +1371,7 @@ func kubectlDeployedOptionalArms(t testing.TB, stubsDir string, spec KubectlDepl
 	}
 	if spec.SeedKeyFile != "" {
 		arms.WriteString(`  *" exec -i deployment/"*)` + "\n")
-		arms.WriteString(`    cat > '` + spec.SeedKeyFile + `'` + "\n")
+		arms.WriteString(`    cat > '` + filepath.ToSlash(spec.SeedKeyFile) + `'` + "\n")
 		arms.WriteString(`    exit 0 ;;` + "\n")
 	}
 	if spec.WaitExitCode != 0 {
@@ -1336,14 +1382,14 @@ func kubectlDeployedOptionalArms(t testing.TB, stubsDir string, spec KubectlDepl
 		fmt.Fprintf(&arms, `    exit %d ;;`+"\n", spec.WaitExitCode)
 	}
 	if spec.PodsJSON != "" {
-		podsFile := filepath.Join(stubsDir, "pods.json")
+		podsFile := filepath.ToSlash(filepath.Join(stubsDir, "pods.json"))
 		mustWrite(t, podsFile, spec.PodsJSON)
 		arms.WriteString(`  *" get pods "*)` + "\n")
 		arms.WriteString(`    cat '` + podsFile + `'` + "\n")
 		arms.WriteString(`    exit 0 ;;` + "\n")
 	}
 	if spec.EventsJSON != "" {
-		eventsFile := filepath.Join(stubsDir, "events.json")
+		eventsFile := filepath.ToSlash(filepath.Join(stubsDir, "events.json"))
 		mustWrite(t, eventsFile, spec.EventsJSON)
 		arms.WriteString(`  *" get events "*)` + "\n")
 		arms.WriteString(`    cat '` + eventsFile + `'` + "\n")
