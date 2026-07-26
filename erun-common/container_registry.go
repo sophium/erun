@@ -82,11 +82,6 @@ func (e ContainerRegistryEntry) identity() string {
 	return strings.TrimSpace(e.Registry)
 }
 
-// isConfigured reports whether the entry names a target at all.
-func (e ContainerRegistryEntry) isConfigured() bool {
-	return e.Cluster != nil || strings.TrimSpace(e.Registry) != ""
-}
-
 // ContainerRegistries is the marked registry list. Build pushes to the BUILD
 // registry; deploy copies images FROM → every TO when both are set, then the
 // cluster pulls from the DEPLOY registry.
@@ -218,30 +213,42 @@ func (r ContainerRegistries) Concrete(resolve ClusterRegistryResolver) (Containe
 			out = append(out, entry)
 			continue
 		}
-		addrs, err := resolve(entry.Cluster.WithDefaults())
+		expanded, err := expandClusterEntry(entry, resolve)
 		if err != nil {
 			return nil, err
 		}
-		var pull, push []RegistryRole
-		for _, role := range entry.Roles {
-			if isClusterPullRole(role) {
-				pull = append(pull, role)
-			} else {
-				push = append(push, role)
-			}
+		out = append(out, expanded...)
+	}
+	return out, nil
+}
+
+// expandClusterEntry resolves one cluster entry's push/pull hosts and splits its
+// roles into plain per-host entries: DEPLOY pulls; BUILD/FROM/TO push.
+func expandClusterEntry(entry ContainerRegistryEntry, resolve ClusterRegistryResolver) (ContainerRegistries, error) {
+	addrs, err := resolve(entry.Cluster.WithDefaults())
+	if err != nil {
+		return nil, err
+	}
+	var pull, push []RegistryRole
+	for _, role := range entry.Roles {
+		if isClusterPullRole(role) {
+			pull = append(pull, role)
+		} else {
+			push = append(push, role)
 		}
-		if len(push) > 0 {
-			if strings.TrimSpace(addrs.Push) == "" {
-				return nil, errors.New("cluster registry resolved an empty push address")
-			}
-			out = append(out, ContainerRegistryEntry{Registry: addrs.Push, Roles: push})
+	}
+	out := make(ContainerRegistries, 0, 2)
+	if len(push) > 0 {
+		if strings.TrimSpace(addrs.Push) == "" {
+			return nil, errors.New("cluster registry resolved an empty push address")
 		}
-		if len(pull) > 0 {
-			if strings.TrimSpace(addrs.Pull) == "" {
-				return nil, errors.New("cluster registry resolved an empty pull address")
-			}
-			out = append(out, ContainerRegistryEntry{Registry: addrs.Pull, Roles: pull})
+		out = append(out, ContainerRegistryEntry{Registry: addrs.Push, Roles: push})
+	}
+	if len(pull) > 0 {
+		if strings.TrimSpace(addrs.Pull) == "" {
+			return nil, errors.New("cluster registry resolved an empty pull address")
 		}
+		out = append(out, ContainerRegistryEntry{Registry: addrs.Pull, Roles: pull})
 	}
 	return out, nil
 }
