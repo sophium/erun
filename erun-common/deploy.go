@@ -1812,7 +1812,7 @@ func windowsDrivePathToWSLMount(p string) string {
 		return p
 	}
 	drive := p[0]
-	if !((drive >= 'A' && drive <= 'Z') || (drive >= 'a' && drive <= 'z')) {
+	if (drive < 'A' || drive > 'Z') && (drive < 'a' || drive > 'z') {
 		return p
 	}
 	rest := strings.TrimPrefix(p[2:], "/")

@@ -65,19 +65,9 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 
 func initRunParams(cmd *cobra.Command, args []string, params common.BootstrapInitParams, setDefaultTenant, confirmEnvironment, clusterRegistry bool, envType string) (common.BootstrapInitParams, error) {
 	runParams := params
-	if runParams.Tenant == "" && len(args) > 0 {
-		runParams.Tenant = args[0]
-	}
-	if runParams.Environment == "" && len(args) > 1 {
-		runParams.Environment = args[1]
-	}
-	if clusterRegistry {
-		if strings.TrimSpace(runParams.ContainerRegistry) != "" {
-			return common.BootstrapInitParams{}, fmt.Errorf("--cluster-registry conflicts with --container-registry; pick one")
-		}
-		// The in-cluster erun-registry is plain HTTP, so mark it insecure; the
-		// rest (service/namespace/port) fill from the erun-registry convention.
-		runParams.ClusterRegistry = &common.ClusterRegistry{Insecure: true}
+	applyPositionalInitArgs(&runParams, args)
+	if err := applyClusterRegistryFlag(&runParams, clusterRegistry); err != nil {
+		return common.BootstrapInitParams{}, err
 	}
 	if err := applyInitTypeFlag(cmd, &runParams, envType); err != nil {
 		return common.BootstrapInitParams{}, err
@@ -92,6 +82,28 @@ func initRunParams(cmd *cobra.Command, args []string, params common.BootstrapIni
 		runParams.ConfirmEnvironment = &confirmEnvironment
 	}
 	return runParams, nil
+}
+
+func applyPositionalInitArgs(runParams *common.BootstrapInitParams, args []string) {
+	if runParams.Tenant == "" && len(args) > 0 {
+		runParams.Tenant = args[0]
+	}
+	if runParams.Environment == "" && len(args) > 1 {
+		runParams.Environment = args[1]
+	}
+}
+
+func applyClusterRegistryFlag(runParams *common.BootstrapInitParams, clusterRegistry bool) error {
+	if !clusterRegistry {
+		return nil
+	}
+	if strings.TrimSpace(runParams.ContainerRegistry) != "" {
+		return fmt.Errorf("--cluster-registry conflicts with --container-registry; pick one")
+	}
+	// The in-cluster erun-registry is plain HTTP, so mark it insecure; the
+	// rest (service/namespace/port) fill from the erun-registry convention.
+	runParams.ClusterRegistry = &common.ClusterRegistry{Insecure: true}
+	return nil
 }
 
 func applyInitTypeFlag(cmd *cobra.Command, runParams *common.BootstrapInitParams, envType string) error {

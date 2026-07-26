@@ -1324,31 +1324,35 @@ func (s bootstrapRunner) saveProjectContainerRegistry(projectRoot, envName, regi
 	}
 
 	if params.ClusterRegistry != nil {
-		projectConfig, err := s.loadProjectConfigForContainerRegistry(projectRoot)
-		if err != nil {
-			return err
-		}
-		desired := ClusterContainerRegistries(*params.ClusterRegistry)
-		if projectConfig.ContainerRegistriesForEnvironment(envName).Equal(desired) {
-			return nil
-		}
-		projectConfig.SetContainerRegistriesForEnvironment(envName, desired)
-		return s.SaveProjectConfig(projectRoot, projectConfig)
+		return s.saveClusterContainerRegistry(projectRoot, envName, *params.ClusterRegistry)
 	}
+	return s.savePlainContainerRegistry(projectRoot, envName, registry)
+}
 
-	if registry == "" {
-		return nil
-	}
-
+func (s bootstrapRunner) saveClusterContainerRegistry(projectRoot, envName string, cluster ClusterRegistry) error {
 	projectConfig, err := s.loadProjectConfigForContainerRegistry(projectRoot)
 	if err != nil {
 		return err
 	}
+	desired := ClusterContainerRegistries(cluster)
+	if projectConfig.ContainerRegistriesForEnvironment(envName).Equal(desired) {
+		return nil
+	}
+	projectConfig.SetContainerRegistriesForEnvironment(envName, desired)
+	return s.SaveProjectConfig(projectRoot, projectConfig)
+}
 
+func (s bootstrapRunner) savePlainContainerRegistry(projectRoot, envName, registry string) error {
+	if registry == "" {
+		return nil
+	}
+	projectConfig, err := s.loadProjectConfigForContainerRegistry(projectRoot)
+	if err != nil {
+		return err
+	}
 	if existing, _ := projectConfig.ContainerRegistriesForEnvironment(envName).BuildRegistry(); existing == registry {
 		return nil
 	}
-
 	projectConfig.SetContainerRegistriesForEnvironment(envName, SingleContainerRegistries(registry))
 	return s.SaveProjectConfig(projectRoot, projectConfig)
 }

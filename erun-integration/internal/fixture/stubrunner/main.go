@@ -26,7 +26,7 @@ func main() {
 	if err != nil {
 		os.Exit(97)
 	}
-	defer os.Remove(argvFile.Name())
+	defer func() { _ = os.Remove(argvFile.Name()) }()
 	for _, arg := range os.Args[1:] {
 		if _, err := argvFile.WriteString(arg); err != nil {
 			os.Exit(97)

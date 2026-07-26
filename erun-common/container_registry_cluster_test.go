@@ -40,6 +40,11 @@ func TestClusterContainerRegistries(t *testing.T) {
 	if !entry.Cluster.Insecure {
 		t.Error("insecure not preserved")
 	}
+}
+
+func TestClusterContainerRegistriesRolesAndValidate(t *testing.T) {
+	list := ClusterContainerRegistries(ClusterRegistry{Insecure: true})
+	entry := list[0]
 	if !entry.hasRole(RegistryRoleBuild) || !entry.hasRole(RegistryRoleDeploy) {
 		t.Errorf("roles = %v, want build+deploy", entry.Roles)
 	}
