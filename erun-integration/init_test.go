@@ -286,6 +286,50 @@ func TestInit(t *testing.T) {
 		golden.Equal(t, "init/type_remote_agent_dry_run", normalize.Apply(result.Combined))
 	})
 
+	t.Run("cluster_registry_dry_run", func(t *testing.T) {
+		// --cluster-registry seeds the in-cluster erun-registry as the env's
+		// container registry (a cluster: entry whose push/pull hosts resolve from
+		// the kube-context at build/deploy time) instead of a static
+		// --container-registry, so the resolved plan carries the cluster marker.
+		setup := env.New(t)
+		args := []string{
+			"init", "team", "dev",
+			"--type", "remote-agent",
+			"--version", "1.0.0",
+			"--kubernetes-context", "test-context",
+			"--cluster-registry",
+			"--no-git",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/cluster_registry_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("cluster_registry_conflicts_with_container_registry", func(t *testing.T) {
+		// --cluster-registry and --container-registry are mutually exclusive; supplying
+		// both fails fast before any resolution.
+		setup := env.New(t)
+		args := []string{
+			"init", "team", "dev",
+			"--type", "remote-agent",
+			"--version", "1.0.0",
+			"--kubernetes-context", "test-context",
+			"--cluster-registry",
+			"--container-registry", "registry.example/test",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for conflicting flags, got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "init/cluster_registry_conflicts_with_container_registry", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_with_mcp_auth_public_key", func(t *testing.T) {
 		// --mcp-auth-public-key folds the desktop's MCP-auth key into init's single
 		// runtime deploy: the runtime (team-devops) chart carries mcpAuth.* helm
