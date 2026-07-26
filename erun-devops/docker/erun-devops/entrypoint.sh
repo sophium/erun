@@ -90,6 +90,21 @@ ensure_outputs_dir() {
     mkdir -p "$(runtime_outputs_dir)" 2>/dev/null || true
 }
 
+# ensure_git_safe_directory lets git operate on the worktree even when it is a
+# host mount owned by a foreign uid. A local-agent env on Windows shares the repo
+# into the WSL2 node, where the files surface as root:root; git's dubious-owner
+# guard then aborts every in-pod `git status`, which the desktop renders as an
+# empty "No changes" view. Marking the worktree safe is a no-op on a PVC worktree
+# already owned by erun, so it is applied unconditionally and idempotently.
+ensure_git_safe_directory() {
+    command -v git >/dev/null 2>&1 || return 0
+    repo_dir=$(runtime_repo_dir)
+    [ -n "${repo_dir}" ] || return 0
+    if ! git config --global --get-all safe.directory 2>/dev/null | grep -qxF "${repo_dir}"; then
+        git config --global --add safe.directory "${repo_dir}" 2>/dev/null || true
+    fi
+}
+
 runtime_repo_is_remote() {
     case "${ERUN_REPO_REMOTE:-}" in
         1|true|TRUE|True|yes|YES|on|ON)
@@ -953,6 +968,7 @@ run_shell() {
 write_kubeconfig
 normalize_ssh_key_permissions
 ensure_outputs_dir
+ensure_git_safe_directory
 start_sshd
 start_environment_idle_monitor
 

@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/manifoldco/promptui"
@@ -19,6 +20,7 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 	params := common.BootstrapInitParams{}
 	setDefaultTenant := false
 	confirmEnvironment := false
+	clusterRegistry := false
 	var envType string
 
 	cmd := &cobra.Command{
@@ -27,7 +29,7 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 		Args:         cobra.MaximumNArgs(2),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			runParams, err := initRunParams(cmd, args, params, setDefaultTenant, confirmEnvironment, envType)
+			runParams, err := initRunParams(cmd, args, params, setDefaultTenant, confirmEnvironment, clusterRegistry, envType)
 			if err != nil {
 				return err
 			}
@@ -44,6 +46,7 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 	cmd.Flags().StringVar(&params.RuntimePod.Memory, "runtime-memory", "", "Runtime pod memory limit")
 	cmd.Flags().StringVar(&params.KubernetesContext, "kubernetes-context", "", "Kubernetes context to associate with the environment")
 	cmd.Flags().StringVar(&params.ContainerRegistry, "container-registry", "", "Container registry to associate with the environment")
+	cmd.Flags().BoolVar(&clusterRegistry, "cluster-registry", false, "Use the in-cluster erun-registry (addresses resolved from the env's kube-context) instead of --container-registry; mutually exclusive with it")
 	cmd.Flags().StringVar(&params.CodeCommitSSHKeyID, "codecommit-ssh-key-id", "", "CodeCommit SSH public key ID to use for remote repository access")
 	cmd.Flags().BoolVar(&params.Bootstrap, "bootstrap", false, "Deprecated: ignored; remote runtimes deploy the published erun-devops chart")
 	_ = cmd.Flags().MarkDeprecated("bootstrap", "remote runtimes deploy the published erun-devops chart; the flag is ignored")
@@ -55,17 +58,16 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 	cmd.Flags().BoolVarP(&params.AutoApprove, "yes", "y", false, "Automatically approve initialization prompts")
 	cmd.Flags().BoolVar(&params.DisableBuildScript, "disable-build-script", false, "Ignore any project build.sh for this env; erun build resolves docker/release contexts directly")
 	cmd.Flags().BoolVar(&params.PlatformAccount, "platform-account", false, "Make this env a cluster platform account: deploy binds its runtime ServiceAccount to cluster-admin so in-pod platform terraform (cluster edge) and component installs can manage cluster-scoped resources")
+	cmd.Flags().StringVar(&params.MCPAuthPublicKeyPath, "mcp-auth-public-key", "", "Require the env's MCP edge to authenticate bearer tokens signed by this PEM public key; empty leaves the edge loopback-only. Folds MCP auth into init's single runtime deploy.")
 	addDryRunFlag(cmd)
 	return cmd
 }
 
-func initRunParams(cmd *cobra.Command, args []string, params common.BootstrapInitParams, setDefaultTenant, confirmEnvironment bool, envType string) (common.BootstrapInitParams, error) {
+func initRunParams(cmd *cobra.Command, args []string, params common.BootstrapInitParams, setDefaultTenant, confirmEnvironment, clusterRegistry bool, envType string) (common.BootstrapInitParams, error) {
 	runParams := params
-	if runParams.Tenant == "" && len(args) > 0 {
-		runParams.Tenant = args[0]
-	}
-	if runParams.Environment == "" && len(args) > 1 {
-		runParams.Environment = args[1]
+	applyPositionalInitArgs(&runParams, args)
+	if err := applyClusterRegistryFlag(&runParams, clusterRegistry); err != nil {
+		return common.BootstrapInitParams{}, err
 	}
 	if err := applyInitTypeFlag(cmd, &runParams, envType); err != nil {
 		return common.BootstrapInitParams{}, err
@@ -80,6 +82,28 @@ func initRunParams(cmd *cobra.Command, args []string, params common.BootstrapIni
 		runParams.ConfirmEnvironment = &confirmEnvironment
 	}
 	return runParams, nil
+}
+
+func applyPositionalInitArgs(runParams *common.BootstrapInitParams, args []string) {
+	if runParams.Tenant == "" && len(args) > 0 {
+		runParams.Tenant = args[0]
+	}
+	if runParams.Environment == "" && len(args) > 1 {
+		runParams.Environment = args[1]
+	}
+}
+
+func applyClusterRegistryFlag(runParams *common.BootstrapInitParams, clusterRegistry bool) error {
+	if !clusterRegistry {
+		return nil
+	}
+	if strings.TrimSpace(runParams.ContainerRegistry) != "" {
+		return fmt.Errorf("--cluster-registry conflicts with --container-registry; pick one")
+	}
+	// The in-cluster erun-registry is plain HTTP, so mark it insecure; the
+	// rest (service/namespace/port) fill from the erun-registry convention.
+	runParams.ClusterRegistry = &common.ClusterRegistry{Insecure: true}
+	return nil
 }
 
 func applyInitTypeFlag(cmd *cobra.Command, runParams *common.BootstrapInitParams, envType string) error {
@@ -173,9 +197,21 @@ func codeCommitSSHKeyIDPrompt(run PromptRunner, label string) (string, error) {
 }
 
 func confirmPrompt(run PromptRunner, label string) (bool, error) {
+	return confirmPromptTo(run, label, nil)
+}
+
+// confirmPromptTo renders the confirm to out instead of promptui's default
+// (os.Stdout) when out is non-nil. The open --no-shell alias flow routes it to
+// stderr: promptui repaints the confirm from a readline goroutine, and it prints
+// the eval-able setup script to stdout immediately afterward, so leaving the
+// prompt on stdout lets the two writers interleave non-deterministically (on
+// Windows the repaint frames fused into the first script line ~1 run in 20).
+// Keeping the UI on stderr leaves stdout carrying only the script.
+func confirmPromptTo(run PromptRunner, label string, out io.WriteCloser) (bool, error) {
 	label = strings.TrimRight(strings.TrimSpace(label), "?")
 	prompt := promptui.Prompt{
-		Label: label,
+		Label:  label,
+		Stdout: out,
 		Templates: &promptui.PromptTemplates{
 			Prompt:  `{{ "?" | blue }} {{ . | bold }}? {{ "[Y/n]" | faint }} `,
 			Valid:   `{{ "?" | blue }} {{ . | bold }}? {{ "[Y/n]" | faint }} `,

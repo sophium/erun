@@ -47,6 +47,26 @@ func TestBuild(t *testing.T) {
 		golden.Equal(t, "build/dry_run_from_devops_cwd", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_cluster_registry_resolves_host_port_forward", func(t *testing.T) {
+		// A cluster: container registry resolves its concrete push host from the
+		// kube-context at build time. On the host (not in-pod) the push host is a
+		// managed port-forward to the registry Service; dry-run traces the ClusterIP
+		// lookup and the port-forward and uses placeholders so no cluster is touched.
+		// Locks the cluster-registry build resolution (Concrete → expandClusterEntry
+		// → resolver → port-forward) that plain registries skip.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectK8sConfig(t, setup, "paths:\n    docker: build/docker\n    version: build/VERSION\ncontainerregistries:\n    - cluster: {}\n      roles:\n        - build\n        - deploy\n")
+		fixture.SeedDockerComponentAt(t, filepath.Join(setup.Cwd, "build", "docker"), "api")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "build", "VERSION"), "2.3.4\n")
+		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_cluster_registry_resolves_host_port_forward", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_configured_docker_and_version_paths", func(t *testing.T) {
 		// paths.docker and paths.version in .erun/config.yaml relocate the docker
 		// build root and VERSION file out of the <tenant>-devops convention: the
@@ -656,7 +676,7 @@ func TestBuild(t *testing.T) {
 		stubs := setup.Cwd + "/stubs"
 		fixture.StubBinary(t, stubs, "dpkg-deb", "")
 		envVars := append(setup.Env(), "ERUN_HOST_OS_OVERRIDE=linux")
-		envVars = append(envVars, "PATH="+stubs+":"+os.Getenv("PATH"))
+		envVars = append(envVars, "PATH="+stubs+string(os.PathListSeparator)+os.Getenv("PATH"))
 		result := erun.Run(t, []string{"build", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: pkgDir, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -683,7 +703,7 @@ func TestBuild(t *testing.T) {
 		stubs := setup.Cwd + "/stubs"
 		fixture.StubBinary(t, stubs, "dpkg-deb", "")
 		envVars := append(setup.Env(), "ERUN_HOST_OS_OVERRIDE=linux")
-		envVars = append(envVars, "PATH="+stubs+":"+os.Getenv("PATH"))
+		envVars = append(envVars, "PATH="+stubs+string(os.PathListSeparator)+os.Getenv("PATH"))
 		result := erun.Run(t, []string{"build", "--version", "1.0.0"}, erun.RunOptions{Cwd: linuxDir, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -718,7 +738,7 @@ func TestBuild(t *testing.T) {
 		fixture.StubBinary(t, stubs, "dpkg-deb", "")
 		envVars := append(setup.Env(), stubDockerNoLocalImages(t, setup)...)
 		envVars = append(envVars, "ERUN_HOST_OS_OVERRIDE=linux")
-		envVars = append(envVars, "PATH="+stubs+":"+os.Getenv("PATH"))
+		envVars = append(envVars, "PATH="+stubs+string(os.PathListSeparator)+os.Getenv("PATH"))
 		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -956,7 +976,7 @@ func TestBuild(t *testing.T) {
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "gh", "git", "helm")...)
 		// tryGHCRLoginViaGH gates on exec.LookPath("gh"), which reads PATH
 		// rather than the ERUN_<NAME>_BIN override.
-		envVars = append(envVars, "PATH="+stubs+":"+os.Getenv("PATH"))
+		envVars = append(envVars, "PATH="+stubs+string(os.PathListSeparator)+os.Getenv("PATH"))
 		envVars = append(envVars, "ERUN_AUTO_LOGIN_ON_PUSH=1")
 		// -vv so the `docker login ghcr.io` TraceCommand that gates the
 		// retry is locked in the golden; at lower verbosity the retry is

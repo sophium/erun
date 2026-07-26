@@ -108,6 +108,10 @@ th {
   border: 1px solid currentColor;
 }
 
+.status-badge--registered {
+  color: #64748b;
+}
+
 .status-badge--provisioning {
   color: #92740a;
 }

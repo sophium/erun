@@ -77,7 +77,7 @@ The runtime chart configures each edge with a set of trusted issuers mapping eac
 An edge can trust **multiple issuers at once**, of two kinds, dispatched by the *configured* issuer's scheme (not the token's claimed `iss`, so the verification path can't be attacker-chosen):
 
 - **`https://` OIDC issuer** (the platform's Zitadel, AWS) — verified via the issuer's JWKS through provider discovery, using the same shared verifier the REST API uses (so the API and every MCP edge verify identically). A caller that already holds an `erun-mcp`-audience OIDC token presents it directly. A deploy trusts an OIDC issuer by setting the env's [`mcpauthissuer`](/reference/configuration#envconfig) to it; `erun deploy` threads it into the chart as `mcpAuth.{enabled,issuer,audience}` — issuer verbatim, audience derived as `erun-mcp:<tenant>/<environment>` — and injects **no** key, since the edge fetches the issuer's JWKS. Mutually exclusive with the `file://` key below; the `--mcp-auth-public-key` flag wins when both are set. The **console does not use this path** — a browser SPA cannot obtain an `erun-mcp`-audience OIDC token — it uses the backend-signed `file://` path below (issue #685).
-- **`file://` key** (issues #655, #686) — a self-contained trust anchor instead of an OIDC IdP: an Ed25519 public key injected into the runtime pod on deploy (`erun deploy --mcp-auth-public-key <key>`). The signer stamps a `file://<path>` `iss` naming that public key; the edge loads the key from that path and verifies the EdDSA signature, with `alg` hard-locked to `EdDSA` (closing the alg-confusion class). Two signers use it, and each env picks exactly one:
+- **`file://` key** (issues #655, #686) — a self-contained trust anchor instead of an OIDC IdP: an Ed25519 public key injected into the runtime pod when the env's runtime is deployed (`erun deploy --mcp-auth-public-key <key>`, or `erun init --mcp-auth-public-key <key>`, which folds it into init's create-time deploy so the desktop needs no separate post-init redeploy). The signer stamps a `file://<path>` `iss` naming that public key; the edge loads the key from that path and verifies the EdDSA signature, with `alg` hard-locked to `EdDSA` (closing the alg-confusion class). Two signers use it, and each env picks exactly one:
   - **Desktop** — the desktop generates the key (`desktopid.key`) once and signs each token locally.
   - **Hosted (console)** — the **backend** is the signer, the hosted twin of the desktop: it holds the MCP signing key (`ERUN_API_MCP_SIGNING_KEY_PATH`) and mints a per-env token on the console's behalf via [`POST /v1/environments/{id}/mcp-token`](#mcp-token-endpoint), while the deploy injects the backend's public key — so the console never holds a signing key. This supersedes the OIDC-issuer path for the console.
 
@@ -96,7 +96,7 @@ The `(iss, org) → tenant` resolution model and first-identity bootstrap above 
 | `GET` | `/v1/whoami` | Resolved identity for the calling token. Response below. | Tenant member |
 | `GET` | `/v1/config` | The console's read model over the per-tenant erun config: `{tenant, environments[], contexts[]}`. | Tenant member |
 | `GET` | `/v1/environments` | List the tenant's environments. | Tenant member |
-| `POST` | `/v1/environments` | Register an environment in the caller's tenant, bound to a referenced context. Body below. | Tenant member (write) |
+| `POST` | `/v1/environments` | Register an environment in the caller's tenant, bound to a referenced context; when the deploy executor is configured, a runtime env with a pinned version also starts its durable server-side deploy (`202`). Body below. | Tenant member (write) |
 | `GET` | `/v1/environments/{environment_id}` | Fetch one environment by id. | Tenant member |
 | `POST` | `/v1/environments/{environment_id}/mcp-token` | Mint a per-env MCP bearer token (`{token, audience}`) for the caller to present to the env's `erun-mcp` edge. Body-less. Response below. | Tenant member (write) |
 | `POST` | `/v1/environments/{environment_id}/dns01-token` | Mint a per-env DNS-01 broker token (`{token, audience}`), the credential the cluster's cert-manager DNS-01 webhook presents to the [DNS-01 broker](#dns01-broker). Body-less. Response below. | Tenant member (write) |
@@ -177,10 +177,13 @@ Registers an **environment** in the caller's tenant. The tenant is resolved from
 }
 ```
 
-On success the endpoint persists the row and returns it with HTTP `201`:
+On success the endpoint persists the row and returns it. The status code tells the caller whether a deploy started:
+
+- **`201 Created`** — the row is registered config only, no deploy. This is the response when the deploy executor is not configured, or the env is not a `runtime` env, or no `runtimeVersion` is pinned (nothing to deploy). `status` is `registered`.
+- **`202 Accepted`** — the deploy executor is configured **and** this is a `runtime` env with a pinned `runtimeVersion`, so the backend has started the durable server-side deploy. The row comes back at `status: registered` and moves to `provisioning` → `running`/`failed` as the deploy runs; poll `GET /v1/environments/{id}` (or watch the `GET /v1/config` read model) to follow it.
 
 ```jsonc
-// 201 response
+// 201 / 202 response (same body shape; 202 means a deploy is now running)
 {
   "environmentId": "019a7fa5-c2c0-7c55-bc70-714873a71f30",
   "tenantId": "019a7fa5-c2c0-7c55-bc70-714873a71f10",
@@ -189,14 +192,19 @@ On success the endpoint persists the row and returns it with HTTP `201`:
   "kubernetesContext": "primary",
   "contextId": "019a7fa5-c2c0-7c55-bc70-714873a71f20",
   "runtimeVersion": "1.2.3",
+  "status": "registered",       // provisioning lifecycle: registered → provisioning → running/failed
   "createdAt": "2026-06-24T10:00:00Z",
   "updatedAt": "2026-06-24T10:00:00Z"
 }
 ```
 
+A newly-registered environment is `registered` — the row exists but nothing is deployed. The server-side deploy executor (#605) then moves it `provisioning` → `running`/`failed` and sets `provisionError` on failure; the same `status`/`provisionError` appear on `GET /v1/environments/{id}` and in the `GET /v1/config` read model.
+
 **Per-tenant environment-count quota.** After validating the body and before persisting, the endpoint enforces the tenant's environment-count cap: it compares how many environments the tenant already has against the cap and rejects the registration with HTTP `409` once the tenant is at or over it. The cap defaults to **10** and is overridden per tenant by a `tenant_quotas.max_environments` row. That override row is set by the operations-only [`PUT /v1/tenants/{tenant_id}/quota`](#put-v1tenantstenant_idquota) endpoint (below). Both the count and the cap are read under row-level security, so each is scoped to the caller's own tenant.
 
-**Live namespace + runtime-chart deploy is `(Planned.)`.** This endpoint registers the environment row only; it does **not** yet ensure the `<tenant>-<env>` namespace or deploy the runtime chart server-side (that runs `RunBootstrapInitWithDependencies` against a live cluster). Until that lands, a registered environment stands as registered config — the namespace creation and chart deploy from the registered row are the planned follow-up.
+**Server-side deploy executor.** When configured, the backend deploys the runtime chart itself: it runs the deploy as a Kubernetes `Job` in the tenant's `<tenant>-devops` runtime image (which carries `erun` + `helm` + `kubectl`) under a cluster-admin ServiceAccount, invoking `erun deploy <tenant> <env> --version <runtimeVersion>`, and watches the Job to completion — succeeded → `running`, failed → `failed` with the reason on `provisionError`. A durable workflow (DBOS) wraps this, keyed by environment id, so a control-plane restart resumes an in-flight deploy rather than double-deploying. The deploy image is `<registry>/<tenant>-devops:<runtimeVersion>` (image-baked config model).
+
+The executor is **opt-in and off by default** — it requires the backend to run in-cluster with a durable-workflow database, a kube client, and the deployer ServiceAccount configured (chart value `api.envDeployer.enabled`, which also provisions the SA and its cluster-admin binding). When it is off, or the env is not a `runtime` env, or no `runtimeVersion` is pinned, the endpoint is register-only (`201`) exactly as before.
 
 **Error behaviour.** Today the API returns a bare HTTP status with a plain-text body (no JSON envelope):
 
@@ -205,7 +213,7 @@ On success the endpoint persists the row and returns it with HTTP `201`:
 | `400` | `name` is not a DNS-1123 label (the env forms the `<tenant>-<env>` namespace), `type` is not one of `runtime`/`remote-agent`/`local-agent`, or the body is not valid JSON. | Send a DNS-1123 `name` and a valid `type`. |
 | `401` / `403` | Standard auth failures (see [Errors](#errors)). The `WriteAll` permission covers `POST /v1/environments`. | Send a valid token whose roles permit the write. |
 | `409` | The tenant is at its environment-count cap (default `10` unless a `tenant_quotas` row overrides it); the body is `environment quota reached: this tenant already has N of N environments`. | Delete an unused environment, or raise the tenant's cap via [`PUT /v1/tenants/{tenant_id}/quota`](#put-v1tenantstenant_idquota) (operations-only). |
-| `500` | Persistence failed — e.g. `contextId` references a context that is not the caller's (the composite `(tenant_id, context_id)` foreign key is violated), or the request-scoped security context is missing (an internal wiring error). | Reference a context owned by the caller's tenant; if it persists with a valid context, it is a server bug. |
+| `500` | Persistence failed — e.g. `contextId` references a context that is not the caller's (the composite `(tenant_id, context_id)` foreign key is violated), or the request-scoped security context is missing (an internal wiring error). The row is persisted **before** the deploy is started, so a `failed to start provisioning` `500` (the deploy executor could not enqueue the durable workflow) leaves the environment registered — re-create is a no-op conflict; poll `GET /v1/environments/{id}` to confirm the row exists. | Reference a context owned by the caller's tenant; if it persists with a valid context, it is a server bug. |
 
 ### `POST /v1/environments/{environment_id}/mcp-token` {#mcp-token-endpoint}
 
@@ -221,9 +229,9 @@ The endpoint takes **no body**. On success it returns HTTP `200`:
 }
 ```
 
-**Backend signing key.** The signer is enabled by pointing `ERUN_API_MCP_SIGNING_KEY_PATH` at the backend's Ed25519 private key (PKCS#8 PEM). Unset, the endpoint reports `501` and mints nothing. The matching public key is what a deploy injects into the env (`erun deploy --mcp-auth-public-key`), so the edge trusts backend-signed tokens.
+**Backend signing key.** The signer is enabled by pointing `ERUN_API_MCP_SIGNING_KEY_PATH` at the backend's Ed25519 private key (PKCS#8 PEM) — on a hosted deploy, the `erun-backend-api` chart's `api.mcpSigning.secretName` value mounts that key Secret and sets the path (opt-in; unset leaves the endpoint at `501`). The matching public key is what a deploy injects into the env (`erun deploy --mcp-auth-public-key`), so the edge trusts backend-signed tokens.
 
-**Usable once the env is deployed.** A minted token only authenticates against a **deployed** env whose edge already carries the backend's public key. A dedicated `409`-until-deployed guard is `(Planned.)` — the backend does not yet track per-env deploy state (server-side deploy is itself `(Planned.)`; see [`POST /v1/environments`](#post-v1environments)); until then the endpoint mints whenever the signer is configured and the environment exists.
+**Usable once the env is deployed.** A minted token only authenticates against a **deployed** env whose edge already carries the backend's public key. A dedicated `409`-until-deployed guard is `(Planned.)` — the backend tracks a per-env provisioning `status` (see [`POST /v1/environments`](#post-v1environments)) but the mint endpoint does not yet gate on it reaching `running`; until it does, the endpoint mints whenever the signer is configured and the environment exists.
 
 **Error behaviour.** Bare HTTP status with a plain-text body (no JSON envelope):
 
@@ -269,7 +277,7 @@ A request succeeds (`204`) only when:
 2. The challenge FQDN is an `_acme-challenge` name **within** that env's subzone `<tenant>-<environment>.<services-zone>` — anything else (another tenant's or env's name, a foreign zone, a non-challenge record) → `403`, no write. This is the impersonation guard: `(tenant, environment)` come only from the verified token, never the FQDN.
 3. The `_acme-challenge` TXT write to PowerDNS (RFC2136 DNS UPDATE + central TSIG) succeeds — a DNS failure → `502`. Every authorized write is audited.
 
-`present` adds the challenge TXT; `cleanup` removes it. The broker is only registered when the platform env configures the PowerDNS write path (`ERUN_DNS01_*`); otherwise the endpoints are absent. Driving this against a **live** two-tenant cluster (staging then production ACME, with the negative cross-tenant test) is the issue's end-to-end acceptance — `(Planned.)` until a second tenant is stood up on the platform cluster.
+`present` adds the challenge TXT; `cleanup` removes it. The broker is only registered when the platform env configures the PowerDNS write path (`ERUN_DNS01_*`); otherwise the endpoints are absent. On a hosted deploy those are set (opt-in) by the `erun-backend-api` chart's `api.dns01.{enabled,servicesZone}` values — the TSIG key, algorithm, and PowerDNS `:53` endpoint default to the co-located `erun-powerdns` chart's conventions, so enabling the broker needs only `enabled` + the services zone. Driving this against a **live** two-tenant cluster (staging then production ACME, with the negative cross-tenant test) is the issue's end-to-end acceptance — `(Planned.)` until a second tenant is stood up on the platform cluster.
 
 ### `POST /v1/contexts`
 

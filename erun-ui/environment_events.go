@@ -7,15 +7,42 @@ type uiEnvironmentInitializedPayload struct {
 	Environment string `json:"environment"`
 }
 
+func initEmittedKey(tenant, environment string) string {
+	return strings.TrimSpace(tenant) + "\x00" + strings.TrimSpace(environment)
+}
+
+// clearInitEmitted lets a later legitimate (re-)initialization of the same env
+// fire the event again — after an init failure (retry) or a delete + re-create.
+func (a *App) clearInitEmitted(tenant, environment string) {
+	a.initEmittedMu.Lock()
+	delete(a.initEmitted, initEmittedKey(tenant, environment))
+	a.initEmittedMu.Unlock()
+}
+
 // Commands piped into the shared Local shell never produce a PTY exit, so init
 // success is observed from a trace line and surfaced as this event rather than
-// a PTY-exit hook.
+// a PTY-exit hook. It fires AT MOST ONCE per env: a Windows ConPTY repaint (from
+// writing the follow-up deploy command into the same Local shell) re-sends the
+// buffered "==> Initialized" line as fresh output, and without this guard each
+// re-fire composed another deploy — whose write repainted again — an endless
+// create→deploy loop. clearInitEmitted resets it for a retry/re-create.
 func (a *App) emitEnvironmentInitialized(tenant, environment string) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
 	if tenant == "" || environment == "" {
 		return
 	}
+	key := initEmittedKey(tenant, environment)
+	a.initEmittedMu.Lock()
+	if a.initEmitted == nil {
+		a.initEmitted = make(map[string]struct{})
+	}
+	if _, done := a.initEmitted[key]; done {
+		a.initEmittedMu.Unlock()
+		return
+	}
+	a.initEmitted[key] = struct{}{}
+	a.initEmittedMu.Unlock()
 	a.emitEvent(environmentInitializedEvent, uiEnvironmentInitializedPayload{
 		Tenant:      tenant,
 		Environment: environment,
@@ -28,6 +55,8 @@ func (a *App) emitEnvironmentInitFailed(tenant, environment string) {
 	if tenant == "" || environment == "" {
 		return
 	}
+	// A failed init may be retried; allow the next success to fire the event.
+	a.clearInitEmitted(tenant, environment)
 	a.emitEvent(environmentInitFailedEvent, uiEnvironmentInitializedPayload{
 		Tenant:      tenant,
 		Environment: environment,

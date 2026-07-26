@@ -35,6 +35,13 @@ export function missingRequiredFieldReason(dialog: EnvironmentDialogState): stri
   if (!values.tenant || !values.environment) {
     return 'Enter a tenant and environment name.';
   }
+  // Mirror erun-common's ValidateTenantName: a tenant name is a single DNS-safe
+  // label of lowercase letters and digits with no hyphens, so the <tenant>-<env>
+  // namespace stays unambiguous. Surface it here so Create is blocked with a clear
+  // reason instead of failing only once `erun init` runs in the terminal.
+  if (!/^[a-z0-9]{1,63}$/.test(values.tenant)) {
+    return 'Tenant name must use only lowercase letters and digits (no hyphens or uppercase).';
+  }
   // local-agent envs mount a host directory into the agent pod; the path
   // is required and free-text (the user picks where their project lives).
   if (values.envType === 'local-agent' && !values.localRepoPath) {
@@ -43,7 +50,9 @@ export function missingRequiredFieldReason(dialog: EnvironmentDialogState): stri
   if (!values.kubernetesContext) {
     return 'Select a Kubernetes context.';
   }
-  if (!values.containerRegistry) {
+  // The in-cluster registry needs no host string — its addresses resolve from the
+  // kube-context — so a container registry is only required when not using it.
+  if (!dialog.useClusterRegistry && !values.containerRegistry) {
     return 'Select a container registry.';
   }
   return null;

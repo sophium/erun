@@ -50,6 +50,43 @@ test.describe('environment init dialog', () => {
     await app.envInitDialog.waitForClosed();
   });
 
+  test('marks mandatory fields with a required indicator (not colour-only)', async ({
+    app,
+    page,
+  }) => {
+    // The reported gap: Create sat disabled with no on-field cue for which values
+    // were mandatory — only a one-at-a-time footer reason. Every required field now
+    // carries a marker, and the requirement folds into the accessible name via the
+    // label's visually-hidden "(required)", so it is conveyed non-visually too.
+    await stubDialogCluster(page);
+    await app.sidebar.openInitDialog();
+    await app.envInitDialog.waitForOpen();
+
+    // getByRole(name) reads the accessible name — the exact surface this test is
+    // about: the "(required)" folds in via the sr-only span, while the visible
+    // "*" glyph (aria-hidden) is excluded. getByLabel matches raw label
+    // textContent, which includes that glyph ("Tenant* (required)"), so it is the
+    // wrong query for an accessible-name assertion.
+    for (const name of [
+      'Tenant (required)',
+      'Environment (required)',
+      'Environment type (required)',
+      'Kubernetes context (required)',
+      'Container registry (required)',
+    ]) {
+      await expect(page.getByRole('combobox', { name, exact: true })).toBeVisible();
+    }
+
+    // The visible marker is a glyph, present in the label DOM.
+    await expect(page.locator('label[for="environment-container-registry"]')).toContainText('*');
+
+    // Optional fields (e.g. Runtime version) carry no requirement marker.
+    await expect(page.getByLabel('Runtime version (required)', { exact: true })).toHaveCount(0);
+
+    await app.envInitDialog.cancel();
+    await app.envInitDialog.waitForClosed();
+  });
+
   test('init mode shows the "create" description and a submit-reason status line', async ({
     app,
   }) => {
@@ -91,7 +128,10 @@ test.describe('environment init dialog', () => {
     await app.sidebar.openInitDialog();
     await app.envInitDialog.waitForOpen();
 
-    const typeSelect = page.getByLabel('Environment type', { exact: true });
+    // The control's accessible name carries the folded-in "(required)"; match it
+    // by role+name rather than getByLabel (which sees the raw label textContent,
+    // including the aria-hidden "*").
+    const typeSelect = page.getByRole('combobox', { name: 'Environment type (required)' });
     const localRepoPathInput = page.locator('#environment-local-repo-path');
     const browseButton = page.getByRole('button', { name: /Browse/ });
     const noGitCheckbox = page.locator('#environment-no-git');
@@ -203,6 +243,58 @@ test.describe('environment init dialog', () => {
     await app.envInitDialog.fillContainerRegistry('ghcr.io/sophium');
     await expect(createButton).toBeEnabled();
     await expect(reason).toHaveText('');
+
+    await app.envInitDialog.cancel();
+    await app.envInitDialog.waitForClosed();
+  });
+
+  test('runtime capacity is shown only after a Kubernetes context is selected', async ({
+    app,
+    page,
+  }) => {
+    // Reported bug: the RUNTIME RESOURCES panel showed "Available on best node: N
+    // CPU …" while the context dropdown still sat on its "Select Kubernetes
+    // context" placeholder — capacity for a cluster the user never chose. The
+    // dialog no longer auto-resolves contexts[0] for the capacity fetch, so
+    // capacity appears only for an explicitly selected context.
+    await stubDialogCluster(page);
+    await app.sidebar.openInitDialog();
+    await app.envInitDialog.waitForOpen();
+
+    const capacity = app.envInitDialog.locator().getByText(/Available on best node/);
+
+    // One context is available but not preselected — so no capacity is shown.
+    await expect(app.envInitDialog.kubernetesContextTrigger()).toContainText(
+      'Select Kubernetes context',
+    );
+    await expect(capacity).toHaveCount(0);
+
+    // Selecting the context fetches and reveals its capacity.
+    await app.envInitDialog.selectKubernetesContext('orbstack');
+    await expect(capacity).toBeVisible();
+
+    await app.envInitDialog.cancel();
+    await app.envInitDialog.waitForClosed();
+  });
+
+  test('does not pre-check default-tenant and offers a skip-Git-checkout option', async ({
+    app,
+    page,
+  }) => {
+    await app.sidebar.openInitDialog();
+    await app.envInitDialog.waitForOpen();
+
+    // "Set as default tenant" is OFF by default — creating an environment must not
+    // silently repoint the operator's default tenant.
+    await expect(page.locator('#environment-default-tenant')).not.toBeChecked();
+
+    // A remote-agent (the default type) offers skipping the Git checkout, off by
+    // default and toggleable — the way to create without the remote-worktree flow.
+    const skipGit = page.locator('#environment-no-git');
+    await expect(skipGit).toBeVisible();
+    await expect(skipGit).not.toBeChecked();
+    await skipGit.click();
+    await expect(skipGit).toBeChecked();
 
     await app.envInitDialog.cancel();
     await app.envInitDialog.waitForClosed();

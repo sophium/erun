@@ -11,7 +11,7 @@ type EnvironmentRepository struct {
 	txs *TxManager
 }
 
-const environmentColumns = `environment_id, tenant_id, name, type, kubernetes_context, context_id, runtime_version, created_at, updated_at`
+const environmentColumns = `environment_id, tenant_id, name, type, kubernetes_context, context_id, runtime_version, status, provision_error, created_at, updated_at`
 
 func NewEnvironmentRepository(txs *TxManager) *EnvironmentRepository {
 	return &EnvironmentRepository{txs: txs}
@@ -54,6 +54,22 @@ func (r *EnvironmentRepository) Count(ctx context.Context) (int, error) {
 		return err
 	})
 	return count, err
+}
+
+// UpdateProvisioningStatus persists an environment's provisioning-lifecycle
+// transition (registered → provisioning → running/failed), clearing the error
+// on any non-failed state. Mirrors the contexts provisioning-result update; RLS
+// keeps the write scoped to the caller's tenant.
+func (r *EnvironmentRepository) UpdateProvisioningStatus(ctx context.Context, environmentID, status, provisionError string) error {
+	return r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		_, err := tx.NewRaw(`
+			UPDATE environments
+			   SET status = ?,
+			       provision_error = NULLIF(?, '')
+			 WHERE environment_id = ?
+		`, status, provisionError, environmentID).Exec(ctx)
+		return err
+	})
 }
 
 func (r *EnvironmentRepository) Get(ctx context.Context, environmentID string) (model.Environment, error) {

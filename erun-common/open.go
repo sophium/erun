@@ -91,6 +91,15 @@ type OpenResult struct {
 	LocalPorts   EnvironmentLocalPorts
 	RepoPath     string
 	Title        string
+	// ClusterPullRegistry, when set, is the concrete in-cluster pull host a
+	// context-resolved cluster registry resolved to; deploy renders it as the
+	// chart's containerRegistry in place of the on-disk DEPLOY entry. Empty for a
+	// plain (non-cluster) registry, so those envs are unaffected.
+	ClusterPullRegistry string
+	// ClusterRegistryInsecure marks the resolved cluster registry as plain HTTP,
+	// so deploy tells the in-pod dind daemon to trust it (an in-pod build pushes
+	// to this non-loopback host, which dind would otherwise reject as needing TLS).
+	ClusterRegistryInsecure bool
 }
 
 func (r OpenResult) RemoteRepo() bool {
@@ -391,6 +400,14 @@ func resolveOpenRepoPath(envConfig EnvConfig) (string, error) {
 	if repoPath == "" {
 		return "", ErrRepoPathNotConfigured
 	}
+	// A remote/PVC-worktree env's repo path is a POSIX path inside the pod, not a
+	// host path. filepath.Clean would rewrite "/home/erun/..." to "\home\erun\..."
+	// on Windows, which then breaks the emitted `cd`/Set-Location (and any in-pod
+	// use). Normalize with forward-slash `path` for remote envs; only local-agent
+	// envs get the OS-native filepath.Clean.
+	if envConfig.RemoteWorktree() {
+		return path.Clean(repoPath), nil
+	}
 	return filepath.Clean(repoPath), nil
 }
 
@@ -565,7 +582,16 @@ func ExecShell(req ShellLaunchParams) error {
 		return err
 	}
 
-	cmd := Command("kubectl", kubectlExecArgs(req, script)...)
+	// The interactive shell needs kubectl's `exec -it` to allocate a TTY, which
+	// requires inheriting this process's console. Command() applies
+	// CREATE_NO_WINDOW (to stop background children of the windowless desktop app
+	// flashing a console) — but that detaches the child from the console, so
+	// kubectl reports "Unable to use a TTY", falls back to non-interactive, and
+	// the pod shell never renders a prompt (the env looks like it won't open).
+	// erun open already runs inside the ERun tab's ConPTY, so inheriting that
+	// console flashes nothing. Use newExecCommand to keep the ERUN_KUBECTL_BIN
+	// test seam without the console-detaching flag.
+	cmd := newExecCommand("kubectl", kubectlExecArgs(req, script)...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

@@ -104,6 +104,7 @@ func ideLaunchCommand(hostOS common.HostOS, uri string) (string, []string, error
 
 func openIDEURICommand(ctx common.Context, command string, args []string) (string, error) {
 	cmd := ideExecCommand(command, args...)
+	common.HideConsoleWindow(cmd)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdin = ctx.Stdin
@@ -122,6 +123,7 @@ func openIDEURICommand(ctx common.Context, command string, args []string) (strin
 
 func startIDEURICommand(ctx common.Context, command string, args []string) (string, error) {
 	cmd := ideExecCommand(command, args...)
+	common.HideConsoleWindow(cmd)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdin = nil
@@ -185,6 +187,7 @@ func runJetBrainsBootstrapAttempt(ctx common.Context, attempt jetbrainsBootstrap
 		return nil
 	}
 	cmd := ideExecCommand(attempt.command, attempt.args...)
+	common.HideConsoleWindow(cmd)
 	cmd.Stdin = nil
 	cmd.Stdout = &bytes.Buffer{}
 	cmd.Stderr = &bytes.Buffer{}

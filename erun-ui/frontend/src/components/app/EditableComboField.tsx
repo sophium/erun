@@ -3,9 +3,10 @@ import * as React from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
+
+import { FieldLabel } from './FieldLabel';
 
 function EditableComboChoices({
   id,
@@ -25,6 +26,7 @@ function EditableComboChoices({
       id={`${id}-choices`}
       className="w-96 max-w-[calc(100vw-4rem)] p-1"
       align="start"
+      collisionPadding={12}
     >
       {visibleSuggestions.length === 0 ? (
         <div className="px-2 py-6 text-center text-sm text-muted-foreground">
@@ -86,7 +88,9 @@ export function EditableComboField({
 
   return (
     <div className="grid gap-2">
-      <Label htmlFor={id}>{label}</Label>
+      <FieldLabel htmlFor={id} required={required}>
+        {label}
+      </FieldLabel>
       <div className="relative">
         <Input
           id={id}

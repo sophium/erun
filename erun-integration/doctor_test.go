@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -295,7 +296,6 @@ func TestDoctor(t *testing.T) {
 		}
 		golden.Equal(t, "doctor/in_runtime_no_marker_dry_run", normalize.Apply(result.Combined))
 	})
-
 
 	t.Run("in_runtime_multi_tenant_markers_dry_run", func(t *testing.T) {
 		// Two tenants share one $HOME (developer machine or shared runtime
@@ -1719,6 +1719,11 @@ func readFileForTest(t *testing.T, path string) string {
 
 func assertFileMode(t *testing.T, path string, want os.FileMode) {
 	t.Helper()
+	// Windows has no Unix permission bits — os.Chmod only toggles the read-only
+	// attribute, so Stat reports 0666/0777. The mode contract is Unix-only.
+	if runtime.GOOS == "windows" {
+		return
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Errorf("stat %s: %v", path, err)

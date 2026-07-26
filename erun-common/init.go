@@ -74,6 +74,16 @@ type BootstrapInitParams struct {
 	NoGit                    bool
 	KubernetesContext        string
 	ContainerRegistry        string
+	// ClusterRegistry, when set, seeds the new env with a resolvable cluster:
+	// registry entry (addresses resolved from the env's kube-context) instead of
+	// the static ContainerRegistry string. Set by `erun init --cluster-registry`.
+	ClusterRegistry *ClusterRegistry
+	// MCPAuthPublicKeyPath, when set, points at a PEM public key the init-time
+	// runtime deploy trusts so the env's erun-mcp edge requires a bearer signed by
+	// it — mirrors `erun deploy --mcp-auth-public-key`. The desktop sets it so
+	// init's single deploy already carries MCP auth and no post-init redeploy
+	// (which would roll the just-created pod) is needed.
+	MCPAuthPublicKeyPath string
 	// Type is the canonical environment type and takes precedence over the
 	// legacy Remote bool; when unset the type is derived from Remote for
 	// backward compatibility with --remote flag callers.
@@ -763,7 +773,7 @@ func (s *bootstrapRunState) createEnvConfig() error {
 	if err != nil {
 		return err
 	}
-	if err := s.runner.saveProjectContainerRegistry(envProjectRoot, s.envName, containerRegistry, s.params.Remote); err != nil {
+	if err := s.runner.saveProjectContainerRegistry(envProjectRoot, s.envName, containerRegistry, s.params); err != nil {
 		return err
 	}
 	s.runner.Context.Trace("Adding new environment")
@@ -784,14 +794,30 @@ func (s *bootstrapRunState) createEnvConfig() error {
 		RuntimePod:         NormalizeRuntimePodResources(s.params.RuntimePod),
 		DisableBuildScript: s.params.DisableBuildScript,
 		PlatformAccount:    s.params.PlatformAccount,
+		// Seed the registries into the FIRST persisted config. The init-time deploy
+		// (ensureDevopsAssets) reads the env config from disk before
+		// saveEnvConfigIfChanged runs, so registries set only in-memory here were
+		// ignored — the initial deploy fell back to the default registry even with
+		// --container-registry or --cluster-registry. Persisting them up front fixes
+		// that so the new env deploys to the configured registry from the start.
+		ContainerRegistries: seedInitContainerRegistries(s.params, containerRegistry),
 	}
 	if err := saveEnvConfig(s.runner.Store, s.tenant, s.envConfig); err != nil {
 		return err
 	}
-	s.envConfig.ContainerRegistries = SingleContainerRegistries(containerRegistry)
-	s.envConfigChanged = s.params.Remote && containerRegistry != ""
 	s.result.CreatedEnvConfig = true
 	return nil
+}
+
+// seedInitContainerRegistries returns the marked list a new env is created with:
+// a resolvable cluster: entry when the operator requested the in-cluster registry
+// (--cluster-registry), otherwise the single static registry resolved from
+// --container-registry / the prompt.
+func seedInitContainerRegistries(params BootstrapInitParams, registry string) ContainerRegistries {
+	if params.ClusterRegistry != nil {
+		return ClusterContainerRegistries(*params.ClusterRegistry)
+	}
+	return SingleContainerRegistries(registry)
 }
 
 func (s *bootstrapRunState) envProjectRoot() (string, error) {
@@ -907,6 +933,17 @@ func (s *bootstrapRunState) updateEnvCloudProvider(kubernetesContext string) err
 
 func (s *bootstrapRunState) updateEnvContainerRegistry() error {
 	projectRoot := s.projectRoot()
+	if s.params.ClusterRegistry != nil {
+		if err := s.runner.saveProjectContainerRegistry(projectRoot, s.envName, "", s.params); err != nil {
+			return err
+		}
+		desired := ClusterContainerRegistries(*s.params.ClusterRegistry)
+		if !s.envConfig.ContainerRegistries.Equal(desired) {
+			s.envConfig.ContainerRegistries = desired
+			s.envConfigChanged = true
+		}
+		return nil
+	}
 	current, _ := s.envConfig.ContainerRegistries.BuildRegistry()
 	containerRegistry, err := s.runner.resolveContainerRegistry(s.params, s.tenant, s.envName, projectRoot, current, false)
 	if err != nil {
@@ -915,7 +952,7 @@ func (s *bootstrapRunState) updateEnvContainerRegistry() error {
 	if containerRegistry == "" {
 		return nil
 	}
-	if err := s.runner.saveProjectContainerRegistry(projectRoot, s.envName, containerRegistry, s.params.Remote); err != nil {
+	if err := s.runner.saveProjectContainerRegistry(projectRoot, s.envName, containerRegistry, s.params); err != nil {
 		return err
 	}
 	if existing, _ := s.envConfig.ContainerRegistries.BuildRegistry(); containerRegistry != existing {
@@ -944,7 +981,7 @@ func (s *bootstrapRunState) ensureDevopsAssets() error {
 }
 
 func (s *bootstrapRunState) ensureRemoteDevopsAssets(projectRoot string) error {
-	req, repository, err := s.runner.ensureRemoteRepository(s.params, s.tenant, s.envName, s.envConfig.KubernetesContext, projectRoot)
+	req, repository, err := s.runner.ensureRemoteRepository(s.params, s.tenant, s.envName, s.envConfig.KubernetesContext, projectRoot, s.envConfig.ContainerRegistries)
 	if err != nil {
 		return err
 	}
@@ -1201,6 +1238,11 @@ func (s bootstrapRunner) resolveKubernetesContext(params BootstrapInitParams, te
 }
 
 func (s bootstrapRunner) resolveContainerRegistry(params BootstrapInitParams, tenant, envName, projectRoot, current string, creating bool) (string, error) {
+	// A cluster registry is written as a resolvable cluster: entry, not a static
+	// string, so short-circuit the string resolution/prompt entirely.
+	if params.ClusterRegistry != nil {
+		return "", nil
+	}
 	if params.ContainerRegistry != "" {
 		return params.ContainerRegistry, nil
 	}
@@ -1271,23 +1313,46 @@ func (s bootstrapRunner) resolveCloudProviderAlias(kubernetesContext, current st
 	return strings.TrimSpace(status.CloudProviderAlias), nil
 }
 
-func (s bootstrapRunner) saveProjectContainerRegistry(projectRoot, envName, registry string, remote bool) error {
-	if remote {
+func (s bootstrapRunner) saveProjectContainerRegistry(projectRoot, envName, registry string, params BootstrapInitParams) error {
+	// Remote envs record the registry on the env config only; the shared project
+	// config is for local-agent envs whose worktree lives in this repo.
+	if params.Remote {
 		return nil
 	}
-	if projectRoot == "" || envName == "" || registry == "" || s.SaveProjectConfig == nil {
+	if projectRoot == "" || envName == "" || s.SaveProjectConfig == nil {
 		return nil
 	}
 
+	if params.ClusterRegistry != nil {
+		return s.saveClusterContainerRegistry(projectRoot, envName, *params.ClusterRegistry)
+	}
+	return s.savePlainContainerRegistry(projectRoot, envName, registry)
+}
+
+func (s bootstrapRunner) saveClusterContainerRegistry(projectRoot, envName string, cluster ClusterRegistry) error {
 	projectConfig, err := s.loadProjectConfigForContainerRegistry(projectRoot)
 	if err != nil {
 		return err
 	}
+	desired := ClusterContainerRegistries(cluster)
+	if projectConfig.ContainerRegistriesForEnvironment(envName).Equal(desired) {
+		return nil
+	}
+	projectConfig.SetContainerRegistriesForEnvironment(envName, desired)
+	return s.SaveProjectConfig(projectRoot, projectConfig)
+}
 
+func (s bootstrapRunner) savePlainContainerRegistry(projectRoot, envName, registry string) error {
+	if registry == "" {
+		return nil
+	}
+	projectConfig, err := s.loadProjectConfigForContainerRegistry(projectRoot)
+	if err != nil {
+		return err
+	}
 	if existing, _ := projectConfig.ContainerRegistriesForEnvironment(envName).BuildRegistry(); existing == registry {
 		return nil
 	}
-
 	projectConfig.SetContainerRegistriesForEnvironment(envName, SingleContainerRegistries(registry))
 	return s.SaveProjectConfig(projectRoot, projectConfig)
 }

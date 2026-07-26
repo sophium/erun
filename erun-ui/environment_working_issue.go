@@ -40,6 +40,7 @@ func parseIssueNumberFromBranch(branch string) int {
 
 func execWorkingIssueCommand(ctx context.Context, dir, name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
+	eruncommon.HideConsoleWindow(cmd)
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	return strings.TrimSpace(string(out)), err

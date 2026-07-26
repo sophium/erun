@@ -261,7 +261,18 @@ func runKubectlGetPods(parent context.Context, params podWatchParams) ([]byte, e
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
 		}
-		<-done
+		// Bound the drain. On Windows an endpoint-security agent can hold the
+		// killed kubectl's stdout pipe open (or a grandchild inherits its write
+		// end), so cmd.Output() never reaches EOF and never returns — even though
+		// the process is dead. Without this timeout the watcher goroutine, and the
+		// deploy that joins it after helm has already succeeded, hang forever
+		// (observed: `erun deploy` alive minutes past `helm STATUS=deployed`, no
+		// child processes, blocked in Go). done is buffered (cap 1), so abandoning
+		// it here leaks nothing — the goroutine's send still completes.
+		select {
+		case <-done:
+		case <-time.After(defaultPodWatchKubectlTimeout):
+		}
 	}
 	select {
 	case <-parent.Done():

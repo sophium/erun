@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -739,6 +740,26 @@ func TestDeploy(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "deploy/dry_run_remote_env_tenant_umbrella_explicit_runtime_image_wins", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_remote_env_cluster_registry_chart_from_runtime_image", func(t *testing.T) {
+		// The `--cluster-registry` branch of the chart-registry resolver. The env's
+		// deploy registry is the in-cluster erun-registry (a cluster: entry resolved
+		// from the kube-context), which holds the tenant's built app images but never
+		// the erun platform chart. So the runtime chart and RUNTIME_REGISTRY must
+		// resolve from the runtime image's own registry (ghcr.io/sophium), not the
+		// in-cluster pull host — resolving them to the cluster registry would fail
+		// every chart pull. This locks the branch that fix 49f7f92f introduced, the
+		// counterpart to the plain-env branch every other remote deploy golden pins.
+		// The cluster entry is concretized in dry-run via the kubectl svc ClusterIP
+		// lookup, which returns a placeholder without touching a cluster.
+		setup := env.New(t)
+		fixture.SeedClusterRegistryRemoteTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_cluster_registry_chart_from_runtime_image", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_remote_env_image_pull_secrets", func(t *testing.T) {
@@ -2039,6 +2060,15 @@ func isHex(c byte) bool {
 // possible but vanishingly unlikely.
 func reapedChildPID(t *testing.T) int {
 	t.Helper()
+	// The reaped-pid reclaim path is Unix liveness semantics (Signal(0) →
+	// ESRCH/os.ErrProcessDone). Windows checks liveness via the process handle
+	// and recycles PIDs aggressively, so a freshly reaped PID reads as
+	// non-deterministically alive — the reclaim behaviour itself is covered on
+	// Unix, so skip the seeding here rather than ship a flaky test.
+	if runtime.GOOS == "windows" {
+		t.Skip("reaped-pid reclaim relies on Unix signal liveness; Windows PID reuse is non-deterministic")
+	}
+	// Spawn and reap a real child to get a positive, dead PID.
 	cmd := exec.Command("/bin/sh", "-c", "exit 0")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("seed reaped child: %v", err)

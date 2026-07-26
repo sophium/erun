@@ -29,13 +29,25 @@ const titlebarButtonClassName =
 const activeTitlebarButtonClassName =
   'bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground';
 
+// macOS overlays the window traffic-light controls at the top-left, so the
+// sidebar toggle must be inset to clear them. Windows/Linux put window controls
+// on the right, so that inset would just push the toggle away from the edge and
+// misalign it — detect the platform from the WebView UA (synchronous, no flash).
+const isMacPlatform =
+  typeof navigator !== 'undefined' && /\b(Mac|iPhone|iPad|iPod)\b/.test(navigator.userAgent);
+
 // TitlebarLeftControls renders the leftmost titlebar cluster: the sidebar toggle.
 export function TitlebarLeftControls(): React.ReactElement {
   const dispatch = useAppDispatch();
   const sidebarHidden = useAppSelector((state) => state.layout.sidebarHidden);
   const SidebarIcon = sidebarHidden ? PanelLeftOpen : PanelLeftClose;
   return (
-    <div className="relative z-[1] flex items-center gap-2 pl-[88px] [--wails-draggable:no-drag] max-[980px]:pl-[80px]">
+    <div
+      className={cn(
+        'relative z-[1] flex items-center gap-2 [--wails-draggable:no-drag]',
+        isMacPlatform && 'pl-[88px] max-[980px]:pl-[80px]',
+      )}
+    >
       <IconTooltip label="Toggle sidebar">
         <Button
           className={titlebarButtonClassName}

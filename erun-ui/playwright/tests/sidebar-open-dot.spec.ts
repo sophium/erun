@@ -53,17 +53,36 @@ test.describe('sidebar env open dot', () => {
     await expect(dot).toBeVisible();
     await expect(dot).toHaveAttribute('data-env-state', 'running');
 
-    await emitEnvStatus(page, tenant, environment, 'stopped');
-    await expect(dot).toHaveAttribute('data-env-state', 'stopped');
-    await expect(dot).toHaveAccessibleName(new RegExp(`^${tenant} / ${environment} is stopped`));
+    // While an env is settling open, the backend legitimately emits its OWN
+    // env-status (a session reconnect clears to "", a runtime-ensure that can't
+    // reach the undeployed runtime flags "failed"). Those one-shot emissions can
+    // land just after a single simulated event and revert the dot — a real race
+    // that a faster host happens to win. Re-drive the simulated event until the
+    // dot reflects it in BOTH its state attribute and its accessible name, so the
+    // assertion is deterministic on any host WITHOUT masking a regression: the dot
+    // must still actually reach and hold each state (a broken dot never converges
+    // and the step times out). Folding the name check into the retry matters —
+    // a delayed backend emission on a loaded host can revert it between a
+    // converged attribute check and a separate name assertion.
+    const driveEnvStatus = async (
+      status: string,
+      expectedState: string,
+      expectedName: string | RegExp,
+    ): Promise<void> => {
+      await expect(async () => {
+        await emitEnvStatus(page, tenant, environment, status);
+        await expect(dot).toHaveAttribute('data-env-state', expectedState, { timeout: 1_000 });
+        await expect(dot).toHaveAccessibleName(expectedName, { timeout: 1_000 });
+      }).toPass();
+    };
 
-    await emitEnvStatus(page, tenant, environment, 'failed');
-    await expect(dot).toHaveAttribute('data-env-state', 'failed');
-    await expect(dot).toHaveAccessibleName(/deploy failed/);
-
-    await emitEnvStatus(page, tenant, environment, '');
-    await expect(dot).toHaveAttribute('data-env-state', 'running');
-    await expect(dot).toHaveAccessibleName(`Close ${tenant} / ${environment}`);
+    await driveEnvStatus(
+      'stopped',
+      'stopped',
+      new RegExp(`^${tenant} / ${environment} is stopped`),
+    );
+    await driveEnvStatus('failed', 'failed', /deploy failed/);
+    await driveEnvStatus('', 'running', `Close ${tenant} / ${environment}`);
 
     // Close the env so the singleton backend returns to its pre-test shape.
     await dot.click();

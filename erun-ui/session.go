@@ -22,6 +22,12 @@ type terminalSession interface {
 	// detector uses it to decide whether a session whose Wait hasn't returned
 	// is still alive.
 	Pid() int
+	// Alive reports whether the backing process is still running. It must not
+	// depend on OpenProcess/os.FindProcess: on locked-down Windows an endpoint
+	// security agent denies OpenProcess, which would make a live shell look dead
+	// and surface a false "shell exited unexpectedly". Implementations use the
+	// process handle they already hold (Windows) or a signal-0 probe (POSIX).
+	Alive() bool
 }
 
 type startTerminalSessionParams struct {
@@ -82,6 +88,7 @@ func resolveCLIExecutableFromPath(goos, appExecutable, executableName string) st
 
 func runIDECommand(ctx context.Context, params startTerminalSessionParams) (string, error) {
 	cmd := exec.CommandContext(ctx, params.Executable, params.Args...)
+	eruncommon.HideConsoleWindow(cmd)
 	cmd.Dir = resolveTerminalStartDir(params.Dir)
 	if len(params.Env) > 0 {
 		cmd.Env = append(os.Environ(), params.Env...)
@@ -217,6 +224,8 @@ func buildOpenNoShellArgs(tenant, environment string) []string {
 func ensureMCPViaOpenCommand(ctx context.Context, cliPath string, result eruncommon.OpenResult) error {
 	args := buildOpenNoShellArgs(result.Tenant, result.Environment)
 	cmd := exec.CommandContext(ctx, cliPath, args...)
+	eruncommon.HideConsoleWindow(cmd)
+	eruncommon.BoundCommandWait(cmd)
 	cmd.Env = append(os.Environ(), "ERUN_IDLE_PROBE=1")
 	output, err := cmd.CombinedOutput()
 	if err == nil {
@@ -236,6 +245,8 @@ func ensureMCPViaOpenCommand(ctx context.Context, cliPath string, result eruncom
 func runOpenForReconnect(ctx context.Context, cliPath string, result eruncommon.OpenResult, onLine func(string)) error {
 	args := buildOpenNoShellArgs(result.Tenant, result.Environment)
 	cmd := exec.CommandContext(ctx, cliPath, args...)
+	eruncommon.HideConsoleWindow(cmd)
+	eruncommon.BoundCommandWait(cmd)
 	cmd.Env = append(os.Environ(), "ERUN_IDLE_PROBE=1")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -287,6 +298,8 @@ func scanReconnectOutput(reader io.Reader, captureErr bool, onLine func(string),
 func ensureSSHDViaOpenCommand(ctx context.Context, cliPath string, result eruncommon.OpenResult) error {
 	args := buildOpenNoShellArgs(result.Tenant, result.Environment)
 	cmd := exec.CommandContext(ctx, cliPath, args...)
+	eruncommon.HideConsoleWindow(cmd)
+	eruncommon.BoundCommandWait(cmd)
 	cmd.Env = append(os.Environ(), "ERUN_IDLE_PROBE=1")
 	output, err := cmd.CombinedOutput()
 	if err == nil {
@@ -327,17 +340,25 @@ func buildInitArgs(selection uiSelection) []string {
 }
 
 func appendInitOptionalFlags(args []string, selection uiSelection) []string {
-	for _, pair := range []struct{ flag, value string }{
+	pairs := []struct{ flag, value string }{
 		{"--version", strings.TrimSpace(selection.Version)},
 		{"--runtime-image", strings.TrimSpace(selection.RuntimeImage)},
 		{"--runtime-cpu", strings.TrimSpace(selection.RuntimeCPU)},
 		{"--runtime-memory", strings.TrimSpace(selection.RuntimeMemory)},
 		{"--kubernetes-context", strings.TrimSpace(selection.KubernetesContext)},
-		{"--container-registry", strings.TrimSpace(selection.ContainerRegistry)},
-	} {
+	}
+	// The cluster registry and a static container registry are mutually exclusive
+	// (`erun init` rejects both); cluster wins when selected.
+	if !selection.ClusterRegistry {
+		pairs = append(pairs, struct{ flag, value string }{"--container-registry", strings.TrimSpace(selection.ContainerRegistry)})
+	}
+	for _, pair := range pairs {
 		if pair.value != "" {
 			args = append(args, pair.flag, pair.value)
 		}
+	}
+	if selection.ClusterRegistry {
+		args = append(args, "--cluster-registry")
 	}
 	return args
 }
@@ -456,15 +477,24 @@ func resolveDeployStartDir(findProjectRoot eruncommon.ProjectFinderFunc, result 
 const defaultAITool = "claude"
 
 func resolveLocalShellCommand(goos string) (string, []string) {
+	if strings.TrimSpace(goos) == "windows" {
+		// ConPTY resolves a non-absolute executable relative to the session's
+		// start dir (not PATH), so a bare "powershell.exe" becomes
+		// "<startDir>\powershell.exe" and fails with "the system cannot find the
+		// file specified". Return an absolute shell path. $SHELL is ignored on
+		// Windows — it is typically a POSIX path from Git Bash that ConPTY cannot
+		// launch. Prefer PowerShell 7 (pwsh), fall back to Windows PowerShell.
+		for _, name := range []string{"pwsh.exe", "powershell.exe"} {
+			if resolved, err := exec.LookPath(name); err == nil {
+				return resolved, []string{"-NoLogo"}
+			}
+		}
+		return "powershell.exe", []string{"-NoLogo"}
+	}
 	if shell := strings.TrimSpace(os.Getenv("SHELL")); shell != "" {
 		return shell, nil
 	}
-	switch strings.TrimSpace(goos) {
-	case "windows":
-		return "powershell.exe", []string{"-NoLogo"}
-	default:
-		return "/bin/bash", nil
-	}
+	return "/bin/bash", nil
 }
 
 // claudeEffortLevels enumerates the selectable Claude effort levels in ascending

@@ -22,4 +22,9 @@ export {
   updateManageDialog,
   updateManageSSHDConfig,
 } from './manageDialogThunks';
+export {
+  checkManageEnvironmentHealth,
+  deployFromHealthCheck,
+  focusRegistryFieldFromHealthCheck,
+} from './manageHealthThunks';
 export { enableManageSSHD, startManageDoctor } from './manageHiddenSessionThunks';

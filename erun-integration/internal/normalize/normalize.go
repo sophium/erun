@@ -4,6 +4,7 @@ package normalize
 
 import (
 	"regexp"
+	"runtime"
 	"strings"
 )
 
@@ -36,6 +37,22 @@ var defaultRules = []Replacement{
 	// A separate rule for temp paths whose separators are percent-escaped,
 	// which the plain-path rule above cannot match.
 	{regexp.MustCompile(`%2F(?:private%2F)?(?:var%2Ffolders|var%2Ftmp|tmp)%2F[A-Za-z0-9._%+-]*`), "<TMP>"},
+	// Windows path roots (either separator): t.TempDir() lands under
+	// <drive>:\Users\<user>\AppData\Local\Temp\<test>. Mirror the Unix rules —
+	// STATE_ROOT terraform variant first, then the generic temp dir — so a golden
+	// recorded on either OS normalizes to the same token. Inert on Unix output
+	// (no drive letter), so existing macOS/Linux goldens are unaffected.
+	{regexp.MustCompile(`(?i)[A-Za-z]:[\\/](?:[^\\/\s'"]+[\\/])*?temp[\\/][^\s'"]*?[\\/]\.erun[\\/]terraform`), "<STATE_ROOT>"},
+	{regexp.MustCompile(`(?i)[A-Za-z]:[\\/](?:[^\\/\s'"]+[\\/])*?temp[\\/][^\s'"]*`), "<TMP>"},
+	// A local-agent env's host worktree renders through the WSL2 mount view of a
+	// Windows temp dir (C:\...\Temp\... -> /mnt/<drive>/.../Temp/...). Collapse it
+	// here, before the /Users and /home rules below would carve the drive prefix
+	// off. Inert on macOS/Linux output, which carries no /mnt/<drive> worktree.
+	{regexp.MustCompile(`(?i)/mnt/[a-z]/(?:[^/\s'"]+/)*?temp/[^\s'"]*`), "<TMP>"},
+	// Windows home dir. Before the Unix /Users rule below, so C:/Users/<user>
+	// (after backslash canonicalization) collapses whole rather than leaving the
+	// drive prefix. Inert on Unix output.
+	{regexp.MustCompile(`(?i)[A-Za-z]:[\\/]Users[\\/][^\\/\s'"]+`), "<HOME>"},
 	// Also collapses deterministic UUIDs (e.g. JetBrains ssh config IDs) on
 	// purpose; both shapes are opaque tokens, so no coverage signal is lost.
 	{regexp.MustCompile(`\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`), "<UUID>"},
@@ -57,17 +74,49 @@ var defaultRules = []Replacement{
 	// Safety net for a real home path that leaks despite the test HOME override.
 	{regexp.MustCompile(`/Users/[^/\s'"]+`), "<HOME>"},
 	{regexp.MustCompile(`/home/[^/\s'"]+`), "<HOME>"},
+	// Drop the Windows executable suffix from a launched erun binary so the trace
+	// matches the Unix golden (erun-app.exe -> erun-app). Anchored to line start
+	// (optionally after the command-quote a -vv trace adds) because that is where
+	// erun prints the executable it invokes — resolveAppExecutable is the only
+	// place erun appends a host .exe. A ".exe" anywhere else on a line is literal
+	// data that must survive: a Scoop manifest's `"erun.exe"` bin entries and its
+	// `\erun.exe` build path, or a `bin must include erun-app.exe` validation
+	// message, are identical on every host and are not host-suffix noise. Inert on
+	// Unix output, which has no .exe.
+	{regexp.MustCompile(`(?m)^('?)(erun-app|erun|emcp|eapi)\.exe\b`), "${1}${2}"},
+	// A failed exec of a missing path reads differently per platform — Unix
+	// `fork/exec <TMP> no such file or directory`, Windows `exec: "<TMP>":
+	// executable file not found in %PATH%` — so collapse either whole message to
+	// one token (the path is already <TMP>) for an OS-invariant golden.
+	{regexp.MustCompile(`(?:fork/exec|exec:)[^\n]*<TMP>[^\n]*`), "<EXEC_ERROR>"},
 	{regexp.MustCompile(`[ \t]+\n`), "\n"},
 }
 
+// windowsDrivePath matches a drive-letter-rooted Windows path (C:\...), the only
+// unambiguous Windows path shape: it starts with a drive letter and colon, so it
+// can never match a shell escape sequence (\n, \033, \,) that also uses
+// backslashes. Its separators are forward-slashed for golden parity. Paths
+// without a drive letter (a Linux path erun mangled via filepath) are fixed at
+// the source instead — the normalizer must not touch bare backslashes, which are
+// escapes far more often than separators.
+var windowsDrivePath = regexp.MustCompile(`[A-Za-z]:\\[^\s'"]*`)
+
 // PromptConfirm normalizes output containing a promptui "[Y/n]" confirm.
-// readline repaints the confirm line an unpredictable number of times (and,
-// under the slower coverage-instrumented binary, leaks partial fragments), so
-// the prompt render is not a stable contract; it drops the repaint frames and
-// keeps the deterministic remainder. It runs the default rules first, so use it
-// in place of Apply, not alongside it.
+// readline repaints the confirm line an unpredictable number of times, so the
+// prompt render is not a stable contract; this drops every repaint frame that
+// still shows the [Y/n] prompt or the █ cursor and dedups the rest, leaving the
+// one settled render (label plus the typed answer) and the deterministic
+// remainder. Runs the default rules first, so use it in place of Apply, not
+// alongside it.
+//
+// This relies on the confirm owning its output stream: a second writer racing
+// the same stream (as the open alias flow's stdout eval-script write once did)
+// interleaves mid-redraw and leaves marker-less corrupted fragments this cannot
+// recognize. Prompts that share a stream with other output must route the
+// confirm elsewhere at the source (see cmd.confirmPromptTo) rather than lean on
+// this to reconstruct the race.
 func PromptConfirm(s string) string {
-	s = strings.ReplaceAll(Apply(s), "\r", "")
+	s = applyBackspaces(strings.ReplaceAll(Apply(s), "\r", ""))
 	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
 	out := make([]string, 0, len(lines))
 	for _, line := range lines {
@@ -85,6 +134,13 @@ func PromptConfirm(s string) string {
 // Apply runs the default rule set over the output. Extra rules run after the
 // defaults, so a caller can override or further normalize the result.
 func Apply(s string, extra ...Replacement) string {
+	// Windows-only: forward-slash path separators BEFORE the token rules so a
+	// path like `\home\erun\git\team` becomes `/home/erun/git/team` and the
+	// /home, /Users, temp rules can collapse it to a token. Gated on GOOS so
+	// macOS/Linux output — already canonical — is provably untouched.
+	if runtime.GOOS == "windows" {
+		s = forwardSlashWindowsPaths(s)
+	}
 	rules := append([]Replacement(nil), defaultRules...)
 	rules = append(rules, extra...)
 	for _, r := range rules {
@@ -93,4 +149,48 @@ func Apply(s string, extra ...Replacement) string {
 	// Absorb the jitter in whether the final line ends with a newline.
 	s = strings.TrimRight(s, "\n") + "\n"
 	return s
+}
+
+// forwardSlashWindowsPaths rewrites backslash separators in drive-letter Windows
+// paths (C:\...) to forward slashes so the downstream token rules — recorded in
+// the Unix goldens' forward-slash shape — match. It deliberately touches only
+// drive-rooted paths: a bare backslash is an escape sequence (\n, \033, \,) in a
+// traced script body far more often than a separator, and quoting parity is
+// handled at the tracer instead (isShellSafe treats backslash as safe, matching
+// Unix's bare forward-slash args). Exported-free so the cross-OS unit test can
+// drive it on any host.
+func forwardSlashWindowsPaths(s string) string {
+	return windowsDrivePath.ReplaceAllStringFunc(s, func(m string) string {
+		m = strings.ReplaceAll(m, `\`, "/")
+		// A %q-quoted path arrives with escaped separators (C:\\Users\\...), which
+		// become // here; collapse runs to a single slash so the path matches the
+		// Unix golden. Safe within a drive path — it contains no :// URL.
+		return multiSlash.ReplaceAllString(m, "/")
+	})
+}
+
+var multiSlash = regexp.MustCompile(`/{2,}`)
+
+// backspacePair matches a printable character immediately followed by a
+// backspace, the byte pair a terminal renders as "erase the previous glyph".
+var backspacePair = regexp.MustCompile("[^\n\x08]\x08")
+
+// applyBackspaces resolves ASCII backspaces (\x08) the way a terminal would, so
+// a confirm repaint that readline draws as "<answer>\b<label>…" collapses to the
+// clean "<label>…" it leaves on screen. Windows readline emits these erase
+// sequences where the unix build does not, and they leak into the piped capture
+// as a spurious "<answer>…" fragment line; resolving them here keeps PromptConfirm
+// deterministic across hosts instead of locking one terminal's repaint bytes.
+func applyBackspaces(s string) string {
+	if !strings.ContainsRune(s, '\x08') {
+		return s
+	}
+	for {
+		next := backspacePair.ReplaceAllString(s, "")
+		if next == s {
+			// Any backspace with nothing left to erase is itself dropped.
+			return strings.ReplaceAll(next, "\x08", "")
+		}
+		s = next
+	}
 }

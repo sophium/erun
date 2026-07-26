@@ -286,7 +286,10 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 }
 
 func (a *App) StartInitSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
-	return a.runErunCommandInLocal(selection, cols, rows, buildInitArgs(selection))
+	// init owns the env's single deploy, so it must carry the desktop's MCP-auth
+	// key like the deploy paths do — otherwise the desktop would have to redeploy
+	// after init to inject it, rolling the pod init just created.
+	return a.runErunCommandInLocal(selection, cols, rows, a.appendMCPAuthPublicKeyFlag(buildInitArgs(selection)))
 }
 
 // StartDeploySession runs the pure `erun deploy` primitive: it installs an
@@ -423,9 +426,27 @@ func (a *App) ensureLocalSession(selection uiSelection, slot, cols, rows int) (*
 }
 
 func buildLocalErunCommand(cliPath string, args []string) string {
+	return buildLocalErunCommandForOS(goruntime.GOOS, cliPath, args)
+}
+
+func buildLocalErunCommandForOS(goos, cliPath string, args []string) string {
 	cliPath = strings.TrimSpace(cliPath)
 	if cliPath == "" {
 		cliPath = "erun"
+	}
+	if goos == "windows" {
+		// The Windows local shell is PowerShell (see resolveLocalShellCommand), so
+		// the command must be PowerShell syntax: run the quoted exe via the call
+		// operator (&) — a quoted path alone is just a string literal — and submit
+		// with a carriage return. PSReadLine treats a bare LF as a line
+		// continuation, which left the piped command stuck at the ">>" prompt and
+		// never ran (so init/deploy/sshd/doctor silently did nothing).
+		parts := make([]string, 0, len(args)+2)
+		parts = append(parts, "&", powerShellQuoteIfNeeded(cliPath))
+		for _, arg := range args {
+			parts = append(parts, powerShellQuoteIfNeeded(arg))
+		}
+		return strings.Join(parts, " ") + "\r"
 	}
 	parts := make([]string, 0, len(args)+1)
 	parts = append(parts, shellQuoteIfNeeded(cliPath))
@@ -433,6 +454,22 @@ func buildLocalErunCommand(cliPath string, args []string) string {
 		parts = append(parts, shellQuoteIfNeeded(arg))
 	}
 	return strings.Join(parts, " ") + "\n"
+}
+
+// powerShellQuoteIfNeeded quotes value for PowerShell only when it contains a
+// character that isn't safe bare (matching shellQuoteIfNeeded's safe set), so
+// readable tokens like --type=remote-agent stay unquoted while paths with
+// backslashes/colons are single-quoted.
+func powerShellQuoteIfNeeded(value string) string {
+	if value == "" {
+		return "''"
+	}
+	for _, r := range value {
+		if !shellQuoteSafeRune(r) {
+			return powerShellQuote(value)
+		}
+	}
+	return value
 }
 
 func shellQuoteIfNeeded(value string) string {
@@ -634,6 +671,8 @@ func (a *App) DeleteEnvironment(selection uiSelection, confirmation string) (del
 		return deleteEnvironmentResult{}, err
 	}
 
+	// A later re-create of this env must fire environment-initialized again.
+	a.clearInitEmitted(selection.Tenant, selection.Environment)
 	result, err := eruncommon.RunDeleteEnvironment(eruncommon.Context{}, eruncommon.DeleteEnvironmentParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
@@ -1085,8 +1124,23 @@ func (a *App) handleSessionOutput(managed *managedTerminal, chunk []byte, lastOu
 // SIGWINCHes are not coalesced.
 var (
 	aiRepaintNudgeDelay  = 400 * time.Millisecond
-	aiRepaintNudgeSettle = 150 * time.Millisecond
+	aiRepaintNudgeSettle = defaultAIRepaintNudgeSettle()
 )
+
+// defaultAIRepaintNudgeSettle sizes the shrink-hold to the platform's resize
+// delivery. POSIX kubectl exec delivers the resize via SIGWINCH immediately, so
+// a short hold suffices. On Windows there is no SIGWINCH: kubectl exec -it POLLS
+// the terminal size (~250ms), so the shrink must be held past a poll interval or
+// the pod TTY never sees it — and then Claude, a main-screen TUI that only
+// repaints on a real geometry change, stays blank after a reattach until the
+// user types (verified: a held ConPTY resize does reach the pod TTY; a 150ms
+// blip does not).
+func defaultAIRepaintNudgeSettle() time.Duration {
+	if goruntime.GOOS == "windows" {
+		return 600 * time.Millisecond
+	}
+	return 150 * time.Millisecond
+}
 
 // aiAttachMarker is the window-title escape (OSC 0) the open bootstrap prints
 // immediately before `dtach -A` reattaches to the running program — the precise

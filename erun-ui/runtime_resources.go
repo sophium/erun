@@ -20,6 +20,47 @@ func (a *App) LoadRuntimeResourceStatus(input uiRuntimeResourceInput) (uiRuntime
 	return a.deps.loadResourceStatus(ctx, normalizeRuntimeResourceInput(input))
 }
 
+// LoadClusterRegistry reports whether the given Kubernetes context has an
+// in-cluster erun-registry Service, so the new-environment dialog can default to
+// a resolvable cluster: registry entry (addresses derived from the context) for
+// that env instead of a hardcoded host.
+func (a *App) LoadClusterRegistry(input uiRuntimeResourceInput) (uiClusterRegistryStatus, error) {
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return a.deps.loadClusterRegistry(ctx, normalizeRuntimeResourceInput(input))
+}
+
+func loadClusterRegistry(ctx context.Context, input uiRuntimeResourceInput) (uiClusterRegistryStatus, error) {
+	input = normalizeRuntimeResourceInput(input)
+	if input.KubernetesContext == "" {
+		return uiClusterRegistryStatus{}, nil
+	}
+	service := eruncommon.DefaultClusterRegistryService
+	namespace := eruncommon.DefaultClusterRegistryNamespace
+	// A ClusterIP means the registry Service exists in this context. A missing
+	// Service makes kubectl exit non-zero — treated as "not deployed", not an
+	// error, so the dialog simply falls back to its normal registry default.
+	output, err := kubectlJSON(ctx, input.KubernetesContext,
+		"get", "svc", service, "-n", namespace, "-o", "jsonpath={.spec.clusterIP}")
+	clusterIP := strings.TrimSpace(string(output))
+	if err != nil || clusterIP == "" || clusterIP == "None" {
+		return uiClusterRegistryStatus{KubernetesContext: input.KubernetesContext, Deployed: false}, nil
+	}
+	port := eruncommon.DefaultClusterRegistryPort
+	return uiClusterRegistryStatus{
+		KubernetesContext: input.KubernetesContext,
+		Deployed:          true,
+		Service:           service,
+		Namespace:         namespace,
+		Port:              port,
+		// The erun-registry is plain HTTP, so mark it insecure for the in-pod dind.
+		Insecure: true,
+		Message:  fmt.Sprintf("In-cluster registry %s.%s:%d", service, namespace, port),
+	}, nil
+}
+
 func loadRuntimeResourceStatus(ctx context.Context, input uiRuntimeResourceInput) (uiRuntimeResourceStatus, error) {
 	input = normalizeRuntimeResourceInput(input)
 	if input.KubernetesContext == "" {
@@ -254,7 +295,9 @@ func kubectlJSON(ctx context.Context, kubernetesContext string, args ...string) 
 	if kubernetesContext != "" {
 		args = append([]string{"--context", kubernetesContext}, args...)
 	}
-	output, err := exec.CommandContext(ctx, "kubectl", args...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	eruncommon.HideConsoleWindow(cmd)
+	output, err := cmd.CombinedOutput()
 	if err != nil {
 		detail := strings.TrimSpace(string(output))
 		if detail != "" {

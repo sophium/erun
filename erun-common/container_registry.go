@@ -26,11 +26,60 @@ const (
 	RegistryRoleDeploy RegistryRole = "deploy"
 )
 
-// ContainerRegistryEntry is one registry in the project's marked list: a host
-// (or host/namespace) plus the roles it carries.
+// ContainerRegistryEntry is one registry in the project's marked list. It names
+// its target one of two ways: a static host (or host/namespace) in Registry, or
+// a Cluster block resolved from the env's kube-context. Exactly one is set.
 type ContainerRegistryEntry struct {
-	Registry string         `yaml:"registry" json:"registry"`
-	Roles    []RegistryRole `yaml:"roles" json:"roles"`
+	Registry string           `yaml:"registry,omitempty" json:"registry,omitempty"`
+	Cluster  *ClusterRegistry `yaml:"cluster,omitempty" json:"cluster,omitempty"`
+	Roles    []RegistryRole   `yaml:"roles" json:"roles"`
+}
+
+// ClusterRegistry describes an in-cluster image registry whose addresses are
+// resolved from the env's kube-context rather than hardcoded. The cluster pulls
+// it at its in-cluster address (the DEPLOY role); operator-side roles
+// (BUILD/FROM/TO) reach it at a push address — the in-cluster address for an
+// in-pod build, or a managed port-forward (localhost:<port>) from the host.
+type ClusterRegistry struct {
+	Service   string `yaml:"service,omitempty" json:"service,omitempty"`
+	Namespace string `yaml:"namespace,omitempty" json:"namespace,omitempty"`
+	Port      int    `yaml:"port,omitempty" json:"port,omitempty"`
+	// Insecure marks the registry as plain HTTP (a local dev registry), so the
+	// in-pod dind daemon is told to trust it and the resolver never assumes TLS.
+	Insecure bool `yaml:"insecure,omitempty" json:"insecure,omitempty"`
+}
+
+// Cluster registry defaults match the erun-registry convention the local k3s
+// setup provisions, so a bare `cluster: {}` block resolves without extra config.
+const (
+	DefaultClusterRegistryService   = "erun-registry"
+	DefaultClusterRegistryNamespace = "kube-system"
+	DefaultClusterRegistryPort      = 5000
+)
+
+// WithDefaults fills unset fields with the erun-registry convention.
+func (c ClusterRegistry) WithDefaults() ClusterRegistry {
+	if strings.TrimSpace(c.Service) == "" {
+		c.Service = DefaultClusterRegistryService
+	}
+	if strings.TrimSpace(c.Namespace) == "" {
+		c.Namespace = DefaultClusterRegistryNamespace
+	}
+	if c.Port == 0 {
+		c.Port = DefaultClusterRegistryPort
+	}
+	return c
+}
+
+// identity names the entry for role tallies and dedup: the static host, or a
+// stable pseudo-host for a cluster entry so two cluster entries for the same
+// service collapse.
+func (e ContainerRegistryEntry) identity() string {
+	if e.Cluster != nil {
+		c := e.Cluster.WithDefaults()
+		return fmt.Sprintf("cluster:%s.%s:%d", c.Service, c.Namespace, c.Port)
+	}
+	return strings.TrimSpace(e.Registry)
 }
 
 // ContainerRegistries is the marked registry list. Build pushes to the BUILD
@@ -106,6 +155,104 @@ func (r ContainerRegistries) ToRegistries() []string {
 	return out
 }
 
+// ClusterRegistryAddresses is a cluster registry resolved to concrete hosts:
+// Push is where operator-side roles (build/from/to) read and write; Pull is the
+// in-cluster host the DEPLOY role renders into the chart for the cluster to pull.
+type ClusterRegistryAddresses struct {
+	Push string
+	Pull string
+}
+
+// ClusterRegistryResolver turns a cluster block into concrete push/pull hosts.
+// It is injected so resolution (kube-context queries, port-forward setup) stays
+// out of the pure config layer and is faked in tests.
+type ClusterRegistryResolver func(ClusterRegistry) (ClusterRegistryAddresses, error)
+
+// isClusterPullRole reports whether a role is served by the cluster itself
+// (DEPLOY) rather than the operator side; the cluster pulls at the pull host.
+func isClusterPullRole(role RegistryRole) bool {
+	return normalizeRole(role) == RegistryRoleDeploy
+}
+
+// HasClusterEntry reports whether any entry is a context-resolved cluster
+// registry, so callers know a resolver is required before use.
+func (r ContainerRegistries) HasClusterEntry() bool {
+	for _, entry := range r {
+		if entry.Cluster != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// ClusterEntry returns the first cluster block (defaults filled), if any —
+// callers use it to set up the port-forward and dind insecure trust.
+func (r ContainerRegistries) ClusterEntry() (ClusterRegistry, bool) {
+	for _, entry := range r {
+		if entry.Cluster != nil {
+			return entry.Cluster.WithDefaults(), true
+		}
+	}
+	return ClusterRegistry{}, false
+}
+
+// Concrete expands cluster entries into plain per-role entries using resolved
+// push/pull hosts, so BuildRegistry/DeployRegistry/copy resolution operate on
+// static hosts unchanged. Plain entries pass through untouched. A cluster entry
+// splits by role: DEPLOY → pull host; BUILD/FROM/TO → push host.
+func (r ContainerRegistries) Concrete(resolve ClusterRegistryResolver) (ContainerRegistries, error) {
+	if !r.HasClusterEntry() {
+		return r, nil
+	}
+	if resolve == nil {
+		return nil, errors.New("cluster registry entry requires a resolver")
+	}
+	out := make(ContainerRegistries, 0, len(r)+1)
+	for _, entry := range r {
+		if entry.Cluster == nil {
+			out = append(out, entry)
+			continue
+		}
+		expanded, err := expandClusterEntry(entry, resolve)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, expanded...)
+	}
+	return out, nil
+}
+
+// expandClusterEntry resolves one cluster entry's push/pull hosts and splits its
+// roles into plain per-host entries: DEPLOY pulls; BUILD/FROM/TO push.
+func expandClusterEntry(entry ContainerRegistryEntry, resolve ClusterRegistryResolver) (ContainerRegistries, error) {
+	addrs, err := resolve(entry.Cluster.WithDefaults())
+	if err != nil {
+		return nil, err
+	}
+	var pull, push []RegistryRole
+	for _, role := range entry.Roles {
+		if isClusterPullRole(role) {
+			pull = append(pull, role)
+		} else {
+			push = append(push, role)
+		}
+	}
+	out := make(ContainerRegistries, 0, 2)
+	if len(push) > 0 {
+		if strings.TrimSpace(addrs.Push) == "" {
+			return nil, errors.New("cluster registry resolved an empty push address")
+		}
+		out = append(out, ContainerRegistryEntry{Registry: addrs.Push, Roles: push})
+	}
+	if len(pull) > 0 {
+		if strings.TrimSpace(addrs.Pull) == "" {
+			return nil, errors.New("cluster registry resolved an empty pull address")
+		}
+		out = append(out, ContainerRegistryEntry{Registry: addrs.Pull, Roles: pull})
+	}
+	return out, nil
+}
+
 // Validate enforces the marker invariants. A DEPLOY registry need not carry
 // BUILD or TO — the image it serves may be published there externally (e.g. a
 // runtime env pulling a released image), which erun cannot police at config
@@ -149,7 +296,10 @@ type registryRoleTally struct {
 func (r ContainerRegistries) tallyRoles() (registryRoleTally, error) {
 	tally := registryRoleTally{toRegistries: make(map[string]struct{}, len(r))}
 	for _, entry := range r {
-		registry := strings.TrimSpace(entry.Registry)
+		if entry.Cluster != nil && strings.TrimSpace(entry.Registry) != "" {
+			return registryRoleTally{}, errors.New("registry list entry sets both registry and cluster; use exactly one")
+		}
+		registry := entry.identity()
 		if registry == "" {
 			return registryRoleTally{}, errors.New("registry list entry is missing a registry")
 		}
@@ -181,6 +331,12 @@ func (r ContainerRegistries) Equal(other ContainerRegistries) bool {
 		if strings.TrimSpace(r[i].Registry) != strings.TrimSpace(other[i].Registry) {
 			return false
 		}
+		if (r[i].Cluster == nil) != (other[i].Cluster == nil) {
+			return false
+		}
+		if r[i].Cluster != nil && r[i].Cluster.WithDefaults() != other[i].Cluster.WithDefaults() {
+			return false
+		}
 		if len(r[i].Roles) != len(other[i].Roles) {
 			return false
 		}
@@ -202,6 +358,10 @@ func (r ContainerRegistries) Clone() ContainerRegistries {
 	out := make(ContainerRegistries, len(r))
 	for i, entry := range r {
 		out[i] = ContainerRegistryEntry{Registry: entry.Registry, Roles: append([]RegistryRole(nil), entry.Roles...)}
+		if entry.Cluster != nil {
+			cluster := *entry.Cluster
+			out[i].Cluster = &cluster
+		}
 	}
 	return out
 }
@@ -225,6 +385,19 @@ func SingleContainerRegistries(registry string) ContainerRegistries {
 	return ContainerRegistries{{
 		Registry: registry,
 		Roles:    []RegistryRole{RegistryRoleBuild, RegistryRoleDeploy},
+	}}
+}
+
+// ClusterContainerRegistries builds the one-entry list that seeds a new env from
+// an in-cluster registry (e.g. the erun-registry the local k3s setup deploys),
+// marked build+deploy. Its addresses resolve from the env's kube-context, so the
+// same entry works for an in-pod build (ClusterIP) and a host build (managed
+// port-forward) without hardcoding a host that only one of them can reach.
+func ClusterContainerRegistries(cluster ClusterRegistry) ContainerRegistries {
+	c := cluster.WithDefaults()
+	return ContainerRegistries{{
+		Cluster: &c,
+		Roles:   []RegistryRole{RegistryRoleBuild, RegistryRoleDeploy},
 	}}
 }
 

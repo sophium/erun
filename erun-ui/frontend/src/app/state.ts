@@ -16,6 +16,7 @@ import type {
   UIVersionSuggestion,
   UIVersionSuggestionNotice,
 } from '@/types';
+import type { UIClusterRegistryStatus, UIEnvironmentHealth } from '@/uiDiagnosticsTypes';
 
 export const MIN_SIDEBAR_WIDTH = 248;
 export const MAX_SIDEBAR_WIDTH = 520;
@@ -68,6 +69,12 @@ export interface EnvironmentDialogState {
     memory: string;
   };
   containerRegistry: string;
+  // clusterRegistry is the in-cluster erun-registry detected for the selected
+  // Kubernetes context (null when none / not yet resolved). When present and
+  // useClusterRegistry is set, the env is created with a resolvable cluster:
+  // registry entry instead of the containerRegistry string.
+  clusterRegistry: UIClusterRegistryStatus | null;
+  useClusterRegistry: boolean;
   envType: EnvironmentType;
   localRepoPath: string;
   noGit: boolean;
@@ -105,6 +112,10 @@ export interface ManageDialogState {
   deployComponents: UIDeployableComponent[];
   deployComponentSelection: string[];
   deployComponentsLoading: boolean;
+  // Result of the General tab's "Check environment" health run, null until the
+  // operator runs it. healthLoading gates the in-flight indicator.
+  health: UIEnvironmentHealth | null;
+  healthLoading: boolean;
 }
 
 export interface TenantDialogState {
@@ -267,6 +278,8 @@ export const defaultEnvironmentDialog = (): EnvironmentDialogState => ({
   resourceStatusLoading: false,
   runtimePod: defaultRuntimePodConfig(),
   containerRegistry: '',
+  clusterRegistry: null,
+  useClusterRegistry: false,
   envType: 'remote-agent',
   localRepoPath: '',
   noGit: false,
@@ -300,6 +313,8 @@ export const defaultManageDialog = (): ManageDialogState => ({
   deployComponents: [],
   deployComponentSelection: [],
   deployComponentsLoading: false,
+  health: null,
+  healthLoading: false,
 });
 
 export const defaultTenantDialog = (): TenantDialogState => ({
@@ -368,6 +383,7 @@ export const defaultEnvironmentConfig = (): UIEnvironmentConfig => ({
   repoPath: '',
   kubernetesContext: '',
   containerRegistries: [],
+  containerRegistriesInherited: false,
   cloudProviderAlias: '',
   runtimeVersion: '',
   runtimePod: defaultRuntimePodConfig(),

@@ -6,15 +6,50 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
+
+// commandWaitDelay bounds how long Wait()/Output()/Run() will wait for a
+// finished process's stdout/stderr to reach EOF before force-closing the pipes
+// and returning. Without it, a leaked pipe write-end — an endpoint-security
+// agent or a grandchild that inherited the handle, common on Windows — keeps
+// Wait blocked forever even though the process is already dead, hanging deploys,
+// reconnects, and the pod-watch drain. It only ever triggers after the process
+// exits, so a legitimately long-running command is unaffected.
+const commandWaitDelay = 10 * time.Second
 
 // Command wraps exec.Command, honoring an ERUN_<NAME>_BIN override so tests
 // can redirect a named binary to a stub without a live toolchain or account.
+// On Windows it also suppresses the stray console window that a console child
+// of the windowless desktop app would otherwise flash (see HideConsoleWindow).
 func Command(name string, args ...string) *exec.Cmd {
+	cmd := newExecCommand(name, args...)
+	HideConsoleWindow(cmd)
+	// Bound the post-exit I/O drain so a leaked pipe handle can't wedge Wait
+	// forever (see commandWaitDelay). Interactive tab shells build their command
+	// via newExecCommand directly and deliberately skip this.
+	cmd.WaitDelay = commandWaitDelay
+	return cmd
+}
+
+// BoundCommandWait applies the same post-exit I/O-drain bound as Command to a
+// cmd built elsewhere (e.g. the desktop's exec.CommandContext calls that stream
+// a child's stdout/stderr). Call it right after constructing such a cmd so a
+// leaked pipe handle can't wedge Wait()/CombinedOutput() forever on Windows.
+func BoundCommandWait(cmd *exec.Cmd) {
+	if cmd != nil {
+		cmd.WaitDelay = commandWaitDelay
+	}
+}
+
+func newExecCommand(name string, args ...string) *exec.Cmd {
 	if strings.ContainsAny(name, "/\\") {
 		return exec.Command(name, args...)
 	}
-	envName := "ERUN_" + strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + "_BIN"
+	// Derive the override var from the base tool name so a Windows .exe suffix
+	// (erun-app.exe) resolves to the same ERUN_ERUN_APP_BIN seam as erun-app.
+	base := strings.TrimSuffix(name, ".exe")
+	envName := "ERUN_" + strings.ToUpper(strings.ReplaceAll(base, "-", "_")) + "_BIN"
 	if override := strings.TrimSpace(os.Getenv(envName)); override != "" {
 		return exec.Command(override, args...)
 	}

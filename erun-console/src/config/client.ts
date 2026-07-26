@@ -1,4 +1,11 @@
-import type { CloudContext, ContextStatus, Environment, Tenant, TenantConfigView } from './types';
+import type {
+  CloudContext,
+  ContextStatus,
+  Environment,
+  EnvironmentStatus,
+  Tenant,
+  TenantConfigView,
+} from './types';
 
 // No separate BFF in this increment — the console calls the auth-carrying
 // erun-backend-api directly. Same-origin default lets the SPA sit behind the
@@ -40,6 +47,17 @@ function parseTenant(raw: Record<string, unknown>): Tenant {
   };
 }
 
+// An unknown or absent env status maps to undefined so the UI shows no badge
+// rather than a misleading one.
+function asEnvironmentStatus(value: unknown): EnvironmentStatus | undefined {
+  return value === 'registered' ||
+    value === 'provisioning' ||
+    value === 'running' ||
+    value === 'failed'
+    ? value
+    : undefined;
+}
+
 function parseEnvironment(raw: Record<string, unknown>): Environment {
   return {
     environmentId: asString(raw.environmentId),
@@ -48,6 +66,8 @@ function parseEnvironment(raw: Record<string, unknown>): Environment {
     kubernetesContext: asOptionalString(raw.kubernetesContext),
     contextId: asOptionalString(raw.contextId),
     runtimeVersion: asOptionalString(raw.runtimeVersion),
+    status: asEnvironmentStatus(raw.status),
+    provisionError: asOptionalString(raw.provisionError),
   };
 }
 

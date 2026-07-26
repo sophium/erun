@@ -3,10 +3,22 @@ package eruncommon
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
+
+// setTestHomeDir points os.UserHomeDir() at dir on the current OS. Windows reads
+// USERPROFILE, not HOME, so setting HOME alone leaves production writing under the
+// real profile while the test reads the temp dir.
+func setTestHomeDir(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("HOME", dir)
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", dir)
+	}
+}
 
 // TestActivateEnvTrace owns the real-write branches, which the dry-run
 // integration harness cannot reach by design; the dry-run trace contract
@@ -14,7 +26,7 @@ import (
 func TestActivateEnvTrace(t *testing.T) {
 	t.Run("tee captures suppressed trace lines, stamped, with no opt-in", func(t *testing.T) {
 		home := t.TempDir()
-		t.Setenv("HOME", home)
+		setTestHomeDir(t, home)
 		ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, os.Stderr, os.Stderr)}
 		teeCtx, closeTee := ActivateEnvTrace(ctx, "team", "dev")
 		// TraceCommand is gated to -vv on the terminal; the sink must see it
@@ -34,7 +46,7 @@ func TestActivateEnvTrace(t *testing.T) {
 
 	t.Run("dry-run names the path and writes nothing", func(t *testing.T) {
 		home := t.TempDir()
-		t.Setenv("HOME", home)
+		setTestHomeDir(t, home)
 		ctx := Context{
 			Logger: NewLoggerWithWriters(VerbosityInfo, os.Stderr, os.Stderr),
 			DryRun: true,
@@ -48,7 +60,7 @@ func TestActivateEnvTrace(t *testing.T) {
 
 	t.Run("a blank tenant or environment deactivates the tee", func(t *testing.T) {
 		home := t.TempDir()
-		t.Setenv("HOME", home)
+		setTestHomeDir(t, home)
 		ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, os.Stderr, os.Stderr)}
 		teeCtx, closeTee := ActivateEnvTrace(ctx, " ", "dev")
 		teeCtx.Trace("invisible")
@@ -61,7 +73,7 @@ func TestActivateEnvTrace(t *testing.T) {
 
 	t.Run("an oversized log rotates to .1", func(t *testing.T) {
 		home := t.TempDir()
-		t.Setenv("HOME", home)
+		setTestHomeDir(t, home)
 		path := filepath.Join(home, ".erun", "team", "dev", "trace.log")
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)

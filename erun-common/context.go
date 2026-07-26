@@ -20,6 +20,12 @@ type Context struct {
 	Stdout                     io.Writer
 	Stderr                     io.Writer
 	KubernetesContextPreflight KubernetesContextPreflightFunc
+	// RegistryForwards owns any kubectl port-forwards a cluster registry needs.
+	// It is set once at command entry so the forward's lifetime spans registry
+	// resolution and the build/deploy that uses it; the entry defers its Close.
+	// Nil when no command-level forward lifecycle has been established (tests,
+	// pure resolution) — concretization then forwards on demand into a throwaway.
+	RegistryForwards *ClusterRegistryForwards
 }
 
 // WriteResult emits v as the command's structured result; callers invoke it on
@@ -190,7 +196,7 @@ func isShellSafe(value string) bool {
 		case r >= 'a' && r <= 'z':
 		case r >= 'A' && r <= 'Z':
 		case r >= '0' && r <= '9':
-		case strings.ContainsRune("/._:=+-", r):
+		case strings.ContainsRune(`/._:=+-\`, r):
 		default:
 			return false
 		}

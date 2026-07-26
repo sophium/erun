@@ -376,12 +376,21 @@ func newActivityTraceLineHandler(app *App, selection uiSelection, kind sessionKi
 	// <elapsed>" only when no release is set; match both shapes.
 	failedRe := regexp.MustCompile(`^==> Deploy (?:of \S+ )?failed`)
 	errorRe := regexp.MustCompile(`(?i)^Error: `)
-	_ = kind
+	// The init lifecycle (==> Initializing / ==> Initialized / init failed) is
+	// honored ONLY from the Local session that actually runs `erun init`. A
+	// remote-agent `erun open` re-runs the remote-worktree bootstrap and also
+	// prints "==> Initialized"; before this guard the desktop treated that as a
+	// fresh env creation and fired another deploy — which rolled the pod (helm
+	// --force-conflicts), killed the open shell (exit 137), respawned it, and
+	// re-emitted "==> Initialized", an endless deploy⇄reopen loop (and the
+	// visible flicker from the rapid respawns). open/ai/command sessions never
+	// create the env, so their init-trace lines are display-only here.
+	initTraceHonored := kind == sessionKindLocal
 	return func(line string) {
 		line = strings.TrimSpace(line)
 		switch {
 		case app.handleDeployTraceLine(selection, line):
-		case app.handleInitTraceLine(selection, line):
+		case initTraceHonored && app.handleInitTraceLine(selection, line):
 		case app.handleCommandTraceLine(selection, line):
 		case failedRe.MatchString(line):
 			app.finishActivityTracking(selection, activityQueueStatusFailed, line)
@@ -798,6 +807,7 @@ func (a *App) fetchActivityContainerStatuses(ctx context.Context, entry activity
 		args = append(args, "--namespace", entry.Namespace)
 	}
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	eruncommon.HideConsoleWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err

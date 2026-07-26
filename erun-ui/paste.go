@@ -39,6 +39,7 @@ func savePastedFileToRuntime(params pastedFileSaveParams) (string, error) {
 	name, args, _ := buildPastedFileCopyCommand(params.Result, remoteDir, remotePath)
 
 	cmd := exec.Command(name, args...)
+	eruncommon.HideConsoleWindow(cmd)
 	cmd.Stdin = strings.NewReader(base64.StdEncoding.EncodeToString(params.Data))
 	output, err := cmd.CombinedOutput()
 	if err != nil {

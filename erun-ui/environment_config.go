@@ -269,7 +269,8 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 		name = strings.TrimSpace(fallbackName)
 	}
 	syncStatus := a.workspaceSyncStatus(uiSelection{Tenant: tenant, Environment: name})
-	registries := containerRegistriesToUI(a.effectiveEnvironmentContainerRegistries(tenant, fallbackName, config))
+	effectiveRegistries, registriesInherited := a.effectiveEnvironmentContainerRegistries(tenant, fallbackName, config)
+	registries := containerRegistriesToUI(effectiveRegistries)
 	ports = eruncommon.LocalPortsForResult(eruncommon.OpenResult{
 		EnvConfig:  config,
 		LocalPorts: ports,
@@ -277,17 +278,18 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 	workspaceSyncLocalPath := strings.TrimSpace(config.SSHD.WorkspaceSync.LocalPath)
 	workspaceSyncEnabled := config.SSHD.WorkspaceSync.Enabled && workspaceSyncLocalPath != ""
 	result := uiEnvironmentConfig{
-		Name:                 name,
-		Type:                 config.ResolvedType(),
-		LocalRepoPath:        strings.TrimSpace(config.LocalRepoPath),
-		RepoPath:             config.EffectiveLocalRepoPath(),
-		KubernetesContext:    strings.TrimSpace(config.KubernetesContext),
-		ContainerRegistries:  registries,
-		CloudProviderAlias:   strings.TrimSpace(config.CloudProviderAlias),
-		CloudProviderAliases: environmentCloudProviderAliases(a.deps.store, config.CloudProviderAlias),
-		CloudAliasSlots:      environmentCloudAliasSlots(a.deps.store, config),
-		RuntimeVersion:       strings.TrimSpace(config.RuntimeVersion),
-		RuntimePod:           runtimePodConfigToUI(config.RuntimePod),
+		Name:                         name,
+		Type:                         config.ResolvedType(),
+		LocalRepoPath:                strings.TrimSpace(config.LocalRepoPath),
+		RepoPath:                     config.EffectiveLocalRepoPath(),
+		KubernetesContext:            strings.TrimSpace(config.KubernetesContext),
+		ContainerRegistries:          registries,
+		ContainerRegistriesInherited: registriesInherited,
+		CloudProviderAlias:           strings.TrimSpace(config.CloudProviderAlias),
+		CloudProviderAliases:         environmentCloudProviderAliases(a.deps.store, config.CloudProviderAlias),
+		CloudAliasSlots:              environmentCloudAliasSlots(a.deps.store, config),
+		RuntimeVersion:               strings.TrimSpace(config.RuntimeVersion),
+		RuntimePod:                   runtimePodConfigToUI(config.RuntimePod),
 		SSHD: uiSSHDConfig{
 			Enabled:                    config.SSHD.Enabled,
 			LocalPort:                  config.SSHD.LocalPort,
@@ -342,7 +344,21 @@ func containerRegistriesToUI(list eruncommon.ContainerRegistries) []uiContainerR
 		for _, role := range entry.Roles {
 			roles = append(roles, string(role))
 		}
-		entries = append(entries, uiContainerRegistryEntry{Registry: strings.TrimSpace(entry.Registry), Roles: roles})
+		uiEntry := uiContainerRegistryEntry{Registry: strings.TrimSpace(entry.Registry), Roles: roles}
+		// A cluster entry carries no static host, so surface its resolved
+		// service/namespace/port and a legible label instead of an empty
+		// Registry string that would render as a blank text box.
+		if entry.Cluster != nil {
+			cluster := entry.Cluster.WithDefaults()
+			uiEntry.Cluster = &uiContainerRegistryCluster{
+				Service:   cluster.Service,
+				Namespace: cluster.Namespace,
+				Port:      cluster.Port,
+				Insecure:  cluster.Insecure,
+				Label:     fmt.Sprintf("%s.%s:%d", cluster.Service, cluster.Namespace, cluster.Port),
+			}
+		}
+		entries = append(entries, uiEntry)
 	}
 	return entries
 }
@@ -353,15 +369,29 @@ func containerRegistriesToUI(list eruncommon.ContainerRegistries) []uiContainerR
 func uiToContainerRegistries(entries []uiContainerRegistryEntry) (eruncommon.ContainerRegistries, error) {
 	list := make(eruncommon.ContainerRegistries, 0, len(entries))
 	for _, entry := range entries {
-		registry := strings.TrimSpace(entry.Registry)
-		if registry == "" {
-			continue
-		}
 		roles := make([]eruncommon.RegistryRole, 0, len(entry.Roles))
 		for _, role := range entry.Roles {
 			if trimmed := strings.TrimSpace(role); trimmed != "" {
 				roles = append(roles, eruncommon.RegistryRole(trimmed))
 			}
+		}
+		// A cluster entry has no static host: preserve it as a cluster block so a
+		// context-resolved registry is not silently dropped on save.
+		if entry.Cluster != nil {
+			list = append(list, eruncommon.ContainerRegistryEntry{
+				Cluster: &eruncommon.ClusterRegistry{
+					Service:   strings.TrimSpace(entry.Cluster.Service),
+					Namespace: strings.TrimSpace(entry.Cluster.Namespace),
+					Port:      entry.Cluster.Port,
+					Insecure:  entry.Cluster.Insecure,
+				},
+				Roles: roles,
+			})
+			continue
+		}
+		registry := strings.TrimSpace(entry.Registry)
+		if registry == "" {
+			continue
 		}
 		list = append(list, eruncommon.ContainerRegistryEntry{Registry: registry, Roles: roles})
 	}
@@ -376,16 +406,19 @@ func uiToContainerRegistries(entries []uiContainerRegistryEntry) (eruncommon.Con
 
 // effectiveEnvironmentContainerRegistries mirrors the container-registry
 // resolution order the build/deploy resolvers use, so the editor shows the same
-// list they will act on.
-func (a *App) effectiveEnvironmentContainerRegistries(tenant, environment string, config eruncommon.EnvConfig) eruncommon.ContainerRegistries {
+// list they will act on. The second return is true when the list was resolved
+// from the project's .erun/config.yaml (inherited-from-project) rather than
+// carried on the env config.
+func (a *App) effectiveEnvironmentContainerRegistries(tenant, environment string, config eruncommon.EnvConfig) (eruncommon.ContainerRegistries, bool) {
 	if !config.ContainerRegistries.IsZero() {
-		return config.ContainerRegistries
+		return config.ContainerRegistries, false
 	}
 	projectConfig, ok := a.loadEnvironmentProjectConfig(tenant, config)
 	if !ok {
-		return nil
+		return nil, false
 	}
-	return projectConfig.ContainerRegistriesForEnvironment(environmentName(environment, config))
+	list := projectConfig.ContainerRegistriesForEnvironment(environmentName(environment, config))
+	return list, !list.IsZero()
 }
 
 func (a *App) loadEnvironmentProjectConfig(tenant string, config eruncommon.EnvConfig) (eruncommon.ProjectConfig, bool) {

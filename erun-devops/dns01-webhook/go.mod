@@ -1,6 +1,6 @@
 module github.com/sophium/erun/erun-devops/dns01-webhook
 
-go 1.26.3
+go 1.26.0
 
 require (
 	github.com/cert-manager/cert-manager v1.16.3

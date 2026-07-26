@@ -35,6 +35,27 @@ func skipIfPortsBusy(t *testing.T, ports ...int) {
 	}
 }
 
+// openHostOSOverride pins DetectHost() to darwin for the open scenarios that
+// cross a host-OS branch. Two branches need it, and both resolve through
+// eruncommon.DetectHost (which honors this seam), so a single canonical OS keeps
+// the Unix-recorded goldens deterministic on any host — including Windows, where
+// they would otherwise diverge:
+//   - the `open --no-shell` setup preamble dialect: POSIX
+//     (`kubectl … >/dev/null && … cd '…'`) on unix vs PowerShell
+//     (`… | Out-Null`, `Set-Location …`) when DetectHost reports windows
+//     (erun-cli/cmd/open.go localShellSetupScript/detectOpenNoShellDialect);
+//   - the adopt-or-conflict port-forward probe (findLocalPortHolder in
+//     erun-cli/cmd/port_forward_adopt.go), which is a no-op unless DetectHost
+//     reports a unix host, so the lsof/ps decision-input stubs only drive it
+//     under this override.
+//
+// It is a deliberate test seam, not a production knob (erun-integration/AGENTS.md
+// § "Platform-dependent goldens"). Baked into the kubectl decision-input helpers
+// below so every scenario that emits the preamble or drives the adopt probe pins
+// it; SHELL-pinned scenarios (zsh/bash/pwsh) are unaffected because the shell
+// name wins over host OS for the dialect.
+const openHostOSOverride = "ERUN_HOST_OS_OVERRIDE=darwin"
+
 // stubKubectlNotFound makes the deployment check a deterministic decision
 // input. Without it, dry-run's redeploy branch is driven by whatever kubectl
 // sits on the developer's PATH, leaking its "exit status 1" into the trace.
@@ -46,7 +67,8 @@ func stubKubectlNotFound(t *testing.T, setup env.Setup) []string {
 		ExitCode: 1,
 	})
 	stubLsofNoHolder(t, stubs)
-	return append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "lsof", "ps")...)
+	envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "lsof", "ps")...)
+	return append(envVars, openHostOSOverride)
 }
 
 // portForwardStateFile mirrors production's os.UserConfigDir() layout, which
@@ -137,7 +159,10 @@ func stubKubectlGenericError(t *testing.T, setup env.Setup) []string {
 		ExitCode: 2,
 	})
 	stubLsofNoHolder(t, stubs)
-	return append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "lsof", "ps")...)
+	envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "lsof", "ps")...)
+	// Pin DetectHost so the --no-shell preamble dialect stays POSIX; see
+	// openHostOSOverride.
+	return append(envVars, openHostOSOverride)
 }
 
 // stubLsofNoHolder keeps the adopt-or-conflict probe silent in scenarios that
@@ -291,6 +316,9 @@ func TestOpen(t *testing.T) {
 		})...)
 		fixture.StubBinary(t, stubsDir, "helm", "")
 		envVars = append(envVars, fixture.StubEnv(stubsDir, "helm")...)
+		// Real-run --no-shell still emits the setup preamble on stdout; pin
+		// DetectHost so its dialect stays POSIX. See openHostOSOverride.
+		envVars = append(envVars, openHostOSOverride)
 		result := erun.Run(t, []string{"open", "team", "dev", "--version", "9.9.9", "--no-shell", "--no-alias-prompt"}, erun.RunOptions{
 			Cwd: setup.Cwd,
 			Env: envVars,
@@ -716,7 +744,7 @@ func TestOpen(t *testing.T) {
 		ideLog := filepath.Join(setup.Cwd, "ide-launcher.log")
 		fixture.StubBinaryWithScript(t, stubsDir, "open",
 			`printf '%s\n' "$*" > '`+ideLog+`'`+"\n"+`exit 0`+"\n")
-		envVars = append(envVars, "PATH="+stubsDir+":"+os.Getenv("PATH"))
+		envVars = append(envVars, "PATH="+stubsDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 		// Pin darwin so the IDE launcher resolves to the stubbed macOS
 		// `open` command. On a Linux host production calls xdg-open, which
 		// this scenario does not stub. (erun-integration/AGENTS.md —
@@ -782,7 +810,7 @@ func TestOpen(t *testing.T) {
 		ideLog := filepath.Join(setup.Cwd, "ide-launcher.log")
 		fixture.StubBinaryWithScript(t, stubsDir, "open",
 			`printf '%s\n' "$*" >> '`+ideLog+`'`+"\n"+`exit 0`+"\n")
-		envVars = append(envVars, "PATH="+stubsDir+":"+os.Getenv("PATH"))
+		envVars = append(envVars, "PATH="+stubsDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 		// Pin darwin: this scenario seeds the macOS JetBrains options dir
 		// above and asserts the `open -a 'IntelliJ IDEA'` bootstrap, both
 		// macOS-shaped. Without the pin a Linux host resolves a different
@@ -891,7 +919,7 @@ func TestOpen(t *testing.T) {
 		ideLog := filepath.Join(setup.Cwd, "ide-launcher.log")
 		fixture.StubBinaryWithScript(t, stubsDir, "open",
 			`printf '%s\n' "$*" >> '`+ideLog+`'`+"\n"+`exit 0`+"\n")
-		envVars = append(envVars, "PATH="+stubsDir+":"+os.Getenv("PATH"))
+		envVars = append(envVars, "PATH="+stubsDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 		envVars = append(envVars, "ERUN_HOST_OS_OVERRIDE=darwin")
 
 		run1 := erun.Run(t, []string{"open", "team", "dev", "--intellij", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
@@ -1011,7 +1039,7 @@ func TestOpen(t *testing.T) {
 		ideaLog := filepath.Join(setup.Cwd, "idea-launcher.log")
 		fixture.StubBinaryWithScript(t, stubsDir, "idea",
 			`printf 'idea %s\n' "$*" > '`+ideaLog+`'`+"\n"+`exit 0`+"\n")
-		envVars = append(envVars, "PATH="+stubsDir+":"+os.Getenv("PATH"))
+		envVars = append(envVars, "PATH="+stubsDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 		envVars = append(envVars, "ERUN_HOST_OS_OVERRIDE=linux")
 		result := erun.Run(t, []string{"open", "team", "dev", "--intellij", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
@@ -1245,7 +1273,10 @@ func TestOpen(t *testing.T) {
 		// the decision in the golden via the "would adopt" trace.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		envVars := stubKubectlNotFound(t, setup)
+		// Pin DetectHost to darwin so the --no-shell preamble stays POSIX (see
+		// openHostOSOverride); the adopt holder probe is stubbed, so the pinned OS
+		// only keeps the golden deterministic across hosts.
+		envVars := append(stubKubectlNotFound(t, setup), "ERUN_HOST_OS_OVERRIDE=darwin")
 		stubAdoptHolderProbes(t, setup, adoptHolder{port: 17000, pid: 99999,
 			argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 17000:17000 --address 127.0.0.1"})
 		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
@@ -1260,7 +1291,10 @@ func TestOpen(t *testing.T) {
 		// message that gave nothing actionable in the prior UI loop.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		envVars := stubKubectlNotFound(t, setup)
+		// Pin DetectHost to darwin so the --no-shell preamble stays POSIX (see
+		// openHostOSOverride); the adopt holder probe is stubbed, so the pinned OS
+		// only keeps the golden deterministic across hosts.
+		envVars := append(stubKubectlNotFound(t, setup), "ERUN_HOST_OS_OVERRIDE=darwin")
 		stubAdoptHolderProbes(t, setup, adoptHolder{port: 17000, pid: 88888,
 			argv: "/usr/local/bin/some-foreign-process --bind 127.0.0.1:17000"})
 		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
@@ -1294,6 +1328,9 @@ func TestOpen(t *testing.T) {
 		// into the golden when port 17000 is in use locally.
 		stubLsofNoHolder(t, stubsDir)
 		envVars = append(envVars, fixture.StubEnv(stubsDir, "lsof", "ps")...)
+		// Pin DetectHost so the --no-shell preamble dialect stays POSIX; see
+		// openHostOSOverride.
+		envVars = append(envVars, openHostOSOverride)
 		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/deployment_match_ignores_missing_api_port", normalize.Apply(result.Combined))
 	})
