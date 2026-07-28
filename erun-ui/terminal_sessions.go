@@ -1886,10 +1886,11 @@ func (m *managedTerminal) signalReady(err error) {
 type sessionKind string
 
 const (
-	sessionKindOpen    sessionKind = "erun"
-	sessionKindLocal   sessionKind = "local"
-	sessionKindAI      sessionKind = "ai"
-	sessionKindCommand sessionKind = "command"
+	sessionKindOpen         sessionKind = "erun"
+	sessionKindLocal        sessionKind = "local"
+	sessionKindAI           sessionKind = "ai"
+	sessionKindCommand      sessionKind = "command"
+	sessionKindOrchestrator sessionKind = "orchestrator"
 )
 
 func (s *managedTerminal) Close() error {

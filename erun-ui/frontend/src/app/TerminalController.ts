@@ -464,6 +464,14 @@ export class TerminalController {
     }
   }
 
+  // resizeActiveSession pushes the current terminal geometry to the active PTY.
+  // Called when the active session changes so a session spawned at a default
+  // size (e.g. an orchestrator) is resized to the pane instead of rendering its
+  // UI at the wrong width.
+  resizeActiveSession(): void {
+    this.runTerminalResize();
+  }
+
   queueVisibleDiffSelectionUpdate(): void {
     if (this.reviewScrollFrame > 0) {
       return;

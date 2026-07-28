@@ -1,8 +1,8 @@
-import { Download, FileText, Folder, LoaderCircle } from 'lucide-react';
+import { Download, FileText, Folder, LoaderCircle, Play } from 'lucide-react';
 import * as React from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { downloadOutput } from '@/app/outputsThunks';
+import { downloadOutput, runOutputOnHost } from '@/app/outputsThunks';
 import { closeOutputsDialog } from '@/app/slices/outputsDialogSlice';
 import { Button } from '@/components/ui/button';
 import {
@@ -19,7 +19,7 @@ import type { AgentOutputEntry } from '@/types';
 // tracks operations): the surface for the output files an agent left behind.
 export function OutputsDialog(): React.ReactElement {
   const dispatch = useAppDispatch();
-  const { open, loading, error, dir, entries, downloadingName, status, statusError } =
+  const { open, loading, error, dir, entries, downloadingName, runningName, status, statusError } =
     useAppSelector((state) => state.outputsDialog);
   return (
     <Dialog
@@ -36,7 +36,8 @@ export function OutputsDialog(): React.ReactElement {
           <DialogDescription>
             Files an agent produced in this environment’s runtime pod
             {dir ? <span className="font-mono"> ({dir})</span> : null}. Download pulls each onto
-            this machine; folders download as a .tar.gz archive.
+            this machine; folders download as a .tar.gz archive. Host-runnable binaries can be run
+            on this machine from the copy workspace sync mirrors down.
           </DialogDescription>
         </DialogHeader>
         <OutputsDialogBody
@@ -44,6 +45,7 @@ export function OutputsDialog(): React.ReactElement {
           error={error}
           entries={entries}
           downloadingName={downloadingName}
+          runningName={runningName}
         />
         {status ? (
           <p
@@ -78,11 +80,13 @@ function OutputsDialogBody({
   error,
   entries,
   downloadingName,
+  runningName,
 }: {
   loading: boolean;
   error: string;
   entries: AgentOutputEntry[];
   downloadingName: string;
+  runningName: string;
 }): React.ReactElement {
   if (loading) {
     return (
@@ -114,7 +118,8 @@ function OutputsDialogBody({
             key={entry.name}
             entry={entry}
             downloading={downloadingName === entry.name}
-            anyDownloading={downloadingName !== ''}
+            running={runningName === entry.name}
+            anyBusy={downloadingName !== '' || runningName !== ''}
           />
         ))}
       </ul>
@@ -125,14 +130,17 @@ function OutputsDialogBody({
 function OutputRow({
   entry,
   downloading,
-  anyDownloading,
+  running,
+  anyBusy,
 }: {
   entry: AgentOutputEntry;
   downloading: boolean;
-  anyDownloading: boolean;
+  running: boolean;
+  anyBusy: boolean;
 }): React.ReactElement {
   const dispatch = useAppDispatch();
   const Icon = entry.isDir ? Folder : FileText;
+  const runnable = !entry.isDir && isHostRunnableArtifact(entry.name);
   return (
     <li className="flex items-center gap-3 py-2.5">
       <Icon className="size-4 flex-none text-muted-foreground" aria-hidden="true" />
@@ -143,11 +151,30 @@ function OutputRow({
           {formatRelativeTime(entry.modTime)}
         </div>
       </div>
+      {runnable ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={anyBusy}
+          aria-label={`Run ${entry.name} on this machine`}
+          onClick={() => {
+            void dispatch(runOutputOnHost(entry.name));
+          }}
+        >
+          {running ? (
+            <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+          ) : (
+            <Play aria-hidden="true" />
+          )}
+          Run on host
+        </Button>
+      ) : null}
       <Button
         type="button"
         size="sm"
         variant="outline"
-        disabled={anyDownloading}
+        disabled={anyBusy}
         aria-label={`Download ${entry.name}`}
         onClick={() => {
           void dispatch(downloadOutput(entry.name));
@@ -162,6 +189,15 @@ function OutputRow({
       </Button>
     </li>
   );
+}
+
+// isHostRunnableArtifact reports whether an artifact is a binary the host can
+// launch directly. Scoped to Windows executable suffixes — the primary case is a
+// cross-built .exe an agent produced in the Linux pod — so the action stays
+// inert for report/data outputs and on hosts that produce none.
+function isHostRunnableArtifact(name: string): boolean {
+  const lower = name.toLowerCase();
+  return lower.endsWith('.exe') || lower.endsWith('.bat') || lower.endsWith('.cmd');
 }
 
 function formatOutputSize(size: number): string {

@@ -31,11 +31,11 @@ func (a *App) SaveERunConfig(config uiERunConfig) (uiERunConfig, error) {
 	} else if err != nil {
 		return uiERunConfig{}, err
 	}
-	updated := eruncommon.ERunConfig{
-		DefaultTenant:  strings.TrimSpace(config.DefaultTenant),
-		CloudProviders: existing.CloudProviders,
-		CloudContexts:  existing.CloudContexts,
-	}
+	// Preserve every field this dialog does not edit (cloud providers/contexts,
+	// runtime registry, orchestrators) — a scoped save must not drop config the
+	// user manages elsewhere. Only DefaultTenant is editable here.
+	updated := existing
+	updated.DefaultTenant = strings.TrimSpace(config.DefaultTenant)
 	if err := a.deps.store.SaveERunConfig(updated); err != nil {
 		return uiERunConfig{}, err
 	}

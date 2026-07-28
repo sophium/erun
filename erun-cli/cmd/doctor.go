@@ -27,6 +27,7 @@ type doctorOptions struct {
 	remoteRepositoryURL        string
 	codeCommitSSHKeyID         string
 	syncConfig                 bool
+	repairWorkspaceSync        bool
 }
 
 type jetBrainsGatewayDoctorRepair struct {
@@ -50,7 +51,10 @@ func newDoctorCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error)
 			"init. The recovery actions mutate the live release; run one directly with --clear-pending-helm " +
 			"or --rollback (the two are alternatives — pass only one). Run inside a runtime pod, " +
 			"--sync-config reconciles the on-disk env config with the helm-injected ERUN_* env vars " +
-			"(injected env wins) and rewrites the projected keys, preserving everything else.",
+			"(injected env wins) and rewrites the projected keys, preserving everything else. " +
+			"For a remote-agent env with workspace sync enabled it reports the host mirror's SSH " +
+			"provisioning, and --repair-workspace-sync repairs it without redeploying (resolve/persist " +
+			"the key, write the ssh config alias, install the pod authorized_keys, ensure the port-forward).",
 		Args:          cobra.MaximumNArgs(2),
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -75,6 +79,7 @@ func newDoctorCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error)
 	cmd.Flags().StringVar(&options.remoteRepositoryURL, "remote-repository-url", "", "Git remote URL to use when finishing an unfinished remote init")
 	cmd.Flags().StringVar(&options.codeCommitSSHKeyID, "codecommit-ssh-key-id", "", "CodeCommit SSH public key ID to use when finishing an unfinished remote init for an AWS CodeCommit repository")
 	cmd.Flags().BoolVar(&options.syncConfig, "sync-config", false, "Reconcile the in-pod erun config with the helm-injected ERUN_* env vars (only takes effect inside a runtime pod)")
+	cmd.Flags().BoolVar(&options.repairWorkspaceSync, "repair-workspace-sync", false, "Repair a remote-agent env's host workspace-sync SSH provisioning (resolve/persist key, write ssh config alias, install pod authorized_keys, ensure port-forward) without redeploying the runtime")
 	return cmd
 }
 
@@ -102,6 +107,12 @@ func runDoctorCommand(ctx common.Context, resolveOpen func(common.OpenParams) (c
 
 	if _, err := fmt.Fprintf(ctx.Stdout, "Target: %s/%s\n", result.Tenant, result.Environment); err != nil {
 		return err
+	}
+	if err := runWorkspaceSyncDoctor(ctx, promptRunner, configStore, result, options); err != nil {
+		return err
+	}
+	if doctorOnlyRepairWorkspaceSync(options) {
+		return nil
 	}
 	repairedJetBrains, err := runSelectedJetBrainsGatewayRepair(ctx, promptRunner, result, options)
 	if err != nil {

@@ -24,6 +24,29 @@ type ERunConfig struct {
 	CloudProviders  []CloudProviderConfig `yaml:"cloudproviders,omitempty"`
 	CloudContexts   []CloudContextConfig  `yaml:"cloudcontexts,omitempty"`
 	RuntimeRegistry RuntimeRegistryConfig `yaml:"runtimeregistry,omitempty"`
+	// Orchestrators are the operator's persisted host-side AI orchestrator
+	// definitions (see OrchestratorConfig). They live in root config so the same
+	// set reappears across desktop restarts; the running session itself is
+	// ephemeral and re-spawned on demand.
+	Orchestrators []OrchestratorConfig `yaml:"orchestrators,omitempty" json:"orchestrators,omitempty"`
+}
+
+// OrchestratorConfig is a persisted host-side AI orchestrator definition. An
+// orchestrator drives one or more remote-agent environments from the operator's
+// machine; each linked environment is mirrored (one-way) to a host directory it
+// reviews read-only.
+type OrchestratorConfig struct {
+	ID           string                  `yaml:"id" json:"id"`
+	Name         string                  `yaml:"name" json:"name"`
+	Environments []OrchestratorEnvConfig `yaml:"environments,omitempty" json:"environments,omitempty"`
+}
+
+// OrchestratorEnvConfig links one remote-agent environment to the host directory
+// its workspace sync mirrors into (the orchestrator's read-only review window).
+type OrchestratorEnvConfig struct {
+	Tenant      string `yaml:"tenant" json:"tenant"`
+	Environment string `yaml:"environment" json:"environment"`
+	Directory   string `yaml:"directory" json:"directory"`
 }
 
 // RuntimeRegistryConfig lets operators running an internal mirror of `erun-devops`

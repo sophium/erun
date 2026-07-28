@@ -58,13 +58,13 @@ A commit you make in VS Code is immediately visible to the Agent's next file rea
 
 ## Workspace sync (optional)
 
-You don't normally need workspace sync — the runtime pod already sees your project repo (via host mount in a local-agent env, or via PVC checkout in a remote-agent env). Edits in your IDE are immediately visible to the Agent.
+For a **remote-agent** env, the worktree lives in the pod. Workspace sync mirrors it **down to a folder on your machine** so you can review and act on it host-side — open it in a host IDE, read the synced files, and run binaries the Agent built in the pod — without reaching into the pod for every step. It's the piece that makes an agent-driven env comfortable on Windows, where the pod-side worktree isn't directly openable by a host editor.
 
-Workspace sync covers a narrower case: making files **outside** the project repo visible inside the pod — editor scratch files, local notes you want the Agent to read, secrets you want in the pod's home directory without committing.
+Enable it from the desktop's env settings panel and pick the local folder to mirror into. The sync is **one-way, pod → host**: the desktop keeps the folder matching the pod's worktree (tracked and untracked-but-not-ignored files), so **treat it as read-only** — host edits are overwritten on the next pass. Files removed in the pod are removed from the mirror too. The mirror is a **plain directory** — it needs no local git; to see the Agent's uncommitted diff, view it from the pod (the desktop's review, or ask the in-pod Agent to run `git diff`).
 
-Enable it from the desktop's env settings panel and pick the local folder to mirror. The desktop polls the folder and pushes new or changed files into the pod; it's **one-way only** (local → pod), and stale files on the pod side are cleaned up automatically after a grace period. For the polling cadence, the cleanup semantics, and the size budget, see [Agent reference · Workspace sync spec](/agent-reference/workspace-sync-spec).
+Build artifacts land alongside it. Anything the Agent writes to the pod's outputs directory — a cross-compiled `.exe`, a report, a bundle — is mirrored into a **read-only `.erun-outputs` folder** next to the synced source. That's how a Windows binary built in the Linux pod reaches your machine: it syncs down, and you run or debug it from the desktop (the same artifacts are also available via **Download** on the env's Outputs dialog).
 
-The sync is a convenience for ancillary files. Code lives in the repo; the repo is mounted or checked out separately.
+For the polling cadence, the cleanup semantics, and the size budget, see [Agent reference · Workspace sync spec](/agent-reference/workspace-sync-spec).
 
 ## Contribute to ERun from any environment
 

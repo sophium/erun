@@ -151,6 +151,63 @@ export class Sidebar {
     return this.cloudAliasPopover().getByRole('button', { name });
   }
 
+  // The ERUN section is the top-level host-side control-plane block above
+  // ENVIRONMENTS (AI Orchestrators, Platform, Agent-local envs).
+  erunSection(): Locator {
+    return this.page.getByTestId('erun-section');
+  }
+
+  environmentsHeading(): Locator {
+    return this.locator().getByText('Environments', { exact: true });
+  }
+
+  erunDoctorButton(): Locator {
+    return this.erunSection().getByRole('button', { name: 'Run doctor' });
+  }
+
+  erunSettingsButton(): Locator {
+    return this.erunSection().getByRole('button', { name: 'Open ERun settings' });
+  }
+
+  orchestratorsEmptyState(): Locator {
+    return this.erunSection().getByText('No orchestrators yet');
+  }
+
+  newOrchestratorButton(): Locator {
+    return this.erunSection().getByRole('button', { name: 'New orchestrator' });
+  }
+
+  // A persisted orchestrator's row is identified by its "…" details button,
+  // whose aria-label carries the name — mirrors environmentRow().
+  orchestratorDetailsButton(name: string): Locator {
+    return this.erunSection().getByRole('button', { name: `Edit orchestrator ${name} settings` });
+  }
+
+  // The row's shape-encoded status light, labelled by state, is the same
+  // StatusDotGlyph env rows use — so status is never colour-only.
+  orchestratorStatusDot(name: string, state: 'running' | 'stopped'): Locator {
+    return this.erunSection().getByRole('img', { name: `Orchestrator ${name} is ${state}` });
+  }
+
+  // Open the orchestrator's management dialog via its "…" button. Like the env
+  // edit button it is pointer-events-none until hover/focus and a hover opens
+  // the IconTooltip popper that would swallow a click — so focus it and press
+  // Enter, retrying because a boot-reattached session can steal focus.
+  async openOrchestratorDialog(name: string): Promise<void> {
+    const dialog = this.page.getByRole('dialog', { name: 'Edit orchestrator' });
+    for (let attempt = 0; attempt < 4; attempt++) {
+      await this.orchestratorDetailsButton(name).press('Enter');
+      const opened = await dialog.waitFor({ state: 'visible', timeout: 2_000 }).then(
+        () => true,
+        () => false,
+      );
+      if (opened) {
+        return;
+      }
+    }
+    throw new Error(`orchestrator dialog did not open for ${name} via keyboard`);
+  }
+
   async tenants(): Promise<string[]> {
     const buttons = this.page.locator(
       'button[aria-label^="Collapse "], button[aria-label^="Expand "]',

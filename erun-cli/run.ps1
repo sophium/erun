@@ -17,8 +17,11 @@ param(
 $ErrorActionPreference = "Stop"
 
 # Make the toolchain resolvable even from a shell with a stale in-memory PATH.
+# Dedup so appending does not compound an already-long inherited PATH: once PATH
+# passes cmd.exe's ~8 KB limit, yarn's spawned cmd child truncates it and drops
+# node ("'node' is not recognized"), silently skipping the desktop's frontend build.
 $persisted = ([Environment]::GetEnvironmentVariable('Path','Machine'), [Environment]::GetEnvironmentVariable('Path','User')) -join ';'
-$env:Path = $persisted + ';' + $env:Path
+$env:Path = (($persisted + ';' + $env:Path) -split ';' | Where-Object { $_ -ne '' } | Select-Object -Unique) -join ';'
 
 $ScriptDir = $PSScriptRoot                       # erun-cli
 $RepoRoot = Split-Path $ScriptDir -Parent
@@ -73,8 +76,10 @@ if ($commandName -eq "app") {
 }
 
 # Prepend bin so the launched desktop app (and any PTY tab it spawns) resolves
-# the freshly-built plain erun.exe here, not the rebuilding shim on PATH.
-$env:Path = "$Bin;$env:Path"
+# the freshly-built plain erun.exe here, not the rebuilding shim on PATH. Dedup so
+# the app (and every PTY tab that inherits this) starts from a compact PATH rather
+# than compounding one that later overflows cmd.exe's limit (see the note above).
+$env:Path = (("$Bin;$env:Path") -split ';' | Where-Object { $_ -ne '' } | Select-Object -Unique) -join ';'
 
 & $CliExe @CliArgs
 exit $LASTEXITCODE

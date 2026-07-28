@@ -329,6 +329,59 @@ func seedRemoteTenantEnvWithSSHD(t testing.TB, setup env.Setup, tenant, environm
 	mustWrite(t, filepath.Join(envDir, "config.yaml"), envContents)
 }
 
+// SeedRemoteTenantEnvWithWorkspaceSync seeds a remote-agent env with SSHD and
+// workspace sync enabled, a local mirror directory, and a fixed public-key path,
+// pinning a high localportrangestart so the SSH port-forward preview never
+// collides with a developer's live erun session on the default 17000 range. It
+// backs the `erun doctor --repair-workspace-sync` scenario.
+func SeedRemoteTenantEnvWithWorkspaceSync(t testing.TB, setup env.Setup, tenant, environment string, rangeStart int) {
+	t.Helper()
+	root := filepath.Join(setup.ConfigHome, "erun")
+	tenantDir := filepath.Join(root, tenant)
+	envDir := filepath.Join(tenantDir, environment)
+	for _, dir := range []string{root, tenantDir, envDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	repoPath := filepath.Join(setup.Home, "git", tenant)
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("mkdir repo %s: %v", repoPath, err)
+	}
+	mirrorPath := filepath.Join(setup.Home, "mirror", tenant+"-"+environment)
+	if err := os.MkdirAll(mirrorPath, 0o755); err != nil {
+		t.Fatalf("mkdir mirror %s: %v", mirrorPath, err)
+	}
+	keyPath := filepath.Join(setup.Home, ".ssh", "id_ed25519.pub")
+	if err := os.MkdirAll(filepath.Dir(keyPath), 0o700); err != nil {
+		t.Fatalf("mkdir .ssh %s: %v", filepath.Dir(keyPath), err)
+	}
+	mustWrite(t, keyPath, "ssh-ed25519 AAAATESTKEY erun-integration\n")
+
+	envContents := "name: " + environment + "\n" +
+		"repopath: " + repoPath + "\n" +
+		"kubernetescontext: test-context\n" +
+		"containerregistry: registry.example/test\n" +
+		"runtimeversion: 1.0.0\n" +
+		"type: remote-agent\n" +
+		"localportrangestart: " + strconv.Itoa(rangeStart) + "\n" +
+		"sshd:\n" +
+		"  enabled: true\n" +
+		"  publickeypath: " + keyPath + "\n" +
+		"  workspacesync:\n" +
+		"    enabled: true\n" +
+		"    localpath: " + mirrorPath + "\n"
+
+	mustWrite(t, filepath.Join(root, "config.yaml"), "defaulttenant: "+tenant+"\n")
+	mustWrite(t, filepath.Join(tenantDir, "config.yaml"),
+		"projectroot: "+repoPath+"\n"+
+			"name: "+tenant+"\n"+
+			"defaultenvironment: "+environment+"\n",
+	)
+	mustWrite(t, filepath.Join(envDir, "config.yaml"), envContents)
+}
+
 // SeedRemoteTenantEnv marks the env remote so commands like open, api, and mcp
 // exercise the kubectl port-forward and remote-runtime traces. Its project root
 // lives under a real on-disk repo dir so cwd resolution still works when the

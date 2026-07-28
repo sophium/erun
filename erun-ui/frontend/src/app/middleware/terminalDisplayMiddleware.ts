@@ -31,5 +31,9 @@ startListening({
     rebuildTerminalDisplayBuffer(controller.sessions, sessionId);
     controller.resetTerminal();
     controller.writeTerminalBuffer(sessionId, controller.sessions.displayBuffer(sessionId));
+    // Push the pane geometry to the newly-active PTY so a session spawned at a
+    // default size (an orchestrator starts at 80x24) redraws at the real width
+    // instead of rendering its UI clipped.
+    controller.resizeActiveSession();
   },
 });

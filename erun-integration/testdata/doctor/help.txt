@@ -1,6 +1,6 @@
 Diagnose and repair an environment's runtime and config.
 
-Reports why a deploy may have failed (helm release status and the runtime pods, read-only). When the release looks unhealthy it recommends the one recovery that fits — clear a stuck pending helm release, or roll back to the last successful revision — and prompts before running it. It also prunes Docker images, build cache, or stopped containers; restores or fixes the root erun config; and finishes an interrupted remote init. The recovery actions mutate the live release; run one directly with --clear-pending-helm or --rollback (the two are alternatives — pass only one). Run inside a runtime pod, --sync-config reconciles the on-disk env config with the helm-injected ERUN_* env vars (injected env wins) and rewrites the projected keys, preserving everything else.
+Reports why a deploy may have failed (helm release status and the runtime pods, read-only). When the release looks unhealthy it recommends the one recovery that fits — clear a stuck pending helm release, or roll back to the last successful revision — and prompts before running it. It also prunes Docker images, build cache, or stopped containers; restores or fixes the root erun config; and finishes an interrupted remote init. The recovery actions mutate the live release; run one directly with --clear-pending-helm or --rollback (the two are alternatives — pass only one). Run inside a runtime pod, --sync-config reconciles the on-disk env config with the helm-injected ERUN_* env vars (injected env wins) and rewrites the projected keys, preserving everything else. For a remote-agent env with workspace sync enabled it reports the host mirror's SSH provisioning, and --repair-workspace-sync repairs it without redeploying (resolve/persist the key, write the ssh config alias, install the pod authorized_keys, ensure the port-forward).
 
 Usage:
   erun doctor [tenant] [environment] [flags]
@@ -17,6 +17,7 @@ Flags:
       --remote-repository-url string            Git remote URL to use when finishing an unfinished remote init
       --repair-config                           Inspect the root erun config and offer to restore from backup or re-init orphaned cloud provider aliases; stops before running tenant/env cleanup actions
       --repair-jetbrains-gateway                Clear cached JetBrains Gateway backend metadata for this environment
+      --repair-workspace-sync                   Repair a remote-agent env's host workspace-sync SSH provisioning (resolve/persist key, write ssh config alias, install pod authorized_keys, ensure port-forward) without redeploying the runtime
       --restore-config-from-backup string       Restore the root erun config from a dated backup non-interactively (YYYY-MM-DD or absolute path)
       --restore-env-config-from-backup string   Restore the target environment's config.yaml from a dated backup (YYYY-MM-DD or absolute path); needs an explicit tenant and environment
       --rollback                                Roll the runtime release back to its last successful revision without prompting
