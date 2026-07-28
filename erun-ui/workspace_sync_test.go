@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -154,8 +153,9 @@ func TestStartSessionStartsConfiguredWorkspaceSync(t *testing.T) {
 }
 
 func TestSaveEnvironmentConfigPersistsWorkspaceSyncLocalPath(t *testing.T) {
+	// A plain (non-git) directory is a valid sync target: the mirror is a
+	// one-way copy the sync owns and needs no local git.
 	localRoot := t.TempDir()
-	requireWorkspaceSyncNoError(t, exec.Command("git", "-C", localRoot, "init").Run(), "init local git repo")
 	store := workspaceSyncStore(true)
 	env := store.envs["frs/dev"]
 	env.SSHD.WorkspaceSync.LocalPath = ""
@@ -245,6 +245,176 @@ func TestLoadEnvironmentConfigTreatsEnabledWorkspaceSyncWithoutLocalPathAsOff(t 
 	requireWorkspaceSyncNoError(t, err, "load config")
 	if config.SSHD.WorkspaceSyncEnabled {
 		t.Fatalf("expected workspace sync to load as off without local path, got %+v", config.SSHD)
+	}
+}
+
+func TestSafeWorkspaceSyncPathRejectsArtifactMirrorSubdir(t *testing.T) {
+	for _, p := range []string{workspaceSyncArtifactsSubdir, workspaceSyncArtifactsSubdir + "/erun-app.exe"} {
+		if safeWorkspaceSyncPath(p) {
+			t.Errorf("expected source lane to reject artifact-mirror path %q", p)
+		}
+	}
+	// A distinct sibling that merely shares the prefix stays in the source lane.
+	if !safeWorkspaceSyncPath(".erun-outputs-notes/readme.md") {
+		t.Error("expected a distinct sibling path to remain allowed")
+	}
+}
+
+func TestListLocalArtifactFiles(t *testing.T) {
+	root := t.TempDir()
+	requireWorkspaceSyncNoError(t, os.MkdirAll(filepath.Join(root, "sub"), 0o755), "mkdir sub")
+	requireWorkspaceSyncNoError(t, os.WriteFile(filepath.Join(root, "erun-app.exe"), []byte("x"), 0o644), "write exe")
+	requireWorkspaceSyncNoError(t, os.WriteFile(filepath.Join(root, "sub", "report.txt"), []byte("y"), 0o644), "write report")
+
+	got, err := listLocalArtifactFiles(root)
+	requireWorkspaceSyncNoError(t, err, "list artifacts")
+	want := []string{"erun-app.exe", "sub/report.txt"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected artifact files: got %+v want %+v", got, want)
+	}
+}
+
+func TestListLocalArtifactFilesMissingRootIsEmpty(t *testing.T) {
+	got, err := listLocalArtifactFiles(filepath.Join(t.TempDir(), "does-not-exist"))
+	requireWorkspaceSyncNoError(t, err, "list missing artifacts")
+	if len(got) != 0 {
+		t.Fatalf("expected no files for a missing root, got %+v", got)
+	}
+}
+
+func TestPruneLocalArtifactsRemovesStaleAndKeepsPresent(t *testing.T) {
+	root := t.TempDir()
+	requireWorkspaceSyncNoError(t, os.WriteFile(filepath.Join(root, "keep.exe"), []byte("k"), 0o644), "write keep")
+	requireWorkspaceSyncNoError(t, os.WriteFile(filepath.Join(root, "stale.exe"), []byte("s"), 0o644), "write stale")
+
+	requireWorkspaceSyncNoError(t, pruneLocalArtifacts(root, []string{"keep.exe"}), "prune")
+	if _, err := os.Stat(filepath.Join(root, "keep.exe")); err != nil {
+		t.Fatalf("expected keep.exe to remain: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "stale.exe")); !os.IsNotExist(err) {
+		t.Fatalf("expected stale.exe to be pruned, got %v", err)
+	}
+}
+
+func TestArtifactReadOnlyRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	artifact := filepath.Join(root, "erun-app.exe")
+	requireWorkspaceSyncNoError(t, os.WriteFile(artifact, []byte("x"), 0o644), "write exe")
+
+	requireWorkspaceSyncNoError(t, markArtifactsReadOnly(root, []string{"erun-app.exe"}), "mark read-only")
+	info, err := os.Stat(artifact)
+	requireWorkspaceSyncNoError(t, err, "stat after read-only")
+	if info.Mode().Perm()&0o200 != 0 {
+		t.Fatalf("expected write bit cleared on the read-only mirror, got mode %v", info.Mode().Perm())
+	}
+
+	requireWorkspaceSyncNoError(t, makeArtifactsWritable(root), "make writable")
+	info, err = os.Stat(artifact)
+	requireWorkspaceSyncNoError(t, err, "stat after writable")
+	if info.Mode().Perm()&0o200 == 0 {
+		t.Fatalf("expected write bit restored before refresh, got mode %v", info.Mode().Perm())
+	}
+}
+
+func TestEnsureLocalWorkspaceSyncTargetAcceptsPlainDirAndCreatesMissing(t *testing.T) {
+	// An existing plain directory is accepted without any local git.
+	existing := t.TempDir()
+	requireWorkspaceSyncNoError(t, ensureLocalWorkspaceSyncTarget(existing), "accept plain dir")
+
+	// A missing directory is created.
+	missing := filepath.Join(t.TempDir(), "nested", "mirror")
+	requireWorkspaceSyncNoError(t, ensureLocalWorkspaceSyncTarget(missing), "create missing dir")
+	info, err := os.Stat(missing)
+	requireWorkspaceSyncNoError(t, err, "stat created dir")
+	if !info.IsDir() {
+		t.Fatal("expected the created path to be a directory")
+	}
+
+	// A path that is a file, not a directory, is rejected.
+	file := filepath.Join(t.TempDir(), "afile")
+	requireWorkspaceSyncNoError(t, os.WriteFile(file, []byte("x"), 0o644), "write file")
+	if err := ensureLocalWorkspaceSyncTarget(file); err == nil {
+		t.Fatal("expected a non-directory path to be rejected")
+	}
+}
+
+func TestLocalWorkspaceSourceFileMetaSkipsGitAndArtifacts(t *testing.T) {
+	root := t.TempDir()
+	requireWorkspaceSyncNoError(t, os.MkdirAll(filepath.Join(root, "app"), 0o755), "mkdir app")
+	requireWorkspaceSyncNoError(t, os.MkdirAll(filepath.Join(root, ".git", "refs"), 0o755), "mkdir .git")
+	requireWorkspaceSyncNoError(t, os.MkdirAll(filepath.Join(root, workspaceSyncArtifactsSubdir), 0o755), "mkdir outputs")
+	requireWorkspaceSyncNoError(t, os.WriteFile(filepath.Join(root, "README.md"), []byte("readme"), 0o644), "write readme")
+	requireWorkspaceSyncNoError(t, os.WriteFile(filepath.Join(root, "app", "main.go"), []byte("m"), 0o644), "write main")
+	requireWorkspaceSyncNoError(t, os.WriteFile(filepath.Join(root, ".git", "config"), []byte("g"), 0o644), "write git config")
+	requireWorkspaceSyncNoError(t, os.WriteFile(filepath.Join(root, ".git", "refs", "head"), []byte("h"), 0o644), "write git ref")
+	requireWorkspaceSyncNoError(t, os.WriteFile(filepath.Join(root, workspaceSyncArtifactsSubdir, "erun-app.exe"), []byte("e"), 0o644), "write artifact")
+
+	meta, err := localWorkspaceSourceFileMeta(root)
+	requireWorkspaceSyncNoError(t, err, "fingerprint source files")
+	want := []string{"README.md", "app/main.go"}
+	if got := sortedWorkspaceFileMetaKeys(meta); !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected source files: got %+v want %+v", got, want)
+	}
+	if meta["README.md"].Size != int64(len("readme")) {
+		t.Fatalf("unexpected README.md size: got %d want %d", meta["README.md"].Size, len("readme"))
+	}
+}
+
+func TestLocalWorkspaceSourceFileMetaMissingRootIsEmpty(t *testing.T) {
+	meta, err := localWorkspaceSourceFileMeta(filepath.Join(t.TempDir(), "does-not-exist"))
+	requireWorkspaceSyncNoError(t, err, "fingerprint missing root")
+	if len(meta) != 0 {
+		t.Fatalf("expected no files for a missing root, got %+v", meta)
+	}
+}
+
+func TestChangedWorkspaceSyncPathsFetchesNewChangedAndUnknown(t *testing.T) {
+	// remotePaths order is preserved in the output.
+	remotePaths := []string{"changed.txt", "new.txt", "same.txt", "unknown-remote.txt"}
+	remoteMeta := map[string]workspaceFileMeta{
+		"changed.txt": {Size: 10, MTime: 200},
+		"new.txt":     {Size: 5, MTime: 100},
+		"same.txt":    {Size: 7, MTime: 150},
+		// unknown-remote.txt intentionally absent → fetch when unsure.
+	}
+	localMeta := map[string]workspaceFileMeta{
+		"changed.txt":        {Size: 10, MTime: 100}, // mtime differs → fetch
+		"same.txt":           {Size: 7, MTime: 150},  // identical → skip
+		"unknown-remote.txt": {Size: 1, MTime: 1},
+		// new.txt absent locally → fetch.
+	}
+	got := changedWorkspaceSyncPaths(remotePaths, remoteMeta, localMeta)
+	want := []string{"changed.txt", "new.txt", "unknown-remote.txt"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected changed paths: got %+v want %+v", got, want)
+	}
+}
+
+func TestChangedWorkspaceSyncPathsSkipsWhenFingerprintsMatch(t *testing.T) {
+	remotePaths := []string{"a.txt", "b.txt"}
+	meta := map[string]workspaceFileMeta{
+		"a.txt": {Size: 3, MTime: 42},
+		"b.txt": {Size: 4, MTime: 43},
+	}
+	if got := changedWorkspaceSyncPaths(remotePaths, meta, meta); len(got) != 0 {
+		t.Fatalf("expected no fetches when every fingerprint matches, got %+v", got)
+	}
+}
+
+func TestParseWorkspaceFileMeta(t *testing.T) {
+	out := "12 1700000000 README.md\n34 1700000005 dir/with space.txt\nbad line\n56 1700000009 .git/config\n"
+	meta := parseWorkspaceFileMeta(out)
+	if len(meta) != 2 {
+		t.Fatalf("expected 2 valid entries (bad line + .git skipped), got %d: %+v", len(meta), meta)
+	}
+	if meta["README.md"] != (workspaceFileMeta{Size: 12, MTime: 1700000000}) {
+		t.Fatalf("unexpected README.md meta: %+v", meta["README.md"])
+	}
+	if meta["dir/with space.txt"] != (workspaceFileMeta{Size: 34, MTime: 1700000005}) {
+		t.Fatalf("unexpected spaced-path meta: %+v", meta["dir/with space.txt"])
+	}
+	if _, ok := meta[".git/config"]; ok {
+		t.Fatal("expected .git path to be skipped by safeWorkspaceSyncPath")
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,8 +25,9 @@ type workspaceSyncParams struct {
 }
 
 type workspaceSyncResult struct {
-	FilesCopied  int
-	FilesDeleted int
+	FilesCopied     int
+	FilesDeleted    int
+	ArtifactsCopied int
 }
 
 type workspaceSyncWorker struct {
@@ -118,9 +120,13 @@ func (a *App) runWorkspaceSyncLoop(ctx context.Context, key string, selection ui
 		if err != nil {
 			a.setWorkspaceSyncError(key, err)
 		} else {
+			message := fmt.Sprintf("Synced %d files, deleted %d", synced.FilesCopied, synced.FilesDeleted)
+			if synced.ArtifactsCopied > 0 {
+				message += fmt.Sprintf(", %d artifacts", synced.ArtifactsCopied)
+			}
 			a.setWorkspaceSyncStatus(key, workspaceSyncStatus{
 				Status:     "synced",
-				Message:    fmt.Sprintf("Synced %d files, deleted %d", synced.FilesCopied, synced.FilesDeleted),
+				Message:    message,
 				LastSynced: time.Now(),
 				Files:      synced.FilesCopied,
 			})
@@ -243,31 +249,174 @@ func syncWorkspaceOnce(ctx context.Context, params workspaceSyncParams) (workspa
 	if params.HostAlias == "" || params.RemotePath == "" || params.LocalPath == "" {
 		return workspaceSyncResult{}, fmt.Errorf("host alias, remote path, and local path are required")
 	}
-	if err := ensureLocalWorkspaceSyncTarget(ctx, params.LocalPath); err != nil {
+	if err := ensureLocalWorkspaceSyncTarget(params.LocalPath); err != nil {
 		return workspaceSyncResult{}, err
 	}
-	remotePaths, localPaths, notGitRepo, err := resolveWorkspaceSyncPaths(ctx, params)
+	remotePaths, localMeta, notGitRepo, err := resolveWorkspaceSyncPaths(ctx, params)
 	if err != nil {
 		return workspaceSyncResult{}, err
 	}
 	if notGitRepo {
 		return workspaceSyncResult{}, nil
 	}
-	if len(remotePaths) > 0 {
-		if err := extractRemoteWorkspaceFiles(ctx, params.HostAlias, params.RemotePath, params.LocalPath, remotePaths); err != nil {
+	// Fetch only files whose size or mtime differs from the mirror, so a steady
+	// state costs one metadata listing instead of re-transferring the whole tree
+	// every pass; tar preserves mtime, so an unchanged file matches next pass.
+	remoteMeta := remoteWorkspaceFileMeta(ctx, params.HostAlias, params.RemotePath)
+	toFetch := changedWorkspaceSyncPaths(remotePaths, remoteMeta, localMeta)
+	if len(toFetch) > 0 {
+		if err := extractRemoteWorkspaceFiles(ctx, params.HostAlias, params.RemotePath, params.LocalPath, toFetch); err != nil {
 			return workspaceSyncResult{}, err
 		}
 	}
-	deleted, err := deleteLocalWorkspaceFilesNotInRemote(params.LocalPath, localPaths, remotePaths)
+	deleted, err := deleteLocalWorkspaceFilesNotInRemote(params.LocalPath, sortedWorkspaceFileMetaKeys(localMeta), remotePaths)
 	if err != nil {
 		return workspaceSyncResult{}, err
 	}
-	return workspaceSyncResult{FilesCopied: len(remotePaths), FilesDeleted: deleted}, nil
+	artifacts, err := syncOutputsArtifacts(ctx, params.HostAlias, eruncommon.DefaultRuntimeOutputsDir, filepath.Join(params.LocalPath, workspaceSyncArtifactsSubdir))
+	if err != nil {
+		return workspaceSyncResult{}, err
+	}
+	return workspaceSyncResult{FilesCopied: len(toFetch), FilesDeleted: deleted, ArtifactsCopied: artifacts}, nil
+}
+
+// workspaceSyncArtifactsSubdir is the read-only subdir of the host mirror that
+// receives the pod's $ERUN_OUTPUTS_DIR deliverables — e.g. a Windows .exe an
+// agent cross-builds in the Linux pod. It sits beside the synced source but the
+// source lane skips it (safeWorkspaceSyncPath), so the two mirrors never contend
+// over the same paths.
+const workspaceSyncArtifactsSubdir = ".erun-outputs"
+
+// syncOutputsArtifacts mirrors the pod's deliverables directory
+// (eruncommon.DefaultRuntimeOutputsDir) into artifactsLocal as a one-way,
+// read-only host mirror. Artifacts live outside the git worktree, so they escape
+// the gitignore that hides *.exe from the source mirror — this is how a Windows
+// binary cross-built in the pod reaches the host to run/debug. Returns the number
+// of artifact files delivered; a missing or empty outputs dir is a no-op.
+func syncOutputsArtifacts(ctx context.Context, hostAlias, outputsRemote, artifactsLocal string) (int, error) {
+	remote, err := remoteOutputsFiles(ctx, hostAlias, outputsRemote)
+	if err != nil {
+		return 0, err
+	}
+	if len(remote) > 0 {
+		if err := os.MkdirAll(artifactsLocal, 0o755); err != nil {
+			return 0, fmt.Errorf("create artifacts dir %s: %w", artifactsLocal, err)
+		}
+		// Clear the read-only bit set by the previous pass so the tar extract can
+		// overwrite the mirror in place (matters on Windows, where a read-only
+		// attribute otherwise blocks the rewrite).
+		if err := makeArtifactsWritable(artifactsLocal); err != nil {
+			return 0, err
+		}
+		if err := extractRemoteWorkspaceFiles(ctx, hostAlias, outputsRemote, artifactsLocal, remote); err != nil {
+			return 0, err
+		}
+		if err := markArtifactsReadOnly(artifactsLocal, remote); err != nil {
+			return 0, err
+		}
+	}
+	if err := pruneLocalArtifacts(artifactsLocal, remote); err != nil {
+		return 0, err
+	}
+	return len(remote), nil
+}
+
+// remoteOutputsFiles lists the regular files under the pod outputs dir, relative
+// to it. A not-yet-created dir yields no paths and no error, so the mirror is a
+// no-op until an agent writes a deliverable. GNU find's %P prints the path
+// without the leading "./" so entries pass safeWorkspaceSyncPath.
+func remoteOutputsFiles(ctx context.Context, hostAlias, outputsRemote string) ([]string, error) {
+	script := fmt.Sprintf("cd %s 2>/dev/null && find . -type f -printf '%%P\\0'", shellQuote(outputsRemote))
+	cmd := exec.CommandContext(ctx, "ssh", workspaceSyncSSHArgs(hostAlias, script)...)
+	eruncommon.HideConsoleWindow(cmd)
+	output, err := cmd.Output()
+	if err != nil {
+		// `cd` into a not-yet-created outputs dir exits non-zero; treat the whole
+		// "no deliverables yet" case as an empty, error-free listing.
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("list remote outputs: %w", err)
+	}
+	return parseWorkspaceSyncPathList(output), nil
+}
+
+// pruneLocalArtifacts deletes host artifact files no longer present in the pod so
+// an artifact removed in the pod disappears from the host mirror too.
+func pruneLocalArtifacts(artifactsLocal string, remotePaths []string) error {
+	localPaths, err := listLocalArtifactFiles(artifactsLocal)
+	if err != nil {
+		return err
+	}
+	_, err = deleteLocalWorkspaceFilesNotInRemote(artifactsLocal, localPaths, remotePaths)
+	return err
+}
+
+// listLocalArtifactFiles returns the regular files under root, relative to it and
+// slash-normalized. A missing root yields no files.
+func listLocalArtifactFiles(root string) ([]string, error) {
+	var files []string
+	err := filepath.Walk(root, func(p string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			if os.IsNotExist(walkErr) {
+				return nil
+			}
+			return walkErr
+		}
+		if info.IsDir() {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, p)
+		if relErr != nil {
+			return relErr
+		}
+		files = append(files, filepath.ToSlash(rel))
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return files, nil
+}
+
+// makeArtifactsWritable restores the write bit on mirrored artifact files so the
+// next sync pass can overwrite them; markArtifactsReadOnly re-applies read-only
+// after the refresh. Directories stay writable throughout.
+func makeArtifactsWritable(artifactsLocal string) error {
+	files, err := listLocalArtifactFiles(artifactsLocal)
+	if err != nil {
+		return err
+	}
+	for _, item := range files {
+		full := filepath.Join(artifactsLocal, filepath.FromSlash(item))
+		if err := os.Chmod(full, 0o644); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("prepare artifact for refresh %s: %w", full, err)
+		}
+	}
+	return nil
+}
+
+// markArtifactsReadOnly strips the write bit from mirrored artifact files so the
+// host copy reads as the read-only mirror it is (on Windows this sets the
+// read-only attribute), signalling the operator not to edit a copy the sync will
+// overwrite.
+func markArtifactsReadOnly(artifactsLocal string, paths []string) error {
+	for _, item := range paths {
+		if !safeWorkspaceSyncPath(item) {
+			continue
+		}
+		full := filepath.Join(artifactsLocal, filepath.FromSlash(item))
+		if err := os.Chmod(full, 0o444); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("mark artifact read-only %s: %w", full, err)
+		}
+	}
+	return nil
 }
 
 // resolveWorkspaceSyncPaths reports notGitRepo=true (with a nil error) when the
 // remote is not a Git repository; callers treat that as a no-op sync pass.
-func resolveWorkspaceSyncPaths(ctx context.Context, params workspaceSyncParams) (remotePaths, localPaths []string, notGitRepo bool, err error) {
+func resolveWorkspaceSyncPaths(ctx context.Context, params workspaceSyncParams) (remotePaths []string, localMeta map[string]workspaceFileMeta, notGitRepo bool, err error) {
 	remotePaths, err = remoteWorkspaceGitVisibleFiles(ctx, params.HostAlias, params.RemotePath)
 	if errors.Is(err, errRemoteNotGitRepo) {
 		return nil, nil, true, nil
@@ -275,15 +424,14 @@ func resolveWorkspaceSyncPaths(ctx context.Context, params workspaceSyncParams) 
 	if err != nil {
 		return nil, nil, false, err
 	}
-	localPaths, err = localWorkspaceGitVisibleFiles(ctx, params.LocalPath)
+	// The mirror is a one-way copy, so its file set comes from a plain directory
+	// walk — the pod already applied the repo's ignore rules via
+	// `git ls-files --exclude-standard`, so the host needs no git of its own.
+	localMeta, err = localWorkspaceSourceFileMeta(params.LocalPath)
 	if err != nil {
 		return nil, nil, false, err
 	}
-	remotePaths, err = filterLocalIgnoredWorkspaceSyncPaths(ctx, params.LocalPath, remotePaths)
-	if err != nil {
-		return nil, nil, false, err
-	}
-	return remotePaths, localPaths, false, nil
+	return remotePaths, localMeta, false, nil
 }
 
 func workspaceSyncSSHReady(ctx context.Context, hostAlias string) error {
@@ -300,19 +448,20 @@ func workspaceSyncSSHReady(ctx context.Context, hostAlias string) error {
 	return nil
 }
 
-func ensureLocalWorkspaceSyncTarget(ctx context.Context, localPath string) error {
+// ensureLocalWorkspaceSyncTarget makes the mirror path usable as a sync target:
+// it must be a directory, created if missing. The mirror is a one-way,
+// read-only copy the sync owns, so it deliberately does NOT need to be a git
+// worktree — sync reconciles files by listing the directory, not by local git.
+func ensureLocalWorkspaceSyncTarget(localPath string) error {
+	if err := os.MkdirAll(localPath, 0o755); err != nil {
+		return fmt.Errorf("create local workspace path %s: %w", localPath, err)
+	}
 	info, err := os.Stat(localPath)
 	if err != nil {
 		return fmt.Errorf("local workspace path %s: %w", localPath, err)
 	}
 	if !info.IsDir() {
 		return fmt.Errorf("local workspace path is not a directory: %s", localPath)
-	}
-	cmd := exec.CommandContext(ctx, "git", "-C", localPath, "rev-parse", "--is-inside-work-tree")
-	eruncommon.HideConsoleWindow(cmd)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("local workspace is not a Git worktree: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 	return nil
 }
@@ -337,39 +486,116 @@ func remoteWorkspaceGitVisibleFiles(ctx context.Context, hostAlias, remotePath s
 	return parseWorkspaceSyncPathList(output), nil
 }
 
-func localWorkspaceGitVisibleFiles(ctx context.Context, localPath string) ([]string, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", localPath, "ls-files", "-coz", "--exclude-standard")
-	eruncommon.HideConsoleWindow(cmd)
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("list local Git-visible files: %w", err)
-	}
-	return parseWorkspaceSyncPathList(output), nil
+// workspaceFileMeta is the change-detection fingerprint for one mirrored file:
+// its size and mtime (unix seconds). tar preserves mtime on extract, so a file
+// left unchanged in the pod keeps the same fingerprint on the host and is
+// skipped on the next pass.
+type workspaceFileMeta struct {
+	Size  int64
+	MTime int64
 }
 
-func filterLocalIgnoredWorkspaceSyncPaths(ctx context.Context, localPath string, paths []string) ([]string, error) {
-	if len(paths) == 0 {
-		return nil, nil
+// localWorkspaceSourceFileMeta fingerprints the mirror's source-lane files with
+// a plain filesystem walk, so the host copy needs no local git. It skips the
+// operator's own .git (never synced or pruned) and the outputs lane's
+// .erun-outputs subdir, keeping only the paths the source lane owns
+// (safeWorkspaceSyncPath). A missing mirror yields an empty set.
+func localWorkspaceSourceFileMeta(root string) (map[string]workspaceFileMeta, error) {
+	meta := make(map[string]workspaceFileMeta)
+	err := filepath.Walk(root, func(p string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			if os.IsNotExist(walkErr) {
+				return nil
+			}
+			return walkErr
+		}
+		rel, relErr := filepath.Rel(root, p)
+		if relErr != nil {
+			return relErr
+		}
+		relSlash := filepath.ToSlash(rel)
+		if info.IsDir() {
+			if relSlash == ".git" || relSlash == workspaceSyncArtifactsSubdir {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if safeWorkspaceSyncPath(relSlash) {
+			meta[relSlash] = workspaceFileMeta{Size: info.Size(), MTime: info.ModTime().Unix()}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	cmd := exec.CommandContext(ctx, "git", "-C", localPath, "check-ignore", "-z", "--stdin")
+	return meta, nil
+}
+
+// remoteWorkspaceFileMeta fingerprints the pod's Git-visible files (size + mtime)
+// so a pass can fetch only what changed. It is best-effort: any listing or parse
+// failure yields no fingerprint for a path, and changedWorkspaceSyncPaths then
+// fetches that path — so correctness never depends on the metadata, only the
+// transfer volume does.
+func remoteWorkspaceFileMeta(ctx context.Context, hostAlias, remotePath string) map[string]workspaceFileMeta {
+	script := fmt.Sprintf("cd %s && git ls-files -coz --exclude-standard | xargs -0 -r stat -c '%%s %%Y %%n'", shellQuote(remotePath))
+	cmd := exec.CommandContext(ctx, "ssh", workspaceSyncSSHArgs(hostAlias, script)...)
 	eruncommon.HideConsoleWindow(cmd)
-	cmd.Stdin = bytes.NewReader(encodeWorkspaceSyncPathList(paths))
 	output, err := cmd.Output()
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
-			return paths, nil
-		}
-		return nil, fmt.Errorf("check local ignored files: %w", err)
+		return nil
 	}
-	ignored := pathSet(parseWorkspaceSyncPathList(output))
-	filtered := make([]string, 0, len(paths))
-	for _, item := range paths {
-		if _, skip := ignored[item]; !skip {
-			filtered = append(filtered, item)
+	return parseWorkspaceFileMeta(string(output))
+}
+
+// parseWorkspaceFileMeta reads `stat -c '%s %Y %n'` lines (size, mtime, path).
+// The path is the remainder after the first two spaces, so paths with spaces
+// parse correctly; an unparseable line is skipped (its path is then fetched).
+func parseWorkspaceFileMeta(output string) map[string]workspaceFileMeta {
+	meta := make(map[string]workspaceFileMeta)
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if line == "" {
+			continue
+		}
+		fields := strings.SplitN(line, " ", 3)
+		if len(fields) != 3 {
+			continue
+		}
+		size, sizeErr := strconv.ParseInt(fields[0], 10, 64)
+		mtime, mtimeErr := strconv.ParseInt(fields[1], 10, 64)
+		if sizeErr != nil || mtimeErr != nil {
+			continue
+		}
+		if !safeWorkspaceSyncPath(fields[2]) {
+			continue
+		}
+		meta[fields[2]] = workspaceFileMeta{Size: size, MTime: mtime}
+	}
+	return meta
+}
+
+// changedWorkspaceSyncPaths returns, in remotePaths order, the paths a pass must
+// fetch: those missing locally, changed (size or mtime differ), or whose
+// fingerprint is unknown on either side (fetch when unsure).
+func changedWorkspaceSyncPaths(remotePaths []string, remoteMeta, localMeta map[string]workspaceFileMeta) []string {
+	changed := make([]string, 0, len(remotePaths))
+	for _, path := range remotePaths {
+		remote, remoteKnown := remoteMeta[path]
+		local, localKnown := localMeta[path]
+		if !remoteKnown || !localKnown || remote != local {
+			changed = append(changed, path)
 		}
 	}
-	return filtered, nil
+	return changed
+}
+
+func sortedWorkspaceFileMetaKeys(meta map[string]workspaceFileMeta) []string {
+	keys := make([]string, 0, len(meta))
+	for key := range meta {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func extractRemoteWorkspaceFiles(ctx context.Context, hostAlias, remotePath, localPath string, paths []string) error {
@@ -496,7 +722,12 @@ func safeWorkspaceSyncPath(value string) bool {
 	if cleaned != value || strings.HasPrefix(cleaned, "../") || cleaned == ".." {
 		return false
 	}
-	return cleaned != ".git" && !strings.HasPrefix(cleaned, ".git/")
+	if cleaned == ".git" || strings.HasPrefix(cleaned, ".git/") {
+		return false
+	}
+	// The source lane must ignore the artifact mirror subdir so it never prunes
+	// or lists files the outputs lane owns.
+	return cleaned != workspaceSyncArtifactsSubdir && !strings.HasPrefix(cleaned, workspaceSyncArtifactsSubdir+"/")
 }
 
 func pathClean(value string) string {

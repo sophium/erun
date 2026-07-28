@@ -43,6 +43,12 @@ export const SEED_CLOUD_ALIAS = 'pw-aws';
 // the per-type selector, the per-type sidebar row, and the "Verify token"
 // (re-verify) action without a live Cloudflare account.
 export const SEED_CLOUDFLARE_ALIAS = 'pw-token+0123456789abcdef@cloudflare';
+// One persisted, stopped AI orchestrator so the ERUN section's orchestrator row
+// is stageable without a running Claude session: its shape-encoded status dot
+// and the single "…" that opens the management dialog. Only the persisted
+// definition matters for the row — ListOrchestrators reads config, not env
+// type — so it links the alpha env and renders stopped on boot.
+export const SEED_ORCHESTRATOR = 'pw-orch';
 
 // isolatedRoot resolves the suite-owned root. When run.sh has not exported
 // ERUN_PLAYWRIGHT_HOME (a direct `playwright test`), the fresh temp root is
@@ -263,7 +269,11 @@ export function seedRemoteAgentForK3d(tenant: string, environment: string, conte
 // lets a spec reproduce the git-create redeploy loop WITHOUT the per-env SSH-key
 // import that blocks automation — the SSH wait only gates `erun init`; the loop is
 // in the post-init deploy→open cycle, which this config exercises.
-export function seedGitRemoteAgentForK3d(tenant: string, environment: string, context: string): void {
+export function seedGitRemoteAgentForK3d(
+  tenant: string,
+  environment: string,
+  context: string,
+): void {
   const envDir = path.join(erunConfigDir(), tenant, environment);
   fs.mkdirSync(envDir, { recursive: true });
   fs.writeFileSync(
@@ -368,7 +378,14 @@ export function seedBaseline(): void {
       '    cloudflare:\n' +
       '      accountid: 0123456789abcdef\n' +
       '      tokenname: pw-token\n' +
-      `      tokenref: cloudflare/${SEED_CLOUDFLARE_ALIAS}\n`,
+      `      tokenref: cloudflare/${SEED_CLOUDFLARE_ALIAS}\n` +
+      'orchestrators:\n' +
+      `  - id: ${SEED_ORCHESTRATOR}\n` +
+      `    name: ${SEED_ORCHESTRATOR}\n` +
+      '    environments:\n' +
+      `      - tenant: ${SEED_TENANT}\n` +
+      `        environment: ${SEED_ENV_ALPHA}\n` +
+      `        directory: ${repoDir()}\n`,
   );
   fs.writeFileSync(
     path.join(root, SEED_TENANT, 'config.yaml'),

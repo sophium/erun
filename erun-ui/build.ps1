@@ -20,9 +20,13 @@ param(
 $ErrorActionPreference = "Stop"
 
 # Make the toolchain (go/node/yarn/gcc, Scoop-installed and persisted to PATH)
-# resolvable even if the launching shell has a stale in-memory PATH.
+# resolvable even if the launching shell has a stale in-memory PATH. Dedup the
+# result: blindly appending compounds an already-long inherited PATH (the nested
+# app -> run.ps1 -> PTY-tab launch chain each prepend), and once PATH passes
+# cmd.exe's ~8 KB limit, yarn's spawned cmd child truncates it and drops node
+# ("'node' is not recognized"), silently skipping the frontend build.
 $persisted = ([Environment]::GetEnvironmentVariable('Path','Machine'), [Environment]::GetEnvironmentVariable('Path','User')) -join ';'
-$env:Path = $persisted + ';' + $env:Path
+$env:Path = (($persisted + ';' + $env:Path) -split ';' | Where-Object { $_ -ne '' } | Select-Object -Unique) -join ';'
 
 $ScriptDir = $PSScriptRoot
 $RepoRoot = Split-Path $ScriptDir -Parent

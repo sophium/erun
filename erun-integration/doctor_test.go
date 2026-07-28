@@ -83,6 +83,24 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/conflicting_recovery_flags_error", normalize.Apply(result.Combined))
 	})
 
+	t.Run("repair_workspace_sync_dry_run", func(t *testing.T) {
+		// Exercises doctor.go --repair-workspace-sync for a remote-agent env
+		// with workspace sync enabled: --dry-run must trace the non-destructive
+		// provisioning it would run — write the local ssh config alias, install
+		// the pod authorized_keys through the runtime container (never a helm
+		// redeploy), ensure the SSH port-forward, and re-check reachability —
+		// then short-circuit before the deploy diagnosis and prune prompts. The
+		// high localportrangestart pins the SSH port so the port-forward preview
+		// never collides with a developer's live erun session.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithWorkspaceSync(t, setup, "team", "dev", 26100)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--repair-workspace-sync", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/repair_workspace_sync_dry_run", normalize.Apply(result.Combined))
+	})
+
 	t.Run("in_runtime_complete_marker_dry_run", func(t *testing.T) {
 		// When the runtime env reports ERUN_REPO_REMOTE=true and the
 		// bootstrap marker shows the previous init finished, doctor
