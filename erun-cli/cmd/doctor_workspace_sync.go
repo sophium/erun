@@ -45,16 +45,30 @@ func doctorWorkspaceSyncApplicable(result common.OpenResult) bool {
 // the deploy diagnosis and prune prompts.
 func doctorOnlyRepairWorkspaceSync(options doctorOptions) bool {
 	return options.repairWorkspaceSync &&
-		!options.pruneImages &&
-		!options.pruneBuildCache &&
-		!options.pruneContainers &&
-		!options.repairJetBrainsGateway &&
-		!options.clearPendingHelm &&
-		!options.rollback &&
-		!options.finishRemoteInit &&
-		!options.repairConfig &&
 		strings.TrimSpace(options.restoreConfigFromBackup) == "" &&
-		strings.TrimSpace(options.restoreEnvConfigFromBackup) == ""
+		strings.TrimSpace(options.restoreEnvConfigFromBackup) == "" &&
+		!anyDoctorActionRequested(
+			options.pruneImages,
+			options.pruneBuildCache,
+			options.pruneContainers,
+			options.repairJetBrainsGateway,
+			options.clearPendingHelm,
+			options.rollback,
+			options.finishRemoteInit,
+			options.repairConfig,
+		)
+}
+
+// anyDoctorActionRequested reports whether any of the given doctor action flags
+// is set, letting the "only X requested" guards express their exclusions as a
+// flat list instead of a long boolean chain.
+func anyDoctorActionRequested(flags ...bool) bool {
+	for _, f := range flags {
+		if f {
+			return true
+		}
+	}
+	return false
 }
 
 // diagnoseAndReportWorkspaceSync prints the workspace-sync provisioning state and

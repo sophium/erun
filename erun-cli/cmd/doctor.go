@@ -114,6 +114,13 @@ func runDoctorCommand(ctx common.Context, resolveOpen func(common.OpenParams) (c
 	if doctorOnlyRepairWorkspaceSync(options) {
 		return nil
 	}
+	return runDoctorPostSyncActions(ctx, promptRunner, result, options)
+}
+
+// runDoctorPostSyncActions runs the JetBrains Gateway repair and then the
+// remaining cleanup actions, unless the JetBrains repair was the only action
+// requested. It is the tail of runDoctorCommand's diagnosis sequence.
+func runDoctorPostSyncActions(ctx common.Context, promptRunner PromptRunner, result common.OpenResult, options doctorOptions) error {
 	repairedJetBrains, err := runSelectedJetBrainsGatewayRepair(ctx, promptRunner, result, options)
 	if err != nil {
 		return err
