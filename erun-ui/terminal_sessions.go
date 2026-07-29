@@ -896,7 +896,17 @@ func (a *App) RepaintSession(sessionID int) error {
 	if managed == nil || managed.session == nil {
 		return nil
 	}
-	go a.nudgeAIRepaint(managed, cols, rows)
+	// Only AI TUIs (claude/codex) need the WINCH repaint: they render on the MAIN
+	// screen and only repaint on a real geometry change, so a tab switch leaves
+	// them blank until their next diff. Plain shells and alt-screen apps
+	// reconstruct from the replayed buffer, so a nudge would just cause a needless
+	// reflow. The frontend fires this on every switch and lets this gate decide.
+	if !isAITabKind(managed) {
+		return nil
+	}
+	// No attach delay on a switch: the program is already attached (unlike the
+	// attach-marker path, which must wait for dtach to reattach first).
+	go a.nudgeAIRepaint(managed, cols, rows, 0)
 	return nil
 }
 
@@ -1194,18 +1204,20 @@ func (a *App) maybeNudgeAIRepaint(managed *managedTerminal, chunk []byte) {
 	managed.repaintNudged = true
 	cols, rows := managed.lastCols, managed.lastRows
 	a.mu.Unlock()
-	go a.nudgeAIRepaint(managed, cols, rows)
+	go a.nudgeAIRepaint(managed, cols, rows, aiRepaintNudgeDelay)
 }
 
 // nudgeAIRepaint briefly shrinks the backend pty by one row and restores it:
 // the change reaches Claude as a real WINCH and forces the full repaint a
 // same-size reattach cannot. The local xterm is never resized, so the user sees
 // the tab's content appear with no visible reflow.
-func (a *App) nudgeAIRepaint(managed *managedTerminal, cols, rows int) {
+func (a *App) nudgeAIRepaint(managed *managedTerminal, cols, rows int, initialDelay time.Duration) {
 	if cols <= 0 || rows <= 1 {
 		return
 	}
-	time.Sleep(aiRepaintNudgeDelay)
+	if initialDelay > 0 {
+		time.Sleep(initialDelay)
+	}
 	if !a.resizeSessionIfLive(managed, cols, rows-1) {
 		return
 	}

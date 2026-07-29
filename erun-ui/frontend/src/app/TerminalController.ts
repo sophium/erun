@@ -583,13 +583,14 @@ export class TerminalController {
     this.terminal?.write('', () => {
       this.terminal?.scrollToBottom();
     });
-    // An alt-screen TUI (claude/codex) only repaints on a real geometry change,
-    // so the replay above reconstructs an approximate frame but the app won't
-    // refresh it until it next emits a diff — leaving the pane blank on switch.
-    // Nudge its backend pty (shrink+restore one row, never the local xterm) to
-    // raise a genuine WINCH and force a full repaint immediately.
-    if (finalState.altScreen) {
-      void RepaintSession(sessionId);
-    }
+    // AI TUIs (claude/codex) render on the MAIN screen — not the alt-screen — and
+    // only repaint on a real geometry change, so the trimmed replay above can't
+    // reconstruct their frame and the pane is blank on switch until the app next
+    // emits a diff (the black-pane the operator hit). Nudge the backend pty on
+    // every switch to raise a genuine WINCH and force a full repaint; the Go side
+    // (RepaintSession) applies it only to AI sessions and no-ops for plain shells
+    // and alt-screen apps (which reconstruct from the replay), so this is safe to
+    // call unconditionally. The local xterm is never resized — no visible reflow.
+    void RepaintSession(sessionId);
   }
 }
