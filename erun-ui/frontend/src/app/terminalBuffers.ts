@@ -69,6 +69,11 @@ function stripTerminalResponses(input: Uint8Array): Uint8Array {
 export interface CursorVisibilityState {
   altScreen: boolean;
   cursorHidden: boolean;
+  // A DEC private-mode escape (e.g. `\x1B[?1049h`) can be split across PTY output
+  // chunks. Carry any trailing incomplete fragment into the next scan so a split
+  // alt-screen enter/exit (or cursor hide/show) is not silently missed — missing
+  // it mis-routed a session switch to the trim path and blanked alt-screen TUIs.
+  pendingEscape?: string;
 }
 
 export const SHOW_CURSOR_SEQUENCE = '\x1B[?25h';
@@ -80,31 +85,52 @@ const initialCursorVisibility: CursorVisibilityState = {
 
 const DEC_PRIVATE_MODE = /\x1B\[\?([\d;]+)([lh])/g;
 const ALT_SCREEN_MODES = new Set(['47', '1047', '1049']);
+// A trailing fragment at the end of a chunk that could be the start of a DEC
+// private-mode sequence still waiting for its terminator: `\x1B`, `\x1B[`,
+// `\x1B[?`, or `\x1B[?12;` with no `l`/`h` yet. Carried into the next scan.
+const TRAILING_DEC_FRAGMENT = /\x1B(?:\[(?:\?[\d;]*)?)?$/;
+
+// applyDecPrivateMode folds one matched `\x1B[?<params><l|h>` into the running
+// state: `?25` toggles cursor visibility, alt-screen modes toggle altScreen.
+function applyDecPrivateMode(
+  state: { altScreen: boolean; cursorHidden: boolean },
+  params: string,
+  set: boolean,
+): void {
+  for (const param of params.split(';')) {
+    if (param === '25') {
+      state.cursorHidden = !set;
+    } else if (ALT_SCREEN_MODES.has(param)) {
+      state.altScreen = set;
+    }
+  }
+}
 
 export function scanCursorVisibility(
   prev: CursorVisibilityState,
   data: TerminalWriteData,
 ): CursorVisibilityState {
-  const text = typeof data === 'string' ? data : new TextDecoder().decode(data);
-  if (!text.includes('\x1B[?')) {
-    return prev;
-  }
-  let { altScreen, cursorHidden } = prev;
+  const decoded = typeof data === 'string' ? data : new TextDecoder().decode(data);
+  // Prepend any incomplete escape fragment carried from the previous chunk so a
+  // sequence split across chunk boundaries is reassembled before matching.
+  const carried = prev.pendingEscape ?? '';
+  const text = carried + decoded;
+  const next = { altScreen: prev.altScreen, cursorHidden: prev.cursorHidden };
   for (const match of text.matchAll(DEC_PRIVATE_MODE)) {
-    const set = match[2] === 'h';
-    const params = match[1] ?? '';
-    for (const param of params.split(';')) {
-      if (param === '25') {
-        cursorHidden = !set;
-      } else if (ALT_SCREEN_MODES.has(param)) {
-        altScreen = set;
-      }
-    }
+    applyDecPrivateMode(next, match[1] ?? '', match[2] === 'h');
   }
-  if (altScreen === prev.altScreen && cursorHidden === prev.cursorHidden) {
+  // Only an incomplete DEC tail is carried; a completed sequence matched above
+  // ends in l/h and never matches this, so nothing is ever counted twice.
+  const tailMatch = TRAILING_DEC_FRAGMENT.exec(text);
+  const pendingEscape = tailMatch ? tailMatch[0] : '';
+  if (
+    next.altScreen === prev.altScreen &&
+    next.cursorHidden === prev.cursorHidden &&
+    pendingEscape === carried
+  ) {
     return prev;
   }
-  return { altScreen, cursorHidden };
+  return { altScreen: next.altScreen, cursorHidden: next.cursorHidden, pendingEscape };
 }
 
 export function bufferCursorVisibility(buffer: TerminalWriteData[]): CursorVisibilityState {
