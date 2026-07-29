@@ -156,7 +156,103 @@ func (a *App) ensureOrchestratorWorkspace() (string, error) {
 	if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte(orchestratorClaudeMd), 0o644); err != nil {
 		return "", fmt.Errorf("write orchestrator CLAUDE.md: %w", err)
 	}
+	// Make every erun skill available to the orchestrator by default — the
+	// operator must never have to install them by hand. Best-effort: a missing
+	// skills source (e.g. a distributed binary with no repo checkout) must not
+	// block the orchestrator from launching.
+	if err := ensureOrchestratorSkills(); err != nil {
+		fmt.Fprintf(os.Stderr, "erun: could not install orchestrator skills: %v\n", err)
+	}
 	return dir, nil
+}
+
+// hostSkillsSource resolves the directory holding the canonical erun skills
+// (erun-skills/skills/<name>/) on the host. ERUN_SKILLS_DIR overrides it (tests
+// and non-standard installs); otherwise it walks up from the erun-app executable
+// to the erun repo root, since erun-app is built from source there
+// (erun-cli/bin/erun-app). Returns "" when no source can be found, so the caller
+// skips installation instead of failing.
+func hostSkillsSource() string {
+	if override := strings.TrimSpace(os.Getenv("ERUN_SKILLS_DIR")); override != "" {
+		return override
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	dir := filepath.Dir(exe)
+	for i := 0; i < 8; i++ {
+		cand := filepath.Join(dir, "erun-skills", "skills")
+		if info, statErr := os.Stat(cand); statErr == nil && info.IsDir() {
+			return cand
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return ""
+}
+
+// ensureOrchestratorSkills installs every erun skill into ~/.claude/skills so the
+// orchestrator's Claude session sees them by default, with no operator install
+// step. A skill whose destination SKILL.md already exists is left untouched so
+// in-place edits survive (mirrors finishRemoteInitSkills). Returns nil when no
+// skills source is resolvable so a distributed binary still launches cleanly.
+func ensureOrchestratorSkills() error {
+	root := hostSkillsSource()
+	if root == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return nil
+	}
+	destRoot := filepath.Join(home, ".claude", "skills")
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		dst := filepath.Join(destRoot, entry.Name())
+		if _, statErr := os.Stat(filepath.Join(dst, "SKILL.md")); statErr == nil {
+			continue // already installed — preserve any in-place edits
+		}
+		if err := copyDirTree(filepath.Join(root, entry.Name()), dst); err != nil {
+			return fmt.Errorf("install skill %s: %w", entry.Name(), err)
+		}
+	}
+	return nil
+}
+
+// copyDirTree recursively copies src into dst (files + subdirectories), portable
+// across host OSes (no shell cp).
+func copyDirTree(src, dst string) error {
+	return filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0o644)
+	})
 }
 
 func envInfos(envs []eruncommon.OrchestratorEnvConfig) []orchestratorEnvInfo {

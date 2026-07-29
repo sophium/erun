@@ -301,6 +301,48 @@ func TestOrchestratorWorkspaceIsSharedRootWithOneClaudeMd(t *testing.T) {
 	}
 }
 
+func TestOrchestratorSkillsInstalledByDefault(t *testing.T) {
+	// Fixture skills source standing in for the repo's erun-skills/skills.
+	srcRoot := t.TempDir()
+	for _, name := range []string{"erun-orchestrate", "erun-file-issue"} {
+		dir := filepath.Join(srcRoot, name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("# "+name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("ERUN_SKILLS_DIR", srcRoot)
+
+	app := orchestratorTestApp(t) // confines $HOME to a temp dir
+	defer app.shutdown(context.Background())
+
+	if _, err := app.ensureOrchestratorWorkspace(); err != nil {
+		t.Fatalf("ensureOrchestratorWorkspace failed: %v", err)
+	}
+
+	home, _ := os.UserHomeDir()
+	skillsRoot := filepath.Join(home, ".claude", "skills")
+	for _, name := range []string{"erun-orchestrate", "erun-file-issue"} {
+		if _, err := os.Stat(filepath.Join(skillsRoot, name, "SKILL.md")); err != nil {
+			t.Fatalf("skill %q not installed by default: %v", name, err)
+		}
+	}
+
+	// Idempotent + edit-preserving: a hand-edited installed skill survives a re-run.
+	edited := filepath.Join(skillsRoot, "erun-orchestrate", "SKILL.md")
+	if err := os.WriteFile(edited, []byte("EDITED"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.ensureOrchestratorWorkspace(); err != nil {
+		t.Fatalf("second ensureOrchestratorWorkspace failed: %v", err)
+	}
+	if data, _ := os.ReadFile(edited); string(data) != "EDITED" {
+		t.Fatalf("expected in-place skill edit preserved, got %q", data)
+	}
+}
+
 func TestBuildOrchestratorLaunchResumesWithUltracodeOpus(t *testing.T) {
 	_, posix := buildOrchestratorLaunch("linux", "", "")
 	posixCmd := posix[len(posix)-1]

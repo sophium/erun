@@ -50,6 +50,18 @@ When the change under test is to **erun itself** — the `erun`/`emcp` CLI or th
 
 The relauncher **must be detached** — if it dies with your session, the desktop never returns and you cannot resume. (A plain same-binary restart may briefly run two `erun-app` instances, which is fine — there is no single-instance lock; for a rebuild the relauncher waits for the old one to exit first so `build.sh` can replace it.)
 
+## Fixing erun itself: release-first, never ad-hoc
+
+When a task is blocked by a limitation in erun the platform — a missing command flag, a bug in a command's behaviour, RBAC the runtime chart should provision but doesn't, an unsupported registry or transport mode — the fix is to **improve erun, cut a release, and base the environment on that release**. A one-off workaround applied to the running cluster or pod is never the end state.
+
+When you hit an erun gap:
+
+1. **Fix it at the source in the `erun/main` environment** — change the erun code, chart, or templates in the platform repo, not the tenant repo and not by hand-patching live objects.
+2. **Cut a release** — `erun build --release` for a versioned release, or a snapshot (`erun build` / `erun push`) when a version bump isn't warranted — so the fix ships in a real `erun-devops` image + charts.
+3. **Base the environment on that release** — rebuild the tenant's `<tenant>-devops` image `FROM` the new erun version and redeploy the env on it, so the fix is actually in effect and every other env can adopt it too.
+
+Hand-patching to make erun behave — `kubectl apply`/`patch` of RBAC or Deployment specs, manual `docker`/`helm` calls that paper over a missing erun flag, editing a running pod — is only ever a **throwaway probe** to confirm a diagnosis. The shipped fix lives in erun and arrives through a release; if you find yourself patching the cluster to work around erun, stop and fix erun instead. File the gap with the `erun-file-issue` skill so it is tracked even when you also fix it.
+
 ## Guardrails
 
 - **Never edit files in the host mirror directories.** They are read-only review copies; edits are lost and mislead you into thinking work is done. All code changes go through the pod agent.
