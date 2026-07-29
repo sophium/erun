@@ -559,17 +559,22 @@ export class TerminalController {
   }
 
   writeTerminalBuffer(sessionId: number, chunks: TerminalWriteData[]): void {
-    // Only the tail that fills xterm's scrollback is worth replaying; replaying
-    // the whole session history is parsed and rendered only to be discarded,
-    // which is the ~20s scroll-through seen when switching to a busy session.
-    const replayChunks = trimReplayChunks(chunks);
+    // Rehydrate live cursor tracking from the full buffer (a cheap scan, not a
+    // render); its final alt-screen verdict also decides how much to replay.
+    const finalState = bufferCursorVisibility(chunks);
+    // Main-screen shells: replay only the tail that fills xterm's scrollback —
+    // replaying the whole history just scroll-renders lines xterm then discards
+    // (the ~20s scroll-through this cap fixed). Alt-screen TUIs (claude/codex):
+    // the visible frame is drawn by cursor-addressed redraws whose alt-screen
+    // enter (`?1049h`) + initial paint live in the buffer HEAD, so trimming the
+    // head would leave those redraws on a blank main screen — a black pane.
+    // Alt-screen has no scrollback, so a full replay carries no scroll-through
+    // cost; replay it whole.
+    const replayChunks = finalState.altScreen ? chunks : trimReplayChunks(chunks);
     for (const chunk of replayChunks) {
       this.writeToTerminal(sessionId, chunk, true);
     }
-    // Rehydrate live cursor tracking from the full buffer — a cheap scan, not a
-    // render — so an alt-screen TUI whose cursor control sequence predates the
-    // replayed window still tracks accurately (not only the replayed tail).
-    this.liveCursorState = bufferCursorVisibility(chunks);
+    this.liveCursorState = finalState;
     this.cancelCursorRestoreTimer();
     // xterm parses write() calls asynchronously, so a synchronous scroll would
     // run before the replayed chunks are laid out. The empty write's callback
