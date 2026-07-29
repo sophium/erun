@@ -876,6 +876,30 @@ func (a *App) ResizeSession(sessionID, cols, rows int) error {
 	return managed.session.Resize(cols, rows)
 }
 
+// RepaintSession forces the session's program to fully repaint by raising a real
+// WINCH (shrink one row, then restore) on its backend pty. Switching to a tab
+// replays the retained buffer locally, but an Ink/alt-screen TUI (Claude) only
+// repaints on a geometry change, so a same-size switch would leave the tab blank
+// until the app next emits a diff on its own. Unlike maybeNudgeAIRepaint this is
+// deliberately NOT gated by repaintNudged (that guard is for the once-per-attach
+// streaming path — every alt-screen switch wants a fresh repaint); the frontend
+// calls it only for alt-screen sessions. The local xterm is never resized, so
+// the user sees the frame appear with no visible reflow.
+func (a *App) RepaintSession(sessionID int) error {
+	a.mu.Lock()
+	managed := a.sessionBySerialLocked(sessionID)
+	var cols, rows int
+	if managed != nil {
+		cols, rows = managed.lastCols, managed.lastRows
+	}
+	a.mu.Unlock()
+	if managed == nil || managed.session == nil {
+		return nil
+	}
+	go a.nudgeAIRepaint(managed, cols, rows)
+	return nil
+}
+
 func (a *App) CloseSession(sessionID int) error {
 	a.mu.Lock()
 	managed := a.sessionBySerialLocked(sessionID)

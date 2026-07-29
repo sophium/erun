@@ -4,7 +4,7 @@ import { type IDisposable, Terminal } from '@xterm/xterm';
 import { noop } from '@/lib/utils';
 import type { TerminalExitPayload, TerminalOutputPayload } from '@/types';
 
-import { ResizeSession, SendSessionInput } from '../../wailsjs/go/main/App';
+import { RepaintSession, ResizeSession, SendSessionInput } from '../../wailsjs/go/main/App';
 import { EventsOn } from '../../wailsjs/runtime/runtime';
 import { boot, reloadStateAfterEnvironmentChange } from './bootThunks';
 import { decodeBase64Bytes } from './clipboard';
@@ -583,5 +583,13 @@ export class TerminalController {
     this.terminal?.write('', () => {
       this.terminal?.scrollToBottom();
     });
+    // An alt-screen TUI (claude/codex) only repaints on a real geometry change,
+    // so the replay above reconstructs an approximate frame but the app won't
+    // refresh it until it next emits a diff — leaving the pane blank on switch.
+    // Nudge its backend pty (shrink+restore one row, never the local xterm) to
+    // raise a genuine WINCH and force a full repaint immediately.
+    if (finalState.altScreen) {
+      void RepaintSession(sessionId);
+    }
   }
 }
