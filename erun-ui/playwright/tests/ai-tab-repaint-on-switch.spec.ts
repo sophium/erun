@@ -39,6 +39,30 @@ test.describe('AI tab repaints on switch', () => {
     await page.screenshot({ path: shot });
     await testInfo.attach('ai-tab-after-switch', { path: shot, contentType: 'image/png' });
   });
+
+  // Initial open (issue #861): the AI tab must show its content on first open,
+  // without the user typing. The seed's AI tool is an inert `sh`, so this guards
+  // the observable invariant — content present and the viewport at the prompt on
+  // first open — but cannot render a real Claude UI. The backend repaint nudge
+  // that fixes the real reattach (split-chunk attach-marker detection + bounded
+  // retry) is covered by the Go unit tests in erun-ui/app_test.go
+  // (TestAISessionRepaintNudge*).
+  test('the AI tab shows its content on first open without a keypress', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    const { tenant, environment } = seededEnv;
+    await app.sidebar.openEnvironment(tenant, environment);
+
+    const aiTab = page.getByRole('tab', { name: 'AI', exact: true });
+    await aiTab.waitFor({ state: 'visible', timeout: 20_000 });
+
+    // First open only — no switch, no input. Content must appear on its own.
+    await aiTab.click();
+    await expect.poll(() => rowsText(page), { timeout: 20_000 }).not.toBe('');
+    await expect.poll(() => terminalAtBottom(page)).toBe(true);
+  });
 });
 
 function rowsText(page: Page): Promise<string> {

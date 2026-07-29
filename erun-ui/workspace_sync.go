@@ -82,6 +82,38 @@ func (a *App) startWorkspaceSyncForSelection(selection uiSelection) {
 	go a.runWorkspaceSyncLoop(ctx, key, selection, result, localPath)
 }
 
+// startWorkspaceSyncForConfiguredEnvs starts the host-mirror sync poller for
+// every configured remote-agent env that has SSHD and workspace sync enabled,
+// so an orchestrator's linked mirrors populate and stay live without the
+// operator opening each env's tab first. Called at startup: without it, sync
+// only ran for envs opened this session, so a linked-but-unopened env's mirror
+// stayed empty. startWorkspaceSyncForSelection re-validates each env and dedups
+// an already-running poller, so this is safe to call for every env and
+// idempotent if an env is later opened.
+func (a *App) startWorkspaceSyncForConfiguredEnvs() {
+	if a.deps.store == nil {
+		return
+	}
+	tenants, err := a.deps.store.ListTenantConfigs()
+	if err != nil {
+		return
+	}
+	for _, tenant := range tenants {
+		envs, envErr := a.deps.store.ListEnvConfigs(tenant.Name)
+		if envErr != nil {
+			continue
+		}
+		for _, env := range envs {
+			// Cheap pre-filter; startWorkspaceSyncForSelection re-validates and
+			// gates on RemoteRepo(), so a non-remote env here is a no-op.
+			if !env.SSHD.Enabled || !env.SSHD.WorkspaceSync.Enabled {
+				continue
+			}
+			a.startWorkspaceSyncForSelection(uiSelection{Tenant: tenant.Name, Environment: env.Name})
+		}
+	}
+}
+
 func (a *App) reconcileWorkspaceSyncForSelection(selection uiSelection, enabled bool) {
 	a.stopWorkspaceSyncForSelection(selection)
 	if enabled {

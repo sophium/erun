@@ -3,3 +3,7 @@ playwright-report
 test-results
 package.json
 yarn.lock
+# CLAUDE.md is a symlink to AGENTS.md (checked directly); on Windows it checks
+# out as a plain stub file, which prettier would otherwise flag and rewrite,
+# corrupting the pointer.
+CLAUDE.md

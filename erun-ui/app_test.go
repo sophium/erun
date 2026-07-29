@@ -4296,18 +4296,16 @@ func swapAIRepaintNudgeTimings(delay, settle time.Duration) func() {
 	return func() { aiRepaintNudgeDelay, aiRepaintNudgeSettle = prevDelay, prevSettle }
 }
 
-// TestAISessionRepaintNudgeFiresOnAttachMarker pins the fix: an AI tab
-// reattaching to a running Claude renders blank because Claude (a main-screen
-// TUI) only repaints on a real geometry change, and a same-size reattach
-// raises none. The desktop forces the repaint by briefly resizing the pty one
-// row shorter then back. The attach is detected by the bootstrap's window-title
-// escape (OSC 0), emitted right before `dtach -A` — nudging on the first output
-// overall would fire too early (it is the `erun open` audit trace). Verified
-// end-to-end against a live pod via the headless app + DOM read; this locks the
-// backend contract.
-func TestAISessionRepaintNudgeFiresOnAttachMarker(t *testing.T) {
-	defer swapAIRepaintNudgeTimings(time.Millisecond, time.Millisecond)()
+func swapAIRepaintNudgeRetry(attempts int, interval time.Duration) func() {
+	prevAttempts, prevInterval := aiRepaintNudgeAttempts, aiRepaintNudgeRetryInterval
+	aiRepaintNudgeAttempts, aiRepaintNudgeRetryInterval = attempts, interval
+	return func() { aiRepaintNudgeAttempts, aiRepaintNudgeRetryInterval = prevAttempts, prevInterval }
+}
 
+// newAIRepaintTestSession builds an app with a single registered AI-tab managed
+// session backed by a stub PTY, the shared fixture for the repaint-nudge tests.
+func newAIRepaintTestSession(t *testing.T) (*App, *managedTerminal, *stubTerminalSession) {
+	t.Helper()
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{"erun": {Name: "erun", DefaultEnvironment: "remote"}},
@@ -4320,8 +4318,6 @@ func TestAISessionRepaintNudgeFiresOnAttachMarker(t *testing.T) {
 		resolveCLIPath:  func() string { return "/tmp/erun" },
 		startTerminal:   func(startTerminalSessionParams) (terminalSession, error) { return session, nil },
 	})
-	defer app.shutdown(context.Background())
-
 	managed := &managedTerminal{
 		session:   session,
 		selection: uiSelection{Tenant: "erun", Environment: "remote"},
@@ -4334,6 +4330,46 @@ func TestAISessionRepaintNudgeFiresOnAttachMarker(t *testing.T) {
 	app.mu.Lock()
 	app.sessions[managed.key] = managed
 	app.mu.Unlock()
+	return app, managed, session
+}
+
+// waitForResizes polls until the stub session has recorded at least len(want)
+// resizes and asserts the leading ones match want.
+func waitForResizes(t *testing.T, session *stubTerminalSession, want [][2]int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		got := session.Resizes()
+		if len(got) >= len(want) {
+			for i := range want {
+				if got[i] != want[i] {
+					t.Fatalf("unexpected nudge resizes: got %v want %v", got, want)
+				}
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("repaint nudge did not fire enough: got %v want %v", got, want)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// TestAISessionRepaintNudgeFiresOnAttachMarker pins the fix: an AI tab
+// reattaching to a running Claude renders blank because Claude (a main-screen
+// TUI) only repaints on a real geometry change, and a same-size reattach
+// raises none. The desktop forces the repaint by briefly resizing the pty one
+// row shorter then back. The attach is detected by the bootstrap's window-title
+// escape (OSC 0), emitted right before `dtach -A` — nudging on the first output
+// overall would fire too early (it is the `erun open` audit trace). Verified
+// end-to-end against a live pod via the headless app + DOM read; this locks the
+// backend contract.
+func TestAISessionRepaintNudgeFiresOnAttachMarker(t *testing.T) {
+	defer swapAIRepaintNudgeTimings(time.Millisecond, time.Millisecond)()
+	defer swapAIRepaintNudgeRetry(1, time.Millisecond)()
+
+	app, managed, session := newAIRepaintTestSession(t)
+	defer app.shutdown(context.Background())
 
 	var lastActivity time.Time
 	// Output without the attach marker (the open audit trace) must not nudge.
@@ -4345,28 +4381,52 @@ func TestAISessionRepaintNudgeFiresOnAttachMarker(t *testing.T) {
 
 	// The attach marker (OSC 0 window-title set) triggers shrink-then-restore.
 	app.handleSessionOutput(managed, []byte("\x1b]0;erun-remote\x07"), &lastActivity)
-	want := [][2]int{{80, 23}, {80, 24}}
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		got := session.Resizes()
-		if len(got) >= 2 {
-			if got[0] != want[0] || got[1] != want[1] {
-				t.Fatalf("unexpected nudge resizes: got %v want %v", got, want)
-			}
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("repaint nudge did not fire; resizes=%v", got)
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	waitForResizes(t, session, [][2]int{{80, 23}, {80, 24}})
 
-	// The nudge is once per attach: a second marker chunk must not re-fire it.
+	// The nudge arms once per attach: a second marker chunk must not re-arm it.
 	app.handleSessionOutput(managed, []byte("\x1b]0;erun-remote\x07"), &lastActivity)
 	time.Sleep(30 * time.Millisecond)
 	if got := session.Resizes(); len(got) != 2 {
-		t.Fatalf("nudge must fire once per attach; got %v", got)
+		t.Fatalf("nudge must arm once per attach; got %v", got)
 	}
+}
+
+// TestAISessionRepaintNudgeDetectsMarkerSplitAcrossChunks pins the split-chunk
+// fix: the OSC-0 attach marker straddling two PTY reads must still arm the
+// repaint nudge. A single-chunk Contains would miss it, leaving the tab blank
+// until the user types.
+func TestAISessionRepaintNudgeDetectsMarkerSplitAcrossChunks(t *testing.T) {
+	defer swapAIRepaintNudgeTimings(time.Millisecond, time.Millisecond)()
+	defer swapAIRepaintNudgeRetry(1, time.Millisecond)()
+
+	app, managed, session := newAIRepaintTestSession(t)
+	defer app.shutdown(context.Background())
+
+	var lastActivity time.Time
+	// First read ends mid-marker ("\x1b]"); the escape completes in the next.
+	app.handleSessionOutput(managed, []byte("bootstrap\x1b]"), &lastActivity)
+	time.Sleep(20 * time.Millisecond)
+	if got := session.Resizes(); len(got) != 0 {
+		t.Fatalf("partial marker must not nudge yet; got resizes %v", got)
+	}
+	app.handleSessionOutput(managed, []byte("0;erun-remote\x07"), &lastActivity)
+	waitForResizes(t, session, [][2]int{{80, 23}, {80, 24}})
+}
+
+// TestAISessionRepaintNudgeRetriesUntilAttached pins the retry: a single nudge
+// can land before dtach reattaches Claude, so the nudge re-fires over a short
+// window. With a session that never signals readiness the retry fires the full
+// bounded number of shrink/restore passes.
+func TestAISessionRepaintNudgeRetriesUntilAttached(t *testing.T) {
+	defer swapAIRepaintNudgeTimings(time.Millisecond, time.Millisecond)()
+	defer swapAIRepaintNudgeRetry(3, time.Millisecond)()
+
+	app, managed, session := newAIRepaintTestSession(t)
+	defer app.shutdown(context.Background())
+
+	var lastActivity time.Time
+	app.handleSessionOutput(managed, []byte("\x1b]0;erun-remote\x07"), &lastActivity)
+	waitForResizes(t, session, [][2]int{{80, 23}, {80, 24}, {80, 23}, {80, 24}, {80, 23}, {80, 24}})
 }
 
 func TestStartSessionAutoReconnectsOnExit(t *testing.T) {

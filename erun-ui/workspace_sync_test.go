@@ -418,6 +418,55 @@ func TestParseWorkspaceFileMeta(t *testing.T) {
 	}
 }
 
+func TestStartWorkspaceSyncForConfiguredEnvsStartsEnabledEnvs(t *testing.T) {
+	called := make(chan workspaceSyncParams, 1)
+	app := NewApp(erunUIDeps{
+		store:                 workspaceSyncStore(true),
+		canConnectLocalPort:   func(int) bool { return true },
+		workspaceSyncReady:    func(context.Context, string) error { return nil },
+		workspaceSyncInterval: time.Hour,
+		syncWorkspace: func(_ context.Context, params workspaceSyncParams) (workspaceSyncResult, error) {
+			called <- params
+			return workspaceSyncResult{FilesCopied: 1}, nil
+		},
+	})
+	defer app.shutdown(context.Background())
+
+	app.startWorkspaceSyncForConfiguredEnvs()
+
+	select {
+	case params := <-called:
+		if params.HostAlias != "erun-frs-dev" || params.LocalPath != "/tmp/frs-local" {
+			t.Fatalf("unexpected sync params: %+v", params)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected startup to start workspace sync for a configured env without opening it")
+	}
+}
+
+func TestStartWorkspaceSyncForConfiguredEnvsSkipsDisabledEnvs(t *testing.T) {
+	called := make(chan workspaceSyncParams, 1)
+	app := NewApp(erunUIDeps{
+		store:                 workspaceSyncStore(false),
+		canConnectLocalPort:   func(int) bool { return true },
+		workspaceSyncReady:    func(context.Context, string) error { return nil },
+		workspaceSyncInterval: time.Hour,
+		syncWorkspace: func(_ context.Context, params workspaceSyncParams) (workspaceSyncResult, error) {
+			called <- params
+			return workspaceSyncResult{}, nil
+		},
+	})
+	defer app.shutdown(context.Background())
+
+	app.startWorkspaceSyncForConfiguredEnvs()
+
+	select {
+	case params := <-called:
+		t.Fatalf("did not expect sync for a workspace-sync-disabled env, got %+v", params)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
 func workspaceSyncStore(enabled bool) stubUIStore {
 	return stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{

@@ -1,4 +1,8 @@
-import { createK3dCluster, e2eRealClusterContext, useExistingCluster } from './fixtures/k3dCluster.js';
+import {
+  createK3dCluster,
+  e2eRealClusterContext,
+  useExistingCluster,
+} from './fixtures/k3dCluster.js';
 import {
   createIsolatedLayout,
   e2eK3dEnabled,

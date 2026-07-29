@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	goruntime "runtime"
 	"strings"
 	"sync"
@@ -1155,10 +1156,18 @@ func (a *App) handleSessionOutput(managed *managedTerminal, chunk []byte, lastOu
 // aiRepaintNudgeDelay waits after the attach marker so the bootstrap's
 // `dtach -A` has reattached the client to Claude and Claude is listening for
 // the WINCH; aiRepaintNudgeSettle spaces the shrink and restore so the two
-// SIGWINCHes are not coalesced.
+// SIGWINCHes are not coalesced. The marker is emitted before the pod-side
+// master-scan and `dtach -A`, so a single nudge one delay after it often lands
+// before Claude has reattached — leaving the tab blank on first open until the
+// user types. aiRepaintNudgeAttempts re-fires the nudge over a short window
+// (spaced by aiRepaintNudgeRetryInterval) so a slow reattach still receives an
+// effective geometry change once Claude is listening. Each nudge only reflows
+// the pod pty (the local xterm is never resized), so the retries stay invisible.
 var (
-	aiRepaintNudgeDelay  = 400 * time.Millisecond
-	aiRepaintNudgeSettle = defaultAIRepaintNudgeSettle()
+	aiRepaintNudgeDelay         = 400 * time.Millisecond
+	aiRepaintNudgeSettle        = defaultAIRepaintNudgeSettle()
+	aiRepaintNudgeAttempts      = 4
+	aiRepaintNudgeRetryInterval = 700 * time.Millisecond
 )
 
 // defaultAIRepaintNudgeSettle sizes the shrink-hold to the platform's resize
@@ -1187,13 +1196,13 @@ func isAITabKind(managed *managedTerminal) bool {
 		(managed.kind == sessionKindAI || managed.kind == sessionKindContributeAI)
 }
 
-// maybeNudgeAIRepaint fires the AI repaint nudge when the attach marker first
+// maybeNudgeAIRepaint arms the AI repaint retry when the attach marker first
 // appears. dtach hands a reattached client a cleared screen, but Claude (an Ink
 // main-screen TUI) only fully repaints on an actual geometry change — a
 // same-size reattach raises no effective WINCH, so the tab would render blank.
-// The nudge forces that geometry change once Claude is attached.
+// The retry forces that geometry change once Claude is attached and listening.
 func (a *App) maybeNudgeAIRepaint(managed *managedTerminal, chunk []byte) {
-	if !isAITabKind(managed) || !bytes.Contains(chunk, aiAttachMarker) {
+	if !isAITabKind(managed) {
 		return
 	}
 	a.mu.Lock()
@@ -1201,10 +1210,73 @@ func (a *App) maybeNudgeAIRepaint(managed *managedTerminal, chunk []byte) {
 		a.mu.Unlock()
 		return
 	}
+	if !markerInScanTailLocked(managed, chunk) {
+		a.mu.Unlock()
+		return
+	}
 	managed.repaintNudged = true
-	cols, rows := managed.lastCols, managed.lastRows
+	managed.repaintScanTail = nil
 	a.mu.Unlock()
-	go a.nudgeAIRepaint(managed, cols, rows, aiRepaintNudgeDelay)
+	log.Printf("erun-app: AI tab session %d saw the attach marker; arming reattach repaint nudge", managed.serial)
+	go a.nudgeAIRepaintReattach(managed)
+}
+
+// markerInScanTailLocked reports whether the AI attach marker (OSC 0) appears in
+// this chunk, joining it to a short retained tail of the previous chunk so a
+// marker split across two PTY reads is still detected — otherwise the reattach
+// repaint never fires and the tab stays blank until the user types. It updates
+// the retained tail and must be called with a.mu held; the caller clears the
+// tail once the marker latches the nudge (scanning then stops).
+func markerInScanTailLocked(managed *managedTerminal, chunk []byte) bool {
+	scan := chunk
+	if len(managed.repaintScanTail) > 0 {
+		scan = make([]byte, 0, len(managed.repaintScanTail)+len(chunk))
+		scan = append(scan, managed.repaintScanTail...)
+		scan = append(scan, chunk...)
+	}
+	if bytes.Contains(scan, aiAttachMarker) {
+		return true
+	}
+	keep := len(aiAttachMarker) - 1
+	if len(scan) > keep {
+		scan = scan[len(scan)-keep:]
+	}
+	managed.repaintScanTail = append([]byte(nil), scan...)
+	return false
+}
+
+// nudgeAIRepaintReattach re-fires the repaint nudge a bounded number of times
+// after the attach marker. The marker is emitted before `dtach -A` reattaches,
+// so the first nudge can land before Claude is listening; retrying over a short
+// window guarantees at least one effective WINCH once the reattach completes,
+// however loaded the pod. It re-reads the live geometry each pass so a real
+// resize mid-window is respected rather than fought, and bails as soon as the
+// session is gone.
+func (a *App) nudgeAIRepaintReattach(managed *managedTerminal) {
+	for attempt := 0; attempt < aiRepaintNudgeAttempts; attempt++ {
+		if attempt == 0 {
+			time.Sleep(aiRepaintNudgeDelay)
+		} else {
+			time.Sleep(aiRepaintNudgeRetryInterval)
+		}
+		a.mu.Lock()
+		cols, rows := managed.lastCols, managed.lastRows
+		closed := managed.closed
+		a.mu.Unlock()
+		if closed {
+			return
+		}
+		if cols <= 0 || rows <= 1 {
+			continue
+		}
+		if !a.resizeSessionIfLive(managed, cols, rows-1) {
+			return
+		}
+		time.Sleep(aiRepaintNudgeSettle)
+		if !a.resizeSessionIfLive(managed, cols, rows) {
+			return
+		}
+	}
 }
 
 // nudgeAIRepaint briefly shrinks the backend pty by one row and restores it:
@@ -1808,10 +1880,15 @@ type managedTerminal struct {
 	lastCols int
 	lastRows int
 
-	// repaintNudged guards the once-per-attach AI repaint nudge so it fires
-	// on the first output after a (re)attach and not on every chunk.
+	// repaintNudged guards the once-per-attach AI repaint nudge so it arms
+	// on the attach marker after a (re)attach and not on every chunk.
 	// tryReconnect clears it so the next attach nudges again.
 	repaintNudged bool
+
+	// repaintScanTail retains up to len(aiAttachMarker)-1 trailing bytes of the
+	// previous PTY chunk so the attach marker is detected even when it straddles
+	// two reads. Scanned only until repaintNudged latches, then cleared.
+	repaintScanTail []byte
 
 	// awaitingPostRespawnInput, when true, tells streamSession to skip
 	// the 2s output-activity ticker. Set on each successful respawn so
