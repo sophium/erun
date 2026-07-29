@@ -54,6 +54,50 @@ import {
 
 const REVIEW_DIFF_REFRESH_INTERVAL_MS = 5000;
 
+// xterm keeps only this many lines of scrollback, so replaying more history than
+// this on a session switch is pure parse/render cost that xterm immediately
+// discards. Switching to a long-running session therefore replayed multiple MB
+// of history — the terminal visibly scrolled through all of it for ~20s before
+// landing at the prompt. The replay is capped to this budget below.
+const TERMINAL_SCROLLBACK = 5000;
+// Replay a little more than the scrollback (long lines wrap into several rows),
+// but never more than a hard byte ceiling so a sparse-newline stream can't blow
+// the cap. Both bound switch cost to O(scrollback) instead of O(total history).
+const MAX_REPLAY_LINES = TERMINAL_SCROLLBACK * 2;
+const MAX_REPLAY_BYTES = 2_000_000;
+
+function countNewlines(chunk: TerminalWriteData): number {
+  let count = 0;
+  if (typeof chunk === 'string') {
+    for (const ch of chunk) {
+      if (ch === '\n') count++;
+    }
+    return count;
+  }
+  for (const byte of chunk) {
+    if (byte === 10) count++;
+  }
+  return count;
+}
+
+// trimReplayChunks keeps only the tail of the retained buffer worth replaying —
+// enough to fill xterm's scrollback, not the whole session history. Returns the
+// original slice reference when nothing needs trimming.
+function trimReplayChunks(chunks: TerminalWriteData[]): TerminalWriteData[] {
+  let lines = 0;
+  let bytes = 0;
+  let start = 0;
+  for (let i = chunks.length - 1; i >= 0; i--) {
+    start = i;
+    const chunk = chunks[i];
+    if (chunk === undefined) continue;
+    lines += countNewlines(chunk);
+    bytes += chunk.length;
+    if (lines >= MAX_REPLAY_LINES || bytes >= MAX_REPLAY_BYTES) break;
+  }
+  return start === 0 ? chunks : chunks.slice(start);
+}
+
 export class TerminalController {
   readonly sessions = new TerminalSessionRegistry();
   // Tracks the source session of each in-flight xterm write so terminal query
@@ -229,6 +273,7 @@ export class TerminalController {
 
     this.terminal = new Terminal({
       allowProposedApi: false,
+      scrollback: TERMINAL_SCROLLBACK,
       cursorBlink: true,
       fontFamily:
         'ui-monospace, SFMono-Regular, SF Mono, Menlo, Monaco, Consolas, Liberation Mono, monospace',
@@ -514,12 +559,16 @@ export class TerminalController {
   }
 
   writeTerminalBuffer(sessionId: number, chunks: TerminalWriteData[]): void {
-    for (const chunk of chunks) {
+    // Only the tail that fills xterm's scrollback is worth replaying; replaying
+    // the whole session history is parsed and rendered only to be discarded,
+    // which is the ~20s scroll-through seen when switching to a busy session.
+    const replayChunks = trimReplayChunks(chunks);
+    for (const chunk of replayChunks) {
       this.writeToTerminal(sessionId, chunk, true);
     }
-    // Rehydrate live cursor tracking from the replayed buffer so an alt-screen
-    // TUI that left the buffer in its own intentional cursor state stays
-    // tracked accurately, rather than assuming main-screen + cursor-visible.
+    // Rehydrate live cursor tracking from the full buffer — a cheap scan, not a
+    // render — so an alt-screen TUI whose cursor control sequence predates the
+    // replayed window still tracks accurately (not only the replayed tail).
     this.liveCursorState = bufferCursorVisibility(chunks);
     this.cancelCursorRestoreTimer();
     // xterm parses write() calls asynchronously, so a synchronous scroll would
