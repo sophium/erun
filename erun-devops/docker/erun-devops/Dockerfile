@@ -120,7 +120,7 @@ USER root
 # contribute-app browser bridge is the only way to test desktop-side
 # changes without leaving the env.
 RUN apt-get update && \
-    apt-get install -y git bash-completion bubblewrap dpkg-dev dtach iproute2 procps \
+    apt-get install -y git bash-completion bubblewrap dpkg-dev dtach iproute2 procps tini \
         build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev && \
     rm -rf /var/lib/apt/lists/* && \
     # ripgrep ships a musl static build for amd64 but only a gnu build for
@@ -223,5 +223,10 @@ USER erun
 
 EXPOSE 17000 17033 17022
 
-ENTRYPOINT ["erun-devops-entrypoint"]
+# Run PID 1 under tini so orphaned children are reaped. The entrypoint daemonises
+# sshd, whose per-connection session children reparent to PID 1 when they finish;
+# with workspace-sync opening an SSH connection every couple of seconds, an
+# unreaped PID 1 accumulates thousands of <defunct> sshd zombies until the node's
+# process table is exhausted and no container can fork (cluster-wide crashloop).
+ENTRYPOINT ["/usr/bin/tini", "--", "erun-devops-entrypoint"]
 CMD ["devops"]
