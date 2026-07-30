@@ -467,6 +467,37 @@ func TestStartWorkspaceSyncForConfiguredEnvsSkipsDisabledEnvs(t *testing.T) {
 	}
 }
 
+func TestParseGitLsFilesSymlinkPaths(t *testing.T) {
+	// `git ls-files -sz` records: "<mode> <object> <stage>\t<path>", NUL-delimited.
+	out := []byte("120000 aaa 0\tCLAUDE.md\x00100644 bbb 0\tREADME.md\x00120000 ccc 0\terun-ui/CLAUDE.md\x00100755 ddd 0\tscripts/run.sh\x00")
+	got := parseGitLsFilesSymlinkPaths(out)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 symlinks, got %d: %v", len(got), got)
+	}
+	for _, want := range []string{"CLAUDE.md", "erun-ui/CLAUDE.md"} {
+		if _, ok := got[want]; !ok {
+			t.Errorf("expected symlink %q in set", want)
+		}
+	}
+	if _, ok := got["README.md"]; ok {
+		t.Error("regular file README.md must not be treated as a symlink")
+	}
+}
+
+func TestExcludeWorkspaceSyncSymlinks(t *testing.T) {
+	paths := []string{"AGENTS.md", "CLAUDE.md", "erun-ui/CLAUDE.md", "erun-ui/app.go"}
+	symlinks := map[string]struct{}{"CLAUDE.md": {}, "erun-ui/CLAUDE.md": {}}
+	got := excludeWorkspaceSyncSymlinks(paths, symlinks)
+	want := []string{"AGENTS.md", "erun-ui/app.go"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected filtered paths: got %v want %v", got, want)
+	}
+	// An empty symlink set is a no-op (returns the input).
+	if got := excludeWorkspaceSyncSymlinks(paths, nil); !reflect.DeepEqual(got, paths) {
+		t.Fatalf("nil symlink set must be a no-op, got %v", got)
+	}
+}
+
 func workspaceSyncStore(enabled bool) stubUIStore {
 	return stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{

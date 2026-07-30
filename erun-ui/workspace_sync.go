@@ -296,10 +296,14 @@ func syncWorkspaceOnce(ctx context.Context, params workspaceSyncParams) (workspa
 	// every pass; tar preserves mtime, so an unchanged file matches next pass.
 	remoteMeta := remoteWorkspaceFileMeta(ctx, params.HostAlias, params.RemotePath)
 	toFetch := changedWorkspaceSyncPaths(remotePaths, remoteMeta, localMeta)
+	// A fetch failure must NOT strand deletions: deletion correctness depends only
+	// on the remote file listing, not on whether every changed file transferred.
+	// Returning here on error (the pre-fix behaviour) let one un-fetchable file
+	// block every deletion, so files removed in the pod lingered in the mirror
+	// forever. Record the error and still run the delete + outputs steps.
+	var fetchErr error
 	if len(toFetch) > 0 {
-		if err := extractRemoteWorkspaceFiles(ctx, params.HostAlias, params.RemotePath, params.LocalPath, toFetch); err != nil {
-			return workspaceSyncResult{}, err
-		}
+		fetchErr = extractRemoteWorkspaceFiles(ctx, params.HostAlias, params.RemotePath, params.LocalPath, toFetch)
 	}
 	deleted, err := deleteLocalWorkspaceFilesNotInRemote(params.LocalPath, sortedWorkspaceFileMetaKeys(localMeta), remotePaths)
 	if err != nil {
@@ -309,7 +313,11 @@ func syncWorkspaceOnce(ctx context.Context, params workspaceSyncParams) (workspa
 	if err != nil {
 		return workspaceSyncResult{}, err
 	}
-	return workspaceSyncResult{FilesCopied: len(toFetch), FilesDeleted: deleted, ArtifactsCopied: artifacts}, nil
+	result := workspaceSyncResult{FilesCopied: len(toFetch), FilesDeleted: deleted, ArtifactsCopied: artifacts}
+	if fetchErr != nil {
+		return result, fetchErr
+	}
+	return result, nil
 }
 
 // workspaceSyncArtifactsSubdir is the read-only subdir of the host mirror that
@@ -456,6 +464,13 @@ func resolveWorkspaceSyncPaths(ctx context.Context, params workspaceSyncParams) 
 	if err != nil {
 		return nil, nil, false, err
 	}
+	// Symlinks (e.g. the per-module CLAUDE.md -> AGENTS.md pointers) cannot
+	// round-trip to a plain-directory host mirror on Windows: their fingerprint
+	// never matches, so they re-fetch every pass, and extracting them can fail —
+	// which (before the delete step was decoupled from fetch) stranded every
+	// deletion. Drop them from the synced set; AGENTS.md itself still syncs as a
+	// regular file, so the mirror loses only the redundant pointer.
+	remotePaths = excludeWorkspaceSyncSymlinks(remotePaths, remoteWorkspaceSymlinkSet(ctx, params.HostAlias, params.RemotePath))
 	// The mirror is a one-way copy, so its file set comes from a plain directory
 	// walk — the pod already applied the repo's ignore rules via
 	// `git ls-files --exclude-standard`, so the host needs no git of its own.
@@ -516,6 +531,56 @@ func remoteWorkspaceGitVisibleFiles(ctx context.Context, hostAlias, remotePath s
 		return nil, fmt.Errorf("list remote Git-visible files: %w: %s", err, detail)
 	}
 	return parseWorkspaceSyncPathList(output), nil
+}
+
+// remoteWorkspaceSymlinkSet returns the git-tracked symlink paths (mode 120000)
+// in the remote worktree. Symlinks cannot round-trip to a plain-directory host
+// mirror on Windows, so the sync excludes them (see resolveWorkspaceSyncPaths).
+// Best-effort: a listing failure yields nil, so the sync degrades to keeping the
+// symlinks rather than failing the pass.
+func remoteWorkspaceSymlinkSet(ctx context.Context, hostAlias, remotePath string) map[string]struct{} {
+	script := fmt.Sprintf("cd %s && git ls-files -sz --exclude-standard", shellQuote(remotePath))
+	cmd := exec.CommandContext(ctx, "ssh", workspaceSyncSSHArgs(hostAlias, script)...)
+	eruncommon.HideConsoleWindow(cmd)
+	output, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	return parseGitLsFilesSymlinkPaths(output)
+}
+
+// parseGitLsFilesSymlinkPaths reads `git ls-files -sz` NUL-delimited records
+// (`<mode> <object> <stage>\t<path>`) and returns the paths whose mode is the
+// symlink mode 120000.
+func parseGitLsFilesSymlinkPaths(output []byte) map[string]struct{} {
+	set := make(map[string]struct{})
+	for _, record := range bytes.Split(output, []byte{0}) {
+		tab := bytes.IndexByte(record, '\t')
+		if tab < 0 {
+			continue
+		}
+		path := string(record[tab+1:])
+		if bytes.HasPrefix(record, []byte("120000 ")) && safeWorkspaceSyncPath(path) {
+			set[path] = struct{}{}
+		}
+	}
+	return set
+}
+
+// excludeWorkspaceSyncSymlinks drops the symlink paths from the git-visible list,
+// preserving order. A nil/empty symlink set returns the input unchanged.
+func excludeWorkspaceSyncSymlinks(paths []string, symlinks map[string]struct{}) []string {
+	if len(symlinks) == 0 {
+		return paths
+	}
+	kept := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if _, isSymlink := symlinks[p]; isSymlink {
+			continue
+		}
+		kept = append(kept, p)
+	}
+	return kept
 }
 
 // workspaceFileMeta is the change-detection fingerprint for one mirrored file:
