@@ -57,7 +57,11 @@ test.describe('real erun-k3s e2e: Skip-Git create comes up with one Helm revisio
         async (sel) => {
           const boundApp = (
             window as unknown as {
-              go?: { main?: { App?: { StartInitSession?: (s: unknown, c: number, r: number) => unknown } } };
+              go?: {
+                main?: {
+                  App?: { StartInitSession?: (s: unknown, c: number, r: number) => unknown };
+                };
+              };
             }
           ).go?.main?.App;
           if (!boundApp?.StartInitSession) {
@@ -124,12 +128,18 @@ test.describe('real erun-k3s e2e: Skip-Git create comes up with one Helm revisio
     } finally {
       // Best-effort cluster cleanup so reruns start clean; config removal too.
       try {
-        execSync(`helm --kube-context ${cluster.context} -n ${tenant}-${environment} uninstall ${tenant}-devops`, {
-          stdio: 'ignore',
-        });
-        execSync(`kubectl --context ${cluster.context} delete ns ${tenant}-${environment} --wait=false`, {
-          stdio: 'ignore',
-        });
+        execSync(
+          `helm --kube-context ${cluster.context} -n ${tenant}-${environment} uninstall ${tenant}-devops`,
+          {
+            stdio: 'ignore',
+          },
+        );
+        execSync(
+          `kubectl --context ${cluster.context} delete ns ${tenant}-${environment} --wait=false`,
+          {
+            stdio: 'ignore',
+          },
+        );
       } catch {
         // ignore cleanup failures
       }

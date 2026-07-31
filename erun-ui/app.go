@@ -381,6 +381,10 @@ func (a *App) startup(ctx context.Context) {
 	a.startActivityPollers()
 	a.startCloudContextStatusPoller()
 	a.startConfigWatcher()
+	// Populate and keep live every linked orchestrator mirror, not only envs
+	// opened this session. Off the startup path so config/network I/O per env
+	// does not delay first paint.
+	go a.startWorkspaceSyncForConfiguredEnvs()
 }
 
 func (a *App) shutdown(context.Context) {

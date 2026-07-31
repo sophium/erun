@@ -34,6 +34,7 @@ import {
 import { TerminalClipboard } from './terminalClipboard';
 import { applyTerminalLayoutVars } from './terminalLayoutVars';
 import { registerTerminalQueryResponseHandlers } from './terminalQueryResponses';
+import { TerminalReattachRepaint } from './terminalReattachRepaint';
 import { TerminalSessionRegistry } from './TerminalSessionRegistry';
 import { decodeTerminalOutput } from './terminalStatus';
 import { TerminalWriteSourceQueue } from './TerminalWriteSourceQueue';
@@ -117,6 +118,14 @@ export class TerminalController {
   private reviewScrollFrame = 0;
   private idleStatusTimer = 0;
   private reviewDiffRefreshTimer = 0;
+  private readonly reattachRepaint = new TerminalReattachRepaint({
+    getTerminal: () => this.terminal,
+    getFitAddon: () => this.fitAddon,
+    activeSessionId: () => store.getState().terminal.sessionId,
+    afterRestore: () => {
+      this.publishTerminalDims();
+    },
+  });
   private bootStarted = false;
   private terminalDataDisposable: TerminalDataDisposable | null = null;
   private terminalQueryResponseDisposables: IDisposable[] = [];
@@ -346,6 +355,7 @@ export class TerminalController {
     }
     this.detachWailsEventListeners();
     window.clearTimeout(this.idleStatusTimer);
+    this.reattachRepaint.clear();
     this.stopReviewDiffRefresh();
     if (this.pasteHandler && this.terminalRoot) {
       this.terminalRoot.removeEventListener('paste', this.pasteHandler, true);
@@ -401,6 +411,7 @@ export class TerminalController {
     this.terminal?.reset();
     this.terminal?.clear();
     this.cancelCursorRestoreTimer();
+    this.reattachRepaint.clear();
     this.liveCursorState = { altScreen: false, cursorHidden: false };
   }
 
@@ -592,5 +603,10 @@ export class TerminalController {
     // and alt-screen apps (which reconstruct from the replay), so this is safe to
     // call unconditionally. The local xterm is never resized — no visible reflow.
     void RepaintSession(sessionId);
+    // A pty-only WINCH (RepaintSession above) does not reach a reattached Claude,
+    // so if this session stays blank after selection (a reattached AI tab) the
+    // reattach-repaint helper forces a real xterm+pty resize cycle. See
+    // TerminalReattachRepaint.
+    this.reattachRepaint.schedule(sessionId);
   }
 }
