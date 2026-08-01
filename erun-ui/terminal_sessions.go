@@ -950,11 +950,24 @@ func (a *App) CloseEnvironmentSessions(selection uiSelection) ([]int, error) {
 	if selection.Tenant == "" || selection.Environment == "" {
 		return nil, fmt.Errorf("tenant and environment are required")
 	}
-	targets := a.collectLiveSessionsForSelection(selection)
+	targets := a.collectAndMarkClosedForSelection(selection)
+	// Close is a real teardown: stop the env's workspace-sync worker so a
+	// closed env stops mirroring its worktree. Startup starts one sync worker
+	// per configured env, so without this a closed env keeps an rsync-over-ssh
+	// poller running; reopening the env restarts it.
+	a.stopWorkspaceSyncForSelection(selection)
 	return closeManagedTerminals(targets)
 }
 
-func (a *App) collectLiveSessionsForSelection(selection uiSelection) []*managedTerminal {
+// collectAndMarkClosedForSelection gathers the env's live sessions and marks
+// each closed under a.mu BEFORE the caller shuts their PTYs down. Marking
+// closed here is what makes "close env" a genuine teardown rather than a
+// reconnect: tryReconnect and the spawn-reuse branch both refuse a closed
+// session, so streamSession reaches finalizeSessionExit — which emits the
+// terminal-exit and the AI-activity busy=false that clears the sidebar
+// spinner — instead of reconnecting the still-live pod session and leaving the
+// row spinning forever. Mirrors EndAISessions' mark-closed-under-lock.
+func (a *App) collectAndMarkClosedForSelection(selection uiSelection) []*managedTerminal {
 	var targets []*managedTerminal
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -968,6 +981,8 @@ func (a *App) collectLiveSessionsForSelection(selection uiSelection) []*managedT
 		if managed.selection.Environment != selection.Environment {
 			continue
 		}
+		managed.closed = true
+		a.releaseIdleBlockLocked(managed)
 		targets = append(targets, managed)
 	}
 	return targets
