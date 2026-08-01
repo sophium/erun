@@ -274,12 +274,21 @@ func workspaceSyncLocalPath(result eruncommon.OpenResult, findProjectRoot erunco
 	return ""
 }
 
-func syncWorkspaceOnce(ctx context.Context, params workspaceSyncParams) (workspaceSyncResult, error) {
+// validateWorkspaceSyncParams trims the params in place and rejects a sync that
+// is missing the host alias, remote path, or local path.
+func validateWorkspaceSyncParams(params *workspaceSyncParams) error {
 	params.HostAlias = strings.TrimSpace(params.HostAlias)
 	params.RemotePath = strings.TrimSpace(params.RemotePath)
 	params.LocalPath = strings.TrimSpace(params.LocalPath)
 	if params.HostAlias == "" || params.RemotePath == "" || params.LocalPath == "" {
-		return workspaceSyncResult{}, fmt.Errorf("host alias, remote path, and local path are required")
+		return fmt.Errorf("host alias, remote path, and local path are required")
+	}
+	return nil
+}
+
+func syncWorkspaceOnce(ctx context.Context, params workspaceSyncParams) (workspaceSyncResult, error) {
+	if err := validateWorkspaceSyncParams(&params); err != nil {
+		return workspaceSyncResult{}, err
 	}
 	if err := ensureLocalWorkspaceSyncTarget(params.LocalPath); err != nil {
 		return workspaceSyncResult{}, err

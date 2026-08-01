@@ -100,7 +100,6 @@ type App struct {
 	busyEnvs                  map[string]int
 	workspaceSyncs            map[string]*workspaceSyncWorker
 	orchestrators             map[string]*orchestratorSession
-	nextOrchestrator          int
 	credentialRefreshers      map[string]*cloudCredentialsRefresher
 	activityQueue             *activityQueueStore
 	activityStatusPoller      func(activityQueueEntry)
@@ -244,6 +243,12 @@ func withDefaultCloudDeps(deps erunUIDeps) erunUIDeps {
 }
 
 func withDefaultRuntimeDeps(deps erunUIDeps) erunUIDeps {
+	deps = withDefaultRuntimeResolutionDeps(deps)
+	deps = withDefaultRuntimeSessionDeps(deps)
+	return deps
+}
+
+func withDefaultRuntimeResolutionDeps(deps erunUIDeps) erunUIDeps {
 	if deps.listKubeContexts == nil {
 		deps.listKubeContexts = listKubernetesContexts
 	}
@@ -256,6 +261,19 @@ func withDefaultRuntimeDeps(deps erunUIDeps) erunUIDeps {
 	if deps.checkRuntimeDeployed == nil {
 		deps.checkRuntimeDeployed = checkRuntimeDeployed
 	}
+	if deps.canConnectLocalPort == nil {
+		deps.canConnectLocalPort = canConnectLocalTCP
+	}
+	if deps.setRemoteCloudAlias == nil {
+		deps.setRemoteCloudAlias = setEnvironmentCloudAliasViaMCP
+	}
+	if deps.resolveOrchestratorLaunch == nil {
+		deps.resolveOrchestratorLaunch = orchestratorLaunchCommand
+	}
+	return deps
+}
+
+func withDefaultRuntimeSessionDeps(deps erunUIDeps) erunUIDeps {
 	if deps.ensureMCP == nil {
 		deps.ensureMCP = func(ctx context.Context, result eruncommon.OpenResult) error {
 			return ensureMCPViaOpenCommand(ctx, deps.resolveCLIPath(), result)
@@ -271,12 +289,6 @@ func withDefaultRuntimeDeps(deps erunUIDeps) erunUIDeps {
 			return ensureSSHDViaOpenCommand(ctx, deps.resolveCLIPath(), result)
 		}
 	}
-	if deps.canConnectLocalPort == nil {
-		deps.canConnectLocalPort = canConnectLocalTCP
-	}
-	if deps.setRemoteCloudAlias == nil {
-		deps.setRemoteCloudAlias = setEnvironmentCloudAliasViaMCP
-	}
 	if deps.startTerminal == nil {
 		deps.startTerminal = startTerminalSession
 	}
@@ -285,9 +297,6 @@ func withDefaultRuntimeDeps(deps erunUIDeps) erunUIDeps {
 	}
 	if deps.launchHostArtifact == nil {
 		deps.launchHostArtifact = launchHostArtifactDetached
-	}
-	if deps.resolveOrchestratorLaunch == nil {
-		deps.resolveOrchestratorLaunch = orchestratorLaunchCommand
 	}
 	return deps
 }

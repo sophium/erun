@@ -60,6 +60,54 @@ func TestListOrchestratorEnvCandidatesReturnsOnlyRemoteAgents(t *testing.T) {
 	}
 }
 
+// assertSingleOrchestratorStatus fails unless the app lists exactly one
+// orchestrator in wantStatus.
+func assertSingleOrchestratorStatus(t *testing.T, app *App, wantStatus string) {
+	t.Helper()
+	got := app.ListOrchestrators()
+	if len(got) != 1 || got[0].Status != wantStatus {
+		t.Fatalf("expected one %s orchestrator, got %+v", wantStatus, got)
+	}
+}
+
+// assertLoneTenant fails unless tenants is exactly [want].
+func assertLoneTenant(t *testing.T, tenants []string, want string) {
+	t.Helper()
+	if len(tenants) != 1 || tenants[0] != want {
+		t.Fatalf("expected the lone tenant %q, got %+v", want, tenants)
+	}
+}
+
+// assertSingleOrchestratorID fails unless the app lists exactly one
+// orchestrator with wantID.
+func assertSingleOrchestratorID(t *testing.T, app *App, wantID string) {
+	t.Helper()
+	listed := app.ListOrchestrators()
+	if len(listed) != 1 || listed[0].ID != wantID {
+		t.Fatalf("expected the orchestrator to persist, got %+v", listed)
+	}
+}
+
+// assertSingleTransientOrchestrator fails unless the app lists exactly one
+// transient orchestrator.
+func assertSingleTransientOrchestrator(t *testing.T, app *App) {
+	t.Helper()
+	listed := app.ListOrchestrators()
+	if len(listed) != 1 || !listed[0].Transient {
+		t.Fatalf("expected one transient investigator listed, got %+v", listed)
+	}
+}
+
+// assertCreatedFRSOrchestrator checks the shape of a freshly created
+// single-env "frs" orchestrator.
+func assertCreatedFRSOrchestrator(t *testing.T, info orchestratorInfo) {
+	t.Helper()
+	if info.Status != "stopped" || len(info.Environments) != 1 || info.Environments[0].Directory == "" {
+		t.Fatalf("unexpected created orchestrator: %+v", info)
+	}
+	assertLoneTenant(t, info.Tenants, "frs")
+}
+
 func TestCreateOrchestratorWiresSyncAndPersists(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
@@ -75,12 +123,7 @@ func TestCreateOrchestratorWiresSyncAndPersists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
-	if info.Status != "stopped" || len(info.Environments) != 1 || info.Environments[0].Directory == "" {
-		t.Fatalf("unexpected created orchestrator: %+v", info)
-	}
-	if len(info.Tenants) != 1 || info.Tenants[0] != "frs" {
-		t.Fatalf("expected tenants derived from the linked env, got %+v", info.Tenants)
-	}
+	assertCreatedFRSOrchestrator(t, info)
 
 	// The env's one-way workspace sync was wired to the mirror directory.
 	env, _, err := app.deps.store.LoadEnvConfig("frs", "dev")
@@ -96,10 +139,7 @@ func TestCreateOrchestratorWiresSyncAndPersists(t *testing.T) {
 		t.Fatalf("expected the mirror directory to be created: %v", statErr)
 	}
 	// Persisted.
-	listed := app.ListOrchestrators()
-	if len(listed) != 1 || listed[0].ID != info.ID {
-		t.Fatalf("expected the orchestrator to persist, got %+v", listed)
-	}
+	assertSingleOrchestratorID(t, app, info.ID)
 }
 
 func TestRestartOrchestratorRespawnsWithFreshSession(t *testing.T) {
@@ -205,15 +245,11 @@ func TestUpdateOrchestratorRelinksEnvironments(t *testing.T) {
 	if _, err := app.StartOrchestrator(created.ID, 80, 24); err != nil {
 		t.Fatalf("StartOrchestrator failed: %v", err)
 	}
-	if got := app.ListOrchestrators(); len(got) != 1 || got[0].Status != "running" {
-		t.Fatalf("expected one running orchestrator, got %+v", got)
-	}
+	assertSingleOrchestratorStatus(t, app, "running")
 	if err := app.StopOrchestrator(created.ID); err != nil {
 		t.Fatalf("StopOrchestrator failed: %v", err)
 	}
-	if got := app.ListOrchestrators(); len(got) != 1 || got[0].Status != "stopped" {
-		t.Fatalf("expected the definition to survive a stop, got %+v", got)
-	}
+	assertSingleOrchestratorStatus(t, app, "stopped")
 	if err := app.DeleteOrchestrator(created.ID); err != nil {
 		t.Fatalf("DeleteOrchestrator failed: %v", err)
 	}
@@ -246,9 +282,7 @@ func TestInvestigateFailureSpawnsTransientTenantScopedOrchestrator(t *testing.T)
 	if !info.Transient {
 		t.Fatalf("expected a transient investigator, got %+v", info)
 	}
-	if len(info.Tenants) != 1 || info.Tenants[0] != "frs" {
-		t.Fatalf("expected the investigator grouped under the failed env's tenant, got %+v", info.Tenants)
-	}
+	assertLoneTenant(t, info.Tenants, "frs")
 	if !strings.Contains(seededPrompt, "erun-investigate") || !strings.Contains(seededPrompt, "erun-file-issue") {
 		t.Fatalf("unexpected seed prompt: %q", seededPrompt)
 	}
@@ -264,9 +298,7 @@ func TestInvestigateFailureSpawnsTransientTenantScopedOrchestrator(t *testing.T)
 	if !strings.Contains(string(data), "helm timeout") {
 		t.Fatalf("staged report missing the failure detail: %q", data)
 	}
-	if listed := app.ListOrchestrators(); len(listed) != 1 || !listed[0].Transient {
-		t.Fatalf("expected one transient investigator listed, got %+v", listed)
-	}
+	assertSingleTransientOrchestrator(t, app)
 }
 
 func TestOrchestratorWorkspaceIsSharedRootWithOneClaudeMd(t *testing.T) {

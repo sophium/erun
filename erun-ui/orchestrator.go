@@ -757,19 +757,7 @@ func (a *App) DeleteOrchestrator(id string) error {
 // uniqueOrchestratorID derives a stable, human-readable id from the name that
 // does not collide with an existing definition.
 func uniqueOrchestratorID(name string, existing []eruncommon.OrchestratorConfig) string {
-	var slug strings.Builder
-	for _, r := range strings.ToLower(strings.TrimSpace(name)) {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			slug.WriteRune(r)
-		case r == ' ' || r == '-' || r == '_' || r == ',':
-			slug.WriteByte('-')
-		}
-	}
-	stem := strings.Trim(slug.String(), "-")
-	if stem == "" {
-		stem = "orchestrator"
-	}
+	stem := orchestratorIDStem(name)
 	taken := make(map[string]struct{}, len(existing))
 	for _, config := range existing {
 		taken[config.ID] = struct{}{}
@@ -781,4 +769,23 @@ func uniqueOrchestratorID(name string, existing []eruncommon.OrchestratorConfig)
 		}
 		candidate = fmt.Sprintf("%s-%d", stem, i)
 	}
+}
+
+// orchestratorIDStem slugifies name into a stable id stem, falling back to
+// "orchestrator" when the name carries no id-safe characters.
+func orchestratorIDStem(name string) string {
+	var slug strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(name)) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			slug.WriteRune(r)
+		case r == ' ' || r == '-' || r == '_' || r == ',':
+			slug.WriteByte('-')
+		}
+	}
+	stem := strings.Trim(slug.String(), "-")
+	if stem == "" {
+		return "orchestrator"
+	}
+	return stem
 }
