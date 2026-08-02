@@ -192,10 +192,6 @@ func ghcrOwnerFromNamespace(namespace string) (string, bool) {
 	return rest, true
 }
 
-func ResolveDockerHubRuntimeRegistryVersions(ctx context.Context, client *http.Client, namespace, repository string) (RuntimeRegistryVersions, error) {
-	return resolveDockerHubRuntimeRegistryVersionsAt(ctx, client, namespace, repository, defaultDockerHubRegistryBaseURL)
-}
-
 func resolveDockerHubRuntimeRegistryVersionsAt(ctx context.Context, client *http.Client, namespace, repository, baseURL string) (RuntimeRegistryVersions, error) {
 	namespace = strings.TrimSpace(namespace)
 	repository = strings.TrimSpace(repository)
@@ -228,10 +224,6 @@ func resolveDockerHubRuntimeRegistryVersionsAt(ctx context.Context, client *http
 	versions := latestRuntimeVersionsFromTags(tags)
 	versions.Image = namespace + "/" + repository
 	return versions, nil
-}
-
-func ResolveGHCRRuntimeRegistryVersions(ctx context.Context, client *http.Client, owner, repository string) (RuntimeRegistryVersions, error) {
-	return resolveGHCRRuntimeRegistryVersionsAt(ctx, client, owner, repository, defaultGHCRRegistryBaseURL, defaultGHCRRegistryBaseURL)
 }
 
 func resolveGHCRRuntimeRegistryVersionsAt(ctx context.Context, client *http.Client, owner, repository, baseURL, tokenURL string) (RuntimeRegistryVersions, error) {

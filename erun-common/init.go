@@ -212,22 +212,6 @@ type bootstrapRunState struct {
 	envConfigChanged      bool
 }
 
-func RunBootstrapInit(ctx Context, params BootstrapInitParams, store BootstrapStore, findProjectRoot ProjectFinderFunc, getWorkingDir WorkDirFunc, selectTenant SelectTenantFunc, confirm ConfirmFunc, promptKubernetesContext PromptValueFunc, promptContainerRegistry PromptValueFunc, ensureKubernetesNamespace NamespaceEnsurerFunc, loadProjectConfig ProjectConfigLoaderFunc, saveProjectConfig ProjectConfigSaverFunc) (BootstrapInitResult, error) {
-	return RunBootstrapInitWithDependencies(BootstrapInitDependencies{
-		Store:                     store,
-		FindProjectRoot:           findProjectRoot,
-		GetWorkingDir:             getWorkingDir,
-		SelectTenant:              selectTenant,
-		Confirm:                   confirm,
-		PromptKubernetesContext:   promptKubernetesContext,
-		PromptContainerRegistry:   promptContainerRegistry,
-		EnsureKubernetesNamespace: ensureKubernetesNamespace,
-		LoadProjectConfig:         loadProjectConfig,
-		SaveProjectConfig:         saveProjectConfig,
-		Context:                   ctx,
-	}, params)
-}
-
 func RunBootstrapInitWithDependencies(deps BootstrapInitDependencies, params BootstrapInitParams) (BootstrapInitResult, error) {
 	return bootstrapRunner{
 		BootstrapInitDependencies: deps,

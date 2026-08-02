@@ -48,10 +48,6 @@ func (e ErrLocalPortRangeOverlap) Error() string {
 	return fmt.Sprintf("local port range start %d is claimed by both %s and %s; edit localportrangestart in one of the env configs to resolve", e.RangeStart, e.A, e.B)
 }
 
-func ServicePort(offset int) int {
-	return LowerServicePort + offset
-}
-
 // EnvironmentLocalPortsFromRangeStart derives the per-service ports from a
 // persisted range start.
 func EnvironmentLocalPortsFromRangeStart(rangeStart int) EnvironmentLocalPorts {
