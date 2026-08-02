@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
@@ -313,29 +314,79 @@ const orchestratorUltracodeFlag = ` --settings '{"ultracode":true}'`
 // orchestratorLaunchCommand resolves how to launch the host AI harness. It runs
 // through the host shell so an npm claude.cmd / .ps1 shim resolves (ConPTY can't
 // exec a .cmd directly). A non-empty initialPrompt seeds a fresh session (the
-// Investigate flow); a non-empty resumePrompt resumes the most recent
-// conversation AND hands it that prompt so a rebuild+restart continues its task
-// itself; otherwise the launch resumes the most recent conversation in the
-// orchestrator's working directory, falling back to a fresh one on first run.
-func orchestratorLaunchCommand(initialPrompt, resumePrompt string) (string, []string, error) {
+// Investigate flow); otherwise the launch resumes THIS orchestrator's own
+// conversation (pinned by sessionID) — creating it on first open — so
+// orchestrators no longer collide on `--continue`'s single most-recent
+// conversation in the shared workspace. A non-empty resumePrompt is handed to
+// the resumed (or freshly created) session so a rebuild+restart continues its
+// task itself.
+func orchestratorLaunchCommand(sessionID, initialPrompt, resumePrompt string) (string, []string, error) {
 	if _, err := exec.LookPath(defaultAITool); err != nil {
 		return "", nil, fmt.Errorf("the %q CLI was not found on PATH; install it to run an orchestrator", defaultAITool)
 	}
-	shell, args := buildOrchestratorLaunch(runtime.GOOS, initialPrompt, resumePrompt)
+	shell, args := buildOrchestratorLaunch(runtime.GOOS, sessionID, orchestratorSessionExists(sessionID), initialPrompt, resumePrompt)
 	return shell, args, nil
 }
 
+// orchestratorSessionNamespace seeds the deterministic per-orchestrator Claude
+// session id. Any fixed UUID works; it only has to be stable.
+var orchestratorSessionNamespace = uuid.MustParse("6f7e9c2a-1b3d-4e5f-8a9b-0c1d2e3f4a5b")
+
+// orchestratorSessionID derives a stable Claude session id for an orchestrator
+// from its own id, so each orchestrator resumes ITS OWN conversation rather than
+// whatever `--continue` finds as the most-recent one in the shared
+// $HOME/orchestrators workspace (which collapses every orchestrator onto one
+// shared session). Deterministic, so it needs no persistence, and unique per
+// orchestrator id. Empty for a transient/Investigate orchestrator (no id), which
+// keeps starting a fresh unpinned session.
+func orchestratorSessionID(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ""
+	}
+	return uuid.NewSHA1(orchestratorSessionNamespace, []byte(id)).String()
+}
+
+// orchestratorSessionExists reports whether a Claude conversation for this
+// session id already exists on disk, so the launch can `--resume` it instead of
+// trying to create it (Claude rejects `--session-id` for an id already in use).
+// It globs across all project dirs — the session id is globally unique — so it
+// need not replicate Claude's cwd->project-dir encoding.
+func orchestratorSessionExists(sessionID string) bool {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return false
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	matches, err := filepath.Glob(filepath.Join(home, ".claude", "projects", "*", sessionID+".jsonl"))
+	return err == nil && len(matches) > 0
+}
+
 // buildOrchestratorLaunch composes the host-shell invocation. Every launch runs
-// ultracode effort on opus. Resume ("continue, else fresh") is expressed per
-// shell so it survives a first run with no prior conversation: PowerShell tests
-// $LASTEXITCODE, POSIX chains with ||. A resumePrompt appends the prompt to both
-// the resume and the fresh-fallback branch, so an auto-resume runs the task even
-// on the first launch with no prior conversation.
-func buildOrchestratorLaunch(goos, initialPrompt, resumePrompt string) (string, []string) {
+// ultracode effort on opus. With a pinned sessionID the launch resumes THIS
+// orchestrator's own conversation (`--resume <id>` when it already exists, else
+// `--session-id <id>` to create it under that id) so orchestrators stay
+// isolated; without one (transient/Investigate, or a legacy caller) it keeps the
+// old "continue, else fresh". The resume is expressed per shell so it survives a
+// first run: PowerShell tests $LASTEXITCODE, POSIX chains with ||. A resumePrompt
+// is appended to both the resume and the fresh-fallback branch so an auto-resume
+// runs the task even on the first launch.
+func buildOrchestratorLaunch(goos, sessionID string, sessionExists bool, initialPrompt, resumePrompt string) (string, []string) {
 	flags := orchestratorUltracodeFlag + " --model " + orchestratorModel
 	fresh := defaultAITool + flags
-	resume := defaultAITool + " --continue" + flags
 	shell, shellArgs := resolveLocalShellCommand(goos)
+
+	resume := defaultAITool + " --continue" + flags
+	if strings.TrimSpace(sessionID) != "" {
+		if sessionExists {
+			resume = defaultAITool + " --resume " + sessionID + flags
+		} else {
+			resume = defaultAITool + " --session-id " + sessionID + flags
+		}
+	}
 
 	chain := func(primary, fallback string) string {
 		if goos == "windows" {
@@ -582,8 +633,8 @@ func (a *App) startPersistedOrchestrator(id, resumePrompt string, cols, rows int
 
 // RestartOrchestrator stops a persisted orchestrator's running session and spawns
 // a fresh one, so the operator can recycle a stuck agent without losing context:
-// spawnOrchestratorSession relaunches `claude --continue`, which resumes the same
-// conversation. The definition is resolved before teardown because
+// spawnOrchestratorSession relaunches this orchestrator's own pinned session,
+// which resumes its own conversation. The definition is resolved before teardown because
 // stopOrchestratorSession forgets the live session, and a transient (Investigate)
 // orchestrator has no persisted definition to respawn — findOrchestratorConfig
 // then returns an error, so transients are intentionally not restartable.
@@ -612,7 +663,7 @@ func (a *App) runningOrchestratorInfo(id string) (orchestratorInfo, bool) {
 // mirror directory and tracks the live session.
 func (a *App) spawnOrchestratorSession(id, name string, envs []eruncommon.OrchestratorEnvConfig, initialPrompt, resumePrompt string, transient bool, cols, rows int) (orchestratorInfo, error) {
 	cols, rows = clampTerminalSize(cols, rows)
-	executable, args, err := a.deps.resolveOrchestratorLaunch(initialPrompt, resumePrompt)
+	executable, args, err := a.deps.resolveOrchestratorLaunch(orchestratorSessionID(id), initialPrompt, resumePrompt)
 	if err != nil {
 		return orchestratorInfo{}, err
 	}

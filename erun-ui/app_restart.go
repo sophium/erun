@@ -93,8 +93,8 @@ func consumeOrchestratorRestoreTarget(path string, now time.Time) relaunchTarget
 // ConsumeRelaunchTarget returns the orchestrator a restart asked to reopen (and
 // any prompt to auto-run on resume), clearing it so it fires once. The frontend
 // calls this on boot (after loading the orchestrator list) and, if the id still
-// resolves to a persisted orchestrator, re-starts it — spawnOrchestratorSession's
-// `claude --continue` resumes the same conversation, so the operator lands back
+// resolves to a persisted orchestrator, re-starts it — spawnOrchestratorSession
+// resumes that orchestrator's own pinned conversation, so the operator lands back
 // where they were. When ResumePrompt is set, the resumed session runs it
 // immediately so a rebuild+restart continues its task itself.
 func (a *App) ConsumeRelaunchTarget() relaunchTarget {
