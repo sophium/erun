@@ -12,13 +12,6 @@ import (
 // without a registry. Not a production knob.
 const UpgradeVersionsOverrideEnv = "ERUN_UPGRADE_VERSIONS_OVERRIDE"
 
-// RuntimeVersionsOverrideFromEnv reads the test-seam versions; ok is false when
-// the seam is unset.
-func RuntimeVersionsOverrideFromEnv() (RuntimeRegistryVersions, bool) {
-	versions, _, ok := runtimeVersionsOverrideFromEnvWithError()
-	return versions, ok
-}
-
 func runtimeVersionsOverrideFromEnvWithError() (RuntimeRegistryVersions, string, bool) {
 	raw := strings.TrimSpace(os.Getenv(UpgradeVersionsOverrideEnv))
 	if raw == "" {
