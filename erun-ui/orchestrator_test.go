@@ -323,7 +323,7 @@ func TestOrchestratorWorkspaceIsSharedRootWithOneClaudeMd(t *testing.T) {
 	if readErr != nil {
 		t.Fatalf("read CLAUDE.md: %v", readErr)
 	}
-	for _, want := range []string{"erun-orchestrate", "Never edit", "uninterrupted", "end-to-end", "`<tenant>-<env>`"} {
+	for _, want := range []string{"erun-orchestrate", "Never edit", "uninterrupted", "end-to-end", "`<tenant>-<env>`", "already operating under this contract", "ERUN_ORCHESTRATOR_ID"} {
 		if !strings.Contains(string(data), want) {
 			t.Fatalf("shared orchestrator CLAUDE.md missing %q:\n%s", want, data)
 		}
@@ -452,7 +452,7 @@ func TestOrchestratorSkillsPreserveEditAcrossSourceChange(t *testing.T) {
 	}
 }
 
-func TestOrchestratorSessionStartHookLoadsSkill(t *testing.T) {
+func TestOrchestratorSessionStartHookInjectsContract(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
 
@@ -484,8 +484,8 @@ func TestOrchestratorSessionStartHookLoadsSkill(t *testing.T) {
 		if len(group.Hooks) == 0 || group.Hooks[0].Type != "command" {
 			t.Fatalf("SessionStart matcher %q missing a command hook:\n%s", group.Matcher, data)
 		}
-		if !strings.Contains(group.Hooks[0].Command, "erun-orchestrate") {
-			t.Fatalf("SessionStart command does not load erun-orchestrate:\n%s", group.Hooks[0].Command)
+		if !strings.Contains(group.Hooks[0].Command, "CLAUDE.md") {
+			t.Fatalf("SessionStart command does not inject the contract (print CLAUDE.md):\n%s", group.Hooks[0].Command)
 		}
 	}
 	for _, want := range []string{"startup", "resume"} {

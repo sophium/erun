@@ -91,7 +91,7 @@ The install both **installs a skill when absent and refreshes it when the baked 
 
 ### Host orchestrator (desktop)
 
-The desktop app installs the same canonical skills into the host's `~/.claude/skills/<name>/` for host-side orchestrator sessions, using the identical marker-based install-or-refresh — so a host orchestrator tracks the latest skill on each launch while preserving any host-side edits. It also writes a `SessionStart` hook into the shared orchestrators workspace's `.claude/settings.json` that loads the [`erun-orchestrate`](#erun-orchestrate) skill on every session start and reopen (Claude Code's `SessionStart` fires on both a new session and a `--continue`/`--resume`), so an orchestrator always operates under its current contract without having to invoke the skill by hand.
+The desktop app installs the same canonical skills into the host's `~/.claude/skills/<name>/` for host-side orchestrator sessions, using the identical marker-based install-or-refresh — so a host orchestrator tracks the latest skill on each launch while preserving any host-side edits. It also writes a `SessionStart` hook into the shared orchestrators workspace's `.claude/settings.json` that **injects the operating contract** — it prints the workspace `CLAUDE.md` to the session on every session start and reopen (Claude Code's `SessionStart` fires on both a new session and a `--continue`/`--resume`) — so the contract is always already in context rather than a [`erun-orchestrate`](#erun-orchestrate) skill the model is merely asked to load and could skip. The hook prints the file directly (plain stdout, so no `additionalContext` size cap), falling back to a short directive if the `CLAUDE.md` is ever missing.
 
 ### Laptop (plugin marketplace)
 
