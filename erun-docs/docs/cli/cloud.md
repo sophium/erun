@@ -27,7 +27,7 @@ Registers an AWS IAM Identity Center (SSO) profile and saves it as a cloud provi
 | `--sso-start-url` | AWS IAM Identity Center start URL. |
 | `--sso-region` | Identity Center region. |
 | `--account-id` | AWS account ID to log into. |
-| `--role-name` | AWS role to assume. |
+| `--role-name` | AWS permission set (IAM Identity Center) to assume — the name shown under the account in your AWS access portal. |
 | `--region` | Default region for the alias (defaults to `--sso-region`). |
 | `--oidc-issuer-url` | Override the OIDC issuer (normally derived from the live token). |
 

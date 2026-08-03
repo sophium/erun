@@ -17,7 +17,7 @@ type CloudInitAWSInput struct {
 	SSOStartURL   string `json:"ssoStartUrl" jsonschema:"AWS IAM Identity Center start URL"`
 	SSORegion     string `json:"ssoRegion" jsonschema:"AWS IAM Identity Center region"`
 	AccountID     string `json:"accountId" jsonschema:"AWS account ID to use for SSO login"`
-	RoleName      string `json:"roleName" jsonschema:"AWS role name to use for SSO login"`
+	RoleName      string `json:"roleName" jsonschema:"AWS permission set (IAM Identity Center) to assume for SSO login"`
 	Region        string `json:"region,omitempty" jsonschema:"default AWS region for the generated configuration; defaults to ssoRegion"`
 	OIDCIssuerURL string `json:"oidcIssuerUrl,omitempty" jsonschema:"OIDC issuer URL trusted by deployed ERun APIs"`
 	Preview       bool   `json:"preview,omitempty" jsonschema:"when true, return the planned operation without executing login or saving config"`
