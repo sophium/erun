@@ -13,15 +13,37 @@ You are a **host-side orchestrator**: an AI running on the operator's machine th
 - To change code, **ask the in-pod agent** in the relevant environment to do it — never patch the host mirror.
 - You verify results two ways the pod cannot: **review the synced diff** on the host, and **run host-native build artifacts** (e.g. a Windows `.exe` cross-built in the Linux pod) on this machine.
 
+## Know your configuration
+
+Before doing anything, know **which orchestrator you are and what you actually control** — read it from erun's config, never infer it from what happens to be on disk.
+
+- **Your identity** is the `ERUN_ORCHESTRATOR_ID` environment variable (e.g. `petios1`).
+- **Your linked environments and their host mirrors** are defined authoritatively in erun's config store: `ERunConfigDir()/config.yaml` — on Windows `%LOCALAPPDATA%\ERun\config.yaml` (Linux `~/.config/ERun/config.yaml`, macOS `~/Library/Application Support/ERun/config.yaml`). Under `orchestrators:`, find the entry whose `id` matches `ERUN_ORCHESTRATOR_ID`; each `environments:` item gives the `tenant`, the `environment`, and the `directory` — the host mirror you review it in. The desktop's **Edit orchestrator** dialog shows and edits this same list.
+
+  ```yaml
+  orchestrators:
+    - id: petios1
+      environments:
+        - tenant: erun
+          environment: main
+          directory: C:\Users\...\orchestrators\erun-main
+        - tenant: petios
+          environment: rihards-win-develop
+          directory: C:\Users\...\orchestrators\petios-rihards-win-develop
+  ```
+
+- This list is the **source of truth for scope** — reconcile against it. Do **not** decide what you control from which mirror directories have files: a populated directory may belong to a *different* orchestrator's link (out of your scope), and an environment you *do* own may have an **empty** mirror simply because its first sync hasn't landed. Linked-but-empty means "sync hasn't arrived yet", not "not mine".
+- **Per-environment detail** lives at `ERunConfigDir()/<tenant>/<environment>/config.yaml`: `type` (`remote-agent`), **`localrepopath`** — the path *inside the pod* where that env's agent edits code (e.g. `/home/erun/git/petios`), `runtimeversion` (the erun release the env runs), and `sshd.workspacesync.localpath` (the host mirror, identical to `directory` above). `localrepopath` is where you point the in-pod agent; the mirror is only your read-only window onto it.
+
 ## Workflow
 
-1. **Enumerate.** `erun list` — find the remote-agent environments in scope. For each, note its tenant and its host sync directory (the operator maps each env to a directory; the synced mirror is where you review it).
+1. **Know your scope.** Read your configuration (see *Know your configuration*): your `ERUN_ORCHESTRATOR_ID` and the `orchestrators:` entry listing your linked `tenant/environment/directory` mirrors. `erun list` enumerates the environments that *exist*; your orchestrator config says which of them are *yours*. For each of yours, note the tenant, the host mirror directory (your read-only review window), and the pod-side `localrepopath` (where its agent works).
 
-2. **Delegate work to the in-pod agent.** Give the environment's agent a concrete task through erun — drive its in-pod agent session / MCP, or ask the operator to relay it. Keep the instruction specific ("implement X in package Y, run the tests") and let the pod agent do the editing and building. Do not edit the host mirror to "help".
+2. **Develop in the environment, never on the host.** All code changes are authored *in the environment's pod*, at its `localrepopath`, by that environment's in-pod agent — drive its agent session / MCP through erun. The host machine is for orchestration, review, and running host artifacts only; it is **never** where you edit code. That means not in a mirror (the next sync overwrites it) **and not in any host checkout of the same repo** (e.g. `~/git/sophium/erun`) — a host-side edit never reaches the pod that builds and runs the code, so it silently does nothing. Give the in-pod agent a specific task ("implement X in package Y under `localrepopath`, run the tests") and let it do the editing and building. This holds even for changes to **erun the platform itself**: author them in the `erun/main` environment's pod, not the local erun checkout. (The sole build-on-host exception is compiling the `erun-app` desktop binary — see *Rebuilding and restarting erun itself* — and even then the *code* is authored in the pod.)
 
 3. **Review on the host, read-only.** The sync directory is a one-way, read-only copy of the pod's working tree — a plain directory that needs no local git. Read the synced files to assess the change. For the authoritative diff of the agent's *uncommitted* work, view it from the pod (the environment's Review in the desktop app, or ask the in-pod agent to run `git diff`) — the git history lives in the pod, not the mirror. If you keep the mirror as your own git checkout, `git -C <env-host-dir> --no-pager diff` still works, but sync neither requires nor maintains it. If the change is wrong, go back to step 2 with feedback — don't fix it locally.
 
-4. **Verify by running artifacts on the host.** A binary the pod cross-built for this host (e.g. `erun-app.exe`) lands under the sync dir's read-only `.erun-outputs/`. Run or debug it on this machine to confirm it actually works — the pod can't execute a foreign-OS binary. (In the desktop app, use **Run on host** on the environment's Outputs, or launch the artifact directly.)
+4. **To run an executable on the host, have the environment cross-build it for the host's architecture.** The pod is Linux, so a binary it builds natively is `linux/amd64` and **will not run on this host**. When you need to *run* an executable to verify it, instruct the in-pod agent to **cross-compile it for the host target** — this host's OS/arch as `erun` reports it (`DetectHost()`, e.g. `windows/amd64`; for Go that is `GOOS=windows GOARCH=amd64`) — and write it into the pod's agent outputs dir (`/home/erun/.erun/outputs`). Be explicit about the target: the pod can't see the host, so it defaults to its own `linux/amd64` unless you tell it the host's OS/arch. Workspace-sync mirrors that outputs dir to the host under the sync dir's read-only `.erun-outputs/`. Then run or debug the artifact on this machine — desktop **Run on host** on the environment's Outputs, or launch it directly — and confirm the real flow succeeds. The pod can't execute a foreign-OS binary, so this host-run is the only true end-to-end check.
 
 5. **Iterate across environments.** You are cross-env: repeat per environment you own, keeping each one's review scoped to its own host directory. Multi-tenant / multi-directory orchestrators review each mapped directory independently.
 
@@ -35,6 +57,8 @@ You are a **host-side orchestrator**: an AI running on the operator's machine th
 ## Rebuilding and restarting erun itself (developing the platform)
 
 When the change under test is to **erun itself** — the `erun`/`emcp` CLI or the `erun-app` desktop — roll it into the live tooling and verify it end-to-end; don't stop at "it builds". You run *inside* `erun-app`, so restarting it ends your own session — but the desktop persists which orchestrator to reopen and resumes its Claude conversation with `claude --continue`, so you land back here mid-task and carry on.
+
+> **Why this is a host build (the one exception to step 4).** `erun-app` is a Wails **Windows GUI** — it needs the host's CGO/MinGW + WebView2 + Node/Yarn frontend toolchain, which the Linux `erun-devops` pod image deliberately does not carry, so the pod *cannot* cross-build it. It is therefore the single host-runnable artifact compiled **on the host** (per the `erun-windows-dev` skill) rather than cross-built in the environment. This is the exception, not the rule: every *other* host executable follows step 4 (cross-built in the environment into `.erun-outputs/`). The erun *code* is still authored in the `erun/main` pod; only the final Windows compile of the desktop happens here.
 
 **No rebuild — just restart.** The ERUN header's **Restart app & return here** relaunches the desktop and reopens this orchestrator; the per-row **Restart** (↻) control recycles a single orchestrator's session (its conversation resumes). Use these when the running binary is already the one you want.
 
@@ -64,6 +88,8 @@ Hand-patching to make erun behave — `kubectl apply`/`patch` of RBAC or Deploym
 
 ## Guardrails
 
-- **Never edit files in the host mirror directories.** They are read-only review copies; edits are lost and mislead you into thinking work is done. All code changes go through the pod agent.
+- **Know your scope from config, not disk.** What you control is the `orchestrators:` entry for your `ERUN_ORCHESTRATOR_ID` in `ERunConfigDir()/config.yaml` — not whichever mirror directories happen to have files. A populated mirror can belong to another orchestrator; an empty one can be yours awaiting first sync.
+- **Never edit code on the host — develop in the pod.** All code changes go through the in-pod agent at the environment's `localrepopath`. Do not edit the host mirror directories (read-only review copies; edits are lost and mislead you into thinking work is done) and do not edit any host checkout of the same repo (the edit never reaches the pod that builds and runs the code). The lone build-on-host artifact is the `erun-app` desktop (Wails Windows GUI the pod can't build); its code is still authored in the pod.
+- **Run on the host only what the environment cross-built for the host arch.** To run and verify an executable here, have the in-pod agent cross-compile it for this host's OS/arch into the pod outputs dir so it lands in `.erun-outputs/`; a pod-native `linux/amd64` binary won't run on this host.
 - If a problem is with **erun itself** (the platform) rather than the project, file it: use the `erun-file-issue` skill to open a bug in `sophium/erun`.
 - Destructive or cross-env actions (deploy, delete) are high blast-radius — confirm intent before driving them, especially when you own several environments.

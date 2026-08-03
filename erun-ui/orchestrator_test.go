@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -375,6 +376,160 @@ func TestOrchestratorSkillsInstalledByDefault(t *testing.T) {
 	}
 }
 
+// installedOrchestrateSkill is the path an installed erun-orchestrate SKILL.md
+// lands at under the test's confined $HOME.
+func installedOrchestrateSkill(t *testing.T) string {
+	t.Helper()
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".claude", "skills", "erun-orchestrate", "SKILL.md")
+}
+
+// singleSkillSource writes a one-skill fixture source (erun-orchestrate) and
+// points ERUN_SKILLS_DIR at it, returning the source SKILL.md path.
+func singleSkillSource(t *testing.T, body string) string {
+	t.Helper()
+	srcRoot := t.TempDir()
+	skillDir := filepath.Join(srcRoot, "erun-orchestrate")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	srcMD := filepath.Join(skillDir, "SKILL.md")
+	if err := os.WriteFile(srcMD, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ERUN_SKILLS_DIR", srcRoot)
+	return srcMD
+}
+
+func TestOrchestratorSkillsRefreshWhenSourceChanges(t *testing.T) {
+	srcMD := singleSkillSource(t, "# v1\n")
+	app := orchestratorTestApp(t)
+	defer app.shutdown(context.Background())
+
+	if _, err := app.ensureOrchestratorWorkspace(); err != nil {
+		t.Fatalf("first ensureOrchestratorWorkspace: %v", err)
+	}
+	installed := installedOrchestrateSkill(t)
+	if data, _ := os.ReadFile(installed); string(data) != "# v1\n" {
+		t.Fatalf("expected installed v1, got %q", data)
+	}
+
+	// A newer skill ships; an untouched install must track it on next launch.
+	if err := os.WriteFile(srcMD, []byte("# v2 newer\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.ensureOrchestratorWorkspace(); err != nil {
+		t.Fatalf("second ensureOrchestratorWorkspace: %v", err)
+	}
+	if data, _ := os.ReadFile(installed); string(data) != "# v2 newer\n" {
+		t.Fatalf("expected untouched install refreshed to v2, got %q", data)
+	}
+}
+
+func TestOrchestratorSkillsPreserveEditAcrossSourceChange(t *testing.T) {
+	srcMD := singleSkillSource(t, "# v1\n")
+	app := orchestratorTestApp(t)
+	defer app.shutdown(context.Background())
+
+	if _, err := app.ensureOrchestratorWorkspace(); err != nil {
+		t.Fatalf("first ensureOrchestratorWorkspace: %v", err)
+	}
+	installed := installedOrchestrateSkill(t)
+
+	// Operator edits the installed skill; then a newer source ships. The edit
+	// must win over the refresh.
+	if err := os.WriteFile(installed, []byte("# operator edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(srcMD, []byte("# v2 newer\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.ensureOrchestratorWorkspace(); err != nil {
+		t.Fatalf("second ensureOrchestratorWorkspace: %v", err)
+	}
+	if data, _ := os.ReadFile(installed); string(data) != "# operator edit\n" {
+		t.Fatalf("expected operator edit preserved across a source change, got %q", data)
+	}
+}
+
+func TestOrchestratorSessionStartHookLoadsSkill(t *testing.T) {
+	app := orchestratorTestApp(t)
+	defer app.shutdown(context.Background())
+
+	dir, err := app.ensureOrchestratorWorkspace()
+	if err != nil {
+		t.Fatalf("ensureOrchestratorWorkspace: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, ".claude", "settings.json"))
+	if err != nil {
+		t.Fatalf("read orchestrator settings.json: %v", err)
+	}
+	var settings struct {
+		Hooks struct {
+			SessionStart []struct {
+				Matcher string `json:"matcher"`
+				Hooks   []struct {
+					Type    string `json:"type"`
+					Command string `json:"command"`
+				} `json:"hooks"`
+			} `json:"SessionStart"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatalf("unmarshal settings.json: %v\n%s", err, data)
+	}
+	matchers := map[string]bool{}
+	for _, group := range settings.Hooks.SessionStart {
+		matchers[group.Matcher] = true
+		if len(group.Hooks) == 0 || group.Hooks[0].Type != "command" {
+			t.Fatalf("SessionStart matcher %q missing a command hook:\n%s", group.Matcher, data)
+		}
+		if !strings.Contains(group.Hooks[0].Command, "erun-orchestrate") {
+			t.Fatalf("SessionStart command does not load erun-orchestrate:\n%s", group.Hooks[0].Command)
+		}
+	}
+	for _, want := range []string{"startup", "resume"} {
+		if !matchers[want] {
+			t.Fatalf("SessionStart hook missing matcher %q:\n%s", want, data)
+		}
+	}
+}
+
+func TestOrchestratorSessionStartHookPreservesExistingSettings(t *testing.T) {
+	app := orchestratorTestApp(t)
+	defer app.shutdown(context.Background())
+
+	claudeDir := filepath.Join(orchestratorsRoot(), ".claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A pre-existing project settings file with an unrelated key and hook event.
+	pre := `{"model":"opus","hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"echo keep"}]}]}}`
+	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(pre), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := app.ensureOrchestratorWorkspace(); err != nil {
+		t.Fatalf("ensureOrchestratorWorkspace: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(claudeDir, "settings.json"))
+	var settings map[string]any
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatalf("unmarshal settings.json: %v\n%s", err, data)
+	}
+	if settings["model"] != "opus" {
+		t.Fatalf("expected unrelated key preserved, got %v\n%s", settings["model"], data)
+	}
+	hooks, _ := settings["hooks"].(map[string]any)
+	if _, ok := hooks["PreToolUse"]; !ok {
+		t.Fatalf("expected unrelated hook event preserved:\n%s", data)
+	}
+	if _, ok := hooks["SessionStart"]; !ok {
+		t.Fatalf("expected SessionStart hook added:\n%s", data)
+	}
+}
+
 func TestBuildOrchestratorLaunchResumesWithUltracodeOpus(t *testing.T) {
 	// No pinned session id (legacy/transient) keeps the continue-else-fresh path.
 	_, posix := buildOrchestratorLaunch("linux", "", false, "", "")
@@ -429,11 +584,16 @@ func TestBuildOrchestratorLaunchPinsPerOrchestratorSession(t *testing.T) {
 	if wcmd := win[len(win)-1]; !strings.Contains(wcmd, "--resume "+sid) || !strings.Contains(wcmd, "finish the task") {
 		t.Fatalf("windows pinned resume+prompt missing pieces: %q", wcmd)
 	}
+}
 
+// Per-orchestrator session ids are deterministic and unique so each orchestrator
+// resumes its own conversation, while a transient (empty-id) orchestrator has no
+// pinned session.
+func TestOrchestratorSessionIDIsStableAndDistinct(t *testing.T) {
 	if orchestratorSessionID("va1") == orchestratorSessionID("petios1") {
 		t.Fatal("distinct orchestrators must derive distinct session ids")
 	}
-	if orchestratorSessionID("va1") != orchestratorSessionID("va1") {
+	if id := orchestratorSessionID("va1"); id != orchestratorSessionID("va1") {
 		t.Fatal("session id must be stable for the same orchestrator")
 	}
 	if orchestratorSessionID("") != "" {

@@ -27,7 +27,7 @@ ERun ships skills through two paths, both vendored from the same canonical sourc
 
 ### Inside a deployed env
 
-The runtime image bakes the skill set, and the env's entrypoint installs each one into the Agent's discovery directory (`~/.claude/skills/<name>/` for Claude Code, `~/.codex/skills/<name>/` for Codex). The Operator doesn't install or wire anything — opening an env makes the skills available to whatever's running inside. Edits made to a skill file inside a running env survive pod restarts; only a fresh home (or a new skill name) re-pulls the baked copy.
+The runtime image bakes the skill set, and the env's entrypoint installs each one into the Agent's discovery directory (`~/.claude/skills/<name>/` for Claude Code, `~/.codex/skills/<name>/` for Codex). The Operator doesn't install or wire anything — opening an env makes the skills available to whatever's running inside. An un-edited skill is refreshed from the image when it changes, so envs track skill improvements across upgrades; edits made to a skill file inside a running env are preserved across pod restarts and rebuilds.
 
 ### On your laptop
 
