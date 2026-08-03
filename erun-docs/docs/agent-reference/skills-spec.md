@@ -85,9 +85,13 @@ The runtime Dockerfile vendors the whole tree with one line:
 COPY --chmod=0644 erun-skills/skills /etc/erun/skills
 ```
 
-On every entrypoint run, `initialize_claude_config` and `initialize_codex_config` iterate every subdirectory under `/etc/erun/skills/` and install each skill into `~/.claude/skills/<name>/` and `~/.codex/skills/<name>/` — but only when the destination `SKILL.md` is absent. Supporting files (templates, helper scripts) inside the skill directory ship with the skill automatically.
+On every entrypoint run, `initialize_claude_config` and `initialize_codex_config` run `skills-install.sh` over every subdirectory under `/etc/erun/skills/`, installing each skill into `~/.claude/skills/<name>/` and `~/.codex/skills/<name>/`. Supporting files (templates, helper scripts) inside the skill directory ship with the skill automatically.
 
-The `[ ! -e ]` guard means a user can edit `~/.claude/skills/<name>/SKILL.md` inside a running env and the edit survives pod restarts. Only a fresh home (or a new skill name) re-pulls the baked copy.
+The install both **installs a skill when absent and refreshes it when the baked copy changed**, so a rebuilt image's updated skill reaches existing envs — while **preserving in-pod edits**. Provenance is tracked per skill by recording the baked `SKILL.md` hash in a `.erun-skill-baked-sha256` marker: a copy whose `SKILL.md` still matches its marker is unmodified since erun installed it and is refreshed to the baked version, while one that differs was edited in-pod and is left untouched (a legacy copy with no marker is treated as unmodified and adopted on the first refresh). So an un-edited skill tracks the image across upgrades, and a skill you edit inside a running env survives both pod restarts and image rebuilds.
+
+### Host orchestrator (desktop)
+
+The desktop app installs the same canonical skills into the host's `~/.claude/skills/<name>/` for host-side orchestrator sessions, using the identical marker-based install-or-refresh — so a host orchestrator tracks the latest skill on each launch while preserving any host-side edits. It also writes a `SessionStart` hook into the shared orchestrators workspace's `.claude/settings.json` that loads the [`erun-orchestrate`](#erun-orchestrate) skill on every session start and reopen (Claude Code's `SessionStart` fires on both a new session and a `--continue`/`--resume`), so an orchestrator always operates under its current contract without having to invoke the skill by hand.
 
 ### Laptop (plugin marketplace)
 
@@ -361,8 +365,8 @@ Key contract: the skill **explicitly reads** the cloned repo's `AGENTS.md` and e
 | Source | `erun-skills/skills/erun-orchestrate/SKILL.md` |
 | Description | "Operate as a host-side erun orchestrator that drives and reviews work across remote-agent environments without editing their code locally." |
 | Triggers | "orchestrate erun environments", "drive the remote agents", "coordinate work across environments", "review what the agents changed", "review changes across envs", "run the built app to verify", "delegate this to the environment's agent" |
-| Inputs | The remote-agent environments in scope (via `erun list`) and each one's host mirror directory (the workspace-sync local path the operator mapped it to). |
-| Outputs | No files. The orchestrator delegates edits to the in-pod agents, reviews each env's synced mirror read-only (reading the synced files — the mirror is a plain one-way copy that needs no local git, so the authoritative diff is viewed from the pod), and runs host-native build artifacts (e.g. a cross-built `.exe` under the mirror's `.erun-outputs/`) to verify. Platform bugs are filed via `erun-file-issue`. |
+| Inputs | The orchestrator's own configuration — its `ERUN_ORCHESTRATOR_ID` and the `orchestrators:` entry in erun's config store listing its linked `tenant/environment/directory` mirrors (authoritative for scope; `erun list` only enumerates what exists) — plus, per linked env, the pod-side `localrepopath` where its agent edits and the host mirror directory (the workspace-sync local path). |
+| Outputs | No files. The orchestrator develops changes in the environment's pod (never on the host), delegating edits to the in-pod agents; reviews each env's synced mirror read-only (reading the synced files — the mirror is a plain one-way copy that needs no local git, so the authoritative diff is viewed from the pod); and to run an executable on the host has the in-pod agent cross-build it for the host arch into the mirror's `.erun-outputs/`, then runs it to verify. Platform bugs are filed via `erun-file-issue`. |
 | Error behaviour | Editing the host mirror is a no-op (the next sync overwrites it) — the skill directs all changes through the pod agent instead. A missing host mirror (workspace sync not enabled for an env) → review is unavailable for that env until sync is enabled. Destructive cross-env actions (deploy, delete) require explicit confirmation. |
 
 ### Catalogue evolution

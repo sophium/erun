@@ -1,6 +1,9 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -164,6 +167,14 @@ func (a *App) ensureOrchestratorWorkspace() (string, error) {
 	if err := ensureOrchestratorSkills(); err != nil {
 		fmt.Fprintf(os.Stderr, "erun: could not install orchestrator skills: %v\n", err)
 	}
+	// Load the erun-orchestrate skill on every session start and reopen via a
+	// SessionStart hook, so an orchestrator always operates under its current
+	// contract instead of relying on the model to invoke the skill. Best-effort
+	// for the same reason as the skills install; a SessionStart hook is
+	// non-blocking, so a stale or missing one never prevents a launch.
+	if err := ensureOrchestratorSessionStartHook(dir); err != nil {
+		fmt.Fprintf(os.Stderr, "erun: could not write orchestrator SessionStart hook: %v\n", err)
+	}
 	return dir, nil
 }
 
@@ -196,11 +207,20 @@ func hostSkillsSource() string {
 	return ""
 }
 
+// orchestratorSkillMarker records, per installed skill, the sha256 of the
+// SKILL.md erun last installed, so a later launch can tell an untouched copy
+// (safe to refresh from the shipped source) from one the operator edited in
+// place (must be preserved). Mirrors the runtime pod's skills-install.sh marker.
+const orchestratorSkillMarker = ".erun-skill-baked-sha256"
+
 // ensureOrchestratorSkills installs every erun skill into ~/.claude/skills so the
 // orchestrator's Claude session sees them by default, with no operator install
-// step. A skill whose destination SKILL.md already exists is left untouched so
-// in-place edits survive (mirrors finishRemoteInitSkills). Returns nil when no
-// skills source is resolvable so a distributed binary still launches cleanly.
+// step. It installs a skill when absent and REFRESHES an untouched one when the
+// shipped source changed — so an orchestrator tracks the latest skill instead of
+// freezing at first install — while preserving any in-place operator edits via a
+// per-skill marker. Mirrors the pod entrypoint's install-or-refresh so host and
+// pod treat skill provenance identically. Returns nil when no skills source is
+// resolvable so a distributed binary still launches cleanly.
 func ensureOrchestratorSkills() error {
 	root := hostSkillsSource()
 	if root == "" {
@@ -219,15 +239,126 @@ func ensureOrchestratorSkills() error {
 		if !entry.IsDir() {
 			continue
 		}
-		dst := filepath.Join(destRoot, entry.Name())
-		if _, statErr := os.Stat(filepath.Join(dst, "SKILL.md")); statErr == nil {
-			continue // already installed — preserve any in-place edits
-		}
-		if err := copyDirTree(filepath.Join(root, entry.Name()), dst); err != nil {
+		if err := installOrRefreshOrchestratorSkill(filepath.Join(root, entry.Name()), filepath.Join(destRoot, entry.Name())); err != nil {
 			return fmt.Errorf("install skill %s: %w", entry.Name(), err)
 		}
 	}
 	return nil
+}
+
+// installOrRefreshOrchestratorSkill reconciles one installed skill against its
+// shipped source: install when absent; refresh when the installed copy is still
+// the one erun wrote (marker matches, or a legacy copy with no marker); leave a
+// copy the operator edited in place untouched.
+func installOrRefreshOrchestratorSkill(src, dst string) error {
+	bakedMD := filepath.Join(src, "SKILL.md")
+	if _, err := os.Stat(bakedMD); err != nil {
+		return nil // a source dir with no SKILL.md is not a skill
+	}
+	instMD := filepath.Join(dst, "SKILL.md")
+	if _, err := os.Stat(instMD); err != nil {
+		return copyOrchestratorSkill(src, dst) // absent — install
+	}
+	bakedSHA, err := fileSHA256(bakedMD)
+	if err != nil {
+		return err
+	}
+	instSHA, err := fileSHA256(instMD)
+	if err != nil {
+		return err
+	}
+	marker := filepath.Join(dst, orchestratorSkillMarker)
+	if instSHA == bakedSHA {
+		// Already the shipped version; record the marker so a future upgrade can
+		// still tell this untouched copy from an edited one (also adopts a
+		// pre-marker copy that happens to match).
+		return os.WriteFile(marker, []byte(bakedSHA+"\n"), 0o644)
+	}
+	markerSHA := ""
+	if b, readErr := os.ReadFile(marker); readErr == nil {
+		markerSHA = strings.TrimSpace(string(b))
+	}
+	if markerSHA == "" || instSHA == markerSHA {
+		// Unmodified since erun installed it, or a legacy copy with no marker —
+		// refresh to the shipped version.
+		return copyOrchestratorSkill(src, dst)
+	}
+	return nil // edited in place — preserve the operator's copy
+}
+
+// copyOrchestratorSkill replaces dst with a fresh copy of src and records the
+// shipped SKILL.md hash, so a later launch can distinguish an untouched copy
+// from an edited one.
+func copyOrchestratorSkill(src, dst string) error {
+	if err := os.RemoveAll(dst); err != nil {
+		return err
+	}
+	if err := copyDirTree(src, dst); err != nil {
+		return err
+	}
+	sha, err := fileSHA256(filepath.Join(src, "SKILL.md"))
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dst, orchestratorSkillMarker), []byte(sha+"\n"), 0o644)
+}
+
+// fileSHA256 returns the hex sha256 of a file's contents.
+func fileSHA256(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// orchestratorSkillHookCommand is the SessionStart hook command written into the
+// orchestrators root's .claude/settings.json. It echoes a directive to plain
+// stdout (added to the session context) telling the session to load and follow
+// the erun-orchestrate skill. Plain stdout — not JSON — sidesteps the
+// 10,000-char additionalContext cap (the skill body is larger) and Windows Git
+// Bash quoting hazards; the directive is deliberately ASCII-only and
+// apostrophe-free so the single-quoted echo is safe in both Git Bash (Windows)
+// and sh (macOS/Linux).
+const orchestratorSkillHookCommand = `echo 'You are a host-side erun orchestrator. Before doing anything else, invoke the erun-orchestrate skill and follow it: it is your authoritative, always-current operating contract, refreshed on every launch. Also follow the CLAUDE.md in this directory.'`
+
+// ensureOrchestratorSessionStartHook writes a SessionStart hook into the shared
+// orchestrators root's .claude/settings.json, merging so it never clobbers other
+// keys or hook events already there. SessionStart fires on a new session
+// (startup) and a reopened one (resume), so every orchestrator loads the skill's
+// contract both on start and on reopen.
+func ensureOrchestratorSessionStartHook(dir string) error {
+	claudeDir := filepath.Join(dir, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		return err
+	}
+	path := filepath.Join(claudeDir, "settings.json")
+	settings := map[string]any{}
+	if b, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(b, &settings) // best-effort; the hook is rebuilt below regardless
+	}
+	hooks, _ := settings["hooks"].(map[string]any)
+	if hooks == nil {
+		hooks = map[string]any{}
+	}
+	hooks["SessionStart"] = orchestratorSessionStartHook()
+	settings["hooks"] = hooks
+	out, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(out, '\n'), 0o644)
+}
+
+// orchestratorSessionStartHook is the SessionStart hook block: the skill-loading
+// command runs on both new starts (startup) and reopens (resume).
+func orchestratorSessionStartHook() []any {
+	command := map[string]any{"type": "command", "command": orchestratorSkillHookCommand}
+	matcher := func(source string) map[string]any {
+		return map[string]any{"matcher": source, "hooks": []any{command}}
+	}
+	return []any{matcher("startup"), matcher("resume")}
 }
 
 // copyDirTree recursively copies src into dst (files + subdirectories), portable
