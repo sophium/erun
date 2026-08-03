@@ -38,7 +38,7 @@ func orchestratorTestApp(t *testing.T) *App {
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			return newStubTerminalSession(), nil
 		},
-		resolveOrchestratorLaunch: func(string, string) (string, []string, error) {
+		resolveOrchestratorLaunch: func(string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
 	})
@@ -188,7 +188,7 @@ func TestSpawnOrchestratorSessionExposesOrchestratorID(t *testing.T) {
 			capturedEnv = p.Env
 			return newStubTerminalSession(), nil
 		},
-		resolveOrchestratorLaunch: func(string, string) (string, []string, error) { return "claude-stub", nil, nil },
+		resolveOrchestratorLaunch: func(string, string, string) (string, []string, error) { return "claude-stub", nil, nil },
 	})
 	defer app.shutdown(context.Background())
 
@@ -268,7 +268,7 @@ func TestInvestigateFailureSpawnsTransientTenantScopedOrchestrator(t *testing.T)
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			return newStubTerminalSession(), nil
 		},
-		resolveOrchestratorLaunch: func(prompt, _ string) (string, []string, error) {
+		resolveOrchestratorLaunch: func(_, prompt, _ string) (string, []string, error) {
 			seededPrompt = prompt
 			return "claude-stub", nil, nil
 		},
@@ -376,7 +376,8 @@ func TestOrchestratorSkillsInstalledByDefault(t *testing.T) {
 }
 
 func TestBuildOrchestratorLaunchResumesWithUltracodeOpus(t *testing.T) {
-	_, posix := buildOrchestratorLaunch("linux", "", "")
+	// No pinned session id (legacy/transient) keeps the continue-else-fresh path.
+	_, posix := buildOrchestratorLaunch("linux", "", false, "", "")
 	posixCmd := posix[len(posix)-1]
 	for _, want := range []string{"claude --continue", "ultracode", "--model opus", " || claude"} {
 		if !strings.Contains(posixCmd, want) {
@@ -384,7 +385,7 @@ func TestBuildOrchestratorLaunchResumesWithUltracodeOpus(t *testing.T) {
 		}
 	}
 
-	_, win := buildOrchestratorLaunch("windows", "", "")
+	_, win := buildOrchestratorLaunch("windows", "", false, "", "")
 	winCmd := win[len(win)-1]
 	for _, want := range []string{"claude --continue", "ultracode", "--model opus", "$LASTEXITCODE"} {
 		if !strings.Contains(winCmd, want) {
@@ -393,7 +394,7 @@ func TestBuildOrchestratorLaunchResumesWithUltracodeOpus(t *testing.T) {
 	}
 
 	// A seeded (Investigate) launch is a fresh session — no resume.
-	_, seeded := buildOrchestratorLaunch("linux", "fix the thing", "")
+	_, seeded := buildOrchestratorLaunch("linux", "", false, "fix the thing", "")
 	seededCmd := seeded[len(seeded)-1]
 	if strings.Contains(seededCmd, "--continue") {
 		t.Fatalf("seeded launch must not resume: %q", seededCmd)
@@ -403,13 +404,50 @@ func TestBuildOrchestratorLaunchResumesWithUltracodeOpus(t *testing.T) {
 	}
 }
 
+// A pinned session id isolates each orchestrator: it resumes its OWN conversation
+// (`--resume <id>` when it exists, `--session-id <id>` to create it on first
+// open) and never `--continue`s the shared most-recent conversation.
+func TestBuildOrchestratorLaunchPinsPerOrchestratorSession(t *testing.T) {
+	const sid = "6f7e9c2a-1b3d-4e5f-8a9b-000000000001"
+
+	_, existing := buildOrchestratorLaunch("linux", sid, true, "", "")
+	cmd := existing[len(existing)-1]
+	if !strings.Contains(cmd, "--resume "+sid) || strings.Contains(cmd, "--continue") {
+		t.Fatalf("existing session must --resume its own id, not --continue: %q", cmd)
+	}
+
+	_, firstOpen := buildOrchestratorLaunch("linux", sid, false, "", "")
+	fresh := firstOpen[len(firstOpen)-1]
+	if !strings.Contains(fresh, "--session-id "+sid) {
+		t.Fatalf("first open must create the pinned session: %q", fresh)
+	}
+	if strings.Contains(fresh, "--continue") || strings.Contains(fresh, "--resume") {
+		t.Fatalf("first open must not continue/resume: %q", fresh)
+	}
+
+	_, win := buildOrchestratorLaunch("windows", sid, true, "", "finish the task")
+	if wcmd := win[len(win)-1]; !strings.Contains(wcmd, "--resume "+sid) || !strings.Contains(wcmd, "finish the task") {
+		t.Fatalf("windows pinned resume+prompt missing pieces: %q", wcmd)
+	}
+
+	if orchestratorSessionID("va1") == orchestratorSessionID("petios1") {
+		t.Fatal("distinct orchestrators must derive distinct session ids")
+	}
+	if orchestratorSessionID("va1") != orchestratorSessionID("va1") {
+		t.Fatal("session id must be stable for the same orchestrator")
+	}
+	if orchestratorSessionID("") != "" {
+		t.Fatal("transient orchestrator (empty id) must have no pinned session")
+	}
+}
+
 // A resume prompt resumes the conversation AND hands it the prompt, on both
 // shells, with a fresh-session fallback that carries the same prompt so an
 // auto-resume runs the task even on a first launch with no prior conversation.
 func TestBuildOrchestratorLaunchResumeWithPromptRunsIt(t *testing.T) {
 	const prompt = "verify the rebuild is live, then finish the task"
 
-	_, posix := buildOrchestratorLaunch("linux", "", prompt)
+	_, posix := buildOrchestratorLaunch("linux", "", false, "", prompt)
 	posixCmd := posix[len(posix)-1]
 	for _, want := range []string{"claude --continue", prompt, " || claude", "ultracode", "--model opus"} {
 		if !strings.Contains(posixCmd, want) {
@@ -421,7 +459,7 @@ func TestBuildOrchestratorLaunchResumeWithPromptRunsIt(t *testing.T) {
 		t.Fatalf("expected the resume prompt on both branches: %q", posixCmd)
 	}
 
-	_, win := buildOrchestratorLaunch("windows", "", prompt)
+	_, win := buildOrchestratorLaunch("windows", "", false, "", prompt)
 	winCmd := win[len(win)-1]
 	for _, want := range []string{"claude --continue", prompt, "$LASTEXITCODE"} {
 		if !strings.Contains(winCmd, want) {
@@ -430,7 +468,7 @@ func TestBuildOrchestratorLaunchResumeWithPromptRunsIt(t *testing.T) {
 	}
 
 	// initialPrompt still wins over resumePrompt (a seeded fresh session ignores resume).
-	_, seeded := buildOrchestratorLaunch("linux", "fix the thing", prompt)
+	_, seeded := buildOrchestratorLaunch("linux", "", false, "fix the thing", prompt)
 	if seededCmd := seeded[len(seeded)-1]; strings.Contains(seededCmd, "--continue") {
 		t.Fatalf("initialPrompt must take precedence over resumePrompt (fresh, no resume): %q", seededCmd)
 	}
