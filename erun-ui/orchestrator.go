@@ -109,6 +109,21 @@ You are a **host-side erun orchestrator**. You coordinate work across the erun
 remote-agent environments mirrored here, from the operator's machine. The real
 work happens in the pods — you delegate, review, and verify. Follow the ` + "`erun-orchestrate`" + ` skill.
 
+## Operating under this contract (read first)
+
+You are **already operating under this contract** from the first turn of a
+session — treat it as always in force. Do not defer or skip it for a "quick" or
+"trivial-looking" question: answer every question and run every task as the
+orchestrator, under these rules, before doing anything else. The ` + "`erun-orchestrate`" + ` skill
+holds the detailed workflow — follow it — but never act without the rules here in
+force.
+
+**Know your scope from config, never from memory or disk.** Your identity is the
+` + "`ERUN_ORCHESTRATOR_ID`" + ` environment variable; your linked environments are the
+` + "`orchestrators:`" + ` entry with that id in erun's ` + "`config.yaml`" + `. Never state which
+environments are yours from recollection, or infer them from which mirror
+directories happen to have files — read the config every time.
+
 ## Rules
 
 - Each ` + "`<tenant>-<env>`" + ` subdirectory here is a **read-only** one-way mirror of a
@@ -167,11 +182,11 @@ func (a *App) ensureOrchestratorWorkspace() (string, error) {
 	if err := ensureOrchestratorSkills(); err != nil {
 		fmt.Fprintf(os.Stderr, "erun: could not install orchestrator skills: %v\n", err)
 	}
-	// Load the erun-orchestrate skill on every session start and reopen via a
+	// Inject the operating contract on every session start and reopen via a
 	// SessionStart hook, so an orchestrator always operates under its current
-	// contract instead of relying on the model to invoke the skill. Best-effort
-	// for the same reason as the skills install; a SessionStart hook is
-	// non-blocking, so a stale or missing one never prevents a launch.
+	// contract instead of relying on the model to invoke a skill it can skip.
+	// Best-effort for the same reason as the skills install; a SessionStart hook
+	// is non-blocking, so a stale or missing one never prevents a launch.
 	if err := ensureOrchestratorSessionStartHook(dir); err != nil {
 		fmt.Fprintf(os.Stderr, "erun: could not write orchestrator SessionStart hook: %v\n", err)
 	}
@@ -313,21 +328,31 @@ func fileSHA256(path string) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
+// orchestratorContractFallback is echoed when the shared CLAUDE.md is somehow
+// missing, so a session still boots knowing it is under the contract. It is
+// ASCII-only and apostrophe-free so the single-quoted echo is safe in both Git
+// Bash (Windows) and sh (macOS/Linux).
+const orchestratorContractFallback = "You are a host-side erun orchestrator. Read and follow the CLAUDE.md in this directory and the erun-orchestrate skill before doing anything, even a trivial-looking question."
+
 // orchestratorSkillHookCommand is the SessionStart hook command written into the
-// orchestrators root's .claude/settings.json. It echoes a directive to plain
-// stdout (added to the session context) telling the session to load and follow
-// the erun-orchestrate skill. Plain stdout — not JSON — sidesteps the
-// 10,000-char additionalContext cap (the skill body is larger) and Windows Git
-// Bash quoting hazards; the directive is deliberately ASCII-only and
-// apostrophe-free so the single-quoted echo is safe in both Git Bash (Windows)
-// and sh (macOS/Linux).
-const orchestratorSkillHookCommand = `echo 'You are a host-side erun orchestrator. Before doing anything else, invoke the erun-orchestrate skill and follow it: it is your authoritative, always-current operating contract, refreshed on every launch. Also follow the CLAUDE.md in this directory.'`
+// orchestrators root's .claude/settings.json. It INJECTS the operating contract
+// into the session by printing the shared CLAUDE.md to plain stdout (added to the
+// session context), so an orchestrator always has its contract in context instead
+// of being asked to load a skill it can skip. Plain stdout — not JSON — sidesteps
+// the 10,000-char additionalContext cap; cat reads the file directly, so the
+// contract body is never shell-quoted and only the forward-slashed path is
+// double-quoted (safe in Git Bash and sh). The apostrophe-free echo is the
+// fallback if the file is ever missing.
+func orchestratorSkillHookCommand(dir string) string {
+	claudeMd := filepath.ToSlash(filepath.Join(dir, "CLAUDE.md"))
+	return `cat "` + claudeMd + `" 2>/dev/null || echo '` + orchestratorContractFallback + `'`
+}
 
 // ensureOrchestratorSessionStartHook writes a SessionStart hook into the shared
 // orchestrators root's .claude/settings.json, merging so it never clobbers other
 // keys or hook events already there. SessionStart fires on a new session
-// (startup) and a reopened one (resume), so every orchestrator loads the skill's
-// contract both on start and on reopen.
+// (startup) and a reopened one (resume), so every orchestrator has its contract
+// injected both on start and on reopen.
 func ensureOrchestratorSessionStartHook(dir string) error {
 	claudeDir := filepath.Join(dir, ".claude")
 	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
@@ -342,7 +367,7 @@ func ensureOrchestratorSessionStartHook(dir string) error {
 	if hooks == nil {
 		hooks = map[string]any{}
 	}
-	hooks["SessionStart"] = orchestratorSessionStartHook()
+	hooks["SessionStart"] = orchestratorSessionStartHook(dir)
 	settings["hooks"] = hooks
 	out, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
@@ -351,10 +376,10 @@ func ensureOrchestratorSessionStartHook(dir string) error {
 	return os.WriteFile(path, append(out, '\n'), 0o644)
 }
 
-// orchestratorSessionStartHook is the SessionStart hook block: the skill-loading
-// command runs on both new starts (startup) and reopens (resume).
-func orchestratorSessionStartHook() []any {
-	command := map[string]any{"type": "command", "command": orchestratorSkillHookCommand}
+// orchestratorSessionStartHook is the SessionStart hook block: the contract-
+// injecting command runs on both new starts (startup) and reopens (resume).
+func orchestratorSessionStartHook(dir string) []any {
+	command := map[string]any{"type": "command", "command": orchestratorSkillHookCommand(dir)}
 	matcher := func(source string) map[string]any {
 		return map[string]any{"matcher": source, "hooks": []any{command}}
 	}
