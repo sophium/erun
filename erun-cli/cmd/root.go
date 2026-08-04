@@ -3,6 +3,7 @@ package cmd
 import (
 	"io"
 	"os"
+	"runtime"
 	"time"
 
 	"github.com/manifoldco/promptui"
@@ -22,13 +23,19 @@ type (
 // own goroutines, so its cursor-control frames' final flush would otherwise race
 // process exit.
 //
+// Windows takes the plain reader for interactive terminals too: the desktop app's
+// terminal is a ConPTY, whose repaints re-send promptui's in-place cursor redraws
+// as duplicate lines, so each answered prompt echoes twice. A single-write plain
+// prompt gives ConPTY nothing to re-paint. Masked prompts stay on promptui so the
+// secret input remains hidden — keeping it masked matters more than the repaint.
+//
 // The promptui branch binds its reader to os.Stdin explicitly: on Windows
 // readline otherwise opens the console directly and cannot read piped stdin at
 // all, so a forced-TTY scenario (or any scripted run) would read EOF. Passing
 // os.Stdin is a no-op for a real interactive terminal — that is already the
 // default source — and lets piped input drive the prompt on every host.
 func runPrompt(prompt promptui.Prompt) (string, error) {
-	if writerIsTerminal(os.Stdout) {
+	if writerIsTerminal(os.Stdout) && (runtime.GOOS != "windows" || prompt.Mask != 0) {
 		prompt.Stdin = os.Stdin
 		return prompt.Run()
 	}
@@ -36,7 +43,7 @@ func runPrompt(prompt promptui.Prompt) (string, error) {
 }
 
 func runSelect(prompt promptui.Select) (int, string, error) {
-	if writerIsTerminal(os.Stdout) {
+	if writerIsTerminal(os.Stdout) && runtime.GOOS != "windows" {
 		prompt.Stdin = os.Stdin
 		return prompt.Run()
 	}

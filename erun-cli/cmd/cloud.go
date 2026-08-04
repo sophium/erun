@@ -65,7 +65,7 @@ func newCloudInitAWSCmd(store common.CloudStore, promptRunner PromptRunner, deps
 	cmd.Flags().StringVar(&params.SSOStartURL, "sso-start-url", "", "AWS IAM Identity Center start URL")
 	cmd.Flags().StringVar(&params.SSORegion, "sso-region", "", "AWS IAM Identity Center region")
 	cmd.Flags().StringVar(&params.AccountID, "account-id", "", "AWS account ID to use for SSO login")
-	cmd.Flags().StringVar(&params.RoleName, "role-name", "", "AWS role name to use for SSO login")
+	cmd.Flags().StringVar(&params.RoleName, "role-name", "", "AWS permission set (IAM Identity Center) to assume for SSO login")
 	cmd.Flags().StringVar(&params.Region, "region", "", "Default AWS region for the generated configuration")
 	cmd.Flags().StringVar(&params.OIDCIssuerURL, "oidc-issuer-url", "", "OIDC issuer URL trusted by deployed ERun APIs")
 	addDryRunFlag(cmd)
@@ -74,6 +74,9 @@ func newCloudInitAWSCmd(store common.CloudStore, promptRunner PromptRunner, deps
 
 func runCloudInitAWSCommand(ctx common.Context, store common.CloudStore, promptRunner PromptRunner, params common.InitAWSCloudProviderParams, deps common.CloudDependencies) error {
 	var err error
+	if strings.TrimSpace(params.Profile) == "" && awsInitParamsNeedPrompt(params) {
+		printAWSInitGuidance(ctx)
+	}
 	params, err = promptAWSInitParams(promptRunner, params)
 	if err != nil {
 		return err
@@ -308,7 +311,7 @@ func promptMissingAWSInitParams(promptRunner PromptRunner, params common.InitAWS
 	if err != nil {
 		return params, err
 	}
-	params.RoleName, err = promptCloudValueIfEmpty(promptRunner, params.RoleName, "AWS role name", "")
+	params.RoleName, err = promptCloudValueIfEmpty(promptRunner, params.RoleName, "AWS permission set", "")
 	if err != nil {
 		return params, err
 	}
@@ -317,6 +320,34 @@ func promptMissingAWSInitParams(promptRunner PromptRunner, params common.InitAWS
 		return params, err
 	}
 	return params, err
+}
+
+// awsInitParamsNeedPrompt reports whether the AWS SSO wizard will ask the
+// operator for at least one value — used to gate the one-time guidance block.
+func awsInitParamsNeedPrompt(params common.InitAWSCloudProviderParams) bool {
+	return strings.TrimSpace(params.SSOStartURL) == "" ||
+		strings.TrimSpace(params.SSORegion) == "" ||
+		strings.TrimSpace(params.AccountID) == "" ||
+		strings.TrimSpace(params.RoleName) == "" ||
+		strings.TrimSpace(params.Region) == ""
+}
+
+// awsInitGuidance orients the operator before the AWS SSO prompts: where to find
+// each value in the AWS access portal, and that IAM Identity Center grants the
+// account through a permission set.
+const awsInitGuidance = `Set up an AWS IAM Identity Center (SSO) profile for ERun.
+You'll sign in through your browser when prompted; ERun never sees your AWS password.
+Find each value in your AWS access portal (open the SSO start URL, sign in, then expand the account):
+  - SSO start URL   your Identity Center portal, e.g. https://my-sso.awsapps.com/start
+  - SSO region      the region Identity Center runs in, e.g. eu-west-2
+  - Account ID      the 12-digit AWS account to use
+  - Permission set  the permission set granted to you on that account (the name shown
+                    under the account tile, e.g. AdministratorAccess)
+
+`
+
+func printAWSInitGuidance(ctx common.Context) {
+	_, _ = fmt.Fprint(ctx.Stdout, awsInitGuidance)
 }
 
 func promptCloudValueIfEmpty(promptRunner PromptRunner, value, label, defaultValue string) (string, error) {

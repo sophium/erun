@@ -11,7 +11,7 @@ Flags:
   -h, --help                     help for aws
       --oidc-issuer-url string   OIDC issuer URL trusted by deployed ERun APIs
       --region string            Default AWS region for the generated configuration
-      --role-name string         AWS role name to use for SSO login
+      --role-name string         AWS permission set (IAM Identity Center) to assume for SSO login
       --sso-region string        AWS IAM Identity Center region
       --sso-start-url string     AWS IAM Identity Center start URL
 

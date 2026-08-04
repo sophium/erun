@@ -1,3 +1,12 @@
+Set up an AWS IAM Identity Center (SSO) profile for ERun.
+You'll sign in through your browser when prompted; ERun never sees your AWS password.
+Find each value in your AWS access portal (open the SSO start URL, sign in, then expand the account):
+  - SSO start URL   your Identity Center portal, e.g. https://my-sso.awsapps.com/start
+  - SSO region      the region Identity Center runs in, e.g. eu-west-2
+  - Account ID      the 12-digit AWS account to use
+  - Permission set  the permission set granted to you on that account (the name shown
+                    under the account tile, e.g. AdministratorAccess)
+
 Default AWS region [eu-west-1]: Dry run: AWS cloud provider initialization planned.
 audit: erun cloud init aws --account-id 123456789012 --dry-run --role-name Admin --sso-region eu-west-1 --sso-start-url https://example.awsapps.com/start
 aws configure set sso_start_url https://example.awsapps.com/start --profile 'erun-sso-<timestamp>'
