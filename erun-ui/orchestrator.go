@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -476,11 +477,11 @@ const orchestratorUltracodeFlag = ` --settings '{"ultracode":true}'`
 // conversation in the shared workspace. A non-empty resumePrompt is handed to
 // the resumed (or freshly created) session so a rebuild+restart continues its
 // task itself.
-func orchestratorLaunchCommand(sessionID, initialPrompt, resumePrompt string) (string, []string, error) {
+func orchestratorLaunchCommand(sessionID, initialPrompt, resumePrompt, mcpConfigPath string) (string, []string, error) {
 	if _, err := exec.LookPath(defaultAITool); err != nil {
 		return "", nil, fmt.Errorf("the %q CLI was not found on PATH; install it to run an orchestrator", defaultAITool)
 	}
-	shell, args := buildOrchestratorLaunch(runtime.GOOS, sessionID, orchestratorSessionExists(sessionID), initialPrompt, resumePrompt)
+	shell, args := buildOrchestratorLaunch(runtime.GOOS, sessionID, orchestratorSessionExists(sessionID), initialPrompt, resumePrompt, mcpConfigPath)
 	return shell, args, nil
 }
 
@@ -530,8 +531,11 @@ func orchestratorSessionExists(sessionID string) bool {
 // first run: PowerShell tests $LASTEXITCODE, POSIX chains with ||. A resumePrompt
 // is appended to both the resume and the fresh-fallback branch so an auto-resume
 // runs the task even on the first launch.
-func buildOrchestratorLaunch(goos, sessionID string, sessionExists bool, initialPrompt, resumePrompt string) (string, []string) {
+func buildOrchestratorLaunch(goos, sessionID string, sessionExists bool, initialPrompt, resumePrompt, mcpConfigPath string) (string, []string) {
 	flags := orchestratorUltracodeFlag + " --model " + orchestratorModel
+	if strings.TrimSpace(mcpConfigPath) != "" {
+		flags += ` --mcp-config "` + mcpConfigPath + `"`
+	}
 	fresh := defaultAITool + flags
 	shell, shellArgs := resolveLocalShellCommand(goos)
 
@@ -819,7 +823,14 @@ func (a *App) runningOrchestratorInfo(id string) (orchestratorInfo, bool) {
 // mirror directory and tracks the live session.
 func (a *App) spawnOrchestratorSession(id, name string, envs []eruncommon.OrchestratorEnvConfig, initialPrompt, resumePrompt string, transient bool, cols, rows int) (orchestratorInfo, error) {
 	cols, rows = clampTerminalSize(cols, rows)
-	executable, args, err := a.deps.resolveOrchestratorLaunch(orchestratorSessionID(id), initialPrompt, resumePrompt)
+	// Wire each linked env's erun MCP into the orchestrator session so it drives
+	// its envs through the MCP (raw/build/deploy/…) rather than raw kubectl.
+	// Non-fatal: the orchestrator still launches without the env MCP.
+	mcpConfigPath, mcpErr := a.writeOrchestratorMCPConfig(id, envs)
+	if mcpErr != nil {
+		log.Printf("erun-app: write orchestrator MCP config for %s: %v", id, mcpErr)
+	}
+	executable, args, err := a.deps.resolveOrchestratorLaunch(orchestratorSessionID(id), initialPrompt, resumePrompt, mcpConfigPath)
 	if err != nil {
 		return orchestratorInfo{}, err
 	}
