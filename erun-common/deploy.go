@@ -3297,15 +3297,24 @@ func findComponentHelmChartPath(projectRoot, componentName string) (string, erro
 	return matches[0], nil
 }
 
-// discoverComponentChartDirs walks projectRoot for every chart directory whose
-// parent is a k8s/ directory (**/k8s/<chart>/Chart.yaml) — the same places the
-// per-image lookup found charts, but returning all of them regardless of image
-// name so a module's image-less component charts (a tenant's wrappers) are
-// included. It skips .git; vendored subcharts under charts/ are excluded by the
-// parent-is-k8s check.
+// discoverComponentChartDirs returns the component-chart directories under the
+// project's devops k8s dir (<k8s>/<chart>/Chart.yaml), returning all of them
+// regardless of image name so a module's image-less component charts (a tenant's
+// wrappers) are included. It resolves that k8s dir scoped to the tenant — see
+// componentChartsK8sDir — rather than walking the whole project, so a brownfield
+// tenant's own unrelated k8s/*/Chart.yaml trees are never treated as publishable
+// component charts. It skips .git; vendored subcharts under charts/ are excluded
+// by the parent-is-k8s check.
 func discoverComponentChartDirs(projectRoot string) ([]KubernetesDeployContext, error) {
+	k8sDir, ok, err := componentChartsK8sDir(projectRoot)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
 	var contexts []KubernetesDeployContext
-	err := filepath.WalkDir(projectRoot, func(path string, d fs.DirEntry, walkErr error) error {
+	err = filepath.WalkDir(k8sDir, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -3333,6 +3342,54 @@ func discoverComponentChartDirs(projectRoot string) ([]KubernetesDeployContext, 
 		return nil, err
 	}
 	return contexts, nil
+}
+
+// componentChartsK8sDir resolves the directory whose subdirectories are the
+// project's component charts, scoped so a brownfield tenant's own unrelated
+// k8s/*/Chart.yaml trees are never treated as publishable component charts.
+// Resolution order: the paths.k8s override; else, when a tenant is detected for
+// this project root, ONLY that tenant's <tenant>-devops/k8s — returning "no
+// charts" when it is absent rather than falling through to an unrelated -devops
+// module (deploy's runtime-chart lookup is name-scoped the same way); else, for a
+// tenant-less project (e.g. erun releasing itself), the single -devops/k8s
+// convention scan.
+func componentChartsK8sDir(projectRoot string) (string, bool, error) {
+	projectRoot = filepath.Clean(strings.TrimSpace(projectRoot))
+	if projectRoot == "" {
+		return "", false, nil
+	}
+	if dir, ok, err := configuredK8sDir(projectRoot); err != nil || ok {
+		return dir, ok, err
+	}
+	if tenant, detectedRoot, err := FindProjectRoot(); err == nil &&
+		filepath.Clean(strings.TrimSpace(detectedRoot)) == projectRoot &&
+		strings.TrimSpace(tenant) != "" {
+		k8sDir := filepath.Join(projectRoot, RuntimeReleaseName(tenant), "k8s")
+		ok, err := isKubernetesDeployModuleDir(k8sDir)
+		if err != nil {
+			return "", false, err
+		}
+		return k8sDir, ok, nil
+	}
+	return singleDevopsK8sDir(projectRoot)
+}
+
+// singleDevopsK8sDir returns the sole <name>-devops/k8s chart module under
+// projectRoot, for a tenant-less project where the tenant name cannot scope the
+// lookup; it errors when more than one exists rather than guessing.
+func singleDevopsK8sDir(projectRoot string) (string, bool, error) {
+	candidates, err := findDevopsK8sDirs(projectRoot)
+	if err != nil {
+		return "", false, err
+	}
+	switch len(candidates) {
+	case 0:
+		return "", false, nil
+	case 1:
+		return candidates[0], true, nil
+	default:
+		return "", false, fmt.Errorf("multiple devops k8s directories found under project root")
+	}
 }
 
 func componentHelmChartCandidate(path string, d fs.DirEntry, componentName string, err error) (string, bool, error) {
