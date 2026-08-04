@@ -59,7 +59,7 @@ type erunUIDeps struct {
 	startTerminal             func(startTerminalSessionParams) (terminalSession, error)
 	runIDECommand             func(context.Context, startTerminalSessionParams) (string, error)
 	launchHostArtifact        func(exePath, dir string) error
-	resolveOrchestratorLaunch func(sessionID, initialPrompt, resumePrompt string) (string, []string, error)
+	resolveOrchestratorLaunch func(sessionID, initialPrompt, resumePrompt, mcpConfigPath string) (string, []string, error)
 	savePastedFile            func(pastedFileSaveParams) (string, error)
 	listAgentOutputs          func(eruncommon.OpenResult, eruncommon.RuntimeOutputsParams) (eruncommon.RuntimeOutputsListResult, error)
 	downloadAgentOutput       func(eruncommon.OpenResult, eruncommon.RuntimeOutputDownloadParams) (eruncommon.RuntimeOutputResult, error)
