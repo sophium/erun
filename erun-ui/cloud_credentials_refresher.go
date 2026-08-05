@@ -30,7 +30,7 @@ func (a *App) cloudCredentialsRefresherKey(selection uiSelection) string {
 	return strings.TrimSpace(selection.Tenant) + "/" + strings.TrimSpace(selection.Environment)
 }
 
-// startCloudCredentialsRefresherForSelection seeds a remote AWS env with
+// startCloudCredentialsRefresherForSelection seeds an env's runtime pod with
 // temporary host credentials on the operator's behalf. Attaching an AWS cloud
 // alias is itself the opt-in, so no separate toggle gates it. Idempotent per
 // selection.
@@ -69,9 +69,10 @@ func (a *App) resolveCloudCredentialsRefreshTarget(selection uiSelection) (strin
 	if err != nil {
 		return "", eruncommon.OpenResult{}, false
 	}
-	if !envConfig.RemoteWorktree() {
-		return "", eruncommon.OpenResult{}, false
-	}
+	// Deliberately not gated on env type. Where the worktree lives says nothing
+	// about whose identity the pod should act as, and the pod is in the cluster
+	// for every type — so it can only reach AWS through the profile pushed here,
+	// which the chart wires into AWS_PROFILE whenever an AWS alias is attached.
 	// CloudProviderAlias is the legacy scalar that only ever holds an AWS alias;
 	// non-AWS aliases (Cloudflare) live in CloudProviderAliases, so a
 	// Cloudflare-only env correctly reads empty here. Cloudflare credentials ship
@@ -97,7 +98,7 @@ func (a *App) resolveCloudCredentialsRefreshTarget(selection uiSelection) (strin
 }
 
 // stopCloudCredentialsRefresherForSelection stops the refresher and clears the
-// remote credentials so they do not linger after opt-out. Safe to call when
+// in-pod credentials so they do not linger after opt-out. Safe to call when
 // none is running.
 func (a *App) stopCloudCredentialsRefresherForSelection(selection uiSelection) {
 	selection = normalizeSelection(selection)

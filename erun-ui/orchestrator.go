@@ -21,14 +21,16 @@ import (
 
 // An orchestrator is a host-side AI session that is NOT scoped to a single
 // environment: it runs the AI harness on the operator's machine with the erun
-// CLI on PATH, so it can drive the remote-agent environments it links. The real
-// work happens in the pods — the orchestrator delegates edits and builds to the
-// in-pod agents, reviews each env's one-way synced mirror on the host read-only,
-// and runs host-native build artifacts to verify. It may build locally to help,
-// but never edits the mirror (the next sync would overwrite it anyway).
+// CLI on PATH, so it can drive the agent environments it links. The real work
+// happens in the pods — the orchestrator delegates edits and builds to the
+// in-pod agents, reviews each env's worktree on the host read-only, and runs
+// host-native build artifacts to verify. It may build locally to help, but never
+// writes into a review directory: the in-pod agent owns the worktree.
 //
-// An orchestrator is a persisted definition (root config): a set of linked
-// remote-agent environments, each mirrored to a host directory. The set
+// An orchestrator is a persisted definition (root config): a set of linked agent
+// environments, each with a host review directory. A remote-agent env's is the
+// one-way mirror its workspace sync fills; a local-agent env's is the worktree
+// itself, already on this machine because the pod hostPath-mounts it. The set
 // reappears across restarts; the running session is ephemeral.
 
 // orchestratorSession is a live orchestrator PTY. Persisted orchestrators are
@@ -50,12 +52,15 @@ type orchestratorEnvInput struct {
 	Directory   string `json:"directory"`
 }
 
-// orchestratorEnvCandidate is a remote-agent env the operator can link, with the
-// host directory its mirror defaults to.
+// orchestratorEnvCandidate is an agent env the operator can link, with the host
+// directory the orchestrator reviews it in. Mirrored distinguishes the two kinds
+// of review directory: a workspace-sync mirror the operator may place anywhere,
+// or the env's own worktree on this machine, whose path is derived and fixed.
 type orchestratorEnvCandidate struct {
 	Tenant           string `json:"tenant"`
 	Environment      string `json:"environment"`
 	DefaultDirectory string `json:"defaultDirectory"`
+	Mirrored         bool   `json:"mirrored"`
 }
 
 type orchestratorEnvInfo struct {
@@ -99,6 +104,30 @@ func defaultOrchestratorDirectory(tenant, environment string) string {
 	return filepath.Join(orchestratorsRoot(), strings.TrimSpace(tenant)+"-"+strings.TrimSpace(environment))
 }
 
+// orchestratableEnv reports whether an env can be linked to an orchestrator. It
+// needs a worktree to review and an in-pod agent to delegate to, which both agent
+// types have and a runtime env does not.
+func orchestratableEnv(env eruncommon.EnvConfig) bool {
+	switch env.ResolvedType() {
+	case eruncommon.EnvironmentTypeLocalAgent, eruncommon.EnvironmentTypeRemoteAgent:
+		return true
+	default:
+		return false
+	}
+}
+
+// orchestratorReviewDirectory resolves where an orchestrator reviews an env on
+// this machine, and whether that directory is a synced mirror. It applies the
+// same policy as hostWorkspacePath — a local-agent worktree is already here, so
+// it is reviewed in place — but yields the mirror path a remote-agent env would
+// be wired to rather than "" when its sync is not on yet.
+func orchestratorReviewDirectory(tenant string, env eruncommon.EnvConfig) (string, bool) {
+	if env.ResolvedType() == eruncommon.EnvironmentTypeLocalAgent {
+		return strings.TrimSpace(env.LocalRepoPath), false
+	}
+	return defaultOrchestratorDirectory(tenant, env.Name), true
+}
+
 // orchestratorClaudeMd is the single CLAUDE.md every orchestrator shares in the
 // orchestrators root. It mirrors the erun-orchestrate skill (the source of truth
 // for the full workflow) and is generic on purpose: mirrors are discovered as the
@@ -107,7 +136,7 @@ func defaultOrchestratorDirectory(tenant, environment string) string {
 const orchestratorClaudeMd = `# Orchestrator working directory
 
 You are a **host-side erun orchestrator**. You coordinate work across the erun
-remote-agent environments mirrored here, from the operator's machine. The real
+agent environments linked to you, from the operator's machine. The real
 work happens in the pods — you delegate, review, and verify. Follow the ` + "`erun-orchestrate`" + ` skill.
 
 ## Operating under this contract (read first)
@@ -122,23 +151,34 @@ force.
 **Know your scope from config, never from memory or disk.** Your identity is the
 ` + "`ERUN_ORCHESTRATOR_ID`" + ` environment variable; your linked environments are the
 ` + "`orchestrators:`" + ` entry with that id in erun's ` + "`config.yaml`" + `. Never state which
-environments are yours from recollection, or infer them from which mirror
-directories happen to have files — read the config every time.
+environments are yours from recollection, or infer them from which directories
+here happen to have files — read the config every time.
 
 ## Rules
 
-- Each ` + "`<tenant>-<env>`" + ` subdirectory here is a **read-only** one-way mirror of a
-  remote-agent environment's worktree, kept in sync from the pod. **Never edit
-  files in a mirror** — the next sync overwrites them, and edits mislead you.
+- Your **review directory** for an environment is the ` + "`directory`" + ` on its
+  ` + "`orchestrators:`" + ` entry, and it is one of two kinds. A ` + "`<tenant>-<env>`" + `
+  subdirectory here is a one-way **mirror** of a remote-agent environment's worktree,
+  kept in sync from its pod. A path outside this root is a **local-agent
+  environment's own worktree**, which lives on this machine and is hostPath-mounted
+  into its pod. The environment's ` + "`type`" + ` tells you which kind you have.
+- **Never write into a review directory**, whichever kind it is. In a mirror the edit
+  is simply lost — the next sync overwrites it. In a local-agent worktree it is worse:
+  the edit *does* reach the pod, so it silently competes with the in-pod agent that
+  owns that tree, in what is also the operator's own checkout.
 - To change code, **ask the in-pod agent** in the relevant environment to do it
-  (drive it via ` + "`erun`" + ` / the env's MCP). Do not patch the mirror.
+  (drive it via ` + "`erun`" + ` / the env's MCP). Never patch the directory yourself.
 - **Review** changes on the host, read-only. A mirror is a one-way plain-directory
-  copy of the pod's working tree — it needs no local git. Read the synced files, and
-  for the authoritative diff of the agent's uncommitted work view it from the pod
-  (the desktop app's Review, or ask the in-pod agent to run ` + "`git diff`" + `).
+  copy of the pod's working tree with no git of its own, so read the synced files and
+  take the authoritative diff of uncommitted work from the pod (the desktop app's
+  Review, or ask the in-pod agent to run ` + "`git diff`" + `). A local-agent worktree
+  *is* a real checkout, so ` + "`git -C <dir> diff`" + ` here is already authoritative.
 - **Verify** by running host-native build artifacts (e.g. a Windows ` + "`.exe`" + ` the pod
-  cross-built) under a mirror's ` + "`.erun-outputs/`" + ` — the pod can't run a foreign-OS
-  binary. You may build locally to help, but never edit the mirror.
+  cross-built) — the pod can't run a foreign-OS binary. A mirror carries them under
+  its read-only ` + "`.erun-outputs/`" + `; a local-agent environment has no mirror, so
+  pull them with that env's ` + "`outputs_list`" + `/` + "`outputs_download`" + ` (or the
+  desktop's Outputs) first. You may build locally to help, but never edit a review
+  directory.
 - File erun **platform** bugs with the ` + "`erun-file-issue`" + ` skill.
 
 ## Operating mode
@@ -613,10 +653,10 @@ func (a *App) findOrchestratorConfig(id string) (eruncommon.OrchestratorConfig, 
 	return eruncommon.OrchestratorConfig{}, fmt.Errorf("orchestrator %q not found", id)
 }
 
-// ListOrchestratorEnvCandidates returns the remote-agent environments the
-// operator can link, each with the host directory its mirror defaults to. Only
-// remote-agent envs qualify — they are the ones whose worktree lives in a pod and
-// syncs down to the host.
+// ListOrchestratorEnvCandidates returns the agent environments the operator can
+// link, each with the host directory the orchestrator reviews it in: a mirror the
+// sync fills for a remote-agent env, or the worktree itself for a local-agent env,
+// which is already on this machine because the pod hostPath-mounts it.
 func (a *App) ListOrchestratorEnvCandidates() ([]orchestratorEnvCandidate, error) {
 	tenants, err := a.deps.store.ListTenantConfigs()
 	if err != nil {
@@ -629,13 +669,15 @@ func (a *App) ListOrchestratorEnvCandidates() ([]orchestratorEnvCandidate, error
 			continue
 		}
 		for _, env := range envs {
-			if env.ResolvedType() != eruncommon.EnvironmentTypeRemoteAgent {
+			if !orchestratableEnv(env) {
 				continue
 			}
+			directory, mirrored := orchestratorReviewDirectory(tenant.Name, env)
 			out = append(out, orchestratorEnvCandidate{
 				Tenant:           tenant.Name,
 				Environment:      env.Name,
-				DefaultDirectory: defaultOrchestratorDirectory(tenant.Name, env.Name),
+				DefaultDirectory: directory,
+				Mirrored:         mirrored,
 			})
 		}
 	}
@@ -648,6 +690,11 @@ func (a *App) ListOrchestratorEnvCandidates() ([]orchestratorEnvCandidate, error
 	return out, nil
 }
 
+// resolveEnvInputs turns the frontend's selection into links. A mirror directory
+// is the operator's to place, so their input wins; a local-agent env's review
+// directory is derived from its repository path, so it is resolved here and any
+// supplied value ignored — that keeps the env config the single source of truth
+// and a link from outliving a repository path that moved.
 func (a *App) resolveEnvInputs(inputs []orchestratorEnvInput) ([]eruncommon.OrchestratorEnvConfig, error) {
 	refs := make([]eruncommon.OrchestratorEnvConfig, 0, len(inputs))
 	for _, input := range inputs {
@@ -656,29 +703,48 @@ func (a *App) resolveEnvInputs(inputs []orchestratorEnvInput) ([]eruncommon.Orch
 		if tenant == "" || environment == "" {
 			continue
 		}
-		dir := strings.TrimSpace(input.Directory)
-		if dir == "" {
-			dir = defaultOrchestratorDirectory(tenant, environment)
+		env, _, err := a.deps.store.LoadEnvConfig(tenant, environment)
+		if err != nil {
+			return nil, fmt.Errorf("load %s/%s: %w", tenant, environment, err)
+		}
+		derived, mirrored := orchestratorReviewDirectory(tenant, env)
+		dir := derived
+		if mirrored {
+			if supplied := strings.TrimSpace(input.Directory); supplied != "" {
+				dir = supplied
+			}
+		} else if dir == "" {
+			return nil, fmt.Errorf("%s/%s has no repository path on this machine; set one before linking it to an orchestrator", tenant, environment)
 		}
 		refs = append(refs, eruncommon.OrchestratorEnvConfig{Tenant: tenant, Environment: environment, Directory: dir})
 	}
 	if len(refs) == 0 {
-		return nil, fmt.Errorf("an orchestrator must link at least one remote-agent environment")
+		return nil, fmt.Errorf("an orchestrator must link at least one environment")
 	}
 	return refs, nil
 }
 
-// wireEnvironmentSync creates the host mirror directory and turns on the env's
-// one-way workspace sync into it, so the orchestrator's review window fills from
-// the pod. SSHD must be deployed for the sync to flow; enabling it here is the
-// configuration half, activated on the env's next open/deploy.
-func (a *App) wireEnvironmentSync(ref eruncommon.OrchestratorEnvConfig) error {
-	if err := os.MkdirAll(ref.Directory, 0o755); err != nil {
-		return fmt.Errorf("create orchestrator directory %s: %w", ref.Directory, err)
-	}
+// wireEnvironmentReview prepares the env's host review directory. A remote-agent
+// env needs the mirror created and its one-way sync turned on so the window fills
+// from the pod (SSHD must be deployed for it to flow; enabling it here is the
+// configuration half, activated on the env's next open/deploy). A local-agent env
+// needs neither: the pod hostPath-mounts the worktree, so the directory already
+// exists and no sync is involved — creating it would hand the orchestrator an
+// empty review window instead of surfacing a repository path that is not there.
+func (a *App) wireEnvironmentReview(ref eruncommon.OrchestratorEnvConfig) error {
 	env, _, err := a.deps.store.LoadEnvConfig(ref.Tenant, ref.Environment)
 	if err != nil {
 		return fmt.Errorf("load %s/%s: %w", ref.Tenant, ref.Environment, err)
+	}
+	if _, mirrored := orchestratorReviewDirectory(ref.Tenant, env); !mirrored {
+		info, statErr := os.Stat(ref.Directory)
+		if statErr != nil || !info.IsDir() {
+			return fmt.Errorf("%s/%s has no worktree at %s; check its repository path before linking it to an orchestrator", ref.Tenant, ref.Environment, ref.Directory)
+		}
+		return nil
+	}
+	if err := os.MkdirAll(ref.Directory, 0o755); err != nil {
+		return fmt.Errorf("create orchestrator directory %s: %w", ref.Directory, err)
 	}
 	env.SSHD.Enabled = true
 	env.SSHD.WorkspaceSync.Enabled = true
@@ -699,16 +765,17 @@ func orchestratorDisplayName(name string, envs []eruncommon.OrchestratorEnvConfi
 	return "orchestrator"
 }
 
-// CreateOrchestrator persists a new orchestrator: it wires one-way sync for each
-// linked remote-agent env (creating the host mirror directory), then stores the
-// definition. Created stopped — StartOrchestrator spawns the session.
+// CreateOrchestrator persists a new orchestrator: it prepares each linked env's
+// host review directory (creating the mirror and wiring its sync where the env
+// needs one), then stores the definition. Created stopped — StartOrchestrator
+// spawns the session.
 func (a *App) CreateOrchestrator(name string, envs []orchestratorEnvInput) (orchestratorInfo, error) {
 	refs, err := a.resolveEnvInputs(envs)
 	if err != nil {
 		return orchestratorInfo{}, err
 	}
 	for _, ref := range refs {
-		if err := a.wireEnvironmentSync(ref); err != nil {
+		if err := a.wireEnvironmentReview(ref); err != nil {
 			return orchestratorInfo{}, err
 		}
 	}
@@ -748,7 +815,7 @@ func (a *App) UpdateOrchestrator(id, name string, envs []orchestratorEnvInput) (
 		return orchestratorInfo{}, fmt.Errorf("orchestrator %q not found", id)
 	}
 	for _, ref := range refs {
-		if err := a.wireEnvironmentSync(ref); err != nil {
+		if err := a.wireEnvironmentReview(ref); err != nil {
 			return orchestratorInfo{}, err
 		}
 	}
@@ -788,7 +855,25 @@ func (a *App) startPersistedOrchestrator(id, resumePrompt string, cols, rows int
 	if err != nil {
 		return orchestratorInfo{}, err
 	}
-	return a.spawnOrchestratorSession(def.ID, def.Name, def.Environments, "", resumePrompt, false, cols, rows)
+	return a.spawnOrchestratorSession(def.ID, def.Name, a.refreshLinkedEnvDirectories(def.Environments), "", resumePrompt, false, cols, rows)
+}
+
+// refreshLinkedEnvDirectories re-derives each local-agent link's review directory
+// from the env config as a session starts, so an orchestrator keeps reviewing a
+// worktree whose repository path moved after it was linked. A mirror path is the
+// operator's own choice, so it is left exactly as persisted.
+func (a *App) refreshLinkedEnvDirectories(envs []eruncommon.OrchestratorEnvConfig) []eruncommon.OrchestratorEnvConfig {
+	out := make([]eruncommon.OrchestratorEnvConfig, 0, len(envs))
+	for _, ref := range envs {
+		env, _, err := a.deps.store.LoadEnvConfig(ref.Tenant, ref.Environment)
+		if err == nil {
+			if derived, mirrored := orchestratorReviewDirectory(ref.Tenant, env); !mirrored && derived != "" {
+				ref.Directory = derived
+			}
+		}
+		out = append(out, ref)
+	}
+	return out
 }
 
 // RestartOrchestrator stops a persisted orchestrator's running session and spawns
@@ -805,7 +890,7 @@ func (a *App) RestartOrchestrator(id string, cols, rows int) (orchestratorInfo, 
 		return orchestratorInfo{}, err
 	}
 	a.stopOrchestratorSession(id)
-	return a.spawnOrchestratorSession(def.ID, def.Name, def.Environments, "", "", false, cols, rows)
+	return a.spawnOrchestratorSession(def.ID, def.Name, a.refreshLinkedEnvDirectories(def.Environments), "", "", false, cols, rows)
 }
 
 func (a *App) runningOrchestratorInfo(id string) (orchestratorInfo, bool) {
@@ -819,8 +904,8 @@ func (a *App) runningOrchestratorInfo(id string) (orchestratorInfo, bool) {
 	return orchestratorInfoFor(session.id, session.name, session.envs, "running", session.serial, session.transient), true
 }
 
-// spawnOrchestratorSession launches the host AI harness in the first linked env's
-// mirror directory and tracks the live session.
+// spawnOrchestratorSession launches the host AI harness in the shared
+// orchestrators root and tracks the live session.
 func (a *App) spawnOrchestratorSession(id, name string, envs []eruncommon.OrchestratorEnvConfig, initialPrompt, resumePrompt string, transient bool, cols, rows int) (orchestratorInfo, error) {
 	cols, rows = clampTerminalSize(cols, rows)
 	// Wire each linked env's erun MCP into the orchestrator session so it drives

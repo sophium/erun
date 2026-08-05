@@ -42,14 +42,17 @@ test.describe('environment init refresh', () => {
     seedTenant(tenant, environment);
     seedEnvironment(tenant, environment);
     try {
+      // The composed deploy's failure banner replaces this success banner within
+      // milliseconds in the inert harness, so record the banner stream rather
+      // than sampling the locator.
+      await app.titlebar.recordBanners();
       await emitWailsEvent(app.page, 'environment-initialized', { tenant, environment });
 
-      // Assert the transient success toast first — it auto-dismisses after a
-      // few seconds, whereas the row is persistent.
-      await expect(app.titlebar.statusMessage()).toContainText(
-        `Created ${tenant} / ${environment}`,
-        { timeout: 10_000 },
-      );
+      await expect
+        .poll(() => app.titlebar.sawBanner(`Created ${tenant} / ${environment}`), {
+          timeout: 10_000,
+        })
+        .toBe(true);
       await expect(app.sidebar.envRowButton(tenant, environment)).toBeVisible({ timeout: 10_000 });
     } finally {
       removeTenant(tenant);

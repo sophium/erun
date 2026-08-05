@@ -15,7 +15,7 @@ func TestRestartAppPersistsTargetRelaunchesAndQuits(t *testing.T) {
 
 	relaunched, quit := false, false
 	app := NewApp(erunUIDeps{
-		store:                   newOrchestratorStubStore(),
+		store:                   newOrchestratorStubStore(t.TempDir()),
 		orchestratorRestorePath: restorePath,
 		relaunchApp:             func() error { relaunched = true; return nil },
 		quitApp:                 func() { quit = true },

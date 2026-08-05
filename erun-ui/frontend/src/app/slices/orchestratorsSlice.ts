@@ -7,8 +7,8 @@ export interface OrchestratorEnvRef {
 }
 
 // OrchestratorInfo mirrors the Go orchestratorInfo JSON contract: a host-side
-// cross-env AI session that links one or more remote-agent environments (each
-// mirrored to a host directory) and, when running, exposes the terminal
+// cross-env AI session that links one or more agent environments (each reviewed
+// in a host directory) and, when running, exposes the terminal
 // SessionID the pane attaches to. Transient ones (Investigate) are not persisted.
 export interface OrchestratorInfo {
   id: string;
