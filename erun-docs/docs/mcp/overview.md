@@ -56,13 +56,32 @@ JSON-RPC 2.0 over `POST http://127.0.0.1:<port>/mcp` with `Accept: application/j
 
 ### Authentication
 
-The in-pod MCP server is **loopback-only by default**: the chart binds the listener to `127.0.0.1:<port>`. The default-deny `NetworkPolicy` on the env's namespace blocks ingress from outside the namespace. There is no token check on the MCP server itself; clients reach it via the desktop's port-forward, which is bound to the user's own loopback.
+An env deployed with a trust anchor requires a **bearer on every request**, including idle probes — the `raw` tool can `kubectl exec`, so the edge is authenticated ahead of any tool running. The anchor is the desktop identity's public key, injected into the pod at deploy time; the matching private key stays on the machine that deployed the env.
 
-To expose MCP cross-namespace or externally (rare), wire an Ingress + token-gated proxy in front of the listener. ERun does not ship that proxy.
+| Property | Value |
+|---|---|
+| Algorithm | EdDSA (Ed25519). Hard-checked, so no `none` / HMAC confusion is possible. |
+| `iss` | `file:///etc/erun/mcp-auth/desktopid.pub` — the in-pod path the edge loads its trusted key from. Only the configured issuer is ever trusted, never one named by the token. |
+| `aud` | `erun-mcp:<tenant>/<environment>` — a token minted for one env cannot be replayed against another. |
+| Lifetime | 5 minutes. Mint per request; do not cache. |
+| Failure | `401` with the verification reason. |
+
+An env deployed before key injection (no anchor configured) stays unauthenticated — loopback-only, behind the namespace's default-deny `NetworkPolicy`.
+
+**Don't hand-roll the token.** `erun mcp call` and `erun mcp tools` mint one internally per request, and `erun mcp token` prints one for a client that speaks MCP itself:
+
+```bash
+erun mcp call --tool list --output json          # one typed call, no token handling
+TOKEN=$(erun mcp token --tenant myapp --environment local)
+```
+
+See [`erun mcp`](/cli/mcp#talking-to-an-environments-mcp-edge) for the Operator view and [CLI flags · `erun mcp`](/agent-reference/cli-flags#erun-mcp) for the full contract.
+
+To expose MCP cross-namespace or externally (rare), wire an Ingress in front of the listener; the bearer check above applies there too.
 
 ### Worked example
 
-The full handshake and a single `tools/call` for `list`, expressed as `curl` calls. Replace `<port>` with the `localPort` from the discovery file.
+The full handshake and a single `tools/call` for `list`, expressed as `curl` calls — what `erun mcp call` does for you, spelled out. Replace `<port>` with the `localPort` from the discovery file and add `-H "Authorization: Bearer $(erun mcp token)"` to every request against an authenticated env.
 
 ```bash
 # 1. initialize — note the response's Mcp-Session-Id header.

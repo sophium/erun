@@ -40,7 +40,7 @@ func newOutputsListCmd(resolveOpen OpenResolver) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runOutputsListCommand(commandContext(cmd), resolveOpen, outputsOpenParams(tenant, environment), dirPath, limit, common.RunRemoteCommand)
+			return runOutputsListCommand(commandContext(cmd), resolveOpen, scopedOpenParams(tenant, environment), dirPath, limit, common.RunRemoteCommand)
 		},
 	}
 	addDryRunFlag(cmd)
@@ -65,7 +65,7 @@ func newOutputsDownloadCmd(resolveOpen OpenResolver) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runOutputsDownloadCommand(commandContext(cmd), resolveOpen, outputsOpenParams(tenant, environment), dirPath, args[0], dest, force, common.RunRemoteCommand)
+			return runOutputsDownloadCommand(commandContext(cmd), resolveOpen, scopedOpenParams(tenant, environment), dirPath, args[0], dest, force, common.RunRemoteCommand)
 		},
 	}
 	addDryRunFlag(cmd)
@@ -79,17 +79,6 @@ func addOutputsScopeFlags(cmd *cobra.Command, tenant, environment, dirPath *stri
 	cmd.Flags().StringVar(tenant, "tenant", "", "Target a specific tenant (default: the current scope)")
 	cmd.Flags().StringVar(environment, "environment", "", "Target a specific environment; requires --tenant")
 	cmd.Flags().StringVar(dirPath, "path", "", "Pod directory to operate on (default: $ERUN_OUTPUTS_DIR, /home/erun/.erun/outputs)")
-}
-
-func outputsOpenParams(tenant, environment string) common.OpenParams {
-	tenant = strings.TrimSpace(tenant)
-	environment = strings.TrimSpace(environment)
-	return common.OpenParams{
-		Tenant:                tenant,
-		Environment:           environment,
-		UseDefaultTenant:      tenant == "",
-		UseDefaultEnvironment: environment == "",
-	}
 }
 
 func runOutputsListCommand(ctx common.Context, resolveOpen OpenResolver, params common.OpenParams, dirPath string, limit int, run common.RuntimeOutputsRunner) error {

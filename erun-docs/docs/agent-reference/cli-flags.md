@@ -553,6 +553,61 @@ See [MCP overview](/mcp/overview) for the protocol and the tool list. The launch
 |---|---|---|---|
 | `--port <n>` | int | `EnvConfig.mcpport` (default `17000`). | The HTTP listener port. |
 | `--host <addr>` | string | `127.0.0.1` | The bind address. The in-pod default is loopback-only. |
+| `--path <p>` | string | `/mcp` | The HTTP path the endpoint is served from. |
+
+### `erun mcp call` / `tools` / `token` — client side
+
+These call an environment's MCP edge rather than serving one; they are the supported way for a script or an orchestrating Agent to reach an env without configuring an MCP client, and the reason no MCP *tool* exists for this (a tool that calls another env's edge would invert the transport). All three share the target flags:
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--tenant <t>` | string | The current scope. | Target a specific tenant. |
+| `--environment <e>` | string | The tenant's default env. | Target a specific environment; requires `--tenant`. |
+| `--dry-run` | bool | `false` | Resolve the endpoint and trace the request without sending it. |
+| `--output json` | string | `text` | Emit the structured result on stdout. |
+
+`call` adds:
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--tool <name>` | string | *(required)* | The tool to invoke. |
+| `--args <json>` | string | `{}` | The tool's arguments as a JSON object. |
+
+Resolution and request contract:
+
+1. The target resolves through the same path as `deploy` / `open` (explicit flags, else the current runtime directory).
+2. The endpoint is `http://127.0.0.1:<localPort>/mcp`, where `localPort` is the env's MCP port — the value `erun list` reports and `erun open` forwards.
+3. A bearer is minted **per HTTP request**, immediately before it is sent: EdDSA (Ed25519) over the desktop identity, `iss=file:///etc/erun/mcp-auth/desktopid.pub`, `aud=erun-mcp:<tenant>/<environment>`, 5-minute expiry. No client-side timeout is imposed on the call, so a tool that runs for minutes is not cut short and cannot fail on an aged-out token.
+4. The handshake is the standard one — `initialize`, `notifications/initialized`, then `tools/call` or `tools/list` — propagating `Mcp-Session-Id` and accepting both plain-JSON and SSE-framed replies.
+
+`--output json` shapes:
+
+```json
+// erun mcp call --output json
+{ "tool": "version", "text": "{\"version\":\"1.0.80\"}", "structured": { "version": "1.0.80" }, "isError": false }
+
+// erun mcp tools --output json
+{ "tools": [ { "name": "raw", "description": "…", "inputSchema": { "type": "object", "properties": {} } } ] }
+
+// erun mcp token --output json
+{ "tenant": "myapp", "environment": "local", "endpoint": "http://127.0.0.1:17000/mcp",
+  "issuer": "file:///etc/erun/mcp-auth/desktopid.pub", "audience": "erun-mcp:myapp/local",
+  "expiresAt": "2026-05-24T10:47:15Z", "token": "eyJhbGciOiJFZERTQSI…" }
+```
+
+`text` is every text content block of the tool result joined by newlines; `structured` is the tool's `structuredContent`, absent when the tool returns none. In text mode `call` prints `text`, or the structured payload when the tool returned no text.
+
+Error codes:
+
+| Code | Cause | Exit code |
+|---|---|---|
+| `--tool is required` | `call` invoked without `--tool`. | `1` |
+| `--args must be a JSON object` | `--args` did not parse as a JSON object. Raised before the target resolves. | `1` |
+| `MCP endpoint is not reachable` | The dial to the local MCP port failed — normally a missing port-forward. Recovery: `erun open <tenant> <env>`. | `1` |
+| `MCP endpoint rejected the bearer token` | The edge answered `401`/`403`: it does not trust this machine's identity. Recovery: redeploy the env from the desktop app so the current public key is injected. | `1` |
+| `MCP tool <name> reported an error` | The tool set `isError`; the message is the tool's own. | `1` |
+| `MCP tools/call failed` | A JSON-RPC-level error (unknown tool, invalid arguments), reported with the protocol code. | `1` |
+| `no desktop identity at <path>` | No private key on this machine. A key is never generated here, because a fresh identity signs tokens no deployed env trusts. Recovery: open an env from the desktop app once. | `1` |
 
 ---
 

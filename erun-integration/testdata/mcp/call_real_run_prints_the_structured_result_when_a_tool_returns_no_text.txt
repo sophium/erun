@@ -1,0 +1,3 @@
+{"stopEligible":false}
+audit: erun mcp call --tool idle
+mcp: team/dev edge resolved to http://<LOOPBACK>:26100/mcp

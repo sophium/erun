@@ -1272,7 +1272,7 @@ func TestStartDeploySessionInjectsMCPAuthPublicKey(t *testing.T) {
 	if _, err := app.StartDeploySession(uiSelection{Tenant: "erun", Environment: "remote", Version: "1.0.19"}, 80, 24); err != nil {
 		t.Fatalf("StartDeploySession failed: %v", err)
 	}
-	wantPath := filepath.Join(identityDir, desktopIdentityPubFile)
+	wantPath := eruncommon.DesktopIdentityPublicKeyPath(identityDir)
 	written := sessions[0].WrittenString()
 	// Derive the expectation from the production builder so the platform's shell
 	// prefix, per-arg quoting (the temp path needs it on Windows), and line ending
@@ -1318,7 +1318,7 @@ func TestStartInitSessionInjectsMCPAuthPublicKey(t *testing.T) {
 	if _, err := app.StartInitSession(uiSelection{Tenant: "erun", Environment: "remote", Version: "1.0.19", NoGit: true}, 80, 24); err != nil {
 		t.Fatalf("StartInitSession failed: %v", err)
 	}
-	wantPath := filepath.Join(identityDir, desktopIdentityPubFile)
+	wantPath := eruncommon.DesktopIdentityPublicKeyPath(identityDir)
 	wantFlag := "--mcp-auth-public-key " + shellQuoteIfNeeded(wantPath)
 	written := sessions[0].WrittenString()
 	if !strings.Contains(written, wantFlag) {

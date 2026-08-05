@@ -1,0 +1,2 @@
+audit: erun mcp call --args not-json --dry-run --tool raw
+--args must be a JSON object: invalid character 'o' in literal null (expecting 'u')

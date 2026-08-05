@@ -187,7 +187,7 @@ func NewApp(deps erunUIDeps) *App {
 	}
 	app.contribute = newContributeStore(deps.contributeStatePath)
 	if app.identity == nil {
-		app.identity = newDesktopIdentity(defaultDesktopIdentityDir())
+		app.identity = newDesktopIdentity(eruncommon.DefaultDesktopIdentityDir())
 	}
 	return app
 }

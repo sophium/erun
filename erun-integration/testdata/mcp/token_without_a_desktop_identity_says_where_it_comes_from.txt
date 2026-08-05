@@ -1,0 +1,3 @@
+audit: erun mcp token
+mcp: team/dev edge resolved to http://<LOOPBACK>:17000/mcp
+no desktop identity at <TMP> open an environment from the ERun desktop app once so the identity exists and deployed runtimes trust it

@@ -1,0 +1,3 @@
+audit: erun mcp call --tool raw
+mcp: team/dev edge resolved to http://<LOOPBACK>:26100/mcp
+MCP tool raw reported an error: no such path

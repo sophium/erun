@@ -1,0 +1,26 @@
+Call a single tool on an environment's MCP edge and print its result.
+
+The bearer token is minted for this call from the desktop identity and never handled by the caller, so a script or agent driving an environment cannot be stopped by an expired token. The call goes to the environment's local MCP port, which requires the port-forward `erun open` establishes.
+
+A tool can change the environment: whatever the named tool does, this runs it.
+
+Usage:
+  erun mcp call [flags]
+
+Examples:
+  erun mcp call --tool version
+  erun mcp call --tenant acme --environment dev --tool raw --args '{"command":["git","status"]}'
+  erun mcp call --tool list --output json
+
+Flags:
+      --args string          Tool arguments as a JSON object (default: no arguments)
+      --dry-run              Resolve and trace mutating actions without executing them.
+      --environment string   Target a specific environment; requires --tenant
+  -h, --help                 help for call
+      --tenant string        Target a specific tenant (default: the current scope)
+      --tool string          Name of the tool to call, as listed by 'erun mcp tools'
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

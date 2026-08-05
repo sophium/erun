@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -26,7 +25,7 @@ func TestDesktopIdentityRoundTrip(t *testing.T) {
 
 	pubPath, err := id.ensurePublicKeyPath()
 	mustNoErr(t, err, "ensurePublicKeyPath")
-	if pubPath != filepath.Join(dir, desktopIdentityPubFile) {
+	if pubPath != eruncommon.DesktopIdentityPublicKeyPath(dir) {
 		t.Fatalf("public key path = %q", pubPath)
 	}
 	_, err = os.Stat(pubPath)
@@ -41,7 +40,7 @@ func TestDesktopIdentityRoundTrip(t *testing.T) {
 		t.Fatalf("token issuer = %q, want %q", issuer, eruncommon.DesktopMCPIssuer())
 	}
 
-	priv, err := os.ReadFile(filepath.Join(dir, desktopIdentityKeyFile))
+	priv, err := os.ReadFile(eruncommon.DesktopIdentityKeyPath(dir))
 	mustNoErr(t, err, "read persisted private key")
 	localIssuer := eruncommon.FileIssuer(pubPath)
 	audience := eruncommon.MCPTokenAudience("acme", "prod")
@@ -57,7 +56,7 @@ func TestDesktopIdentityRoundTrip(t *testing.T) {
 		t.Fatalf("verified audience = %q, want %q", claims.Audience, audience)
 	}
 
-	priv2, err := os.ReadFile(filepath.Join(dir, desktopIdentityKeyFile))
+	priv2, err := os.ReadFile(eruncommon.DesktopIdentityKeyPath(dir))
 	mustNoErr(t, err, "re-read persisted private key")
 	if string(priv) != string(priv2) {
 		t.Fatal("private key was regenerated on second ensure")

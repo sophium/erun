@@ -1,0 +1,3 @@
+audit: erun mcp token --dry-run
+mcp: team/dev edge resolved to http://<LOOPBACK>:17000/mcp
+mcp mint-token erun-mcp:team/dev

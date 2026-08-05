@@ -37,8 +37,8 @@ The `build → release → push → deploy` commands form ERun's delivery pipeli
 | [`erun list`](/cli/list) | List tenants, environments, and the effective target. |
 | [`erun idle`](/cli/idle) | Show an environment's idle / auto-stop status. |
 | [`erun doctor`](/cli/doctor) | Diagnose and repair an environment's runtime and config. |
-| [`erun version`](/cli/version) | Print build version + latest published versions. |
-| [`erun mcp`](/cli/mcp) | Run the MCP server for Agents (launches `emcp`). |
+| [`erun version`](/cli/version) | Print erun's build version (and the project's, when in one) + latest published versions. |
+| [`erun mcp`](/cli/mcp) | Run the MCP server for Agents (launches `emcp`); `call` / `tools` / `token` reach an env's MCP edge. |
 | [`erun api`](/cli/api) | Run the backend API server (launches `eapi`). |
 | [`erun app`](/cli/app) | Launch the desktop app. |
 | [`erun exec`](/cli/exec) | Run repository helpers — `diff`, `raw`. |
