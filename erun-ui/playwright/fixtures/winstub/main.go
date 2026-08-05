@@ -51,7 +51,7 @@ func main() {
 			// activity_queue_app.go), then block so the tab behaves like a healthy,
 			// quiet, killable session.
 			fmt.Print("erun@playwright:~$ \n")
-			os.Stdout.Sync()
+			_ = os.Stdout.Sync()
 			blockForever() // stay alive like `exec sleep`; killed on env close via taskkill
 		}
 		os.Exit(0)

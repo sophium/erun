@@ -40,10 +40,29 @@ MSG
   fi
   GO_MODULE_DIRS=$(find "$REPO_ROOT" -name go.mod -not -path '*/node_modules/*' -not -path '*/.git/*' -exec dirname {} \; | sort)
   for module_dir in $GO_MODULE_DIRS; do
+    # A module nested inside another module's tree (an ancestor dir carries its
+    # own go.mod) is isolated by design and kept out of the parent's go.work —
+    # e.g. the playwright winstub fixture, which seedRoot.ts builds with
+    # GOWORK=off. Under the ambient workspace golangci-lint would reject it
+    # ("directory prefix . does not contain modules listed in go.work") and abort
+    # the whole hook, so lint it standalone the same way it is built.
+    gowork_off=
+    ancestor=$(dirname "$module_dir")
+    while [ "$ancestor" != "$REPO_ROOT" ] && [ "$ancestor" != "/" ]; do
+      if [ -f "$ancestor/go.mod" ]; then
+        gowork_off=1
+        break
+      fi
+      ancestor=$(dirname "$ancestor")
+    done
     printf 'golangci-lint --fix %s\n' "${module_dir#"$REPO_ROOT"/}"
     (
       cd "$module_dir"
-      golangci-lint run --fix ./...
+      if [ -n "$gowork_off" ]; then
+        GOWORK=off golangci-lint run --fix ./...
+      else
+        golangci-lint run --fix ./...
+      fi
     )
   done
   printf 'Restaging Go files touched by golangci-lint...\n'

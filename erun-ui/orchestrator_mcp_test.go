@@ -7,6 +7,30 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
+// orchestratorTestPort/Bearer are the port and bearer stubs the config builder
+// is driven with; extracted from the test body so its own branching stays under
+// the cyclop threshold. nobearer resolves a port but an empty bearer, so the
+// builder must still skip it.
+func orchestratorTestPort(tenant, _ string) int {
+	switch tenant {
+	case "petios":
+		return 17400
+	case "erun":
+		return 17300
+	case "nobearer":
+		return 18000
+	default:
+		return 0
+	}
+}
+
+func orchestratorTestBearer(tenant, _ string) string {
+	if tenant == "nobearer" {
+		return ""
+	}
+	return "tok-" + tenant
+}
+
 func TestBuildOrchestratorMCPConfig(t *testing.T) {
 	envs := []eruncommon.OrchestratorEnvConfig{
 		{Tenant: "petios", Environment: "rihards-win-develop"},
@@ -15,26 +39,8 @@ func TestBuildOrchestratorMCPConfig(t *testing.T) {
 		{Tenant: "nobearer", Environment: "y"}, // skipped: empty bearer
 		{Tenant: "", Environment: "z"},         // skipped: blank tenant
 	}
-	port := func(tenant, _ string) int {
-		switch tenant {
-		case "petios":
-			return 17400
-		case "erun":
-			return 17300
-		case "nobearer":
-			return 18000
-		default:
-			return 0
-		}
-	}
-	bearer := func(tenant, _ string) string {
-		if tenant == "nobearer" {
-			return ""
-		}
-		return "tok-" + tenant
-	}
 
-	config := buildOrchestratorMCPConfig(envs, port, bearer)
+	config := buildOrchestratorMCPConfig(envs, orchestratorTestPort, orchestratorTestBearer)
 
 	if len(config.MCPServers) != 2 {
 		t.Fatalf("expected 2 servers, got %d: %v", len(config.MCPServers), config.MCPServers)

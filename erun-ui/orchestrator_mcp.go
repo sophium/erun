@@ -26,8 +26,10 @@ type orchestratorMCPConfig struct {
 
 // mcpPortResolver and bearerSigner are seams so the config assembly is unit
 // testable without a live config store or signing identity.
-type mcpPortResolver func(tenant, environment string) int
-type bearerSigner func(tenant, environment string) string
+type (
+	mcpPortResolver func(tenant, environment string) int
+	bearerSigner    func(tenant, environment string) string
+)
 
 // buildOrchestratorMCPConfig assembles the per-env MCP server map, keyed
 // "<tenant>-<environment>". An env is skipped (not an error) when its MCP port
