@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/adrg/xdg"
@@ -166,8 +167,52 @@ func TestHTTPHandlerExposesVersionTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools failed: %v", err)
 	}
-	if len(tools.Tools) != 33 {
-		t.Fatalf("unexpected tools: %+v", tools.Tools)
+	// The registered tool set is this module's public surface, so it is asserted
+	// by name: a bare count cannot say which tool appeared or vanished, and its
+	// failure message prints unreadable struct pointers.
+	wantTools := []string{
+		"build",
+		"cloud_clear_aws_credentials",
+		"cloud_init_aws",
+		"cloud_init_cloudflare",
+		"cloud_inject_aws_credentials",
+		"cloud_list",
+		"cloud_login",
+		"cloud_oidc",
+		"cloud_set",
+		"context_init",
+		"context_list",
+		"context_start",
+		"context_stop",
+		"contribute_clone",
+		"delete",
+		"deploy",
+		"diff",
+		"doctor",
+		"expose",
+		"idle",
+		"idle_stop_cancel",
+		"idle_stop_history",
+		"idle_stop_record",
+		"init",
+		"list",
+		"outputs_download",
+		"outputs_list",
+		"publish",
+		"push",
+		"raw",
+		"release",
+		"terraform",
+		"upgrade",
+		"version",
+	}
+	gotTools := make([]string, 0, len(tools.Tools))
+	for _, tool := range tools.Tools {
+		gotTools = append(gotTools, tool.Name)
+	}
+	slices.Sort(gotTools)
+	if !slices.Equal(gotTools, wantTools) {
+		t.Fatalf("exposed tools = %v, want %v", gotTools, wantTools)
 	}
 
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "version"})

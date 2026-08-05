@@ -5,6 +5,7 @@ import { DebugPanel } from './DebugPanel';
 import { EnvironmentInitDialog } from './EnvironmentInitDialog';
 import { GlobalConfigDialog } from './GlobalConfigDialog';
 import { ManageDialog } from './ManageDialog';
+import { OrchestratorDialog } from './OrchestratorDialog';
 import { OutputsDialog } from './OutputsDialog';
 import { ReviewPanel } from './ReviewPanel';
 import { Sidebar } from './Sidebar';
@@ -86,6 +87,10 @@ export class AppShell {
 
   get autoStartPromptDialog(): AutoStartPromptDialog {
     return new AutoStartPromptDialog(this.page);
+  }
+
+  get orchestratorDialog(): OrchestratorDialog {
+    return new OrchestratorDialog(this.page);
   }
 
   get outputsDialog(): OutputsDialog {

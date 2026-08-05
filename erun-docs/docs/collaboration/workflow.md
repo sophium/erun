@@ -26,6 +26,17 @@ The Operator orchestrates **multiple Agents, each in its own ERun environment**.
 
 Level 3 is where ERun's per-env isolation, per-Agent identity, and audit trail pay off. The rest of this page assumes you're heading there — the workflow primitives below are what scale into many Agents working in parallel.
 
+At this level the desktop app lets you run an **orchestrator**: a host-side AI session that is not scoped to one environment. It links a set of your [agent environments](/concepts/environment-types) — `local-agent` and `remote-agent` alike — drives each through that env's MCP (delegating the actual edits to the Agent in its pod), reviews each one's code in a host directory, and runs host-native build artifacts the Linux pod cannot execute itself.
+
+Where that review directory lives follows the environment's type, and you don't choose it per orchestrator:
+
+| Environment type | Review directory | How it gets there |
+|---|---|---|
+| `remote-agent` | A mirror under your home `orchestrators/` folder, one per env | Linking the env turns on its one-way [workspace sync](/agent-reference/workspace-sync-spec), which fills the mirror from the pod. You can place the mirror anywhere. |
+| `local-agent` | The env's own repository path | Nothing to set up — the pod already hostPath-mounts that directory, so the orchestrator reads the same worktree the Agent builds from. The path is derived from the environment, so change it in **Manage**, not in the orchestrator. |
+
+An orchestrator never writes into a review directory whichever type it is: the Agent in the pod owns the worktree, and the orchestrator delegates, reviews, and verifies. For a `local-agent` env that rule matters more, not less — an edit there really would reach the pod, and land in the middle of the Agent's work.
+
 ## First principles
 
 Every workflow on ERun shares the same shape, regardless of which level you're at:
