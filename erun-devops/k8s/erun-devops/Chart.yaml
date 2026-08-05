@@ -1,6 +1,6 @@
 apiVersion: v2
-appVersion: 1.0.160
+appVersion: 1.0.161
 description: ERun DevOps
 name: erun-devops
 type: application
-version: 1.0.160
+version: 1.0.161
