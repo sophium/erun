@@ -47,17 +47,22 @@ func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 			if strings.TrimSpace(deployTarget.VersionOverride) == "" && !useCurrent {
 				return fmt.Errorf("deploy requires a version: pass --version <version> produced by `erun build`/`erun push`, or --current to redeploy the version this environment already runs")
 			}
+			// A scope-defaulted deploy carries no tenant/environment on the
+			// target, so name them up front: the per-env trace log and every
+			// `==> ...` line must identify the env even when the deploy fails
+			// before spec resolution names it.
+			tenant, environment := common.ResolveDeployTargetScope(store, findProjectRoot, deployTarget)
 			var closeEnvTrace func()
-			ctx, closeEnvTrace = common.ActivateEnvTrace(ctx, deployTarget.Tenant, deployTarget.Environment)
+			ctx, closeEnvTrace = common.ActivateEnvTrace(ctx, tenant, environment)
 			defer closeEnvTrace()
 			ctx.Trace(fmt.Sprintf("deploy: tenant=%s environment=%s version-override=%s components=%v force=%v current=%v",
-				deployTarget.Tenant, deployTarget.Environment, deployTarget.VersionOverride,
+				tenant, environment, deployTarget.VersionOverride,
 				components, deployTarget.Force, useCurrent))
 			if err := runDeploy(ctx, store, saveEnvConfig, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployHelmChart, deployTarget); err != nil {
 				// Transports that react only to `==> ...` trace lines (the desktop
 				// activity queue) need one for a deploy that fails before rollout,
 				// or they surface nothing.
-				ctx.Trace(fmt.Sprintf("==> Deploy failed %s/%s: %s", deployTarget.Tenant, deployTarget.Environment, err.Error()))
+				ctx.Trace(deployFailedTrace(tenant, environment, err))
 				return err
 			}
 			return nil
@@ -69,6 +74,16 @@ func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 	cmd.Flags().BoolVar(&useCurrent, "current", false, "Redeploy the version this environment already runs (its persisted runtime version) instead of passing --version")
 	cmd.Flags().StringSliceVar(&components, "components", nil, "Deploy exactly these charts this run — chart directory names under <tenant>-devops/k8s/, or the runtime release name (<tenant>-devops); overrides the env's saved selection and the k8s.deployments plan. Empty falls back to the saved selection, then the plan, then the runtime chart alone")
 	return cmd
+}
+
+// deployFailedTrace renders the failure header transports parse for the failed
+// env. When the scope never resolved there is no env to name, so the pair is
+// dropped rather than rendered as a bare separator no reader or parser can use.
+func deployFailedTrace(tenant, environment string, err error) string {
+	if tenant != "" && environment != "" {
+		return fmt.Sprintf("==> Deploy failed %s/%s: %s", tenant, environment, err.Error())
+	}
+	return fmt.Sprintf("==> Deploy failed: %s", err.Error())
 }
 
 func runDeploy(ctx common.Context, store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, deployHelmChart common.HelmChartDeployerFunc, deployTarget common.DeployTarget) error {

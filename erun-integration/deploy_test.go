@@ -278,6 +278,37 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_multiple_devops_modules_errors", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_scope_defaulted_early_failure_names_resolved_env", func(t *testing.T) {
+		// Regression: a deploy that takes its target from the current scope
+		// rather than explicit args carried an empty tenant/environment through
+		// the whole command, so every early failure rendered the header as
+		// "==> Deploy failed /:" — a bare separator the desktop cannot attribute
+		// to an env — and the per-env trace log was never opened. Same ambiguous
+		// -devops-modules failure as the scenario above, with the target left to
+		// the default scope: the header must name team/dev.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsRepoAt(t, setup.Cwd, "other", "dev")
+		result := erun.Run(t, []string{"deploy", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for ambiguous devops modules, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_scope_defaulted_early_failure_names_resolved_env", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_unresolvable_scope_failure_omits_env_pair", func(t *testing.T) {
+		// The other arm of the same header: with no tenant configured at all
+		// there is no env to name, so the header drops the tenant/environment
+		// pair entirely instead of falling back to a bare separator.
+		setup := env.New(t)
+		result := erun.Run(t, []string{"deploy", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit with no tenant configured, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_unresolvable_scope_failure_omits_env_pair", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_no_devops_module_bootstraps_published_runtime", func(t *testing.T) {
 		// Opt-in-only resolution: a local env whose project root has no
 		// *-devops module has no local charts, so an empty selection defaults to

@@ -1359,6 +1359,25 @@ func resolveDeployTarget(store DeployStore, findProjectRoot ProjectFinderFunc, r
 	})
 }
 
+// ResolveDeployTargetScope names the tenant/environment a deploy would act on
+// before any spec work, so traces and failure headers can identify the target
+// even when the deploy fails before spec resolution reaches it. Explicit
+// overrides win; otherwise the current scope resolves. Naming the target is
+// diagnostics, never a failure source, so an unresolvable scope degrades to
+// whatever the target already carried.
+func ResolveDeployTargetScope(store DeployStore, findProjectRoot ProjectFinderFunc, target DeployTarget) (string, string) {
+	tenant := strings.TrimSpace(target.Tenant)
+	environment := strings.TrimSpace(target.Environment)
+	if tenant != "" && environment != "" {
+		return tenant, environment
+	}
+	resolved, err := resolveDeployTarget(store, findProjectRoot, nil, nil, nil, target)
+	if err != nil {
+		return tenant, environment
+	}
+	return strings.TrimSpace(resolved.Tenant), strings.TrimSpace(resolved.Environment)
+}
+
 func normalizeDeployDependencies(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc) (DeployStore, ProjectFinderFunc, BuildContextResolverFunc, DeployContextResolverFunc, NowFunc) {
 	if store == nil {
 		store = ConfigStore{}
