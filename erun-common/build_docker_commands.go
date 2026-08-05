@@ -160,8 +160,8 @@ func runDockerBuildOnce(args []string, dir, authContextTag string, push bool, st
 	cmd := Command("docker", args...)
 	cmd.Dir = dir
 	output := new(bytes.Buffer)
-	cmd.Stdout = dockerCommandOutputWriter(stdout, output)
-	cmd.Stderr = dockerCommandOutputWriter(stderr, output)
+	cmd.Stdout = commandOutputWriter(stdout, output)
+	cmd.Stderr = commandOutputWriter(stderr, output)
 	err := cmd.Run()
 	if err == nil {
 		return nil
@@ -229,7 +229,7 @@ func tryDockerTag(source, target string, stdout, stderr io.Writer) error {
 	if stdout != nil {
 		cmd.Stdout = stdout
 	}
-	cmd.Stderr = dockerCommandOutputWriter(stderr, capture)
+	cmd.Stderr = commandOutputWriter(stderr, capture)
 	if err := cmd.Run(); err != nil {
 		return dockerTagError{err: err, message: capture.String()}
 	}
@@ -308,7 +308,7 @@ func DockerManifestExists(tag string) (bool, error) {
 	return false, err
 }
 
-func dockerCommandOutputWriter(primary io.Writer, capture io.Writer) io.Writer {
+func commandOutputWriter(primary io.Writer, capture io.Writer) io.Writer {
 	writers := make([]io.Writer, 0, 2)
 	if primary != nil {
 		writers = append(writers, primary)
@@ -335,16 +335,19 @@ func dockerBuildArgs(buildInput DockerBuildSpec, platform string) []string {
 	args = append(args, dockerVerbosityBuildFlags(buildInput.Verbosity)...)
 	args = append(args, "-t", tag)
 	buildArgVersion := dockerImageTagVersion(strings.TrimSpace(buildInput.Image.Tag))
+	// A base this run keeps local — a snapshot base, or a pinned-version base built
+	// without pushing — is only resolvable from the daemon, and only under its
+	// per-arch tags: the arch-less tag names just the last arch built, so a
+	// multi-platform wrapper would otherwise pull the wrong arch (or fail "not
+	// found" on a strict image store). Release wrappers keep the plain version;
+	// they resolve their base from its pushed multi-arch manifest.
+	baseIsLocal := strings.TrimSpace(buildInput.LocalBaseTag) != ""
 	if buildInput.Image.BaseVersion != "" {
 		buildArgVersion = buildInput.Image.BaseVersion
-		// A ${ERUN_VERSION} wrapper must resolve the base's per-arch stable tag:
-		// the arch-less tag names only the last arch built, so a multi-platform
-		// build would otherwise pull the wrong arch (or fail "not found" on a
-		// strict image store). Release wrappers skip this — BaseVersion is empty
-		// because they resolve the base from its pushed multi-arch manifest.
-		if dockerfileHasVersionedFrom(buildInput.DockerfilePath) {
-			buildArgVersion = buildArgVersion + "-" + platformShortSuffix(platform)
-		}
+		baseIsLocal = true
+	}
+	if baseIsLocal && buildArgVersion != "" && dockerfileHasVersionedFrom(buildInput.DockerfilePath) {
+		buildArgVersion = buildArgVersion + "-" + platformShortSuffix(platform)
 	}
 	if buildArgVersion != "" {
 		args = append(args, "--build-arg", "ERUN_VERSION="+buildArgVersion)
@@ -413,8 +416,8 @@ func runDockerPushOnce(tag string, verbosity int, stdout, stderr io.Writer) erro
 	args := dockerPushArgs(tag, verbosity)
 	pushCmd := Command("docker", args...)
 	output := new(bytes.Buffer)
-	pushCmd.Stdout = dockerCommandOutputWriter(stdout, output)
-	pushCmd.Stderr = dockerCommandOutputWriter(stderr, output)
+	pushCmd.Stdout = commandOutputWriter(stdout, output)
+	pushCmd.Stderr = commandOutputWriter(stderr, output)
 	err := pushCmd.Run()
 	if err == nil {
 		return nil
@@ -574,12 +577,10 @@ func interactiveGHAuthAllowed(stdin io.Reader) bool {
 	return err == nil && (info.Mode()&os.ModeCharDevice) != 0
 }
 
-// inInjectedRuntimePod detects the chart-injected runtime pod: the entrypoint
-// sets both ERUN_TENANT and ERUN_ENVIRONMENT for every runtime pod and nothing
-// else does.
+// inInjectedRuntimePod detects the chart-injected runtime pod.
 func inInjectedRuntimePod() bool {
-	return strings.TrimSpace(os.Getenv("ERUN_TENANT")) != "" &&
-		strings.TrimSpace(os.Getenv("ERUN_ENVIRONMENT")) != ""
+	_, _, ok := injectedRuntimePodIdentity(os.Getenv)
+	return ok
 }
 
 func newNonInteractiveGHCRScopeRefreshError(tag, namespace string) error {

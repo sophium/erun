@@ -1,6 +1,8 @@
 package integration
 
 import (
+	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -274,6 +276,37 @@ func TestDeploy(t *testing.T) {
 			t.Fatalf("expected non-zero exit for ambiguous devops modules, got 0:\n%s", result.Combined)
 		}
 		golden.Equal(t, "deploy/dry_run_multiple_devops_modules_errors", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_scope_defaulted_early_failure_names_resolved_env", func(t *testing.T) {
+		// Regression: a deploy that takes its target from the current scope
+		// rather than explicit args carried an empty tenant/environment through
+		// the whole command, so every early failure rendered the header as
+		// "==> Deploy failed /:" — a bare separator the desktop cannot attribute
+		// to an env — and the per-env trace log was never opened. Same ambiguous
+		// -devops-modules failure as the scenario above, with the target left to
+		// the default scope: the header must name team/dev.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsRepoAt(t, setup.Cwd, "other", "dev")
+		result := erun.Run(t, []string{"deploy", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for ambiguous devops modules, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_scope_defaulted_early_failure_names_resolved_env", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_unresolvable_scope_failure_omits_env_pair", func(t *testing.T) {
+		// The other arm of the same header: with no tenant configured at all
+		// there is no env to name, so the header drops the tenant/environment
+		// pair entirely instead of falling back to a bare separator.
+		setup := env.New(t)
+		result := erun.Run(t, []string{"deploy", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit with no tenant configured, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_unresolvable_scope_failure_omits_env_pair", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_no_devops_module_bootstraps_published_runtime", func(t *testing.T) {
@@ -2005,6 +2038,269 @@ func TestDeploy(t *testing.T) {
 			t.Fatalf("expected 'dedup: would reclaim' trace, got:\n%s", out)
 		}
 	})
+
+	t.Run("dry_run_rethreads_recorded_mcp_auth_public_key", func(t *testing.T) {
+		// Regression: a plain version bump of an env whose MCP edge authenticates
+		// used to emit no mcpAuth values at all, and since deploy does not
+		// --reuse-values the chart defaults turned a publicly reachable,
+		// token-authenticated edge (whose `raw` tool runs commands in the pod) into
+		// an open one. Auth is now sticky: the env records the key path the last
+		// authenticated deploy trusted, and a deploy with no --mcp-auth-public-key
+		// rethreads it, rendering the same mcpAuth.* values and re-applying the
+		// key Secret.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		keyPath := seedMCPAuthPublicKey(t, setup)
+		appendEnvConfig(t, setup, "team", "dev", "mcpauthpublickeypath: "+keyPath+"\n")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_rethreads_recorded_mcp_auth_public_key", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_no_mcp_auth_drops_recorded_key", func(t *testing.T) {
+		// Turning authentication off is explicit: --no-mcp-auth resolves no
+		// mcpAuth values even though the env has a recorded key, so the rendered
+		// release leaves the edge loopback-only. The sibling
+		// dry_run_rethreads_recorded_mcp_auth_public_key golden shows the same env
+		// keeping auth without the flag.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		keyPath := seedMCPAuthPublicKey(t, setup)
+		appendEnvConfig(t, setup, "team", "dev", "mcpauthpublickeypath: "+keyPath+"\n")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-mcp-auth", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_no_mcp_auth_drops_recorded_key", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_refuses_to_downgrade_live_mcp_auth", func(t *testing.T) {
+		// The env's MCP auth predates the recorded key (it was enabled by an older
+		// desktop deploy), so nothing in the config says "authenticated" — only
+		// the live release does. deploy reads it and refuses rather than roll out a
+		// release that silently drops authentication, naming the flag that turns it
+		// off on purpose. The ERUN_MCP_AUTH_LIVE_PROBE_OVERRIDE seam answers the
+		// live-release read so the scenario needs no cluster (env.Env() sets it to
+		// unknown globally, which is why sibling scenarios never reach helm).
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		envVars := append(setup.Env(), "ERUN_MCP_AUTH_LIVE_PROBE_OVERRIDE=enabled")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit for a deploy that would strip live MCP auth:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_refuses_to_downgrade_live_mcp_auth", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_no_mcp_auth_clears_live_mcp_auth", func(t *testing.T) {
+		// The opt-out is the way past the downgrade guard: with the same
+		// live-auth-enabled release as dry_run_refuses_to_downgrade_live_mcp_auth,
+		// --no-mcp-auth resolves and rolls out an unauthenticated edge.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		envVars := append(setup.Env(), "ERUN_MCP_AUTH_LIVE_PROBE_OVERRIDE=enabled")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-mcp-auth", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_no_mcp_auth_clears_live_mcp_auth", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_records_then_clears_mcp_auth_public_key", func(t *testing.T) {
+		// Persisting the key path is a real-run side effect outside the captured
+		// streams, so it is asserted by reading the env config: an authenticated
+		// deploy records the path (which is what makes the next redeploy sticky),
+		// and --no-mcp-auth forgets it.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		keyPath := seedMCPAuthPublicKey(t, setup)
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.1", "--mcp-auth-public-key", keyPath}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if body := readEnvConfig(t, setup, "team", "dev"); !strings.Contains(body, "mcpauthpublickeypath: "+keyPath) {
+			t.Fatalf("expected the env config to record mcpauthpublickeypath: %s, got:\n%s", keyPath, body)
+		}
+
+		result = erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.2", "--no-mcp-auth"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if body := readEnvConfig(t, setup, "team", "dev"); strings.Contains(body, "mcpauthpublickeypath:") {
+			t.Fatalf("expected --no-mcp-auth to clear mcpauthpublickeypath, got:\n%s", body)
+		}
+	})
+
+	t.Run("in_pod_local_agent_runtime_deploy_refused", func(t *testing.T) {
+		// Regression: calling a local-agent env's own in-pod MCP deploy resolved
+		// every environment-shaping value from the in-pod config projection —
+		// default ports, the in-pod mount path as worktreeHostPath, default pod
+		// resources, the project's deploy registry for the chart — so the rollout
+		// reshaped the env and cut the channel that asked for it. The in-pod
+		// marker is the chart-set ERUN_TENANT/ERUN_ENVIRONMENT pair, which the
+		// harness sets here to stand in for running inside the pod.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit for an in-pod local-agent runtime deploy:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/in_pod_local_agent_runtime_deploy_refused", normalize.Apply(result.Combined))
+	})
+
+	t.Run("in_pod_remote_agent_runtime_deploy_allowed", func(t *testing.T) {
+		// The guard is scoped to local-agent envs: a remote-agent env owns its
+		// worktree inside the pod, so deploying itself in-pod stays supported.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/in_pod_remote_agent_runtime_deploy_allowed", normalize.Apply(result.Combined))
+	})
+
+	t.Run("in_pod_local_agent_component_deploy_allowed", func(t *testing.T) {
+		// A component chart carries no environment shape, so an in-pod
+		// local-agent deploy that selects only components keeps working — the
+		// guard fires on the runtime chart alone.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsBackendCharts(t, setup, "team", "dev")
+		envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--components", "erun-backend-api", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/in_pod_local_agent_component_deploy_allowed", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_reports_stale_runtime_port_forward", func(t *testing.T) {
+		// Regression: a runtime rollout replaces the pod, which orphans the
+		// env's `kubectl port-forward` — the local socket keeps listening while
+		// every request fails with EOF, so the MCP endpoint looks broken rather
+		// than disconnected, and the deploy said nothing. deploy does not own
+		// port-forward lifecycle (`erun open` starts and tracks them), so it
+		// reports the condition and names the repair command.
+		//
+		// The orphan is modelled faithfully: a listener that accepts and closes
+		// without answering, exactly what a forward to a deleted pod does. It
+		// binds :0 so the scenario never contends for a fixed host port.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		port := startOrphanedPortForwardListener(t)
+		seedMCPPortForwardState(t, setup, "team", "dev", port)
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/real_run_reports_stale_runtime_port_forward", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_silent_when_env_has_no_tracked_port_forward", func(t *testing.T) {
+		// An env nobody opened on this host has no tracked forward, so there is
+		// nothing to repair and the deploy stays quiet. Together with
+		// real_run_reports_stale_runtime_port_forward this locks both arms; the
+		// only difference between the two goldens is the warning.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/real_run_silent_when_env_has_no_tracked_port_forward", normalize.Apply(result.Combined))
+	})
+}
+
+// seedMCPAuthPublicKey writes a PEM public key inside the scenario's temp tree so
+// the path normalizes in goldens.
+func seedMCPAuthPublicKey(t *testing.T, setup env.Setup) string {
+	t.Helper()
+	keyPath := filepath.Join(setup.Home, "desktopid.pub")
+	mustWriteFile(t, keyPath, "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAtestkeytestkeytestkeytestkeytestkeytestke=\n-----END PUBLIC KEY-----\n")
+	return keyPath
+}
+
+func envConfigPathFor(setup env.Setup, tenant, environment string) string {
+	return filepath.Join(setup.ConfigHome, "erun", tenant, environment, "config.yaml")
+}
+
+func readEnvConfig(t *testing.T, setup env.Setup, tenant, environment string) string {
+	t.Helper()
+	raw, err := os.ReadFile(envConfigPathFor(setup, tenant, environment))
+	if err != nil {
+		t.Fatalf("read env config: %v", err)
+	}
+	return string(raw)
+}
+
+func appendEnvConfig(t *testing.T, setup env.Setup, tenant, environment, body string) {
+	t.Helper()
+	mustWriteFile(t, envConfigPathFor(setup, tenant, environment), readEnvConfig(t, setup, tenant, environment)+body)
+}
+
+// seedMCPPortForwardState records a tracked MCP port-forward for the env, the
+// state `erun open` writes when it starts or adopts one.
+func seedMCPPortForwardState(t *testing.T, setup env.Setup, tenant, environment string, localPort int) {
+	t.Helper()
+	path := portForwardStateFile(setup, "mcp", tenant, environment)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	mustWriteFile(t, path, fmt.Sprintf(
+		`{"tenant":%q,"environment":%q,"kubernetesContext":"test-context","namespace":"%s-%s","localPort":%d}`,
+		tenant, environment, tenant, environment, localPort))
+}
+
+// startOrphanedPortForwardListener binds a local port that accepts connections
+// and closes them without answering — what a kubectl port-forward to a deleted
+// pod does, and the condition deploy must report.
+func startOrphanedPortForwardListener(t *testing.T) int {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			_ = conn.Close()
+		}
+	}()
+	return listener.Addr().(*net.TCPAddr).Port
 }
 
 // seedDevopsChartRuntimeImage gives the seeded <tenant>-devops chart a concrete

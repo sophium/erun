@@ -54,8 +54,11 @@ func TestVersion(t *testing.T) {
 		golden.Equal(t, "version/time_flag_prints_elapsed", normalize.Apply(result.Combined))
 	})
 
-	t.Run("version_file_in_cwd_overrides_build_info", func(t *testing.T) {
-		// A VERSION file in the working directory overrides the compiled-in version string.
+	t.Run("project_version_file_does_not_shadow_the_erun_version", func(t *testing.T) {
+		// A VERSION file in the working directory is the project's version, not
+		// erun's: the `erun` line must stay the compiled-in build version (so it
+		// stays comparable with `latest stable:`) and the project version must get
+		// its own labelled line.
 		setup := env.New(t)
 		if err := os.WriteFile(filepath.Join(setup.Cwd, "VERSION"), []byte("9.9.9\n"), 0o644); err != nil {
 			t.Fatalf("write VERSION: %v", err)
@@ -67,7 +70,24 @@ func TestVersion(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		golden.Equal(t, "version/version_file_in_cwd_overrides_build_info", normalize.Apply(result.Combined))
+		golden.Equal(t, "version/project_version_file_does_not_shadow_the_erun_version", normalize.Apply(result.Combined))
+	})
+
+	t.Run("json_output_separates_the_erun_and_project_versions", func(t *testing.T) {
+		// The structured result an orchestrator reads must keep the two versions in
+		// distinct fields, so neither can be mistaken for the other.
+		setup := env.New(t)
+		if err := os.WriteFile(filepath.Join(setup.Cwd, "VERSION"), []byte("9.9.9\n"), 0o644); err != nil {
+			t.Fatalf("write VERSION: %v", err)
+		}
+		result := erun.Run(t, []string{"version", "--no-registry", "--output", "json"}, erun.RunOptions{
+			Cwd: setup.Cwd,
+			Env: setup.Env(),
+		})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "version/json_output_separates_the_erun_and_project_versions", normalize.Apply(result.Combined))
 	})
 
 	t.Run("registry_dockerhub_stub_returns_latest_stable_and_snapshot", func(t *testing.T) {

@@ -17,7 +17,7 @@ import (
 const (
 	DefaultHost = "127.0.0.1"
 	DefaultPort = eruncommon.MCPServicePort
-	DefaultPath = "/mcp"
+	DefaultPath = eruncommon.MCPServerPath
 )
 
 type HTTPConfig struct {

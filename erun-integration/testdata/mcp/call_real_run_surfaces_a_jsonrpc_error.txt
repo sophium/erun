@@ -1,0 +1,3 @@
+audit: erun mcp call --tool nope
+mcp: team/dev edge resolved to http://<LOOPBACK>:26100/mcp
+MCP tools/call failed: unknown tool: nope (code -32602)

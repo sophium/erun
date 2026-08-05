@@ -3,6 +3,7 @@ package routes
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -48,6 +49,47 @@ type createContextResponse struct {
 	Plan    []string       `json:"plan"`
 }
 
+// contextBootstrapParams are the trimmed cluster-bootstrap inputs. Both the
+// context-create route and the provision preview plan from the same shape.
+type contextBootstrapParams struct {
+	name         string
+	alias        string
+	region       string
+	instanceType string
+	diskType     string
+	diskSizeGB   int
+}
+
+// createContextInput is a validated registration request.
+type createContextInput struct {
+	contextBootstrapParams
+	preview bool
+}
+
+// decodeCreateContextInput validates the registration body. Its error message is
+// the operator-facing 400 reason.
+func decodeCreateContextInput(req *http.Request) (createContextInput, error) {
+	var body createContextRequest
+	if err := decodeJSON(req, &body); err != nil {
+		return createContextInput{}, errors.New("invalid request body")
+	}
+	input := createContextInput{
+		contextBootstrapParams: contextBootstrapParams{
+			name:         strings.TrimSpace(body.Name),
+			alias:        strings.TrimSpace(body.CloudProviderAlias),
+			region:       strings.TrimSpace(body.Region),
+			instanceType: strings.TrimSpace(body.InstanceType),
+			diskType:     strings.TrimSpace(body.DiskType),
+			diskSizeGB:   body.DiskSizeGB,
+		},
+		preview: body.Preview,
+	}
+	if input.name == "" || input.alias == "" || input.region == "" {
+		return createContextInput{}, errors.New("name, cloudProviderAlias, and region are required")
+	}
+	return input, nil
+}
+
 func RegisterContextRoutes(register ProtectedRouteRegistrar, contexts ContextRepository, provisioner ContextProvisioner) {
 	routes := ContextRoutes{contexts: contexts, provisioner: provisioner}
 	register(http.MethodGet, "/v1/contexts", http.HandlerFunc(routes.listContexts))
@@ -74,21 +116,13 @@ func (r ContextRoutes) getContext(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r ContextRoutes) createContext(w http.ResponseWriter, req *http.Request) {
-	var body createContextRequest
-	if err := decodeJSON(req, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+	input, err := decodeCreateContextInput(req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	name := strings.TrimSpace(body.Name)
-	alias := strings.TrimSpace(body.CloudProviderAlias)
-	region := strings.TrimSpace(body.Region)
-	if name == "" || alias == "" || region == "" {
-		writeError(w, http.StatusBadRequest, "name, cloudProviderAlias, and region are required")
-		return
-	}
-
-	plan, err := buildContextBootstrapPlan(body, name, alias, region)
+	plan, err := buildContextBootstrapPlan(input.contextBootstrapParams)
 	if err != nil {
 		// A dry-run InitCloudContext failure here is an input-resolution error
 		// (e.g. an unsupported region/instance type), not a server fault.
@@ -96,20 +130,20 @@ func (r ContextRoutes) createContext(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if body.Preview {
+	if input.preview {
 		writeJSON(w, http.StatusOK, createContextResponse{Plan: plan})
 		return
 	}
 
 	created, err := r.contexts.Create(req.Context(), model.Context{
-		Name:               name,
+		Name:               input.name,
 		Provider:           eruncommon.CloudProviderAWS,
-		CloudProviderAlias: alias,
-		Region:             region,
-		InstanceType:       strings.TrimSpace(body.InstanceType),
-		DiskType:           strings.TrimSpace(body.DiskType),
-		DiskSizeGB:         body.DiskSizeGB,
-		KubernetesContext:  name,
+		CloudProviderAlias: input.alias,
+		Region:             input.region,
+		InstanceType:       input.instanceType,
+		DiskType:           input.diskType,
+		DiskSizeGB:         input.diskSizeGB,
+		KubernetesContext:  input.name,
 	})
 	if err != nil {
 		writeRepositoryError(w, err)
@@ -134,12 +168,12 @@ func (r ContextRoutes) createContext(w http.ResponseWriter, req *http.Request) {
 		TenantType:         securityContext.TenantType,
 		ErunUserID:         securityContext.ErunUserID,
 		ContextID:          created.ContextID,
-		Name:               name,
-		CloudProviderAlias: alias,
-		Region:             region,
-		InstanceType:       strings.TrimSpace(body.InstanceType),
-		DiskType:           strings.TrimSpace(body.DiskType),
-		DiskSizeGB:         body.DiskSizeGB,
+		Name:               input.name,
+		CloudProviderAlias: input.alias,
+		Region:             input.region,
+		InstanceType:       input.instanceType,
+		DiskType:           input.diskType,
+		DiskSizeGB:         input.diskSizeGB,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to start provisioning")
 		return
@@ -149,7 +183,7 @@ func (r ContextRoutes) createContext(w http.ResponseWriter, req *http.Request) {
 
 // buildContextBootstrapPlan returns the cluster-bootstrap plan — the commands the
 // real bootstrap would run — via a dry-run that never reaches AWS.
-func buildContextBootstrapPlan(body createContextRequest, name, alias, region string) ([]string, error) {
+func buildContextBootstrapPlan(bootstrap contextBootstrapParams) ([]string, error) {
 	var trace bytes.Buffer
 	logger := eruncommon.NewLoggerWithWriters(eruncommon.VerbosityInfo, io.Discard, io.Discard).WithTraceSink(&trace)
 	ctx := eruncommon.Context{
@@ -159,14 +193,14 @@ func buildContextBootstrapPlan(body createContextRequest, name, alias, region st
 		Stderr: io.Discard,
 	}
 
-	store := newInMemoryCloudStore(alias)
+	store := newInMemoryCloudStore(bootstrap.alias)
 	params := eruncommon.InitCloudContextParams{
-		Name:               name,
-		CloudProviderAlias: alias,
-		Region:             region,
-		InstanceType:       strings.TrimSpace(body.InstanceType),
-		DiskType:           strings.TrimSpace(body.DiskType),
-		DiskSizeGB:         body.DiskSizeGB,
+		Name:               bootstrap.name,
+		CloudProviderAlias: bootstrap.alias,
+		Region:             bootstrap.region,
+		InstanceType:       bootstrap.instanceType,
+		DiskType:           bootstrap.diskType,
+		DiskSizeGB:         bootstrap.diskSizeGB,
 	}
 	// Zero-value dependencies: InitCloudContext normalizes them to its own
 	// defaults, and in DryRun the default RunAWS/RunKubectl only trace the argv

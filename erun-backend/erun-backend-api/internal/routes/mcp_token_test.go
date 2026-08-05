@@ -6,11 +6,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/mcptoken"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
+	eruncommon "github.com/sophium/erun/erun-common"
 )
 
 func testSigner(t *testing.T) *mcptoken.Signer {

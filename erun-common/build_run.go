@@ -80,7 +80,7 @@ func describeMissingPlatforms(platforms []string) string {
 }
 
 func RunDockerBuilds(ctx Context, builds []DockerBuildSpec, build DockerImageBuilderFunc) error {
-	for _, buildInput := range orderedDockerBuildSpecs(builds) {
+	for _, buildInput := range markLocalBaseImageBuilds(orderedDockerBuildSpecs(builds)) {
 		if err := RunDockerBuild(ctx, buildInput, build); err != nil {
 			return err
 		}
@@ -308,16 +308,45 @@ func RunDockerPushExecution(ctx Context, execution DockerPushExecutionSpec, buil
 
 // publishComponentCharts packages+pushes then verifies each resolved chart.
 func publishComponentCharts(ctx Context, specs []HelmChartPublishSpec) error {
-	for _, spec := range specs {
+	published := make([]string, 0, len(specs))
+	for i, spec := range specs {
 		spec.Verbosity = ctx.Verbosity
 		if err := RunHelmChartPublish(ctx, spec); err != nil {
-			return err
+			return newPartialChartPublishError(spec, published, specs[i+1:], err)
 		}
 		if err := VerifyPublishedHelmChart(ctx, spec.OCIRepo, spec.ChartName, spec.Version); err != nil {
-			return err
+			return newPartialChartPublishError(spec, published, specs[i+1:], err)
 		}
+		published = append(published, spec.ChartName)
 	}
 	return nil
+}
+
+// newPartialChartPublishError reports a chart publish that stopped mid-set. By
+// the time charts publish, the version's images — and, for a release, its git tag
+// and GitHub release — are already public, so aborting here leaves a version whose
+// consumers cannot resolve every chart. The operator needs the exact split to
+// recover, and re-running push is the recovery: publishing a chart already
+// published is harmless.
+func newPartialChartPublishError(failed HelmChartPublishSpec, published []string, remaining []HelmChartPublishSpec, err error) error {
+	notAttempted := make([]string, 0, len(remaining))
+	for _, spec := range remaining {
+		notAttempted = append(notAttempted, spec.ChartName)
+	}
+	return fmt.Errorf("%w\npublishing charts at %s stopped at %s, so version %s is only partially published:\n  published: %s\n  failed: %s\n  not attempted: %s\nre-run `erun push --version %s` to publish the rest; republishing an already-published chart is safe",
+		err,
+		failed.Version, failed.ChartName, failed.Version,
+		describeChartNames(published),
+		failed.ChartName,
+		describeChartNames(notAttempted),
+		failed.Version)
+}
+
+func describeChartNames(names []string) string {
+	if len(names) == 0 {
+		return "(none)"
+	}
+	return strings.Join(names, ", ")
 }
 
 // packageComponentCharts packages each resolved chart locally (validate + record

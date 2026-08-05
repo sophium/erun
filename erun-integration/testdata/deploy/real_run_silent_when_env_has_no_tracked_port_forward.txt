@@ -1,0 +1,12 @@
+audit: erun deploy --version <VERSION> team dev
+trace-log: appending the full trace to <TMP>
+deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=false current=false
+deploy: component selection source default (runtime only); deploying the runtime chart alone
+deploy: version <VERSION> pinned; installing the published image by reference (deploy never builds)
+deploy: resolved 1 spec(s)
+deploy: watching pods in team-dev on context test-context for early container failure (release team-devops)
+dedup: claim (release=test-context-team-dev-team-devops, hash=<HASH>, pid=<PID>)
+==> Deploying team/dev <VERSION>
+    namespace team-dev on context test-context
+    waiting for helm rollout (timeout 5m0s)...
+==> Deployed team/dev <VERSION> in <ELAPSED>

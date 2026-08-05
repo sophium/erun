@@ -1,11 +1,13 @@
 package eruncommon
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -147,6 +149,19 @@ func RunHelmChartPublish(ctx Context, spec HelmChartPublishSpec) error {
 	return nil
 }
 
+// chartVerifyMaxAttempts bounds the post-push verification pull-back and
+// chartVerifyRetryBase is its linear backoff step, so the worst case costs a few
+// seconds rather than stalling a publish.
+// A tag erun just pushed is not always immediately readable: the registry can
+// mint the pull token before the new tag has propagated and answer the first
+// fetch 403 denied. Verification reads back an object erun itself wrote, so a
+// transient-looking read is a propagation race, not a verdict — a few fast
+// attempts clear it, while a genuinely unreadable chart still fails.
+const (
+	chartVerifyMaxAttempts = 4
+	chartVerifyRetryBase   = 500 * time.Millisecond
+)
+
 // VerifyPublishedHelmChart re-pulls the just-pushed chart so a release never
 // assumes remote state: the artifact later steps and consuming envs depend on
 // must be provably fetchable.
@@ -165,12 +180,46 @@ func VerifyPublishedHelmChart(ctx Context, ociRepo, chartName, version string) e
 	if err := os.MkdirAll(destination, 0o755); err != nil {
 		return err
 	}
-	if err := runHelmCommand(ctx, commandSpec{Name: "helm", Args: args}); err != nil {
-		return fmt.Errorf("verify published chart %s:%s: %w", chartName, version, err)
-	}
 	defer func() { _ = os.Remove(filepath.Join(destination, chartName+"-"+version+".tgz")) }()
-	ctx.Info("==> Verified published chart " + chartName + " " + version)
-	return nil
+
+	spec := commandSpec{Name: "helm", Args: args}
+	var lastErr error
+	for attempt := 1; attempt <= chartVerifyMaxAttempts; attempt++ {
+		output, err := runHelmCommandCapturingOutput(ctx, spec)
+		if err == nil {
+			ctx.Info("==> Verified published chart " + chartName + " " + version)
+			return nil
+		}
+		lastErr = err
+		if attempt == chartVerifyMaxAttempts || !isTransientChartReadError(output) {
+			break
+		}
+		delay := chartVerifyRetryBase * time.Duration(attempt)
+		ctx.Info(fmt.Sprintf("==> Published chart %s %s not readable yet; retrying in %s (attempt %d of %d)", chartName, version, delay, attempt+1, chartVerifyMaxAttempts))
+		time.Sleep(delay)
+	}
+	return fmt.Errorf("verify published chart %s:%s: %w", chartName, version, lastErr)
+}
+
+// isTransientChartReadError classifies a failed read-back of a chart erun just
+// pushed. Authorization and not-found answers are the shape registry
+// read-after-write propagation takes (the pull token is minted for a tag the
+// backend has not yet listed), and transport failures are transient by nature;
+// anything else is treated as final.
+func isTransientChartReadError(output string) bool {
+	message := strings.ToLower(output)
+	for _, marker := range []string{
+		"401", "403", "404",
+		"denied", "unauthorized", "not found", "manifest unknown",
+		"timeout", "timed out", "temporary failure", "connection reset",
+		"connection refused", "eof", "no such host", "tls handshake",
+		"service unavailable", "too many requests", "500 ", "502", "503",
+	} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func runHelmCommand(ctx Context, spec commandSpec) error {
@@ -179,6 +228,18 @@ func runHelmCommand(ctx Context, spec commandSpec) error {
 	cmd.Stdout = ctx.Stdout
 	cmd.Stderr = ctx.Stderr
 	return cmd.Run()
+}
+
+// runHelmCommandCapturingOutput streams helm's output as usual while also
+// capturing it, so a caller can classify the failure it reports.
+func runHelmCommandCapturingOutput(ctx Context, spec commandSpec) (string, error) {
+	capture := new(bytes.Buffer)
+	cmd := Command(spec.Name, spec.Args...)
+	cmd.Dir = spec.Dir
+	cmd.Stdout = commandOutputWriter(ctx.Stdout, capture)
+	cmd.Stderr = commandOutputWriter(ctx.Stderr, capture)
+	err := cmd.Run()
+	return capture.String(), err
 }
 
 func loadHelmChartName(chartPath string) (string, error) {

@@ -161,7 +161,7 @@ func (d rootDependencies) commands() []*cobra.Command {
 		newContributeCmd(common.GitCommandRunner),
 		newIdleCmd(d.configStore),
 		newReleaseCmd(common.FindProjectRoot, common.GitCommandRunner),
-		newVersionCmd(func() (common.BuildInfo, string, error) {
+		newVersionCmd(func() (versionCommandInfo, error) {
 			return resolveVersionCommandBuildInfo(common.FindProjectRoot)
 		}, common.ResolveDefaultRuntimeRegistryVersions),
 		newActivityCmd(d.configStore),

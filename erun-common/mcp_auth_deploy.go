@@ -1,6 +1,7 @@
 package eruncommon
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -23,26 +24,128 @@ func resolveMCPAuthPublicKey(path string) (string, bool, error) {
 
 // applyMCPAuthToRuntimeSpec applies MCP-auth metadata only to the runtime
 // release: the erun-mcp container ships in the erun-devops runtime chart, so
-// backend component charts never carry mcpAuth. A blank key path is a no-op,
-// leaving a non-desktop deploy unauthenticated (back-compat).
-func applyMCPAuthToRuntimeSpec(target DeployTarget, spec *DeploySpec) error {
+// backend component charts never carry mcpAuth. Auth is sticky — a redeploy that
+// does not re-supply the key rethreads the env's persisted one — and turning it
+// off is explicit, so a routine version bump can never quietly downgrade a
+// publicly-reachable edge to unauthenticated.
+func applyMCPAuthToRuntimeSpec(ctx Context, target DeployTarget, spec *DeploySpec) error {
 	if spec == nil || spec.Deploy.ReleaseName != RuntimeReleaseName(target.Tenant) {
 		return nil
 	}
-	pem, ok, err := resolveMCPAuthPublicKey(target.MCPAuthPublicKeyPath)
+	keyPath := resolveMCPAuthKeyPathForDeploy(ctx, target, spec.Target.EnvConfig)
+	pem, ok, err := resolveMCPAuthPublicKey(keyPath)
 	if err != nil {
 		return err
 	}
 	if ok {
 		// Desktop path: a local public key → trust a file:// issuer.
-		applyMCPAuthDeployMetadata(&spec.Deploy, pem)
+		applyMCPAuthDeployMetadata(&spec.Deploy, pem, keyPath)
 		return nil
 	}
-	// Hosted path: trust the tenant's registered OIDC issuer (https://). No local
-	// key — the MCP edge fetches the issuer's JWKS. Mutually exclusive with the
-	// desktop key above; empty issuer leaves the deploy unauthenticated.
-	applyMCPAuthOIDCMetadata(&spec.Deploy, spec.Target.EnvConfig.MCPAuthIssuer)
+	if !target.DisableMCPAuth {
+		// Hosted path: trust the tenant's registered OIDC issuer (https://). No
+		// local key — the MCP edge fetches the issuer's JWKS. Mutually exclusive
+		// with the desktop key above; empty issuer leaves the deploy
+		// unauthenticated.
+		applyMCPAuthOIDCMetadata(&spec.Deploy, spec.Target.EnvConfig.MCPAuthIssuer)
+	}
 	return nil
+}
+
+// resolveMCPAuthKeyPathForDeploy picks the desktop public key this deploy trusts.
+// Precedence: the explicit opt-out clears it, then the caller-supplied path, then
+// the path the env recorded when auth was last enabled. Rethreading the recorded
+// path is what makes auth survive a plain version bump.
+func resolveMCPAuthKeyPathForDeploy(ctx Context, target DeployTarget, envConfig EnvConfig) string {
+	if target.DisableMCPAuth {
+		ctx.Trace("deploy: mcp auth disabled by request; the env's MCP edge will accept loopback traffic only")
+		return ""
+	}
+	if path := strings.TrimSpace(target.MCPAuthPublicKeyPath); path != "" {
+		return path
+	}
+	if path := strings.TrimSpace(envConfig.MCPAuthPublicKeyPath); path != "" {
+		ctx.Trace("deploy: mcp auth: rethreading the env's recorded public key " + path)
+		return path
+	}
+	return ""
+}
+
+// guardMCPAuthDowngrade refuses a deploy that would strip authentication from an
+// env whose live release still has it enabled. The env's MCP edge executes
+// arbitrary commands in the pod, so an unnoticed downgrade is the failure mode
+// worth a hard stop; the operator opts out explicitly instead.
+//
+// The live read is the only way to catch an env that enabled auth before the
+// setting was recorded in its config, and it only runs on the risky path (a
+// runtime deploy whose resolved plan has auth off), so an auth-enabled deploy
+// pays nothing. Scoped to explicit deploy requests: `erun open`'s heal-redeploy
+// rethreads a recorded key but must not be blocked from handing over a shell.
+func guardMCPAuthDowngrade(ctx Context, target DeployTarget, deployInput HelmDeploySpec) error {
+	if target.DisableMCPAuth || deployInput.MCPAuthEnabled {
+		return nil
+	}
+	if deployInput.ReleaseName != RuntimeReleaseName(deployInput.Tenant) {
+		return nil
+	}
+	enabled, known := liveMCPAuthEnabled(deployInput)
+	if !known {
+		return nil
+	}
+	if !enabled {
+		ctx.Trace("deploy: mcp auth: release " + deployInput.ReleaseName + " has none; leaving the MCP edge loopback-only")
+		return nil
+	}
+	ctx.Trace("deploy: mcp auth: release " + deployInput.ReleaseName + " has it enabled but this deploy resolved none; refusing to downgrade")
+	return fmt.Errorf("deploy %s/%s: MCP auth is enabled on the live %s release, but this deploy resolved none — it would leave the environment's MCP edge unauthenticated. Re-supply the key with --mcp-auth-public-key <path>, or pass --no-mcp-auth to turn authentication off on purpose",
+		deployInput.Tenant, deployInput.Environment, deployInput.ReleaseName)
+}
+
+// mcpAuthLiveProbeOverrideEnv is a test-only seam that answers "does the live
+// release have MCP auth enabled?" from a static value instead of reading helm, so
+// integration goldens never depend on a real cluster's releases. Not a production
+// knob: when the variable is unset the probe performs the real helm read.
+// Accepted values: "enabled", "disabled"; anything else (including empty) means
+// unknown, which is how a machine with no reachable release answers.
+const mcpAuthLiveProbeOverrideEnv = "ERUN_MCP_AUTH_LIVE_PROBE_OVERRIDE"
+
+// liveMCPAuthEnabled reports whether the deployed release currently has MCP auth
+// on. known=false means the release could not be read (absent, no helm, no
+// cluster) — the caller then imposes no constraint rather than block a deploy on
+// an unreachable cluster.
+func liveMCPAuthEnabled(deployInput HelmDeploySpec) (enabled bool, known bool) {
+	if override, ok := os.LookupEnv(mcpAuthLiveProbeOverrideEnv); ok {
+		switch strings.TrimSpace(override) {
+		case "enabled":
+			return true, true
+		case "disabled":
+			return false, true
+		default:
+			return false, false
+		}
+	}
+	release := strings.TrimSpace(deployInput.ReleaseName)
+	namespace := strings.TrimSpace(deployInput.Namespace)
+	if release == "" || namespace == "" {
+		return false, false
+	}
+	args := []string{"get", "values", release, "--namespace", namespace, "-o", "json"}
+	if kubernetesContext := strings.TrimSpace(deployInput.KubernetesContext); kubernetesContext != "" {
+		args = append(args, "--kube-context", kubernetesContext)
+	}
+	output, err := Command("helm", args...).Output()
+	if err != nil {
+		return false, false
+	}
+	var values struct {
+		MCPAuth struct {
+			Enabled bool `json:"enabled"`
+		} `json:"mcpAuth"`
+	}
+	if err := json.Unmarshal(output, &values); err != nil {
+		return false, false
+	}
+	return values.MCPAuth.Enabled, true
 }
 
 // applyMCPAuthOIDCMetadata configures the runtime MCP edge to trust the tenant's
@@ -124,13 +227,16 @@ func applyMCPAuthSecret(ctx Context, deployInput HelmDeploySpec) error {
 // applyMCPAuthDeployMetadata records the MCP-auth fields but applies no Secret
 // — that happens later in applyMCPAuthSecret. An empty key is a no-op, leaving
 // a non-desktop deploy unauthenticated (back-compat). Issuer and audience come
-// from the shared conventions so signer, chart, and verifier all agree.
-func applyMCPAuthDeployMetadata(deployInput *HelmDeploySpec, publicKeyPEM string) {
+// from the shared conventions so signer, chart, and verifier all agree. The key
+// path rides along so the deploy can record it on the env and rethread it next
+// time.
+func applyMCPAuthDeployMetadata(deployInput *HelmDeploySpec, publicKeyPEM, publicKeyPath string) {
 	if deployInput == nil || strings.TrimSpace(publicKeyPEM) == "" {
 		return
 	}
 	deployInput.MCPAuthEnabled = true
 	deployInput.MCPAuthPublicKeyPEM = publicKeyPEM
+	deployInput.MCPAuthPublicKeyPath = strings.TrimSpace(publicKeyPath)
 	deployInput.MCPAuthIssuer = DesktopMCPIssuer()
 	deployInput.MCPAuthAudience = MCPTokenAudience(deployInput.Tenant, deployInput.Environment)
 	deployInput.MCPAuthSecretName = mcpAuthSecretName(deployInput.ReleaseName)

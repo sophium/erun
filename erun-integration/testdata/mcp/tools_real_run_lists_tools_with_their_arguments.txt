@@ -1,0 +1,8 @@
+Tools on team/dev (http://<LOOPBACK>:26100/mcp):
+  raw
+      Run an argv in the runtime pod
+      arguments: command (required), verbosity
+  version
+      Report the runtime's erun version
+audit: erun mcp tools
+mcp: team/dev edge resolved to http://<LOOPBACK>:26100/mcp

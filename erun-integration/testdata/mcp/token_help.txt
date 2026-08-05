@@ -1,0 +1,21 @@
+Print a freshly minted bearer token for an environment's MCP edge, for a caller that speaks MCP itself.
+
+The token is signed by this machine's desktop identity, scoped to one environment, and short-lived — mint a new one per request rather than storing it. Prefer `erun mcp call`, which mints its own token, when a single tool call is all you need.
+
+Usage:
+  erun mcp token [flags]
+
+Examples:
+  erun mcp token
+  erun mcp token --tenant acme --environment dev --output json
+
+Flags:
+      --dry-run              Resolve and trace mutating actions without executing them.
+      --environment string   Target a specific environment; requires --tenant
+  -h, --help                 help for token
+      --tenant string        Target a specific tenant (default: the current scope)
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

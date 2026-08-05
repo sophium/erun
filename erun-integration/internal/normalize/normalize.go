@@ -18,6 +18,10 @@ type Replacement struct {
 var defaultRules = []Replacement{
 	// First, so later rules never see escape codes.
 	{regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`), ""},
+	// A minted MCP bearer signs a live timestamp, so its token can never be
+	// stable in a golden; the claims are asserted from the parsed payload
+	// instead. Early, so no later rule chews on a JWT segment.
+	{regexp.MustCompile(`"token": "[A-Za-z0-9_.\-]+"`), `"token": "<TOKEN>"`},
 	// Loopback IP — emit a stable token before the version rule so its
 	// dotted-numeric form isn't trimmed (RE2 has no negative lookahead, so
 	// the version regex would otherwise eat "127.0.0" and leave a dangling

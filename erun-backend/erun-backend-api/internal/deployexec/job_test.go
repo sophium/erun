@@ -7,7 +7,9 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func testParams() DeployJobParams {
@@ -40,8 +42,17 @@ func TestBuildDeployJobSpec(t *testing.T) {
 	if len(pod.Containers) != 1 || pod.Containers[0].Image != "ghcr.io/sophium/acme-devops:1.0.149" {
 		t.Fatalf("container image = %+v", pod.Containers)
 	}
-	got := pod.Containers[0].Command
-	want := []string{"erun", "deploy", "acme", "prod", "--version", "1.0.149"}
+	assertCommand(t, pod.Containers[0].Command, []string{"erun", "deploy", "acme", "prod", "--version", "1.0.149"})
+	// No in-Job retries: a failed deploy must surface, not silently retry.
+	if job.Spec.BackoffLimit == nil || *job.Spec.BackoffLimit != 0 {
+		t.Fatalf("backoffLimit = %v, want 0", job.Spec.BackoffLimit)
+	}
+}
+
+// assertCommand compares the deploy argv element by element, so a mismatch names
+// the position that differs.
+func assertCommand(t *testing.T, got, want []string) {
+	t.Helper()
 	if len(got) != len(want) {
 		t.Fatalf("command = %v, want %v", got, want)
 	}
@@ -49,10 +60,6 @@ func TestBuildDeployJobSpec(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("command[%d] = %q, want %q", i, got[i], want[i])
 		}
-	}
-	// No in-Job retries: a failed deploy must surface, not silently retry.
-	if job.Spec.BackoffLimit == nil || *job.Spec.BackoffLimit != 0 {
-		t.Fatalf("backoffLimit = %v, want 0", job.Spec.BackoffLimit)
 	}
 }
 
@@ -112,38 +119,58 @@ func TestRunWatchesToFailure(t *testing.T) {
 }
 
 // TestRunCreatesWhenAbsent proves the Job is actually created when it doesn't
-// exist; a status-updater goroutine simulates the cluster completing it.
+// exist, and that Run keeps polling until it turns terminal. The reactions below
+// stand in for the cluster's Job controller: the Job is admitted Active and only
+// completes once Run has already observed it running. Driving the transition off
+// the client calls, rather than off a status update racing the watch, keeps the
+// test free of any timing assumption.
 func TestRunCreatesWhenAbsent(t *testing.T) {
 	kube := fake.NewSimpleClientset()
 	launcher := NewLauncher(kube)
-	launcher.pollEvery = 0 // don't wait between polls in the test
+	launcher.pollEvery = 0 // the reactions advance the Job, so nothing waits on the clock
+
+	jobsResource := batchv1.SchemeGroupVersion.WithResource("jobs")
+	var created *batchv1.Job
+	kube.PrependReactor("create", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		created = action.(k8stesting.CreateAction).GetObject().(*batchv1.Job).DeepCopy()
+		admitted := created.DeepCopy()
+		admitted.Status.Active = 1
+		if err := kube.Tracker().Add(admitted); err != nil {
+			return true, nil, err
+		}
+		return true, admitted, nil
+	})
+	polls := 0
+	kube.PrependReactor("get", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		polls++
+		if polls > 1 {
+			completed := created.DeepCopy()
+			completed.Status.Succeeded = 1
+			if err := kube.Tracker().Update(jobsResource, completed, completed.Namespace); err != nil {
+				return true, nil, err
+			}
+		}
+		return false, nil, nil
+	})
 
 	p := testParams()
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		outcome, err := launcher.Run(context.Background(), p)
-		if err != nil || outcome != OutcomeSucceeded {
-			t.Errorf("run = (%q, %v), want succeeded", outcome, err)
-		}
-	}()
-
-	// Wait for Run to create the Job, then drive it to Succeeded.
-	name := DeployJobName(p.Tenant, p.Environment, p.Version)
-	waitForJob(t, kube, p.Namespace, name)
-	job := seededJob(batchv1.JobStatus{Succeeded: 1})
-	if _, err := kube.BatchV1().Jobs(p.Namespace).UpdateStatus(context.Background(), job, metav1.UpdateOptions{}); err != nil {
-		t.Fatalf("update status: %v", err)
+	outcome, err := launcher.Run(context.Background(), p)
+	if err != nil {
+		t.Fatalf("run: %v", err)
 	}
-	<-done
-}
-
-func waitForJob(t *testing.T, kube *fake.Clientset, namespace, name string) {
-	t.Helper()
-	for i := 0; i < 200; i++ {
-		if _, err := kube.BatchV1().Jobs(namespace).Get(context.Background(), name, metav1.GetOptions{}); err == nil {
-			return
-		}
+	if outcome != OutcomeSucceeded {
+		t.Fatalf("outcome = %q, want succeeded", outcome)
 	}
-	t.Fatalf("deploy job %s was not created", name)
+	if created == nil {
+		t.Fatal("deploy job was not created")
+	}
+	if want := DeployJobName(p.Tenant, p.Environment, p.Version); created.Name != want {
+		t.Fatalf("created job name = %q, want %q", created.Name, want)
+	}
+	if created.Namespace != p.Namespace {
+		t.Fatalf("created job namespace = %q, want %q", created.Namespace, p.Namespace)
+	}
+	if polls < 2 {
+		t.Fatalf("polls = %d, want Run to poll past the still-active Job", polls)
+	}
 }

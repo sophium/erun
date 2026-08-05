@@ -141,19 +141,25 @@ func redactAuditArgs(args []string) []string {
 			redactNext = false
 			continue
 		}
-		if name, _, ok := strings.Cut(arg, "="); ok && isSensitiveName(name) {
+		if name, _, ok := strings.Cut(arg, "="); ok && isSensitiveFlag(name) {
 			redacted = append(redacted, name+"=<redacted>")
 			continue
 		}
 		redacted = append(redacted, arg)
-		if isSensitiveName(arg) {
+		if isSensitiveFlag(arg) {
 			redactNext = true
 		}
 	}
 	return redacted
 }
 
-func isSensitiveName(value string) bool {
+// Only a flag can carry a secret, so a bare word is never treated as one: a
+// command named `token` would otherwise redact the argument after it, and the
+// audit line would claim a secret was passed where none was.
+func isSensitiveFlag(value string) bool {
+	if !strings.HasPrefix(value, "-") {
+		return false
+	}
 	normalized := strings.ToLower(strings.TrimLeft(value, "-"))
 	for _, token := range []string{"password", "passwd", "secret", "token", "apikey", "api-key", "access-key", "private-key"} {
 		if strings.Contains(normalized, token) {

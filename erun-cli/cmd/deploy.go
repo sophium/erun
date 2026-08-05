@@ -47,17 +47,22 @@ func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 			if strings.TrimSpace(deployTarget.VersionOverride) == "" && !useCurrent {
 				return fmt.Errorf("deploy requires a version: pass --version <version> produced by `erun build`/`erun push`, or --current to redeploy the version this environment already runs")
 			}
+			// A scope-defaulted deploy carries no tenant/environment on the
+			// target, so name them up front: the per-env trace log and every
+			// `==> ...` line must identify the env even when the deploy fails
+			// before spec resolution names it.
+			tenant, environment := common.ResolveDeployTargetScope(store, findProjectRoot, deployTarget)
 			var closeEnvTrace func()
-			ctx, closeEnvTrace = common.ActivateEnvTrace(ctx, deployTarget.Tenant, deployTarget.Environment)
+			ctx, closeEnvTrace = common.ActivateEnvTrace(ctx, tenant, environment)
 			defer closeEnvTrace()
 			ctx.Trace(fmt.Sprintf("deploy: tenant=%s environment=%s version-override=%s components=%v force=%v current=%v",
-				deployTarget.Tenant, deployTarget.Environment, deployTarget.VersionOverride,
+				tenant, environment, deployTarget.VersionOverride,
 				components, deployTarget.Force, useCurrent))
 			if err := runDeploy(ctx, store, saveEnvConfig, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployHelmChart, deployTarget); err != nil {
 				// Transports that react only to `==> ...` trace lines (the desktop
 				// activity queue) need one for a deploy that fails before rollout,
 				// or they surface nothing.
-				ctx.Trace(fmt.Sprintf("==> Deploy failed %s/%s: %s", deployTarget.Tenant, deployTarget.Environment, err.Error()))
+				ctx.Trace(deployFailedTrace(tenant, environment, err))
 				return err
 			}
 			return nil
@@ -71,6 +76,16 @@ func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 	return cmd
 }
 
+// deployFailedTrace renders the failure header transports parse for the failed
+// env. When the scope never resolved there is no env to name, so the pair is
+// dropped rather than rendered as a bare separator no reader or parser can use.
+func deployFailedTrace(tenant, environment string, err error) string {
+	if tenant != "" && environment != "" {
+		return fmt.Sprintf("==> Deploy failed %s/%s: %s", tenant, environment, err.Error())
+	}
+	return fmt.Sprintf("==> Deploy failed: %s", err.Error())
+}
+
 func runDeploy(ctx common.Context, store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, deployHelmChart common.HelmChartDeployerFunc, deployTarget common.DeployTarget) error {
 	deploySpecs, err := common.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
 	if err != nil {
@@ -81,7 +96,11 @@ func runDeploy(ctx common.Context, store common.DeployStore, saveEnvConfig commo
 	if err := common.RunDeploySpecs(ctx, deploySpecs, deployHelmChart); err != nil {
 		return err
 	}
-	return common.PersistRuntimeVersionFromDeploySpecs(ctx, deploySpecs, saveEnvConfig, common.ResolveDeployedHelmReleaseVersion)
+	if err := common.PersistRuntimeVersionFromDeploySpecs(ctx, deploySpecs, saveEnvConfig, common.ResolveDeployedHelmReleaseVersion); err != nil {
+		return err
+	}
+	noticeStaleRuntimePortForwards(ctx, deploySpecs)
+	return nil
 }
 
 func newK8sDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
@@ -115,7 +134,8 @@ func addDeployCommandTargetFlags(cmd *cobra.Command, target *common.DeployTarget
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Deploy for a specific environment; requires --tenant")
 	cmd.Flags().BoolVar(&target.Force, "force", false, "Re-run the helm upgrade even when the deployed release already matches the requested version")
 	cmd.Flags().StringVar(&target.RolloutTimeout, "rollout-timeout", "", "Override the helm rollout wait for this deploy (Go duration, e.g. 8m); empty uses the env's deploy.timeout or the 5m default")
-	cmd.Flags().StringVar(&target.MCPAuthPublicKeyPath, "mcp-auth-public-key", "", "Require the env's MCP edge to authenticate bearer tokens signed by this PEM public key (issue #655); empty leaves the edge loopback-only")
+	cmd.Flags().StringVar(&target.MCPAuthPublicKeyPath, "mcp-auth-public-key", "", "Require the env's MCP edge to authenticate bearer tokens signed by this PEM public key, and record it on the env so later redeploys keep authenticating; omit to reuse the recorded key")
+	cmd.Flags().BoolVar(&target.DisableMCPAuth, "no-mcp-auth", false, "Deploy the env's MCP edge unauthenticated (loopback-only) and forget its recorded public key; required to turn authentication off, which deploy otherwise refuses to do by omission")
 	cmd.Flags().StringVar(&target.RepoPath, "repo-path", "", "Repo path override for internal tooling")
 	_ = cmd.Flags().MarkHidden("repo-path")
 }

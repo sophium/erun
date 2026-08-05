@@ -32,7 +32,7 @@ For each opted-in environment, `erun upgrade` resolves the latest version for it
 
 ## High blast radius
 
-`erun upgrade` rolls out new runtime images to **multiple, possibly remote** environments, restarting their pods and potentially spending cloud money. Run `erun upgrade --dry-run` first: it prints the resolved plan (which environments are opted in, their channels, and current → target) and the exact deploy actions for each lagging member before anything ships. In the desktop app, the **Upgrade all** button shows the same plan in a confirmation dialog before any deploy.
+`erun upgrade` rolls out new runtime images to **multiple, possibly remote** environments, restarting their pods and potentially spending cloud money. Each rollout replaces a pod, so an environment you have open locally has its port-forwards orphaned — `upgrade` reports that and names the repair, the same as [`erun deploy`](/cli/deploy#port-forwards-after-a-rollout). Each environment's [MCP edge authentication](/cli/deploy#mcp-auth-sticky) is rethreaded from its own config, so an upgrade never downgrades an authenticated edge. Run `erun upgrade --dry-run` first: it prints the resolved plan (which environments are opted in, their channels, and current → target) and the exact deploy actions for each lagging member before anything ships. In the desktop app, the **Upgrade all** button shows the same plan in a confirmation dialog before any deploy.
 
 ## Examples
 

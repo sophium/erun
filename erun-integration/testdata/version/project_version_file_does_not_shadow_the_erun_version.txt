@@ -1,2 +1,3 @@
-erun <VERSION>
+erun dev
+project cwd <VERSION>
 audit: erun version --no-registry

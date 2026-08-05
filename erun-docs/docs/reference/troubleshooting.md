@@ -80,6 +80,15 @@ The Agent runs inside the env by default — the runtime pod ships the `EnvConfi
 
 If you find yourself reaching for this regularly, treat it as a signal that the in-pod Agent's config or version needs work — `erun doctor` will surface most causes.
 
+**"requires re-authorization (token expired)".** A laptop-side client holds the bearer it was configured with, and those are short-lived by design — when it expires, every tool for that env stops at once. You do not need the client to keep working: `erun mcp call` mints a fresh token per request, so it keeps answering while the client is stale.
+
+```bash
+erun mcp tools --tenant my-tenant --environment local        # is the edge healthy?
+erun mcp call --tool list --output json                      # keep working meanwhile
+```
+
+Restart or re-authorize the client to pick up a new token. If `erun mcp call` reports `MCP endpoint rejected the bearer token`, the env does not trust this machine at all — redeploy it from the desktop app. If it reports `MCP endpoint is not reachable`, the port-forward is down: re-run `erun open`.
+
 ## Cloud context won't start
 
 **Symptoms:** `erun open` reports a long-running "starting" status that never resolves.

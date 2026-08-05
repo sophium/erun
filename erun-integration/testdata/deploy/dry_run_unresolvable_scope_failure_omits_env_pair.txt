@@ -1,0 +1,5 @@
+audit: erun deploy --dry-run --version <VERSION>
+deploy: tenant= environment= version-override=<VERSION> components=[] force=false current=false
+deploy: spec resolution failed: default tenant is not configured
+==> Deploy failed: default tenant is not configured
+default tenant is not configured

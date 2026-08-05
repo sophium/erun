@@ -70,9 +70,49 @@ func (p *mockOIDCProvider) sign(t *testing.T, claims map[string]any) string {
 	return token
 }
 
+// signWithUntrustedKey signs claims with a fresh key while keeping the provider's
+// kid, so the JWKS lookup succeeds but the signature cannot verify against it.
+func (p *mockOIDCProvider) signWithUntrustedKey(t *testing.T, claims map[string]any) string {
+	t.Helper()
+	otherKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate other key: %v", err)
+	}
+	signer, err := jose.NewSigner(
+		jose.SigningKey{Algorithm: jose.RS256, Key: otherKey},
+		(&jose.SignerOptions{}).WithType("JWT").WithHeader("kid", p.keyID),
+	)
+	if err != nil {
+		t.Fatalf("new signer: %v", err)
+	}
+	token, err := jwt.Signed(signer).Claims(claims).Serialize()
+	if err != nil {
+		t.Fatalf("serialize token: %v", err)
+	}
+	return token
+}
+
 func writeOIDCJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+// mustVerify returns the claims of a token the verifier must accept.
+func mustVerify(t *testing.T, verifier *BearerTokenVerifier, token string) Claims {
+	t.Helper()
+	claims, err := verifier.VerifyBearerToken(context.Background(), token)
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	return claims
+}
+
+// mustReject fails with why unless the verifier rejects the token.
+func mustReject(t *testing.T, verifier *BearerTokenVerifier, token string, why string) {
+	t.Helper()
+	if _, err := verifier.VerifyBearerToken(context.Background(), token); err == nil {
+		t.Fatal(why)
+	}
 }
 
 func TestVerifyBearerTokenDelegatesToSharedVerifier(t *testing.T) {
@@ -89,10 +129,7 @@ func TestVerifyBearerTokenDelegatesToSharedVerifier(t *testing.T) {
 			"iat":                now.Unix(),
 			"exp":                now.Add(time.Hour).Unix(),
 		})
-		claims, err := verifier.VerifyBearerToken(context.Background(), token)
-		if err != nil {
-			t.Fatalf("verify: %v", err)
-		}
+		claims := mustVerify(t, verifier, token)
 		if claims.Issuer != provider.issuer() || claims.Subject != "user-1" || claims.Username != "user@example" {
 			t.Fatalf("claims = %+v", claims)
 		}
@@ -113,10 +150,7 @@ func TestVerifyBearerTokenDelegatesToSharedVerifier(t *testing.T) {
 			"iat": now.Unix(),
 			"exp": now.Add(time.Hour).Unix(),
 		})
-		claims, err := verifier.VerifyBearerToken(context.Background(), token)
-		if err != nil {
-			t.Fatalf("verify: %v", err)
-		}
+		claims := mustVerify(t, verifier, token)
 		if claims.Subject != "265222f4-f041-7008-6e0c-2d3993b555bf" {
 			t.Fatalf("subject = %q, want AWS identity-store user id", claims.Subject)
 		}
@@ -130,35 +164,17 @@ func TestVerifyBearerTokenDelegatesToSharedVerifier(t *testing.T) {
 			"iat": now.Unix(),
 			"exp": now.Add(time.Hour).Unix(),
 		})
-		if _, err := verifier.VerifyBearerToken(context.Background(), token); err == nil {
-			t.Fatal("expected a disallowed issuer to be rejected")
-		}
+		mustReject(t, verifier, token, "expected a disallowed issuer to be rejected")
 	})
 
 	t.Run("bad signature is rejected", func(t *testing.T) {
-		otherKey, err := rsa.GenerateKey(rand.Reader, 2048)
-		if err != nil {
-			t.Fatalf("generate other key: %v", err)
-		}
-		signer, err := jose.NewSigner(
-			jose.SigningKey{Algorithm: jose.RS256, Key: otherKey},
-			(&jose.SignerOptions{}).WithType("JWT").WithHeader("kid", provider.keyID),
-		)
-		if err != nil {
-			t.Fatalf("new signer: %v", err)
-		}
-		token, err := jwt.Signed(signer).Claims(map[string]any{
+		token := provider.signWithUntrustedKey(t, map[string]any{
 			"iss": provider.issuer(),
 			"sub": "user-1",
 			"iat": now.Unix(),
 			"exp": now.Add(time.Hour).Unix(),
-		}).Serialize()
-		if err != nil {
-			t.Fatalf("serialize token: %v", err)
-		}
-		if _, err := verifier.VerifyBearerToken(context.Background(), token); err == nil {
-			t.Fatal("expected a token signed by a key not in the JWKS to be rejected")
-		}
+		})
+		mustReject(t, verifier, token, "expected a token signed by a key not in the JWKS to be rejected")
 	})
 }
 
@@ -166,102 +182,89 @@ func TestVerifyBearerTokenDelegatesToSharedVerifier(t *testing.T) {
 // desktop-signed EdDSA token authenticates to the API with no live IdP,
 // the same auth the MCP edge uses, with the API audience enforced.
 func TestVerifyBearerTokenFileIssuer(t *testing.T) {
-	privatePEM, publicPEM, err := eruncommon.GenerateDesktopIdentity()
-	if err != nil {
-		t.Fatalf("generate desktop identity: %v", err)
-	}
-	keyPath := filepath.Join(t.TempDir(), "desktopid.pub")
-	if err := os.WriteFile(keyPath, publicPEM, 0o600); err != nil {
-		t.Fatalf("write public key: %v", err)
-	}
+	privatePEM, keyPath := newDesktopIdentity(t)
 	issuer := eruncommon.FileIssuer(keyPath)
 	verifier := NewBearerTokenVerifier(BearerTokenVerifierOptions{DesktopPublicKeyPath: keyPath})
 	now := time.Now()
 
-	sign := func(t *testing.T, privateKey []byte, claims eruncommon.MCPTokenClaims) string {
-		t.Helper()
-		token, signErr := eruncommon.SignMCPToken(privateKey, claims)
-		if signErr != nil {
-			t.Fatalf("sign token: %v", signErr)
-		}
-		return token
-	}
-
 	t.Run("valid desktop token authenticates", func(t *testing.T) {
-		token := sign(t, privatePEM, eruncommon.MCPTokenClaims{
+		token := signDesktopToken(t, privatePEM, eruncommon.MCPTokenClaims{
 			Issuer:    issuer,
 			Subject:   "dev-user",
 			Audience:  eruncommon.APITokenAudience,
 			ExpiresAt: now.Add(time.Hour).Unix(),
 		})
-		claims, verifyErr := verifier.VerifyBearerToken(context.Background(), token)
-		if verifyErr != nil {
-			t.Fatalf("verify: %v", verifyErr)
-		}
+		claims := mustVerify(t, verifier, token)
 		if claims.Issuer != issuer || claims.Subject != "dev-user" {
 			t.Fatalf("claims = %+v", claims)
 		}
 	})
 
 	t.Run("a token minted for an MCP env audience is rejected against the API", func(t *testing.T) {
-		token := sign(t, privatePEM, eruncommon.MCPTokenClaims{
+		token := signDesktopToken(t, privatePEM, eruncommon.MCPTokenClaims{
 			Issuer:    issuer,
 			Subject:   "dev-user",
 			Audience:  eruncommon.MCPTokenAudience("acme", "prod"),
 			ExpiresAt: now.Add(time.Hour).Unix(),
 		})
-		if _, verifyErr := verifier.VerifyBearerToken(context.Background(), token); verifyErr == nil {
-			t.Fatal("expected an MCP-audience token to be rejected against the API")
-		}
+		mustReject(t, verifier, token, "expected an MCP-audience token to be rejected against the API")
 	})
 
 	t.Run("a token claiming the trusted issuer but signed by a different key is rejected", func(t *testing.T) {
-		attackerPrivate, _, genErr := eruncommon.GenerateDesktopIdentity()
-		if genErr != nil {
-			t.Fatalf("generate attacker identity: %v", genErr)
-		}
-		token := sign(t, attackerPrivate, eruncommon.MCPTokenClaims{
+		attackerPrivate, _ := newDesktopIdentity(t)
+		token := signDesktopToken(t, attackerPrivate, eruncommon.MCPTokenClaims{
 			Issuer:    issuer,
 			Subject:   "intruder",
 			Audience:  eruncommon.APITokenAudience,
 			ExpiresAt: now.Add(time.Hour).Unix(),
 		})
-		if _, verifyErr := verifier.VerifyBearerToken(context.Background(), token); verifyErr == nil {
-			t.Fatal("expected a token signed by a key other than the trusted public key to be rejected")
-		}
+		mustReject(t, verifier, token, "expected a token signed by a key other than the trusted public key to be rejected")
 	})
 
 	t.Run("expired token is rejected", func(t *testing.T) {
-		token := sign(t, privatePEM, eruncommon.MCPTokenClaims{
+		token := signDesktopToken(t, privatePEM, eruncommon.MCPTokenClaims{
 			Issuer:    issuer,
 			Subject:   "dev-user",
 			Audience:  eruncommon.APITokenAudience,
 			ExpiresAt: now.Add(-time.Minute).Unix(),
 		})
-		if _, verifyErr := verifier.VerifyBearerToken(context.Background(), token); verifyErr == nil {
-			t.Fatal("expected an expired token to be rejected")
-		}
+		mustReject(t, verifier, token, "expected an expired token to be rejected")
 	})
 
 	t.Run("a desktop token from an untrusted file issuer is rejected", func(t *testing.T) {
-		otherPrivate, otherPublic, genErr := eruncommon.GenerateDesktopIdentity()
-		if genErr != nil {
-			t.Fatalf("generate other identity: %v", genErr)
-		}
-		otherPath := filepath.Join(t.TempDir(), "desktopid.pub")
-		if writeErr := os.WriteFile(otherPath, otherPublic, 0o600); writeErr != nil {
-			t.Fatalf("write other public key: %v", writeErr)
-		}
-		token := sign(t, otherPrivate, eruncommon.MCPTokenClaims{
+		otherPrivate, otherPath := newDesktopIdentity(t)
+		token := signDesktopToken(t, otherPrivate, eruncommon.MCPTokenClaims{
 			Issuer:    eruncommon.FileIssuer(otherPath),
 			Subject:   "intruder",
 			Audience:  eruncommon.APITokenAudience,
 			ExpiresAt: now.Add(time.Hour).Unix(),
 		})
-		if _, verifyErr := verifier.VerifyBearerToken(context.Background(), token); verifyErr == nil {
-			t.Fatal("expected a token from a non-configured file issuer to be rejected")
-		}
+		mustReject(t, verifier, token, "expected a token from a non-configured file issuer to be rejected")
 	})
+}
+
+// newDesktopIdentity mints a desktop identity and writes its public key where a
+// file:// issuer resolves it, returning the private key and that path.
+func newDesktopIdentity(t *testing.T) (privatePEM []byte, keyPath string) {
+	t.Helper()
+	privatePEM, publicPEM, err := eruncommon.GenerateDesktopIdentity()
+	if err != nil {
+		t.Fatalf("generate desktop identity: %v", err)
+	}
+	keyPath = filepath.Join(t.TempDir(), "desktopid.pub")
+	if err := os.WriteFile(keyPath, publicPEM, 0o600); err != nil {
+		t.Fatalf("write public key: %v", err)
+	}
+	return privatePEM, keyPath
+}
+
+func signDesktopToken(t *testing.T, privateKey []byte, claims eruncommon.MCPTokenClaims) string {
+	t.Helper()
+	token, err := eruncommon.SignMCPToken(privateKey, claims)
+	if err != nil {
+		t.Fatalf("sign token: %v", err)
+	}
+	return token
 }
 
 func TestClaimsFromOIDCTokenClaimsUsesAWSIdentityStoreUserID(t *testing.T) {

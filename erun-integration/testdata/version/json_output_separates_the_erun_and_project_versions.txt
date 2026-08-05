@@ -1,0 +1,11 @@
+{
+  "erun": {
+    "version": "dev"
+  },
+  "project": {
+    "name": "cwd",
+    "version": "<VERSION>",
+    "versionFile": "<TMP>"
+  }
+}
+audit: erun version --no-registry --output json

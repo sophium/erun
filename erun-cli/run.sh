@@ -4,14 +4,23 @@ set -eu
 
 ORIGINAL_DIR=$(pwd)
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
-TARGET="$SCRIPT_DIR/bin/erun"
-APP_TARGET="$SCRIPT_DIR/bin/erun-app"
+# Where this dev wrapper writes the binaries it builds. Defaults to the
+# in-repo bin/ (gitignored), which keeps `erun app`'s sibling-directory lookup
+# for erun-app/ERun.app working unchanged. ERUN_DEV_BIN_DIR moves them out of
+# the worktree for callers that must not write into the checkout at all — a
+# host-side orchestrator treats an environment's worktree as a read-only review
+# directory, and merely invoking `erun` would otherwise mutate it. Set it to a
+# directory you own (e.g. "$HOME/.cache/erun/dev-bin"); when erun-app is also
+# resolved from there, build it there too so the sibling lookup still finds it.
+BIN_DIR=${ERUN_DEV_BIN_DIR:-$SCRIPT_DIR/bin}
+TARGET="$BIN_DIR/erun"
+APP_TARGET="$BIN_DIR/erun-app"
 UI_DIR="$SCRIPT_DIR/../erun-ui"
 VERSION_FILE="$SCRIPT_DIR/../erun-devops/VERSION"
 
 cd "$SCRIPT_DIR"
 
-mkdir -p bin
+mkdir -p "$BIN_DIR"
 
 BUILD_VERSION=dev
 if [ -f "$VERSION_FILE" ]; then

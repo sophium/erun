@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -65,46 +66,18 @@ func (r ProvisionRoutes) provision(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	envName := strings.TrimSpace(body.Environment.Name)
-	// The env name forms the <tenant>-<env> namespace, so it must be a DNS-1123
-	// label. Tenants are hyphen-free, so the first-hyphen split of the namespace
-	// stays unambiguous.
-	if !validNamespaceLabel(envName) {
-		writeError(w, http.StatusBadRequest, "environment.name must be a DNS-1123 label: lowercase letters, digits, and internal hyphens, not starting or ending with a hyphen, at most 63 characters")
-		return
-	}
-	envType := model.EnvironmentType(strings.TrimSpace(body.Environment.Type))
-	if _, ok := validEnvironmentTypes[envType]; !ok {
-		writeError(w, http.StatusBadRequest, "environment.type must be one of runtime, remote-agent, local-agent")
+	envName, envType, err := validateProvisionEnvironment(body.Environment)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	var (
-		ctxName     string
-		ctxAlias    string
-		ctxRegion   string
-		contextPlan []string
-	)
-	if body.Context != nil {
-		ctxName = strings.TrimSpace(body.Context.Name)
-		ctxAlias = strings.TrimSpace(body.Context.CloudProviderAlias)
-		ctxRegion = strings.TrimSpace(body.Context.Region)
-		if ctxName == "" || ctxAlias == "" || ctxRegion == "" {
-			writeError(w, http.StatusBadRequest, "context.name, context.cloudProviderAlias, and context.region are required when a context block is present")
-			return
-		}
-		plan, err := buildContextBootstrapPlan(createContextRequest{
-			InstanceType: strings.TrimSpace(body.Context.InstanceType),
-			DiskType:     strings.TrimSpace(body.Context.DiskType),
-			DiskSizeGB:   body.Context.DiskSizeGB,
-		}, ctxName, ctxAlias, ctxRegion)
-		if err != nil {
-			// A dry-run bootstrap failure is an input-resolution error (e.g. an
-			// unsupported region/instance type), not a server fault.
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		contextPlan = plan
+	newCluster, contextPlan, err := resolveProvisionContext(body.Context)
+	if err != nil {
+		// A dry-run bootstrap failure is an input-resolution error (e.g. an
+		// unsupported region/instance type), not a server fault.
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	// The tenant name (not the UUID) forms the <tenant>-<env> namespace and the
@@ -115,54 +88,117 @@ func (r ProvisionRoutes) provision(w http.ResponseWriter, req *http.Request) {
 		writeRepositoryError(w, err)
 		return
 	}
-	tenantName := strings.TrimSpace(tenant.Name)
 
-	plan := make([]string, 0, 8+len(contextPlan))
-
-	plan = append(plan, fmt.Sprintf("provision: tenant %s (resolved from token)", tenantName))
-
-	maxEnvironments, err := r.quotas.MaxEnvironments(req.Context())
+	count, maxEnvironments, err := environmentQuotaUsage(req.Context(), r.environments, r.quotas)
 	if err != nil {
 		writeRepositoryError(w, err)
 		return
 	}
-	count, err := r.environments.Count(req.Context())
-	if err != nil {
-		writeRepositoryError(w, err)
-		return
-	}
-	quotaOk := count < maxEnvironments
-	quotaLine := fmt.Sprintf("quota: tenant has %d of %d environments", count, maxEnvironments)
-	if quotaOk {
-		quotaLine += " — within quota"
-	} else {
-		quotaLine += " — WOULD EXCEED, provisioning blocked"
-	}
-	plan = append(plan, quotaLine)
-
-	if body.Context != nil {
-		plan = append(plan, fmt.Sprintf("context: bootstrap cluster %s via alias %s", ctxName, ctxAlias))
-		plan = append(plan, contextPlan...)
-	} else {
-		plan = append(plan, fmt.Sprintf("context: reuse existing kubernetes context %s", strings.TrimSpace(body.KubernetesContext)))
-	}
-
-	namespace := eruncommon.KubernetesNamespaceName(tenantName, envName)
-	plan = append(plan, fmt.Sprintf("namespace: would create %s", namespace))
-
-	contextRef := strings.TrimSpace(body.KubernetesContext)
-	if body.Context != nil {
-		contextRef = ctxName
-	}
-	plan = append(plan, fmt.Sprintf("register: would persist environment %s (%s) in tenant %s referencing context %s", envName, envType, tenantName, contextRef))
-
-	plan = append(plan, fmt.Sprintf("deploy: would helm install the erun-devops runtime chart (release %s) into %s", eruncommon.RuntimeReleaseName(tenantName), namespace))
 
 	// TODO(live): execute this plan (cluster bootstrap → namespace → runtime
 	// deploy → exposure + auth edge); needs a live AWS account + cluster. Do not
 	// persist here — the discrete POST /v1/contexts and POST /v1/environments
 	// endpoints own the config writes; this preview composes their plans without
 	// side effects.
+	preview := provisionPlanInput{
+		tenantName:        strings.TrimSpace(tenant.Name),
+		envName:           envName,
+		envType:           envType,
+		newCluster:        newCluster,
+		contextPlan:       contextPlan,
+		kubernetesContext: strings.TrimSpace(body.KubernetesContext),
+		count:             count,
+		maxEnvironments:   maxEnvironments,
+	}
+	writeJSON(w, http.StatusOK, provisionResponse{Plan: provisionPlan(preview), QuotaOk: preview.quotaOk()})
+}
 
-	writeJSON(w, http.StatusOK, provisionResponse{Plan: plan, QuotaOk: quotaOk})
+// validateProvisionEnvironment returns the requested env name and type. Its error
+// message is the operator-facing 400 reason.
+func validateProvisionEnvironment(environment provisionEnvironment) (string, model.EnvironmentType, error) {
+	envName := strings.TrimSpace(environment.Name)
+	// The env name forms the <tenant>-<env> namespace, so it must be a DNS-1123
+	// label. Tenants are hyphen-free, so the first-hyphen split of the namespace
+	// stays unambiguous.
+	if !validNamespaceLabel(envName) {
+		return "", "", errors.New("environment.name must be a DNS-1123 label: lowercase letters, digits, and internal hyphens, not starting or ending with a hyphen, at most 63 characters")
+	}
+	envType := model.EnvironmentType(strings.TrimSpace(environment.Type))
+	if _, ok := validEnvironmentTypes[envType]; !ok {
+		return "", "", errors.New("environment.type must be one of runtime, remote-agent, local-agent")
+	}
+	return envName, envType, nil
+}
+
+// resolveProvisionContext plans the new cluster a context block asks for. Both
+// results are empty for an existing-context provision, which bootstraps nothing.
+func resolveProvisionContext(block *provisionContext) (*contextBootstrapParams, []string, error) {
+	if block == nil {
+		return nil, nil, nil
+	}
+	bootstrap := contextBootstrapParams{
+		name:         strings.TrimSpace(block.Name),
+		alias:        strings.TrimSpace(block.CloudProviderAlias),
+		region:       strings.TrimSpace(block.Region),
+		instanceType: strings.TrimSpace(block.InstanceType),
+		diskType:     strings.TrimSpace(block.DiskType),
+		diskSizeGB:   block.DiskSizeGB,
+	}
+	if bootstrap.name == "" || bootstrap.alias == "" || bootstrap.region == "" {
+		return nil, nil, errors.New("context.name, context.cloudProviderAlias, and context.region are required when a context block is present")
+	}
+	contextPlan, err := buildContextBootstrapPlan(bootstrap)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &bootstrap, contextPlan, nil
+}
+
+// provisionPlanInput is the resolved provision, ready to render as a plan.
+// newCluster is nil when the env lands on an existing kubernetes context.
+type provisionPlanInput struct {
+	tenantName        string
+	envName           string
+	envType           model.EnvironmentType
+	newCluster        *contextBootstrapParams
+	contextPlan       []string
+	kubernetesContext string
+	count             int
+	maxEnvironments   int
+}
+
+func (in provisionPlanInput) quotaOk() bool {
+	return in.count < in.maxEnvironments
+}
+
+// provisionPlan renders the ordered preview: who provisions, whether quota
+// allows it, where the env lands, and what would be deployed.
+func provisionPlan(in provisionPlanInput) []string {
+	plan := make([]string, 0, 8+len(in.contextPlan))
+
+	plan = append(plan, fmt.Sprintf("provision: tenant %s (resolved from token)", in.tenantName))
+
+	quotaLine := fmt.Sprintf("quota: tenant has %d of %d environments", in.count, in.maxEnvironments)
+	if in.quotaOk() {
+		quotaLine += " — within quota"
+	} else {
+		quotaLine += " — WOULD EXCEED, provisioning blocked"
+	}
+	plan = append(plan, quotaLine)
+
+	contextRef := in.kubernetesContext
+	if in.newCluster != nil {
+		contextRef = in.newCluster.name
+		plan = append(plan, fmt.Sprintf("context: bootstrap cluster %s via alias %s", in.newCluster.name, in.newCluster.alias))
+		plan = append(plan, in.contextPlan...)
+	} else {
+		plan = append(plan, fmt.Sprintf("context: reuse existing kubernetes context %s", in.kubernetesContext))
+	}
+
+	namespace := eruncommon.KubernetesNamespaceName(in.tenantName, in.envName)
+	plan = append(plan, fmt.Sprintf("namespace: would create %s", namespace))
+
+	plan = append(plan, fmt.Sprintf("register: would persist environment %s (%s) in tenant %s referencing context %s", in.envName, in.envType, in.tenantName, contextRef))
+
+	return append(plan, fmt.Sprintf("deploy: would helm install the erun-devops runtime chart (release %s) into %s", eruncommon.RuntimeReleaseName(in.tenantName), namespace))
 }

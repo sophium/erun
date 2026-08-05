@@ -11,8 +11,10 @@ type ReviewRepository struct {
 	txs *TxManager
 }
 
-const reviewColumns = `review_id, tenant_id, name, target_branch, source_branch, status, last_failed_build_id, last_ready_build_id, last_merged_build_id, created_at, updated_at`
-const qualifiedReviewColumns = `r.review_id, r.tenant_id, r.name, r.target_branch, r.source_branch, r.status, r.last_failed_build_id, r.last_ready_build_id, r.last_merged_build_id, r.created_at, r.updated_at`
+const (
+	reviewColumns          = `review_id, tenant_id, name, target_branch, source_branch, status, last_failed_build_id, last_ready_build_id, last_merged_build_id, created_at, updated_at`
+	qualifiedReviewColumns = `r.review_id, r.tenant_id, r.name, r.target_branch, r.source_branch, r.status, r.last_failed_build_id, r.last_ready_build_id, r.last_merged_build_id, r.created_at, r.updated_at`
+)
 
 func NewReviewRepository(txs *TxManager) *ReviewRepository {
 	return &ReviewRepository{txs: txs}
