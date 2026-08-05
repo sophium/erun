@@ -28,8 +28,15 @@ test.describe('sidebar env open dot', () => {
     const dot = sidebar.getByRole('button', { name: `Close ${tenant} / ${environment}` });
     await expect(dot).toBeVisible();
 
-    // Clicking the dot closes the env; it must not also trigger the row's openSelection.
-    await dot.click();
+    // Activating the dot closes the env, and must not also trigger the row's
+    // openSelection — a keyboard-activated button still fires a bubbling click,
+    // so stopPropagation is exercised either way. Driven by key rather than mouse
+    // because the dot sits inside an IconTooltip: a mouse click hovers it first,
+    // and the tooltip content that opens can intercept the press (the same reason
+    // openManageDialogViaKeyboard exists). Under a loaded shared backend that
+    // interception is what left the env open and the dot mounted.
+    await dot.focus();
+    await dot.press('Enter');
     await expect(dot).toHaveCount(0);
   });
 
@@ -48,7 +55,19 @@ test.describe('sidebar env open dot', () => {
   }) => {
     const { tenant, environment } = seededEnv;
 
+    // Let the open settle before driving simulated states. The backend emits its
+    // own env-status while an env is settling, and those one-shot emissions are
+    // what revert a simulated state mid-assertion. Waiting on the env's first
+    // completed idle poll bounds that window by a real event rather than the wall
+    // clock, so the retry below only has to absorb genuine overlap instead of the
+    // whole settle sequence.
+    const idlePolled = page.waitForResponse(
+      (response) =>
+        response.url().includes('/__erun_invoke') &&
+        (response.request().postData() ?? '').includes('LoadIdleStatus'),
+    );
     await app.sidebar.openEnvironment(tenant, environment);
+    await idlePolled;
     const dot = app.sidebar.envOpenDot(tenant, environment);
     await expect(dot).toBeVisible();
     await expect(dot).toHaveAttribute('data-env-state', 'running');
@@ -73,7 +92,7 @@ test.describe('sidebar env open dot', () => {
         await emitEnvStatus(page, tenant, environment, status);
         await expect(dot).toHaveAttribute('data-env-state', expectedState, { timeout: 1_000 });
         await expect(dot).toHaveAccessibleName(expectedName, { timeout: 1_000 });
-      }).toPass();
+      }).toPass({ timeout: 20_000 });
     };
 
     await driveEnvStatus(
@@ -84,8 +103,12 @@ test.describe('sidebar env open dot', () => {
     await driveEnvStatus('failed', 'failed', /deploy failed/);
     await driveEnvStatus('', 'running', `Close ${tenant} / ${environment}`);
 
-    // Close the env so the singleton backend returns to its pre-test shape.
-    await dot.click();
+    // Close the env so the singleton backend returns to its pre-test shape, by
+    // key for the tooltip-interception reason above. This step is still an
+    // intermittent red under full-suite load — the close occasionally misses the
+    // expect window — tracked separately; do not paper over it with a retry.
+    await dot.focus();
+    await dot.press('Enter');
     await expect(dot).toHaveCount(0);
   });
 });

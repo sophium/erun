@@ -12,17 +12,20 @@ import (
 )
 
 // newOrchestratorStubStore backs the store with a persistent in-memory root
-// config plus a remote-agent env (frs/dev) to link and a local-agent env
-// (frs/laptop) that must be filtered out of the candidates.
-func newOrchestratorStubStore() stubUIStore {
+// config plus one env of each agent type — remote-agent frs/dev, reviewed in a
+// mirror, and local-agent frs/laptop, reviewed in the worktree at laptopRepoPath
+// — plus a runtime env, which has no worktree to review and no agent to delegate
+// to and so is not orchestratable.
+func newOrchestratorStubStore(laptopRepoPath string) stubUIStore {
 	return stubUIStore{
 		config: &eruncommon.ERunConfig{},
 		tenants: map[string]eruncommon.TenantConfig{
 			"frs": {Name: "frs", DefaultEnvironment: "dev"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
-			"frs/dev":    {Name: "dev", Type: eruncommon.EnvironmentTypeRemoteAgent, KubernetesContext: "ctx"},
-			"frs/laptop": {Name: "laptop", Type: eruncommon.EnvironmentTypeLocalAgent},
+			"frs/dev":     {Name: "dev", Type: eruncommon.EnvironmentTypeRemoteAgent, KubernetesContext: "ctx"},
+			"frs/laptop":  {Name: "laptop", Type: eruncommon.EnvironmentTypeLocalAgent, LocalRepoPath: laptopRepoPath},
+			"frs/runtime": {Name: "runtime", Type: eruncommon.EnvironmentTypeRuntime},
 		},
 	}
 }
@@ -31,33 +34,129 @@ func newOrchestratorStubStore() stubUIStore {
 // and the default mirror directories never touch the real home.
 func orchestratorTestApp(t *testing.T) *App {
 	t.Helper()
+	app, _ := orchestratorTestAppWithLocalRepo(t)
+	return app
+}
+
+// orchestratorTestAppWithLocalRepo also returns the local-agent env's worktree
+// path, for the assertions that care where that env is reviewed.
+func orchestratorTestAppWithLocalRepo(t *testing.T) (*App, string) {
+	t.Helper()
 	home := t.TempDir()
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("HOME", home)
+	laptopRepo := t.TempDir()
 	return NewApp(erunUIDeps{
-		store: newOrchestratorStubStore(),
+		store: newOrchestratorStubStore(laptopRepo),
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			return newStubTerminalSession(), nil
 		},
 		resolveOrchestratorLaunch: func(string, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
-	})
+	}), laptopRepo
 }
 
-func TestListOrchestratorEnvCandidatesReturnsOnlyRemoteAgents(t *testing.T) {
-	app := orchestratorTestApp(t)
+// TestListOrchestratorEnvCandidatesCoversBothAgentTypes locks the capability: an
+// orchestrator can link either agent type, and each candidate carries where that
+// env is reviewed — a mirror the operator may place anywhere, or the local-agent
+// worktree already on this machine. A runtime env stays out: nothing to review.
+func TestListOrchestratorEnvCandidatesCoversBothAgentTypes(t *testing.T) {
+	app, laptopRepo := orchestratorTestAppWithLocalRepo(t)
 	defer app.shutdown(context.Background())
 
 	candidates, err := app.ListOrchestratorEnvCandidates()
 	if err != nil {
 		t.Fatalf("ListOrchestratorEnvCandidates failed: %v", err)
 	}
-	if len(candidates) != 1 || candidates[0].Tenant != "frs" || candidates[0].Environment != "dev" {
-		t.Fatalf("expected only the remote-agent env, got %+v", candidates)
+	if len(candidates) != 2 {
+		t.Fatalf("expected both agent envs and no runtime env, got %+v", candidates)
 	}
-	if !strings.HasSuffix(candidates[0].DefaultDirectory, "orchestrators"+string(os.PathSeparator)+"frs-dev") {
-		t.Fatalf("unexpected default directory: %q", candidates[0].DefaultDirectory)
+	dev, laptop := candidates[0], candidates[1]
+	if dev.Environment != "dev" || laptop.Environment != "laptop" {
+		t.Fatalf("expected dev then laptop, got %+v", candidates)
+	}
+	if !dev.Mirrored {
+		t.Fatalf("expected the remote-agent env to be reviewed in a mirror, got %+v", dev)
+	}
+	if !strings.HasSuffix(dev.DefaultDirectory, "orchestrators"+string(os.PathSeparator)+"frs-dev") {
+		t.Fatalf("unexpected mirror directory: %q", dev.DefaultDirectory)
+	}
+	if laptop.Mirrored {
+		t.Fatalf("expected the local-agent env to be reviewed in place, got %+v", laptop)
+	}
+	if laptop.DefaultDirectory != laptopRepo {
+		t.Fatalf("local-agent review directory = %q, want the env worktree %q", laptop.DefaultDirectory, laptopRepo)
+	}
+}
+
+// TestCreateOrchestratorLinksLocalAgentWithoutSync locks the other half: a
+// local-agent env's worktree is already on this machine, so linking it must not
+// switch SSHD or workspace sync on behind the operator's back, and the review
+// directory is derived from the env rather than taken from the caller.
+func TestCreateOrchestratorLinksLocalAgentWithoutSync(t *testing.T) {
+	app, laptopRepo := orchestratorTestAppWithLocalRepo(t)
+	defer app.shutdown(context.Background())
+
+	info, err := app.CreateOrchestrator("laptop agent", []orchestratorEnvInput{
+		{Tenant: "frs", Environment: "laptop", Directory: filepath.Join(t.TempDir(), "ignored")},
+	})
+	if err != nil {
+		t.Fatalf("CreateOrchestrator failed: %v", err)
+	}
+	if len(info.Environments) != 1 || info.Environments[0].Directory != laptopRepo {
+		t.Fatalf("expected the env worktree %q as the review directory, got %+v", laptopRepo, info.Environments)
+	}
+	env, _, err := app.deps.store.LoadEnvConfig("frs", "laptop")
+	if err != nil {
+		t.Fatalf("load env: %v", err)
+	}
+	if env.SSHD.Enabled || env.SSHD.WorkspaceSync.Enabled {
+		t.Fatalf("expected sync left off for a local-agent env, got %+v", env.SSHD)
+	}
+}
+
+// TestCreateOrchestratorRejectsLocalAgentWithoutWorktree keeps the failure loud:
+// with no worktree to read, the orchestrator would otherwise be handed an empty
+// review window that looks like an env with no changes.
+func TestCreateOrchestratorRejectsLocalAgentWithoutWorktree(t *testing.T) {
+	app, _ := orchestratorTestAppWithLocalRepo(t)
+	defer app.shutdown(context.Background())
+
+	missing := filepath.Join(t.TempDir(), "not-there")
+	store := app.deps.store.(stubUIStore)
+	store.envs["frs/gone"] = eruncommon.EnvConfig{Name: "gone", Type: eruncommon.EnvironmentTypeLocalAgent, LocalRepoPath: missing}
+	store.envs["frs/unset"] = eruncommon.EnvConfig{Name: "unset", Type: eruncommon.EnvironmentTypeLocalAgent}
+
+	if _, err := app.CreateOrchestrator("gone", []orchestratorEnvInput{{Tenant: "frs", Environment: "gone"}}); err == nil {
+		t.Fatal("expected a local-agent env whose worktree is absent to be rejected")
+	}
+	if _, err := app.CreateOrchestrator("unset", []orchestratorEnvInput{{Tenant: "frs", Environment: "unset"}}); err == nil {
+		t.Fatal("expected a local-agent env with no repository path to be rejected")
+	}
+}
+
+// TestRefreshLinkedEnvDirectoriesFollowsAMovedWorktree covers the derived path
+// staying correct: a local-agent link follows its env's repository path, while a
+// mirror path the operator chose is left alone.
+func TestRefreshLinkedEnvDirectoriesFollowsAMovedWorktree(t *testing.T) {
+	app, _ := orchestratorTestAppWithLocalRepo(t)
+	defer app.shutdown(context.Background())
+
+	moved := t.TempDir()
+	store := app.deps.store.(stubUIStore)
+	store.envs["frs/laptop"] = eruncommon.EnvConfig{Name: "laptop", Type: eruncommon.EnvironmentTypeLocalAgent, LocalRepoPath: moved}
+	chosenMirror := filepath.Join(t.TempDir(), "my-mirror")
+
+	refreshed := app.refreshLinkedEnvDirectories([]eruncommon.OrchestratorEnvConfig{
+		{Tenant: "frs", Environment: "laptop", Directory: "/stale/path"},
+		{Tenant: "frs", Environment: "dev", Directory: chosenMirror},
+	})
+	if refreshed[0].Directory != moved {
+		t.Fatalf("local-agent directory = %q, want the moved worktree %q", refreshed[0].Directory, moved)
+	}
+	if refreshed[1].Directory != chosenMirror {
+		t.Fatalf("mirror directory = %q, want the operator's choice %q", refreshed[1].Directory, chosenMirror)
 	}
 }
 
@@ -184,7 +283,7 @@ func TestSpawnOrchestratorSessionExposesOrchestratorID(t *testing.T) {
 	t.Setenv("HOME", home)
 	var capturedEnv []string
 	app := NewApp(erunUIDeps{
-		store: newOrchestratorStubStore(),
+		store: newOrchestratorStubStore(t.TempDir()),
 		startTerminal: func(p startTerminalSessionParams) (terminalSession, error) {
 			capturedEnv = p.Env
 			return newStubTerminalSession(), nil
@@ -265,7 +364,7 @@ func TestInvestigateFailureSpawnsTransientTenantScopedOrchestrator(t *testing.T)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("HOME", home)
 	app := NewApp(erunUIDeps{
-		store: newOrchestratorStubStore(),
+		store: newOrchestratorStubStore(t.TempDir()),
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			return newStubTerminalSession(), nil
 		},
@@ -323,7 +422,7 @@ func TestOrchestratorWorkspaceIsSharedRootWithOneClaudeMd(t *testing.T) {
 	if readErr != nil {
 		t.Fatalf("read CLAUDE.md: %v", readErr)
 	}
-	for _, want := range []string{"erun-orchestrate", "Never edit", "uninterrupted", "end-to-end", "`<tenant>-<env>`", "already operating under this contract", "ERUN_ORCHESTRATOR_ID"} {
+	for _, want := range []string{"erun-orchestrate", "Never write into a review directory", "local-agent", "uninterrupted", "end-to-end", "`<tenant>-<env>`", "already operating under this contract", "ERUN_ORCHESTRATOR_ID"} {
 		if !strings.Contains(string(data), want) {
 			t.Fatalf("shared orchestrator CLAUDE.md missing %q:\n%s", want, data)
 		}

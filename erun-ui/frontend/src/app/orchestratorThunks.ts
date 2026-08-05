@@ -33,8 +33,9 @@ export const loadOrchestrators = (): AppThunk<Promise<void>> => async (dispatch)
   }
 };
 
-// createOrchestrator persists a new orchestrator linking the chosen remote-agent
-// environments (each wired to its host mirror directory) and closes the dialog.
+// createOrchestrator persists a new orchestrator linking the chosen agent
+// environments (each with the host directory it is reviewed in) and closes the
+// dialog.
 export const createOrchestrator =
   (name: string, envs: OrchestratorEnvRef[]): AppThunk<Promise<void>> =>
   async (dispatch) => {
