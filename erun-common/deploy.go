@@ -208,6 +208,10 @@ type HelmDeploySpec struct {
 	MCPAuthIssuer       string
 	MCPAuthAudience     string
 	MCPAuthSecretName   string
+	// MCPAuthPublicKeyPath is the key's on-host location, recorded on the env
+	// after the deploy so a later redeploy rethreads the same key instead of
+	// dropping the edge back to unauthenticated. Empty on the OIDC-issuer path.
+	MCPAuthPublicKeyPath string
 }
 
 type HelmReleaseRecoveryParams struct {
@@ -260,9 +264,13 @@ type DeployTarget struct {
 	RolloutTimeout string
 	// MCPAuthPublicKeyPath, when set, points at a PEM public key the runtime
 	// chart trusts so the per-env erun-mcp edge requires a bearer token signed by
-	// it. Empty leaves the edge in legacy loopback-only mode, so non-desktop
-	// deploys are unchanged.
+	// it. Empty rethreads the key the env recorded on its last authenticated
+	// deploy, so authentication survives a plain version bump.
 	MCPAuthPublicKeyPath string
+	// DisableMCPAuth is the explicit opt-out: it deploys the MCP edge
+	// unauthenticated (loopback-only) and clears the env's recorded key. Required
+	// to turn auth off, so no deploy can downgrade a reachable edge by omission.
+	DisableMCPAuth bool
 	// RuntimeImageOverride lets an operator stand up an env on the shared ERun
 	// base image (or any external image) before the env's own <tenant>-devops
 	// image exists, then switch to the tenant image once it is built. Empty
@@ -343,12 +351,19 @@ func resolveRunningRuntimeVersion(ctx Context, spec DeploySpec, resolveDeployedV
 
 func persistRuntimeVersionIfChanged(spec DeploySpec, version string, save EnvConfigSaver) error {
 	registry := strings.TrimSpace(spec.Deploy.ContainerRegistry)
+	// The MCP-auth key path mirrors the deploy verbatim: recording it makes auth
+	// sticky for the next redeploy, and an explicit opt-out resolves to empty so
+	// the same write clears it.
+	mcpAuthKeyPath := strings.TrimSpace(spec.Deploy.MCPAuthPublicKeyPath)
 	envConfig := spec.Target.EnvConfig
-	if strings.TrimSpace(envConfig.RuntimeVersion) == version && strings.TrimSpace(envConfig.RuntimeRegistry) == registry {
+	if strings.TrimSpace(envConfig.RuntimeVersion) == version &&
+		strings.TrimSpace(envConfig.RuntimeRegistry) == registry &&
+		strings.TrimSpace(envConfig.MCPAuthPublicKeyPath) == mcpAuthKeyPath {
 		return nil
 	}
 	envConfig.RuntimeVersion = version
 	envConfig.RuntimeRegistry = registry
+	envConfig.MCPAuthPublicKeyPath = mcpAuthKeyPath
 	if err := save(spec.Target.Tenant, envConfig); err != nil {
 		return fmt.Errorf("persist runtime version after deploy: %w", err)
 	}
@@ -725,7 +740,10 @@ func ResolveDeploySpec(ctx Context, store DeployStore, findProjectRoot ProjectFi
 	if ok {
 		spec.Deploy.Timeout = override
 	}
-	if err := applyMCPAuthToRuntimeSpec(target, &spec); err != nil {
+	if err := applyMCPAuthToRuntimeSpec(ctx, target, &spec); err != nil {
+		return DeploySpec{}, err
+	}
+	if err := guardMCPAuthDowngrade(ctx, target, spec.Deploy); err != nil {
 		return DeploySpec{}, err
 	}
 	return spec, nil
@@ -745,11 +763,6 @@ func ResolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 	if ok {
 		for i := range specs {
 			specs[i].Deploy.Timeout = override
-		}
-	}
-	for i := range specs {
-		if err := applyMCPAuthToRuntimeSpec(target, &specs[i]); err != nil {
-			return nil, err
 		}
 	}
 	return specs, nil
@@ -796,10 +809,32 @@ func resolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 		resolvedTarget.EnvConfig.RuntimeImage = runtimeImageOverride
 	}
 
+	specs, err := resolveDeploySpecsForResolvedTarget(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, resolvedTarget, target, buildOrchestration, runtimeImageOverride)
+	if err != nil {
+		return nil, err
+	}
+	if err := guardInPodLocalAgentRuntimeDeploy(os.Getenv, resolvedTarget, specs); err != nil {
+		return nil, err
+	}
+	// Applied here rather than in the exported entrypoints so every deploy of the
+	// runtime chart — `erun deploy`, `erun upgrade`, `open --deploy`,
+	// `build --deploy` — carries the env's MCP-auth state. A path that skips this
+	// silently downgrades the edge to unauthenticated.
+	for i := range specs {
+		if err := applyMCPAuthToRuntimeSpec(ctx, target, &specs[i]); err != nil {
+			return nil, err
+		}
+		if err := guardMCPAuthDowngrade(ctx, target, specs[i].Deploy); err != nil {
+			return nil, err
+		}
+	}
+	return specs, nil
+}
+
+func resolveDeploySpecsForResolvedTarget(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, resolvedTarget OpenResult, target DeployTarget, buildOrchestration bool, runtimeImageOverride string) ([]DeploySpec, error) {
 	if resolvedTarget.RemoteRepo() {
 		return resolvePublishedDeploySpecs(ctx, store, resolvedTarget, target)
 	}
-
 	return resolveSelectedLocalDeploySpecs(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, resolvedTarget, target, buildOrchestration, runtimeImageOverride)
 }
 
@@ -1263,7 +1298,17 @@ func applyDeployKubernetesContext(store DeployStore, target OpenResult) OpenResu
 func ResolveOpenRuntimeDeploySpec(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, allowLocalBuilds bool) (DeploySpec, error) {
 	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	now = freezeNow(now)
-	return resolveOpenRuntimeDeploySpec(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, allowLocalBuilds)
+	spec, err := resolveOpenRuntimeDeploySpec(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, allowLocalBuilds)
+	if err != nil {
+		return DeploySpec{}, err
+	}
+	// open's heal-redeploy must rethread the env's recorded MCP-auth key too, or
+	// reopening an authenticated env would replace its pod with an
+	// unauthenticated edge.
+	if err := applyMCPAuthToRuntimeSpec(ctx, DeployTarget{Tenant: target.Tenant, Environment: target.Environment}, &spec); err != nil {
+		return DeploySpec{}, err
+	}
+	return spec, nil
 }
 
 type BuildDeployStore interface {

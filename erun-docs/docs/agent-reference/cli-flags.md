@@ -250,7 +250,7 @@ gh auth token -u <owner> -h github.com | docker login ghcr.io -u <owner> --passw
 
 ### Common flags
 
-`--version`, `--runtime-image`, `--current`, `--components`, `--force`, `--rollout-timeout`, `--dry-run`, `--output`. Subcommand: `erun deploy <component>`.
+`--version`, `--runtime-image`, `--current`, `--components`, `--force`, `--rollout-timeout`, `--mcp-auth-public-key`, `--no-mcp-auth`, `--dry-run`, `--output`. Subcommand: `erun deploy <component>`.
 
 ### Version selection — `--version` / `--current` (required)
 
@@ -315,6 +315,33 @@ The selection resolves by **precedence** — the first non-empty tier wins entir
 
 A chart deploys **iff** its component name is in the resolved selection. The runtime deploys only when the selection names a runtime alias, or when the selection is empty (tier 4) — an explicit selection that omits the runtime deploys the named components without it. `erun-powerdns` is the platform's authoritative DNS singleton; it runs the gpgsql backend against `erun-backend-postgres`, so sequence it after postgres in the plan. The dry-run trace names the tier: `deploy: component selection source <tier>; deploying the runtime chart alone` (empty selection) or `deploy: component selection source <tier>; components <a, b, …>`.
 
+### MCP-auth stickiness and the downgrade guard {#deploy-mcp-auth}
+
+`erun deploy` renders the chart from scratch (no `helm --reuse-values`), so any `mcpAuth.*` value it does not set falls back to the chart default — off. Because the edge's `raw` tool executes commands in the pod, an omission is a privilege downgrade, not a cosmetic one. The setting is therefore resolved from the environment, with an explicit opt-out:
+
+| Input | Resolution |
+|---|---|
+| `--mcp-auth-public-key <path>` (MCP `deploy` `mcp_auth_public_key` input) | Trust that key. The path is persisted to `EnvConfig.mcpauthpublickeypath` after a successful runtime rollout. |
+| Neither flag, `EnvConfig.mcpauthpublickeypath` set | Rethread the recorded key. Trace: `deploy: mcp auth: rethreading the env's recorded public key <path>`. |
+| Neither flag, no recorded key, `EnvConfig.mcpauthissuer` set | The `https://` OIDC-issuer path (unchanged; already an env setting). |
+| `--no-mcp-auth` (MCP `deploy` `no_mcp_auth` input) | Resolve **no** authentication and clear `mcpauthpublickeypath`. Suppresses the OIDC-issuer path for this deploy without erasing `mcpauthissuer`. Trace: `deploy: mcp auth disabled by request; …`. |
+
+**Downgrade guard.** When the resolved plan has authentication off and `--no-mcp-auth` was not given, deploy reads the live release's values (`helm get values <release> -o json`) and fails at resolution if `mcpAuth.enabled` is true — the case of an environment that enabled authentication before the key was recorded. Error code `MCP_AUTH_DOWNGRADE_REFUSED`; the message names both remedies. The read runs **only** on that path (an authenticated deploy pays nothing) and a release that cannot be read imposes no constraint, so an unreachable cluster never blocks a deploy. `ERUN_MCP_AUTH_LIVE_PROBE_OVERRIDE` is the integration-suite seam that answers the read without a cluster; it is a test seam, not a production knob.
+
+The guard is scoped to explicit deploy requests (`erun deploy`, `erun upgrade`, `erun publish`, `open --deploy`, `build --deploy`). `erun open`'s heal-redeploy rethreads a recorded key but is never blocked by the guard — it must still be able to hand over a shell.
+
+### In-pod guard for `local-agent` environments {#deploy-in-pod-local-agent}
+
+The erun config store inside a runtime pod is a projection of the `ERUN_*` env vars the chart injects (see [`erun doctor --sync-config`](#erun-doctor)), not the host config that defines the environment. For a `local-agent` environment that projection is missing everything that shapes the env — the hostPath worktree, the local port range, the pod resource limits, and the runtime registry — so an in-pod resolve silently substitutes defaults and the rollout reshapes the environment (and cuts the MCP channel that issued it).
+
+`erun deploy` refuses that combination at resolution: error code `IN_POD_LOCAL_AGENT_RUNTIME_DEPLOY`, naming the host command to run instead. The guard fires only when all of the following hold, so nothing else regresses:
+
+- The environment's `type` is `local-agent`.
+- The process is inside an erun runtime pod, identified by the chart-set `ERUN_TENANT` + `ERUN_ENVIRONMENT` pair, and they name **this** environment. (A kubeconfig or an `in-cluster` context is not the signal — both exist off-pod.)
+- The resolved specs include the runtime chart (`<tenant>-devops`). A component-only selection is unaffected.
+
+A `remote-agent` environment owns its worktree inside the pod, so it keeps deploying itself in-pod.
+
 ### Deploy-plan resolution
 
 The deploy plan comes from `ProjectConfig.environments.<env>.k8s.deployments[]` (see [Configuration · `environments.<env>.k8s.deployments[]`](/reference/configuration#per-project-config)). It serves two roles: **selection tier 3** above — its charts are the deploy selection when no `--components` and no saved `deploy.components` apply — and the **ordering** source: steps deploy in listed order, and a list within a step deploys in parallel. When the field is absent, `erun deploy` falls back to ordering by chart dependency declarations; on a tie, alphabetical by component name.
@@ -376,6 +403,8 @@ The recovery is bounded to a single retry (the delete removes the conflict, so t
 | `HELM_UPGRADE_FAILED` | A step in the plan failed (or helm's own `--timeout` elapsed while the rollout was still not ready); later steps are not executed. | `2` |
 | `ROLLOUT_CONTAINER_FAILED` | The [pod monitor](#rollout-wait-and-pod-monitoring) observed a terminal container failure (crash loop, config/runtime error, or a permanent image-pull rejection) and aborted the rollout early instead of waiting out the timeout. The message names the pod, container, and reason. | `2` |
 | `INVALID_ROLLOUT_TIMEOUT` | `--rollout-timeout` or `EnvConfig.deploy.timeout` is not a positive Go duration. Nothing runs. | `1` |
+| `MCP_AUTH_DOWNGRADE_REFUSED` | The live release has `mcpAuth.enabled=true` but the resolved plan has no authentication, and `--no-mcp-auth` was not given. Nothing runs. See [MCP-auth stickiness](#deploy-mcp-auth). | `1` |
+| `IN_POD_LOCAL_AGENT_RUNTIME_DEPLOY` | A `local-agent` environment's runtime chart was deployed from inside that environment's own runtime pod, where the config store is not authoritative. Nothing runs. See [In-pod guard](#deploy-in-pod-local-agent). | `1` |
 
 ---
 

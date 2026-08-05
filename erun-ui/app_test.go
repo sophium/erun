@@ -3315,14 +3315,21 @@ func TestSendSessionInputRecordsCLIActivityForCurrentEnvironment(t *testing.T) {
 		},
 	}
 
+	var recordMu sync.Mutex
 	var recorded []eruncommon.EnvironmentActivityParams
 	app := NewApp(erunUIDeps{
 		store:          store,
 		resolveCLIPath: func() string { return "/tmp/erun" },
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
-			return newStubTerminalSession(), nil
+			// A silent session: streamSession's 2s output-activity ticker fires on
+			// the first chunk (its last-activity stamp starts at the zero time), so
+			// a stub that emits the ready line would race a third, asynchronous
+			// event against the assertion below.
+			return newSilentStubTerminalSession(), nil
 		},
 		recordActivity: func(params eruncommon.EnvironmentActivityParams) error {
+			recordMu.Lock()
+			defer recordMu.Unlock()
 			recorded = append(recorded, params)
 			return nil
 		},
@@ -3337,8 +3344,10 @@ func TestSendSessionInputRecordsCLIActivityForCurrentEnvironment(t *testing.T) {
 		t.Fatalf("SendSessionInput failed: %v", err)
 	}
 
+	recordMu.Lock()
+	defer recordMu.Unlock()
 	if len(recorded) != 2 {
-		t.Fatalf("recorded %d activity events, want 2", len(recorded))
+		t.Fatalf("recorded %d activity events, want 2 (session start and input): %+v", len(recorded), recorded)
 	}
 	for _, event := range recorded {
 		if event.Tenant != "erun" || event.Environment != "local" || event.Kind != eruncommon.ActivityKindCLI {
@@ -4135,6 +4144,13 @@ func newStubTerminalSession() *stubTerminalSession {
 		closeCh:       make(chan struct{}),
 		initialOutput: []byte(stubSessionReadyOutput),
 	}
+}
+
+// newSilentStubTerminalSession emits nothing, so streamSession never records
+// output activity. Use it where a test counts activity events and the ready-line
+// gate is not needed.
+func newSilentStubTerminalSession() *stubTerminalSession {
+	return &stubTerminalSession{closeCh: make(chan struct{})}
 }
 
 func (s *stubTerminalSession) Read(buf []byte) (int, error) {

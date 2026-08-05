@@ -574,12 +574,10 @@ func interactiveGHAuthAllowed(stdin io.Reader) bool {
 	return err == nil && (info.Mode()&os.ModeCharDevice) != 0
 }
 
-// inInjectedRuntimePod detects the chart-injected runtime pod: the entrypoint
-// sets both ERUN_TENANT and ERUN_ENVIRONMENT for every runtime pod and nothing
-// else does.
+// inInjectedRuntimePod detects the chart-injected runtime pod.
 func inInjectedRuntimePod() bool {
-	return strings.TrimSpace(os.Getenv("ERUN_TENANT")) != "" &&
-		strings.TrimSpace(os.Getenv("ERUN_ENVIRONMENT")) != ""
+	_, _, ok := injectedRuntimePodIdentity(os.Getenv)
+	return ok
 }
 
 func newNonInteractiveGHCRScopeRefreshError(tag, namespace string) error {

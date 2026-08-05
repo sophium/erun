@@ -153,6 +153,12 @@ type EnvConfig struct {
 	// deploy unauthenticated (loopback-only), preserving back-compat. Distinct
 	// from the desktop `file://` path, which threads a local public key instead.
 	MCPAuthIssuer string `yaml:"mcpauthissuer,omitempty" json:"mcpAuthIssuer,omitempty"`
+	// MCPAuthPublicKeyPath records the desktop public key a deploy last enabled
+	// MCP auth with, so a later redeploy that does not re-supply the key rethreads
+	// it instead of falling back to the chart default and silently turning the
+	// env's authenticated MCP edge into an unauthenticated one. Cleared only by an
+	// explicit opt-out; empty means the env never had desktop MCP auth.
+	MCPAuthPublicKeyPath string `yaml:"mcpauthpublickeypath,omitempty" json:"mcpAuthPublicKeyPath,omitempty"`
 	// ImagePullSecrets names Kubernetes dockerconfigjson secrets the runtime pod
 	// uses to pull private images (e.g. a private <tenant>-devops umbrella image).
 	// Empty leaves the pod pulling anonymously, so envs on public images (the erun

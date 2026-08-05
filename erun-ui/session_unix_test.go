@@ -3,8 +3,10 @@
 package main
 
 import (
+	"os/exec"
 	"regexp"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -26,7 +28,7 @@ func TestCloseReapsWholeProcessGroup(t *testing.T) {
 	}
 
 	childPid := readChildPid(t, session)
-	if syscall.Kill(childPid, 0) != nil {
+	if !processIsRunning(childPid) {
 		t.Fatalf("grandchild %d not alive before Close()", childPid)
 	}
 
@@ -34,13 +36,31 @@ func TestCloseReapsWholeProcessGroup(t *testing.T) {
 
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if syscall.Kill(childPid, 0) != nil {
+		if !processIsRunning(childPid) {
 			return
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 	_ = syscall.Kill(childPid, syscall.SIGKILL)
 	t.Fatalf("grandchild %d survived Close(); the kubectl exec orphan leak is back", childPid)
+}
+
+// processIsRunning reports whether the pid names a process that is still
+// executing. A signal-0 probe cannot answer that on its own: the grandchild is
+// reparented on kill, and where the new parent never reaps (a container whose
+// PID 1 is an application, not an init) the pid lingers as a zombie that
+// signal-0 still accepts. Reading the process state distinguishes "killed but
+// unreaped" from "still running", which is what the test is asserting.
+func processIsRunning(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	out, err := exec.Command("ps", "-o", "state=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return false
+	}
+	state := strings.TrimSpace(string(out))
+	return state != "" && !strings.HasPrefix(state, "Z")
 }
 
 var childPidPattern = regexp.MustCompile(`CHILD_PID=(\d+)`)
