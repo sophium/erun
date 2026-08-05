@@ -3,6 +3,7 @@ package integration
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -262,6 +263,83 @@ func TestPush(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "push/real_run_local_push_assembles_per_arch_manifest", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_transient_chart_verify_read_retries_then_verifies", func(t *testing.T) {
+		// A release aborted mid-publish because the read-back of a chart erun had
+		// just pushed answered 403 denied — the registry minted the pull token
+		// before the new tag propagated. Verification reads an object erun itself
+		// wrote, so it must retry with bounded backoff instead of failing the
+		// publish. The helm stub fails the first `pull` with the exact ghcr error
+		// and succeeds after, so the whole push must still complete.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		stubs := setup.Cwd + "/stubs"
+		counter := setup.Cwd + "/helm-pull-counter"
+		fixture.StubBinaryAdvanced(t, stubs, "docker", fixture.StubBinarySpec{ExitCode: 0})
+		fixture.StubBinaryWithScript(t, stubs, "helm", strings.Join([]string{
+			`case "$1" in`,
+			`  pull)`,
+			`    count=0`,
+			`    if [ -f '` + counter + `' ]; then count=$(cat '` + counter + `'); fi`,
+			`    count=$((count + 1))`,
+			`    printf '%s' "$count" > '` + counter + `'`,
+			`    if [ "$count" = "1" ]; then`,
+			`      printf 'Error: failed to perform "FetchReference" on source: response status code 403: denied: denied\n' >&2`,
+			`      exit 1`,
+			`    fi`,
+			`    exit 0 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
+		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "push/real_run_transient_chart_verify_read_retries_then_verifies", normalize.Apply(result.Combined))
+		// The pull count is a side effect outside the captured streams: 3 proves
+		// the failed read really was retried (api fail + retry, then base) rather
+		// than the failure being swallowed.
+		rawCount, err := os.ReadFile(counter)
+		if err != nil {
+			t.Fatalf("read helm pull counter: %v", err)
+		}
+		if pulls, convErr := strconv.Atoi(strings.TrimSpace(string(rawCount))); convErr != nil || pulls != 3 {
+			t.Fatalf("expected 3 helm pull invocations (fail + retry + second chart), got %q", rawCount)
+		}
+	})
+
+	t.Run("real_run_persistent_chart_verify_read_reports_partial_publish", func(t *testing.T) {
+		// The other half of the retry contract: a read that never succeeds must
+		// still fail the push, and because the version's images are already public
+		// by then, the failure must name exactly which charts landed, which did
+		// not, and that re-running push is the recovery. The extra `zeta` chart
+		// makes the middle chart fail so all three lists are non-empty.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "erun-devops", "k8s", "zeta", "Chart.yaml"),
+			"apiVersion: v2\nname: zeta\nversion: 0.1.0\nappVersion: 0.1.0\n")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryAdvanced(t, stubs, "docker", fixture.StubBinarySpec{ExitCode: 0})
+		fixture.StubBinaryWithScript(t, stubs, "helm", strings.Join([]string{
+			`case "$1" in`,
+			`  pull)`,
+			`    case "$2" in`,
+			`      */charts/base)`,
+			`        printf 'Error: failed to perform "FetchReference" on source: response status code 403: denied: denied\n' >&2`,
+			`        exit 1 ;;`,
+			`    esac`,
+			`    exit 0 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
+		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a chart that never verifies, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "push/real_run_persistent_chart_verify_read_reports_partial_publish", normalize.Apply(result.Combined))
 	})
 
 	t.Run("real_run_auth_failure_prompts_login_and_retries", func(t *testing.T) {

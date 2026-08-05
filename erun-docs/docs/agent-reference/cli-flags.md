@@ -164,6 +164,7 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
    a. If fingerprint matches the registry copy and `--no-incremental` / `--force` is not set: promote the registry copy locally; skip the build.
    b. Otherwise: invoke `docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/<image>:<version> -f <Dockerfile> <context>` with the resolved `--build-arg` set.
    c. Tag the result `<registry>/<image>:fp-<fingerprint>-<arch>` for each architecture.
+   d. **`ERUN_VERSION` for a base built by this same run.** Images are ordered so a `FROM <registry>/<base>:${ERUN_VERSION}` wrapper builds after its base. A build that does not push tags only per-arch (`…:<version>-<arch>`) — the arch-less `…:<version>` is a manifest list [`push`](#erun-push) mints in the registry, so it exists neither locally nor remotely for an unpublished version. So when the wrapper's base is one of this run's own unpublished images, its `ERUN_VERSION` build arg is `<version>-<arch>` for the architecture being built, resolving the base from the local daemon at the matching arch (an arch-less local tag would be last-arch-wins, and therefore single-arch). This is what lets `erun build --version <v>` validate a whole release locally, dependent images included, before any git ref moves. A local snapshot base follows the same rule at `<base>-snapshot-<arch>`. A `--release` wrapper keeps the plain `<version>`: its base is pushed earlier in the same run, so it resolves from the published multi-arch manifest. No plain-`<version>` local tag is ever created, so a local build can never be mistaken for a published manifest or pushed in place of one.
 5. Emit the minted version (and, with `--output json`, the structured result).
 6. If `--deploy`: compose push + deploy at the minted version (operator-convenience shortcut). If `--release`: chain to `erun release`, which builds, then reuses `push` to publish the release-tagged variants and chart. Programmatic callers skip both and orchestrate the primitives themselves.
 7. Exit `0`.
@@ -201,6 +202,18 @@ binfmt for <arch> not installed. Run:
 ### What push publishes
 
 For the supplied `--version`, `push` always builds each image from its source context (never a prebuilt bare tag), pushes per-arch tags, assembles the manifest list, then publishes every Helm chart discovered under the project's `k8s/*` directories — a **directory scan**, not a lookup keyed to same-named images, so image-less charts (a tenant's own `frs-backend-api`, `frs-powerdns`, … wrappers) publish too. For each: `helm dependency build` (umbrella charts that vendor published subcharts) + `helm package` + `helm push` to `oci://<registry>/charts` at `--version`, verified with a `helm pull` round-trip. Chart publishing is decoupled from the image push: a **version-pinned base** (`erun-powerdns`, `erun-backend-postgres`) keeps its image at the upstream pin and is not re-pushed at `--version`, but its chart still publishes at `--version` so platform deploys resolve it. [`erun build`](#erun-build) packages the same charts locally (validate + `--output json`) without publishing. Charts publish under `/charts`, separate from the same-named image repo so a chart never collides with its image at the same ref. There is no environment-type branch. [`erun release`](#erun-release) reuses this step for all its publishing.
+
+### Chart verification retry semantics
+
+The `helm pull` round-trip reads back an artifact `push` itself just wrote, so a registry that has not finished propagating the new tag is a race, not a verdict — GHCR in particular mints the pull token before the tag is listed and answers the first fetch `403: denied`. Verification therefore retries up to **4 attempts** with a linear backoff of **500ms, 1s, 1.5s** (≈3s worst case) when the failed read's output matches a transient class, case-insensitive:
+
+| Class | Matched substrings |
+|---|---|
+| Authorization / propagation | `401`, `403`, `404`, `denied`, `unauthorized`, `not found`, `manifest unknown` |
+| Transport | `timeout`, `timed out`, `temporary failure`, `connection reset`, `connection refused`, `eof`, `no such host`, `tls handshake` |
+| Server-side | `service unavailable`, `too many requests`, `500 `, `502`, `503` |
+
+Any other failure is treated as final and fails on the first attempt. A read that never succeeds still fails the push after the last attempt — the retry bounds a race, it does not swallow a persistent failure.
 
 ### Common flags
 
@@ -240,7 +253,7 @@ gh auth token -u <owner> -h github.com | docker login ghcr.io -u <owner> --passw
 | `NO_BUILDABLE_CONTEXT` | No `<tenant>-devops/docker/<image>/` build context found to build the version from. | `1` |
 | `REGISTRY_AUTH_FAILED` | All retry attempts failed (or no TTY for the interactive login). | `2` |
 | `MANIFEST_LIST_ASSEMBLY_FAILED` | Per-arch tags pushed but `docker manifest create` failed. | `2` |
-| `CHART_PUSH_FAILED` | Images pushed but `helm push` or the `helm pull` verification of the runtime chart failed — the version is not yet deployable. | `2` |
+| `CHART_PUSH_FAILED` | Images pushed but a chart's `helm push`, or its `helm pull` verification after every retry, failed — the version is not yet deployable. Charts publish one at a time, so the error names the split explicitly (`published:` / `failed:` / `not attempted:`) and states the recovery: re-run `erun push --version <version>`, which republishes idempotently. | `2` |
 
 ---
 

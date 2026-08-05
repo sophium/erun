@@ -904,6 +904,49 @@ func TestBuild(t *testing.T) {
 		}
 	})
 
+	t.Run("dry_run_pinned_version_wrapper_resolves_local_base", func(t *testing.T) {
+		// `erun build --version <v>` is the pre-release gate: validate the release
+		// build locally before any git ref moves. It used to be impossible for a
+		// dependent image — a pinned-version local build tags only per-arch, so a
+		// wrapper's FROM base:<v> resolved neither locally nor (unpublished) in the
+		// registry and the build died "not found". The wrapper's per-platform build
+		// must now ask for the base's per-arch local tag instead, without pushing
+		// anything. Unlike the snapshot sibling above, the pinned version has no
+		// -snapshot BaseVersion, so the arch suffix comes from the base being one of
+		// this same build's own images.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "erun-devops", "docker", "wrapper", "Dockerfile"),
+			"FROM ghcr.io/sophium/api:${ERUN_VERSION}\nCMD [\"true\"]\n")
+		fixture.RunGit(t, setup.Cwd, "add", "erun-devops/docker/wrapper/Dockerfile")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add ${ERUN_VERSION} wrapper over api")
+		result := erun.Run(t, []string{"build", "--version", "1.0.166", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_pinned_version_wrapper_resolves_local_base", normalize.Apply(result.Combined))
+		// Version normalization collapses 1.0.166 and 1.0.166-amd64 to the same
+		// <VERSION> token, so the golden cannot tell the fixed plan from the broken
+		// one. Assert the build args on the raw output: the wrapper resolves the
+		// base per arch, while the base itself (no versioned FROM) keeps the plain
+		// version so its own ERUN_VERSION still stamps the release.
+		for _, want := range []string{
+			"-t ghcr.io/sophium/wrapper:1.0.166-amd64 --build-arg ERUN_VERSION=1.0.166-amd64",
+			"-t ghcr.io/sophium/wrapper:1.0.166-arm64 --build-arg ERUN_VERSION=1.0.166-arm64",
+			"-t ghcr.io/sophium/api:1.0.166-amd64 --build-arg ERUN_VERSION=1.0.166 ",
+		} {
+			if !strings.Contains(result.Combined, want) {
+				t.Errorf("expected local base resolution %q in output:\n%s", want, result.Combined)
+			}
+		}
+		// A local build must not mint the plain <version> tag: push's manifest
+		// assembly owns that reference, and a local tag under the same name would
+		// masquerade as the published multi-arch manifest.
+		if strings.Contains(result.Combined, "docker tag ghcr.io/sophium/api:1.0.166-amd64 ghcr.io/sophium/api:1.0.166\n") {
+			t.Errorf("local build must not tag the plain published version:\n%s", result.Combined)
+		}
+	})
+
 	t.Run("real_run_versioned_wrapper_tags_per_arch_base", func(t *testing.T) {
 		// Real-run companion to the dry-run wrapper scenario. The docker stub
 		// returns exit 1 for `image inspect` (no fp images → everything rebuilds)

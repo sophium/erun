@@ -1,0 +1,25 @@
+audit: erun push --environment local --version <VERSION>
+==> Pushing
+fingerprint image present locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
+fingerprint image present locally: ghcr.io/sophium/api:fp-<HEX16>-arm64
+promoting from cached fingerprint image: ghcr.io/sophium/api:<VERSION>
+fingerprint image present locally: ghcr.io/sophium/base:fp-<HEX16>-amd64
+fingerprint image present locally: ghcr.io/sophium/base:fp-<HEX16>-arm64
+promoting from cached fingerprint image: ghcr.io/sophium/base:<VERSION>
+==> Publishing api <VERSION> to oci://ghcr.io/sophium/charts
+==> Verified published chart api <VERSION>
+==> Publishing base <VERSION> to oci://ghcr.io/sophium/charts
+Error: failed to perform "FetchReference" on source: response status code 403: denied: denied
+==> Published chart base <VERSION> not readable yet; retrying in 500ms (attempt 2 of 4)
+Error: failed to perform "FetchReference" on source: response status code 403: denied: denied
+==> Published chart base <VERSION> not readable yet; retrying in <ELAPSED> (attempt 3 of 4)
+Error: failed to perform "FetchReference" on source: response status code 403: denied: denied
+==> Published chart base <VERSION> not readable yet; retrying in 1.5s (attempt 4 of 4)
+Error: failed to perform "FetchReference" on source: response status code 403: denied: denied
+==> Push failed after <ELAPSED>
+verify published chart base:<VERSION>: exit status 1
+publishing charts at <VERSION> stopped at base, so version <VERSION> is only partially published:
+  published: api
+  failed: base
+  not attempted: zeta
+re-run `erun push --version <VERSION>` to publish the rest; republishing an already-published chart is safe
