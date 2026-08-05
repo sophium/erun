@@ -32,7 +32,7 @@ type DoctorRepairAliasInput struct {
 	Alias         string `json:"alias" jsonschema:"orphaned cloud provider alias (username+account@provider) to recreate"`
 	SSOStartURL   string `json:"ssoStartUrl" jsonschema:"AWS IAM Identity Center start URL"`
 	SSORegion     string `json:"ssoRegion" jsonschema:"AWS IAM Identity Center region"`
-	RoleName      string `json:"roleName,omitempty" jsonschema:"AWS role name used during SSO login"`
+	RoleName      string `json:"roleName,omitempty" jsonschema:"AWS permission set (IAM Identity Center) used during SSO login"`
 	Region        string `json:"region,omitempty" jsonschema:"default AWS region for the recreated provider (derived from referenced cloud context when blank)"`
 	OIDCIssuerURL string `json:"oidcIssuerUrl,omitempty" jsonschema:"override for the OIDC issuer URL; usually inferred from AWS web identity token"`
 	SkipLogin     bool   `json:"skipLogin,omitempty" jsonschema:"when true, skip aws sso login and rely on existing credentials"`

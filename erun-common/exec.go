@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -40,6 +41,29 @@ func BoundCommandWait(cmd *exec.Cmd) {
 	if cmd != nil {
 		cmd.WaitDelay = commandWaitDelay
 	}
+}
+
+// DesktopAppCommand builds the command that launches the ERun desktop app
+// (erun-app). On macOS an `.app` bundle must launch via `open -n <bundle>` (a
+// fresh instance; forwarded args go after `--args`); elsewhere the binary is
+// spawned directly, with argv[0] set to "ERun" on macOS for a stable process
+// name. It lives here, transport-neutral, so both `erun app` (CLI) and the
+// desktop app's own self-restart build the launch identically without the
+// desktop importing erun-cli.
+func DesktopAppCommand(goos, executable string, args []string) *exec.Cmd {
+	if goos == "darwin" && filepath.Ext(executable) == ".app" {
+		openArgs := []string{"-n", executable}
+		if len(args) > 0 {
+			openArgs = append(openArgs, "--args")
+			openArgs = append(openArgs, args...)
+		}
+		return Command("open", openArgs...)
+	}
+	cmd := Command(executable, args...)
+	if goos == "darwin" {
+		cmd.Args[0] = "ERun"
+	}
+	return cmd
 }
 
 func newExecCommand(name string, args ...string) *exec.Cmd {

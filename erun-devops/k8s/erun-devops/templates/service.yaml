@@ -637,7 +637,19 @@ spec:
                   - sh
                   - -lc
                   - while [ ! -S /var/run/docker.sock ]; do sleep 1; done; chmod 0666 /var/run/docker.sock
+          # The dind sidecar is the docker daemon that resolves a tenant's
+          # docker-compose bind-mount sources on its own filesystem, so it must
+          # see the same home + repo tree as the erun-devops container: without
+          # the repo mount a "./relative" compose bind mount resolves to a path
+          # the daemon lacks and Docker silently creates an empty dir there
+          # (localstack init hooks, DB seed SQL, service configs all vanish).
           volumeMounts:
+            - name: erun-home
+              mountPath: /home/erun
+            {{- if ne $worktreeStorage "none" }}
+            - name: repo-worktree
+              mountPath: {{ $worktreePath | quote }}
+            {{- end }}
             - name: docker-socket
               mountPath: /var/run
             - name: docker-state

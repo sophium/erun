@@ -1,12 +1,13 @@
 import type { AgentOutputsList, UISelection } from '@/types';
 
-import { DownloadAgentOutput, ListAgentOutputs } from '../../wailsjs/go/main/App';
+import { DownloadAgentOutput, ListAgentOutputs, RunHostArtifact } from '../../wailsjs/go/main/App';
 import { readError } from './errors';
 import {
   openOutputsDialog,
   setOutputs,
   setOutputsDownloading,
   setOutputsError,
+  setOutputsRunning,
   setOutputsStatus,
 } from './slices/outputsDialogSlice';
 import type { AppThunk } from './store';
@@ -42,6 +43,26 @@ export const downloadOutput =
             : { message: `Saved ${name} to ${dest}`, error: false },
         ),
       );
+    } catch (error) {
+      dispatch(setOutputsStatus({ message: readError(error), error: true }));
+    }
+  };
+
+// runOutputOnHost launches a synced artifact on the host so the operator can run
+// or debug a binary an agent cross-built in the pod. The backend runs the copy
+// workspace sync mirrored into the read-only host outputs dir, erroring clearly
+// when the env has no host workspace or the artifact has not synced down yet.
+export const runOutputOnHost =
+  (name: string): AppThunk<Promise<void>> =>
+  async (dispatch, getState) => {
+    const selection = getState().outputsDialog.selection;
+    if (!selection) {
+      return;
+    }
+    dispatch(setOutputsRunning(name));
+    try {
+      await RunHostArtifact(selection, name);
+      dispatch(setOutputsStatus({ message: `Launched ${name} on this machine.`, error: false }));
     } catch (error) {
       dispatch(setOutputsStatus({ message: readError(error), error: true }));
     }

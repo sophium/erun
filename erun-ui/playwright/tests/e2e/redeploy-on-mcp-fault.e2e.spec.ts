@@ -4,7 +4,12 @@ import type { Request } from '@playwright/test';
 
 import { expect, test } from '../../fixtures/erunApp.js';
 import { readK3dCluster } from '../../fixtures/k3dCluster.js';
-import { kubeconfigPath, removeEnvironment, SEED_TENANT, uniqueEnvironmentName } from '../../fixtures/seedRoot.js';
+import {
+  kubeconfigPath,
+  removeEnvironment,
+  SEED_TENANT,
+  uniqueEnvironmentName,
+} from '../../fixtures/seedRoot.js';
 
 // Fault-injection reproduction of the field redeploy loop: on the erun-k3s (WSL2)
 // cluster the MCP port-forward keeps dropping while the pod stays healthy, and the
@@ -48,7 +53,16 @@ test.describe('k3d e2e: a dropped MCP port-forward must not trigger a redeploy',
       try {
         execFileSync(
           'kubectl',
-          ['--context', cluster.context, '-n', namespace, 'delete', 'pods', '--all', '--wait=false'],
+          [
+            '--context',
+            cluster.context,
+            '-n',
+            namespace,
+            'delete',
+            'pods',
+            '--all',
+            '--wait=false',
+          ],
           { env: kubectlEnv, stdio: 'pipe' },
         );
       } catch {
@@ -75,7 +89,11 @@ test.describe('k3d e2e: a dropped MCP port-forward must not trigger a redeploy',
         (sel) => {
           const boundApp = (
             window as unknown as {
-              go?: { main?: { App?: { StartInitSession?: (s: unknown, c: number, r: number) => unknown } } };
+              go?: {
+                main?: {
+                  App?: { StartInitSession?: (s: unknown, c: number, r: number) => unknown };
+                };
+              };
             }
           ).go?.main?.App;
           return boundApp?.StartInitSession?.(sel, 120, 40);
@@ -120,9 +138,13 @@ test.describe('k3d e2e: a dropped MCP port-forward must not trigger a redeploy',
           ['--kube-context', cluster.context, '-n', namespace, 'uninstall', `${tenant}-devops`],
           { stdio: 'ignore' },
         );
-        execFileSync('kubectl', ['--context', cluster.context, 'delete', 'ns', namespace, '--wait=false'], {
-          stdio: 'ignore',
-        });
+        execFileSync(
+          'kubectl',
+          ['--context', cluster.context, 'delete', 'ns', namespace, '--wait=false'],
+          {
+            stdio: 'ignore',
+          },
+        );
       } catch {
         /* ignore cleanup failures */
       }

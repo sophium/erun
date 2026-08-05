@@ -2,62 +2,54 @@ import { GitFork, Plus, X } from 'lucide-react';
 import * as React from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { openOrchestrator, stopOrchestrator } from '@/app/orchestratorThunks';
 import { addTerminalTab, closeTerminalTab, selectTerminalTab } from '@/app/sessionThunks';
 import { selectionKey } from '@/app/versionSuggestions';
 import { IconTooltip } from '@/components/app/IconTooltip';
 import { cn } from '@/lib/utils';
 
-interface TerminalTab {
-  sessionId: number;
+// StripTab is the render-agnostic tab model. The strip has two modes — the env's
+// in-pod/host tabs, and the cross-env orchestrator sessions — but both render
+// identically; only the source list and the select/close actions differ.
+interface StripTab {
+  key: string;
   label: string;
-  kind: string;
+  sessionId: number;
+  icon?: 'contribute';
+  closeable: boolean;
+  onSelect: () => void;
+  onClose: () => void;
 }
 
-function activateTab(
-  index: number,
-  tabs: TerminalTab[],
-  dispatch: ReturnType<typeof useAppDispatch>,
-  focusTab: (index: number) => void,
-): void {
-  const id = tabs[index]?.sessionId;
-  if (id !== undefined) {
-    dispatch(selectTerminalTab(id));
-  }
+function activateTab(index: number, tabs: StripTab[], focusTab: (index: number) => void): void {
+  tabs[index]?.onSelect();
   focusTab(index);
 }
 
-function tabStripKeyDownHandler(
-  tabs: TerminalTab[],
-  dispatch: ReturnType<typeof useAppDispatch>,
-  focusTab: (index: number) => void,
-) {
-  return (
-    event: React.KeyboardEvent<HTMLButtonElement>,
-    index: number,
-    sessionId: number,
-  ): void => {
+function tabStripKeyDownHandler(tabs: StripTab[], focusTab: (index: number) => void) {
+  return (event: React.KeyboardEvent<HTMLButtonElement>, index: number): void => {
     switch (event.key) {
       case 'ArrowRight':
         event.preventDefault();
-        activateTab((index + 1) % tabs.length, tabs, dispatch, focusTab);
+        activateTab((index + 1) % tabs.length, tabs, focusTab);
         return;
       case 'ArrowLeft':
         event.preventDefault();
-        activateTab((index - 1 + tabs.length) % tabs.length, tabs, dispatch, focusTab);
+        activateTab((index - 1 + tabs.length) % tabs.length, tabs, focusTab);
         return;
       case 'Home':
         event.preventDefault();
-        activateTab(0, tabs, dispatch, focusTab);
+        activateTab(0, tabs, focusTab);
         return;
       case 'End':
         event.preventDefault();
-        activateTab(tabs.length - 1, tabs, dispatch, focusTab);
+        activateTab(tabs.length - 1, tabs, focusTab);
         return;
       case 'Delete':
       case 'Backspace':
         if (event.metaKey || event.ctrlKey) {
           event.preventDefault();
-          void dispatch(closeTerminalTab(sessionId));
+          tabs[index]?.onClose();
         }
         return;
       default:
@@ -71,63 +63,95 @@ export function TerminalTabStrip(): React.ReactElement {
   const selection = useAppSelector((state) => state.selection.selected);
   const tabsByEnv = useAppSelector((state) => state.terminal.tabsByEnv);
   const activeId = useAppSelector((state) => state.terminal.sessionId);
+  const orchestrators = useAppSelector((state) => state.orchestrators.items);
   const tabRefs = React.useRef<(HTMLButtonElement | null)[]>([]);
   const stripBaseClass =
     'flex h-8 items-end border-b border-[oklch(0.18_0_0)] bg-[oklch(0.05_0_0)] pl-2 pr-1';
 
-  if (!selection) {
+  // When the active session is an orchestrator, the strip reflects the
+  // orchestrators (they are cross-env, so the selected env's tabs would misalign
+  // with what the pane actually renders). Selecting an environment row switches
+  // the active session back to an env tab and the strip returns to env mode.
+  const orchestratorMode = activeId > 0 && orchestrators.some((o) => o.sessionId === activeId);
+
+  let tabs: StripTab[];
+  let showNewTerminal = false;
+  if (orchestratorMode) {
+    tabs = orchestrators.map((orchestrator) => ({
+      key: orchestrator.id,
+      label: orchestrator.name,
+      sessionId: orchestrator.sessionId,
+      closeable: true,
+      onSelect: () => {
+        dispatch(openOrchestrator(orchestrator.sessionId));
+      },
+      onClose: () => {
+        void dispatch(stopOrchestrator(orchestrator.id));
+      },
+    }));
+  } else if (selection) {
+    tabs = (tabsByEnv[selectionKey(selection)] ?? []).map((tab, index) => ({
+      key: String(tab.sessionId),
+      label: tab.label || `Terminal ${String(index + 1)}`,
+      sessionId: tab.sessionId,
+      icon:
+        tab.kind === 'contribute-erun' || tab.kind === 'contribute-ai' ? 'contribute' : undefined,
+      closeable: tab.kind === 'extra',
+      onSelect: () => {
+        dispatch(selectTerminalTab(tab.sessionId));
+      },
+      onClose: () => {
+        void dispatch(closeTerminalTab(tab.sessionId));
+      },
+    }));
+    showNewTerminal = true;
+  } else {
     return <div className={stripBaseClass} aria-hidden="true" />;
   }
 
-  const tabs = tabsByEnv[selectionKey(selection)] ?? [];
   tabRefs.current.length = tabs.length;
-
   const focusTab = (index: number): void => {
-    const node = tabRefs.current[index];
-    node?.focus();
+    tabRefs.current[index]?.focus();
   };
-
-  const handleKeyDown = tabStripKeyDownHandler(tabs, dispatch, focusTab);
+  const handleKeyDown = tabStripKeyDownHandler(tabs, focusTab);
 
   return (
-    <div className={stripBaseClass} role="tablist" aria-label="Open terminals">
+    <div
+      className={stripBaseClass}
+      role="tablist"
+      aria-label={orchestratorMode ? 'Orchestrators' : 'Open terminals'}
+    >
       {tabs.map((tab, index) => (
         <Tab
-          key={tab.sessionId}
-          label={tab.label || `Terminal ${String(index + 1)}`}
-          icon={
-            tab.kind === 'contribute-erun' || tab.kind === 'contribute-ai'
-              ? 'contribute'
-              : undefined
-          }
-          closeable={tab.kind === 'extra'}
+          key={tab.key}
+          label={tab.label}
+          icon={tab.icon}
+          closeable={tab.closeable}
           active={tab.sessionId === activeId}
           ref={(node) => {
             tabRefs.current[index] = node;
           }}
-          onSelect={() => {
-            dispatch(selectTerminalTab(tab.sessionId));
-          }}
-          onClose={() => {
-            void dispatch(closeTerminalTab(tab.sessionId));
-          }}
+          onSelect={tab.onSelect}
+          onClose={tab.onClose}
           onKeyDown={(event) => {
-            handleKeyDown(event, index, tab.sessionId);
+            handleKeyDown(event, index);
           }}
         />
       ))}
-      <IconTooltip label="New terminal">
-        <button
-          type="button"
-          className="ml-1 mb-[-1px] flex h-7 items-center justify-center rounded-md px-2 text-[oklch(0.66_0_0)] transition-colors hover:bg-[oklch(0.13_0_0)] hover:text-[oklch(0.96_0_0)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.62_0_0)]"
-          aria-label="Open a new terminal"
-          onClick={() => {
-            void dispatch(addTerminalTab());
-          }}
-        >
-          <Plus className="size-4" aria-hidden="true" />
-        </button>
-      </IconTooltip>
+      {showNewTerminal && (
+        <IconTooltip label="New terminal">
+          <button
+            type="button"
+            className="ml-1 mb-[-1px] flex h-7 items-center justify-center rounded-md px-2 text-[oklch(0.66_0_0)] transition-colors hover:bg-[oklch(0.13_0_0)] hover:text-[oklch(0.96_0_0)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.62_0_0)]"
+            aria-label="Open a new terminal"
+            onClick={() => {
+              void dispatch(addTerminalTab());
+            }}
+          >
+            <Plus className="size-4" aria-hidden="true" />
+          </button>
+        </IconTooltip>
+      )}
     </div>
   );
 }

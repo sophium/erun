@@ -15,7 +15,7 @@ If you already have a Kubernetes cluster — EKS, GKE, an on-prem k3s — you do
 ## Prerequisites
 
 1. An AWS account reachable through IAM Identity Center (SSO). Managed cloud contexts are AWS-only today.
-2. Permission for your SSO role to create and manage EC2 instances, security groups, and IAM instance profiles in the target region.
+2. Permission for your SSO permission set to create and manage EC2 instances, security groups, and IAM instance profiles in the target region.
 3. An OIDC issuer for ERun API callers — derived automatically from your AWS web-identity token in Step 1.
 
 ## Step 1 — Register a cloud provider alias

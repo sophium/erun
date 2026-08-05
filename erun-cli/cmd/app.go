@@ -82,21 +82,10 @@ func launchAppProcess(stdout, stderr io.Writer, args []string) error {
 	return cmd.Process.Release()
 }
 
+// newAppProcessCommand delegates to the shared eruncommon.DesktopAppCommand so
+// the CLI and the desktop app's self-restart build the launch identically.
 func newAppProcessCommand(goos string, executable string, args []string) *exec.Cmd {
-	if goos == "darwin" && filepath.Ext(executable) == ".app" {
-		openArgs := []string{"-n", executable}
-		if len(args) > 0 {
-			openArgs = append(openArgs, "--args")
-			openArgs = append(openArgs, args...)
-		}
-		return eruncommon.Command("open", openArgs...)
-	}
-
-	cmd := eruncommon.Command(executable, args...)
-	if goos == "darwin" {
-		cmd.Args[0] = "ERun"
-	}
-	return cmd
+	return eruncommon.DesktopAppCommand(goos, executable, args)
 }
 
 func resolveAppExecutable() string {

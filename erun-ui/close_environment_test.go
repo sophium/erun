@@ -107,3 +107,48 @@ func TestCloseEnvironmentSessionsRejectsEmptyTarget(t *testing.T) {
 		t.Fatal("expected error when environment is empty")
 	}
 }
+
+// TestCloseEnvironmentSessionsMarksClosedSoReconnectRefuses guards the fix
+// behind the "sidebar keeps spinning after close" bug. Closing an env must
+// mark each live session closed (and release its idle-stop block) so
+// tryReconnect refuses to respawn it — which is what lets streamSession reach
+// finalizeSessionExit -> finalizeAIActivity and emit AI busy=false, clearing
+// the sidebar spinner. Before the fix CloseEnvironmentSessions closed the PTY
+// without marking closed, so the AI session reconnected the still-live pod
+// session, finalize never ran, and a continuously repainting Claude TUI (never
+// quiet for the 3s idle-clear) left the aiBusy latch — and the row — spinning
+// forever.
+func TestCloseEnvironmentSessionsMarksClosedSoReconnectRefuses(t *testing.T) {
+	app := &App{
+		sessions: make(map[string]*managedTerminal),
+		busyEnvs: make(map[string]int),
+	}
+	target := uiSelection{Tenant: "erun", Environment: "local"}
+	// respawn is non-nil so the ONLY reason tryReconnect can refuse is the
+	// closed flag the fix sets, not a nil respawn.
+	ai := &managedTerminal{
+		selection:      target,
+		session:        newStubTerminalSession(),
+		serial:         1,
+		key:            "ai",
+		kind:           sessionKindAI,
+		aiBusyEmitted:  true,
+		blocksIdleStop: true,
+		respawn:        func() (terminalSession, error) { return newStubTerminalSession(), nil },
+	}
+	app.sessions["ai"] = ai
+	app.busyEnvs[selectionKey(target)] = 1
+
+	if _, err := app.CloseEnvironmentSessions(target); err != nil {
+		t.Fatalf("CloseEnvironmentSessions returned err: %v", err)
+	}
+	if !ai.closed {
+		t.Fatal("close must mark the session closed so tryReconnect refuses it")
+	}
+	if _, ok := app.busyEnvs[selectionKey(target)]; ok {
+		t.Fatal("close must release the env's idle-stop block")
+	}
+	if app.tryReconnect(ai, "test") {
+		t.Fatal("tryReconnect must refuse a session closed by CloseEnvironmentSessions")
+	}
+}

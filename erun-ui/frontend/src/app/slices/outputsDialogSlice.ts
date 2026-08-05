@@ -12,6 +12,7 @@ export interface OutputsDialogState {
   entries: AgentOutputEntry[];
   selection: UISelection | null;
   downloadingName: string;
+  runningName: string;
   status: string;
   statusError: boolean;
 }
@@ -24,6 +25,7 @@ const initialState: OutputsDialogState = {
   entries: [],
   selection: null,
   downloadingName: '',
+  runningName: '',
   status: '',
   statusError: false,
 };
@@ -40,6 +42,7 @@ export const outputsDialogSlice = createSlice({
       state.dir = '';
       state.selection = action.payload;
       state.downloadingName = '';
+      state.runningName = '';
       state.status = '';
       state.statusError = false;
     },
@@ -60,8 +63,16 @@ export const outputsDialogSlice = createSlice({
         state.statusError = false;
       }
     },
+    setOutputsRunning(state, action: PayloadAction<string>) {
+      state.runningName = action.payload;
+      if (action.payload !== '') {
+        state.status = '';
+        state.statusError = false;
+      }
+    },
     setOutputsStatus(state, action: PayloadAction<{ message: string; error: boolean }>) {
       state.downloadingName = '';
+      state.runningName = '';
       state.status = action.payload.message;
       state.statusError = action.payload.error;
     },
@@ -76,6 +87,7 @@ export const {
   setOutputs,
   setOutputsError,
   setOutputsDownloading,
+  setOutputsRunning,
   setOutputsStatus,
   closeOutputsDialog,
 } = outputsDialogSlice.actions;

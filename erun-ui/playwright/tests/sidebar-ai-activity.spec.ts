@@ -84,4 +84,39 @@ test.describe('sidebar AI activity spinner', () => {
     });
     await expect(sidebar.getByRole('status')).toHaveCount(0);
   });
+
+  test('closing an env clears a latched AI-activity spinner', async ({ app, page, seededEnv }) => {
+    const { tenant, environment } = seededEnv;
+    const sidebar = page.locator('aside').first();
+    const envSpinner = sidebar.getByRole('status', {
+      name: new RegExp(`${tenant} / ${environment}`),
+    });
+
+    // Open the env so it has live tabs and the close dot mounts.
+    await app.sidebar.openEnvironment(tenant, environment);
+    const closeDot = sidebar.getByRole('button', { name: `Close ${tenant} / ${environment}` });
+    await expect(closeDot).toBeVisible();
+    await expect(envSpinner).toHaveCount(0);
+
+    // A real Claude TUI repaints continuously, so the Go idle-clear never fires
+    // and the ai-activity latch stays on; emulate that stuck busy=true.
+    await page.evaluate(
+      ({ tenant, environment }) => {
+        const runtime = (
+          window as unknown as {
+            runtime: { EventsEmit: (n: string, ...a: unknown[]) => void };
+          }
+        ).runtime;
+        runtime.EventsEmit('ai-activity', { sessionId: 99, tenant, environment, busy: true });
+      },
+      { tenant, environment },
+    );
+    await expect(envSpinner).toBeVisible();
+
+    // Closing the env must clear the busy latch. Before the fix the spinner
+    // stayed forever (green dot gone, row still spinning) because close never
+    // finalized the AI session, so busy=false was never emitted.
+    await closeDot.click();
+    await expect(envSpinner).toHaveCount(0);
+  });
 });

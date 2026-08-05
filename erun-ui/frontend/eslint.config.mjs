@@ -84,6 +84,9 @@ export default tseslint.config(
       complexity: 'off',
       'max-lines-per-function': 'off',
       'max-lines': 'off',
+      // node:test top-level `test(...)` calls are fire-and-forget by design —
+      // the runner collects and awaits them — so they are not floating promises.
+      '@typescript-eslint/no-floating-promises': 'off',
     },
   },
 );

@@ -93,53 +93,6 @@ func parseDockerImageReference(image string) (registry, imageName, version strin
 	return registry, imageName, version, true
 }
 
-func ResolveDockerBuildForImageReference(ctx Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, projectRoot, environment, image string) (DockerBuildSpec, bool, error) {
-	image = strings.TrimSpace(image)
-	registry, imageName, version, ok := parseDockerImageReference(image)
-	if !ok {
-		return DockerBuildSpec{}, false, nil
-	}
-
-	if registry == "" {
-		resolved, err := resolveDockerBuildRegistryForEnvironment(ctx, projectRoot, environment)
-		if err != nil {
-			return DockerBuildSpec{}, false, err
-		}
-		registry = resolved
-	}
-
-	buildContext, ok, err := FindComponentDockerBuildContext(projectRoot, imageName)
-	if err != nil || !ok {
-		return DockerBuildSpec{}, false, err
-	}
-
-	tag := image
-	if !strings.Contains(image, "/") {
-		tag = fmt.Sprintf("%s/%s:%s", strings.TrimRight(registry, "/"), imageName, version)
-	}
-
-	imageRef := DockerImageReference{
-		ProjectRoot: projectRoot,
-		Environment: strings.TrimSpace(environment),
-		Registry:    registry,
-		ImageName:   imageName,
-		Version:     version,
-		Tag:         tag,
-	}
-
-	contextDir, err := ResolveDockerBuildContextDirForProject(buildContext.Dir, projectRoot)
-	if err != nil {
-		return DockerBuildSpec{}, false, err
-	}
-
-	return DockerBuildSpec{
-		ContextDir:     contextDir,
-		DockerfilePath: buildContext.DockerfilePath,
-		Image:          imageRef,
-		Platforms:      slices.Clone(multiPlatformDockerBuilds),
-	}, true, nil
-}
-
 func resolveDockerBuildSpec(ctx Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, buildContext DockerBuildContext, target DockerCommandTarget) (DockerBuildSpec, error) {
 	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil {

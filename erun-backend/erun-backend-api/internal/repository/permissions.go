@@ -13,10 +13,6 @@ type PermissionAuthorizer struct {
 	txs *TxManager
 }
 
-func NewPermissionAuthorizer(db *sql.DB) *PermissionAuthorizer {
-	return NewPermissionAuthorizerForDialect(db, DialectPostgres)
-}
-
 func NewPermissionAuthorizerForDialect(db *sql.DB, dialect Dialect) *PermissionAuthorizer {
 	return &PermissionAuthorizer{txs: NewTxManager(db, dialect)}
 }

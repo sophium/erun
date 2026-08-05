@@ -39,43 +39,48 @@ type projectConfigStore interface {
 }
 
 type erunUIDeps struct {
-	store                  erunUIStore
-	findProjectRoot        eruncommon.ProjectFinderFunc
-	resolveCLIPath         func() string
-	resolveBuildInfo       func() eruncommon.BuildInfo
-	resolveImageRegistry   func(context.Context, string, string) (eruncommon.RuntimeRegistryVersions, error)
-	cloudDeps              eruncommon.CloudDependencies
-	cloudContextDeps       eruncommon.CloudContextDependencies
-	deleteNamespace        eruncommon.NamespaceDeleterFunc
-	listKubeContexts       func() ([]string, error)
-	loadResourceStatus     func(context.Context, uiRuntimeResourceInput) (uiRuntimeResourceStatus, error)
-	loadClusterRegistry    func(context.Context, uiRuntimeResourceInput) (uiClusterRegistryStatus, error)
-	checkRuntimeDeployed   func(context.Context, string, string, string) (bool, error)
-	ensureMCP              func(context.Context, eruncommon.OpenResult) error
-	reconnectMCP           func(context.Context, eruncommon.OpenResult, func(string)) error
-	ensureSSHD             func(context.Context, eruncommon.OpenResult) error
-	canConnectLocalPort    func(int) bool
-	setRemoteCloudAlias    func(context.Context, string, string, string, string, string) (eruncommon.EnvConfig, error)
-	startTerminal          func(startTerminalSessionParams) (terminalSession, error)
-	runIDECommand          func(context.Context, startTerminalSessionParams) (string, error)
-	savePastedFile         func(pastedFileSaveParams) (string, error)
-	listAgentOutputs       func(eruncommon.OpenResult, eruncommon.RuntimeOutputsParams) (eruncommon.RuntimeOutputsListResult, error)
-	downloadAgentOutput    func(eruncommon.OpenResult, eruncommon.RuntimeOutputDownloadParams) (eruncommon.RuntimeOutputResult, error)
-	loadDiff               func(context.Context, string, string, uiDiffOptions) (eruncommon.DiffResult, error)
-	loadIdleStatus         func(context.Context, string, string) (eruncommon.EnvironmentIdleStatus, error)
-	loadAPILog             func(context.Context, uiTenantDashboardInput) (string, error)
-	workspaceSyncReady     func(context.Context, string) error
-	syncWorkspace          func(context.Context, workspaceSyncParams) (workspaceSyncResult, error)
-	workspaceSyncInterval  time.Duration
-	recordActivity         func(eruncommon.EnvironmentActivityParams) error
-	runWorkingIssueCommand workingIssueCommandRunner
-	loadPodBranch          func(context.Context, string, string) (string, error)
-	runPodRaw              func(context.Context, string, string, []string) (string, error)
-	stopCloudContext       func(context.Context, string) (eruncommon.CloudContextStatus, error)
-	windowStatePath        string
-	windowMaximised        func(context.Context) bool
-	cloneERun              func(context.Context, string, string) error
-	contributeStatePath    string
+	store                     erunUIStore
+	findProjectRoot           eruncommon.ProjectFinderFunc
+	resolveCLIPath            func() string
+	resolveBuildInfo          func() eruncommon.BuildInfo
+	resolveImageRegistry      func(context.Context, string, string) (eruncommon.RuntimeRegistryVersions, error)
+	cloudDeps                 eruncommon.CloudDependencies
+	cloudContextDeps          eruncommon.CloudContextDependencies
+	deleteNamespace           eruncommon.NamespaceDeleterFunc
+	listKubeContexts          func() ([]string, error)
+	loadResourceStatus        func(context.Context, uiRuntimeResourceInput) (uiRuntimeResourceStatus, error)
+	loadClusterRegistry       func(context.Context, uiRuntimeResourceInput) (uiClusterRegistryStatus, error)
+	checkRuntimeDeployed      func(context.Context, string, string, string) (bool, error)
+	ensureMCP                 func(context.Context, eruncommon.OpenResult) error
+	reconnectMCP              func(context.Context, eruncommon.OpenResult, func(string)) error
+	ensureSSHD                func(context.Context, eruncommon.OpenResult) error
+	canConnectLocalPort       func(int) bool
+	setRemoteCloudAlias       func(context.Context, string, string, string, string, string) (eruncommon.EnvConfig, error)
+	startTerminal             func(startTerminalSessionParams) (terminalSession, error)
+	runIDECommand             func(context.Context, startTerminalSessionParams) (string, error)
+	launchHostArtifact        func(exePath, dir string) error
+	resolveOrchestratorLaunch func(sessionID, initialPrompt, resumePrompt, mcpConfigPath string) (string, []string, error)
+	savePastedFile            func(pastedFileSaveParams) (string, error)
+	listAgentOutputs          func(eruncommon.OpenResult, eruncommon.RuntimeOutputsParams) (eruncommon.RuntimeOutputsListResult, error)
+	downloadAgentOutput       func(eruncommon.OpenResult, eruncommon.RuntimeOutputDownloadParams) (eruncommon.RuntimeOutputResult, error)
+	loadDiff                  func(context.Context, string, string, uiDiffOptions) (eruncommon.DiffResult, error)
+	loadIdleStatus            func(context.Context, string, string) (eruncommon.EnvironmentIdleStatus, error)
+	loadAPILog                func(context.Context, uiTenantDashboardInput) (string, error)
+	workspaceSyncReady        func(context.Context, string) error
+	syncWorkspace             func(context.Context, workspaceSyncParams) (workspaceSyncResult, error)
+	workspaceSyncInterval     time.Duration
+	recordActivity            func(eruncommon.EnvironmentActivityParams) error
+	runWorkingIssueCommand    workingIssueCommandRunner
+	loadPodBranch             func(context.Context, string, string) (string, error)
+	runPodRaw                 func(context.Context, string, string, []string) (string, error)
+	stopCloudContext          func(context.Context, string) (eruncommon.CloudContextStatus, error)
+	windowStatePath           string
+	windowMaximised           func(context.Context) bool
+	cloneERun                 func(context.Context, string, string) error
+	contributeStatePath       string
+	orchestratorRestorePath   string
+	relaunchApp               func() error
+	quitApp                   func()
 }
 
 type App struct {
@@ -94,6 +99,7 @@ type App struct {
 	intentionalStops          map[string]struct{}
 	busyEnvs                  map[string]int
 	workspaceSyncs            map[string]*workspaceSyncWorker
+	orchestrators             map[string]*orchestratorSession
 	credentialRefreshers      map[string]*cloudCredentialsRefresher
 	activityQueue             *activityQueueStore
 	activityStatusPoller      func(activityQueueEntry)
@@ -166,6 +172,7 @@ func NewApp(deps erunUIDeps) *App {
 		intentionalStops:     make(map[string]struct{}),
 		busyEnvs:             make(map[string]int),
 		workspaceSyncs:       make(map[string]*workspaceSyncWorker),
+		orchestrators:        make(map[string]*orchestratorSession),
 		credentialRefreshers: make(map[string]*cloudCredentialsRefresher),
 		workingIssueCache:    make(map[string]workingIssueCacheEntry),
 	}
@@ -236,6 +243,12 @@ func withDefaultCloudDeps(deps erunUIDeps) erunUIDeps {
 }
 
 func withDefaultRuntimeDeps(deps erunUIDeps) erunUIDeps {
+	deps = withDefaultRuntimeResolutionDeps(deps)
+	deps = withDefaultRuntimeSessionDeps(deps)
+	return deps
+}
+
+func withDefaultRuntimeResolutionDeps(deps erunUIDeps) erunUIDeps {
 	if deps.listKubeContexts == nil {
 		deps.listKubeContexts = listKubernetesContexts
 	}
@@ -248,6 +261,19 @@ func withDefaultRuntimeDeps(deps erunUIDeps) erunUIDeps {
 	if deps.checkRuntimeDeployed == nil {
 		deps.checkRuntimeDeployed = checkRuntimeDeployed
 	}
+	if deps.canConnectLocalPort == nil {
+		deps.canConnectLocalPort = canConnectLocalTCP
+	}
+	if deps.setRemoteCloudAlias == nil {
+		deps.setRemoteCloudAlias = setEnvironmentCloudAliasViaMCP
+	}
+	if deps.resolveOrchestratorLaunch == nil {
+		deps.resolveOrchestratorLaunch = orchestratorLaunchCommand
+	}
+	return deps
+}
+
+func withDefaultRuntimeSessionDeps(deps erunUIDeps) erunUIDeps {
 	if deps.ensureMCP == nil {
 		deps.ensureMCP = func(ctx context.Context, result eruncommon.OpenResult) error {
 			return ensureMCPViaOpenCommand(ctx, deps.resolveCLIPath(), result)
@@ -263,17 +289,14 @@ func withDefaultRuntimeDeps(deps erunUIDeps) erunUIDeps {
 			return ensureSSHDViaOpenCommand(ctx, deps.resolveCLIPath(), result)
 		}
 	}
-	if deps.canConnectLocalPort == nil {
-		deps.canConnectLocalPort = canConnectLocalTCP
-	}
-	if deps.setRemoteCloudAlias == nil {
-		deps.setRemoteCloudAlias = setEnvironmentCloudAliasViaMCP
-	}
 	if deps.startTerminal == nil {
 		deps.startTerminal = startTerminalSession
 	}
 	if deps.runIDECommand == nil {
 		deps.runIDECommand = runIDECommand
+	}
+	if deps.launchHostArtifact == nil {
+		deps.launchHostArtifact = launchHostArtifactDetached
 	}
 	return deps
 }
@@ -350,6 +373,9 @@ func withDefaultWindowAndContributeDeps(deps erunUIDeps) erunUIDeps {
 	if deps.contributeStatePath == "" {
 		deps.contributeStatePath = defaultContributeStatePath()
 	}
+	if deps.orchestratorRestorePath == "" {
+		deps.orchestratorRestorePath = defaultOrchestratorRestorePath()
+	}
 	return deps
 }
 
@@ -364,6 +390,10 @@ func (a *App) startup(ctx context.Context) {
 	a.startActivityPollers()
 	a.startCloudContextStatusPoller()
 	a.startConfigWatcher()
+	// Populate and keep live every linked orchestrator mirror, not only envs
+	// opened this session. Off the startup path so config/network I/O per env
+	// does not delay first paint.
+	go a.startWorkspaceSyncForConfiguredEnvs()
 }
 
 func (a *App) shutdown(context.Context) {

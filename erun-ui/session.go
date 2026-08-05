@@ -97,6 +97,24 @@ func runIDECommand(ctx context.Context, params startTerminalSessionParams) (stri
 	return string(output), err
 }
 
+// launchHostArtifactDetached starts a host binary and detaches it so it keeps
+// running independently of the desktop; HideConsoleWindow suppresses the console
+// flash a windowless desktop child would otherwise get on Windows. It backs the
+// host "run artifact" facade so a binary an agent cross-built in the pod can be
+// run or debugged on the host.
+func launchHostArtifactDetached(exePath, dir string) error {
+	cmd := exec.Command(exePath)
+	cmd.Dir = dir
+	eruncommon.HideConsoleWindow(cmd)
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("launch %s: %w", filepath.Base(exePath), err)
+	}
+	if cmd.Process != nil {
+		_ = cmd.Process.Release()
+	}
+	return nil
+}
+
 func buildOpenCommand(cliPath, tenant, environment string) string {
 	if runtime.GOOS == "windows" {
 		return "& " + powerShellQuote(cliPath) + " open " + powerShellQuote(strings.TrimSpace(tenant)) + " " + powerShellQuote(strings.TrimSpace(environment))

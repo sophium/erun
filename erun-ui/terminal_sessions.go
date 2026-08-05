@@ -876,6 +876,40 @@ func (a *App) ResizeSession(sessionID, cols, rows int) error {
 	return managed.session.Resize(cols, rows)
 }
 
+// RepaintSession forces the session's program to fully repaint by raising a real
+// WINCH (shrink one row, then restore) on its backend pty. Switching to a tab
+// replays the retained buffer locally, but an Ink/alt-screen TUI (Claude) only
+// repaints on a geometry change, so a same-size switch would leave the tab blank
+// until the app next emits a diff on its own. Unlike maybeNudgeAIRepaint this is
+// deliberately NOT gated by repaintNudged (that guard is for the once-per-attach
+// streaming path — every alt-screen switch wants a fresh repaint); the frontend
+// calls it only for alt-screen sessions. The local xterm is never resized, so
+// the user sees the frame appear with no visible reflow.
+func (a *App) RepaintSession(sessionID int) error {
+	a.mu.Lock()
+	managed := a.sessionBySerialLocked(sessionID)
+	var cols, rows int
+	if managed != nil {
+		cols, rows = managed.lastCols, managed.lastRows
+	}
+	a.mu.Unlock()
+	if managed == nil || managed.session == nil {
+		return nil
+	}
+	// Only AI TUIs (claude/codex) need the WINCH repaint: they render on the MAIN
+	// screen and only repaint on a real geometry change, so a tab switch leaves
+	// them blank until their next diff. Plain shells and alt-screen apps
+	// reconstruct from the replayed buffer, so a nudge would just cause a needless
+	// reflow. The frontend fires this on every switch and lets this gate decide.
+	if !isAITabKind(managed) {
+		return nil
+	}
+	// No attach delay on a switch: the program is already attached (unlike the
+	// attach-marker path, which must wait for dtach to reattach first).
+	go a.nudgeAIRepaint(managed, cols, rows, 0)
+	return nil
+}
+
 func (a *App) CloseSession(sessionID int) error {
 	a.mu.Lock()
 	managed := a.sessionBySerialLocked(sessionID)
@@ -916,11 +950,24 @@ func (a *App) CloseEnvironmentSessions(selection uiSelection) ([]int, error) {
 	if selection.Tenant == "" || selection.Environment == "" {
 		return nil, fmt.Errorf("tenant and environment are required")
 	}
-	targets := a.collectLiveSessionsForSelection(selection)
+	targets := a.collectAndMarkClosedForSelection(selection)
+	// Close is a real teardown: stop the env's workspace-sync worker so a
+	// closed env stops mirroring its worktree. Startup starts one sync worker
+	// per configured env, so without this a closed env keeps an rsync-over-ssh
+	// poller running; reopening the env restarts it.
+	a.stopWorkspaceSyncForSelection(selection)
 	return closeManagedTerminals(targets)
 }
 
-func (a *App) collectLiveSessionsForSelection(selection uiSelection) []*managedTerminal {
+// collectAndMarkClosedForSelection gathers the env's live sessions and marks
+// each closed under a.mu BEFORE the caller shuts their PTYs down. Marking
+// closed here is what makes "close env" a genuine teardown rather than a
+// reconnect: tryReconnect and the spawn-reuse branch both refuse a closed
+// session, so streamSession reaches finalizeSessionExit — which emits the
+// terminal-exit and the AI-activity busy=false that clears the sidebar
+// spinner — instead of reconnecting the still-live pod session and leaving the
+// row spinning forever. Mirrors EndAISessions' mark-closed-under-lock.
+func (a *App) collectAndMarkClosedForSelection(selection uiSelection) []*managedTerminal {
 	var targets []*managedTerminal
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -934,6 +981,8 @@ func (a *App) collectLiveSessionsForSelection(selection uiSelection) []*managedT
 		if managed.selection.Environment != selection.Environment {
 			continue
 		}
+		managed.closed = true
+		a.releaseIdleBlockLocked(managed)
 		targets = append(targets, managed)
 	}
 	return targets
@@ -1170,18 +1219,20 @@ func (a *App) maybeNudgeAIRepaint(managed *managedTerminal, chunk []byte) {
 	managed.repaintNudged = true
 	cols, rows := managed.lastCols, managed.lastRows
 	a.mu.Unlock()
-	go a.nudgeAIRepaint(managed, cols, rows)
+	go a.nudgeAIRepaint(managed, cols, rows, aiRepaintNudgeDelay)
 }
 
 // nudgeAIRepaint briefly shrinks the backend pty by one row and restores it:
 // the change reaches Claude as a real WINCH and forces the full repaint a
 // same-size reattach cannot. The local xterm is never resized, so the user sees
 // the tab's content appear with no visible reflow.
-func (a *App) nudgeAIRepaint(managed *managedTerminal, cols, rows int) {
+func (a *App) nudgeAIRepaint(managed *managedTerminal, cols, rows int, initialDelay time.Duration) {
 	if cols <= 0 || rows <= 1 {
 		return
 	}
-	time.Sleep(aiRepaintNudgeDelay)
+	if initialDelay > 0 {
+		time.Sleep(initialDelay)
+	}
 	if !a.resizeSessionIfLive(managed, cols, rows-1) {
 		return
 	}
@@ -1886,10 +1937,11 @@ func (m *managedTerminal) signalReady(err error) {
 type sessionKind string
 
 const (
-	sessionKindOpen    sessionKind = "erun"
-	sessionKindLocal   sessionKind = "local"
-	sessionKindAI      sessionKind = "ai"
-	sessionKindCommand sessionKind = "command"
+	sessionKindOpen         sessionKind = "erun"
+	sessionKindLocal        sessionKind = "local"
+	sessionKindAI           sessionKind = "ai"
+	sessionKindCommand      sessionKind = "command"
+	sessionKindOrchestrator sessionKind = "orchestrator"
 )
 
 func (s *managedTerminal) Close() error {

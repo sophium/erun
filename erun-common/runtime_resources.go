@@ -102,10 +102,3 @@ func FormatKubernetesCPUFromMilli(milli int64) string {
 	}
 	return strconv.FormatFloat(float64(milli)/1000.0, 'f', -1, 64)
 }
-
-func FormatKubernetesMemoryFromMi(mi int64) string {
-	if mi <= 0 {
-		return ""
-	}
-	return strconv.FormatInt(mi, 10) + "Mi"
-}

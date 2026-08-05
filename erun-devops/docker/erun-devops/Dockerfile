@@ -99,7 +99,7 @@ ARG RIPGREP_VERSION=15.1.0
 ARG NODE_VERSION=24.14.0
 ARG YARN_VERSION=1.22.22
 ARG CODEX_VERSION=0.125.0
-ARG CLAUDE_CODE_VERSION=2.1.198
+ARG CLAUDE_CODE_VERSION=2.1.222
 ARG AWS_CLI_VERSION=2.32.16
 ARG ATLAS_VERSION=v1.2.0
 # Keep in sync with the @playwright/test version resolved in
@@ -120,7 +120,7 @@ USER root
 # contribute-app browser bridge is the only way to test desktop-side
 # changes without leaving the env.
 RUN apt-get update && \
-    apt-get install -y git bash-completion bubblewrap dpkg-dev dtach iproute2 procps \
+    apt-get install -y git bash-completion bubblewrap dpkg-dev dtach iproute2 procps tini \
         build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev && \
     rm -rf /var/lib/apt/lists/* && \
     # ripgrep ships a musl static build for amd64 but only a gnu build for
@@ -223,5 +223,10 @@ USER erun
 
 EXPOSE 17000 17033 17022
 
-ENTRYPOINT ["erun-devops-entrypoint"]
+# Run PID 1 under tini so orphaned children are reaped. The entrypoint daemonises
+# sshd, whose per-connection session children reparent to PID 1 when they finish;
+# with workspace-sync opening an SSH connection every couple of seconds, an
+# unreaped PID 1 accumulates thousands of <defunct> sshd zombies until the node's
+# process table is exhausted and no container can fork (cluster-wide crashloop).
+ENTRYPOINT ["/usr/bin/tini", "--", "erun-devops-entrypoint"]
 CMD ["devops"]

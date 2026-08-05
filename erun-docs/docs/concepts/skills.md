@@ -27,7 +27,7 @@ ERun ships skills through two paths, both vendored from the same canonical sourc
 
 ### Inside a deployed env
 
-The runtime image bakes the skill set, and the env's entrypoint installs each one into the Agent's discovery directory (`~/.claude/skills/<name>/` for Claude Code, `~/.codex/skills/<name>/` for Codex). The Operator doesn't install or wire anything — opening an env makes the skills available to whatever's running inside. Edits made to a skill file inside a running env survive pod restarts; only a fresh home (or a new skill name) re-pulls the baked copy.
+The runtime image bakes the skill set, and the env's entrypoint installs each one into the Agent's discovery directory (`~/.claude/skills/<name>/` for Claude Code, `~/.codex/skills/<name>/` for Codex). The Operator doesn't install or wire anything — opening an env makes the skills available to whatever's running inside. An un-edited skill is refreshed from the image when it changes, so envs track skill improvements across upgrades; edits made to a skill file inside a running env are preserved across pod restarts and rebuilds.
 
 ### On your laptop
 
@@ -57,6 +57,7 @@ Skills come in two kinds: *Blueprint* (ERun's accumulated best practices for ind
 | `erun-build-env` | Workflow | Extend ERun's published runtime image with your project's own toolchain — and publish a `<tenant>-devops` runtime chart when the tenant ships its own components or needs custom pod shape — then point the environment at the result, and maintain or upgrade it in place ([spec](/agent-reference/skills-spec#erun-build-env)). |
 | `erun-browser-session-rest` | Workflow | Call a host's REST API when the org blocks API tokens and gates OAuth, by reusing a saved browser login session ([spec](/agent-reference/skills-spec#erun-browser-session-rest)). |
 | `erun-setup-k3s-cluster` | Workflow | Stand up a durable local Kubernetes cluster on Windows for erun to build and deploy to — real k3s inside WSL2 with an in-cluster registry and a WSL-hosted Docker engine (no Docker Desktop) — and wire a `local-agent` environment at it ([spec](/agent-reference/skills-spec#erun-setup-k3s-cluster)). |
+| `erun-orchestrate` | Workflow | Act as a host-side orchestrator across remote-agent environments: drive each env through its erun MCP (its raw/build/deploy tools, or its in-pod agent), review each env's synced mirror read-only, and run built artifacts on this machine — never editing the mirror or reaching into the pod with kubectl ([spec](/agent-reference/skills-spec#erun-orchestrate)). |
 
 For the SKILL.md contract, the deployment mechanism, the marketplace manifest format, and the per-skill spec, see [Agent reference · Skills spec](/agent-reference/skills-spec).
 

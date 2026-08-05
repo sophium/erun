@@ -4,7 +4,7 @@ import { type IDisposable, Terminal } from '@xterm/xterm';
 import { noop } from '@/lib/utils';
 import type { TerminalExitPayload, TerminalOutputPayload } from '@/types';
 
-import { ResizeSession, SendSessionInput } from '../../wailsjs/go/main/App';
+import { RepaintSession, ResizeSession, SendSessionInput } from '../../wailsjs/go/main/App';
 import { EventsOn } from '../../wailsjs/runtime/runtime';
 import { boot, reloadStateAfterEnvironmentChange } from './bootThunks';
 import { decodeBase64Bytes } from './clipboard';
@@ -34,6 +34,7 @@ import {
 import { TerminalClipboard } from './terminalClipboard';
 import { applyTerminalLayoutVars } from './terminalLayoutVars';
 import { registerTerminalQueryResponseHandlers } from './terminalQueryResponses';
+import { TerminalReattachRepaint } from './terminalReattachRepaint';
 import { TerminalSessionRegistry } from './TerminalSessionRegistry';
 import { decodeTerminalOutput } from './terminalStatus';
 import { TerminalWriteSourceQueue } from './TerminalWriteSourceQueue';
@@ -54,6 +55,50 @@ import {
 
 const REVIEW_DIFF_REFRESH_INTERVAL_MS = 5000;
 
+// xterm keeps only this many lines of scrollback, so replaying more history than
+// this on a session switch is pure parse/render cost that xterm immediately
+// discards. Switching to a long-running session therefore replayed multiple MB
+// of history — the terminal visibly scrolled through all of it for ~20s before
+// landing at the prompt. The replay is capped to this budget below.
+const TERMINAL_SCROLLBACK = 5000;
+// Replay a little more than the scrollback (long lines wrap into several rows),
+// but never more than a hard byte ceiling so a sparse-newline stream can't blow
+// the cap. Both bound switch cost to O(scrollback) instead of O(total history).
+const MAX_REPLAY_LINES = TERMINAL_SCROLLBACK * 2;
+const MAX_REPLAY_BYTES = 2_000_000;
+
+function countNewlines(chunk: TerminalWriteData): number {
+  let count = 0;
+  if (typeof chunk === 'string') {
+    for (const ch of chunk) {
+      if (ch === '\n') count++;
+    }
+    return count;
+  }
+  for (const byte of chunk) {
+    if (byte === 10) count++;
+  }
+  return count;
+}
+
+// trimReplayChunks keeps only the tail of the retained buffer worth replaying —
+// enough to fill xterm's scrollback, not the whole session history. Returns the
+// original slice reference when nothing needs trimming.
+function trimReplayChunks(chunks: TerminalWriteData[]): TerminalWriteData[] {
+  let lines = 0;
+  let bytes = 0;
+  let start = 0;
+  for (let i = chunks.length - 1; i >= 0; i--) {
+    start = i;
+    const chunk = chunks[i];
+    if (chunk === undefined) continue;
+    lines += countNewlines(chunk);
+    bytes += chunk.length;
+    if (lines >= MAX_REPLAY_LINES || bytes >= MAX_REPLAY_BYTES) break;
+  }
+  return start === 0 ? chunks : chunks.slice(start);
+}
+
 export class TerminalController {
   readonly sessions = new TerminalSessionRegistry();
   // Tracks the source session of each in-flight xterm write so terminal query
@@ -73,6 +118,14 @@ export class TerminalController {
   private reviewScrollFrame = 0;
   private idleStatusTimer = 0;
   private reviewDiffRefreshTimer = 0;
+  private readonly reattachRepaint = new TerminalReattachRepaint({
+    getTerminal: () => this.terminal,
+    getFitAddon: () => this.fitAddon,
+    activeSessionId: () => store.getState().terminal.sessionId,
+    afterRestore: () => {
+      this.publishTerminalDims();
+    },
+  });
   private bootStarted = false;
   private terminalDataDisposable: TerminalDataDisposable | null = null;
   private terminalQueryResponseDisposables: IDisposable[] = [];
@@ -229,6 +282,7 @@ export class TerminalController {
 
     this.terminal = new Terminal({
       allowProposedApi: false,
+      scrollback: TERMINAL_SCROLLBACK,
       cursorBlink: true,
       fontFamily:
         'ui-monospace, SFMono-Regular, SF Mono, Menlo, Monaco, Consolas, Liberation Mono, monospace',
@@ -301,6 +355,7 @@ export class TerminalController {
     }
     this.detachWailsEventListeners();
     window.clearTimeout(this.idleStatusTimer);
+    this.reattachRepaint.clear();
     this.stopReviewDiffRefresh();
     if (this.pasteHandler && this.terminalRoot) {
       this.terminalRoot.removeEventListener('paste', this.pasteHandler, true);
@@ -356,6 +411,7 @@ export class TerminalController {
     this.terminal?.reset();
     this.terminal?.clear();
     this.cancelCursorRestoreTimer();
+    this.reattachRepaint.clear();
     this.liveCursorState = { altScreen: false, cursorHidden: false };
   }
 
@@ -464,6 +520,14 @@ export class TerminalController {
     }
   }
 
+  // resizeActiveSession pushes the current terminal geometry to the active PTY.
+  // Called when the active session changes so a session spawned at a default
+  // size (e.g. an orchestrator) is resized to the pane instead of rendering its
+  // UI at the wrong width.
+  resizeActiveSession(): void {
+    this.runTerminalResize();
+  }
+
   queueVisibleDiffSelectionUpdate(): void {
     if (this.reviewScrollFrame > 0) {
       return;
@@ -506,13 +570,22 @@ export class TerminalController {
   }
 
   writeTerminalBuffer(sessionId: number, chunks: TerminalWriteData[]): void {
-    for (const chunk of chunks) {
+    // Rehydrate live cursor tracking from the full buffer (a cheap scan, not a
+    // render); its final alt-screen verdict also decides how much to replay.
+    const finalState = bufferCursorVisibility(chunks);
+    // Main-screen shells: replay only the tail that fills xterm's scrollback —
+    // replaying the whole history just scroll-renders lines xterm then discards
+    // (the ~20s scroll-through this cap fixed). Alt-screen TUIs (claude/codex):
+    // the visible frame is drawn by cursor-addressed redraws whose alt-screen
+    // enter (`?1049h`) + initial paint live in the buffer HEAD, so trimming the
+    // head would leave those redraws on a blank main screen — a black pane.
+    // Alt-screen has no scrollback, so a full replay carries no scroll-through
+    // cost; replay it whole.
+    const replayChunks = finalState.altScreen ? chunks : trimReplayChunks(chunks);
+    for (const chunk of replayChunks) {
       this.writeToTerminal(sessionId, chunk, true);
     }
-    // Rehydrate live cursor tracking from the replayed buffer so an alt-screen
-    // TUI that left the buffer in its own intentional cursor state stays
-    // tracked accurately, rather than assuming main-screen + cursor-visible.
-    this.liveCursorState = bufferCursorVisibility(chunks);
+    this.liveCursorState = finalState;
     this.cancelCursorRestoreTimer();
     // xterm parses write() calls asynchronously, so a synchronous scroll would
     // run before the replayed chunks are laid out. The empty write's callback
@@ -521,5 +594,19 @@ export class TerminalController {
     this.terminal?.write('', () => {
       this.terminal?.scrollToBottom();
     });
+    // AI TUIs (claude/codex) render on the MAIN screen — not the alt-screen — and
+    // only repaint on a real geometry change, so the trimmed replay above can't
+    // reconstruct their frame and the pane is blank on switch until the app next
+    // emits a diff (the black-pane the operator hit). Nudge the backend pty on
+    // every switch to raise a genuine WINCH and force a full repaint; the Go side
+    // (RepaintSession) applies it only to AI sessions and no-ops for plain shells
+    // and alt-screen apps (which reconstruct from the replay), so this is safe to
+    // call unconditionally. The local xterm is never resized — no visible reflow.
+    void RepaintSession(sessionId);
+    // A pty-only WINCH (RepaintSession above) does not reach a reattached Claude,
+    // so if this session stays blank after selection (a reattached AI tab) the
+    // reattach-repaint helper forces a real xterm+pty resize cycle. See
+    // TerminalReattachRepaint.
+    this.reattachRepaint.schedule(sessionId);
   }
 }

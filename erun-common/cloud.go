@@ -931,7 +931,7 @@ func validateAWSProfileConfig(config AWSProfileConfig) error {
 	case config.AccountID == "":
 		return fmt.Errorf("AWS account ID is required")
 	case config.RoleName == "":
-		return fmt.Errorf("AWS role name is required")
+		return fmt.Errorf("AWS permission set is required")
 	case config.Region == "":
 		return fmt.Errorf("AWS region is required")
 	default:

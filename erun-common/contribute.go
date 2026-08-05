@@ -35,16 +35,6 @@ func ContributeShimPath(homeDir string) (string, error) {
 	return filepath.Join(resolved, ".erun", "contribute", "bin", "erun"), nil
 }
 
-// ContributeShimDir returns the directory holding the `erun` shim that
-// contribute tabs prepend to PATH.
-func ContributeShimDir(homeDir string) (string, error) {
-	shim, err := ContributeShimPath(homeDir)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Dir(shim), nil
-}
-
 // ContributeRunScriptPath returns the path to erun-cli/run.sh inside the
 // contribute clone, which the shim forwards to.
 func ContributeRunScriptPath(homeDir string) (string, error) {

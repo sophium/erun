@@ -1,0 +1,29 @@
+Target: team/dev
+== Workspace sync (host mirror) ==
+  host alias: erun-team-dev
+  mirror: <TMP>
+audit: erun doctor --dry-run --repair-workspace-sync team dev
+trace-log: would append the full trace to <TMP>
+workspace-sync: would resolve the SSH public key and the local ssh config alias
+ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR erun-team-dev true
+workspace-sync: write ssh config host erun-team-dev for team/dev
+kubectl --context test-context --namespace team-dev exec deployment/team-devops -- /bin/sh -lc '<remote-script>'
+remote-ssh-authorized-keys:
+  set -eu
+  mkdir -p "$HOME/.ssh"
+  chmod 700 "$HOME/.ssh"
+  key_file="$HOME/.ssh/authorized_keys"
+  tmp_keys="$(mktemp)"
+  tmp_new="$(mktemp)"
+  touch "$key_file"
+  chmod 600 "$key_file"
+  cat > "$tmp_new" <<'EOF'
+  ssh-ed25519 AAAATESTKEY erun-integration
+  EOF
+  grep -Fvx -f "$tmp_new" "$key_file" > "$tmp_keys" || true
+  cat "$tmp_new" >> "$tmp_keys"
+  mv "$tmp_keys" "$key_file"
+  rm -f "$tmp_new"
+  chmod 600 "$key_file"
+kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26122:26122 --address <LOOPBACK>
+ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR erun-team-dev true

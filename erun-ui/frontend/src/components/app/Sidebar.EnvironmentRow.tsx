@@ -1,4 +1,4 @@
-import { Download, LoaderCircle, MoreHorizontal, TriangleAlert } from 'lucide-react';
+import { Download, LoaderCircle, MoreHorizontal } from 'lucide-react';
 import * as React from 'react';
 
 import { readError } from '@/app/errors';
@@ -12,6 +12,7 @@ import { selectionKey } from '@/app/versionSuggestions';
 import { IconTooltip } from '@/components/app/IconTooltip';
 import { EnvHoverCard } from '@/components/app/Sidebar.EnvHoverCard';
 import { deriveEnvironmentRow } from '@/components/app/Sidebar.helpers';
+import { StatusDotGlyph, type StatusDotState } from '@/components/app/Sidebar.StatusDot';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { UISelection } from '@/types';
@@ -131,25 +132,15 @@ function OpenEnvDot({
   const closeHint = `Click to close its tabs — terminals + tracking only, leaves AWS untouched`;
   let label = `Close ${name}`;
   let tooltip = `${label} — terminals + tracking only, leaves AWS untouched`;
-  let glyph = (
-    <span
-      aria-hidden="true"
-      className="block size-2 rounded-full bg-emerald-500 shadow-[0_0_0_1px_color-mix(in_oklch,currentColor_20%,transparent)]"
-    />
-  );
+  let dotState: StatusDotState = 'running';
   if (envState === 'stopped') {
     label = `${name} is stopped — start it from the titlebar`;
     tooltip = `${label}. ${closeHint}`;
-    glyph = (
-      <span
-        aria-hidden="true"
-        className="block size-2 rounded-full border-[1.5px] border-muted-foreground bg-transparent"
-      />
-    );
+    dotState = 'stopped';
   } else if (envState === 'failed') {
     label = `${name} deploy failed — recover from Activities or re-click the row`;
     tooltip = `${label}. ${closeHint}`;
-    glyph = <TriangleAlert aria-hidden="true" className="size-2.5 text-amber-500" />;
+    dotState = 'failed';
   }
   return (
     <IconTooltip label={tooltip}>
@@ -168,7 +159,7 @@ function OpenEnvDot({
           });
         }}
       >
-        {glyph}
+        <StatusDotGlyph state={dotState} />
       </Button>
     </IconTooltip>
   );
@@ -252,7 +243,14 @@ export function EnvironmentRow({
     reconnecting,
     envState,
   } = useEnvironmentRowSelectors(tenantName, environmentName);
-  const { selected, busy, busyLabel, isLocal, runtimeVersion, selection } = deriveEnvironmentRow(
+  const {
+    selected: selectedBySelection,
+    busy,
+    busyLabel,
+    isLocal,
+    runtimeVersion,
+    selection,
+  } = deriveEnvironmentRow(
     tenantName,
     environmentName,
     selectedSelection,
@@ -262,6 +260,15 @@ export function EnvironmentRow({
     aiBusy,
     reconnecting,
   );
+  // While an orchestrator owns the terminal pane, no environment is the focused
+  // thing — suppress the env's selected highlight so the sidebar matches what the
+  // pane renders (the orchestrator row carries the active highlight instead).
+  const orchestratorActive = useAppSelector(
+    (state) =>
+      state.terminal.sessionId > 0 &&
+      state.orchestrators.items.some((o) => o.sessionId === state.terminal.sessionId),
+  );
+  const selected = selectedBySelection && !orchestratorActive;
 
   const rowLabel = `${tenantName} / ${environmentName}${isLocal ? ' (local)' : ''}`;
   return (

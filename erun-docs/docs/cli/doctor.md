@@ -31,6 +31,7 @@ Beyond reporting, `doctor` offers these fixes (each prompts first, or runs non-i
 - **Root config repair** — restore the root erun config from a dated backup, or re-initialize orphaned cloud provider aliases.
 - **Environment config restore** — restore one environment's `config.yaml` from a dated backup when a setting was changed or corrupted (for example an environment type that resolved to the wrong value). Each save snapshots the previous config alongside it, so there is a daily backup to roll back to.
 - **JetBrains Gateway** — clear cached backend metadata for the environment when a Gateway connection is stuck.
+- **Workspace sync (host mirror)** — for a remote-agent env with workspace sync enabled, report the host mirror's SSH provisioning and, with `--repair-workspace-sync`, repair it **without redeploying**: resolve/persist the SSH key, write the local `~/.ssh/config` alias, install the pod's `authorized_keys` through the runtime container (not a helm redeploy), and ensure the SSH port-forward. If SSH still can't reach the pod afterwards, it names `erun sshd init` as the remaining step (the redeploy this repair won't run).
 - **Remote init** — inside a runtime pod, finish an interrupted init (SSH keygen, repo clone).
 
 The exact flags for running these non-interactively are on the [CLI flag spec](/agent-reference/cli-flags#erun-doctor).
@@ -42,6 +43,7 @@ The exact flags for running these non-interactively are on the [CLI flag spec](/
 | `--dry-run` | Run the inspection and print the recovery plan without performing any recovery actions. |
 | `--sync-config` | Reconcile the in-pod erun config with the helm-injected `ERUN_*` env vars. Only takes effect inside a runtime pod. The injected env wins: erun rebuilds the canonical projection (`type`, `kubernetescontext`, `cloudprovideralias`, `managedcloud`, the cloud-context/provider blocks, `idle`, `runtimeregistry`, `containerregistries`, `disablebuildscript`) and rewrites those keys, **preserving** every key the env does not carry (`sshd`, `claude`, `runtimeversion`, `localrepopath`, …). Drift is reported per key as `missing`, `wrong`, or `legacy`; with `--dry-run` the file writes are traced but not performed. |
 | `--restore-env-config-from-backup <date\|path>` | Restore the target environment's `config.yaml` from a dated backup (`YYYY-MM-DD`) or an absolute path, before the rest of the inspection runs so a corrupted env config can be recovered first. Needs an explicit tenant and environment. With `--dry-run`, the copy is traced but not performed. |
+| `--repair-workspace-sync` | For a remote-agent env with workspace sync enabled, repair the host mirror's SSH provisioning without redeploying the runtime: resolve/persist the SSH key, write the local `~/.ssh/config` alias, install the pod's `authorized_keys` through the runtime container, and ensure the SSH port-forward. With `--dry-run`, every action is traced and nothing runs. |
 
 ## Examples
 

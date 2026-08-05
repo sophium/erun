@@ -7,6 +7,7 @@ import {
   Clipboard,
   Clock,
   LoaderCircle,
+  Sparkles,
   Stethoscope,
   Trash2,
 } from 'lucide-react';
@@ -14,6 +15,7 @@ import * as React from 'react';
 
 import type { ActivityQueueEntry } from '@/app/activityQueueState';
 import { useAppDispatch } from '@/app/hooks';
+import { investigateFailure } from '@/app/orchestratorThunks';
 import { startDoctorSelection, startForceDeploySelection } from '@/app/recoveryThunks';
 import { ContainerStatusList } from '@/components/app/ActivityCard.ContainerStatus';
 import {
@@ -143,6 +145,7 @@ export const ActivityCard = React.memo(function ActivityCard({
 // The copy-report button stays available even on a fast failure that captured
 // no output, because the report carries context the user would otherwise retype.
 function FailureDetails({ entry }: { entry: ActivityQueueEntry }): React.ReactElement {
+  const dispatch = useAppDispatch();
   const [expanded, setExpanded] = React.useState<boolean>(false);
   const [copied, setCopied] = React.useState<boolean>(false);
   const copiedTimer = React.useRef<number | undefined>(undefined);
@@ -192,6 +195,21 @@ function FailureDetails({ entry }: { entry: ActivityQueueEntry }): React.ReactEl
             <Clipboard aria-hidden="true" className="size-3" />
           )}
           {copied ? 'Copied' : 'Copy failure report'}
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          className="h-6 gap-1 text-[11px]"
+          aria-label="Investigate this failure with an AI orchestrator"
+          onClick={() => {
+            void dispatch(
+              investigateFailure(buildFailureReport(entry), entry.tenant, entry.environment),
+            );
+          }}
+        >
+          <Sparkles aria-hidden="true" className="size-3" />
+          Investigate
         </Button>
       </div>
       {expanded &&
