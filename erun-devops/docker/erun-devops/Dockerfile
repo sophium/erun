@@ -25,6 +25,9 @@ COPY erun-cli /src/erun-cli
 COPY erun-common /src/erun-common
 COPY erun-mcp /src/erun-mcp
 COPY erun-integration /src/erun-integration
+# Every module in the Makefile's LINT_MODULES must land here or `make check`
+# cannot cd into it.
+COPY erun-backend/erun-backend-api /src/erun-backend/erun-backend-api
 
 # `make check` runs golangci-lint across the Go modules then the integration
 # suite + coverage gate. A failing lint or test fails the build, the builder

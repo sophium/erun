@@ -59,42 +59,7 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 	if options.DB != nil {
 		txManager = repository.NewTxManager(options.DB, options.DBDialect)
 	}
-	identityResolver := options.IdentityResolver
-	tenantResolver := options.TenantResolver
-	userResolver := options.UserResolver
-	orgResolver := options.OrgResolver
-	if options.DB != nil && (tenantResolver == nil || userResolver == nil || orgResolver == nil) {
-		identities := repository.NewIdentityRepository(options.DB, options.DBDialect)
-		if identityResolver == nil && tenantResolver == nil && userResolver == nil {
-			identityResolver = identities
-		} else if tenantResolver == nil {
-			tenantResolver = identities
-		}
-		if userResolver == nil {
-			userResolver = identities
-		}
-		if orgResolver == nil {
-			orgResolver = identities
-		}
-	}
-	audit := options.AuditLogger
-	if audit == nil && txManager != nil {
-		audit = repository.NewAuditEventRepository(txManager)
-	}
-	authorizer := options.Authorizer
-	if authorizer == nil && options.DB != nil {
-		authorizer = repository.NewPermissionAuthorizerForDialect(options.DB, options.DBDialect)
-	}
-	auth, err := NewAuthMiddleware(AuthMiddlewareOptions{
-		TokenVerifier:    options.TokenVerifier,
-		IdentityResolver: identityResolver,
-		TenantResolver:   tenantResolver,
-		UserResolver:     userResolver,
-		OrgResolver:      orgResolver,
-		IdentityCache:    options.IdentityCache,
-		AuditLogger:      audit,
-		Authorizer:       authorizer,
-	})
+	auth, err := newAuthMiddlewareFor(options, txManager)
 	if err != nil {
 		return nil, err
 	}
@@ -111,53 +76,135 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 	var users routes.WhoamiUserRepository
 	if txManager != nil {
 		users = repository.NewUserRepository(txManager)
-		reviews := repository.NewReviewRepository(txManager)
-		builds := repository.NewBuildRepository(txManager)
-		comments := repository.NewCommentRepository(txManager)
-		tenantIssuers := repository.NewTenantIssuerRepository(txManager)
-		tenants := repository.NewTenantRepository(txManager)
-		environments := repository.NewEnvironmentRepository(txManager)
-		contexts := repository.NewContextRepository(txManager)
-		tenantQuotas := repository.NewTenantQuotaRepository(txManager)
-		reviewService := service.NewReviewService(reviews, builds)
-		buildService := service.NewBuildService(builds, reviewService)
-		commentService := service.NewCommentService(comments)
-		routes.RegisterTenantIssuerRoutes(register, tenantIssuers)
-		routes.RegisterReviewRoutes(register, reviews, reviewService)
-		routes.RegisterBuildRoutes(register, builds, buildService)
-		routes.RegisterCommentRoutes(register, comments, commentService)
-		var environmentProvisioner routes.EnvironmentProvisioner
-		if options.DBOSContext != nil && options.KubeClient != nil &&
-			options.EnvDeploy.DeployerServiceAccount != "" && options.EnvDeploy.PlatformNamespace != "" && options.EnvDeploy.Registry != "" {
-			coordinator := service.NewEnvironmentProvisioner(deployexec.NewLauncher(options.KubeClient), environments)
-			environmentProvisioner = provision.NewEnvProvisioner(options.DBOSContext, coordinator, options.EnvDeploy)
-		}
-		routes.RegisterEnvironmentRoutes(register, environments, tenantQuotas, tenants, environmentProvisioner)
-		routes.RegisterMCPTokenRoutes(register, environments, tenants, options.MCPSigner)
-		routes.RegisterDNS01TokenRoutes(register, environments, tenants, options.MCPSigner)
-		var contextProvisioner routes.ContextProvisioner
-		if options.Cipher != nil {
-			aliases := repository.NewCloudProviderAliasRepository(txManager, options.Cipher)
-			routes.RegisterCloudProviderAliasRoutes(register, aliases)
-			if options.DBOSContext != nil {
-				contextProvisioner = provision.NewProvisioner(
-					options.DBOSContext,
-					contexts,
-					repository.NewContextCredentialRepository(txManager, options.Cipher),
-					aliases,
-					options.Cipher,
-					options.AWSEndpoint,
-				)
-			}
-		}
-		routes.RegisterContextRoutes(register, contexts, contextProvisioner)
-		routes.RegisterTenantRoutes(register, tenants)
-		routes.RegisterTenantQuotaRoute(register, tenantQuotas)
-		routes.RegisterConfigRoute(register, tenants, environments, contexts)
-		routes.RegisterProvisionRoute(register, tenants, environments, tenantQuotas)
+		registerDatabaseRoutes(register, options, txManager)
 	}
 	routes.RegisterWhoamiRoute(register, users)
 	return mux, nil
+}
+
+// identityResolvers is the auth resolver set. Whichever ones the caller did not
+// inject default to the database-backed identity repository.
+type identityResolvers struct {
+	identity IdentityResolver
+	tenant   TenantResolver
+	user     UserResolver
+	org      OrgResolver
+}
+
+func resolveIdentityResolvers(options HandlerOptions) identityResolvers {
+	resolvers := identityResolvers{
+		identity: options.IdentityResolver,
+		tenant:   options.TenantResolver,
+		user:     options.UserResolver,
+		org:      options.OrgResolver,
+	}
+	if options.DB == nil || resolvers.complete() {
+		return resolvers
+	}
+	resolvers.defaultTo(repository.NewIdentityRepository(options.DB, options.DBDialect))
+	return resolvers
+}
+
+func (r identityResolvers) complete() bool {
+	return r.tenant != nil && r.user != nil && r.org != nil
+}
+
+// defaultTo fills the unset resolvers from the identity repository. A caller who
+// injected no tenant or user resolver gets the combined identity resolver,
+// because empty-database bootstrap must resolve or create tenant, issuer, and
+// user atomically.
+func (r *identityResolvers) defaultTo(identities *repository.IdentityRepository) {
+	if r.identity == nil && r.tenant == nil && r.user == nil {
+		r.identity = identities
+	} else if r.tenant == nil {
+		r.tenant = identities
+	}
+	if r.user == nil {
+		r.user = identities
+	}
+	if r.org == nil {
+		r.org = identities
+	}
+}
+
+// newAuthMiddlewareFor assembles the authentication middleware, defaulting every
+// database-backed dependency the caller did not inject.
+func newAuthMiddlewareFor(options HandlerOptions, txManager *repository.TxManager) (*AuthMiddleware, error) {
+	resolvers := resolveIdentityResolvers(options)
+	audit := options.AuditLogger
+	if audit == nil && txManager != nil {
+		audit = repository.NewAuditEventRepository(txManager)
+	}
+	authorizer := options.Authorizer
+	if authorizer == nil && options.DB != nil {
+		authorizer = repository.NewPermissionAuthorizerForDialect(options.DB, options.DBDialect)
+	}
+	return NewAuthMiddleware(AuthMiddlewareOptions{
+		TokenVerifier:    options.TokenVerifier,
+		IdentityResolver: resolvers.identity,
+		TenantResolver:   resolvers.tenant,
+		UserResolver:     resolvers.user,
+		OrgResolver:      resolvers.org,
+		IdentityCache:    options.IdentityCache,
+		AuditLogger:      audit,
+		Authorizer:       authorizer,
+	})
+}
+
+// registerDatabaseRoutes registers every route backed by persistence, which is
+// all of them except the health check and the DNS-01 broker.
+func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options HandlerOptions, txManager *repository.TxManager) {
+	reviews := repository.NewReviewRepository(txManager)
+	builds := repository.NewBuildRepository(txManager)
+	comments := repository.NewCommentRepository(txManager)
+	tenantIssuers := repository.NewTenantIssuerRepository(txManager)
+	tenants := repository.NewTenantRepository(txManager)
+	environments := repository.NewEnvironmentRepository(txManager)
+	contexts := repository.NewContextRepository(txManager)
+	tenantQuotas := repository.NewTenantQuotaRepository(txManager)
+	reviewService := service.NewReviewService(reviews, builds)
+	buildService := service.NewBuildService(builds, reviewService)
+	commentService := service.NewCommentService(comments)
+	routes.RegisterTenantIssuerRoutes(register, tenantIssuers)
+	routes.RegisterReviewRoutes(register, reviews, reviewService)
+	routes.RegisterBuildRoutes(register, builds, buildService)
+	routes.RegisterCommentRoutes(register, comments, commentService)
+	routes.RegisterEnvironmentRoutes(register, environments, tenantQuotas, tenants, newEnvironmentProvisioner(options, environments))
+	routes.RegisterMCPTokenRoutes(register, environments, tenants, options.MCPSigner)
+	routes.RegisterDNS01TokenRoutes(register, environments, tenants, options.MCPSigner)
+	var contextProvisioner routes.ContextProvisioner
+	if options.Cipher != nil {
+		aliases := repository.NewCloudProviderAliasRepository(txManager, options.Cipher)
+		routes.RegisterCloudProviderAliasRoutes(register, aliases)
+		if options.DBOSContext != nil {
+			contextProvisioner = provision.NewProvisioner(
+				options.DBOSContext,
+				contexts,
+				repository.NewContextCredentialRepository(txManager, options.Cipher),
+				aliases,
+				options.Cipher,
+				options.AWSEndpoint,
+			)
+		}
+	}
+	routes.RegisterContextRoutes(register, contexts, contextProvisioner)
+	routes.RegisterTenantRoutes(register, tenants)
+	routes.RegisterTenantQuotaRoute(register, tenantQuotas)
+	routes.RegisterConfigRoute(register, tenants, environments, contexts)
+	routes.RegisterProvisionRoute(register, tenants, environments, tenantQuotas)
+}
+
+// newEnvironmentProvisioner wires live env provisioning, which needs durable
+// workflows, an in-cluster client, and the full deploy placement. Anything
+// missing leaves it nil, so env creation only registers the row.
+func newEnvironmentProvisioner(options HandlerOptions, environments *repository.EnvironmentRepository) routes.EnvironmentProvisioner {
+	deploy := options.EnvDeploy
+	if options.DBOSContext == nil || options.KubeClient == nil ||
+		deploy.DeployerServiceAccount == "" || deploy.PlatformNamespace == "" || deploy.Registry == "" {
+		return nil
+	}
+	coordinator := service.NewEnvironmentProvisioner(deployexec.NewLauncher(options.KubeClient), environments)
+	return provision.NewEnvProvisioner(options.DBOSContext, coordinator, deploy)
 }
 
 func registerHealthRoute(mux *http.ServeMux) {

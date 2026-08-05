@@ -9,30 +9,29 @@ import (
 	"time"
 )
 
+// mustEqual fails when a value the middleware passed through differs from the one
+// it resolved from.
+func mustEqual(t *testing.T, field, got, want string) {
+	t.Helper()
+	if got != want {
+		t.Fatalf("unexpected %s: %q", field, got)
+	}
+}
+
 func TestAuthMiddlewareResolvesTenantFromIssuer(t *testing.T) {
 	middleware, err := NewAuthMiddleware(AuthMiddlewareOptions{
 		TokenVerifier: TokenVerifierFunc(func(ctx context.Context, token string) (Claims, error) {
-			if token != "valid-token" {
-				t.Fatalf("unexpected token: %q", token)
-			}
+			mustEqual(t, "token", token, "valid-token")
 			return Claims{Issuer: "https://issuer.example", Subject: "user-1"}, nil
 		}),
 		TenantResolver: TenantResolverFunc(func(ctx context.Context, claims Claims) (Tenant, error) {
-			if claims.Issuer != "https://issuer.example" {
-				t.Fatalf("unexpected issuer: %q", claims.Issuer)
-			}
+			mustEqual(t, "issuer", claims.Issuer, "https://issuer.example")
 			return Tenant{TenantID: "019a7fa5-c2c0-7c55-bc70-714873a71f10"}, nil
 		}),
 		UserResolver: UserResolverFunc(func(ctx context.Context, tenantID string, issuer string, externalID string) (User, error) {
-			if tenantID != "019a7fa5-c2c0-7c55-bc70-714873a71f10" {
-				t.Fatalf("unexpected tenant id: %q", tenantID)
-			}
-			if issuer != "https://issuer.example" {
-				t.Fatalf("unexpected issuer: %q", issuer)
-			}
-			if externalID != "user-1" {
-				t.Fatalf("unexpected external id: %q", externalID)
-			}
+			mustEqual(t, "tenant id", tenantID, "019a7fa5-c2c0-7c55-bc70-714873a71f10")
+			mustEqual(t, "issuer", issuer, "https://issuer.example")
+			mustEqual(t, "external id", externalID, "user-1")
 			return User{UserID: "019a7fa5-c2c0-7c55-bc70-714873a71f11"}, nil
 		}),
 	})
@@ -45,12 +44,8 @@ func TestAuthMiddlewareResolvesTenantFromIssuer(t *testing.T) {
 		if !ok {
 			t.Fatal("expected auth context")
 		}
-		if auth.Tenant.TenantID != "019a7fa5-c2c0-7c55-bc70-714873a71f10" {
-			t.Fatalf("unexpected tenant id: %q", auth.Tenant.TenantID)
-		}
-		if auth.User.UserID != "019a7fa5-c2c0-7c55-bc70-714873a71f11" {
-			t.Fatalf("unexpected user id: %q", auth.User.UserID)
-		}
+		mustEqual(t, "tenant id", auth.Tenant.TenantID, "019a7fa5-c2c0-7c55-bc70-714873a71f10")
+		mustEqual(t, "user id", auth.User.UserID, "019a7fa5-c2c0-7c55-bc70-714873a71f11")
 		w.WriteHeader(http.StatusNoContent)
 	}))
 

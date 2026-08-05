@@ -21,6 +21,32 @@ func postProvision(t *testing.T, tenants ConfigTenantRepository, environments *s
 // The tenant Name (not ID) forms the <tenant>-<env> namespace and runtime release name asserted below.
 var acmeTenant = stubConfigTenantRepository{tenant: model.Tenant{TenantID: "tenant-1", Name: "acme", Type: model.TenantTypeCompany}}
 
+func decodeProvisionResponse(t *testing.T, rec *httptest.ResponseRecorder) provisionResponse {
+	t.Helper()
+	var response provisionResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	return response
+}
+
+// mustPlanLine fails with why unless the preview plan carries the expected line.
+func mustPlanLine(t *testing.T, plan []string, want string, why string) {
+	t.Helper()
+	if !planContains(plan, want) {
+		t.Fatalf("%s: %v", why, plan)
+	}
+}
+
+// mustNotPlanLine fails with why when the preview plan carries a line it should
+// not have planned.
+func mustNotPlanLine(t *testing.T, plan []string, unwanted string, why string) {
+	t.Helper()
+	if planContains(plan, unwanted) {
+		t.Fatalf("%s: %v", why, plan)
+	}
+}
+
 func TestProvisionRejectsInvalidEnvironment(t *testing.T) {
 	cases := map[string]string{
 		"missing environment":  `{}`,
@@ -70,35 +96,18 @@ func TestProvisionWithNewClusterComposesFullPlan(t *testing.T) {
 		t.Fatalf("provision is preview-only and must not call Create, got %d calls", environments.createCalls)
 	}
 
-	var response provisionResponse
-	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	response := decodeProvisionResponse(t, rec)
 	if !response.QuotaOk {
 		t.Fatalf("expected quotaOk=true under the cap, got false: %v", response.Plan)
 	}
 
-	if !planContains(response.Plan, "provision: tenant acme (resolved from token)") {
-		t.Fatalf("plan missing the authz/tenant line: %v", response.Plan)
-	}
-	if !planContains(response.Plan, "quota: tenant has 2 of 10 environments — within quota") {
-		t.Fatalf("plan missing the within-quota line: %v", response.Plan)
-	}
-	if !planContains(response.Plan, "context: bootstrap cluster acme-prod via alias acme-aws") {
-		t.Fatalf("plan missing the context bootstrap header: %v", response.Plan)
-	}
-	if !planContains(response.Plan, "ec2 run-instances") {
-		t.Fatalf("plan missing the EC2 run-instances step from the InitCloudContext dry-run: %v", response.Plan)
-	}
-	if !planContains(response.Plan, "namespace: would create acme-prod") {
-		t.Fatalf("plan missing the <tenant>-<env> namespace line: %v", response.Plan)
-	}
-	if !planContains(response.Plan, "register: would persist environment prod (runtime) in tenant acme referencing context acme-prod") {
-		t.Fatalf("plan missing the register line: %v", response.Plan)
-	}
-	if !planContains(response.Plan, "deploy: would helm install the erun-devops runtime chart (release acme-devops) into acme-prod") {
-		t.Fatalf("plan missing the deploy line: %v", response.Plan)
-	}
+	mustPlanLine(t, response.Plan, "provision: tenant acme (resolved from token)", "plan missing the authz/tenant line")
+	mustPlanLine(t, response.Plan, "quota: tenant has 2 of 10 environments — within quota", "plan missing the within-quota line")
+	mustPlanLine(t, response.Plan, "context: bootstrap cluster acme-prod via alias acme-aws", "plan missing the context bootstrap header")
+	mustPlanLine(t, response.Plan, "ec2 run-instances", "plan missing the EC2 run-instances step from the InitCloudContext dry-run")
+	mustPlanLine(t, response.Plan, "namespace: would create acme-prod", "plan missing the <tenant>-<env> namespace line")
+	mustPlanLine(t, response.Plan, "register: would persist environment prod (runtime) in tenant acme referencing context acme-prod", "plan missing the register line")
+	mustPlanLine(t, response.Plan, "deploy: would helm install the erun-devops runtime chart (release acme-devops) into acme-prod", "plan missing the deploy line")
 }
 
 // TestProvisionReusesExistingContext proves the existing-context path emits no cloud bootstrap argv.
@@ -116,22 +125,11 @@ func TestProvisionReusesExistingContext(t *testing.T) {
 		t.Fatalf("provision is preview-only and must not call Create, got %d calls", environments.createCalls)
 	}
 
-	var response provisionResponse
-	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if !planContains(response.Plan, "context: reuse existing kubernetes context acme-prod") {
-		t.Fatalf("plan missing the reuse-context line: %v", response.Plan)
-	}
-	if planContains(response.Plan, "ec2 run-instances") {
-		t.Fatalf("existing-context provision must not emit bootstrap argv: %v", response.Plan)
-	}
-	if !planContains(response.Plan, "namespace: would create acme-staging") {
-		t.Fatalf("plan missing the namespace line: %v", response.Plan)
-	}
-	if !planContains(response.Plan, "register: would persist environment staging (remote-agent) in tenant acme referencing context acme-prod") {
-		t.Fatalf("plan missing the register line: %v", response.Plan)
-	}
+	response := decodeProvisionResponse(t, rec)
+	mustPlanLine(t, response.Plan, "context: reuse existing kubernetes context acme-prod", "plan missing the reuse-context line")
+	mustNotPlanLine(t, response.Plan, "ec2 run-instances", "existing-context provision must not emit bootstrap argv")
+	mustPlanLine(t, response.Plan, "namespace: would create acme-staging", "plan missing the namespace line")
+	mustPlanLine(t, response.Plan, "register: would persist environment staging (remote-agent) in tenant acme referencing context acme-prod", "plan missing the register line")
 }
 
 // TestProvisionOverCapReturnsPlanWithQuotaBlocked proves over-cap provisioning still returns a 200 preview with quotaOk=false, not a 4xx.
@@ -149,19 +147,12 @@ func TestProvisionOverCapReturnsPlanWithQuotaBlocked(t *testing.T) {
 		t.Fatalf("provision must never call Create, got %d calls", environments.createCalls)
 	}
 
-	var response provisionResponse
-	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	response := decodeProvisionResponse(t, rec)
 	if response.QuotaOk {
 		t.Fatalf("expected quotaOk=false at the cap, got true: %v", response.Plan)
 	}
-	if !planContains(response.Plan, "quota: tenant has 10 of 10 environments — WOULD EXCEED, provisioning blocked") {
-		t.Fatalf("plan missing the blocked-quota line: %v", response.Plan)
-	}
+	mustPlanLine(t, response.Plan, "quota: tenant has 10 of 10 environments — WOULD EXCEED, provisioning blocked", "plan missing the blocked-quota line")
 	// Even when blocked, the rest of the plan is shown so the operator sees the
 	// full intended work alongside the blocking reason.
-	if !planContains(response.Plan, "deploy: would helm install the erun-devops runtime chart (release acme-devops) into acme-prod") {
-		t.Fatalf("blocked plan should still show the full intended actions: %v", response.Plan)
-	}
+	mustPlanLine(t, response.Plan, "deploy: would helm install the erun-devops runtime chart (release acme-devops) into acme-prod", "blocked plan should still show the full intended actions")
 }

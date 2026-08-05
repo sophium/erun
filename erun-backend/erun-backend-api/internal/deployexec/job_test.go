@@ -42,8 +42,17 @@ func TestBuildDeployJobSpec(t *testing.T) {
 	if len(pod.Containers) != 1 || pod.Containers[0].Image != "ghcr.io/sophium/acme-devops:1.0.149" {
 		t.Fatalf("container image = %+v", pod.Containers)
 	}
-	got := pod.Containers[0].Command
-	want := []string{"erun", "deploy", "acme", "prod", "--version", "1.0.149"}
+	assertCommand(t, pod.Containers[0].Command, []string{"erun", "deploy", "acme", "prod", "--version", "1.0.149"})
+	// No in-Job retries: a failed deploy must surface, not silently retry.
+	if job.Spec.BackoffLimit == nil || *job.Spec.BackoffLimit != 0 {
+		t.Fatalf("backoffLimit = %v, want 0", job.Spec.BackoffLimit)
+	}
+}
+
+// assertCommand compares the deploy argv element by element, so a mismatch names
+// the position that differs.
+func assertCommand(t *testing.T, got, want []string) {
+	t.Helper()
 	if len(got) != len(want) {
 		t.Fatalf("command = %v, want %v", got, want)
 	}
@@ -51,10 +60,6 @@ func TestBuildDeployJobSpec(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("command[%d] = %q, want %q", i, got[i], want[i])
 		}
-	}
-	// No in-Job retries: a failed deploy must surface, not silently retry.
-	if job.Spec.BackoffLimit == nil || *job.Spec.BackoffLimit != 0 {
-		t.Fatalf("backoffLimit = %v, want 0", job.Spec.BackoffLimit)
 	}
 }
 
