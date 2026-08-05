@@ -48,12 +48,16 @@ test.describe('create → deploy → open gate (#644)', () => {
           response.url().includes('/__erun_invoke') &&
           (response.request().postData() ?? '').includes('StartInitialDeploySession'),
       );
+      // The composed deploy fails fast against the inert stubs and its banner
+      // replaces the success one, so record the stream instead of sampling it.
+      await app.titlebar.recordBanners();
       await emitWailsEvent(app.page, 'environment-initialized', { tenant, environment });
 
-      await expect(app.titlebar.statusMessage()).toContainText(
-        `Created ${tenant} / ${environment}`,
-        { timeout: 10_000 },
-      );
+      await expect
+        .poll(() => app.titlebar.sawBanner(`Created ${tenant} / ${environment}`), {
+          timeout: 10_000,
+        })
+        .toBe(true);
       await deployStarted;
       await expect(erunTab).toHaveCount(0);
 
@@ -82,11 +86,13 @@ test.describe('create → deploy → open gate (#644)', () => {
           response.url().includes('/__erun_invoke') &&
           (response.request().postData() ?? '').includes('StartInitialDeploySession'),
       );
+      await app.titlebar.recordBanners();
       await emitWailsEvent(app.page, 'environment-initialized', { tenant, environment });
-      await expect(app.titlebar.statusMessage()).toContainText(
-        `Created ${tenant} / ${environment}`,
-        { timeout: 10_000 },
-      );
+      await expect
+        .poll(() => app.titlebar.sawBanner(`Created ${tenant} / ${environment}`), {
+          timeout: 10_000,
+        })
+        .toBe(true);
       await deployStarted;
       await expect(erunTab).toHaveCount(0);
     } finally {

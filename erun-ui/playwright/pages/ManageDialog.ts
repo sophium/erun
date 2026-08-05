@@ -291,6 +291,11 @@ export class ManageDialog {
     await this.cloudAliasNoneOption().click();
   }
 
+  async chooseCloudAlias(alias: string): Promise<void> {
+    await this.openCloudAliasOptions();
+    await this.page.getByRole('option', { name: alias, exact: true }).click();
+  }
+
   // --- Per-provider-type cloud-alias selectors ---
 
   cloudAliasSlotSelect(providerType: string): Locator {
