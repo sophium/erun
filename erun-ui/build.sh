@@ -55,6 +55,10 @@ if [ -d frontend ]; then
 		"$YARN_BIN" typecheck
 		"$YARN_BIN" lint
 		"$YARN_BIN" format:check
+		# The frontend unit tests cover pure logic the Playwright suite
+		# cannot isolate (stream parsing, row-state derivation). They were
+		# runnable but ungated, which is the same as absent.
+		"$YARN_BIN" test
 		# Go-side lint gate. erun-ui's Go module is not built by the
 		# erun-devops image (it needs this CGO/webkit + frontend toolchain),
 		# so its golangci-lint gate lives here next to the frontend checks

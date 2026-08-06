@@ -168,8 +168,18 @@ func registerReadModelTools(server *mcp.Server, info eruncommon.BuildInfo, runti
 func registerIdleStopTools(server *mcp.Server, runtime RuntimeConfig) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "idle",
-		Description: "Return environment idle stop timeout and marker status without recording activity",
+		Description: "Return environment idle stop timeout and marker status without recording activity. Includes the leases currently holding the env busy, so a caller can see what is deferring auto-stop.",
 	}, idleTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "activity_lease_take",
+		Description: "Hold a named lease for the lifetime of long work in this env, so it reports as busy and idle-stop leaves it alone. " +
+			"Take one before detaching a build, test suite, or agent run: a detached job makes no MCP calls while it runs, so without a lease the env reads as untouched and auto-stop would kill exactly the work worth protecting. " +
+			"Re-taking the same id renews it. Pass the detached job's pid so the lease is reclaimed if it dies; a lease also expires on its own, so it can never pin the env awake forever.",
+	}, activityLeaseTakeTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "activity_lease_release",
+		Description: "Release a lease taken by activity_lease_take once the work is done, so the env can go idle again. Releasing an unknown or already-expired lease succeeds.",
+	}, activityLeaseReleaseTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "idle_stop_cancel",
 		Description: "Dismiss the pending auto-stop grace warning for the env without touching AWS state. No-op when no warning is armed.",

@@ -25,7 +25,7 @@ const (
 	ActivityKindCodex = "codex"
 )
 
-var environmentActivityKinds = []string{ActivityKindSSH, ActivityKindAPI, ActivityKindMCP, ActivityKindCLI, ActivityKindCodex}
+var environmentActivityKinds = []string{ActivityKindSSH, ActivityKindAPI, ActivityKindMCP, ActivityKindCLI, ActivityKindCodex, ActivityKindProcess}
 
 type EnvironmentIdleConfig struct {
 	Timeout          string `yaml:"timeout,omitempty" json:"timeout,omitempty"`
@@ -111,6 +111,10 @@ type EnvironmentIdleStatus struct {
 	SecondsUntilStop    int64                                  `json:"secondsUntilStop,omitempty"`
 	Markers             []EnvironmentIdleMarker                `json:"markers"`
 	Activity            map[string]EnvironmentActivitySnapshot `json:"activity,omitempty"`
+	// Leases are the work claims currently holding the environment. They are
+	// carried on the status so a client can say *what* is deferring auto-stop,
+	// not merely that something is.
+	Leases []EnvironmentActivityLease `json:"leases,omitempty"`
 	// StopPendingSince is the RFC3339 time the auto-stop grace period was
 	// first armed. While set, the in-pod monitor and the desktop treat the
 	// env as "warning, not yet ready to fire"; MaybeArmOrFireIdleStop fires
@@ -161,7 +165,7 @@ func (c EnvironmentIdleConfig) Resolve() (EnvironmentIdlePolicy, error) {
 	}, nil
 }
 
-func ResolveEnvironmentIdleStatus(config EnvironmentIdleConfig, activity map[string]EnvironmentActivitySnapshot, now time.Time) (EnvironmentIdleStatus, error) {
+func ResolveEnvironmentIdleStatus(config EnvironmentIdleConfig, activity map[string]EnvironmentActivitySnapshot, leases []EnvironmentActivityLease, now time.Time) (EnvironmentIdleStatus, error) {
 	policy, err := config.Resolve()
 	if err != nil {
 		return EnvironmentIdleStatus{}, err
@@ -178,7 +182,7 @@ func ResolveEnvironmentIdleStatus(config EnvironmentIdleConfig, activity map[str
 		return EnvironmentIdleStatus{}, err
 	}
 
-	markers := environmentIdleMarkers(activity, policy, now, outsideWorkingHours, secondsUntilWorkingHoursEnd)
+	markers := environmentIdleMarkers(activity, leases, policy, now, outsideWorkingHours, secondsUntilWorkingHoursEnd)
 	stopEligible, secondsUntilStop := environmentStopEligibility(markers, outsideWorkingHours)
 	stopBlockedReason := environmentBlockedReason(markers, stopEligible)
 
@@ -190,10 +194,11 @@ func ResolveEnvironmentIdleStatus(config EnvironmentIdleConfig, activity map[str
 		SecondsUntilStop:    secondsUntilStop,
 		Markers:             markers,
 		Activity:            activity,
+		Leases:              leases,
 	}, nil
 }
 
-func environmentIdleMarkers(activity map[string]EnvironmentActivitySnapshot, policy EnvironmentIdlePolicy, now time.Time, outsideWorkingHours bool, secondsUntilWorkingHoursEnd int64) []EnvironmentIdleMarker {
+func environmentIdleMarkers(activity map[string]EnvironmentActivitySnapshot, leases []EnvironmentActivityLease, policy EnvironmentIdlePolicy, now time.Time, outsideWorkingHours bool, secondsUntilWorkingHoursEnd int64) []EnvironmentIdleMarker {
 	markers := []EnvironmentIdleMarker{{
 		Name:             "working-hours",
 		Idle:             outsideWorkingHours,
@@ -204,7 +209,7 @@ func environmentIdleMarkers(activity map[string]EnvironmentActivitySnapshot, pol
 		snapshot := activity[kind]
 		markers = append(markers, activityIdleMarker(kind, snapshot, policy, now))
 	}
-	return markers
+	return append(markers, leaseIdleMarker(leases, now))
 }
 
 func environmentStopEligibility(markers []EnvironmentIdleMarker, outsideWorkingHours bool) (bool, int64) {
@@ -252,7 +257,11 @@ func ResolveStoredEnvironmentIdleStatus(store EnvironmentIdleStore, tenant, envi
 	if err != nil {
 		return EnvironmentIdleStatus{}, err
 	}
-	status, err := ResolveEnvironmentIdleStatus(config.Idle, activity, now)
+	leases, err := LoadEnvironmentActivityLeases(tenant, environment, now)
+	if err != nil {
+		return EnvironmentIdleStatus{}, err
+	}
+	status, err := ResolveEnvironmentIdleStatus(config.Idle, activity, leases, now)
 	if err != nil {
 		return EnvironmentIdleStatus{}, err
 	}

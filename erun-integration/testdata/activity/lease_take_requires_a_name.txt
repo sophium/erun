@@ -1,0 +1,2 @@
+audit: erun activity lease take --environment dev --tenant team
+lease name is required

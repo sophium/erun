@@ -30,17 +30,7 @@ export const test = base.extend<{
   seededEnv: async ({ app }, use, testInfo) => {
     const environment = uniqueEnvironmentName(testInfo.title);
     seedEnvironment(SEED_TENANT, environment);
-    // The backend's fsnotify config watcher normally surfaces the new row, but
-    // the very first env created right after boot can race the watcher's
-    // readiness — the create/write events are missed and the row never appears
-    // within the wait (a flake, ~40% when this fixture is the first env change
-    // after boot). The config file is already on disk (synchronous write), and
-    // the backend reads config fresh on each state refetch, so a forced reload
-    // surfaces the row deterministically, independent of fsnotify timing.
-    await app.reloadEnvironments();
-    await app.sidebar
-      .envRowButton(SEED_TENANT, environment)
-      .waitFor({ state: 'visible', timeout: 15_000 });
+    await waitForSeededRow(app, environment);
     await use({ tenant: SEED_TENANT, environment });
     removeEnvironment(SEED_TENANT, environment);
   },
@@ -50,13 +40,30 @@ export const test = base.extend<{
   seededRuntimeEnv: async ({ app }, use, testInfo) => {
     const environment = uniqueEnvironmentName(testInfo.title);
     seedRuntimeEnvironment(SEED_TENANT, environment);
-    await app.reloadEnvironments();
-    await app.sidebar
-      .envRowButton(SEED_TENANT, environment)
-      .waitFor({ state: 'visible', timeout: 15_000 });
+    await waitForSeededRow(app, environment);
     await use({ tenant: SEED_TENANT, environment });
     removeEnvironment(SEED_TENANT, environment);
   },
 });
+
+// waitForSeededRow surfaces a freshly-written env config in the sidebar.
+//
+// The backend's fsnotify watcher normally does this, but it can miss the
+// create/write events — most reliably right after boot, before the watcher is
+// ready. A forced reload covers that, except that one reload is not
+// sufficient either: the desktop's state refetch is deduplicated, so a reload
+// issued while an earlier refetch is already in flight can resolve against a
+// snapshot taken *before* the config was written, and nothing re-triggers.
+// Re-driving the reload until the row appears converges on the observable
+// condition instead of betting on one round-trip winning the race — a genuinely
+// missing row still never converges, so the step still fails.
+async function waitForSeededRow(app: AppShell, environment: string): Promise<void> {
+  await expect(async () => {
+    await app.reloadEnvironments();
+    await app.sidebar
+      .envRowButton(SEED_TENANT, environment)
+      .waitFor({ state: 'visible', timeout: 2_000 });
+  }).toPass({ timeout: 30_000 });
+}
 
 export { expect };

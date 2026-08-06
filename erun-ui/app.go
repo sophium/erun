@@ -23,6 +23,7 @@ const (
 	environmentsChangedEvent    = "environments-changed"
 	aiActivityEvent             = "ai-activity"
 	envStatusEvent              = "env-status"
+	envActivityEvent            = "env-activity"
 	appSessionEnvVar            = "ERUN_UI_SESSION"
 )
 
@@ -110,7 +111,11 @@ type App struct {
 	// what keeps a quiet-but-running AI tab from reading as finished, and what
 	// makes the rendered session count and the running state one observation
 	// rather than two guesses. See session_heartbeat.go.
-	sessionHeartbeats         map[string]sessionHeartbeat
+	sessionHeartbeats map[string]sessionHeartbeat
+	// envActivity is the last observation published per environment, so the
+	// sweep announces transitions rather than restating a quiet environment
+	// every tick. See environment_activity.go.
+	envActivity               map[string]environmentActivityState
 	busyEnvs                  map[string]int
 	workspaceSyncs            map[string]*workspaceSyncWorker
 	orchestrators             map[string]*orchestratorSession

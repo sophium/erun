@@ -55,8 +55,9 @@ printf '%s\n' "\$*" >>"${run_dir}/emcp-argv"
 printf '%s\n' "\$\$" >>"${run_dir}/emcp-pids"
 exec sleep 300
 EOF
-    cat >"${run_dir}/bin/erun" <<'EOF'
+    cat >"${run_dir}/bin/erun" <<EOF
 #!/bin/sh
+printf '%s\n' "\$*" >>"${run_dir}/erun-argv"
 exit 0
 EOF
     chmod +x "${run_dir}/bin/emcp" "${run_dir}/bin/erun"
@@ -162,4 +163,14 @@ env -i \
     fail "an in-container shell must not prune live session sockets"
 session_dir_override=""
 
-echo "PASS: entrypoint MCP supervision and session reconciliation"
+# --- 6. The environment monitor samples resident work in every pod ---
+# The sampler is what makes uninstrumented work — a build, a test suite, an
+# agent nobody wrapped in a lease — register as activity. It must run in every
+# pod, not only a cloud-managed one, because the desktop reads the same signal.
+prepare_run sampler
+start_run true devops
+wait_for 'grep -q "^activity sample --tenant team --environment dev$" "${run_dir}/erun-argv" 2>/dev/null' ||
+    fail "the environment monitor should sample resident work at boot: $(cat "${run_dir}/erun-argv" 2>/dev/null)"
+stop_run
+
+echo "PASS: entrypoint MCP supervision, session reconciliation, and activity sampling"

@@ -1,0 +1,19 @@
+Hold, release, and inspect activity leases
+
+Usage:
+  erun activity lease [command]
+
+Available Commands:
+  list        List the leases currently holding the environment busy
+  release     Release a held lease so the environment can go idle again
+  take        Take or renew a named lease so the environment reports it as busy
+
+Flags:
+  -h, --help   help for lease
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.
+
+Use "erun activity lease [command] --help" for more information about a command.

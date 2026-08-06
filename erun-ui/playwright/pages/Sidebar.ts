@@ -1,4 +1,4 @@
-import type { Locator, Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 
 export class Sidebar {
   constructor(public readonly page: Page) {}
@@ -105,9 +105,38 @@ export class Sidebar {
   }
 
   // Scoped through the row button's parent so it resolves one env's dot even
-  // when several are open; clicking the dot closes that env's tabs.
+  // when several are open; activating the dot closes that env's tabs.
   envOpenDot(tenant: string, env: string): Locator {
     return this.envRowButton(tenant, env).locator('..').getByTestId('env-open-dot');
+  }
+
+  // closeEnvironment activates the row's indicator until the env's tabs are
+  // actually gone.
+  //
+  // One activation is not reliable: the indicator lives inside an IconTooltip,
+  // and focusing it opens the tooltip content — a DOM change that can land
+  // between the focus and the key, so the key reaches nothing and the env stays
+  // open. (Observed on main as well as on a feature branch, on either of the two
+  // specs that close an env, roughly one full-suite run in two.) Driven by key
+  // rather than mouse because a mouse press hovers first and the tooltip that
+  // opens can swallow the click outright.
+  //
+  // Re-activating until the indicator is gone converges on the observable
+  // condition rather than betting on one keypress winning the race. A close that
+  // is genuinely broken never converges, so the regression still fails the step.
+  // This is the whole close contract for a spec — do not re-assert the indicator
+  // afterwards: a closed environment produces no further traffic, so there is no
+  // event to bound a "still closed" check against, and a bare re-check is a race
+  // with any tab spawn the open left in flight.
+  async closeEnvironment(tenant: string, env: string): Promise<void> {
+    const dot = this.envOpenDot(tenant, env);
+    await expect(async () => {
+      if ((await dot.count()) > 0) {
+        await dot.focus();
+        await dot.press('Enter');
+      }
+      await expect(dot).toHaveCount(0, { timeout: 2_000 });
+    }).toPass({ timeout: 30_000 });
   }
 
   async hasLocalBadge(tenant: string, env: string): Promise<boolean> {
