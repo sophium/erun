@@ -294,7 +294,7 @@ func publishedDevopsChartRegistry(target OpenResult) string {
 		return registry
 	}
 	// The published erun-devops runtime chart and its platform images (erun-devops,
-	// erun-mcp, erun-dind, …) are released together to the runtime image's registry
+	// erun-dind, …) are released together to the runtime image's registry
 	// (e.g. ghcr.io/sophium). A `--cluster-registry` env's deploy registry is the
 	// in-cluster erun-registry that only ever holds the tenant's built app images —
 	// never the erun platform chart — so for that env alone the chart must resolve

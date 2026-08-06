@@ -8,7 +8,7 @@ MCP is **the typed-tool surface for an environment.** Where shell-level work hap
 
 ERun's conventions reach the Agent through a separate mechanism — [skill bundles](/concepts/skills) deployed into the env, loaded by the Agent's own skill loader. Skills are not MCP tools; they're content the Agent reads to know how to write conformant code. The MCP surface stays focused on inspection + action + escape; "how to scaffold a Go service" lives in the Agent's loaded skill, not behind a tool call.
 
-Every open environment exposes an MCP server in its runtime pod. The desktop app port-forwards it to localhost so any MCP-compatible client — the Claude Code desktop app, the Codex desktop app, custom agents, any other JSON-RPC client — can connect directly.
+Every open environment exposes an MCP server in its runtime pod. It runs **inside the runtime container** — the same image the in-pod Agent and an `erun open` shell use — so a tool call executes with the environment's own toolchain, including anything a custom runtime image adds. The desktop app port-forwards it to localhost so any MCP-compatible client — the Claude Code desktop app, the Codex desktop app, custom agents, any other JSON-RPC client — can connect directly.
 
 **Both endpoints accept any client.** SSH and MCP live in the same pod and see the same workspace. The Claude Code and Codex desktop apps typically use both — SSH for shell + filesystem, MCP for structured ERun operations. See [Desktop app](/desktop/overview).
 

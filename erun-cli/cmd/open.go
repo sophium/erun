@@ -398,7 +398,7 @@ func (r *resolvedOpenRunner) maybeDeployRuntime(shellReq common.ShellLaunchParam
 
 func (r *resolvedOpenRunner) resolveRuntimeExecution() (common.DeploySpec, error) {
 	// Heal envs created by older binaries: their tenant Chart.yaml is pinned to
-	// the literal "1.0.0" placeholder, so helm keeps pulling an erun-mcp:1.0.0
+	// the literal "1.0.0" placeholder, so helm keeps pulling an erun-devops:1.0.0
 	// image that was never published and every rollout fails at pod startup.
 	appVersion := strings.TrimSpace(r.result.EnvConfig.RuntimeVersion)
 	if appVersion == "" {

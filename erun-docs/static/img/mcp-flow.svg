@@ -47,7 +47,7 @@
   <g>
     <rect x="280" y="110" width="780" height="240" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
     <text x="670" y="140" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600">MCP server</text>
-    <text x="670" y="160" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.6">in the runtime pod · `erun-mcp` container</text>
+    <text x="670" y="160" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.6">in the runtime pod · `erun-devops` container</text>
 
     <!-- Row 1: INSPECTION (5 chips) -->
     <text x="300" y="190" text-anchor="start" fill="#0891b2" font-size="10.5" font-weight="600" letter-spacing="0.08em">INSPECTION</text>

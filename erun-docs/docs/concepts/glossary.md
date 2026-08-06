@@ -47,7 +47,7 @@ Three interfaces, one engine. See the anatomy diagram on the [introduction](/int
 
 ## Infrastructure
 
-**Runtime pod** — one pod per env, hosting `erun-devops` (shell + tools), `erun-mcp` (MCP server), `erun-dind` (docker daemon). The shared surface for Operator (SSH) and Agent (MCP). See [Inside an environment](/concepts/runtime-pods).
+**Runtime pod** — one pod per env, hosting `erun-devops` (shell + tools + the env's MCP server) and `erun-dind` (docker daemon). The shared surface for Operator (SSH) and Agent (MCP). See [Inside an environment](/concepts/runtime-pods).
 
 **Cloud context** — a managed Kubernetes cluster ERun starts on demand and stops when idle. See [Cloud contexts](/concepts/cloud-contexts).
 

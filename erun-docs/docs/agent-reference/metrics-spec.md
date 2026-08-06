@@ -12,7 +12,7 @@ ERun's runtime pod exposes a Prometheus-format metrics endpoint. The full schema
 
 | Property | Value |
 |---|---|
-| Listener | `erun-mcp` container, port `9100`. |
+| Listener | `erun-devops` container, port `9100`. |
 | Path | `/metrics`. |
 | Format | Prometheus text exposition format, v0.0.4. |
 | Authentication | None (loopback-only by default; cross-namespace ingress denied by the runtime chart's `NetworkPolicy`). |
@@ -28,7 +28,7 @@ A typical Prometheus scrape configuration:
         names: []                     # all namespaces
   relabel_configs:
     - source_labels: [__meta_kubernetes_pod_container_name]
-      regex: erun-mcp
+      regex: erun-devops
       action: keep
     - source_labels: [__meta_kubernetes_namespace]
       target_label: namespace

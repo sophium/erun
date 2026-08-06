@@ -1,4 +1,12 @@
 {{- $mcpPort := default 17000 .Values.mcpPort -}}
+{{- /* The environment's MCP edge is served by the runtime container itself, so
+       every MCP-driven command runs with the environment's own toolchain. On by
+       default; set mcpEnabled=false to run the pod without an edge. Resolved
+       through hasKey because `default true` cannot express an explicit false. */ -}}
+{{- $mcpEnabled := "true" -}}
+{{- if hasKey .Values "mcpEnabled" -}}
+  {{- $mcpEnabled = toString .Values.mcpEnabled -}}
+{{- end -}}
 {{- $sshPort := default 17022 .Values.sshPort -}}
 {{- /*
 worktreeStorage selects how the runtime pod sources its worktree.
@@ -66,7 +74,6 @@ emitted; type is the single source of truth.
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
 {{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
 {{- $devopsImage := default (printf "%s/erun-devops:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-devops") -}}
-{{- $mcpImage := default (printf "%s/erun-mcp:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-mcp") -}}
 {{- $dindImage := default "ghcr.io/sophium/erun-dind:28.1.1-1" (index $imageOverrides "erun-dind") -}}
 {{- $cloudContext := default dict .Values.cloudContext -}}
 {{- $cloudContextName := default "" $cloudContext.name -}}
@@ -502,6 +509,8 @@ spec:
               value: {{ if .Values.sshdEnabled }}"true"{{ else }}"false"{{ end }}
             - name: ERUN_MCP_PORT
               value: {{ $mcpPort | quote }}
+            - name: ERUN_MCP_ENABLED
+              value: {{ $mcpEnabled | quote }}
             - name: ERUN_SSHD_PORT
               value: {{ $sshPort | quote }}
             - name: ERUN_IDLE_TIMEOUT
@@ -516,6 +525,12 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            {{- if $mcpAuthEnabled }}
+            - name: ERUN_MCP_TRUSTED_ISSUER
+              value: {{ $mcpAuthIssuer | quote }}
+            - name: ERUN_MCP_AUDIENCE
+              value: {{ $mcpAuthAudience | quote }}
+            {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -525,6 +540,10 @@ spec:
           ports:
             - containerPort: {{ $sshPort }}
               name: ssh
+            {{- if eq $mcpEnabled "true" }}
+            - containerPort: {{ $mcpPort }}
+              name: mcp
+            {{- end }}
           resources:
             limits:
               cpu: {{ $runtimeCPU | quote }}
@@ -541,61 +560,6 @@ spec:
             {{- end }}
             - name: docker-socket
               mountPath: /var/run
-            {{- with .Values.extraVolumeMounts }}
-            {{- toYaml . | nindent 12 }}
-            {{- end }}
-        - image: {{ $mcpImage }}
-          name: erun-mcp
-          imagePullPolicy: IfNotPresent
-          env:
-            - name: HOME
-              value: /home/erun
-            - name: KUBECONFIG
-              value: /home/erun/.kube/config
-            - name: DOCKER_HOST
-              value: unix:///var/run/docker.sock
-            - name: DOCKER_BUILDKIT
-              value: "1"
-            - name: ERUN_REPO_PATH
-              value: {{ $repoPath | quote }}
-            - name: ERUN_OUTPUTS_DIR
-              value: /home/erun/.erun/outputs
-            - name: ERUN_REPO_REMOTE
-              value: {{ if eq $worktreeStorage "pvc" }}"true"{{ else }}"false"{{ end }}
-            - name: ERUN_ENV_TYPE
-              value: {{ $envType | quote }}
-            - name: ERUN_KUBERNETES_CONTEXT
-              value: in-cluster
-            - name: ERUN_CLOUD_CONTEXT_NAME
-              value: {{ $cloudContextName | quote }}
-            - name: ERUN_TENANT
-              value: {{ required "tenant is required" .Values.tenant | quote }}
-            - name: ERUN_ENVIRONMENT
-              value: {{ required "environment is required" .Values.environment | quote }}
-            - name: ERUN_MCP_PORT
-              value: {{ $mcpPort | quote }}
-            - name: ERUN_NAMESPACE
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
-            {{- if $mcpAuthEnabled }}
-            - name: ERUN_MCP_TRUSTED_ISSUER
-              value: {{ $mcpAuthIssuer | quote }}
-            - name: ERUN_MCP_AUDIENCE
-              value: {{ $mcpAuthAudience | quote }}
-            {{- end }}
-          ports:
-            - containerPort: {{ $mcpPort }}
-              name: mcp
-          volumeMounts:
-            - name: erun-home
-              mountPath: /home/erun
-            {{- if ne $worktreeStorage "none" }}
-            - name: repo-worktree
-              mountPath: {{ $worktreePath | quote }}
-            {{- end }}
-            - name: docker-socket
-              mountPath: /var/run
             {{- /* Mount the desktop key only when there is one (file:// issuer).
                    The OIDC-issuer path (hosted) sets issuer+audience but no
                    secret, so gate the mount on secretName, not mcpAuthEnabled. */ -}}
@@ -603,6 +567,9 @@ spec:
             - name: mcp-auth
               mountPath: {{ $mcpAuthMountDir | quote }}
               readOnly: true
+            {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
             {{- end }}
         - image: {{ $dindImage }}
           name: erun-dind

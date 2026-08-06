@@ -7,7 +7,7 @@ title: Inside an environment
 When you open an environment, ERun creates (or reuses) a **dedicated Kubernetes namespace** for it. Everything that belongs to the env lives in that namespace — both ERun's own developer-access surface and the application services your project deploys.
 
 <figure className="erun-hero-figure">
-  <img src="/img/inside-environment.svg" alt="Inside one Kubernetes namespace. At the top, an Operator pill and an Agent pill connect via dashed arrows labelled SSH and MCP into a runtime pod that sits inside the namespace card. The runtime pod holds three charcoal containers — erun-devops (shell + erun + docker), erun-mcp (MCP server for agents), erun-dind (docker daemon sidecar). Below the runtime pod, still inside the same namespace, four application service boxes — frontend, api, db, queue — plus a '+ more' note. A strapline reads: 'One namespace = one full functioning copy of the project. Drop the namespace, everything goes with it.'" />
+  <img src="/img/inside-environment.svg" alt="Inside one Kubernetes namespace. At the top, an Operator pill and an Agent pill connect via dashed arrows labelled SSH and MCP into a runtime pod that sits inside the namespace card. The runtime pod holds two charcoal containers — erun-devops (shell + erun + docker + MCP server), erun-dind (docker daemon sidecar). Below the runtime pod, still inside the same namespace, four application service boxes — frontend, api, db, queue — plus a '+ more' note. A strapline reads: 'One namespace = one full functioning copy of the project. Drop the namespace, everything goes with it.'" />
   <figcaption>One namespace = one full functioning copy of the project. The runtime pod is the shared surface for Operator (SSH) and Agent (MCP); the application services live alongside it.</figcaption>
 </figure>
 
@@ -19,15 +19,16 @@ A typical env namespace holds two kinds of workload, side by side:
 
 ### 1. The ERun runtime pod (developer access)
 
-One pod with three containers:
+One pod with two containers:
 
 | Container | Role |
 |---|---|
-| `erun-devops` | Main shell + tools (`erun`, `docker`, `kubectl`, `helm`, `gh`, …). **Also ships the Agent CLI** — `claude`, `codex`, or whichever tool the env is configured for — pre-wired against the in-pod MCP loopback. The default Agent in the env runs inside this container. |
-| `erun-mcp` | MCP server for Agents. Exposes structured tools (`idle`, `doctor`, `list`, `version`, `build`, `deploy`, `raw`, …). Reached at loopback by the in-pod Agent and via port-forward from laptop-side clients. |
+| `erun-devops` | Main shell + tools (`erun`, `docker`, `kubectl`, `helm`, `gh`, …). **Also ships the Agent CLI** — `claude`, `codex`, or whichever tool the env is configured for — pre-wired against the in-pod MCP loopback. The default Agent in the env runs inside this container. **And it serves the env's MCP edge** — structured tools (`idle`, `doctor`, `list`, `version`, `build`, `deploy`, `raw`, …) on `ERUN_MCP_PORT`, reached at loopback by the in-pod Agent and via port-forward from laptop-side clients. |
 | `erun-dind` | Docker daemon sidecar. Backs `/var/run/docker.sock` for the shell container's `docker` invocations. |
 
-The three share two persistent volume claims: `/home/erun` (workspace + config) and `/var/lib/docker` (the daemon's image store, so builds stay cache-warm across pod restarts). The home PVC also holds the **agent outputs directory** (`$ERUN_OUTPUTS_DIR`, default `/home/erun/.erun/outputs`) — where agents and skills drop deliverables you pull out with [`erun outputs`](/cli/outputs); because it's on the PVC, those files survive pod restarts.
+Because the MCP edge runs in this container, an MCP tool call executes with exactly the toolchain the env is built with. Add Java or a compose plugin to the runtime image and MCP-driven `raw` and `build` see it, the same as an `erun open` shell does.
+
+Both share two persistent volume claims: `/home/erun` (workspace + config) and `/var/lib/docker` (the daemon's image store, so builds stay cache-warm across pod restarts). The home PVC also holds the **agent outputs directory** (`$ERUN_OUTPUTS_DIR`, default `/home/erun/.erun/outputs`) — where agents and skills drop deliverables you pull out with [`erun outputs`](/cli/outputs); because it's on the PVC, those files survive pod restarts.
 
 This pod is the **shared surface** for Operator and Agent. Two endpoints on the same pod, both accepting any client:
 
@@ -51,10 +52,10 @@ These run in the same namespace as the runtime pod, with their own services and 
 
 ## Why a single pod for the developer surface
 
-The three developer containers live in one pod, not three:
+The developer containers live in one pod, not two:
 
 - File edits visible in `erun-devops` are immediately visible to the daemon in `erun-dind`.
-- The MCP container inspects the same `/home/erun` filesystem the shell sees.
+- MCP tools run inside `erun-devops`, so they see the same filesystem, toolchain, and docker daemon the shell sees.
 - One ServiceAccount, one RBAC scope, one audit surface.
 
 ## Idle / auto-stop

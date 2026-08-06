@@ -23,7 +23,7 @@ func resolveMCPAuthPublicKey(path string) (string, bool, error) {
 }
 
 // applyMCPAuthToRuntimeSpec applies MCP-auth metadata only to the runtime
-// release: the erun-mcp container ships in the erun-devops runtime chart, so
+// release: the MCP edge is served by the runtime container, so
 // backend component charts never carry mcpAuth. Auth is sticky — a redeploy that
 // does not re-supply the key rethreads the env's persisted one — and turning it
 // off is explicit, so a routine version bump can never quietly downgrade a

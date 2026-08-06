@@ -16,9 +16,9 @@ ERun watches two activity sources per env, both surfaced via the [MCP `idle` too
 |---|---|
 | Type | RFC3339 UTC timestamp. |
 | Updated by | Any of: a keystroke on the in-pod SSH PTY; a successful in-pod `erun` invocation; any non-`idle` MCP `tools/call` against the env. |
-| **Not** updated by | `erun-mcp`'s own `idle` polling (would self-perpetuate); file-only edits from a laptop-side IDE that doesn't open an SSH session; passive port-forward traffic without an active session. |
+| **Not** updated by | the MCP edge's own `idle` polling (would self-perpetuate); file-only edits from a laptop-side IDE that doesn't open an SSH session; passive port-forward traffic without an active session. |
 | Initial value | Pod start time (so a freshly-started env is "active"). |
-| Persistence | In-memory in the `erun-mcp` container. A pod restart resets to the new start time. |
+| Persistence | In-memory in the runtime container's MCP server. A pod restart resets to the new start time. |
 
 ### `last_network_traffic_window`
 
@@ -30,7 +30,7 @@ ERun watches two activity sources per env, both surfaced via the [MCP `idle` too
 
 ## Predicate evaluation cadence
 
-The idle monitor inside `erun-mcp` evaluates the predicate every **10 seconds**. State transitions:
+The idle monitor inside the MCP edge evaluates the predicate every **10 seconds**. State transitions:
 
 - Each evaluation produces an `eligible` boolean.
 - ERun maintains a `continuously_eligible_since` timestamp: set to now on the first `eligible=true` after `eligible=false`; cleared the moment `eligible=false` is observed.
