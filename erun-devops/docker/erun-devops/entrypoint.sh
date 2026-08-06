@@ -909,10 +909,12 @@ EOF
     echo "$!" >"${proxy_pid_file}"
 }
 
-start_environment_idle_monitor() {
-    if ! runtime_cloud_environment; then
-        return
-    fi
+# start_environment_monitor runs one loop per pod. Every tick samples the
+# processes actually working in this container, so a build or agent run nobody
+# instrumented still registers as activity instead of reading as idle; the
+# auto-stop decision rides the same tick but only for a cloud-managed env, which
+# is the only kind that has a host to stop.
+start_environment_monitor() {
     if [ -z "${ERUN_TENANT:-}" ] || [ -z "${ERUN_ENVIRONMENT:-}" ]; then
         return
     fi
@@ -927,7 +929,14 @@ start_environment_idle_monitor() {
         # surfaces a stop error attributable to a previous pod lifetime.
         : >"${stop_log}"
         while :; do
+            # Sampled before the sleep so the very first tick establishes the
+            # CPU baseline the next one compares against; work that started
+            # during boot is then visible one tick later, not two.
+            erun activity sample --tenant "${ERUN_TENANT}" --environment "${ERUN_ENVIRONMENT}" >/dev/null 2>&1 || true
             sleep 30
+            if ! runtime_cloud_environment; then
+                continue
+            fi
             tick_ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
             # The stop-ready command exits non-zero on every active env. Capture
             # the substitution in an `if` so dash's `set -e` (active script-wide)
@@ -1046,7 +1055,7 @@ normalize_ssh_key_permissions
 ensure_outputs_dir
 ensure_git_safe_directory
 start_sshd
-start_environment_idle_monitor
+start_environment_monitor
 
 if [ "${1:-}" = "shell" ]; then
     shift

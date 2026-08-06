@@ -64,6 +64,19 @@ type envStatusPayload struct {
 	Status      string `json:"status"`
 }
 
+// envActivityPayload is the observed half of the same sidebar state: whether the
+// environment's edge answers at all (reachable — true whoever opened it, the
+// desktop or a bare `erun open`), and whether the environment reports work in
+// flight (busy) and what. Separate from envStatusPayload because the lifetimes
+// differ: a status is a sticky condition, this is replaced on every poll.
+type envActivityPayload struct {
+	Tenant      string `json:"tenant"`
+	Environment string `json:"environment"`
+	Reachable   bool   `json:"reachable"`
+	Busy        bool   `json:"busy"`
+	Detail      string `json:"detail,omitempty"`
+}
+
 // uiEnvironmentStopResult is what the Runtime tab's Stop control reports back.
 type uiEnvironmentStopResult struct {
 	Tenant         string `json:"tenant"`

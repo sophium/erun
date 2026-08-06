@@ -17,15 +17,9 @@ const mcpPortForwardStartupTimeout = 5 * time.Second
 
 type MCPForwarder func(common.Context, common.OpenResult) error
 
-type mcpPortForwardState struct {
-	Tenant            string `json:"tenant"`
-	Environment       string `json:"environment"`
-	KubernetesContext string `json:"kubernetesContext"`
-	Namespace         string `json:"namespace"`
-	LocalPort         int    `json:"localPort"`
-	LogPath           string `json:"logPath,omitempty"`
-	ProcessID         int    `json:"processId,omitempty"`
-}
+// Aliased rather than redeclared so the shape the CLI writes and the shape the
+// desktop reads cannot drift apart.
+type mcpPortForwardState = common.PortForwardState
 
 func newMCPForwarder() MCPForwarder {
 	return func(ctx common.Context, result common.OpenResult) error {

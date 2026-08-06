@@ -1,0 +1,8 @@
+lease held: gradle-build (id gradle-build), expires in <REMAINING>
+audit: erun activity lease take --environment dev --name gradle-build --tenant team --ttl 10m0s
+  gradle-build: gradle-build, expires in <REMAINING>
+audit: erun activity lease list --environment dev --tenant team
+lease released: gradle-build
+audit: erun activity lease release --environment dev --id gradle-build --tenant team
+no leases held
+audit: erun activity lease list --environment dev --tenant team

@@ -121,7 +121,7 @@ Four categories. The protocol treats them all as MCP tools; the categorisation i
 
 | Tool | Purpose |
 |---|---|
-| `idle` | Resolved idle policy, managed-cloud flag, stop eligibility, current activity snapshot. |
+| `idle` | Resolved idle policy, managed-cloud flag, stop eligibility, current activity snapshot, and the activity leases currently holding the env busy. |
 | `doctor` | In-pod health checks (config files, git checkout, SSH keys, docker daemon, workspace PVC). |
 | `list` | Same data as the CLI `erun list`, structured. |
 | `version` | Build version and commit of the MCP server. |
@@ -145,6 +145,10 @@ These wrap the [pure command primitives](/concepts/command-primitives): `build` 
 | `expose` | `erun expose` | Resolved public hostname, per-env wildcard record, Host-routing Ingress. Requires a `platform:` block. Supports preview (dry-run). |
 | `init` | `erun init` | Created files, deployed namespace. |
 | `delete` | `erun delete` | Namespace deleted, local config removed. |
+| `activity_lease_take` | `erun activity lease take` | The lease held, plus every lease still held on the env. |
+| `activity_lease_release` | `erun activity lease release` | Every lease still held on the env. |
+
+Take an activity lease before **detaching** long work in the env — a build, a test suite, an agent run. A detached job makes no calls while it runs, so without a lease the env reads as untouched and auto-stop would kill exactly the work worth protecting; with one, the env reports as busy with the lease's name and the operator can see it. Pass the detached job's `pid` so an abandoned lease is reclaimed, and release it when the work finishes. See [Agent reference · Idle policy](/agent-reference/idle-policy#activity-leases).
 
 ### Credential tools — desktop-only
 
@@ -199,7 +203,10 @@ Resolves the env's idle policy and reports its current activity. Useful for an A
       "bytes": 184320
     },
     "within_working_hours": true
-  }
+  },
+  "leases": [
+    { "id": "agent-run", "name": "agent-run", "pid": 4242, "expiresAt": "2026-05-25T14:50:00Z" }
+  ]
 }
 ```
 

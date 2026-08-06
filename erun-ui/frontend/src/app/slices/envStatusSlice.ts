@@ -12,12 +12,26 @@ export type EnvRealStatus = 'stopped' | 'runtime-stopped' | 'failed';
 
 const envRealStatuses: readonly string[] = ['stopped', 'runtime-stopped', 'failed'];
 
+// EnvObservedActivity is the other input to the same row state: what the
+// environment itself reports, refreshed on every poll. Kept apart from the
+// status because a status is a sticky condition the desktop set, while this is
+// an observation that must be free to change back — and because it is true for
+// an environment the desktop never opened, which is exactly the case a
+// tab-presence check cannot see.
+export interface EnvObservedActivity {
+  reachable: boolean;
+  busy: boolean;
+  detail: string;
+}
+
 export interface EnvStatusState {
   statusByEnv: Record<string, EnvRealStatus>;
+  activityByEnv: Record<string, EnvObservedActivity>;
 }
 
 const initialState: EnvStatusState = {
   statusByEnv: {},
+  activityByEnv: {},
 };
 
 export const envStatusSlice = createSlice({
@@ -32,8 +46,32 @@ export const envStatusSlice = createSlice({
         Reflect.deleteProperty(state.statusByEnv, key);
       }
     },
+    setEnvActivityForEnv(
+      state,
+      action: PayloadAction<{ key: string; activity: EnvObservedActivity }>,
+    ) {
+      const { key, activity } = action.payload;
+      // A quiet environment carries no entry, so a repeated "still quiet"
+      // observation must leave the slice byte-identical rather than producing a
+      // new state object every poll.
+      if (!activity.reachable && !activity.busy) {
+        if (key in state.activityByEnv) {
+          Reflect.deleteProperty(state.activityByEnv, key);
+        }
+        return;
+      }
+      const current = state.activityByEnv[key];
+      if (
+        current?.reachable === activity.reachable &&
+        current.busy === activity.busy &&
+        current.detail === activity.detail
+      ) {
+        return;
+      }
+      state.activityByEnv[key] = activity;
+    },
   },
 });
 
-export const { setEnvStatusForEnv } = envStatusSlice.actions;
+export const { setEnvActivityForEnv, setEnvStatusForEnv } = envStatusSlice.actions;
 export default envStatusSlice.reducer;

@@ -4,17 +4,18 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	common "github.com/sophium/erun/erun-common"
 )
 
-// State lives under the config dir, not the cache dir: an evicted cache
-// entry would orphan the still-running kubectl port-forward and leave the
-// next `erun open` unable to recognise its own forward.
+// The canonical location is shared (erun-common) because the desktop reads the
+// same files to tell a reachable environment from one nobody opened. Only the
+// migration off the old cache-dir location stays here, with the writer.
 func portForwardStatePath(kind, tenant, environment string) (string, error) {
-	configDir, err := os.UserConfigDir()
+	newPath, err := common.PortForwardStatePath(kind, tenant, environment)
 	if err != nil {
 		return "", err
 	}
-	newPath := filepath.Join(configDir, "erun", "portforward", kind, tenant, environment+".json")
 
 	if _, err := os.Stat(newPath); err == nil {
 		return newPath, nil

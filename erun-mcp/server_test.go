@@ -178,6 +178,8 @@ func TestHTTPHandlerExposesVersionTool(t *testing.T) {
 	// by name: a bare count cannot say which tool appeared or vanished, and its
 	// failure message prints unreadable struct pointers.
 	wantTools := []string{
+		"activity_lease_release",
+		"activity_lease_take",
 		"build",
 		"cloud_clear_aws_credentials",
 		"cloud_init_aws",

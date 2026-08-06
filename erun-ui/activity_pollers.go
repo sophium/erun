@@ -30,6 +30,10 @@ func (a *App) startActivityPollers() {
 	// stopped printing. Together they keep what the UI shows tied to what the
 	// pod is doing rather than to stream traffic.
 	go a.runSessionHeartbeatPoller(stop)
+	// Both of the above only see environments the desktop itself opened. This
+	// one sweeps every configured environment, so one driven from the CLI or by
+	// an in-pod agent stops rendering as untouched.
+	go a.runEnvironmentActivityPoller(stop)
 }
 
 // stopActivityPollers is idempotent: safe to call more than once.

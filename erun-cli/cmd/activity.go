@@ -21,6 +21,8 @@ func newActivityCmd(store common.OpenStore) *cobra.Command {
 	}
 	cmd.AddCommand(
 		newActivityTouchCmd(),
+		newActivityLeaseCmd(),
+		newActivitySampleCmd(),
 		newActivityStatusCmd(store),
 		newActivityStopReadyCmd(store),
 		newActivityCancelStopPendingCmd(),

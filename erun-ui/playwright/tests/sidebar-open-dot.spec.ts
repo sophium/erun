@@ -30,14 +30,11 @@ test.describe('sidebar env open dot', () => {
 
     // Activating the dot closes the env, and must not also trigger the row's
     // openSelection — a keyboard-activated button still fires a bubbling click,
-    // so stopPropagation is exercised either way. Driven by key rather than mouse
-    // because the dot sits inside an IconTooltip: a mouse click hovers it first,
-    // and the tooltip content that opens can intercept the press (the same reason
-    // openManageDialogViaKeyboard exists). Under a loaded shared backend that
-    // interception is what left the env open and the dot mounted.
-    await dot.focus();
-    await dot.press('Enter');
-    await expect(dot).toHaveCount(0);
+    // so stopPropagation is exercised either way. The POM owns the activation:
+    // the dot sits inside an IconTooltip whose content can intercept the press,
+    // so it re-activates until the env is actually closed.
+    // closeEnvironment already asserts the row went quiet and stayed quiet.
+    await app.sidebar.closeEnvironment(tenant, environment);
   });
 
   // The dot must reflect the env's REAL condition, not just tab
@@ -120,16 +117,16 @@ test.describe('sidebar env open dot', () => {
     await driveEnvStatus('failed', 'failed', /deploy failed/);
     await driveEnvStatus('', 'running', `Close ${tenant} / ${environment}`);
 
-    // Close the env so the singleton backend returns to its pre-test shape, by
-    // key for the tooltip-interception reason above. This step used to be an
-    // intermittent red under full-suite load: a session that had already exited
-    // made its PTY close report "file already closed", which failed the whole
-    // CloseEnvironmentSessions call and aborted the frontend's unwind before it
-    // cleared the env's tabs — so the dot stayed mounted. Session close is
-    // idempotent now (erun-ui/session.go ignoreAlreadyClosed).
-    await dot.focus();
-    await dot.press('Enter');
-    await expect(dot).toHaveCount(0);
+    // Close the env so the singleton backend returns to its pre-test shape.
+    // This step used to be an intermittent red under full-suite load: a session
+    // that had already exited made its PTY close report "file already closed",
+    // which failed the whole CloseEnvironmentSessions call and aborted the
+    // frontend's unwind before it cleared the env's tabs — so the dot stayed
+    // mounted. Session close is idempotent now (erun-ui/session.go
+    // ignoreAlreadyClosed); what remains is the tooltip swallowing the
+    // activation, which the POM's re-activation absorbs.
+    // closeEnvironment already asserts the row went quiet and stayed quiet.
+    await app.sidebar.closeEnvironment(tenant, environment);
   });
 });
 

@@ -14,6 +14,7 @@ import type {
   AIActivityPayload,
   AppNotificationPayload,
   AppStatusPayload,
+  EnvActivityPayload,
   EnvironmentInitializedPayload,
   EnvStatusPayload,
   MountElements,
@@ -43,6 +44,7 @@ import {
   handleAIActivity,
   handleAppNotification,
   handleAppStatus,
+  handleEnvActivity,
   handleEnvironmentDeployed,
   handleEnvironmentInitFailed,
   handleEnvironmentInitialized,
@@ -140,6 +142,7 @@ export class TerminalController {
   private environmentsChangedOff: (() => void) | null = null;
   private aiActivityOff: (() => void) | null = null;
   private envStatusOff: (() => void) | null = null;
+  private envActivityOff: (() => void) | null = null;
   private pasteHandler: ((event: ClipboardEvent) => void) | null = null;
   private contextMenuHandler: ((event: MouseEvent) => void) | null = null;
   // When the active session ends in "main screen + cursor hidden" with no
@@ -244,6 +247,9 @@ export class TerminalController {
     });
     this.envStatusOff = EventsOn('env-status', (payload: EnvStatusPayload) => {
       store.dispatch(handleEnvStatus(payload));
+    });
+    this.envActivityOff = EventsOn('env-activity', (payload: EnvActivityPayload) => {
+      store.dispatch(handleEnvActivity(payload));
     });
   }
 
@@ -385,6 +391,7 @@ export class TerminalController {
       'environmentsChangedOff',
       'aiActivityOff',
       'envStatusOff',
+      'envActivityOff',
     ] as const;
     for (const field of fields) {
       this[field]?.();
