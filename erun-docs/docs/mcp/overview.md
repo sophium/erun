@@ -115,7 +115,7 @@ The response payload is the typed shape from [Structured tool schemas](#structur
 
 ## Built-in tools
 
-Three categories. The protocol treats them all as MCP tools; the categorisation is about *what they do*. (A fourth category — opinionated code-generation skills — used to live here and has moved off the MCP surface entirely. See [Skills](/concepts/skills) for how Agents pick up project conventions now.)
+Four categories. The protocol treats them all as MCP tools; the categorisation is about *what they do*. (A fifth category — opinionated code-generation skills — used to live here and has moved off the MCP surface entirely. See [Skills](/concepts/skills) for how Agents pick up project conventions now.)
 
 ### Inspection — read-only
 
@@ -145,6 +145,15 @@ These wrap the [pure command primitives](/concepts/command-primitives): `build` 
 | `expose` | `erun expose` | Resolved public hostname, per-env wildcard record, Host-routing Ingress. Requires a `platform:` block. Supports preview (dry-run). |
 | `init` | `erun init` | Created files, deployed namespace. |
 | `delete` | `erun delete` | Namespace deleted, local config removed. |
+
+### Credential tools — desktop-only
+
+| Tool | Purpose |
+|---|---|
+| `cloud_inject_aws_credentials` | Write temporary AWS credentials into the pod's `~/.aws/credentials` under the `erun-host` profile, replacing that profile in place. |
+| `cloud_clear_aws_credentials` | Remove the `erun-host` profile from the pod's `~/.aws/credentials`. |
+
+`cloud_inject_aws_credentials` takes the access key, secret, and session token as **tool arguments**, so **do not call it from anything that records its arguments** — an Agent transcript, a session log, an audit trail. It exists for the desktop app's credential refresher, which holds the values in memory. Everything else refreshes an environment's host credentials with [`erun cloud refresh <tenant> <environment>`](/cli/cloud#cloud-refresh), which reads the operator's own AWS profile and streams the credentials to the pod on stdin, so nothing sensitive passes through the caller.
 
 ### Escape hatch
 

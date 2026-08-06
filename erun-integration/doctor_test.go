@@ -1170,6 +1170,90 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/repair_jetbrains_gateway_no_metadata", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_aws_alias_env_plans_host_credential_check", func(t *testing.T) {
+		// For an env configured to act as the operator's AWS identity, doctor
+		// reads back the pod's erun-host profile. The plan must show the exec and
+		// the script, and the script must ask only for presence and expiry —
+		// never for a key, a secret, or a session token.
+		setup := env.New(t)
+		fixture.SeedLocalTenantEnvWithAWSAlias(t, setup, "team", "dev", "ops+123456789012@aws", "eu-west-2", "")
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/dry_run_aws_alias_env_plans_host_credential_check", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_reports_expired_host_credentials", func(t *testing.T) {
+		// The failure #903 was filed for: the profile is present and well-formed
+		// but its credentials lapsed overnight, which otherwise first surfaces as
+		// a registry pull error inside whatever tool reached AWS first. The
+		// kubectl stub answers the read script with a past expiry — the decision
+		// input dry-run cannot supply — so doctor must name it as expired and
+		// point at the refresh verb.
+		setup := env.New(t)
+		fixture.SeedLocalTenantEnvWithAWSAlias(t, setup, "team", "dev", "ops+123456789012@aws", "eu-west-2", "")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatus(t, stubs, "deployed")
+		stubDoctorKubectlWithHostCredentials(t, stubs, "present", "2020-01-02T03:04:05Z")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_reports_expired_host_credentials", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_reports_absent_host_credentials", func(t *testing.T) {
+		// The other half of the same diagnosis: nothing ever injected the
+		// profile, so the pod has no AWS identity at all.
+		setup := env.New(t)
+		fixture.SeedLocalTenantEnvWithAWSAlias(t, setup, "team", "dev", "ops+123456789012@aws", "eu-west-2", "")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatus(t, stubs, "deployed")
+		stubDoctorKubectlWithHostCredentials(t, stubs, "absent", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_reports_absent_host_credentials", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_reports_valid_host_credentials", func(t *testing.T) {
+		// The healthy verdict: a future expiry reads as "valid until" and offers
+		// no recovery, so a working env is not nagged at.
+		setup := env.New(t)
+		fixture.SeedLocalTenantEnvWithAWSAlias(t, setup, "team", "dev", "ops+123456789012@aws", "eu-west-2", "")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatus(t, stubs, "deployed")
+		stubDoctorKubectlWithHostCredentials(t, stubs, "present", "2126-01-02T03:04:05Z")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_reports_valid_host_credentials", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_reports_unrecorded_expiry_and_unresolved_region", func(t *testing.T) {
+		// A profile written by an older erun records no expiry, so staleness
+		// cannot be judged and the report says so instead of claiming health.
+		// The same env resolves no region — the other half of the failure the
+		// operator hit — so the region line names that too.
+		setup := env.New(t)
+		fixture.SeedLocalTenantEnvWithAWSAlias(t, setup, "team", "dev", "ops+123456789012@aws", "", "")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatus(t, stubs, "deployed")
+		stubDoctorKubectlWithHostCredentials(t, stubs, "present", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_reports_unrecorded_expiry_and_unresolved_region", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_prune_images_and_build_cache_via_stubs", func(t *testing.T) {
 		// Real-run doctor cleanup with a healthy release: covers the
 		// non-dry-run arms of runDeployDiagnosis (helm status + pods
@@ -1655,6 +1739,25 @@ func stubDoctorKubectl(t *testing.T, stubsDir, waitArm string) {
 		`  *"docker image prune"*) printf '%s\n' 'Total reclaimed space: 2GB' ;;`,
 		`  *"docker builder prune"*) printf '%s\n' 'Total: 3GB' ;;`,
 		`  *"docker container prune"*) printf '%s\n' 'Total reclaimed space: 1GB' ;;`,
+		`esac`,
+		`exit 0`,
+	}, "\n")
+	fixture.StubBinaryWithScript(t, stubsDir, "kubectl", script)
+}
+
+// stubDoctorKubectlWithHostCredentials answers the host-credentials read script
+// with a fixed presence/expiry verdict — the decision input dry-run cannot
+// supply — while keeping every other doctor arm intact. Matched on the
+// x_erun_expiration key, which only that script mentions.
+func stubDoctorKubectlWithHostCredentials(t *testing.T, stubsDir, presence, expiration string) {
+	t.Helper()
+	script := strings.Join([]string{
+		`case "$*" in`,
+		`  *"x_erun_expiration"*) printf 'profile=` + presence + `\nexpiration=` + expiration + `\n' ;;`,
+		`  *" get pods "*) printf '%s\n' 'NAME                READY   STATUS    RESTARTS' 'team-devops-pod-1   2/2     Running   0' ;;`,
+		`  *" get namespaces "*) printf 'namespace/team-dev\n' ;;`,
+		`  *"df -h /var/lib/docker"*) printf '%s\n' 'Filesystem  Size  Used  Avail  Mounted on' 'overlay     100G  20G   80G    /var/lib/docker' ;;`,
+		`  *"docker image prune"*) printf '%s\n' 'Total reclaimed space: 2GB' ;;`,
 		`esac`,
 		`exit 0`,
 	}, "\n")

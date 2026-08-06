@@ -321,6 +321,7 @@ func (r *resolvedOpenRunner) run() error {
 	if err := r.prepareRuntime(shellReq); err != nil {
 		return err
 	}
+	r.refreshHostCredentials()
 	r.activateForwarders()
 	if launched, err := r.maybeLaunchIDE(); launched || err != nil {
 		return err
@@ -603,6 +604,29 @@ func runtimeDeploymentPresenceArgs(kubernetesContext, namespace, release string)
 		args = append(args, "--namespace", namespace)
 	}
 	return append(args, "get", "deployment", release, "-o", "name")
+}
+
+// refreshHostCredentials re-injects the operator's short-lived AWS credentials
+// at the moment they declare they are about to use the env. Nothing else renews
+// them, so a long-lived environment silently loses AWS access mid-session and
+// the failure surfaces layers away as an unrelated image-pull error. It writes
+// into the pod's credentials file, so it has to run after the runtime is awake —
+// a stopped environment has nothing to write to. Best-effort like the
+// forwarders: a lapsed SSO session degrades the environment but must not block
+// the session being opened.
+func (r *resolvedOpenRunner) refreshHostCredentials() {
+	if !r.result.EnvConfig.HasAWSCloudAlias() {
+		return
+	}
+	refresh, err := refreshEnvironmentHostCredentials(r.ctx, r.result)
+	if err != nil {
+		r.ctx.Trace("open: host AWS credential refresh failed; the environment keeps whatever credentials it already had: " + strings.TrimSpace(err.Error()))
+		return
+	}
+	if r.ctx.DryRun {
+		return
+	}
+	r.ctx.Trace(fmt.Sprintf("open: refreshed host AWS credentials for %s into the %s profile", refresh.Alias, refresh.Profile))
 }
 
 // activateForwarders binds the env's laptop-side port-forwards (SSHD, MCP, API)

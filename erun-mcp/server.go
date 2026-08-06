@@ -210,8 +210,13 @@ func registerCloudTools(server *mcp.Server, runtime RuntimeConfig) {
 		Description: "Set the cloud provider alias for a tenant environment, with preview support",
 	}, cloudSetTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "cloud_inject_aws_credentials",
-		Description: "Write temporary AWS credentials into the runtime pod's ~/.aws/credentials under the erun-host profile",
+		Name: "cloud_inject_aws_credentials",
+		Description: "Write temporary AWS credentials into the runtime pod's ~/.aws/credentials under the erun-host profile, " +
+			"replacing that profile in place. The credential values are tool arguments, so DO NOT call this from anything " +
+			"that records its arguments — an agent transcript, a session log, an audit trail. It exists for the desktop's " +
+			"credential refresher, which holds the values in memory. To refresh an environment's host credentials from a " +
+			"script, an agent, or a terminal, run `erun cloud refresh <tenant> <environment>` instead: it reads the " +
+			"operator's own profile and streams the secret to the pod on stdin, so nothing sensitive passes through the caller.",
 	}, cloudInjectAWSCredentialsTool())
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "cloud_clear_aws_credentials",

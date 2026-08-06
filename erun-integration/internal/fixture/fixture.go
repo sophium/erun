@@ -569,6 +569,40 @@ func SeedRemoteTenantEnvWithAWSAlias(t testing.TB, setup env.Setup, tenant, envi
 	)
 }
 
+// SeedLocalTenantEnvWithAWSAlias seeds an env on a local cluster carrying an AWS
+// alias but no cloud context, with the alias registered in the root config so it
+// actually resolves — the shape that produced both the expired-host-credential
+// and the empty-AWS_REGION failures. ssoRegion and
+// registry select which region tier the env exercises — the alias' Identity
+// Center region, the region an ECR registry host encodes, or (both left plain)
+// no resolvable region at all.
+func SeedLocalTenantEnvWithAWSAlias(t testing.TB, setup env.Setup, tenant, environment, alias, ssoRegion, registry string) {
+	t.Helper()
+	SeedTenantEnv(t, setup, tenant, environment)
+	rootBody := "defaulttenant: " + tenant + "\n" +
+		"cloudproviders:\n" +
+		"  - alias: " + alias + "\n" +
+		"    provider: aws\n" +
+		"    profile: erun-sso-test\n"
+	if strings.TrimSpace(ssoRegion) != "" {
+		rootBody += "    ssoregion: " + ssoRegion + "\n"
+	}
+	mustWrite(t, filepath.Join(setup.ConfigHome, "erun", "config.yaml"), rootBody)
+	if strings.TrimSpace(registry) == "" {
+		registry = "registry.example/test"
+	}
+	envDir := filepath.Join(setup.ConfigHome, "erun", tenant, environment)
+	mustWrite(t, filepath.Join(envDir, "config.yaml"),
+		"name: "+environment+"\n"+
+			"repopath: "+setup.Cwd+"\n"+
+			"kubernetescontext: test-context\n"+
+			"containerregistry: "+registry+"\n"+
+			"runtimeversion: 1.0.0\n"+
+			"type: local-agent\n"+
+			"cloudprovideralias: "+alias+"\n",
+	)
+}
+
 // SeedRemoteRepoPathTenantEnv points the env's repopath at a nonexistent
 // remote-host path while keeping the tenant projectroot at setup.Cwd (so chart
 // resolution still finds the local <tenant>-devops module). Use it for

@@ -216,7 +216,7 @@ Each value renders as an env var on the runtime container, and the pod's entrypo
 | `claude.disablePromptCaching` | `DISABLE_PROMPT_CACHING` | unset | Turn prompt caching off (set `1`). |
 | `claude.enablePromptCaching1H` | `ENABLE_PROMPT_CACHING_1H` | unset | Use the 1-hour prompt-cache TTL on Bedrock (set `1`). |
 | `claude.maxThinkingTokens` | `MAX_THINKING_TOKENS` | `1024` | Thinking-token budget per response. |
-| `claude.smallFastModelAWSRegion` | `ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION` | `cloudContext.region` | AWS region for the small/fast helper model, when it differs from the env's region. |
+| `claude.smallFastModelAWSRegion` | `ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION` | `cloudContext.region` | AWS region for the small/fast helper model, when it differs from the env's region. Like `AWS_REGION`, the env var is emitted only when a region resolves — see [Environment variables](/reference/env-vars). |
 
 The `claude.*` keys erun does manage — `claude.useBedrock`, `claude.useMantle`, `claude.availableModels`, `claude.maxOutputTokens` — come from the [`EnvConfig` fields above](#envconfig) and are always `--set`; an overlay value for them is ignored.
 

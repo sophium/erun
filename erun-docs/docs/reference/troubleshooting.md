@@ -106,6 +106,51 @@ kubectl --context <cloud-context> get nodes     # is the cluster reachable direc
 - IAM credentials expired on the host (`aws sso login`).
 - Network policy blocks the cluster's API endpoint from your laptop's IP.
 
+## AWS calls in an environment fail with `ExpiredToken` or `no basic auth credentials` {#host-credentials-expired}
+
+**Symptoms:** an environment that worked yesterday now fails every AWS call. The shape of the failure depends on which tool reached AWS first, so it rarely names credentials:
+
+```
+$ aws sts get-caller-identity
+An error occurred (ExpiredToken) … The security token included in the request is expired
+
+# or, several layers away, from a test suite pulling a container image:
+org.testcontainers.containers.ContainerFetchException: Can't get Docker image …
+Error response from daemon: Head "https://<account>.dkr.ecr.<region>.amazonaws.com/v2/…":
+  no basic auth credentials
+```
+
+**Diagnose:**
+
+```bash
+erun doctor <tenant> <env>       # reports the erun-host profile's presence and expiry
+```
+
+**Cause:** the environment acts as your AWS identity through short-lived credentials in the pod's `erun-host` profile, and they lapsed. The file is still present and well-formed, which is why this reads like a registry or repository problem.
+
+**Fix:**
+
+```bash
+erun cloud login --alias <alias>          # only if your local SSO session has also lapsed
+erun cloud refresh <tenant> <env>         # re-inject, nothing secret passes through the caller
+```
+
+`erun open` performs the same refresh, so reopening the environment also fixes it. See [Acting as your AWS identity](/deployment/cloud-setup#host-credentials).
+
+## AWS calls fail with `Invalid endpoint: https://sts..amazonaws.com` {#aws-region-empty}
+
+**Symptoms:** every AWS call in the environment fails with an endpoint that has an empty region in it, and passing `--region <region>` by hand makes the same call succeed.
+
+**Diagnose:**
+
+```bash
+erun doctor <tenant> <env>       # the Region line reports what resolved, or that nothing did
+```
+
+**Cause:** no AWS region resolved for the environment. ERun resolves one from its managed cloud context, its kubeconfig context name, the alias's Identity Center region, or an ECR registry host — an environment on a local cluster whose alias records none of those has nothing to resolve. ERun deliberately exports **no** `AWS_REGION` in that case rather than an empty one, because an empty value overrides the region an AWS profile would otherwise supply instead of falling back to it.
+
+**Fix:** give the environment a region to find — set the Identity Center region on the alias (`erun cloud init aws --sso-region <region>`), point the environment at an ECR registry, or set `AWS_REGION` yourself in the pod. Then `erun cloud refresh <tenant> <env>` writes the resolved region into the pod's profile and the next deploy exports it.
+
 ## Idle-stop fires while you're working
 
 **Symptoms:** the cloud context shuts down even though you're typing.

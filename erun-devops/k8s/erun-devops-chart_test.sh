@@ -114,4 +114,27 @@ rendered=$(render)
 grep -q '^  replicas: 1$' "${rendered}" ||
     fail "an environment with no stop recorded should render replicas: 1"
 
+# --- 8. An AWS env with a region exports it ---
+rendered=$(render --set-string cloudContext.provider=aws --set-string cloudContext.region=eu-west-2)
+grep -A1 '^            - name: AWS_REGION$' "${rendered}" | grep -q '"eu-west-2"' ||
+    fail "a resolved region should reach AWS_REGION"
+grep -A1 '^            - name: ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION$' "${rendered}" | grep -q '"eu-west-2"' ||
+    fail "the small/fast model region should default to the env's region"
+
+# --- 9. An AWS env with no resolved region exports no region at all ---
+# An empty AWS_REGION overrides the pod profile's own region instead of falling
+# back to it, so the variable has to be absent rather than empty.
+rendered=$(render --set-string cloudContext.provider=aws)
+grep -q '^            - name: AWS_REGION$' "${rendered}" &&
+    fail "no AWS_REGION should render when no region resolved"
+grep -q '^            - name: ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION$' "${rendered}" &&
+    fail "no small/fast model region should render when no region resolved"
+grep -q '^            - name: ERUN_CLOUD_REGION$' "${rendered}" ||
+    fail "erun's own ERUN_CLOUD_REGION stays wired so the in-pod config sync still projects it"
+
+# --- 10. Host credentials select the profile erun writes into the pod ---
+rendered=$(render --set-string cloudContext.provider=aws --set cloudContext.useHostCredentials=true)
+grep -A1 '^            - name: AWS_PROFILE$' "${rendered}" | grep -q '"erun-host"' ||
+    fail "useHostCredentials should select the erun-host profile"
+
 echo "PASS: erun-devops chart pod shape"

@@ -427,6 +427,36 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_tenant_aliases_resolve_oidc_issuers", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_aws_alias_without_cloud_context_resolves_region_from_alias", func(t *testing.T) {
+		// An env with a provider alias but no cloud context used to thread
+		// `cloudContext.region=` — an empty AWS_REGION that overrides the pod
+		// profile's own region instead of falling back to it, breaking every AWS
+		// call in the pod. The alias' Identity Center region is the fallback, and
+		// the helm command must carry it.
+		setup := env.New(t)
+		fixture.SeedLocalTenantEnvWithAWSAlias(t, setup, "team", "dev", "ops+123456789012@aws", "eu-west-2", "")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_aws_alias_without_cloud_context_resolves_region_from_alias", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_aws_alias_resolves_region_from_ecr_registry_host", func(t *testing.T) {
+		// Last region fallback: the alias records no Identity Center region, so
+		// the only region left to find is the one the tenant's ECR registry host
+		// encodes. Its sibling above locks the alias tier.
+		setup := env.New(t)
+		fixture.SeedLocalTenantEnvWithAWSAlias(t, setup, "team", "dev", "ops+123456789012@aws", "", "123456789012.dkr.ecr.eu-west-1.amazonaws.com/team")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_aws_alias_resolves_region_from_ecr_registry_host", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_remote_env_published_chart_via_stubs", func(t *testing.T) {
 		// Real-run deploy of a remote env with no local checkout: the
 		// runtime spec resolves to the published erun-devops OCI chart and
