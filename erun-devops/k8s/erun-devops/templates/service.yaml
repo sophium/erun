@@ -442,10 +442,19 @@ spec:
             - name: CLAUDE_CODE_USE_MANTLE
               value: "1"
             {{- end }}
+            {{- /* An empty AWS_REGION is worse than an absent one: it overrides
+                   the region the pod's own profile or the operator's environment
+                   would otherwise supply, so every AWS call builds an endpoint
+                   with no region in it. Emit the variable only when a region
+                   actually resolved. */}}
+            {{- if $cloudRegion }}
             - name: AWS_REGION
               value: {{ $cloudRegion | quote }}
+            {{- end }}
+            {{- if $claudeSmallFastRegion }}
             - name: ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION
               value: {{ $claudeSmallFastRegion | quote }}
+            {{- end }}
             - name: ERUN_CLAUDE_AVAILABLE_MODELS
               value: {{ $claudeAvailableModels | quote }}
             - name: CLAUDE_CODE_MAX_OUTPUT_TOKENS

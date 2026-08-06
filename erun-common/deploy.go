@@ -1768,8 +1768,11 @@ func applyCloudProviderDeployMetadata(store CloudReadStore, env EnvConfig, deplo
 			return
 		}
 	}
+	// An env with an AWS alias but no cloud context (a local cluster, say) still
+	// needs a region: without one every AWS call in its pod has to be told the
+	// region by hand.
 	if deployInput.CloudRegion == "" && deployInput.CloudProvider == CloudProviderAWS {
-		deployInput.CloudRegion = cloudContextRegionFromName(env.KubernetesContext)
+		deployInput.CloudRegion = resolveEnvironmentAWSRegion(store, env)
 	}
 }
 
@@ -1958,12 +1961,9 @@ func (d HelmDeploySpec) command() commandSpec {
 		"--set", "apiPort="+formatHelmPort(d.APIPort, APIServicePort),
 		"--set", "sshPort="+formatHelmPort(d.SSHPort, DefaultSSHLocalPort),
 		"--set", "managedCloud="+formatHelmBool(d.ManagedCloud),
-		"--set-string", "cloudContext.name="+d.CloudContextName,
-		"--set-string", "cloudContext.provider="+d.CloudProvider,
-		"--set-string", "cloudContext.providerAlias="+d.CloudProviderAlias,
-		"--set-string", "cloudContext.region="+d.CloudRegion,
-		"--set-string", "cloudContext.instanceId="+d.CloudInstanceID,
-		"--set", "cloudContext.useHostCredentials="+formatHelmBool(d.UseHostCredentials),
+	)
+	args = append(args, helmCloudContextSetArgs(d)...)
+	args = append(args,
 		"--set-string", "api.oidcAllowedIssuers="+escapeHelmSetValue(d.OIDCAllowedIssuers),
 		"--set", "api.postgres.reset="+formatHelmBool(d.ResetDatabase),
 	)
@@ -2223,6 +2223,27 @@ func helmIdleTimezone(config EnvironmentIdleConfig) string {
 		return ""
 	}
 	return policy.Timezone
+}
+
+// helmCloudContextSetArgs projects the env's resolved cloud context. Every value
+// but the region is always set, so a projection reconciles back to empty when an
+// env loses its cloud context. The region is the exception: the chart turns it
+// into AWS_REGION, and an explicitly empty AWS_REGION overrides — rather than
+// falls back to — the region the pod's own AWS profile carries, so "no region
+// resolved" has to mean "no value threaded at all".
+func helmCloudContextSetArgs(d HelmDeploySpec) []string {
+	args := []string{
+		"--set-string", "cloudContext.name=" + d.CloudContextName,
+		"--set-string", "cloudContext.provider=" + d.CloudProvider,
+		"--set-string", "cloudContext.providerAlias=" + d.CloudProviderAlias,
+	}
+	if region := strings.TrimSpace(d.CloudRegion); region != "" {
+		args = append(args, "--set-string", "cloudContext.region="+region)
+	}
+	return append(args,
+		"--set-string", "cloudContext.instanceId="+d.CloudInstanceID,
+		"--set", "cloudContext.useHostCredentials="+formatHelmBool(d.UseHostCredentials),
+	)
 }
 
 // helmRegistrySetArgs returns the registry-projection helm --set args, each

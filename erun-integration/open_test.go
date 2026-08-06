@@ -544,11 +544,30 @@ func TestOpen(t *testing.T) {
 		// toggle — the alias association alone drives it. The
 		// desktop refresher writes the matching profile into the pod's
 		// ~/.aws/credentials at runtime — that path is tested in erun-mcp.
+		// The alias here is deliberately not registered in the root config, so
+		// this golden also locks the degraded arm of open's credential refresh:
+		// an unresolvable alias warns and the session still opens.
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnvWithAWSAlias(t, setup, "team", "dev")
 		envVars := stubKubectlNotFound(t, setup)
 		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/remote_dry_run_aws_alias_propagates_host_credentials", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_configured_aws_alias_refreshes_host_credentials", func(t *testing.T) {
+		// Injected host credentials are temporary and nothing else renews them,
+		// so open refreshes them at the moment the operator declares they are
+		// about to use the env. The plan must show the wait and the exec that
+		// rewrites the erun-host profile, and the resolved region — this env has
+		// a provider alias but no cloud context, the shape that produced both
+		// the expired-credentials and the empty-AWS_REGION failures.
+		setup := env.New(t)
+		fixture.SeedLocalTenantEnvWithAWSAlias(t, setup, "team", "dev", "ops+123456789012@aws", "eu-west-2", "")
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "open/dry_run_configured_aws_alias_refreshes_host_credentials", normalize.Apply(result.Combined))
 	})
 
 	t.Run("app_session_dry_run_pure_open_does_not_deploy", func(t *testing.T) {

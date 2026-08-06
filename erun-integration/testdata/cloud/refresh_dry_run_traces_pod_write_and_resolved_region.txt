@@ -1,0 +1,26 @@
+Dry run: host credential refresh planned for team/dev.
+audit: erun cloud refresh --dry-run team dev
+trace-log: would append the full trace to <TMP>
+cloud refresh: alias=ops+123456789012@aws profile=erun-host region=eu-west-2
+cloud refresh: credentials are exported from the host profile and streamed to the pod on stdin (never an argument or a trace line)
+kubectl --context test-context --namespace team-dev wait --for=condition=Available --timeout 2m0s deployment/team-devops
+kubectl --context test-context --namespace team-dev exec -i deployment/team-devops -- /bin/sh -lc '<remote-script>'
+host-credentials-write-script:
+  set -eu
+  umask 077
+  dir="$HOME/.aws"
+  file="$dir/credentials"
+  tmp="$file.erun-refresh"
+  mkdir -p "$dir"
+  if [ -f "$file" ]; then
+    awk -v profile='erun-host' '
+      /^[[:space:]]*\[/ { drop = ($0 ~ "^[[:space:]]*\\[" profile "\\][[:space:]]*$") }
+      !drop { print }
+    ' "$file" > "$tmp"
+  else
+    : > "$tmp"
+  fi
+  if [ -s "$tmp" ]; then printf '\n' >> "$tmp"; fi
+  cat >> "$tmp"
+  chmod 600 "$tmp"
+  mv "$tmp" "$file"

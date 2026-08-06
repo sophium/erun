@@ -14,6 +14,7 @@ import (
 type cloudCommandStoreInterface interface {
 	common.CloudStore
 	common.EnvironmentCloudAliasStore
+	common.OpenStore
 }
 
 // cloudDependencies tolerates a missing secret store: when it can't be created
@@ -27,6 +28,14 @@ func cloudDependencies() common.CloudDependencies {
 	return deps
 }
 
+// refreshEnvironmentHostCredentials re-injects the operator's short-lived AWS
+// credentials into an env's runtime pod. The root config store and the cloud
+// dependency set are stateless values, so they are constructed here instead of
+// widening open's already-long dependency list.
+func refreshEnvironmentHostCredentials(ctx common.Context, result common.OpenResult) (common.HostCredentialsRefresh, error) {
+	return common.RefreshHostAWSCredentials(ctx, common.ConfigStore{}, result, cloudDependencies())
+}
+
 func newCloudCmd(store cloudCommandStoreInterface, promptRunner PromptRunner, selectRunner SelectRunner, deps common.CloudDependencies) *cobra.Command {
 	return newCommandGroup(
 		"cloud",
@@ -35,7 +44,65 @@ func newCloudCmd(store cloudCommandStoreInterface, promptRunner PromptRunner, se
 		newCloudLoginCmd(store, promptRunner, selectRunner, deps),
 		newCloudOIDCCmd(store, promptRunner, selectRunner, deps),
 		newCloudSetCmd(store),
+		newCloudRefreshCmd(store, deps),
 	)
+}
+
+func newCloudRefreshCmd(store cloudCommandStoreInterface, deps common.CloudDependencies) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "refresh TENANT ENVIRONMENT",
+		Short: "Refresh an environment's in-pod host AWS credentials",
+		Long: "Refresh an environment's in-pod host AWS credentials.\n\n" +
+			"Reads the AWS profile behind the environment's cloud provider alias, mints short-lived " +
+			"credentials from it, and writes them into the runtime pod's ~/.aws/credentials under the " +
+			"erun-host profile — the profile the chart wires into the pod's AWS_PROFILE. The pod then " +
+			"acts as your AWS identity until those credentials expire, typically about an hour.\n\n" +
+			"Nothing secret passes through the caller: the credentials are exported here and streamed " +
+			"to the pod on stdin, so no key, secret, or session token ever appears in an argument, a " +
+			"trace line, or a transcript. That makes this the verb scripts and agents should use. " +
+			"`erun open` runs the same refresh, so reach for this when a long-running session has gone " +
+			"stale without reopening it. The write replaces the erun-host profile in place and leaves " +
+			"every other profile in the file alone.\n\n" +
+			"Requires an unexpired local SSO session; run `erun cloud login --alias <alias>` first if " +
+			"it has lapsed.",
+		Args:         cobra.ExactArgs(2),
+		SilenceUsage: true,
+		Example: "  erun cloud refresh my-tenant prod\n" +
+			"  erun cloud refresh my-tenant prod --dry-run",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCloudRefreshCommand(commandContext(cmd), store, args[0], args[1], deps)
+		},
+	}
+	addDryRunFlag(cmd)
+	return cmd
+}
+
+func runCloudRefreshCommand(ctx common.Context, store cloudCommandStoreInterface, tenant, environment string, deps common.CloudDependencies) error {
+	result, err := common.ResolveOpen(store, common.OpenParams{Tenant: tenant, Environment: environment})
+	if err != nil {
+		return err
+	}
+	ctx, closeEnvTrace := common.ActivateEnvTrace(ctx, result.Tenant, result.Environment)
+	defer closeEnvTrace()
+	refresh, err := common.RefreshHostAWSCredentials(ctx, store, result, deps)
+	if err != nil {
+		return err
+	}
+	if ctx.DryRun {
+		_, err := fmt.Fprintf(ctx.Stdout, "Dry run: host credential refresh planned for %s/%s.\n", result.Tenant, result.Environment)
+		return err
+	}
+	return writeHostCredentialsRefreshed(ctx, result, refresh)
+}
+
+func writeHostCredentialsRefreshed(ctx common.Context, result common.OpenResult, refresh common.HostCredentialsRefresh) error {
+	line := fmt.Sprintf("Refreshed %s credentials for %s/%s in profile %s (%s)",
+		refresh.Alias, result.Tenant, result.Environment, refresh.Profile, refresh.Path)
+	if !refresh.Expiration.IsZero() {
+		line += ", valid until " + refresh.Expiration.UTC().Format(time.RFC3339)
+	}
+	_, err := fmt.Fprintln(ctx.Stdout, line)
+	return err
 }
 
 func newCloudInitCmd(store common.CloudStore, promptRunner PromptRunner, selectRunner SelectRunner, deps common.CloudDependencies) *cobra.Command {

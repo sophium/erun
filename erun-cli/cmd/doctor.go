@@ -108,6 +108,9 @@ func runDoctorCommand(ctx common.Context, resolveOpen func(common.OpenParams) (c
 	if _, err := fmt.Fprintf(ctx.Stdout, "Target: %s/%s\n", result.Tenant, result.Environment); err != nil {
 		return err
 	}
+	if err := reportHostCredentials(ctx, configStore, result); err != nil {
+		return err
+	}
 	if err := runWorkspaceSyncDoctor(ctx, promptRunner, configStore, result, options); err != nil {
 		return err
 	}

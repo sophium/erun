@@ -1,0 +1,3 @@
+audit: erun cloud refresh --dry-run team dev
+trace-log: would append the full trace to <TMP>
+environment team/dev has no AWS cloud provider alias; attach one with `erun cloud set team dev --alias <alias>`

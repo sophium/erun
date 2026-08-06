@@ -7,6 +7,7 @@ Available Commands:
   init        Initialize cloud provider configuration
   login       Login to a configured cloud provider alias
   oidc        Refresh the OIDC issuer for a configured cloud provider alias
+  refresh     Refresh an environment's in-pod host AWS credentials
   set         Set the cloud provider alias for an environment
 
 Flags:

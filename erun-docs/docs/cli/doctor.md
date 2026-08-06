@@ -20,6 +20,8 @@ When the deploy diagnosis shows a stuck pending release or a failed image pull, 
 
 For the full per-check id catalogue and the offered recovery actions, see [Agent reference · CLI flag spec · `erun doctor`](/agent-reference/cli-flags#erun-doctor).
 
+For an environment carrying an AWS cloud alias, `doctor` also reports the **host AWS credentials** it acts with: whether the pod's `erun-host` profile exists, when it expires (or that it has already **expired**), and the AWS region the environment resolves — or that none does. Both failures otherwise surface far from their cause, as an SDK `ExpiredToken` or an image pull rejected with `no basic auth credentials`, so this is the check that names them. The fix in either case is [`erun cloud refresh`](/cli/cloud#cloud-refresh); see [Troubleshooting](/reference/troubleshooting#host-credentials-expired).
+
 When any item is `missing`, `doctor` offers to run the corresponding recovery step.
 
 ## What it can repair
