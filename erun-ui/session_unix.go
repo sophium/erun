@@ -107,7 +107,7 @@ func (s *unixTerminalSession) Close() error {
 		_ = s.Wait()
 	}
 	if s.ptyFile != nil {
-		return s.ptyFile.Close()
+		return ignoreAlreadyClosed(s.ptyFile.Close())
 	}
 	return nil
 }

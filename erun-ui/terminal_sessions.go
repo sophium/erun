@@ -112,6 +112,10 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 
 	// A fresh open attempt supersedes any stopped/failed flag the row
 	// carried; the reconnect refusal paths re-flag if this open fails too.
+	// Opening is also the deliberate wake for a runtime the operator stopped —
+	// `erun open` scales it back up — so the stop latch is released here or the
+	// reconnect gate would keep refusing against an env that is coming back.
+	a.clearRuntimeStopped(selection)
 	a.emitEnvStatus(selection, "")
 	a.logSpawnedCommandToLocal(selection, "erun", formatLocalCommandLog(formatLaunchCommand(openParams), "ERun tab"))
 	_ = ctx
@@ -1321,6 +1325,19 @@ func (a *App) reconnectRefused(managed *managedTerminal) bool {
 		return true
 	}
 
+	// A runtime scaled to zero is a stopped environment, not a broken one.
+	// It must be checked BEFORE the deploy-failure guards below, or the
+	// tabs that die when the pod goes away flag the row as failed and the
+	// operator's own Stop looks like an outage. Respawning is refused for
+	// the same reason the cloud-context guard refuses: `erun open` wakes a
+	// stopped env, so an automatic respawn would undo the stop the operator
+	// just asked for. Re-clicking the row is the deliberate wake.
+	if a.runtimeStoppedForSelection(managed.selection) {
+		a.emitStoppedRuntimeMarker(managed.serial)
+		a.emitEnvStatus(managed.selection, envStatusRuntimeStopped)
+		return true
+	}
+
 	// A deploy failure is terminal, not a transient drop. Respawning
 	// re-runs `erun open`, which re-deploys and fails the same way — and
 	// because every env tab (ERun + AI) reconnects independently, that
@@ -1598,6 +1615,17 @@ func (a *App) reconnectBlockedByActivityDeployFailure(managed *managedTerminal) 
 // Play button) in the line itself means no separate UI element is needed.
 func (a *App) emitStoppedContextMarker(sessionID int) {
 	marker := "\r\n\x1b[2;33m── environment stopped — click the start button in the titlebar to resume ──\x1b[0m\r\n"
+	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
+		SessionID: sessionID,
+		Data:      base64.StdEncoding.EncodeToString([]byte(marker)),
+	})
+}
+
+// emitStoppedRuntimeMarker names the other recovery: a runtime scaled to zero
+// is woken by opening the environment, not by the titlebar's cloud-context
+// start button.
+func (a *App) emitStoppedRuntimeMarker(sessionID int) {
+	marker := "\r\n\x1b[2;33m── environment stopped — click it in the sidebar to start it again ──\x1b[0m\r\n"
 	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
 		SessionID: sessionID,
 		Data:      base64.StdEncoding.EncodeToString([]byte(marker)),

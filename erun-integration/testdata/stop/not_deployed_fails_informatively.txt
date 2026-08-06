@@ -1,0 +1,6 @@
+audit: erun stop --dry-run team dev
+trace-log: would append the full trace to <TMP>
+stop: tenant=team environment=dev kubernetes-context=test-context release=team-devops namespace=team-dev
+kubectl --context test-context --namespace team-dev get deployment team-devops -o 'jsonpath={.spec.replicas}/{.status.readyReplicas}'
+runtime run state: deployment team-devops is absent from namespace team-dev
+runtime for team/dev is not deployed (deployment "team-devops" not found in namespace "team-dev"); nothing to stop

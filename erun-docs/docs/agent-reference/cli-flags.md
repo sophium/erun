@@ -113,10 +113,11 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 2. Load `EnvConfig` (Kubernetes context, container registry, runtime version, type). By default `open` neither builds, pushes, nor deploys; it expects the runtime to already exist.
 3. If `EnvConfig.cloudprovideralias` is set, look up the cloud context. If `stopped`, send the provider-specific start command. Poll the cluster API every `5s` until reachable or 5 minutes elapse (then abort `CLUSTER_UNREACHABLE`).
 4. **If `--deploy` (or an implied deploy):** deploy the runtime first — a builds-here env composes build → push → deploy; a runtime/remote env runs `helm upgrade --install <env>-runtime <chart>` into `<tenant>-<env>` for the recorded/`--version` published chart by reference (requires a resolvable version, else `RUNTIME_VERSION_REQUIRED`). Default (no `--deploy`): a trace line records that `open` is a pure primitive that is not deploying, then `open` verifies the runtime deployment exists in `<tenant>-<env>` and aborts with `RUNTIME_NOT_DEPLOYED` if it does not. This deployment-presence check is the authoritative "is the runtime up" signal — reachability is **not** inferred from a later port-forward timeout, so a forward that merely can't bind is never misreported as an undeployed environment.
-5. Wait for the runtime pod's SSH server to be reachable on the in-pod port (`EnvConfig.sshd.port`, default `22`). Readiness probe is a TCP connect + banner-line read, retried every `2s` with a `60s` cap.
-6. Establish local port-forwards (**best-effort**). `erun open` starts a detached `kubectl port-forward` per channel (MCP, SSH, API) and records each at `<UserConfigDir>/erun/portforward/{mcp,sshd,api}/<tenant>/<env>.json` with `{tenant, environment, kubernetesContext, namespace, localPort, logPath, processId}` — see [Networking spec · Port-forward state files](/agent-reference/networking-spec#port-forward-state-files). These forwards back **laptop-side tooling only** (the desktop app's panels, `erun api`, `erun mcp`); the shell/AI session itself runs in-pod via `kubectl exec` and does not use them, so a forward that cannot bind is logged as a warning and skipped rather than aborting `open`.
-7. Attach a terminal (default), print kubectl/cwd switching commands (`--no-shell`), or launch the IDE (`--vscode`/`--intellij`).
-8. Exit `0` when the terminal exits.
+5. **Wake the runtime if it is stopped.** Read the runtime Deployment's `spec.replicas`. If it is `0`, `kubectl scale deployment/<tenant>-devops --replicas=1`, then `kubectl wait --for=condition=Available --timeout 2m0s`. This runs before any port-forward because `kubectl port-forward deployment/…` cannot attach to zero replicas. A Deployment already asking for `>= 1` replica gets no scale call. A Deployment that is absent, or a replica count that cannot be read, is treated as running and the open proceeds — the wake must never be more fragile than the open it precedes. Independently, if `EnvConfig.stopped` is set it is cleared **before** step 4, so a `--deploy` run renders `replicas: 1` instead of re-applying the recorded stop.
+6. Wait for the runtime pod's SSH server to be reachable on the in-pod port (`EnvConfig.sshd.port`, default `22`). Readiness probe is a TCP connect + banner-line read, retried every `2s` with a `60s` cap.
+7. Establish local port-forwards (**best-effort**). `erun open` starts a detached `kubectl port-forward` per channel (MCP, SSH, API) and records each at `<UserConfigDir>/erun/portforward/{mcp,sshd,api}/<tenant>/<env>.json` with `{tenant, environment, kubernetesContext, namespace, localPort, logPath, processId}` — see [Networking spec · Port-forward state files](/agent-reference/networking-spec#port-forward-state-files). These forwards back **laptop-side tooling only** (the desktop app's panels, `erun api`, `erun mcp`); the shell/AI session itself runs in-pod via `kubectl exec` and does not use them, so a forward that cannot bind is logged as a warning and skipped rather than aborting `open`.
+8. Attach a terminal (default), print kubectl/cwd switching commands (`--no-shell`), or launch the IDE (`--vscode`/`--intellij`).
+9. Exit `0` when the terminal exits.
 
 ### Error codes
 
@@ -516,6 +517,79 @@ A file streams as base64; a folder streams as a `tar.gz` archive (saved as `<nam
 ## `erun release`
 
 `erun release` orchestrates **build → push → git-tag**: it builds the release-tagged images, then reuses [`erun push`](#erun-push) to publish the multi-arch image manifest **and** the runtime chart at the release version, then creates the commit + tag. It has no chart-publishing step of its own. See [Release version policy](/agent-reference/release-policy) for the version-pattern rules and the publishing contract; the `erun release` flag set is just `--dry-run` and `--output`, and is documented on the [Operator page](/cli/release).
+
+---
+
+## `erun stop`
+
+`erun stop` scales an environment's runtime Deployment to zero, returning the runtime container's
+resource limits **and** its unlimited `dind` sidecar's real consumption to the node. It is the
+counterpart to `erun open`, which is the only thing that starts an environment again. There is
+deliberately **no MCP `stop` tool**: the env's MCP edge runs inside the runtime container, so
+stopping over MCP would kill the caller mid-call. Lifecycle is host-side, as it always has been for
+`deploy` and `open`.
+
+### Flags
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--tenant <name>` | string | current scope | Target tenant. |
+| `--environment <name>` | string | current scope | Target environment. |
+| `--dry-run` | bool | `false` | Trace every action and decision; perform no side effect. |
+| `--output json` | string | `text` | Emit the structured result on stdout (see below). |
+
+### `erun stop` lifecycle algorithm
+
+1. Resolve the target the same way `erun open` does (positional args, then `--tenant`/`--environment`, then the current scope). A missing Kubernetes context aborts.
+2. **No cloud-context preflight.** Unlike every other cluster-touching command, `stop` never starts a stopped [cloud context](/concepts/cloud-contexts) to reach the cluster.
+3. Read the runtime Deployment's `spec.replicas` / `status.readyReplicas`. An absent Deployment aborts with `RUNTIME_NOT_DEPLOYED`.
+4. If `spec.replicas > 0`, `kubectl scale deployment/<tenant>-devops --replicas=0`. If it is already `0`, no scale call is made.
+5. If `EnvConfig.stopped` is not already `true`, set it. This is the durable half: a bare scale patch is drift that the next `helm upgrade` reverts, so `deploy` renders the chart's `stopped` value from this field and reconciles `replicas` declaratively.
+6. Emit `==> Stopped <tenant>/<env>` and exit `0`.
+
+### Durability and the interaction with `deploy`
+
+| Sequence | Result |
+|---|---|
+| `stop` → `open` | The environment starts. `open` clears `EnvConfig.stopped` and scales the Deployment back to `1`. |
+| `stop` → `deploy` | The environment **stays stopped**. `deploy` threads `--set stopped=true`, so the chart renders `replicas: 0`. `deploy` installs a version; it does not decide whether the environment should be running. |
+| `stop` → `deploy` → `open` | The environment starts, on the version `deploy` installed. |
+
+Making `deploy` a wake would have been unreliable in one specific way: `deploy` skips the helm call
+when the released version already matches, so a wake-on-deploy would fire or not depending on
+whether anything changed. Reconciling the recorded intent instead is consistent whether the helm
+call runs or is skipped.
+
+### `--output json` result
+
+```json
+{
+  "tenant": "my-tenant",
+  "environment": "rihards-dev",
+  "namespace": "my-tenant-rihards-dev",
+  "release": "my-tenant-devops",
+  "kubernetesContext": "my-cluster",
+  "stopped": true,
+  "alreadyStopped": false
+}
+```
+
+`alreadyStopped` distinguishes the no-op from the run that actually reclaimed capacity.
+
+### What survives
+
+The `/home/erun` PVC (workspace, agent config, outputs, credentials), the docker-state PVC (image
+store and build cache), and a `local-agent` env's hostPath worktree are all untouched, so waking is
+a pod start rather than a cold rebuild. In-pod processes are not: a stop ends whatever was running.
+
+### Error codes
+
+| Code | Cause | Exit code |
+|---|---|---|
+| `ENVIRONMENT_NOT_FOUND` | Resolved tenant/environment has no config. | `1` |
+| `KUBE_CONTEXT_MISSING` | `EnvConfig.kubernetescontext` is empty or absent from `~/.kube/config`. | `1` |
+| `RUNTIME_NOT_DEPLOYED` | The runtime Deployment does not exist in `<tenant>-<env>`. Nothing is holding capacity, and nothing is changed. | `1` |
+| `KUBE_SCALE_FAILED` | `kubectl scale` returned non-zero. `EnvConfig.stopped` is **not** recorded, so the config never claims a stop that did not happen. | `1` |
 
 ---
 

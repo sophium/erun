@@ -11,7 +11,14 @@ import { envKey } from '@/app/slices/sessionsSlice';
 import { selectionKey } from '@/app/versionSuggestions';
 import { IconTooltip } from '@/components/app/IconTooltip';
 import { EnvHoverCard } from '@/components/app/Sidebar.EnvHoverCard';
-import { deriveEnvironmentRow } from '@/components/app/Sidebar.helpers';
+import {
+  deriveEnvironmentRow,
+  ENV_STATE_FAILED,
+  ENV_STATE_RUNTIME_STOPPED,
+  ENV_STATE_STOPPED,
+  environmentStateRecovery,
+  environmentStatusDot,
+} from '@/components/app/Sidebar.helpers';
 import { StatusDotGlyph, type StatusDotState } from '@/components/app/Sidebar.StatusDot';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -132,15 +139,13 @@ function OpenEnvDot({
   const closeHint = `Click to close its tabs — terminals + tracking only, leaves AWS untouched`;
   let label = `Close ${name}`;
   let tooltip = `${label} — terminals + tracking only, leaves AWS untouched`;
-  let dotState: StatusDotState = 'running';
-  if (envState === 'stopped') {
-    label = `${name} is stopped — start it from the titlebar`;
+  const dotState: StatusDotState = environmentStatusDot(envState);
+  if (envState === ENV_STATE_STOPPED || envState === ENV_STATE_RUNTIME_STOPPED) {
+    label = `${name} is stopped — ${environmentStateRecovery(envState)}`;
     tooltip = `${label}. ${closeHint}`;
-    dotState = 'stopped';
-  } else if (envState === 'failed') {
-    label = `${name} deploy failed — recover from Activities or re-click the row`;
+  } else if (envState === ENV_STATE_FAILED) {
+    label = `${name} deploy failed — ${environmentStateRecovery(envState)}`;
     tooltip = `${label}. ${closeHint}`;
-    dotState = 'failed';
   }
   return (
     <IconTooltip label={tooltip}>
@@ -206,7 +211,8 @@ function useEnvironmentRowSelectors(tenantName: string, environmentName: string)
       state.review.reconnect.environment === environmentName,
   );
   // The env's real condition behind the open dot: '' running, 'stopped'
-  // cloud context down, 'failed' deploy or reconnect gave up.
+  // cloud context down, 'runtime-stopped' runtime scaled to zero, 'failed'
+  // deploy or reconnect gave up.
   const envState = useAppSelector(
     (state) =>
       state.envStatus.statusByEnv[

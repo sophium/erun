@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +14,19 @@ import (
 
 	eruncommon "github.com/sophium/erun/erun-common"
 )
+
+// ignoreAlreadyClosed makes a session's Close idempotent. A PTY whose process
+// already exited has had its file closed by the streaming goroutine, so a later
+// teardown gets "file already closed" — which is the desired end state, not a
+// failure. Reporting it as one made "close environment" fail for an env whose
+// session happened to die first, and the desktop then left the row rendered as
+// open because the caller aborts its unwind on error.
+func ignoreAlreadyClosed(err error) error {
+	if errors.Is(err, os.ErrClosed) {
+		return nil
+	}
+	return err
+}
 
 type terminalSession interface {
 	io.ReadWriteCloser

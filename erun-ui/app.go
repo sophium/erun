@@ -51,6 +51,8 @@ type erunUIDeps struct {
 	loadResourceStatus        func(context.Context, uiRuntimeResourceInput) (uiRuntimeResourceStatus, error)
 	loadClusterRegistry       func(context.Context, uiRuntimeResourceInput) (uiClusterRegistryStatus, error)
 	checkRuntimeDeployed      func(context.Context, string, string, string) (bool, error)
+	stopEnvironmentRuntime    func(eruncommon.Context, eruncommon.StopEnvironmentParams) (eruncommon.StopEnvironmentResult, error)
+	readRuntimeRunState       func(eruncommon.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error)
 	ensureMCP                 func(context.Context, eruncommon.OpenResult) error
 	reconnectMCP              func(context.Context, eruncommon.OpenResult, func(string)) error
 	ensureSSHD                func(context.Context, eruncommon.OpenResult) error
@@ -92,11 +94,16 @@ type App struct {
 	// verify those tokens. nil in unit tests.
 	identity *desktopIdentity
 
-	mu                        sync.Mutex
-	nextSerial                int
-	sessions                  map[string]*managedTerminal
-	idleStops                 map[string]struct{}
-	intentionalStops          map[string]struct{}
+	mu               sync.Mutex
+	nextSerial       int
+	sessions         map[string]*managedTerminal
+	idleStops        map[string]struct{}
+	intentionalStops map[string]struct{}
+	// runtimeStops latches a per-env `erun stop` the desktop issued. Kept
+	// separate from intentionalStops (which is per cloud context) so the two
+	// stops cannot alias: they have different recoveries, and a runtime stop
+	// flagged as a cloud-context stop would name the wrong one.
+	runtimeStops              map[string]struct{}
 	busyEnvs                  map[string]int
 	workspaceSyncs            map[string]*workspaceSyncWorker
 	orchestrators             map[string]*orchestratorSession
@@ -170,6 +177,7 @@ func NewApp(deps erunUIDeps) *App {
 		sessions:             make(map[string]*managedTerminal),
 		idleStops:            make(map[string]struct{}),
 		intentionalStops:     make(map[string]struct{}),
+		runtimeStops:         make(map[string]struct{}),
 		busyEnvs:             make(map[string]int),
 		workspaceSyncs:       make(map[string]*workspaceSyncWorker),
 		orchestrators:        make(map[string]*orchestratorSession),
@@ -260,6 +268,12 @@ func withDefaultRuntimeResolutionDeps(deps erunUIDeps) erunUIDeps {
 	}
 	if deps.checkRuntimeDeployed == nil {
 		deps.checkRuntimeDeployed = checkRuntimeDeployed
+	}
+	if deps.stopEnvironmentRuntime == nil {
+		deps.stopEnvironmentRuntime = eruncommon.RunStopEnvironment
+	}
+	if deps.readRuntimeRunState == nil {
+		deps.readRuntimeRunState = eruncommon.ReadRuntimeRunState
 	}
 	if deps.canConnectLocalPort == nil {
 		deps.canConnectLocalPort = canConnectLocalTCP

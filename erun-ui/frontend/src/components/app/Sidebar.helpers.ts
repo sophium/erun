@@ -1,5 +1,6 @@
 import { environmentTypeIsRemoteWorktree } from '@/app/environmentType';
 import type { AppState } from '@/app/state';
+import type { StatusDotState } from '@/components/app/Sidebar.StatusDot';
 import type { UIEnvironment, UISelection } from '@/types';
 
 // pendingForTenant returns the optimistic selection for an env being created but
@@ -207,4 +208,40 @@ function orderCloudAliasRows(aliasByType: Map<string, string>): string[] {
     }
   }
   return ordered;
+}
+
+// The env-status values the Go side emits (erun-ui/ui_model.go). There are two
+// stopped values because the recovery differs: a stopped cloud context is
+// started from the titlebar, while a runtime scaled to zero is woken by opening
+// the environment (which runs `erun open`, and that is what scales it back up).
+export const ENV_STATE_STOPPED = 'stopped';
+export const ENV_STATE_RUNTIME_STOPPED = 'runtime-stopped';
+export const ENV_STATE_FAILED = 'failed';
+
+// environmentStatusDot maps an env state onto the shared indicator shape. Both
+// stopped kinds read as stopped — a stopped environment is not a failure, and
+// must never render the failure glyph.
+export function environmentStatusDot(envState: string): StatusDotState {
+  if (envState === ENV_STATE_FAILED) {
+    return 'failed';
+  }
+  if (envState === ENV_STATE_STOPPED || envState === ENV_STATE_RUNTIME_STOPPED) {
+    return 'stopped';
+  }
+  return 'running';
+}
+
+// environmentStateRecovery names the action that gets the environment back, so
+// the state is never shown without the way out of it. Empty for a running env.
+export function environmentStateRecovery(envState: string): string {
+  if (envState === ENV_STATE_STOPPED) {
+    return 'start it from the titlebar';
+  }
+  if (envState === ENV_STATE_RUNTIME_STOPPED) {
+    return 'click it in the sidebar to start it again';
+  }
+  if (envState === ENV_STATE_FAILED) {
+    return 'recover from Activities or re-click the row';
+  }
+  return '';
 }

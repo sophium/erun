@@ -27,6 +27,7 @@ import {
 import { CheckboxField, TextField } from '@/components/app/ManageDialog.fields';
 import { parseIdleTrafficBytes } from '@/components/app/ManageDialog.helpers';
 import { DeployComponentsField } from '@/components/app/ManageDialogDeployComponents';
+import { RuntimePowerField } from '@/components/app/ManageDialogRuntimePower';
 import { RuntimeResourceControls } from '@/components/app/RuntimeResourceControls';
 import { SelectField } from '@/components/app/SelectField';
 import { VersionNotices } from '@/components/app/VersionNotices';
@@ -85,6 +86,7 @@ export function RuntimeTab(): React.ReactElement {
           })
         }
       />
+      <RuntimePowerField dialog={dialog} />
       <RuntimePodFields dialog={dialog} />
       <IdleStopFields dialog={dialog} />
     </>

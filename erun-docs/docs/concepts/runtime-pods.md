@@ -58,6 +58,24 @@ The developer containers live in one pod, not two:
 - MCP tools run inside `erun-devops`, so they see the same filesystem, toolchain, and docker daemon the shell sees.
 - One ServiceAccount, one RBAC scope, one audit surface.
 
+## Stopping and starting an environment
+
+An environment is not always running. Most environments are idle most of the time, and an idle one
+still reserves everything it was given — the runtime container's CPU and memory limits, plus
+whatever `erun-dind` is really consuming, which has no limit at all. [`erun stop`](/cli/stop) scales
+the runtime to zero so all of it goes back to the node; **opening the environment starts it again**,
+and [`erun open`](/cli/open) waits for the pod before it forwards anything.
+
+Both PVCs survive a stop, so starting is a pod start rather than a cold rebuild: the workspace,
+the agent config, the outputs directory, the image store and the build cache are all still there.
+What does not survive is whatever was running in the pod — stop an environment because nobody is
+using it, not to pause work in progress.
+
+The desktop shows a stopped environment as **stopped**, not as broken: a hollow indicator on the
+environment's row rather than the warning triangle a failed deploy gets. Stopping is also an action
+there, on the environment's Runtime tab beside Deploy — which is where you notice the problem,
+because the resource sliders on that tab are computed from what the node's pods currently reserve.
+
 ## Idle / auto-stop
 
 Cloud-backed envs participate in an idle policy — see [Cloud contexts](/concepts/cloud-contexts).
@@ -88,5 +106,10 @@ The hard limit is your machine's CPU + memory (for local clusters) or the cloud 
 - **16 GiB laptop** — 1–2 envs running side by side comfortably.
 - **32 GiB laptop** — 3–4 envs.
 - **64 GiB laptop** — 6–8 envs, or more if you trim per-env runtime-pod sizing to fit your workload.
+
+Those numbers are about envs running *at once*, not envs you have. Configured envs cost nothing;
+only running ones reserve capacity. So the usual way past the limit is not a bigger machine — it is
+[`erun stop`](/cli/stop) on the envs nobody is using, which hands their CPU and memory straight back
+to the ones that are. Opening a stopped env starts it again.
 
 Lower the runtime pod's CPU / memory per env from the desktop's env settings if you want more concurrency on a constrained machine. For the field names and defaults, see [Configuration · `EnvConfig`](/reference/configuration#envconfig). For genuinely heavy parallel work, point envs at a managed cloud context — see [Cloud contexts](/concepts/cloud-contexts).

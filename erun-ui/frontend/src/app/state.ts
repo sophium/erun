@@ -98,7 +98,7 @@ export interface ManageDialogState {
   resourceStatusLoading: boolean;
   confirmation: string;
   busy: boolean;
-  busyAction: '' | 'save' | 'delete' | 'cloud-context-power';
+  busyAction: '' | 'save' | 'delete' | 'stop' | 'cloud-context-power';
   busyTarget: string;
   choicesOpen: boolean;
   error: string;

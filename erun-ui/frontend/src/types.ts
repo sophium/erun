@@ -574,15 +574,6 @@ export interface AgentOutputsList {
   truncated: boolean;
 }
 
-export interface DeleteEnvironmentResult {
-  tenant: string;
-  environment: string;
-  namespace?: string;
-  kubernetesContext?: string;
-  namespaceDeleteError?: string;
-  cloudContextStopError?: string;
-}
-
 export interface DiffResult {
   workingDirectory?: string;
   rawDiff: string;

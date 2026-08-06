@@ -168,9 +168,14 @@ type HelmDeploySpec struct {
 	Idle             EnvironmentIdleConfig
 	Claude           EnvironmentClaudeConfig
 	RuntimePod       RuntimePodResources
-	Version          string
-	Timeout          string
-	Verbosity        int
+	// Stopped mirrors EnvConfig.Stopped so a helm upgrade of a stopped
+	// environment re-renders replicas: 0 instead of restarting the pod the
+	// operator deliberately scaled away. deploy never decides run/stop itself —
+	// it only reconciles the recorded intent, and `erun open` is what wakes.
+	Stopped   bool
+	Version   string
+	Timeout   string
+	Verbosity int
 	// Cloudflare* deliver a delegated Cloudflare token to the runtime pod.
 	// CloudflareTokenRef is a handle into the secret store, never the token
 	// itself, resolved at execution time.
@@ -1677,6 +1682,7 @@ func newHelmDeploySpecWithValues(target OpenResult, deployContext KubernetesDepl
 		Idle:                target.EnvConfig.Idle,
 		Claude:              target.EnvConfig.Claude,
 		RuntimePod:          NormalizeRuntimePodResources(target.EnvConfig.RuntimePod),
+		Stopped:             target.EnvConfig.Stopped,
 		Version:             version,
 		Timeout:             rolloutTimeout,
 	}, nil
@@ -1994,6 +2000,7 @@ func (d HelmDeploySpec) command() commandSpec {
 			"--set-string", "mcpAuth.audience="+escapeHelmSetValue(d.MCPAuthAudience),
 		)
 	}
+	args = append(args, helmStoppedSetArgs(d.Stopped)...)
 	args = append(args, helmRegistrySetArgs(d)...)
 	// disableBuildScript is always set — a boolean projection must be able to
 	// reconcile a flip in either direction, so the chart always receives the
@@ -2240,10 +2247,6 @@ func helmRegistrySetArgs(d HelmDeploySpec) []string {
 	return args
 }
 
-// helmPlatformSetArgs returns the per-instance platform.* helm --set args,
-// guarded on presence so non-platform deploys (every existing env) render none.
-// Threaded to every chart; only the PowerDNS singleton reads them (to bootstrap
-// its services zone).
 // helmPlatformAccountSetArgs appends the platform-account switch only when the
 // env opted in, so every other deploy plan stays byte-for-byte unchanged. When
 // set, the runtime chart binds the env's SA to cluster-admin (a
@@ -2258,6 +2261,22 @@ func helmPlatformAccountSetArgs(platformAccount bool) []string {
 	return []string{"--set", "platformAccount=true"}
 }
 
+// helmStoppedSetArgs renders the operator's stop so the upgrade reconciles it
+// instead of quietly restarting the pod. Emitted only when the env is stopped,
+// so every running env's plan is byte-for-byte unchanged — and an absent value
+// renders replicas: 1, so a wake reconciles in the other direction just as
+// declaratively.
+func helmStoppedSetArgs(stopped bool) []string {
+	if !stopped {
+		return nil
+	}
+	return []string{"--set", "stopped=true"}
+}
+
+// helmPlatformSetArgs returns the per-instance platform.* helm --set args,
+// guarded on presence so non-platform deploys (every existing env) render none.
+// Threaded to every chart; only the PowerDNS singleton reads them (to bootstrap
+// its services zone).
 func helmPlatformSetArgs(p PlatformConfig) []string {
 	if p.IsZero() {
 		return nil

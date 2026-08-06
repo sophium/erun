@@ -1,0 +1,25 @@
+Stop an environment's runtime and return its capacity to the node.
+
+Scales the environment's runtime Deployment to zero, so both the runtime container's resource limits and its unlimited dind sidecar's real usage go back to the cluster and the environments you are actually using can be given more. Running work in the pod is terminated. Persistent state is not touched — the home volume, the Docker/build caches, and a builds-here environment's worktree all survive — so waking is a pod start, not a rebuild.
+
+The stop is durable: it is recorded on the environment, so a later `erun deploy` reconciles it rather than restarting the pod. `erun open` is what wakes the environment again. Defaults to the current scope; pass TENANT and ENVIRONMENT (or --tenant/--environment) to target another.
+
+Usage:
+  erun stop [TENANT] [ENVIRONMENT] [flags]
+
+Examples:
+  erun stop
+  erun stop team dev
+  erun stop team dev --dry-run
+  erun stop team dev --output json
+
+Flags:
+      --dry-run              Resolve and trace mutating actions without executing them.
+      --environment string   Stop a specific environment
+  -h, --help                 help for stop
+      --tenant string        Stop a specific tenant
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

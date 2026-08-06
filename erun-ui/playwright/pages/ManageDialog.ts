@@ -115,6 +115,18 @@ export class ManageDialog {
     return this.locator().locator('#environment-config-deploy');
   }
 
+  // "Stop environment" scales the runtime to zero so its CPU and memory go back
+  // to the node. It sits beside Deploy because that is where the operator finds
+  // the resource sliders capped. There is no matching Start: opening the
+  // environment wakes it.
+  stopButton(): Locator {
+    return this.locator().locator('#environment-config-stop');
+  }
+
+  stopHelperText(): Locator {
+    return this.locator().locator('#environment-config-stop-help');
+  }
+
   // "Create & deploy new version" (build → push → deploy) — shown only for a
   // local-agent env, which owns source to build.
   createVersionButton(): Locator {

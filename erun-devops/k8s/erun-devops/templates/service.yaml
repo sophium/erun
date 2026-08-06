@@ -353,7 +353,11 @@ spec:
   selector:
     matchLabels:
       app: {{ .Release.Name }}
-  replicas: 1
+  {{/* A stopped environment returns the runtime container's limits and the
+       unlimited dind sidecar's real usage to the node. Declared here rather
+       than left as a scale patch so a helm upgrade reconciles the operator's
+       stop instead of silently restarting the pod. */}}
+  replicas: {{ if .Values.stopped }}0{{ else }}1{{ end }}
   template:
     metadata:
       labels:

@@ -5,6 +5,7 @@ import type {
   UIVersionSuggestions,
 } from '@/types';
 import type { UIClusterRegistryStatus, UIEnvironmentHealth } from '@/uiDiagnosticsTypes';
+import type { UIEnvironmentStopResult } from '@/uiLifecycleTypes';
 
 import {
   CheckEnvironmentHealth,
@@ -16,6 +17,7 @@ import {
   LoadRuntimeResourceStatus,
   LoadVersionSuggestions,
   SaveEnvironmentConfig,
+  StopEnvironment,
 } from '../../../wailsjs/go/main/App';
 import { wailsApi } from './wailsApi';
 import { wailsQueryFn } from './wailsBaseQuery';
@@ -91,6 +93,15 @@ export const environmentApi = wailsApi.injectEndpoints({
         LoadClusterRegistry(args),
       ),
       providesTags: ['RuntimeResourceStatus'],
+    }),
+    // Stopping frees the env's runtime and dind limits, so the node capacity
+    // the Runtime tab offers every other env changes the moment it lands —
+    // invalidate the resource status rather than leaving stale maxima on screen.
+    stopEnvironment: builder.mutation<UIEnvironmentStopResult, UISelection>({
+      queryFn: wailsQueryFn<UISelection, UIEnvironmentStopResult>((selection) =>
+        StopEnvironment(selection),
+      ),
+      invalidatesTags: ['RuntimeResourceStatus', 'AppState'],
     }),
     checkEnvironmentHealth: builder.mutation<UIEnvironmentHealth, UISelection>({
       queryFn: wailsQueryFn<UISelection, UIEnvironmentHealth>((selection) =>

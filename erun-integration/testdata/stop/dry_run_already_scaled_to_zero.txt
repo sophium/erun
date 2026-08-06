@@ -1,0 +1,8 @@
+audit: erun stop --dry-run team dev
+trace-log: would append the full trace to <TMP>
+stop: tenant=team environment=dev kubernetes-context=test-context release=team-devops namespace=team-dev
+kubectl --context test-context --namespace team-dev get deployment team-devops -o 'jsonpath={.spec.replicas}/{.status.readyReplicas}'
+runtime run state: deployment team-devops wants 0 replica(s), 0 ready
+stop: team/dev is already stopped (deployment team-devops wants 0 replicas)
+config: would assign stopped=true to team/dev
+==> Stopped team/dev

@@ -45,19 +45,32 @@ type uiWorkingIssue struct {
 
 // Env-status values carried by the env-status event. The empty string clears
 // the state (the env is healthy again, or a fresh open attempt is in flight).
+// The two stopped values are separate because their recovery differs: a stopped
+// cloud context is started from the titlebar, while a runtime scaled to zero is
+// woken by opening the environment.
 const (
-	envStatusStopped = "stopped"
-	envStatusFailed  = "failed"
+	envStatusStopped        = "stopped"
+	envStatusRuntimeStopped = "runtime-stopped"
+	envStatusFailed         = "failed"
 )
 
 // envStatusPayload tells the sidebar the real per-env condition behind the
 // open dot (tab presence alone is not running-ness — the dot must
 // not show green for an env that is actually stopped or whose deploy failed).
-// Status is one of "", envStatusStopped, envStatusFailed.
+// Status is one of "", envStatusStopped, envStatusRuntimeStopped, envStatusFailed.
 type envStatusPayload struct {
 	Tenant      string `json:"tenant"`
 	Environment string `json:"environment"`
 	Status      string `json:"status"`
+}
+
+// uiEnvironmentStopResult is what the Runtime tab's Stop control reports back.
+type uiEnvironmentStopResult struct {
+	Tenant         string `json:"tenant"`
+	Environment    string `json:"environment"`
+	Release        string `json:"release"`
+	Namespace      string `json:"namespace"`
+	AlreadyStopped bool   `json:"alreadyStopped"`
 }
 
 type uiSelection struct {

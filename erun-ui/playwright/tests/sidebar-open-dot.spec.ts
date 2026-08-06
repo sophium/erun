@@ -42,13 +42,16 @@ test.describe('sidebar env open dot', () => {
 
   // The dot must reflect the env's REAL condition, not just tab
   // presence: green filled circle while running, hollow grey ring while the
-  // linked cloud context is stopped, amber triangle after a failed deploy /
-  // abandoned reconnect. Shape + accessible label carry the state (never
-  // colour alone). A real stopped EC2 context or failed deploy cannot be
+  // linked cloud context is stopped OR the runtime is scaled to zero, amber
+  // triangle after a failed deploy / abandoned reconnect. Stopped and failed
+  // are distinct states — a stopped environment must never read as a failure.
+  // Shape + accessible label carry the state (never colour alone). A real
+  // stopped EC2 context, scaled-down runtime, or failed deploy cannot be
   // staged headless, so the spec drives the same env-status Wails event the
   // Go side emits — the emission decisions themselves are owned by
-  // erun-ui/env_status_test.go (tryReconnect refusal paths).
-  test('the dot reflects the real env state: running → stopped → failed → running', async ({
+  // erun-ui/env_status_test.go (tryReconnect refusal paths) and
+  // erun-ui/environment_stop_test.go (the scaled-to-zero refusal).
+  test('the dot reflects the real env state: running → stopped → runtime-stopped → failed → running', async ({
     app,
     page,
     seededEnv,
@@ -100,13 +103,30 @@ test.describe('sidebar env open dot', () => {
       'stopped',
       new RegExp(`^${tenant} / ${environment} is stopped`),
     );
+    // A runtime scaled to zero is stopped, not broken: it renders the same
+    // hollow-ring stopped glyph as a stopped cloud context, but names the other
+    // recovery — opening the environment is what wakes the runtime, whereas a
+    // stopped cloud context is started from the titlebar. Scaling a real
+    // Deployment to zero needs a cluster the headless harness deliberately
+    // lacks, so the spec drives the same env-status event the Go side emits;
+    // the emission decisions are owned by erun-ui/environment_stop_test.go
+    // (TestReconnectRefusedFlagsStoppedRuntimeInsteadOfFailed) and the
+    // cluster-state mapping by TestRuntimeStoppedForSelectionMapsClusterStateToTheIndicator.
+    await driveEnvStatus(
+      'runtime-stopped',
+      'runtime-stopped',
+      /is stopped — click it in the sidebar/,
+    );
     await driveEnvStatus('failed', 'failed', /deploy failed/);
     await driveEnvStatus('', 'running', `Close ${tenant} / ${environment}`);
 
     // Close the env so the singleton backend returns to its pre-test shape, by
-    // key for the tooltip-interception reason above. This step is still an
-    // intermittent red under full-suite load — the close occasionally misses the
-    // expect window — tracked separately; do not paper over it with a retry.
+    // key for the tooltip-interception reason above. This step used to be an
+    // intermittent red under full-suite load: a session that had already exited
+    // made its PTY close report "file already closed", which failed the whole
+    // CloseEnvironmentSessions call and aborted the frontend's unwind before it
+    // cleared the env's tabs — so the dot stayed mounted. Session close is
+    // idempotent now (erun-ui/session.go ignoreAlreadyClosed).
     await dot.focus();
     await dot.press('Enter');
     await expect(dot).toHaveCount(0);
