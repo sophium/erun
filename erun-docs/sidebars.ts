@@ -33,6 +33,7 @@ const sidebars: SidebarsConfig = {
         'cli/overview',
         'cli/init',
         'cli/open',
+        'cli/stop',
         'cli/delete',
         'cli/build',
         'cli/release',

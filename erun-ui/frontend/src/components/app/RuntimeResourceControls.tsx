@@ -82,6 +82,14 @@ export function RuntimeResourceControls({
             {bounds.message}
           </div>
         )}
+        {/* Nielsen #1: a maximum equal to the current value is indistinguishable
+            from a product limit unless the reading says why. role="status" so a
+            screen reader hears the explanation with the figure, not instead of it. */}
+        {bounds.notice && (
+          <div className="text-xs leading-[1.35] text-amber-600 dark:text-amber-400" role="status">
+            {bounds.notice}
+          </div>
+        )}
       </div>
       <ResourceControl
         id={`${idPrefix}-cpu`}

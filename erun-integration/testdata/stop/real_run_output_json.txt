@@ -1,0 +1,9 @@
+{
+  "tenant": "team",
+  "environment": "dev",
+  "namespace": "team-dev",
+  "release": "team-devops",
+  "kubernetesContext": "test-context",
+  "stopped": true,
+  "alreadyStopped": false
+}

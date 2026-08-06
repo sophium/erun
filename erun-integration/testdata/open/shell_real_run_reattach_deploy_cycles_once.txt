@@ -2,6 +2,7 @@ audit: erun open team dev
 trace-log: appending the full trace to <TMP>
 open: tenant=team environment=dev kubernetes-context=test-context remote=true no-shell=false ide=shell
 open: pure primitive — not deploying (run `erun deploy` first, or pass --deploy to deploy before opening)
+runtime run state: deployment team-devops wants 1 replica(s), 0 ready
 deploy: component selection source default (runtime only); deploying the runtime chart alone
 deploy: no local runtime chart; using published chart oci://registry.example/test/charts/erun-devops version <VERSION>
 deploy: defaulting runtime image to the tenant's team-devops image registry.example/test/team-devops:<VERSION> (imageOverrides.erun-devops)

@@ -4,6 +4,9 @@ trace-log: would append the full trace to <TMP>
 open: tenant=team environment=dev kubernetes-context=test-context remote=true no-shell=false ide=shell
 open: pure primitive — not deploying (run `erun deploy` first, or pass --deploy to deploy before opening)
 kubectl --context test-context --namespace team-dev get deployment team-devops -o name
+kubectl --context test-context --namespace team-dev get deployment team-devops -o 'jsonpath={.spec.replicas}/{.status.readyReplicas}'
+runtime run state: deployment team-devops is absent from namespace team-dev
+open: team-devops is not deployed, so there is nothing to wake
 kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 17000:17000 --address <LOOPBACK>
 kubectl --context test-context --namespace team-dev get deployment team-api -o name
 kubectl --context test-context --namespace team-dev port-forward service/team-api 17033:17033 --address <LOOPBACK>
@@ -58,7 +61,8 @@ bootstrap-script:
   attach_id="$$-$(date +%s)"
   printf '%s' "$attach_id" > "<TMP>"
   master_pid=""
-  for dtach_pid in $(pgrep -x dtach 2>/dev/null || true); do if grep -qF "<TMP>" "/proc/$dtach_pid/cmdline" 2>/dev/null; then for child_pid in $(pgrep -P "$dtach_pid" 2>/dev/null || true); do child_comm="$(cat "/proc/$child_pid/comm" 2>/dev/null)"; if [ -n "$child_comm" ] && [ "$child_comm" != "dtach" ]; then master_pid="$dtach_pid"; fi; done; fi; done
+  master_program=""
+  for dtach_pid in $(pgrep -x dtach 2>/dev/null || true); do if grep -qF "<TMP>" "/proc/$dtach_pid/cmdline" 2>/dev/null; then for child_pid in $(pgrep -P "$dtach_pid" 2>/dev/null || true); do child_comm="$(cat "/proc/$child_pid/comm" 2>/dev/null)"; if [ -n "$child_comm" ] && [ "$child_comm" != "dtach" ]; then master_pid="$dtach_pid"; master_program="$child_comm"; fi; done; fi; done
   if [ -S "<TMP>" ] && [ -n "$master_pid" ]; then for dtach_pid in $(pgrep -x dtach 2>/dev/null || true); do if [ "$dtach_pid" != "$master_pid" ] && grep -qF "<TMP>" "/proc/$dtach_pid/cmdline" 2>/dev/null; then kill "$dtach_pid" 2>/dev/null || true; fi; done; fi
   dtach -A "<TMP>" -r ctrl_l /bin/bash "$HOME/.erun/team/dev/launch-open-0.sh" || shell_status=$?
   if [ "$(cat "<TMP>" 2>/dev/null)" != "$attach_id" ]; then exit 76; fi

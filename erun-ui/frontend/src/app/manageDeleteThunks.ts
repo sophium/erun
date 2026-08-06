@@ -1,4 +1,4 @@
-import type { DeleteEnvironmentResult } from '@/types';
+import type { DeleteEnvironmentResult } from '@/uiLifecycleTypes';
 
 import { environmentApi } from './api/environmentApi';
 import { reloadStateAfterEnvironmentChange } from './bootThunks';

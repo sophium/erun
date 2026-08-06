@@ -7,6 +7,8 @@ trace-log: would append the full trace to <TMP>
 open: tenant=team environment=dev kubernetes-context=test-context remote=false no-shell=true ide=shell
 open: pure primitive — not deploying (run `erun deploy` first, or pass --deploy to deploy before opening)
 kubectl --context test-context --namespace team-dev get deployment team-devops -o name
+kubectl --context test-context --namespace team-dev get deployment team-devops -o 'jsonpath={.spec.replicas}/{.status.readyReplicas}'
+open: could not read the runtime's replica count (failed to read deployment "team-devops": exit status 2); assuming it is running and continuing
 kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 17000:17000 --address <LOOPBACK>
 kubectl --context test-context --namespace team-dev get deployment team-api -o name
 kubectl --context test-context --namespace team-dev port-forward service/team-api 17033:17033 --address <LOOPBACK>

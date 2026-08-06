@@ -23,7 +23,8 @@ The `build → release → push → deploy` commands form ERun's delivery pipeli
 |---|---|
 | `erun` | Universal entry point. In a fresh project, runs `init`. In a configured one, runs `open`. |
 | [`erun init`](/cli/init) | Create or update a tenant + environment, bring the environment up. |
-| [`erun open`](/cli/open) | Open a shell into the environment (brings it up first if needed). |
+| [`erun open`](/cli/open) | Open a shell into the environment (starts it first if it was stopped). |
+| [`erun stop`](/cli/stop) | Stop an environment so its CPU and memory go back to the ones you are using. |
 | [`erun delete`](/cli/delete) | Tear down an environment — remote namespace + local config. |
 | [`erun build`](/cli/build) | Build the project's container images (agent envs only — runtime envs receive deploys). |
 | [`erun release`](/cli/release) | Cut a release: stamp the version, tag it, push the tag. |

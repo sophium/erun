@@ -102,4 +102,16 @@ grep -A1 '^            - name: ERUN_MCP_ENABLED$' "${rendered}" | grep -q '"fals
 grep -q '^              name: mcp$' "${rendered}" &&
     fail "a disabled edge should advertise no mcp containerPort"
 
+# --- 7. A stopped environment renders replicas: 0, a running one replicas: 1 ---
+# This is what makes a stop durable: without the chart value the scale patch is
+# drift the next helm upgrade silently reverts, restarting a pod the operator
+# deliberately scaled away to give its capacity back to the node.
+rendered=$(render --set stopped=true)
+grep -q '^  replicas: 0$' "${rendered}" ||
+    fail "stopped=true should render replicas: 0"
+
+rendered=$(render)
+grep -q '^  replicas: 1$' "${rendered}" ||
+    fail "an environment with no stop recorded should render replicas: 1"
+
 echo "PASS: erun-devops chart pod shape"

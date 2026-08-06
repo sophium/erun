@@ -53,6 +53,24 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_from_devops_cwd", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_stopped_env_renders_replicas_zero", func(t *testing.T) {
+		// deploy reconciles the operator's stop rather than overriding it: an env
+		// carrying `stopped: true` threads --set stopped=true so the chart renders
+		// replicas: 0, and a helm upgrade cannot silently restart a pod the
+		// operator deliberately scaled away. deploy never wakes — `erun open`
+		// does, which is also why deploy's version dedup skipping the helm call
+		// cannot leave the run/stop state inconsistent. A running env emits no
+		// such --set (the sibling dry_run_from_devops_cwd golden shows its absence).
+		setup := env.New(t)
+		fixture.SeedStoppedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_stopped_env_renders_replicas_zero", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_platform_account_binds_cluster_admin", func(t *testing.T) {
 		// An env flagged platformaccount:true threads --set platformAccount=true
 		// into the runtime helm command, so the chart binds the env's SA to

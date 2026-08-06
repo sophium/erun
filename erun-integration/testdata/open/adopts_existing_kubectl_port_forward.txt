@@ -7,6 +7,9 @@ trace-log: would append the full trace to <TMP>
 open: tenant=team environment=dev kubernetes-context=test-context remote=false no-shell=true ide=shell
 open: pure primitive — not deploying (run `erun deploy` first, or pass --deploy to deploy before opening)
 kubectl --context test-context --namespace team-dev get deployment team-devops -o name
+kubectl --context test-context --namespace team-dev get deployment team-devops -o 'jsonpath={.spec.replicas}/{.status.readyReplicas}'
+runtime run state: deployment team-devops is absent from namespace team-dev
+open: team-devops is not deployed, so there is nothing to wake
 mcp: would adopt existing kubectl port-forward on <LOOPBACK>:17000 (PID 99999)
 kubectl --context test-context --namespace team-dev get deployment team-api -o name
 kubectl --context test-context --namespace team-dev port-forward service/team-api 17033:17033 --address <LOOPBACK>

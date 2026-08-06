@@ -90,3 +90,25 @@ func readChildPid(t *testing.T, session terminalSession) int {
 	t.Fatalf("grandchild pid never appeared in session output: %q", output)
 	return 0
 }
+
+// TestCloseIsIdempotentAfterTheProcessExits pins the teardown contract: closing
+// a session whose PTY the streaming goroutine already closed must succeed. It is
+// the desired end state, and reporting it as a failure made "close environment"
+// abort its unwind, leaving the sidebar rendering a torn-down env as open.
+func TestCloseIsIdempotentAfterTheProcessExits(t *testing.T) {
+	session, err := startTerminalSession(startTerminalSessionParams{
+		Executable: "/bin/sh",
+		Args:       []string{"-c", "exit 0"},
+		Cols:       80,
+		Rows:       24,
+	})
+	if err != nil {
+		t.Fatalf("startTerminalSession: %v", err)
+	}
+	if err := session.Close(); err != nil {
+		t.Fatalf("first Close: %v", err)
+	}
+	if err := session.Close(); err != nil {
+		t.Fatalf("closing an already-closed session must succeed, got: %v", err)
+	}
+}

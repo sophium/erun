@@ -195,6 +195,13 @@ type EnvConfig struct {
 	// can create the cluster-scoped resources they require. Default false leaves
 	// the SA with namespaced admin only.
 	PlatformAccount bool `yaml:"platformaccount,omitempty" json:"platformAccount,omitempty"`
+	// Stopped records that the operator stopped this environment, so its runtime
+	// Deployment stays scaled to zero and its node capacity stays with the
+	// environments actually in use. It is the durable half of the stop: a bare
+	// scale patch is drift a helm upgrade silently reverts, so `deploy` renders
+	// the chart's `stopped` value from this flag and reconciles replicas
+	// declaratively. `erun open` clears it — waking is what opening means.
+	Stopped bool `yaml:"stopped,omitempty" json:"stopped,omitempty"`
 }
 
 // ResolvedCloudAliases returns the env's attached cloud aliases keyed by provider

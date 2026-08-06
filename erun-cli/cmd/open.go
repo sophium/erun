@@ -312,19 +312,14 @@ func (r *resolvedOpenRunner) run() error {
 	shellReq.AppSession = r.options.AppSession
 	shellReq.AI = r.options.AI
 	shellReq.Contribute = r.options.Contribute
-	if r.options.Deploy {
-		// --deploy is operator-convenience only (root AGENTS.md § "Command
-		// primitives vs orchestration"): programmatic callers like the desktop
-		// must NOT use it — they compose build→push→deploy themselves and open
-		// the pure shell.
-		if err := r.maybeDeployRuntime(shellReq); err != nil {
-			return err
-		}
-	} else {
-		r.ctx.Trace("open: pure primitive — not deploying (run `erun deploy` first, or pass --deploy to deploy before opening)")
-		if err := r.ensureRuntimeDeployed(); err != nil {
-			return err
-		}
+	// Opening an environment means running it, so drop any recorded stop before
+	// the chart is rendered: a deploy that still saw the flag would re-apply
+	// replicas: 0 and the wake below would have to undo its own rollout.
+	if err := r.clearStopIntent(); err != nil {
+		return err
+	}
+	if err := r.prepareRuntime(shellReq); err != nil {
+		return err
 	}
 	r.activateForwarders()
 	if launched, err := r.maybeLaunchIDE(); launched || err != nil {
@@ -544,6 +539,58 @@ func (r *resolvedOpenRunner) ensureRuntimeDeployed() error {
 		return fmt.Errorf("runtime for %s/%s is not deployed (deployment %q not found in namespace %q); run `erun deploy %s %s` first",
 			r.result.Tenant, r.result.Environment, release, namespace, r.result.Tenant, r.result.Environment)
 	}
+	return nil
+}
+
+// prepareRuntime brings the environment to a state the rest of open can use:
+// deploy when the operator asked for it, otherwise verify the runtime is there,
+// and either way start it if it was stopped. The wake comes last because it is
+// the step that must hold immediately before the port-forwards.
+func (r *resolvedOpenRunner) prepareRuntime(shellReq common.ShellLaunchParams) error {
+	if r.options.Deploy {
+		// --deploy is operator-convenience only (root AGENTS.md § "Command
+		// primitives vs orchestration"): programmatic callers like the desktop
+		// must NOT use it — they compose build→push→deploy themselves and open
+		// the pure shell.
+		if err := r.maybeDeployRuntime(shellReq); err != nil {
+			return err
+		}
+	} else {
+		r.ctx.Trace("open: pure primitive — not deploying (run `erun deploy` first, or pass --deploy to deploy before opening)")
+		if err := r.ensureRuntimeDeployed(); err != nil {
+			return err
+		}
+	}
+	// Wake before the forwards: kubectl port-forward cannot attach to a
+	// Deployment with zero replicas, so a stopped environment would otherwise
+	// surface as a forward timeout instead of starting.
+	return r.ensureRuntimeAwake()
+}
+
+// clearStopIntent records that this environment is wanted running again. It
+// touches only the config, so it is safe to run before the runtime is known to
+// exist (a first `open --deploy` has no Deployment yet).
+func (r *resolvedOpenRunner) clearStopIntent() error {
+	updated, err := common.ClearEnvironmentStopIntent(r.ctx, r.result, r.options.SaveEnvConfig)
+	if err != nil {
+		return err
+	}
+	r.result.EnvConfig = updated
+	return nil
+}
+
+// ensureRuntimeAwake scales a stopped environment back to one replica and waits
+// for the rollout. It is quiet for an environment that is already running: the
+// single read below decides, and no scale call is made.
+func (r *resolvedOpenRunner) ensureRuntimeAwake() error {
+	wake, err := common.EnsureEnvironmentAwake(r.ctx, common.WakeEnvironmentParams{
+		Result:        r.result,
+		SaveEnvConfig: r.options.SaveEnvConfig,
+	})
+	if err != nil {
+		return err
+	}
+	r.result.EnvConfig = wake.EnvConfig
 	return nil
 }
 

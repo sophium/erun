@@ -291,3 +291,90 @@ Examples in the erun repo:
 
 - `erun-devops/k8s/erun-backend-db/` — a migration Job that runs Atlas migrations against the env's postgres.
 - `erun-devops/k8s/erun-docs/` — a Cloudflare Pages deploy Job that runs `wrangler pages deploy /site/`.
+
+## Runtime capacity reading
+
+The capacity figures the desktop offers for an environment's CPU and memory sliders are computed
+per node, on demand. For the Operator view, see
+[Runtime pods → Reading the resource figures](/concepts/runtime-pods#reading-the-resource-figures).
+
+Inputs, in the order they are read:
+
+1. `kubectl get nodes -o json` — `status.allocatable.cpu` and `status.allocatable.memory` per node.
+2. `kubectl get pods --all-namespaces -o json` — every non-terminal pod's `spec.nodeName` and each
+   container's `resources.limits`.
+3. `kubectl top pod --all-namespaces --containers --no-headers` — measured per-container usage.
+   Optional: a cluster with no metrics source yields no rows and the reading proceeds without them.
+
+Per container, the consumption charged to its node resolves by precedence:
+
+| Condition | Charged | Accounted |
+|---|---|---|
+| The container declares a limit for the resource | The declared limit | yes |
+| No limit, but a measured row exists for `<namespace>/<pod>/<container>` | The measured usage | yes |
+| Neither | `0` | **no** — the container is counted in `unmeasuredContainers` |
+
+Charging `0` for a limitless container without saying so is the failure mode this precedence
+exists to prevent: every `erun-dind` sidecar declares no limits, so a limits-only sum reports
+capacity the node does not have.
+
+Free capacity per node and resource:
+
+```
+free = allocatable − Σ(charged for every container except this environment's own runtime container)
+free = max(free, 0)
+if free < thisEnvironmentsOwnLimit:
+    free = thisEnvironmentsOwnLimit
+    floored = true
+```
+
+The floor exists because an environment can always keep what it already has. `floored` is reported
+separately so a maximum that equals the current value is distinguishable from a product limit:
+`floored: true` means the node is fully committed, and the documented remedy is
+[`erun stop`](/cli/stop) on an environment nobody is using.
+
+The reading names the node it came from (`node`) and whether a metrics source answered
+(`measuredUsage`). It is a snapshot: allocatable capacity and neighbouring pods both move on their
+own, so two readings minutes apart legitimately differ with no configuration change.
+
+## Persistent session liveness
+
+A desktop session in a runtime pod is a `dtach` socket at
+`/tmp/erun-app/<tenant>-<environment>-<id>.dtach`, created by
+[`erun open --app-session <id>`](/cli/open). A session is **running** when both hold:
+
+1. The socket exists (`[ -S "$socket" ]`).
+2. A `dtach` process references that socket in its `/proc/<pid>/cmdline` **and** has a non-`dtach`
+   child — the session program. Clients have no children, and the `-A` creator's only child is the
+   master, so this identifies exactly one master per socket.
+
+The probe is `/proc`-based because the runtime image ships no `ss` or `lsof`. It reports one
+tab-separated line per socket:
+
+```
+erun-session\t<id>\t<master-pid-or-0>\t<program-comm>
+```
+
+Consumers must treat a `0` master pid as not running. Stream traffic is **not** a liveness signal in
+either direction: an Agent waiting on a compile is silent while running, and a dropped exec stream
+is quiet while finished. A rendered "N sessions running" count and any per-session running state
+must be derived from the same probe, or the two can contradict each other.
+
+Sockets are container-lifetime by design. A `dtach` server is a process in the container, so a
+socket that outlived its pod could never be attached to; clearing them with the pod is what lets
+`claude --continue` resume in a fresh session instead of failing against a dead socket. The
+entrypoint runs `erun-prune-sessions /tmp/erun-app` on the container-boot path (never on the
+in-container `shell` path), removing any `*.dtach` with no live server plus its `.owner` file.
+
+## Runtime resource reclaim
+
+Two named reclaim actions run in the runtime pod. Both are scoped to build leftovers; neither
+touches the worktree, a running session, or the Agent's own process.
+
+| Action | Script |
+|---|---|
+| `gradle-daemons` | `gradle --stop` (when `gradle` is on `PATH`), then `kill` for every pid matching `pgrep -f GradleDaemon`. |
+| `build-cache` | `docker buildx prune -f`, falling back to `docker builder prune -f`, then `docker image prune -f`. |
+
+Both tolerate absence: a pod with no Gradle and no images is a successful no-op, not an error. An
+unknown action name is rejected without running anything.

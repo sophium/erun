@@ -1,5 +1,11 @@
 import * as React from 'react';
 
+import {
+  ENV_STATE_FAILED,
+  ENV_STATE_RUNTIME_STOPPED,
+  ENV_STATE_STOPPED,
+  environmentStateRecovery,
+} from '@/components/app/Sidebar.helpers';
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover';
 import type { UISelection, UIWorkingIssue } from '@/types';
 
@@ -146,10 +152,10 @@ function ActivityState({
   if (activityLabel) {
     return <span>{activityLabel}</span>;
   }
-  if (envState === 'stopped') {
-    return <Muted>Stopped — start it from the titlebar</Muted>;
+  if (envState === ENV_STATE_STOPPED || envState === ENV_STATE_RUNTIME_STOPPED) {
+    return <Muted>Stopped — {environmentStateRecovery(envState)}</Muted>;
   }
-  if (envState === 'failed') {
+  if (envState === ENV_STATE_FAILED) {
     return <Muted>Deploy failed — recover from Activities</Muted>;
   }
   if (!isOpen) {

@@ -13,15 +13,18 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// TestListRemoteAppSessionsParsesPodSockets pins the read-model that lets a
-// fresh ERun window rebuild tabs for sessions another window created.
-func TestListRemoteAppSessionsParsesPodSockets(t *testing.T) {
+// TestListRemoteAppSessionsRebuildsOnlyRunningSessions pins the read-model that
+// lets a fresh ERun window rebuild tabs for sessions another window created —
+// and only for sessions that still have a live program. A socket whose master
+// is gone is a leftover: rebuilding a tab for it would present a dead pane as a
+// running session, which is the disagreement the heartbeat exists to prevent.
+func TestListRemoteAppSessionsRebuildsOnlyRunningSessions(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("PATH-stub kubectl uses a shell script; skipping on Windows")
 	}
 	stubDir := t.TempDir()
 	script := "#!/bin/sh\n" +
-		"printf 'erun-remote-open-1.dtach\\nerun-remote-ai.dtach\\nerun-remote-open-1.owner\\nother-env-open-2.dtach\\n'\n"
+		"printf 'erun-session\\topen-1\\t311\\tbash\\nerun-session\\tai\\t412\\tclaude\\nerun-session\\topen-9\\t0\\t\\n'\n"
 	if err := os.WriteFile(filepath.Join(stubDir, "kubectl"), []byte(script), 0o755); err != nil {
 		t.Fatalf("write kubectl stub: %v", err)
 	}

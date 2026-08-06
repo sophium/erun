@@ -159,6 +159,21 @@ link_runtime_release() {
     erun-link-release "$(runtime_repo_dir)" /opt/erun/release || true
 }
 
+# runtime_session_dir is where `erun open` keeps the desktop's persistent dtach
+# sockets. Container-local on purpose (see session-prune.sh).
+runtime_session_dir() {
+    printf '%s\n' "${ERUN_APP_SESSION_DIR:-/tmp/erun-app}"
+}
+
+# prune_stale_app_sessions reconciles the session directory at container start.
+# A dtach server cannot outlive its container, so any socket still present is a
+# leftover the desktop would otherwise read as a running session. Only the
+# container-boot paths call this — never the `shell` path, which runs inside a
+# live container where the sockets are real.
+prune_stale_app_sessions() {
+    erun-prune-sessions "$(runtime_session_dir)" 2>/dev/null || true
+}
+
 runtime_cloud_environment() {
     case "${ERUN_CLOUD_ENVIRONMENT:-}" in
         1|true|TRUE|True|yes|YES|on|ON)
@@ -1054,6 +1069,7 @@ if [ "${1:-}" = "mcp" ]; then
 fi
 
 if [ "${1:-}" = "devops" ] || [ "$#" -eq 0 ]; then
+    prune_stale_app_sessions
     ensure_runtime_source
     link_runtime_release
     initialize_erun_config
