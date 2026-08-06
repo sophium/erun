@@ -120,7 +120,11 @@ func newUpgradeDeployer(store common.DeployStore, saveEnvConfig common.EnvConfig
 		if err := common.RunDeploySpecs(ctx, specs, deployHelmChart); err != nil {
 			return err
 		}
-		return common.PersistRuntimeVersionFromDeploySpecs(ctx, specs, saveEnvConfig, common.ResolveDeployedHelmReleaseVersion)
+		if err := common.PersistRuntimeVersionFromDeploySpecs(ctx, specs, saveEnvConfig, common.ResolveDeployedHelmReleaseVersion); err != nil {
+			return err
+		}
+		noticeStaleRuntimePortForwards(ctx, specs)
+		return nil
 	}
 }
 

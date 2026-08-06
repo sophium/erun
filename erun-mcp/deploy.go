@@ -20,6 +20,10 @@ type DeployInput struct {
 	Timeout      string   `json:"timeout,omitempty" jsonschema:"override the helm rollout wait for this deploy as a Go duration (e.g. 8m); empty uses the env's deploy.timeout or the 5m default. The deploy keeps waiting while an image is still pulling and aborts early on a real container failure"`
 	Preview      bool     `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
 	Verbosity    int      `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+	// MCP auth is sticky: omitting both inputs keeps whatever the env recorded, so
+	// a plain version bump can never leave the edge unauthenticated by accident.
+	MCPAuthPublicKey string `json:"mcp_auth_public_key,omitempty" jsonschema:"path to a PEM public key the env's MCP edge must accept bearer tokens signed by; recorded on the env so later redeploys keep authenticating. Omit to reuse the recorded key"`
+	NoMCPAuth        bool   `json:"no_mcp_auth,omitempty" jsonschema:"when true, deploy the env's MCP edge unauthenticated (loopback-only) and forget its recorded public key; required to turn authentication off, which deploy otherwise refuses to do by omission"`
 }
 
 func deployTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, DeployInput) (*mcp.CallToolResult, CommandOutput, error) {
@@ -47,6 +51,8 @@ func deployTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 				Components:           input.Components,
 				Force:                input.Force,
 				RolloutTimeout:       strings.TrimSpace(input.Timeout),
+				MCPAuthPublicKeyPath: strings.TrimSpace(input.MCPAuthPublicKey),
+				DisableMCPAuth:       input.NoMCPAuth,
 			}
 
 			component := strings.TrimSpace(input.Component)

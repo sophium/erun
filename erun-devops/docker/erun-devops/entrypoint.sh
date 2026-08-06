@@ -284,6 +284,22 @@ runtime_sshd_enabled() {
     return 1
 }
 
+# runtime_mcp_enabled reports whether this container serves the environment's MCP
+# edge. The chart sets ERUN_MCP_ENABLED explicitly so an operator can turn the
+# edge off; a chart that predates it leaves the variable unset, and a configured
+# port is then enough to keep serving an existing environment.
+runtime_mcp_enabled() {
+    case "${ERUN_MCP_ENABLED:-}" in
+        1|true|TRUE|True|yes|YES|on|ON)
+            return 0
+            ;;
+        0|false|FALSE|False|no|NO|off|OFF)
+            return 1
+            ;;
+    esac
+    [ -n "${ERUN_MCP_PORT:-}" ]
+}
+
 activity_args() {
     tenant="${ERUN_TENANT:-}"
     environment="${ERUN_ENVIRONMENT:-}"
@@ -951,6 +967,51 @@ start_environment_idle_monitor() {
     ) &
 }
 
+# exec_runtime_mcp replaces the current process with the environment's MCP
+# server. Both MCP paths go through it — the standalone `mcp` command and the
+# supervisor the runtime container starts — so the edge is served with identical
+# flags either way. A caller that wants the server supervised instead of
+# replacing itself wraps the call in a subshell.
+exec_runtime_mcp() {
+    set -- emcp "$@" \
+        --host "${ERUN_MCP_HOST:-0.0.0.0}" \
+        --port "${ERUN_MCP_PORT:-17000}" \
+        --path "${ERUN_MCP_PATH:-/mcp}" \
+        --tenant "${ERUN_TENANT:-}" \
+        --environment "${ERUN_ENVIRONMENT:-}" \
+        --repo-path "$(runtime_repo_dir)" \
+        --kubernetes-context "${ERUN_KUBERNETES_CONTEXT:-in-cluster}"
+
+    namespace=$(runtime_namespace)
+    if [ -n "${namespace}" ]; then
+        set -- "$@" --namespace "${namespace}"
+    fi
+
+    echo "starting erun MCP on ${ERUN_MCP_HOST:-0.0.0.0}:${ERUN_MCP_PORT:-17000}${ERUN_MCP_PATH:-/mcp}"
+    exec "$@"
+}
+
+# start_runtime_mcp serves the environment's MCP edge from the runtime container
+# itself, so every MCP-driven command runs with the toolchain the environment is
+# built with. Nothing else supervises it here — the runtime container's own
+# foreground work is an idle sleep — so the loop restarts a crashed server and
+# logs each restart, keeping a crash-loop visible in the container log.
+start_runtime_mcp() {
+    if ! runtime_mcp_enabled; then
+        return
+    fi
+
+    (
+        attempt=1
+        while :; do
+            ( exec_runtime_mcp ) || true
+            attempt=$((attempt + 1))
+            echo "erun MCP exited; restarting (attempt ${attempt})"
+            sleep 2
+        done
+    ) &
+}
+
 run_shell() {
     repo_dir=$(runtime_repo_dir)
 
@@ -989,23 +1050,7 @@ if [ "${1:-}" = "mcp" ]; then
     initialize_codex_config
     initialize_claude_config
     record_activity mcp
-
-    set -- emcp "$@" \
-        --host "${ERUN_MCP_HOST:-0.0.0.0}" \
-        --port "${ERUN_MCP_PORT:-17000}" \
-        --path "${ERUN_MCP_PATH:-/mcp}" \
-        --tenant "${ERUN_TENANT:-}" \
-        --environment "${ERUN_ENVIRONMENT:-}" \
-        --repo-path "$(runtime_repo_dir)" \
-        --kubernetes-context "${ERUN_KUBERNETES_CONTEXT:-in-cluster}"
-
-    namespace=$(runtime_namespace)
-    if [ -n "${namespace}" ]; then
-        set -- "$@" --namespace "${namespace}"
-    fi
-
-    echo "starting erun MCP on ${ERUN_MCP_HOST:-0.0.0.0}:${ERUN_MCP_PORT:-17000}${ERUN_MCP_PATH:-/mcp}"
-    exec "$@"
+    exec_runtime_mcp "$@"
 fi
 
 if [ "${1:-}" = "devops" ] || [ "$#" -eq 0 ]; then
@@ -1015,6 +1060,9 @@ if [ "${1:-}" = "devops" ] || [ "$#" -eq 0 ]; then
     initialize_codex_config
     initialize_claude_config
     record_activity devops
+    # Started only after the worktree is prepared, so the edge can never serve a
+    # half-initialised environment.
+    start_runtime_mcp
     exec sleep infinity
 fi
 

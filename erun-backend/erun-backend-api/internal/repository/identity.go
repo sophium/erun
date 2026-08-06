@@ -242,59 +242,9 @@ func (r *IdentityRepository) bootstrapFirstIdentity(ctx context.Context, claims 
 	var user model.User
 
 	err := r.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		var tenantCount int
-		if err := tx.NewRaw(`SELECT COUNT(*) FROM tenants`).Scan(ctx, &tenantCount); err != nil {
-			return err
-		}
-		if tenantCount != 0 {
-			return ErrNotFound
-		}
-
 		var err error
-		tenant, err = r.insertTenant(ctx, tx, "operations", model.TenantTypeOperations)
-		if err != nil {
-			return err
-		}
-		if r.dialect == DialectPostgres {
-			if err := r.setPostgresSecurityContext(ctx, tx, security.Context{
-				TenantID:   tenant.TenantID,
-				TenantType: string(model.TenantTypeOperations),
-			}); err != nil {
-				return err
-			}
-		}
-
-		username := strings.TrimSpace(claims.Username)
-		if username == "" {
-			username = claims.Subject
-		}
-
-		// Register the issuer in the root issuers table first: tenant_issuers.issuer
-		// now foreign-keys issuers(issuer). The bootstrap issuer is single-tenant
-		// (org_field_key left NULL), so the token's iss alone resolves the tenant.
-		if _, err := tx.NewRaw(`INSERT INTO issuers (issuer) VALUES (?) ON CONFLICT (issuer) DO NOTHING`, claims.Issuer).Exec(ctx); err != nil {
-			return err
-		}
-		if _, err := tx.NewRaw(`INSERT INTO tenant_issuers (issuer, name) VALUES (?, ?)`, claims.Issuer, defaultTenantIssuerName(claims.Issuer)).Exec(ctx); err != nil {
-			return err
-		}
-		user, err = r.insertUser(ctx, tx, username)
-		if err != nil {
-			return err
-		}
-		if r.dialect == DialectPostgres {
-			if err := r.setPostgresSecurityContext(ctx, tx, security.Context{
-				TenantID:   tenant.TenantID,
-				TenantType: string(model.TenantTypeOperations),
-				ErunUserID: user.UserID,
-			}); err != nil {
-				return err
-			}
-		}
-		if err := r.insertDefaultUserAccess(ctx, tx, user.UserID, claims.Issuer, claims.Subject); err != nil {
-			return err
-		}
-		return nil
+		tenant, user, err = r.insertFirstIdentity(ctx, tx, claims)
+		return err
 	})
 	if err != nil {
 		return model.Tenant{}, model.User{}, err
@@ -303,56 +253,130 @@ func (r *IdentityRepository) bootstrapFirstIdentity(ctx context.Context, claims 
 	return tenant, user, nil
 }
 
+// insertFirstIdentity creates the initial OPERATIONS tenant, its issuer, and the
+// tenant's first user as one atomic unit. A non-empty tenants table means another
+// caller won the bootstrap, which is ErrNotFound so resolution falls back to the
+// normal path.
+func (r *IdentityRepository) insertFirstIdentity(ctx context.Context, tx bun.Tx, claims security.Claims) (model.Tenant, model.User, error) {
+	var tenantCount int
+	if err := tx.NewRaw(`SELECT COUNT(*) FROM tenants`).Scan(ctx, &tenantCount); err != nil {
+		return model.Tenant{}, model.User{}, err
+	}
+	if tenantCount != 0 {
+		return model.Tenant{}, model.User{}, ErrNotFound
+	}
+
+	tenant, err := r.insertTenant(ctx, tx, "operations", model.TenantTypeOperations)
+	if err != nil {
+		return model.Tenant{}, model.User{}, err
+	}
+	if err := r.bindSecurityContext(ctx, tx, security.Context{
+		TenantID:   tenant.TenantID,
+		TenantType: string(model.TenantTypeOperations),
+	}); err != nil {
+		return model.Tenant{}, model.User{}, err
+	}
+
+	if err := insertBootstrapIssuer(ctx, tx, claims.Issuer); err != nil {
+		return model.Tenant{}, model.User{}, err
+	}
+	user, err := r.insertUser(ctx, tx, bootstrapUsername(claims))
+	if err != nil {
+		return model.Tenant{}, model.User{}, err
+	}
+	if err := r.bindSecurityContext(ctx, tx, security.Context{
+		TenantID:   tenant.TenantID,
+		TenantType: string(model.TenantTypeOperations),
+		ErunUserID: user.UserID,
+	}); err != nil {
+		return model.Tenant{}, model.User{}, err
+	}
+	if err := r.insertDefaultUserAccess(ctx, tx, user.UserID, claims.Issuer, claims.Subject); err != nil {
+		return model.Tenant{}, model.User{}, err
+	}
+	return tenant, user, nil
+}
+
 func (r *IdentityRepository) bootstrapFirstTenantUser(ctx context.Context, tenant model.Tenant, claims security.Claims) (model.User, error) {
 	var user model.User
 
 	err := r.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		var userCount int
-		if err := tx.NewRaw(`SELECT COUNT(*) FROM users WHERE tenant_id = ?`, tenant.TenantID).Scan(ctx, &userCount); err != nil {
-			return err
-		}
-		if userCount != 0 {
-			return ErrNotFound
-		}
-
-		if r.dialect == DialectPostgres {
-			if err := r.setPostgresSecurityContext(ctx, tx, security.Context{
-				TenantID:   tenant.TenantID,
-				TenantType: string(tenant.Type),
-			}); err != nil {
-				return err
-			}
-		}
-
-		username := strings.TrimSpace(claims.Username)
-		if username == "" {
-			username = claims.Subject
-		}
-
 		var err error
-		user, err = r.insertUser(ctx, tx, username)
-		if err != nil {
-			return err
-		}
-		if r.dialect == DialectPostgres {
-			if err := r.setPostgresSecurityContext(ctx, tx, security.Context{
-				TenantID:   tenant.TenantID,
-				TenantType: string(tenant.Type),
-				ErunUserID: user.UserID,
-			}); err != nil {
-				return err
-			}
-		}
-		if err := r.insertDefaultUserAccess(ctx, tx, user.UserID, claims.Issuer, claims.Subject); err != nil {
-			return err
-		}
-		return nil
+		user, err = r.insertFirstTenantUser(ctx, tx, tenant, claims)
+		return err
 	})
 	if err != nil {
 		return model.User{}, err
 	}
 	log.Printf("erun api identity enrolled first user tenant=%q tenantName=%q tenantType=%q user=%q issuer=%q subject=%q username=%q", tenant.TenantID, tenant.Name, tenant.Type, user.UserID, claims.Issuer, claims.Subject, user.Username)
 	return user, nil
+}
+
+// insertFirstTenantUser enrols the subject as the tenant's first user with the
+// predefined roles. A tenant that already has a user gets no implicit enrolment,
+// which is ErrNotFound so the caller rejects the unknown subject.
+func (r *IdentityRepository) insertFirstTenantUser(ctx context.Context, tx bun.Tx, tenant model.Tenant, claims security.Claims) (model.User, error) {
+	var userCount int
+	if err := tx.NewRaw(`SELECT COUNT(*) FROM users WHERE tenant_id = ?`, tenant.TenantID).Scan(ctx, &userCount); err != nil {
+		return model.User{}, err
+	}
+	if userCount != 0 {
+		return model.User{}, ErrNotFound
+	}
+
+	if err := r.bindSecurityContext(ctx, tx, security.Context{
+		TenantID:   tenant.TenantID,
+		TenantType: string(tenant.Type),
+	}); err != nil {
+		return model.User{}, err
+	}
+
+	user, err := r.insertUser(ctx, tx, bootstrapUsername(claims))
+	if err != nil {
+		return model.User{}, err
+	}
+	if err := r.bindSecurityContext(ctx, tx, security.Context{
+		TenantID:   tenant.TenantID,
+		TenantType: string(tenant.Type),
+		ErunUserID: user.UserID,
+	}); err != nil {
+		return model.User{}, err
+	}
+	if err := r.insertDefaultUserAccess(ctx, tx, user.UserID, claims.Issuer, claims.Subject); err != nil {
+		return model.User{}, err
+	}
+	return user, nil
+}
+
+// bindSecurityContext binds the transaction's RLS context. Only PostgreSQL has
+// transaction-local security settings to bind.
+func (r *IdentityRepository) bindSecurityContext(ctx context.Context, tx bun.Tx, securityContext security.Context) error {
+	if r.dialect != DialectPostgres {
+		return nil
+	}
+	return r.setPostgresSecurityContext(ctx, tx, securityContext)
+}
+
+// insertBootstrapIssuer registers the issuer before tenant_issuers references it
+// (tenant_issuers.issuer foreign-keys issuers.issuer). The bootstrap issuer is
+// single-tenant — org_field_key stays NULL — so the token's iss alone resolves
+// the tenant.
+func insertBootstrapIssuer(ctx context.Context, tx bun.Tx, issuer string) error {
+	if _, err := tx.NewRaw(`INSERT INTO issuers (issuer) VALUES (?) ON CONFLICT (issuer) DO NOTHING`, issuer).Exec(ctx); err != nil {
+		return err
+	}
+	_, err := tx.NewRaw(`INSERT INTO tenant_issuers (issuer, name) VALUES (?, ?)`, issuer, defaultTenantIssuerName(issuer)).Exec(ctx)
+	return err
+}
+
+// bootstrapUsername prefers the token's username claim and falls back to its
+// subject, so an enrolled user always has a display name.
+func bootstrapUsername(claims security.Claims) string {
+	username := strings.TrimSpace(claims.Username)
+	if username == "" {
+		return claims.Subject
+	}
+	return username
 }
 
 func (r *IdentityRepository) insertTenant(ctx context.Context, tx bun.Tx, name string, tenantType model.TenantType) (model.Tenant, error) {

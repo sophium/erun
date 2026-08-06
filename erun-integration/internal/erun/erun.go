@@ -136,8 +136,8 @@ type RunOptions struct {
 	// Env is the full environment for the subprocess (it replaces the parent
 	// environment except for GOCOVERDIR which the harness always injects).
 	// PATH should be included by callers that need it.
-	Env []string
-	Stdin string
+	Env     []string
+	Stdin   string
 	Timeout time.Duration
 }
 

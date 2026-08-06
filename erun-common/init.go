@@ -775,9 +775,12 @@ func (s *bootstrapRunState) createEnvConfig() error {
 		ManagedCloud:       managedCloud,
 		RuntimeVersion:     strings.TrimSpace(s.params.RuntimeVersion),
 		RuntimeImage:       strings.TrimSpace(s.params.RuntimeImage),
-		RuntimePod:         NormalizeRuntimePodResources(s.params.RuntimePod),
-		DisableBuildScript: s.params.DisableBuildScript,
-		PlatformAccount:    s.params.PlatformAccount,
+		// Record the key init's runtime deploy trusted, so the next redeploy
+		// rethreads it instead of dropping the env's MCP edge to unauthenticated.
+		MCPAuthPublicKeyPath: strings.TrimSpace(s.params.MCPAuthPublicKeyPath),
+		RuntimePod:           NormalizeRuntimePodResources(s.params.RuntimePod),
+		DisableBuildScript:   s.params.DisableBuildScript,
+		PlatformAccount:      s.params.PlatformAccount,
 		// Seed the registries into the FIRST persisted config. The init-time deploy
 		// (ensureDevopsAssets) reads the env config from disk before
 		// saveEnvConfigIfChanged runs, so registries set only in-memory here were

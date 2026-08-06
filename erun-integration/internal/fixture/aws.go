@@ -30,7 +30,7 @@ type AWSStubError struct {
 // chosen so the happy path completes.
 type AWSCloudContextStubSpec struct {
 	// RoleName's value is ignored by production; only the call's exit code matters.
-	RoleName string
+	RoleName           string
 	InstanceProfileARN string
 	// ProfileRoleName of "None" (the AWS text-output null) means the profile
 	// carries no role yet.
@@ -40,13 +40,13 @@ type AWSCloudContextStubSpec struct {
 	ActiveAssociationID  string
 	ActiveAssociationARN string
 	PendingAssociationID string
-	PublicIP string
+	PublicIP             string
 	// InstanceStates is multi-line "id<TAB>state" text as the AWS CLI prints
 	// it; empty makes every instance read as "not found in AWS".
-	InstanceStates string
+	InstanceStates  string
 	SecurityGroupID string
-	ImageID string
-	InstanceID string
+	ImageID         string
+	InstanceID      string
 
 	// Per-argv-family error injection. Nil means the call succeeds.
 	GetRoleError                  *AWSStubError

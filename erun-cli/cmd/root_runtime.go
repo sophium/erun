@@ -39,6 +39,20 @@ func newCommandGroup(use, short string, commands ...*cobra.Command) *cobra.Comma
 	return command
 }
 
+// scopedOpenParams adapts the --tenant/--environment flag pair every
+// environment-scoped command shares: an omitted flag means "the current scope",
+// resolved the same way as for `deploy` or `open`.
+func scopedOpenParams(tenant, environment string) common.OpenParams {
+	tenant = strings.TrimSpace(tenant)
+	environment = strings.TrimSpace(environment)
+	return common.OpenParams{
+		Tenant:                tenant,
+		Environment:           environment,
+		UseDefaultTenant:      tenant == "",
+		UseDefaultEnvironment: environment == "",
+	}
+}
+
 func newRootCommand(runRoot func(*cobra.Command, []string) error) *cobra.Command {
 	var verbosity int
 

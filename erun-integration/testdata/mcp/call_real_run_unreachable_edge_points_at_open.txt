@@ -1,0 +1,3 @@
+audit: erun mcp call --tool version
+mcp: team/dev edge resolved to http://<LOOPBACK>:26100/mcp
+MCP endpoint is not reachable: http://<LOOPBACK>:26100/mcp (Post "http://<LOOPBACK>:26100/mcp": dial tcp <LOOPBACK>:26100: connect: connection refused); run `erun open team dev` so the local MCP port-forward is up

@@ -1,0 +1,11 @@
+{
+  "tenant": "team",
+  "environment": "dev",
+  "endpoint": "http://<LOOPBACK>:26100/mcp",
+  "issuer": "file:///etc/erun/mcp-auth/desktopid.pub",
+  "audience": "erun-mcp:team/dev",
+  "expiresAt": "<TS>",
+  "token": "<TOKEN>"
+}
+audit: erun mcp token --output json
+mcp: team/dev edge resolved to http://<LOOPBACK>:26100/mcp

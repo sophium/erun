@@ -164,6 +164,7 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
    a. If fingerprint matches the registry copy and `--no-incremental` / `--force` is not set: promote the registry copy locally; skip the build.
    b. Otherwise: invoke `docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/<image>:<version> -f <Dockerfile> <context>` with the resolved `--build-arg` set.
    c. Tag the result `<registry>/<image>:fp-<fingerprint>-<arch>` for each architecture.
+   d. **`ERUN_VERSION` for a base built by this same run.** Images are ordered so a `FROM <registry>/<base>:${ERUN_VERSION}` wrapper builds after its base. A build that does not push tags only per-arch (`…:<version>-<arch>`) — the arch-less `…:<version>` is a manifest list [`push`](#erun-push) mints in the registry, so it exists neither locally nor remotely for an unpublished version. So when the wrapper's base is one of this run's own unpublished images, its `ERUN_VERSION` build arg is `<version>-<arch>` for the architecture being built, resolving the base from the local daemon at the matching arch (an arch-less local tag would be last-arch-wins, and therefore single-arch). This is what lets `erun build --version <v>` validate a whole release locally, dependent images included, before any git ref moves. A local snapshot base follows the same rule at `<base>-snapshot-<arch>`. A `--release` wrapper keeps the plain `<version>`: its base is pushed earlier in the same run, so it resolves from the published multi-arch manifest. No plain-`<version>` local tag is ever created, so a local build can never be mistaken for a published manifest or pushed in place of one.
 5. Emit the minted version (and, with `--output json`, the structured result).
 6. If `--deploy`: compose push + deploy at the minted version (operator-convenience shortcut). If `--release`: chain to `erun release`, which builds, then reuses `push` to publish the release-tagged variants and chart. Programmatic callers skip both and orchestrate the primitives themselves.
 7. Exit `0`.
@@ -201,6 +202,18 @@ binfmt for <arch> not installed. Run:
 ### What push publishes
 
 For the supplied `--version`, `push` always builds each image from its source context (never a prebuilt bare tag), pushes per-arch tags, assembles the manifest list, then publishes every Helm chart discovered under the project's `k8s/*` directories — a **directory scan**, not a lookup keyed to same-named images, so image-less charts (a tenant's own `frs-backend-api`, `frs-powerdns`, … wrappers) publish too. For each: `helm dependency build` (umbrella charts that vendor published subcharts) + `helm package` + `helm push` to `oci://<registry>/charts` at `--version`, verified with a `helm pull` round-trip. Chart publishing is decoupled from the image push: a **version-pinned base** (`erun-powerdns`, `erun-backend-postgres`) keeps its image at the upstream pin and is not re-pushed at `--version`, but its chart still publishes at `--version` so platform deploys resolve it. [`erun build`](#erun-build) packages the same charts locally (validate + `--output json`) without publishing. Charts publish under `/charts`, separate from the same-named image repo so a chart never collides with its image at the same ref. There is no environment-type branch. [`erun release`](#erun-release) reuses this step for all its publishing.
+
+### Chart verification retry semantics
+
+The `helm pull` round-trip reads back an artifact `push` itself just wrote, so a registry that has not finished propagating the new tag is a race, not a verdict — GHCR in particular mints the pull token before the tag is listed and answers the first fetch `403: denied`. Verification therefore retries up to **4 attempts** with a linear backoff of **500ms, 1s, 1.5s** (≈3s worst case) when the failed read's output matches a transient class, case-insensitive:
+
+| Class | Matched substrings |
+|---|---|
+| Authorization / propagation | `401`, `403`, `404`, `denied`, `unauthorized`, `not found`, `manifest unknown` |
+| Transport | `timeout`, `timed out`, `temporary failure`, `connection reset`, `connection refused`, `eof`, `no such host`, `tls handshake` |
+| Server-side | `service unavailable`, `too many requests`, `500 `, `502`, `503` |
+
+Any other failure is treated as final and fails on the first attempt. A read that never succeeds still fails the push after the last attempt — the retry bounds a race, it does not swallow a persistent failure.
 
 ### Common flags
 
@@ -240,7 +253,7 @@ gh auth token -u <owner> -h github.com | docker login ghcr.io -u <owner> --passw
 | `NO_BUILDABLE_CONTEXT` | No `<tenant>-devops/docker/<image>/` build context found to build the version from. | `1` |
 | `REGISTRY_AUTH_FAILED` | All retry attempts failed (or no TTY for the interactive login). | `2` |
 | `MANIFEST_LIST_ASSEMBLY_FAILED` | Per-arch tags pushed but `docker manifest create` failed. | `2` |
-| `CHART_PUSH_FAILED` | Images pushed but `helm push` or the `helm pull` verification of the runtime chart failed — the version is not yet deployable. | `2` |
+| `CHART_PUSH_FAILED` | Images pushed but a chart's `helm push`, or its `helm pull` verification after every retry, failed — the version is not yet deployable. Charts publish one at a time, so the error names the split explicitly (`published:` / `failed:` / `not attempted:`) and states the recovery: re-run `erun push --version <version>`, which republishes idempotently. | `2` |
 
 ---
 
@@ -250,7 +263,7 @@ gh auth token -u <owner> -h github.com | docker login ghcr.io -u <owner> --passw
 
 ### Common flags
 
-`--version`, `--runtime-image`, `--current`, `--components`, `--force`, `--rollout-timeout`, `--dry-run`, `--output`. Subcommand: `erun deploy <component>`.
+`--version`, `--runtime-image`, `--current`, `--components`, `--force`, `--rollout-timeout`, `--mcp-auth-public-key`, `--no-mcp-auth`, `--dry-run`, `--output`. Subcommand: `erun deploy <component>`.
 
 ### Version selection — `--version` / `--current` (required)
 
@@ -315,6 +328,33 @@ The selection resolves by **precedence** — the first non-empty tier wins entir
 
 A chart deploys **iff** its component name is in the resolved selection. The runtime deploys only when the selection names a runtime alias, or when the selection is empty (tier 4) — an explicit selection that omits the runtime deploys the named components without it. `erun-powerdns` is the platform's authoritative DNS singleton; it runs the gpgsql backend against `erun-backend-postgres`, so sequence it after postgres in the plan. The dry-run trace names the tier: `deploy: component selection source <tier>; deploying the runtime chart alone` (empty selection) or `deploy: component selection source <tier>; components <a, b, …>`.
 
+### MCP-auth stickiness and the downgrade guard {#deploy-mcp-auth}
+
+`erun deploy` renders the chart from scratch (no `helm --reuse-values`), so any `mcpAuth.*` value it does not set falls back to the chart default — off. Because the edge's `raw` tool executes commands in the pod, an omission is a privilege downgrade, not a cosmetic one. The setting is therefore resolved from the environment, with an explicit opt-out:
+
+| Input | Resolution |
+|---|---|
+| `--mcp-auth-public-key <path>` (MCP `deploy` `mcp_auth_public_key` input) | Trust that key. The path is persisted to `EnvConfig.mcpauthpublickeypath` after a successful runtime rollout. |
+| Neither flag, `EnvConfig.mcpauthpublickeypath` set | Rethread the recorded key. Trace: `deploy: mcp auth: rethreading the env's recorded public key <path>`. |
+| Neither flag, no recorded key, `EnvConfig.mcpauthissuer` set | The `https://` OIDC-issuer path (unchanged; already an env setting). |
+| `--no-mcp-auth` (MCP `deploy` `no_mcp_auth` input) | Resolve **no** authentication and clear `mcpauthpublickeypath`. Suppresses the OIDC-issuer path for this deploy without erasing `mcpauthissuer`. Trace: `deploy: mcp auth disabled by request; …`. |
+
+**Downgrade guard.** When the resolved plan has authentication off and `--no-mcp-auth` was not given, deploy reads the live release's values (`helm get values <release> -o json`) and fails at resolution if `mcpAuth.enabled` is true — the case of an environment that enabled authentication before the key was recorded. Error code `MCP_AUTH_DOWNGRADE_REFUSED`; the message names both remedies. The read runs **only** on that path (an authenticated deploy pays nothing) and a release that cannot be read imposes no constraint, so an unreachable cluster never blocks a deploy. `ERUN_MCP_AUTH_LIVE_PROBE_OVERRIDE` is the integration-suite seam that answers the read without a cluster; it is a test seam, not a production knob.
+
+The guard is scoped to explicit deploy requests (`erun deploy`, `erun upgrade`, `erun publish`, `open --deploy`, `build --deploy`). `erun open`'s heal-redeploy rethreads a recorded key but is never blocked by the guard — it must still be able to hand over a shell.
+
+### In-pod guard for `local-agent` environments {#deploy-in-pod-local-agent}
+
+The erun config store inside a runtime pod is a projection of the `ERUN_*` env vars the chart injects (see [`erun doctor --sync-config`](#erun-doctor)), not the host config that defines the environment. For a `local-agent` environment that projection is missing everything that shapes the env — the hostPath worktree, the local port range, the pod resource limits, and the runtime registry — so an in-pod resolve silently substitutes defaults and the rollout reshapes the environment (and cuts the MCP channel that issued it).
+
+`erun deploy` refuses that combination at resolution: error code `IN_POD_LOCAL_AGENT_RUNTIME_DEPLOY`, naming the host command to run instead. The guard fires only when all of the following hold, so nothing else regresses:
+
+- The environment's `type` is `local-agent`.
+- The process is inside an erun runtime pod, identified by the chart-set `ERUN_TENANT` + `ERUN_ENVIRONMENT` pair, and they name **this** environment. (A kubeconfig or an `in-cluster` context is not the signal — both exist off-pod.)
+- The resolved specs include the runtime chart (`<tenant>-devops`). A component-only selection is unaffected.
+
+A `remote-agent` environment owns its worktree inside the pod, so it keeps deploying itself in-pod.
+
 ### Deploy-plan resolution
 
 The deploy plan comes from `ProjectConfig.environments.<env>.k8s.deployments[]` (see [Configuration · `environments.<env>.k8s.deployments[]`](/reference/configuration#per-project-config)). It serves two roles: **selection tier 3** above — its charts are the deploy selection when no `--components` and no saved `deploy.components` apply — and the **ordering** source: steps deploy in listed order, and a list within a step deploys in parallel. When the field is absent, `erun deploy` falls back to ordering by chart dependency declarations; on a tie, alphabetical by component name.
@@ -376,6 +416,8 @@ The recovery is bounded to a single retry (the delete removes the conflict, so t
 | `HELM_UPGRADE_FAILED` | A step in the plan failed (or helm's own `--timeout` elapsed while the rollout was still not ready); later steps are not executed. | `2` |
 | `ROLLOUT_CONTAINER_FAILED` | The [pod monitor](#rollout-wait-and-pod-monitoring) observed a terminal container failure (crash loop, config/runtime error, or a permanent image-pull rejection) and aborted the rollout early instead of waiting out the timeout. The message names the pod, container, and reason. | `2` |
 | `INVALID_ROLLOUT_TIMEOUT` | `--rollout-timeout` or `EnvConfig.deploy.timeout` is not a positive Go duration. Nothing runs. | `1` |
+| `MCP_AUTH_DOWNGRADE_REFUSED` | The live release has `mcpAuth.enabled=true` but the resolved plan has no authentication, and `--no-mcp-auth` was not given. Nothing runs. See [MCP-auth stickiness](#deploy-mcp-auth). | `1` |
+| `IN_POD_LOCAL_AGENT_RUNTIME_DEPLOY` | A `local-agent` environment's runtime chart was deployed from inside that environment's own runtime pod, where the config store is not authoritative. Nothing runs. See [In-pod guard](#deploy-in-pod-local-agent). | `1` |
 
 ---
 
@@ -511,6 +553,61 @@ See [MCP overview](/mcp/overview) for the protocol and the tool list. The launch
 |---|---|---|---|
 | `--port <n>` | int | `EnvConfig.mcpport` (default `17000`). | The HTTP listener port. |
 | `--host <addr>` | string | `127.0.0.1` | The bind address. The in-pod default is loopback-only. |
+| `--path <p>` | string | `/mcp` | The HTTP path the endpoint is served from. |
+
+### `erun mcp call` / `tools` / `token` — client side
+
+These call an environment's MCP edge rather than serving one; they are the supported way for a script or an orchestrating Agent to reach an env without configuring an MCP client, and the reason no MCP *tool* exists for this (a tool that calls another env's edge would invert the transport). All three share the target flags:
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--tenant <t>` | string | The current scope. | Target a specific tenant. |
+| `--environment <e>` | string | The tenant's default env. | Target a specific environment; requires `--tenant`. |
+| `--dry-run` | bool | `false` | Resolve the endpoint and trace the request without sending it. |
+| `--output json` | string | `text` | Emit the structured result on stdout. |
+
+`call` adds:
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--tool <name>` | string | *(required)* | The tool to invoke. |
+| `--args <json>` | string | `{}` | The tool's arguments as a JSON object. |
+
+Resolution and request contract:
+
+1. The target resolves through the same path as `deploy` / `open` (explicit flags, else the current runtime directory).
+2. The endpoint is `http://127.0.0.1:<localPort>/mcp`, where `localPort` is the env's MCP port — the value `erun list` reports and `erun open` forwards.
+3. A bearer is minted **per HTTP request**, immediately before it is sent: EdDSA (Ed25519) over the desktop identity, `iss=file:///etc/erun/mcp-auth/desktopid.pub`, `aud=erun-mcp:<tenant>/<environment>`, 5-minute expiry. No client-side timeout is imposed on the call, so a tool that runs for minutes is not cut short and cannot fail on an aged-out token.
+4. The handshake is the standard one — `initialize`, `notifications/initialized`, then `tools/call` or `tools/list` — propagating `Mcp-Session-Id` and accepting both plain-JSON and SSE-framed replies.
+
+`--output json` shapes:
+
+```json
+// erun mcp call --output json
+{ "tool": "version", "text": "{\"version\":\"1.0.80\"}", "structured": { "version": "1.0.80" }, "isError": false }
+
+// erun mcp tools --output json
+{ "tools": [ { "name": "raw", "description": "…", "inputSchema": { "type": "object", "properties": {} } } ] }
+
+// erun mcp token --output json
+{ "tenant": "myapp", "environment": "local", "endpoint": "http://127.0.0.1:17000/mcp",
+  "issuer": "file:///etc/erun/mcp-auth/desktopid.pub", "audience": "erun-mcp:myapp/local",
+  "expiresAt": "2026-05-24T10:47:15Z", "token": "eyJhbGciOiJFZERTQSI…" }
+```
+
+`text` is every text content block of the tool result joined by newlines; `structured` is the tool's `structuredContent`, absent when the tool returns none. In text mode `call` prints `text`, or the structured payload when the tool returned no text.
+
+Error codes:
+
+| Code | Cause | Exit code |
+|---|---|---|
+| `--tool is required` | `call` invoked without `--tool`. | `1` |
+| `--args must be a JSON object` | `--args` did not parse as a JSON object. Raised before the target resolves. | `1` |
+| `MCP endpoint is not reachable` | The dial to the local MCP port failed — normally a missing port-forward. Recovery: `erun open <tenant> <env>`. | `1` |
+| `MCP endpoint rejected the bearer token` | The edge answered `401`/`403`: it does not trust this machine's identity. Recovery: redeploy the env from the desktop app so the current public key is injected. | `1` |
+| `MCP tool <name> reported an error` | The tool set `isError`; the message is the tool's own. | `1` |
+| `MCP tools/call failed` | A JSON-RPC-level error (unknown tool, invalid arguments), reported with the protocol code. | `1` |
+| `no desktop identity at <path>` | No private key on this machine. A key is never generated here, because a fresh identity signs tokens no deployed env trusts. Recovery: open an env from the desktop app once. | `1` |
 
 ---
 

@@ -67,19 +67,9 @@ func (s *ReviewService) UpdateStatus(ctx context.Context, reviewID string, statu
 		return model.Review{}, err
 	}
 
+	// READY without a build is the missed-merge-window path, not a build result.
 	if status == model.ReviewStatusReady && buildID == "" {
-		if review.Status != model.ReviewStatusMerge {
-			return model.Review{}, repository.ErrNotFound
-		}
-		review.Status = model.ReviewStatusReady
-		updated, err := s.reviews.Update(ctx, review)
-		if err != nil {
-			return model.Review{}, err
-		}
-		if err := s.enqueueReview(ctx, updated); err != nil {
-			return model.Review{}, err
-		}
-		return updated, nil
+		return s.requeueMergingReview(ctx, review)
 	}
 
 	if reviewLastBuildColumn(status) != "" {
@@ -89,6 +79,29 @@ func (s *ReviewService) UpdateStatus(ctx context.Context, reviewID string, statu
 		return s.updateBuildStatus(ctx, review, status, buildID)
 	}
 
+	return s.dequeueWithStatus(ctx, review, status)
+}
+
+// requeueMergingReview returns a review that missed its merge window to READY at
+// the end of its target branch queue; only a merging review can take that path.
+func (s *ReviewService) requeueMergingReview(ctx context.Context, review model.Review) (model.Review, error) {
+	if review.Status != model.ReviewStatusMerge {
+		return model.Review{}, repository.ErrNotFound
+	}
+	review.Status = model.ReviewStatusReady
+	updated, err := s.reviews.Update(ctx, review)
+	if err != nil {
+		return model.Review{}, err
+	}
+	if err := s.enqueueReview(ctx, updated); err != nil {
+		return model.Review{}, err
+	}
+	return updated, nil
+}
+
+// dequeueWithStatus applies a status no queued review may hold, so the review
+// also leaves the merge queue.
+func (s *ReviewService) dequeueWithStatus(ctx context.Context, review model.Review, status model.ReviewStatus) (model.Review, error) {
 	review.Status = status
 	updated, err := s.reviews.Update(ctx, review)
 	if err != nil {
@@ -107,25 +120,39 @@ func (s *ReviewService) MarkBuildResult(ctx context.Context, reviewID string, bu
 	}
 
 	if successful {
-		if review.Status != model.ReviewStatusOpen && review.Status != model.ReviewStatusFailed {
-			return nil
-		}
-		review.Status = model.ReviewStatusReady
-		review.LastReadyBuildID = buildID
-		updated, err := s.reviews.Update(ctx, review)
-		if err != nil {
-			return err
-		}
-		if err := s.enqueueReview(ctx, updated); err != nil {
-			return err
-		}
-		_, err = s.AdvanceMergeQueue(ctx, updated.TargetBranch)
-		if err != nil && !errors.Is(err, repository.ErrNotFound) {
-			return err
-		}
+		return s.markBuildSucceeded(ctx, review, buildID)
+	}
+	return s.markBuildFailed(ctx, review, buildID)
+}
+
+// markBuildSucceeded queues a review whose build passed and lets its target
+// branch start merging. A review in any other status has already moved past this
+// build, so its status stands.
+func (s *ReviewService) markBuildSucceeded(ctx context.Context, review model.Review, buildID string) error {
+	if review.Status != model.ReviewStatusOpen && review.Status != model.ReviewStatusFailed {
 		return nil
 	}
+	review.Status = model.ReviewStatusReady
+	review.LastReadyBuildID = buildID
+	updated, err := s.reviews.Update(ctx, review)
+	if err != nil {
+		return err
+	}
+	if err := s.enqueueReview(ctx, updated); err != nil {
+		return err
+	}
+	// Another review already merging on that branch is the normal case, not a
+	// failure of this build.
+	_, err = s.AdvanceMergeQueue(ctx, updated.TargetBranch)
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
+		return err
+	}
+	return nil
+}
 
+// markBuildFailed fails a review whose build failed and drops it from the merge
+// queue. A review past those statuses keeps the status it has.
+func (s *ReviewService) markBuildFailed(ctx context.Context, review model.Review, buildID string) error {
 	if review.Status != model.ReviewStatusOpen &&
 		review.Status != model.ReviewStatusFailed &&
 		review.Status != model.ReviewStatusReady &&
@@ -137,7 +164,7 @@ func (s *ReviewService) MarkBuildResult(ctx context.Context, reviewID string, bu
 	if _, err := s.reviews.Update(ctx, review); err != nil {
 		return err
 	}
-	return s.reviews.DeleteMergeQueueEntryByReview(ctx, reviewID)
+	return s.reviews.DeleteMergeQueueEntryByReview(ctx, review.ReviewID)
 }
 
 func (s *ReviewService) updateBuildStatus(ctx context.Context, review model.Review, status model.ReviewStatus, buildID string) (model.Review, error) {

@@ -33,15 +33,8 @@ func main() {
 }
 
 func run(args []string) error {
-	cfg := configFromEnv()
-	flags := flag.NewFlagSet("eapi", flag.ContinueOnError)
-	flags.StringVar(&cfg.Host, "host", cfg.Host, "Host interface to bind the backend API HTTP server to")
-	flags.IntVar(&cfg.Port, "port", cfg.Port, "Port to bind the backend API HTTP server to")
-	flags.StringVar(&cfg.DatabaseURL, "database-url", cfg.DatabaseURL, "Backend PostgreSQL database URL")
-	flags.StringVar(&cfg.AllowedIssuers, "oidc-allowed-issuers", cfg.AllowedIssuers, "Comma-separated OIDC issuer allow-list; empty allows any issuer resolved from a token")
-	flags.StringVar(&cfg.DesktopPublicKeyPath, "desktop-public-key-path", cfg.DesktopPublicKeyPath, "Path to the desktop Ed25519 public key; when set, the API trusts file://<path> desktop-signed tokens (issue #674), the same auth the MCP edge uses")
-	flags.StringVar(&cfg.MCPSigningKeyPath, "mcp-signing-key-path", cfg.MCPSigningKeyPath, "Path to the backend's Ed25519 MCP signing private key; when set, the mcp-token endpoint mints per-env MCP bearer tokens for the console (unset disables it: the endpoint reports 501)")
-	if err := flags.Parse(args); err != nil {
+	cfg, err := resolveConfig(args)
+	if err != nil {
 		return err
 	}
 
@@ -51,26 +44,11 @@ func run(args []string) error {
 	}
 	defer func() { _ = db.Close() }()
 
-	cipher, err := optionalCipher(cfg.SecretsKey)
+	optional, err := optionalDependencies(cfg)
 	if err != nil {
 		return err
 	}
-	dbosCtx, err := optionalDBOS(cfg.DBOSDatabaseURL)
-	if err != nil {
-		return err
-	}
-	mcpSigner, err := optionalMCPSigner(cfg.MCPSigningKeyPath)
-	if err != nil {
-		return err
-	}
-	dns01Broker, err := optionalDNS01Broker(cfg, mcpSigner)
-	if err != nil {
-		return err
-	}
-	kubeClient, err := optionalKubeClient(cfg)
-	if err != nil {
-		return err
-	}
+	dbosCtx := optional.dbosCtx
 
 	handler, err := backendapi.NewHandler(backendapi.HandlerOptions{
 		TokenVerifier: backendapi.NewBearerTokenVerifier(backendapi.BearerTokenVerifierOptions{
@@ -81,11 +59,11 @@ func run(args []string) error {
 		DB:            db,
 		DBDialect:     repository.DialectPostgres,
 		DBOSContext:   dbosCtx,
-		Cipher:        cipher,
+		Cipher:        optional.cipher,
 		AWSEndpoint:   cfg.AWSEndpoint,
-		MCPSigner:     mcpSigner,
-		DNS01Broker:   dns01Broker,
-		KubeClient:    kubeClient,
+		MCPSigner:     optional.mcpSigner,
+		DNS01Broker:   optional.dns01Broker,
+		KubeClient:    optional.kubeClient,
 		EnvDeploy: provision.EnvDeployConfig{
 			Registry:               cfg.EnvDeployRegistry,
 			PlatformNamespace:      cfg.PlatformNamespace,
@@ -113,6 +91,62 @@ func run(args []string) error {
 	log.Printf("erun api listening on %s; database=postgres audit=postgres oidc allowed issuers=%d", server.Addr, len(splitCSV(cfg.AllowedIssuers)))
 	log.Print(identityBootstrapStatus(context.Background(), db))
 	return server.ListenAndServe()
+}
+
+// resolveConfig layers command-line flags over the environment-derived config.
+func resolveConfig(args []string) (apiConfig, error) {
+	cfg := configFromEnv()
+	flags := flag.NewFlagSet("eapi", flag.ContinueOnError)
+	flags.StringVar(&cfg.Host, "host", cfg.Host, "Host interface to bind the backend API HTTP server to")
+	flags.IntVar(&cfg.Port, "port", cfg.Port, "Port to bind the backend API HTTP server to")
+	flags.StringVar(&cfg.DatabaseURL, "database-url", cfg.DatabaseURL, "Backend PostgreSQL database URL")
+	flags.StringVar(&cfg.AllowedIssuers, "oidc-allowed-issuers", cfg.AllowedIssuers, "Comma-separated OIDC issuer allow-list; empty allows any issuer resolved from a token")
+	flags.StringVar(&cfg.DesktopPublicKeyPath, "desktop-public-key-path", cfg.DesktopPublicKeyPath, "Path to the desktop Ed25519 public key; when set, the API trusts file://<path> desktop-signed tokens (issue #674), the same auth the MCP edge uses")
+	flags.StringVar(&cfg.MCPSigningKeyPath, "mcp-signing-key-path", cfg.MCPSigningKeyPath, "Path to the backend's Ed25519 MCP signing private key; when set, the mcp-token endpoint mints per-env MCP bearer tokens for the console (unset disables it: the endpoint reports 501)")
+	if err := flags.Parse(args); err != nil {
+		return apiConfig{}, err
+	}
+	return cfg, nil
+}
+
+// apiDependencies are the runtime pieces the API only gets when their
+// configuration is present; each stays nil otherwise, disabling its feature.
+type apiDependencies struct {
+	cipher      *secrets.Cipher
+	dbosCtx     dbos.DBOSContext
+	mcpSigner   *mcptoken.Signer
+	dns01Broker *dns01broker.Broker
+	kubeClient  kubernetes.Interface
+}
+
+func optionalDependencies(cfg apiConfig) (apiDependencies, error) {
+	cipher, err := optionalCipher(cfg.SecretsKey)
+	if err != nil {
+		return apiDependencies{}, err
+	}
+	dbosCtx, err := optionalDBOS(cfg.DBOSDatabaseURL)
+	if err != nil {
+		return apiDependencies{}, err
+	}
+	mcpSigner, err := optionalMCPSigner(cfg.MCPSigningKeyPath)
+	if err != nil {
+		return apiDependencies{}, err
+	}
+	dns01Broker, err := optionalDNS01Broker(cfg, mcpSigner)
+	if err != nil {
+		return apiDependencies{}, err
+	}
+	kubeClient, err := optionalKubeClient(cfg)
+	if err != nil {
+		return apiDependencies{}, err
+	}
+	return apiDependencies{
+		cipher:      cipher,
+		dbosCtx:     dbosCtx,
+		mcpSigner:   mcpSigner,
+		dns01Broker: dns01Broker,
+		kubeClient:  kubeClient,
+	}, nil
 }
 
 func identityBootstrapStatus(ctx context.Context, db *sql.DB) string {

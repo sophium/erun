@@ -36,7 +36,18 @@ func TestSignerMintsPerEnvToken(t *testing.T) {
 		t.Fatalf("audience = %q, want %q", audience, want)
 	}
 
-	claims := decodeClaims(t, token)
+	assertEnforcedClaims(t, decodeClaims(t, token), audience, now)
+
+	if !verifySignature(t, token, publicPEM) {
+		t.Fatal("token signature did not verify against the backend public key")
+	}
+}
+
+// assertEnforcedClaims checks every claim the deployed edge enforces on a minted
+// token: the fixed in-pod file:// issuer, the per-env audience, the ERun-user
+// sub, and a bounded lifetime.
+func assertEnforcedClaims(t *testing.T, claims eruncommon.MCPTokenClaims, audience string, now time.Time) {
+	t.Helper()
 	if claims.Issuer != eruncommon.DesktopMCPIssuer() {
 		t.Fatalf("iss = %q, want %q", claims.Issuer, eruncommon.DesktopMCPIssuer())
 	}
@@ -51,10 +62,6 @@ func TestSignerMintsPerEnvToken(t *testing.T) {
 	}
 	if got := claims.ExpiresAt - claims.IssuedAt; got != int64(tokenTTL/time.Second) {
 		t.Fatalf("ttl = %ds, want %ds", got, int64(tokenTTL/time.Second))
-	}
-
-	if !verifySignature(t, token, publicPEM) {
-		t.Fatal("token signature did not verify against the backend public key")
 	}
 }
 

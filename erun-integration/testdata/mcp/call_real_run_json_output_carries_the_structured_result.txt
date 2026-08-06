@@ -1,0 +1,9 @@
+{
+  "tool": "version",
+  "text": "<VERSION>",
+  "structured": {
+    "version": "<VERSION>"
+  }
+}
+audit: erun mcp call --output json --tool version
+mcp: team/dev edge resolved to http://<LOOPBACK>:26100/mcp

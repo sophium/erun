@@ -56,6 +56,8 @@ This installs the published `erun-devops` chart with `ghcr.io/sophium/erun-devop
 | `--current` | Redeploy the version the environment is already recorded as running (its persisted runtime version). Use it to re-roll the same version, or after a `--force`-style retry, without retyping the number. Required unless `--version` is given. |
 | `--runtime-image <ref>` | Install the runtime running this image via the published `erun-devops` chart (`imageOverrides.erun-devops`), pinned to `--version`, **even when the env has a repo-local runtime chart** (which it bypasses). Use it to [bootstrap an env on the canonical ERun base image](#runtime-image-bootstrap) before its own image is built; mirrors [`erun open --runtime-image`](/cli/open). |
 | `--components <name,name,...>` | The exact charts to deploy this run — chart directory names under `<tenant>-devops/k8s/`, plus the runtime release name `<tenant>-devops`. Overrides the env's saved selection and the deployment plan for this run; an unknown name (matching no chart and no runtime alias) is rejected with `unknown deploy component`. See [Agent reference · `--components`](/agent-reference/cli-flags#components-value-set). |
+| `--mcp-auth-public-key <path>` | Require the environment's [MCP edge](/agent-reference/api-protocol#mcp-edge) to authenticate bearer tokens signed by this PEM public key. The key is recorded on the environment, so later deploys keep authenticating without repeating the flag — see [MCP edge authentication is sticky](#mcp-auth-sticky). |
+| `--no-mcp-auth` | Deploy the environment's MCP edge unauthenticated (loopback-only) and forget its recorded public key. Required to turn authentication **off**; deploy refuses to do it by omission. |
 | `--force` | Re-run helm upgrade even when the resolved version is unchanged and nothing needs rolling. |
 | `--rollout-timeout <dur>` | How long to wait for the rollout before giving up (e.g. `10m`). Defaults to the env's setting, or 5 minutes. Raise it for the first deploy of a large image on a slow connection; see [rollout wait and monitoring](/agent-reference/cli-flags#rollout-wait-and-pod-monitoring). |
 | `--dry-run` | Resolve and print every command it would run — `helm dependency build` for local umbrella charts, `helm pull --untar` for a by-reference umbrella's bundled values, then `helm upgrade --install` (and any image-copy step) — without executing. |
@@ -76,6 +78,34 @@ You always say *which* version:
 - **`--current`** — reinstall the version the environment already runs (its persisted runtime version). Use it to re-roll the same version without retyping the number.
 
 To produce a *new* version from your working tree, build and push it first ([`erun build`](/cli/build) mints it, [`erun push`](/cli/push) publishes it), then `deploy --version` that version. The desktop app composes those steps for you; the `build --deploy` shortcut runs them end to end for an Operator at the terminal (see [Command primitives](/concepts/command-primitives)).
+
+## MCP edge authentication is sticky {#mcp-auth-sticky}
+
+An environment whose [MCP edge](/agent-reference/api-protocol#mcp-edge) authenticates bearer tokens keeps authenticating across redeploys. `erun deploy` does not reuse the live release's values, so a version bump renders the chart from scratch — and the edge's `raw` tool runs commands in the pod, so an edge that quietly lost its trust anchor is an open door. Deploy closes that by making the setting part of the environment:
+
+- **Enabling records the key.** `erun deploy --mcp-auth-public-key <path>` (and [`erun init --mcp-auth-public-key`](/cli/init)) writes the path to the environment's [`mcpauthpublickeypath`](/reference/configuration#envconfig).
+- **A later deploy rethreads it.** With no `--mcp-auth-public-key`, deploy reuses the recorded key and renders the same `mcpAuth.*` values. The trace names the decision: `deploy: mcp auth: rethreading the env's recorded public key <path>`.
+- **Turning it off is explicit.** `--no-mcp-auth` resolves no authentication and clears the recorded key.
+- **A silent downgrade is refused.** If the live release still has authentication enabled but the resolved plan has none — an environment that enabled it before the key was recorded — deploy stops before the rollout and tells you to re-supply the key or pass `--no-mcp-auth` on purpose.
+
+The `https://` OIDC-issuer path ([`mcpauthissuer`](/reference/configuration#envconfig)) is already an environment setting, so it was never at risk; `--no-mcp-auth` suppresses it for the deploy without erasing the tenant's issuer registration.
+
+## Deploying a local-agent environment from inside its own pod {#local-agent-in-pod}
+
+A `local-agent` environment is defined by state that lives on your machine: the checkout the runtime pod hostPath-mounts, the local port range, the pod's resource limits, and the registry its chart comes from. The runtime pod carries only the projection the chart injected, so resolving the deploy in there falls back to defaults — the mount path as the worktree host path, the default port range, default resources, the project's deploy registry — and rolling that out reshapes the environment and cuts the very MCP connection that asked for it.
+
+`erun deploy` refuses that combination: deploying the **runtime** chart of a `local-agent` environment from inside that environment's own pod errors and points at the host CLI. Component-only deploys still work in-pod (a component chart carries no environment shape), and a `remote-agent` environment — which owns its worktree inside the pod — keeps deploying itself normally.
+
+## Port-forwards after a rollout
+
+A rollout replaces the runtime pod, and `kubectl port-forward` is bound to one pod: the local socket keeps listening while every request fails. `erun deploy` does not own port-forward lifecycle — [`erun open`](/cli/open) starts and tracks the forwards — so when it finds the environment's tracked MCP forward no longer answering after a rollout, it says so and names the repair:
+
+```
+warning: the local port-forwards for team/dev still point at the replaced runtime pod
+    re-establish them with: erun open --tenant team --environment dev --no-shell --no-alias-prompt
+```
+
+An environment you never opened on this host has no tracked forward, so nothing is reported.
 
 ## Skipping helm when nothing changed
 
@@ -109,6 +139,18 @@ Bootstrap a new environment on the canonical ERun base image (before its own ima
 erun deploy team dev --version 1.2.3 --runtime-image ghcr.io/sophium/erun-devops
 ```
 
+Require the environment's MCP edge to authenticate, recording the key for later deploys:
+
+```bash
+erun deploy team dev --version 1.2.3 --mcp-auth-public-key ~/.config/erun/desktopid.pub
+```
+
+Turn that authentication back off on purpose:
+
+```bash
+erun deploy team dev --version 1.2.3 --no-mcp-auth
+```
+
 Install a version plus the backend stack:
 
 ```bash
@@ -139,6 +181,8 @@ erun deploy team prod --version 1.2.3
 |---|---|
 | Neither `--version` nor `--current` given. | Errors before any change: `deploy requires a version — pass --version <v> or --current`. `deploy` never builds, so there is nothing to install without one. Exit code 1. |
 | Cluster unreachable. | Errors before any change; exit code 1, message identifies the context. |
+| The live release has MCP authentication enabled but the deploy resolved none. | Errors during resolution, before `helm upgrade`: `MCP auth is enabled on the live <release> release, but this deploy resolved none …`. Re-supply `--mcp-auth-public-key <path>`, or pass `--no-mcp-auth` to turn it off on purpose. See [MCP edge authentication is sticky](#mcp-auth-sticky). Exit code 1. |
+| Deploying a `local-agent` environment's runtime chart from inside that environment's own runtime pod. | Errors during resolution, before any change, and names the host command to run instead. The in-pod config is not authoritative for a `local-agent` environment — see [Deploying a local-agent environment from inside its own pod](#local-agent-in-pod). Exit code 1. |
 | Linked cloud context is stopped. | Starts the context, waits for readiness, then proceeds. If start fails, errors. |
 | `--version <v>` names a version whose image was never published. | Errors during resolution, before `helm upgrade`: `image <ref> is not present locally or in the registry; deploy installs an existing version and does not build it — run erun build/push to create it first`. No build, no push, no partial deploy. |
 | `--current` but the environment has no recorded version yet. | Errors before any change — there is no current version to redeploy. Deploy a specific `--version` once to seed it. |

@@ -141,6 +141,13 @@ func TestEndpointURL(t *testing.T) {
 }
 
 func TestHTTPHandlerExposesVersionTool(t *testing.T) {
+	// newHTTPHandler resolves its auth trust anchor from the ambient environment,
+	// so running this test inside an erun runtime pod (which sets
+	// ERUN_MCP_TRUSTED_ISSUER) would enable auth and reject the unauthenticated
+	// client. Clear the anchors so the tool surface is what is under test.
+	for _, key := range []string{envMCPTrustedIssuers, envMCPTrustedIssuer, envMCPAudience, envTenant} {
+		t.Setenv(key, "")
+	}
 	cfg := HTTPConfig{Path: "/mcp"}
 	info := eruncommon.BuildInfo{
 		Version: "1.2.3",

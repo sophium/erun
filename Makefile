@@ -1,15 +1,15 @@
 .PHONY: integration-test lint check
 
-# Go modules linted by the in-build gate. This list must stay limited to the
-# modules the erun-devops image test stage actually COPYs into its context
-# (erun-devops/docker/erun-devops/Dockerfile): erun-cli, erun-common, erun-mcp,
-# erun-integration. Adding a module the stage does not COPY makes `cd $m` fail
-# and breaks every build (this happened with erun-backend-api, #599). erun-ui
-# and erun-backend are not built by this image, so they are not gated here:
-# erun-ui's lint lives in erun-ui/build.sh, and the .githooks pre-commit hook
-# lints every module (erun-ui + erun-backend included) locally, where the full
-# toolchain is present.
-LINT_MODULES := erun-common erun-cli erun-mcp erun-integration
+# Go modules linted by the in-build gate: erun-cli, erun-common, erun-mcp,
+# erun-integration, and erun-backend/erun-backend-api. Every entry must also be
+# COPYd into the erun-devops image test stage's context
+# (erun-devops/docker/erun-devops/Dockerfile) — a module the stage does not COPY
+# makes `cd $m` fail and breaks every build (this happened with
+# erun-backend-api, #599), so add the COPY in the same change as the entry.
+# erun-ui and erun-backend-db are not gated here: erun-ui's lint lives in
+# erun-ui/build.sh, and the .githooks pre-commit hook lints every module
+# locally, where the full toolchain is present.
+LINT_MODULES := erun-common erun-cli erun-mcp erun-integration erun-backend/erun-backend-api
 
 # Run golangci-lint across the gated modules, each against its own
 # .golangci.yml (erun-integration has none, so it uses the default linters).

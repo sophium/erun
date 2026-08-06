@@ -21,9 +21,11 @@ var (
 
 const usernameHintHeader = "X-ERun-Username"
 
-type Claims = security.Claims
-type Tenant = model.Tenant
-type User = model.User
+type (
+	Claims = security.Claims
+	Tenant = model.Tenant
+	User   = model.User
+)
 
 type Identity struct {
 	Tenant Tenant
@@ -173,24 +175,11 @@ func NewAuthMiddleware(options AuthMiddlewareOptions) (*AuthMiddleware, error) {
 
 func (m *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token, err := bearerToken(r.Header.Get("Authorization"))
+		claims, err := m.authenticate(r)
 		if err != nil {
-			log.Printf("erun api auth rejected method=%s path=%s reason=%q", r.Method, r.URL.Path, err.Error())
 			http.Error(w, err.Error(), http.StatusUnauthorized)
 			return
 		}
-
-		claims, err := m.verifier.VerifyBearerToken(r.Context(), token)
-		if err != nil || strings.TrimSpace(claims.Issuer) == "" || strings.TrimSpace(claims.Subject) == "" {
-			reason := ErrInvalidBearerToken.Error()
-			if err != nil {
-				reason = err.Error()
-			}
-			log.Printf("erun api auth rejected method=%s path=%s reason=%q", r.Method, r.URL.Path, reason)
-			http.Error(w, ErrInvalidBearerToken.Error(), http.StatusUnauthorized)
-			return
-		}
-		claims = claimsWithUsernameHint(claims, r.Header.Get(usernameHintHeader))
 
 		identity, err := m.resolveIdentity(r.Context(), claims)
 		if err != nil {
@@ -199,44 +188,82 @@ func (m *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 			return
 		}
 
-		ctx := context.WithValue(r.Context(), authContextKey{}, AuthContext{
-			Claims: claims,
-			Tenant: identity.Tenant,
-			User:   identity.User,
-			Org:    identity.Org,
-		})
-		ctx = security.WithContext(ctx, security.Context{
-			TenantID:       identity.Tenant.TenantID,
-			TenantType:     string(identity.Tenant.Type),
-			ErunUserID:     identity.User.UserID,
-			ExternalIssuer: claims.Issuer,
-			ExternalUserID: claims.Subject,
-			ExternalOrgID:  identity.Org,
-		})
-		req := r.WithContext(ctx)
-		if m.authz != nil {
-			apiPath, ok := APIPathFromContext(req.Context())
-			if !ok {
-				log.Printf("erun api request rejected method=%s path=%s reason=%q", req.Method, req.URL.Path, "api path not resolved")
-				http.Error(w, "api path not resolved", http.StatusInternalServerError)
-				return
-			}
-			if err := m.authz.Authorize(req.Context(), req.Method, apiPath); err != nil {
-				log.Printf("erun api authorization rejected method=%s path=%s tenant=%q user=%q reason=%q", req.Method, apiPath, identity.Tenant.TenantID, identity.User.UserID, err.Error())
-				http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
-				return
-			}
-		}
-		if m.audit != nil {
-			if _, ok := APIPathFromContext(req.Context()); !ok {
-				log.Printf("erun api request rejected method=%s path=%s reason=%q", req.Method, req.URL.Path, "api path not resolved")
-				http.Error(w, "api path not resolved", http.StatusInternalServerError)
-				return
-			}
+		req := r.WithContext(authenticatedContext(r.Context(), claims, identity))
+		if !m.authorize(w, req, identity) {
+			return
 		}
 		_ = m.logAuditEvent(req)
 		next.ServeHTTP(w, req)
 	})
+}
+
+// authenticate verifies the request's bearer token and returns its claims. It
+// logs the concrete rejection reason and returns the client-facing error, which
+// deliberately hides verifier detail behind ErrInvalidBearerToken.
+func (m *AuthMiddleware) authenticate(r *http.Request) (Claims, error) {
+	token, err := bearerToken(r.Header.Get("Authorization"))
+	if err != nil {
+		logAuthRejected(r, err.Error())
+		return Claims{}, err
+	}
+	claims, err := m.verifier.VerifyBearerToken(r.Context(), token)
+	if err != nil || strings.TrimSpace(claims.Issuer) == "" || strings.TrimSpace(claims.Subject) == "" {
+		reason := ErrInvalidBearerToken.Error()
+		if err != nil {
+			reason = err.Error()
+		}
+		logAuthRejected(r, reason)
+		return Claims{}, ErrInvalidBearerToken
+	}
+	return claimsWithUsernameHint(claims, r.Header.Get(usernameHintHeader)), nil
+}
+
+func logAuthRejected(r *http.Request, reason string) {
+	log.Printf("erun api auth rejected method=%s path=%s reason=%q", r.Method, r.URL.Path, reason)
+}
+
+// authenticatedContext carries the resolved identity to route code both as the
+// auth context and as the security context repository transactions bind RLS from.
+func authenticatedContext(ctx context.Context, claims Claims, identity Identity) context.Context {
+	ctx = context.WithValue(ctx, authContextKey{}, AuthContext{
+		Claims: claims,
+		Tenant: identity.Tenant,
+		User:   identity.User,
+		Org:    identity.Org,
+	})
+	return security.WithContext(ctx, security.Context{
+		TenantID:       identity.Tenant.TenantID,
+		TenantType:     string(identity.Tenant.Type),
+		ErunUserID:     identity.User.UserID,
+		ExternalIssuer: claims.Issuer,
+		ExternalUserID: claims.Subject,
+		ExternalOrgID:  identity.Org,
+	})
+}
+
+// authorize enforces endpoint authorization and reports whether the request may
+// continue, writing the rejection itself. Both authorization and auditing key off
+// the canonical route path, so a request that reached here without one is a
+// route-registration fault rather than a caller error.
+func (m *AuthMiddleware) authorize(w http.ResponseWriter, req *http.Request, identity Identity) bool {
+	if m.authz == nil && m.audit == nil {
+		return true
+	}
+	apiPath, ok := APIPathFromContext(req.Context())
+	if !ok {
+		log.Printf("erun api request rejected method=%s path=%s reason=%q", req.Method, req.URL.Path, "api path not resolved")
+		http.Error(w, "api path not resolved", http.StatusInternalServerError)
+		return false
+	}
+	if m.authz == nil {
+		return true
+	}
+	if err := m.authz.Authorize(req.Context(), req.Method, apiPath); err != nil {
+		log.Printf("erun api authorization rejected method=%s path=%s tenant=%q user=%q reason=%q", req.Method, apiPath, identity.Tenant.TenantID, identity.User.UserID, err.Error())
+		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+		return false
+	}
+	return true
 }
 
 func (m *AuthMiddleware) resolveIdentity(ctx context.Context, claims Claims) (Identity, error) {
@@ -255,54 +282,57 @@ func (m *AuthMiddleware) resolveIdentity(ctx context.Context, claims Claims) (Id
 		cache = nil
 	}
 
+	// A cached success whose username the token now contradicts counts as a miss,
+	// so the refreshed username reaches the database.
 	if cache != nil {
-		if identity, err, ok := cache.Get(claims.Issuer, claims.Subject, org); ok {
-			if !cachedIdentityNeedsUsernameRefresh(identity, err, claims) {
-				return identity, err
-			}
+		identity, err, ok := cache.Get(claims.Issuer, claims.Subject, org)
+		if ok && !cachedIdentityNeedsUsernameRefresh(identity, err, claims) {
+			return identity, err
 		}
 	}
 
-	if m.identities != nil {
-		tenant, user, err := m.identities.ResolveIdentity(ctx, claims)
-		if err != nil || strings.TrimSpace(tenant.TenantID) == "" || strings.TrimSpace(user.UserID) == "" {
-			if err == nil {
-				err = ErrUserNotResolved
-			}
-			if cache != nil {
-				cache.SetFailure(claims.Issuer, claims.Subject, org, err)
-			}
-			return Identity{}, err
-		}
-		identity := Identity{Tenant: tenant, User: user, Org: m.resolvedOrg(ctx, claims, org, orgErr)}
-		if cache != nil {
-			cache.SetSuccess(claims.Issuer, claims.Subject, org, identity)
-		}
-		return identity, nil
-	}
-
-	tenant, err := m.tenants.ResolveTenantByIssuer(ctx, claims)
-	if err != nil || strings.TrimSpace(tenant.TenantID) == "" {
-		err = ErrTenantNotResolved
+	tenant, user, err := m.tenantAndUser(ctx, claims)
+	if err != nil {
 		if cache != nil {
 			cache.SetFailure(claims.Issuer, claims.Subject, org, err)
 		}
 		return Identity{}, err
 	}
-	user, err := m.users.ResolveUserByExternalID(ctx, tenant.TenantID, claims.Issuer, claims.Subject)
-	if err != nil || strings.TrimSpace(user.UserID) == "" {
-		err = ErrUserNotResolved
-		if cache != nil {
-			cache.SetFailure(claims.Issuer, claims.Subject, org, err)
-		}
-		return Identity{}, err
-	}
-
 	identity := Identity{Tenant: tenant, User: user, Org: m.resolvedOrg(ctx, claims, org, orgErr)}
 	if cache != nil {
 		cache.SetSuccess(claims.Issuer, claims.Subject, org, identity)
 	}
 	return identity, nil
+}
+
+// tenantAndUser resolves the tenant and ERun user for verified claims. The
+// combined identity resolver takes precedence when wired, because it owns
+// bootstrap and must create tenant, issuer, and user atomically.
+func (m *AuthMiddleware) tenantAndUser(ctx context.Context, claims Claims) (Tenant, User, error) {
+	if m.identities != nil {
+		return resolvedIdentity(m.identities.ResolveIdentity(ctx, claims))
+	}
+	tenant, err := m.tenants.ResolveTenantByIssuer(ctx, claims)
+	if err != nil || strings.TrimSpace(tenant.TenantID) == "" {
+		return Tenant{}, User{}, ErrTenantNotResolved
+	}
+	user, err := m.users.ResolveUserByExternalID(ctx, tenant.TenantID, claims.Issuer, claims.Subject)
+	if err != nil || strings.TrimSpace(user.UserID) == "" {
+		return Tenant{}, User{}, ErrUserNotResolved
+	}
+	return tenant, user, nil
+}
+
+// resolvedIdentity treats a blank tenant or user as unresolved, so a resolver
+// that reports no error but no identity cannot authenticate a request.
+func resolvedIdentity(tenant Tenant, user User, err error) (Tenant, User, error) {
+	if err == nil && (strings.TrimSpace(tenant.TenantID) == "" || strings.TrimSpace(user.UserID) == "") {
+		err = ErrUserNotResolved
+	}
+	if err != nil {
+		return Tenant{}, User{}, err
+	}
+	return tenant, user, nil
 }
 
 func (m *AuthMiddleware) resolveOrg(ctx context.Context, claims Claims) (string, error) {

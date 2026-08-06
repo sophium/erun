@@ -83,6 +83,12 @@ type DockerBuildSpec struct {
 	// its own fingerprint matched. It lets the trace name the real cause instead
 	// of the misleading "fingerprint image is missing".
 	CascadeRebuildFromTag string
+	// LocalBaseTag holds the image tag of the `FROM …:${ERUN_VERSION}` base that
+	// this same build produces locally, when that base is never published by this
+	// run. Such a base only exists under its per-arch local tags, so the wrapper's
+	// ERUN_VERSION build arg must name the arch being built or the plain version
+	// reference resolves nowhere.
+	LocalBaseTag string
 }
 
 type DockerPushSpec struct {

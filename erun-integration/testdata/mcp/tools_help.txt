@@ -1,0 +1,21 @@
+List the tools an environment's MCP edge exposes, with the arguments each one takes.
+
+Use it to discover what `erun mcp call --tool` accepts. Full JSON input schemas come with --output json. Reaching the edge requires the port-forward `erun open` establishes.
+
+Usage:
+  erun mcp tools [flags]
+
+Examples:
+  erun mcp tools
+  erun mcp tools --tenant acme --environment dev --output json
+
+Flags:
+      --dry-run              Resolve and trace mutating actions without executing them.
+      --environment string   Target a specific environment; requires --tenant
+  -h, --help                 help for tools
+      --tenant string        Target a specific tenant (default: the current scope)
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

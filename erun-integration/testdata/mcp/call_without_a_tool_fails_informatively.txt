@@ -1,0 +1,2 @@
+audit: erun mcp call --dry-run
+--tool is required; run `erun mcp tools` to list the environment's tools

@@ -169,7 +169,7 @@ func (s bootstrapRunner) ensureRemoteRuntime(target OpenResult, req ShellLaunchP
 	// Init owns the env's single deploy, so it must also carry the desktop's
 	// MCP-auth key; otherwise the desktop would redeploy right after init just to
 	// inject it, rolling the pod init just created. A blank path is a no-op.
-	if err := applyMCPAuthToRuntimeSpec(DeployTarget{Tenant: target.Tenant, MCPAuthPublicKeyPath: mcpAuthPublicKeyPath}, &spec); err != nil {
+	if err := applyMCPAuthToRuntimeSpec(s.Context, DeployTarget{Tenant: target.Tenant, MCPAuthPublicKeyPath: mcpAuthPublicKeyPath}, &spec); err != nil {
 		return err
 	}
 	if err := RunDeploySpec(s.Context, spec, s.DeployHelmChart); err != nil {

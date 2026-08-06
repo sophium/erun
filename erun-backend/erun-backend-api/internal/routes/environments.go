@@ -2,6 +2,7 @@ package routes
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -85,12 +86,29 @@ func validNamespaceLabel(s string) bool {
 		return false
 	}
 	for _, r := range s {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
-			continue
+		if !namespaceLabelRune(r) {
+			return false
 		}
-		return false
 	}
 	return true
+}
+
+func namespaceLabelRune(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-'
+}
+
+// environmentQuotaUsage reports how many environments the caller's tenant has
+// and its cap. Creation enforces the cap; the provision preview reports it.
+func environmentQuotaUsage(ctx context.Context, environments EnvironmentRepository, quotas TenantQuotaRepository) (count int, maxEnvironments int, err error) {
+	maxEnvironments, err = quotas.MaxEnvironments(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	count, err = environments.Count(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	return count, maxEnvironments, nil
 }
 
 var validEnvironmentTypes = map[model.EnvironmentType]struct{}{
@@ -99,33 +117,41 @@ var validEnvironmentTypes = map[model.EnvironmentType]struct{}{
 	model.EnvironmentTypeLocalAgent:  {},
 }
 
-func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Request) {
+// decodeCreateEnvironmentInput validates the create body and returns the
+// environment it describes. Its error message is the operator-facing 400 reason.
+func decodeCreateEnvironmentInput(req *http.Request) (model.Environment, error) {
 	var body createEnvironmentRequest
 	if err := decodeJSON(req, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
+		return model.Environment{}, errors.New("invalid request body")
 	}
-
 	name := strings.TrimSpace(body.Name)
 	// The tenant is hyphen-free (enforced at tenant registration), so allowing
 	// internal hyphens in the env keeps the first-hyphen split of the
 	// <tenant>-<env> namespace unambiguous.
 	if !validNamespaceLabel(name) {
-		writeError(w, http.StatusBadRequest, "name must be a DNS-1123 label: lowercase letters, digits, and internal hyphens, not starting or ending with a hyphen, at most 63 characters")
-		return
+		return model.Environment{}, errors.New("name must be a DNS-1123 label: lowercase letters, digits, and internal hyphens, not starting or ending with a hyphen, at most 63 characters")
 	}
 	envType := model.EnvironmentType(strings.TrimSpace(body.Type))
 	if _, ok := validEnvironmentTypes[envType]; !ok {
-		writeError(w, http.StatusBadRequest, "type must be one of runtime, remote-agent, local-agent")
+		return model.Environment{}, errors.New("type must be one of runtime, remote-agent, local-agent")
+	}
+	return model.Environment{
+		Name:              name,
+		Type:              envType,
+		ContextID:         strings.TrimSpace(body.ContextID),
+		KubernetesContext: strings.TrimSpace(body.KubernetesContext),
+		RuntimeVersion:    strings.TrimSpace(body.RuntimeVersion),
+	}, nil
+}
+
+func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Request) {
+	environment, err := decodeCreateEnvironmentInput(req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	maxEnvironments, err := r.quotas.MaxEnvironments(req.Context())
-	if err != nil {
-		writeRepositoryError(w, err)
-		return
-	}
-	count, err := r.environments.Count(req.Context())
+	count, maxEnvironments, err := environmentQuotaUsage(req.Context(), r.environments, r.quotas)
 	if err != nil {
 		writeRepositoryError(w, err)
 		return
@@ -135,13 +161,7 @@ func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Re
 		return
 	}
 
-	created, err := r.environments.Create(req.Context(), model.Environment{
-		Name:              name,
-		Type:              envType,
-		ContextID:         strings.TrimSpace(body.ContextID),
-		KubernetesContext: strings.TrimSpace(body.KubernetesContext),
-		RuntimeVersion:    strings.TrimSpace(body.RuntimeVersion),
-	})
+	created, err := r.environments.Create(req.Context(), environment)
 	if err != nil {
 		// A context belonging to another tenant is rejected here — the
 		// enforcement point for tenant isolation on the context reference.
@@ -154,7 +174,7 @@ func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Re
 	// GET /v1/environments/{id} to running/failed. Otherwise (no provisioner, a
 	// non-runtime env, or no version to deploy) the row is only registered
 	// config (201).
-	if r.provisioner == nil || envType != model.EnvironmentTypeRuntime || created.RuntimeVersion == "" {
+	if r.provisioner == nil || environment.Type != model.EnvironmentTypeRuntime || created.RuntimeVersion == "" {
 		writeJSON(w, http.StatusCreated, created)
 		return
 	}

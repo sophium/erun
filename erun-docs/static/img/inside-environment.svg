@@ -1,5 +1,5 @@
 <svg viewBox="0 0 1000 520" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="insideEnvTitle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
-  <title id="insideEnvTitle">Inside a single environment. Operator and Agent pills at the top attach to two endpoints — SSH and MCP — on a single runtime pod inside one Kubernetes namespace. The runtime pod contains three containers: erun-devops, erun-mcp, erun-dind. Below the runtime pod, the same namespace also holds the application services for the project: frontend, api, db, queue. The whole composition shows that operator+agent peers share one pod, which sits alongside the deployed services in one isolated namespace.</title>
+  <title id="insideEnvTitle">Inside a single environment. Operator and Agent pills at the top attach to two endpoints — SSH and MCP — on a single runtime pod inside one Kubernetes namespace. The runtime pod contains two containers: erun-devops, which serves both endpoints, and erun-dind. Below the runtime pod, the same namespace also holds the application services for the project: frontend, api, db, queue. The whole composition shows that operator+agent peers share one pod, which sits alongside the deployed services in one isolated namespace.</title>
 
   <defs>
     <linearGradient id="ieCharcoal" x1="0" y1="0" x2="0" y2="1">
@@ -50,21 +50,16 @@
     <rect x="100" y="240" width="800" height="110" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
     <text x="500" y="265" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600">Runtime pod — shared by Operator + Agent</text>
 
-    <!-- 3 container mini-boxes -->
+    <!-- 2 container mini-boxes -->
     <g>
-      <rect x="140" y="285" width="220" height="50" rx="10" fill="url(#ieCharcoal)"/>
-      <text x="250" y="307" text-anchor="middle" fill="#ffffff" font-size="12.5" font-weight="600">erun-devops</text>
-      <text x="250" y="324" text-anchor="middle" fill="#ffffff" font-size="10.5" opacity="0.7">shell + erun + docker</text>
+      <rect x="250" y="285" width="220" height="50" rx="10" fill="url(#ieCharcoal)"/>
+      <text x="360" y="307" text-anchor="middle" fill="#ffffff" font-size="12.5" font-weight="600">erun-devops</text>
+      <text x="360" y="324" text-anchor="middle" fill="#ffffff" font-size="10.5" opacity="0.7">shell + erun + docker + MCP</text>
     </g>
     <g>
-      <rect x="390" y="285" width="220" height="50" rx="10" fill="url(#ieCharcoal)"/>
-      <text x="500" y="307" text-anchor="middle" fill="#ffffff" font-size="12.5" font-weight="600">erun-mcp</text>
-      <text x="500" y="324" text-anchor="middle" fill="#ffffff" font-size="10.5" opacity="0.7">MCP server for agents</text>
-    </g>
-    <g>
-      <rect x="640" y="285" width="220" height="50" rx="10" fill="url(#ieCharcoal)"/>
-      <text x="750" y="307" text-anchor="middle" fill="#ffffff" font-size="12.5" font-weight="600">erun-dind</text>
-      <text x="750" y="324" text-anchor="middle" fill="#ffffff" font-size="10.5" opacity="0.7">docker daemon sidecar</text>
+      <rect x="530" y="285" width="220" height="50" rx="10" fill="url(#ieCharcoal)"/>
+      <text x="640" y="307" text-anchor="middle" fill="#ffffff" font-size="12.5" font-weight="600">erun-dind</text>
+      <text x="640" y="324" text-anchor="middle" fill="#ffffff" font-size="10.5" opacity="0.7">docker daemon sidecar</text>
     </g>
   </g>
 

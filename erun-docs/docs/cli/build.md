@@ -61,6 +61,8 @@ Every build produces both `linux/amd64` and `linux/arm64`. There is no single-pl
 
 The local Docker daemon must have binfmt installed for the foreign arch. The runtime chart's `binfmt` init container installs this automatically inside the cluster; for local builds you may need to run `docker run --privileged --rm tonistiigi/binfmt --install all` once on your host.
 
+An image whose Dockerfile builds `FROM` another image the same build produces resolves that base from the local build, for each architecture, without the base being published. So `erun build --version <version>` builds a whole release locally — dependent images included — which makes it usable as the gate to run *before* [`erun release`](/cli/release) moves any git ref. Nothing local is tagged as the plain published version; assembling that multi-arch manifest stays [`erun push`](/cli/push)'s job. See [Agent reference · CLI flag spec · `erun build`](/agent-reference/cli-flags#erun-build) for the exact build-arg rule.
+
 ## `--dry-run` output
 
 `erun build --dry-run` streams the same `audit:` and `trace:` lines a real run would: the resolved build scope (project root, tenant, environment, version, registry), the per-component fingerprint-cache decision, and the `docker build` (one per architecture), `docker tag`, and — with `--release` — `docker push` / manifest commands it would run, without executing any of them. Values matching secret patterns are redacted. The trace is otherwise identical to the real run. Redaction follows the rules in [Agent reference · Dry-run redaction](/agent-reference/dry-run-redaction).
@@ -71,5 +73,6 @@ The local Docker daemon must have binfmt installed for the foreign arch. The run
 |---|---|
 | No Docker build context in scope (e.g. a runtime env with no worktree). | Errors that no build context was found; nothing is built. |
 | Foreign-arch binfmt missing locally. | Fails with a direct error before the per-arch build, rather than a confusing mid-build failure. |
+| A dependent image's base is not published at the version. | Not a failure: a base this build produces is resolved from the local build, per architecture. Only a base that no build in scope produces has to exist in the registry. |
 | Registry rejects a `--release` push as unauthorised. | Retries with `docker login` (requires a TTY); see [`erun push`](/cli/push) authentication. |
 | `--version` combined with `--release`. | Rejected — `--release` resolves the version itself. |

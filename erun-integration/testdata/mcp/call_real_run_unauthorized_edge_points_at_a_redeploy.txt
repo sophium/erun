@@ -1,0 +1,3 @@
+audit: erun mcp call --tool version
+mcp: team/dev edge resolved to http://<LOOPBACK>:26100/mcp
+MCP endpoint rejected the bearer token: http://<LOOPBACK>:26100/mcp (HTTP 401): edge refused the request; team/dev was deployed without this machine's MCP public key, so redeploy it from the ERun desktop app

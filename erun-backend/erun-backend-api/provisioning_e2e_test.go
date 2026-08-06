@@ -86,9 +86,16 @@ func TestProvisionContextEndToEnd(t *testing.T) {
 		t.Fatalf("created status = %q, want provisioning", created.Context.Status)
 	}
 
+	awaitContextRunning(t, srv.URL, created.Context.ContextID)
+}
+
+// awaitContextRunning polls the context until the durable workflow reports a
+// terminal state, failing on a failed provision or on timeout.
+func awaitContextRunning(t *testing.T, baseURL, contextID string) {
+	t.Helper()
 	deadline := time.Now().Add(120 * time.Second)
 	for time.Now().Before(deadline) {
-		c, b := e2eRequest(t, srv.URL, http.MethodGet, "/v1/contexts/"+created.Context.ContextID, nil)
+		c, b := e2eRequest(t, baseURL, http.MethodGet, "/v1/contexts/"+contextID, nil)
 		if c != http.StatusOK {
 			t.Fatalf("get context: HTTP %d: %s", c, b)
 		}

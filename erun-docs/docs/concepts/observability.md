@@ -31,7 +31,7 @@ kubectl logs -n <tenant>-<env> -c erun-devops <runtime-pod> --tail=200
 kubectl logs -n <tenant>-<env> <pod> --all-containers --prefix
 ```
 
-The runtime pod has three containers (`erun-devops`, `erun-mcp`, `erun-dind`); `-c <container>` selects between them.
+The runtime pod has two containers (`erun-devops`, `erun-dind`); `-c <container>` selects between them.
 
 ### From inside the env
 

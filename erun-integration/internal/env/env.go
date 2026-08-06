@@ -55,6 +55,12 @@ func (s Setup) Env() []string {
 		// ERUN_PUBLISHED_CHART_PROBE_OVERRIDE after Env() (the later duplicate
 		// wins).
 		"ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=",
+		// Answer the "does the live release already have MCP auth enabled?" probe
+		// as unknown, so a deploy that resolves no MCP auth never reads helm and
+		// no scenario depends on a real release (or consumes a helm stub call).
+		// Scenarios that exercise the downgrade guard append their own
+		// ERUN_MCP_AUTH_LIVE_PROBE_OVERRIDE after Env() (the later duplicate wins).
+		"ERUN_MCP_AUTH_LIVE_PROBE_OVERRIDE=",
 	}
 }
 

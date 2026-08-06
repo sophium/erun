@@ -1,0 +1,3 @@
+sse reply body
+audit: erun mcp call --tool version
+mcp: team/dev edge resolved to http://<LOOPBACK>:26100/mcp

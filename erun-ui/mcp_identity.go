@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -11,36 +10,28 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-const (
-	desktopIdentityKeyFile = "desktopid.key"
-	desktopIdentityPubFile = "desktopid.pub"
-	// Kept short-lived so a leaked bearer has a small exploit window.
-	desktopMCPTokenTTL = 5 * time.Minute
-)
-
 // desktopIdentity is the desktop's persistent Ed25519 identity: it signs the
 // per-env MCP bearer tokens each env's edge verifies, and supplies the public
-// key the deploy injects into the pod so that edge can trust them.
+// key the deploy injects into the pod so that edge can trust them. Where the
+// identity lives, and how a token for an env is shaped, is owned by
+// `erun-common` so the CLI mints tokens the same deployed edges already trust.
 type desktopIdentity struct {
 	dir        string
 	mu         sync.Mutex
 	privatePEM []byte
 }
 
-func defaultDesktopIdentityDir() string {
-	configDir, err := os.UserConfigDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(configDir, "ERun")
-}
-
 func newDesktopIdentity(dir string) *desktopIdentity {
 	return &desktopIdentity{dir: dir}
 }
 
-func (d *desktopIdentity) keyPath() string       { return filepath.Join(d.dir, desktopIdentityKeyFile) }
-func (d *desktopIdentity) publicKeyPath() string { return filepath.Join(d.dir, desktopIdentityPubFile) }
+func (d *desktopIdentity) keyPath() string {
+	return eruncommon.DesktopIdentityKeyPath(d.dir)
+}
+
+func (d *desktopIdentity) publicKeyPath() string {
+	return eruncommon.DesktopIdentityPublicKeyPath(d.dir)
+}
 
 func (d *desktopIdentity) ensure() error {
 	d.mu.Lock()
@@ -98,8 +89,6 @@ func (d *desktopIdentity) ensurePublicKeyPath() (string, error) {
 	return d.publicKeyPath(), nil
 }
 
-// The per-env audience prevents a token minted for one env from being replayed
-// against another.
 func (d *desktopIdentity) signToken(tenant, environment string, now time.Time) (string, error) {
 	if d == nil {
 		return "", fmt.Errorf("desktop identity is not configured")
@@ -110,11 +99,5 @@ func (d *desktopIdentity) signToken(tenant, environment string, now time.Time) (
 	d.mu.Lock()
 	priv := d.privatePEM
 	d.mu.Unlock()
-	return eruncommon.SignMCPToken(priv, eruncommon.MCPTokenClaims{
-		Issuer:    eruncommon.DesktopMCPIssuer(),
-		Subject:   "erun-desktop",
-		Audience:  eruncommon.MCPTokenAudience(tenant, environment),
-		IssuedAt:  now.Unix(),
-		ExpiresAt: now.Add(desktopMCPTokenTTL).Unix(),
-	})
+	return eruncommon.SignDesktopMCPToken(priv, tenant, environment, now)
 }
