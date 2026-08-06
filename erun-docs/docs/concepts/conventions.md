@@ -26,9 +26,7 @@ erun/                                    # Git repo root. .git lives here.
 │   ├── VERSION                           # Default version for builds in this module.
 │   ├── docker/
 │   │   ├── erun-devops/                  # The runtime pod image (extends erun-ubuntu).
-│   │   │   └── Dockerfile
-│   │   ├── erun-mcp/                     # MCP server image.
-│   │   │   └── Dockerfile
+│   │   │   └── Dockerfile                #   Ships the shell, the CLI, and the MCP server.
 │   │   ├── erun-backend-api/             # Backend API image.
 │   │   │   └── Dockerfile
 │   │   ├── erun-backend-postgres/        # Postgres image (pinned).
@@ -205,7 +203,7 @@ For the exact algorithm and the registry/local interaction, see [Conventions spe
 
 ## The runtime-pod sub-chart
 
-Within `<tenant>-devops/`, one chart is special: `<tenant>-devops/k8s/<tenant>-devops/`. This is the **runtime-pod chart** for the tenant — it deploys the per-environment runtime pod (the `erun-devops`, `erun-mcp`, and `erun-dind` containers) that gives operators and agents a shell, MCP endpoint, and dind for builds.
+Within `<tenant>-devops/`, one chart is special: `<tenant>-devops/k8s/<tenant>-devops/`. This is the **runtime-pod chart** for the tenant — it deploys the per-environment runtime pod (the `erun-devops` and `erun-dind` containers) that gives operators and agents a shell, MCP endpoint, and dind for builds.
 
 It's deployed by `erun open` automatically. You don't usually deploy it directly, but it's the same shape as any other chart in `<tenant>-devops/k8s/*/`.
 
