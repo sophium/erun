@@ -27,6 +27,7 @@ import {
 import { CheckboxField, TextField } from '@/components/app/ManageDialog.fields';
 import { parseIdleTrafficBytes } from '@/components/app/ManageDialog.helpers';
 import { DeployComponentsField } from '@/components/app/ManageDialogDeployComponents';
+import { RuntimeActivityField } from '@/components/app/ManageDialogRuntimeActivity';
 import { RuntimePowerField } from '@/components/app/ManageDialogRuntimePower';
 import { RuntimeResourceControls } from '@/components/app/RuntimeResourceControls';
 import { SelectField } from '@/components/app/SelectField';
@@ -88,6 +89,14 @@ export function RuntimeTab(): React.ReactElement {
       />
       <RuntimePowerField dialog={dialog} />
       <RuntimePodFields dialog={dialog} />
+      {/* Directly under the sliders: when the figures read as capped, the next
+          question is what this environment is holding, and the answer is here. */}
+      {dialog.selection && (
+        <RuntimeActivityField
+          selection={dialog.selection}
+          disabled={dialog.busy || dialog.configLoading}
+        />
+      )}
       <IdleStopFields dialog={dialog} />
     </>
   );

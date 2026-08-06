@@ -507,10 +507,19 @@ export interface UIRuntimePodConfig {
   memory: string;
 }
 
+// A reading of node capacity taken at one instant, not a fixed ceiling. `notice`
+// explains what the number alone cannot: `floored` means the maximum equals what
+// this env already holds because the node is full, and `unmeasuredContainers`
+// counts capacity the reading cannot see.
 export interface UIRuntimeResourceStatus {
   kubernetesContext: string;
   available: boolean;
   message?: string;
+  notice?: string;
+  node?: string;
+  floored: boolean;
+  measuredUsage: boolean;
+  unmeasuredContainers?: number;
   cpu: UIRuntimeResourceMetric;
   memory: UIRuntimeResourceMetric;
   nodes?: UIRuntimeResourceNode[];
@@ -522,6 +531,7 @@ export interface UIRuntimeResourceMetric {
   free: number;
   unit: string;
   formatted: string;
+  floored: boolean;
 }
 
 export interface UIRuntimeResourceNode {

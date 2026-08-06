@@ -160,4 +160,19 @@ func TestStop(t *testing.T) {
 		}
 		golden.Equal(t, "stop/real_run_output_json", normalize.Apply(result.Stdout))
 	})
+
+	// Stopping an environment that is already scaled to zero must succeed and
+	// say so, rather than reporting a stop that did not happen. The distinction
+	// only reaches the operator in real-run — dry-run prints the plan, not the
+	// summary — so the no-op wording needs its own real-run scenario.
+	t.Run("real_run_already_stopped_reports_the_no_op", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envVars := stubKubectlStopRunState(t, setup, 0, 0)
+		result := erun.Run(t, []string{"stop", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "stop/real_run_already_stopped_reports_the_no_op", normalize.Apply(result.Combined))
+	})
 }

@@ -11,6 +11,28 @@ export interface RuntimeResourceBounds {
   loading: boolean;
   available: boolean;
   message: string;
+  // notice explains what the maximum alone cannot: that it is capped by the
+  // node being full rather than by a limit on this environment, and/or that
+  // part of the node's real usage is invisible to the reading.
+  notice: string;
+}
+
+// unavailableRuntimeResourceStatus is the shape a dialog shows when the
+// capacity read itself failed. One helper so the three dialogs that build it
+// cannot drift from the contract as fields are added to the reading.
+export function unavailableRuntimeResourceStatus(
+  kubernetesContext: string,
+  message: string,
+): UIRuntimeResourceStatus {
+  return {
+    kubernetesContext,
+    available: false,
+    message,
+    floored: false,
+    measuredUsage: false,
+    cpu: { total: 0, used: 0, free: 0, unit: 'cores', formatted: '', floored: false },
+    memory: { total: 0, used: 0, free: 0, unit: 'GiB', formatted: '', floored: false },
+  };
 }
 
 export function runtimePodConfigToDisplay(config: UIRuntimePodConfig): UIRuntimePodConfig {
@@ -38,6 +60,7 @@ export function runtimeResourceBounds(
       loading: true,
       available: false,
       message: 'Checking capacity...',
+      notice: '',
     };
   }
   if (!status) {
@@ -47,6 +70,7 @@ export function runtimeResourceBounds(
       loading: false,
       available: false,
       message: '',
+      notice: '',
     };
   }
   if (!status.available) {
@@ -56,6 +80,7 @@ export function runtimeResourceBounds(
       loading: false,
       available: false,
       message: status.message ?? 'Capacity is unavailable.',
+      notice: '',
     };
   }
   return {
@@ -65,7 +90,8 @@ export function runtimeResourceBounds(
     available: true,
     message:
       status.message ??
-      `Available on best node: ${formatNumber(status.cpu.free)} CPU, ${formatNumber(status.memory.free)} GiB memory.`,
+      `Right now: ${formatNumber(status.cpu.free)} CPU, ${formatNumber(status.memory.free)} GiB memory free.`,
+    notice: status.notice ?? '',
   };
 }
 

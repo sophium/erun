@@ -23,11 +23,25 @@ async function stubDialogCluster(page: Page): Promise<void> {
       return route.fulfill({
         contentType: 'application/json',
         body: JSON.stringify({
+          // Mirrors the backend's contract: a reading always names the node it
+          // came from and carries its own message, because the figure is a
+          // snapshot of one node rather than a fixed ceiling.
           data: {
             kubernetesContext: 'orbstack',
             available: true,
-            cpu: { total: 8, used: 0, free: 8, unit: 'cores', formatted: '8' },
-            memory: { total: 16, used: 0, free: 16, unit: 'GiB', formatted: '16' },
+            node: 'node-a',
+            floored: false,
+            measuredUsage: true,
+            message: 'Right now on node-a (the emptiest node): 8 CPU and 16.0 GiB memory free.',
+            cpu: { total: 8, used: 0, free: 8, unit: 'cores', formatted: '8', floored: false },
+            memory: {
+              total: 16,
+              used: 0,
+              free: 16,
+              unit: 'GiB',
+              formatted: '16',
+              floored: false,
+            },
           },
         }),
       });
@@ -252,16 +266,17 @@ test.describe('environment init dialog', () => {
     app,
     page,
   }) => {
-    // Reported bug: the RUNTIME RESOURCES panel showed "Available on best node: N
-    // CPU …" while the context dropdown still sat on its "Select Kubernetes
-    // context" placeholder — capacity for a cluster the user never chose. The
+    // Reported bug: the RUNTIME RESOURCES panel showed a capacity reading
+    // ("Right now on <node> …") while the context dropdown still sat on its
+    // "Select Kubernetes context" placeholder — capacity for a cluster the user
+    // never chose. The
     // dialog no longer auto-resolves contexts[0] for the capacity fetch, so
     // capacity appears only for an explicitly selected context.
     await stubDialogCluster(page);
     await app.sidebar.openInitDialog();
     await app.envInitDialog.waitForOpen();
 
-    const capacity = app.envInitDialog.locator().getByText(/Available on best node/);
+    const capacity = app.envInitDialog.locator().getByText(/Right now on /);
 
     // One context is available but not preselected — so no capacity is shown.
     await expect(app.envInitDialog.kubernetesContextTrigger()).toContainText(

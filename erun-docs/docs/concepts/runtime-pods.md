@@ -76,6 +76,53 @@ environment's row rather than the warning triangle a failed deploy gets. Stoppin
 there, on the environment's Runtime tab beside Deploy — which is where you notice the problem,
 because the resource sliders on that tab are computed from what the node's pods currently reserve.
 
+## Reading the resource figures
+
+The CPU and memory figures on the Runtime tab are **one reading of the node right now**, not a
+ceiling on what an environment supports. Two things move underneath them: a node's allocatable
+capacity changes as its own reservations change, and the free figure depends on what every other
+pod on that node currently holds. So the number you see is a snapshot, and the tab says which node
+it came from.
+
+Two cases the number alone cannot explain, so the tab spells them out:
+
+- **The maximum equals what this environment already has.** An environment can always keep what it
+  is already running with, so when the node has nothing left the slider's maximum is floored at the
+  current value. That reads like a product limit but means the opposite — the node is fully
+  committed. The remedy is to [stop an environment](/cli/stop) nobody is using on that node, after
+  which the figure rises.
+- **Some usage is not counted.** The reading prefers a container's declared limits, falls back to
+  its measured usage when the cluster reports metrics, and says how many containers it could not
+  account for at all when neither is available. The `erun-dind` sidecar declares no limits, so on a
+  cluster without metrics its real consumption — Testcontainers, the build cache — is invisible to
+  the reading and the tab warns that the true usage is higher than shown.
+
+## What is holding the environment's resources
+
+A build leaves things running. Gradle keeps its daemons alive for the next build, Testcontainers
+leaves JVMs resident, the container build cache grows. That is fine while you are working and
+wasteful afterwards — and until now nothing showed it, so a heavy environment had no explanation.
+
+The Runtime tab reports what the pod is running, directly under the resource sliders: how many
+[sessions](/desktop/overview) actually have a live program behind them, and the processes holding
+memory grouped by what they are. It is read-only by default — you see what is there before anything
+is stopped — and the groups that are safe to reclaim carry an action:
+
+| Group | Action | What it does |
+|---|---|---|
+| Gradle daemons / Java processes | **Stop build daemons** | `gradle --stop`, then terminates any Gradle daemon JVMs left behind. |
+| Container build processes | **Prune build cache** | Prunes the build cache and dangling images. |
+
+Neither touches your worktree, a running session, or the Agent. Agent processes are shown without an
+action for exactly that reason: they are your work, not a leftover.
+
+A session's running state is **observed in the pod** — its socket exists *and* a live program sits
+behind it — rather than inferred from how recently it printed something. An Agent waiting on a
+compile is silent but running; a dropped connection is quiet but finished. Inferring from output
+gets both backwards, which is how a pane could show a stalled indicator beside a truthful "still
+running" count. The session sockets themselves live and die with the pod, and a replaced pod clears
+any left behind at boot, so a leftover socket is never presented as a running session.
+
 ## Idle / auto-stop
 
 Cloud-backed envs participate in an idle policy — see [Cloud contexts](/concepts/cloud-contexts).

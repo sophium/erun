@@ -18,6 +18,7 @@ import {
   runtimePodConfigToDisplay,
   runtimePodConfigToKubernetes,
   runtimeResourceValidation,
+  unavailableRuntimeResourceStatus,
 } from './runtimeResources';
 import { patchManageDialog, setManageDialog } from './slices/manageDialogSlice';
 import { bumpManageDialogVersion } from './slices/requestCountersSlice';
@@ -314,13 +315,7 @@ const loadManageResourceStatus =
       }
       dispatch(
         patchManageDialog({
-          resourceStatus: {
-            kubernetesContext,
-            available: false,
-            message: readError(error),
-            cpu: { total: 0, used: 0, free: 0, unit: 'cores', formatted: '' },
-            memory: { total: 0, used: 0, free: 0, unit: 'GiB', formatted: '' },
-          },
+          resourceStatus: unavailableRuntimeResourceStatus(kubernetesContext, readError(error)),
           resourceStatusLoading: false,
         }),
       );

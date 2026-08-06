@@ -75,6 +75,7 @@ type erunUIDeps struct {
 	runWorkingIssueCommand    workingIssueCommandRunner
 	loadPodBranch             func(context.Context, string, string) (string, error)
 	runPodRaw                 func(context.Context, string, string, []string) (string, error)
+	execRuntimePod            func(context.Context, uiSelection, string) (string, error)
 	stopCloudContext          func(context.Context, string) (eruncommon.CloudContextStatus, error)
 	windowStatePath           string
 	windowMaximised           func(context.Context) bool
@@ -103,7 +104,13 @@ type App struct {
 	// separate from intentionalStops (which is per cloud context) so the two
 	// stops cannot alias: they have different recoveries, and a runtime stop
 	// flagged as a cloud-context stop would name the wrong one.
-	runtimeStops              map[string]struct{}
+	runtimeStops map[string]struct{}
+	// sessionHeartbeats holds the most recent pod observation per environment:
+	// which persistent sessions still have a live program behind them. It is
+	// what keeps a quiet-but-running AI tab from reading as finished, and what
+	// makes the rendered session count and the running state one observation
+	// rather than two guesses. See session_heartbeat.go.
+	sessionHeartbeats         map[string]sessionHeartbeat
 	busyEnvs                  map[string]int
 	workspaceSyncs            map[string]*workspaceSyncWorker
 	orchestrators             map[string]*orchestratorSession
@@ -178,6 +185,7 @@ func NewApp(deps erunUIDeps) *App {
 		idleStops:            make(map[string]struct{}),
 		intentionalStops:     make(map[string]struct{}),
 		runtimeStops:         make(map[string]struct{}),
+		sessionHeartbeats:    make(map[string]sessionHeartbeat),
 		busyEnvs:             make(map[string]int),
 		workspaceSyncs:       make(map[string]*workspaceSyncWorker),
 		orchestrators:        make(map[string]*orchestratorSession),
@@ -362,6 +370,11 @@ func withDefaultPodDeps(deps erunUIDeps) erunUIDeps {
 	}
 	if deps.runPodRaw == nil {
 		deps.runPodRaw = runPodRawFromMCP
+	}
+	if deps.execRuntimePod == nil {
+		deps.execRuntimePod = func(ctx context.Context, selection uiSelection, script string) (string, error) {
+			return execInRuntimePodViaKubectl(ctx, selection, deps.store, script)
+		}
 	}
 	if deps.recordActivity == nil {
 		deps.recordActivity = eruncommon.RecordEnvironmentActivity
