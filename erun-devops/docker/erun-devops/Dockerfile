@@ -202,6 +202,10 @@ COPY --chmod=0755 erun-devops/docker/erun-devops/skills-install.sh /usr/local/bi
 # /opt/erun/release so a tenant devops image can surface baked artifacts there
 # (outside the /home/erun PVC, which would otherwise shadow them).
 COPY --chmod=0755 erun-devops/docker/erun-devops/release-link.sh /usr/local/bin/erun-link-release
+# erun-prune-sessions clears persistent desktop session sockets left with no
+# dtach server behind them, so a replaced pod never presents a leftover socket
+# as a running session.
+COPY --chmod=0755 erun-devops/docker/erun-devops/session-prune.sh /usr/local/bin/erun-prune-sessions
 COPY --chmod=0755 erun-devops/docker/erun-devops/codex-wrapper.sh /usr/local/bin/codex
 COPY --chmod=0755 erun-devops/docker/erun-devops/claude-wrapper.sh /usr/local/bin/claude
 COPY --chmod=0644 erun-devops/docker/erun-devops/bash_prompt.sh /etc/erun/bash_prompt.sh

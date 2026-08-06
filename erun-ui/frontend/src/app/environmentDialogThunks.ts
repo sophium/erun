@@ -9,7 +9,11 @@ import {
 } from './environmentDialogState';
 import { readError } from './errors';
 import { showTerminalMessage } from './notificationThunks';
-import { runtimePodConfigToKubernetes, runtimeResourceLimitMessage } from './runtimeResources';
+import {
+  runtimePodConfigToKubernetes,
+  runtimeResourceLimitMessage,
+  unavailableRuntimeResourceStatus,
+} from './runtimeResources';
 import { startInitSelection } from './sessionThunks';
 import { patchEnvironmentDialog, setEnvironmentDialog } from './slices/environmentDialogSlice';
 import {
@@ -302,7 +306,7 @@ const refreshEnvironmentRuntimeResources =
     }
     // No selected context → there is no cluster to measure. Clear any capacity
     // fetched for a previously selected/auto-resolved context so the dialog never
-    // shows a stale "Available on best node" figure under an empty selection.
+    // shows a stale capacity figure under an empty selection.
     if (!context) {
       dispatch(patchEnvironmentDialog({ resourceStatus: null, resourceStatusLoading: false }));
       return;
@@ -346,13 +350,7 @@ const refreshEnvironmentRuntimeResources =
       }
       dispatch(
         patchEnvironmentDialog({
-          resourceStatus: {
-            kubernetesContext: context,
-            available: false,
-            message: readError(error),
-            cpu: { total: 0, used: 0, free: 0, unit: 'cores', formatted: '' },
-            memory: { total: 0, used: 0, free: 0, unit: 'GiB', formatted: '' },
-          },
+          resourceStatus: unavailableRuntimeResourceStatus(context, readError(error)),
           resourceStatusLoading: false,
         }),
       );

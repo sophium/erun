@@ -1,0 +1,23 @@
+Refresh an environment's in-pod host AWS credentials.
+
+Reads the AWS profile behind the environment's cloud provider alias, mints short-lived credentials from it, and writes them into the runtime pod's ~/.aws/credentials under the erun-host profile — the profile the chart wires into the pod's AWS_PROFILE. The pod then acts as your AWS identity until those credentials expire, typically about an hour.
+
+Nothing secret passes through the caller: the credentials are exported here and streamed to the pod on stdin, so no key, secret, or session token ever appears in an argument, a trace line, or a transcript. That makes this the verb scripts and agents should use. `erun open` runs the same refresh, so reach for this when a long-running session has gone stale without reopening it. The write replaces the erun-host profile in place and leaves every other profile in the file alone.
+
+Requires an unexpired local SSO session; run `erun cloud login --alias <alias>` first if it has lapsed.
+
+Usage:
+  erun cloud refresh TENANT ENVIRONMENT [flags]
+
+Examples:
+  erun cloud refresh my-tenant prod
+  erun cloud refresh my-tenant prod --dry-run
+
+Flags:
+      --dry-run   Resolve and trace mutating actions without executing them.
+  -h, --help      help for refresh
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

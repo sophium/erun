@@ -149,7 +149,7 @@ func (s *windowsTerminalSession) Close() error {
 		s.handle = 0
 	}
 	if s.pty != nil {
-		return s.pty.Close()
+		return ignoreAlreadyClosed(s.pty.Close())
 	}
 	return nil
 }

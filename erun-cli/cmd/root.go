@@ -139,6 +139,7 @@ func (d rootDependencies) commands() []*cobra.Command {
 	return []*cobra.Command{
 		newInitCmd(d.runInit),
 		d.openCommand(),
+		newStopCmd(d.resolveOpen, d.store.SaveEnvConfig),
 		d.sshdCommand(),
 		devopsCmd,
 		d.optionalBuildCommand(),

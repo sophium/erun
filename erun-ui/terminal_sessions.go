@@ -93,6 +93,7 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 		serial:                 serial,
 		slot:                   slot,
 		kind:                   sessionKindOpen,
+		appSession:             fmt.Sprintf("open-%d", slot),
 		blocksIdleStop:         true,
 		clearIdleBlockOnOutput: true,
 		respawn: func() (terminalSession, error) {
@@ -112,6 +113,10 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 
 	// A fresh open attempt supersedes any stopped/failed flag the row
 	// carried; the reconnect refusal paths re-flag if this open fails too.
+	// Opening is also the deliberate wake for a runtime the operator stopped —
+	// `erun open` scales it back up — so the stop latch is released here or the
+	// reconnect gate would keep refusing against an env that is coming back.
+	a.clearRuntimeStopped(selection)
 	a.emitEnvStatus(selection, "")
 	a.logSpawnedCommandToLocal(selection, "erun", formatLocalCommandLog(formatLaunchCommand(openParams), "ERun tab"))
 	_ = ctx
@@ -256,12 +261,13 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 	a.nextSerial++
 	serial := a.nextSerial
 	managed := &managedTerminal{
-		session:   session,
-		selection: selection,
-		key:       key,
-		serial:    serial,
-		slot:      slot,
-		kind:      sessionKindAI,
+		session:    session,
+		selection:  selection,
+		key:        key,
+		serial:     serial,
+		slot:       slot,
+		kind:       sessionKindAI,
+		appSession: "ai",
 		respawn: func() (terminalSession, error) {
 			return a.deps.startTerminal(params)
 		},
@@ -956,6 +962,10 @@ func (a *App) CloseEnvironmentSessions(selection uiSelection) ([]int, error) {
 	// per configured env, so without this a closed env keeps an rsync-over-ssh
 	// poller running; reopening the env restarts it.
 	a.stopWorkspaceSyncForSelection(selection)
+	// The env's pod observation describes sessions that no longer have a tab.
+	// Dropping it means reopening the env starts from a fresh reading rather
+	// than one taken before the close (or before a deploy replaced the pod).
+	a.forgetSessionHeartbeats(selection)
 	return closeManagedTerminals(targets)
 }
 
@@ -1321,6 +1331,19 @@ func (a *App) reconnectRefused(managed *managedTerminal) bool {
 		return true
 	}
 
+	// A runtime scaled to zero is a stopped environment, not a broken one.
+	// It must be checked BEFORE the deploy-failure guards below, or the
+	// tabs that die when the pod goes away flag the row as failed and the
+	// operator's own Stop looks like an outage. Respawning is refused for
+	// the same reason the cloud-context guard refuses: `erun open` wakes a
+	// stopped env, so an automatic respawn would undo the stop the operator
+	// just asked for. Re-clicking the row is the deliberate wake.
+	if a.runtimeStoppedForSelection(managed.selection) {
+		a.emitStoppedRuntimeMarker(managed.serial)
+		a.emitEnvStatus(managed.selection, envStatusRuntimeStopped)
+		return true
+	}
+
 	// A deploy failure is terminal, not a transient drop. Respawning
 	// re-runs `erun open`, which re-deploys and fails the same way — and
 	// because every env tab (ERun + AI) reconnects independently, that
@@ -1604,6 +1627,17 @@ func (a *App) emitStoppedContextMarker(sessionID int) {
 	})
 }
 
+// emitStoppedRuntimeMarker names the other recovery: a runtime scaled to zero
+// is woken by opening the environment, not by the titlebar's cloud-context
+// start button.
+func (a *App) emitStoppedRuntimeMarker(sessionID int) {
+	marker := "\r\n\x1b[2;33m── environment stopped — click it in the sidebar to start it again ──\x1b[0m\r\n"
+	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
+		SessionID: sessionID,
+		Data:      base64.StdEncoding.EncodeToString([]byte(marker)),
+	})
+}
+
 func (a *App) emitReconnectFailureMarker(sessionID int, err error) {
 	if err == nil {
 		return
@@ -1677,16 +1711,46 @@ func (a *App) recordAIActivity(managed *managedTerminal) {
 // busy latch only if the session has stayed quiet. If newer output arrived, a
 // later recordAIActivity already reset the timer, so this firing is stale and a
 // no-op.
+//
+// Silence alone is not enough to declare the work finished: an agent waiting on
+// a compile, and a session whose output stream dropped, are both silent while
+// the program in the pod keeps running. So a session the pod recently observed
+// as running keeps the latch — the heartbeat poller releases it when the pod
+// agrees it has stopped (applySessionHeartbeat).
 func (a *App) clearAIActivityIfQuiet(managed *managedTerminal) {
 	if managed == nil {
 		return
 	}
+	if a.heartbeatSaysRunning(managed) {
+		return
+	}
+	a.releaseAIActivityIfQuiet(managed)
+}
+
+func (a *App) releaseAIActivityIfQuiet(managed *managedTerminal) {
 	a.mu.Lock()
 	if managed.closed || !managed.aiBusyEmitted {
 		a.mu.Unlock()
 		return
 	}
 	if time.Since(managed.aiLastOutput) < aiActivityIdleThreshold {
+		a.mu.Unlock()
+		return
+	}
+	managed.aiBusyEmitted = false
+	managed.aiActiveSince = time.Time{}
+	selection := managed.selection
+	serial := managed.serial
+	a.mu.Unlock()
+	a.emitAIActivity(serial, selection, false)
+}
+
+// releaseAIActivity drops the busy latch regardless of how recently the session
+// printed. Used when the pod itself reports the session's program is gone: the
+// stream may still be dribbling reconnect noise, but the work is over.
+func (a *App) releaseAIActivity(managed *managedTerminal) {
+	a.mu.Lock()
+	if managed.closed || !managed.aiBusyEmitted {
 		a.mu.Unlock()
 		return
 	}
@@ -1855,11 +1919,19 @@ type managedTerminal struct {
 	// sidebar starts a fresh session, which is the deliberate take-back.
 	takenOver bool
 
+	// appSession is the persistent pod session id this terminal attaches to
+	// (`ai`, `open-2`, `contribute-ai`, …), empty for sessions with no pod
+	// session. The heartbeat poller keys its observations on it, so what the pod
+	// reports is matched to the tab by identity rather than re-derived.
+	appSession string
+
 	// aiActiveSince / aiLastOutput / aiBusyEmitted / aiInactivityTimer
 	// drive the debounced AI activity signal that powers the sidebar
 	// "Claude is working" spinner. Only populated for sessionKindAI
 	// managed terminals. See recordAIActivity for the debounce policy
-	// (5 s sustained output to flip on, 3 s silence to flip off).
+	// (5 s sustained output to flip on, 3 s silence to flip off) and
+	// session_heartbeat.go for the observed-liveness override that keeps a
+	// quiet-but-running session from reading as finished.
 	aiActiveSince     time.Time
 	aiLastOutput      time.Time
 	aiBusyEmitted     bool

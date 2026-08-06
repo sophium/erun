@@ -23,6 +23,7 @@ const (
 	environmentsChangedEvent    = "environments-changed"
 	aiActivityEvent             = "ai-activity"
 	envStatusEvent              = "env-status"
+	envActivityEvent            = "env-activity"
 	appSessionEnvVar            = "ERUN_UI_SESSION"
 )
 
@@ -51,6 +52,8 @@ type erunUIDeps struct {
 	loadResourceStatus        func(context.Context, uiRuntimeResourceInput) (uiRuntimeResourceStatus, error)
 	loadClusterRegistry       func(context.Context, uiRuntimeResourceInput) (uiClusterRegistryStatus, error)
 	checkRuntimeDeployed      func(context.Context, string, string, string) (bool, error)
+	stopEnvironmentRuntime    func(eruncommon.Context, eruncommon.StopEnvironmentParams) (eruncommon.StopEnvironmentResult, error)
+	readRuntimeRunState       func(eruncommon.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error)
 	ensureMCP                 func(context.Context, eruncommon.OpenResult) error
 	reconnectMCP              func(context.Context, eruncommon.OpenResult, func(string)) error
 	ensureSSHD                func(context.Context, eruncommon.OpenResult) error
@@ -73,6 +76,7 @@ type erunUIDeps struct {
 	runWorkingIssueCommand    workingIssueCommandRunner
 	loadPodBranch             func(context.Context, string, string) (string, error)
 	runPodRaw                 func(context.Context, string, string, []string) (string, error)
+	execRuntimePod            func(context.Context, uiSelection, string) (string, error)
 	stopCloudContext          func(context.Context, string) (eruncommon.CloudContextStatus, error)
 	windowStatePath           string
 	windowMaximised           func(context.Context) bool
@@ -92,11 +96,26 @@ type App struct {
 	// verify those tokens. nil in unit tests.
 	identity *desktopIdentity
 
-	mu                        sync.Mutex
-	nextSerial                int
-	sessions                  map[string]*managedTerminal
-	idleStops                 map[string]struct{}
-	intentionalStops          map[string]struct{}
+	mu               sync.Mutex
+	nextSerial       int
+	sessions         map[string]*managedTerminal
+	idleStops        map[string]struct{}
+	intentionalStops map[string]struct{}
+	// runtimeStops latches a per-env `erun stop` the desktop issued. Kept
+	// separate from intentionalStops (which is per cloud context) so the two
+	// stops cannot alias: they have different recoveries, and a runtime stop
+	// flagged as a cloud-context stop would name the wrong one.
+	runtimeStops map[string]struct{}
+	// sessionHeartbeats holds the most recent pod observation per environment:
+	// which persistent sessions still have a live program behind them. It is
+	// what keeps a quiet-but-running AI tab from reading as finished, and what
+	// makes the rendered session count and the running state one observation
+	// rather than two guesses. See session_heartbeat.go.
+	sessionHeartbeats map[string]sessionHeartbeat
+	// envActivity is the last observation published per environment, so the
+	// sweep announces transitions rather than restating a quiet environment
+	// every tick. See environment_activity.go.
+	envActivity               map[string]environmentActivityState
 	busyEnvs                  map[string]int
 	workspaceSyncs            map[string]*workspaceSyncWorker
 	orchestrators             map[string]*orchestratorSession
@@ -170,6 +189,8 @@ func NewApp(deps erunUIDeps) *App {
 		sessions:             make(map[string]*managedTerminal),
 		idleStops:            make(map[string]struct{}),
 		intentionalStops:     make(map[string]struct{}),
+		runtimeStops:         make(map[string]struct{}),
+		sessionHeartbeats:    make(map[string]sessionHeartbeat),
 		busyEnvs:             make(map[string]int),
 		workspaceSyncs:       make(map[string]*workspaceSyncWorker),
 		orchestrators:        make(map[string]*orchestratorSession),
@@ -261,6 +282,12 @@ func withDefaultRuntimeResolutionDeps(deps erunUIDeps) erunUIDeps {
 	if deps.checkRuntimeDeployed == nil {
 		deps.checkRuntimeDeployed = checkRuntimeDeployed
 	}
+	if deps.stopEnvironmentRuntime == nil {
+		deps.stopEnvironmentRuntime = eruncommon.RunStopEnvironment
+	}
+	if deps.readRuntimeRunState == nil {
+		deps.readRuntimeRunState = eruncommon.ReadRuntimeRunState
+	}
 	if deps.canConnectLocalPort == nil {
 		deps.canConnectLocalPort = canConnectLocalTCP
 	}
@@ -348,6 +375,11 @@ func withDefaultPodDeps(deps erunUIDeps) erunUIDeps {
 	}
 	if deps.runPodRaw == nil {
 		deps.runPodRaw = runPodRawFromMCP
+	}
+	if deps.execRuntimePod == nil {
+		deps.execRuntimePod = func(ctx context.Context, selection uiSelection, script string) (string, error) {
+			return execInRuntimePodViaKubectl(ctx, selection, deps.store, script)
+		}
 	}
 	if deps.recordActivity == nil {
 		deps.recordActivity = eruncommon.RecordEnvironmentActivity

@@ -15,6 +15,12 @@ Module-specific guidance for `erun-mcp`. Follow the repository root `AGENTS.md` 
 - Action-oriented MCP endpoints should provide a preview or plan path so callers can inspect the resolved work before execution. Preview behavior should avoid side effects and return the concrete actions that would run.
 - By default, new commands should be implemented in both transports: CLI and MCP. Keep the MCP layer thin; shared planning and execution belong in `erun-common`.
 
+## Host AWS Credentials Are A CLI Verb, Not An MCP Tool
+
+`cloud_inject_aws_credentials` / `cloud_clear_aws_credentials` are the **in-pod half** of host credential delivery: `emcp` runs inside the runtime container, so it can write `~/.aws/credentials` but has no access to the operator's own AWS SSO profile, which lives only on their machine. The refresh itself is therefore a CLI verb (`erun cloud refresh <tenant> <environment>`) and deliberately has no MCP counterpart — the root `AGENTS.md` both-transports default does not apply when one transport structurally cannot originate the operation.
+
+Keep the inject tool working (the desktop's credential refresher calls it), but treat its argument-carried credentials as a hazard: its `Description:` must keep telling callers not to invoke it from anything that records arguments, and must keep pointing at the CLI verb. Do not add new tools that take credential material as tool input. When a secret has to reach the pod, stream it on stdin behind a constant script (`erun-common/cloud_host_credentials.go`, `remoteSSHKeySeedScript` in `erun-common/open.go`) or deliver it as a Secret (`applyCloudflareCredentialsSecret`).
+
 ## MCP Tool Descriptions
 
 The MCP server's tool `Description:` and parameter `jsonschema:"…"` strings are part of the product's public surface — the only place a reader (human or LLM) learns what a tool does before calling it. The shared quality bar and review methodology for tool descriptions and CLI help live in `erun-cli/AGENTS.md` § "CLI Help And MCP Tool Descriptions"; apply it to MCP descriptions too. The key cross-transport rule: the MCP tool `Description:` and the CLI `Short:` + `Long:` for the same operation must reflect the same ground-truth behaviour — if they diverge in meaning, fix both.

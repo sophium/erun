@@ -1,0 +1,3 @@
+audit: erun cloud refresh --dry-run team dev
+trace-log: would append the full trace to <TMP>
+cloud provider alias "dns-edit+0a1b2c3d@cloudflare" is a cloudflare alias; host credential refresh applies to AWS aliases only

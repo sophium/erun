@@ -23,7 +23,8 @@ The `build → release → push → deploy` commands form ERun's delivery pipeli
 |---|---|
 | `erun` | Universal entry point. In a fresh project, runs `init`. In a configured one, runs `open`. |
 | [`erun init`](/cli/init) | Create or update a tenant + environment, bring the environment up. |
-| [`erun open`](/cli/open) | Open a shell into the environment (brings it up first if needed). |
+| [`erun open`](/cli/open) | Open a shell into the environment (starts it first if it was stopped). |
+| [`erun stop`](/cli/stop) | Stop an environment so its CPU and memory go back to the ones you are using. |
 | [`erun delete`](/cli/delete) | Tear down an environment — remote namespace + local config. |
 | [`erun build`](/cli/build) | Build the project's container images (agent envs only — runtime envs receive deploys). |
 | [`erun release`](/cli/release) | Cut a release: stamp the version, tag it, push the tag. |
@@ -31,7 +32,7 @@ The `build → release → push → deploy` commands form ERun's delivery pipeli
 | [`erun deploy`](/cli/deploy) | Roll a version out to an environment (build · push · helm upgrade). |
 | [`erun publish`](/cli/publish) | Mirror a built version's images to the shared registry (`from`→`to`), no build or deploy. |
 | [`erun expose`](/cli/expose) | Expose an env's Service at a public hostname under the platform's services zone. |
-| [`erun cloud`](/cli/cloud) | Set up and manage cloud provider aliases (AWS SSO). |
+| [`erun cloud`](/cli/cloud) | Set up and manage cloud provider aliases (AWS SSO), and refresh an environment's host AWS credentials. |
 | [`erun context`](/cli/context) | Create and power managed cloud contexts (an EC2 instance running k3s). |
 | [`erun sshd`](/cli/sshd) | Enable SSH (and IDE) access to a remote environment. |
 | [`erun list`](/cli/list) | List tenants, environments, and the effective target. |

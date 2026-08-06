@@ -30,25 +30,25 @@ test.describe('sidebar env open dot', () => {
 
     // Activating the dot closes the env, and must not also trigger the row's
     // openSelection — a keyboard-activated button still fires a bubbling click,
-    // so stopPropagation is exercised either way. Driven by key rather than mouse
-    // because the dot sits inside an IconTooltip: a mouse click hovers it first,
-    // and the tooltip content that opens can intercept the press (the same reason
-    // openManageDialogViaKeyboard exists). Under a loaded shared backend that
-    // interception is what left the env open and the dot mounted.
-    await dot.focus();
-    await dot.press('Enter');
-    await expect(dot).toHaveCount(0);
+    // so stopPropagation is exercised either way. The POM owns the activation:
+    // the dot sits inside an IconTooltip whose content can intercept the press,
+    // so it re-activates until the env is actually closed.
+    // closeEnvironment already asserts the row went quiet and stayed quiet.
+    await app.sidebar.closeEnvironment(tenant, environment);
   });
 
   // The dot must reflect the env's REAL condition, not just tab
   // presence: green filled circle while running, hollow grey ring while the
-  // linked cloud context is stopped, amber triangle after a failed deploy /
-  // abandoned reconnect. Shape + accessible label carry the state (never
-  // colour alone). A real stopped EC2 context or failed deploy cannot be
+  // linked cloud context is stopped OR the runtime is scaled to zero, amber
+  // triangle after a failed deploy / abandoned reconnect. Stopped and failed
+  // are distinct states — a stopped environment must never read as a failure.
+  // Shape + accessible label carry the state (never colour alone). A real
+  // stopped EC2 context, scaled-down runtime, or failed deploy cannot be
   // staged headless, so the spec drives the same env-status Wails event the
   // Go side emits — the emission decisions themselves are owned by
-  // erun-ui/env_status_test.go (tryReconnect refusal paths).
-  test('the dot reflects the real env state: running → stopped → failed → running', async ({
+  // erun-ui/env_status_test.go (tryReconnect refusal paths) and
+  // erun-ui/environment_stop_test.go (the scaled-to-zero refusal).
+  test('the dot reflects the real env state: running → stopped → runtime-stopped → failed → running', async ({
     app,
     page,
     seededEnv,
@@ -100,16 +100,33 @@ test.describe('sidebar env open dot', () => {
       'stopped',
       new RegExp(`^${tenant} / ${environment} is stopped`),
     );
+    // A runtime scaled to zero is stopped, not broken: it renders the same
+    // hollow-ring stopped glyph as a stopped cloud context, but names the other
+    // recovery — opening the environment is what wakes the runtime, whereas a
+    // stopped cloud context is started from the titlebar. Scaling a real
+    // Deployment to zero needs a cluster the headless harness deliberately
+    // lacks, so the spec drives the same env-status event the Go side emits;
+    // the emission decisions are owned by erun-ui/environment_stop_test.go
+    // (TestReconnectRefusedFlagsStoppedRuntimeInsteadOfFailed) and the
+    // cluster-state mapping by TestRuntimeStoppedForSelectionMapsClusterStateToTheIndicator.
+    await driveEnvStatus(
+      'runtime-stopped',
+      'runtime-stopped',
+      /is stopped — click it in the sidebar/,
+    );
     await driveEnvStatus('failed', 'failed', /deploy failed/);
     await driveEnvStatus('', 'running', `Close ${tenant} / ${environment}`);
 
-    // Close the env so the singleton backend returns to its pre-test shape, by
-    // key for the tooltip-interception reason above. This step is still an
-    // intermittent red under full-suite load — the close occasionally misses the
-    // expect window — tracked separately; do not paper over it with a retry.
-    await dot.focus();
-    await dot.press('Enter');
-    await expect(dot).toHaveCount(0);
+    // Close the env so the singleton backend returns to its pre-test shape.
+    // This step used to be an intermittent red under full-suite load: a session
+    // that had already exited made its PTY close report "file already closed",
+    // which failed the whole CloseEnvironmentSessions call and aborted the
+    // frontend's unwind before it cleared the env's tabs — so the dot stayed
+    // mounted. Session close is idempotent now (erun-ui/session.go
+    // ignoreAlreadyClosed); what remains is the tooltip swallowing the
+    // activation, which the POM's re-activation absorbs.
+    // closeEnvironment already asserts the row went quiet and stayed quiet.
+    await app.sidebar.closeEnvironment(tenant, environment);
   });
 });
 

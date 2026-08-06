@@ -65,7 +65,33 @@ erun context start <context>           # bring it back (gated to working hours; 
 | Stop / start a context | `erun context stop` / `erun context start <context>` |
 | Keep a context up during repair | `erun context disable-api-stop <context>`, then `enable-api-stop` after |
 | Rotate the OIDC issuer | `erun cloud oidc --alias <alias>` |
+| Re-inject an environment's host AWS credentials | `erun cloud refresh <tenant> <env>` |
 | See status / which contexts exist | `erun context list` |
+
+## Acting as your AWS identity in an environment {#host-credentials}
+
+Attaching an AWS alias to an environment is what lets its runtime pod reach AWS **as you** — pull from your ECR, read your S3 buckets, call Bedrock. There is no separate toggle: ERun writes short-lived credentials derived from your alias into the pod's `~/.aws/credentials` under the `erun-host` profile, and the runtime pod's `AWS_PROFILE` points at it.
+
+Those credentials are **temporary**, on the order of an hour, and nothing in the cluster renews them. Two things keep an environment usable:
+
+- **The desktop app** refreshes them on a timer for every open environment.
+- **`erun open`** refreshes them as you open the environment. If your SSO session has lapsed the refresh is skipped with a warning and the shell still opens — the environment keeps whatever credentials it already had.
+
+For anything else — a long-running session, a script, an Agent that never reopens the environment — refresh them explicitly:
+
+```bash
+erun cloud refresh my-tenant rihards-dev
+```
+
+Nothing sensitive passes through the caller: ERun reads your own AWS profile and streams the credentials to the pod on stdin, so no key or token lands in a command line or a transcript. See [`erun cloud refresh`](/cli/cloud#cloud-refresh).
+
+When credentials do go stale, the symptom usually appears far from the cause — a container pull failing with `no basic auth credentials`, or an SDK call reporting `ExpiredToken`. Ask ERun instead of guessing:
+
+```bash
+erun doctor my-tenant rihards-dev
+```
+
+For an environment with an AWS alias, `doctor` reports whether the `erun-host` profile is present, when it expires, and which AWS region the environment resolves — see [Troubleshooting](/reference/troubleshooting#host-credentials-expired).
 
 ## Bring your own cluster
 

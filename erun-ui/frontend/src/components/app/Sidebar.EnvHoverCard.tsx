@@ -1,5 +1,6 @@
 import * as React from 'react';
 
+import type { EnvironmentIndicator } from '@/components/app/Sidebar.helpers';
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover';
 import type { UISelection, UIWorkingIssue } from '@/types';
 
@@ -16,8 +17,7 @@ export function EnvHoverCard({
   isLocal,
   runtimeVersion,
   activityLabel,
-  isOpen,
-  envState,
+  indicator,
   children,
 }: {
   className?: string;
@@ -27,8 +27,7 @@ export function EnvHoverCard({
   isLocal: boolean;
   runtimeVersion: string;
   activityLabel: string;
-  isOpen: boolean;
-  envState: string;
+  indicator: EnvironmentIndicator;
   children: React.ReactNode;
 }): React.ReactElement {
   const [open, setOpen] = React.useState(false);
@@ -105,7 +104,7 @@ export function EnvHoverCard({
             <WorkingOn issue={issue} />
           </HoverRow>
           <HoverRow label="Activity">
-            <ActivityState activityLabel={activityLabel} isOpen={isOpen} envState={envState} />
+            <ActivityState activityLabel={activityLabel} indicator={indicator} />
           </HoverRow>
         </dl>
       </PopoverContent>
@@ -132,30 +131,24 @@ function Muted({ children }: { children: React.ReactNode }): React.ReactElement 
   return <span className="text-muted-foreground">{children}</span>;
 }
 
-// ActivityState distinguishes a never-opened env ("Not open") from an
-// open-but-quiet one ("Idle") — a never-opened env has no pod to be idle.
+// ActivityState reports the desktop's own in-flight command when there is one,
+// and otherwise the environment's condition — which now distinguishes an env
+// that is busy (and with what), one that is merely reachable because someone
+// opened it outside the desktop, and one nobody has opened at all.
 function ActivityState({
   activityLabel,
-  isOpen,
-  envState,
+  indicator,
 }: {
   activityLabel: string;
-  isOpen: boolean;
-  envState: string;
+  indicator: EnvironmentIndicator;
 }): React.ReactElement {
   if (activityLabel) {
     return <span>{activityLabel}</span>;
   }
-  if (envState === 'stopped') {
-    return <Muted>Stopped — start it from the titlebar</Muted>;
+  if (indicator.dot === 'busy') {
+    return <span>{indicator.activity}</span>;
   }
-  if (envState === 'failed') {
-    return <Muted>Deploy failed — recover from Activities</Muted>;
-  }
-  if (!isOpen) {
-    return <Muted>Not open</Muted>;
-  }
-  return <Muted>Idle</Muted>;
+  return <Muted>{indicator.activity}</Muted>;
 }
 
 function WorkingOn({ issue }: { issue: WorkingIssueState }): React.ReactElement {

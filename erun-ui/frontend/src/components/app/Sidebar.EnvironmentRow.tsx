@@ -11,8 +11,12 @@ import { envKey } from '@/app/slices/sessionsSlice';
 import { selectionKey } from '@/app/versionSuggestions';
 import { IconTooltip } from '@/components/app/IconTooltip';
 import { EnvHoverCard } from '@/components/app/Sidebar.EnvHoverCard';
-import { deriveEnvironmentRow } from '@/components/app/Sidebar.helpers';
-import { StatusDotGlyph, type StatusDotState } from '@/components/app/Sidebar.StatusDot';
+import {
+  deriveEnvironmentRow,
+  type EnvironmentIndicator,
+  environmentIndicator,
+} from '@/components/app/Sidebar.helpers';
+import { StatusDotGlyph } from '@/components/app/Sidebar.StatusDot';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { UISelection } from '@/types';
@@ -112,36 +116,48 @@ function BusyRowSpinner({ label }: { label: string }): React.ReactElement {
   );
 }
 
-// The open dot's shape carries the env's real condition (running / stopped /
-// failed), not mere tab presence — open is not running — and conveys it via
-// shape + label, never colour alone. Independent of the busy spinner; both
-// can show at once.
-function OpenEnvDot({
-  tenantName,
-  environmentName,
+// The indicator's shape carries the env's real condition (running / busy /
+// stopped / failed), not mere tab presence — open is not running, and an env in
+// use from the CLI is running without being open here. Conveyed via shape +
+// label, never colour alone. Independent of the busy spinner, which reports the
+// desktop's own in-flight command; both can show at once.
+function EnvStatusIndicator({
+  indicator,
   selection,
   envState,
 }: {
-  tenantName: string;
-  environmentName: string;
+  indicator: EnvironmentIndicator;
   selection: UISelection;
   envState: string;
 }): React.ReactElement {
   const dispatch = useAppDispatch();
-  const name = `${tenantName} / ${environmentName}`;
-  const closeHint = `Click to close its tabs — terminals + tracking only, leaves AWS untouched`;
-  let label = `Close ${name}`;
-  let tooltip = `${label} — terminals + tracking only, leaves AWS untouched`;
-  let dotState: StatusDotState = 'running';
-  if (envState === 'stopped') {
-    label = `${name} is stopped — start it from the titlebar`;
-    tooltip = `${label}. ${closeHint}`;
-    dotState = 'stopped';
-  } else if (envState === 'failed') {
-    label = `${name} deploy failed — recover from Activities or re-click the row`;
-    tooltip = `${label}. ${closeHint}`;
-    dotState = 'failed';
+  const dataEnvState = envState || (indicator.dot === 'busy' ? 'busy' : 'running');
+  // Not opened here means there are no tabs to close, so the indicator is a
+  // passive status light rather than a control that would do nothing.
+  if (!indicator.opened) {
+    return (
+      <IconTooltip label={indicator.condition}>
+        <span
+          role="img"
+          aria-label={indicator.condition}
+          data-testid="env-open-dot"
+          data-env-state={dataEnvState}
+          data-env-opened="false"
+          className="flex size-[18px] flex-none items-center justify-center rounded-full text-current"
+        >
+          <StatusDotGlyph state={indicator.dot} />
+        </span>
+      </IconTooltip>
+    );
   }
+  const closeHint = 'Click to close its tabs — terminals + tracking only, leaves AWS untouched';
+  const isPlainRunning = indicator.dot === 'running';
+  const label = isPlainRunning
+    ? `Close ${selection.tenant} / ${selection.environment}`
+    : indicator.condition;
+  const tooltip = isPlainRunning
+    ? `${label} — terminals + tracking only, leaves AWS untouched`
+    : `${indicator.condition}. ${closeHint}`;
   return (
     <IconTooltip label={tooltip}>
       <Button
@@ -151,7 +167,8 @@ function OpenEnvDot({
         className="size-[18px] flex-none cursor-pointer rounded-full border-0 bg-transparent p-0 text-current hover:bg-[color-mix(in_oklch,currentColor_12%,transparent)]"
         aria-label={label}
         data-testid="env-open-dot"
-        data-env-state={envState || 'running'}
+        data-env-state={dataEnvState}
+        data-env-opened="true"
         onClick={(event) => {
           event.stopPropagation();
           void dispatch(closeEnvironment(selection)).catch((error: unknown) => {
@@ -159,9 +176,50 @@ function OpenEnvDot({
           });
         }}
       >
-        <StatusDotGlyph state={dotState} />
+        <StatusDotGlyph state={indicator.dot} />
       </Button>
     </IconTooltip>
+  );
+}
+
+// The row's main click target: selecting the environment opens it.
+function EnvironmentRowOpenButton({
+  environmentName,
+  rowLabel,
+  selected,
+  selection,
+  isLocal,
+  busy,
+  busyLabel,
+}: {
+  environmentName: string;
+  rowLabel: string;
+  selected: boolean;
+  selection: UISelection;
+  isLocal: boolean;
+  busy: boolean;
+  busyLabel: string;
+}): React.ReactElement {
+  const dispatch = useAppDispatch();
+  return (
+    <button
+      type="button"
+      className={cn(
+        'flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-1.5 border-0 bg-transparent py-0 pr-2 pl-10 text-left text-sm leading-[1.2] tracking-normal text-inherit',
+        selected ? 'font-medium' : 'font-normal',
+      )}
+      aria-label={rowLabel}
+      aria-current={selected ? 'page' : undefined}
+      onClick={() => {
+        void dispatch(openSelection(selection)).catch((error: unknown) => {
+          dispatch(showTerminalMessage(readError(error)));
+        });
+      }}
+    >
+      <span className="min-w-0 truncate">{environmentName}</span>
+      {isLocal && <LocalEnvBadge selected={selected} />}
+      {busy && <BusyRowSpinner label={busyLabel} />}
+    </button>
   );
 }
 
@@ -206,12 +264,26 @@ function useEnvironmentRowSelectors(tenantName: string, environmentName: string)
       state.review.reconnect.environment === environmentName,
   );
   // The env's real condition behind the open dot: '' running, 'stopped'
-  // cloud context down, 'failed' deploy or reconnect gave up.
+  // cloud context down, 'runtime-stopped' runtime scaled to zero, 'failed'
+  // deploy or reconnect gave up.
   const envState = useAppSelector(
     (state) =>
       state.envStatus.statusByEnv[
         selectionKey({ tenant: tenantName, environment: environmentName })
       ] ?? '',
+  );
+  // What the environment itself reports, which is true whoever opened it — the
+  // desktop, a CLI `erun open`, or an agent over MCP. Selectors stay primitive-
+  // returning so an unchanged observation cannot re-render the row.
+  const activityKey = selectionKey({ tenant: tenantName, environment: environmentName });
+  const reachable = useAppSelector(
+    (state) => state.envStatus.activityByEnv[activityKey]?.reachable === true,
+  );
+  const envBusy = useAppSelector(
+    (state) => state.envStatus.activityByEnv[activityKey]?.busy === true,
+  );
+  const envBusyDetail = useAppSelector(
+    (state) => state.envStatus.activityByEnv[activityKey]?.detail ?? '',
   );
   return {
     selectedSelection,
@@ -222,6 +294,9 @@ function useEnvironmentRowSelectors(tenantName: string, environmentName: string)
     isOpen,
     reconnecting,
     envState,
+    reachable,
+    envBusy,
+    envBusyDetail,
   };
 }
 
@@ -232,7 +307,6 @@ export function EnvironmentRow({
   tenantName: string;
   environmentName: string;
 }): React.ReactElement {
-  const dispatch = useAppDispatch();
   const {
     selectedSelection,
     tenants,
@@ -242,6 +316,9 @@ export function EnvironmentRow({
     isOpen,
     reconnecting,
     envState,
+    reachable,
+    envBusy,
+    envBusyDetail,
   } = useEnvironmentRowSelectors(tenantName, environmentName);
   const {
     selected: selectedBySelection,
@@ -271,6 +348,14 @@ export function EnvironmentRow({
   const selected = selectedBySelection && !orchestratorActive;
 
   const rowLabel = `${tenantName} / ${environmentName}${isLocal ? ' (local)' : ''}`;
+  const indicator = environmentIndicator({
+    name: `${tenantName} / ${environmentName}`,
+    envState,
+    isOpen,
+    reachable,
+    busy: envBusy,
+    detail: envBusyDetail,
+  });
   return (
     <EnvHoverCard
       className={cn(
@@ -284,34 +369,19 @@ export function EnvironmentRow({
       isLocal={isLocal}
       runtimeVersion={runtimeVersion}
       activityLabel={busy ? busyLabel : ''}
-      isOpen={isOpen}
-      envState={envState}
+      indicator={indicator}
     >
-      <button
-        type="button"
-        className={cn(
-          'flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-1.5 border-0 bg-transparent py-0 pr-2 pl-10 text-left text-sm leading-[1.2] tracking-normal text-inherit',
-          selected ? 'font-medium' : 'font-normal',
-        )}
-        aria-label={rowLabel}
-        aria-current={selected ? 'page' : undefined}
-        onClick={() => {
-          void dispatch(openSelection(selection)).catch((error: unknown) => {
-            dispatch(showTerminalMessage(readError(error)));
-          });
-        }}
-      >
-        <span className="min-w-0 truncate">{environmentName}</span>
-        {isLocal && <LocalEnvBadge selected={selected} />}
-        {busy && <BusyRowSpinner label={busyLabel} />}
-      </button>
-      {isOpen && (
-        <OpenEnvDot
-          tenantName={tenantName}
-          environmentName={environmentName}
-          selection={selection}
-          envState={envState}
-        />
+      <EnvironmentRowOpenButton
+        environmentName={environmentName}
+        rowLabel={rowLabel}
+        selected={selected}
+        selection={selection}
+        isLocal={isLocal}
+        busy={busy}
+        busyLabel={busyLabel}
+      />
+      {indicator.visible && (
+        <EnvStatusIndicator indicator={indicator} selection={selection} envState={envState} />
       )}
       <EnvironmentRowOutputsButton
         tenantName={tenantName}

@@ -15,6 +15,7 @@ export const wailsApi = createApi({
     'GlobalConfig',
     'KubernetesContexts',
     'RuntimeResourceStatus',
+    'RuntimeActivity',
     'VersionSuggestions',
     'CloudContexts',
     'CloudContextApiStop',

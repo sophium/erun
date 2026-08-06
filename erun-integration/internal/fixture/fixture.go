@@ -54,6 +54,27 @@ func SeedTenantEnv(t testing.TB, setup env.Setup, tenant, environment string) {
 	)
 }
 
+// SeedStoppedTenantEnv seeds a tenant env the operator has stopped, so a
+// scenario can exercise the recorded stop intent — the durable half of `erun
+// stop` that makes deploy re-render replicas: 0 and open wake the environment.
+func SeedStoppedTenantEnv(t testing.TB, setup env.Setup, tenant, environment string) {
+	t.Helper()
+	SeedTenantEnv(t, setup, tenant, environment)
+	appendEnvConfig(t, setup, tenant, environment, "stopped: true\n")
+}
+
+// appendEnvConfig adds extra keys to an already-seeded env config, so seed
+// variants stay one line instead of a copy of the whole tree.
+func appendEnvConfig(t testing.TB, setup env.Setup, tenant, environment, extra string) {
+	t.Helper()
+	path := filepath.Join(setup.ConfigHome, "erun", tenant, environment, "config.yaml")
+	existing, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read env config %s: %v", path, err)
+	}
+	mustWrite(t, path, string(existing)+extra)
+}
+
 // SeedTenantEnvWithContext puts an env on a caller-chosen kubernetes context so
 // a scenario can place a second environment on a distinct cluster (e.g. expose's
 // cross-cluster DNS routing between a PowerDNS platform env and a target env).
@@ -545,6 +566,40 @@ func SeedRemoteTenantEnvWithAWSAlias(t testing.TB, setup env.Setup, tenant, envi
 			"runtimeversion: 1.0.0\n"+
 			"type: remote-agent\n"+
 			"cloudprovideralias: ops+123456789012@aws\n",
+	)
+}
+
+// SeedLocalTenantEnvWithAWSAlias seeds an env on a local cluster carrying an AWS
+// alias but no cloud context, with the alias registered in the root config so it
+// actually resolves — the shape that produced both the expired-host-credential
+// and the empty-AWS_REGION failures. ssoRegion and
+// registry select which region tier the env exercises — the alias' Identity
+// Center region, the region an ECR registry host encodes, or (both left plain)
+// no resolvable region at all.
+func SeedLocalTenantEnvWithAWSAlias(t testing.TB, setup env.Setup, tenant, environment, alias, ssoRegion, registry string) {
+	t.Helper()
+	SeedTenantEnv(t, setup, tenant, environment)
+	rootBody := "defaulttenant: " + tenant + "\n" +
+		"cloudproviders:\n" +
+		"  - alias: " + alias + "\n" +
+		"    provider: aws\n" +
+		"    profile: erun-sso-test\n"
+	if strings.TrimSpace(ssoRegion) != "" {
+		rootBody += "    ssoregion: " + ssoRegion + "\n"
+	}
+	mustWrite(t, filepath.Join(setup.ConfigHome, "erun", "config.yaml"), rootBody)
+	if strings.TrimSpace(registry) == "" {
+		registry = "registry.example/test"
+	}
+	envDir := filepath.Join(setup.ConfigHome, "erun", tenant, environment)
+	mustWrite(t, filepath.Join(envDir, "config.yaml"),
+		"name: "+environment+"\n"+
+			"repopath: "+setup.Cwd+"\n"+
+			"kubernetescontext: test-context\n"+
+			"containerregistry: "+registry+"\n"+
+			"runtimeversion: 1.0.0\n"+
+			"type: local-agent\n"+
+			"cloudprovideralias: "+alias+"\n",
 	)
 }
 
@@ -1143,6 +1198,24 @@ func StubBinaryFailFirstThenSucceed(t testing.TB, dir, name, stderrFirst string,
 		"fi\n" +
 		"exit 0"
 	return StubBinaryWithScript(t, dir, name, script)
+}
+
+// StubKubectlRuntimeRunState writes a kubectl stub that answers the runtime
+// run-state read `erun stop` and `erun open` perform (`get deployment <release>
+// -o jsonpath={.spec.replicas}/{.status.readyReplicas}`) with the supplied
+// replica counts. That answer is a dry-run decision input: it is what decides
+// whether the environment is stopped and therefore whether a scale is planned,
+// and a trace alone cannot supply it. Every other kubectl call exits 0
+// silently, which is all the surrounding dry-run scenarios need.
+//
+// Pass desired=0 for a stopped environment and desired=1 for a running one.
+func StubKubectlRuntimeRunState(t testing.TB, dir string, desired, ready int) string {
+	t.Helper()
+	script := "case \"$*\" in\n" +
+		"  *jsonpath=*) printf '%s' " + shellSingleQuote(strconv.Itoa(desired)+"/"+strconv.Itoa(ready)) + "; exit 0 ;;\n" +
+		"esac\n" +
+		"exit 0"
+	return StubBinaryWithScript(t, dir, "kubectl", script)
 }
 
 // StubEnv returns the env-var pairs that route the named binary lookups to

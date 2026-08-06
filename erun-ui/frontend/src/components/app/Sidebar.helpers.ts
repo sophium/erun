@@ -1,5 +1,6 @@
 import { environmentTypeIsRemoteWorktree } from '@/app/environmentType';
 import type { AppState } from '@/app/state';
+import type { StatusDotState } from '@/components/app/Sidebar.StatusDot';
 import type { UIEnvironment, UISelection } from '@/types';
 
 // pendingForTenant returns the optimistic selection for an env being created but
@@ -207,4 +208,134 @@ function orderCloudAliasRows(aliasByType: Map<string, string>): string[] {
     }
   }
   return ordered;
+}
+
+// The env-status values the Go side emits (erun-ui/ui_model.go). There are two
+// stopped values because the recovery differs: a stopped cloud context is
+// started from the titlebar, while a runtime scaled to zero is woken by opening
+// the environment (which runs `erun open`, and that is what scales it back up).
+const ENV_STATE_STOPPED = 'stopped';
+const ENV_STATE_RUNTIME_STOPPED = 'runtime-stopped';
+const ENV_STATE_FAILED = 'failed';
+
+// environmentStatusDot maps an env state onto the shared indicator shape. Both
+// stopped kinds read as stopped — a stopped environment is not a failure, and
+// must never render the failure glyph. A busy environment only reads busy once
+// no sticky condition contradicts it: a stopped env whose last observation was
+// busy is stopped, not busy.
+function environmentStatusDot(envState: string, busy = false): StatusDotState {
+  if (envState === ENV_STATE_FAILED) {
+    return 'failed';
+  }
+  if (envState === ENV_STATE_STOPPED || envState === ENV_STATE_RUNTIME_STOPPED) {
+    return 'stopped';
+  }
+  return busy ? 'busy' : 'running';
+}
+
+// EnvironmentIndicator is the one derived row state, computed from every input
+// the sidebar has: the sticky condition, what the environment reports about
+// itself, and whether the desktop owns tabs for it. It is the only thing this
+// module exports about row state — the individual inputs are private, so a
+// caller cannot render half of the derivation and disagree with the rest.
+export interface EnvironmentIndicator {
+  visible: boolean;
+  dot: StatusDotState;
+  // opened is true only when the desktop owns tabs, which is what makes the
+  // indicator a Close control rather than a passive light. Reachability is
+  // deliberately not the same thing: an env opened from the CLI is in use but
+  // has no tabs here to close.
+  opened: boolean;
+  // condition names the environment, because it is read out of context — as the
+  // indicator's accessible label and its tooltip.
+  condition: string;
+  // activity is the same state without the name, for the hover card, which is
+  // already titled with the environment it describes.
+  activity: string;
+}
+
+export interface EnvironmentIndicatorInputs {
+  name: string;
+  envState: string;
+  isOpen: boolean;
+  reachable: boolean;
+  busy: boolean;
+  detail: string;
+}
+
+export function environmentIndicator(raw: EnvironmentIndicatorInputs): EnvironmentIndicator {
+  // The sticky condition describes a desktop session. Once the desktop holds no
+  // tabs for the environment it no longer describes anything current, so it is
+  // dropped rather than left to outlive the session that produced it — a closed
+  // row must not keep flying a failure triangle for a session that is gone.
+  const input = raw.isOpen ? raw : { ...raw, envState: '' };
+  const dot = environmentStatusDot(input.envState, input.busy);
+  // What keeps a closed row visible is the environment itself: its edge
+  // answering, or work in flight. Otherwise there is nothing to report.
+  const visible = input.isOpen || input.reachable || input.busy;
+  return {
+    visible,
+    dot,
+    opened: input.isOpen,
+    condition: environmentCondition(input, dot),
+    activity: environmentActivityLabel(input, dot),
+  };
+}
+
+// environmentActivityLabel is the terse form. The card is a small surface and
+// its heading already says which environment this is, so repeating the name on
+// every row would crowd out the state itself.
+function environmentActivityLabel(input: EnvironmentIndicatorInputs, dot: StatusDotState): string {
+  if (dot === 'failed') {
+    return 'Deploy failed — recover from Activities';
+  }
+  if (dot === 'stopped') {
+    return `Stopped — ${environmentStateRecovery(input.envState)}`;
+  }
+  if (dot === 'busy') {
+    return input.detail ? `Busy — ${input.detail}` : 'Busy';
+  }
+  if (input.isOpen) {
+    return 'Idle';
+  }
+  if (input.reachable) {
+    return 'In use elsewhere — not opened here';
+  }
+  return 'Not open';
+}
+
+function environmentCondition(input: EnvironmentIndicatorInputs, dot: StatusDotState): string {
+  if (dot === 'failed') {
+    return `${input.name} deploy failed — ${environmentStateRecovery(input.envState)}`;
+  }
+  if (dot === 'stopped') {
+    return `${input.name} is stopped — ${environmentStateRecovery(input.envState)}`;
+  }
+  if (dot === 'busy') {
+    return input.detail ? `${input.name} is busy — ${input.detail}` : `${input.name} is busy`;
+  }
+  if (input.isOpen) {
+    return `${input.name} is running`;
+  }
+  if (input.reachable) {
+    // The case the blank row hid: reachable without desktop tabs. Say so, and
+    // say why there is no Close affordance on it.
+    return `${input.name} is running and in use elsewhere — not opened here`;
+  }
+  return `${input.name} is not open`;
+}
+
+// environmentStateRecovery names the action that gets the environment back, so
+// the state is never shown without the way out of it. Empty for a running env.
+function environmentStateRecovery(envState: string): string {
+  if (envState === ENV_STATE_STOPPED) {
+    return 'start it from the titlebar';
+  }
+  if (envState === ENV_STATE_RUNTIME_STOPPED) {
+    return 'click it in the sidebar to start it again';
+  }
+  if (envState === ENV_STATE_FAILED) {
+    return 'recover from Activities or re-click the row';
+  }
+  return '';
 }

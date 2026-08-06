@@ -55,8 +55,9 @@ printf '%s\n' "\$*" >>"${run_dir}/emcp-argv"
 printf '%s\n' "\$\$" >>"${run_dir}/emcp-pids"
 exec sleep 300
 EOF
-    cat >"${run_dir}/bin/erun" <<'EOF'
+    cat >"${run_dir}/bin/erun" <<EOF
 #!/bin/sh
+printf '%s\n' "\$*" >>"${run_dir}/erun-argv"
 exit 0
 EOF
     chmod +x "${run_dir}/bin/emcp" "${run_dir}/bin/erun"
@@ -76,6 +77,7 @@ start_run() {
         ERUN_ENVIRONMENT=dev \
         ERUN_MCP_PORT=17000 \
         ERUN_MCP_ENABLED="${_enabled}" \
+        ERUN_APP_SESSION_DIR="${session_dir_override:-}" \
         setsid sh "${entrypoint}" "$@" >"${log}" 2>&1 &
     run_pid=$!
 }
@@ -129,4 +131,46 @@ strip_home() {
     fail "standalone argv should be the pass-through args plus the shared flags: ${standalone_argv}"
 stop_run
 
-echo "PASS: entrypoint MCP supervision"
+# --- 5. Boot reconciles stale session sockets; an in-container shell must not ---
+# A dtach server cannot outlive its container, so every socket present at
+# container start is a leftover the desktop would otherwise read as a running
+# session. The `shell` path runs inside a live container, where the sockets are
+# real, so it must never prune.
+prepare_run prune
+session_dir_override="${run_dir}/sessions"
+mkdir -p "${session_dir_override}"
+cat >"${run_dir}/bin/erun-prune-sessions" <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" >>"${run_dir}/prune-argv"
+EOF
+chmod +x "${run_dir}/bin/erun-prune-sessions"
+
+start_run true devops
+wait_for '[ -s "${run_dir}/prune-argv" ]' ||
+    fail "the devops boot path should reconcile the session directory"
+[ "$(cat "${run_dir}/prune-argv")" = "${session_dir_override}" ] ||
+    fail "the prune should target the session directory: $(cat "${run_dir}/prune-argv")"
+stop_run
+
+env -i \
+    HOME="${run_dir}/home" \
+    PATH="${run_dir}/bin:/usr/local/bin:/usr/bin:/bin" \
+    ERUN_TENANT=team \
+    ERUN_ENVIRONMENT=dev \
+    ERUN_APP_SESSION_DIR="${session_dir_override}" \
+    sh "${entrypoint}" shell </dev/null >>"${log}" 2>&1 || true
+[ "$(wc -l <"${run_dir}/prune-argv")" -eq 1 ] ||
+    fail "an in-container shell must not prune live session sockets"
+session_dir_override=""
+
+# --- 6. The environment monitor samples resident work in every pod ---
+# The sampler is what makes uninstrumented work — a build, a test suite, an
+# agent nobody wrapped in a lease — register as activity. It must run in every
+# pod, not only a cloud-managed one, because the desktop reads the same signal.
+prepare_run sampler
+start_run true devops
+wait_for 'grep -q "^activity sample --tenant team --environment dev$" "${run_dir}/erun-argv" 2>/dev/null' ||
+    fail "the environment monitor should sample resident work at boot: $(cat "${run_dir}/erun-argv" 2>/dev/null)"
+stop_run
+
+echo "PASS: entrypoint MCP supervision, session reconciliation, and activity sampling"

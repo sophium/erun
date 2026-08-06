@@ -312,20 +312,16 @@ func (r *resolvedOpenRunner) run() error {
 	shellReq.AppSession = r.options.AppSession
 	shellReq.AI = r.options.AI
 	shellReq.Contribute = r.options.Contribute
-	if r.options.Deploy {
-		// --deploy is operator-convenience only (root AGENTS.md § "Command
-		// primitives vs orchestration"): programmatic callers like the desktop
-		// must NOT use it — they compose build→push→deploy themselves and open
-		// the pure shell.
-		if err := r.maybeDeployRuntime(shellReq); err != nil {
-			return err
-		}
-	} else {
-		r.ctx.Trace("open: pure primitive — not deploying (run `erun deploy` first, or pass --deploy to deploy before opening)")
-		if err := r.ensureRuntimeDeployed(); err != nil {
-			return err
-		}
+	// Opening an environment means running it, so drop any recorded stop before
+	// the chart is rendered: a deploy that still saw the flag would re-apply
+	// replicas: 0 and the wake below would have to undo its own rollout.
+	if err := r.clearStopIntent(); err != nil {
+		return err
 	}
+	if err := r.prepareRuntime(shellReq); err != nil {
+		return err
+	}
+	r.refreshHostCredentials()
 	r.activateForwarders()
 	if launched, err := r.maybeLaunchIDE(); launched || err != nil {
 		return err
@@ -547,6 +543,58 @@ func (r *resolvedOpenRunner) ensureRuntimeDeployed() error {
 	return nil
 }
 
+// prepareRuntime brings the environment to a state the rest of open can use:
+// deploy when the operator asked for it, otherwise verify the runtime is there,
+// and either way start it if it was stopped. The wake comes last because it is
+// the step that must hold immediately before the port-forwards.
+func (r *resolvedOpenRunner) prepareRuntime(shellReq common.ShellLaunchParams) error {
+	if r.options.Deploy {
+		// --deploy is operator-convenience only (root AGENTS.md § "Command
+		// primitives vs orchestration"): programmatic callers like the desktop
+		// must NOT use it — they compose build→push→deploy themselves and open
+		// the pure shell.
+		if err := r.maybeDeployRuntime(shellReq); err != nil {
+			return err
+		}
+	} else {
+		r.ctx.Trace("open: pure primitive — not deploying (run `erun deploy` first, or pass --deploy to deploy before opening)")
+		if err := r.ensureRuntimeDeployed(); err != nil {
+			return err
+		}
+	}
+	// Wake before the forwards: kubectl port-forward cannot attach to a
+	// Deployment with zero replicas, so a stopped environment would otherwise
+	// surface as a forward timeout instead of starting.
+	return r.ensureRuntimeAwake()
+}
+
+// clearStopIntent records that this environment is wanted running again. It
+// touches only the config, so it is safe to run before the runtime is known to
+// exist (a first `open --deploy` has no Deployment yet).
+func (r *resolvedOpenRunner) clearStopIntent() error {
+	updated, err := common.ClearEnvironmentStopIntent(r.ctx, r.result, r.options.SaveEnvConfig)
+	if err != nil {
+		return err
+	}
+	r.result.EnvConfig = updated
+	return nil
+}
+
+// ensureRuntimeAwake scales a stopped environment back to one replica and waits
+// for the rollout. It is quiet for an environment that is already running: the
+// single read below decides, and no scale call is made.
+func (r *resolvedOpenRunner) ensureRuntimeAwake() error {
+	wake, err := common.EnsureEnvironmentAwake(r.ctx, common.WakeEnvironmentParams{
+		Result:        r.result,
+		SaveEnvConfig: r.options.SaveEnvConfig,
+	})
+	if err != nil {
+		return err
+	}
+	r.result.EnvConfig = wake.EnvConfig
+	return nil
+}
+
 func runtimeDeploymentPresenceArgs(kubernetesContext, namespace, release string) []string {
 	args := make([]string, 0, 7)
 	if strings.TrimSpace(kubernetesContext) != "" {
@@ -556,6 +604,29 @@ func runtimeDeploymentPresenceArgs(kubernetesContext, namespace, release string)
 		args = append(args, "--namespace", namespace)
 	}
 	return append(args, "get", "deployment", release, "-o", "name")
+}
+
+// refreshHostCredentials re-injects the operator's short-lived AWS credentials
+// at the moment they declare they are about to use the env. Nothing else renews
+// them, so a long-lived environment silently loses AWS access mid-session and
+// the failure surfaces layers away as an unrelated image-pull error. It writes
+// into the pod's credentials file, so it has to run after the runtime is awake —
+// a stopped environment has nothing to write to. Best-effort like the
+// forwarders: a lapsed SSO session degrades the environment but must not block
+// the session being opened.
+func (r *resolvedOpenRunner) refreshHostCredentials() {
+	if !r.result.EnvConfig.HasAWSCloudAlias() {
+		return
+	}
+	refresh, err := refreshEnvironmentHostCredentials(r.ctx, r.result)
+	if err != nil {
+		r.ctx.Trace("open: host AWS credential refresh failed; the environment keeps whatever credentials it already had: " + strings.TrimSpace(err.Error()))
+		return
+	}
+	if r.ctx.DryRun {
+		return
+	}
+	r.ctx.Trace(fmt.Sprintf("open: refreshed host AWS credentials for %s into the %s profile", refresh.Alias, refresh.Profile))
 }
 
 // activateForwarders binds the env's laptop-side port-forwards (SSHD, MCP, API)

@@ -31,6 +31,10 @@ var defaultRules = []Replacement{
 	// a git tag's 'v' is the word char immediately before the digits.
 	{regexp.MustCompile(`(?:\bv|\b)\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.\-]+)?`), "<VERSION>"},
 	{regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?`), "<TS>"},
+	// An activity lease's remaining seconds are measured against the wall clock
+	// at print time, so they land a second either side of the ttl depending on
+	// how long the subprocess took to start.
+	{regexp.MustCompile(`expires in \d+s`), "expires in <REMAINING>"},
 	{regexp.MustCompile(`\b20\d{12}\b`), "<TS_COMPACT>"},
 	// The Terraform durable work dir (local-backend state + TF_DATA_DIR) lives
 	// under the test HOME temp dir. Collapse just its temp-path prefix to a stable

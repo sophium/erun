@@ -28,3 +28,4 @@ export {
   focusRegistryFieldFromHealthCheck,
 } from './manageHealthThunks';
 export { enableManageSSHD, startManageDoctor } from './manageHiddenSessionThunks';
+export { submitManageStop } from './manageStopThunks';

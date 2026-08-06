@@ -47,6 +47,20 @@ ERun doesn't deploy a log aggregator. The conventional setup is **Loki + Promtai
 
 In Grafana, filter by the Kubernetes namespace label to scope to one env: `{namespace="<tenant>-<env>"}`.
 
+## Is this environment busy?
+
+Logs tell you what happened; this tells you whether anything is happening right now. An environment reports its own condition, and the desktop's sidebar renders it — so an environment being driven hard by an Agent looks different from one nobody has touched in a week, and different again from one that is stopped.
+
+Three things feed it:
+
+- **Activity leases.** Long work announces itself for its lifetime (`erun activity lease take --name <what>`, or the MCP `activity_lease_take` tool). This is the only signal that names the work, and the only one that survives a job making no calls for forty minutes. Idle-stop will not stop an environment holding one.
+- **Sampled processes.** The in-pod monitor notices resident build and agent processes that are actually burning CPU, so work nobody instrumented still registers.
+- **Request activity.** SSH, API, MCP, and CLI traffic, as before.
+
+Read it from anywhere with the MCP `idle` tool or `erun idle <tenant> <env> --json`: `leases` says what is holding the environment, `markers` breaks the rest down per source, and `stopBlockedReason` names whichever one is deferring auto-stop.
+
+For the full schema and the expiry / liveness rules, see [Agent reference · Idle policy](/agent-reference/idle-policy#activity-leases); for the operator-facing commands, [`erun idle` · Activity leases](/cli/idle#activity-leases).
+
 ## Metrics
 
 ERun's runtime pod exposes a single Prometheus-format metrics endpoint on port `9100`. The series cover idle-eligibility, terminal-input freshness, the network-traffic window, MCP tool-call counts, and audit-event counts — labelled by tenant + environment.
@@ -77,6 +91,8 @@ When a service incident needs an "actor and intent" reconstruction, the audit tr
 |---|---|
 | Service crashed | `kubectl logs -n <tenant>-<env> -l app=<component> --previous` |
 | Idle-stop fired unexpectedly | MCP `idle` tool result + `erun_idle_*` Prometheus series |
+| Is anything running in this env right now | Sidebar row indicator; MCP `idle` tool `leases` + `markers` |
+| Why an idle-looking env never stops | `stopBlockedReason` in the MCP `idle` tool result — a held lease names itself |
 | An Agent's recent actions | `/var/log/erun/audit.log` or the API audit-events table |
 | A merge happened — who advanced the queue | Security events: `mergequeue.advance` |
 | The runtime pod restarted | `kubectl describe pod -n <tenant>-<env> <pod>` (Kubernetes events) |

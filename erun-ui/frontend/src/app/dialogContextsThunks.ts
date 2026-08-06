@@ -1,6 +1,7 @@
 import { environmentApi } from './api/environmentApi';
 import { kubernetesApi } from './api/kubernetesApi';
 import { readError } from './errors';
+import { unavailableRuntimeResourceStatus } from './runtimeResources';
 import { selectDialogKubernetesContext } from './selectors';
 import { patchEnvironmentDialog } from './slices/environmentDialogSlice';
 import type { AppThunk } from './store';
@@ -53,13 +54,7 @@ const refreshDialogRuntimeResources =
       }
       dispatch(
         patchEnvironmentDialog({
-          resourceStatus: {
-            kubernetesContext: context,
-            available: false,
-            message: readError(error),
-            cpu: { total: 0, used: 0, free: 0, unit: 'cores', formatted: '' },
-            memory: { total: 0, used: 0, free: 0, unit: 'GiB', formatted: '' },
-          },
+          resourceStatus: unavailableRuntimeResourceStatus(context, readError(error)),
           resourceStatusLoading: false,
         }),
       );

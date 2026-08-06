@@ -178,6 +178,19 @@ func stubLsofNoHolder(t *testing.T, stubsDir string) {
 	})
 }
 
+// stubKubectlRunState is stubKubectlNotFound's sibling for the wake path: it
+// pins the runtime run-state read (the decision input for whether `open` must
+// scale a stopped environment back up) instead of the deployment-presence
+// check. Same host-OS override, for the same preamble/adopt-probe reasons.
+func stubKubectlRunState(t *testing.T, setup env.Setup, desired, ready int) []string {
+	t.Helper()
+	stubs := setup.Cwd + "/stubs"
+	fixture.StubKubectlRuntimeRunState(t, stubs, desired, ready)
+	stubLsofNoHolder(t, stubs)
+	envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "lsof", "ps")...)
+	return append(envVars, openHostOSOverride)
+}
+
 func TestOpen(t *testing.T) {
 	t.Run("help", func(t *testing.T) {
 		setup := env.New(t)
@@ -531,11 +544,30 @@ func TestOpen(t *testing.T) {
 		// toggle — the alias association alone drives it. The
 		// desktop refresher writes the matching profile into the pod's
 		// ~/.aws/credentials at runtime — that path is tested in erun-mcp.
+		// The alias here is deliberately not registered in the root config, so
+		// this golden also locks the degraded arm of open's credential refresh:
+		// an unresolvable alias warns and the session still opens.
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnvWithAWSAlias(t, setup, "team", "dev")
 		envVars := stubKubectlNotFound(t, setup)
 		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/remote_dry_run_aws_alias_propagates_host_credentials", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_configured_aws_alias_refreshes_host_credentials", func(t *testing.T) {
+		// Injected host credentials are temporary and nothing else renews them,
+		// so open refreshes them at the moment the operator declares they are
+		// about to use the env. The plan must show the wait and the exec that
+		// rewrites the erun-host profile, and the resolved region — this env has
+		// a provider alias but no cloud context, the shape that produced both
+		// the expired-credentials and the empty-AWS_REGION failures.
+		setup := env.New(t)
+		fixture.SeedLocalTenantEnvWithAWSAlias(t, setup, "team", "dev", "ops+123456789012@aws", "eu-west-2", "")
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "open/dry_run_configured_aws_alias_refreshes_host_credentials", normalize.Apply(result.Combined))
 	})
 
 	t.Run("app_session_dry_run_pure_open_does_not_deploy", func(t *testing.T) {
@@ -568,6 +600,52 @@ func TestOpen(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "open/deploy_flag_dry_run_deploys_runtime_before_opening", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_wakes_stopped_runtime_before_forwarding", func(t *testing.T) {
+		// The load-bearing wake: kubectl port-forward cannot attach to a
+		// Deployment with zero replicas, so a stopped environment must be scaled
+		// back up and waited for BEFORE the forwards are traced. The run-state
+		// stub is the decision input — dry-run cannot know the replica count
+		// without asking the cluster.
+		setup := env.New(t)
+		fixture.SeedStoppedTenantEnv(t, setup, "team", "dev")
+		envVars := stubKubectlRunState(t, setup, 0, 0)
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "open/dry_run_wakes_stopped_runtime_before_forwarding", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_running_runtime_wake_is_quiet", func(t *testing.T) {
+		// The common path must stay silent: an environment already running gets
+		// one run-state read and no scale call, so `open` does not churn the
+		// cluster on every invocation. The negative is the point of the golden.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envVars := stubKubectlRunState(t, setup, 1, 1)
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "open/dry_run_running_runtime_wake_is_quiet", normalize.Apply(result.Combined))
+	})
+
+	t.Run("deploy_flag_dry_run_clears_stop_intent_before_rendering_the_chart", func(t *testing.T) {
+		// stop → deploy → open, third leg. The recorded stop must be cleared
+		// BEFORE helm renders, or the rollout would re-apply replicas: 0 and the
+		// wake would have to undo its own deploy. The golden therefore shows the
+		// `stopped=false` config write ahead of the helm plan, and no
+		// `--set stopped=true` in the rendered helm args.
+		setup := env.New(t)
+		fixture.SeedStoppedTenantEnv(t, setup, "team", "dev")
+		envVars := stubKubectlRunState(t, setup, 0, 0)
+		result := erun.Run(t, []string{"open", "team", "dev", "--deploy", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "open/deploy_flag_dry_run_clears_stop_intent_before_rendering_the_chart", normalize.Apply(result.Combined))
 	})
 
 	t.Run("deploy_flag_dry_run_fresh_env_requires_runtime_version", func(t *testing.T) {

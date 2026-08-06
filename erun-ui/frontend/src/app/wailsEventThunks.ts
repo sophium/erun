@@ -7,6 +7,7 @@ import type {
   AIActivityPayload,
   AppNotificationPayload,
   AppStatusPayload,
+  EnvActivityPayload,
   EnvironmentInitializedPayload,
   EnvStatusPayload,
   TerminalExitSelections,
@@ -26,7 +27,7 @@ import {
 import { openSelection, selectTerminalTab, startInitialDeploySelection } from './sessionThunks';
 import { setAIBusyForEnv } from './slices/aiActivitySlice';
 import { setDoctorAll } from './slices/doctorSlice';
-import { setEnvStatusForEnv } from './slices/envStatusSlice';
+import { setEnvActivityForEnv, setEnvStatusForEnv } from './slices/envStatusSlice';
 import { appendReconnectLine } from './slices/reviewSlice';
 import {
   clearPendingOpenAfterDeploy,
@@ -79,6 +80,31 @@ export const handleEnvStatus =
     }
     const key = selectionKey({ tenant, environment });
     dispatch(setEnvStatusForEnv({ key, status: payload.status.trim() }));
+  };
+
+// handleEnvActivity records what the environment itself reports — its edge
+// answering, and whether work is in flight — so a row driven from the CLI or by
+// an in-pod agent shows its condition instead of rendering blank (Nielsen #1,
+// visibility of system status).
+export const handleEnvActivity =
+  (payload: EnvActivityPayload): AppThunk =>
+  (dispatch) => {
+    const tenant = payload.tenant.trim();
+    const environment = payload.environment.trim();
+    if (!tenant || !environment) {
+      return;
+    }
+    const key = selectionKey({ tenant, environment });
+    dispatch(
+      setEnvActivityForEnv({
+        key,
+        activity: {
+          reachable: payload.reachable,
+          busy: payload.busy,
+          detail: (payload.detail ?? '').trim(),
+        },
+      }),
+    );
   };
 
 // handleAppStatus surfaces a backend status line to the user.

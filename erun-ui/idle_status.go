@@ -126,7 +126,7 @@ func (a *App) mergeLocalIdleActivity(result eruncommon.OpenResult, status erunco
 		return status
 	}
 	if len(status.Activity) > 0 {
-		remoteWithLocalPolicy, err := eruncommon.ResolveEnvironmentIdleStatus(result.EnvConfig.Idle, status.Activity, time.Now())
+		remoteWithLocalPolicy, err := eruncommon.ResolveEnvironmentIdleStatus(result.EnvConfig.Idle, status.Activity, status.Leases, time.Now())
 		if err == nil {
 			remoteWithLocalPolicy.ManagedCloud = status.ManagedCloud
 			remoteWithLocalPolicy.StopBlockedReason = status.StopBlockedReason

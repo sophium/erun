@@ -92,8 +92,8 @@ test.describe('sidebar env hover card', () => {
     // Reset the injected status and close the env so it doesn't leak into later specs (shared backend).
     await emitEnvStatusEvent(page, tenant, environment, '');
     await expect(dot).toHaveAttribute('data-env-state', 'running');
-    await dot.click();
-    await expect(dot).toHaveCount(0);
+    // closeEnvironment already asserts the row went quiet and stayed quiet.
+    await app.sidebar.closeEnvironment(tenant, environment);
   });
 });
 

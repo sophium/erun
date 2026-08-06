@@ -13,32 +13,28 @@ import (
 // another ERun window created; the default tabs attach-or-create on their own.
 // Fail-soft by design: unreachable or undeployed envs yield nil, never an
 // error, so the open flow never stalls on detection.
+//
+// A socket with no live program behind it is deliberately excluded: rebuilding a
+// tab for one would reattach to nothing and present a dead pane as a session.
 func (a *App) ListRemoteAppSessions(selection uiSelection) []string {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
 		return nil
 	}
-	envConfig, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment)
-	if err != nil {
-		return nil
-	}
-	kubernetesContext := strings.TrimSpace(envConfig.KubernetesContext)
-	if kubernetesContext == "" {
-		return nil
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(a.backgroundContext(), 5*time.Second)
 	defer cancel()
-	output, err := kubectlText(ctx, kubernetesContext,
-		"--namespace", eruncommon.KubernetesNamespaceName(selection.Tenant, selection.Environment),
-		"exec",
-		"deployment/"+eruncommon.RuntimeReleaseName(selection.Tenant),
-		"--",
-		"/bin/sh", "-c", "ls "+eruncommon.RemoteAppSessionSocketDir+" 2>/dev/null || true",
-	)
+	output, err := a.execInRuntimePod(ctx, selection,
+		eruncommon.RemoteAppSessionHeartbeatScript(selection.Tenant, selection.Environment))
 	if err != nil {
 		return nil
 	}
-	return eruncommon.ParseRemoteAppSessionIDs(selection.Tenant, selection.Environment, output)
+	var ids []string
+	for _, heartbeat := range eruncommon.ParseRemoteAppSessionHeartbeats(output) {
+		if heartbeat.Running() {
+			ids = append(ids, heartbeat.ID)
+		}
+	}
+	return ids
 }
 
 // endRemoteAppSession permanently ends one persistent desktop session so
@@ -52,21 +48,8 @@ func (a *App) endRemoteAppSession(selection uiSelection, sessionID string) {
 	if selection.Tenant == "" || selection.Environment == "" || strings.TrimSpace(sessionID) == "" {
 		return
 	}
-	envConfig, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment)
-	if err != nil {
-		return
-	}
-	kubernetesContext := strings.TrimSpace(envConfig.KubernetesContext)
-	if kubernetesContext == "" {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(a.backgroundContext(), 10*time.Second)
 	defer cancel()
-	_, _ = kubectlText(ctx, kubernetesContext,
-		"--namespace", eruncommon.KubernetesNamespaceName(selection.Tenant, selection.Environment),
-		"exec",
-		"deployment/"+eruncommon.RuntimeReleaseName(selection.Tenant),
-		"--",
-		"/bin/sh", "-c", eruncommon.RemoteAppSessionEndScript(selection.Tenant, selection.Environment, sessionID),
-	)
+	_, _ = a.execInRuntimePod(ctx, selection,
+		eruncommon.RemoteAppSessionEndScript(selection.Tenant, selection.Environment, sessionID))
 }

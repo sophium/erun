@@ -45,19 +45,45 @@ type uiWorkingIssue struct {
 
 // Env-status values carried by the env-status event. The empty string clears
 // the state (the env is healthy again, or a fresh open attempt is in flight).
+// The two stopped values are separate because their recovery differs: a stopped
+// cloud context is started from the titlebar, while a runtime scaled to zero is
+// woken by opening the environment.
 const (
-	envStatusStopped = "stopped"
-	envStatusFailed  = "failed"
+	envStatusStopped        = "stopped"
+	envStatusRuntimeStopped = "runtime-stopped"
+	envStatusFailed         = "failed"
 )
 
 // envStatusPayload tells the sidebar the real per-env condition behind the
 // open dot (tab presence alone is not running-ness — the dot must
 // not show green for an env that is actually stopped or whose deploy failed).
-// Status is one of "", envStatusStopped, envStatusFailed.
+// Status is one of "", envStatusStopped, envStatusRuntimeStopped, envStatusFailed.
 type envStatusPayload struct {
 	Tenant      string `json:"tenant"`
 	Environment string `json:"environment"`
 	Status      string `json:"status"`
+}
+
+// envActivityPayload is the observed half of the same sidebar state: whether the
+// environment's edge answers at all (reachable — true whoever opened it, the
+// desktop or a bare `erun open`), and whether the environment reports work in
+// flight (busy) and what. Separate from envStatusPayload because the lifetimes
+// differ: a status is a sticky condition, this is replaced on every poll.
+type envActivityPayload struct {
+	Tenant      string `json:"tenant"`
+	Environment string `json:"environment"`
+	Reachable   bool   `json:"reachable"`
+	Busy        bool   `json:"busy"`
+	Detail      string `json:"detail,omitempty"`
+}
+
+// uiEnvironmentStopResult is what the Runtime tab's Stop control reports back.
+type uiEnvironmentStopResult struct {
+	Tenant         string `json:"tenant"`
+	Environment    string `json:"environment"`
+	Release        string `json:"release"`
+	Namespace      string `json:"namespace"`
+	AlreadyStopped bool   `json:"alreadyStopped"`
 }
 
 type uiSelection struct {
@@ -337,13 +363,31 @@ type uiRuntimeResourceInput struct {
 	Environment       string `json:"environment,omitempty"`
 }
 
+// uiRuntimeResourceStatus is a reading of node capacity taken at one instant,
+// not a fixed ceiling: allocatable moves as the node's own reservations move,
+// and the free figure depends on what every other pod currently holds. Notice
+// carries the explanation the bare number cannot — why the figure is capped,
+// and what would raise it.
 type uiRuntimeResourceStatus struct {
-	KubernetesContext string                  `json:"kubernetesContext"`
-	Available         bool                    `json:"available"`
-	Message           string                  `json:"message,omitempty"`
-	CPU               uiRuntimeResourceMetric `json:"cpu"`
-	Memory            uiRuntimeResourceMetric `json:"memory"`
-	Nodes             []uiRuntimeResourceNode `json:"nodes,omitempty"`
+	KubernetesContext string `json:"kubernetesContext"`
+	Available         bool   `json:"available"`
+	Message           string `json:"message,omitempty"`
+	Notice            string `json:"notice,omitempty"`
+	Node              string `json:"node,omitempty"`
+	// Floored marks a reading where free capacity was clamped up to what this
+	// environment already holds, so its maximum equals its current limit. Without
+	// it the slider reads as a hard product limit rather than "the node is full".
+	Floored bool `json:"floored"`
+	// MeasuredUsage reports whether a metrics source answered, so the UI can say
+	// whether unlimited containers were counted at their real usage or not
+	// counted at all.
+	MeasuredUsage bool `json:"measuredUsage"`
+	// UnmeasuredContainers counts containers on the chosen node that declare no
+	// limits and had no measured usage either — capacity this reading cannot see.
+	UnmeasuredContainers int                     `json:"unmeasuredContainers,omitempty"`
+	CPU                  uiRuntimeResourceMetric `json:"cpu"`
+	Memory               uiRuntimeResourceMetric `json:"memory"`
+	Nodes                []uiRuntimeResourceNode `json:"nodes,omitempty"`
 }
 
 type uiRuntimeResourceMetric struct {
@@ -352,6 +396,55 @@ type uiRuntimeResourceMetric struct {
 	Free      float64 `json:"free"`
 	Unit      string  `json:"unit"`
 	Formatted string  `json:"formatted"`
+	// Floored marks this metric's free value as clamped up to the environment's
+	// own current limit because the node had nothing left to give.
+	Floored bool `json:"floored"`
+}
+
+// uiRuntimeActivity is one live reading of what an environment's runtime pod is
+// running: its persistent desktop sessions and the processes holding memory.
+type uiRuntimeActivity struct {
+	Tenant          string                  `json:"tenant"`
+	Environment     string                  `json:"environment"`
+	Available       bool                    `json:"available"`
+	Message         string                  `json:"message,omitempty"`
+	SessionsRunning int                     `json:"sessionsRunning"`
+	Sessions        []uiRuntimeSession      `json:"sessions,omitempty"`
+	Processes       []uiRuntimeProcessGroup `json:"processes,omitempty"`
+	MemoryHeld      string                  `json:"memoryHeld,omitempty"`
+	MemoryHeldMiB   int64                   `json:"memoryHeldMiB,omitempty"`
+}
+
+// uiRuntimeSession is one persistent desktop session as the pod reports it:
+// Running is observed (a live program behind the socket), never inferred from
+// how recently the session printed something.
+type uiRuntimeSession struct {
+	ID      string `json:"id"`
+	Running bool   `json:"running"`
+	Program string `json:"program,omitempty"`
+}
+
+// uiRuntimeProcessGroup is a class of resource-holding process the operator can
+// recognise and, when Reclaim is set, act on.
+type uiRuntimeProcessGroup struct {
+	ID           string `json:"id"`
+	Label        string `json:"label"`
+	Count        int    `json:"count"`
+	Memory       string `json:"memory"`
+	MemoryMiB    int64  `json:"memoryMiB"`
+	Reclaim      string `json:"reclaim,omitempty"`
+	ReclaimLabel string `json:"reclaimLabel,omitempty"`
+}
+
+type uiRuntimeReclaimInput struct {
+	Tenant      string `json:"tenant"`
+	Environment string `json:"environment"`
+	Action      string `json:"action"`
+}
+
+type uiRuntimeReclaimResult struct {
+	Action  string `json:"action"`
+	Message string `json:"message"`
 }
 
 // uiClusterRegistryStatus reports whether the selected Kubernetes context has an

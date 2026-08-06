@@ -5,6 +5,12 @@ import type {
   UIVersionSuggestions,
 } from '@/types';
 import type { UIClusterRegistryStatus, UIEnvironmentHealth } from '@/uiDiagnosticsTypes';
+import type { UIEnvironmentStopResult } from '@/uiLifecycleTypes';
+import type {
+  UIRuntimeActivity,
+  UIRuntimeReclaimInput,
+  UIRuntimeReclaimResult,
+} from '@/uiRuntimeTypes';
 
 import {
   CheckEnvironmentHealth,
@@ -13,9 +19,12 @@ import {
   DeleteEnvironment,
   LoadClusterRegistry,
   LoadEnvironmentConfig,
+  LoadRuntimeActivity,
   LoadRuntimeResourceStatus,
   LoadVersionSuggestions,
+  ReclaimRuntimeResources,
   SaveEnvironmentConfig,
+  StopEnvironment,
 } from '../../../wailsjs/go/main/App';
 import { wailsApi } from './wailsApi';
 import { wailsQueryFn } from './wailsBaseQuery';
@@ -92,6 +101,32 @@ export const environmentApi = wailsApi.injectEndpoints({
       ),
       providesTags: ['RuntimeResourceStatus'],
     }),
+    // Stopping frees the env's runtime and dind limits, so the node capacity
+    // the Runtime tab offers every other env changes the moment it lands —
+    // invalidate the resource status rather than leaving stale maxima on screen.
+    stopEnvironment: builder.mutation<UIEnvironmentStopResult, UISelection>({
+      queryFn: wailsQueryFn<UISelection, UIEnvironmentStopResult>((selection) =>
+        StopEnvironment(selection),
+      ),
+      invalidatesTags: ['RuntimeResourceStatus', 'RuntimeActivity', 'AppState'],
+    }),
+    // What the runtime pod is running right now: sessions and the processes
+    // holding memory. Read-only — nothing here reclaims anything.
+    getRuntimeActivity: builder.query<UIRuntimeActivity, UISelection>({
+      queryFn: wailsQueryFn<UISelection, UIRuntimeActivity>((selection) =>
+        LoadRuntimeActivity(selection),
+      ),
+      providesTags: ['RuntimeActivity'],
+    }),
+    // A reclaim changes both what the pod holds and what the node has free, so
+    // it invalidates the activity reading and the capacity figures together —
+    // the operator must be able to see the effect of what they just did.
+    reclaimRuntimeResources: builder.mutation<UIRuntimeReclaimResult, UIRuntimeReclaimInput>({
+      queryFn: wailsQueryFn<UIRuntimeReclaimInput, UIRuntimeReclaimResult>((input) =>
+        ReclaimRuntimeResources(input),
+      ),
+      invalidatesTags: ['RuntimeActivity', 'RuntimeResourceStatus'],
+    }),
     checkEnvironmentHealth: builder.mutation<UIEnvironmentHealth, UISelection>({
       queryFn: wailsQueryFn<UISelection, UIEnvironmentHealth>((selection) =>
         CheckEnvironmentHealth(selection),
@@ -111,4 +146,6 @@ export const {
   useLazyGetVersionSuggestionsQuery,
   useGetRuntimeResourceStatusQuery,
   useLazyGetRuntimeResourceStatusQuery,
+  useGetRuntimeActivityQuery,
+  useReclaimRuntimeResourcesMutation,
 } = environmentApi;
