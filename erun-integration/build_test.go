@@ -15,7 +15,17 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-var apiFingerprintRE = regexp.MustCompile(`ghcr\.io/sophium/api:fp-([0-9a-f]{16})-amd64`)
+// imageFingerprint reads the fingerprint-cache tag an image resolved to from the
+// raw trace, which output normalization would otherwise collapse to <HEX16>.
+func imageFingerprint(t testing.TB, out, image string) string {
+	t.Helper()
+	re := regexp.MustCompile(`ghcr\.io/sophium/` + regexp.QuoteMeta(image) + `:fp-([0-9a-f]{16})-amd64`)
+	match := re.FindStringSubmatch(out)
+	if match == nil {
+		t.Fatalf("no fingerprint tag for %s in trace:\n%s", image, out)
+	}
+	return match[1]
+}
 
 // chartPackageVersion reads a chart's published version from the raw trace,
 // which output normalization would otherwise collapse to <VERSION>.
@@ -570,11 +580,7 @@ func TestBuild(t *testing.T) {
 			if result.ExitCode != 0 {
 				t.Fatalf("%s: exit %d: %s", label, result.ExitCode, result.Combined)
 			}
-			match := apiFingerprintRE.FindStringSubmatch(result.Combined)
-			if match == nil {
-				t.Fatalf("%s: api fingerprint not found in trace:\n%s", label, result.Combined)
-			}
-			return match[1]
+			return imageFingerprint(t, result.Combined, "api")
 		}
 
 		baseline := fp("baseline")
@@ -588,6 +594,56 @@ func TestBuild(t *testing.T) {
 		if afterTrackedChange == baseline {
 			t.Fatalf("fingerprint did not move when a tracked file changed; got %s for both runs", baseline)
 		}
+	})
+
+	t.Run("dry_run_new_version_rebuilds_version_stamped_image", func(t *testing.T) {
+		// An image that bakes ERUN_VERSION into its content must not be published
+		// at a new version by re-tagging the previous version's cached copy: the
+		// binary inside would keep reporting the version before the tag it shipped
+		// under. `stamped` consumes ERUN_VERSION, `api` does not. The first build
+		// mints both fingerprints at 1.0.170; the docker stub then answers "present"
+		// for exactly those two fp tags and "missing" for everything else, so the
+		// second build at 1.0.171 sees the 1.0.170 cache and nothing more. stamped
+		// must rebuild; api and base must still promote, so the cache keeps paying
+		// for everything that carries no version.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "erun-devops", "docker", "stamped", "Dockerfile"),
+			"FROM alpine:3.22\nARG ERUN_VERSION\nRUN echo \"${ERUN_VERSION}\" > /etc/erun-version\n")
+		fixture.RunGit(t, setup.Cwd, "add", "erun-devops/docker/stamped/Dockerfile")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add version-stamped image")
+
+		first := erun.Run(t, []string{"build", "--dry-run", "--version", "1.0.170"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if first.ExitCode != 0 {
+			t.Fatalf("first build exit %d: %s", first.ExitCode, first.Combined)
+		}
+		cachedAPI := imageFingerprint(t, first.Combined, "api")
+		cachedBase := imageFingerprint(t, first.Combined, "base")
+		cachedStamped := imageFingerprint(t, first.Combined, "stamped")
+
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$*" in`,
+			`  "image inspect ghcr.io/sophium/api:fp-` + cachedAPI + `-"*) exit 0 ;;`,
+			`  "image inspect ghcr.io/sophium/base:fp-` + cachedBase + `-"*) exit 0 ;;`,
+			`  "image inspect ghcr.io/sophium/stamped:fp-` + cachedStamped + `-"*) exit 0 ;;`,
+			`  *) exit 1 ;;`,
+			`esac`,
+		}, "\n"))
+		second := erun.Run(t, []string{"build", "--dry-run", "--version", "1.0.171"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), fixture.StubEnv(stubs, "docker")...)})
+		if second.ExitCode != 0 {
+			t.Fatalf("second build exit %d: %s", second.ExitCode, second.Combined)
+		}
+		// Normalization collapses every fingerprint to <HEX16>, so the golden
+		// cannot tell the 1.0.170 cache tag from a fresh one — assert the pinned
+		// hashes on the raw trace.
+		if staleTag := "ghcr.io/sophium/stamped:fp-" + cachedStamped + "-"; strings.Contains(second.Combined, staleTag) {
+			t.Fatalf("1.0.171 re-tagged the 1.0.170 stamped image (%s), so the published image would report 1.0.170:\n%s", staleTag, second.Combined)
+		}
+		if promoted := "docker tag ghcr.io/sophium/api:fp-" + cachedAPI + "-amd64 ghcr.io/sophium/api:1.0.171-amd64"; !strings.Contains(second.Combined, promoted) {
+			t.Fatalf("expected the version-free api image to still promote across the version change (%s):\n%s", promoted, second.Combined)
+		}
+		golden.Equal(t, "build/dry_run_new_version_rebuilds_version_stamped_image", normalize.Apply(second.Combined))
 	})
 
 	t.Run("real_run_with_existing_fingerprint_promotes_via_tag", func(t *testing.T) {

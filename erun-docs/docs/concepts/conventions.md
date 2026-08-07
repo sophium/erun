@@ -199,6 +199,8 @@ For agent envs, the version is a snapshot timestamp; the artifact is disposable.
 
 Every Docker build computes a content fingerprint over the Dockerfile and its `COPY` sources, persisted per-image in `.erun/config.yaml`. On the next build, if the fingerprint hasn't changed, ERun promotes the image from cache instead of rebuilding — fresh clones pull a few pinned base images instead of rebuilding everything.
 
+An image that stamps the version into what it ships is the exception: its fingerprint includes the version, so a new version rebuilds it rather than re-labelling the previous one. That is what keeps the version a deployed environment reports the same as the version it was deployed at.
+
 For the exact algorithm and the registry/local interaction, see [Conventions spec · Fingerprint cache](/agent-reference/conventions-spec#fingerprint-cache).
 
 ## The runtime-pod sub-chart
