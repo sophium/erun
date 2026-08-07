@@ -5,9 +5,27 @@ package env
 
 import (
 	"os"
+	osexec "os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// shellUtilities are the POSIX utilities the suite's own stub scripts invoke
+// (counters, marker files, heredocs). They are forwarded into every scenario's
+// PATH because a stub runs as a child of the binary under test and inherits its
+// PATH; everything else the host has installed stays unreachable. Adding a name
+// here is a deliberate act: it must be a utility a stub script needs, never a
+// tool erun itself invokes.
+var shellUtilities = []string{"cat", "dirname", "mkdir", "sleep", "touch", "tr", "wc"}
+
+// hostTools are the host executables erun itself may resolve, forwarded through
+// their declared ERUN_<NAME>_BIN seam rather than through PATH. git is the
+// suite's one irreducible host dependency: the fixtures build real repositories
+// with it and the release/diff/exec scenarios read real git state, so no stub
+// could stand in for it. A scenario that wants a scripted git appends its own
+// ERUN_GIT_BIN after Env() (the later duplicate wins).
+var hostTools = []string{"git"}
 
 // Setup is the resolved environment for a single subprocess invocation.
 type Setup struct {
@@ -16,13 +34,18 @@ type Setup struct {
 	CacheHome  string
 	DataHome   string
 	Cwd        string
+	// PathDir is the scenario's entire PATH: the host's PATH is deliberately
+	// not inherited, so a command can only reach an external binary the
+	// scenario declared. See scrubbedPathDir.
+	PathDir string
+	// toolBins routes hostTools to their absolute host paths.
+	toolBins []string
 }
 
 // Env returns the subprocess environment as a fresh slice each call, so
 // callers can append scenario-specific vars.
 func (s Setup) Env() []string {
-	path := os.Getenv("PATH")
-	return []string{
+	return append([]string{
 		"HOME=" + s.Home,
 		"XDG_CONFIG_HOME=" + s.ConfigHome,
 		"XDG_CACHE_HOME=" + s.CacheHome,
@@ -34,7 +57,12 @@ func (s Setup) Env() []string {
 		"USERPROFILE=" + s.Home,
 		"LOCALAPPDATA=" + s.ConfigHome,
 		"APPDATA=" + s.ConfigHome,
-		"PATH=" + path,
+		// The scenario's PATH holds nothing but the utility forwarders in
+		// scrubbedPathDir. A command under test therefore behaves the same on a
+		// laptop, in the agent pod, and in the runtime image's test stage — none
+		// of which agree about what is installed — and a scenario that needs
+		// kubectl/helm/docker/aws must declare a stub for it.
+		"PATH=" + s.PathDir,
 		// LANG is required by some path-handling code that calls into glibc.
 		"LANG=C.UTF-8",
 		// Prevent the subprocess from picking up the developer's terminal
@@ -61,7 +89,7 @@ func (s Setup) Env() []string {
 		// Scenarios that exercise the downgrade guard append their own
 		// ERUN_MCP_AUTH_LIVE_PROBE_OVERRIDE after Env() (the later duplicate wins).
 		"ERUN_MCP_AUTH_LIVE_PROBE_OVERRIDE=",
-	}
+	}, s.toolBins...)
 }
 
 // New creates a fresh Setup rooted at a per-test temp directory.
@@ -92,5 +120,50 @@ func New(t testing.TB) Setup {
 		CacheHome:  cache,
 		DataHome:   data,
 		Cwd:        cwd,
+		PathDir:    scrubbedPathDir(t, filepath.Join(root, "path")),
+		toolBins:   hostToolBins(t),
 	}
+}
+
+// scrubbedPathDir builds the one directory a scenario's PATH points at: a
+// forwarder per shellUtilities entry, and nothing else. Forwarders rather than
+// the host's own bin directories, because those also hold whatever tools the
+// developer installed — the ambient kubectl that made a golden depend on the
+// recording machine. Forwarders rather than symlinks, because Windows hosts
+// cannot create them without elevation.
+func scrubbedPathDir(t testing.TB, dir string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	for _, name := range shellUtilities {
+		target := hostBinary(t, name)
+		body := "#!/bin/sh\n# erun integration PATH forwarder\nexec '" + filepath.ToSlash(target) + "' \"$@\"\n"
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o755); err != nil {
+			t.Fatalf("write PATH forwarder %s: %v", name, err)
+		}
+	}
+	return dir
+}
+
+// hostToolBins routes each hostTools entry to its absolute host path through the
+// ERUN_<NAME>_BIN seam production already honors, so the tool stays reachable
+// with the PATH scrubbed.
+func hostToolBins(t testing.TB) []string {
+	t.Helper()
+	out := make([]string, 0, len(hostTools))
+	for _, name := range hostTools {
+		seam := "ERUN_" + strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + "_BIN"
+		out = append(out, seam+"="+hostBinary(t, name))
+	}
+	return out
+}
+
+func hostBinary(t testing.TB, name string) string {
+	t.Helper()
+	path, err := osexec.LookPath(name)
+	if err != nil {
+		t.Fatalf("the integration suite needs %q on the host PATH: %v", name, err)
+	}
+	return path
 }

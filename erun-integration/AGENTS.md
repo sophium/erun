@@ -68,6 +68,23 @@ Per the root `AGENTS.md`, `--dry-run` must produce a complete, side-effect-free 
 - `fixture.SeedGitRepo(t, dir)` runs `git init` + commit so release/diff/exec see a project root.
 - For commands that prompt interactively, prefer flags that bypass prompts (`--confirm-environment`, `--set-default-tenant=true`, `-y`) over scripted stdin. Goldens are easier to read without prompt redrawing.
 
+## The PATH is scrubbed: nothing ambient is reachable
+
+`setup.Env()` sets `PATH` to one generated directory (`setup.PathDir`) and does **not** inherit the host's. No host-installed binary is reachable from a scenario unless the scenario declared it. This is the contract that keeps the gate a contributor runs and the gate that blocks a release from disagreeing: the runtime image's test stage runs `make check` with no kubectl, helm, docker, aws or gh, while every developer machine and the agent pod have all of them. Before the scrub, a scenario that reached for an ambient binary recorded that host's answer into its golden and went red only inside the image build — eleven minutes into `erun build`, after the release tag was already cut.
+
+What the scrubbed PATH holds, both declared in `internal/env/env.go`:
+
+- `shellUtilities` — forwarders for the POSIX utilities the suite's **own stub scripts** use (`cat`, `dirname`, `mkdir`, `sleep`, `touch`, `tr`, `wc`). A stub runs as a child of the binary under test and inherits its PATH, so without these a stub that keeps a counter file cannot run. Add a name here only for a utility a stub body needs; never for a tool erun itself invokes.
+- `hostTools` — routed through their `ERUN_<NAME>_BIN` seam at an absolute path rather than through PATH. `git` only: the fixtures build real repositories with it and the release/diff/exec scenarios read real git state, so no stub can stand in for it. Treat any addition here as a new host prerequisite for the whole suite, and justify it.
+
+Consequences for writing a scenario:
+
+- A command that invokes an external binary needs a declared stub — `fixture.Stub*` plus `fixture.StubEnv` for anything reached through `eruncommon.Command`, or a stub directory prepended to PATH for anything reached through `exec.LookPath` (`gh`, `dpkg-deb`, the IDE launchers).
+- When a scenario prepends its own PATH entry, append `setup.PathDir` after it (`"PATH="+stubs+string(os.PathListSeparator)+setup.PathDir`) rather than `os.Getenv("PATH")`, or that scenario alone goes back to seeing the whole host.
+- `erun.Run` fails the test when the captured output shows `exec: "<name>": executable file not found`, naming the binary. That is the authoring-time signal: the scenario reached past its declared stubs.
+- A scenario that wants a binary to be *absent* needs no override — it already is. Say so in the test comment so a reader knows the absence is the point.
+- Nothing in the suite may gate on host capability. `runtime.GOOS` checks and `exec.LookPath` probes in test bodies were how host dependence used to hide: they turned into a `t.Skip` on some machines and a live tool on others, so a shared-fixture change could leave a golden stale and green everywhere except the image build. Pin the host through `ERUN_HOST_OS_OVERRIDE` and the tool through a stub instead — `TestRelease/dry_run_includes_linux_release_scripts` does both and runs everywhere as a result.
+
 ## Stubbing rules: dry-run-first, decision-input second
 
 Integration scenarios run `erun` in `--dry-run` mode by default. Dry-run is meant to be fully auditable: every action and every decision must surface as a trace line, so a complete dry-run output is sufficient evidence that the command would behave correctly. Pile on stubs only when the dry-run trace already shows the action; never use stubs to *replace* a missing trace.
@@ -142,16 +159,18 @@ Rules:
 - Document the override in the test comment so a future reader does not delete it. Without the override the scenario would silently re-shape the golden to whatever host ran `UPDATE_GOLDEN=1` last.
 - The override is a deliberate test seam, not a production knob. If you find yourself wanting to set it from a CLI command or MCP tool, that is a sign the production code should be detecting differently — fix the detection.
 
-### Linux-only scenarios skip on macOS — regenerate their goldens in Linux
+### Do not gate a scenario on a real host capability
 
-A few scenarios gate on a real Linux capability the override can't fake — notably `TestRelease/dry_run_includes_linux_release_scripts`, which needs both `runtime.GOOS == "linux"` **and** `dpkg-deb` on PATH (linux package builds), so it `t.Skip`s on macOS. `ERUN_HOST_OS_OVERRIDE` only fakes `DetectHost`; it does not conjure `dpkg-deb`, so these goldens can only be regenerated where the capability actually exists.
+No scenario skips on host OS or on a tool being installed, and none may start doing so. `TestRelease/dry_run_includes_linux_release_scripts` used to need both `runtime.GOOS == "linux"` **and** `dpkg-deb` on PATH, so it skipped on macOS; it now pins `ERUN_HOST_OS_OVERRIDE=linux` and declares a `dpkg-deb` stub on PATH, and runs everywhere.
 
-The trap: `UPDATE_GOLDEN=1` on macOS silently **skips** these scenarios, so a change to a **shared fixture** (e.g. `SeedReleaseRepo`) that alters their output leaves their goldens stale — green locally on macOS, red in the Linux image-build gate (`make check` inside the `erun-devops` Dockerfile), which is where it actually bites. When you touch a shared fixture, regenerate the linux-only goldens in Linux and run the full suite there before pushing:
+The trap that pattern created is why it is banned: `UPDATE_GOLDEN=1` on a host that skips the scenario leaves its golden un-regenerated, so a change to a **shared fixture** (e.g. `SeedReleaseRepo`) that alters its output goes green locally and red in the Linux image-build gate (`make check` inside the `erun-devops` Dockerfile) — the one place nobody is watching until `erun build` fails. A skipped scenario is not covered, and a scenario nobody notices is uncovered is worse than none.
+
+The Linux container run is still the closest local stand-in for the image-build gate, and worth one pass when you touch a shared fixture or the harness itself:
 
 ```sh
 docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -e GOCACHE=/tmp/gc -e GOMODCACHE=/tmp/gm \
   -v "$PWD":/src -w /src/erun-integration golang:1.26 sh -c \
-  'git config --global --add safe.directory "*"; UPDATE_GOLDEN=1 go test ./... && go test ./...'
+  'git config --global --add safe.directory "*"; go test ./...'
 ```
 
 ## TTY-dependent branches: force via `ERUN_FORCE_TTY`

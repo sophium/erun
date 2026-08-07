@@ -213,13 +213,17 @@ func environmentIdleMarkers(activity map[string]EnvironmentActivitySnapshot, lea
 }
 
 func environmentStopEligibility(markers []EnvironmentIdleMarker, outsideWorkingHours bool) (bool, int64) {
-	if outsideWorkingHours {
-		return true, 0
-	}
 	stopEligible := true
 	secondsUntilStop := int64(0)
 	for _, marker := range markers {
 		if marker.Name == "working-hours" || marker.Idle {
+			continue
+		}
+		// Outside working hours the quiet signals no longer hold the environment
+		// up. A lease is not a quiet signal: it is a job saying it is running
+		// right now, so it blocks the stop whatever the clock says — otherwise an
+		// agent run started at 19:59 loses its environment a minute later.
+		if outsideWorkingHours && marker.Name != environmentActivityLeaseMarker {
 			continue
 		}
 		stopEligible = false
