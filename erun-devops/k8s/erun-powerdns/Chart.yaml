@@ -1,6 +1,6 @@
 apiVersion: v2
-appVersion: 1.0.171
+appVersion: 1.0.172
 description: ERun platform PowerDNS authoritative nameserver
 name: erun-powerdns
 type: application
-version: 1.0.171
+version: 1.0.172
