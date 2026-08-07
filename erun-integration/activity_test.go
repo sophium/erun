@@ -19,9 +19,32 @@ import (
 // activity is a hidden command group the runtime entrypoint uses to record
 // SSH/MCP/CLI/Codex traffic; its subcommands are exercised here.
 
+// The working-hours window decides which arm of the stop-eligibility branch a
+// scenario takes, and the resolved policy always has one (the default is
+// 08:00-20:00 in the host's zone), so a scenario that leaves it alone exercises
+// a different arm depending on the wall clock and the host's TZ. These two
+// blocks pin the arm: each is the widest window the parser accepts (start and
+// end must differ), inverted, so only the 23:59 UTC minute falls on the other
+// side. Landing on the other side there costs nothing — a held lease refuses the
+// stop identically on both arms, which is the point these scenarios make — so
+// what the pin buys is that each scenario reliably exercises the arm it names.
+const (
+	insideWorkingHoursIdleBlock  = "idle:\n  workinghours: 00:00-23:59\n  timezone: UTC\n"
+	outsideWorkingHoursIdleBlock = "idle:\n  workinghours: 23:59-00:00\n  timezone: UTC\n"
+)
+
 // seedManagedCloudTenantEnv marks the seeded env cloud-managed so the idle
 // resolver's Arm/Wait/Fire branches become reachable.
 func seedManagedCloudTenantEnv(t *testing.T, setup env.Setup, tenant, environment string) {
+	t.Helper()
+	seedManagedCloudTenantEnvWithIdle(t, setup, tenant, environment, "")
+}
+
+// seedManagedCloudTenantEnvWithIdle is seedManagedCloudTenantEnv with an
+// explicit idle block appended, so a scenario whose outcome depends on the
+// working-hours window can pin that window instead of inheriting the default
+// 08:00-20:00 and reading differently depending on the wall clock.
+func seedManagedCloudTenantEnvWithIdle(t *testing.T, setup env.Setup, tenant, environment, idleBlock string) {
 	t.Helper()
 	fixture.SeedTenantEnv(t, setup, tenant, environment)
 	cfgPath := filepath.Join(setup.ConfigHome, "erun", tenant, environment, "config.yaml")
@@ -29,7 +52,9 @@ func seedManagedCloudTenantEnv(t *testing.T, setup env.Setup, tenant, environmen
 	if err != nil {
 		t.Fatalf("read env config %s: %v", cfgPath, err)
 	}
-	if err := os.WriteFile(cfgPath, append(body, []byte("managedcloud: true\n")...), 0o644); err != nil {
+	body = append(body, []byte("managedcloud: true\n")...)
+	body = append(body, []byte(idleBlock)...)
+	if err := os.WriteFile(cfgPath, body, 0o644); err != nil {
 		t.Fatalf("write env config %s: %v", cfgPath, err)
 	}
 }
@@ -743,9 +768,12 @@ func TestActivity(t *testing.T) {
 	t.Run("stop_ready_blocked_by_a_held_lease", func(t *testing.T) {
 		// AC6 of the stop work: an otherwise-idle cloud-managed env that holds a
 		// lease must not be stopped, and the refusal must name the lease so an
-		// operator can see why auto-stop is being deferred.
+		// operator can see why auto-stop is being deferred. The window is pinned
+		// to a UTC day so the scenario stays on the inside-working-hours arm
+		// whatever time the suite runs; its outside-hours sibling below pins the
+		// other arm.
 		setup := env.New(t)
-		seedManagedCloudTenantEnv(t, setup, "team", "dev")
+		seedManagedCloudTenantEnvWithIdle(t, setup, "team", "dev", insideWorkingHoursIdleBlock)
 		take := erun.Run(t, []string{"activity", "lease", "take", "--tenant", "team", "--environment", "dev", "--name", "agent-run", "--ttl", "1h"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if take.ExitCode != 0 {
 			t.Fatalf("take: exit %d: %s", take.ExitCode, take.Combined)
@@ -755,6 +783,28 @@ func TestActivity(t *testing.T) {
 			t.Fatalf("expected a leased env to refuse the stop, got exit 0:\n%s", result.Combined)
 		}
 		golden.Equal(t, "activity/stop_ready_blocked_by_a_held_lease", normalize.Apply(result.Combined))
+		if _, err := os.Stat(filepath.Join(setup.Home, ".erun", "team", "dev", "stop-pending.json")); !os.IsNotExist(err) {
+			t.Errorf("a leased env must not arm a grace window, stat err: %v", err)
+		}
+	})
+
+	t.Run("stop_ready_blocked_by_a_held_lease_outside_working_hours", func(t *testing.T) {
+		// The lease clause is absolute: outside working hours the quiet signals
+		// stop holding the environment up, but a held lease still does, or an
+		// agent run that starts near the end of the window loses its environment
+		// mid-job. Same refusal, same withheld grace window, other arm of the
+		// working-hours branch.
+		setup := env.New(t)
+		seedManagedCloudTenantEnvWithIdle(t, setup, "team", "dev", outsideWorkingHoursIdleBlock)
+		take := erun.Run(t, []string{"activity", "lease", "take", "--tenant", "team", "--environment", "dev", "--name", "agent-run", "--ttl", "1h"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if take.ExitCode != 0 {
+			t.Fatalf("take: exit %d: %s", take.ExitCode, take.Combined)
+		}
+		result := erun.Run(t, []string{"activity", "stop-ready", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a leased env to refuse the stop outside working hours, got exit 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "activity/stop_ready_blocked_by_a_held_lease_outside_working_hours", normalize.Apply(result.Combined))
 		if _, err := os.Stat(filepath.Join(setup.Home, ".erun", "team", "dev", "stop-pending.json")); !os.IsNotExist(err) {
 			t.Errorf("a leased env must not arm a grace window, stat err: %v", err)
 		}

@@ -560,10 +560,14 @@ func TestOpen(t *testing.T) {
 		// about to use the env. The plan must show the wait and the exec that
 		// rewrites the erun-host profile, and the resolved region — this env has
 		// a provider alias but no cloud context, the shape that produced both
-		// the expired-credentials and the empty-AWS_REGION failures.
+		// the expired-credentials and the empty-AWS_REGION failures. The
+		// run-state stub answers the pre-forward replica probe with a running
+		// runtime — an unremarkable answer, because this scenario is about the
+		// credential refresh, not about the wake branch its sibling locks.
 		setup := env.New(t)
 		fixture.SeedLocalTenantEnvWithAWSAlias(t, setup, "team", "dev", "ops+123456789012@aws", "eu-west-2", "")
-		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		envVars := stubKubectlRunState(t, setup, 1, 1)
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -822,7 +826,7 @@ func TestOpen(t *testing.T) {
 		ideLog := filepath.Join(setup.Cwd, "ide-launcher.log")
 		fixture.StubBinaryWithScript(t, stubsDir, "open",
 			`printf '%s\n' "$*" > '`+ideLog+`'`+"\n"+`exit 0`+"\n")
-		envVars = append(envVars, "PATH="+stubsDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+		envVars = append(envVars, "PATH="+stubsDir+string(os.PathListSeparator)+setup.PathDir)
 		// Pin darwin so the IDE launcher resolves to the stubbed macOS
 		// `open` command. On a Linux host production calls xdg-open, which
 		// this scenario does not stub. (erun-integration/AGENTS.md —
@@ -888,7 +892,7 @@ func TestOpen(t *testing.T) {
 		ideLog := filepath.Join(setup.Cwd, "ide-launcher.log")
 		fixture.StubBinaryWithScript(t, stubsDir, "open",
 			`printf '%s\n' "$*" >> '`+ideLog+`'`+"\n"+`exit 0`+"\n")
-		envVars = append(envVars, "PATH="+stubsDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+		envVars = append(envVars, "PATH="+stubsDir+string(os.PathListSeparator)+setup.PathDir)
 		// Pin darwin: this scenario seeds the macOS JetBrains options dir
 		// above and asserts the `open -a 'IntelliJ IDEA'` bootstrap, both
 		// macOS-shaped. Without the pin a Linux host resolves a different
@@ -997,7 +1001,7 @@ func TestOpen(t *testing.T) {
 		ideLog := filepath.Join(setup.Cwd, "ide-launcher.log")
 		fixture.StubBinaryWithScript(t, stubsDir, "open",
 			`printf '%s\n' "$*" >> '`+ideLog+`'`+"\n"+`exit 0`+"\n")
-		envVars = append(envVars, "PATH="+stubsDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+		envVars = append(envVars, "PATH="+stubsDir+string(os.PathListSeparator)+setup.PathDir)
 		envVars = append(envVars, "ERUN_HOST_OS_OVERRIDE=darwin")
 
 		run1 := erun.Run(t, []string{"open", "team", "dev", "--intellij", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
@@ -1117,7 +1121,7 @@ func TestOpen(t *testing.T) {
 		ideaLog := filepath.Join(setup.Cwd, "idea-launcher.log")
 		fixture.StubBinaryWithScript(t, stubsDir, "idea",
 			`printf 'idea %s\n' "$*" > '`+ideaLog+`'`+"\n"+`exit 0`+"\n")
-		envVars = append(envVars, "PATH="+stubsDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+		envVars = append(envVars, "PATH="+stubsDir+string(os.PathListSeparator)+setup.PathDir)
 		envVars = append(envVars, "ERUN_HOST_OS_OVERRIDE=linux")
 		result := erun.Run(t, []string{"open", "team", "dev", "--intellij", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -135,7 +136,8 @@ type RunOptions struct {
 	Cwd string
 	// Env is the full environment for the subprocess (it replaces the parent
 	// environment except for GOCOVERDIR which the harness always injects).
-	// PATH should be included by callers that need it.
+	// Build it from env.Setup.Env(), which carries the scrubbed PATH; a
+	// scenario that needs an external binary appends its own stub routing.
 	Env     []string
 	Stdin   string
 	Timeout time.Duration
@@ -235,10 +237,34 @@ func Run(t testing.TB, args []string, opts RunOptions) Result {
 		t.Fatalf("erun timed out after %s; args=%v\n--- subprocess goroutine dump (stderr) ---\n%s", timeout, args, stderr.String())
 	}
 
-	return Result{
+	result := Result{
 		Stdout:   stdout.String(),
 		Stderr:   stderr.String(),
 		Combined: stdout.String() + stderr.String(),
 		ExitCode: exitCode,
+	}
+	reportUndeclaredBinaries(t, result.Combined)
+	return result
+}
+
+// missingBinary matches the exec error Go reports when a command resolves no
+// executable, in either platform's spelling.
+var missingBinary = regexp.MustCompile(`exec: "([^"]+)": executable file not found in [$%]PATH%?`)
+
+// reportUndeclaredBinaries turns a scenario's reliance on an ambient binary into
+// an immediate failure. The suite's PATH is scrubbed, so this message means the
+// command reached for an external binary the scenario never declared: on a host
+// that happens to have it installed the scenario would instead capture that
+// host's answer, and the golden would only reproduce where it was recorded.
+func reportUndeclaredBinaries(t testing.TB, combined string) {
+	t.Helper()
+	seen := map[string]bool{}
+	for _, match := range missingBinary.FindAllStringSubmatch(combined, -1) {
+		name := match[1]
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		t.Errorf("erun.Run: the command resolved no %q, so this scenario depends on whatever the host has installed; declare a stub (fixture.StubBinaryAdvanced + fixture.StubEnv) and re-record the golden", name)
 	}
 }

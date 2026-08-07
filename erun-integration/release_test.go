@@ -2,9 +2,7 @@ package integration
 
 import (
 	"os"
-	osexec "os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -129,17 +127,13 @@ func TestRelease(t *testing.T) {
 	})
 
 	t.Run("dry_run_includes_linux_release_scripts", func(t *testing.T) {
-		// Linux release scripts run only where package builds are actually
-		// supported (GOOS=linux + dpkg-deb on PATH), so this skips on other
-		// hosts. The build-only second component (build.sh, no release.sh) is
-		// a valid linux context that contributes no release script, exercising
-		// the skip-component branch.
-		if runtime.GOOS != "linux" {
-			t.Skip("linux release scripts only run on Linux hosts")
-		}
-		if _, err := osexec.LookPath("dpkg-deb"); err != nil {
-			t.Skip("linux release scripts require dpkg-deb in PATH")
-		}
+		// Linux release scripts run only where package builds are supported,
+		// which erun reads as a linux host that has dpkg-deb. Both halves are
+		// declared here — ERUN_HOST_OS_OVERRIDE for the host, a dpkg-deb stub on
+		// PATH for the tool — so the golden is the same on every host instead of
+		// describing whichever machine recorded it. The build-only second
+		// component (build.sh, no release.sh) is a valid linux context that
+		// contributes no release script, exercising the skip-component branch.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 		linuxComponentDir := filepath.Join(setup.Cwd, "erun-devops", "linux", "erun-cli")
@@ -159,7 +153,15 @@ func TestRelease(t *testing.T) {
 		fixture.RunGit(t, setup.Cwd, "add", ".")
 		fixture.RunGit(t, setup.Cwd, "commit", "-m", "add linux release script")
 
-		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		fixture.StubBinary(t, stubs, "dpkg-deb", "")
+		envVars := append(setup.Env(),
+			"ERUN_HOST_OS_OVERRIDE=linux",
+			// The support check resolves dpkg-deb through exec.LookPath, so the
+			// stub has to be reachable on PATH rather than via ERUN_..._BIN.
+			"PATH="+stubs+string(os.PathListSeparator)+setup.PathDir,
+		)
+		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}

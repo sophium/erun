@@ -1,8 +1,6 @@
 package integration
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/sophium/erun/erun-integration/internal/env"
@@ -11,18 +9,6 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/golden"
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
-
-// emptyPathDir yields a PATH override that makes "binary not on PATH"
-// deterministic: os/exec keeps the last duplicate Env value, so appending
-// it after setup.Env() reliably shadows whatever the host has installed.
-func emptyPathDir(t *testing.T, root string) string {
-	t.Helper()
-	dir := filepath.Join(root, "empty-path")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("mkdir %s: %v", dir, err)
-	}
-	return "PATH=" + dir
-}
 
 func TestAPI(t *testing.T) {
 	t.Run("help", func(t *testing.T) {
@@ -90,11 +76,11 @@ exit 0`)
 
 	t.Run("real_run_errors_when_eapi_missing", func(t *testing.T) {
 		// A missing eapi must surface the friendly "build or install it
-		// first" message, not a raw exec error.
+		// first" message, not a raw exec error. The scenario's scrubbed PATH is
+		// what makes eapi absent, on every host.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		envVars := append(setup.Env(), emptyPathDir(t, setup.Cwd))
-		result := erun.Run(t, []string{"api", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"api", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit when eapi is missing, got 0:\n%s", result.Combined)
 		}

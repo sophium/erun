@@ -66,10 +66,10 @@ exit 0`)
 
 	t.Run("real_run_errors_when_app_binary_missing", func(t *testing.T) {
 		// A missing erun-app must surface the friendly build-or-install
-		// message rather than a raw exec error.
+		// message rather than a raw exec error. The scenario's scrubbed PATH is
+		// what makes erun-app absent, on every host.
 		setup := env.New(t)
-		envVars := append(setup.Env(), emptyPathDir(t, setup.Cwd))
-		result := erun.Run(t, []string{"app"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"app"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit when erun-app is missing, got 0:\n%s", result.Combined)
 		}
