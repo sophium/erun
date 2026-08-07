@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	common "github.com/sophium/erun/erun-common"
 	"github.com/spf13/cobra"
@@ -18,11 +19,12 @@ func newStopCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), 
 			"the environments you are actually using can be given more. Running work in the pod is " +
 			"terminated. Persistent state is not touched — the home volume, the Docker/build caches, " +
 			"and a builds-here environment's worktree all survive — so waking is a pod start, not a " +
-			"rebuild.\n\n" +
+			"rebuild. Desktop terminal sessions attached to the environment end with the pod; the " +
+			"stop names them so you can see what it took down.\n\n" +
 			"The stop is durable: it is recorded on the environment, so a later `erun deploy` " +
-			"reconciles it rather than restarting the pod. `erun open` is what wakes the " +
-			"environment again. Defaults to the current scope; pass TENANT and ENVIRONMENT (or " +
-			"--tenant/--environment) to target another.",
+			"reconciles it rather than restarting the pod, and an automatic session reconnect " +
+			"leaves it stopped. `erun open` is what wakes the environment again. Defaults to the " +
+			"current scope; pass TENANT and ENVIRONMENT (or --tenant/--environment) to target another.",
 		Example:      "  erun stop\n  erun stop team dev\n  erun stop team dev --dry-run\n  erun stop team dev --output json",
 		Args:         cobra.MaximumNArgs(2),
 		SilenceUsage: true,
@@ -72,9 +74,16 @@ func runStopCommand(ctx common.Context, args []string, overrides common.OpenPara
 	return ctx.WriteResult(stopResult)
 }
 
+// stopCommandSummary names the ended sessions as well as the recovery: an
+// operator whose desktop tabs go dark a second after the stop should read that
+// as their own command doing what it said, not as the environment breaking.
 func stopCommandSummary(result common.StopEnvironmentResult) string {
 	if result.AlreadyStopped {
 		return fmt.Sprintf("%s/%s was already stopped", result.Tenant, result.Environment)
 	}
-	return fmt.Sprintf("stopped %s/%s; run `erun open %s %s` to wake it", result.Tenant, result.Environment, result.Tenant, result.Environment)
+	sessions := ""
+	if len(result.EndedSessions) > 0 {
+		sessions = fmt.Sprintf(" and ended %d attached desktop session(s) (%s)", len(result.EndedSessions), strings.Join(result.EndedSessions, ", "))
+	}
+	return fmt.Sprintf("stopped %s/%s%s; run `erun open %s %s` to wake it", result.Tenant, result.Environment, sessions, result.Tenant, result.Environment)
 }

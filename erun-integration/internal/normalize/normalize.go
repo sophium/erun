@@ -75,10 +75,24 @@ var defaultRules = []Replacement{
 	// despite looking like a stable digest.
 	{regexp.MustCompile(`hash=[0-9a-f]{16}\b`), "hash=<HASH>"},
 	{regexp.MustCompile(`pid=\d+`), "pid=<PID>"},
+	// A job reports the process it is reconciled against and the group a cancel
+	// signals. Both are real OS pids, so they differ on every run; the contract a
+	// golden locks is that the job names a recorded process at all, never which
+	// number the kernel handed out.
+	{regexp.MustCompile(`\bpid \d+`), "pid <PID>"},
+	{regexp.MustCompile(`\bprocess group \d+`), "process group <PGID>"},
+	{regexp.MustCompile(`\b(supervisor|process) \d+ is gone`), "$1 <PID> is gone"},
 	{regexp.MustCompile(`id=[A-Za-z0-9_./-]*-\d{10,}\b`), "id=<COMMAND_ID>"},
 	{regexp.MustCompile(`-[0-9a-f]{16}\b`), "-<HEX16>"},
 	{regexp.MustCompile(`\b[0-9a-f]{32,}\b`), "<HEX>"},
 	{regexp.MustCompile(`\bcommit = [0-9a-f]{7,12}\b`), "commit = <SHORTSHA>"},
+	// Real git output in a real-run scenario: `git commit` prints
+	// `[<branch> <sha>]` and `git push` prints an indented `<old>..<new>` range
+	// per ref. Both carry the commit the fixture repo happened to produce on
+	// this run. The range rule is anchored to the start of a push status line so
+	// a diff's `index <blob>..<blob>` — content-derived and stable — survives.
+	{regexp.MustCompile(`\[([^\s\]]+) [0-9a-f]{7,40}\]`), "[$1 <SHORTSHA>]"},
+	{regexp.MustCompile(`(?m)^(\s+)[0-9a-f]{7,40}\.\.[0-9a-f]{7,40}\b`), "${1}<SHORTSHA>..<SHORTSHA>"},
 	// Safety net for a real home path that leaks despite the test HOME override.
 	{regexp.MustCompile(`/Users/[^/\s'"]+`), "<HOME>"},
 	{regexp.MustCompile(`/home/[^/\s'"]+`), "<HOME>"},

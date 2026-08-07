@@ -1,0 +1,31 @@
+release: resolving project root
+release: project root = <TMP>
+release: resolving release module root
+release: release root = <TMP>
+release: loading release config from project
+release: main branch = main, develop branch = develop
+release: resolving git branch and commit
+release: branch = main, commit = <SHORTSHA>
+release: resolving base version from VERSION file
+release: base version = <VERSION> (from <TMP>
+release: classified mode = stable
+release: develop branch "develop" exists = false
+<VERSION>
+audit: erun release
+==> Releasing <VERSION>
+release: branch=main mode=stable version=<VERSION>
+next version: <VERSION>
+publishing image: ghcr.io/sophium/api:<VERSION>
+release: worktree clean = true
+stage: sync-remote
+Current branch main is up to date.
+stage: release
+[main <SHORTSHA>] [skip ci] release <VERSION>
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+stage: publish
+fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
+fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-arm64
+rebuilding ghcr.io/sophium/api:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
+==> Release failed after <ELAPSED>
+verify multi-arch build capability (docker buildx inspect): exit status 1
+simulated docker failure

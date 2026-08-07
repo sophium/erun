@@ -94,13 +94,14 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 
 ### Common flags
 
-`--tenant`, `--environment`, `--no-shell`, `--deploy`, `--vscode`, `--intellij`.
+`--tenant`, `--environment`, `--no-shell`, `--deploy`, `--vscode`, `--intellij`, `--reconnect`.
 
 ### Advanced flags
 
 | Flag | Type | Default | Validation | Persists to |
 |---|---|---|---|---|
 | `--deploy` | bool | `false` | Operator-convenience switch. | None. |
+| `--reconnect` | bool | `false` | Declares the run a machine-initiated reattach rather than an Operator open. Suppresses everything in `open` that *starts* something: the cloud-context start in step 3, and both halves of the wake in step 5 (the `EnvConfig.stopped` clear and the scale-to-one). A stopped runtime aborts with `RUNTIME_STOPPED`. Composes with every other flag. | None — and, by design, prevents the `EnvConfig.stopped` write a plain `open` performs. |
 | `--no-alias-prompt` | bool | `false` | Only meaningful with `--no-shell`. | None (interactive choice only). |
 | `--version <version>` | string (semver) | `EnvConfig.runtimeversion` or the CLI built-in. | Same as `erun init --version`. Implies `--deploy` (pinning a version is only meaningful if it rolls out). | `EnvConfig.runtimeversion` for this run only (not persisted). |
 | `--runtime-image <ref>` | string | `EnvConfig.runtimeimage` (unset → the published image). | Same reference rules as `erun init --runtime-image`. Applies only to envs deploying the published chart (rides in as `imageOverrides.erun-devops`); envs with a repo-local chart ignore it. Implies `--deploy`. | Run-only override (not persisted). |
@@ -111,9 +112,11 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 
 1. Parse flags; resolve effective tenant + env. `--version`/`--runtime-image` set the effective deploy flag.
 2. Load `EnvConfig` (Kubernetes context, container registry, runtime version, type). By default `open` neither builds, pushes, nor deploys; it expects the runtime to already exist.
-3. If `EnvConfig.cloudprovideralias` is set, look up the cloud context. If `stopped`, send the provider-specific start command. Poll the cluster API every `5s` until reachable or 5 minutes elapse (then abort `CLUSTER_UNREACHABLE`).
+3. If `EnvConfig.cloudprovideralias` is set, look up the cloud context. If `stopped`, send the provider-specific start command. Poll the cluster API every `5s` until reachable or 5 minutes elapse (then abort `CLUSTER_UNREACHABLE`). **`--reconnect` skips this step entirely** — the same reason [`erun stop`](#erun-stop) skips it: starting the machine an Operator (or an idle policy) just stopped is not a decision a reattach gets to make. The reconnect then fails against the unreachable cluster, which is the honest outcome. For an already-running context the step is a no-op either way.
 4. **If `--deploy` (or an implied deploy):** deploy the runtime first — a builds-here env composes build → push → deploy; a runtime/remote env runs `helm upgrade --install <env>-runtime <chart>` into `<tenant>-<env>` for the recorded/`--version` published chart by reference (requires a resolvable version, else `RUNTIME_VERSION_REQUIRED`). Default (no `--deploy`): a trace line records that `open` is a pure primitive that is not deploying, then `open` verifies the runtime deployment exists in `<tenant>-<env>` and aborts with `RUNTIME_NOT_DEPLOYED` if it does not. This deployment-presence check is the authoritative "is the runtime up" signal — reachability is **not** inferred from a later port-forward timeout, so a forward that merely can't bind is never misreported as an undeployed environment.
 5. **Wake the runtime if it is stopped.** Read the runtime Deployment's `spec.replicas`. If it is `0`, `kubectl scale deployment/<tenant>-devops --replicas=1`, then `kubectl wait --for=condition=Available --timeout 2m0s`. This runs before any port-forward because `kubectl port-forward deployment/…` cannot attach to zero replicas. A Deployment already asking for `>= 1` replica gets no scale call. A Deployment that is absent, or a replica count that cannot be read, is treated as running and the open proceeds — the wake must never be more fragile than the open it precedes. Independently, if `EnvConfig.stopped` is set it is cleared **before** step 4, so a `--deploy` run renders `replicas: 1` instead of re-applying the recorded stop.
+
+   **`--reconnect` inverts this step.** Waking is what an Operator opening the environment means; it is not what a supervisor re-establishing a dropped session means, and the two are indistinguishable from inside `open` unless the caller says which it is. A `--reconnect` run therefore makes no scale call and no `EnvConfig.stopped` clear at all: a stopped Deployment aborts with `RUNTIME_STOPPED` and a running one proceeds through the rest of the algorithm unchanged. This is what makes a stop durable against reconnects — [`erun stop`](#erun-stop) drops every attached session, so a reconnect that woke would undo the stop that caused it, erasing the recorded intent on the way, on a loop for as long as anything is attached.
 6. **Refresh the host AWS credentials** if `EnvConfig.cloudprovideralias` names an AWS alias — the same write [`erun cloud refresh`](#erun-cloud-refresh) performs. This runs after the wake because the credentials are streamed into the running pod: a stopped environment has nothing to write to. **Best-effort**: a failure (usually a lapsed SSO session) is traced as a warning and `open` continues, so the environment keeps whatever credentials it already had and the session still opens.
 7. Wait for the runtime pod's SSH server to be reachable on the in-pod port (`EnvConfig.sshd.port`, default `22`). Readiness probe is a TCP connect + banner-line read, retried every `2s` with a `60s` cap.
 8. Establish local port-forwards (**best-effort**). `erun open` starts a detached `kubectl port-forward` per channel (MCP, SSH, API) and records each at `<UserConfigDir>/erun/portforward/{mcp,sshd,api}/<tenant>/<env>.json` with `{tenant, environment, kubernetesContext, namespace, localPort, logPath, processId}` — see [Networking spec · Port-forward state files](/agent-reference/networking-spec#port-forward-state-files). These forwards back **laptop-side tooling only** (the desktop app's panels, `erun api`, `erun mcp`); the shell/AI session itself runs in-pod via `kubectl exec` and does not use them, so a forward that cannot bind is logged as a warning and skipped rather than aborting `open`.
@@ -131,6 +134,7 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 | `RUNTIME_VERSION_REQUIRED` | `--deploy` for an env with no local chart and no resolvable runtime version (none recorded, none passed via `--version`). Run `erun deploy --version <v>` or persist a version. | `1` |
 | `HELM_UPGRADE_FAILED` | `helm upgrade --install` returned non-zero (only on the `--deploy` path). The release is in helm's failure state; consult `helm history`. | `2` |
 | `RUNTIME_NOT_DEPLOYED` | Pure `open` (no `--deploy`) but the runtime deployment is absent in `<tenant>-<env>`. Detected before the port-forwards so the message is actionable: run `erun deploy` or `erun open --deploy`. | `1` |
+| `RUNTIME_STOPPED` | `--reconnect` against a Deployment scaled to zero. Deliberate: a reattach does not start an environment. Nothing is scaled and `EnvConfig.stopped` is left set; the message names the plain `erun open <tenant> <env>` that starts it. | `1` |
 | `SSH_READY_TIMEOUT` | The runtime is deployed but its SSH server did not become reachable within the `60s` readiness window. (A genuinely undeployed runtime is caught earlier as `RUNTIME_NOT_DEPLOYED`.) | `2` |
 | `IDE_LAUNCHER_MISSING` | `--vscode` / `--intellij` requested but the launcher binary isn't on `PATH`. Falls back to printing SSH details; exit `0`. | `0` |
 
@@ -168,7 +172,7 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
    c. Tag the result `<registry>/<image>:fp-<fingerprint>-<arch>` for each architecture.
    d. **`ERUN_VERSION` for a base built by this same run.** Images are ordered so a `FROM <registry>/<base>:${ERUN_VERSION}` wrapper builds after its base. A build that does not push tags only per-arch (`…:<version>-<arch>`) — the arch-less `…:<version>` is a manifest list [`push`](#erun-push) mints in the registry, so it exists neither locally nor remotely for an unpublished version. So when the wrapper's base is one of this run's own unpublished images, its `ERUN_VERSION` build arg is `<version>-<arch>` for the architecture being built, resolving the base from the local daemon at the matching arch (an arch-less local tag would be last-arch-wins, and therefore single-arch). This is what lets `erun build --version <v>` validate a whole release locally, dependent images included, before any git ref moves. A local snapshot base follows the same rule at `<base>-snapshot-<arch>`. A `--release` wrapper keeps the plain `<version>`: its base is pushed earlier in the same run, so it resolves from the published multi-arch manifest. No plain-`<version>` local tag is ever created, so a local build can never be mistaken for a published manifest or pushed in place of one.
 5. Emit the minted version (and, with `--output json`, the structured result).
-6. If `--deploy`: compose push + deploy at the minted version (operator-convenience shortcut). If `--release`: chain to `erun release`, which builds, then reuses `push` to publish the release-tagged variants and chart. Programmatic callers skip both and orchestrate the primitives themselves.
+6. If `--deploy`: compose push + deploy at the minted version (operator-convenience shortcut). If `--release`: run the `erun release` flow, which builds and reuses `push` to publish the release-tagged variants and chart, verifies they resolve, and only then moves the git refs. Programmatic callers skip both and orchestrate the primitives themselves.
 7. Exit `0`.
 
 ### Multi-arch verification
@@ -552,7 +556,7 @@ The credential material never appears in an argument, a trace line, or a golden 
 
 ## `erun release`
 
-`erun release` orchestrates **build → push → git-tag**: it builds the release-tagged images, then reuses [`erun push`](#erun-push) to publish the multi-arch image manifest **and** the runtime chart at the release version, then creates the commit + tag. It has no chart-publishing step of its own. See [Release version policy](/agent-reference/release-policy) for the version-pattern rules and the publishing contract; the `erun release` flag set is just `--dry-run` and `--output`, and is documented on the [Operator page](/cli/release).
+`erun release` orchestrates **build → push → git-tag**, in that order: it stamps the version and creates the commit and a local tag, builds the release-tagged images, reuses [`erun push`](#erun-push) to publish the multi-arch image manifest **and** the runtime chart at the release version, re-resolves each published manifest, and only then pushes the tag and branches. It has no chart-publishing step of its own. The ordering is the contract — a release that exits `0` means the announced version is deployable, and one that cannot publish fails with nothing public. See [Release version policy](/agent-reference/release-policy) for the version-pattern rules and the publishing contract; the `erun release` flag set is just `--dry-run` and `--output`, and is documented on the [Operator page](/cli/release).
 
 ---
 
@@ -579,17 +583,23 @@ stopping over MCP would kill the caller mid-call. Lifecycle is host-side, as it 
 1. Resolve the target the same way `erun open` does (positional args, then `--tenant`/`--environment`, then the current scope). A missing Kubernetes context aborts.
 2. **No cloud-context preflight.** Unlike every other cluster-touching command, `stop` never starts a stopped [cloud context](/concepts/cloud-contexts) to reach the cluster.
 3. Read the runtime Deployment's `spec.replicas` / `status.readyReplicas`. An absent Deployment aborts with `RUNTIME_NOT_DEPLOYED`.
-4. If `spec.replicas > 0`, `kubectl scale deployment/<tenant>-devops --replicas=0`. If it is already `0`, no scale call is made.
-5. If `EnvConfig.stopped` is not already `true`, set it. This is the durable half: a bare scale patch is drift that the next `helm upgrade` reverts, so `deploy` renders the chart's `stopped` value from this field and reconciles `replicas` declaratively.
-6. Emit `==> Stopped <tenant>/<env>` and exit `0`.
+4. If the Deployment is already at `0` replicas, skip to step 8 — steps 5–7 are the "this run actually reclaims capacity" path.
+5. **List the attached desktop sessions.** `kubectl exec deployment/<tenant>-devops` runs the same in-pod session heartbeat probe the desktop app polls, and the ids it reports are traced and returned as `endedSessions`. They live in the pod, so the stop ends them; naming them makes that a stated consequence rather than tabs mysteriously going dark. An unreadable probe is traced and the stop continues — it is reporting, not a precondition.
+6. `kubectl scale deployment/<tenant>-devops --replicas=0`.
+7. **Confirm the stop took effect.** Re-read `spec.replicas`. Anything other than `0` aborts with `STOP_NOT_APPLIED` *before* the config write, so `EnvConfig.stopped` never claims a stop the cluster did not keep and the command never reports success for a stop that did not happen. Skipped under `--dry-run`, which traces the check instead.
+8. If `EnvConfig.stopped` is not already `true`, set it. This is the durable half: a bare scale patch is drift that the next `helm upgrade` reverts, so `deploy` renders the chart's `stopped` value from this field and reconciles `replicas` declaratively.
+9. Emit `==> Stopped <tenant>/<env>` and exit `0`.
 
 ### Durability and the interaction with `deploy`
 
 | Sequence | Result |
 |---|---|
 | `stop` → `open` | The environment starts. `open` clears `EnvConfig.stopped` and scales the Deployment back to `1`. |
+| `stop` → `open --reconnect` | The environment **stays stopped**. The reconnect aborts with `RUNTIME_STOPPED`; nothing is scaled and `EnvConfig.stopped` stays set. This is the sequence the desktop app produces on its own — a stop drops every attached session and each tab respawns `open` — so it is what makes a stop hold for an environment somebody has open. |
 | `stop` → `deploy` | The environment **stays stopped**. `deploy` threads `--set stopped=true`, so the chart renders `replicas: 0`. `deploy` installs a version; it does not decide whether the environment should be running. |
 | `stop` → `deploy` → `open` | The environment starts, on the version `deploy` installed. |
+
+Every automatic stop inherits the same protection, because it is `open` that refuses rather than `stop` that defends. An idle-stop that scales an environment down records the same `EnvConfig.stopped` and drops the same sessions, and the reconnects it triggers decline for the same reason. The [idle stop](/agent-reference/idle-policy) that ships today stops the whole [cloud context](/concepts/cloud-contexts) rather than one Deployment, and it is covered by the same flag one layer up: `--reconnect` skips `open`'s cloud-context start, so a reattach cannot restart the machine an idle policy just stopped.
 
 Making `deploy` a wake would have been unreliable in one specific way: `deploy` skips the helm call
 when the released version already matches, so a wake-on-deploy would fire or not depending on
@@ -606,11 +616,12 @@ call runs or is skipped.
   "release": "my-tenant-devops",
   "kubernetesContext": "my-cluster",
   "stopped": true,
-  "alreadyStopped": false
+  "alreadyStopped": false,
+  "endedSessions": ["open-0", "ai"]
 }
 ```
 
-`alreadyStopped` distinguishes the no-op from the run that actually reclaimed capacity.
+`alreadyStopped` distinguishes the no-op from the run that actually reclaimed capacity. `endedSessions` lists the desktop terminal sessions that were living in the pod and went down with it, omitted when there were none or when the run was a no-op.
 
 ### What survives
 
@@ -626,6 +637,7 @@ a pod start rather than a cold rebuild. In-pod processes are not: a stop ends wh
 | `KUBE_CONTEXT_MISSING` | `EnvConfig.kubernetescontext` is empty or absent from `~/.kube/config`. | `1` |
 | `RUNTIME_NOT_DEPLOYED` | The runtime Deployment does not exist in `<tenant>-<env>`. Nothing is holding capacity, and nothing is changed. | `1` |
 | `KUBE_SCALE_FAILED` | `kubectl scale` returned non-zero. `EnvConfig.stopped` is **not** recorded, so the config never claims a stop that did not happen. | `1` |
+| `STOP_NOT_APPLIED` | The scale returned zero but the confirming re-read found the Deployment still asking for replicas. `EnvConfig.stopped` is **not** recorded and the command does **not** report success — a stop that silently did not take effect is the one failure the Operator cannot see for themselves. | `1` |
 
 ---
 
@@ -652,6 +664,155 @@ The local port-forward state files under `<UserConfigDir>/erun/portforward/{mcp,
 |---|---|---|
 | `NAMESPACE_NOT_FOUND` | The Kubernetes namespace does not exist. Treated as a successful no-op; exits `0`. | `0` |
 | `KUBE_DELETE_FAILED` | Namespace deletion returned an error from the API server. Local config is **not** removed. | `2` |
+
+---
+
+## `erun job` {#erun-job}
+
+`erun job` starts long work in an environment and answers what happened to it. It is the in-environment half of the job surface; the host-side half is the `job_*` [MCP tools](/mcp/overview#job-tools), which run the same shared implementation.
+
+Use it instead of hand-rolling detachment, a log redirect, a polling loop, a sentinel token, and an exit-code parse around [`erun exec raw`](/cli/exec) / the `raw` MCP tool. Three properties are the reason it exists:
+
+- **The outcome is captured inside the environment**, by the supervisor process that waited on the work. It is never derived from a token in the log and never passes through an intermediate shell, so `$?` cannot be expanded in the wrong place.
+- **Liveness is a probe of a recorded pid**, never a match against a command line. A pattern can match the polling shell itself, or the shell issuing a cancel.
+- **A status is definite or explicitly `unknown`**, never silently partial.
+
+### Job states
+
+| State | Meaning | `exitCode` |
+|---|---|---|
+| `running` | The recorded process is alive and no outcome has been observed. | `null` |
+| `exited` | The work finished and the supervisor captured its status. `-1` means it was terminated by a signal, which `signal` names. | integer |
+| `unknown` | The record outlived whatever was meant to finish it — the supervisor is gone without recording an outcome (most often because the runtime pod was replaced), or an attached job's tracked process is gone. `reason` says which. | `null` |
+
+The demotion to `unknown` happens on the next read and is persisted, so every later read gives the same answer. An `unknown` job is never a success: `job await` exits `125` for it, distinct from both `0` and a failure.
+
+### `erun job start`
+
+`erun job start [flags] -- <command> [args...]`
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--tenant <t>` / `--environment <e>` | string | **required** | Target environment. |
+| `--name <what>` | string | **required** | What the work is. Shown wherever the environment reports as busy. |
+| `--id <id>` | string | the `--name` | Handle to address the job by, filename-sanitised. |
+| `--dir <path>` | path | the caller's resolution | Working directory for the work. |
+| `--max-output-bytes <n>` | int64 | `4194304` (4 MiB) | Cap on captured output. |
+| `--lease-ttl <duration>` | duration | `15m` | Activity lease TTL; the supervisor renews at TTL/3 (minimum 5s) for as long as the work runs. |
+| `--dry-run` | bool | `false` | Trace the supervisor argv, the log path, and the lease; start nothing. |
+
+erun spawns a supervisor in **its own session**, so the work survives this call returning, the caller exiting, and the transport dropping — nothing needs wrapping in `setsid`, `nohup`, or a redirect. The work itself runs in its own process group, which is what lets [`cancel`](#erun-job-cancel) reach it without touching the supervisor.
+
+The supervisor registers the job before starting the work, so `start` returns a handle that always resolves — including for work that fails to `exec`, which lands as an `exited` job whose `reason` says `failed to start: …`.
+
+Re-using the id of a job that is **still running** is refused (two supervisors writing one record would make every later answer ambiguous). Re-using a **finished** id replaces it, and traces that it did.
+
+`--output json` emits the job record.
+
+### `erun job attach`
+
+Registers work erun did **not** start, so it is visible and holds an activity lease.
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--tenant` / `--environment` | string | **required** | Target environment. |
+| `--name <what>` | string | **required** | What the work is. |
+| `--id <id>` | string | the `--name` | Handle. Re-attaching the same id renews the lease rather than restarting the job. |
+| `--pid <n>` | int | **required** | Process to track. |
+| `--log <path>` | path | none | File the work already writes to, so `job output` can serve it. |
+| `--lease-ttl <duration>` | duration | `15m` | Lease TTL. |
+| `--dry-run` | bool | `false` | Resolve and trace without recording. |
+
+An attached job resolves against the named pid and nothing else. It reads `running` while that process lives and `unknown` once it is gone; it can **never** report an exit status, because nothing erun ran was waiting on the process to observe one. Start work through `job start` when the outcome matters.
+
+### `erun job status`
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--tenant` / `--environment` | string | **required** | Target environment. |
+| `--id <id>` | string | none | Report one job; omit for every retained job, newest first. |
+
+`--output json` emits the job record (with `--id`) or the array (without).
+
+### `erun job await` {#erun-job-await}
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--tenant` / `--environment` | string | **required** | Target environment. |
+| `--id <id>` | string | **required** | Job to wait for. |
+| `--timeout <duration>` | duration | `30s` | Bounded wait. Must be `> 0` and `≤ 10m`; a larger value is an error, not a clamp. |
+
+The call returns inside the timeout either way, so no connection is held open for the work's lifetime. The record is re-read every 250 ms; nothing streams. Call it again to keep waiting.
+
+**Exit codes are the contract** — a timeout is a different event from a failure, and neither is inferred from the other:
+
+| Exit code | Meaning |
+|---|---|
+| `0` | The job reached `exited` with code `0`. |
+| `1` | The job reached `exited` with a non-zero code. The real code is in the message and in `job.exitCode`. |
+| `124` | The timeout elapsed with the job still running. Matches `timeout(1)`. |
+| `125` | The job's state is `unknown` — no outcome was ever recorded. |
+
+`--output json` emits `{job, timedOut, waitedSeconds, timeoutSeconds}`. `timedOut` is `true` only for the `124` case, so a caller reading the payload does not have to infer it from the exit code either.
+
+### `erun job output`
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--tenant` / `--environment` | string | **required** | Target environment. |
+| `--id <id>` | string | **required** | Job whose output to read. |
+| `--offset <n>` | int64 | `0` | Byte offset to read from. Pass the previous read's `nextOffset` to continue rather than repeat. An offset past the end of the log is an error. |
+| `--max-bytes <n>` | int64 | `65536` | Most bytes to return in this read. |
+
+stdout and stderr are **merged** into one log in write order, and served as the file stands — so progress is readable long before the work exits. The bytes go to stdout; `next offset: <n> (more: <bool>, complete: <bool>)` goes to stderr so it never corrupts the payload. `--output json` emits `{job, offset, nextOffset, output, hasMore, complete}`.
+
+`complete` is true only when the job has finished **and** this page reached the end of its output. `hasMore` only describes this read; the job's own `outputTruncated` is what says output was dropped at the cap.
+
+### `erun job cancel` {#erun-job-cancel}
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--tenant` / `--environment` | string | **required** | Target environment. |
+| `--id <id>` | string | **required** | Job to cancel. |
+| `--signal <name>` | `TERM` \| `INT` \| `HUP` \| `KILL` | `TERM` | Signal to send. |
+| `--dry-run` | bool | `false` | Trace the target without signalling. |
+
+The signal goes to the **process group of the pid the record holds**, so a cancel can only reach the work it names — not a process that merely looks like it, and not the shell issuing the cancel. Two guards make the latter impossible: signalling erun's own pid is refused, and so is signalling erun's own process group.
+
+The job's supervisor is deliberately **not** signalled, so it survives to record the outcome; the cancelled job then reads back as a normal `exited` job carrying `signal`. Cancelling a job that already finished is not an error — it reports `signalled: false`.
+
+On Windows there are no signals: every name maps to a `taskkill /F /T` of the recorded pid, and `signal` is never populated on the resulting record.
+
+### Storage, retention, and output bounding {#job-storage}
+
+| Property | Value |
+|---|---|
+| Record | `${XDG_CACHE_HOME}/erun/activity/<tenant>/<environment>/jobs/<id>.json`, written atomically (temp + rename) so a concurrent status read can never see a half-written record. |
+| Log | `…/jobs/<id>.log`. |
+| Durability | The same store the [activity leases](/agent-reference/idle-policy#activity-leases) use. Inside a runtime pod that path is on the home PVC, so records survive pod replacement — deliberately not container-local `/tmp`, which every deploy strands. |
+| Output cap | `--max-output-bytes` (default 4 MiB) per job. Past it the log stops growing, the record sets `outputTruncated: true` (immediately, not at exit), and `job status` says `(truncated at the output cap)`. The **head** is kept: the outcome never comes from the log, so a bounded log costs detail, never the result. |
+| Retention | A finished job stays readable for **24 hours** after it ended, and the newest **50** finished records per environment are kept. Running jobs are never pruned. An orchestrator reconnecting after the work ended can therefore still learn the outcome; reaping at exit would recreate the problem this surface closes. |
+| Pruning | Happens on read and on write, alongside the same reconcile-on-read pass that demotes abandoned records. Pruning removes the record and its log together. |
+
+### The lease a job holds
+
+A job holds an activity lease named after the job for its whole lifetime, with `id` = `job-<job id>` and `pid` = the supervisor's. Starting a job therefore makes the environment report as busy and defers auto-stop, with the caller arranging nothing — see [Idle policy · activity_leases](/agent-reference/idle-policy#activity-leases) for the lease's own semantics. If the supervisor is killed outright the lease is reclaimed by the same pid probe that reclaims any abandoned holder.
+
+### Error behaviour
+
+| Failure | Behaviour |
+|---|---|
+| No `--tenant` / `--environment`. | Exit 1, `tenant and environment are required`. |
+| `start` with no `--name`. | Exit 1, `job name is required` — a job that names no work would report the environment busy without saying why. |
+| `start` with no command after `--`. | Exit 1 from argument validation. |
+| `start` re-using a running id. | Exit 1, `job "<id>" is already running (pid <n>); pass a different id or cancel it first`. Nothing is spawned. |
+| The supervisor never registers the job within 10s. | Exit 1, naming the supervisor pid. No handle is returned. |
+| `attach` with no `--pid`. | Exit 1, `a pid to track is required; an attached job has nothing else to reconcile against`. |
+| Unknown job id on `status` / `await` / `output` / `cancel`. | Exit 1, `no job "<id>" in <tenant>/<environment>`. |
+| `await --timeout` above the ceiling or `≤ 0`. | Exit 1 before waiting, naming the `10m0s` ceiling. |
+| `output --offset` past the end of the log. | Exit 1, naming the offset and the log size. |
+| `cancel --signal` outside `TERM`/`INT`/`HUP`/`KILL`. | Exit 1, `unsupported signal`. |
+| `cancel` targeting a process that already exited. | Success; the record reconciles on the next read. |
 
 ---
 

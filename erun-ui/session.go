@@ -249,8 +249,21 @@ func buildDoctorArgs(selection uiSelection) []string {
 	return []string{"doctor", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment)}
 }
 
+// buildOpenNoShellArgs builds the forwarder-rebind open. Every caller is the
+// desktop reacting to a dropped connection rather than the operator asking for
+// the environment, so it carries --reconnect: a rebind must reattach to a
+// running environment, never start the one the operator just stopped.
 func buildOpenNoShellArgs(tenant, environment string) []string {
-	return []string{"open", strings.TrimSpace(tenant), strings.TrimSpace(environment), "--no-shell", "--no-alias-prompt"}
+	return []string{"open", strings.TrimSpace(tenant), strings.TrimSpace(environment), "--no-shell", "--no-alias-prompt", "--reconnect"}
+}
+
+// reconnectSessionParams marks a tab respawn as machine-initiated. The desktop
+// respawns a tab whenever its session drops, and a stop is exactly what drops
+// every session — so without this the respawn reads as an operator opening the
+// environment and starts the runtime the stop just reclaimed.
+func reconnectSessionParams(params startTerminalSessionParams) startTerminalSessionParams {
+	params.Args = append(append([]string(nil), params.Args...), "--reconnect")
+	return params
 }
 
 func ensureMCPViaOpenCommand(ctx context.Context, cliPath string, result eruncommon.OpenResult) error {

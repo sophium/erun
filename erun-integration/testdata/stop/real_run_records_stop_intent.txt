@@ -3,6 +3,8 @@ audit: erun stop team dev
 trace-log: appending the full trace to <TMP>
 stop: tenant=team environment=dev kubernetes-context=test-context release=team-devops namespace=team-dev
 runtime run state: deployment team-devops wants 1 replica(s), 1 ready
+stop: no desktop session is attached to team-devops
 stop: scaling team-devops to 0 replicas to return its runtime and dind capacity to the node
+runtime run state: deployment team-devops wants 0 replica(s), 0 ready
 config: assigned stopped=true to team/dev
 ==> Stopped team/dev

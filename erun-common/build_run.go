@@ -108,35 +108,47 @@ func traceBuildUmbrella(ctx Context) func(*error) {
 	}
 }
 
-func RunBuildExecution(ctx Context, execution BuildExecutionSpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc) error {
-	return runBuildExecution(ctx, execution, nil, runScript, build, push, nil)
-}
-
-func RunBuildExecutionAndDeploy(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
-	return runBuildExecution(ctx, execution, deploySpecs, runScript, build, push, deploy)
-}
-
-func runBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) (err error) {
+func RunBuildExecution(ctx Context, execution BuildExecutionSpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc) (err error) {
 	defer traceBuildUmbrella(ctx)(&err)
+	return runBuildExecution(ctx, execution, nil, nil, runScript, build, push, nil)
+}
+
+func RunBuildExecutionAndDeploy(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) (err error) {
+	defer traceBuildUmbrella(ctx)(&err)
+	return runBuildExecution(ctx, execution, deploySpecs, nil, runScript, build, push, deploy)
+}
+
+// RunReleaseExecution is a standalone `erun release`: the same build → publish →
+// tag orchestration `erun build --release` performs, under the `==> Releasing`
+// umbrella the desktop activity queue expects for a release rather than the
+// `==> Building` one. Both entrypoints share one execution so the flow cannot
+// drift between them.
+func RunReleaseExecution(ctx Context, execution BuildExecutionSpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc) (err error) {
+	defer traceReleaseUmbrella(ctx, releaseExecutionVersion(execution))(&err)
+	return runBuildExecution(ctx, execution, nil, runGit, runScript, build, push, nil)
+}
+
+func runBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
 	if execution.release != nil {
-		// The exported RunReleaseSpec would emit its own `==> Releasing`
-		// markers, double-registering activity under the `==> Building`
-		// umbrella already active for this `erun build --release`.
-		if err = runReleaseSpec(ctx, *execution.release, nil, runScript, nil); err != nil {
+		// The release owns the publish rather than following it: its stages run
+		// around the build+push so the version's images and charts exist, and
+		// resolve, before the tag and branch pushes make it public.
+		publisher := newReleasePublisher(execution, deploySpecs, runScript, build, push)
+		if err := runReleaseSpec(ctx, *execution.release, runGit, runScript, nil, publisher); err != nil {
 			return err
 		}
-	}
-	if execution.skippedLinux {
-		ctx.Trace("skipping linux package scripts: host is not Linux or dpkg-deb is unavailable")
-	}
-
-	if _, err = runBuildExecutionBuilds(ctx, execution, deploySpecs, runScript, build, push); err != nil {
-		return err
+	} else {
+		if execution.skippedLinux {
+			ctx.Trace("skipping linux package scripts: host is not Linux or dpkg-deb is unavailable")
+		}
+		if _, err := runBuildExecutionBuilds(ctx, execution, deploySpecs, runScript, build, push); err != nil {
+			return err
+		}
 	}
 	// build+push above already published the images and runtime chart, so
 	// these pure deploy specs only run helm.
 	for _, deploySpec := range deploySpecs {
-		if err = RunDeploySpec(ctx, deploySpec, deploy); err != nil {
+		if err := RunDeploySpec(ctx, deploySpec, deploy); err != nil {
 			return err
 		}
 	}
@@ -147,6 +159,22 @@ func runBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []
 		ctx.Info("deployed version: " + version)
 	}
 	return nil
+}
+
+// BuildExecutionReleaseSpec exposes the release a build execution carries, for
+// transports that report the resolved plan alongside the run.
+func BuildExecutionReleaseSpec(execution BuildExecutionSpec) (ReleaseSpec, bool) {
+	if execution.release == nil {
+		return ReleaseSpec{}, false
+	}
+	return *execution.release, true
+}
+
+func releaseExecutionVersion(execution BuildExecutionSpec) string {
+	if execution.release == nil {
+		return ""
+	}
+	return execution.release.Version
 }
 
 func runBuildExecutionBuilds(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc) (map[string]struct{}, error) {

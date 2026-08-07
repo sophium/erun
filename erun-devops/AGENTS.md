@@ -78,11 +78,13 @@ Components that run an upstream image unmodified (PostgreSQL today; PowerDNS, Zi
 
 ## Release Workflow
 
-- Stable release behavior for this module currently means:
+- Stable release behavior for this module currently means, in this order:
   - release chart metadata is rewritten so chart version and application version match the release
   - package-manager metadata for supported installers is updated together with the release when present
-  - release commits and tags are created before release-tagged Docker images are pushed
-  - after a successful stable release, the next patch version is prepared for subsequent work
+  - the release commit and a **local** tag are created — recoverable state, nothing public yet
+  - the release-tagged Docker images and their charts are built and published, then read back from the registry to prove they resolve
+  - only then does the tag reach origin, packaging checksums sync against the now-public archive, the next patch version is prepared, and the branches push
+  - a release that cannot publish fails at the publish, leaving no public tag and `VERSION` still on the version it was releasing, so re-running retries the same version
 - Candidate releases use candidate version tags and still rely on the same shared release/build orchestration.
 - When changing release behavior, validate the repository-wide flow, not only this subtree. At minimum run the release-sensitive suites in `erun-common`, `erun-cli`, and `erun-mcp`.
 - A non-erun tenant consumes erun's **published** charts by reference — it never forks or copies them:

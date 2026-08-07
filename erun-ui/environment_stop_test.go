@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -46,6 +47,17 @@ func TestRuntimeStoppedForSelectionMapsClusterStateToTheIndicator(t *testing.T) 
 		{
 			name:  "scaled to zero with no pods is stopped",
 			state: eruncommon.RuntimeRunState{Present: true, DesiredReplicas: 0, ReadyReplicas: 0},
+			want:  true,
+		},
+		{
+			// The termination window the reconnect gate used to lose. The scale
+			// has landed and every attached session has already dropped, but the
+			// old pod stays Ready for the length of its grace period. Reading that
+			// as "running" let the respawn through, and the respawned `erun open`
+			// — reading the same Deployment — scaled the environment straight back
+			// up about a second after the stop.
+			name:  "scaled to zero while the old pod drains is stopped",
+			state: eruncommon.RuntimeRunState{Present: true, DesiredReplicas: 0, ReadyReplicas: 1},
 			want:  true,
 		},
 		{
@@ -148,6 +160,27 @@ func TestStopEnvironmentFlagsTheRowStoppedAndTargetsTheRuntimeDeployment(t *test
 	waitForEnvStatus(t, emits, envStatusRuntimeStopped, 2*time.Second)
 	if !app.isRuntimeStopped(selection) {
 		t.Fatal("stop did not latch the intent, so an open tab's reconnect would wake the env straight back up")
+	}
+}
+
+// The notice is the whole visible outcome of a stop for the tabs it ends: they
+// go dark a moment later, and without being told they went dark *because of
+// this*, the operator reads their own command as the environment breaking.
+func TestStopEnvironmentNoticeNamesTheEndedSessionsAndTheWayBack(t *testing.T) {
+	notice := stopEnvironmentNotice(eruncommon.StopEnvironmentResult{
+		Tenant:        "erun",
+		Environment:   "remote",
+		EndedSessions: []string{"open-0", "ai"},
+	})
+	for _, want := range []string{"Stopped erun/remote", "2 attached session(s) ended with the pod", "Open it to start it again"} {
+		if !strings.Contains(notice, want) {
+			t.Fatalf("notice = %q, want it to contain %q", notice, want)
+		}
+	}
+
+	quiet := stopEnvironmentNotice(eruncommon.StopEnvironmentResult{Tenant: "erun", Environment: "remote"})
+	if strings.Contains(quiet, "session") {
+		t.Fatalf("an environment nobody had open must not mention sessions: %q", quiet)
 	}
 }
 

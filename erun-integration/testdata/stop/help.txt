@@ -1,8 +1,8 @@
 Stop an environment's runtime and return its capacity to the node.
 
-Scales the environment's runtime Deployment to zero, so both the runtime container's resource limits and its unlimited dind sidecar's real usage go back to the cluster and the environments you are actually using can be given more. Running work in the pod is terminated. Persistent state is not touched — the home volume, the Docker/build caches, and a builds-here environment's worktree all survive — so waking is a pod start, not a rebuild.
+Scales the environment's runtime Deployment to zero, so both the runtime container's resource limits and its unlimited dind sidecar's real usage go back to the cluster and the environments you are actually using can be given more. Running work in the pod is terminated. Persistent state is not touched — the home volume, the Docker/build caches, and a builds-here environment's worktree all survive — so waking is a pod start, not a rebuild. Desktop terminal sessions attached to the environment end with the pod; the stop names them so you can see what it took down.
 
-The stop is durable: it is recorded on the environment, so a later `erun deploy` reconciles it rather than restarting the pod. `erun open` is what wakes the environment again. Defaults to the current scope; pass TENANT and ENVIRONMENT (or --tenant/--environment) to target another.
+The stop is durable: it is recorded on the environment, so a later `erun deploy` reconciles it rather than restarting the pod, and an automatic session reconnect leaves it stopped. `erun open` is what wakes the environment again. Defaults to the current scope; pass TENANT and ENVIRONMENT (or --tenant/--environment) to target another.
 
 Usage:
   erun stop [TENANT] [ENVIRONMENT] [flags]

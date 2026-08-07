@@ -1,0 +1,5 @@
+unknown: overnight build (job supervisor <PID> is gone without recording an exit status; the runtime pod was most likely replaced), 0 bytes of output
+audit: erun job status --environment dev --id stranded --tenant team
+unknown: overnight build (job supervisor <PID> is gone without recording an exit status; the runtime pod was most likely replaced), 0 bytes of output
+audit: erun job await --environment dev --id stranded --tenant team --timeout 1s
+job "stranded" has no recorded outcome: job supervisor <PID> is gone without recording an exit status; the runtime pod was most likely replaced

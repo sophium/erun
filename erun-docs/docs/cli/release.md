@@ -19,14 +19,15 @@ erun release [flags]
 1. Resolves the current version from `erun-devops/VERSION`.
 2. Updates the chart `version` and `appVersion` to match.
 3. Updates package-manager metadata (Homebrew formula, Scoop manifest, etc.) when present.
-4. Creates the release commit and tag, and pushes the moved refs.
-5. Prepares the next patch version for subsequent work.
-6. Builds the release-tagged Docker images for `linux/amd64` and `linux/arm64`.
-7. Runs `push` at the release version: pushes the per-arch image tags, assembles the multi-arch manifest list, and publishes + verifies every helm chart.
+4. Creates the release commit and a **local** tag. Nothing is public yet.
+5. Builds the release-tagged Docker images for `linux/amd64` and `linux/arm64`.
+6. Runs `push` at the release version: pushes the per-arch image tags, assembles the multi-arch manifest list, and publishes + verifies every helm chart.
+7. Re-resolves each published image's manifest from the registry, so the version is known deployable rather than assumed to be.
+8. Pushes the tag, syncs packaging checksums against the now-public source archive, prepares the next patch version, and pushes the branches.
 
-Steps 6–7 run under [`erun build --release`](/cli/build); the bare `erun release` command stops after step 5, and `erun push --version <version>` does 6–7 on its own.
+`erun release` runs all eight steps. [`erun build --release`](/cli/build) runs the same sequence — it is the same execution, under the build command's output — and `erun push --version <version>` does 5–6 on its own for a version that is already built.
 
-**The git refs move before the artifacts publish**, so a failure in step 7 leaves a public tag pointing at a version whose charts are only partly published. That is recoverable, not corrupt: re-run `erun push --version <version>` and it republishes what is missing (the failure names which charts landed and which did not). To catch a broken release *before* the tag exists, run `erun build --version <version>` first — a local build validates every image, dependent images included, without publishing anything.
+**The artifacts publish before the git refs move.** A release that exits 0 therefore means `erun deploy --version <version>` can resolve both the image and the chart at that version. A release that cannot publish fails at step 5–7, leaving no public tag, no GitHub release, and `erun-devops/VERSION` still holding the version it was releasing — so re-running retries the *same* version rather than skipping past it.
 
 ## Flags
 
@@ -44,6 +45,6 @@ For the exact regex, the per-class behaviour, and the multi-arch contract, see [
 
 ## Error behaviour
 
-`erun release` is atomic-ish: each failure aborts the release and tries hard to leave git, the registry, and package-manager files unchanged. Common abort causes: dirty working tree, tag conflict, single-arch image, registry auth, git-push failure mid-flow. Use `--dry-run` first when you're unsure of state. Full failure-code + recovery table: [Agent reference · Release version policy · Error codes](/agent-reference/release-policy#error-codes).
+`erun release` is atomic-ish: each failure aborts the release and tries hard to leave git, the registry, and package-manager files unchanged. Common abort causes: dirty working tree, tag conflict, single-arch image, registry auth, git-push failure mid-flow. It also refuses up front when the images it would stamp are not all covered by a build it will publish — running it from inside a single component's build directory is the usual cause; run it from the project root. Use `--dry-run` first when you're unsure of state. Full failure-code + recovery table: [Agent reference · Release version policy · Error codes](/agent-reference/release-policy#error-codes).
 
-The one window it can't roll back is a publish failure after the refs moved (see the ordering note above): the tag stays, and re-running `erun push --version <version>` is the recovery.
+The remaining window it can't roll back is a failure *after* the tag reaches origin — a packaging-checksum sync or branch push that fails once the artifacts are already published. The version is deployable at that point; re-running `erun release` picks up where it stopped.

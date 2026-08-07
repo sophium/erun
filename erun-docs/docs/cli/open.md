@@ -8,6 +8,8 @@ Open a shell in the tenant environment. `open` is a **pure primitive**: it check
 
 `open` is also what **starts a stopped environment**. If the environment was stopped with [`erun stop`](/cli/stop), `open` scales its runtime back up and waits for it before it forwards any port — a port-forward cannot attach to an environment with no pod. It says so while it waits, because a cold start takes a moment. An environment that is already running gets no extra work.
 
+That makes opening an **Operator gesture**, and it is the only one that starts an environment. Something that runs `open` automatically to re-establish a session it lost — the desktop app respawning a terminal tab, or any supervisor of your own — passes `--reconnect`, which reattaches to a running environment but refuses a stopped one and leaves the recorded stop alone. Without it, stopping an environment that has a tab open would be undone by the tab reconnecting a second later.
+
 `open` is how the **Operator joins an environment**. The env has two endpoints on the same pod — SSH and [MCP](/mcp/overview) — both accepting any client. IDEs and the Claude Code / Codex desktop apps attach over SSH; Agents typically use MCP for structured calls and SSH for shell work. Either way, same files, same shell, same audit trail.
 
 ## Synopsis
@@ -28,6 +30,7 @@ Arguments resolve the same way as [`erun init`](/cli/init): from working directo
 | `--deploy` | Deploy the runtime before opening (operator convenience: builds-here envs build → push → deploy, runtime envs install the current version). |
 | `--vscode` | Open the remote environment in VS Code (Remote-SSH) instead of a shell. |
 | `--intellij` | Open the remote environment in IntelliJ IDEA Gateway instead of a shell. |
+| `--reconnect` | Reattach a dropped session instead of opening. Never starts a stopped environment and never clears a recorded stop; for supervisors that respawn `open` automatically, not for you at a terminal. |
 
 Advanced flags (`--no-alias-prompt`, `--version`, `--runtime-image`) and the full open lifecycle algorithm are on [Agent reference · CLI flag spec · `erun open`](/agent-reference/cli-flags#erun-open). `open` is a pure primitive — it just opens a shell to the already-deployed environment; it does not build, push, or deploy on its own. `--deploy` is the operator-convenience shortcut that deploys first; programmatic callers (the desktop app) instead orchestrate [`build`](/cli/build) → [`push`](/cli/push) → [`deploy`](/cli/deploy) themselves and open the pure shell (see [Command primitives](/concepts/command-primitives)).
 
@@ -63,4 +66,4 @@ alias my-tenant-local='eval "$(erun open my-tenant local --no-shell)"'
 
 ## Error behaviour
 
-Common failures: tenant/env not configured (suggests `erun init`), kubeconfig context missing, cluster unreachable, runtime not deployed (`open` detects this up front and tells you to run `erun deploy` or `erun open --deploy`), SSH readiness timeout. A port-forward that can't bind does not fail `open` — it prints a warning and continues, since the shell doesn't depend on it. A host-credential refresh that fails (usually a lapsed SSO session) is a warning too: the environment keeps whatever credentials it had and the session still opens, so recover with `erun cloud login` + [`erun cloud refresh`](/cli/cloud#cloud-refresh) when you need AWS. `erun doctor` from another shell diagnoses most cases. Full code + exit-code table: [Agent reference · CLI flag spec · `erun open` error codes](/agent-reference/cli-flags#erun-open).
+Common failures: tenant/env not configured (suggests `erun init`), kubeconfig context missing, cluster unreachable, runtime not deployed (`open` detects this up front and tells you to run `erun deploy` or `erun open --deploy`), SSH readiness timeout. `--reconnect` against a stopped environment is a deliberate failure, not a fault: it says the environment is stopped and names the plain `erun open` that starts it. A port-forward that can't bind does not fail `open` — it prints a warning and continues, since the shell doesn't depend on it. A host-credential refresh that fails (usually a lapsed SSO session) is a warning too: the environment keeps whatever credentials it had and the session still opens, so recover with `erun cloud login` + [`erun cloud refresh`](/cli/cloud#cloud-refresh) when you need AWS. `erun doctor` from another shell diagnoses most cases. Full code + exit-code table: [Agent reference · CLI flag spec · `erun open` error codes](/agent-reference/cli-flags#erun-open).

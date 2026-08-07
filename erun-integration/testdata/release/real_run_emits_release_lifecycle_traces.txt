@@ -1,5 +1,3 @@
-<VERSION>
-audit: erun release
 release: resolving project root
 release: project root = <TMP>
 release: resolving release module root
@@ -12,11 +10,27 @@ release: resolving base version from VERSION file
 release: base version = <VERSION> (from <TMP>
 release: classified mode = candidate
 release: develop branch "develop" exists = true
+<VERSION>
+audit: erun release
 ==> Releasing <VERSION>
 release: branch=develop mode=candidate version=<VERSION>
-docker image: ghcr.io/sophium/api:<VERSION>
+publishing image: ghcr.io/sophium/api:<VERSION>
 release: worktree clean = true
 stage: sync-remote
 stage: release
+stage: publish
+fingerprint image present locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
+fingerprint image present locally: ghcr.io/sophium/api:fp-<HEX16>-arm64
+promoting from cached fingerprint image: ghcr.io/sophium/api:<VERSION>
+fingerprint image present locally: ghcr.io/sophium/base:fp-<HEX16>-amd64
+fingerprint image present locally: ghcr.io/sophium/base:fp-<HEX16>-arm64
+promoting from cached fingerprint image: ghcr.io/sophium/base:<VERSION>
+==> Publishing api <VERSION> to oci://ghcr.io/sophium/charts
+==> Verified published chart api <VERSION>
+==> Publishing base <VERSION> to oci://ghcr.io/sophium/charts
+==> Verified published chart base <VERSION>
+stage: verify-publication
+==> Verified published image ghcr.io/sophium/api:<VERSION>
 stage: push
+release version: <VERSION>
 ==> Released <VERSION> in <ELAPSED>

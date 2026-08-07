@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -191,9 +192,13 @@ func waitForFailEpisodeCleared(t *testing.T, app *App, key string, timeout time.
 	t.Fatal("successful ensure did not clear the failure episode")
 }
 
+// capturedEnsureApp builds an ensure-focused app. readRunState is optional; a
+// nil one leaves the cluster unreadable, which the stopped check reads as "not
+// stopped" so a failure surfaces as a failure.
 func capturedEnsureApp(
 	t *testing.T,
 	reconnect func(context.Context, eruncommon.OpenResult, func(string)) error,
+	readRunState func(eruncommon.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error),
 ) (*App, *capturedEmits) {
 	t.Helper()
 	emits := newCapturedEmits()
@@ -213,7 +218,8 @@ func capturedEnsureApp(
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			return newStubTerminalSession(), nil
 		},
-		reconnectMCP: reconnect,
+		reconnectMCP:        reconnect,
+		readRuntimeRunState: readRunState,
 	})
 	app.ctx = context.Background()
 	app.SetEmitter(emits.fn())
@@ -230,7 +236,7 @@ func capturedEnsureApp(
 func TestSurfaceEnsureFailureSuppressedWhileDeployInFlight(t *testing.T) {
 	app, emits := capturedEnsureApp(t, func(context.Context, eruncommon.OpenResult, func(string)) error {
 		return nil
-	})
+	}, nil)
 	selection := uiSelection{Tenant: "erun", Environment: "remote"}
 
 	app.mu.Lock()
@@ -271,6 +277,39 @@ func TestSurfaceEnsureFailureSuppressedWhileDeployInFlight(t *testing.T) {
 	}
 }
 
+// TestSurfaceEnsureFailureRendersAStoppedRuntimeAsStopped locks the outcome an
+// operator sees after stopping an env with tabs open. The forwarder rebind runs
+// `erun open --reconnect`, which refuses to start a stopped runtime by design,
+// so its error is the operator's own Stop coming back — rendering it as failed
+// would report their command as an outage and offer a deploy that is not the
+// recovery. The row reads stopped and the banner names opening as the way back.
+func TestSurfaceEnsureFailureRendersAStoppedRuntimeAsStopped(t *testing.T) {
+	app, emits := capturedEnsureApp(t, func(context.Context, eruncommon.OpenResult, func(string)) error {
+		return nil
+	}, func(eruncommon.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error) {
+		return eruncommon.RuntimeRunState{Present: true, DesiredReplicas: 0, ReadyReplicas: 1}, nil
+	})
+	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+
+	app.surfaceEnvRuntimeEnsureFailure(selection, errors.New("erun/remote is stopped, and a session reconnect does not start it"))
+
+	statuses := envStatuses(emits)
+	if len(statuses) != 1 || statuses[0].Status != envStatusRuntimeStopped {
+		t.Fatalf("env status = %+v, want a single %q", statuses, envStatusRuntimeStopped)
+	}
+	notes := emits.events(appNotificationEvent)
+	if len(notes) != 1 {
+		t.Fatalf("notification emitted %d times, want 1", len(notes))
+	}
+	note, ok := notes[0].(appNotificationPayload)
+	if !ok {
+		t.Fatalf("notification payload has unexpected type %T", notes[0])
+	}
+	if !strings.Contains(note.Message, "Open it to start it again") {
+		t.Fatalf("notification must name the way back, got %q", note.Message)
+	}
+}
+
 // TestEnsureSuccessClearsRuntimeUnreachableNotification locks the fix: once
 // the runtime is reachable again, the "Could not reach the runtime …" banner is
 // stale, so a successful ensure clears it (tagged by env + source so an
@@ -278,7 +317,7 @@ func TestSurfaceEnsureFailureSuppressedWhileDeployInFlight(t *testing.T) {
 func TestEnsureSuccessClearsRuntimeUnreachableNotification(t *testing.T) {
 	app, emits := capturedEnsureApp(t, func(context.Context, eruncommon.OpenResult, func(string)) error {
 		return nil
-	})
+	}, nil)
 	selection := uiSelection{Tenant: "erun", Environment: "remote"}
 
 	app.ensureEnvRuntimeOnce(selection)

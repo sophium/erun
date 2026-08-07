@@ -146,6 +146,7 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig) *mcp.Server {
 
 	registerReadModelTools(server, info, runtime)
 	registerIdleStopTools(server, runtime)
+	registerJobTools(server, runtime)
 	registerCloudTools(server, runtime)
 	registerContextTools(server, runtime)
 	registerDeliveryTools(server, runtime)
@@ -192,6 +193,48 @@ func registerIdleStopTools(server *mcp.Server, runtime RuntimeConfig) {
 		Name:        "idle_stop_record",
 		Description: "Record a host-driven stop entry in stop-history.json (source=host-manual). Called by the desktop's Stop button after the AWS stop succeeds, so the History tab can also explain 'you clicked Stop' alongside the in-pod monitor's auto-stops.",
 	}, idleStopRecordTool(runtime))
+}
+
+func registerJobTools(server *mcp.Server, runtime RuntimeConfig) {
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "job_start",
+		Description: "Run a long command in this env as a detached job and return its handle. " +
+			"Reach for this instead of `raw` for anything you will need to come back to — a build, a test suite, an agent run. " +
+			"erun detaches the work, captures its merged stdout and stderr, and records the exit status by waiting on the process inside the env, so nothing has to be wrapped in setsid/nohup/a redirect and no sentinel token or shell expansion sits between the work and its result. " +
+			"The job also holds an activity lease for its lifetime, so the env reports as busy and idle-stop leaves it alone. " +
+			"Then use job_await (bounded) and job_output (incremental) rather than holding this call open. " +
+			"The id defaults to the name; re-using the id of a job that is still running is refused, while re-using a finished one replaces it.",
+	}, jobStartTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "job_attach",
+		Description: "Give work you started another way a job handle and an activity lease, so it is visible and protected from idle-stop. " +
+			"erun tracks the pid you name and nothing else: the job reads as running while that process lives and as unknown once it is gone. " +
+			"It can never report an exit status, because nothing erun ran was waiting on that process to observe one — start work through job_start when you need the outcome.",
+	}, jobAttachTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "job_status",
+		Description: "Return one job's state and outcome, or every retained job newest-first. " +
+			"The answer is always definite: running, exited with a captured exit code, or explicitly unknown with the reason (its supervisor is gone without an outcome, most often because the runtime pod was replaced). " +
+			"It is never a truncated or partial answer, so it is safe to act on. Finished jobs stay readable for 24 hours, so an orchestrator reconnecting after the work ended can still learn what happened.",
+	}, jobStatusTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "job_await",
+		Description: "Wait a bounded time (default 30s, max 600s) for a job to finish. " +
+			"The call always returns inside the timeout — either the outcome or timedOut=true with the job still running — so no connection is held open for the work's lifetime and a dropped stream is never confused with a dead job. " +
+			"timedOut is reported separately from every outcome, so 'not finished yet' can never be read as a failure. Call it again to keep waiting.",
+	}, jobAwaitTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "job_output",
+		Description: "Read a page of a job's captured output, including while it is still running, so progress is visible before the work exits. " +
+			"Pass the previous read's nextOffset back as offset to continue where you left off. " +
+			"complete is true only when the job has finished and you have read to the end; the job's own outputTruncated says whether output was dropped at the cap.",
+	}, jobOutputTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "job_cancel",
+		Description: "Signal a running job's work (TERM by default, or INT/HUP/KILL). " +
+			"The target comes from the job record, never from a command-line pattern, so a cancel can only reach the work it names and never a process that merely looks like it. " +
+			"The job's supervisor is deliberately left alone, so it survives to record the outcome; the cancelled job then reads back as a normal exited job carrying the signal.",
+	}, jobCancelTool(runtime))
 }
 
 func registerCloudTools(server *mcp.Server, runtime RuntimeConfig) {
@@ -315,7 +358,7 @@ func registerInspectionTools(server *mcp.Server, runtime RuntimeConfig) {
 	}, outputsDownloadTool())
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "release",
-		Description: "Plan and execute a project release from the runtime repo root using .erun/config.yaml branch policy",
+		Description: "Cut a project release from the runtime repo root using .erun/config.yaml branch policy. Stamps the release version into the charts and packaging metadata and commits and tags it locally, then builds and publishes that version's images and helm charts and reads each one back from the registry, and only then pushes the tag, prepares the next patch version, and pushes the branches. A release that completes means deploy can resolve the image and the chart at that version; a release that cannot publish fails while nothing is public. Set preview to resolve and return the plan without executing it.",
 	}, releaseTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "contribute_clone",

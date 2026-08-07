@@ -3,7 +3,17 @@ trace-log: would append the full trace to <TMP>
 stop: tenant=team environment=prod kubernetes-context=test-context release=team-devops namespace=team-prod
 kubectl --context test-context --namespace team-prod get deployment team-devops -o 'jsonpath={.spec.replicas}/{.status.readyReplicas}'
 runtime run state: deployment team-devops wants 1 replica(s), 1 ready
+kubectl --context test-context --namespace team-prod exec deployment/team-devops -- /bin/sh -lc 'for socket in "<TMP>"*.dtach; do
+[ -S "$socket" ] || continue
+name="${socket##*/}"; id="${name#team-prod-}"; id="${id%.dtach}"
+master_pid=""
+master_program=""
+for dtach_pid in $(pgrep -x dtach 2>/dev/null || true); do if grep -qF "$socket" "/proc/$dtach_pid/cmdline" 2>/dev/null; then for child_pid in $(pgrep -P "$dtach_pid" 2>/dev/null || true); do child_comm="$(cat "/proc/$child_pid/comm" 2>/dev/null)"; if [ -n "$child_comm" ] && [ "$child_comm" != "dtach" ]; then master_pid="$dtach_pid"; master_program="$child_comm"; fi; done; fi; done
+printf '"'"'erun-session	%s\t%s\t%s\n'"'"' "$id" "${master_pid:-0}" "${master_program}"
+done'
+stop: no desktop session is attached to team-devops
 stop: scaling team-devops to 0 replicas to return its runtime and dind capacity to the node
 kubectl --context test-context --namespace team-prod scale deployment/team-devops --replicas=0
+stop: would re-read team-devops to confirm it wants 0 replicas before reporting success
 config: would assign stopped=true to team/prod
 ==> Stopped team/prod

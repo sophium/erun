@@ -56,12 +56,18 @@ func (a *App) StopEnvironment(selection uiSelection) (uiEnvironmentStopResult, e
 }
 
 // stopEnvironmentNotice names the recovery action, so the operator is never left
-// with a stopped environment and no idea how to get it back.
+// with a stopped environment and no idea how to get it back — and names the
+// sessions the stop ended, so the tabs going dark read as the command finishing
+// rather than the environment breaking.
 func stopEnvironmentNotice(result eruncommon.StopEnvironmentResult) string {
 	if result.AlreadyStopped {
 		return fmt.Sprintf("%s/%s was already stopped. Open it to start it again.", result.Tenant, result.Environment)
 	}
-	return fmt.Sprintf("Stopped %s/%s and returned its capacity to the node. Open it to start it again.", result.Tenant, result.Environment)
+	sessions := ""
+	if len(result.EndedSessions) > 0 {
+		sessions = fmt.Sprintf(" %d attached session(s) ended with the pod.", len(result.EndedSessions))
+	}
+	return fmt.Sprintf("Stopped %s/%s and returned its capacity to the node.%s Open it to start it again.", result.Tenant, result.Environment, sessions)
 }
 
 // markRuntimeStopped / clearRuntimeStopped latch a per-env stop the same way the
@@ -121,8 +127,13 @@ func (a *App) runtimeStoppedForSelection(selection uiSelection) bool {
 	if err != nil {
 		return false
 	}
-	// Stopped means the Deployment wants no pods AND none are running.
-	// "Pods exist but are not ready" is an unhealthy environment, and must keep
-	// reading as unhealthy rather than being softened into "stopped".
-	return state.Stopped() && state.ReadyReplicas == 0
+	// Stopped is "the Deployment wants no pods", nothing more. Waiting for the
+	// ready count to reach zero as well made the gate disagree with the wake for
+	// the length of the pod's termination grace: the tabs drop the instant the
+	// scale lands, while the old pod is still Ready, so the gate said "running",
+	// let the respawn through, and `erun open` — reading the same Deployment —
+	// said "stopped, wake it". A stop with a tab open was undone in about a
+	// second. "Pods exist but are not ready" with a non-zero desired count is an
+	// unhealthy environment and Stopped() already reports false for it.
+	return state.Stopped()
 }

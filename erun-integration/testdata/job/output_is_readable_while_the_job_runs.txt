@@ -1,0 +1,6 @@
+first
+audit: erun job output --environment dev --id chatty --tenant team
+next offset: 6 (more: false, complete: false)
+second
+audit: erun job output --environment dev --id chatty --offset 6 --tenant team
+next offset: 13 (more: false, complete: true)

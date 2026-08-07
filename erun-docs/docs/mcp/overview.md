@@ -140,7 +140,7 @@ These wrap the [pure command primitives](/concepts/command-primitives): `build` 
 | `build` | `erun build` | Minted `version`, per-component status (`built` / `cached` / `error`), image tags, fingerprints. |
 | `push` | `erun push` | Per-component status, registry URLs, published chart ref. Requires `version`. |
 | `deploy` | `erun deploy` | Per-chart rollout status, helm release info. Requires `version`. |
-| `release` | `erun release` | Released version, tag, multi-arch confirmation. |
+| `release` | `erun release` | Released version, tag, multi-arch confirmation, and the read-back that proves the published version resolves. |
 | `open` | `erun open` | Local SSH + MCP ports, status (`opened` / `already_open`). |
 | `expose` | `erun expose` | Resolved public hostname, per-env wildcard record, Host-routing Ingress. Requires a `platform:` block. Supports preview (dry-run). |
 | `init` | `erun init` | Created files, deployed namespace. |
@@ -148,7 +148,31 @@ These wrap the [pure command primitives](/concepts/command-primitives): `build` 
 | `activity_lease_take` | `erun activity lease take` | The lease held, plus every lease still held on the env. |
 | `activity_lease_release` | `erun activity lease release` | Every lease still held on the env. |
 
-Take an activity lease before **detaching** long work in the env — a build, a test suite, an agent run. A detached job makes no calls while it runs, so without a lease the env reads as untouched and auto-stop would kill exactly the work worth protecting; with one, the env reports as busy with the lease's name and the operator can see it. Pass the detached job's `pid` so an abandoned lease is reclaimed, and release it when the work finishes. See [Agent reference · Idle policy](/agent-reference/idle-policy#activity-leases).
+Take an activity lease before **detaching** long work in the env — a build, a test suite, an agent run. A detached job makes no calls while it runs, so without a lease the env reads as untouched and auto-stop would kill exactly the work worth protecting; with one, the env reports as busy with the lease's name and the operator can see it. Pass the detached job's `pid` so an abandoned lease is reclaimed, and release it when the work finishes. See [Agent reference · Idle policy](/agent-reference/idle-policy#activity-leases). Work started through the job tools below takes and releases its lease for you.
+
+### Jobs — long work you come back to {#job-tools}
+
+| Tool | Purpose |
+|---|---|
+| `job_start` | Run a command in the env as a detached job; returns the handle. |
+| `job_attach` | Give work you started another way a handle and a lease. |
+| `job_status` | One job's state and outcome, or every retained job newest-first. |
+| `job_await` | Wait a bounded time (default 30s, max 600s) for a job to finish. |
+| `job_output` | Read a page of a job's output, including while it runs. |
+| `job_cancel` | Signal a running job's work by its recorded process. |
+
+**Reach for these instead of `raw` for anything you will need to come back to.** `raw` is request/response: it returns when the process exits, so observing long work through it means re-implementing job bookkeeping in shell — detach the work, redirect it to a log, poll in a loop, invent a sentinel token because the real signal is buffered until exit, and parse that token back out of this envelope. Each of those is a place to get it wrong, and none of them is the interesting problem.
+
+The job tools remove all five:
+
+- **`job_start` detaches for you.** The work gets its own session and its merged stdout + stderr captured to the job's log — no `setsid`, no `nohup`, no redirect.
+- **The exit status is captured in the env**, by the supervisor that waited on the work. No sentinel token, and no exit code re-expanded by an intermediate shell.
+- **`job_await` is bounded.** It always returns inside the timeout, so no connection is held open for the work's lifetime and a dropped stream is never confused with a dead job. `timedOut` is reported separately from every outcome, so "not finished yet" can never be read as a failure. Call it again to keep waiting.
+- **`job_output` is incremental.** Pass the previous read's `nextOffset` back to continue; progress is visible long before the work exits.
+- **`job_status` is definite or explicitly `unknown`** — never truncated, and never a success nobody recorded.
+- **`job_cancel` targets the pid the record holds**, never a command-line pattern, so it cannot match a process that merely looks like the job or the caller issuing the cancel.
+
+A job also holds an activity lease for its lifetime, so starting one makes the env read as busy and defers auto-stop with nothing extra to call. Finished jobs stay readable for 24 hours, so an orchestrator that reconnects after the work ended still learns the outcome. Full schemas, exit-code contract, retention, and error behaviour: [Agent reference · `erun job`](/agent-reference/cli-flags#erun-job).
 
 ### Credential tools — desktop-only
 
@@ -167,10 +191,11 @@ Take an activity lease before **detaching** long work in the env — a build, a 
 
 ### Tool selection rule
 
-In order of preference: **inspection > action > raw.**
+In order of preference: **inspection > action > jobs > raw.**
 
 - If a question is "what's the state of X" — reach for an inspection tool.
 - If you're invoking a known CLI command — reach for the action wrapper, not `raw`.
+- If the work is long-running and you will need to know how it ended — reach for [`job_start`](#job-tools), not `raw`. `raw` returns only when the process exits, so using it for lifecycle observation means re-implementing job bookkeeping in shell.
 - If none of the above apply — use `raw`.
 
 Generating conventional code (a new service, a migration job, an Ingress, …) isn't a tool-call decision — load the relevant [skill](/concepts/skills) and write the files by hand. The skill teaches the convention; the MCP surface stays out of the generation path.
@@ -382,6 +407,60 @@ Install a published version into the env. Same semantics as the CLI `erun deploy
 }
 ```
 
+### `job_start` / `job_await` / `job_output`
+
+The job record is the shared shape every job tool returns. It is deliberately explicit about what is *not* known: `exitCode` is `null` in every state but `exited`, so a missing outcome can never be read as a zero one.
+
+```jsonc
+// job_start {"name": "suite", "command": ["./gradlew", "test"]}
+{
+  "tenant": "team", "environment": "dev", "executed": true,
+  "job": {
+    "id": "suite",                 // defaults to name; addresses the job from here on
+    "name": "suite",
+    "state": "running",            // running | exited | unknown
+    "command": ["./gradlew", "test"],
+    "dir": "/home/erun/git/team",
+    "pid": 4242,                   // the supervisor — what liveness is decided by
+    "childPid": 4243,              // the work — what job_cancel signals
+    "startedAt": "2026-08-07T09:14:02Z",
+    "exitCode": null,
+    "logPath": "/home/erun/.cache/erun/activity/team/dev/jobs/suite.log",
+    "outputBytes": 0,
+    "outputLimitBytes": 4194304,
+    "leaseId": "job-suite"         // the activity lease held for the job's lifetime
+  }
+}
+```
+
+`job_await` wraps it, and separates "not finished yet" from every outcome:
+
+```jsonc
+// job_await {"id": "suite", "timeoutSeconds": 30} — still running
+{ "job": { "id": "suite", "state": "running", "exitCode": null, … },
+  "timedOut": true, "waitedSeconds": 30, "timeoutSeconds": 30 }
+
+// job_await {"id": "suite", "timeoutSeconds": 30} — finished, and it failed
+{ "job": { "id": "suite", "state": "exited", "exitCode": 42,
+           "endedAt": "2026-08-07T09:18:41Z", "outputBytes": 81204, … },
+  "timedOut": false, "waitedSeconds": 4, "timeoutSeconds": 30 }
+
+// a job whose supervisor vanished — never reported as success
+{ "job": { "id": "suite", "state": "unknown", "exitCode": null,
+           "reason": "job supervisor 4242 is gone without recording an exit status; the runtime pod was most likely replaced" },
+  "timedOut": false, … }
+```
+
+`job_output` pages through the merged stdout + stderr:
+
+```jsonc
+// job_output {"id": "suite", "offset": 4096}
+{ "job": { … }, "offset": 4096, "nextOffset": 69632,
+  "output": "…", "hasMore": true, "complete": false }
+```
+
+`hasMore` describes this read; `complete` is true only when the job has finished *and* this page reached the end. Whether output was dropped at the cap is `job.outputTruncated`, not either of those. Field-by-field semantics, the retention window, and error behaviour: [Agent reference · `erun job`](/agent-reference/cli-flags#erun-job).
+
 ### Other action tools
 
 `push`, `release`, `open`, `init`, `delete` follow the same shape — typed `arguments` matching their CLI flags, typed `result` payload mirroring the CLI's structured output. The MCP tool name matches the CLI subcommand exactly. Like the CLI, the `push` tool takes a **required** `version` (it publishes a specific version's image + chart and never mints one); omitting it is rejected with `NO_VERSION`. Field-by-field semantics, flag defaults, and per-tool error codes live in the [CLI flag spec](/agent-reference/cli-flags) — every CLI command listed there corresponds 1:1 to the MCP tool of the same name.
@@ -451,7 +530,8 @@ When a `tools/call` fails, the MCP response wraps a typed error. The envelope:
 - ✅ Inspecting state the structured tools don't surface (a specific log file, a kubectl debug command).
 - ✅ Running project-specific scripts (`./scripts/seed-test-data.sh`).
 - ❌ Anything an existing tool covers — `list`, `doctor`, `idle` give typed output that's much easier for the Operator to scan.
-- ❌ Long-running daemons — `raw` is request/response; it returns when the process exits.
+- ❌ Long-running work you need to observe or come back to — `raw` is request/response; it returns when the process exits. Use the [job tools](#job-tools), which detach the work, capture its exit status in the env, and let you poll status and output by handle.
+- ❌ Long-running daemons — same reason. Start them as a job and cancel by handle.
 
 ## Skills are not MCP tools
 

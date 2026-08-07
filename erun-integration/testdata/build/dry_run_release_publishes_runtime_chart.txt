@@ -12,8 +12,8 @@ release: classified mode = candidate
 release: develop branch "develop" exists = true
 audit: erun build --dry-run --release
 release: branch=develop mode=candidate version=<VERSION>
-docker image: ghcr.io/sophium/api:<VERSION>
-docker image: ghcr.io/sophium/erun-devops:<VERSION>
+publishing image: ghcr.io/sophium/api:<VERSION>
+publishing image: ghcr.io/sophium/erun-devops:<VERSION>
 git -C <TMP> status --porcelain --untracked-files=no
 release: worktree clean = true
 stage: sync-remote
@@ -40,8 +40,7 @@ cd <TMP> && git add erun-devops/k8s/api/Chart.yaml erun-devops/k8s/base/Chart.ya
 cd <TMP> && git commit -m '[skip ci] release <VERSION>'
 git -C <TMP> rev-parse '<VERSION>^{}'
 cd <TMP> && git tag -a <VERSION> -m 'Release candidate <VERSION>'
-stage: push
-cd <TMP> && git push --follow-tags origin develop
+stage: publish
 docker image inspect ghcr.io/sophium/api:fp-<HEX16>-amd64
 fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
 docker image inspect ghcr.io/sophium/api:fp-<HEX16>-arm64
@@ -86,4 +85,9 @@ helm pull oci://ghcr.io/sophium/charts/base --version <VERSION> --destination <T
 cd <TMP> && helm package erun-devops --version <VERSION> --app-version <VERSION>
 cd <TMP> && helm push erun-devops-<VERSION> oci://ghcr.io/sophium/charts
 helm pull oci://ghcr.io/sophium/charts/erun-devops --version <VERSION> --destination <TMP>
+stage: verify-publication
+docker manifest inspect ghcr.io/sophium/api:<VERSION>
+docker manifest inspect ghcr.io/sophium/erun-devops:<VERSION>
+stage: push
+cd <TMP> && git push --follow-tags origin develop
 release version: <VERSION>

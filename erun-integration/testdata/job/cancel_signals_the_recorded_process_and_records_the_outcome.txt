@@ -1,0 +1,6 @@
+job cancelled: runaway, SIGTERM to process group <PGID>
+audit: erun job cancel --environment dev --id runaway --tenant team
+job: sending SIGTERM to process group <PGID> (job runaway)
+exited -1: runaway (signal terminated), 0 bytes of output
+audit: erun job await --environment dev --id runaway --tenant team --timeout 30s
+job "runaway" exited -1
