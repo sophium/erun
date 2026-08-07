@@ -233,7 +233,9 @@ Every Docker build computes a **content fingerprint** over the Dockerfile and th
 4. Append the Dockerfile's bytes to the buffer.
 5. Compute `SHA-256` over the buffer. The first 8 hex bytes (16 chars) form the fingerprint string written as `fp-<hash>`.
 
-Build args (`--build-arg KEY=VALUE`) are **not** part of the fingerprint — they affect runtime behaviour but not the image content layers. A build whose only change is a `--build-arg` value still cache-promotes (and may produce a stale image; this is the documented limitation).
+6. If the Dockerfile references `ERUN_VERSION` anywhere — baking it into a compiled binary, or selecting the base tag it builds `FROM` — append `build-arg/ERUN_VERSION=<version>` and a null byte before hashing. `<version>` is the value the build arg would carry, without the per-architecture suffix, so both arch fingerprints move together.
+
+Other build args (`--build-arg KEY=VALUE`) are **not** part of the fingerprint. `ERUN_VERSION` is the exception because an image that consumes it resolves its own content from it: the version is a build input that lives in no file in the context. Without step 6, a release whose only diff was `VERSION` would cache-promote the previous release's image, and the binary inside would report the version *before* the tag it shipped under. An image that never references `ERUN_VERSION` keeps a version-independent identity and still promotes across releases.
 
 ### Cache state
 

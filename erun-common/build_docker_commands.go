@@ -334,18 +334,14 @@ func dockerBuildArgs(buildInput DockerBuildSpec, platform string) []string {
 	args := []string{"build", "--platform", platform, "--provenance=false"}
 	args = append(args, dockerVerbosityBuildFlags(buildInput.Verbosity)...)
 	args = append(args, "-t", tag)
-	buildArgVersion := dockerImageTagVersion(strings.TrimSpace(buildInput.Image.Tag))
+	buildArgVersion := dockerBuildArgVersion(buildInput)
 	// A base this run keeps local — a snapshot base, or a pinned-version base built
 	// without pushing — is only resolvable from the daemon, and only under its
 	// per-arch tags: the arch-less tag names just the last arch built, so a
 	// multi-platform wrapper would otherwise pull the wrong arch (or fail "not
 	// found" on a strict image store). Release wrappers keep the plain version;
 	// they resolve their base from its pushed multi-arch manifest.
-	baseIsLocal := strings.TrimSpace(buildInput.LocalBaseTag) != ""
-	if buildInput.Image.BaseVersion != "" {
-		buildArgVersion = buildInput.Image.BaseVersion
-		baseIsLocal = true
-	}
+	baseIsLocal := strings.TrimSpace(buildInput.LocalBaseTag) != "" || buildInput.Image.BaseVersion != ""
 	if baseIsLocal && buildArgVersion != "" && dockerfileHasVersionedFrom(buildInput.DockerfilePath) {
 		buildArgVersion = buildArgVersion + "-" + platformShortSuffix(platform)
 	}
@@ -354,6 +350,18 @@ func dockerBuildArgs(buildInput DockerBuildSpec, platform string) []string {
 	}
 	args = append(args, "-f", buildInput.DockerfilePath, ".")
 	return args
+}
+
+// dockerBuildArgVersion is the value the ERUN_VERSION build arg carries before
+// any per-platform suffix: the stable base version when the build resolves a
+// base locally, else the version in the image's own tag. Shared with the
+// fingerprint so the identity a build is cached under and the version that build
+// would bake in can never disagree.
+func dockerBuildArgVersion(buildInput DockerBuildSpec) string {
+	if base := strings.TrimSpace(buildInput.Image.BaseVersion); base != "" {
+		return base
+	}
+	return dockerImageTagVersion(strings.TrimSpace(buildInput.Image.Tag))
 }
 
 func dockerVerbosityBuildFlags(verbosity int) []string {

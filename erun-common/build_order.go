@@ -59,6 +59,21 @@ var dockerfileFromPattern = regexp.MustCompile(`(?im)^\s*FROM(?:\s+--platform=\S
 
 var dockerfileVersionedFromPattern = regexp.MustCompile(`(?im)^\s*FROM(?:\s+--platform=\S+)?\s+[^\s]*\$\{?ERUN_VERSION\}?`)
 
+var dockerfileVersionReferencePattern = regexp.MustCompile(`\$\{?ERUN_VERSION\b`)
+
+// dockerfileConsumesVersion reports whether a Dockerfile resolves any of its own
+// content through ERUN_VERSION — baking it into a compiled binary, or selecting
+// the base tag it builds on. For such an image the version is a build input, so
+// two versions are two artifacts even when every file in the context is byte
+// identical; images that never reference it keep a version-independent identity.
+func dockerfileConsumesVersion(dockerfilePath string) bool {
+	data, err := os.ReadFile(dockerfilePath)
+	if err != nil {
+		return false
+	}
+	return dockerfileVersionReferencePattern.Match(data)
+}
+
 // dockerfileHasVersionedFrom identifies images that use ERUN_VERSION only for
 // base-image resolution, not to bake a version into a compiled binary, so their
 // ERUN_VERSION build arg must be the full snapshot version, not the stable semver.

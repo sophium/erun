@@ -132,6 +132,9 @@ func computeBuildFingerprint(buildInput DockerBuildSpec) (string, error) {
 	if err := hashComponentChartInto(hasher, buildInput); err != nil {
 		return "", err
 	}
+	if err := hashBuildVersionInto(hasher, buildInput); err != nil {
+		return "", err
+	}
 	digest := hex.EncodeToString(hasher.Sum(nil))
 	return digest[:16], nil
 }
@@ -160,6 +163,32 @@ func hashFingerprintFiles(hasher io.Writer, contextDir string, files []string) e
 		}
 	}
 	return nil
+}
+
+// hashBuildVersionInto folds the ERUN_VERSION build arg into the fingerprint of
+// every build whose Dockerfile consumes it. The version is a build input that
+// lives in no file in the context, so hashing only files answered "is this the
+// same source?" where a versioned artifact needs "is this the same artifact?":
+// a release whose only diff was VERSION promoted the previous release's image,
+// and the binary inside kept reporting the version before the tag it shipped
+// under. A build that never references the version keeps a version-independent
+// identity, so the cache still spans releases for everything that does not bake
+// one in.
+func hashBuildVersionInto(w io.Writer, buildInput DockerBuildSpec) error {
+	if !dockerfileConsumesVersion(buildInput.DockerfilePath) {
+		return nil
+	}
+	// The unsuffixed value, so both per-arch fingerprints stay identical and one
+	// version change still invalidates them together.
+	version := dockerBuildArgVersion(buildInput)
+	if version == "" {
+		return nil
+	}
+	if _, err := io.WriteString(w, "build-arg/ERUN_VERSION="+version+"\n"); err != nil {
+		return err
+	}
+	_, err := w.Write([]byte{0})
+	return err
 }
 
 // hashComponentChartInto folds the component's Helm chart into the build
