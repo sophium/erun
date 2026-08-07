@@ -150,7 +150,10 @@ type mcpSession struct {
 	nextID        int
 }
 
-func openMCPSession(ctx context.Context, endpoint string, mintToken MCPTokenMinter, clientVersion string) (*mcpSession, error) {
+// newMCPSession prepares the transport without performing the handshake, so a
+// relay that forwards a client's own initialize can share the header, session,
+// and framing rules with the typed callers.
+func newMCPSession(endpoint string, mintToken MCPTokenMinter, clientVersion string) (*mcpSession, error) {
 	endpoint = strings.TrimSpace(endpoint)
 	if endpoint == "" {
 		return nil, fmt.Errorf("MCP endpoint is required")
@@ -163,11 +166,18 @@ func openMCPSession(ctx context.Context, endpoint string, mintToken MCPTokenMint
 	}
 	// Deliberately no client timeout: a tool call may legitimately run for many
 	// minutes, so the deadline belongs to the caller's context.
-	session := &mcpSession{
+	return &mcpSession{
 		endpoint:      endpoint,
 		mintToken:     mintToken,
 		clientVersion: clientVersion,
 		client:        &http.Client{},
+	}, nil
+}
+
+func openMCPSession(ctx context.Context, endpoint string, mintToken MCPTokenMinter, clientVersion string) (*mcpSession, error) {
+	session, err := newMCPSession(endpoint, mintToken, clientVersion)
+	if err != nil {
+		return nil, err
 	}
 	if _, err := session.call(ctx, "initialize", map[string]any{
 		"protocolVersion": mcpClientProtocolVersion,
@@ -208,21 +218,29 @@ func (s *mcpSession) post(ctx context.Context, payload mcpJSONRPCRequest) (*mcpJ
 	if err != nil {
 		return nil, err
 	}
+	raw, err := s.postRaw(ctx, body)
+	if err != nil || len(raw) == 0 {
+		return nil, err
+	}
+	var decoded mcpJSONRPCResponse
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return nil, fmt.Errorf("decode MCP reply: %w", err)
+	}
+	return &decoded, nil
+}
+
+// postRaw sends one already-encoded JSON-RPC message and returns the raw reply,
+// or nil when the edge answered without a body — the 202 a notification gets.
+// Bearer minting and session-id capture live here so a raw relay and a typed
+// call cannot drift apart on either.
+func (s *mcpSession) postRaw(ctx context.Context, body []byte) ([]byte, error) {
 	token, err := s.mintToken()
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.endpoint, bytes.NewReader(body))
+	req, err := s.newRequest(ctx, body, token)
 	if err != nil {
 		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json, text/event-stream")
-	req.Header.Set(mcpProtocolVersionHeader, mcpClientProtocolVersion)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("User-Agent", mcpClientName+"/"+s.clientVersion)
-	if s.sessionID != "" {
-		req.Header.Set(mcpSessionHeader, s.sessionID)
 	}
 
 	resp, err := s.client.Do(req)
@@ -239,6 +257,22 @@ func (s *mcpSession) post(ctx context.Context, payload mcpJSONRPCRequest) (*mcpJ
 		return nil, err
 	}
 	return decodeMCPReply(resp)
+}
+
+func (s *mcpSession) newRequest(ctx context.Context, body []byte, token string) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set(mcpProtocolVersionHeader, mcpClientProtocolVersion)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("User-Agent", mcpClientName+"/"+s.clientVersion)
+	if s.sessionID != "" {
+		req.Header.Set(mcpSessionHeader, s.sessionID)
+	}
+	return req, nil
 }
 
 // A failure to dial the loopback port is reported as unreachable rather than as a
@@ -268,8 +302,9 @@ func mcpStatusError(endpoint string, resp *http.Response) error {
 }
 
 // The edge answers either a plain JSON body or an SSE-framed stream depending on
-// how it was configured, so both framings are accepted.
-func decodeMCPReply(resp *http.Response) (*mcpJSONRPCResponse, error) {
+// how it was configured, so both framings are accepted. The reply is returned as
+// the raw JSON-RPC object so a relay can forward it verbatim.
+func decodeMCPReply(resp *http.Response) ([]byte, error) {
 	if resp.StatusCode == http.StatusAccepted || resp.StatusCode == http.StatusNoContent {
 		return nil, nil
 	}
@@ -283,17 +318,13 @@ func decodeMCPReply(resp *http.Response) (*mcpJSONRPCResponse, error) {
 	if len(bytes.TrimSpace(body)) == 0 {
 		return nil, nil
 	}
-	var decoded mcpJSONRPCResponse
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		return nil, fmt.Errorf("decode MCP reply: %w", err)
-	}
-	return &decoded, nil
+	return body, nil
 }
 
 // Only the first event carrying a JSON-RPC result or error is consumed; progress
 // notifications on the same stream are skipped. Each event's payload is one line,
 // which is how the edge frames it.
-func decodeMCPEventStream(body io.Reader) (*mcpJSONRPCResponse, error) {
+func decodeMCPEventStream(body io.Reader) ([]byte, error) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 	for scanner.Scan() {
@@ -301,12 +332,13 @@ func decodeMCPEventStream(body io.Reader) (*mcpJSONRPCResponse, error) {
 		if !ok {
 			continue
 		}
+		payload := strings.TrimSpace(data)
 		var decoded mcpJSONRPCResponse
-		if err := json.Unmarshal([]byte(strings.TrimSpace(data)), &decoded); err != nil {
+		if err := json.Unmarshal([]byte(payload), &decoded); err != nil {
 			continue
 		}
 		if decoded.Result != nil || decoded.Error != nil {
-			return &decoded, nil
+			return []byte(payload), nil
 		}
 	}
 	if err := scanner.Err(); err != nil {

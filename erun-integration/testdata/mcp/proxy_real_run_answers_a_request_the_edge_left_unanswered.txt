@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"the MCP edge at http://<LOOPBACK>:26100/mcp accepted the request but returned no reply"}}
+audit: erun mcp proxy --environment dev --tenant team
+mcp: team/dev edge resolved to http://<LOOPBACK>:26100/mcp
+mcp proxy: the MCP edge at http://<LOOPBACK>:26100/mcp accepted the request but returned no reply

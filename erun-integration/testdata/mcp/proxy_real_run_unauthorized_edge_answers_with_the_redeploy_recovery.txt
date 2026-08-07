@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"MCP endpoint rejected the bearer token: http://<LOOPBACK>:26100/mcp (HTTP 401): edge refused the request; team/dev was deployed without this machine's MCP public key, so redeploy it from the ERun desktop app"}}
+audit: erun mcp proxy --environment dev --tenant team
+mcp: team/dev edge resolved to http://<LOOPBACK>:26100/mcp
+mcp proxy: MCP endpoint rejected the bearer token: http://<LOOPBACK>:26100/mcp (HTTP 401): edge refused the request

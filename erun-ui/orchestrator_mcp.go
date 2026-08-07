@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,51 +9,48 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// orchestratorMCPServer is one Claude Code HTTP MCP server entry: a linked env's
-// erun MCP edge (emcp in the pod, exposing raw/diff/build/push/deploy/outputs_*),
-// reached over the desktop's local port-forward and authenticated with a
-// desktop-signed bearer.
+// orchestratorMCPServer is one Claude Code MCP server entry: a linked env's erun
+// MCP edge (emcp in the pod, exposing raw/diff/build/push/deploy/outputs_*),
+// reached by launching `erun mcp proxy` over stdio. The proxy mints a bearer per
+// request, so no credential is written here and a session cannot lose its envs
+// partway through to an aged-out token.
 type orchestratorMCPServer struct {
-	Type    string            `json:"type"`
-	URL     string            `json:"url"`
-	Headers map[string]string `json:"headers,omitempty"`
+	Type    string   `json:"type"`
+	Command string   `json:"command"`
+	Args    []string `json:"args"`
 }
 
 type orchestratorMCPConfig struct {
 	MCPServers map[string]orchestratorMCPServer `json:"mcpServers"`
 }
 
-// mcpPortResolver and bearerSigner are seams so the config assembly is unit
-// testable without a live config store or signing identity.
-type (
-	mcpPortResolver func(tenant, environment string) int
-	bearerSigner    func(tenant, environment string) string
-)
+// mcpPortResolver is a seam so the config assembly is unit testable without a
+// live config store.
+type mcpPortResolver func(tenant, environment string) int
 
 // buildOrchestratorMCPConfig assembles the per-env MCP server map, keyed
 // "<tenant>-<environment>". An env is skipped (not an error) when its MCP port
-// or bearer cannot be resolved, so a partially-signable orchestrator still wires
-// the envs it can.
-func buildOrchestratorMCPConfig(envs []eruncommon.OrchestratorEnvConfig, mcpPort mcpPortResolver, bearer bearerSigner) orchestratorMCPConfig {
+// does not resolve — that env is not wired for MCP at all — so an orchestrator
+// still gets the envs it can reach.
+func buildOrchestratorMCPConfig(envs []eruncommon.OrchestratorEnvConfig, executable string, mcpPort mcpPortResolver) orchestratorMCPConfig {
 	servers := map[string]orchestratorMCPServer{}
+	executable = strings.TrimSpace(executable)
+	if executable == "" {
+		return orchestratorMCPConfig{MCPServers: servers}
+	}
 	for _, env := range envs {
 		tenant := strings.TrimSpace(env.Tenant)
 		environment := strings.TrimSpace(env.Environment)
 		if tenant == "" || environment == "" {
 			continue
 		}
-		port := mcpPort(tenant, environment)
-		if port <= 0 {
-			continue
-		}
-		token := strings.TrimSpace(bearer(tenant, environment))
-		if token == "" {
+		if mcpPort(tenant, environment) <= 0 {
 			continue
 		}
 		servers[tenant+"-"+environment] = orchestratorMCPServer{
-			Type:    "http",
-			URL:     fmt.Sprintf("http://127.0.0.1:%d/mcp", port),
-			Headers: map[string]string{"Authorization": "Bearer " + token},
+			Type:    "stdio",
+			Command: executable,
+			Args:    []string{"mcp", "proxy", "--tenant", tenant, "--environment", environment},
 		}
 	}
 	return orchestratorMCPConfig{MCPServers: servers}
@@ -63,19 +59,22 @@ func buildOrchestratorMCPConfig(envs []eruncommon.OrchestratorEnvConfig, mcpPort
 // writeOrchestratorMCPConfig writes a per-orchestrator Claude Code --mcp-config
 // file wiring each linked env's erun MCP into the orchestrator session, so it
 // drives its envs through the MCP rather than raw kubectl. Returns "" (no file)
-// when no env resolves a port + bearer, so the caller skips --mcp-config.
-// Bearers are minted fresh at each launch/resume (they expire; a longer-lived
-// refresh is a follow-up).
+// when no env resolves a port, so the caller skips --mcp-config.
 func (a *App) writeOrchestratorMCPConfig(id string, envs []eruncommon.OrchestratorEnvConfig) (string, error) {
-	config := buildOrchestratorMCPConfig(envs,
+	// No erun binary means no proxy to launch, so the session launches without
+	// its envs rather than with entries that would fail on first use.
+	executable, err := eruncommon.ResolveErunExecutable()
+	if err != nil {
+		return "", err
+	}
+	config := buildOrchestratorMCPConfig(envs, executable,
 		func(tenant, environment string) int {
-			ports, err := eruncommon.ResolveEnvironmentLocalPorts(a.deps.store, tenant, environment)
-			if err != nil {
+			ports, portErr := eruncommon.ResolveEnvironmentLocalPorts(a.deps.store, tenant, environment)
+			if portErr != nil {
 				return 0
 			}
 			return ports.MCP
 		},
-		a.mcpBearer,
 	)
 	if len(config.MCPServers) == 0 {
 		return "", nil

@@ -70,24 +70,26 @@ The Agent runs inside the env by default — the runtime pod ships the `EnvConfi
    ```bash
    erun open my-tenant local
    ```
-2. `erun open` publishes the local MCP port at `<UserConfigDir>/erun/portforward/mcp/<tenant>/<env>.json` — read the `localPort` field.
-3. Point your laptop-side Agent at the published config. Example for Claude Code:
+2. Configure the client to launch `erun mcp proxy` as a stdio MCP server for that env. Example for Claude Code:
    ```bash
-   claude --mcp-config <UserConfigDir>/erun/portforward/mcp/my-tenant/local.json
+   claude --mcp-config '{"mcpServers":{"my-tenant-local":{"type":"stdio","command":"erun",
+     "args":["mcp","proxy","--tenant","my-tenant","--environment","local"]}}}'
    ```
-   For Codex / custom clients, use the equivalent config pointing at `http://127.0.0.1:<localPort>/mcp`.
-4. Verify by asking the Agent to call the `list` tool — it should return the same data as `erun list`.
+   For Codex / custom clients, use the equivalent stdio-server entry with the same command and arguments. See [`erun mcp` · Wiring a laptop-side MCP client](/cli/mcp#wiring-a-laptop-side-mcp-client).
+3. Verify by asking the Agent to call the `list` tool — it should return the same data as `erun list`.
 
 If you find yourself reaching for this regularly, treat it as a signal that the in-pod Agent's config or version needs work — `erun doctor` will surface most causes.
 
-**"requires re-authorization (token expired)".** A laptop-side client holds the bearer it was configured with, and those are short-lived by design — when it expires, every tool for that env stops at once. You do not need the client to keep working: `erun mcp call` mints a fresh token per request, so it keeps answering while the client is stale.
+**"requires re-authorization (token expired)".** This means the client was configured with a bearer of its own rather than with `erun mcp proxy`. Bearers are short-lived by design, a client reads its config once at launch and cannot refresh a header, so roughly five minutes in every tool for that env stops at the same moment. Re-point the client at the proxy as shown above: it mints a bearer per request, so nothing in the client's config expires and the session keeps working for as long as it runs.
+
+Meanwhile, and for checking the edge itself:
 
 ```bash
 erun mcp tools --tenant my-tenant --environment local        # is the edge healthy?
 erun mcp call --tool list --output json                      # keep working meanwhile
 ```
 
-Restart or re-authorize the client to pick up a new token. If `erun mcp call` reports `MCP endpoint rejected the bearer token`, the env does not trust this machine at all — redeploy it from the desktop app. If it reports `MCP endpoint is not reachable`, the port-forward is down: re-run `erun open`.
+If `erun mcp call` reports `MCP endpoint rejected the bearer token`, the env does not trust this machine at all — redeploy it from the desktop app. If it reports `MCP endpoint is not reachable`, the port-forward is down: re-run `erun open`. The proxy surfaces both of those as JSON-RPC errors carrying the same recovery text, so a client wired through it shows the fix instead of going silent.
 
 ## Cloud context won't start
 

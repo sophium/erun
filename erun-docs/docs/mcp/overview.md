@@ -68,12 +68,15 @@ An env deployed with a trust anchor requires a **bearer on every request**, incl
 
 An env deployed before key injection (no anchor configured) stays unauthenticated — loopback-only, behind the namespace's default-deny `NetworkPolicy`.
 
-**Don't hand-roll the token.** `erun mcp call` and `erun mcp tools` mint one internally per request, and `erun mcp token` prints one for a client that speaks MCP itself:
+**Don't hand-roll the token.** `erun mcp call` and `erun mcp tools` mint one internally per request; `erun mcp proxy` does the same for a client that speaks MCP itself, relaying its stdio to this endpoint; and `erun mcp token` prints one for a caller driving the protocol directly:
 
 ```bash
 erun mcp call --tool list --output json          # one typed call, no token handling
+erun mcp proxy --tenant myapp --environment local  # stdio MCP server, bearer per request
 TOKEN=$(erun mcp token --tenant myapp --environment local)
 ```
+
+**A bearer must never be written into an MCP client's server config.** The client reads that config once at launch and cannot refresh a header, so the 5-minute lifetime above becomes a hard session limit: every tool for the env fails at once when the token ages out. Configure `erun mcp proxy` as a stdio server instead — the config then names a command, not a credential, and the token is minted per request behind it. See [`erun mcp` · Wiring a laptop-side MCP client](/cli/mcp#wiring-a-laptop-side-mcp-client).
 
 See [`erun mcp`](/cli/mcp#talking-to-an-environments-mcp-edge) for the Operator view and [CLI flags · `erun mcp`](/agent-reference/cli-flags#erun-mcp) for the full contract.
 

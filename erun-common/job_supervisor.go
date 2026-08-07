@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -612,17 +613,54 @@ func normalizeEnvironmentJobSignal(signal string) (string, error) {
 	}
 }
 
-// ResolveErunExecutable finds the erun binary a caller can hand to
-// StartEnvironmentJobParams.SupervisorPath. A transport that is not itself the
-// erun binary — the MCP server running in the environment — uses this, and gets
-// a clear failure rather than a job that never registers.
+// ResolveErunExecutable finds the erun binary for a transport that is not itself
+// that binary — the in-environment MCP server supervising a job, the desktop app
+// wiring a per-env MCP proxy — so those callers get a clear failure rather than a
+// launch that silently never happens. A sibling of the running program is
+// preferred over PATH so a source build resolves the binary it was built beside
+// instead of an unrelated installed one.
 func ResolveErunExecutable() (string, error) {
 	if override := strings.TrimSpace(os.Getenv("ERUN_ERUN_BIN")); override != "" {
 		return override, nil
 	}
-	path, err := exec.LookPath("erun")
+	name := ErunExecutableName()
+	if sibling := erunExecutableNearRunningProgram(name); sibling != "" {
+		return sibling, nil
+	}
+	path, err := exec.LookPath(name)
 	if err != nil {
-		return "", fmt.Errorf("the erun executable is required to supervise a job but was not found on PATH: %w", err)
+		return "", fmt.Errorf("the erun executable was not found beside this program or on PATH: %w", err)
 	}
 	return path, nil
+}
+
+// ErunExecutableName is the on-disk file name of the erun binary for this host.
+func ErunExecutableName() string {
+	if runtime.GOOS == "windows" {
+		return "erun.exe"
+	}
+	return "erun"
+}
+
+// erunExecutableNearRunningProgram mirrors how the CLI locates its sibling
+// erun-app: the install layout puts every erun executable in one directory, and
+// a source build puts them in each module's own bin/.
+func erunExecutableNearRunningProgram(name string) string {
+	executable, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	dir := filepath.Dir(executable)
+	for _, candidate := range []string{
+		filepath.Join(dir, name),
+		filepath.Clean(filepath.Join(dir, "..", "..", "erun-cli", "bin", name)),
+	} {
+		if candidate == executable {
+			continue
+		}
+		if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return ""
 }

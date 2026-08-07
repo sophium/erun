@@ -1,46 +1,38 @@
 package main
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// orchestratorTestPort/Bearer are the port and bearer stubs the config builder
-// is driven with; extracted from the test body so its own branching stays under
-// the cyclop threshold. nobearer resolves a port but an empty bearer, so the
-// builder must still skip it.
+// orchestratorTestPort is the port stub the config builder is driven with;
+// extracted from the test body so its own branching stays under the cyclop
+// threshold.
 func orchestratorTestPort(tenant, _ string) int {
 	switch tenant {
 	case "petios":
 		return 17400
 	case "erun":
 		return 17300
-	case "nobearer":
-		return 18000
 	default:
 		return 0
 	}
 }
 
-func orchestratorTestBearer(tenant, _ string) string {
-	if tenant == "nobearer" {
-		return ""
+func orchestratorTestEnvs() []eruncommon.OrchestratorEnvConfig {
+	return []eruncommon.OrchestratorEnvConfig{
+		{Tenant: "petios", Environment: "rihards-win-develop"},
+		{Tenant: "erun", Environment: "main"},
+		{Tenant: "noport", Environment: "x"}, // skipped: port 0
+		{Tenant: "", Environment: "z"},       // skipped: blank tenant
 	}
-	return "tok-" + tenant
 }
 
 func TestBuildOrchestratorMCPConfig(t *testing.T) {
-	envs := []eruncommon.OrchestratorEnvConfig{
-		{Tenant: "petios", Environment: "rihards-win-develop"},
-		{Tenant: "erun", Environment: "main"},
-		{Tenant: "noport", Environment: "x"},   // skipped: port 0
-		{Tenant: "nobearer", Environment: "y"}, // skipped: empty bearer
-		{Tenant: "", Environment: "z"},         // skipped: blank tenant
-	}
-
-	config := buildOrchestratorMCPConfig(envs, orchestratorTestPort, orchestratorTestBearer)
+	config := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "/opt/erun/bin/erun", orchestratorTestPort)
 
 	if len(config.MCPServers) != 2 {
 		t.Fatalf("expected 2 servers, got %d: %v", len(config.MCPServers), config.MCPServers)
@@ -49,19 +41,46 @@ func TestBuildOrchestratorMCPConfig(t *testing.T) {
 	if !ok {
 		t.Fatalf("missing petios server: %v", config.MCPServers)
 	}
-	if petios.Type != "http" || petios.URL != "http://127.0.0.1:17400/mcp" {
+	if petios.Type != "stdio" || petios.Command != "/opt/erun/bin/erun" {
 		t.Fatalf("unexpected petios server: %+v", petios)
 	}
-	if got := petios.Headers["Authorization"]; got != "Bearer tok-petios" {
-		t.Fatalf("unexpected petios auth header: %q", got)
+	wantArgs := "mcp proxy --tenant petios --environment rihards-win-develop"
+	if got := strings.Join(petios.Args, " "); got != wantArgs {
+		t.Fatalf("petios args = %q, want %q", got, wantArgs)
 	}
 	if _, ok := config.MCPServers["erun-main"]; !ok {
 		t.Fatalf("missing erun server")
 	}
-	for _, skipped := range []string{"noport-x", "nobearer-y", "-z"} {
+	for _, skipped := range []string{"noport-x", "-z"} {
 		if _, ok := config.MCPServers[skipped]; ok {
 			t.Fatalf("expected %s to be skipped", skipped)
 		}
+	}
+}
+
+// The written file is what a launched orchestrator reads, and it must never be a
+// place a bearer can leak from: an MCP client cannot refresh a header it was
+// configured with, so the fix for the expiry was to stop writing one at all.
+func TestBuildOrchestratorMCPConfigCarriesNoCredential(t *testing.T) {
+	config := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "/opt/erun/bin/erun", orchestratorTestPort)
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+	for _, forbidden := range []string{"Bearer", "Authorization", "authorization", "headers", "token"} {
+		if strings.Contains(string(data), forbidden) {
+			t.Fatalf("config carries %q:\n%s", forbidden, data)
+		}
+	}
+}
+
+// Without an erun binary there is no proxy to launch, so the whole map is empty
+// and the caller skips --mcp-config rather than writing entries that fail on
+// first use.
+func TestBuildOrchestratorMCPConfigSkipsEveryEnvWithoutAnExecutable(t *testing.T) {
+	config := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "  ", orchestratorTestPort)
+	if len(config.MCPServers) != 0 {
+		t.Fatalf("expected no servers without an executable, got %v", config.MCPServers)
 	}
 }
 

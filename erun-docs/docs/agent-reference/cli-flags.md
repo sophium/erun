@@ -826,9 +826,9 @@ See [MCP overview](/mcp/overview) for the protocol and the tool list. The launch
 | `--host <addr>` | string | `127.0.0.1` | The bind address. The in-pod default is loopback-only. |
 | `--path <p>` | string | `/mcp` | The HTTP path the endpoint is served from. |
 
-### `erun mcp call` / `tools` / `token` — client side
+### `erun mcp call` / `tools` / `token` / `proxy` — client side
 
-These call an environment's MCP edge rather than serving one; they are the supported way for a script or an orchestrating Agent to reach an env without configuring an MCP client, and the reason no MCP *tool* exists for this (a tool that calls another env's edge would invert the transport). All three share the target flags:
+These call an environment's MCP edge rather than serving one; they are the supported way for a script or an orchestrating Agent to reach an env without configuring an MCP client, and the reason no MCP *tool* exists for this (a tool that calls another env's edge would invert the transport). All four share the target flags:
 
 | Flag | Type | Default | Effect |
 |---|---|---|---|
@@ -850,6 +850,37 @@ Resolution and request contract:
 2. The endpoint is `http://127.0.0.1:<localPort>/mcp`, where `localPort` is the env's MCP port — the value `erun list` reports and `erun open` forwards.
 3. A bearer is minted **per HTTP request**, immediately before it is sent: EdDSA (Ed25519) over the desktop identity, `iss=file:///etc/erun/mcp-auth/desktopid.pub`, `aud=erun-mcp:<tenant>/<environment>`, 5-minute expiry. No client-side timeout is imposed on the call, so a tool that runs for minutes is not cut short and cannot fail on an aged-out token.
 4. The handshake is the standard one — `initialize`, `notifications/initialized`, then `tools/call` or `tools/list` — propagating `Mcp-Session-Id` and accepting both plain-JSON and SSE-framed replies.
+
+#### `proxy` — stdio bridge
+
+`proxy` takes only the shared target flags. It is a transport adapter, not an operation: an MCP client launches it as a stdio server and it relays that client's own JSON-RPC to the env's edge. It exists because a client reads its server config once at launch and cannot refresh a header, so a bearer written into that config turns the 5-minute token lifetime into a hard session limit — every tool for the env failing at the same moment. Configuring a *command* rather than a credential removes the class of failure: nothing in the client's config expires.
+
+| Property | Contract |
+|---|---|
+| Input framing | Newline-delimited JSON-RPC on **stdin**, one message per line. A final message without a trailing newline is still relayed. Blank lines are ignored. Relay is sequential — one message in flight at a time. |
+| Output framing | One JSON-RPC message per line on **stdout**, compacted to a single line even when the edge pretty-printed it. **stdout carries JSON-RPC and nothing else**; the audit line, trace output, and every diagnostic go to stderr. |
+| Notifications | A message with no `id` (or `"id": null`) gets no stdout line at all — including when the relay fails, since there is no id to answer against. The failure still reaches stderr. |
+| Session | The `Mcp-Session-Id` from the first reply is captured and sent on every subsequent request; the client never sees it. |
+| Bearer | Minted per relayed request, same claims as row 3 above. The proxy never writes a token to disk and never reuses one past its life. |
+| Handshake | Not performed by the proxy — the client's own `initialize` / `notifications/initialized` are relayed like any other message. |
+| Termination | Exits `0` when stdin closes. |
+
+Failure mapping. Every one of these is answered as a JSON-RPC error on the failing request's own `id`, with code `-32603`, and the relay keeps serving the next message — the edge can come back mid-session:
+
+| Condition | `error.message` |
+|---|---|
+| Nothing listening on the local MCP port | `MCP endpoint is not reachable: <endpoint> (…); run erun open <tenant> <env> so the local MCP port-forward is up` |
+| Edge answered `401`/`403` | `MCP endpoint rejected the bearer token: <endpoint> (HTTP 401); <tenant>/<env> was deployed without this machine's MCP public key, so redeploy it from the ERun desktop app` |
+| Edge accepted a request but returned no body | `the MCP edge at <endpoint> accepted the request but returned no reply` — the client fails visibly instead of waiting on a reply that is not coming. |
+| No desktop identity on this machine | The minting error, naming the path it looked at. |
+
+The same text is written to stderr on every failure, including the notification case that has no reply to carry it.
+
+```json
+// a Claude Code / Codex stdio server entry
+{ "mcpServers": { "acme-dev": { "type": "stdio", "command": "erun",
+  "args": ["mcp", "proxy", "--tenant", "acme", "--environment", "dev"] } } }
+```
 
 `--output json` shapes:
 

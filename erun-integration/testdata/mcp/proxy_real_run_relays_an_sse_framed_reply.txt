@@ -1,0 +1,3 @@
+{"jsonrpc":"2.0","id":7,"result":{"content":[{"type":"text","text":"<VERSION>"}]}}
+audit: erun mcp proxy --environment dev --tenant team
+mcp: team/dev edge resolved to http://<LOOPBACK>:26100/mcp
