@@ -1218,6 +1218,36 @@ func StubKubectlRuntimeRunState(t testing.TB, dir string, desired, ready int) st
 	return StubBinaryWithScript(t, dir, "kubectl", script)
 }
 
+// StubKubectlScalingRuntime writes a kubectl stub that remembers the replica
+// count `kubectl scale` last set and answers every later run-state read with
+// it. It is what lets one scenario run a whole stop → reconnect → open sequence
+// as a sequence: with the fixed-answer stub above, a later `erun` invocation
+// cannot see what an earlier one did, so an ordering regression (a reconnect
+// scaling a stopped environment back up) would be invisible.
+//
+// The deployment-presence read (`-o name`) answers with the release so `open`
+// gets past its "is the runtime deployed" check and reaches the wake decision
+// this stub exists to drive.
+func StubKubectlScalingRuntime(t testing.TB, dir, release string, desired int) string {
+	t.Helper()
+	// Forward slashes: embedded in the sh stub, where Git Bash handles a
+	// backslash Windows path unreliably.
+	state := shellSingleQuote(filepath.ToSlash(filepath.Join(dir, "kubectl-replicas")))
+	script := "state=" + state + "\n" +
+		"[ -f \"$state\" ] || printf '%s' " + shellSingleQuote(strconv.Itoa(desired)) + " > \"$state\"\n" +
+		"case \"$*\" in\n" +
+		"  *--replicas=*)\n" +
+		"    for arg in \"$@\"; do\n" +
+		"      case \"$arg\" in --replicas=*) printf '%s' \"${arg#--replicas=}\" > \"$state\" ;; esac\n" +
+		"    done\n" +
+		"    exit 0 ;;\n" +
+		"  *jsonpath=*) replicas=$(cat \"$state\"); printf '%s/%s' \"$replicas\" \"$replicas\"; exit 0 ;;\n" +
+		"  *-o\\ name*) printf 'deployment.apps/%s\\n' " + shellSingleQuote(release) + "; exit 0 ;;\n" +
+		"esac\n" +
+		"exit 0"
+	return StubBinaryWithScript(t, dir, "kubectl", script)
+}
+
 // StubEnv returns the env-var pairs that route the named binary lookups to
 // the stub at dir/<name>. Pass each result through env.Setup.Env() concat.
 func StubEnv(dir string, names ...string) []string {

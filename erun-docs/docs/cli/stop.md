@@ -37,6 +37,14 @@ Everything you would not want to rebuild:
 
 What does not survive: **whatever was running in the pod**. A build, an agent session, a long job — stopping ends it. Stop an environment because nobody is using it, not to pause work in progress.
 
+## Stopping an environment you have open
+
+Your desktop terminal tabs live in the pod, so stopping ends them. `erun stop` names them as it goes — "stopped my-tenant/rihards-dev and ended 2 attached desktop session(s) (open-0, ai)" — so tabs going dark reads as your own command finishing rather than the environment breaking. In the desktop app the environment's row switches to stopped, and opening it is the way back.
+
+The tabs do not fight the stop. The desktop reconnects a tab whenever its session drops, and a stop is exactly what drops it, so a reconnect that started the environment would undo your stop within a second and every time you tried again. It doesn't: a reconnect reattaches to a *running* environment only ([`erun open --reconnect`](/cli/open)), and opening the environment yourself is still what starts it. A reconnect will not start a stopped [cloud context](/concepts/cloud-contexts) either, so an environment that stops itself when idle is protected the same way.
+
+If a stop cannot take effect, `erun stop` says so and fails. It never prints a success for a stop that did not happen.
+
 ## Waking it again
 
 There is one way to start an environment: **open it**.
@@ -76,6 +84,7 @@ erun stop my-tenant rihards-dev --output json
 | Tenant + environment not configured. | Errors with "no such environment"; nothing is touched. Exit `1`. |
 | The environment's runtime is not deployed. | Errors with "runtime for `<tenant>/<env>` is not deployed … nothing to stop"; nothing is touched. Exit `1`. Deploy it first, or there is nothing holding capacity. |
 | The environment is already stopped. | Succeeds and says so; the stop is recorded if it was not already. Exit `0`. |
+| The scale ran but the environment is still asking for a pod. | Errors with "stop … did not take effect"; the stop is **not** recorded on the environment. Exit `1`. |
 | Cluster unreachable. | Errors with the cluster's message; nothing is changed. Exit `1`. `erun stop` never starts a stopped [cloud context](/concepts/cloud-contexts) to reach it — starting a machine in order to stop a pod on it is the opposite of what you asked for. |
 
 Full flag, result-shape and error-code spec: [Agent reference · CLI flag spec · `erun stop`](/agent-reference/cli-flags#erun-stop).

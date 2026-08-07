@@ -73,6 +73,64 @@ func TestStartSessionStopsReconnectingAfterRepeatedFailures(t *testing.T) {
 	}
 }
 
+// TestRespawnDeclaresItselfAReconnect pins the flag that keeps a stop stopped.
+// The desktop respawns a tab whenever its session drops, and a stop is exactly
+// what drops every session — so a respawn that reached `erun open` as a plain
+// open would clear the recorded stop and scale the runtime back up, undoing the
+// operator's command within a second. The operator's own tab open must stay a
+// plain open, or nothing would ever start a stopped environment again.
+func TestRespawnDeclaresItselfAReconnect(t *testing.T) {
+	projectRoot := t.TempDir()
+	var launchesMu sync.Mutex
+	var launches [][]string
+	var sessionsMu sync.Mutex
+	var sessions []*stubTerminalSession
+	emits := newCapturedEmits()
+	app := NewApp(erunUIDeps{
+		store: stubUIStore{
+			tenants: map[string]eruncommon.TenantConfig{
+				"erun": {Name: "erun", DefaultEnvironment: "remote"},
+			},
+			envs: map[string]eruncommon.EnvConfig{
+				"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
+			},
+		},
+		findProjectRoot: func() (string, string, error) { return "erun", projectRoot, nil },
+		resolveCLIPath:  func() string { return "/tmp/erun" },
+		startTerminal: func(params startTerminalSessionParams) (terminalSession, error) {
+			launchesMu.Lock()
+			launches = append(launches, params.Args)
+			launchesMu.Unlock()
+			session := newStubTerminalSession()
+			sessionsMu.Lock()
+			sessions = append(sessions, session)
+			sessionsMu.Unlock()
+			return session, nil
+		},
+	})
+	defer app.shutdown(context.Background())
+	app.SetEmitter(emits.fn())
+
+	if _, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
+		t.Fatalf("StartSession failed: %v", err)
+	}
+	waitForSessionCount(t, &sessionsMu, &sessions, 1, 2*time.Second)
+	sessionsMu.Lock()
+	first := sessions[0]
+	sessionsMu.Unlock()
+	_ = first.Close()
+	waitForSessionCount(t, &sessionsMu, &sessions, 2, 2*time.Second)
+
+	launchesMu.Lock()
+	defer launchesMu.Unlock()
+	if contains := strings.Contains(strings.Join(launches[0], " "), "--reconnect"); contains {
+		t.Fatalf("the operator's tab open must stay a plain open: %v", launches[0])
+	}
+	if contains := strings.Contains(strings.Join(launches[1], " "), "--reconnect"); !contains {
+		t.Fatalf("the respawn must declare itself a reconnect: %v", launches[1])
+	}
+}
+
 func waitForSessionCount(t *testing.T, mu *sync.Mutex, sessions *[]*stubTerminalSession, want int, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)

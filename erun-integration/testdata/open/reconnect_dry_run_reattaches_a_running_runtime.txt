@@ -1,0 +1,20 @@
+kubectl config use-context 'test-context' >/dev/null &&
+kubectl config set-context --current --namespace='team-dev' >/dev/null &&
+cd '<TMP>'
+audit: erun open --dry-run --no-alias-prompt --no-shell --reconnect team dev
+config: would assign localportrangestart=17000 to team/dev
+trace-log: would append the full trace to <TMP>
+open: tenant=team environment=dev kubernetes-context=test-context remote=false no-shell=true ide=shell
+open: --reconnect, so a stopped cloud context is left stopped rather than started to reach it
+open: --reconnect, so any recorded stop stays recorded and a stopped runtime is not started
+open: pure primitive — not deploying (run `erun deploy` first, or pass --deploy to deploy before opening)
+kubectl --context test-context --namespace team-dev get deployment team-devops -o name
+kubectl --context test-context --namespace team-dev get deployment team-devops -o 'jsonpath={.spec.replicas}/{.status.readyReplicas}'
+runtime run state: deployment team-devops wants 1 replica(s), 1 ready
+kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 17000:17000 --address <LOOPBACK>
+kubectl --context test-context --namespace team-dev get deployment team-api -o name
+kubectl --context test-context --namespace team-dev port-forward service/team-api 17033:17033 --address <LOOPBACK>
+open: --no-shell selected, emitting setup commands instead of launching shell
+kubectl config use-context test-context
+kubectl config set-context --current --namespace=team-dev
+cd <TMP>

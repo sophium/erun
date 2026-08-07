@@ -33,6 +33,7 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 	var deployRuntime bool
 	var aiTab bool
 	var contributeTab bool
+	var reconnect bool
 	target := common.OpenParams{}
 
 	cmd := &cobra.Command{
@@ -44,7 +45,11 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 			"`erun deploy` first, or pass --deploy to deploy before opening (the operator-convenience " +
 			"shortcut: builds-here envs build→push→deploy, runtime envs install the current version). " +
 			"Use --vscode or --intellij to open an IDE instead, or --no-shell to print the setup " +
-			"commands for your current shell.",
+			"commands for your current shell.\n\n" +
+			"Opening is also how you start an environment you stopped with `erun stop`. That makes " +
+			"open an operator gesture: anything that respawns it automatically to re-establish a " +
+			"dropped session must pass --reconnect, which reattaches without starting a stopped " +
+			"environment or discarding the recorded stop.",
 		Example:      "  erun open\n  erun open team dev\n  erun open team dev --deploy\n  erun open team dev --vscode",
 		Args:         cobra.MaximumNArgs(2),
 		SilenceUsage: true,
@@ -84,6 +89,7 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 				AppSession:       strings.TrimSpace(appSession),
 				AI:               aiTab,
 				Contribute:       contributeTab,
+				Reconnect:        reconnect,
 				// A --version or --runtime-image override also implies a deploy:
 				// pinning a version is only meaningful if it rolls out.
 				Deploy: deployRuntime || strings.TrimSpace(versionOverride) != "" || strings.TrimSpace(runtimeImage) != "",
@@ -108,6 +114,7 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 	cmd.Flags().BoolVar(&aiTab, "ai", false, "Launch the configured AI tool as the persistent session's program")
 	cmd.Flags().BoolVar(&contributeTab, "contribute", false, "Start the persistent session in the contribute clone")
 	cmd.Flags().BoolVar(&deployRuntime, "deploy", false, "Deploy the runtime before opening (operator convenience: builds-here envs build→push→deploy, runtime envs install the current version)")
+	cmd.Flags().BoolVar(&reconnect, "reconnect", false, "Reattach a dropped session instead of opening: never starts a stopped environment and never clears a recorded stop")
 	_ = cmd.Flags().MarkHidden("app-session")
 	_ = cmd.Flags().MarkHidden("ai")
 	_ = cmd.Flags().MarkHidden("contribute")
@@ -127,6 +134,7 @@ type openOptions struct {
 	AI               bool
 	Deploy           bool
 	Contribute       bool
+	Reconnect        bool
 }
 
 func persistOpenRuntimeVersion(result common.OpenResult, version, registry string, saveEnvConfig func(string, common.EnvConfig) error) (common.OpenResult, error) {
@@ -300,7 +308,7 @@ func (r *resolvedOpenRunner) run() error {
 		r.result.Tenant, r.result.Environment,
 		r.result.EnvConfig.KubernetesContext, r.result.RemoteRepo(),
 		r.options.NoShell, openIDEKindLabel(r.options)))
-	if err := r.ctx.EnsureKubernetesContext(r.result.EnvConfig.KubernetesContext); err != nil {
+	if err := r.ensureKubernetesContext(); err != nil {
 		return err
 	}
 	r.recordActivity()
@@ -314,7 +322,8 @@ func (r *resolvedOpenRunner) run() error {
 	shellReq.Contribute = r.options.Contribute
 	// Opening an environment means running it, so drop any recorded stop before
 	// the chart is rendered: a deploy that still saw the flag would re-apply
-	// replicas: 0 and the wake below would have to undo its own rollout.
+	// replicas: 0 and the wake below would have to undo its own rollout. A
+	// reconnect makes no such statement — see clearStopIntent.
 	if err := r.clearStopIntent(); err != nil {
 		return err
 	}
@@ -348,6 +357,20 @@ func openIDEKindLabel(options openOptions) string {
 	default:
 		return "shell"
 	}
+}
+
+// ensureKubernetesContext runs open's cloud-context preflight, which starts the
+// machine behind a stopped context so the cluster is reachable. A reconnect
+// skips it for the same reason it does not wake the runtime: starting what an
+// operator — or an idle policy — just stopped is not something a reattach gets
+// to decide. The reattach then fails against the unreachable cluster, which is
+// the honest outcome. `erun stop` skips the same preflight, for the same reason.
+func (r *resolvedOpenRunner) ensureKubernetesContext() error {
+	if r.options.Reconnect {
+		r.ctx.Trace("open: --reconnect, so a stopped cloud context is left stopped rather than started to reach it")
+		return nil
+	}
+	return r.ctx.EnsureKubernetesContext(r.result.EnvConfig.KubernetesContext)
 }
 
 func (r *resolvedOpenRunner) recordActivity() {
@@ -570,8 +593,14 @@ func (r *resolvedOpenRunner) prepareRuntime(shellReq common.ShellLaunchParams) e
 
 // clearStopIntent records that this environment is wanted running again. It
 // touches only the config, so it is safe to run before the runtime is known to
-// exist (a first `open --deploy` has no Deployment yet).
+// exist (a first `open --deploy` has no Deployment yet). A reconnect declares
+// itself as machine-initiated and is therefore not that statement: the operator
+// stopped the environment, which is what dropped the session being reattached.
 func (r *resolvedOpenRunner) clearStopIntent() error {
+	if r.options.Reconnect {
+		r.ctx.Trace("open: --reconnect, so any recorded stop stays recorded and a stopped runtime is not started")
+		return nil
+	}
 	updated, err := common.ClearEnvironmentStopIntent(r.ctx, r.result, r.options.SaveEnvConfig)
 	if err != nil {
 		return err
@@ -582,11 +611,14 @@ func (r *resolvedOpenRunner) clearStopIntent() error {
 
 // ensureRuntimeAwake scales a stopped environment back to one replica and waits
 // for the rollout. It is quiet for an environment that is already running: the
-// single read below decides, and no scale call is made.
+// single read below decides, and no scale call is made. A reconnect never
+// scales — a stopped environment fails the reattach instead of being restarted
+// behind the operator.
 func (r *resolvedOpenRunner) ensureRuntimeAwake() error {
 	wake, err := common.EnsureEnvironmentAwake(r.ctx, common.WakeEnvironmentParams{
 		Result:        r.result,
 		SaveEnvConfig: r.options.SaveEnvConfig,
+		Reconnect:     r.options.Reconnect,
 	})
 	if err != nil {
 		return err

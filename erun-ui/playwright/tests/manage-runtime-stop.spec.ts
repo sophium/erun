@@ -36,6 +36,16 @@ test.describe('manage dialog runtime stop control', () => {
   // rather than left believing capacity was freed (Nielsen #1, #9). The success
   // path's decisions are owned by erun-common's stop scenarios in
   // erun-integration/stop_test.go and by erun-ui/environment_stop_test.go.
+  //
+  // The same limitation covers what a stop does to attached tabs: whether a
+  // reconnect leaves the environment stopped, and whether the row then renders
+  // stopped rather than failed, is decided by a live replica count no stub can
+  // produce. Those branches are owned by
+  // erun-integration/stop_test.go::real_run_stop_survives_a_session_reconnect,
+  // erun-ui/reconnect_loop_test.go::TestRespawnDeclaresItselfAReconnect,
+  // erun-ui/environment_stop_test.go::TestRuntimeStoppedForSelectionMapsClusterStateToTheIndicator,
+  // and
+  // erun-ui/env_ensure_test.go::TestSurfaceEnsureFailureRendersAStoppedRuntimeAsStopped.
   test('a stop that cannot reach the cluster reports the failure instead of claiming success', async ({
     app,
     seededEnv,

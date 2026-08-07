@@ -713,9 +713,12 @@ func TestBuildDoctorArgsTrimsTenantAndEnvironment(t *testing.T) {
 	}
 }
 
+// The forwarder rebind is machine-initiated, so --reconnect is part of its
+// contract: without it a rebind fired by a stop's own connection drop would
+// start the environment back up.
 func TestBuildOpenNoShellArgsTrimsTenantAndEnvironment(t *testing.T) {
 	got := buildOpenNoShellArgs(" erun ", " local ")
-	want := []string{"open", "erun", "local", "--no-shell", "--no-alias-prompt"}
+	want := []string{"open", "erun", "local", "--no-shell", "--no-alias-prompt", "--reconnect"}
 	if len(got) != len(want) {
 		t.Fatalf("unexpected args length: got %+v want %+v", got, want)
 	}

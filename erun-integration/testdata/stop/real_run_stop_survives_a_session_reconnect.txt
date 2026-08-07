@@ -1,0 +1,38 @@
+$ erun stop team dev
+stopped team/dev; run `erun open team dev` to wake it
+audit: erun stop team dev
+trace-log: appending the full trace to <TMP>
+stop: tenant=team environment=dev kubernetes-context=test-context release=team-devops namespace=team-dev
+runtime run state: deployment team-devops wants 1 replica(s), 1 ready
+stop: no desktop session is attached to team-devops
+stop: scaling team-devops to 0 replicas to return its runtime and dind capacity to the node
+runtime run state: deployment team-devops wants 0 replica(s), 0 ready
+config: assigned stopped=true to team/dev
+==> Stopped team/dev
+
+$ erun open team dev --app-session open-0 --reconnect --no-shell --no-alias-prompt
+team/dev is stopped, and a session reconnect does not start it; run `erun open team dev` to start it again
+
+$ erun open team dev --no-shell --no-alias-prompt --dry-run
+kubectl config use-context 'test-context' >/dev/null &&
+kubectl config set-context --current --namespace='team-dev' >/dev/null &&
+cd '<TMP>'
+audit: erun open --dry-run --no-alias-prompt --no-shell team dev
+trace-log: would append the full trace to <TMP>
+open: tenant=team environment=dev kubernetes-context=test-context remote=false no-shell=true ide=shell
+config: would assign stopped=false to team/dev
+open: pure primitive — not deploying (run `erun deploy` first, or pass --deploy to deploy before opening)
+kubectl --context test-context --namespace team-dev get deployment team-devops -o name
+kubectl --context test-context --namespace team-dev get deployment team-devops -o 'jsonpath={.spec.replicas}/{.status.readyReplicas}'
+runtime run state: deployment team-devops wants 0 replica(s), 0 ready
+==> Waking stopped environment team/dev
+kubectl --context test-context --namespace team-dev scale deployment/team-devops --replicas=1
+kubectl --context test-context --namespace team-dev wait --for=condition=Available --timeout 2m0s deployment/team-devops
+==> Woke team/dev
+kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 17000:17000 --address <LOOPBACK>
+kubectl --context test-context --namespace team-dev get deployment team-api -o name
+kubectl --context test-context --namespace team-dev port-forward service/team-api 17033:17033 --address <LOOPBACK>
+open: --no-shell selected, emitting setup commands instead of launching shell
+kubectl config use-context test-context
+kubectl config set-context --current --namespace=team-dev
+cd <TMP>
