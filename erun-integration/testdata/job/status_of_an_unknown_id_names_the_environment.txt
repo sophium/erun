@@ -1,0 +1,2 @@
+audit: erun job status --environment dev --id nothing --tenant team
+no job "nothing" in team/dev

@@ -75,6 +75,13 @@ var defaultRules = []Replacement{
 	// despite looking like a stable digest.
 	{regexp.MustCompile(`hash=[0-9a-f]{16}\b`), "hash=<HASH>"},
 	{regexp.MustCompile(`pid=\d+`), "pid=<PID>"},
+	// A job reports the process it is reconciled against and the group a cancel
+	// signals. Both are real OS pids, so they differ on every run; the contract a
+	// golden locks is that the job names a recorded process at all, never which
+	// number the kernel handed out.
+	{regexp.MustCompile(`\bpid \d+`), "pid <PID>"},
+	{regexp.MustCompile(`\bprocess group \d+`), "process group <PGID>"},
+	{regexp.MustCompile(`\b(supervisor|process) \d+ is gone`), "$1 <PID> is gone"},
 	{regexp.MustCompile(`id=[A-Za-z0-9_./-]*-\d{10,}\b`), "id=<COMMAND_ID>"},
 	{regexp.MustCompile(`-[0-9a-f]{16}\b`), "-<HEX16>"},
 	{regexp.MustCompile(`\b[0-9a-f]{32,}\b`), "<HEX>"},

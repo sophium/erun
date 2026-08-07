@@ -1,0 +1,26 @@
+The wait is bounded and the call returns either an outcome or "still
+running" — it never holds a connection open for the work's lifetime, which
+is what drops under load and leaves a caller unable to tell a dead stream
+from a dead job.
+
+Exit codes are the contract: 0 when the job exited 0, 124 when the timeout
+elapsed with the job still running, 125 when the outcome is unknown, and 1
+when the job exited non-zero (its real code is in the reported result).
+
+Usage:
+  erun job await [flags]
+
+Examples:
+  erun job await --tenant team --environment dev --id suite --timeout 2m
+
+Flags:
+      --environment string   Environment the job runs in
+  -h, --help                 help for await
+      --id string            Job to wait for
+      --tenant string        Tenant whose environment the job belongs to
+      --timeout duration     How long to wait before reporting the job as still running (default 30s)
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

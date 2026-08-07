@@ -20,7 +20,7 @@ func run() int {
 			logger := eruncommon.NewLogger(0)
 			logger.Fatal(err)
 		}
-		return 1
+		return internal.ExitCodeFor(err)
 	}
 	return 0
 }

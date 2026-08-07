@@ -1,0 +1,9 @@
+exited 42: suite, 15 bytes of output
+audit: erun job await --environment dev --id suite --tenant team --timeout 30s
+job "suite" exited 42
+  suite: exited 42: suite, 15 bytes of output
+audit: erun job status --environment dev --tenant team
+compiling
+boom
+audit: erun job output --environment dev --id suite --tenant team
+next offset: 15 (more: false, complete: true)

@@ -1,0 +1,3 @@
+exited 3: chatterbox, 32 bytes of output (truncated at the output cap)
+audit: erun job await --environment dev --id chatterbox --tenant team --timeout 30s
+job "chatterbox" exited 3

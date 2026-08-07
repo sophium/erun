@@ -37,6 +37,7 @@ Available Commands:
   help        Help about any command
   idle        Show environment idle stop status
   init        Initialize configuration for the current project
+  job         Start long work in the environment and observe it by handle
   list        List configured tenants and environments
   mcp         Run ERun as an MCP server over HTTP
   open        Open a shell in the tenant environment

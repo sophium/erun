@@ -655,6 +655,155 @@ The local port-forward state files under `<UserConfigDir>/erun/portforward/{mcp,
 
 ---
 
+## `erun job` {#erun-job}
+
+`erun job` starts long work in an environment and answers what happened to it. It is the in-environment half of the job surface; the host-side half is the `job_*` [MCP tools](/mcp/overview#job-tools), which run the same shared implementation.
+
+Use it instead of hand-rolling detachment, a log redirect, a polling loop, a sentinel token, and an exit-code parse around [`erun exec raw`](/cli/exec) / the `raw` MCP tool. Three properties are the reason it exists:
+
+- **The outcome is captured inside the environment**, by the supervisor process that waited on the work. It is never derived from a token in the log and never passes through an intermediate shell, so `$?` cannot be expanded in the wrong place.
+- **Liveness is a probe of a recorded pid**, never a match against a command line. A pattern can match the polling shell itself, or the shell issuing a cancel.
+- **A status is definite or explicitly `unknown`**, never silently partial.
+
+### Job states
+
+| State | Meaning | `exitCode` |
+|---|---|---|
+| `running` | The recorded process is alive and no outcome has been observed. | `null` |
+| `exited` | The work finished and the supervisor captured its status. `-1` means it was terminated by a signal, which `signal` names. | integer |
+| `unknown` | The record outlived whatever was meant to finish it — the supervisor is gone without recording an outcome (most often because the runtime pod was replaced), or an attached job's tracked process is gone. `reason` says which. | `null` |
+
+The demotion to `unknown` happens on the next read and is persisted, so every later read gives the same answer. An `unknown` job is never a success: `job await` exits `125` for it, distinct from both `0` and a failure.
+
+### `erun job start`
+
+`erun job start [flags] -- <command> [args...]`
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--tenant <t>` / `--environment <e>` | string | **required** | Target environment. |
+| `--name <what>` | string | **required** | What the work is. Shown wherever the environment reports as busy. |
+| `--id <id>` | string | the `--name` | Handle to address the job by, filename-sanitised. |
+| `--dir <path>` | path | the caller's resolution | Working directory for the work. |
+| `--max-output-bytes <n>` | int64 | `4194304` (4 MiB) | Cap on captured output. |
+| `--lease-ttl <duration>` | duration | `15m` | Activity lease TTL; the supervisor renews at TTL/3 (minimum 5s) for as long as the work runs. |
+| `--dry-run` | bool | `false` | Trace the supervisor argv, the log path, and the lease; start nothing. |
+
+erun spawns a supervisor in **its own session**, so the work survives this call returning, the caller exiting, and the transport dropping — nothing needs wrapping in `setsid`, `nohup`, or a redirect. The work itself runs in its own process group, which is what lets [`cancel`](#erun-job-cancel) reach it without touching the supervisor.
+
+The supervisor registers the job before starting the work, so `start` returns a handle that always resolves — including for work that fails to `exec`, which lands as an `exited` job whose `reason` says `failed to start: …`.
+
+Re-using the id of a job that is **still running** is refused (two supervisors writing one record would make every later answer ambiguous). Re-using a **finished** id replaces it, and traces that it did.
+
+`--output json` emits the job record.
+
+### `erun job attach`
+
+Registers work erun did **not** start, so it is visible and holds an activity lease.
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--tenant` / `--environment` | string | **required** | Target environment. |
+| `--name <what>` | string | **required** | What the work is. |
+| `--id <id>` | string | the `--name` | Handle. Re-attaching the same id renews the lease rather than restarting the job. |
+| `--pid <n>` | int | **required** | Process to track. |
+| `--log <path>` | path | none | File the work already writes to, so `job output` can serve it. |
+| `--lease-ttl <duration>` | duration | `15m` | Lease TTL. |
+| `--dry-run` | bool | `false` | Resolve and trace without recording. |
+
+An attached job resolves against the named pid and nothing else. It reads `running` while that process lives and `unknown` once it is gone; it can **never** report an exit status, because nothing erun ran was waiting on the process to observe one. Start work through `job start` when the outcome matters.
+
+### `erun job status`
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--tenant` / `--environment` | string | **required** | Target environment. |
+| `--id <id>` | string | none | Report one job; omit for every retained job, newest first. |
+
+`--output json` emits the job record (with `--id`) or the array (without).
+
+### `erun job await` {#erun-job-await}
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--tenant` / `--environment` | string | **required** | Target environment. |
+| `--id <id>` | string | **required** | Job to wait for. |
+| `--timeout <duration>` | duration | `30s` | Bounded wait. Must be `> 0` and `≤ 10m`; a larger value is an error, not a clamp. |
+
+The call returns inside the timeout either way, so no connection is held open for the work's lifetime. The record is re-read every 250 ms; nothing streams. Call it again to keep waiting.
+
+**Exit codes are the contract** — a timeout is a different event from a failure, and neither is inferred from the other:
+
+| Exit code | Meaning |
+|---|---|
+| `0` | The job reached `exited` with code `0`. |
+| `1` | The job reached `exited` with a non-zero code. The real code is in the message and in `job.exitCode`. |
+| `124` | The timeout elapsed with the job still running. Matches `timeout(1)`. |
+| `125` | The job's state is `unknown` — no outcome was ever recorded. |
+
+`--output json` emits `{job, timedOut, waitedSeconds, timeoutSeconds}`. `timedOut` is `true` only for the `124` case, so a caller reading the payload does not have to infer it from the exit code either.
+
+### `erun job output`
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--tenant` / `--environment` | string | **required** | Target environment. |
+| `--id <id>` | string | **required** | Job whose output to read. |
+| `--offset <n>` | int64 | `0` | Byte offset to read from. Pass the previous read's `nextOffset` to continue rather than repeat. An offset past the end of the log is an error. |
+| `--max-bytes <n>` | int64 | `65536` | Most bytes to return in this read. |
+
+stdout and stderr are **merged** into one log in write order, and served as the file stands — so progress is readable long before the work exits. The bytes go to stdout; `next offset: <n> (more: <bool>, complete: <bool>)` goes to stderr so it never corrupts the payload. `--output json` emits `{job, offset, nextOffset, output, hasMore, complete}`.
+
+`complete` is true only when the job has finished **and** this page reached the end of its output. `hasMore` only describes this read; the job's own `outputTruncated` is what says output was dropped at the cap.
+
+### `erun job cancel` {#erun-job-cancel}
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--tenant` / `--environment` | string | **required** | Target environment. |
+| `--id <id>` | string | **required** | Job to cancel. |
+| `--signal <name>` | `TERM` \| `INT` \| `HUP` \| `KILL` | `TERM` | Signal to send. |
+| `--dry-run` | bool | `false` | Trace the target without signalling. |
+
+The signal goes to the **process group of the pid the record holds**, so a cancel can only reach the work it names — not a process that merely looks like it, and not the shell issuing the cancel. Two guards make the latter impossible: signalling erun's own pid is refused, and so is signalling erun's own process group.
+
+The job's supervisor is deliberately **not** signalled, so it survives to record the outcome; the cancelled job then reads back as a normal `exited` job carrying `signal`. Cancelling a job that already finished is not an error — it reports `signalled: false`.
+
+On Windows there are no signals: every name maps to a `taskkill /F /T` of the recorded pid, and `signal` is never populated on the resulting record.
+
+### Storage, retention, and output bounding {#job-storage}
+
+| Property | Value |
+|---|---|
+| Record | `${XDG_CACHE_HOME}/erun/activity/<tenant>/<environment>/jobs/<id>.json`, written atomically (temp + rename) so a concurrent status read can never see a half-written record. |
+| Log | `…/jobs/<id>.log`. |
+| Durability | The same store the [activity leases](/agent-reference/idle-policy#activity-leases) use. Inside a runtime pod that path is on the home PVC, so records survive pod replacement — deliberately not container-local `/tmp`, which every deploy strands. |
+| Output cap | `--max-output-bytes` (default 4 MiB) per job. Past it the log stops growing, the record sets `outputTruncated: true` (immediately, not at exit), and `job status` says `(truncated at the output cap)`. The **head** is kept: the outcome never comes from the log, so a bounded log costs detail, never the result. |
+| Retention | A finished job stays readable for **24 hours** after it ended, and the newest **50** finished records per environment are kept. Running jobs are never pruned. An orchestrator reconnecting after the work ended can therefore still learn the outcome; reaping at exit would recreate the problem this surface closes. |
+| Pruning | Happens on read and on write, alongside the same reconcile-on-read pass that demotes abandoned records. Pruning removes the record and its log together. |
+
+### The lease a job holds
+
+A job holds an activity lease named after the job for its whole lifetime, with `id` = `job-<job id>` and `pid` = the supervisor's. Starting a job therefore makes the environment report as busy and defers auto-stop, with the caller arranging nothing — see [Idle policy · activity_leases](/agent-reference/idle-policy#activity-leases) for the lease's own semantics. If the supervisor is killed outright the lease is reclaimed by the same pid probe that reclaims any abandoned holder.
+
+### Error behaviour
+
+| Failure | Behaviour |
+|---|---|
+| No `--tenant` / `--environment`. | Exit 1, `tenant and environment are required`. |
+| `start` with no `--name`. | Exit 1, `job name is required` — a job that names no work would report the environment busy without saying why. |
+| `start` with no command after `--`. | Exit 1 from argument validation. |
+| `start` re-using a running id. | Exit 1, `job "<id>" is already running (pid <n>); pass a different id or cancel it first`. Nothing is spawned. |
+| The supervisor never registers the job within 10s. | Exit 1, naming the supervisor pid. No handle is returned. |
+| `attach` with no `--pid`. | Exit 1, `a pid to track is required; an attached job has nothing else to reconcile against`. |
+| Unknown job id on `status` / `await` / `output` / `cancel`. | Exit 1, `no job "<id>" in <tenant>/<environment>`. |
+| `await --timeout` above the ceiling or `≤ 0`. | Exit 1 before waiting, naming the `10m0s` ceiling. |
+| `output --offset` past the end of the log. | Exit 1, naming the offset and the log size. |
+| `cancel --signal` outside `TERM`/`INT`/`HUP`/`KILL`. | Exit 1, `unsupported signal`. |
+| `cancel` targeting a process that already exited. | Success; the record reconciles on the next read. |
+
+---
+
 ## `erun mcp`
 
 See [MCP overview](/mcp/overview) for the protocol and the tool list. The launcher flag set is:

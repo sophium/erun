@@ -37,6 +37,7 @@ The `build → release → push → deploy` commands form ERun's delivery pipeli
 | [`erun sshd`](/cli/sshd) | Enable SSH (and IDE) access to a remote environment. |
 | [`erun list`](/cli/list) | List tenants, environments, and the effective target. |
 | [`erun idle`](/cli/idle) | Show an environment's idle / auto-stop status. |
+| [`erun job`](/agent-reference/cli-flags#erun-job) | Start long work in an environment and observe it by handle — `start`, `status`, `await`, `output`, `cancel`. |
 | [`erun doctor`](/cli/doctor) | Diagnose and repair an environment's runtime and config. |
 | [`erun version`](/cli/version) | Print erun's build version (and the project's, when in one) + latest published versions. |
 | [`erun mcp`](/cli/mcp) | Run the MCP server for Agents (launches `emcp`); `call` / `tools` / `token` reach an env's MCP edge. |
