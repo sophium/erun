@@ -1,0 +1,4 @@
+audit: erun job start --name suite work
+tenant and environment are required
+audit: erun job start --environment dev --tenant team work
+job name is required

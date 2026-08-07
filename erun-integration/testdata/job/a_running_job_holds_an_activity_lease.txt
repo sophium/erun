@@ -1,0 +1,4 @@
+  job-indexing: indexing, expires in <REMAINING>, pid <PID>
+audit: erun activity lease list --environment dev --tenant team
+no leases held
+audit: erun activity lease list --environment dev --tenant team

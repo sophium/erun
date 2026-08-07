@@ -1,0 +1,2 @@
+audit: erun job cancel --dry-run --environment dev --id suite --signal KILL --tenant team
+job: sending SIGKILL to process group <PGID> (job suite)

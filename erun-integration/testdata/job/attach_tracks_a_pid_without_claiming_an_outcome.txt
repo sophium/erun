@@ -1,0 +1,6 @@
+job attached: overnight index (id overnight), tracking pid <PID>
+audit: erun job attach --environment dev --id overnight --name overnight index --pid <PID> --tenant team
+job: attaching "overnight index" as job overnight, tracking pid <PID>
+job: holding activity lease job-overnight while pid <PID> lives
+unknown: overnight index (attached process <PID> is gone; erun did not run this work, so no exit status was recorded), 0 bytes of output
+audit: erun job status --environment dev --id overnight --tenant team
