@@ -101,7 +101,7 @@ func (a *App) runContributeSession(ctx context.Context, selection uiSelection, s
 		blocksIdleStop:         true,
 		clearIdleBlockOnOutput: true,
 		respawn: func() (terminalSession, error) {
-			return a.deps.startTerminal(params)
+			return a.deps.startTerminal(reconnectSessionParams(params))
 		},
 		startedAt: time.Now(),
 		lastCols:  cols,

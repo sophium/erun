@@ -18,6 +18,13 @@ import (
 // deploy renders from it (so a helm upgrade reconciles replicas instead of
 // silently undoing the scale patch). The cluster stays the source of truth for
 // what is displayed; the config only records intent.
+//
+// Starting an environment again is an operator gesture — opening it — and that
+// is the whole reason the wake below takes a reconnect flag. A stop drops every
+// session attached to the pod, and whatever supervises those sessions will try
+// to re-establish them; if that reattach counted as an open, it would scale the
+// runtime back up and erase the recorded intent within a second of the stop,
+// for as long as anything stayed attached. So the wake asks who is calling.
 
 // RuntimeScaleTarget identifies one environment's runtime Deployment.
 type RuntimeScaleTarget struct {
@@ -82,17 +89,33 @@ func DecideRuntimeStop(state RuntimeRunState, stoppedIntent bool) RuntimeStopDec
 
 // RuntimeWakeDecision is what a wake would do. ClearIntent is separate from
 // Scale because `open --deploy` clears the intent before helm renders the
-// chart, and lets the rollout itself bring the pod up.
+// chart, and lets the rollout itself bring the pod up. RefuseStopped is the
+// reconnect answer: nothing to do, and the caller must not proceed as if the
+// environment were up.
 type RuntimeWakeDecision struct {
 	Scale          bool
 	ClearIntent    bool
 	AlreadyRunning bool
+	RefuseStopped  bool
 }
 
 // DecideRuntimeWake resolves a wake. An environment that is already running and
 // carries no stop intent needs neither a scale call nor a config write, which is
 // what keeps `erun open` quiet on the common path.
-func DecideRuntimeWake(state RuntimeRunState, stoppedIntent bool) RuntimeWakeDecision {
+//
+// reconnect marks the caller as a supervisor re-establishing a dropped session
+// rather than an operator asking for the environment. Only the operator's
+// gesture starts a stopped environment or retires the recorded stop: a stop is
+// precisely what drops every attached session, so a reconnect that woke would
+// undo the stop that triggered it, on a loop, and erase the intent meant to
+// outlive it.
+func DecideRuntimeWake(state RuntimeRunState, stoppedIntent, reconnect bool) RuntimeWakeDecision {
+	if reconnect {
+		return RuntimeWakeDecision{
+			AlreadyRunning: state.Present && !state.Stopped(),
+			RefuseStopped:  state.Stopped(),
+		}
+	}
 	return RuntimeWakeDecision{
 		Scale:          state.Stopped(),
 		ClearIntent:    stoppedIntent,
@@ -118,11 +141,17 @@ type StopEnvironmentResult struct {
 	// no-op from the run that actually reclaimed the node's capacity.
 	Stopped        bool `json:"stopped"`
 	AlreadyStopped bool `json:"alreadyStopped"`
+	// EndedSessions names the desktop terminal sessions the stop took down with
+	// the pod, so the outcome for attached tabs is stated rather than left for
+	// the operator to infer from tabs going dark.
+	EndedSessions []string `json:"endedSessions,omitempty"`
 }
 
 // RunStopEnvironment scales the environment's runtime Deployment to zero and
 // records the intent so a later helm upgrade re-renders replicas: 0 instead of
-// quietly restarting the pod.
+// quietly restarting the pod. The intent is written last and only once the
+// cluster has confirmed the scale, so the config never records a stop that did
+// not happen.
 func RunStopEnvironment(ctx Context, params StopEnvironmentParams) (StopEnvironmentResult, error) {
 	target := RuntimeScaleTargetForResult(params.Result)
 	result := StopEnvironmentResult{
@@ -148,8 +177,12 @@ func RunStopEnvironment(ctx Context, params StopEnvironmentParams) (StopEnvironm
 	if decision.AlreadyStopped {
 		ctx.Trace(fmt.Sprintf("stop: %s/%s is already stopped (deployment %s wants 0 replicas)", target.Tenant, target.Environment, target.ReleaseName))
 	} else {
+		result.EndedSessions = traceAttachedAppSessions(ctx, target)
 		ctx.Trace(fmt.Sprintf("stop: scaling %s to 0 replicas to return its runtime and dind capacity to the node", target.ReleaseName))
 		if err := scaleRuntimeDeployment(ctx, target, 0); err != nil {
+			return StopEnvironmentResult{}, err
+		}
+		if err := confirmRuntimeStopped(ctx, target); err != nil {
 			return StopEnvironmentResult{}, err
 		}
 	}
@@ -160,6 +193,71 @@ func RunStopEnvironment(ctx Context, params StopEnvironmentParams) (StopEnvironm
 	}
 	ctx.Trace(fmt.Sprintf("==> Stopped %s/%s", target.Tenant, target.Environment))
 	return result, nil
+}
+
+// confirmRuntimeStopped re-reads the Deployment after the scale so a stop that
+// did not take effect is reported as a failure. Returning capacity is the whole
+// point of the command, and a replica count that bounced back is the one
+// outcome the operator cannot see for themselves — the config write that
+// follows must never claim a stop the cluster did not keep.
+func confirmRuntimeStopped(ctx Context, target RuntimeScaleTarget) error {
+	if ctx.DryRun {
+		ctx.Trace(fmt.Sprintf("stop: would re-read %s to confirm it wants 0 replicas before reporting success", target.ReleaseName))
+		return nil
+	}
+	state, err := ReadRuntimeRunState(ctx, target)
+	if err != nil {
+		return fmt.Errorf("confirm %s/%s stopped: %w", target.Tenant, target.Environment, err)
+	}
+	if !state.Stopped() {
+		return fmt.Errorf("stop of %s/%s did not take effect: deployment %q in namespace %q still wants %d replica(s) after the scale",
+			target.Tenant, target.Environment, target.ReleaseName, target.Namespace, state.DesiredReplicas)
+	}
+	return nil
+}
+
+// traceAttachedAppSessions names the desktop terminal sessions living in the
+// pod that is about to go away, and returns their ids for the structured
+// result. Stopping ends them, so saying which turns tabs going dark into a
+// stated consequence of the operator's own command.
+func traceAttachedAppSessions(ctx Context, target RuntimeScaleTarget) []string {
+	sessions, err := readAttachedAppSessions(ctx, target)
+	if err != nil {
+		ctx.Trace(fmt.Sprintf("stop: could not list the desktop sessions attached to %s (%s); stopping anyway", target.ReleaseName, strings.TrimSpace(err.Error())))
+		return nil
+	}
+	if len(sessions) == 0 {
+		ctx.Trace(fmt.Sprintf("stop: no desktop session is attached to %s", target.ReleaseName))
+		return nil
+	}
+	ids := make([]string, 0, len(sessions))
+	labels := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		ids = append(ids, session.ID)
+		if program := strings.TrimSpace(session.Program); program != "" {
+			labels = append(labels, session.ID+" ("+program+")")
+			continue
+		}
+		labels = append(labels, session.ID)
+	}
+	ctx.Trace(fmt.Sprintf("stop: %d attached desktop session(s) end with the pod: %s", len(labels), strings.Join(labels, ", ")))
+	return ids
+}
+
+// readAttachedAppSessions runs the same in-pod heartbeat probe the desktop uses
+// to count live sessions. Like the run-state read it performs no mutation, so
+// it runs under --dry-run too and the plan can show what a real stop would end.
+func readAttachedAppSessions(ctx Context, target RuntimeScaleTarget) ([]RemoteAppSessionHeartbeat, error) {
+	args := kubectlRuntimeTargetArgs(target)
+	args = append(args, "exec", "deployment/"+target.ReleaseName, "--", "/bin/sh", "-lc",
+		RemoteAppSessionHeartbeatScript(target.Tenant, target.Environment))
+
+	ctx.TraceCommand("", "kubectl", args...)
+	output, err := Command("kubectl", args...).Output()
+	if err != nil {
+		return nil, err
+	}
+	return ParseRemoteAppSessionHeartbeats(string(output)), nil
 }
 
 // ClearEnvironmentStopIntent records that the operator wants the environment
@@ -179,10 +277,13 @@ func ClearEnvironmentStopIntent(ctx Context, result OpenResult, saveEnvConfig fu
 }
 
 // WakeEnvironmentParams is a wake request: the resolved target plus the writer
-// that clears the recorded stop intent.
+// that clears the recorded stop intent. Reconnect marks the request as a
+// supervisor reattaching a dropped session rather than an operator opening the
+// environment, which is the difference between waking and leaving it stopped.
 type WakeEnvironmentParams struct {
 	Result        OpenResult
 	SaveEnvConfig func(string, EnvConfig) error
+	Reconnect     bool
 }
 
 // WakeEnvironmentResult reports what the wake did. EnvConfig carries the config
@@ -199,6 +300,10 @@ type WakeEnvironmentResult struct {
 // replicas, so this is what makes "start it when the operator opens it" work —
 // and it is host-side, so an orchestrator that finds an environment stopped
 // wakes it with `erun open` and no in-pod component is involved.
+//
+// A reconnecting caller gets the opposite answer for a stopped environment: an
+// error, so the reattach fails plainly instead of quietly resurrecting what the
+// operator stopped.
 func EnsureEnvironmentAwake(ctx Context, params WakeEnvironmentParams) (WakeEnvironmentResult, error) {
 	target := RuntimeScaleTargetForResult(params.Result)
 	result := WakeEnvironmentResult{EnvConfig: params.Result.EnvConfig}
@@ -213,8 +318,13 @@ func EnsureEnvironmentAwake(ctx Context, params WakeEnvironmentParams) (WakeEnvi
 		ctx.Trace("open: could not read the runtime's replica count (" + err.Error() + "); assuming it is running and continuing")
 		state = RuntimeRunState{Present: true, DesiredReplicas: 1}
 	}
-	decision := DecideRuntimeWake(state, params.Result.EnvConfig.Stopped)
+	decision := DecideRuntimeWake(state, params.Result.EnvConfig.Stopped, params.Reconnect)
 	result.AlreadyRunning = decision.AlreadyRunning
+	if decision.RefuseStopped {
+		return WakeEnvironmentResult{}, fmt.Errorf(
+			"%s/%s is stopped, and a session reconnect does not start it; run `erun open %s %s` to start it again",
+			target.Tenant, target.Environment, target.Tenant, target.Environment)
+	}
 	if decision.ClearIntent {
 		updated, err := ClearEnvironmentStopIntent(ctx, params.Result, params.SaveEnvConfig)
 		if err != nil {

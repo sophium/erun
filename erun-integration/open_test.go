@@ -622,6 +622,37 @@ func TestOpen(t *testing.T) {
 		golden.Equal(t, "open/dry_run_wakes_stopped_runtime_before_forwarding", normalize.Apply(result.Combined))
 	})
 
+	t.Run("reconnect_dry_run_refuses_to_start_a_stopped_runtime", func(t *testing.T) {
+		// The other half of the wake contract. A supervisor respawning `open` to
+		// re-establish a dropped session is not the operator opening the
+		// environment — and a stop is exactly what drops every session — so the
+		// reattach must fail rather than scale the runtime back up. The golden
+		// shows no scale command and no `stopped=false` config write.
+		setup := env.New(t)
+		fixture.SeedStoppedTenantEnv(t, setup, "team", "dev")
+		envVars := stubKubectlRunState(t, setup, 0, 0)
+		result := erun.Run(t, []string{"open", "team", "dev", "--reconnect", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit reconnecting to a stopped environment:\n%s", result.Combined)
+		}
+		golden.Equal(t, "open/reconnect_dry_run_refuses_to_start_a_stopped_runtime", normalize.Apply(result.Combined))
+	})
+
+	t.Run("reconnect_dry_run_reattaches_a_running_runtime", func(t *testing.T) {
+		// A reconnect against a running environment is the common case and must
+		// stay a normal open: forwards rebound, no scale, and — the part that
+		// matters — no config write, so an intent recorded from elsewhere is not
+		// retired by a background reattach.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envVars := stubKubectlRunState(t, setup, 1, 1)
+		result := erun.Run(t, []string{"open", "team", "dev", "--reconnect", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "open/reconnect_dry_run_reattaches_a_running_runtime", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_running_runtime_wake_is_quiet", func(t *testing.T) {
 		// The common path must stay silent: an environment already running gets
 		// one run-state read and no scale call, so `open` does not churn the

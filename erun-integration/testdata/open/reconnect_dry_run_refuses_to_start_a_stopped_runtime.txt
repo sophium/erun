@@ -1,0 +1,11 @@
+audit: erun open --dry-run --no-alias-prompt --no-shell --reconnect team dev
+config: would assign localportrangestart=17000 to team/dev
+trace-log: would append the full trace to <TMP>
+open: tenant=team environment=dev kubernetes-context=test-context remote=false no-shell=true ide=shell
+open: --reconnect, so a stopped cloud context is left stopped rather than started to reach it
+open: --reconnect, so any recorded stop stays recorded and a stopped runtime is not started
+open: pure primitive — not deploying (run `erun deploy` first, or pass --deploy to deploy before opening)
+kubectl --context test-context --namespace team-dev get deployment team-devops -o name
+kubectl --context test-context --namespace team-dev get deployment team-devops -o 'jsonpath={.spec.replicas}/{.status.readyReplicas}'
+runtime run state: deployment team-devops wants 0 replica(s), 0 ready
+team/dev is stopped, and a session reconnect does not start it; run `erun open team dev` to start it again

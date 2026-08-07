@@ -97,7 +97,7 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 		blocksIdleStop:         true,
 		clearIdleBlockOnOutput: true,
 		respawn: func() (terminalSession, error) {
-			return a.deps.startTerminal(openParams)
+			return a.deps.startTerminal(reconnectSessionParams(openParams))
 		},
 		startedAt: time.Now(),
 	}
@@ -269,7 +269,7 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 		kind:       sessionKindAI,
 		appSession: "ai",
 		respawn: func() (terminalSession, error) {
-			return a.deps.startTerminal(params)
+			return a.deps.startTerminal(reconnectSessionParams(params))
 		},
 		startedAt: time.Now(),
 		lastCols:  cols,

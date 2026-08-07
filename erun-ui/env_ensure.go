@@ -102,6 +102,14 @@ func (a *App) surfaceEnvRuntimeEnsureFailure(selection uiSelection, err error) {
 	if a.deployInFlightForEnv(selection) {
 		return
 	}
+	// A stopped environment is not an unreachable one. The rebind runs `open
+	// --reconnect`, which refuses to start a stopped runtime by design, so
+	// reporting that refusal as a failure would render the operator's own Stop
+	// as an outage and offer a deploy that is not the recovery.
+	if a.runtimeStoppedForSelection(selection) {
+		a.surfaceEnvRuntimeStopped(selection)
+		return
+	}
 	// The sidebar row's failed status is the persistent signal and is updated on
 	// every attempt. The notification is transient and posts only once per
 	// failure episode: the ensure retries on every tab open/respawn (it does not
@@ -109,15 +117,7 @@ func (a *App) surfaceEnvRuntimeEnsureFailure(selection uiSelection, err error) {
 	// the banner re-appear the instant the user dismissed it. The dedup is
 	// cleared when the env is reached again, so a later failure surfaces afresh.
 	a.emitEnvStatus(selection, envStatusFailed)
-	key := selectionKey(selection)
-	a.envEnsureMu.Lock()
-	if a.envEnsureFailNotified == nil {
-		a.envEnsureFailNotified = make(map[string]struct{})
-	}
-	_, alreadyNotified := a.envEnsureFailNotified[key]
-	a.envEnsureFailNotified[key] = struct{}{}
-	a.envEnsureMu.Unlock()
-	if alreadyNotified {
+	if a.ensureFailureAlreadyNotified(selection) {
 		return
 	}
 	// Tag the notification with the env + a stable source so the deploy
@@ -128,6 +128,35 @@ func (a *App) surfaceEnvRuntimeEnsureFailure(selection uiSelection, err error) {
 		"Could not reach the runtime for %s/%s: %s. Deploy the environment to bring it up.",
 		selection.Tenant, selection.Environment, strings.TrimSpace(err.Error()),
 	))
+}
+
+// surfaceEnvRuntimeStopped renders a stopped environment as stopped and names
+// the way back, so the row is recoverable by recognition rather than by the
+// operator recalling that opening is what starts one (Nielsen #1, #6, #9).
+func (a *App) surfaceEnvRuntimeStopped(selection uiSelection) {
+	a.emitEnvStatus(selection, envStatusRuntimeStopped)
+	if a.ensureFailureAlreadyNotified(selection) {
+		return
+	}
+	a.emitEnvNotification("info", selection.Tenant, selection.Environment, notificationSourceRuntimeUnreachable, fmt.Sprintf(
+		"%s/%s is stopped, so its sessions did not reconnect. Open it to start it again.",
+		selection.Tenant, selection.Environment,
+	))
+}
+
+// ensureFailureAlreadyNotified latches one notification per failure episode and
+// reports whether this attempt is a repeat. The latch is cleared when the env is
+// reached again, so a later episode surfaces afresh.
+func (a *App) ensureFailureAlreadyNotified(selection uiSelection) bool {
+	key := selectionKey(selection)
+	a.envEnsureMu.Lock()
+	defer a.envEnsureMu.Unlock()
+	if a.envEnsureFailNotified == nil {
+		a.envEnsureFailNotified = make(map[string]struct{})
+	}
+	_, alreadyNotified := a.envEnsureFailNotified[key]
+	a.envEnsureFailNotified[key] = struct{}{}
+	return alreadyNotified
 }
 
 // deployInFlightForEnv reports whether a terminal-locking deploy is currently

@@ -2,6 +2,8 @@ Open a shell in the tenant environment.
 
 open is a pure primitive: it starts the port-forwards and drops you into a shell against the runtime that is already deployed. It does not deploy on its own — run `erun deploy` first, or pass --deploy to deploy before opening (the operator-convenience shortcut: builds-here envs build→push→deploy, runtime envs install the current version). Use --vscode or --intellij to open an IDE instead, or --no-shell to print the setup commands for your current shell.
 
+Opening is also how you start an environment you stopped with `erun stop`. That makes open an operator gesture: anything that respawns it automatically to re-establish a dropped session must pass --reconnect, which reattaches without starting a stopped environment or discarding the recorded stop.
+
 Usage:
   erun open [TENANT] [ENVIRONMENT] [flags]
 
@@ -19,6 +21,7 @@ Flags:
       --intellij               Open the remote environment in IntelliJ IDEA instead of a shell
       --no-alias-prompt        Skip prompting to add a local shell alias with --no-shell
       --no-shell               Print shell commands to switch kubectl context, namespace, and worktree locally
+      --reconnect              Reattach a dropped session instead of opening: never starts a stopped environment and never clears a recorded stop
       --runtime-image string   Override the runtime image repository before opening
       --tenant string          Open a specific tenant
       --version string         Override the runtime chart and image version before opening
