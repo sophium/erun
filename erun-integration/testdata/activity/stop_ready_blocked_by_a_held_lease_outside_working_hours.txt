@@ -1,0 +1,2 @@
+audit: erun activity stop-ready --environment dev --tenant team
+environment is not stop eligible: lease: held by agent-run
