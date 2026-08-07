@@ -5,19 +5,23 @@ release: release root = <TMP>
 release: loading release config from project
 release: main branch = main, develop branch = develop
 release: resolving git branch and commit
-release: branch = develop, commit = <SHORTSHA>
+release: branch = main, commit = <SHORTSHA>
 release: resolving base version from VERSION file
 release: base version = <VERSION> (from <TMP>
-release: classified mode = candidate
-release: develop branch "develop" exists = true
+release: classified mode = stable
+release: develop branch "develop" exists = false
 <VERSION>
 audit: erun release
 ==> Releasing <VERSION>
-release: branch=develop mode=candidate version=<VERSION>
+release: branch=main mode=stable version=<VERSION>
+next version: <VERSION>
 publishing image: ghcr.io/sophium/api:<VERSION>
 release: worktree clean = true
 stage: sync-remote
+Current branch main is up to date.
 stage: release
+[main <SHORTSHA>] [skip ci] release <VERSION>
+ 2 files changed, 4 insertions(+), 4 deletions(-)
 stage: publish
 fingerprint image present locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
 fingerprint image present locally: ghcr.io/sophium/api:fp-<HEX16>-arm64
@@ -31,6 +35,12 @@ promoting from cached fingerprint image: ghcr.io/sophium/base:<VERSION>
 ==> Verified published chart base <VERSION>
 stage: verify-publication
 ==> Verified published image ghcr.io/sophium/api:<VERSION>
+stage: post-release-version-bump
+[main <SHORTSHA>] [skip ci] prepare <VERSION>
+ 1 file changed, 1 insertion(+), 1 deletion(-)
 stage: push
+To <TMP>
+   <SHORTSHA>..<SHORTSHA>  main -> main
+ * [new tag]         <VERSION> -> <VERSION>
 release version: <VERSION>
 ==> Released <VERSION> in <ELAPSED>

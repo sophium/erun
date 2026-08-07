@@ -13,10 +13,11 @@ release: develop branch "develop" exists = true
 audit: erun build --release
 ==> Building
 release: branch= mode=prerelease version=<VERSION>
-docker image: ghcr.io/sophium/api:<VERSION>
+publishing image: ghcr.io/sophium/api:<VERSION>
 release: worktree clean = true
 stage: release
 release tag already exists at HEAD; skipping <VERSION>
+stage: publish
 fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
 fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-arm64
 rebuilding ghcr.io/sophium/api:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
@@ -27,5 +28,7 @@ rebuilding ghcr.io/sophium/base:<VERSION> because fingerprint image is missing f
 ==> Verified published chart api <VERSION>
 ==> Publishing base <VERSION> to oci://ghcr.io/sophium/charts
 ==> Verified published chart base <VERSION>
+stage: verify-publication
+==> Verified published image ghcr.io/sophium/api:<VERSION>
 release version: <VERSION>
 ==> Built in <ELAPSED>

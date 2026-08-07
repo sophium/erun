@@ -55,12 +55,14 @@ The check applies whether the build is local (in which case `docker buildx image
 3. Check the release tag is not already present in git (`git rev-parse v<version>`) or the registry (`docker manifest inspect <registry>/<image>:<version>` for each image in the deploy plan). Code: `TAG_CONFLICT`. Override available via `erun build --release --force` (deletes the prior tag first).
 4. Sync `<chart>/Chart.yaml`'s `version` and `appVersion` fields to `<version>`. Commit on `release.mainbranch`.
 5. If **stable**: update package-manager metadata. Commit alongside the chart sync.
-6. Build per-arch images and push to the registry. Assemble the manifest list. Verify multi-arch coverage (see above).
-7. `git push --follow-tags` to publish the release commit + tag.
-8. If **stable**: open a follow-up commit on `release.developbranch` that bumps the canonical `VERSION` to the next patch (`X.Y.Z+1`). Push.
-9. Exit `0`.
+6. Create the release tag **locally**. Nothing is public yet.
+7. Build per-arch images and push to the registry. Assemble the manifest list. Verify multi-arch coverage (see above). Publish every co-located helm chart and read each one back.
+8. Re-resolve each published image's manifest from the registry. A tag that does not resolve aborts here, before anything is public.
+9. `git push` the release tag. If **stable**: sync the package-manager checksums against the now-public source archive and commit.
+10. If **stable**: open a follow-up commit that bumps the canonical `VERSION` to the next patch (`X.Y.Z+1`), merge to `release.developbranch`, and `git push --follow-tags` both branches.
+11. Exit `0`.
 
-Each step is wrapped in an abort-and-rollback boundary: a failure at step N rolls back side effects at steps `< N` only if those steps were filesystem-local (chart sync revert, package-manager metadata revert). Registry pushes are not rolled back — the contract is that a partially-published release leaves a recoverable state (re-run `--dry-run` to inspect, then resume with explicit flags).
+Steps 1–8 leave nothing public: a failure there rolls back nothing on the remote because nothing reached it, and the canonical `VERSION` still holds the version being released, so re-running retries the same version. Registry pushes themselves are not rolled back — republishing a version is idempotent. From step 9 the tag is public, but by then the artifacts it names are too.
 
 ## Error codes
 
@@ -69,9 +71,11 @@ Each step is wrapped in an abort-and-rollback boundary: a failure at step N roll
 | `INVALID_VERSION` | Canonical `VERSION` fails the version regex. | `1` |
 | `DIRTY_WORKTREE` | Uncommitted changes in the working tree. | `1` |
 | `TAG_CONFLICT` | Release tag already exists in git or in the registry. | `1` |
-| `MULTI_ARCH_VERIFY_FAILED` | Manifest list missing `linux/amd64` or `linux/arm64`. The release tag is **not** created on git. | `2` |
-| `REGISTRY_PUSH_AUTH_FAILED` | Registry rejected the push after one interactive-login retry. | `2` |
-| `GIT_PUSH_FAILED` | `git push --follow-tags` failed (network / permission). Local tag and registry images exist; rerun `git push --follow-tags` to complete. | `2` |
+| `MULTI_ARCH_VERIFY_FAILED` | Manifest list missing `linux/amd64` or `linux/arm64`. The release tag is **not** pushed. | `2` |
+| `UNPUBLISHABLE_RELEASE_IMAGE` | The release stamps an image no build in this run publishes — usually `erun release` run from inside one component's build directory. Refused during resolution, before any stage runs. | `1` |
+| `PUBLISHED_ARTIFACT_UNRESOLVABLE` | A just-pushed image manifest did not resolve on read-back. The release tag is **not** pushed. | `2` |
+| `REGISTRY_PUSH_AUTH_FAILED` | Registry rejected the push after one interactive-login retry. The release tag is **not** pushed. | `2` |
+| `GIT_PUSH_FAILED` | `git push --follow-tags` failed (network / permission). The version's images and charts are already published; rerun `erun release` to complete the ref push. | `2` |
 | `PACKAGE_METADATA_WRITE_FAILED` | Homebrew formula / Scoop manifest write failed after the registry push. Registry has the tag; rerun `--dry-run` to inspect, fix manually. | `2` |
 
 In every case, `--dry-run` reports the planned steps without executing them.

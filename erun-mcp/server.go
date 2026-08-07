@@ -358,7 +358,7 @@ func registerInspectionTools(server *mcp.Server, runtime RuntimeConfig) {
 	}, outputsDownloadTool())
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "release",
-		Description: "Plan and execute a project release from the runtime repo root using .erun/config.yaml branch policy",
+		Description: "Cut a project release from the runtime repo root using .erun/config.yaml branch policy. Stamps the release version into the charts and packaging metadata and commits and tags it locally, then builds and publishes that version's images and helm charts and reads each one back from the registry, and only then pushes the tag, prepares the next patch version, and pushes the branches. A release that completes means deploy can resolve the image and the chart at that version; a release that cannot publish fails while nothing is public. Set preview to resolve and return the plan without executing it.",
 	}, releaseTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "contribute_clone",

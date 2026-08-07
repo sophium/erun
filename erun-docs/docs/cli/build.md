@@ -31,7 +31,7 @@ Charts are build source too: `erun build` also packages every Helm chart under `
 | Flag | Description |
 |---|---|
 | `--deploy` | **Operator shortcut.** After a successful build, push the minted version and deploy it to the same environment — `build → push → deploy` in one command. |
-| `--release` | **Operator shortcut.** Pin a stable release version instead of a snapshot, then run the [`erun release`](/cli/release) flow (which pushes and tags it). |
+| `--release` | **Operator shortcut.** Pin a stable release version instead of a snapshot and run the full [`erun release`](/cli/release) flow — publish the version, then tag it. |
 | `--force` | Delete and recreate conflicting release tags when combined with `--release`. |
 | `--dry-run` | Resolve and print every `docker build` / `docker tag` / `docker push` command without executing. |
 

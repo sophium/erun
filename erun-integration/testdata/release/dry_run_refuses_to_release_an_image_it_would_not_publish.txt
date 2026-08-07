@@ -15,24 +15,6 @@ audit: erun release --dry-run
 release: branch=main mode=stable version=<VERSION>
 next version: <VERSION>
 publishing image: ghcr.io/sophium/api:<VERSION>
-git -C <TMP> status --porcelain --untracked-files=no
-release: worktree clean = true
-stage: sync-remote
-cd <TMP> && git fetch origin
-cd <TMP> && git rebase origin/main
-stage: release
-write <TMP>
-  apiVersion: v2
-  appVersion: <VERSION>
-  name: api
-  version: <VERSION>
-write <TMP>
-  apiVersion: v2
-  appVersion: <VERSION>
-  name: base
-  version: <VERSION>
-cd <TMP> && git add erun-devops/k8s/api/Chart.yaml erun-devops/k8s/base/Chart.yaml
-cd <TMP> && git commit -m '[skip ci] release <VERSION>'
-git -C <TMP> rev-parse '<VERSION>^{}'
-git -C <TMP> rev-parse HEAD
-release tag "<VERSION>" already exists at <HEX>, expected current HEAD <HEX>
+publishing image: ghcr.io/sophium/web:<VERSION>
+release <VERSION> resolved images that nothing in this run publishes: ghcr.io/sophium/web:<VERSION>
+a release publishes before it tags, so it will not announce a version the registry never receives; run `erun release` from the project root so every release image resolves to a build

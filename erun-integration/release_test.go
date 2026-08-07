@@ -2,6 +2,7 @@ package integration
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -85,7 +86,7 @@ func TestRelease(t *testing.T) {
 	t.Run("dry_run_in_git_repo", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedGitRepo(t, setup.Cwd)
-		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: releaseEnv(t, setup)})
 		golden.Equal(t, "release/dry_run_in_git_repo", normalize.Apply(result.Combined))
 	})
 
@@ -94,7 +95,7 @@ func TestRelease(t *testing.T) {
 		// a stable one.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
-		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: releaseEnv(t, setup)})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -107,7 +108,7 @@ func TestRelease(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
 		fixture.RunGit(t, setup.Cwd, "branch", "develop")
-		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: releaseEnv(t, setup)})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -119,7 +120,7 @@ func TestRelease(t *testing.T) {
 		// main.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
-		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: releaseEnv(t, setup)})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -155,7 +156,7 @@ func TestRelease(t *testing.T) {
 
 		stubs := filepath.Join(setup.Cwd, "stubs")
 		fixture.StubBinary(t, stubs, "dpkg-deb", "")
-		envVars := append(setup.Env(),
+		envVars := append(releaseEnv(t, setup),
 			"ERUN_HOST_OS_OVERRIDE=linux",
 			// The support check resolves dpkg-deb through exec.LookPath, so the
 			// stub has to be reachable on PATH rather than via ERUN_..._BIN.
@@ -186,7 +187,7 @@ func TestRelease(t *testing.T) {
 		fixture.RunGit(t, setup.Cwd, "add", ".")
 		fixture.RunGit(t, setup.Cwd, "commit", "-m", "add linux release script")
 
-		envVars := append(setup.Env(), "ERUN_HOST_OS_OVERRIDE=darwin")
+		envVars := append(releaseEnv(t, setup), "ERUN_HOST_OS_OVERRIDE=darwin")
 		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -203,7 +204,7 @@ func TestRelease(t *testing.T) {
 		fixture.SeedMarketplaceJSON(t, setup.Cwd)
 		fixture.RunGit(t, setup.Cwd, "add", ".claude-plugin")
 		fixture.RunGit(t, setup.Cwd, "commit", "-m", "add marketplace.json")
-		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: releaseEnv(t, setup)})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -221,7 +222,7 @@ func TestRelease(t *testing.T) {
 		fixture.SeedScoopManifest(t, setup.Cwd, validScoopManifest)
 		fixture.RunGit(t, setup.Cwd, "add", "bucket")
 		fixture.RunGit(t, setup.Cwd, "commit", "-m", "add scoop manifest")
-		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: releaseEnv(t, setup)})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -240,7 +241,7 @@ func TestRelease(t *testing.T) {
 		fixture.SeedMarketplaceJSON(t, setup.Cwd)
 		fixture.RunGit(t, setup.Cwd, "add", "Formula", "bucket", ".claude-plugin")
 		fixture.RunGit(t, setup.Cwd, "commit", "-m", "add packaging artifacts")
-		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: releaseEnv(t, setup)})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -256,7 +257,7 @@ func TestRelease(t *testing.T) {
 		fixture.SeedScoopManifest(t, setup.Cwd, scoopManifestMissingMingwAndBin)
 		fixture.RunGit(t, setup.Cwd, "add", "bucket")
 		fixture.RunGit(t, setup.Cwd, "commit", "-m", "add scoop manifest")
-		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: releaseEnv(t, setup)})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit for invalid scoop manifest, got 0: %s", result.Combined)
 		}
@@ -270,7 +271,7 @@ func TestRelease(t *testing.T) {
 		fixture.SeedScoopManifest(t, setup.Cwd, scoopManifestEmptyScript)
 		fixture.RunGit(t, setup.Cwd, "add", "bucket")
 		fixture.RunGit(t, setup.Cwd, "commit", "-m", "add scoop manifest")
-		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: releaseEnv(t, setup)})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit for empty scoop script, got 0: %s", result.Combined)
 		}
@@ -285,7 +286,7 @@ func TestRelease(t *testing.T) {
 		fixture.SeedScoopManifest(t, setup.Cwd, "{\n  \"version\": \"1.0.0\",\n")
 		fixture.RunGit(t, setup.Cwd, "add", "bucket")
 		fixture.RunGit(t, setup.Cwd, "commit", "-m", "add malformed scoop manifest")
-		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: releaseEnv(t, setup)})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit for malformed scoop manifest, got 0: %s", result.Combined)
 		}
@@ -298,7 +299,7 @@ func TestRelease(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
 		fixture.RunGit(t, setup.Cwd, "tag", "-a", "v1.4.2", "-m", "Release 1.4.2")
-		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: releaseEnv(t, setup)})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -314,7 +315,7 @@ func TestRelease(t *testing.T) {
 		fixture.RunGit(t, setup.Cwd, "tag", "-a", "v1.4.2", "-m", "Release 1.4.2")
 		fixture.RunGit(t, setup.Cwd, "commit", "--allow-empty", "-m", "advance head")
 
-		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: releaseEnv(t, setup)})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit for stale release tag without --force, got 0: %s", result.Combined)
 		}
@@ -330,7 +331,7 @@ func TestRelease(t *testing.T) {
 		mustWriteFile(t, filepath.Join(setup.Cwd, "VERSION"), "2.5.0\n")
 		fixture.RunGit(t, setup.Cwd, "add", "VERSION")
 		fixture.RunGit(t, setup.Cwd, "commit", "-m", "add version file")
-		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: releaseEnv(t, setup)})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -358,7 +359,7 @@ func TestRelease(t *testing.T) {
 		mustWriteFile(t, filepath.Join(setup.Cwd, "tools", "assets", "VERSION"), "3.0.0\n")
 		fixture.RunGit(t, setup.Cwd, "add", ".")
 		fixture.RunGit(t, setup.Cwd, "commit", "-m", "add ambiguous release roots")
-		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: releaseEnv(t, setup)})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit for ambiguous release roots, got 0: %s", result.Combined)
 		}
@@ -380,7 +381,7 @@ func TestRelease(t *testing.T) {
 		fixture.RunGit(t, setup.Cwd, "commit", "--allow-empty", "-m", "advance head")
 		fixture.RunGit(t, setup.Cwd, "push", "origin", "main")
 
-		result := erun.Run(t, []string{"release", "--dry-run", "--force"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"release", "--dry-run", "--force"}, erun.RunOptions{Cwd: setup.Cwd, Env: releaseEnv(t, setup)})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -407,7 +408,7 @@ func TestRelease(t *testing.T) {
 		fixture.RunGit(t, setup.Cwd, "add", "erun-docs/.gitignore")
 		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "ignore node_modules in docs")
 
-		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: releaseEnv(t, setup)})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -430,7 +431,7 @@ func TestRelease(t *testing.T) {
 		}
 		mustWriteFile(t, filepath.Join(setup.Cwd, ".idea", "workspace.xml"), "<project/>\n")
 
-		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: releaseEnv(t, setup)})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -456,6 +457,7 @@ func TestRelease(t *testing.T) {
 esac
 `)
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "git")...)
+		envVars = append(envVars, stubPublishToolchain(t, setup)...)
 		result := erun.Run(t, []string{"release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -488,6 +490,7 @@ esac
 			TagSHA:      releaseSHA,
 			RemoteTag:   "v1.4.2",
 		})...)
+		envVars = append(envVars, stubPublishToolchain(t, setup)...)
 
 		result := erun.Run(t, []string{"release", "--force"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
@@ -529,10 +532,139 @@ esac
 		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 		mustWriteFile(t, filepath.Join(setup.Cwd, "erun-devops", "docker", "api", "Dockerfile"), "FROM alpine:3.23\n")
 
-		result := erun.Run(t, []string{"release"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"release"}, erun.RunOptions{Cwd: setup.Cwd, Env: releaseEnv(t, setup)})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit for dirty worktree, got 0: %s", result.Combined)
 		}
 		golden.Equal(t, "release/real_run_dirty_worktree_fails", normalize.Apply(result.Combined))
 	})
+
+	t.Run("real_run_publishes_before_the_tag_reaches_origin", func(t *testing.T) {
+		// Regression. A release used to run only its git stages: it
+		// tagged, announced, and bumped the version without ever building or
+		// publishing an image or a chart, so the announced version was
+		// undeployable and the gap only surfaced at the next deploy's chart
+		// pull. Release now publishes between its local stages and its
+		// outward-facing ones. Real git against a bare origin proves the
+		// ordering behaviourally: the publish stage runs, the read-back
+		// verification resolves each image and chart, and only then does the
+		// tag reach origin. docker and helm are stubbed because the harness has
+		// no daemon or registry; git is real so "public" means public.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
+		seedBareOrigin(t, setup)
+
+		result := erun.Run(t, []string{"release"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubPublishToolchain(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "release/real_run_publishes_before_the_tag_reaches_origin", normalize.Apply(result.Combined))
+
+		if tags := remoteTags(t, setup); !strings.Contains(tags, "refs/tags/v1.4.2") {
+			t.Fatalf("release tag did not reach origin after a successful publish:\n%s", tags)
+		}
+		assertVersionFile(t, setup, "1.4.3\n")
+	})
+
+	t.Run("real_run_publish_failure_leaves_no_public_tag", func(t *testing.T) {
+		// The other half of the same contract: when the publish cannot
+		// complete, the release must fail while nothing is public. docker fails
+		// every invocation, so the build inside the publish stage errors out.
+		// The tag must not exist on origin and VERSION must still hold the
+		// version that was being released, so re-running retries the same
+		// version rather than stranding it behind a bump.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
+		seedBareOrigin(t, setup)
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		fixture.StubBinaryAdvanced(t, stubs, "docker", fixture.StubBinarySpec{Stderr: "simulated docker failure", ExitCode: 1})
+		fixture.StubBinary(t, stubs, "helm", "")
+
+		result := erun.Run(t, []string{"release"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when the publish fails, got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "release/real_run_publish_failure_leaves_no_public_tag", normalize.Apply(result.Combined))
+
+		if tags := remoteTags(t, setup); strings.Contains(tags, "refs/tags/v1.4.2") {
+			t.Fatalf("a failed release pushed its tag to origin:\n%s", tags)
+		}
+		assertVersionFile(t, setup, "1.4.2\n")
+	})
+
+	t.Run("dry_run_refuses_to_release_an_image_it_would_not_publish", func(t *testing.T) {
+		// Run from inside one component's build context, release resolves only
+		// that component's build but still stamps and would tag every image on
+		// the release version line. That is the shape of the original defect —
+		// a version announced for artifacts nobody publishes — so it is refused
+		// during resolution, before any stage runs.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
+		webDir := filepath.Join(setup.Cwd, "erun-devops", "docker", "web")
+		if err := os.MkdirAll(webDir, 0o755); err != nil {
+			t.Fatalf("mkdir web component dir: %v", err)
+		}
+		mustWriteFile(t, filepath.Join(webDir, "Dockerfile"), "FROM alpine:3.22\n")
+		fixture.RunGit(t, setup.Cwd, "add", ".")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add web component")
+
+		componentCwd := filepath.Join(setup.Cwd, "erun-devops", "docker", "api")
+		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: componentCwd, Env: releaseEnv(t, setup)})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a release that cannot publish every image, got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "release/dry_run_refuses_to_release_an_image_it_would_not_publish", normalize.Apply(result.Combined))
+	})
+}
+
+// releaseEnv declares the docker stub every release scenario now needs: release
+// resolves the build execution that publishes the version, so it inspects the
+// local image store for fingerprint cache tags. The stub reports no local image
+// so the plan consistently shows a rebuild.
+func releaseEnv(t *testing.T, setup env.Setup) []string {
+	t.Helper()
+	return append(setup.Env(), stubDockerNoLocalImages(t, setup)...)
+}
+
+// stubPublishToolchain declares succeeding docker and helm stubs so a real-run
+// release can execute its publish stage — build, push, manifest assembly, chart
+// publish, and the read-back verification — without a daemon or a registry.
+func stubPublishToolchain(t *testing.T, setup env.Setup) []string {
+	t.Helper()
+	stubs := filepath.Join(setup.Cwd, "stubs")
+	fixture.StubBinary(t, stubs, "docker", "")
+	fixture.StubBinary(t, stubs, "helm", "")
+	return fixture.StubEnv(stubs, "docker", "helm")
+}
+
+// seedBareOrigin gives a release scenario a real remote, so "the tag is public"
+// is an observable fact rather than a stubbed git call that returned zero.
+func seedBareOrigin(t *testing.T, setup env.Setup) {
+	t.Helper()
+	remoteRoot := filepath.Join(setup.Home, "origin.git")
+	fixture.RunGit(t, setup.Home, "init", "-q", "--bare", remoteRoot)
+	fixture.RunGit(t, setup.Cwd, "remote", "add", "origin", remoteRoot)
+	fixture.RunGit(t, setup.Cwd, "push", "-u", "-q", "origin", "main")
+}
+
+func remoteTags(t *testing.T, setup env.Setup) string {
+	t.Helper()
+	cmd := exec.Command("git", "ls-remote", "--tags", "origin")
+	cmd.Dir = setup.Cwd
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git ls-remote --tags origin: %v: %s", err, output)
+	}
+	return string(output)
+}
+
+func assertVersionFile(t *testing.T, setup env.Setup, want string) {
+	t.Helper()
+	version, err := os.ReadFile(filepath.Join(setup.Cwd, "erun-devops", "VERSION"))
+	if err != nil {
+		t.Fatalf("read VERSION: %v", err)
+	}
+	if got := string(version); got != want {
+		t.Fatalf("VERSION is %q, want %q", got, want)
+	}
 }

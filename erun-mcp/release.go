@@ -19,21 +19,18 @@ type ReleaseOutput struct {
 
 func releaseTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReleaseInput) (*mcp.CallToolResult, ReleaseOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ReleaseInput) (*mcp.CallToolResult, ReleaseOutput, error) {
-		workDir, err := runtimeRepoPath(runtime.Context)
-		if err != nil {
-			return nil, ReleaseOutput{}, err
-		}
-
-		findProjectRoot := func() (string, string, error) {
-			return runtimeFindProjectRoot(runtime.Context, workDir)
-		}
-		spec, err := eruncommon.ResolveReleaseSpec(eruncommon.Context{}, findProjectRoot, eruncommon.ReleaseParams{})
-		if err != nil {
-			return nil, ReleaseOutput{}, err
-		}
-
-		commandOutput, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, func(runCtx eruncommon.Context, _ string) error {
-			return eruncommon.RunReleaseSpec(runCtx, spec, eruncommon.GitCommandRunner, eruncommon.BuildScriptRunner)
+		var spec eruncommon.ReleaseSpec
+		commandOutput, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, func(runCtx eruncommon.Context, workDir string) error {
+			// Release resolves the same execution `erun build --release` does, so
+			// it publishes the version's images and charts before it tags them.
+			execution, err := resolveRuntimeBuildExecution(runCtx, runtime, workDir, "", "", true, false)
+			if err != nil {
+				return err
+			}
+			if resolved, ok := eruncommon.BuildExecutionReleaseSpec(execution); ok {
+				spec = resolved
+			}
+			return eruncommon.RunReleaseExecution(runCtx, execution, eruncommon.GitCommandRunner, runtime.BuildScriptRunner, runtime.BuildDockerImage, runtimePushFunc(runtime))
 		})
 		if err != nil {
 			return nil, ReleaseOutput{CommandOutput: commandOutput, Spec: spec}, err

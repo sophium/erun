@@ -86,6 +86,13 @@ var defaultRules = []Replacement{
 	{regexp.MustCompile(`-[0-9a-f]{16}\b`), "-<HEX16>"},
 	{regexp.MustCompile(`\b[0-9a-f]{32,}\b`), "<HEX>"},
 	{regexp.MustCompile(`\bcommit = [0-9a-f]{7,12}\b`), "commit = <SHORTSHA>"},
+	// Real git output in a real-run scenario: `git commit` prints
+	// `[<branch> <sha>]` and `git push` prints an indented `<old>..<new>` range
+	// per ref. Both carry the commit the fixture repo happened to produce on
+	// this run. The range rule is anchored to the start of a push status line so
+	// a diff's `index <blob>..<blob>` — content-derived and stable — survives.
+	{regexp.MustCompile(`\[([^\s\]]+) [0-9a-f]{7,40}\]`), "[$1 <SHORTSHA>]"},
+	{regexp.MustCompile(`(?m)^(\s+)[0-9a-f]{7,40}\.\.[0-9a-f]{7,40}\b`), "${1}<SHORTSHA>..<SHORTSHA>"},
 	// Safety net for a real home path that leaks despite the test HOME override.
 	{regexp.MustCompile(`/Users/[^/\s'"]+`), "<HOME>"},
 	{regexp.MustCompile(`/home/[^/\s'"]+`), "<HOME>"},

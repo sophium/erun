@@ -1,5 +1,3 @@
-<VERSION>
-audit: erun release --dry-run
 release: resolving project root
 release: project root = <TMP>
 release: resolving release module root
@@ -7,14 +5,14 @@ release: release root = <TMP>
 release: loading release config from project
 release: main branch = main, develop branch = develop
 release: resolving git branch and commit
-git -C <TMP> rev-parse --abbrev-ref HEAD
-git -C <TMP> rev-parse --short HEAD
 release: branch = main, commit = <SHORTSHA>
 release: resolving base version from VERSION file
 release: base version = <VERSION> (from <TMP>
 release: classified mode = stable
-git -C <TMP> show-ref --verify --quiet refs/heads/develop
 release: develop branch "develop" exists = false
+<VERSION>
+audit: erun release --dry-run
+build: this project has no <tenant>-devops build environment — ask Claude to "init erun build environment" to set one up with the erun-build-env skill
 release: branch=main mode=stable version=<VERSION>
 next version: <VERSION>
 git -C <TMP> status --porcelain --untracked-files=no
@@ -25,6 +23,8 @@ cd <TMP> && git rebase origin/main
 stage: release
 git -C <TMP> rev-parse '<VERSION>^{}'
 cd <TMP> && git tag -a <VERSION> -m 'Release <VERSION>'
+stage: publish
+stage: verify-publication
 stage: post-release-version-bump
 write <TMP>
   <VERSION>
@@ -32,3 +32,4 @@ cd <TMP> && git add VERSION
 cd <TMP> && git commit -m '[skip ci] prepare <VERSION>'
 stage: push
 cd <TMP> && git push --follow-tags origin main
+release version: <VERSION>

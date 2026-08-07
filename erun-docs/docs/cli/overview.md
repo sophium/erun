@@ -27,7 +27,7 @@ The `build → release → push → deploy` commands form ERun's delivery pipeli
 | [`erun stop`](/cli/stop) | Stop an environment so its CPU and memory go back to the ones you are using. |
 | [`erun delete`](/cli/delete) | Tear down an environment — remote namespace + local config. |
 | [`erun build`](/cli/build) | Build the project's container images (agent envs only — runtime envs receive deploys). |
-| [`erun release`](/cli/release) | Cut a release: stamp the version, tag it, push the tag. |
+| [`erun release`](/cli/release) | Cut a release: stamp the version, publish its images and charts, then tag it. |
 | [`erun push`](/cli/push) | Push built images to the configured container registry. |
 | [`erun deploy`](/cli/deploy) | Roll a version out to an environment (build · push · helm upgrade). |
 | [`erun publish`](/cli/publish) | Mirror a built version's images to the shared registry (`from`→`to`), no build or deploy. |
