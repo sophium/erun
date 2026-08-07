@@ -16,6 +16,8 @@ ERun's release flow is repository-wide: a release moves all modules together (`e
 
 `erun release` builds release-tagged images for both `linux/amd64` and `linux/arm64`, then hands the version to [`erun push`](/cli/push), which pushes the per-arch tags and assembles a manifest list so `<image>:<version>` resolves to either arch automatically. Release does not push directly — it reuses `push` for every publish, so a released version and a pushed snapshot are published the same way.
 
+That publish happens **before** the release tag reaches origin, and the release re-resolves each published manifest afterwards. A completed release therefore means the announced version is deployable; a release that cannot publish fails while the tag is still local.
+
 Base images (`erun-ubuntu`, `erun-dind`, `erun-ubuntu`-derived) publish first; dependent images publish only after their bases are available in the registry.
 
 ## Published runtime chart
@@ -52,7 +54,7 @@ release:
 The conventional flow on a release:
 
 1. CI sees a release-tagged commit land on `release.mainbranch`.
-2. `erun release` reads `<projectroot>/<tenant>-devops/VERSION`, syncs the chart `version` / `appVersion`, builds the multi-arch images, runs `push` at the release version (per-arch tags + manifest list + the runtime chart), creates the release commit + tag, then advances the next patch on `release.developbranch`.
+2. `erun release` reads `<projectroot>/<tenant>-devops/VERSION`, syncs the chart `version` / `appVersion`, creates the release commit and a local tag, builds the multi-arch images, runs `push` at the release version (per-arch tags + manifest list + the runtime chart), verifies each published manifest resolves, and only then pushes the tag and advances the next patch on `release.developbranch`.
 3. A subsequent `erun deploy <env> --version <released version>` against a runtime env installs the now-published image and chart from the registry by reference.
 
 For projects that use a single-branch trunk model, set both fields to the same branch.

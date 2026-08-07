@@ -11,28 +11,21 @@ release: base version = <VERSION> (from <TMP>
 release: classified mode = stable
 release: develop branch "develop" exists = false
 <VERSION>
-audit: erun release --dry-run
+audit: erun release
+==> Releasing <VERSION>
 release: branch=main mode=stable version=<VERSION>
 next version: <VERSION>
 publishing image: ghcr.io/sophium/api:<VERSION>
-git -C <TMP> status --porcelain --untracked-files=no
 release: worktree clean = true
 stage: sync-remote
-cd <TMP> && git fetch origin
-cd <TMP> && git rebase origin/main
+Current branch main is up to date.
 stage: release
-write <TMP>
-  apiVersion: v2
-  appVersion: <VERSION>
-  name: api
-  version: <VERSION>
-write <TMP>
-  apiVersion: v2
-  appVersion: <VERSION>
-  name: base
-  version: <VERSION>
-cd <TMP> && git add erun-devops/k8s/api/Chart.yaml erun-devops/k8s/base/Chart.yaml
-cd <TMP> && git commit -m '[skip ci] release <VERSION>'
-git -C <TMP> rev-parse '<VERSION>^{}'
-git -C <TMP> rev-parse HEAD
-release tag "<VERSION>" already exists at <HEX>, expected current HEAD <HEX>
+[main <SHORTSHA>] [skip ci] release <VERSION>
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+stage: publish
+fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
+fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-arm64
+rebuilding ghcr.io/sophium/api:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
+==> Release failed after <ELAPSED>
+verify multi-arch build capability (docker buildx inspect): exit status 1
+simulated docker failure

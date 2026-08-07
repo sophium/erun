@@ -162,7 +162,7 @@ func (d rootDependencies) commands() []*cobra.Command {
 		newContributeCmd(common.GitCommandRunner),
 		newIdleCmd(d.configStore),
 		newJobCmd(),
-		newReleaseCmd(common.FindProjectRoot, common.GitCommandRunner),
+		newReleaseCmd(d.store, common.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, common.GitCommandRunner, common.BuildScriptRunner, common.DockerImageBuilder, common.DockerRegistryLogin, runSelect, d.push),
 		newVersionCmd(func() (versionCommandInfo, error) {
 			return resolveVersionCommandBuildInfo(common.FindProjectRoot)
 		}, common.ResolveDefaultRuntimeRegistryVersions),

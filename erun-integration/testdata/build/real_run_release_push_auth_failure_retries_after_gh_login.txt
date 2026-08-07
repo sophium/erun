@@ -13,7 +13,7 @@ release: develop branch "develop" exists = true
 audit: erun build --release
 ==> Building
 release: branch= mode=prerelease version=<VERSION>
-docker image: ghcr.io/sophium/api:<VERSION>
+publishing image: ghcr.io/sophium/api:<VERSION>
 git -C <TMP> status --porcelain --untracked-files=no
 release: worktree clean = true
 stage: release
@@ -32,6 +32,7 @@ cd <TMP> && git commit -m '[skip ci] release <VERSION>'
 git -C <TMP> rev-parse '<VERSION>^{}'
 git -C <TMP> rev-parse HEAD
 release tag already exists at HEAD; skipping <VERSION>
+stage: publish
 docker image inspect ghcr.io/sophium/api:fp-<HEX16>-amd64
 fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
 docker image inspect ghcr.io/sophium/api:fp-<HEX16>-arm64
@@ -66,5 +67,8 @@ cd <TMP> && helm push base-<VERSION> oci://ghcr.io/sophium/charts
 ==> Publishing base <VERSION> to oci://ghcr.io/sophium/charts
 helm pull oci://ghcr.io/sophium/charts/base --version <VERSION> --destination <TMP>
 ==> Verified published chart base <VERSION>
+stage: verify-publication
+docker manifest inspect ghcr.io/sophium/api:<VERSION>
+==> Verified published image ghcr.io/sophium/api:<VERSION>
 release version: <VERSION>
 ==> Built in <ELAPSED>
