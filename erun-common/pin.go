@@ -1,0 +1,337 @@
+package eruncommon
+
+import (
+	"encoding/json"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+)
+
+// One erun version is written down in several places in a tenant repo — the
+// Terraform module refs, every umbrella chart's erun dependencies, the build-env
+// image tag, and the environment's own runtimeversion — and they only work when
+// they agree. Nothing enforced that, so they drifted: a repo was found pinned to
+// three different versions at once, and realigning it meant editing seven files
+// by hand.
+//
+// The sites are found by pattern rather than by walking a fixed layout. The
+// Terraform root alone has three legitimate locations, and a tenant is free to
+// add modules and umbrellas, so a scan that recognises an erun reference wherever
+// it appears is the thing that stays true as a repo grows.
+
+// PinSiteKind names what kind of reference a site is, so a plan can be read
+// without knowing the repo's layout.
+type PinSiteKind string
+
+const (
+	PinSiteRuntimeVersion PinSiteKind = "runtime-version"
+	PinSiteTerraformRef   PinSiteKind = "terraform-ref"
+	PinSiteHelmDependency PinSiteKind = "helm-dependency"
+	PinSiteRuntimeImage   PinSiteKind = "runtime-image"
+)
+
+// PinSite is one place a version is recorded, and what it would become.
+type PinSite struct {
+	Kind PinSiteKind `json:"kind"`
+	// Path is repo-relative, or empty for the environment's own config, which
+	// is not a file in the repo.
+	Path    string `json:"path,omitempty"`
+	Detail  string `json:"detail,omitempty"`
+	Current string `json:"current"`
+	Target  string `json:"target"`
+}
+
+// Aligned reports whether this site already holds the target, which is what
+// makes a re-pin safe to re-run.
+func (s PinSite) Aligned() bool {
+	return strings.TrimSpace(s.Current) == strings.TrimSpace(s.Target)
+}
+
+// PinPlan is every site a re-pin would touch, resolved before anything is
+// written so it can be rendered and refused as a whole.
+type PinPlan struct {
+	Tenant      string    `json:"tenant"`
+	Environment string    `json:"environment"`
+	Target      string    `json:"target"`
+	Previous    string    `json:"previous,omitempty"`
+	ProjectRoot string    `json:"projectRoot"`
+	Sites       []PinSite `json:"sites"`
+}
+
+// Changes is the sites that would actually move. A plan whose changes are empty
+// is a no-op, which is the expected result of running a re-pin twice.
+func (p PinPlan) Changes() []PinSite {
+	changes := make([]PinSite, 0, len(p.Sites))
+	for _, site := range p.Sites {
+		if !site.Aligned() {
+			changes = append(changes, site)
+		}
+	}
+	return changes
+}
+
+func (p PinPlan) Aligned() bool { return len(p.Changes()) == 0 }
+
+// erunTerraformRefPattern matches an erun Terraform module reference and
+// captures the tag it is pinned to. Only erun's own repository is rewritten: a
+// tenant's other module sources have nothing to do with the erun version.
+var erunTerraformRefPattern = regexp.MustCompile(`(github\.com/sophium/erun\.git//[^"'\s?]*\?ref=)v?([0-9][^"'\s]*)`)
+
+// erunHelmDependencyPattern matches one erun OCI chart dependency's version line
+// within a Chart.yaml. The repository line anchors it so a tenant's own charts,
+// which are versioned independently, are left alone.
+var erunHelmDependencyPattern = regexp.MustCompile(`(?ms)(-\s+name:\s*(\S+)[^\n]*\n(?:\s+[^\n]*\n)*?\s+repository:\s*[^\n]*sophium[^\n]*\n(?:\s+[^\n]*\n)*?\s+version:\s*)(\S+)`)
+
+// erunDevopsImagePattern matches a build-env base image tag.
+var erunDevopsImagePattern = regexp.MustCompile(`(erun-devops:)([0-9][^\s"']*)`)
+
+// ResolvePinPlan reads every pin site under projectRoot and reports what moving
+// to target would change. It never writes, so a caller can render the plan,
+// refuse it, or apply it.
+func ResolvePinPlan(projectRoot, tenant, environment string, env EnvConfig, target string) (PinPlan, error) {
+	projectRoot = strings.TrimSpace(projectRoot)
+	target = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(target), "v"))
+	if projectRoot == "" {
+		return PinPlan{}, fmt.Errorf("a project root is required to resolve the pin sites")
+	}
+	if target == "" {
+		return PinPlan{}, fmt.Errorf("a target erun version is required")
+	}
+
+	plan := PinPlan{
+		Tenant:      tenant,
+		Environment: environment,
+		Target:      target,
+		ProjectRoot: projectRoot,
+		Previous:    strings.TrimSpace(env.RuntimeVersion),
+	}
+	plan.Sites = append(plan.Sites, PinSite{
+		Kind:    PinSiteRuntimeVersion,
+		Detail:  tenant + "/" + environment,
+		Current: strings.TrimSpace(env.RuntimeVersion),
+		Target:  target,
+	})
+	if image := strings.TrimSpace(env.RuntimeImage); image != "" {
+		if _, version, ok := splitImageTag(image); ok {
+			plan.Sites = append(plan.Sites, PinSite{
+				Kind:    PinSiteRuntimeImage,
+				Detail:  image,
+				Current: version,
+				Target:  target,
+			})
+		}
+	}
+
+	fileSites, err := scanPinFiles(projectRoot, target)
+	if err != nil {
+		return PinPlan{}, err
+	}
+	plan.Sites = append(plan.Sites, fileSites...)
+	return plan, nil
+}
+
+func splitImageTag(image string) (repository, tag string, ok bool) {
+	index := strings.LastIndex(image, ":")
+	if index <= 0 || index == len(image)-1 {
+		return "", "", false
+	}
+	// A registry port is not a tag separator.
+	if strings.Contains(image[index+1:], "/") {
+		return "", "", false
+	}
+	return image[:index], image[index+1:], true
+}
+
+// scanPinFiles walks the repo once and recognises each erun reference it finds.
+// Vendored trees are skipped: a chart pulled into charts/ is a build artifact of
+// a pin, not a pin, and rewriting it would edit something the next
+// `helm dependency update` regenerates anyway.
+func scanPinFiles(projectRoot, target string) ([]PinSite, error) {
+	var sites []PinSite
+	walkErr := filepath.WalkDir(projectRoot, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if entry.IsDir() {
+			if skipPinScanDir(entry.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		relative, relErr := filepath.Rel(projectRoot, path)
+		if relErr != nil {
+			return nil
+		}
+		found, readErr := pinSitesInFile(path, filepath.ToSlash(relative), entry.Name(), target)
+		if readErr != nil {
+			return nil
+		}
+		sites = append(sites, found...)
+		return nil
+	})
+	if walkErr != nil {
+		return nil, walkErr
+	}
+	sort.SliceStable(sites, func(i, j int) bool {
+		if sites[i].Path == sites[j].Path {
+			return sites[i].Detail < sites[j].Detail
+		}
+		return sites[i].Path < sites[j].Path
+	})
+	return sites, nil
+}
+
+func skipPinScanDir(name string) bool {
+	switch name {
+	case ".git", "node_modules", "charts", ".terraform", "vendor", "build", "dist":
+		return true
+	}
+	return false
+}
+
+func pinSitesInFile(path, relative, name, target string) ([]PinSite, error) {
+	if !pinScannableFile(name) {
+		return nil, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	content := string(data)
+
+	var sites []PinSite
+	for _, match := range erunTerraformRefPattern.FindAllStringSubmatch(content, -1) {
+		sites = append(sites, PinSite{Kind: PinSiteTerraformRef, Path: relative, Detail: match[0], Current: match[2], Target: target})
+	}
+	for _, match := range erunHelmDependencyPattern.FindAllStringSubmatch(content, -1) {
+		sites = append(sites, PinSite{Kind: PinSiteHelmDependency, Path: relative, Detail: match[2], Current: match[3], Target: target})
+	}
+	for _, match := range erunDevopsImagePattern.FindAllStringSubmatch(content, -1) {
+		sites = append(sites, PinSite{Kind: PinSiteRuntimeImage, Path: relative, Detail: "erun-devops", Current: match[2], Target: target})
+	}
+	return sites, nil
+}
+
+func pinScannableFile(name string) bool {
+	switch {
+	case strings.HasSuffix(name, ".tf"):
+		return true
+	case name == "Chart.yaml":
+		return true
+	case name == "Dockerfile" || strings.HasPrefix(name, "Dockerfile."):
+		return true
+	}
+	return false
+}
+
+// ApplyPinPlan rewrites every file site to the target. The environment's own
+// runtimeversion is not written here: it lives in erun's config store, which the
+// caller owns, so the transport applies that half and this owns the repo half.
+func ApplyPinPlan(plan PinPlan) error {
+	byPath := map[string]struct{}{}
+	for _, site := range plan.Changes() {
+		if site.Path == "" {
+			continue
+		}
+		byPath[site.Path] = struct{}{}
+	}
+	paths := make([]string, 0, len(byPath))
+	for path := range byPath {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+
+	for _, relative := range paths {
+		full := filepath.Join(plan.ProjectRoot, filepath.FromSlash(relative))
+		data, err := os.ReadFile(full)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", relative, err)
+		}
+		info, err := os.Stat(full)
+		if err != nil {
+			return fmt.Errorf("stat %s: %w", relative, err)
+		}
+		updated := rewritePinnedVersions(string(data), plan.Target)
+		if updated == string(data) {
+			continue
+		}
+		if err := os.WriteFile(full, []byte(updated), info.Mode().Perm()); err != nil {
+			return fmt.Errorf("write %s: %w", relative, err)
+		}
+	}
+	return nil
+}
+
+// rewritePinnedVersions moves every erun reference in one file to the target,
+// and touches nothing else — a re-pin edits pins, never content.
+func rewritePinnedVersions(content, target string) string {
+	content = erunTerraformRefPattern.ReplaceAllString(content, "${1}v"+target)
+	content = erunHelmDependencyPattern.ReplaceAllString(content, "${1}"+target)
+	content = erunDevopsImagePattern.ReplaceAllString(content, "${1}"+target)
+	return content
+}
+
+// pinHistoryFileName records what the repo was pinned to before the last
+// re-pin, so reverting is one motion rather than remembering a number. It lives
+// beside the project's erun config because it describes this tree.
+const pinHistoryFileName = "pin-history.json"
+
+type pinHistory struct {
+	Previous map[string]string `json:"previous"`
+}
+
+func pinHistoryPath(projectRoot string) string {
+	return filepath.Join(projectRoot, projectConfigDir, pinHistoryFileName)
+}
+
+func pinHistoryKey(tenant, environment string) string {
+	return strings.TrimSpace(tenant) + "/" + strings.TrimSpace(environment)
+}
+
+// RecordPinPrevious remembers the version this environment was on before a
+// re-pin. A re-pin that changes nothing does not overwrite the record: reverting
+// twice must still reach the version you came from, not the one you are on.
+func RecordPinPrevious(projectRoot, tenant, environment, previous string) error {
+	previous = strings.TrimSpace(previous)
+	if previous == "" {
+		return nil
+	}
+	path := pinHistoryPath(projectRoot)
+	history := readPinHistory(path)
+	if history.Previous == nil {
+		history.Previous = map[string]string{}
+	}
+	history.Previous[pinHistoryKey(tenant, environment)] = previous
+	data, err := json.MarshalIndent(history, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(data, '\n'), 0o644)
+}
+
+// PinPrevious reports the version recorded before the last re-pin, which is what
+// a revert targets.
+func PinPrevious(projectRoot, tenant, environment string) (string, bool) {
+	history := readPinHistory(pinHistoryPath(projectRoot))
+	previous, ok := history.Previous[pinHistoryKey(tenant, environment)]
+	return strings.TrimSpace(previous), ok && strings.TrimSpace(previous) != ""
+}
+
+func readPinHistory(path string) pinHistory {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return pinHistory{}
+	}
+	var history pinHistory
+	if err := json.Unmarshal(data, &history); err != nil {
+		return pinHistory{}
+	}
+	return history
+}

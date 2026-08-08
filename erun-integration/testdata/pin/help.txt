@@ -1,0 +1,27 @@
+Re-pin every erun version reference for an environment: the Terraform module refs, each umbrella chart's erun dependencies, the build-env image tag, and the environment's own runtime version.
+
+Idempotent, and a no-op once aligned. It rewrites the source of truth only — realizing the new version (terraform apply, deploy) stays a separate explicit step.
+
+Usage:
+  erun pin [TENANT] [ENVIRONMENT] [flags]
+
+Examples:
+  erun pin --list
+  erun pin acme dev --dry-run
+  erun pin acme dev --version <VERSION>
+  erun pin acme dev --revert
+
+Flags:
+      --dry-run              Resolve and trace mutating actions without executing them.
+      --environment string   Re-pin a specific environment
+  -h, --help                 help for pin
+      --latest               Pin to the latest published stable release
+      --list                 List the published erun versions available to pin to
+      --revert               Pin back to the version recorded before the last re-pin
+      --tenant string        Re-pin a specific tenant
+      --version string       Pin to this erun version
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

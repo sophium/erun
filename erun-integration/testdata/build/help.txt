@@ -42,6 +42,7 @@ Available Commands:
   mcp         Run ERun as an MCP server over HTTP
   open        Open a shell in the tenant environment
   outputs     List and download files an agent produced in the runtime pod
+  pin         Re-pin every erun version reference for an environment
   publish     Mirror a built version's images to the shared registry
   release     Cut a release: publish the version's images and charts, then tag and announce it
   sshd        Remote SSH utilities

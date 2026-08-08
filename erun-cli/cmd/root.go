@@ -141,6 +141,7 @@ func (d rootDependencies) commands() []*cobra.Command {
 		d.openCommand(),
 		newStopCmd(d.resolveOpen, d.store.SaveEnvConfig),
 		d.sshdCommand(),
+		d.pinCommand(),
 		devopsCmd,
 		d.optionalBuildCommand(),
 		d.optionalPushCommand(),
@@ -190,6 +191,12 @@ func (d rootDependencies) openCommand() *cobra.Command {
 		launchVSCode,
 		launchIntelliJ,
 	)
+}
+
+func (d rootDependencies) pinCommand() *cobra.Command {
+	return newPinCmd(func(ctx common.Context) common.Context {
+		return withCloudContextPreflight(ctx, d.store)
+	}, d.resolveOpen, d.store.SaveEnvConfig, common.FindProjectRoot)
 }
 
 func (d rootDependencies) sshdCommand() *cobra.Command {

@@ -336,6 +336,12 @@ func registerDeliveryTools(server *mcp.Server, runtime RuntimeConfig) {
 		Description: "Expose an in-namespace Service at a stable public hostname under the platform's services zone (requires a platform block in .erun/config.yaml): ensure the per-environment wildcard DNS record points at the env's ingress IP and apply a Host-routing Ingress. Supports preview.",
 	}, exposeTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
+		Name: "pin",
+		Description: "Re-pin every erun version reference for this environment in one motion: the Terraform module ?ref, each umbrella chart's erun chart dependencies, the build-env image tag, and the environment's own runtime version. " +
+			"They only work when they agree, and nothing else keeps them in step. Idempotent and a no-op once aligned. Refuses a version that is not published. Set revert to go back to the version recorded before the last re-pin. " +
+			"Set preview to return the full plan — every site, old and new — without writing. Edits the source of truth only: realizing the version (terraform apply, deploy) stays a separate explicit step.",
+	}, pinTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "terraform",
 		Description: "Run a hosted platform's per-environment Terraform from terraform-<tenant>/<environment>/ (or <tenant>-devops/terraform-<tenant>/<environment>/, or the paths.terraform base from .erun/config.yaml) for the resolved tenant/environment: resolve the env folder, pick up the symlinked common.tf, and run its main.tf with <environment>.tfvars. State and the provider cache live on the durable home directory (not the playbook tree), so they survive a runtime pod restart. operation is apply (init → fmt → plan → apply), plan (read-only), or destroy. apply/destroy mutate real cloud and cluster state and require confirm to equal the environment name. Injects TF_VAR_cloudflare_api_token from CLOUDFLARE_API_TOKEN when present. Set preview to resolve and return the terraform commands without executing them.",
 	}, terraformTool(runtime))

@@ -213,6 +213,7 @@ func TestHTTPHandlerExposesVersionTool(t *testing.T) {
 		"list",
 		"outputs_download",
 		"outputs_list",
+		"pin",
 		"publish",
 		"push",
 		"raw",

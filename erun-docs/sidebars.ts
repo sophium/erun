@@ -36,6 +36,7 @@ const sidebars: SidebarsConfig = {
         'cli/stop',
         'cli/delete',
         'cli/build',
+        'cli/pin',
         'cli/release',
         'cli/push',
         'cli/deploy',

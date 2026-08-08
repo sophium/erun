@@ -49,6 +49,9 @@ type CommandOutput struct {
 	// Build lets an Agent capture the minted version and thread it into `push`
 	// / `deploy`, since MCP composes the pure primitives itself.
 	Build *eruncommon.BuildResult `json:"build,omitempty"`
+	// Pin carries the resolved re-pin plan so a caller sees every reference that
+	// moved without diffing the tree afterwards.
+	Pin *PinOutput `json:"pin,omitempty"`
 }
 
 var ansiRegexp = regexp.MustCompile(`\x1b\[[0-9;]*m`)
