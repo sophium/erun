@@ -1690,8 +1690,16 @@ const aiActivityIdleThreshold = 3 * time.Second
 // `managed == nil` guard visible: folding the nil check in here hid it from
 // static analysis, which then read every later field access as a possible nil
 // dereference.
+//
+// An orchestrator is deliberately NOT here. It runs an interactive agent TUI,
+// which repaints its prompt and counters continuously, so "this terminal is
+// emitting bytes" is true forever and the silence rule that releases the latch
+// never fires — the row span forever and the desktop burned CPU reading redraws
+// to keep it that way. An env's AI tab survives the same weakness only because
+// the pod heartbeat independently observes its program exit. An orchestrator has
+// no pod, so it reports its own turn boundaries instead (orchestrator_activity.go).
 func aiActivityKind(kind sessionKind) bool {
-	return kind == sessionKindAI || kind == sessionKindOrchestrator
+	return kind == sessionKindAI
 }
 
 func (a *App) recordAIActivity(managed *managedTerminal) {
