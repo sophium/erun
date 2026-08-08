@@ -741,6 +741,20 @@ func TestBuildOrchestratorLaunchResumeWithPromptRunsIt(t *testing.T) {
 // consumed by the preceding multi-value --mcp-config unless option parsing ends
 // first, and the host shell executes the metacharacters unless the value is
 // quoted for the shell that re-parses the command line.
+// An orchestrator is contracted to resolve ambiguity itself and carry a task to
+// a verified end, so stopping to ask is a defect — and one asked while the
+// operator is away stalls the work until they come back. The harness cannot ask
+// if it does not have the tool, which makes that structural rather than a matter
+// of the agent's own judgement about its instructions.
+func TestBuildOrchestratorLaunchCannotStopToAsk(t *testing.T) {
+	for _, goos := range []string{"linux", "windows"} {
+		_, launch := buildOrchestratorLaunch(goos, "", false, "", "", "")
+		if command := launch[len(launch)-1]; !strings.Contains(command, "--disallowedTools AskUserQuestion") {
+			t.Fatalf("%s launch must deny the ask tool: %q", goos, command)
+		}
+	}
+}
+
 func TestBuildOrchestratorLaunchHandsThePromptOverVerbatim(t *testing.T) {
 	const prompt = "Run `erun-ui/playwright/run.sh`, read $HOME, keep C:\\tmp\\x and \"quotes\" and 'apostrophes'"
 

@@ -2,23 +2,40 @@ package eruncommon
 
 import (
 	"fmt"
+	"io"
 	"strings"
 	"time"
 )
 
 func RunDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBuilderFunc) error {
-	if build == nil {
-		build = DockerImageBuilder
+	traceDockerBuild(ctx, buildInput)
+	if ctx.DryRun {
+		return nil
 	}
+	return executeDockerBuild(ctx, buildInput, build, ctx.Stdout, ctx.Stderr)
+}
+
+// traceDockerBuild emits everything one build would announce, and does nothing
+// else. It is separate from execution because the trace is a public contract —
+// the dry-run goldens — and must stay in dependency order no matter how the
+// builds themselves are scheduled.
+func traceDockerBuild(ctx Context, buildInput DockerBuildSpec) {
 	buildInput.Verbosity = ctx.Verbosity
 	traceIncrementalDecision(ctx, buildInput)
 	for _, command := range buildInput.traceCommands() {
 		ctx.TraceCommand(command.Dir, command.Name, command.Args...)
 	}
-	if ctx.DryRun {
-		return nil
+}
+
+// executeDockerBuild runs one build against the given streams. The streams are
+// a parameter rather than ctx's own so a concurrent wave can buffer each image
+// separately and replay them in a fixed order.
+func executeDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBuilderFunc, stdout, stderr io.Writer) error {
+	if build == nil {
+		build = DockerImageBuilder
 	}
-	return build(buildInput, ctx.Stdout, ctx.Stderr)
+	buildInput.Verbosity = ctx.Verbosity
+	return build(buildInput, stdout, stderr)
 }
 
 // traceIncrementalDecision re-emits the fingerprint inspect already run during
@@ -79,13 +96,53 @@ func describeMissingPlatforms(platforms []string) string {
 	return "platforms [" + strings.Join(labels, ", ") + "]"
 }
 
+// RunDockerBuilds builds every discovered image, running independent ones
+// concurrently. Most images in a multi-image project have no edge between them,
+// so the sequential loop this replaced spent most of its wall-clock waiting.
+//
+// Two phases, and the split is the point: every trace line is emitted first, in
+// dependency order, before anything builds. That keeps dry-run output and the
+// decision lines identical whatever the scheduling, so only timing changes.
 func RunDockerBuilds(ctx Context, builds []DockerBuildSpec, build DockerImageBuilderFunc) error {
-	for _, buildInput := range markLocalBaseImageBuilds(orderedDockerBuildSpecs(builds)) {
-		if err := RunDockerBuild(ctx, buildInput, build); err != nil {
-			return err
-		}
+	ordered := markLocalBaseImageBuilds(orderedDockerBuildSpecs(builds))
+	waves, err := resolveBuildWaves(ordered)
+	if err != nil {
+		return err
 	}
-	return nil
+	jobs := resolveBuildJobs(ctx, len(ordered))
+	if jobs <= 1 {
+		// Sequential keeps each image's decision lines next to its own build
+		// output. Hoisting the traces here would separate a failure from the
+		// image that produced it, which is a real loss and buys nothing when only
+		// one thing runs at a time.
+		for _, buildInput := range ordered {
+			if err := RunDockerBuild(ctx, buildInput, build); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	// Concurrent: the traces are hoisted ahead of every build, in dependency
+	// order, because interleaved output from images racing each other would be
+	// neither readable nor reproducible.
+	traceBuildWavePlan(ctx, waves)
+	for _, buildInput := range ordered {
+		traceDockerBuild(ctx, buildInput)
+	}
+	if ctx.DryRun {
+		return nil
+	}
+	return runBuildWaves(ctx, waves, build, jobs)
+}
+
+// runDockerBuildsSequentially is the same two phases with the schedule pinned to
+// one at a time. The push and deploy paths use it: those builds push images and
+// assemble multi-arch manifests as they go, and the release path shares a single
+// in-pod docker daemon, so their concurrency is a separate question from this
+// one and is deliberately not answered here.
+func runDockerBuildsSequentially(ctx Context, builds []DockerBuildSpec, build DockerImageBuilderFunc) error {
+	ctx.BuildJobs = 1
+	return RunDockerBuilds(ctx, builds, build)
 }
 
 // traceBuildUmbrella brackets a build with the `==> Building` / `==> Built`
@@ -221,7 +278,7 @@ func recordDockerPushTags(tags map[string]struct{}, pushes []DockerPushSpec) map
 }
 
 func buildAndPushDeployDockerImages(ctx Context, builds []DockerBuildSpec, build DockerImageBuilderFunc, push DockerPushFunc, pushedTags map[string]struct{}) error {
-	if err := RunDockerBuilds(ctx, builds, build); err != nil {
+	if err := runDockerBuildsSequentially(ctx, builds, build); err != nil {
 		return err
 	}
 	for _, buildInput := range builds {
@@ -311,7 +368,7 @@ func RunDockerPushSpec(ctx Context, pushInput DockerPushSpec, buildInput *Docker
 }
 
 func RunDockerPushExecution(ctx Context, execution DockerPushExecutionSpec, build DockerImageBuilderFunc, push DockerPushFunc) error {
-	if err := RunDockerBuilds(ctx, execution.builds, build); err != nil {
+	if err := runDockerBuildsSequentially(ctx, execution.builds, build); err != nil {
 		return err
 	}
 	builtAndPushedTags := make(map[string]struct{}, len(execution.builds))

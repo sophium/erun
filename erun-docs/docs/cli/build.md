@@ -34,12 +34,33 @@ Charts are build source too: `erun build` also packages every Helm chart under `
 | `--release` | **Operator shortcut.** Pin a stable release version instead of a snapshot and run the full [`erun release`](/cli/release) flow — publish the version, then tag it. |
 | `--force` | Delete and recreate conflicting release tags when combined with `--release`. |
 | `--dry-run` | Resolve and print every `docker build` / `docker tag` / `docker push` command without executing. |
+| `--jobs`, `-j` | Build this many images at once. `0` (default) resolves a conservative degree from the machine; `1` builds strictly one at a time. |
 
 `--deploy` and `--release` are **convenience shortcuts for an Operator at the terminal** — they compose the pure primitives so you don't have to type three commands. Programmatic callers (the desktop app, scripts, an Agent driving MCP) don't use them; they run `build`, `push`, and `deploy` themselves and thread the version between the steps. See [Command primitives](/concepts/command-primitives).
 
 To capture the minted version for that kind of orchestration, run `erun build --output json`, which prints `{version, baseVersion, images}` on stdout — the version an orchestrator hands to `push` and `deploy`. `--output {text|json}` is a root flag available on every command (see [CLI flag spec · Common flags](/agent-reference/cli-flags)).
 
 Advanced flags (`--no-incremental`, `--version`) and the full build lifecycle (binfmt verification, fingerprint resolution, per-arch build → manifest list, the `--output json` shape) are on [Agent reference · CLI flag spec · `erun build`](/agent-reference/cli-flags#erun-build).
+
+## Concurrency
+
+Independent images build **concurrently by default**. Most images in a multi-image project have no relationship to each other, so building them one after another spends most of its wall-clock waiting.
+
+What stays ordered is only what has to: an image whose Dockerfile `FROM`s a sibling does not start until that sibling has finished and written its tags. `erun build` resolves those edges into **waves** — one wave is a set of images that can build at the same time — and reports the plan before it starts:
+
+```
+build: 9 images in 2 waves — wave 1 (8): …; wave 2 (1): erun-mcp
+```
+
+The plan is a pure function of the Dockerfiles, so it is the same on every machine. The number of workers is not printed, because it is derived from the machine.
+
+`--jobs 1` restores strictly sequential building, including keeping each image's decision lines next to its own build output. Above one, each image's output is buffered and flushed in wave order, so a run is readable and two runs of the same build produce the same stream.
+
+`ERUN_BUILD_JOBS` sets the same degree by environment.
+
+`push`, `release`, and `build --deploy` build sequentially regardless: those builds publish images and assemble multi-arch manifests as they go, and the release path shares a single in-pod Docker daemon.
+
+A `FROM` cycle between two images has no valid schedule; it fails naming the images rather than deadlocking.
 
 ## Examples
 

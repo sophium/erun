@@ -212,6 +212,18 @@ export class Sidebar {
     return this.erunSection().getByRole('button', { name: `Edit orchestrator ${name} settings` });
   }
 
+  // The orchestrator's Outputs button, mirroring the env row's. Like the other
+  // row actions it is pointer-events-none until hover/focus and a hover raises
+  // the IconTooltip popper that would swallow a click, so it is driven by
+  // keyboard.
+  orchestratorOutputsButton(name: string): Locator {
+    return this.erunSection().getByRole('button', { name: `Outputs for orchestrator ${name}` });
+  }
+
+  async openOrchestratorOutputs(name: string): Promise<void> {
+    await this.orchestratorOutputsButton(name).press('Enter');
+  }
+
   // The row's shape-encoded status light, labelled by state, is the same
   // StatusDotGlyph env rows use — so status is never colour-only.
   orchestratorStatusDot(name: string, state: 'running' | 'stopped'): Locator {

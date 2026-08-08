@@ -19,8 +19,19 @@ import type { AgentOutputEntry } from '@/types';
 // tracks operations): the surface for the output files an agent left behind.
 export function OutputsDialog(): React.ReactElement {
   const dispatch = useAppDispatch();
-  const { open, loading, error, dir, entries, downloadingName, runningName, status, statusError } =
-    useAppSelector((state) => state.outputsDialog);
+  const {
+    open,
+    loading,
+    error,
+    dir,
+    entries,
+    downloadingName,
+    runningName,
+    status,
+    statusError,
+    target,
+  } = useAppSelector((state) => state.outputsDialog);
+  const orchestrator = target?.kind === 'orchestrator';
   return (
     <Dialog
       open={open}
@@ -30,14 +41,20 @@ export function OutputsDialog(): React.ReactElement {
         }
       }}
     >
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="sm:max-w-2xl" data-testid="outputs-dialog">
         <DialogHeader>
-          <DialogTitle>Agent outputs</DialogTitle>
+          <DialogTitle>
+            {target?.kind === 'orchestrator' ? `Outputs — ${target.name}` : 'Agent outputs'}
+          </DialogTitle>
           <DialogDescription>
-            Files an agent produced in this environment’s runtime pod
-            {dir ? <span className="font-mono"> ({dir})</span> : null}. Download pulls each onto
-            this machine; folders download as a .tar.gz archive. Host-runnable binaries can be run
-            on this machine from the copy workspace sync mirrors down.
+            {orchestrator
+              ? 'Files this orchestrator produced on this machine'
+              : 'Files an agent produced in this environment’s runtime pod'}
+            {dir ? <span className="font-mono"> ({dir})</span> : null}. Download saves each
+            somewhere of your choosing; folders download as a .tar.gz archive.{' '}
+            {orchestrator
+              ? 'They were produced here, so runnable ones run in place.'
+              : 'Host-runnable binaries can be run on this machine from the copy workspace sync mirrors down.'}
           </DialogDescription>
         </DialogHeader>
         <OutputsDialogBody
@@ -46,6 +63,7 @@ export function OutputsDialog(): React.ReactElement {
           entries={entries}
           downloadingName={downloadingName}
           runningName={runningName}
+          hostNative={orchestrator}
         />
         {status ? (
           <p
@@ -81,12 +99,14 @@ function OutputsDialogBody({
   entries,
   downloadingName,
   runningName,
+  hostNative,
 }: {
   loading: boolean;
   error: string;
   entries: AgentOutputEntry[];
   downloadingName: string;
   runningName: string;
+  hostNative: boolean;
 }): React.ReactElement {
   if (loading) {
     return (
@@ -106,7 +126,7 @@ function OutputsDialogBody({
   if (entries.length === 0) {
     return (
       <p className="py-4 text-sm text-muted-foreground">
-        No outputs yet. Files an agent or skill writes to the pod’s outputs directory show up here.
+        No outputs yet. Files written to the agent’s $ERUN_OUTPUTS_DIR show up here.
       </p>
     );
   }
@@ -120,6 +140,7 @@ function OutputsDialogBody({
             downloading={downloadingName === entry.name}
             running={runningName === entry.name}
             anyBusy={downloadingName !== '' || runningName !== ''}
+            hostNative={hostNative}
           />
         ))}
       </ul>
@@ -132,15 +153,17 @@ function OutputRow({
   downloading,
   running,
   anyBusy,
+  hostNative,
 }: {
   entry: AgentOutputEntry;
   downloading: boolean;
   running: boolean;
   anyBusy: boolean;
+  hostNative: boolean;
 }): React.ReactElement {
   const dispatch = useAppDispatch();
   const Icon = entry.isDir ? Folder : FileText;
-  const runnable = !entry.isDir && isHostRunnableArtifact(entry.name);
+  const runnable = !entry.isDir && isHostRunnableArtifact(entry.name, hostNative);
   return (
     <li className="flex items-center gap-3 py-2.5">
       <Icon className="size-4 flex-none text-muted-foreground" aria-hidden="true" />
@@ -192,13 +215,46 @@ function OutputRow({
 }
 
 // isHostRunnableArtifact reports whether an artifact is a binary the host can
-// launch directly. Scoped to Windows executable suffixes — the primary case is a
-// cross-built .exe an agent produced in the Linux pod — so the action stays
-// inert for report/data outputs and on hosts that produce none.
-function isHostRunnableArtifact(name: string): boolean {
+// launch directly. For a pod-produced artifact that means Windows executable
+// suffixes — the primary case is a cross-built .exe from the Linux pod — so the
+// action stays inert for report/data outputs and on hosts that produce none.
+//
+// An orchestrator's outputs were produced on this host, so a native binary there
+// usually carries no suffix at all; requiring one would leave the action dead for
+// exactly the case it exists to serve. Data suffixes are excluded instead, which
+// is the safer direction to be wrong in: an unrunnable file simply fails to
+// launch, whereas a hidden button cannot be recovered from.
+function isHostRunnableArtifact(name: string, hostNative: boolean): boolean {
   const lower = name.toLowerCase();
-  return lower.endsWith('.exe') || lower.endsWith('.bat') || lower.endsWith('.cmd');
+  if (lower.endsWith('.exe') || lower.endsWith('.bat') || lower.endsWith('.cmd')) {
+    return true;
+  }
+  if (!hostNative) {
+    return false;
+  }
+  return !NON_RUNNABLE_OUTPUT_SUFFIXES.some((suffix) => lower.endsWith(suffix));
 }
+
+const NON_RUNNABLE_OUTPUT_SUFFIXES = [
+  '.md',
+  '.txt',
+  '.json',
+  '.yaml',
+  '.yml',
+  '.csv',
+  '.log',
+  '.html',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.svg',
+  '.pdf',
+  '.zip',
+  '.tar',
+  '.gz',
+  '.patch',
+  '.diff',
+];
 
 function formatOutputSize(size: number): string {
   if (size < 1024) {

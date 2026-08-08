@@ -15,7 +15,12 @@ type Context struct {
 	// Output selects how a command renders its machine-readable result. JSON mode
 	// puts the structured result on Stdout while logging stays on Stderr, so an
 	// orchestrator captures an uncorrupted payload.
-	Output                     OutputMode
+	Output OutputMode
+	// BuildJobs caps how many images build at once. Concurrency is execution
+	// policy, so it rides the context rather than the docker command target,
+	// which flows into the env-agnostic resolvers where policy must not leak.
+	// Zero means "resolve it" (see resolveBuildJobs); one is strictly sequential.
+	BuildJobs                  int
 	Stdin                      io.Reader
 	Stdout                     io.Writer
 	Stderr                     io.Writer

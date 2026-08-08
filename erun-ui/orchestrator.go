@@ -508,6 +508,14 @@ const orchestratorModel = "opus"
 // lockstep with erun-common's claudeEffortFlags(ultracode).
 const orchestratorUltracodeFlag = ` --settings '{"ultracode":true}'`
 
+// orchestratorNoAskFlag removes the harness's ability to stop and ask. An
+// orchestrator's contract is to resolve ambiguity from the code, tests and
+// sensible defaults and carry the task to a verified end — so a question is a
+// defect, not caution, and one asked while the operator is away stalls the work
+// indefinitely. Denying the tool makes that structural rather than a matter of
+// the agent's judgement about its own instructions.
+const orchestratorNoAskFlag = " --disallowedTools AskUserQuestion"
+
 // orchestratorLaunchCommand resolves how to launch the host AI harness. It runs
 // through the host shell so an npm claude.cmd / .ps1 shim resolves (ConPTY can't
 // exec a .cmd directly). A non-empty initialPrompt seeds a fresh session (the
@@ -576,7 +584,7 @@ func buildOrchestratorLaunch(goos, sessionID string, sessionExists bool, initial
 	if goos == "windows" {
 		quote = powerShellQuote
 	}
-	flags := orchestratorUltracodeFlag + " --model " + orchestratorModel
+	flags := orchestratorUltracodeFlag + orchestratorNoAskFlag + " --model " + orchestratorModel
 	if strings.TrimSpace(mcpConfigPath) != "" {
 		flags += " --mcp-config " + quote(mcpConfigPath)
 	}

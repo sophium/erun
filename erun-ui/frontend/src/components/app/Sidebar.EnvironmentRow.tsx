@@ -97,7 +97,7 @@ function EnvironmentRowOutputsButton({
         aria-label={`Outputs for ${tenantName} / ${environmentName}`}
         onClick={(event) => {
           event.stopPropagation();
-          void dispatch(openOutputs(selection));
+          void dispatch(openOutputs({ kind: 'environment', selection }));
         }}
       >
         <Download />

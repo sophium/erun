@@ -148,6 +148,10 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 
 `--deploy`, `--release`, `--force`, `--dry-run`, `--output`.
 
+`--jobs`/`-j` sets how many images build at once: `0` (default) resolves a conservative degree from the host, `1` is strictly sequential, `N` is explicit. `ERUN_BUILD_JOBS` sets the same value by environment, and is the deterministic seam for tests — pin it rather than inheriting the runner's core count.
+
+Scheduling honours the `FROM` graph: independent images share a **wave**, and an image that `FROM`s a sibling waits for it. With more than one worker the wave plan is emitted as a trace line before any build, followed by every image's decision lines in dependency order, then the builds themselves with each image's output buffered and flushed in wave order — so output is deterministic at any degree and the dry-run contract is unaffected. At `--jobs 1` the decision lines stay interleaved with each image's own output, exactly as before. `push`, `release`, and `build --deploy` are always sequential. A `FROM` cycle fails with an error naming the images rather than deadlocking.
+
 `--deploy` and `--release` are **operator-convenience switches** that compose downstream primitives (`--deploy` → push + deploy; `--release` → the release flow). Programmatic callers do not use them: they run `erun build --output json`, capture `version`, and call `push`/`deploy` themselves. See [Structured output](#structured-output-flag).
 
 ### Advanced flags
