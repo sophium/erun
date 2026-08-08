@@ -623,8 +623,14 @@ func TestOrchestratorSessionStartHookPreservesExistingSettings(t *testing.T) {
 		t.Fatalf("expected unrelated key preserved, got %v\n%s", settings["model"], data)
 	}
 	hooks, _ := settings["hooks"].(map[string]any)
-	if _, ok := hooks["PreToolUse"]; !ok {
-		t.Fatalf("expected unrelated hook event preserved:\n%s", data)
+	// PreToolUse is an event erun writes to as well now, so "preserved" has to
+	// mean the operator's own hook is still there — not merely that the key is.
+	preToolUse, _ := hooks["PreToolUse"].([]any)
+	if !strings.Contains(string(data), "echo keep") {
+		t.Fatalf("expected the operator's own PreToolUse hook preserved:\n%s", data)
+	}
+	if len(preToolUse) < 2 {
+		t.Fatalf("expected erun's report merged alongside it, got %d blocks:\n%s", len(preToolUse), data)
 	}
 	if _, ok := hooks["SessionStart"]; !ok {
 		t.Fatalf("expected SessionStart hook added:\n%s", data)

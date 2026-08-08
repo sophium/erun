@@ -415,9 +415,18 @@ func ensureOrchestratorSessionStartHook(dir string) error {
 	// The agent reports its own turn boundaries. Whether it is working cannot be
 	// read off its terminal: an agent TUI repaints continuously, so an
 	// output-driven latch never clears.
+	//
+	// The busy report goes on the tool-call events as well as the turn's start, so
+	// a turn longer than the staleness bound renews it instead of letting it
+	// expire underneath work that is still running. Each event is merged rather
+	// than assigned: this settings file is shared with the operator, and the
+	// tool-call events in particular are somewhere they are likely to have hooks
+	// of their own, which an assignment would silently delete.
 	busyHook, idleHook := orchestratorActivityHooks()
-	hooks["UserPromptSubmit"] = busyHook
-	hooks["Stop"] = idleHook
+	for _, event := range []string{"UserPromptSubmit", "PreToolUse", "PostToolUse"} {
+		hooks[event] = mergeOrchestratorActivityHook(hooks[event], busyHook)
+	}
+	hooks["Stop"] = mergeOrchestratorActivityHook(hooks["Stop"], idleHook)
 	settings["hooks"] = hooks
 	out, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
@@ -430,8 +439,12 @@ func ensureOrchestratorSessionStartHook(dir string) error {
 // injecting command runs on both new starts (startup) and reopens (resume).
 func orchestratorSessionStartHook(dir string) []any {
 	command := map[string]any{"type": "command", "command": orchestratorSkillHookCommand(dir)}
+	// A session killed mid-turn never writes its end, so a new or reopened one
+	// would inherit the previous run's "working" and spin on arrival with nothing
+	// running. Clearing it here is what makes that guarantee real.
+	idle := map[string]any{"type": "command", "command": orchestratorActivityHookCommand(false)}
 	matcher := func(source string) map[string]any {
-		return map[string]any{"matcher": source, "hooks": []any{command}}
+		return map[string]any{"matcher": source, "hooks": []any{command, idle}}
 	}
 	return []any{matcher("startup"), matcher("resume")}
 }
