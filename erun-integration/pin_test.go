@@ -1,6 +1,9 @@
 package integration
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,6 +93,101 @@ func TestPin(t *testing.T) {
 		}
 	})
 
+	// Discovery answers "what can I pin to" from the registry, so choosing a
+	// version is recognition rather than recall. Served locally: a scenario that
+	// asks a real registry measures the host.
+	t.Run("list_reports_the_published_versions", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"next":"","results":[{"name":"1.0.174"},{"name":"1.0.173"},{"name":"latest"}]}`)
+		}))
+		defer server.Close()
+		writeRuntimeRegistryConfig(t, setup, "runtimeregistry:\n  namespace: acme\n  repository: erun-devops\n  baseurl: "+server.URL+"\n")
+
+		result := erun.Run(t, []string{"pin", "team", "dev", "--list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		for _, want := range []string{"latest stable: 1.0.174", "1.0.173"} {
+			if !strings.Contains(result.Combined, want) {
+				t.Fatalf("expected %q in the listing:\n%s", want, result.Combined)
+			}
+		}
+	})
+
+	// Pinning to a version the registry does not carry produces a tree that only
+	// fails much later, at a terraform init or a chart pull. It is refused here,
+	// where the cause is still visible.
+	t.Run("refuses_a_version_the_registry_does_not_carry", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		seedDriftedPins(t, setup.Cwd, filepath.Join(setup.ConfigHome, "erun"))
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"next":"","results":[{"name":"1.0.174"}]}`)
+		}))
+		defer server.Close()
+		writeRuntimeRegistryConfig(t, setup, "runtimeregistry:\n  namespace: acme\n  repository: erun-devops\n  baseurl: "+server.URL+"\n")
+
+		result := erun.Run(t, []string{"pin", "team", "dev", "--version", "9.9.9"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a refusal, got exit 0: %s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "not published") {
+			t.Fatalf("the refusal must say why:\n%s", result.Combined)
+		}
+	})
+
+	// The whole motion, for real: every reference moves, the env's own runtime
+	// version moves with them, re-running is a no-op, and the version left behind
+	// is recoverable in one step.
+	t.Run("real_run_pins_every_reference_then_reverts", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		seedDriftedPins(t, setup.Cwd, filepath.Join(setup.ConfigHome, "erun"))
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "helm", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm")...)
+
+		apply := erun.Run(t, []string{"pin", "team", "dev", "--version", "1.0.174"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if apply.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", apply.ExitCode, apply.Combined)
+		}
+		terraform := readPinnedFile(t, setup.Cwd, "terraform-team/dev/main.tf")
+		if !strings.Contains(terraform, "?ref=v1.0.174") {
+			t.Fatalf("terraform ref not re-pinned:\n%s", terraform)
+		}
+		// A tenant's own module ref is not an erun pin.
+		if !strings.Contains(terraform, "github.com/team/infra.git//modules/thing?ref=v9.9.9") {
+			t.Fatalf("the tenant's own ref was rewritten:\n%s", terraform)
+		}
+		chart := readPinnedFile(t, setup.Cwd, "team-api/Chart.yaml")
+		if !strings.Contains(chart, "version: 1.0.174") || !strings.Contains(chart, "version: 3.2.1") {
+			t.Fatalf("chart dependencies wrong:\n%s", chart)
+		}
+
+		// Idempotent: the second run has nothing left to do.
+		again := erun.Run(t, []string{"pin", "team", "dev", "--version", "1.0.174"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if again.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", again.ExitCode, again.Combined)
+		}
+		if !strings.Contains(again.Combined, "already pinned") {
+			t.Fatalf("a re-run must report the no-op:\n%s", again.Combined)
+		}
+
+		// And the version left behind is one motion away.
+		revert := erun.Run(t, []string{"pin", "team", "dev", "--revert"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if revert.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", revert.ExitCode, revert.Combined)
+		}
+		reverted := readPinnedFile(t, setup.Cwd, "terraform-team/dev/main.tf")
+		if strings.Contains(reverted, "?ref=v1.0.174") {
+			t.Fatalf("revert did not move the terraform ref back:\n%s", reverted)
+		}
+	})
+
 	// Reverting needs somewhere to go. Asking for one before any re-pin has
 	// happened must say so rather than silently doing nothing.
 	t.Run("revert_without_a_recorded_pin_says_so", func(t *testing.T) {
@@ -105,4 +203,13 @@ func TestPin(t *testing.T) {
 			t.Fatalf("the refusal must say why:\n%s", result.Combined)
 		}
 	})
+}
+
+func readPinnedFile(t *testing.T, root, relative string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(relative)))
+	if err != nil {
+		t.Fatalf("read %s: %v", relative, err)
+	}
+	return string(data)
 }

@@ -14,6 +14,7 @@ import { MainPane } from '@/components/app/MainPane';
 import { ManageDialogView } from '@/components/app/ManageDialogView';
 import { OrchestratorDialog } from '@/components/app/OrchestratorDialog';
 import { OutputsDialog } from '@/components/app/OutputsDialog';
+import { PinVersionDialog } from '@/components/app/PinVersionDialog';
 import { ReconnectDialog } from '@/components/app/ReconnectDialog';
 import { ReconnectStatusPanel } from '@/components/app/ReconnectStatusPanel';
 import { ResizeHandle } from '@/components/app/ResizeHandle';
@@ -111,6 +112,7 @@ export function App(): React.ReactElement {
         <TenantDialogView />
         <UpgradeAllDialog />
         <OutputsDialog />
+        <PinVersionDialog />
         <OrchestratorDialog />
         <AutoStartPromptDialog />
         <ActivityQueueLauncher

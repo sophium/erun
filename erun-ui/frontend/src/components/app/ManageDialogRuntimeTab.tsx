@@ -29,6 +29,7 @@ import { parseIdleTrafficBytes } from '@/components/app/ManageDialog.helpers';
 import { DeployComponentsField } from '@/components/app/ManageDialogDeployComponents';
 import { RuntimeActivityField } from '@/components/app/ManageDialogRuntimeActivity';
 import { RuntimePowerField } from '@/components/app/ManageDialogRuntimePower';
+import { PinVersionAction } from '@/components/app/PinVersionAction';
 import { RuntimeResourceControls } from '@/components/app/RuntimeResourceControls';
 import { SelectField } from '@/components/app/SelectField';
 import { VersionNotices } from '@/components/app/VersionNotices';
@@ -58,6 +59,10 @@ export function RuntimeTab(): React.ReactElement {
   const versionNotices = dialog.versionSuggestionNotices;
   return (
     <>
+      <PinVersionAction
+        selection={dialog.selection}
+        disabled={dialog.busy || dialog.configLoading}
+      />
       <RuntimeDeployField
         dialog={dialog}
         configuredVersion={dialog.config.runtimeVersion}

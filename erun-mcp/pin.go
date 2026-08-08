@@ -72,6 +72,12 @@ func applyPinPlanUnlessPreviewing(runCtx eruncommon.Context, plan eruncommon.Pin
 	if err := eruncommon.ApplyPinPlan(plan); err != nil {
 		return PinOutput{}, err
 	}
+	// The lock beside a rewritten Chart.yaml still names the old versions, and
+	// deploy refuses a lock that disagrees with its chart — so an agent that
+	// re-pinned and stopped here would have left a tree deploy cannot use.
+	if err := eruncommon.RefreshPinnedChartLocks(runCtx, plan, nil); err != nil {
+		return PinOutput{}, err
+	}
 	out.Applied = true
 	return out, nil
 }

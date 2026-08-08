@@ -1,6 +1,8 @@
 package eruncommon
 
 import (
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -179,6 +181,79 @@ func TestApplyPinPlanIsANoOpOnceAligned(t *testing.T) {
 	}
 	if !again.Aligned() {
 		t.Fatalf("expected an aligned repo to report no changes, got %+v", again.Changes())
+	}
+}
+
+// A rewritten Chart.yaml and the lock beside it must agree: `helm dependency
+// build`, which deploy runs, refuses a lock that disagrees with its chart. So
+// every chart the re-pin moved gets refreshed — once, however many of its
+// dependencies changed.
+func TestRefreshPinnedChartLocksVisitsEachMovedChartOnce(t *testing.T) {
+	root := seedPinnedTenantRepo(t)
+	// A second erun dependency in the same chart must not mean two refreshes.
+	chart := filepath.Join(root, "acme-api", "Chart.yaml")
+	existing, err := os.ReadFile(chart)
+	if err != nil {
+		t.Fatalf("read chart: %v", err)
+	}
+	extra := string(existing) + "  - name: erun-backend-db\n    repository: oci://ghcr.io/sophium/charts\n    version: 1.0.106\n"
+	if err := os.WriteFile(chart, []byte(extra), 0o644); err != nil {
+		t.Fatalf("write chart: %v", err)
+	}
+
+	plan, err := ResolvePinPlan(root, "acme", "dev", EnvConfig{Name: "dev"}, "1.0.175")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+
+	var visited []string
+	err = RefreshPinnedChartLocks(Context{Logger: NewLoggerWithWriters(0, io.Discard, io.Discard)}, plan, func(_ Context, dir string) error {
+		visited = append(visited, dir)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	if len(visited) != 1 {
+		t.Fatalf("expected one refresh for the one chart that moved, got %v", visited)
+	}
+	if filepath.Base(visited[0]) != "acme-api" {
+		t.Fatalf("refreshed %q, want the chart directory", visited[0])
+	}
+}
+
+// A tree with some locks refreshed and others stale is worse than the one we
+// started from, so a failure names the chart and stops rather than carrying on.
+func TestRefreshPinnedChartLocksStopsAtTheFailingChart(t *testing.T) {
+	root := seedPinnedTenantRepo(t)
+	plan, err := ResolvePinPlan(root, "acme", "dev", EnvConfig{Name: "dev"}, "1.0.175")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	err = RefreshPinnedChartLocks(Context{Logger: NewLoggerWithWriters(0, io.Discard, io.Discard)}, plan, func(_ Context, dir string) error {
+		return fmt.Errorf("registry unreachable for %s", filepath.Base(dir))
+	})
+	if err == nil || !strings.Contains(err.Error(), "acme-api") {
+		t.Fatalf("the failure must name the chart, got %v", err)
+	}
+}
+
+// Nothing to refresh when no chart dependency moved — a terraform-only re-pin
+// must not shell out to helm at all.
+func TestRefreshPinnedChartLocksSkipsWhenNoChartMoved(t *testing.T) {
+	root := t.TempDir()
+	plan := PinPlan{ProjectRoot: root, Target: "1.0.175", Sites: []PinSite{
+		{Kind: PinSiteTerraformRef, Path: "terraform-acme/dev/main.tf", Current: "1.0.102", Target: "1.0.175"},
+	}}
+	called := 0
+	if err := RefreshPinnedChartLocks(Context{Logger: NewLoggerWithWriters(0, io.Discard, io.Discard)}, plan, func(Context, string) error {
+		called++
+		return nil
+	}); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	if called != 0 {
+		t.Fatalf("expected no helm run when no chart moved, got %d", called)
 	}
 }
 
