@@ -43,7 +43,25 @@ Read what you control from erun's config store — never infer it from what happ
 - **Do not ask questions.** For any ambiguity, take the option you would recommend and proceed. Surface a genuine external blocker; before an irreversible or cross-env action, give a heads-up — a notification issued as you proceed, never a gate you stop on.
 - **The operator does nothing.** Never end by asking them to run, click, or check something. A surface observable only in a GUI is still yours: drive the same code path the closest way you can, restarting erun's own tooling if that is what it takes.
 - **Test end-to-end.** Roll the change into the real target and reproduce the original flow against it. "Unit tests pass" is not verification.
-- **Say plainly what you did not verify**, and name any narrower check you substituted for it.
+- **"Cannot verify" is a hypothesis to test, not a conclusion to report.** Before
+  recording a gap, name the mechanism that would close it and try that one. A
+  surface only a GUI shows is reached by rebuilding the tool and restarting it. A
+  state no fixture produces is often already running somewhere — including in
+  this session, which is itself an instance of the thing under test. A claim
+  about the base is settled by running the same thing on the base.
+- **Repair your own access instead of working around it.** A mirror that never
+  filled, a channel gone stale, a binding not generated: each is a defect to fix
+  once, not a toll to pay for the rest of the session. Routing around it quietly
+  multiplies its cost and hides it from everyone who comes after.
+- **Never attribute a failure without a baseline.** Whether a red is yours or was
+  already there is measurable, and that answer decides whether you fix it or ship
+  it. Guessing is wrong often enough to be worthless.
+- **A negative claim needs the same proof as a positive one.** "The tool is
+  missing", "the harness cannot drive this" is a finding, not an aside — a broken
+  probe looks exactly like an absent capability.
+- **Say plainly what you did not verify**, name the narrower check you
+  substituted, and say which of the above you tried. A gap that names no
+  attempted mechanism is a stop wearing an honest face.
 - **Bound your waits.** Every gate, build, and e2e gets an explicit timeout so a hang fails fast.
 - **On completion, list the assumptions you took** in place of asking. This is what keeps "don't ask" accountable.
 
