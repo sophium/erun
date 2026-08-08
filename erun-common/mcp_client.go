@@ -39,6 +39,12 @@ var (
 
 	// ErrMCPUnauthorized means the edge refused the bearer.
 	ErrMCPUnauthorized = errors.New("MCP endpoint rejected the bearer token")
+
+	// errMCPSessionLost means the edge no longer knows the session the client
+	// pinned — an edge that restarted inside a still-running pod, or a session
+	// that aged out. It is recoverable by handshaking again, so it never leaves
+	// this package.
+	errMCPSessionLost = errors.New("MCP endpoint no longer knows this session")
 )
 
 // MCPLocalEndpoint is the loopback URL a port-forwarded environment edge answers
@@ -148,6 +154,12 @@ type mcpSession struct {
 	client        *http.Client
 	sessionID     string
 	nextID        int
+	// recovering suppresses a nested re-handshake so one lost session costs at
+	// most one retry.
+	recovering bool
+	// notice reports a recovery the caller would otherwise never see; nil when
+	// the caller has nowhere to put diagnostics.
+	notice func(string)
 }
 
 // newMCPSession prepares the transport without performing the handshake, so a
@@ -179,17 +191,23 @@ func openMCPSession(ctx context.Context, endpoint string, mintToken MCPTokenMint
 	if err != nil {
 		return nil, err
 	}
-	if _, err := session.call(ctx, "initialize", map[string]any{
-		"protocolVersion": mcpClientProtocolVersion,
-		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": mcpClientName, "version": clientVersion},
-	}); err != nil {
-		return nil, err
-	}
-	if err := session.notify(ctx, "notifications/initialized"); err != nil {
+	if err := session.handshake(ctx); err != nil {
 		return nil, err
 	}
 	return session, nil
+}
+
+// handshake claims a session on the edge. It is also the recovery path, so the
+// two cannot drift apart on what a live session requires.
+func (s *mcpSession) handshake(ctx context.Context) error {
+	if _, err := s.call(ctx, "initialize", map[string]any{
+		"protocolVersion": mcpClientProtocolVersion,
+		"capabilities":    map[string]any{},
+		"clientInfo":      map[string]any{"name": mcpClientName, "version": s.clientVersion},
+	}); err != nil {
+		return err
+	}
+	return s.notify(ctx, "notifications/initialized")
 }
 
 func (s *mcpSession) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
@@ -233,7 +251,34 @@ func (s *mcpSession) post(ctx context.Context, payload mcpJSONRPCRequest) (*mcpJ
 // or nil when the edge answered without a body — the 202 a notification gets.
 // Bearer minting and session-id capture live here so a raw relay and a typed
 // call cannot drift apart on either.
+//
+// A session the edge has forgotten is recovered rather than surfaced: a
+// long-lived relay pins one session id for its whole lifetime, so treating the
+// edge's 404 as terminal would kill every request for the environment until the
+// relay itself was restarted. The re-handshake happens at most once per request.
 func (s *mcpSession) postRaw(ctx context.Context, body []byte) ([]byte, error) {
+	raw, err := s.postOnce(ctx, body)
+	if err == nil || s.recovering || !errors.Is(err, errMCPSessionLost) {
+		return raw, err
+	}
+	s.recovering = true
+	defer func() { s.recovering = false }()
+	s.sessionID = ""
+	if err := s.handshake(ctx); err != nil {
+		return nil, fmt.Errorf("re-establish the MCP session with %s: %w", s.endpoint, err)
+	}
+	s.report(fmt.Sprintf("the MCP edge at %s had forgotten its session; re-initialized and retried", s.endpoint))
+	return s.postOnce(ctx, body)
+}
+
+func (s *mcpSession) report(message string) {
+	if s.notice == nil {
+		return
+	}
+	s.notice(message)
+}
+
+func (s *mcpSession) postOnce(ctx context.Context, body []byte) ([]byte, error) {
 	token, err := s.mintToken()
 	if err != nil {
 		return nil, err
@@ -250,10 +295,11 @@ func (s *mcpSession) postRaw(ctx context.Context, body []byte) ([]byte, error) {
 	defer func() {
 		_ = resp.Body.Close()
 	}()
+	pinned := s.sessionID != ""
 	if id := strings.TrimSpace(resp.Header.Get(mcpSessionHeader)); id != "" {
 		s.sessionID = id
 	}
-	if err := mcpStatusError(s.endpoint, resp); err != nil {
+	if err := mcpStatusError(s.endpoint, resp, pinned); err != nil {
 		return nil, err
 	}
 	return decodeMCPReply(resp)
@@ -285,7 +331,10 @@ func (s *mcpSession) transportError(err error) error {
 	return fmt.Errorf("call MCP endpoint %s: %w", s.endpoint, err)
 }
 
-func mcpStatusError(endpoint string, resp *http.Response) error {
+// sessionPinned says the request carried a session id, which is what separates
+// the edge having dropped that session from the endpoint path simply not
+// existing — only the former is worth re-handshaking for.
+func mcpStatusError(endpoint string, resp *http.Response, sessionPinned bool) error {
 	if resp.StatusCode < 400 {
 		return nil
 	}
@@ -297,6 +346,9 @@ func mcpStatusError(endpoint string, resp *http.Response) error {
 	}
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return fmt.Errorf("%w: %s (HTTP %d)%s", ErrMCPUnauthorized, endpoint, resp.StatusCode, detail)
+	}
+	if resp.StatusCode == http.StatusNotFound && sessionPinned {
+		return fmt.Errorf("%w: %s (HTTP %d)%s", errMCPSessionLost, endpoint, resp.StatusCode, detail)
 	}
 	return fmt.Errorf("MCP endpoint %s returned HTTP %d%s", endpoint, resp.StatusCode, detail)
 }

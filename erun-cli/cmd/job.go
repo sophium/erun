@@ -59,11 +59,12 @@ func newJobStartCmd() *cobra.Command {
 	var name string
 	var id string
 	var dir string
+	var agent string
 	var maxOutputBytes int64
 	var leaseTTL time.Duration
 	cmd := &cobra.Command{
 		Use:   "start [flags] -- <command> [args...]",
-		Short: "Run a command as a detached job and return its handle",
+		Short: "Run a command, or an AI agent, as a detached job and return its handle",
 		Long: "The command keeps running after this call returns and after the caller's\n" +
 			"connection drops: erun gives it its own session and captures its merged\n" +
 			"stdout and stderr to the job's log, so nothing has to be wrapped in setsid,\n" +
@@ -71,28 +72,43 @@ func newJobStartCmd() *cobra.Command {
 			"The exit status is recorded by the process that waits on the work, inside\n" +
 			"the environment, so no sentinel token and no shell expansion sit between the\n" +
 			"work and its result. The id defaults to the name; re-using the id of a job\n" +
-			"that is still running is refused, while re-using a finished one replaces it.",
+			"that is still running is refused, while re-using a finished one replaces it.\n\n" +
+			"--agent runs an AI tool instead of a command, with the trailing arguments as\n" +
+			"the prompt. erun invokes the tool in its streaming mode, which is what makes\n" +
+			"an agent run observable at all: left to its default the tool prints nothing\n" +
+			"until it exits, so a multi-hour run reports no output while it is actively\n" +
+			"editing files. status then reports the current activity, not only \"running\".",
 		Example: "  # Start a test suite and come back for the result.\n" +
 			"  erun job start --tenant team --environment dev --name suite -- ./gradlew test\n" +
-			"  erun job await --tenant team --environment dev --id suite --timeout 5m",
+			"  erun job await --tenant team --environment dev --id suite --timeout 5m\n\n" +
+			"  # Start an agent and watch what it is doing.\n" +
+			"  erun job start --tenant team --environment dev --name sweep --agent claude -- 'fix the failing tests'\n" +
+			"  erun job status --tenant team --environment dev --id sweep",
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runJobStart(cmd, common.StartEnvironmentJobParams{
+			params := common.StartEnvironmentJobParams{
 				Tenant:         tenant,
 				Environment:    environment,
 				Name:           name,
 				ID:             id,
-				Command:        args,
 				Dir:            dir,
 				MaxOutputBytes: maxOutputBytes,
 				LeaseTTL:       leaseTTL,
-			})
+			}
+			if strings.TrimSpace(agent) != "" {
+				params.Agent = agent
+				params.Prompt = strings.Join(args, " ")
+			} else {
+				params.Command = args
+			}
+			return runJobStart(cmd, params)
 		},
 	}
 	addJobTargetFlags(cmd, &tenant, &environment)
 	cmd.Flags().StringVar(&name, "name", "", "What the work is, shown wherever the environment reports as busy")
 	cmd.Flags().StringVar(&id, "id", "", "Handle to address the job by (defaults to the name)")
 	cmd.Flags().StringVar(&dir, "dir", "", "Working directory to run the command from")
+	cmd.Flags().StringVar(&agent, "agent", "", "Run an AI tool ("+strings.Join(common.AgentJobTools, " or ")+") in streaming mode, taking the trailing arguments as its prompt")
 	cmd.Flags().Int64Var(&maxOutputBytes, "max-output-bytes", common.DefaultEnvironmentJobOutputLimitBytes, "Cap on captured output; past it output is dropped and the job says so")
 	cmd.Flags().DurationVar(&leaseTTL, "lease-ttl", common.DefaultEnvironmentActivityLeaseTTL, "Activity lease TTL the job renews inside while it runs")
 	addDryRunFlag(cmd)
@@ -265,20 +281,37 @@ func jobStatusLine(job common.EnvironmentJob) string {
 		} else if job.PID > 0 {
 			line += fmt.Sprintf(", pid %d", job.PID)
 		}
-		return line + jobOutputSuffix(job)
+		return line + jobAgentSuffix(job) + jobOutputSuffix(job)
 	case common.EnvironmentJobStateExited:
 		line := fmt.Sprintf("exited %d: %s", jobExitCodeOrUnset(job), job.Name)
 		if strings.TrimSpace(job.Signal) != "" {
 			line += fmt.Sprintf(" (signal %s)", job.Signal)
 		}
-		return line + jobOutputSuffix(job)
+		return line + jobAgentSuffix(job) + jobOutputSuffix(job)
 	default:
 		line := fmt.Sprintf("unknown: %s", job.Name)
 		if strings.TrimSpace(job.Reason) != "" {
 			line += " (" + job.Reason + ")"
 		}
-		return line + jobOutputSuffix(job)
+		return line + jobAgentSuffix(job) + jobOutputSuffix(job)
 	}
+}
+
+// jobAgentSuffix reports what an agent run is doing right now. An agent job that
+// has emitted nothing yet says so rather than reading as an idle one — the
+// difference is exactly what a caller polling for progress needs.
+func jobAgentSuffix(job common.EnvironmentJob) string {
+	if job.Kind != common.EnvironmentJobKindAgent {
+		return ""
+	}
+	suffix := ", agent " + job.AgentTool
+	if job.Progress == nil {
+		return suffix + ", no events yet"
+	}
+	if summary := job.Progress.Summary(); summary != "" {
+		return suffix + ", " + summary
+	}
+	return suffix + ", no events yet"
 }
 
 func jobOutputSuffix(job common.EnvironmentJob) string {
@@ -487,6 +520,7 @@ func newJobSuperviseCmd() *cobra.Command {
 	var name string
 	var id string
 	var dir string
+	var agent string
 	var maxOutputBytes int64
 	var leaseTTL time.Duration
 	cmd := &cobra.Command{
@@ -501,6 +535,7 @@ func newJobSuperviseCmd() *cobra.Command {
 				ID:             id,
 				Name:           name,
 				Dir:            dir,
+				Agent:          agent,
 				Command:        args,
 				MaxOutputBytes: maxOutputBytes,
 				LeaseTTL:       leaseTTL,
@@ -511,6 +546,7 @@ func newJobSuperviseCmd() *cobra.Command {
 	cmd.Flags().StringVar(&name, "name", "", "Job name")
 	cmd.Flags().StringVar(&id, "id", "", "Job id")
 	cmd.Flags().StringVar(&dir, "dir", "", "Working directory for the work")
+	cmd.Flags().StringVar(&agent, "agent", "", "AI tool the command runs, so its event stream is folded into progress")
 	cmd.Flags().Int64Var(&maxOutputBytes, "max-output-bytes", common.DefaultEnvironmentJobOutputLimitBytes, "Cap on captured output")
 	cmd.Flags().DurationVar(&leaseTTL, "lease-ttl", common.DefaultEnvironmentActivityLeaseTTL, "Activity lease TTL")
 	return cmd

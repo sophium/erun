@@ -157,7 +157,7 @@ Take an activity lease before **detaching** long work in the env — a build, a 
 
 | Tool | Purpose |
 |---|---|
-| `job_start` | Run a command in the env as a detached job; returns the handle. |
+| `job_start` | Run a command — or an AI agent — in the env as a detached job; returns the handle. |
 | `job_attach` | Give work you started another way a handle and a lease. |
 | `job_status` | One job's state and outcome, or every retained job newest-first. |
 | `job_await` | Wait a bounded time (default 30s, max 600s) for a job to finish. |
@@ -176,6 +176,21 @@ The job tools remove all five:
 - **`job_cancel` targets the pid the record holds**, never a command-line pattern, so it cannot match a process that merely looks like the job or the caller issuing the cancel.
 
 A job also holds an activity lease for its lifetime, so starting one makes the env read as busy and defers auto-stop with nothing extra to call. Finished jobs stay readable for 24 hours, so an orchestrator that reconnects after the work ended still learns the outcome. Full schemas, exit-code contract, retention, and error behaviour: [Agent reference · `erun job`](/agent-reference/cli-flags#erun-job).
+
+#### Running an agent as a job {#agent-jobs}
+
+An AI tool run non-interactively prints nothing until it exits, so starting one through `job_start`'s `command` reports `outputBytes: 0` for the whole run while the agent is actively editing files — `job_status` can only say `running`, and there is no supported way to report progress. Pass `agent` plus `prompt` instead of `command` and erun invokes the tool in its streaming mode:
+
+```jsonc
+// job_start {"name": "sweep", "agent": "claude", "prompt": "fix the failing tests"}
+```
+
+Two things follow with no change to any other tool's contract:
+
+- **`job_output` returns events while the agent works**, because the job's log is now the tool's event stream.
+- **`job_status` carries a `progress` view** — current activity, turns, tools run, and the last thing the agent said — normalized by erun from the tool's own events, so the shape is identical for `claude` and `codex`.
+
+`agent` accepts `claude` or `codex`, and excludes `command`. Do **not** scrape the agent's private transcript (`~/.claude/projects/…`) or diff the worktree to report progress: that layout is not erun's contract and can change under you, and it cannot work at all for a remote-agent env whose worktree is not host-mounted. Poll `job_status` instead. The full progress schema, the normalized verb set, and the per-tool event mapping are in [Agent reference · Agent jobs](/agent-reference/cli-flags#agent-jobs).
 
 ### Credential tools — desktop-only
 
@@ -463,6 +478,22 @@ The job record is the shared shape every job tool returns. It is deliberately ex
 ```
 
 `hasMore` describes this read; `complete` is true only when the job has finished *and* this page reached the end. Whether output was dropped at the cap is `job.outputTruncated`, not either of those. Field-by-field semantics, the retention window, and error behaviour: [Agent reference · `erun job`](/agent-reference/cli-flags#erun-job).
+
+An [agent job](#agent-jobs) carries three more fields on the same record. `progress` is absent until the run emits its first event, so an agent that has not started yet is never reported as an idle one:
+
+```jsonc
+// job_status {"id": "sweep"} — an agent run in flight
+{ "job": {
+    "id": "sweep", "state": "running",
+    "kind": "agent", "agentTool": "claude",
+    "progress": {
+      "tool": "claude",
+      "activity": "editing erun-common/mcp_client.go",
+      "lastTool": "Edit", "lastTarget": "erun-common/mcp_client.go",
+      "turns": 12, "toolsRun": 47, "events": 133,
+      "lastMessage": "Rewriting the reconnect path."
+    }, … } }
+```
 
 ### Other action tools
 

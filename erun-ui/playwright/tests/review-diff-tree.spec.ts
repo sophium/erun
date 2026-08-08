@@ -84,6 +84,21 @@ async function stubDiff(page: Page, diff: unknown): Promise<void> {
   });
 }
 
+// The panel reloads its diff on a timer. A spec that drives panel state wants the
+// quiet window just after one of those reloads, not whatever moment a re-render
+// happens to land on.
+async function nextDiffRefresh(page: Page): Promise<void> {
+  await page.waitForResponse((res) => {
+    if (!res.url().includes('/__erun_invoke')) return false;
+    try {
+      const body = JSON.parse(res.request().postData() ?? '{}') as { method?: string };
+      return body.method === 'LoadDiff';
+    } catch {
+      return false;
+    }
+  });
+}
+
 // diff.files is in tree pre-order — the ordering contract the desktop relies on.
 const SMALL_FILES = [diffFile('src/a.ts', 2), diffFile('src/b.ts', 2), diffFile('docs/c.md', 2)];
 const SMALL_TREE = [
@@ -105,8 +120,8 @@ test.describe('review diff/tree consistency', () => {
     await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
     await app.titlebar.toggleReviewPanel();
     const review = app.reviewPanel;
-    await expect(review.changedFilesTree()).toBeVisible({ timeout: 10_000 });
-    await expect.poll(() => review.diffSectionPaths(), { timeout: 10_000 }).toEqual(SMALL_ORDER);
+    await expect(review.changedFilesTree()).toBeVisible();
+    await expect.poll(() => review.diffSectionPaths()).toEqual(SMALL_ORDER);
     expect(await review.treeFilePaths()).toEqual(SMALL_ORDER);
   });
 
@@ -119,9 +134,18 @@ test.describe('review diff/tree consistency', () => {
     await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
     await app.titlebar.toggleReviewPanel();
     const review = app.reviewPanel;
-    await expect.poll(() => review.diffSectionPaths(), { timeout: 10_000 }).toEqual(SMALL_ORDER);
+    await expect.poll(() => review.diffSectionPaths()).toEqual(SMALL_ORDER);
 
+    // The filter field is a controlled input fed from the store, and the panel
+    // re-renders on its own silent diff refresh, so a fill landing inside that
+    // window is rewritten from the pre-change value — the intermittent red this
+    // spec used to produce. Anchoring the fill to a completed refresh leaves a
+    // whole refresh interval of quiet, so what follows waits on observable state
+    // instead of racing the timer, and a filter that never applies fails loudly
+    // on its own value rather than being retried until it sticks.
+    await nextDiffRefresh(page);
     await review.setDiffFilter('b.ts');
+    await expect(review.filterInput()).toHaveValue('b.ts');
     await expect.poll(() => review.treeFilePaths()).toEqual(['src/b.ts']);
     await expect.poll(() => review.diffSectionPaths()).toEqual(['src/b.ts']);
   });
@@ -135,7 +159,7 @@ test.describe('review diff/tree consistency', () => {
     await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
     await app.titlebar.toggleReviewPanel();
     const review = app.reviewPanel;
-    await expect.poll(() => review.diffSectionPaths(), { timeout: 10_000 }).toEqual(SMALL_ORDER);
+    await expect.poll(() => review.diffSectionPaths()).toEqual(SMALL_ORDER);
 
     await review.collapseDirectory('src');
     await expect.poll(() => review.treeFilePaths()).toEqual(['docs/c.md']);
@@ -159,9 +183,7 @@ test.describe('review diff/tree consistency', () => {
     await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
     await app.titlebar.toggleReviewPanel();
     const review = app.reviewPanel;
-    await expect
-      .poll(() => review.diffSectionPaths().then((paths) => paths.length), { timeout: 10_000 })
-      .toBe(30);
+    await expect.poll(() => review.diffSectionPaths().then((paths) => paths.length)).toBe(30);
 
     // Scrolling the diff drives the scrollspy to a late file; the tree must
     // follow to keep that node visible. The diff section can still re-render as
@@ -177,17 +199,14 @@ test.describe('review diff/tree consistency', () => {
     // The auto-scroll guarantee: without it the active node would sit below the
     // tree container once the diff scrolls to the bottom.
     await expect
-      .poll(
-        async () => {
-          const nb = await node.boundingBox();
-          const cb = await review.changedFilesTree().boundingBox();
-          if (!nb || !cb) {
-            return false;
-          }
-          return nb.y >= cb.y - 2 && nb.y + nb.height <= cb.y + cb.height + 2;
-        },
-        { timeout: 10_000 },
-      )
+      .poll(async () => {
+        const nb = await node.boundingBox();
+        const cb = await review.changedFilesTree().boundingBox();
+        if (!nb || !cb) {
+          return false;
+        }
+        return nb.y >= cb.y - 2 && nb.y + nb.height <= cb.y + cb.height + 2;
+      })
       .toBe(true);
   });
 });

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -290,36 +291,46 @@ func syncWorkspaceOnce(ctx context.Context, params workspaceSyncParams) (workspa
 	if err := validateWorkspaceSyncParams(&params); err != nil {
 		return workspaceSyncResult{}, err
 	}
+	pass := workspaceSyncPassLog{params: params, stale: "unknown"}
+	defer func() { pass.emit() }()
+
 	if err := ensureLocalWorkspaceSyncTarget(params.LocalPath); err != nil {
+		pass.failure = err
 		return workspaceSyncResult{}, err
 	}
-	remotePaths, localMeta, notGitRepo, err := resolveWorkspaceSyncPaths(ctx, params)
+	resolved, err := resolveWorkspaceSyncPaths(ctx, params)
+	pass.recordResolved(resolved, err)
 	if err != nil {
 		return workspaceSyncResult{}, err
 	}
-	if notGitRepo {
+	if resolved.notGitRepo {
 		return workspaceSyncResult{}, nil
 	}
 	// Fetch only files whose size or mtime differs from the mirror, so a steady
 	// state costs one metadata listing instead of re-transferring the whole tree
 	// every pass; tar preserves mtime, so an unchanged file matches next pass.
 	remoteMeta := remoteWorkspaceFileMeta(ctx, params.HostAlias, params.RemotePath)
-	toFetch := changedWorkspaceSyncPaths(remotePaths, remoteMeta, localMeta)
+	toFetch := changedWorkspaceSyncPaths(resolved.remote, remoteMeta, resolved.localMeta)
+	pass.fetch = len(toFetch)
 	// A fetch failure must NOT strand deletions: deletion correctness depends only
 	// on the remote file listing, not on whether every changed file transferred.
-	// Returning here on error (the pre-fix behaviour) let one un-fetchable file
-	// block every deletion, so files removed in the pod lingered in the mirror
-	// forever. Record the error and still run the delete + outputs steps.
+	// Returning here on error let one un-fetchable file block every deletion, so
+	// files removed in the pod lingered in the mirror forever. Record the error
+	// and still run the delete + outputs steps.
 	var fetchErr error
 	if len(toFetch) > 0 {
 		fetchErr = extractRemoteWorkspaceFiles(ctx, params.HostAlias, params.RemotePath, params.LocalPath, toFetch)
+		pass.fetchErr = fetchErr
 	}
-	deleted, err := deleteLocalWorkspaceFilesNotInRemote(params.LocalPath, sortedWorkspaceFileMetaKeys(localMeta), remotePaths)
+	deleted, err := deleteLocalWorkspaceFilesNotInRemote(params.LocalPath, sortedWorkspaceFileMetaKeys(resolved.localMeta), resolved.remote)
+	pass.deleted = deleted
 	if err != nil {
+		pass.deleteErr = err
 		return workspaceSyncResult{}, err
 	}
 	artifacts, err := syncOutputsArtifacts(ctx, params.HostAlias, eruncommon.DefaultRuntimeOutputsDir, filepath.Join(params.LocalPath, workspaceSyncArtifactsSubdir))
 	if err != nil {
+		pass.failure = err
 		return workspaceSyncResult{}, err
 	}
 	result := workspaceSyncResult{FilesCopied: len(toFetch), FilesDeleted: deleted, ArtifactsCopied: artifacts}
@@ -327,6 +338,50 @@ func syncWorkspaceOnce(ctx context.Context, params workspaceSyncParams) (workspa
 		return result, fetchErr
 	}
 	return result, nil
+}
+
+// workspaceSyncPassLog is the always-on record of what one sync pass saw and
+// did, emitted as a single bounded line. A mirror that kept adding files while
+// silently never removing any took two investigations to explain precisely
+// because a pass left no trace of its own inputs, so this is unconditional and
+// counts-only — never one line per file.
+type workspaceSyncPassLog struct {
+	params     workspaceSyncParams
+	notGitRepo bool
+	remote     int
+	stale      string
+	local      int
+	fetch      int
+	deleted    int
+	fetchErr   error
+	deleteErr  error
+	failure    error
+}
+
+func (l *workspaceSyncPassLog) recordResolved(resolved workspaceSyncPaths, err error) {
+	l.notGitRepo = resolved.notGitRepo
+	l.remote = len(resolved.remote)
+	l.stale = strconv.Itoa(resolved.stale)
+	if resolved.staleUnknown {
+		l.stale = "unknown"
+	}
+	l.local = len(resolved.localMeta)
+	l.failure = err
+}
+
+func (l *workspaceSyncPassLog) emit() {
+	log.Printf("erun-app: workspace sync %s -> %s: notGitRepo=%t remote=%d staleIndex=%s mirror=%d fetch=%d deleted=%d%s%s%s",
+		l.params.RemotePath, l.params.LocalPath, l.notGitRepo, l.remote, l.stale, l.local, l.fetch, l.deleted,
+		workspaceSyncPassErrorSuffix(" fetchError", l.fetchErr),
+		workspaceSyncPassErrorSuffix(" deleteError", l.deleteErr),
+		workspaceSyncPassErrorSuffix(" error", l.failure))
+}
+
+func workspaceSyncPassErrorSuffix(label string, err error) string {
+	if err == nil {
+		return ""
+	}
+	return label + "=" + strings.TrimSpace(err.Error())
 }
 
 // workspaceSyncArtifactsSubdir is the read-only subdir of the host mirror that
@@ -463,31 +518,56 @@ func markArtifactsReadOnly(artifactsLocal string, paths []string) error {
 	return nil
 }
 
+// workspaceSyncPaths is one pass's view of both sides of the mirror.
+type workspaceSyncPaths struct {
+	remote     []string
+	localMeta  map[string]workspaceFileMeta
+	notGitRepo bool
+	// stale counts index entries the pod's worktree no longer has — the
+	// deletions a pass exists to propagate, and the number that stayed
+	// invisible while the mirror kept them. staleUnknown says the listing
+	// itself failed, which reads the same as "none" without being told.
+	stale        int
+	staleUnknown bool
+}
+
 // resolveWorkspaceSyncPaths reports notGitRepo=true (with a nil error) when the
 // remote is not a Git repository; callers treat that as a no-op sync pass.
-func resolveWorkspaceSyncPaths(ctx context.Context, params workspaceSyncParams) (remotePaths []string, localMeta map[string]workspaceFileMeta, notGitRepo bool, err error) {
-	remotePaths, err = remoteWorkspaceGitVisibleFiles(ctx, params.HostAlias, params.RemotePath)
+func resolveWorkspaceSyncPaths(ctx context.Context, params workspaceSyncParams) (workspaceSyncPaths, error) {
+	remotePaths, err := remoteWorkspaceGitVisibleFiles(ctx, params.HostAlias, params.RemotePath)
 	if errors.Is(err, errRemoteNotGitRepo) {
-		return nil, nil, true, nil
+		return workspaceSyncPaths{notGitRepo: true}, nil
 	}
 	if err != nil {
-		return nil, nil, false, err
+		return workspaceSyncPaths{}, err
 	}
+	// `git ls-files -c` reports the index, not the worktree, so a file the agent
+	// removed without staging the removal keeps appearing as a remote file — and
+	// the mirror, which deletes exactly what the remote listing omits, keeps it
+	// forever. Subtracting the index entries whose file is gone is what makes a
+	// deletion in the pod reach the host at all.
+	missing, missingKnown := remoteWorkspaceMissingFiles(ctx, params.HostAlias, params.RemotePath)
+	remotePaths = excludeWorkspaceSyncPaths(remotePaths, missing)
 	// Symlinks (e.g. the per-module CLAUDE.md -> AGENTS.md pointers) cannot
 	// round-trip to a plain-directory host mirror on Windows: their fingerprint
 	// never matches, so they re-fetch every pass, and extracting them can fail —
 	// which (before the delete step was decoupled from fetch) stranded every
 	// deletion. Drop them from the synced set; AGENTS.md itself still syncs as a
 	// regular file, so the mirror loses only the redundant pointer.
-	remotePaths = excludeWorkspaceSyncSymlinks(remotePaths, remoteWorkspaceSymlinkSet(ctx, params.HostAlias, params.RemotePath))
+	remotePaths = excludeWorkspaceSyncPaths(remotePaths, remoteWorkspaceSymlinkSet(ctx, params.HostAlias, params.RemotePath))
 	// The mirror is a one-way copy, so its file set comes from a plain directory
 	// walk — the pod already applied the repo's ignore rules via
 	// `git ls-files --exclude-standard`, so the host needs no git of its own.
-	localMeta, err = localWorkspaceSourceFileMeta(params.LocalPath)
+	localMeta, err := localWorkspaceSourceFileMeta(params.LocalPath)
 	if err != nil {
-		return nil, nil, false, err
+		return workspaceSyncPaths{}, err
 	}
-	return remotePaths, localMeta, false, nil
+	return workspaceSyncPaths{
+		remote:       remotePaths,
+		localMeta:    localMeta,
+		stale:        len(missing),
+		staleUnknown: !missingKnown,
+	}, nil
 }
 
 func workspaceSyncSSHReady(ctx context.Context, hostAlias string) error {
@@ -542,6 +622,22 @@ func remoteWorkspaceGitVisibleFiles(ctx context.Context, hostAlias, remotePath s
 	return parseWorkspaceSyncPathList(output), nil
 }
 
+// remoteWorkspaceMissingFiles returns the index entries whose file is no longer
+// in the pod's worktree — what `git ls-files -c` keeps reporting after a plain
+// `rm`. Best-effort: a listing failure degrades the pass to keeping those files
+// rather than failing outright, and reports false so the per-pass diagnostic can
+// say "unknown" instead of the "none missing" it would otherwise look like.
+func remoteWorkspaceMissingFiles(ctx context.Context, hostAlias, remotePath string) (map[string]struct{}, bool) {
+	script := fmt.Sprintf("cd %s && git ls-files -dz", shellQuote(remotePath))
+	cmd := exec.CommandContext(ctx, "ssh", workspaceSyncSSHArgs(hostAlias, script)...)
+	eruncommon.HideConsoleWindow(cmd)
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, false
+	}
+	return pathSet(parseWorkspaceSyncPathList(output)), true
+}
+
 // remoteWorkspaceSymlinkSet returns the git-tracked symlink paths (mode 120000)
 // in the remote worktree. Symlinks cannot round-trip to a plain-directory host
 // mirror on Windows, so the sync excludes them (see resolveWorkspaceSyncPaths).
@@ -576,15 +672,15 @@ func parseGitLsFilesSymlinkPaths(output []byte) map[string]struct{} {
 	return set
 }
 
-// excludeWorkspaceSyncSymlinks drops the symlink paths from the git-visible list,
-// preserving order. A nil/empty symlink set returns the input unchanged.
-func excludeWorkspaceSyncSymlinks(paths []string, symlinks map[string]struct{}) []string {
-	if len(symlinks) == 0 {
+// excludeWorkspaceSyncPaths drops a set of paths from the git-visible list,
+// preserving order. An empty set returns the input unchanged.
+func excludeWorkspaceSyncPaths(paths []string, excluded map[string]struct{}) []string {
+	if len(excluded) == 0 {
 		return paths
 	}
 	kept := make([]string, 0, len(paths))
 	for _, p := range paths {
-		if _, isSymlink := symlinks[p]; isSymlink {
+		if _, drop := excluded[p]; drop {
 			continue
 		}
 		kept = append(kept, p)

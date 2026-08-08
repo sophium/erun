@@ -36,7 +36,7 @@ func startTerminalSession(params startTerminalSessionParams) (terminalSession, e
 		return nil, err
 	}
 
-	env := append(os.Environ(), append(params.Env, "TERM=xterm-256color", "COLORTERM=truecolor")...)
+	env := terminalSessionEnv(os.Environ(), params.Env)
 
 	// ConPTY's Spawn resolves a non-absolute executable relative to attr.Dir
 	// rather than searching PATH, so a bare name like "powershell.exe" would be

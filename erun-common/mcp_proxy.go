@@ -50,6 +50,7 @@ func RunMCPStdioProxy(ctx context.Context, params MCPStdioProxyParams) error {
 		return err
 	}
 	proxy := &mcpStdioProxy{session: session, params: params}
+	session.notice = proxy.diagnose
 	reader := bufio.NewReader(params.In)
 	for {
 		message, err := readJSONRPCLine(reader)

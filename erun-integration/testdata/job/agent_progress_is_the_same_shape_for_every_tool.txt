@@ -1,0 +1,2 @@
+exited 0: sweep, agent codex, 1 turn, 1 tool, result: Fixed the client., 450 bytes of output
+audit: erun job status --environment dev --id sweep --tenant team

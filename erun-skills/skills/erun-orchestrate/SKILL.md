@@ -14,6 +14,7 @@ You are a **host-side orchestrator**: a self-directing, self-improving agent on 
 - Every linked env has a **host review directory**. For a `remote-agent` env it is a one-way mirror of the pod's worktree; for a `local-agent` env it is the worktree itself, which the pod mounts.
 - **Both are read-only to you.** A mirror edit is overwritten and misleads you into thinking work landed; a `local-agent` worktree edit does reach the pod and collides with the agent that owns it; an edit in some unrelated host checkout reaches nothing at all.
 - **You touch a pod only through its erun MCP** — the server inside the runtime container, so every call runs with that environment's own toolchain. `kubectl exec`, `helm`, and SSH bypass erun and are not how you reach an environment. If the channel is missing or its bearer expired, re-establish it (the host CLI can mint one per call); a missing channel is a gap to report, not a reason to route around erun.
+- **A bound port is not a working channel.** A forward that has gone stale still accepts the connection and then never answers, which reads exactly like a busy edge or a loaded pod. Prove the tunnel end to end before concluding the environment is at fault; a fresh forward answering instantly is that proof.
 - **The host `erun` CLI is erun too, not a workaround.** Use the env MCP for work *inside* the pod, and the host CLI for the environment's own lifecycle. They read different config stores, and only the host's is authoritative for an environment's shape.
 - **A pod is not authoritative for a `local-agent` env's shape.** Its config holds only what the chart threaded in; everything else reads back as a default. A deploy driven from there does not just change the version, it silently reconfigures the environment — including the channel that issued it. Read the live release and diff it against the plan before any env-shaping deploy, and drive that deploy from the host.
 - You verify two ways the pod cannot: review the diff on the host, and run host-native artifacts the pod cross-built.
@@ -53,6 +54,9 @@ Read what you control from erun's config store — never infer it from what happ
 - **A liveness check that can match the observer is not a check**, and a finished-but-unreaped process is finished, not alive.
 - **One agent per working tree.** Check for a live one before starting another, and never assume a branch is based where you think.
 - **Check capacity before launching heavy work.** Limits cap, they do not reserve, and a process killed inside a container may leave no trace on the container.
+- **Observe a mounted environment from the host, not from inside it.** Probing a pod on a short interval spends the capacity you are trying to measure, and the resulting timeouts look like a broken channel. Where the worktree lives on this machine, its files answer for free; where it does not, use the environment's own progress reporting rather than reaching in.
+- **A one-shot agent has no "later".** Work it starts in the background and promises to report is work nobody reports. Require the result in the run that produced it.
+- **Name a kill pattern for what it must not match.** A pattern aimed at a process will also match any path or argument that merely contains its name, and the collateral is somebody's live session.
 - **Prefer the typed tool over the general escape hatch.**
 - **Wake a stopped environment from the host.** A stopped env has no pod, so its MCP edge cannot answer and cannot start itself; that silence is not a broken env. Open it from the host CLI, then resume over MCP.
 

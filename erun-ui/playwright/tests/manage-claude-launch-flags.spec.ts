@@ -22,22 +22,19 @@ test.describe('manage dialog claude launch flags', () => {
     await app.manageDialog.selectTab('AI');
     await expect.poll(() => app.manageDialog.getActiveTab()).toBe('AI');
 
-    // Assert every transition relative to the captured starting values, so
-    // the spec stays valid even if the seeded baseline ever adopts claude
-    // defaults.
+    // The seeded env carries no claude block and this spec cancels without
+    // saving, so the starting state is one deterministic outcome rather than
+    // whatever the dialog happens to open with: nothing ticked, verbose+debug
+    // off. Asserting it also catches a spec that leaks a save into the baseline.
     await expect(app.manageDialog.claudeDefaultModelSelect()).toBeVisible();
-    await expect(app.manageDialog.claudeVerboseDebugCheckbox()).toBeVisible();
-    const initialVerbose = await app.manageDialog.claudeVerboseDebugCheckbox().isChecked();
+    await expect(app.manageDialog.claudeVerboseDebugCheckbox()).not.toBeChecked();
 
     const fable = app.manageDialog.claudeModelCheckbox('fable');
-    await expect(fable).toBeVisible();
-    const initialFable = await fable.isChecked();
+    await expect(fable).not.toBeChecked();
 
     // Ticking fable under Available models is what makes it selectable as the
     // Default model — the coupling between the two controls.
-    if (!initialFable) {
-      await fable.click();
-    }
+    await fable.click();
     await expect(fable).toBeChecked();
     await app.manageDialog.chooseClaudeDefaultModel('fable');
     await expect.poll(() => app.manageDialog.claudeDefaultModelSelectedValue()).toBe('fable');
@@ -54,13 +51,9 @@ test.describe('manage dialog claude launch flags', () => {
     await expect(app.manageDialog.tab('AI')).toHaveAttribute('aria-label', /has unsaved changes/);
 
     await app.manageDialog.claudeVerboseDebugCheckbox().click();
-    await expect(app.manageDialog.claudeVerboseDebugCheckbox()).toBeChecked({
-      checked: !initialVerbose,
-    });
+    await expect(app.manageDialog.claudeVerboseDebugCheckbox()).toBeChecked();
     await app.manageDialog.claudeVerboseDebugCheckbox().click();
-    await expect(app.manageDialog.claudeVerboseDebugCheckbox()).toBeChecked({
-      checked: initialVerbose,
-    });
+    await expect(app.manageDialog.claudeVerboseDebugCheckbox()).not.toBeChecked();
 
     // "Default" is the first available model the session starts on (opus for
     // the seeded set), not the agent's own built-in default.

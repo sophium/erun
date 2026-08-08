@@ -28,7 +28,7 @@ stop_holder() {
     holder_pid=""
 }
 
-sessions="${work_root}/erun-app"
+sessions="${work_root}/erun-sessions"
 
 reset_sessions() {
     rm -rf "${sessions}"

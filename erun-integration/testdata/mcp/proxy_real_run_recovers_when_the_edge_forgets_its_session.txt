@@ -1,0 +1,5 @@
+{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{}}}}
+{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"version","description":"Report the runtime's erun version"}]}}
+audit: erun mcp proxy --environment dev --tenant team
+mcp: team/dev edge resolved to http://<LOOPBACK>:26100/mcp
+mcp proxy: the MCP edge at http://<LOOPBACK>:26100/mcp had forgotten its session; re-initialized and retried

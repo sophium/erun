@@ -39,7 +39,14 @@ func main() {
 		os.Exit(97)
 	}
 
-	cmd := exec.Command("sh", script)
+	// The scenario PATH holds no shell, so the scenario routes an absolute one
+	// through ERUN_STUB_SH; a bare "sh" is only a fallback for a caller that
+	// built the environment itself.
+	shell := os.Getenv("ERUN_STUB_SH")
+	if strings.TrimSpace(shell) == "" {
+		shell = "sh"
+	}
+	cmd := exec.Command(shell, script)
 	cmd.Env = append(os.Environ(), "ERUN_STUB_ARGV_FILE="+argvFile.Name())
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout

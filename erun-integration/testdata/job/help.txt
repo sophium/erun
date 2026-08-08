@@ -11,7 +11,7 @@ Available Commands:
   await       Wait a bounded time for a job to finish, reporting a timeout distinctly
   cancel      Signal a running job's work by its recorded process, never by pattern
   output      Read a job's captured output, including while it is still running
-  start       Run a command as a detached job and return its handle
+  start       Run a command, or an AI agent, as a detached job and return its handle
   status      Report one job's state and outcome, or every retained job
 
 Flags:

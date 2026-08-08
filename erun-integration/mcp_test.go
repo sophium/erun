@@ -45,9 +45,18 @@ type fakeMCPEdge struct {
 	// RPCErrors maps a JSON-RPC method to a raw JSON-RPC error object, the
 	// protocol-level failure a tool-level isError does not cover.
 	RPCErrors map[string]string
+	// ForgetSessionOnce answers 404 for the first request carrying a session id,
+	// the way an edge that restarted inside a still-running pod does; the next
+	// handshake hands out a live session again.
+	ForgetSessionOnce bool
+	// ForgetSessionAlways never accepts a session id, so a client that keeps
+	// re-handshaking would loop forever.
+	ForgetSessionAlways bool
 
-	mu       sync.Mutex
-	requests []fakeMCPRequest
+	mu         sync.Mutex
+	requests   []fakeMCPRequest
+	handshakes int
+	forgot     bool
 }
 
 type fakeMCPRequest struct {
@@ -89,7 +98,14 @@ func (e *fakeMCPEdge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "edge refused the request", e.Status)
 		return
 	}
-	w.Header().Set("Mcp-Session-Id", "test-session")
+	if r.Header.Get("Mcp-Session-Id") != "" && e.forgetSession() {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	if request.Method == "initialize" {
+		e.newSession()
+	}
+	w.Header().Set("Mcp-Session-Id", e.sessionID())
 	if len(request.ID) == 0 || e.AcceptEverything {
 		w.WriteHeader(http.StatusAccepted)
 		return
@@ -115,6 +131,50 @@ func (e *fakeMCPEdge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = fmt.Fprintln(w, reply)
+}
+
+func (e *fakeMCPEdge) forgetSession() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.ForgetSessionAlways {
+		return true
+	}
+	if e.ForgetSessionOnce && !e.forgot {
+		e.forgot = true
+		return true
+	}
+	return false
+}
+
+func (e *fakeMCPEdge) newSession() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.handshakes++
+}
+
+// The first handshake keeps the historical id so the scenarios that only ever
+// shake hands once stay readable; a later one hands out a distinct id, which is
+// how a replay can be told apart from a request on the dead session.
+func (e *fakeMCPEdge) sessionID() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.handshakes > 1 {
+		return fmt.Sprintf("test-session-%d", e.handshakes)
+	}
+	return "test-session"
+}
+
+// requestsFor returns every recorded request for a method in arrival order, so a
+// scenario can prove a recovery cost exactly one extra handshake and that the
+// replay went out on the new session.
+func (e *fakeMCPEdge) requestsFor(method string) []fakeMCPRequest {
+	matched := make([]fakeMCPRequest, 0, 2)
+	for _, request := range e.recorded() {
+		if request.Method == method {
+			matched = append(matched, request)
+		}
+	}
+	return matched
 }
 
 func (e *fakeMCPEdge) recorded() []fakeMCPRequest {
@@ -757,6 +817,85 @@ exit 3`)
 		replies := requireJSONRPCLines(t, result.Stdout, 1)
 		if message := jsonRPCErrorMessage(t, replies[0]); !strings.Contains(message, "redeploy it from the ERun desktop app") {
 			t.Fatalf("reply does not name the trust recovery: %q", message)
+		}
+	})
+
+	t.Run("proxy_real_run_recovers_when_the_edge_forgets_its_session", func(t *testing.T) {
+		// The relay pins one session id for its whole lifetime, so an edge that
+		// restarts inside a still-running pod would otherwise 404 every later
+		// request and leave the client with no tools at all. A forgotten session
+		// must cost one transparent re-handshake and nothing else: the client still
+		// sees one reply per request, on its own ids.
+		skipIfPortsBusy(t, mcpEdgeLocalPort)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
+		fixture.SeedDesktopIdentity(t, setup)
+		edge := &fakeMCPEdge{ForgetSessionOnce: true, Results: map[string]string{
+			"initialize": `{"protocolVersion":"2025-06-18","capabilities":{"tools":{}}}`,
+			"tools/list": `{"tools":[{"name":"version","description":"Report the runtime's erun version"}]}`,
+		}}
+		edge.start(t, mcpEdgeLocalPort)
+
+		stdin := proxyStdin(
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{}}}`,
+			`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
+		)
+		result := erun.Run(t, []string{"mcp", "proxy", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: stdin})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "mcp/proxy_real_run_recovers_when_the_edge_forgets_its_session", normalize.Apply(result.Combined))
+
+		replies := requireJSONRPCLines(t, result.Stdout, 2)
+		if _, failed := replies[1]["error"]; failed {
+			t.Fatalf("tools/list came back as an error after the recovery: %v", replies[1])
+		}
+		if replies[1]["id"] != float64(2) {
+			t.Fatalf("tools/list reply came back on the wrong id: %v", replies[1])
+		}
+		// Session ids are request headers, so the snapshot cannot see them: the
+		// retry must have gone out on the session the second handshake handed out.
+		if handshakes := edge.requestsFor("initialize"); len(handshakes) != 2 {
+			t.Fatalf("edge saw %d initialize requests, want exactly one re-handshake: %+v", len(handshakes), edge.recorded())
+		}
+		lists := edge.requestsFor("tools/list")
+		if len(lists) != 2 {
+			t.Fatalf("edge saw %d tools/list requests, want the original plus one replay: %+v", len(lists), edge.recorded())
+		}
+		if lists[0].SessionID != "test-session" || lists[1].SessionID != "test-session-2" {
+			t.Fatalf("tools/list sessions = %q then %q, want the dead session then the re-established one", lists[0].SessionID, lists[1].SessionID)
+		}
+	})
+
+	t.Run("proxy_real_run_surfaces_a_session_the_edge_never_accepts", func(t *testing.T) {
+		// The recovery is bounded: an edge that rejects every session must produce
+		// one JSON-RPC error against the request the client is waiting on, not an
+		// endless re-handshake loop.
+		skipIfPortsBusy(t, mcpEdgeLocalPort)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
+		fixture.SeedDesktopIdentity(t, setup)
+		edge := &fakeMCPEdge{ForgetSessionAlways: true, Results: map[string]string{
+			"initialize": `{"protocolVersion":"2025-06-18","capabilities":{"tools":{}}}`,
+		}}
+		edge.start(t, mcpEdgeLocalPort)
+
+		stdin := proxyStdin(
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{}}}`,
+			`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
+		)
+		result := erun.Run(t, []string{"mcp", "proxy", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: stdin})
+		if result.ExitCode != 0 {
+			t.Fatalf("expected the relay to keep serving and exit 0, got %d:\n%s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "mcp/proxy_real_run_surfaces_a_session_the_edge_never_accepts", normalize.Apply(result.Combined))
+
+		replies := requireJSONRPCLines(t, result.Stdout, 2)
+		if message := jsonRPCErrorMessage(t, replies[1]); !strings.Contains(message, "re-establish the MCP session") {
+			t.Fatalf("reply does not say the session could not be re-established: %q", message)
+		}
+		if handshakes := edge.requestsFor("initialize"); len(handshakes) != 2 {
+			t.Fatalf("edge saw %d initialize requests, want the client's plus exactly one retry: %+v", len(handshakes), edge.recorded())
 		}
 	})
 

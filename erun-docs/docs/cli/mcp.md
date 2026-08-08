@@ -74,6 +74,8 @@ Being able to reach the edge depends on the port-forward `erun open` establishes
 
 If the port-forward is down, the proxy answers each request with a JSON-RPC error telling you to run `erun open`, and keeps serving; the client shows the message and recovers on its own once the forward is back. stdout carries JSON-RPC and nothing else — every diagnostic goes to stderr, where the client's own log picks it up.
 
+An environment's edge can also forget the session mid-run — it restarts inside a still-running pod, or the session simply ages out. The proxy handles that itself: it re-runs the handshake and retries the request once, so the client sees its reply and nothing else, and the re-handshake is noted on stderr. Only an edge that will not accept a new session surfaces an error to the client.
+
 ## Error behaviour
 
 | Failure | Behaviour |

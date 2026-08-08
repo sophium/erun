@@ -54,6 +54,47 @@ type startTerminalSessionParams struct {
 	InitialInput []byte
 }
 
+// Markers the launching process may carry that a fresh interactive terminal must
+// not inherit. NO_COLOR/FORCE_COLOR are honored on presence alone, so either one
+// silently defeats the TERM/COLORTERM the PTY sets for the child. The Claude
+// Code markers announce an already-running session, so a claude launched under
+// them starts as a nested child: it stops saving its transcript and reports
+// itself as somebody else's subprocess.
+var strippedSessionEnvNames = []string{"NO_COLOR", "FORCE_COLOR", "CLAUDECODE", "CLAUDE_PID"}
+
+const strippedSessionEnvPrefix = "CLAUDE_CODE_"
+
+// terminalSessionEnv assembles a PTY child's environment. Order is the contract:
+// the scrubbed inherited environment first, then the caller's own values, then
+// the terminal capabilities, so a caller that deliberately sets one of the
+// stripped names still wins.
+func terminalSessionEnv(inherited, requested []string) []string {
+	env := make([]string, 0, len(inherited)+len(requested)+2)
+	for _, entry := range inherited {
+		if !stripsFromTerminalSession(entry) {
+			env = append(env, entry)
+		}
+	}
+	env = append(env, requested...)
+	return append(env, "TERM=xterm-256color", "COLORTERM=truecolor")
+}
+
+func stripsFromTerminalSession(entry string) bool {
+	name, _, ok := strings.Cut(entry, "=")
+	if !ok {
+		return false
+	}
+	if strings.HasPrefix(name, strippedSessionEnvPrefix) {
+		return true
+	}
+	for _, stripped := range strippedSessionEnvNames {
+		if name == stripped {
+			return true
+		}
+	}
+	return false
+}
+
 func resolveCLIExecutable() string {
 	// ERUN_APP_CLI is a test seam: the Playwright harness points it at an inert
 	// `erun` stub so the ERun/AI tabs never resolve a real build artifact sitting

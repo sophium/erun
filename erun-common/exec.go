@@ -43,6 +43,11 @@ func BoundCommandWait(cmd *exec.Cmd) {
 	}
 }
 
+// DesktopAppName is the installed file name of the desktop binary, and so the
+// string a `pkill -f` aimed at that binary carries. Nothing erun writes into a
+// process's command line may contain it — see RemoteAppSessionSocketDir.
+const DesktopAppName = "erun-app"
+
 // DesktopAppCommand builds the command that launches the ERun desktop app
 // (erun-app). On macOS an `.app` bundle must launch via `open -n <bundle>` (a
 // fresh instance; forwarded args go after `--args`); elsewhere the binary is

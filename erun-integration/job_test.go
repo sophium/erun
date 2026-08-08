@@ -58,6 +58,32 @@ func startJob(t *testing.T, setup env.Setup, envVars []string, name string, args
 	return result
 }
 
+// waitForJobActivity blocks until the supervisor has folded enough of an agent's
+// event stream to name an activity. The fold runs on the supervisor's own poll,
+// so a scenario that read straight after the stub flushed would race it; waiting
+// on the observable condition is what keeps the read deterministic instead of
+// timing-dependent.
+func waitForJobActivity(t *testing.T, setup env.Setup, envVars []string, id string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		result := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", id, "--output", "json"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		var payload struct {
+			Progress struct {
+				Activity string `json:"activity"`
+			} `json:"progress"`
+		}
+		if json.Unmarshal([]byte(result.Stdout), &payload) == nil && payload.Progress.Activity != "" {
+			return
+		}
+		if !time.Now().Before(deadline) {
+			t.Fatalf("job %q reported no agent activity within %s:\n%s", id, timeout, result.Combined)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
 func TestJob(t *testing.T) {
 	t.Run("help", func(t *testing.T) {
 		setup := env.New(t)
@@ -92,6 +118,156 @@ func TestJob(t *testing.T) {
 		golden.Equal(t, "job/start_dry_run_plans_the_detach", normalize.Apply(result.Combined))
 		if _, err := os.Stat(jobRecordPath(setup, "team", "dev", "suite")); !os.IsNotExist(err) {
 			t.Errorf("a dry-run start must not register a job, stat err: %v", err)
+		}
+	})
+
+	t.Run("start_help", func(t *testing.T) {
+		// The agent switch and what it does to the invocation are only discoverable
+		// here, so the help that states them is locked.
+		setup := env.New(t)
+		result := erun.Run(t, []string{"job", "start", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "job/start_help", normalize.Apply(result.Combined))
+	})
+
+	t.Run("agent_start_dry_run_plans_the_streaming_invocation", func(t *testing.T) {
+		// An agent job names a tool and a prompt; erun builds the argv. The plan is
+		// where that argv is auditable, and the streaming flags are the whole point:
+		// without them the tool prints nothing until it exits, so a multi-hour run
+		// would report no output while it is actively editing files.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		claude := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "sweep", "--agent", "claude", "--dry-run", "--", "fix the failing tests"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if claude.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", claude.ExitCode, claude.Combined)
+		}
+		codex := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "sweep", "--agent", "codex", "--dry-run", "--", "fix the failing tests"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if codex.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", codex.ExitCode, codex.Combined)
+		}
+		golden.Equal(t, "job/agent_start_dry_run_plans_the_streaming_invocation", normalize.Apply(claude.Combined+codex.Combined))
+	})
+
+	t.Run("agent_start_refuses_an_unsupported_tool_or_a_command", func(t *testing.T) {
+		// A caller that meant a command and a caller that meant an agent must not be
+		// silently given the other, and an unsupported tool must name the ones erun
+		// can actually stream.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		unsupported := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "sweep", "--agent", "gemini", "--dry-run", "--", "do the thing"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if unsupported.ExitCode == 0 {
+			t.Fatalf("expected an unsupported agent tool to fail, got 0:\n%s", unsupported.Combined)
+		}
+		golden.Equal(t, "job/agent_start_refuses_an_unsupported_tool_or_a_command", normalize.Apply(unsupported.Combined))
+	})
+
+	t.Run("agent_progress_is_readable_while_the_agent_works", func(t *testing.T) {
+		// The defect this kind closes: a detached agent run reporting nothing but
+		// "running" for its whole life. The stub emits the tool's real stream-json
+		// event shapes and then blocks, so the scenario reads mid-run on an
+		// observable condition and locks that erun answers what the agent is doing.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		flushed := filepath.Join(setup.Cwd, "flushed")
+		release := filepath.Join(setup.Cwd, "release")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		fixture.StubBinaryWithScript(t, stubs, "claude",
+			`printf '{"type":"system","subtype":"init","session_id":"s1"}\n'`+"\n"+
+				`printf '{"type":"assistant","message":{"id":"msg_1","content":[{"type":"text","text":"Starting the sweep."}]}}\n'`+"\n"+
+				`printf '{"type":"assistant","message":{"id":"msg_1","content":[{"type":"tool_use","id":"t1","name":"Edit","input":{"file_path":"erun-common/mcp_client.go"}}]}}\n'`+"\n"+
+				"printf '"+jobStubSignal+"' > '"+flushed+"'\n"+
+				"while [ ! -f '"+release+"' ]; do sleep 0.05; done\n"+
+				`printf '{"type":"assistant","message":{"id":"msg_2","content":[{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"go test ./..."}}]}}\n'`+"\n"+
+				`printf '{"type":"result","subtype":"success","is_error":false,"num_turns":2,"result":"Fixed the client."}\n'`+"\n"+
+				"exit 0")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "claude")...)
+
+		start := startJob(t, setup, envVars, "sweep", "--agent", "claude", "--", "fix the failing tests")
+		if start.ExitCode != 0 {
+			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
+		}
+		waitForFile(t, flushed, 30*time.Second)
+		waitForJobActivity(t, setup, envVars, "sweep", 30*time.Second)
+
+		// job_output already serves the events, and job status answers the activity
+		// — the two together are what replace scraping the agent's own transcript.
+		midRun := erun.Run(t, []string{"job", "output", "--tenant", "team", "--environment", "dev", "--id", "sweep"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		status := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "sweep"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		// The lease already names the work for the desktop; an agent job renames it
+		// to the current activity so "busy" becomes "editing <file>".
+		lease := erun.Run(t, []string{"activity", "lease", "list", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+
+		if err := os.WriteFile(release, []byte("go\n"), 0o644); err != nil {
+			t.Fatalf("release the stub: %v", err)
+		}
+		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "sweep", "--timeout", "30s"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if await.ExitCode != 0 {
+			t.Fatalf("await: exit %d: %s", await.ExitCode, await.Combined)
+		}
+		finished := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "sweep"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "job/agent_progress_is_readable_while_the_agent_works", normalize.Apply(
+			midRun.Combined+status.Combined+lease.Combined+finished.Combined))
+	})
+
+	t.Run("agent_progress_is_the_same_shape_for_every_tool", func(t *testing.T) {
+		// Normalizing inside erun is what keeps the progress contract stable across
+		// AI tools. Codex reports work as thread items rather than tool calls, and
+		// the caller still reads one activity line and one pair of counts.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		fixture.StubBinaryWithScript(t, stubs, "codex",
+			`printf '{"type":"thread.started","thread_id":"th_1"}\n'`+"\n"+
+				`printf '{"type":"turn.started"}\n'`+"\n"+
+				`printf '{"type":"item.started","item":{"id":"i1","type":"file_change","changes":[{"path":"erun-common/mcp_client.go","kind":"update"}]}}\n'`+"\n"+
+				`printf '{"type":"item.completed","item":{"id":"i1","type":"file_change","changes":[{"path":"erun-common/mcp_client.go","kind":"update"}]}}\n'`+"\n"+
+				`printf '{"type":"item.completed","item":{"id":"i2","type":"agent_message","text":"Fixed the client."}}\n'`+"\n"+
+				`printf '{"type":"turn.completed"}\n'`+"\n"+
+				"exit 0")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "codex")...)
+
+		start := startJob(t, setup, envVars, "sweep", "--agent", "codex", "--", "fix the failing tests")
+		if start.ExitCode != 0 {
+			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
+		}
+		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "sweep", "--timeout", "30s"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if await.ExitCode != 0 {
+			t.Fatalf("await: exit %d: %s", await.ExitCode, await.Combined)
+		}
+		status := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "sweep"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "job/agent_progress_is_the_same_shape_for_every_tool", normalize.Apply(status.Combined))
+
+		// The normalized fields are what an orchestrator branches on, and the
+		// snapshot above renders them as one line; the record is the contract.
+		body, err := os.ReadFile(jobRecordPath(setup, "team", "dev", "sweep"))
+		if err != nil {
+			t.Fatalf("read job record: %v", err)
+		}
+		var record struct {
+			Kind      string `json:"kind"`
+			AgentTool string `json:"agentTool"`
+			Progress  *struct {
+				Activity   string `json:"activity"`
+				LastTool   string `json:"lastTool"`
+				LastTarget string `json:"lastTarget"`
+				ToolsRun   int    `json:"toolsRun"`
+				Turns      int    `json:"turns"`
+				Result     string `json:"result"`
+			} `json:"progress"`
+		}
+		if err := json.Unmarshal(body, &record); err != nil {
+			t.Fatalf("parse job record: %v\n%s", err, body)
+		}
+		if record.Kind != "agent" || record.AgentTool != "codex" || record.Progress == nil {
+			t.Fatalf("expected an agent record carrying progress, got:\n%s", body)
+		}
+		if record.Progress.LastTool != "Edit" || record.Progress.LastTarget != "erun-common/mcp_client.go" {
+			t.Errorf("codex file_change must normalize to the same tool/target a claude edit does, got %+v", *record.Progress)
+		}
+		if record.Progress.ToolsRun != 1 || record.Progress.Turns != 1 || record.Progress.Result != "Fixed the client." {
+			t.Errorf("unexpected normalized progress: %+v", *record.Progress)
 		}
 	})
 
