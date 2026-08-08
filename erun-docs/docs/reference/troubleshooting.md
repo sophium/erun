@@ -91,6 +91,17 @@ erun mcp call --tool list --output json                      # keep working mean
 
 If `erun mcp call` reports `MCP endpoint rejected the bearer token`, the env does not trust this machine at all — redeploy it from the desktop app. If it reports `MCP endpoint is not reachable`, the port-forward is down: re-run `erun open`. The proxy surfaces both of those as JSON-RPC errors carrying the same recovery text, so a client wired through it shows the fix instead of going silent.
 
+## Orchestrator started without its environment tools
+
+**Symptoms:** the desktop titlebar shows a warning reading `<name> started without its environment tools`, and the [orchestrator](/collaboration/workflow) has none of the tools for the environments it links — every call against one fails, even though the session itself looks healthy.
+
+The desktop wires each linked environment in by launching `erun mcp proxy` for it. When it cannot wire any of them the session still starts, and the warning names which of the two causes applies, because the fixes differ:
+
+- **"the erun executable could not be resolved"** — the `erun` command line tool was not found beside the desktop app or on `PATH`. Install it, then restart the orchestrator.
+- **"no linked environment resolved an MCP port"** — none of the linked environments resolves a port any more, usually because they were renamed or removed. Check the orchestrator's linked environments in the desktop app, then restart it.
+
+The warning stays until you dismiss it and carries a copy action, so the message is still readable after the session comes up. An orchestrator that links no environments has nothing to wire and stays quiet.
+
 ## Cloud context won't start
 
 **Symptoms:** `erun open` reports a long-running "starting" status that never resolves.
