@@ -71,6 +71,7 @@ When the change under test is to erun's own tooling, roll it into the live tooli
 
 - If only the CLI changed, replace the binary in place; a running executable can be moved aside on every platform erun supports.
 - If the desktop binary is locked while running, the rebuild has to happen *after* it exits — from a **detached** relauncher that outlives your session. Record the return target first, including what to verify on resume.
+- **Reason about a restart from where your session actually runs — process ancestry answers that.** A quit command returning is not evidence that it worked or that your session lives elsewhere; shutdown is asynchronous, and a signal the target ignores looks identical to one that landed. Confirm the restart instead: the process is gone, or its start time moved. A resume-shaped nudge, or the tool list appearing to change, proves neither.
 - On resume, confirm the new code is actually live, then finish the task without waiting to be told. Answering a resume with "nothing to do" is a defect.
 - Building the desktop on the host is the one exception to "never build on the host": its GUI toolchain is not in the pod image. The code is still authored in the pod.
 

@@ -1,0 +1,23 @@
+Speak MCP on stdin/stdout and relay every message to an environment's MCP edge, minting a fresh bearer for each request.
+
+Point an MCP client at this command instead of writing a bearer into the client's config. A client reads that config once at launch and cannot refresh a header, so a token in it ages out mid-session and every tool for the environment fails at once; nothing this command needs is a credential, so a session keeps working for as long as it runs. Reaching the edge still requires the port-forward `erun open` establishes — while it is down, each request is answered with a JSON-RPC error saying so rather than a dead pipe.
+
+stdout carries JSON-RPC and nothing else; every diagnostic goes to stderr.
+
+Usage:
+  erun mcp proxy [flags]
+
+Examples:
+  erun mcp proxy --tenant acme --environment dev
+  claude --mcp-config '{"mcpServers":{"acme-dev":{"type":"stdio","command":"erun","args":["mcp","proxy","--tenant","acme","--environment","dev"]}}}'
+
+Flags:
+      --dry-run              Resolve and trace mutating actions without executing them.
+      --environment string   Target a specific environment; requires --tenant
+  -h, --help                 help for proxy
+      --tenant string        Target a specific tenant (default: the current scope)
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.
