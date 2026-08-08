@@ -24,6 +24,7 @@ var errPushBuildVersionConflict = fmt.Errorf("push --build builds and pushes the
 
 func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
 	target := common.DockerCommandTarget{}
+	var jobs int
 	cmd := &cobra.Command{
 		Use:   "build",
 		Short: "Build the project's container images",
@@ -37,11 +38,17 @@ func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderF
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runBuildCommand(commandContext(cmd), store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target, runBuildScript, buildDockerImage, loginToDockerRegistry, selectRunner, push, deployHelmChart)
+			ctx := commandContext(cmd)
+			ctx.BuildJobs = jobs
+			return runBuildCommand(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target, runBuildScript, buildDockerImage, loginToDockerRegistry, selectRunner, push, deployHelmChart)
 		},
 	}
 	addDryRunFlag(cmd)
 	addBuildCommandTargetFlags(cmd, &target)
+	// Only on build. push and release also call addPushCommandTargetFlags, and
+	// their builds stay sequential, so offering the knob there would advertise a
+	// control that does nothing.
+	cmd.Flags().IntVarP(&jobs, "jobs", "j", 0, "Build this many images at once (0 resolves from the machine, 1 is sequential). Independent images build concurrently; a FROM dependency still waits for its base.")
 	return cmd
 }
 

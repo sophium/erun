@@ -15,6 +15,9 @@ func TestStartWorkspaceSyncForSelectionRequiresRemoteSSHDWorkspaceSync(t *testin
 		canConnectLocalPort: func(int) bool {
 			return true
 		},
+		canReachMCPEndpoint: func(int) bool {
+			return true
+		},
 		workspaceSyncReady: func(context.Context, string) error {
 			return nil
 		},
@@ -43,6 +46,9 @@ func TestStartWorkspaceSyncForSelectionSkipsWhenSSHDWorkspaceSyncDisabled(t *tes
 	app := NewApp(erunUIDeps{
 		store: workspaceSyncStore(false),
 		canConnectLocalPort: func(int) bool {
+			return true
+		},
+		canReachMCPEndpoint: func(int) bool {
 			return true
 		},
 		workspaceSyncReady: func(context.Context, string) error {
@@ -74,6 +80,9 @@ func TestStartSessionStartsConfiguredWorkspaceSync(t *testing.T) {
 			return newStubTerminalSession(), nil
 		},
 		canConnectLocalPort: func(int) bool {
+			return true
+		},
+		canReachMCPEndpoint: func(int) bool {
 			return true
 		},
 		workspaceSyncReady: func(context.Context, string) error {
@@ -113,6 +122,9 @@ func TestSaveEnvironmentConfigPersistsWorkspaceSyncLocalPath(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store: store,
 		canConnectLocalPort: func(int) bool {
+			return true
+		},
+		canReachMCPEndpoint: func(int) bool {
 			return true
 		},
 		workspaceSyncReady: func(context.Context, string) error {
@@ -202,6 +214,7 @@ func TestStartWorkspaceSyncForConfiguredEnvsStartsEnabledEnvs(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store:                 workspaceSyncStore(true),
 		canConnectLocalPort:   func(int) bool { return true },
+		canReachMCPEndpoint:   func(int) bool { return true },
 		workspaceSyncReady:    func(context.Context, string) error { return nil },
 		workspaceSyncInterval: time.Hour,
 		syncWorkspace: func(_ context.Context, params eruncommon.WorkspaceSyncParams) (eruncommon.WorkspaceSyncResult, error) {
@@ -211,7 +224,7 @@ func TestStartWorkspaceSyncForConfiguredEnvsStartsEnabledEnvs(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	app.startWorkspaceSyncForConfiguredEnvs()
+	app.reconcileWorkspaceSyncForConfiguredEnvs()
 
 	select {
 	case params := <-called:
@@ -223,11 +236,54 @@ func TestStartWorkspaceSyncForConfiguredEnvsStartsEnabledEnvs(t *testing.T) {
 	}
 }
 
+// Detaching a mirror is done the same way linking is — by editing config while
+// the app runs — so a worker whose env is no longer linked has to stop. Left
+// running it keeps writing into a directory the operator has stopped treating as
+// a mirror.
+func TestReconcileWorkspaceSyncForConfiguredEnvsStopsAnUnlinkedEnv(t *testing.T) {
+	store := workspaceSyncStore(true)
+	passed := make(chan struct{}, 8)
+	app := NewApp(erunUIDeps{
+		store:                 store,
+		canConnectLocalPort:   func(int) bool { return true },
+		canReachMCPEndpoint:   func(int) bool { return true },
+		workspaceSyncReady:    func(context.Context, string) error { return nil },
+		workspaceSyncInterval: time.Millisecond,
+		syncWorkspace: func(context.Context, eruncommon.WorkspaceSyncParams) (eruncommon.WorkspaceSyncResult, error) {
+			select {
+			case passed <- struct{}{}:
+			default:
+			}
+			return eruncommon.WorkspaceSyncResult{}, nil
+		},
+	})
+	defer app.shutdown(context.Background())
+
+	app.reconcileWorkspaceSyncForConfiguredEnvs()
+	select {
+	case <-passed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected the linked env to start syncing")
+	}
+
+	// The operator unlinks it outside the app, which is where links are made.
+	env := store.envs["frs/dev"]
+	env.SSHD.WorkspaceSync.Enabled = false
+	store.envs["frs/dev"] = env
+
+	app.reconcileWorkspaceSyncForConfiguredEnvs()
+
+	if keys := app.runningWorkspaceSyncKeys(); len(keys) != 0 {
+		t.Fatalf("expected the worker to stop once its env was unlinked, still running: %v", keys)
+	}
+}
+
 func TestStartWorkspaceSyncForConfiguredEnvsSkipsDisabledEnvs(t *testing.T) {
 	called := make(chan eruncommon.WorkspaceSyncParams, 1)
 	app := NewApp(erunUIDeps{
 		store:                 workspaceSyncStore(false),
 		canConnectLocalPort:   func(int) bool { return true },
+		canReachMCPEndpoint:   func(int) bool { return true },
 		workspaceSyncReady:    func(context.Context, string) error { return nil },
 		workspaceSyncInterval: time.Hour,
 		syncWorkspace: func(_ context.Context, params eruncommon.WorkspaceSyncParams) (eruncommon.WorkspaceSyncResult, error) {
@@ -237,7 +293,7 @@ func TestStartWorkspaceSyncForConfiguredEnvsSkipsDisabledEnvs(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	app.startWorkspaceSyncForConfiguredEnvs()
+	app.reconcileWorkspaceSyncForConfiguredEnvs()
 
 	select {
 	case params := <-called:

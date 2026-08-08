@@ -175,7 +175,7 @@ func (a *App) runCloudCredentialsRefresher(ctx context.Context, selection uiSele
 }
 
 func (a *App) waitForMCPReady(ctx context.Context, port int) error {
-	if a.deps.canConnectLocalPort == nil || a.deps.canConnectLocalPort(port) {
+	if a.deps.canReachMCPEndpoint == nil || a.deps.canReachMCPEndpoint(port) {
 		return nil
 	}
 	deadline := time.NewTimer(credentialMCPReadyTimeout)
@@ -189,7 +189,7 @@ func (a *App) waitForMCPReady(ctx context.Context, port int) error {
 		case <-deadline.C:
 			return fmt.Errorf("mcp port %d not reachable", port)
 		case <-ticker.C:
-			if a.deps.canConnectLocalPort(port) {
+			if a.deps.canReachMCPEndpoint(port) {
 				return nil
 			}
 		}

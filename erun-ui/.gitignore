@@ -5,3 +5,4 @@
 /frontend/wailsjs/
 /frontend/*.tsbuildinfo
 /frontend/package.json.md5
+/.golangci-cache/

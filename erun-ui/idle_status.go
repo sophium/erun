@@ -22,7 +22,7 @@ func (a *App) LoadIdleStatus(selection uiSelection) (uiIdleStatus, error) {
 		return uiIdleStatus{}, err
 	}
 	mcpPort := eruncommon.MCPPortForResult(result)
-	if !a.deps.canConnectLocalPort(mcpPort) {
+	if !a.deps.canReachMCPEndpoint(mcpPort) {
 		status, err := a.loadLocalIdleStatus(result)
 		if err == nil {
 			a.maybeStopIdleCloudEnvironment(result, status.status)
@@ -267,7 +267,7 @@ func (a *App) recordManualStopForCloudContext(ctx context.Context, cloudContextN
 			continue
 		}
 		mcpPort := eruncommon.MCPPortForResult(result)
-		if !a.deps.canConnectLocalPort(mcpPort) {
+		if !a.deps.canReachMCPEndpoint(mcpPort) {
 			// Best-effort audit: no port-forward to reach the tool, and the
 			// stop already succeeded, so skip silently.
 			continue

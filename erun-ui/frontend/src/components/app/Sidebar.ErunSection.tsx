@@ -1,4 +1,12 @@
-import { Bot, MoreHorizontal, Plus, RefreshCw, Settings, Stethoscope } from 'lucide-react';
+import {
+  Bot,
+  Download,
+  MoreHorizontal,
+  Plus,
+  RefreshCw,
+  Settings,
+  Stethoscope,
+} from 'lucide-react';
 import * as React from 'react';
 
 import { openGlobalConfigDialog } from '@/app/globalConfigThunks';
@@ -10,6 +18,7 @@ import {
   restartApp,
   startOrchestrator,
 } from '@/app/orchestratorThunks';
+import { openOutputs } from '@/app/outputsThunks';
 import type { OrchestratorInfo } from '@/app/slices/orchestratorsSlice';
 import { openOrchestratorDialog } from '@/app/slices/orchestratorsSlice';
 import { EmptyState } from '@/components/app/EmptyState';
@@ -234,9 +243,52 @@ function OrchestratorRowActions({
         <StatusDotGlyph state={running ? 'running' : 'stopped'} />
       </span>
       {!orchestrator.transient && (
-        <OrchestratorRowDetailsButton orchestrator={orchestrator} active={active} />
+        <>
+          <OrchestratorRowOutputsButton orchestrator={orchestrator} active={active} />
+          <OrchestratorRowDetailsButton orchestrator={orchestrator} active={active} />
+        </>
       )}
     </>
+  );
+}
+
+// The environment row has this same affordance for the files its agent produced
+// in the pod. An orchestrator produces its files here instead, which is why it
+// needs its own reader rather than the env one — but from the operator's side it
+// is the same question, so it is the same button and the same dialog.
+function OrchestratorRowOutputsButton({
+  orchestrator,
+  active,
+}: {
+  orchestrator: OrchestratorInfo;
+  active: boolean;
+}): React.ReactElement {
+  const dispatch = useAppDispatch();
+  return (
+    <IconTooltip label={`View and download ${orchestrator.name} outputs`}>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className={cn(
+          'pointer-events-none size-[26px] flex-none cursor-pointer border-0 bg-transparent text-current opacity-0 transition-[opacity,background-color,color] duration-150 hover:bg-[color-mix(in_oklch,currentColor_12%,transparent)] hover:text-current group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 [&_svg]:size-4',
+          active && 'pointer-events-auto opacity-100',
+        )}
+        aria-label={`Outputs for orchestrator ${orchestrator.name}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          void dispatch(
+            openOutputs({
+              kind: 'orchestrator',
+              orchestratorId: orchestrator.id,
+              name: orchestrator.name,
+            }),
+          );
+        }}
+      >
+        <Download />
+      </Button>
+    </IconTooltip>
   );
 }
 

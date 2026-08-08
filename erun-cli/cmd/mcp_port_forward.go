@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -216,16 +215,7 @@ func canConnectLocalPort(port int) bool {
 }
 
 func canReachLocalMCPEndpoint(port int) bool {
-	if port <= 0 {
-		return false
-	}
-	client := http.Client{Timeout: 500 * time.Millisecond}
-	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/mcp", port))
-	if err != nil {
-		return false
-	}
-	_ = resp.Body.Close()
-	return true
+	return common.CanReachLocalMCPEndpoint(port)
 }
 
 func mcpPortForwardTimeoutDetail(logPath string) string {

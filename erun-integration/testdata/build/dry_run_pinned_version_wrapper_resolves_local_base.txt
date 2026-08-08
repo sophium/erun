@@ -1,4 +1,5 @@
 audit: erun build --dry-run --version <VERSION>
+build: 3 images in 2 waves — wave 1 (2): ghcr.io/sophium/api:<VERSION>, ghcr.io/sophium/base:<VERSION>; wave 2 (1): ghcr.io/sophium/wrapper:<VERSION>
 docker image inspect ghcr.io/sophium/api:fp-<HEX16>-amd64
 fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
 docker image inspect ghcr.io/sophium/api:fp-<HEX16>-arm64

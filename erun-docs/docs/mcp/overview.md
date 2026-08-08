@@ -152,6 +152,7 @@ These wrap the [pure command primitives](/concepts/command-primitives): `build` 
 | `push` | `erun push` | Per-component status, registry URLs, published chart ref. Requires `version`. |
 | `deploy` | `erun deploy` | Per-chart rollout status, helm release info. Requires `version`. |
 | `release` | `erun release` | Released version, tag, multi-arch confirmation, and the read-back that proves the published version resolves. |
+| `pin` | `erun pin` | The resolved plan: every erun version reference for the env, its current value and its new one, plus whether it was applied. Verifies the target is published first. `preview` returns the plan without writing. |
 | `open` | `erun open` | Local SSH + MCP ports, status (`opened` / `already_open`). |
 | `expose` | `erun expose` | Resolved public hostname, per-env wildcard record, Host-routing Ingress. Requires a `platform:` block. Supports preview (dry-run). |
 | `init` | `erun init` | Created files, deployed namespace. |

@@ -1,7 +1,15 @@
-import type { AgentOutputsList, UISelection } from '@/types';
+import type { AgentOutputsList } from '@/types';
 
-import { DownloadAgentOutput, ListAgentOutputs, RunHostArtifact } from '../../wailsjs/go/main/App';
+import {
+  DownloadAgentOutput,
+  DownloadOrchestratorOutput,
+  ListAgentOutputs,
+  ListOrchestratorOutputs,
+  RunHostArtifact,
+  RunOrchestratorOutputOnHost,
+} from '../../wailsjs/go/main/App';
 import { readError } from './errors';
+import type { OutputsTarget } from './slices/outputsDialogSlice';
 import {
   openOutputsDialog,
   setOutputs,
@@ -12,13 +20,16 @@ import {
 } from './slices/outputsDialogSlice';
 import type { AppThunk } from './store';
 
-// openOutputs surfaces the files an agent produced in its runtime pod, newest-first.
+// openOutputs surfaces the files an agent produced, newest-first — from the
+// environment's runtime pod, or from this host for an orchestrator.
 export const openOutputs =
-  (selection: UISelection): AppThunk<Promise<void>> =>
+  (target: OutputsTarget): AppThunk<Promise<void>> =>
   async (dispatch) => {
-    dispatch(openOutputsDialog(selection));
+    dispatch(openOutputsDialog(target));
     try {
-      const list = (await ListAgentOutputs(selection)) as AgentOutputsList;
+      const list = (await (target.kind === 'orchestrator'
+        ? ListOrchestratorOutputs(target.orchestratorId)
+        : ListAgentOutputs(target.selection))) as AgentOutputsList;
       dispatch(setOutputs({ dir: list.dir, entries: list.entries }));
     } catch (error) {
       dispatch(setOutputsError(readError(error)));
@@ -29,13 +40,15 @@ export const openOutputs =
 export const downloadOutput =
   (name: string): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
-    const selection = getState().outputsDialog.selection;
-    if (!selection) {
+    const target = getState().outputsDialog.target;
+    if (!target) {
       return;
     }
     dispatch(setOutputsDownloading(name));
     try {
-      const dest = await DownloadAgentOutput(selection, name);
+      const dest = await (target.kind === 'orchestrator'
+        ? DownloadOrchestratorOutput(target.orchestratorId, name)
+        : DownloadAgentOutput(target.selection, name));
       dispatch(
         setOutputsStatus(
           dest.trim() === ''
@@ -48,20 +61,22 @@ export const downloadOutput =
     }
   };
 
-// runOutputOnHost launches a synced artifact on the host so the operator can run
-// or debug a binary an agent cross-built in the pod. The backend runs the copy
-// workspace sync mirrored into the read-only host outputs dir, erroring clearly
-// when the env has no host workspace or the artifact has not synced down yet.
+// runOutputOnHost launches an artifact on this machine. For an environment that
+// is the copy workspace sync mirrored down from the pod, so it errors clearly
+// when the env has no host workspace or the artifact has not synced yet. For an
+// orchestrator the file was produced here, so it runs in place.
 export const runOutputOnHost =
   (name: string): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
-    const selection = getState().outputsDialog.selection;
-    if (!selection) {
+    const target = getState().outputsDialog.target;
+    if (!target) {
       return;
     }
     dispatch(setOutputsRunning(name));
     try {
-      await RunHostArtifact(selection, name);
+      await (target.kind === 'orchestrator'
+        ? RunOrchestratorOutputOnHost(target.orchestratorId, name)
+        : RunHostArtifact(target.selection, name));
       dispatch(setOutputsStatus({ message: `Launched ${name} on this machine.`, error: false }));
     } catch (error) {
       dispatch(setOutputsStatus({ message: readError(error), error: true }));

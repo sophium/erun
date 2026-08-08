@@ -30,6 +30,12 @@ const MaxRuntimeOutputBytes = 100 * 1024 * 1024
 const outputDownloadArchiveFormat = "tar.gz"
 
 // OutputEntry is one file or directory in the agent outputs directory.
+// RuntimeOutputsDirEnvVar names the directory an agent writes its deliverables
+// to. It is the one convention shared by both kinds of agent: in a pod it points
+// at the runtime outputs dir, and for a host-side orchestrator at that
+// orchestrator's own host directory.
+const RuntimeOutputsDirEnvVar = "ERUN_OUTPUTS_DIR"
+
 type OutputEntry struct {
 	Name    string    `json:"name"`
 	Path    string    `json:"path"`

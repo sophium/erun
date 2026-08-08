@@ -15,6 +15,7 @@ type BuildInput struct {
 	Release       bool   `json:"release,omitempty" jsonschema:"when true, run release first and publish the resolved release-tagged images"`
 	NoIncremental bool   `json:"noIncremental,omitempty" jsonschema:"when true, disable fingerprint-based build caching and rebuild every image from scratch"`
 	Preview       bool   `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
+	Jobs          int    `json:"jobs,omitempty" jsonschema:"build this many images at once; 0 resolves from the machine and 1 is sequential. Independent images build concurrently; an image that FROMs a sibling still waits for it"`
 	Verbosity     int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
 
@@ -31,6 +32,7 @@ func buildTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest
 	return func(_ context.Context, _ *mcp.CallToolRequest, input BuildInput) (*mcp.CallToolResult, CommandOutput, error) {
 		var result *eruncommon.BuildResult
 		output, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, func(runCtx eruncommon.Context, workDir string) error {
+			runCtx.BuildJobs = input.Jobs
 			component := strings.TrimSpace(input.Component)
 			version := strings.TrimSpace(input.Version)
 			execution, err := resolveRuntimeBuildExecution(runCtx, runtime, workDir, component, version, input.Release, input.NoIncremental)

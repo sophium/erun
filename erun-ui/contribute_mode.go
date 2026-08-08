@@ -107,7 +107,7 @@ func (a *App) runEnsureErunClone(selection uiSelection) error {
 		ctx = context.Background()
 	}
 	mcpPort := eruncommon.MCPPortForResult(result)
-	if a.deps.canConnectLocalPort != nil && !a.deps.canConnectLocalPort(mcpPort) {
+	if a.deps.canReachMCPEndpoint != nil && !a.deps.canReachMCPEndpoint(mcpPort) {
 		return wrapMCPUnreachableError(fmt.Errorf("mcp port %d is not reachable; open the environment first", mcpPort))
 	}
 	endpoint := mcpEndpointForOpenResult(result)

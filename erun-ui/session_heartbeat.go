@@ -59,7 +59,7 @@ func (a *App) runSessionHeartbeatPoller(stop <-chan struct{}) {
 			// from an env with no files. startWorkspaceSyncForSelection
 			// re-validates and dedups a running poller, so this settles to a
 			// no-op once every linked env is syncing.
-			a.startWorkspaceSyncForConfiguredEnvs()
+			a.reconcileWorkspaceSyncForConfiguredEnvs()
 		}
 	}
 }

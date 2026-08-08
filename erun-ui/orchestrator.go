@@ -508,6 +508,14 @@ const orchestratorModel = "opus"
 // lockstep with erun-common's claudeEffortFlags(ultracode).
 const orchestratorUltracodeFlag = ` --settings '{"ultracode":true}'`
 
+// orchestratorNoAskFlag removes the harness's ability to stop and ask. An
+// orchestrator's contract is to resolve ambiguity from the code, tests and
+// sensible defaults and carry the task to a verified end — so a question is a
+// defect, not caution, and one asked while the operator is away stalls the work
+// indefinitely. Denying the tool makes that structural rather than a matter of
+// the agent's judgement about its own instructions.
+const orchestratorNoAskFlag = " --disallowedTools AskUserQuestion"
+
 // orchestratorLaunchCommand resolves how to launch the host AI harness. It runs
 // through the host shell so an npm claude.cmd / .ps1 shim resolves (ConPTY can't
 // exec a .cmd directly). A non-empty initialPrompt seeds a fresh session (the
@@ -576,7 +584,7 @@ func buildOrchestratorLaunch(goos, sessionID string, sessionExists bool, initial
 	if goos == "windows" {
 		quote = powerShellQuote
 	}
-	flags := orchestratorUltracodeFlag + " --model " + orchestratorModel
+	flags := orchestratorUltracodeFlag + orchestratorNoAskFlag + " --model " + orchestratorModel
 	if strings.TrimSpace(mcpConfigPath) != "" {
 		flags += " --mcp-config " + quote(mcpConfigPath)
 	}
@@ -943,20 +951,30 @@ func (a *App) spawnOrchestratorSession(id, name string, envs []eruncommon.Orches
 	if err != nil {
 		return orchestratorInfo{}, err
 	}
+	sessionEnv := []string{
+		appSessionEnvVar + "=1",
+		// The orchestrator's own id, so an agent driving from its shell can
+		// record itself as the return target for a rebuild+restart (see the
+		// erun-orchestrate skill). Empty for transient/Investigate sessions.
+		"ERUN_ORCHESTRATOR_ID=" + id,
+		"CLAUDE_CODE_SUBAGENT_MODEL=" + orchestratorModel,
+	}
+	// An orchestrator has no pod, so the outputs convention an in-pod agent
+	// follows needs a host directory to point at. Without it a host-side agent
+	// has nowhere its deliverables are expected, and the operator has no way to
+	// see them. A transient session has no id and so no directory of its own.
+	if outputsDir, outputsErr := ensureOrchestratorOutputsDir(id); outputsErr == nil {
+		sessionEnv = append(sessionEnv, eruncommon.RuntimeOutputsDirEnvVar+"="+outputsDir)
+	} else if strings.TrimSpace(id) != "" {
+		log.Printf("erun-app: orchestrator outputs dir for %s: %v", id, outputsErr)
+	}
 	params := startTerminalSessionParams{
 		Dir:        resolveTerminalStartDir(dir),
 		Executable: executable,
 		Args:       args,
-		Env: []string{
-			appSessionEnvVar + "=1",
-			// The orchestrator's own id, so an agent driving from its shell can
-			// record itself as the return target for a rebuild+restart (see the
-			// erun-orchestrate skill). Empty for transient/Investigate sessions.
-			"ERUN_ORCHESTRATOR_ID=" + id,
-			"CLAUDE_CODE_SUBAGENT_MODEL=" + orchestratorModel,
-		},
-		Cols: cols,
-		Rows: rows,
+		Env:        sessionEnv,
+		Cols:       cols,
+		Rows:       rows,
 	}
 	session, err := a.deps.startTerminal(params)
 	if err != nil {
