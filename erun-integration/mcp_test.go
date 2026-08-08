@@ -36,14 +36,27 @@ type fakeMCPEdge struct {
 	SSE bool
 	// Status, when set, answers every POST with that status instead of a reply.
 	Status int
+	// AcceptEverything answers even a request carrying an id with a bodyless 202,
+	// the protocol anomaly that leaves a client waiting on a reply that is never
+	// coming.
+	AcceptEverything bool
 	// Results maps a JSON-RPC method to the raw JSON result it answers with.
 	Results map[string]string
 	// RPCErrors maps a JSON-RPC method to a raw JSON-RPC error object, the
 	// protocol-level failure a tool-level isError does not cover.
 	RPCErrors map[string]string
+	// ForgetSessionOnce answers 404 for the first request carrying a session id,
+	// the way an edge that restarted inside a still-running pod does; the next
+	// handshake hands out a live session again.
+	ForgetSessionOnce bool
+	// ForgetSessionAlways never accepts a session id, so a client that keeps
+	// re-handshaking would loop forever.
+	ForgetSessionAlways bool
 
-	mu       sync.Mutex
-	requests []fakeMCPRequest
+	mu         sync.Mutex
+	requests   []fakeMCPRequest
+	handshakes int
+	forgot     bool
 }
 
 type fakeMCPRequest struct {
@@ -85,8 +98,15 @@ func (e *fakeMCPEdge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "edge refused the request", e.Status)
 		return
 	}
-	w.Header().Set("Mcp-Session-Id", "test-session")
-	if len(request.ID) == 0 {
+	if r.Header.Get("Mcp-Session-Id") != "" && e.forgetSession() {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	if request.Method == "initialize" {
+		e.newSession()
+	}
+	w.Header().Set("Mcp-Session-Id", e.sessionID())
+	if len(request.ID) == 0 || e.AcceptEverything {
 		w.WriteHeader(http.StatusAccepted)
 		return
 	}
@@ -111,6 +131,50 @@ func (e *fakeMCPEdge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = fmt.Fprintln(w, reply)
+}
+
+func (e *fakeMCPEdge) forgetSession() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.ForgetSessionAlways {
+		return true
+	}
+	if e.ForgetSessionOnce && !e.forgot {
+		e.forgot = true
+		return true
+	}
+	return false
+}
+
+func (e *fakeMCPEdge) newSession() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.handshakes++
+}
+
+// The first handshake keeps the historical id so the scenarios that only ever
+// shake hands once stay readable; a later one hands out a distinct id, which is
+// how a replay can be told apart from a request on the dead session.
+func (e *fakeMCPEdge) sessionID() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.handshakes > 1 {
+		return fmt.Sprintf("test-session-%d", e.handshakes)
+	}
+	return "test-session"
+}
+
+// requestsFor returns every recorded request for a method in arrival order, so a
+// scenario can prove a recovery cost exactly one extra handshake and that the
+// replay went out on the new session.
+func (e *fakeMCPEdge) requestsFor(method string) []fakeMCPRequest {
+	matched := make([]fakeMCPRequest, 0, 2)
+	for _, request := range e.recorded() {
+		if request.Method == method {
+			matched = append(matched, request)
+		}
+	}
+	return matched
 }
 
 func (e *fakeMCPEdge) recorded() []fakeMCPRequest {
@@ -165,6 +229,53 @@ func verifyMCPToken(t *testing.T, token string, publicKey ed25519.PublicKey) mcp
 		t.Fatal("token signature does not verify against the seeded desktop identity")
 	}
 	return claims
+}
+
+// proxyStdin frames JSON-RPC messages the way an MCP client writes them: one
+// per line, newline-delimited, then EOF.
+func proxyStdin(messages ...string) string {
+	return strings.Join(messages, "\n") + "\n"
+}
+
+// requireJSONRPCLines is the proxy's stdout contract, and the one thing the
+// Combined snapshot cannot assert: it concatenates both streams, so it cannot
+// tell a diagnostic that leaked onto stdout from one that went to stderr where it
+// belongs. A single stray byte on stdout desynchronizes the client's parser, so
+// every line is parsed here and the decoded messages are returned for the
+// scenario to assert against.
+func requireJSONRPCLines(t *testing.T, stdout string, want int) []map[string]any {
+	t.Helper()
+	if stdout == "" && want == 0 {
+		return nil
+	}
+	if !strings.HasSuffix(stdout, "\n") {
+		t.Fatalf("proxy stdout does not end in a newline: %q", stdout)
+	}
+	lines := strings.Split(strings.TrimSuffix(stdout, "\n"), "\n")
+	messages := make([]map[string]any, 0, len(lines))
+	for index, line := range lines {
+		var decoded map[string]any
+		if err := json.Unmarshal([]byte(line), &decoded); err != nil {
+			t.Fatalf("proxy stdout line %d is not JSON-RPC (%v): %q", index+1, err, line)
+		}
+		messages = append(messages, decoded)
+	}
+	if len(messages) != want {
+		t.Fatalf("proxy wrote %d stdout lines, want %d:\n%s", len(messages), want, stdout)
+	}
+	return messages
+}
+
+// jsonRPCErrorMessage returns a reply's error message, failing when the reply
+// carries no error at all.
+func jsonRPCErrorMessage(t *testing.T, message map[string]any) string {
+	t.Helper()
+	failure, ok := message["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("reply carries no JSON-RPC error: %v", message)
+	}
+	text, _ := failure["message"].(string)
+	return text
 }
 
 func decodeJWTSegment(t *testing.T, segment string, into any) {
@@ -281,6 +392,15 @@ exit 3`)
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "mcp/tools_help", normalize.Apply(result.Combined))
+	})
+
+	t.Run("proxy_help", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"mcp", "proxy", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "mcp/proxy_help", normalize.Apply(result.Combined))
 	})
 
 	t.Run("token_help", func(t *testing.T) {
@@ -540,6 +660,268 @@ exit 3`)
 			t.Fatalf("expected non-zero exit for an unreachable edge, got 0:\n%s", result.Combined)
 		}
 		golden.Equal(t, "mcp/call_real_run_unreachable_edge_points_at_open", normalize.Apply(result.Combined))
+	})
+
+	t.Run("proxy_dry_run_traces_the_resolved_edge", func(t *testing.T) {
+		// The plan must name the edge the relay would reach, and must neither read
+		// stdin nor touch the network.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"mcp", "proxy", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "mcp/proxy_dry_run_traces_the_resolved_edge", normalize.Apply(result.Combined))
+	})
+
+	t.Run("proxy_real_run_relays_a_json_framed_session", func(t *testing.T) {
+		// The whole session an MCP client drives: initialize, the initialized
+		// notification, then tools/list. The notification must produce no stdout
+		// line at all, and the tools/list must carry the session the handshake
+		// handed out — the client never sees either fact, so the relay owns both.
+		skipIfPortsBusy(t, mcpEdgeLocalPort)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
+		identity := fixture.SeedDesktopIdentity(t, setup)
+		edge := &fakeMCPEdge{Results: map[string]string{
+			"initialize": `{"protocolVersion":"2025-06-18","capabilities":{"tools":{}}}`,
+			"tools/list": `{"tools":[{"name":"version","description":"Report the runtime's erun version"}]}`,
+		}}
+		edge.start(t, mcpEdgeLocalPort)
+
+		stdin := proxyStdin(
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{}}}`,
+			`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+			`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
+		)
+		result := erun.Run(t, []string{"mcp", "proxy", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: stdin})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "mcp/proxy_real_run_relays_a_json_framed_session", normalize.Apply(result.Combined))
+
+		replies := requireJSONRPCLines(t, result.Stdout, 2)
+		if replies[0]["id"] != float64(1) || replies[1]["id"] != float64(2) {
+			t.Fatalf("replies came back on the wrong ids: %v", replies)
+		}
+		list := edge.requestFor(t, "tools/list")
+		if list.SessionID != "test-session" {
+			t.Fatalf("tools/list session id = %q, want test-session", list.SessionID)
+		}
+		// Every relayed request carries its own freshly minted bearer — the reason
+		// a session outlives the 5-minute token lifetime. The headers are in
+		// neither stream, so the snapshot cannot see them. (Two mints inside the
+		// same second sign identical claims, so the bearers are byte-equal here;
+		// what is assertable is that each request carried a verifiable one.)
+		for _, request := range []fakeMCPRequest{edge.requestFor(t, "initialize"), list} {
+			claims := verifyMCPToken(t, request.Authbearer, identity.PublicKey)
+			if claims.Audience != "erun-mcp:team/dev" {
+				t.Fatalf("%s bearer audience = %q", request.Method, claims.Audience)
+			}
+		}
+	})
+
+	t.Run("proxy_real_run_relays_an_sse_framed_reply", func(t *testing.T) {
+		// The edge may frame a reply as an event stream; the client only speaks
+		// newline-delimited JSON, so the relay must unwrap the data: framing and
+		// drop the progress event ahead of it.
+		skipIfPortsBusy(t, mcpEdgeLocalPort)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
+		fixture.SeedDesktopIdentity(t, setup)
+		edge := &fakeMCPEdge{SSE: true, Results: map[string]string{
+			"tools/call": `{"content":[{"type":"text","text":"1.2.3"}]}`,
+		}}
+		edge.start(t, mcpEdgeLocalPort)
+
+		stdin := proxyStdin(`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"version","arguments":{}}}`)
+		result := erun.Run(t, []string{"mcp", "proxy", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: stdin})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "mcp/proxy_real_run_relays_an_sse_framed_reply", normalize.Apply(result.Combined))
+		requireJSONRPCLines(t, result.Stdout, 1)
+	})
+
+	t.Run("proxy_real_run_writes_nothing_for_a_notification", func(t *testing.T) {
+		// A notification has no id, so the protocol has nothing to answer it with.
+		// Writing anything here would leave the client one reply ahead of itself.
+		skipIfPortsBusy(t, mcpEdgeLocalPort)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
+		fixture.SeedDesktopIdentity(t, setup)
+		edge := &fakeMCPEdge{}
+		edge.start(t, mcpEdgeLocalPort)
+
+		stdin := proxyStdin(`{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":3}}`)
+		result := erun.Run(t, []string{"mcp", "proxy", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: stdin})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "mcp/proxy_real_run_writes_nothing_for_a_notification", normalize.Apply(result.Combined))
+		requireJSONRPCLines(t, result.Stdout, 0)
+		edge.requestFor(t, "notifications/cancelled")
+	})
+
+	t.Run("proxy_real_run_unreachable_edge_answers_every_request_and_keeps_serving", func(t *testing.T) {
+		// Nothing listening means the port-forward is missing. A relay that went
+		// quiet here would look to the client like a hung server, so each request
+		// gets a JSON-RPC error naming `erun open`, and the next one is still
+		// served — the port-forward can come back mid-session.
+		skipIfPortsBusy(t, mcpEdgeLocalPort)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
+		fixture.SeedDesktopIdentity(t, setup)
+
+		// The notification in the middle still has no id to answer against, so the
+		// outage reaches stderr only and stdout stays at one line per request.
+		stdin := proxyStdin(
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
+			`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+			`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
+		)
+		result := erun.Run(t, []string{"mcp", "proxy", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: stdin})
+		if result.ExitCode != 0 {
+			t.Fatalf("expected the relay to keep serving and exit 0, got %d:\n%s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "mcp/proxy_real_run_unreachable_edge_answers_every_request_and_keeps_serving", normalize.Apply(result.Combined))
+
+		replies := requireJSONRPCLines(t, result.Stdout, 2)
+		for index, reply := range replies {
+			if message := jsonRPCErrorMessage(t, reply); !strings.Contains(message, "erun open team dev") {
+				t.Fatalf("reply %d does not name the port-forward recovery: %q", index+1, message)
+			}
+		}
+	})
+
+	t.Run("proxy_real_run_unauthorized_edge_answers_with_the_redeploy_recovery", func(t *testing.T) {
+		// An edge that rejects the bearer is a trust problem, not connectivity, and
+		// the client must see that distinction rather than a generic failure.
+		skipIfPortsBusy(t, mcpEdgeLocalPort)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
+		fixture.SeedDesktopIdentity(t, setup)
+		edge := &fakeMCPEdge{Status: http.StatusUnauthorized}
+		edge.start(t, mcpEdgeLocalPort)
+
+		// Deliberately unterminated: a client that closes the pipe right after its
+		// last message leaves no trailing newline, and that message must still be
+		// relayed rather than dropped.
+		stdin := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`
+		result := erun.Run(t, []string{"mcp", "proxy", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: stdin})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "mcp/proxy_real_run_unauthorized_edge_answers_with_the_redeploy_recovery", normalize.Apply(result.Combined))
+
+		replies := requireJSONRPCLines(t, result.Stdout, 1)
+		if message := jsonRPCErrorMessage(t, replies[0]); !strings.Contains(message, "redeploy it from the ERun desktop app") {
+			t.Fatalf("reply does not name the trust recovery: %q", message)
+		}
+	})
+
+	t.Run("proxy_real_run_recovers_when_the_edge_forgets_its_session", func(t *testing.T) {
+		// The relay pins one session id for its whole lifetime, so an edge that
+		// restarts inside a still-running pod would otherwise 404 every later
+		// request and leave the client with no tools at all. A forgotten session
+		// must cost one transparent re-handshake and nothing else: the client still
+		// sees one reply per request, on its own ids.
+		skipIfPortsBusy(t, mcpEdgeLocalPort)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
+		fixture.SeedDesktopIdentity(t, setup)
+		edge := &fakeMCPEdge{ForgetSessionOnce: true, Results: map[string]string{
+			"initialize": `{"protocolVersion":"2025-06-18","capabilities":{"tools":{}}}`,
+			"tools/list": `{"tools":[{"name":"version","description":"Report the runtime's erun version"}]}`,
+		}}
+		edge.start(t, mcpEdgeLocalPort)
+
+		stdin := proxyStdin(
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{}}}`,
+			`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
+		)
+		result := erun.Run(t, []string{"mcp", "proxy", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: stdin})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "mcp/proxy_real_run_recovers_when_the_edge_forgets_its_session", normalize.Apply(result.Combined))
+
+		replies := requireJSONRPCLines(t, result.Stdout, 2)
+		if _, failed := replies[1]["error"]; failed {
+			t.Fatalf("tools/list came back as an error after the recovery: %v", replies[1])
+		}
+		if replies[1]["id"] != float64(2) {
+			t.Fatalf("tools/list reply came back on the wrong id: %v", replies[1])
+		}
+		// Session ids are request headers, so the snapshot cannot see them: the
+		// retry must have gone out on the session the second handshake handed out.
+		if handshakes := edge.requestsFor("initialize"); len(handshakes) != 2 {
+			t.Fatalf("edge saw %d initialize requests, want exactly one re-handshake: %+v", len(handshakes), edge.recorded())
+		}
+		lists := edge.requestsFor("tools/list")
+		if len(lists) != 2 {
+			t.Fatalf("edge saw %d tools/list requests, want the original plus one replay: %+v", len(lists), edge.recorded())
+		}
+		if lists[0].SessionID != "test-session" || lists[1].SessionID != "test-session-2" {
+			t.Fatalf("tools/list sessions = %q then %q, want the dead session then the re-established one", lists[0].SessionID, lists[1].SessionID)
+		}
+	})
+
+	t.Run("proxy_real_run_surfaces_a_session_the_edge_never_accepts", func(t *testing.T) {
+		// The recovery is bounded: an edge that rejects every session must produce
+		// one JSON-RPC error against the request the client is waiting on, not an
+		// endless re-handshake loop.
+		skipIfPortsBusy(t, mcpEdgeLocalPort)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
+		fixture.SeedDesktopIdentity(t, setup)
+		edge := &fakeMCPEdge{ForgetSessionAlways: true, Results: map[string]string{
+			"initialize": `{"protocolVersion":"2025-06-18","capabilities":{"tools":{}}}`,
+		}}
+		edge.start(t, mcpEdgeLocalPort)
+
+		stdin := proxyStdin(
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{}}}`,
+			`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
+		)
+		result := erun.Run(t, []string{"mcp", "proxy", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: stdin})
+		if result.ExitCode != 0 {
+			t.Fatalf("expected the relay to keep serving and exit 0, got %d:\n%s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "mcp/proxy_real_run_surfaces_a_session_the_edge_never_accepts", normalize.Apply(result.Combined))
+
+		replies := requireJSONRPCLines(t, result.Stdout, 2)
+		if message := jsonRPCErrorMessage(t, replies[1]); !strings.Contains(message, "re-establish the MCP session") {
+			t.Fatalf("reply does not say the session could not be re-established: %q", message)
+		}
+		if handshakes := edge.requestsFor("initialize"); len(handshakes) != 2 {
+			t.Fatalf("edge saw %d initialize requests, want the client's plus exactly one retry: %+v", len(handshakes), edge.recorded())
+		}
+	})
+
+	t.Run("proxy_real_run_answers_a_request_the_edge_left_unanswered", func(t *testing.T) {
+		// An edge that accepts a request and returns no body would leave the client
+		// waiting forever on a reply. The relay closes that hole: the request is
+		// answered with an error naming what happened, so the client fails visibly
+		// instead of hanging.
+		skipIfPortsBusy(t, mcpEdgeLocalPort)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
+		fixture.SeedDesktopIdentity(t, setup)
+		edge := &fakeMCPEdge{AcceptEverything: true}
+		edge.start(t, mcpEdgeLocalPort)
+
+		stdin := proxyStdin(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
+		result := erun.Run(t, []string{"mcp", "proxy", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: stdin})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "mcp/proxy_real_run_answers_a_request_the_edge_left_unanswered", normalize.Apply(result.Combined))
+
+		replies := requireJSONRPCLines(t, result.Stdout, 1)
+		if message := jsonRPCErrorMessage(t, replies[0]); !strings.Contains(message, "returned no reply") {
+			t.Fatalf("reply does not say the edge answered without one: %q", message)
+		}
 	})
 
 	t.Run("tools_real_run_lists_tools_with_their_arguments", func(t *testing.T) {

@@ -160,9 +160,11 @@ link_runtime_release() {
 }
 
 # runtime_session_dir is where `erun open` keeps the desktop's persistent dtach
-# sockets. Container-local on purpose (see session-prune.sh).
+# sockets. Container-local on purpose (see session-prune.sh). The name deliberately
+# shares nothing with the desktop binary's process name: a `pkill -f` aimed at that
+# binary would otherwise match every session's dtach command line.
 runtime_session_dir() {
-    printf '%s\n' "${ERUN_APP_SESSION_DIR:-/tmp/erun-app}"
+    printf '%s\n' "${ERUN_APP_SESSION_DIR:-/tmp/erun-sessions}"
 }
 
 # prune_stale_app_sessions reconciles the session directory at container start.

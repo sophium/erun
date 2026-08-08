@@ -56,6 +56,36 @@ test.describe('app-notification toast', () => {
     await expect(pill).toBeVisible();
   });
 
+  test('warning notification persists and stays copyable', async ({ app: _app, page }) => {
+    // An orchestrator that launched without the tools for its linked
+    // environments posts a warning here, and the operator must still be able to
+    // read the cause after the session is up — a warning that auto-dismissed
+    // would put the diagnosis back where it was, in the log. The emit itself is
+    // owned by TestSpawnOrchestratorSignalsUnwiredEnvironments (Go): spawning an
+    // orchestrator needs a real AI harness and PTY, which this harness lacks.
+    const message =
+      'Petios started without its environment tools: no linked environment resolved an MCP port. Check its linked environments still exist, then restart the orchestrator.';
+    await page.clock.install();
+    await page.evaluate(
+      (payload) => {
+        const runtime = (
+          window as unknown as {
+            runtime: { EventsEmit: (n: string, ...a: unknown[]) => void };
+          }
+        ).runtime;
+        runtime.EventsEmit('app-notification', payload);
+      },
+      { kind: 'warning', message },
+    );
+
+    const pill = page.getByRole('status').filter({ hasText: message });
+    await expect(pill).toBeVisible();
+
+    await page.clock.fastForward(5_000);
+    await expect(pill).toBeVisible();
+    await expect(pill.getByRole('button', { name: /copy/i })).toBeVisible();
+  });
+
   test('payload with empty message is ignored', async ({ app: _app, page }) => {
     // The titlebar idle-status widget also carries role=status when an env with
     // a managed cloud context is active, so an ignored payload can't be checked

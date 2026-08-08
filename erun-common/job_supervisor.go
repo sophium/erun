@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,7 +38,13 @@ type StartEnvironmentJobParams struct {
 	// named work keeps one stable handle.
 	ID      string
 	Command []string
-	Dir     string
+	// Agent names the AI tool to run as an agent job. Setting it replaces
+	// Command: erun builds the tool's streaming invocation from Prompt, which is
+	// the whole reason the kind exists — the tool's default mode reports nothing
+	// until it exits.
+	Agent  string
+	Prompt string
+	Dir    string
 	// MaxOutputBytes caps the captured output; zero takes the default.
 	MaxOutputBytes int64
 	// LeaseTTL is how long the job's activity lease holds between renewals; the
@@ -59,8 +66,8 @@ func (p StartEnvironmentJobParams) normalize() (StartEnvironmentJobParams, error
 		return p, err
 	}
 	p.ID = id
-	if len(p.Command) == 0 || strings.TrimSpace(p.Command[0]) == "" {
-		return p, fmt.Errorf("job command is required")
+	if p.Agent, p.Command, err = resolveEnvironmentJobWork(p.Agent, p.Prompt, p.Command); err != nil {
+		return p, err
 	}
 	if strings.TrimSpace(p.SupervisorPath) == "" {
 		return p, fmt.Errorf("job supervisor executable is required")
@@ -89,6 +96,43 @@ func normalizeEnvironmentJobIdentity(tenant, environment, name, id string) (stri
 		value = name
 	}
 	return resolveEnvironmentJobID(value)
+}
+
+// resolveEnvironmentJobWork settles what the job runs. An agent job names a tool
+// and a prompt and erun builds the argv; a command job brings its own. Naming
+// both is refused rather than resolved, because a caller that meant one of them
+// would otherwise silently get the other.
+func resolveEnvironmentJobWork(agent, prompt string, command []string) (string, []string, error) {
+	if strings.TrimSpace(agent) == "" {
+		if strings.TrimSpace(prompt) != "" {
+			return "", nil, fmt.Errorf("a prompt only applies to an agent job; name the agent tool or pass a command")
+		}
+		if len(command) == 0 || strings.TrimSpace(command[0]) == "" {
+			return "", nil, fmt.Errorf("job command is required")
+		}
+		return "", command, nil
+	}
+	if len(command) > 0 {
+		return "", nil, fmt.Errorf("an agent job runs the tool's own streaming invocation; pass a prompt, not a command")
+	}
+	tool, err := NormalizeAgentJobTool(agent)
+	if err != nil {
+		return "", nil, err
+	}
+	built, err := AgentJobCommand(tool, prompt)
+	if err != nil {
+		return "", nil, err
+	}
+	return tool, built, nil
+}
+
+// environmentJobKind names the kind a recorded tool implies, so the record and
+// every reader agree without either re-deriving it.
+func environmentJobKind(agentTool string) string {
+	if strings.TrimSpace(agentTool) == "" {
+		return EnvironmentJobKindCommand
+	}
+	return EnvironmentJobKindAgent
 }
 
 func normalizeEnvironmentJobOutputLimit(limit int64) (int64, error) {
@@ -207,6 +251,8 @@ func plannedEnvironmentJob(params StartEnvironmentJobParams, logPath string) Env
 		ID:               params.ID,
 		Name:             params.Name,
 		State:            EnvironmentJobStateRunning,
+		Kind:             environmentJobKind(params.Agent),
+		AgentTool:        params.Agent,
 		Command:          append([]string(nil), params.Command...),
 		Dir:              params.Dir,
 		LogPath:          logPath,
@@ -231,52 +277,101 @@ func environmentJobSupervisorArgs(params StartEnvironmentJobParams) []string {
 	if strings.TrimSpace(params.Dir) != "" {
 		args = append(args, "--dir", params.Dir)
 	}
+	if strings.TrimSpace(params.Agent) != "" {
+		args = append(args, "--agent", params.Agent)
+	}
 	args = append(args, "--")
 	return append(args, params.Command...)
 }
 
 // EnvironmentJobSupervisorParams is what the supervisor process is handed.
 type EnvironmentJobSupervisorParams struct {
-	Tenant         string
-	Environment    string
-	ID             string
-	Name           string
-	Dir            string
+	Tenant      string
+	Environment string
+	ID          string
+	Name        string
+	Dir         string
+	// Agent names the AI tool the command is a streaming invocation of, so the
+	// supervisor folds its event stream into progress. Empty for a command job.
+	Agent          string
 	Command        []string
 	MaxOutputBytes int64
 	LeaseTTL       time.Duration
 }
 
-// registerEnvironmentJob writes the running record before any work starts, so
-// the handle exists from the moment the start call can observe it — including
-// for work that then fails to exec.
-func registerEnvironmentJob(params EnvironmentJobSupervisorParams) (string, EnvironmentJob, error) {
+// jobRecorder is the supervisor's single writer of the job record. The progress
+// poll and the run's own milestones mutate one value under one lock, so a tick
+// can never overwrite the outcome the wait just captured.
+type jobRecorder struct {
+	dir string
+	mu  sync.Mutex
+	job EnvironmentJob
+}
+
+func (r *jobRecorder) update(mutate func(*EnvironmentJob)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	mutate(&r.job)
+	_ = writeEnvironmentJob(r.dir, r.job)
+}
+
+func (r *jobRecorder) snapshot() EnvironmentJob {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.job
+}
+
+// resolveSupervisorJobIdentity settles what the supervisor is about to record.
+// The supervisor is handed an already-built argv, so the agent tool is only the
+// kind marker and the parser to fold its stream with — it never rebuilds the
+// command, which keeps one source of truth for the argv at the start call.
+func resolveSupervisorJobIdentity(params EnvironmentJobSupervisorParams) (string, string, string, error) {
 	name := strings.TrimSpace(params.Name)
 	if name == "" {
 		name = strings.TrimSpace(params.ID)
 	}
 	id, err := normalizeEnvironmentJobIdentity(params.Tenant, params.Environment, name, params.ID)
 	if err != nil {
-		return "", EnvironmentJob{}, err
+		return "", "", "", err
 	}
 	if len(params.Command) == 0 || strings.TrimSpace(params.Command[0]) == "" {
-		return "", EnvironmentJob{}, fmt.Errorf("job command is required")
+		return "", "", "", fmt.Errorf("job command is required")
+	}
+	agent := strings.TrimSpace(params.Agent)
+	if agent == "" {
+		return id, name, "", nil
+	}
+	if agent, err = NormalizeAgentJobTool(agent); err != nil {
+		return "", "", "", err
+	}
+	return id, name, agent, nil
+}
+
+// registerEnvironmentJob writes the running record before any work starts, so
+// the handle exists from the moment the start call can observe it — including
+// for work that then fails to exec.
+func registerEnvironmentJob(params EnvironmentJobSupervisorParams) (*jobRecorder, error) {
+	id, name, agent, err := resolveSupervisorJobIdentity(params)
+	if err != nil {
+		return nil, err
 	}
 	limit, err := normalizeEnvironmentJobOutputLimit(params.MaxOutputBytes)
 	if err != nil {
-		return "", EnvironmentJob{}, err
+		return nil, err
 	}
 	dir, err := environmentJobDir(params.Tenant, params.Environment)
 	if err != nil {
-		return "", EnvironmentJob{}, err
+		return nil, err
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", EnvironmentJob{}, err
+		return nil, err
 	}
 	job := EnvironmentJob{
 		ID:               id,
 		Name:             name,
 		State:            EnvironmentJobStateRunning,
+		Kind:             environmentJobKind(agent),
+		AgentTool:        agent,
 		Command:          append([]string(nil), params.Command...),
 		Dir:              params.Dir,
 		PID:              os.Getpid(),
@@ -286,9 +381,9 @@ func registerEnvironmentJob(params EnvironmentJobSupervisorParams) (string, Envi
 		LeaseID:          environmentJobLeaseID(id),
 	}
 	if err := writeEnvironmentJob(dir, job); err != nil {
-		return "", EnvironmentJob{}, err
+		return nil, err
 	}
-	return dir, job, nil
+	return &jobRecorder{dir: dir, job: job}, nil
 }
 
 // RunEnvironmentJobSupervisor is the supervisor body: register the job, hold its
@@ -297,10 +392,11 @@ func registerEnvironmentJob(params EnvironmentJobSupervisorParams) (string, Envi
 // durable, so the caller of this function is the process whose liveness the job
 // record is reconciled against.
 func RunEnvironmentJobSupervisor(params EnvironmentJobSupervisorParams) error {
-	dir, job, err := registerEnvironmentJob(params)
+	recorder, err := registerEnvironmentJob(params)
 	if err != nil {
 		return err
 	}
+	job := recorder.snapshot()
 	log, err := os.OpenFile(job.LogPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		return err
@@ -311,13 +407,11 @@ func RunEnvironmentJobSupervisor(params EnvironmentJobSupervisorParams) error {
 	if err != nil {
 		return err
 	}
-	stop := holdEnvironmentJobLease(params.Tenant, params.Environment, job, ttl)
+	beat, stop := startEnvironmentJobHeartbeat(params.Tenant, params.Environment, recorder, ttl)
 	defer stop()
 
 	writer := &jobOutputWriter{file: log, limit: job.OutputLimitBytes, onTruncate: func() {
-		truncated := job
-		truncated.OutputTruncated = true
-		_ = writeEnvironmentJob(dir, truncated)
+		recorder.update(func(job *EnvironmentJob) { job.OutputTruncated = true })
 	}}
 
 	cmd := Command(params.Command[0], params.Command[1:]...)
@@ -331,64 +425,90 @@ func RunEnvironmentJobSupervisor(params EnvironmentJobSupervisorParams) error {
 	detachEnvironmentJobChild(cmd)
 
 	if startErr := cmd.Start(); startErr != nil {
-		return finishEnvironmentJob(dir, job, writer, nil, startErr)
+		return finishEnvironmentJob(recorder, beat, writer, nil, startErr)
 	}
-	job.ChildPID = cmd.Process.Pid
-	_ = writeEnvironmentJob(dir, job)
+	recorder.update(func(job *EnvironmentJob) { job.ChildPID = cmd.Process.Pid })
 
 	waitErr := cmd.Wait()
-	return finishEnvironmentJob(dir, job, writer, cmd.ProcessState, waitErr)
+	return finishEnvironmentJob(recorder, beat, writer, cmd.ProcessState, waitErr)
 }
 
 // finishEnvironmentJob records the outcome the supervisor observed. This is the
 // only place an exit status is ever produced, and it comes from waiting on the
 // process — never from parsing output, and never from a shell's $?.
-func finishEnvironmentJob(dir string, job EnvironmentJob, writer *jobOutputWriter, state *os.ProcessState, waitErr error) error {
-	job.State = EnvironmentJobStateExited
-	job.EndedAt = time.Now()
-	job.OutputBytes = writer.written()
-	job.OutputTruncated = writer.truncated()
+func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *jobOutputWriter, state *os.ProcessState, waitErr error) error {
+	// Fold the stream's tail before the outcome lands, so the finished record
+	// carries what the run last did rather than the poll's stale view of it.
+	beat.refresh(false)
 
 	code := -1
+	var signal, reason string
 	switch {
 	case state != nil:
 		code = state.ExitCode()
-		if signal := environmentJobExitSignal(state); signal != "" {
-			job.Signal = signal
-			job.Reason = "terminated by signal " + signal
+		if signal = environmentJobExitSignal(state); signal != "" {
+			reason = "terminated by signal " + signal
 		}
 	case waitErr != nil:
-		job.Reason = "failed to start: " + waitErr.Error()
+		reason = "failed to start: " + waitErr.Error()
 	}
-	job.ExitCode = &code
-	return writeEnvironmentJob(dir, job)
+	recorder.update(func(job *EnvironmentJob) {
+		job.State = EnvironmentJobStateExited
+		job.EndedAt = time.Now()
+		job.OutputBytes = writer.written()
+		job.OutputTruncated = writer.truncated()
+		job.Signal = signal
+		job.Reason = reason
+		job.ExitCode = &code
+	})
+	return nil
 }
 
-// holdEnvironmentJobLease takes the job's activity lease and renews it well
-// inside its TTL for as long as the supervisor runs. Releasing on the way out is
-// best-effort by design: if this process is killed instead, the lease records
-// this pid, so the lease store reclaims it on the next read exactly as it would
-// for any other abandoned holder.
-func holdEnvironmentJobLease(tenant, environment string, job EnvironmentJob, ttl time.Duration) func() {
-	take := func() {
-		_, _ = TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
-			Tenant:      tenant,
-			Environment: environment,
-			Name:        job.Name,
-			ID:          job.LeaseID,
-			PID:         job.PID,
-			TTL:         ttl,
-		})
-	}
-	take()
+// agentJobProgressInterval is how often an agent job's stream is folded. It is
+// short because the whole point is that a caller polling for progress sees the
+// current activity, not one from minutes ago; each tick reads only the bytes
+// that arrived since the last one.
+const agentJobProgressInterval = 2 * time.Second
 
-	interval := ttl / 3
-	if interval < 5*time.Second {
-		interval = 5 * time.Second
+// jobHeartbeat renews the job's activity lease while the work runs and, for an
+// agent job, folds the tool's event stream into the record's progress. One
+// ticker does both so the lease's name can carry the current activity — which is
+// what lets the desktop report "editing <file>" instead of only "running".
+type jobHeartbeat struct {
+	tenant      string
+	environment string
+	ttl         time.Duration
+	recorder    *jobRecorder
+	// agent is nil for a command job, whose log is not an event stream.
+	agent *agentProgressReader
+
+	mu        sync.Mutex
+	progress  AgentJobProgress
+	leaseName string
+	renewedAt time.Time
+}
+
+// startEnvironmentJobHeartbeat takes the lease immediately and keeps it renewed
+// for as long as the supervisor runs. Releasing on the way out is best-effort by
+// design: if this process is killed instead, the lease records this pid, so the
+// lease store reclaims it on the next read exactly as it would for any other
+// abandoned holder.
+func startEnvironmentJobHeartbeat(tenant, environment string, recorder *jobRecorder, ttl time.Duration) (*jobHeartbeat, func()) {
+	job := recorder.snapshot()
+	beat := &jobHeartbeat{tenant: tenant, environment: environment, ttl: ttl, recorder: recorder}
+	interval := beat.leaseInterval()
+	if job.Kind == EnvironmentJobKindAgent {
+		beat.agent = newAgentProgressReader(job.AgentTool, job.LogPath)
+		interval = agentJobProgressInterval
 	}
+	beat.refresh(true)
+
 	done := make(chan struct{})
 	var once sync.Once
+	var stopped sync.WaitGroup
+	stopped.Add(1)
 	go func() {
+		defer stopped.Done()
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
@@ -396,14 +516,64 @@ func holdEnvironmentJobLease(tenant, environment string, job EnvironmentJob, ttl
 			case <-done:
 				return
 			case <-ticker.C:
-				take()
+				beat.refresh(false)
 			}
 		}
 	}()
-	return func() {
+	return beat, func() {
 		once.Do(func() { close(done) })
+		// The release must not race a tick that is already renewing, or the lease
+		// would outlive the supervisor and keep the environment reading as busy.
+		stopped.Wait()
 		_ = ReleaseEnvironmentActivityLease(tenant, environment, job.LeaseID)
 	}
+}
+
+// refresh folds whatever the agent emitted since the last tick and renews the
+// lease. The record is rewritten only when progress actually moved, so a quiet
+// agent costs one file read per tick and nothing else.
+func (h *jobHeartbeat) refresh(force bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	job := h.recorder.snapshot()
+	name := job.Name
+	if h.agent != nil {
+		progress := h.agent.read()
+		if progress != h.progress {
+			h.progress = progress
+			h.recorder.update(func(job *EnvironmentJob) {
+				folded := progress
+				job.Progress = &folded
+			})
+		}
+		if summary := progress.Summary(); summary != "" {
+			name = job.Name + ": " + summary
+		}
+	}
+	if !force && name == h.leaseName && time.Since(h.renewedAt) < h.leaseInterval() {
+		return
+	}
+	_, _ = TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
+		Tenant:      h.tenant,
+		Environment: h.environment,
+		Name:        name,
+		ID:          job.LeaseID,
+		PID:         job.PID,
+		TTL:         h.ttl,
+	})
+	h.leaseName = name
+	h.renewedAt = time.Now()
+}
+
+// leaseInterval renews well inside the TTL, with a floor so a short TTL cannot
+// turn the renewal into a busy loop.
+func (h *jobHeartbeat) leaseInterval() time.Duration {
+	interval := h.ttl / 3
+	if interval < 5*time.Second {
+		interval = 5 * time.Second
+	}
+	return interval
 }
 
 // jobOutputWriter captures the work's merged stdout and stderr up to the cap.
@@ -612,17 +782,90 @@ func normalizeEnvironmentJobSignal(signal string) (string, error) {
 	}
 }
 
-// ResolveErunExecutable finds the erun binary a caller can hand to
-// StartEnvironmentJobParams.SupervisorPath. A transport that is not itself the
-// erun binary — the MCP server running in the environment — uses this, and gets
-// a clear failure rather than a job that never registers.
+// ResolveErunExecutable finds the erun binary for a transport that is not itself
+// that binary — the in-environment MCP server supervising a job, the desktop app
+// wiring a per-env MCP proxy — so those callers get a clear failure rather than a
+// launch that silently never happens. A sibling of the running program is
+// preferred over PATH so a source build resolves the binary it was built beside
+// instead of an unrelated installed one.
 func ResolveErunExecutable() (string, error) {
 	if override := strings.TrimSpace(os.Getenv("ERUN_ERUN_BIN")); override != "" {
 		return override, nil
 	}
-	path, err := exec.LookPath("erun")
+	name := ErunExecutableName()
+	if sibling := erunExecutableNearRunningProgram(name); sibling != "" {
+		return sibling, nil
+	}
+	path, err := exec.LookPath(name)
 	if err != nil {
-		return "", fmt.Errorf("the erun executable is required to supervise a job but was not found on PATH: %w", err)
+		return "", fmt.Errorf("the erun executable was not found beside this program or on PATH: %w", err)
 	}
 	return path, nil
+}
+
+// ErunExecutableName is the on-disk file name of the erun binary for this host.
+func ErunExecutableName() string {
+	if runtime.GOOS == "windows" {
+		return "erun.exe"
+	}
+	return "erun"
+}
+
+// erunExecutableNearRunningProgram searches beside the running program: the
+// install layout puts every erun executable in one directory, and a source build
+// puts them in each module's own bin/. It is not the mirror of how the CLI finds
+// erun-app — that direction stops at the .app bundle, while a program running
+// from inside one sits three levels below the directory its siblings share.
+func erunExecutableNearRunningProgram(name string) string {
+	executable, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return erunExecutableNear(executable, name)
+}
+
+func erunExecutableNear(executable, name string) string {
+	for _, root := range executableSiblingRoots(filepath.Dir(executable)) {
+		for _, candidate := range []string{
+			filepath.Join(root, name),
+			filepath.Clean(filepath.Join(root, "..", "..", "erun-cli", "bin", name)),
+		} {
+			if candidate == executable {
+				continue
+			}
+			if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() {
+				return candidate
+			}
+		}
+	}
+	return ""
+}
+
+// executableSiblingRoots lists the directories an erun executable may sit in
+// relative to the running program: its own directory, plus the directory holding
+// the macOS .app bundle it runs inside, if any.
+func executableSiblingRoots(dir string) []string {
+	roots := []string{dir}
+	if container := macOSBundleContainer(dir); container != "" {
+		roots = append(roots, container)
+	}
+	return roots
+}
+
+// macOSBundleContainer returns the directory holding the <Name>.app bundle whose
+// Contents/MacOS is dir, and "" for every other layout — so no other host's
+// directory names can accidentally match the bundle shape.
+func macOSBundleContainer(dir string) string {
+	if filepath.Base(dir) != "MacOS" {
+		return ""
+	}
+	contents := filepath.Dir(dir)
+	if filepath.Base(contents) != "Contents" {
+		return ""
+	}
+	bundle := filepath.Dir(contents)
+	if filepath.Ext(bundle) != ".app" {
+		return ""
+	}
+	return filepath.Dir(bundle)
 }

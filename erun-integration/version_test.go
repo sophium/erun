@@ -248,7 +248,9 @@ func TestVersion(t *testing.T) {
 		// A credHelpers entry routes ghcr.io to `docker-credential-<helper> get`; the
 		// resolver must run it and Basic-authenticate the token exchange with what it
 		// returns. The helper name is deliberately absent from PATH so the resolution
-		// is deterministic, and the stub is routed via ERUN_DOCKER_CREDENTIAL_ERUNSTUB_BIN.
+		// is deterministic, and the stub is routed via ERUN_DOCKER_CREDENTIAL_ERUNSTUB_BIN
+		// — which on Windows resolves to the fixture's argv-faithful .exe runner,
+		// since Windows will not execute a shebang script by name.
 		const dockerUser, dockerSecret = "helperbot", "s3cr3t-helper-token"
 		var tokenAuthHeader string
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

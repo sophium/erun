@@ -697,8 +697,9 @@ The demotion to `unknown` happens on the next read and is persisted, so every la
 | `--name <what>` | string | **required** | What the work is. Shown wherever the environment reports as busy. |
 | `--id <id>` | string | the `--name` | Handle to address the job by, filename-sanitised. |
 | `--dir <path>` | path | the caller's resolution | Working directory for the work. |
+| `--agent <tool>` | string | none | Run an AI tool instead of a command; the trailing arguments are the prompt. `claude` or `codex`. See [Agent jobs](#agent-jobs). |
 | `--max-output-bytes <n>` | int64 | `4194304` (4 MiB) | Cap on captured output. |
-| `--lease-ttl <duration>` | duration | `15m` | Activity lease TTL; the supervisor renews at TTL/3 (minimum 5s) for as long as the work runs. |
+| `--lease-ttl <duration>` | duration | `15m` | Activity lease TTL; the supervisor renews at TTL/3 (minimum 5s) for as long as the work runs, and at 2s intervals for an agent job so the lease's name can carry the current activity. |
 | `--dry-run` | bool | `false` | Trace the supervisor argv, the log path, and the lease; start nothing. |
 
 erun spawns a supervisor in **its own session**, so the work survives this call returning, the caller exiting, and the transport dropping — nothing needs wrapping in `setsid`, `nohup`, or a redirect. The work itself runs in its own process group, which is what lets [`cancel`](#erun-job-cancel) reach it without touching the supervisor.
@@ -708,6 +709,46 @@ The supervisor registers the job before starting the work, so `start` returns a 
 Re-using the id of a job that is **still running** is refused (two supervisors writing one record would make every later answer ambiguous). Re-using a **finished** id replaces it, and traces that it did.
 
 `--output json` emits the job record.
+
+### Agent jobs {#agent-jobs}
+
+An AI tool run non-interactively prints **nothing** until it exits, so a multi-hour agent job started as a plain command reports `outputBytes: 0` for its whole life while it is actively editing files. `--agent` makes the run a job *kind* instead of an opaque command: erun builds the tool's streaming invocation, and the supervisor folds the resulting event stream into one normalized progress view.
+
+| `--agent` | Command erun runs | Stream folded |
+|---|---|---|
+| `claude` | `claude -p <prompt> --output-format stream-json --verbose` | `assistant` events (text blocks and `tool_use` blocks), `result`. |
+| `codex` | `codex exec --json <prompt>` | `turn.started` / `turn.completed` / `turn.failed`, `item.started` / `item.updated` / `item.completed` (`agent_message`, `reasoning`, `command_execution`, `file_change`, `mcp_tool_call`, `web_search`), `error`. |
+
+`--agent` and a trailing command are mutually exclusive: passing both fails with `an agent job runs the tool's own streaming invocation; pass a prompt, not a command`. An unsupported tool fails with `unsupported agent tool "<name>": expected one of claude, codex`.
+
+The job record then carries three extra fields:
+
+| Field | Meaning |
+|---|---|
+| `kind` | `command` (default) or `agent`. |
+| `agentTool` | The tool the run invokes; empty for a command job. |
+| `progress` | The normalized view below. Absent until the run emits its first event, so an agent that has not started is never reported as an idle one. |
+
+```jsonc
+"progress": {
+  "tool": "claude",
+  "activity": "editing erun-common/mcp_client.go", // last tool + its target; cleared once the run reports a result
+  "lastTool": "Edit",                              // erun's tool vocabulary, not the vendor's event name
+  "lastTarget": "erun-common/mcp_client.go",
+  "turns": 12,                                     // distinct assistant turns
+  "toolsRun": 47,                                  // completed tool calls
+  "events": 133,                                   // stream events folded, so a caller can tell the stream is alive
+  "lastMessage": "Rewriting the reconnect path.",  // most recent thing the agent said
+  "result": "",                                    // the run's own closing summary; never a substitute for exitCode
+  "error": ""                                      // the last error the stream reported
+}
+```
+
+`activity` is normalized from the tool's own vocabulary into a fixed verb set — `editing`, `reading`, `running`, `searching`, `fetching`, `delegating to`, `thinking`, `calling`, and `using <tool> on` for anything else — so a codex `file_change` item and a claude `Edit` tool call both read `editing <path>`. Every free-text field is truncated to 240 characters. **This normalization is the contract**; the raw vendor events are only in the job log, and a vendor reshaping its stream changes what erun parses, not what a caller reads.
+
+The supervisor folds the stream every 2 seconds and rewrites the record only when progress moved, so polling `job status` is cheap. It also renames the job's activity lease to `<name>: <progress summary>`, which is what lets the desktop show `editing erun-common/mcp_client.go` where it would otherwise show only that something is running — see [Idle policy · activity_leases](/agent-reference/idle-policy#activity-leases).
+
+`job output` needs no special handling for an agent job: the log is the event stream, so the existing incremental read returns events while the agent works.
 
 ### `erun job attach`
 
@@ -733,6 +774,14 @@ An attached job resolves against the named pid and nothing else. It reads `runni
 | `--id <id>` | string | none | Report one job; omit for every retained job, newest first. |
 
 `--output json` emits the job record (with `--id`) or the array (without).
+
+For an [agent job](#agent-jobs) the text line and the record both carry the progress view, so `status` answers what the agent is doing rather than only that it is running:
+
+```
+running: sweep, pid 4243, agent claude, editing erun-common/mcp_client.go, 12 turns, 47 tools, 91204 bytes of output
+```
+
+An agent job that has not emitted yet reads `agent claude, no events yet` — distinct from an idle one, and the honest answer while the tool is still starting.
 
 ### `erun job await` {#erun-job-await}
 
@@ -805,6 +854,8 @@ A job holds an activity lease named after the job for its whole lifetime, with `
 | No `--tenant` / `--environment`. | Exit 1, `tenant and environment are required`. |
 | `start` with no `--name`. | Exit 1, `job name is required` — a job that names no work would report the environment busy without saying why. |
 | `start` with no command after `--`. | Exit 1 from argument validation. |
+| `start --agent <unsupported>`. | Exit 1, `unsupported agent tool "<name>": expected one of claude, codex`. Nothing is spawned. |
+| `start --agent` with an empty prompt. | Exit 1, `an agent job needs a prompt to run`. |
 | `start` re-using a running id. | Exit 1, `job "<id>" is already running (pid <n>); pass a different id or cancel it first`. Nothing is spawned. |
 | The supervisor never registers the job within 10s. | Exit 1, naming the supervisor pid. No handle is returned. |
 | `attach` with no `--pid`. | Exit 1, `a pid to track is required; an attached job has nothing else to reconcile against`. |
@@ -826,9 +877,9 @@ See [MCP overview](/mcp/overview) for the protocol and the tool list. The launch
 | `--host <addr>` | string | `127.0.0.1` | The bind address. The in-pod default is loopback-only. |
 | `--path <p>` | string | `/mcp` | The HTTP path the endpoint is served from. |
 
-### `erun mcp call` / `tools` / `token` — client side
+### `erun mcp call` / `tools` / `token` / `proxy` — client side
 
-These call an environment's MCP edge rather than serving one; they are the supported way for a script or an orchestrating Agent to reach an env without configuring an MCP client, and the reason no MCP *tool* exists for this (a tool that calls another env's edge would invert the transport). All three share the target flags:
+These call an environment's MCP edge rather than serving one; they are the supported way for a script or an orchestrating Agent to reach an env without configuring an MCP client, and the reason no MCP *tool* exists for this (a tool that calls another env's edge would invert the transport). All four share the target flags:
 
 | Flag | Type | Default | Effect |
 |---|---|---|---|
@@ -850,6 +901,37 @@ Resolution and request contract:
 2. The endpoint is `http://127.0.0.1:<localPort>/mcp`, where `localPort` is the env's MCP port — the value `erun list` reports and `erun open` forwards.
 3. A bearer is minted **per HTTP request**, immediately before it is sent: EdDSA (Ed25519) over the desktop identity, `iss=file:///etc/erun/mcp-auth/desktopid.pub`, `aud=erun-mcp:<tenant>/<environment>`, 5-minute expiry. No client-side timeout is imposed on the call, so a tool that runs for minutes is not cut short and cannot fail on an aged-out token.
 4. The handshake is the standard one — `initialize`, `notifications/initialized`, then `tools/call` or `tools/list` — propagating `Mcp-Session-Id` and accepting both plain-JSON and SSE-framed replies.
+
+#### `proxy` — stdio bridge
+
+`proxy` takes only the shared target flags. It is a transport adapter, not an operation: an MCP client launches it as a stdio server and it relays that client's own JSON-RPC to the env's edge. It exists because a client reads its server config once at launch and cannot refresh a header, so a bearer written into that config turns the 5-minute token lifetime into a hard session limit — every tool for the env failing at the same moment. Configuring a *command* rather than a credential removes the class of failure: nothing in the client's config expires.
+
+| Property | Contract |
+|---|---|
+| Input framing | Newline-delimited JSON-RPC on **stdin**, one message per line. A final message without a trailing newline is still relayed. Blank lines are ignored. Relay is sequential — one message in flight at a time. |
+| Output framing | One JSON-RPC message per line on **stdout**, compacted to a single line even when the edge pretty-printed it. **stdout carries JSON-RPC and nothing else**; the audit line, trace output, and every diagnostic go to stderr. |
+| Notifications | A message with no `id` (or `"id": null`) gets no stdout line at all — including when the relay fails, since there is no id to answer against. The failure still reaches stderr. |
+| Session | The `Mcp-Session-Id` from the first reply is captured and sent on every subsequent request; the client never sees it. |
+| Bearer | Minted per relayed request, same claims as row 3 above. The proxy never writes a token to disk and never reuses one past its life. |
+| Handshake | Not performed by the proxy — the client's own `initialize` / `notifications/initialized` are relayed like any other message. |
+| Termination | Exits `0` when stdin closes. |
+
+Failure mapping. Every one of these is answered as a JSON-RPC error on the failing request's own `id`, with code `-32603`, and the relay keeps serving the next message — the edge can come back mid-session:
+
+| Condition | `error.message` |
+|---|---|
+| Nothing listening on the local MCP port | `MCP endpoint is not reachable: <endpoint> (…); run erun open <tenant> <env> so the local MCP port-forward is up` |
+| Edge answered `401`/`403` | `MCP endpoint rejected the bearer token: <endpoint> (HTTP 401); <tenant>/<env> was deployed without this machine's MCP public key, so redeploy it from the ERun desktop app` |
+| Edge accepted a request but returned no body | `the MCP edge at <endpoint> accepted the request but returned no reply` — the client fails visibly instead of waiting on a reply that is not coming. |
+| No desktop identity on this machine | The minting error, naming the path it looked at. |
+
+The same text is written to stderr on every failure, including the notification case that has no reply to carry it.
+
+```json
+// a Claude Code / Codex stdio server entry
+{ "mcpServers": { "acme-dev": { "type": "stdio", "command": "erun",
+  "args": ["mcp", "proxy", "--tenant", "acme", "--environment", "dev"] } } }
+```
 
 `--output json` shapes:
 

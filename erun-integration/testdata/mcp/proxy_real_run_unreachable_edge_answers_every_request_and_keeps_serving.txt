@@ -1,0 +1,7 @@
+{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"MCP endpoint is not reachable: http://<LOOPBACK>:26100/mcp (Post \"http://<LOOPBACK>:26100/mcp\": dial tcp <LOOPBACK>:26100: connect: connection refused); run `erun open team dev` so the local MCP port-forward is up"}}
+{"jsonrpc":"2.0","id":2,"error":{"code":-32603,"message":"MCP endpoint is not reachable: http://<LOOPBACK>:26100/mcp (Post \"http://<LOOPBACK>:26100/mcp\": dial tcp <LOOPBACK>:26100: connect: connection refused); run `erun open team dev` so the local MCP port-forward is up"}}
+audit: erun mcp proxy --environment dev --tenant team
+mcp: team/dev edge resolved to http://<LOOPBACK>:26100/mcp
+mcp proxy: MCP endpoint is not reachable: http://<LOOPBACK>:26100/mcp (Post "http://<LOOPBACK>:26100/mcp": dial tcp <LOOPBACK>:26100: connect: connection refused)
+mcp proxy: MCP endpoint is not reachable: http://<LOOPBACK>:26100/mcp (Post "http://<LOOPBACK>:26100/mcp": dial tcp <LOOPBACK>:26100: connect: connection refused)
+mcp proxy: MCP endpoint is not reachable: http://<LOOPBACK>:26100/mcp (Post "http://<LOOPBACK>:26100/mcp": dial tcp <LOOPBACK>:26100: connect: connection refused)

@@ -64,14 +64,15 @@ func newMCPCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), r
 		},
 	}
 
-	addCommands(cmd, newMCPCallCmd(resolveOpen), newMCPToolsCmd(resolveOpen), newMCPTokenCmd(resolveOpen))
+	addCommands(cmd, newMCPCallCmd(resolveOpen), newMCPToolsCmd(resolveOpen), newMCPTokenCmd(resolveOpen), newMCPProxyCmd(resolveOpen))
 	addDryRunFlag(cmd)
 	cmd.Flags().StringVar(&host, "host", defaultMCPHost, "Host interface to bind the MCP HTTP server to")
 	cmd.Flags().IntVar(&port, "port", defaultMCPPort, "Port to bind the MCP HTTP server to")
 	cmd.Flags().StringVar(&path, "path", defaultMCPPath, "HTTP path to serve the MCP endpoint from")
 	cmd.Long = "Run ERun as an MCP server over HTTP, exposing this machine's erun commands as MCP tools.\n\n" +
 		"The subcommands go the other way: they talk to an already-running environment's MCP edge " +
-		"(`call`, `tools`) or mint a bearer for it (`token`)."
+		"(`call`, `tools`), mint a bearer for it (`token`), or bridge a stdio MCP client to it " +
+		"(`proxy`)."
 	cmd.Example = fmt.Sprintf("  erun mcp --host %s --port %d --path %s\n  erun mcp tenant-a dev\n  erun mcp call --tool version", defaultMCPHost, defaultMCPPort, defaultMCPPath)
 	return cmd
 }

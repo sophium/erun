@@ -342,7 +342,7 @@ own, so two readings minutes apart legitimately differ with no configuration cha
 ## Persistent session liveness
 
 A desktop session in a runtime pod is a `dtach` socket at
-`/tmp/erun-app/<tenant>-<environment>-<id>.dtach`, created by
+`/tmp/erun-sessions/<tenant>-<environment>-<id>.dtach`, created by
 [`erun open --app-session <id>`](/cli/open). A session is **running** when both hold:
 
 1. The socket exists (`[ -S "$socket" ]`).
@@ -365,8 +365,13 @@ must be derived from the same probe, or the two can contradict each other.
 Sockets are container-lifetime by design. A `dtach` server is a process in the container, so a
 socket that outlived its pod could never be attached to; clearing them with the pod is what lets
 `claude --continue` resume in a fresh session instead of failing against a dead socket. The
-entrypoint runs `erun-prune-sessions /tmp/erun-app` on the container-boot path (never on the
+entrypoint runs `erun-prune-sessions /tmp/erun-sessions` on the container-boot path (never on the
 in-container `shell` path), removing any `*.dtach` with no live server plus its `.owner` file.
+
+The directory name shares nothing with the desktop binary's process name (`erun-app`) on purpose. A
+session is held open by a `dtach` command line naming its socket, so a directory whose name contained
+the binary's name would make `pkill -f erun-app` — the natural way to free that binary before a
+rebuild — match and kill every live session in the pod.
 
 ## Runtime resource reclaim
 

@@ -1,0 +1,44 @@
+The command keeps running after this call returns and after the caller's
+connection drops: erun gives it its own session and captures its merged
+stdout and stderr to the job's log, so nothing has to be wrapped in setsid,
+nohup, or a redirect.
+
+The exit status is recorded by the process that waits on the work, inside
+the environment, so no sentinel token and no shell expansion sit between the
+work and its result. The id defaults to the name; re-using the id of a job
+that is still running is refused, while re-using a finished one replaces it.
+
+--agent runs an AI tool instead of a command, with the trailing arguments as
+the prompt. erun invokes the tool in its streaming mode, which is what makes
+an agent run observable at all: left to its default the tool prints nothing
+until it exits, so a multi-hour run reports no output while it is actively
+editing files. status then reports the current activity, not only "running".
+
+Usage:
+  erun job start [flags] -- <command> [args...]
+
+Examples:
+  # Start a test suite and come back for the result.
+  erun job start --tenant team --environment dev --name suite -- ./gradlew test
+  erun job await --tenant team --environment dev --id suite --timeout 5m
+
+  # Start an agent and watch what it is doing.
+  erun job start --tenant team --environment dev --name sweep --agent claude -- 'fix the failing tests'
+  erun job status --tenant team --environment dev --id sweep
+
+Flags:
+      --agent string           Run an AI tool (claude or codex) in streaming mode, taking the trailing arguments as its prompt
+      --dir string             Working directory to run the command from
+      --dry-run                Resolve and trace mutating actions without executing them.
+      --environment string     Environment the job runs in
+  -h, --help                   help for start
+      --id string              Handle to address the job by (defaults to the name)
+      --lease-ttl duration     Activity lease TTL the job renews inside while it runs (default 15m0s)
+      --max-output-bytes int   Cap on captured output; past it output is dropped and the job says so (default 4194304)
+      --name string            What the work is, shown wherever the environment reports as busy
+      --tenant string          Tenant whose environment the job belongs to
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

@@ -49,7 +49,11 @@ const ShellSessionTakenOverNotice = "open: session re-attached in another ERun w
 // container, so a socket that outlived its pod could never be attached to —
 // clearing them with the pod is what lets `claude --continue` resume the
 // conversation in a fresh session instead of failing against a dead socket.
-const RemoteAppSessionSocketDir = "/tmp/erun-app"
+//
+// The name must not contain the desktop binary's process name. Freeing that
+// binary for a rebuild invites `pkill -f erun-app`, and a socket path carrying
+// that string puts every operator's live terminal in the blast radius.
+const RemoteAppSessionSocketDir = "/tmp/erun-sessions"
 
 // ParseRemoteAppSessionIDs extracts this tenant+env's persistent desktop
 // session ids so the desktop can rebuild tabs for sessions another ERun

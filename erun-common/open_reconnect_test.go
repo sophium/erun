@@ -37,7 +37,7 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 		req := base
 		req.AppSession = "open-0"
 		script := preview(t, req)
-		assertScriptHas(t, script, `dtach -A "/tmp/erun-app/erun-local-open-0.dtach" -r ctrl_l /bin/bash`, "ERun tab missing dtach wrap")
+		assertScriptHas(t, script, `dtach -A "/tmp/erun-sessions/erun-local-open-0.dtach" -r ctrl_l /bin/bash`, "ERun tab missing dtach wrap")
 		if strings.Contains(script, "claude") || strings.Contains(script, "ERUN_SKIP_LINT") {
 			t.Fatalf("plain ERun shell must not launch claude or set contribute env:\n%s", script)
 		}
@@ -48,11 +48,11 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 		req := base
 		req.AppSession = "open-0"
 		script := preview(t, req)
-		owner := `/tmp/erun-app/erun-local-open-0.owner`
+		owner := `/tmp/erun-sessions/erun-local-open-0.owner`
 		assertScriptHas(t, script, `printf '%s' "$attach_id" > "`+owner+`"`, "attach must claim the owner file")
 		assertScriptHas(t, script, `if [ "$dtach_pid" != "$master_pid" ]`, "kick loop must spare the session master")
 		assertScriptHas(t, script, `[ "$child_comm" != "dtach" ]`, "master detection must be the /proc child scan (runtime image has no ss)")
-		assertScriptHas(t, script, `[ -S "/tmp/erun-app/erun-local-open-0.dtach" ] && [ -n "$master_pid" ]`, "kick must be skipped when the master cannot be identified")
+		assertScriptHas(t, script, `[ -S "/tmp/erun-sessions/erun-local-open-0.dtach" ] && [ -n "$master_pid" ]`, "kick must be skipped when the master cannot be identified")
 		assertScriptHas(t, script, `!= "$attach_id" ]; then exit 76; fi`, "kicked wrapper must exit 76 on foreign owner")
 	})
 
@@ -60,7 +60,7 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 		req := base
 		req.AppSession = "open-1"
 		script := preview(t, req)
-		assertScriptHas(t, script, `dtach -A "/tmp/erun-app/erun-local-open-1.dtach" -r ctrl_l`, "slot 1 missing its own dtach socket")
+		assertScriptHas(t, script, `dtach -A "/tmp/erun-sessions/erun-local-open-1.dtach" -r ctrl_l`, "slot 1 missing its own dtach socket")
 		assertScriptLacks(t, script, "open-0", "slot 1 must not touch slot 0's session")
 	})
 
@@ -72,7 +72,7 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 		// AI tabs reattach with -r winch, not -r ctrl_l: Claude's main-screen TUI
 		// ignores a bare ^L (and can mis-consume it as a keystroke), so only a
 		// SIGWINCH redraws it.
-		assertScriptHas(t, script, `dtach -A "/tmp/erun-app/erun-local-ai.dtach" -r winch`, "AI tab must reattach with -r winch so Claude repaints")
+		assertScriptHas(t, script, `dtach -A "/tmp/erun-sessions/erun-local-ai.dtach" -r winch`, "AI tab must reattach with -r winch so Claude repaints")
 		assertScriptLacks(t, script, `erun-local-ai.dtach" -r ctrl_l`, "AI tab must not use -r ctrl_l (Claude ignores the bare ^L)")
 		assertScriptHas(t, script, `claude --continue --settings '{"ultracode":true}'`, "AI tab must launch the claude guard at the default effort (ultracode)")
 		// Claude's exit must surface to the user, not silently fall through to
@@ -98,6 +98,40 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 	})
 }
 
+// TestSessionSocketPathCannotCollideWithTheDesktopBinary pins the property, not
+// the literal path: a session socket's name must share nothing with the desktop
+// binary's process name. Freeing that binary for a rebuild invites
+// `pkill -f erun-app`, and while the sockets lived under /tmp/erun-app that
+// pattern matched every session's dtach command line and killed the operator's
+// live terminals along with their agent sessions.
+func TestSessionSocketPathCannotCollideWithTheDesktopBinary(t *testing.T) {
+	paths := []string{
+		RemoteAppSessionSocketDir,
+		remoteAppSessionSocketPath("erun", "local", "open-0"),
+		remoteAppSessionSocketPath("erun", "local", "ai"),
+	}
+	for _, path := range paths {
+		if strings.Contains(path, DesktopAppName) {
+			t.Fatalf("session path %q contains the desktop binary's process name %q; a pkill aimed at the binary would match a live session", path, DesktopAppName)
+		}
+	}
+	// The dtach command line is what pkill actually matches, so the same
+	// property is asserted on the rendered script rather than only on the path.
+	script, err := PreviewShellLaunch(ShellLaunchParams{
+		Tenant:      "erun",
+		Environment: "local",
+		Namespace:   "erun-local",
+		RemoteRepo:  true,
+		AppSession:  "open-0",
+	})
+	if err != nil {
+		t.Fatalf("PreviewShellLaunch: %v", err)
+	}
+	if strings.Contains(script.Script, DesktopAppName) {
+		t.Fatalf("the session launch script names the desktop binary %q:\n%s", DesktopAppName, script.Script)
+	}
+}
+
 func assertScriptHas(t *testing.T, script, want, msg string) {
 	t.Helper()
 	if !strings.Contains(script, want) {
@@ -113,7 +147,7 @@ func assertScriptLacks(t *testing.T, script, unwanted, msg string) {
 }
 
 // TestParseRemoteAppSessionIDs pins the detection contract: parsing a pod's
-// /tmp/erun-app listing yields only this env's dtach-socket session ids, so a
+// /tmp/erun-sessions listing yields only this env's dtach-socket session ids, so a
 // fresh ERun window can rebuild tabs another window created.
 func TestParseRemoteAppSessionIDs(t *testing.T) {
 	lsOutput := strings.Join([]string{
@@ -147,7 +181,7 @@ func TestRemoteAppSessionEndScript(t *testing.T) {
 	for _, want := range []string{
 		`[ "$child_comm" != "dtach" ]`,
 		`if [ -n "$master_pid" ]; then kill "$master_pid" 2>/dev/null || true; fi`,
-		`rm -f "/tmp/erun-app/erun-local-open-2.dtach" "/tmp/erun-app/erun-local-open-2.owner"`,
+		`rm -f "/tmp/erun-sessions/erun-local-open-2.dtach" "/tmp/erun-sessions/erun-local-open-2.owner"`,
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("end script missing %q:\n%s", want, script)

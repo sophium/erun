@@ -69,6 +69,26 @@ test.describe('k3d e2e: a dropped MCP port-forward must not trigger a redeploy',
         /* pod may be mid-roll; ignore */
       }
     };
+    // Each roll is bounded by the cluster's own rollout completing rather than
+    // by a guessed sleep: the condition this spec manufactures is "the forward
+    // dropped and the pod came back", and that is exactly what rollout status
+    // reports.
+    const waitForRuntimeRollout = (): void => {
+      execFileSync(
+        'kubectl',
+        [
+          '--context',
+          cluster.context,
+          '-n',
+          namespace,
+          'rollout',
+          'status',
+          `deployment/${tenant}-devops`,
+          '--timeout=5m',
+        ],
+        { env: kubectlEnv, stdio: 'pipe' },
+      );
+    };
 
     const deploys: Array<{ method: string; at: number }> = [];
     const start = Date.now();
@@ -117,20 +137,19 @@ test.describe('k3d e2e: a dropped MCP port-forward must not trigger a redeploy',
       });
       const deploysAfterOpen = deploys.length;
 
-      // Now manufacture the field condition: roll the pod every ~20s for ~3
-      // minutes so the desktop repeatedly sees the MCP forward drop against a
-      // healthy, already-deployed env.
-      for (let i = 0; i < 9; i += 1) {
+      // Now manufacture the field condition: roll the pod nine times, waiting
+      // each time for it to come back, so the desktop repeatedly sees the MCP
+      // forward drop against a healthy, already-deployed env.
+      for (let roll = 0; roll < 9; roll += 1) {
         rollPod();
-        await app.page.waitForTimeout(20_000);
+        waitForRuntimeRollout();
       }
 
-      // eslint-disable-next-line no-console
       console.log('DEPLOY CALLS (mcp-fault):', JSON.stringify(deploys, null, 2));
       expect(
-        deploys.length,
+        deploys,
         `a dropped MCP forward must not redeploy: ${deploys.length - deploysAfterOpen} extra deploy(s) after open — ${JSON.stringify(deploys)}`,
-      ).toBe(deploysAfterOpen);
+      ).toHaveLength(deploysAfterOpen);
     } finally {
       try {
         execFileSync(

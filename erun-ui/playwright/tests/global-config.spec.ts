@@ -1,3 +1,4 @@
+import { boundingBoxOf } from '../fixtures/boundingBox.js';
 import { test, expect } from '../fixtures/erunApp.js';
 import { SEED_TENANT } from '../fixtures/seedRoot.js';
 
@@ -35,13 +36,12 @@ test.describe('global config dialog', () => {
       span.textContent = `long.user.name+0123456789@aws-${'x'.repeat(80)}`;
     });
 
-    const providerBox = await provider.boundingBox();
-    const valueBox = await app.globalConfigDialog.cloudContextProviderValue().boundingBox();
-    const regionBox = await region.boundingBox();
-    expect(providerBox).not.toBeNull();
-    expect(valueBox).not.toBeNull();
-    expect(regionBox).not.toBeNull();
-    if (!providerBox || !valueBox || !regionBox) return;
+    const providerBox = await boundingBoxOf(provider, 'Cloud provider trigger');
+    const valueBox = await boundingBoxOf(
+      app.globalConfigDialog.cloudContextProviderValue(),
+      'Cloud provider value',
+    );
+    const regionBox = await boundingBoxOf(region, 'Region trigger');
     expect(valueBox.x + valueBox.width).toBeLessThanOrEqual(providerBox.x + providerBox.width);
     expect(providerBox.x + providerBox.width).toBeLessThanOrEqual(regionBox.x);
 

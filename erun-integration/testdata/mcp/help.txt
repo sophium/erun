@@ -1,6 +1,6 @@
 Run ERun as an MCP server over HTTP, exposing this machine's erun commands as MCP tools.
 
-The subcommands go the other way: they talk to an already-running environment's MCP edge (`call`, `tools`) or mint a bearer for it (`token`).
+The subcommands go the other way: they talk to an already-running environment's MCP edge (`call`, `tools`), mint a bearer for it (`token`), or bridge a stdio MCP client to it (`proxy`).
 
 Usage:
   erun mcp [TENANT] [ENVIRONMENT] [flags]
@@ -13,6 +13,7 @@ Examples:
 
 Available Commands:
   call        Call one tool on an environment's MCP edge
+  proxy       Bridge a stdio MCP client to an environment's MCP edge
   token       Mint a bearer token for an environment's MCP edge
   tools       List the tools an environment's MCP edge exposes
 

@@ -40,6 +40,8 @@ type Setup struct {
 	PathDir string
 	// toolBins routes hostTools to their absolute host paths.
 	toolBins []string
+	// stubShell is the absolute POSIX shell the Windows stub runner needs.
+	stubShell string
 }
 
 // Env returns the subprocess environment as a fresh slice each call, so
@@ -89,6 +91,11 @@ func (s Setup) Env() []string {
 		// Scenarios that exercise the downgrade guard append their own
 		// ERUN_MCP_AUTH_LIVE_PROBE_OVERRIDE after Env() (the later duplicate wins).
 		"ERUN_MCP_AUTH_LIVE_PROBE_OVERRIDE=",
+		// The shell the Windows stub runner launches a stub's script body with.
+		// A stub inherits the scrubbed PATH, so it cannot find one there; this is
+		// the same absolute-path routing hostTools uses for git. Empty when the
+		// host has no POSIX shell, which only matters on Windows.
+		"ERUN_STUB_SH=" + s.stubShell,
 	}, s.toolBins...)
 }
 
@@ -122,7 +129,35 @@ func New(t testing.TB) Setup {
 		Cwd:        cwd,
 		PathDir:    scrubbedPathDir(t, filepath.Join(root, "path")),
 		toolBins:   hostToolBins(t),
+		stubShell:  stubShellPath(t),
 	}
+}
+
+// stubShellPath resolves the POSIX shell a stub script body runs under. On Unix
+// it is whatever `sh` the host has. On Windows the shell is not on the scenario
+// PATH and Windows cannot execute a shebang script at all, so the stub runner
+// needs an absolute path to one — and Git for Windows ships it beside the git
+// the suite already requires, which is why deriving it from the resolved git is
+// enough rather than adding a second host prerequisite.
+func stubShellPath(t testing.TB) string {
+	t.Helper()
+	if path, err := osexec.LookPath("sh"); err == nil {
+		return path
+	}
+	git, err := osexec.LookPath("git")
+	if err != nil {
+		return ""
+	}
+	gitRoot := filepath.Dir(filepath.Dir(git))
+	for _, candidate := range []string{
+		filepath.Join(gitRoot, "usr", "bin", "sh.exe"),
+		filepath.Join(gitRoot, "bin", "sh.exe"),
+	} {
+		if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return ""
 }
 
 // scrubbedPathDir builds the one directory a scenario's PATH points at: a
