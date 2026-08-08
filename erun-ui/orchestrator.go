@@ -43,6 +43,9 @@ type orchestratorSession struct {
 	name      string
 	envs      []eruncommon.OrchestratorEnvConfig
 	startedAt time.Time
+	// aiBusy is the last turn-boundary report published to the sidebar, kept so
+	// the poller emits only on change rather than every tick.
+	aiBusy bool
 }
 
 // orchestratorEnvInput is the frontend's env selection for create/update.
@@ -409,6 +412,12 @@ func ensureOrchestratorSessionStartHook(dir string) error {
 		hooks = map[string]any{}
 	}
 	hooks["SessionStart"] = orchestratorSessionStartHook(dir)
+	// The agent reports its own turn boundaries. Whether it is working cannot be
+	// read off its terminal: an agent TUI repaints continuously, so an
+	// output-driven latch never clears.
+	busyHook, idleHook := orchestratorActivityHooks()
+	hooks["UserPromptSubmit"] = busyHook
+	hooks["Stop"] = idleHook
 	settings["hooks"] = hooks
 	out, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {

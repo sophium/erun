@@ -60,7 +60,44 @@ func (a *App) runSessionHeartbeatPoller(stop <-chan struct{}) {
 			// re-validates and dedups a running poller, so this settles to a
 			// no-op once every linked env is syncing.
 			a.reconcileWorkspaceSyncForConfiguredEnvs()
+			a.reconcileOrchestratorActivity()
 		}
+	}
+}
+
+// reconcileOrchestratorActivity publishes what each orchestrator said about
+// itself. The agent writes a turn-boundary report; this turns it into the
+// sidebar's spinner. Emitted only on change, so a quiet orchestrator costs one
+// file read per tick and no events.
+func (a *App) reconcileOrchestratorActivity() {
+	now := time.Now()
+	a.mu.Lock()
+	type row struct {
+		id     string
+		serial int
+		busy   bool
+	}
+	rows := make([]row, 0, len(a.orchestrators))
+	for id, session := range a.orchestrators {
+		if session == nil || session.transient {
+			continue
+		}
+		rows = append(rows, row{id: id, serial: session.serial, busy: session.aiBusy})
+	}
+	a.mu.Unlock()
+
+	for _, r := range rows {
+		activity, ok := readOrchestratorActivity(r.id, now)
+		busy := ok && activity.Busy
+		if busy == r.busy {
+			continue
+		}
+		a.mu.Lock()
+		if session := a.orchestrators[r.id]; session != nil {
+			session.aiBusy = busy
+		}
+		a.mu.Unlock()
+		a.emitAIActivity(r.serial, uiSelection{}, busy)
 	}
 }
 
