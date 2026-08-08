@@ -17,7 +17,10 @@ import (
 //     output, regardless of how long busy=true was latched.
 //   - Session close (finalizeAIActivity) must release a latched
 //     busy=true even mid-generation.
-//   - The signal is silent for non-AI session kinds.
+//   - An orchestrator session drives the signal exactly as an AI tab does:
+//     it runs the same agent, and its row is the one most likely to be
+//     working, so a silent orchestrator row read as idle while it worked.
+//   - The signal is silent for every other session kind.
 func TestRecordAIActivityDebounce(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -26,6 +29,7 @@ func TestRecordAIActivityDebounce(t *testing.T) {
 		wantSecond bool
 	}{
 		{name: "AI session emits ai-activity", kind: sessionKindAI, wantEmits: true},
+		{name: "Orchestrator session emits ai-activity", kind: sessionKindOrchestrator, wantEmits: true},
 		{name: "Local session is silent", kind: sessionKindLocal, wantEmits: false},
 		{name: "Open session is silent", kind: sessionKindOpen, wantEmits: false},
 		{name: "Command session is silent", kind: sessionKindCommand, wantEmits: false},

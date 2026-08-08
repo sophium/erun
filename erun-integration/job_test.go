@@ -94,6 +94,45 @@ func TestJob(t *testing.T) {
 		golden.Equal(t, "job/help", normalize.Apply(result.Combined))
 	})
 
+	t.Run("start_refuses_a_dir_that_does_not_exist_by_name", func(t *testing.T) {
+		// An unusable working directory used to reach exec, where Go reports it
+		// as an ENOENT naming the *binary* — so a dir the supervisor could not
+		// resolve surfaced as a missing shell and sent the reader after a broken
+		// image instead of a bad path (#932).
+		setup := env.New(t)
+		envVars := jobStubEnv(t, setup, "printf '" + jobStubSignal + "'")
+		result := startJob(t, setup, envVars, "baddir", "--dir", "no-such-subdir", "--", "work")
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a refusal for a missing dir, got exit 0:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "no-such-subdir") {
+			t.Fatalf("the refusal must name the dir, got:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "fork/exec") {
+			t.Fatalf("a bad dir must not surface as an exec failure, got:\n%s", result.Combined)
+		}
+	})
+
+	t.Run("start_runs_the_work_in_a_relative_dir", func(t *testing.T) {
+		// The supervisor is detached with no inherited working directory, so a
+		// relative dir has to be anchored before it is handed over, the same way
+		// every other repo-facing surface reads a path (#932).
+		setup := env.New(t)
+		workdir := filepath.Join(setup.Cwd, "workdir-sub")
+		if err := os.MkdirAll(workdir, 0o755); err != nil {
+			t.Fatalf("create the work directory: %v", err)
+		}
+		envVars := jobStubEnv(t, setup, "pwd > pwd.txt")
+		result := startJob(t, setup, envVars, "reldir", "--dir", "workdir-sub", "--", "work")
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		got := strings.TrimSpace(waitForFile(t, filepath.Join(workdir, "pwd.txt"), 30*time.Second))
+		if filepath.Base(got) != "workdir-sub" {
+			t.Fatalf("work ran in %q, want it resolved to %s", got, workdir)
+		}
+	})
+
 	t.Run("await_help", func(t *testing.T) {
 		// The await exit codes are the contract an orchestrator branches on, so the
 		// help that states them is locked here.

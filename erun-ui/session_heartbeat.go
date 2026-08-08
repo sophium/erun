@@ -52,6 +52,14 @@ func (a *App) runSessionHeartbeatPoller(stop <-chan struct{}) {
 			return
 		case <-ticker.C:
 			a.reconcileSessionHeartbeatsOnce()
+			// Mirrors are re-enumerated here, not only at boot. An env linked
+			// while the app is already running — the usual case, since linking is
+			// done from the running app — never got a sync worker, so its mirror
+			// stayed silently empty until the next restart, indistinguishable
+			// from an env with no files. startWorkspaceSyncForSelection
+			// re-validates and dedups a running poller, so this settles to a
+			// no-op once every linked env is syncing.
+			a.startWorkspaceSyncForConfiguredEnvs()
 		}
 	}
 }
@@ -81,7 +89,7 @@ func (a *App) releaseUnobservedAIActivity() {
 	a.mu.Lock()
 	var candidates []*managedTerminal
 	for _, managed := range a.sessions {
-		if managed == nil || managed.closed || managed.kind != sessionKindAI || !managed.aiBusyEmitted {
+		if managed == nil || managed.closed || !aiActivityKind(managed.kind) || !managed.aiBusyEmitted {
 			continue
 		}
 		heartbeat, ok := a.sessionHeartbeats[selectionKey(managed.selection)]
@@ -156,7 +164,7 @@ func (a *App) applySessionHeartbeat(selection uiSelection, activity uiRuntimeAct
 // the pod may simply not have created its socket yet — so it is left alone.
 // Caller holds a.mu.
 func (h sessionHeartbeat) reportsFinished(managed *managedTerminal, key string) bool {
-	if managed == nil || managed.closed || managed.kind != sessionKindAI {
+	if managed == nil || managed.closed || !aiActivityKind(managed.kind) {
 		return false
 	}
 	if selectionKey(managed.selection) != key || !managed.aiBusyEmitted {

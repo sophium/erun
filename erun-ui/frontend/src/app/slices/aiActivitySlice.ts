@@ -8,10 +8,15 @@ import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 // Record<string, true> to keep the slice state serializable.
 export interface AIActivityState {
   aiBusyByEnv: Record<string, true>;
+  // Orchestrator sessions have no tenant/environment to key by, so their latch
+  // is keyed by session id. Same event, same debounce policy — only the address
+  // differs, because an orchestrator row is not an env row.
+  aiBusyBySession: Record<number, true>;
 }
 
 const initialState: AIActivityState = {
   aiBusyByEnv: {},
+  aiBusyBySession: {},
 };
 
 export const aiActivitySlice = createSlice({
@@ -25,11 +30,19 @@ export const aiActivitySlice = createSlice({
         Reflect.deleteProperty(state.aiBusyByEnv, action.payload.key);
       }
     },
+    setAIBusyForSession(state, action: PayloadAction<{ sessionId: number; busy: boolean }>) {
+      if (action.payload.busy) {
+        state.aiBusyBySession[action.payload.sessionId] = true;
+      } else {
+        Reflect.deleteProperty(state.aiBusyBySession, action.payload.sessionId);
+      }
+    },
     clearAIBusy(state) {
       state.aiBusyByEnv = {};
+      state.aiBusyBySession = {};
     },
   },
 });
 
-export const { setAIBusyForEnv, clearAIBusy } = aiActivitySlice.actions;
+export const { setAIBusyForEnv, setAIBusyForSession, clearAIBusy } = aiActivitySlice.actions;
 export default aiActivitySlice.reducer;

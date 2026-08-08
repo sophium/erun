@@ -78,7 +78,46 @@ func (p StartEnvironmentJobParams) normalize() (StartEnvironmentJobParams, error
 	if p.LeaseTTL, err = normalizeEnvironmentJobLeaseTTL(p.LeaseTTL); err != nil {
 		return p, err
 	}
+	if p.Dir, err = resolveEnvironmentJobDir(p.Dir); err != nil {
+		return p, err
+	}
 	return p, nil
+}
+
+// resolveEnvironmentJobDir resolves the directory the work runs in, and proves
+// it usable before anything is detached.
+//
+// The supervisor is started with no inherited working directory, so a relative
+// dir cannot mean "relative to the supervisor" — left alone it resolves against
+// whatever directory the transport happens to be sitting in, which is not the
+// repository. Anchor it to the project root instead, the same reading every
+// other repo-facing surface gives a path, so a caller can name a subdirectory
+// here exactly as they would to `raw`.
+//
+// The check happens now rather than at exec because Go reports an unusable
+// cmd.Dir as an ENOENT naming the *binary*: an unverified dir surfaces as a
+// missing shell, sending the reader after a broken image instead of a bad path.
+func resolveEnvironmentJobDir(dir string) (string, error) {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return "", nil
+	}
+	resolved := dir
+	if !filepath.IsAbs(resolved) {
+		if _, root, err := FindProjectRoot(); err == nil {
+			resolved = filepath.Join(root, resolved)
+		} else if abs, absErr := filepath.Abs(resolved); absErr == nil {
+			resolved = abs
+		}
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", fmt.Errorf("job dir %q does not exist (resolved to %s)", dir, resolved)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("job dir %q is not a directory (resolved to %s)", dir, resolved)
+	}
+	return resolved, nil
 }
 
 // normalizeEnvironmentJobIdentity resolves the target and the handle a job is

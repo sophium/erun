@@ -25,7 +25,7 @@ import {
   selectSelectedIsPendingFor,
 } from './selectors';
 import { openSelection, selectTerminalTab, startInitialDeploySelection } from './sessionThunks';
-import { setAIBusyForEnv } from './slices/aiActivitySlice';
+import { setAIBusyForEnv, setAIBusyForSession } from './slices/aiActivitySlice';
 import { setDoctorAll } from './slices/doctorSlice';
 import { setEnvActivityForEnv, setEnvStatusForEnv } from './slices/envStatusSlice';
 import { appendReconnectLine } from './slices/reviewSlice';
@@ -61,6 +61,11 @@ export const handleAIActivity =
     const tenant = payload.tenant.trim();
     const environment = payload.environment.trim();
     if (!tenant || !environment) {
+      // An orchestrator session carries no env to key by. Dropping the event
+      // here is why the orchestrator row never spun while it was working.
+      if (payload.sessionId > 0) {
+        dispatch(setAIBusyForSession({ sessionId: payload.sessionId, busy: payload.busy }));
+      }
       return;
     }
     const key = selectionKey({ tenant, environment });
