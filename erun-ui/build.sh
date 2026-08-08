@@ -63,7 +63,15 @@ if [ -d frontend ]; then
 		# erun-devops image (it needs this CGO/webkit + frontend toolchain),
 		# so its golangci-lint gate lives here next to the frontend checks
 		# rather than in the shared `make check` the image runs.
-		(cd "$SCRIPT_DIR" && golangci-lint run ./...)
+		#
+		# The cache is scoped to this checkout because golangci-lint keys it by
+		# module, not by working tree: a second checkout of erun-ui replays the
+		# first one's results, and those carry the *other* tree's paths. Those
+		# paths no longer match .golangci.yml's anchored node_modules
+		# exclusions, so vendored third-party Go that this gate deliberately
+		# ignores comes back as findings against a tree that does not contain
+		# it. Scoping the cache makes the gate judge what it is building.
+		(cd "$SCRIPT_DIR" && GOLANGCI_LINT_CACHE="${GOLANGCI_LINT_CACHE:-$SCRIPT_DIR/.golangci-cache}" golangci-lint run ./...)
 	fi
 	"$YARN_BIN" build
 	cd "$SCRIPT_DIR"

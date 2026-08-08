@@ -40,24 +40,29 @@ type projectConfigStore interface {
 }
 
 type erunUIDeps struct {
-	store                     erunUIStore
-	findProjectRoot           eruncommon.ProjectFinderFunc
-	resolveCLIPath            func() string
-	resolveBuildInfo          func() eruncommon.BuildInfo
-	resolveImageRegistry      func(context.Context, string, string) (eruncommon.RuntimeRegistryVersions, error)
-	cloudDeps                 eruncommon.CloudDependencies
-	cloudContextDeps          eruncommon.CloudContextDependencies
-	deleteNamespace           eruncommon.NamespaceDeleterFunc
-	listKubeContexts          func() ([]string, error)
-	loadResourceStatus        func(context.Context, uiRuntimeResourceInput) (uiRuntimeResourceStatus, error)
-	loadClusterRegistry       func(context.Context, uiRuntimeResourceInput) (uiClusterRegistryStatus, error)
-	checkRuntimeDeployed      func(context.Context, string, string, string) (bool, error)
-	stopEnvironmentRuntime    func(eruncommon.Context, eruncommon.StopEnvironmentParams) (eruncommon.StopEnvironmentResult, error)
-	readRuntimeRunState       func(eruncommon.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error)
-	ensureMCP                 func(context.Context, eruncommon.OpenResult) error
-	reconnectMCP              func(context.Context, eruncommon.OpenResult, func(string)) error
-	ensureSSHD                func(context.Context, eruncommon.OpenResult) error
-	canConnectLocalPort       func(int) bool
+	store                  erunUIStore
+	findProjectRoot        eruncommon.ProjectFinderFunc
+	resolveCLIPath         func() string
+	resolveBuildInfo       func() eruncommon.BuildInfo
+	resolveImageRegistry   func(context.Context, string, string) (eruncommon.RuntimeRegistryVersions, error)
+	cloudDeps              eruncommon.CloudDependencies
+	cloudContextDeps       eruncommon.CloudContextDependencies
+	deleteNamespace        eruncommon.NamespaceDeleterFunc
+	listKubeContexts       func() ([]string, error)
+	loadResourceStatus     func(context.Context, uiRuntimeResourceInput) (uiRuntimeResourceStatus, error)
+	loadClusterRegistry    func(context.Context, uiRuntimeResourceInput) (uiClusterRegistryStatus, error)
+	checkRuntimeDeployed   func(context.Context, string, string, string) (bool, error)
+	stopEnvironmentRuntime func(eruncommon.Context, eruncommon.StopEnvironmentParams) (eruncommon.StopEnvironmentResult, error)
+	readRuntimeRunState    func(eruncommon.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error)
+	ensureMCP              func(context.Context, eruncommon.OpenResult) error
+	reconnectMCP           func(context.Context, eruncommon.OpenResult, func(string)) error
+	ensureSSHD             func(context.Context, eruncommon.OpenResult) error
+	canConnectLocalPort    func(int) bool
+	// canReachMCPEndpoint answers whether an MCP port carries traffic, which a
+	// dial cannot: a stale port-forward accepts and never answers, so a
+	// dial-gated recovery never fires and the environment stays dead behind a
+	// healthy-looking listener.
+	canReachMCPEndpoint       func(int) bool
 	setRemoteCloudAlias       func(context.Context, string, string, string, string, string) (eruncommon.EnvConfig, error)
 	startTerminal             func(startTerminalSessionParams) (terminalSession, error)
 	runIDECommand             func(context.Context, startTerminalSessionParams) (string, error)
@@ -288,14 +293,26 @@ func withDefaultRuntimeResolutionDeps(deps erunUIDeps) erunUIDeps {
 	if deps.readRuntimeRunState == nil {
 		deps.readRuntimeRunState = eruncommon.ReadRuntimeRunState
 	}
-	if deps.canConnectLocalPort == nil {
-		deps.canConnectLocalPort = canConnectLocalTCP
-	}
+	deps = withDefaultReachabilityDeps(deps)
 	if deps.setRemoteCloudAlias == nil {
 		deps.setRemoteCloudAlias = setEnvironmentCloudAliasViaMCP
 	}
 	if deps.resolveOrchestratorLaunch == nil {
 		deps.resolveOrchestratorLaunch = orchestratorLaunchCommand
+	}
+	return deps
+}
+
+// withDefaultReachabilityDeps supplies the two distinct liveness questions the
+// app asks: whether a local port is held at all, and whether an MCP port
+// actually carries traffic. They are separate because a stale port-forward
+// answers the first yes and the second no.
+func withDefaultReachabilityDeps(deps erunUIDeps) erunUIDeps {
+	if deps.canConnectLocalPort == nil {
+		deps.canConnectLocalPort = canConnectLocalTCP
+	}
+	if deps.canReachMCPEndpoint == nil {
+		deps.canReachMCPEndpoint = eruncommon.CanReachLocalMCPEndpoint
 	}
 	return deps
 }
@@ -425,7 +442,7 @@ func (a *App) startup(ctx context.Context) {
 	// Populate and keep live every linked orchestrator mirror, not only envs
 	// opened this session. Off the startup path so config/network I/O per env
 	// does not delay first paint.
-	go a.startWorkspaceSyncForConfiguredEnvs()
+	go a.reconcileWorkspaceSyncForConfiguredEnvs()
 }
 
 func (a *App) shutdown(context.Context) {

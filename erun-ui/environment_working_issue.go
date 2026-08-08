@@ -107,7 +107,7 @@ func (a *App) resolveWorkingIssue(result eruncommon.OpenResult) uiWorkingIssue {
 // to open the env.
 func (a *App) resolvePodWorkingIssue(result eruncommon.OpenResult) uiWorkingIssue {
 	mcpPort := eruncommon.MCPPortForResult(result)
-	if mcpPort <= 0 || !a.deps.canConnectLocalPort(mcpPort) {
+	if mcpPort <= 0 || !a.deps.canReachMCPEndpoint(mcpPort) {
 		return uiWorkingIssue{Available: false, Reason: "open this environment to see its in-pod work"}
 	}
 

@@ -502,6 +502,9 @@ func TestLoadDiffUsesSelectedMCPPort(t *testing.T) {
 		canConnectLocalPort: func(int) bool {
 			return true
 		},
+		canReachMCPEndpoint: func(int) bool {
+			return true
+		},
 		ensureMCP: func(_ context.Context, _ eruncommon.OpenResult) error {
 			ensureCalls++
 			return nil
@@ -554,6 +557,9 @@ func TestLoadDiffReturnsUnreachableWhenPortClosed(t *testing.T) {
 		canConnectLocalPort: func(int) bool {
 			return false
 		},
+		canReachMCPEndpoint: func(int) bool {
+			return false
+		},
 		ensureMCP: func(_ context.Context, _ eruncommon.OpenResult) error {
 			ensureCalls++
 			return nil
@@ -597,6 +603,9 @@ func TestLoadDiffWrapsDialFailureAsUnreachable(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store: store,
 		canConnectLocalPort: func(int) bool {
+			return true
+		},
+		canReachMCPEndpoint: func(int) bool {
 			return true
 		},
 		ensureMCP: func(_ context.Context, _ eruncommon.OpenResult) error {
@@ -2962,6 +2971,7 @@ func TestSaveRemoteEnvironmentConfigSetsCloudAliasViaMCP(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store:               store,
 		canConnectLocalPort: func(int) bool { return true },
+		canReachMCPEndpoint: func(int) bool { return true },
 		setRemoteCloudAlias: func(_ context.Context, endpoint, _, tenant, environment, alias string) (eruncommon.EnvConfig, error) {
 			remoteEndpoint = endpoint
 			remoteTenant = tenant
@@ -3593,6 +3603,7 @@ func TestLoadIdleStatusDoesNotStopWhileEnvironmentCommandRunning(t *testing.T) {
 			return newStubTerminalSession(), nil
 		},
 		canConnectLocalPort: func(int) bool { return true },
+		canReachMCPEndpoint: func(int) bool { return true },
 		loadIdleStatus: func(context.Context, string, string) (eruncommon.EnvironmentIdleStatus, error) {
 			return eruncommon.EnvironmentIdleStatus{
 				ManagedCloud: true,
@@ -4640,6 +4651,7 @@ func TestMaybeStopIdleClearsStaleIdleStopWhenContextIsRunningAgain(t *testing.T)
 	app := NewApp(erunUIDeps{
 		store:               store,
 		canConnectLocalPort: func(int) bool { return false },
+		canReachMCPEndpoint: func(int) bool { return false },
 		loadIdleStatus: func(context.Context, string, string) (eruncommon.EnvironmentIdleStatus, error) {
 			return eruncommon.EnvironmentIdleStatus{}, fmt.Errorf("mcp unreachable")
 		},

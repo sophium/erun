@@ -63,15 +63,15 @@ func (a *App) startWorkspaceSyncForSelection(selection uiSelection) {
 	go a.runWorkspaceSyncLoop(ctx, key, selection, result, localPath)
 }
 
-// startWorkspaceSyncForConfiguredEnvs starts the host-mirror sync poller for
-// every configured remote-agent env that has SSHD and workspace sync enabled,
-// so an orchestrator's linked mirrors populate and stay live without the
-// operator opening each env's tab first. Called at startup: without it, sync
-// only ran for envs opened this session, so a linked-but-unopened env's mirror
-// stayed empty. startWorkspaceSyncForSelection re-validates each env and dedups
-// an already-running poller, so this is safe to call for every env and
-// idempotent if an env is later opened.
-func (a *App) startWorkspaceSyncForConfiguredEnvs() {
+// reconcileWorkspaceSyncForConfiguredEnvs settles the running sync workers onto
+// what the config asks for right now, in both directions. It runs on the
+// heartbeat rather than only at boot because linking is done from the running
+// app: an env enabled afterwards never got a worker and its mirror stayed
+// silently empty, and an env disabled afterwards kept its worker and went on
+// writing into a mirror the operator had already detached.
+// startWorkspaceSyncForSelection re-validates each env and dedups an
+// already-running poller, so this settles to a no-op once the two agree.
+func (a *App) reconcileWorkspaceSyncForConfiguredEnvs() {
 	if a.deps.store == nil {
 		return
 	}
@@ -79,9 +79,33 @@ func (a *App) startWorkspaceSyncForConfiguredEnvs() {
 	if err != nil {
 		return
 	}
+	desired, complete := a.desiredWorkspaceSyncSelections(tenants)
+	for _, selection := range desired {
+		a.startWorkspaceSyncForSelection(selection)
+	}
+	// Stopping is only safe on a complete picture: a partial read would tear
+	// down workers for envs that are still perfectly well configured.
+	if !complete {
+		return
+	}
+	for _, key := range a.runningWorkspaceSyncKeys() {
+		if _, keep := desired[key]; !keep {
+			a.stopWorkspaceSyncForKey(key)
+		}
+	}
+}
+
+// desiredWorkspaceSyncSelections reports the envs that should be mirroring right
+// now, and whether that picture is complete. Incomplete matters: a tenant that
+// could not be read says nothing about its envs, and reading silence as "not
+// wanted" would tear down healthy workers.
+func (a *App) desiredWorkspaceSyncSelections(tenants []eruncommon.TenantConfig) (map[string]uiSelection, bool) {
+	desired := map[string]uiSelection{}
+	complete := true
 	for _, tenant := range tenants {
-		envs, envErr := a.deps.store.ListEnvConfigs(tenant.Name)
-		if envErr != nil {
+		envs, err := a.deps.store.ListEnvConfigs(tenant.Name)
+		if err != nil {
+			complete = false
 			continue
 		}
 		for _, env := range envs {
@@ -90,9 +114,24 @@ func (a *App) startWorkspaceSyncForConfiguredEnvs() {
 			if !env.SSHD.Enabled || !env.SSHD.WorkspaceSync.Enabled {
 				continue
 			}
-			a.startWorkspaceSyncForSelection(uiSelection{Tenant: tenant.Name, Environment: env.Name})
+			selection := uiSelection{Tenant: tenant.Name, Environment: env.Name}
+			desired[selectionKey(selection)] = selection
 		}
 	}
+	return desired, complete
+}
+
+// runningWorkspaceSyncKeys snapshots the workers currently polling, so the
+// reconcile can compare against the desired set without holding the lock across
+// the stops it decides on.
+func (a *App) runningWorkspaceSyncKeys() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	keys := make([]string, 0, len(a.workspaceSyncs))
+	for key := range a.workspaceSyncs {
+		keys = append(keys, key)
+	}
+	return keys
 }
 
 func (a *App) reconcileWorkspaceSyncForSelection(selection uiSelection, enabled bool) {
@@ -103,7 +142,10 @@ func (a *App) reconcileWorkspaceSyncForSelection(selection uiSelection, enabled 
 }
 
 func (a *App) stopWorkspaceSyncForSelection(selection uiSelection) {
-	key := selectionKey(selection)
+	a.stopWorkspaceSyncForKey(selectionKey(selection))
+}
+
+func (a *App) stopWorkspaceSyncForKey(key string) {
 	a.mu.Lock()
 	worker := a.workspaceSyncs[key]
 	if worker != nil {

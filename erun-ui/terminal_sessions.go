@@ -809,8 +809,8 @@ func (a *App) LoadDiff(selection uiSelection, options uiDiffOptions) (eruncommon
 		ctx = context.Background()
 	}
 	mcpPort := eruncommon.MCPPortForResult(result)
-	if a.deps.canConnectLocalPort != nil && !a.deps.canConnectLocalPort(mcpPort) {
-		return eruncommon.DiffResult{}, wrapMCPUnreachableError(fmt.Errorf("mcp port %d is not reachable", mcpPort))
+	if a.deps.canReachMCPEndpoint != nil && !a.deps.canReachMCPEndpoint(mcpPort) {
+		return eruncommon.DiffResult{}, wrapMCPUnreachableError(errors.New(eruncommon.DescribeLocalMCPUnreachable(result.Tenant, result.EnvConfig.Name, mcpPort)))
 	}
 	endpoint := mcpEndpointForOpenResult(result)
 	bearer := a.mcpBearer(result.Tenant, result.EnvConfig.Name)
@@ -823,9 +823,13 @@ func (a *App) LoadDiff(selection uiSelection, options uiDiffOptions) (eruncommon
 
 func (a *App) ensureMCPAvailable(ctx context.Context, result eruncommon.OpenResult) error {
 	mcpPort := eruncommon.MCPPortForResult(result)
-	if a.deps.ensureMCP != nil && !a.deps.canConnectLocalPort(mcpPort) {
+	// Reachability is a round trip, not a dial. A stale forward holds the port
+	// and answers nothing, so gating recovery on a dial left the env
+	// permanently unreachable behind a listener that looked fine.
+	if a.deps.ensureMCP != nil && !a.deps.canReachMCPEndpoint(mcpPort) {
+		a.emitAppStatus(eruncommon.DescribeLocalMCPUnreachable(result.Tenant, result.EnvConfig.Name, mcpPort), false)
 		if err := a.deps.ensureMCP(ctx, result); err != nil {
-			if !a.deps.canConnectLocalPort(mcpPort) {
+			if !a.deps.canReachMCPEndpoint(mcpPort) {
 				return err
 			}
 		}
