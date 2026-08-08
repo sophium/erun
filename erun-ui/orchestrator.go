@@ -910,10 +910,13 @@ func (a *App) spawnOrchestratorSession(id, name string, envs []eruncommon.Orches
 	cols, rows = clampTerminalSize(cols, rows)
 	// Wire each linked env's erun MCP into the orchestrator session so it drives
 	// its envs through the MCP (raw/build/deploy/…) rather than raw kubectl.
-	// Non-fatal: the orchestrator still launches without the env MCP.
+	// Non-fatal: the orchestrator still launches without the env MCP, but an
+	// agent with linked envs and none of their tools looks working and is not,
+	// so the operator is told why instead of discovering it tool by tool.
 	mcpConfigPath, mcpErr := a.writeOrchestratorMCPConfig(id, envs)
 	if mcpErr != nil {
 		log.Printf("erun-app: write orchestrator MCP config for %s: %v", id, mcpErr)
+		a.emitAppNotification("warning", orchestratorMCPUnwiredNotice(name, mcpErr))
 	}
 	executable, args, err := a.deps.resolveOrchestratorLaunch(orchestratorSessionID(id), initialPrompt, resumePrompt, mcpConfigPath)
 	if err != nil {

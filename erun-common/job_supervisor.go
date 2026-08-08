@@ -642,25 +642,61 @@ func ErunExecutableName() string {
 	return "erun"
 }
 
-// erunExecutableNearRunningProgram mirrors how the CLI locates its sibling
-// erun-app: the install layout puts every erun executable in one directory, and
-// a source build puts them in each module's own bin/.
+// erunExecutableNearRunningProgram searches beside the running program: the
+// install layout puts every erun executable in one directory, and a source build
+// puts them in each module's own bin/. It is not the mirror of how the CLI finds
+// erun-app — that direction stops at the .app bundle, while a program running
+// from inside one sits three levels below the directory its siblings share.
 func erunExecutableNearRunningProgram(name string) string {
 	executable, err := os.Executable()
 	if err != nil {
 		return ""
 	}
-	dir := filepath.Dir(executable)
-	for _, candidate := range []string{
-		filepath.Join(dir, name),
-		filepath.Clean(filepath.Join(dir, "..", "..", "erun-cli", "bin", name)),
-	} {
-		if candidate == executable {
-			continue
-		}
-		if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() {
-			return candidate
+	return erunExecutableNear(executable, name)
+}
+
+func erunExecutableNear(executable, name string) string {
+	for _, root := range executableSiblingRoots(filepath.Dir(executable)) {
+		for _, candidate := range []string{
+			filepath.Join(root, name),
+			filepath.Clean(filepath.Join(root, "..", "..", "erun-cli", "bin", name)),
+		} {
+			if candidate == executable {
+				continue
+			}
+			if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() {
+				return candidate
+			}
 		}
 	}
 	return ""
+}
+
+// executableSiblingRoots lists the directories an erun executable may sit in
+// relative to the running program: its own directory, plus the directory holding
+// the macOS .app bundle it runs inside, if any.
+func executableSiblingRoots(dir string) []string {
+	roots := []string{dir}
+	if container := macOSBundleContainer(dir); container != "" {
+		roots = append(roots, container)
+	}
+	return roots
+}
+
+// macOSBundleContainer returns the directory holding the <Name>.app bundle whose
+// Contents/MacOS is dir, and "" for every other layout — so no other host's
+// directory names can accidentally match the bundle shape.
+func macOSBundleContainer(dir string) string {
+	if filepath.Base(dir) != "MacOS" {
+		return ""
+	}
+	contents := filepath.Dir(dir)
+	if filepath.Base(contents) != "Contents" {
+		return ""
+	}
+	bundle := filepath.Dir(contents)
+	if filepath.Ext(bundle) != ".app" {
+		return ""
+	}
+	return filepath.Dir(bundle)
 }

@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,16 +58,50 @@ func buildOrchestratorMCPConfig(envs []eruncommon.OrchestratorEnvConfig, executa
 	return orchestratorMCPConfig{MCPServers: servers}
 }
 
+// The two ways an orchestrator ends up with linked environments but none of
+// their tools. They stay distinct because the operator's fix differs: one is a
+// missing erun install, the other a linked environment that no longer resolves.
+var (
+	errOrchestratorMCPExecutable = errors.New("the erun executable could not be resolved")
+	errOrchestratorMCPNoPort     = errors.New("no linked environment resolved an MCP port")
+)
+
+// orchestratorMCPUnwiredNotice is the operator-facing line for an orchestrator
+// that launched without the tools for the environments it is linked to. It names
+// the cause and the matching recovery, since the session otherwise looks healthy
+// right up to the first environment call.
+func orchestratorMCPUnwiredNotice(name string, err error) string {
+	label := strings.TrimSpace(name)
+	if label == "" {
+		label = "The orchestrator"
+	}
+	cause, recovery := err.Error(), "Restart the orchestrator once that is resolved."
+	switch {
+	case errors.Is(err, errOrchestratorMCPExecutable):
+		cause = errOrchestratorMCPExecutable.Error()
+		recovery = "Install the erun command line tool, then restart the orchestrator."
+	case errors.Is(err, errOrchestratorMCPNoPort):
+		cause = errOrchestratorMCPNoPort.Error()
+		recovery = "Check its linked environments still exist, then restart the orchestrator."
+	}
+	return fmt.Sprintf("%s started without its environment tools: %s. %s", label, cause, recovery)
+}
+
 // writeOrchestratorMCPConfig writes a per-orchestrator Claude Code --mcp-config
 // file wiring each linked env's erun MCP into the orchestrator session, so it
-// drives its envs through the MCP rather than raw kubectl. Returns "" (no file)
-// when no env resolves a port, so the caller skips --mcp-config.
+// drives its envs through the MCP rather than raw kubectl. Returns "" with an
+// error naming why when nothing could be wired, so the caller skips
+// --mcp-config and can tell the operator which fix applies.
 func (a *App) writeOrchestratorMCPConfig(id string, envs []eruncommon.OrchestratorEnvConfig) (string, error) {
+	// An orchestrator with no linked envs has nothing to wire, and that is normal.
+	if len(envs) == 0 {
+		return "", nil
+	}
 	// No erun binary means no proxy to launch, so the session launches without
 	// its envs rather than with entries that would fail on first use.
 	executable, err := eruncommon.ResolveErunExecutable()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: %w", errOrchestratorMCPExecutable, err)
 	}
 	config := buildOrchestratorMCPConfig(envs, executable,
 		func(tenant, environment string) int {
@@ -77,7 +113,7 @@ func (a *App) writeOrchestratorMCPConfig(id string, envs []eruncommon.Orchestrat
 		},
 	)
 	if len(config.MCPServers) == 0 {
-		return "", nil
+		return "", errOrchestratorMCPNoPort
 	}
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
