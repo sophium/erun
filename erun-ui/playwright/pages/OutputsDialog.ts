@@ -11,6 +11,12 @@ export class OutputsDialog {
     return this.page.getByTestId('outputs-dialog');
   }
 
+  // The list's accessible name is what a screen reader announces over the
+  // entries, so it has to name the same producer the heading does.
+  list(name: string): Locator {
+    return this.locator().getByRole('list', { name });
+  }
+
   entry(name: string): Locator {
     return this.locator().getByText(name, { exact: true });
   }
