@@ -484,16 +484,16 @@ func TestParseGitLsFilesSymlinkPaths(t *testing.T) {
 	}
 }
 
-func TestExcludeWorkspaceSyncSymlinks(t *testing.T) {
+func TestExcludeWorkspaceSyncPaths(t *testing.T) {
 	paths := []string{"AGENTS.md", "CLAUDE.md", "erun-ui/CLAUDE.md", "erun-ui/app.go"}
 	symlinks := map[string]struct{}{"CLAUDE.md": {}, "erun-ui/CLAUDE.md": {}}
-	got := excludeWorkspaceSyncSymlinks(paths, symlinks)
+	got := excludeWorkspaceSyncPaths(paths, symlinks)
 	want := []string{"AGENTS.md", "erun-ui/app.go"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected filtered paths: got %v want %v", got, want)
 	}
 	// An empty symlink set is a no-op (returns the input).
-	if got := excludeWorkspaceSyncSymlinks(paths, nil); !reflect.DeepEqual(got, paths) {
+	if got := excludeWorkspaceSyncPaths(paths, nil); !reflect.DeepEqual(got, paths) {
 		t.Fatalf("nil symlink set must be a no-op, got %v", got)
 	}
 }

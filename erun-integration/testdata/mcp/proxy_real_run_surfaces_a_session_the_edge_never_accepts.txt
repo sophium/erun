@@ -1,0 +1,5 @@
+{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{}}}}
+{"jsonrpc":"2.0","id":2,"error":{"code":-32603,"message":"re-establish the MCP session with http://<LOOPBACK>:26100/mcp: MCP endpoint no longer knows this session: http://<LOOPBACK>:26100/mcp (HTTP 404): session not found"}}
+audit: erun mcp proxy --environment dev --tenant team
+mcp: team/dev edge resolved to http://<LOOPBACK>:26100/mcp
+mcp proxy: re-establish the MCP session with http://<LOOPBACK>:26100/mcp: MCP endpoint no longer knows this session: http://<LOOPBACK>:26100/mcp (HTTP 404): session not found

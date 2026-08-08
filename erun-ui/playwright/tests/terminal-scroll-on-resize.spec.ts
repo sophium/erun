@@ -22,7 +22,7 @@ test.describe('terminal scroll on resize (#465)', () => {
 
     await app.sidebar.openEnvironment(tenant, environment);
     const localTab = page.getByRole('tab', { name: 'Local', exact: true });
-    await localTab.waitFor({ state: 'visible', timeout: 15_000 });
+    await localTab.waitFor({ state: 'visible' });
     await localTab.click();
 
     const sessionId = await discoverSelectedSessionId(app, page);
@@ -36,7 +36,7 @@ test.describe('terminal scroll on resize (#465)', () => {
         '\r\n',
       ) + '\r\n';
     await emitTerminalOutput(page, sessionId, lines);
-    await expect.poll(() => viewportHasScrollback(page), { timeout: 10_000 }).toBe(true);
+    await expect.poll(() => viewportHasScrollback(page)).toBe(true);
     // xterm keeps an at-bottom viewport pinned while output streams, so the
     // staging leaves the viewport at the live prompt.
     await expect.poll(() => terminalAtBottom(page)).toBe(true);
@@ -44,7 +44,7 @@ test.describe('terminal scroll on resize (#465)', () => {
     // At-bottom resize: after the reflow the viewport must come back to the prompt.
     const colsBefore = await readTerminalCols(page);
     expect(colsBefore).toBeGreaterThan(0);
-    await app.titlebar.toggleReviewPanel();
+    await resizeSettled(page, () => app.titlebar.toggleReviewPanel());
     await expect.poll(() => readTerminalCols(page)).not.toBe(colsBefore);
     await expect.poll(() => terminalAtBottom(page)).toBe(true);
 
@@ -53,7 +53,7 @@ test.describe('terminal scroll on resize (#465)', () => {
     await setViewportScrollTop(page, 0);
     await expect.poll(() => terminalAtBottom(page)).toBe(false);
     const colsMid = await readTerminalCols(page);
-    await app.titlebar.toggleReviewPanel();
+    await resizeSettled(page, () => app.titlebar.toggleReviewPanel());
     await expect.poll(() => readTerminalCols(page)).not.toBe(colsMid);
     // The faulty force-scroll would fire asynchronously within milliseconds of
     // the refit, so sample over a short window rather than checking once.
@@ -64,14 +64,15 @@ test.describe('terminal scroll on resize (#465)', () => {
     await setViewportScrollTop(page, Number.MAX_SAFE_INTEGER);
     await expect.poll(() => terminalAtBottom(page)).toBe(true);
     const colsWide = await readTerminalCols(page);
-    await page.setViewportSize({ width: 1080, height: 860 });
+    await resizeSettled(page, () => page.setViewportSize({ width: 1080, height: 860 }));
     await expect.poll(() => readTerminalCols(page)).not.toBe(colsWide);
     await expect.poll(() => terminalAtBottom(page)).toBe(true);
 
     await setViewportScrollTop(page, 0);
     await expect.poll(() => terminalAtBottom(page)).toBe(false);
     const colsNarrow = await readTerminalCols(page);
-    await page.setViewportSize({ width: 1440, height: 1200 }); // config default
+    // config default
+    await resizeSettled(page, () => page.setViewportSize({ width: 1440, height: 1200 }));
     await expect.poll(() => readTerminalCols(page)).not.toBe(colsNarrow);
     expect(await viewportEverAtBottom(page, 600)).toBe(false);
 
@@ -98,6 +99,20 @@ function parseInvoke(req: Request): InvokeCall | null {
     return null;
   }
   return body?.method ? { method: body.method, args: body.args ?? [] } : null;
+}
+
+// A layout change refits xterm, publishes the new geometry onto the terminal
+// element, and only then pushes it to the PTY — so the ResizeSession call is the
+// app's own "the refit ran" signal. Bounding each resize on that event, rather
+// than on how long a poll is allowed to run, is what keeps the spec honest on a
+// loaded host: the old clock-bounded poll simply expired when the toggle took
+// longer than the window, reporting a re-anchor failure that had not happened.
+async function resizeSettled(page: Page, change: () => Promise<void>): Promise<void> {
+  const resized = page.waitForRequest((req) => parseInvoke(req)?.method === 'ResizeSession', {
+    timeout: 60_000,
+  });
+  await change();
+  await resized;
 }
 
 async function discoverSelectedSessionId(app: AppShell, page: Page): Promise<number> {

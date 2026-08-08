@@ -132,6 +132,15 @@ If a code path cannot be reached from `--dry-run` because the production code do
 
 Reaching for a stub to "make this look real enough to reach the branch" is hiding a production bug. Resist it.
 
+### Stubs must stay executable on Windows
+
+A stub body is a POSIX shell script, and Windows can neither execute a shebang script by name nor preserve complex argv through a `.bat`. Two pieces of the fixture exist for that and must stay intact:
+
+- `writeStub` drops a `<name>.exe` copy of `internal/fixture/stubrunner` beside the script, and `StubEnv`/`stubExecPath` route `ERUN_<NAME>_BIN` at the `.exe`. Production code that reaches a binary through `eruncommon.Command` therefore lands on the runner, which forwards argv byte-for-byte through a NUL-delimited file.
+- The runner launches the script through the absolute shell in `ERUN_STUB_SH`, which `env.Env()` sets. It cannot look one up on PATH: the scenario PATH is scrubbed to `setup.PathDir`, which holds only forwarder scripts. A stub that silently produced nothing on Windows — leaving production to fall through its "no credential" arm and a scenario to assert an empty value — is what this routing prevents.
+
+Goldens are byte-compared against LF output, so `erun-integration/.gitattributes` pins `testdata/**/*.txt` to `eol=lf`; a Windows checkout with `core.autocrlf=true` would otherwise fail every comparison on text that reads identically. Do not widen that entry to unrelated file types.
+
 ### Stub helpers
 
 - `fixture.StubBinary(t, dir, name, stdout)` — stub that prints `stdout` and exits 0. Use for the non-dry-run real-run pattern when the call only needs to succeed.

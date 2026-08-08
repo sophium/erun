@@ -89,7 +89,7 @@ func newAppProcessCommand(goos string, executable string, args []string) *exec.C
 }
 
 func resolveAppExecutable() string {
-	executableName := "erun-app"
+	executableName := eruncommon.DesktopAppName
 	if runtime.GOOS == "windows" {
 		executableName += ".exe"
 	}

@@ -1,6 +1,6 @@
 import { execSync } from 'node:child_process';
 
-import type { Request } from '@playwright/test';
+import type { Page, Request } from '@playwright/test';
 
 import { expect, test } from '../../fixtures/erunApp.js';
 import { readK3dCluster } from '../../fixtures/k3dCluster.js';
@@ -30,6 +30,22 @@ function deployMethodOf(request: Request): string | null {
     }
   }
   return null;
+}
+
+// observeIdlePolls holds the "nothing happened" window open on the desktop's own
+// activity instead of the wall clock: every completed idle poll is a real
+// round-trip the app performs while it is live, so a count of them bounds the
+// observation by an event — and an app that wedges stops producing them and
+// fails here rather than letting the assertion pass vacuously.
+async function observeIdlePolls(page: Page, count: number): Promise<void> {
+  for (let poll = 0; poll < count; poll += 1) {
+    await page.waitForResponse(
+      (response) =>
+        response.url().includes('/__erun_invoke') &&
+        (response.request().postData() ?? '').includes('LoadIdleStatus'),
+      { timeout: 60_000 },
+    );
+  }
 }
 
 test.describe('real erun-k3s e2e: Skip-Git create comes up with one Helm revision', () => {
@@ -85,7 +101,6 @@ test.describe('real erun-k3s e2e: Skip-Git create comes up with one Helm revisio
           setDefaultTenant: false,
         },
       );
-      // eslint-disable-next-line no-console
       console.log('StartInitSession =>', JSON.stringify(result));
       expect(result.ok, `StartInitSession failed: ${JSON.stringify(result)}`).toBe(true);
 
@@ -96,18 +111,18 @@ test.describe('real erun-k3s e2e: Skip-Git create comes up with one Helm revisio
       });
 
       // Observe past a couple of redeploy cadences: the pod-rolling redeploy
-      // landed ~68s after the install, so a few minutes catches it.
-      await app.page.waitForTimeout(3 * 60 * 1000);
+      // landed ~68s after the install, so ~150 idle polls (the desktop's own
+      // ~1s cadence) covers it with room to spare.
+      await observeIdlePolls(app.page, 150);
 
       // init (`erun init`) owns the env's single runtime deploy, so the desktop
       // must compose NO deploy of its own — a post-init redeploy is exactly the
       // bug that rolled the just-created pod.
-      // eslint-disable-next-line no-console
       console.log('DEPLOY CALLS (skip-git):', JSON.stringify(deploys, null, 2));
       expect(
-        deploys.length,
+        deploys,
         `desktop must compose no post-init deploy (init owns it), got ${deploys.length}: ${JSON.stringify(deploys)}`,
-      ).toBe(0);
+      ).toHaveLength(0);
 
       // Ground truth: exactly ONE Helm revision on the cluster. A second revision
       // is the double-deploy that rolled the pod. helm is real + on PATH in e2e
@@ -119,12 +134,11 @@ test.describe('real erun-k3s e2e: Skip-Git create comes up with one Helm revisio
         { encoding: 'utf8' },
       );
       const revisions = JSON.parse(historyJSON) as unknown[];
-      // eslint-disable-next-line no-console
       console.log('HELM REVISIONS:', historyJSON);
       expect(
-        revisions.length,
+        revisions,
         `create must produce exactly one Helm revision (a 2nd = the pod-rolling redeploy), got ${revisions.length}`,
-      ).toBe(1);
+      ).toHaveLength(1);
     } finally {
       // Best-effort cluster cleanup so reruns start clean; config removal too.
       try {

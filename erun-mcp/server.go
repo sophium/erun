@@ -203,7 +203,8 @@ func registerJobTools(server *mcp.Server, runtime RuntimeConfig) {
 			"erun detaches the work, captures its merged stdout and stderr, and records the exit status by waiting on the process inside the env, so nothing has to be wrapped in setsid/nohup/a redirect and no sentinel token or shell expansion sits between the work and its result. " +
 			"The job also holds an activity lease for its lifetime, so the env reports as busy and idle-stop leaves it alone. " +
 			"Then use job_await (bounded) and job_output (incremental) rather than holding this call open. " +
-			"The id defaults to the name; re-using the id of a job that is still running is refused, while re-using a finished one replaces it.",
+			"The id defaults to the name; re-using the id of a job that is still running is refused, while re-using a finished one replaces it. " +
+			"For an agent run pass agent (claude or codex) plus prompt instead of command: erun invokes the tool in its streaming mode, so job_output returns events while the agent works and job_status reports what it is doing. Running the tool yourself through command would report nothing at all until it exits.",
 	}, jobStartTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "job_attach",
@@ -215,7 +216,8 @@ func registerJobTools(server *mcp.Server, runtime RuntimeConfig) {
 		Name: "job_status",
 		Description: "Return one job's state and outcome, or every retained job newest-first. " +
 			"The answer is always definite: running, exited with a captured exit code, or explicitly unknown with the reason (its supervisor is gone without an outcome, most often because the runtime pod was replaced). " +
-			"It is never a truncated or partial answer, so it is safe to act on. Finished jobs stay readable for 24 hours, so an orchestrator reconnecting after the work ended can still learn what happened.",
+			"It is never a truncated or partial answer, so it is safe to act on. Finished jobs stay readable for 24 hours, so an orchestrator reconnecting after the work ended can still learn what happened. " +
+			"An agent job also carries progress — current activity (the last tool and its target), turns, tools run, and the last thing the agent said — normalized by erun from the tool's own event stream, so the shape is the same across AI tools. Poll this to report an in-pod agent's progress; do not scrape the agent's private transcript.",
 	}, jobStatusTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "job_await",

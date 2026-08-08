@@ -1,0 +1,2 @@
+audit: erun job start --agent gemini --dry-run --environment dev --name sweep --tenant team do the thing
+unsupported agent tool "gemini": expected one of claude, codex

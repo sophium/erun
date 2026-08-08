@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test';
 
+import { boundingBoxOf } from '../fixtures/boundingBox.js';
 import { test, expect } from '../fixtures/erunApp.js';
 
 // Stub the version-suggestion RPC so the picker offers deterministic versions.
@@ -269,8 +270,9 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     // A shorter window forces the version list + full component checklist to
     // exceed the viewport; the popover must cap to the visible height and scroll
     // rather than clip the last components off-screen.
+    const viewportHeight = 720;
     await stubVersionSuggestions(page);
-    await page.setViewportSize({ width: 1440, height: 720 });
+    await page.setViewportSize({ width: 1440, height: viewportHeight });
     await app.sidebar.openManageDialogViaKeyboard(
       seededRuntimeEnv.tenant,
       seededRuntimeEnv.environment,
@@ -281,12 +283,11 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     await app.manageDialog.pickVersion('1.0.0');
 
     // The popover fits: its bottom edge stays on-screen.
-    const box = await app.manageDialog.versionPickerPopover().boundingBox();
-    const viewport = page.viewportSize();
-    expect(box).not.toBeNull();
-    if (box && viewport) {
-      expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
-    }
+    const box = await boundingBoxOf(
+      app.manageDialog.versionPickerPopover(),
+      'version picker popover',
+    );
+    expect(box.y + box.height).toBeLessThanOrEqual(viewportHeight + 1);
 
     // The last component (runtime is first now) is reachable by scrolling the popover.
     const lastComponent = app.manageDialog.deployComponentCheckbox('pw-docs');

@@ -82,6 +82,15 @@ type EnvironmentJob struct {
 	// the supervisor's liveness, so a record can never claim to be running after
 	// the process behind it is gone.
 	State string `json:"state"`
+	// Kind is command or agent. An agent job runs an AI tool in its streaming
+	// mode, which is what lets it report progress rather than only a state.
+	Kind string `json:"kind,omitempty"`
+	// AgentTool names the AI tool an agent job runs, and is empty otherwise.
+	AgentTool string `json:"agentTool,omitempty"`
+	// Progress is the normalized view of an agent run, folded from the tool's
+	// event stream by the supervisor. It is nil for a command job and for an
+	// agent run that has not emitted yet — never a made-up zero state.
+	Progress *AgentJobProgress `json:"progress,omitempty"`
 	// Command is the argv the supervisor ran, empty for an attached job.
 	Command []string `json:"command,omitempty"`
 	Dir     string   `json:"dir,omitempty"`

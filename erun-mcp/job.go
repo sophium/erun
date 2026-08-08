@@ -23,7 +23,9 @@ type JobStartInput struct {
 	Environment     string   `json:"environment,omitempty" jsonschema:"environment to run the job in; defaults to the server environment context"`
 	Name            string   `json:"name" jsonschema:"what the work is; shown wherever the environment reports as busy"`
 	ID              string   `json:"id,omitempty" jsonschema:"handle to address the job by; defaults to the name, so re-running the same named work keeps one stable handle"`
-	Command         []string `json:"command" jsonschema:"command and arguments to run, as an argv array; pass [\"sh\",\"-c\",\"...\"] only when shell features are genuinely needed"`
+	Command         []string `json:"command,omitempty" jsonschema:"command and arguments to run, as an argv array; pass [\"sh\",\"-c\",\"...\"] only when shell features are genuinely needed. Omit when running an agent"`
+	Agent           string   `json:"agent,omitempty" jsonschema:"run an AI tool instead of a command: claude or codex. erun invokes it in its streaming mode, so job_output returns events while the agent works and job_status reports its current activity rather than only running. Requires prompt and excludes command"`
+	Prompt          string   `json:"prompt,omitempty" jsonschema:"what the agent should do; only valid with agent"`
 	Dir             string   `json:"dir,omitempty" jsonschema:"working directory to run from; defaults to the runtime repo root"`
 	MaxOutputBytes  int64    `json:"maxOutputBytes,omitempty" jsonschema:"cap on captured output in bytes; past it output is dropped and the job reports outputTruncated. Defaults to 4194304"`
 	LeaseTTLSeconds int64    `json:"leaseTtlSeconds,omitempty" jsonschema:"activity lease TTL the job renews inside while it runs; defaults to 900"`
@@ -66,6 +68,8 @@ func jobStartTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequ
 			Name:           input.Name,
 			ID:             input.ID,
 			Command:        input.Command,
+			Agent:          input.Agent,
+			Prompt:         input.Prompt,
 			Dir:            dir,
 			MaxOutputBytes: input.MaxOutputBytes,
 			LeaseTTL:       time.Duration(input.LeaseTTLSeconds) * time.Second,
