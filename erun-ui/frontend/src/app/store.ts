@@ -32,6 +32,7 @@ import manageDialogReducer from './slices/manageDialogSlice';
 import notificationReducer from './slices/notificationSlice';
 import orchestratorsReducer from './slices/orchestratorsSlice';
 import outputsDialogReducer from './slices/outputsDialogSlice';
+import pinVersionReducer from './slices/pinVersionSlice';
 import requestCountersReducer from './slices/requestCountersSlice';
 import reviewReducer from './slices/reviewSlice';
 import selectionReducer from './slices/selectionSlice';
@@ -71,6 +72,7 @@ export const store = configureStore({
     contribute: contributeReducer,
     upgradeAll: upgradeAllReducer,
     outputsDialog: outputsDialogReducer,
+    pinVersion: pinVersionReducer,
     orchestrators: orchestratorsReducer,
     [wailsApi.reducerPath]: wailsApi.reducer,
   },

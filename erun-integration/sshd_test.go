@@ -96,6 +96,68 @@ func TestSSHD(t *testing.T) {
 		}
 	})
 
+	// A real pass, not just its resolution. The pod reports an empty worktree, so
+	// the mirror must empty to match: the mirror is a copy of the pod, and a file
+	// the pod no longer has is a file the mirror must drop. This is the lane that
+	// silently did nothing for months before the delete step was decoupled from
+	// the fetch.
+	t.Run("sync_real_run_drops_what_the_pod_no_longer_has", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithWorkspaceSync(t, setup, "team", "dev", 47100)
+		mirror := filepath.Join(setup.Home, "mirror", "team-dev")
+		stale := filepath.Join(mirror, "gone-from-the-pod.txt")
+		nested := filepath.Join(mirror, "pkg", "also-gone.go")
+		if err := os.MkdirAll(filepath.Dir(nested), 0o755); err != nil {
+			t.Fatalf("mkdir mirror: %v", err)
+		}
+		for _, path := range []string{stale, nested} {
+			if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+				t.Fatalf("seed mirror %s: %v", path, err)
+			}
+		}
+
+		// An ssh that answers every remote listing with nothing: the pod's
+		// worktree is empty, which is a real state and a deterministic one.
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "ssh", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "ssh")...)
+
+		result := erun.Run(t, []string{"sshd", "sync", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		for _, path := range []string{stale, nested} {
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Fatalf("expected %s to be deleted from the mirror, stat err = %v", path, err)
+			}
+		}
+		if !strings.Contains(result.Combined, "deleted 2") {
+			t.Fatalf("the pass must report what it removed:\n%s", result.Combined)
+		}
+		// An emptied directory is pruned rather than left as a husk.
+		if _, err := os.Stat(filepath.Join(mirror, "pkg")); !os.IsNotExist(err) {
+			t.Fatalf("expected the emptied directory to be pruned, stat err = %v", err)
+		}
+	})
+
+	// A second pass over an already-matching mirror changes nothing, which is
+	// what makes the desktop's two-second poller cheap.
+	t.Run("sync_real_run_is_a_no_op_once_the_mirror_matches", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithWorkspaceSync(t, setup, "team", "dev", 47200)
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "ssh", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "ssh")...)
+
+		result := erun.Run(t, []string{"sshd", "sync", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "copied 0 files, deleted 0") {
+			t.Fatalf("an already-matching mirror must change nothing:\n%s", result.Combined)
+		}
+	})
+
 	t.Run("init_real_run_writes_local_ssh_config", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")

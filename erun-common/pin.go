@@ -275,6 +275,68 @@ func rewritePinnedVersions(content, target string) string {
 	return content
 }
 
+// A rewritten Chart.yaml is only half a re-pin: the lock beside it still names
+// the versions that were there before, and `helm dependency build` — which the
+// deploy path runs — refuses a lock that disagrees with its chart. So the chart
+// directories a re-pin touched have their locks regenerated, or the very next
+// deploy fails on a tree the operator was told was aligned.
+
+// HelmDependencyUpdater regenerates one chart's Chart.lock and charts/. It is a
+// seam so a scenario can prove the pass runs — and runs once per chart — without
+// a helm binary or a reachable registry.
+type HelmDependencyUpdater func(ctx Context, chartDir string) error
+
+// RunHelmDependencyUpdate is the real updater.
+func RunHelmDependencyUpdate(ctx Context, chartDir string) error {
+	ctx.TraceCommand(chartDir, "helm", "dependency", "update")
+	if ctx.DryRun {
+		return nil
+	}
+	cmd := Command("helm", "dependency", "update")
+	cmd.Dir = chartDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("helm dependency update in %s: %w: %s", chartDir, err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+// PinnedChartDirs lists the chart directories a plan rewrote a dependency in,
+// deduplicated and ordered, so each is refreshed exactly once however many
+// dependencies inside it moved.
+func PinnedChartDirs(plan PinPlan) []string {
+	seen := map[string]struct{}{}
+	dirs := make([]string, 0, len(plan.Sites))
+	for _, site := range plan.Changes() {
+		if site.Kind != PinSiteHelmDependency || strings.TrimSpace(site.Path) == "" {
+			continue
+		}
+		dir := filepath.Dir(filepath.Join(plan.ProjectRoot, filepath.FromSlash(site.Path)))
+		if _, already := seen[dir]; already {
+			continue
+		}
+		seen[dir] = struct{}{}
+		dirs = append(dirs, dir)
+	}
+	sort.Strings(dirs)
+	return dirs
+}
+
+// RefreshPinnedChartLocks regenerates the lock of every chart the re-pin moved.
+// A failure names the chart and stops: leaving some locks refreshed and others
+// stale is a worse tree than the one we started from, and the operator needs to
+// know which one to look at.
+func RefreshPinnedChartLocks(ctx Context, plan PinPlan, update HelmDependencyUpdater) error {
+	if update == nil {
+		update = RunHelmDependencyUpdate
+	}
+	for _, dir := range PinnedChartDirs(plan) {
+		if err := update(ctx, dir); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // pinHistoryFileName records what the repo was pinned to before the last
 // re-pin, so reverting is one motion rather than remembering a number. It lives
 // beside the project's erun config because it describes this tree.

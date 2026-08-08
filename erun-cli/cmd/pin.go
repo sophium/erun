@@ -134,6 +134,11 @@ func runPinCommand(ctx context.Context, cmdCtx common.Context, result common.Ope
 	if err := savePinnedRuntimeVersion(result, plan.Target, saveEnvConfig); err != nil {
 		return err
 	}
+	// The rewritten Chart.yaml and the lock beside it have to agree, or the next
+	// deploy fails on a tree this command just called aligned.
+	if err := common.RefreshPinnedChartLocks(cmdCtx, plan, nil); err != nil {
+		return err
+	}
 
 	cmdCtx.Info(fmt.Sprintf("Pinned %s/%s to %s across %d references (was %s).",
 		result.Tenant, result.Environment, plan.Target, len(plan.Changes()), orNone(plan.Previous)))
