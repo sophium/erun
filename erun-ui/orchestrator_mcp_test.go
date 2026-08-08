@@ -92,7 +92,7 @@ func TestBuildOrchestratorMCPConfigSkipsEveryEnvWithoutAnExecutable(t *testing.T
 
 func TestBuildOrchestratorLaunchInjectsMCPConfig(t *testing.T) {
 	_, withMCP := buildOrchestratorLaunch("linux", "", false, "", "", "/cfg/orchestrator-mcp-petios3.json")
-	if joined := strings.Join(withMCP, " "); !strings.Contains(joined, `--mcp-config "/cfg/orchestrator-mcp-petios3.json"`) {
+	if joined := strings.Join(withMCP, " "); !strings.Contains(joined, `--mcp-config '/cfg/orchestrator-mcp-petios3.json'`) {
 		t.Fatalf("expected --mcp-config in launch, got: %s", joined)
 	}
 

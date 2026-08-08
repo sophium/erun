@@ -32,6 +32,70 @@ func TestSSHD(t *testing.T) {
 		golden.Equal(t, "sshd/init_help", normalize.Apply(result.Combined))
 	})
 
+	t.Run("sync_help", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"sshd", "sync", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "sshd/sync_help", normalize.Apply(result.Combined))
+	})
+
+	// The mirror exists only for an environment whose worktree is in a pod, so
+	// asking a local-agent env to fill one is refused by name rather than by a
+	// pass that quietly changes nothing.
+	t.Run("sync_refuses_an_env_with_no_pod_worktree", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"sshd", "sync", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a refusal, got exit 0: %s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "remote-agent") {
+			t.Fatalf("the refusal must name the precondition: %s", result.Combined)
+		}
+	})
+
+	// SSHD reaches the pod but nothing is configured to mirror, which is a
+	// different fix from the one above and so a different message.
+	t.Run("sync_refuses_when_workspace_sync_is_off", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHD(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"sshd", "sync", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a refusal, got exit 0: %s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "not enabled") {
+			t.Fatalf("the refusal must name the precondition: %s", result.Combined)
+		}
+	})
+
+	// A dry run resolves the real pass — which pod path mirrors into which host
+	// path — and stops before touching the mirror.
+	t.Run("sync_dry_run_traces_the_resolved_pass", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithWorkspaceSync(t, setup, "team", "dev", 47000)
+		// An ssh that answers every remote listing with nothing keeps the pass
+		// deterministic: an empty pod worktree and an empty mirror agree, so the
+		// counts are fixed and the scenario measures the resolution, not the host.
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "ssh", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "ssh")...)
+		result := erun.Run(t, []string{"sshd", "sync", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "would copy") {
+			t.Fatalf("a dry run must report the counts a pass would change: %s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "resolve workspace sync") {
+			t.Fatalf("a dry run must trace the pass it resolved: %s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "mirror/team-dev") {
+			t.Fatalf("a dry run must name the host path it would mirror into: %s", result.Combined)
+		}
+	})
+
 	t.Run("init_real_run_writes_local_ssh_config", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")

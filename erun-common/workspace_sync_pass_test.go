@@ -1,4 +1,4 @@
-package main
+package eruncommon
 
 import (
 	"context"
@@ -15,9 +15,9 @@ import (
 // always correct, and the listing it was handed was not.
 
 const (
-	workspaceSyncSSHStubEnv     = "ERUN_UI_TEST_SSH_STUB"
-	workspaceSyncStubIndexEnv   = "ERUN_UI_TEST_SSH_STUB_INDEX"
-	workspaceSyncStubMissingEnv = "ERUN_UI_TEST_SSH_STUB_MISSING"
+	workspaceSyncSSHStubEnv     = "ERUN_COMMON_TEST_SSH_STUB"
+	workspaceSyncStubIndexEnv   = "ERUN_COMMON_TEST_SSH_STUB_INDEX"
+	workspaceSyncStubMissingEnv = "ERUN_COMMON_TEST_SSH_STUB_MISSING"
 )
 
 // TestMain doubles as the stub `ssh` binary: the test executable is copied onto
@@ -116,7 +116,7 @@ func TestSyncWorkspaceOncePropagatesAnUnstagedWorktreeDeletion(t *testing.T) {
 	// gone.go is still in the pod's index and no longer in its worktree.
 	stubWorkspaceSyncSSH(t, []string{"app/keep.go", "app/gone.go"}, []string{"app/gone.go"})
 
-	result, err := syncWorkspaceOnce(context.Background(), workspaceSyncParams{
+	result, err := SyncWorkspaceOnce(context.Background(), WorkspaceSyncParams{
 		HostAlias:  "pod",
 		RemotePath: "/workspace",
 		LocalPath:  mirror,
@@ -142,7 +142,7 @@ func TestSyncWorkspaceOnceKeepsFilesThePodStillHas(t *testing.T) {
 	seedWorkspaceMirror(t, mirror, "app/keep.go")
 	stubWorkspaceSyncSSH(t, []string{"app/keep.go"}, nil)
 
-	result, err := syncWorkspaceOnce(context.Background(), workspaceSyncParams{
+	result, err := SyncWorkspaceOnce(context.Background(), WorkspaceSyncParams{
 		HostAlias:  "pod",
 		RemotePath: "/workspace",
 		LocalPath:  mirror,
