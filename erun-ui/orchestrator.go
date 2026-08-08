@@ -572,9 +572,13 @@ func orchestratorSessionExists(sessionID string) bool {
 // is appended to both the resume and the fresh-fallback branch so an auto-resume
 // runs the task even on the first launch.
 func buildOrchestratorLaunch(goos, sessionID string, sessionExists bool, initialPrompt, resumePrompt, mcpConfigPath string) (string, []string) {
+	quote := shellQuote
+	if goos == "windows" {
+		quote = powerShellQuote
+	}
 	flags := orchestratorUltracodeFlag + " --model " + orchestratorModel
 	if strings.TrimSpace(mcpConfigPath) != "" {
-		flags += ` --mcp-config "` + mcpConfigPath + `"`
+		flags += " --mcp-config " + quote(mcpConfigPath)
 	}
 	fresh := defaultAITool + flags
 	shell, shellArgs := resolveLocalShellCommand(goos)
@@ -598,9 +602,9 @@ func buildOrchestratorLaunch(goos, sessionID string, sessionExists bool, initial
 	var command string
 	switch {
 	case strings.TrimSpace(initialPrompt) != "":
-		command = fresh + " " + orchestratorPromptArg(initialPrompt)
+		command = fresh + " " + orchestratorPromptArg(goos, initialPrompt)
 	case strings.TrimSpace(resumePrompt) != "":
-		arg := orchestratorPromptArg(resumePrompt)
+		arg := orchestratorPromptArg(goos, resumePrompt)
 		command = chain(resume+" "+arg, fresh+" "+arg)
 	default:
 		command = chain(resume, fresh)
@@ -613,9 +617,20 @@ func buildOrchestratorLaunch(goos, sessionID string, sessionExists bool, initial
 	return shell, append(shellArgs, flag, command)
 }
 
-func orchestratorPromptArg(prompt string) string {
-	prompt = strings.ReplaceAll(prompt, "\n", " ")
-	return `"` + strings.ReplaceAll(prompt, `"`, "'") + `"`
+// orchestratorPromptArg renders a prompt as the one argument the harness reads
+// it from, verbatim. Two things have to hold, and neither is the default. The
+// leading `--` ends option parsing, because the prompt is positional and a
+// preceding multi-value flag otherwise swallows it as another value. The text is
+// then quoted for the shell that re-parses this command line, because a prompt is
+// ordinary task text: it carries code spans, `$` and backslashes, which a
+// double-quoted splice would execute on the operator's host and strip from what
+// the harness receives.
+func orchestratorPromptArg(goos, prompt string) string {
+	prompt = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(prompt)
+	if goos == "windows" {
+		return "-- " + powerShellQuote(prompt)
+	}
+	return "-- " + shellQuote(prompt)
 }
 
 func (a *App) loadOrchestratorConfigs() ([]eruncommon.OrchestratorConfig, error) {

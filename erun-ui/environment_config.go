@@ -230,7 +230,7 @@ func (a *App) validateWorkspaceSyncConfig(config eruncommon.EnvConfig) error {
 	if localPath == "" {
 		return fmt.Errorf("local sync folder is required when workspace sync is enabled")
 	}
-	if err := ensureLocalWorkspaceSyncTarget(localPath); err != nil {
+	if err := eruncommon.EnsureLocalWorkspaceSyncTarget(localPath); err != nil {
 		return fmt.Errorf("local sync folder: %w", err)
 	}
 	return nil

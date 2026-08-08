@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 
 	common "github.com/sophium/erun/erun-common"
 	"github.com/spf13/cobra"
@@ -56,5 +58,50 @@ func runMCPProxyCommand(ctx context.Context, commandCtx common.Context, resolveO
 		Out:           commandCtx.Stdout,
 		Diagnostics:   commandCtx.Stderr,
 		DescribeError: func(err error) string { return mcpEdgeError(target, err).Error() },
+		LocalTools:    []common.MCPLocalTool{workspaceSyncLocalTool(resolveOpen, params)},
 	})
+}
+
+// workspaceSyncLocalTool exposes the host mirror's refresh over the same MCP an
+// orchestrator already drives the environment through. It is served here rather
+// than by the edge because the mirror is on this host: the edge runs in the pod
+// and has nothing to write to. The environment is resolved per call, so a mirror
+// enabled mid-session is picked up without restarting the session.
+func workspaceSyncLocalTool(resolveOpen OpenResolver, params common.OpenParams) common.MCPLocalTool {
+	return common.MCPLocalTool{
+		Name: "workspace_sync",
+		Description: "Run one workspace-sync pass for this environment: mirror the pod's git-visible worktree into the host review directory, delete what the pod no longer has, and deliver the pod's cross-built artifacts. " +
+			"Runs on the host, where the mirror lives. Set preview to report what a pass would change without touching the mirror. Refuses, naming which, when the environment is not a remote-agent env, has workspace sync disabled, has no configured local path, or its SSH channel is down.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"preview":{"type":"boolean","description":"when true, report what one pass would change without changing it"}}}`),
+		Call: func(ctx context.Context, arguments json.RawMessage) (string, error) {
+			var call struct {
+				Preview bool `json:"preview"`
+			}
+			if len(arguments) > 0 {
+				if err := json.Unmarshal(arguments, &call); err != nil {
+					return "", fmt.Errorf("read workspace_sync arguments: %w", err)
+				}
+			}
+			result, err := resolveOpen(params)
+			if err != nil {
+				return "", err
+			}
+			syncParams, err := common.ResolveWorkspaceSyncParams(result, nil)
+			if err != nil {
+				return "", fmt.Errorf("workspace sync for %s/%s: %w", result.Tenant, result.Environment, err)
+			}
+			if err := common.WorkspaceSyncSSHReady(ctx, syncParams.HostAlias); err != nil {
+				return "", fmt.Errorf("workspace sync for %s/%s: the SSH channel to the pod is not up (%s): %w", result.Tenant, result.Environment, syncParams.HostAlias, err)
+			}
+			pass := common.SyncWorkspaceOnce
+			if call.Preview {
+				pass = common.PreviewWorkspaceSync
+			}
+			synced, err := pass(ctx, syncParams)
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("%s\n%s", sshdSyncSummary(call.Preview, synced), syncParams.RemotePath+" -> "+syncParams.LocalPath), nil
+		},
+	}
 }

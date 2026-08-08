@@ -26,7 +26,7 @@ func hostWorkspacePath(result eruncommon.OpenResult, findProjectRoot eruncommon.
 		return strings.TrimSpace(result.RepoPath)
 	}
 	if result.EnvConfig.SSHD.Enabled && result.EnvConfig.SSHD.WorkspaceSync.Enabled {
-		return workspaceSyncLocalPath(result, findProjectRoot)
+		return eruncommon.WorkspaceSyncLocalPath(result, findProjectRoot)
 	}
 	return ""
 }
@@ -124,8 +124,8 @@ func (a *App) ListHostArtifacts(selection uiSelection) ([]hostArtifact, error) {
 	if err != nil {
 		return nil, err
 	}
-	dir := filepath.Join(path, workspaceSyncArtifactsSubdir)
-	rels, err := listLocalArtifactFiles(dir)
+	dir := filepath.Join(path, eruncommon.WorkspaceSyncArtifactsSubdir)
+	rels, err := eruncommon.ListLocalArtifactFiles(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -153,14 +153,14 @@ func (a *App) RunHostArtifact(selection uiSelection, relPath string) error {
 	if selection.Tenant == "" || selection.Environment == "" {
 		return fmt.Errorf("tenant and environment are required")
 	}
-	if !safeWorkspaceSyncPath(relPath) {
+	if !eruncommon.SafeWorkspaceSyncPath(relPath) {
 		return fmt.Errorf("invalid artifact path %q", relPath)
 	}
 	_, path, err := a.resolveHostWorkspace(selection)
 	if err != nil {
 		return err
 	}
-	dir := filepath.Join(path, workspaceSyncArtifactsSubdir)
+	dir := filepath.Join(path, eruncommon.WorkspaceSyncArtifactsSubdir)
 	exePath := filepath.Join(dir, filepath.FromSlash(relPath))
 	rel, relErr := filepath.Rel(dir, exePath)
 	if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {

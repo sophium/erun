@@ -70,7 +70,7 @@ type erunUIDeps struct {
 	loadIdleStatus            func(context.Context, string, string) (eruncommon.EnvironmentIdleStatus, error)
 	loadAPILog                func(context.Context, uiTenantDashboardInput) (string, error)
 	workspaceSyncReady        func(context.Context, string) error
-	syncWorkspace             func(context.Context, workspaceSyncParams) (workspaceSyncResult, error)
+	syncWorkspace             func(context.Context, eruncommon.WorkspaceSyncParams) (eruncommon.WorkspaceSyncResult, error)
 	workspaceSyncInterval     time.Duration
 	recordActivity            func(eruncommon.EnvironmentActivityParams) error
 	runWorkingIssueCommand    workingIssueCommandRunner
@@ -355,10 +355,10 @@ func withDefaultWorkspaceDeps(deps erunUIDeps) erunUIDeps {
 		deps.loadAPILog = loadAPILog
 	}
 	if deps.workspaceSyncReady == nil {
-		deps.workspaceSyncReady = workspaceSyncSSHReady
+		deps.workspaceSyncReady = eruncommon.WorkspaceSyncSSHReady
 	}
 	if deps.syncWorkspace == nil {
-		deps.syncWorkspace = syncWorkspaceOnce
+		deps.syncWorkspace = eruncommon.SyncWorkspaceOnce
 	}
 	if deps.workspaceSyncInterval <= 0 {
 		deps.workspaceSyncInterval = defaultWorkspaceSyncInterval

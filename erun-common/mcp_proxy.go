@@ -35,6 +35,9 @@ type MCPStdioProxyParams struct {
 	// caller owns the recovery wording because it knows which command brings the
 	// edge back up; nil falls back to the raw error.
 	DescribeError func(error) string
+	// LocalTools are served here rather than relayed, for work whose subject is
+	// on this host and so is out of the pod's reach.
+	LocalTools []MCPLocalTool
 }
 
 // RunMCPStdioProxy relays newline-delimited JSON-RPC between a client on stdin
@@ -81,7 +84,13 @@ type mcpStdioProxy struct {
 // relay keeps serving — a transient edge outage must not kill the session.
 func (p *mcpStdioProxy) relay(ctx context.Context, message []byte) error {
 	id := jsonRPCMessageID(message)
+	if tool, arguments, ok := mcpLocalToolFor(message, p.params.LocalTools); ok {
+		return p.answerLocally(ctx, id, tool, arguments)
+	}
 	reply, err := p.session.postRaw(ctx, message)
+	if err == nil && len(reply) > 0 && mcpIsToolsList(message) {
+		reply = mcpAppendLocalTools(reply, p.params.LocalTools)
+	}
 	switch {
 	case err != nil:
 		p.diagnose(err.Error())
@@ -94,6 +103,29 @@ func (p *mcpStdioProxy) relay(ctx context.Context, message []byte) error {
 		return p.writeError(id, detail)
 	}
 	return nil
+}
+
+// answerLocally runs a host-served tool and replies in the client's own request
+// slot. A tool that fails answers with an error result rather than a transport
+// error, so the caller reads why and can act on it.
+func (p *mcpStdioProxy) answerLocally(ctx context.Context, id json.RawMessage, tool MCPLocalTool, arguments json.RawMessage) error {
+	if len(id) == 0 {
+		return nil
+	}
+	text, callErr := "", error(nil)
+	if tool.Call == nil {
+		callErr = fmt.Errorf("the %s tool is not wired on this host", tool.Name)
+	} else {
+		text, callErr = tool.Call(ctx, arguments)
+	}
+	if callErr != nil {
+		p.diagnose(callErr.Error())
+	}
+	reply, err := mcpLocalToolReply(id, text, callErr)
+	if err != nil {
+		return p.writeError(id, err.Error())
+	}
+	return p.writeLine(reply)
 }
 
 // writeReply compacts before writing so a pretty-printed edge reply still

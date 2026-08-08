@@ -100,7 +100,7 @@ func TestJob(t *testing.T) {
 		// resolve surfaced as a missing shell and sent the reader after a broken
 		// image instead of a bad path (#932).
 		setup := env.New(t)
-		envVars := jobStubEnv(t, setup, "printf '" + jobStubSignal + "'")
+		envVars := jobStubEnv(t, setup, "printf '"+jobStubSignal+"'")
 		result := startJob(t, setup, envVars, "baddir", "--dir", "no-such-subdir", "--", "work")
 		if result.ExitCode == 0 {
 			t.Fatalf("expected a refusal for a missing dir, got exit 0:\n%s", result.Combined)

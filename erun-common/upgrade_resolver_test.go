@@ -144,6 +144,13 @@ func TestResolveEnvUpgradeItemCandidates(t *testing.T) {
 		item := resolveEnvUpgradeItem("team", env, "3.0.0", nil, noTrace)
 		assertLaggingSingleTarget(t, item, "3.0.0", "expected the override target, got %+v")
 	})
+}
+
+// TestResolveEnvUpgradeItemSnapshotChannel pins how the snapshot channel picks a
+// target when the registry carries stable releases, snapshots, or only one of
+// the two.
+func TestResolveEnvUpgradeItemSnapshotChannel(t *testing.T) {
+	noTrace := func(string) {}
 
 	t.Run("a snapshot-channel env adopts stable when the registry has no snapshots (#928)", func(t *testing.T) {
 		// The canonical registry publishes stable releases only. Before #928 the

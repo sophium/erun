@@ -51,7 +51,7 @@ func TestResolveHostWorkspaceRequiresSyncedMirror(t *testing.T) {
 
 func TestRunHostArtifactLaunchesArtifactWithinOutputsDir(t *testing.T) {
 	local := t.TempDir()
-	outputs := filepath.Join(local, workspaceSyncArtifactsSubdir)
+	outputs := filepath.Join(local, eruncommon.WorkspaceSyncArtifactsSubdir)
 	requireWorkspaceSyncNoError(t, os.MkdirAll(outputs, 0o755), "mkdir outputs")
 	requireWorkspaceSyncNoError(t, os.WriteFile(filepath.Join(outputs, "erun-app.exe"), []byte("x"), 0o644), "write artifact")
 

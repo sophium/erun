@@ -132,6 +132,14 @@ Four categories. The protocol treats them all as MCP tools; the categorisation i
 | `outputs_list` | List the files an agent produced in the pod's outputs directory (`$ERUN_OUTPUTS_DIR`), newest-first. Read-only. |
 | `outputs_download` | Read one entry from the outputs directory and return its bytes inline as base64 (a folder as a `tar.gz`); the server is co-located with the files, so it returns the content directly. `preview` returns name/type/size without the bytes. |
 
+### Host-served — the review mirror
+
+One tool is answered by `erun mcp proxy` on the operator's machine rather than relayed to the edge. The edge runs in the pod; the mirror it would maintain is on the host, so the pod has nothing to write to. A client sees no difference — the tool is listed and called like any other.
+
+| Tool | Purpose |
+|---|---|
+| `workspace_sync` | Run one workspace-sync pass for this environment: mirror the pod's git-visible worktree into the host review directory, delete what the pod no longer has, and deliver its cross-built artifacts. `preview` reports what a pass would change without touching the mirror. Refuses by name when the env has no pod worktree, has sync disabled, has no configured local path, or its SSH channel is down. Same pass as [`erun sshd sync`](/cli/sshd). |
+
 ### Action — typed wrappers around the CLI
 
 These map 1:1 to the CLI commands of the same name. The MCP wrapper exists so Agents get typed input + output instead of stdout-parsing.

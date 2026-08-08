@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -730,6 +732,57 @@ func TestBuildOrchestratorLaunchResumeWithPromptRunsIt(t *testing.T) {
 	_, seeded := buildOrchestratorLaunch("linux", "", false, "fix the thing", prompt, "")
 	if seededCmd := seeded[len(seeded)-1]; strings.Contains(seededCmd, "--continue") {
 		t.Fatalf("initialPrompt must take precedence over resumePrompt (fresh, no resume): %q", seededCmd)
+	}
+}
+
+// A prompt is ordinary operator task text — code spans, `$`, backslashes and
+// quotes — and the harness has to receive it as one argument, unchanged. Two
+// independent things break that, so this drives both: the positional prompt is
+// consumed by the preceding multi-value --mcp-config unless option parsing ends
+// first, and the host shell executes the metacharacters unless the value is
+// quoted for the shell that re-parses the command line.
+func TestBuildOrchestratorLaunchHandsThePromptOverVerbatim(t *testing.T) {
+	const prompt = "Run `erun-ui/playwright/run.sh`, read $HOME, keep C:\\tmp\\x and \"quotes\" and 'apostrophes'"
+
+	_, launch := buildOrchestratorLaunch("linux", "", false, prompt, "", "/cfg/orchestrator-mcp-erun.json")
+	command := launch[len(launch)-1]
+	if !strings.Contains(command, "--mcp-config '/cfg/orchestrator-mcp-erun.json' -- ") {
+		t.Fatalf("the prompt must follow a -- that ends option parsing: %q", command)
+	}
+	if runtime.GOOS == "windows" {
+		return
+	}
+
+	// Let a real POSIX shell parse what we composed and report the argv it
+	// produces: anything it expands, executes or drops shows up here.
+	dir := t.TempDir()
+	stub := filepath.Join(dir, defaultAITool)
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done\n"), 0o755); err != nil {
+		t.Fatalf("write stub: %v", err)
+	}
+	shellCmd := exec.Command("/bin/sh", "-c", command)
+	shellCmd.Env = []string{"PATH=" + dir, "HOME=/expanded-so-the-quoting-leaked"}
+	out, err := shellCmd.Output()
+	if err != nil {
+		t.Fatalf("run the composed command: %v", err)
+	}
+	argv := strings.Split(strings.TrimSuffix(string(out), "\n"), "\n")
+	if got := argv[len(argv)-1]; got != prompt {
+		t.Fatalf("the prompt did not survive the shell:\n got %q\nwant %q\nargv %v", got, prompt, argv)
+	}
+}
+
+// The same guarantee on the other host shell: PowerShell expands `$` and treats
+// the backtick as its escape character inside double quotes, so the prompt and
+// the config path are single-quoted there, with embedded apostrophes doubled.
+func TestBuildOrchestratorLaunchQuotesThePromptForPowerShell(t *testing.T) {
+	_, launch := buildOrchestratorLaunch("windows", "", false, "keep $HOME and `code` and it's fine", "", `C:\cfg\mcp.json`)
+	command := launch[len(launch)-1]
+	if !strings.Contains(command, "-- 'keep $HOME and `code` and it''s fine'") {
+		t.Fatalf("windows prompt must be single-quoted with doubled apostrophes: %q", command)
+	}
+	if !strings.Contains(command, `--mcp-config 'C:\cfg\mcp.json'`) {
+		t.Fatalf("windows mcp-config path must be single-quoted: %q", command)
 	}
 }
 
