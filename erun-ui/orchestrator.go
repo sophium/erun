@@ -943,20 +943,30 @@ func (a *App) spawnOrchestratorSession(id, name string, envs []eruncommon.Orches
 	if err != nil {
 		return orchestratorInfo{}, err
 	}
+	sessionEnv := []string{
+		appSessionEnvVar + "=1",
+		// The orchestrator's own id, so an agent driving from its shell can
+		// record itself as the return target for a rebuild+restart (see the
+		// erun-orchestrate skill). Empty for transient/Investigate sessions.
+		"ERUN_ORCHESTRATOR_ID=" + id,
+		"CLAUDE_CODE_SUBAGENT_MODEL=" + orchestratorModel,
+	}
+	// An orchestrator has no pod, so the outputs convention an in-pod agent
+	// follows needs a host directory to point at. Without it a host-side agent
+	// has nowhere its deliverables are expected, and the operator has no way to
+	// see them. A transient session has no id and so no directory of its own.
+	if outputsDir, outputsErr := ensureOrchestratorOutputsDir(id); outputsErr == nil {
+		sessionEnv = append(sessionEnv, eruncommon.RuntimeOutputsDirEnvVar+"="+outputsDir)
+	} else if strings.TrimSpace(id) != "" {
+		log.Printf("erun-app: orchestrator outputs dir for %s: %v", id, outputsErr)
+	}
 	params := startTerminalSessionParams{
 		Dir:        resolveTerminalStartDir(dir),
 		Executable: executable,
 		Args:       args,
-		Env: []string{
-			appSessionEnvVar + "=1",
-			// The orchestrator's own id, so an agent driving from its shell can
-			// record itself as the return target for a rebuild+restart (see the
-			// erun-orchestrate skill). Empty for transient/Investigate sessions.
-			"ERUN_ORCHESTRATOR_ID=" + id,
-			"CLAUDE_CODE_SUBAGENT_MODEL=" + orchestratorModel,
-		},
-		Cols: cols,
-		Rows: rows,
+		Env:        sessionEnv,
+		Cols:       cols,
+		Rows:       rows,
 	}
 	session, err := a.deps.startTerminal(params)
 	if err != nil {

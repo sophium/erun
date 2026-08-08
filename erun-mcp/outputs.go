@@ -85,5 +85,5 @@ func outputsDirInput(path string) string {
 	if trimmed := strings.TrimSpace(path); trimmed != "" {
 		return trimmed
 	}
-	return strings.TrimSpace(os.Getenv("ERUN_OUTPUTS_DIR"))
+	return strings.TrimSpace(os.Getenv(eruncommon.RuntimeOutputsDirEnvVar))
 }
