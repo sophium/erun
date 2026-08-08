@@ -1675,8 +1675,23 @@ const aiActivityIdleThreshold = 3 * time.Second
 //     responses do not toggle the badge.
 //   - busy=false fires after aiActivityIdleThreshold (3 s) of silence.
 //   - Session close emits busy=false via finalizeAIActivity.
+//
+// aiActivityKind reports whether a session of this kind should drive the
+// sidebar's working spinner. An orchestrator runs the same agent an AI tab
+// does, and it is the row most likely to be working, so gating this on
+// sessionKindAI alone left the one row that is always driving work as the only
+// row that never showed it.
+//
+// It takes the kind rather than the session so each caller keeps its own
+// `managed == nil` guard visible: folding the nil check in here hid it from
+// static analysis, which then read every later field access as a possible nil
+// dereference.
+func aiActivityKind(kind sessionKind) bool {
+	return kind == sessionKindAI || kind == sessionKindOrchestrator
+}
+
 func (a *App) recordAIActivity(managed *managedTerminal) {
-	if managed == nil || managed.kind != sessionKindAI {
+	if managed == nil || !aiActivityKind(managed.kind) {
 		return
 	}
 	now := time.Now()
@@ -1767,7 +1782,7 @@ func (a *App) releaseAIActivity(managed *managedTerminal) {
 // tab mid-generation, or the underlying PTY drops). Caller must not
 // hold a.mu.
 func (a *App) finalizeAIActivity(managed *managedTerminal) {
-	if managed == nil || managed.kind != sessionKindAI {
+	if managed == nil || !aiActivityKind(managed.kind) {
 		return
 	}
 	a.mu.Lock()

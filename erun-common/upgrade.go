@@ -397,7 +397,13 @@ func (p UpgradePlan) Lagging() []UpgradePlanItem {
 
 func channelTarget(versions RuntimeRegistryVersions, channel string) string {
 	if strings.TrimSpace(channel) == UpgradeChannelSnapshot {
-		if stable, _, superseded := stableSupersedesSnapshot(versions); superseded {
+		// An absent snapshot side is not "nothing newer exists" — it means the
+		// registry publishes no snapshots at all, and the stable release is then
+		// the only, and newest, candidate. Falling through to LatestSnapshot in
+		// that case resolves to "", which leaves a snapshot-channel env
+		// permanently unresolvable against a stable-only registry — the canonical
+		// one included, so every env pointed at it silently never upgraded.
+		if stable, snapshot, superseded := stableSupersedesSnapshot(versions); superseded || snapshot == "" {
 			return stable
 		}
 		return strings.TrimSpace(versions.LatestSnapshot)

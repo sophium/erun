@@ -14,6 +14,7 @@ import type { OrchestratorInfo } from '@/app/slices/orchestratorsSlice';
 import { openOrchestratorDialog } from '@/app/slices/orchestratorsSlice';
 import { EmptyState } from '@/components/app/EmptyState';
 import { IconTooltip } from '@/components/app/IconTooltip';
+import { BusyRowSpinner } from '@/components/app/Sidebar.BusyRowSpinner';
 import { StatusDotGlyph } from '@/components/app/Sidebar.StatusDot';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -166,6 +167,13 @@ function OrchestratorRow({
 }): React.ReactElement {
   const dispatch = useAppDispatch();
   const running = orchestrator.status === 'running' && orchestrator.sessionId > 0;
+  // Scoped to this orchestrator's own session, so concurrent orchestrators each
+  // spin on their own row rather than on whichever one happens to be selected.
+  const busy = useAppSelector(
+    (state) =>
+      orchestrator.sessionId > 0 &&
+      state.aiActivity.aiBusyBySession[orchestrator.sessionId] === true,
+  );
   return (
     <li
       className={cn(
@@ -191,6 +199,7 @@ function OrchestratorRow({
       >
         <span className="min-w-0 truncate">{orchestrator.name}</span>
       </button>
+      {busy && <BusyRowSpinner label={`${orchestrator.name} is working`} />}
       <OrchestratorRowActions orchestrator={orchestrator} running={running} active={active} />
     </li>
   );

@@ -10,6 +10,7 @@ import { closeEnvironment, openSelection } from '@/app/sessionThunks';
 import { envKey } from '@/app/slices/sessionsSlice';
 import { selectionKey } from '@/app/versionSuggestions';
 import { IconTooltip } from '@/components/app/IconTooltip';
+import { BusyRowSpinner } from '@/components/app/Sidebar.BusyRowSpinner';
 import { EnvHoverCard } from '@/components/app/Sidebar.EnvHoverCard';
 import {
   deriveEnvironmentRow,
@@ -102,17 +103,6 @@ function EnvironmentRowOutputsButton({
         <Download />
       </Button>
     </IconTooltip>
-  );
-}
-
-function BusyRowSpinner({ label }: { label: string }): React.ReactElement {
-  return (
-    <LoaderCircle
-      className="size-3.5 flex-none animate-spin text-current opacity-75"
-      aria-label={label || undefined}
-      aria-hidden={label ? undefined : true}
-      role={label ? 'status' : undefined}
-    />
   );
 }
 
