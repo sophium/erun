@@ -71,6 +71,10 @@ test.describe('orchestrator outputs (#865)', () => {
     await expect(app.outputsDialog.entry('summary.md')).toBeVisible();
     await expect(app.outputsDialog.entry('bundle')).toBeVisible();
 
+    // The heading names the orchestrator, so the list a screen reader announces
+    // must too — these files were produced on this host, not by a pod agent.
+    await expect(app.outputsDialog.list('Orchestrator outputs')).toBeVisible();
+
     // Scoped to this orchestrator: they share one workspace, so a call that did
     // not carry the id would show every orchestrator the same files.
     await expect.poll(() => listCalls.some((args) => args[0] === SEED_ORCHESTRATOR)).toBe(true);

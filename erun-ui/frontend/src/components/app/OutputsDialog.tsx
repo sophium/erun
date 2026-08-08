@@ -132,7 +132,10 @@ function OutputsDialogBody({
   }
   return (
     <div className="max-h-80 overflow-y-auto">
-      <ul className="divide-y divide-border/60" aria-label="Agent outputs">
+      <ul
+        className="divide-y divide-border/60"
+        aria-label={hostNative ? 'Orchestrator outputs' : 'Agent outputs'}
+      >
         {entries.map((entry) => (
           <OutputRow
             key={entry.name}
