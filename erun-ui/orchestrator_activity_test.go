@@ -32,25 +32,27 @@ func TestOrchestratorActivityIsReadFromTheReportNotTheTerminal(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	now := time.Now()
 
-	if _, ok := readOrchestratorActivity("erun", now); ok {
+	if _, ok := readOrchestratorActivity("erun", now, true); ok {
 		t.Fatal("an orchestrator that has reported nothing is not working")
 	}
 
 	writeOrchestratorActivity(t, "erun", orchestratorActivity{Busy: true, AtUnix: now.Unix()})
-	activity, ok := readOrchestratorActivity("erun", now)
+	activity, ok := readOrchestratorActivity("erun", now, true)
 	if !ok || !activity.Busy {
 		t.Fatalf("a fresh working report must be believed, got %+v %v", activity, ok)
 	}
 
 	writeOrchestratorActivity(t, "erun", orchestratorActivity{Busy: false, AtUnix: now.Unix()})
-	activity, ok = readOrchestratorActivity("erun", now)
+	activity, ok = readOrchestratorActivity("erun", now, true)
 	if !ok || activity.Busy {
 		t.Fatalf("the turn-end report must clear it, got %+v %v", activity, ok)
 	}
 }
 
 // A session killed mid-turn never writes its end. Without a bound its row would
-// spin for as long as the desktop ran — the same failure by another route.
+// spin for as long as the desktop ran — the same failure by another route. The
+// desktop can no longer see that session, which is what puts it on the short
+// bound.
 func TestOrchestratorActivityExpiresAStaleWorkingReport(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
@@ -60,8 +62,8 @@ func TestOrchestratorActivityExpiresAStaleWorkingReport(t *testing.T) {
 		Busy:   true,
 		AtUnix: now.Add(-orchestratorActivityTTL - time.Minute).Unix(),
 	})
-	if _, ok := readOrchestratorActivity("erun", now); ok {
-		t.Fatal("a report older than its TTL must not keep a row spinning")
+	if _, ok := readOrchestratorActivity("erun", now, false); ok {
+		t.Fatal("a report from a session we can no longer see must not keep a row spinning")
 	}
 }
 
@@ -79,10 +81,10 @@ func TestOrchestratorActivityTreatsUnreadableInputAsIdle(t *testing.T) {
 	if err := os.WriteFile(path, []byte("not json"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if _, ok := readOrchestratorActivity("erun", now); ok {
+	if _, ok := readOrchestratorActivity("erun", now, true); ok {
 		t.Fatal("unparseable input must not read as working")
 	}
-	if _, ok := readOrchestratorActivity("  ", now); ok {
+	if _, ok := readOrchestratorActivity("  ", now, true); ok {
 		t.Fatal("an orchestrator with no id has no report")
 	}
 }
@@ -143,4 +145,124 @@ func hookCommandText(t *testing.T, hook []any) string {
 	}
 	text, _ := command["command"].(string)
 	return text
+}
+
+// The bug this pair exists for: a turn is as long as the work is, and the report
+// is written once at its start. Ageing a live session's report out on the short
+// bound answered "not working" for an orchestrator that was still working — the
+// most ordinary case there is.
+func TestOrchestratorActivitySurvivesATurnLongerThanTheShortBound(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	now := time.Now()
+
+	writeOrchestratorActivity(t, "erun", orchestratorActivity{
+		Busy:   true,
+		AtUnix: now.Add(-orchestratorActivityTTL - 5*time.Minute).Unix(),
+	})
+
+	activity, ok := readOrchestratorActivity("erun", now, true)
+	if !ok || !activity.Busy {
+		t.Fatalf("a live session's turn may outlast the short bound, got %+v %v", activity, ok)
+	}
+
+	// The same report, from a session the desktop can no longer see, is the
+	// killed-mid-turn case and must not keep the row spinning.
+	if _, ok := readOrchestratorActivity("erun", now, false); ok {
+		t.Fatal("a session we can no longer see must not keep its working report")
+	}
+}
+
+// The live bound is long, not absent. A report that stops being written at all
+// still ages out, so reporting that has died cannot pin a row spinning forever.
+func TestOrchestratorActivityStillBoundsALiveSession(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	now := time.Now()
+
+	writeOrchestratorActivity(t, "erun", orchestratorActivity{
+		Busy:   true,
+		AtUnix: now.Add(-orchestratorActivityLiveTTL - time.Minute).Unix(),
+	})
+	if _, ok := readOrchestratorActivity("erun", now, true); ok {
+		t.Fatal("a live session's report must still age out once nothing renews it")
+	}
+}
+
+// A turn renews its report from the thing a working orchestrator does
+// constantly. Without this the busy report exists only at the turn's first
+// instant, which is the whole defect.
+func TestOrchestratorActivityRenewsFromToolCalls(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", root)
+
+	if err := ensureOrchestratorSessionStartHook(root); err != nil {
+		t.Fatalf("ensureOrchestratorSessionStartHook: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, ".claude", "settings.json"))
+	if err != nil {
+		t.Fatalf("read settings.json: %v", err)
+	}
+	var settings struct {
+		Hooks map[string][]any `json:"hooks"`
+	}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatalf("unmarshal settings.json: %v\n%s", err, data)
+	}
+
+	for _, event := range []string{"UserPromptSubmit", "PreToolUse", "PostToolUse"} {
+		if len(settings.Hooks[event]) == 0 {
+			t.Fatalf("%s carries no hook, so a long turn stops reporting:\n%s", event, data)
+		}
+		found := false
+		for _, block := range settings.Hooks[event] {
+			if isOrchestratorActivityHookBlock(block) {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("%s is missing the busy report:\n%s", event, data)
+		}
+	}
+
+	// SessionStart clears an inherited "working": a session killed mid-turn never
+	// wrote its end, and the next one must not arrive already spinning.
+	idle := orchestratorActivityHookCommand(false)
+	clearsOnStart := false
+	for _, group := range settings.Hooks["SessionStart"] {
+		block, _ := group.(map[string]any)
+		entries, _ := block["hooks"].([]any)
+		for _, entry := range entries {
+			hook, _ := entry.(map[string]any)
+			if command, _ := hook["command"].(string); command == idle {
+				clearsOnStart = true
+			}
+		}
+	}
+	if !clearsOnStart {
+		t.Fatalf("SessionStart must clear an inherited working report:\n%s", data)
+	}
+}
+
+// Installing our report on an event must not delete what the operator already
+// bound to it, and must stay idempotent across restarts.
+func TestOrchestratorActivityHookMergePreservesOtherHooks(t *testing.T) {
+	theirs := map[string]any{
+		"matcher": "Bash",
+		"hooks":   []any{map[string]any{"type": "command", "command": "echo keep"}},
+	}
+	busy, _ := orchestratorActivityHooks()
+
+	merged := mergeOrchestratorActivityHook([]any{theirs}, busy)
+	if len(merged) != 2 {
+		t.Fatalf("expected theirs kept and ours appended, got %d: %+v", len(merged), merged)
+	}
+	again := mergeOrchestratorActivityHook(merged, busy)
+	if len(again) != 2 {
+		t.Fatalf("re-installing must replace our own block, not stack it: %+v", again)
+	}
+	if !isOrchestratorActivityHookBlock(again[1]) || isOrchestratorActivityHookBlock(again[0]) {
+		t.Fatalf("the operator's hook must survive and stay theirs: %+v", again)
+	}
 }

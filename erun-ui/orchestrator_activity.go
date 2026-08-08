@@ -21,11 +21,24 @@ import (
 // workspace, so the report costs a file write per turn and replaces a guess
 // about pixels with a statement about work.
 
-// orchestratorActivityTTL bounds how long a "working" report stays believable.
-// A session killed mid-turn never writes its end, and without a bound its row
-// would spin for as long as the desktop ran — the same failure by a different
-// route.
+// orchestratorActivityTTL bounds how long a "working" report stays believable
+// once the desktop can no longer see the session that wrote it. A session
+// killed mid-turn never writes its end, and without a bound its row would spin
+// for as long as the desktop ran — the same failure by a different route.
 const orchestratorActivityTTL = 2 * time.Minute
+
+// orchestratorActivityLiveTTL is that bound for a session the desktop can still
+// see. A turn is not a short thing: it runs as long as the work does, and a
+// single tool call inside it — a build, a bounded wait on a detached job — can
+// outlast any interval worth calling "recent". Timing a live session out on the
+// short bound answered "not working" for the most ordinary case there is, an
+// orchestrator that is simply still working.
+//
+// A live session is bounded too, only far enough out that reaching it means the
+// reporting itself has stopped rather than the turn being long. Liveness is what
+// separates the two cases the short bound had to resolve identically; this keeps
+// the short bound for the case it was actually written for.
+const orchestratorActivityLiveTTL = 30 * time.Minute
 
 type orchestratorActivity struct {
 	Busy   bool  `json:"busy"`
@@ -48,10 +61,15 @@ func orchestratorActivityPath(id string) string {
 }
 
 // readOrchestratorActivity reports whether this orchestrator says it is working.
+// sessionAlive is whether the desktop can still see the session that writes the
+// report, and it selects which staleness bound applies: a report from a session
+// still in front of us ages out on the live bound, one from a session we can no
+// longer see on the short one.
+//
 // An unreadable, unparseable or stale file answers "not working": the report can
 // only keep a row spinning, never invent a spin, which is the same direction the
 // pod heartbeat is allowed to push an env's row.
-func readOrchestratorActivity(id string, now time.Time) (orchestratorActivity, bool) {
+func readOrchestratorActivity(id string, now time.Time, sessionAlive bool) (orchestratorActivity, bool) {
 	path := orchestratorActivityPath(id)
 	if path == "" {
 		return orchestratorActivity{}, false
@@ -64,7 +82,11 @@ func readOrchestratorActivity(id string, now time.Time) (orchestratorActivity, b
 	if err := json.Unmarshal(data, &activity); err != nil {
 		return orchestratorActivity{}, false
 	}
-	if activity.AtUnix <= 0 || now.Sub(time.Unix(activity.AtUnix, 0)) > orchestratorActivityTTL {
+	ttl := orchestratorActivityTTL
+	if sessionAlive {
+		ttl = orchestratorActivityLiveTTL
+	}
+	if activity.AtUnix <= 0 || now.Sub(time.Unix(activity.AtUnix, 0)) > ttl {
 		return orchestratorActivity{}, false
 	}
 	return activity, true
@@ -100,14 +122,75 @@ func orchestratorActivityHookCommand(busy bool) string {
 		` || true`
 }
 
-// orchestratorActivityHooks are the turn boundaries. UserPromptSubmit opens a
-// turn; Stop closes it. SessionStart closes one too, so a session resumed after
-// being killed mid-turn does not inherit the previous run's "working".
-func orchestratorActivityHooks() (busyHook, idleHook []any) {
-	wrap := func(command string) []any {
-		return []any{map[string]any{
-			"hooks": []any{map[string]any{"type": "command", "command": command}},
-		}}
+// orchestratorActivityHookMarker identifies a hook this file wrote, so a rewrite
+// replaces its own previous block instead of stacking another copy beside it,
+// and so merging into an event leaves everyone else's hooks alone.
+func orchestratorActivityHookMarker() string {
+	return filepath.ToSlash(orchestratorActivityDir())
+}
+
+// isOrchestratorActivityHookBlock reports whether a settings hook block is one
+// of ours. Anything it cannot read is somebody else's and is kept.
+func isOrchestratorActivityHookBlock(block any) bool {
+	group, ok := block.(map[string]any)
+	if !ok {
+		return false
 	}
-	return wrap(orchestratorActivityHookCommand(true)), wrap(orchestratorActivityHookCommand(false))
+	hooks, ok := group["hooks"].([]any)
+	if !ok {
+		return false
+	}
+	marker := orchestratorActivityHookMarker()
+	for _, hook := range hooks {
+		entry, ok := hook.(map[string]any)
+		if !ok {
+			continue
+		}
+		command, ok := entry["command"].(string)
+		if !ok {
+			continue
+		}
+		if strings.Contains(command, marker) && strings.Contains(command, `"busy":`) {
+			return true
+		}
+	}
+	return false
+}
+
+// orchestratorActivityHookBlock is one report bound to whichever event it is
+// installed on.
+func orchestratorActivityHookBlock(busy bool) []any {
+	return []any{map[string]any{
+		"hooks": []any{map[string]any{"type": "command", "command": orchestratorActivityHookCommand(busy)}},
+	}}
+}
+
+// orchestratorActivityHooks are the reports the settings file installs.
+//
+// The busy report is not bound to the turn's start alone. A turn boundary is the
+// only place work is *known* to begin and end, but it is not the only place the
+// report has to exist: a report written once at the start of a turn is stale for
+// every minute of that turn after the bound, and the row it should have kept
+// spinning goes quiet while the work is still running. Installing the same busy
+// report on the tool-call events renews it from the thing a working orchestrator
+// does constantly, at the cost of the same bare redirect.
+func orchestratorActivityHooks() (busyHook, idleHook []any) {
+	return orchestratorActivityHookBlock(true), orchestratorActivityHookBlock(false)
+}
+
+// mergeOrchestratorActivityHook installs ours on an event without disturbing
+// what is already bound to it. The workspace settings file is shared with the
+// operator, so an event we write to may already carry their hooks; replacing the
+// event outright would delete them. Our own previous block is dropped first so
+// this stays idempotent across restarts.
+func mergeOrchestratorActivityHook(existing any, ours []any) []any {
+	current, _ := existing.([]any)
+	merged := make([]any, 0, len(current)+len(ours))
+	for _, block := range current {
+		if isOrchestratorActivityHookBlock(block) {
+			continue
+		}
+		merged = append(merged, block)
+	}
+	return append(merged, ours...)
 }

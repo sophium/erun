@@ -76,18 +76,29 @@ func (a *App) reconcileOrchestratorActivity() {
 		id     string
 		serial int
 		busy   bool
+		alive  bool
 	}
 	rows := make([]row, 0, len(a.orchestrators))
 	for id, session := range a.orchestrators {
 		if session == nil || session.transient {
 			continue
 		}
-		rows = append(rows, row{id: id, serial: session.serial, busy: session.aiBusy})
+		// Whether the desktop can still see the session that writes the report
+		// decides which staleness bound it ages out on. A live session's turn is
+		// allowed to be long; a session we can no longer see must not keep its
+		// "working" past the short bound, because nothing will ever clear it.
+		managed := a.sessions[orchestratorSessionKey(id)]
+		rows = append(rows, row{
+			id:     id,
+			serial: session.serial,
+			busy:   session.aiBusy,
+			alive:  managed != nil && !managed.closed,
+		})
 	}
 	a.mu.Unlock()
 
 	for _, r := range rows {
-		activity, ok := readOrchestratorActivity(r.id, now)
+		activity, ok := readOrchestratorActivity(r.id, now, r.alive)
 		busy := ok && activity.Busy
 		if busy == r.busy {
 			continue
