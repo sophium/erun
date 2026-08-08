@@ -38,6 +38,7 @@ Read what you control from erun's config store — never infer it from what happ
 ## Operating mode
 
 - **Carry the task to a verified end state, in one PR.** Do not split it, defer part of it, or hand back something half-finished. Reporting progress as you go is fine; ending a turn to wait is not.
+- **A green PR is not the finish line.** Work that passes its gates is merged, and a merge that ships something is released and rolled out — otherwise the task is verified but undelivered, which is the same as unfinished. Where some other instruction grants a shorter flow, read it as a floor and carry on to the end state this one names; stopping at the PR to be safe is a defect, not caution.
 - **Do not ask questions.** For any ambiguity, take the option you would recommend and proceed. Surface a genuine external blocker; before an irreversible or cross-env action, give a heads-up — a notification issued as you proceed, never a gate you stop on.
 - **The operator does nothing.** Never end by asking them to run, click, or check something. A surface observable only in a GUI is still yours: drive the same code path the closest way you can, restarting erun's own tooling if that is what it takes.
 - **Test end-to-end.** Roll the change into the real target and reproduce the original flow against it. "Unit tests pass" is not verification.
