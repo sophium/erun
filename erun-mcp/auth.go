@@ -91,11 +91,21 @@ func authHTTPMiddleware(cfg mcpAuthConfig, next http.Handler) http.Handler {
 			writeUnauthorized(w, "token tenant does not match this environment")
 			return
 		}
-		if _, err := eruncommon.VerifyMCPToken(req.Context(), cfg.oidc, token, issuer, cfg.audience, time.Now()); err != nil {
+		claims, err := eruncommon.VerifyMCPToken(req.Context(), cfg.oidc, token, issuer, cfg.audience, time.Now())
+		if err != nil {
 			writeUnauthorized(w, err.Error())
 			return
 		}
-		next.ServeHTTP(w, requestWithAuthTenant(req, tenant))
+		// Authentication is done; what the caller may do travels with the request
+		// from here, so the tool surface can be built for this caller rather than
+		// filtered after the fact.
+		identity := authIdentity{Tenant: tenant, User: claims.Subject, Capabilities: claims.Capabilities()}
+		if identity.Capabilities.Empty() {
+			writeForbidden(w, "token grants no erun capabilities")
+			return
+		}
+		req = requestWithAuthTenant(req, tenant)
+		next.ServeHTTP(w, req.WithContext(withAuthIdentity(req.Context(), identity)))
 	})
 }
 
@@ -117,6 +127,14 @@ func bearerToken(req *http.Request) string {
 		return ""
 	}
 	return strings.TrimSpace(header[len(prefix):])
+}
+
+// A caller whose token is valid but grants nothing is authenticated and not
+// authorized, which is 403 rather than 401: retrying with the same credentials
+// is pointless, and saying so is the difference between "log in again" and "ask
+// for a role".
+func writeForbidden(w http.ResponseWriter, reason string) {
+	http.Error(w, "forbidden: "+reason, http.StatusForbidden)
 }
 
 func writeUnauthorized(w http.ResponseWriter, reason string) {
