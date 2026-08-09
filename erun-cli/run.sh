@@ -27,11 +27,21 @@ if [ -f "$VERSION_FILE" ]; then
 	BUILD_VERSION=$(tr -d '\n' < "$VERSION_FILE")
 fi
 
+# The stamp has to describe the artifact, not the last commit. These scripts
+# exist to build from a working checkout, so an uncommitted change is the normal
+# case — and HEAD alone then names a commit the binary does not contain, which is
+# exactly the question `erun version` is asked to answer. A dirty build says so.
+#
+# BUILD_DATE is when the binary was built, not when HEAD was authored: a fresh
+# build off an older commit otherwise reports a stale-looking timestamp and reads
+# as the wrong binary.
 BUILD_COMMIT=
-BUILD_DATE=
+BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 if git -C "$SCRIPT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 	BUILD_COMMIT=$(git -C "$SCRIPT_DIR" rev-parse --short=12 HEAD)
-	BUILD_DATE=$(git -C "$SCRIPT_DIR" show -s --format=%cI HEAD)
+	if [ -n "$(git -C "$SCRIPT_DIR" status --porcelain 2>/dev/null)" ]; then
+		BUILD_COMMIT="${BUILD_COMMIT}-dirty"
+	fi
 fi
 
 # --no-shell is the eval-friendly mode (`eval "$(erun open ... --no-shell)"`);
