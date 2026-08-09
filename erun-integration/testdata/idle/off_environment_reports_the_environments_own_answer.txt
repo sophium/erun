@@ -1,0 +1,8 @@
+  timeout: 300 seconds
+  seconds until stop: 1796
+  stop eligible: off
+  stop blocked: a lease is held
+  lease: active (1796s)
+  ssh: idle
+audit: erun idle team dev
+mcp: team/dev edge resolved to http://<LOOPBACK>:26200/mcp

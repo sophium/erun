@@ -28,7 +28,7 @@ Examples:
 
 Flags:
       --agent string           Run an AI tool (claude or codex) in streaming mode, taking the trailing arguments as its prompt
-      --dir string             Working directory to run the command from
+      --dir string             Working directory in the environment to run the command from
       --dry-run                Resolve and trace mutating actions without executing them.
       --environment string     Environment the job runs in
   -h, --help                   help for start

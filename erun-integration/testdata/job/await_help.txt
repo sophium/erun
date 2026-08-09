@@ -14,6 +14,7 @@ Examples:
   erun job await --tenant team --environment dev --id suite --timeout 2m
 
 Flags:
+      --dry-run              Resolve and trace mutating actions without executing them.
       --environment string   Environment the job runs in
   -h, --help                 help for await
       --id string            Job to wait for

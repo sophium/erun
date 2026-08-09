@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newActivityCmd(store common.OpenStore) *cobra.Command {
+func newActivityCmd(store common.OpenStore, resolveOpen OpenResolver) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "activity",
 		Short:         "Record and inspect environment activity",
@@ -21,7 +21,7 @@ func newActivityCmd(store common.OpenStore) *cobra.Command {
 	}
 	cmd.AddCommand(
 		newActivityTouchCmd(),
-		newActivityLeaseCmd(),
+		newActivityLeaseCmd(resolveOpen),
 		newActivitySampleCmd(),
 		newActivityStatusCmd(store),
 		newActivityStopReadyCmd(store),

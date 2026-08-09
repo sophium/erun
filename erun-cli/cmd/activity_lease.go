@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -15,20 +16,21 @@ import (
 // what it is, and the environment reports that instead of reading as untouched.
 // Shaped for a shell wrapper first — take, trap the release, let the recorded
 // pid reclaim the lease if the wrapper dies — and usable directly by an agent
-// that holds one across a detached run.
+// that holds one across a detached run. A lease belongs to the environment it
+// holds, so off-environment these act through its edge.
 
-func newActivityLeaseCmd() *cobra.Command {
+func newActivityLeaseCmd(resolveOpen OpenResolver) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "lease",
 		Short:         "Hold, release, and inspect activity leases",
 		SilenceErrors: true,
 		SilenceUsage:  true,
 	}
-	cmd.AddCommand(newActivityLeaseTakeCmd(), newActivityLeaseReleaseCmd(), newActivityLeaseListCmd())
+	cmd.AddCommand(newActivityLeaseTakeCmd(resolveOpen), newActivityLeaseReleaseCmd(resolveOpen), newActivityLeaseListCmd(resolveOpen))
 	return cmd
 }
 
-func newActivityLeaseTakeCmd() *cobra.Command {
+func newActivityLeaseTakeCmd(resolveOpen OpenResolver) *cobra.Command {
 	var tenant string
 	var environment string
 	var name string
@@ -44,12 +46,12 @@ func newActivityLeaseTakeCmd() *cobra.Command {
 			"Taking an existing id renews it, so a wrapper can refresh on a timer. A lease\n" +
 			"expires without renewal, and one whose --pid is gone is reclaimed on the next\n" +
 			"read, so a crashed job cannot keep an environment awake.",
-		Example: "  # Wrap a long build so the environment stays busy for its lifetime.\n" +
+		Example: "  # From inside the environment, wrap a long build so it stays busy for the build.\n" +
 			"  erun activity lease take --tenant team --environment dev --name gradle-build --pid $$\n" +
 			"  trap 'erun activity lease release --tenant team --environment dev --id gradle-build' EXIT",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runActivityLeaseTake(cmd, common.TakeEnvironmentActivityLeaseParams{
+			return runActivityLeaseTake(cmd, resolveOpen, common.TakeEnvironmentActivityLeaseParams{
 				Tenant:      tenant,
 				Environment: environment,
 				Name:        name,
@@ -62,21 +64,25 @@ func newActivityLeaseTakeCmd() *cobra.Command {
 	addActivityTargetFlags(cmd, &tenant, &environment)
 	cmd.Flags().StringVar(&name, "name", "", "What the lease is holding the environment for (shown to the operator)")
 	cmd.Flags().StringVar(&id, "id", "", "Lease id to take or renew (defaults to the name)")
-	cmd.Flags().IntVar(&pid, "pid", 0, "Holder process to reconcile the lease against; the lease is reclaimed once it exits")
+	cmd.Flags().IntVar(&pid, "pid", 0, "Holder process in the environment to reconcile the lease against; the lease is reclaimed once it exits")
 	cmd.Flags().DurationVar(&ttl, "ttl", common.DefaultEnvironmentActivityLeaseTTL, "How long the lease holds without a renewal")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the lease as JSON")
+	addDryRunFlag(cmd)
 	return cmd
 }
 
-func runActivityLeaseTake(cmd *cobra.Command, params common.TakeEnvironmentActivityLeaseParams, jsonOutput bool) error {
+func runActivityLeaseTake(cmd *cobra.Command, resolveOpen OpenResolver, params common.TakeEnvironmentActivityLeaseParams, jsonOutput bool) error {
 	if err := validateActivityTarget(params.Tenant, params.Environment); err != nil {
 		return err
 	}
-	lease, err := common.TakeEnvironmentActivityLease(params)
+	ctx := commandContext(cmd)
+	lease, resolved, err := takeLease(cmd.Context(), ctx, resolveOpen, params)
 	if err != nil {
 		return err
 	}
-	ctx := commandContext(cmd)
+	if !resolved {
+		return nil
+	}
 	if jsonOutput {
 		encoder := json.NewEncoder(ctx.Stdout)
 		encoder.SetIndent("", "  ")
@@ -86,7 +92,22 @@ func runActivityLeaseTake(cmd *cobra.Command, params common.TakeEnvironmentActiv
 	return err
 }
 
-func newActivityLeaseReleaseCmd() *cobra.Command {
+func takeLease(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, params common.TakeEnvironmentActivityLeaseParams) (common.EnvironmentActivityLease, bool, error) {
+	if !environmentTargetsItself() {
+		return takeLeaseInEnvironment(ctx, commandCtx, resolveOpen, params)
+	}
+	if commandCtx.DryRun {
+		commandCtx.TraceCommand("", "activity", "lease-take", params.Tenant, params.Environment, params.Name)
+		return common.EnvironmentActivityLease{}, false, nil
+	}
+	lease, err := common.TakeEnvironmentActivityLease(params)
+	if err != nil {
+		return common.EnvironmentActivityLease{}, false, err
+	}
+	return lease, true, nil
+}
+
+func newActivityLeaseReleaseCmd(resolveOpen OpenResolver) *cobra.Command {
 	var tenant string
 	var environment string
 	var id string
@@ -97,25 +118,49 @@ func newActivityLeaseReleaseCmd() *cobra.Command {
 		Example: "  erun activity lease release --tenant team --environment dev --id gradle-build",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := validateActivityTarget(tenant, environment); err != nil {
-				return err
-			}
-			if strings.TrimSpace(id) == "" {
-				return fmt.Errorf("lease id is required")
-			}
-			if err := common.ReleaseEnvironmentActivityLease(tenant, environment, id); err != nil {
-				return err
-			}
-			_, err := fmt.Fprintf(commandContext(cmd).Stdout, "lease released: %s\n", strings.TrimSpace(id))
-			return err
+			return runActivityLeaseRelease(cmd, resolveOpen, tenant, environment, id)
 		},
 	}
 	addActivityTargetFlags(cmd, &tenant, &environment)
 	cmd.Flags().StringVar(&id, "id", "", "Lease id to release")
+	addDryRunFlag(cmd)
 	return cmd
 }
 
-func newActivityLeaseListCmd() *cobra.Command {
+func runActivityLeaseRelease(cmd *cobra.Command, resolveOpen OpenResolver, tenant, environment, id string) error {
+	if err := validateActivityTarget(tenant, environment); err != nil {
+		return err
+	}
+	if strings.TrimSpace(id) == "" {
+		return fmt.Errorf("lease id is required")
+	}
+	ctx := commandContext(cmd)
+	resolved, err := releaseLease(cmd.Context(), ctx, resolveOpen, tenant, environment, id)
+	if err != nil {
+		return err
+	}
+	if !resolved {
+		return nil
+	}
+	_, err = fmt.Fprintf(ctx.Stdout, "lease released: %s\n", strings.TrimSpace(id))
+	return err
+}
+
+func releaseLease(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, tenant, environment, id string) (bool, error) {
+	if !environmentTargetsItself() {
+		return releaseLeaseInEnvironment(ctx, commandCtx, resolveOpen, tenant, environment, id)
+	}
+	if commandCtx.DryRun {
+		commandCtx.TraceCommand("", "activity", "lease-release", tenant, environment, id)
+		return false, nil
+	}
+	if err := common.ReleaseEnvironmentActivityLease(tenant, environment, id); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func newActivityLeaseListCmd(resolveOpen OpenResolver) *cobra.Command {
 	var tenant string
 	var environment string
 	var jsonOutput bool
@@ -126,20 +171,43 @@ func newActivityLeaseListCmd() *cobra.Command {
 		Example: "  erun activity lease list --tenant team --environment dev",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := validateActivityTarget(tenant, environment); err != nil {
-				return err
-			}
-			now := time.Now()
-			leases, err := common.LoadEnvironmentActivityLeases(tenant, environment, now)
-			if err != nil {
-				return err
-			}
-			return writeActivityLeases(commandContext(cmd), leases, now, jsonOutput)
+			return runActivityLeaseList(cmd, resolveOpen, tenant, environment, jsonOutput)
 		},
 	}
 	addActivityTargetFlags(cmd, &tenant, &environment)
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the leases as JSON")
+	addDryRunFlag(cmd)
 	return cmd
+}
+
+func runActivityLeaseList(cmd *cobra.Command, resolveOpen OpenResolver, tenant, environment string, jsonOutput bool) error {
+	if err := validateActivityTarget(tenant, environment); err != nil {
+		return err
+	}
+	ctx := commandContext(cmd)
+	leases, resolved, err := listLeases(cmd.Context(), ctx, resolveOpen, tenant, environment)
+	if err != nil {
+		return err
+	}
+	if !resolved {
+		return nil
+	}
+	return writeActivityLeases(ctx, leases, time.Now(), jsonOutput)
+}
+
+func listLeases(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, tenant, environment string) ([]common.EnvironmentActivityLease, bool, error) {
+	if !environmentTargetsItself() {
+		return listLeasesInEnvironment(ctx, commandCtx, resolveOpen, tenant, environment)
+	}
+	if commandCtx.DryRun {
+		commandCtx.TraceCommand("", "activity", "lease-list", tenant, environment)
+		return nil, false, nil
+	}
+	leases, err := common.LoadEnvironmentActivityLeases(tenant, environment, time.Now())
+	if err != nil {
+		return nil, false, err
+	}
+	return leases, true, nil
 }
 
 func writeActivityLeases(ctx common.Context, leases []common.EnvironmentActivityLease, now time.Time, jsonOutput bool) error {

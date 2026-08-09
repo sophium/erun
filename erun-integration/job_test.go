@@ -29,7 +29,7 @@ func jobStubEnv(t *testing.T, setup env.Setup, script string) []string {
 	t.Helper()
 	stubs := filepath.Join(setup.Cwd, "stubs")
 	fixture.StubBinaryWithScript(t, stubs, "work", script)
-	return append(setup.Env(), fixture.StubEnv(stubs, "work")...)
+	return inEnvironment(append(setup.Env(), fixture.StubEnv(stubs, "work")...))
 }
 
 // jobStubSignal is the line a job stub writes to say it reached a point in its
@@ -87,7 +87,7 @@ func waitForJobActivity(t *testing.T, setup env.Setup, envVars []string, id stri
 func TestJob(t *testing.T) {
 	t.Run("help", func(t *testing.T) {
 		setup := env.New(t)
-		result := erun.Run(t, []string{"job", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"job", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -137,7 +137,7 @@ func TestJob(t *testing.T) {
 		// The await exit codes are the contract an orchestrator branches on, so the
 		// help that states them is locked here.
 		setup := env.New(t)
-		result := erun.Run(t, []string{"job", "await", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"job", "await", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -164,7 +164,7 @@ func TestJob(t *testing.T) {
 		// The agent switch and what it does to the invocation are only discoverable
 		// here, so the help that states them is locked.
 		setup := env.New(t)
-		result := erun.Run(t, []string{"job", "start", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"job", "start", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -178,11 +178,11 @@ func TestJob(t *testing.T) {
 		// would report no output while it is actively editing files.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		claude := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "sweep", "--agent", "claude", "--dry-run", "--", "fix the failing tests"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		claude := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "sweep", "--agent", "claude", "--dry-run", "--", "fix the failing tests"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if claude.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", claude.ExitCode, claude.Combined)
 		}
-		codex := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "sweep", "--agent", "codex", "--dry-run", "--", "fix the failing tests"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		codex := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "sweep", "--agent", "codex", "--dry-run", "--", "fix the failing tests"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if codex.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", codex.ExitCode, codex.Combined)
 		}
@@ -195,7 +195,7 @@ func TestJob(t *testing.T) {
 		// can actually stream.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		unsupported := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "sweep", "--agent", "gemini", "--dry-run", "--", "do the thing"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		unsupported := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "sweep", "--agent", "gemini", "--dry-run", "--", "do the thing"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if unsupported.ExitCode == 0 {
 			t.Fatalf("expected an unsupported agent tool to fail, got 0:\n%s", unsupported.Combined)
 		}
@@ -221,7 +221,7 @@ func TestJob(t *testing.T) {
 				`printf '{"type":"assistant","message":{"id":"msg_2","content":[{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"go test ./..."}}]}}\n'`+"\n"+
 				`printf '{"type":"result","subtype":"success","is_error":false,"num_turns":2,"result":"Fixed the client."}\n'`+"\n"+
 				"exit 0")
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "claude")...)
+		envVars := inEnvironment(append(setup.Env(), fixture.StubEnv(stubs, "claude")...))
 
 		start := startJob(t, setup, envVars, "sweep", "--agent", "claude", "--", "fix the failing tests")
 		if start.ExitCode != 0 {
@@ -265,7 +265,7 @@ func TestJob(t *testing.T) {
 				`printf '{"type":"item.completed","item":{"id":"i2","type":"agent_message","text":"Fixed the client."}}\n'`+"\n"+
 				`printf '{"type":"turn.completed"}\n'`+"\n"+
 				"exit 0")
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "codex")...)
+		envVars := inEnvironment(append(setup.Env(), fixture.StubEnv(stubs, "codex")...))
 
 		start := startJob(t, setup, envVars, "sweep", "--agent", "codex", "--", "fix the failing tests")
 		if start.ExitCode != 0 {
@@ -527,11 +527,11 @@ func TestJob(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "stranded.json"), []byte(record), 0o644); err != nil {
 			t.Fatalf("seed job record: %v", err)
 		}
-		status := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "stranded"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		status := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "stranded"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if status.ExitCode != 0 {
 			t.Fatalf("status: exit %d: %s", status.ExitCode, status.Combined)
 		}
-		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "stranded", "--timeout", "1s"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "stranded", "--timeout", "1s"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if await.ExitCode != 125 {
 			t.Fatalf("expected the unknown-outcome exit code 125, distinct from both 0 and 124, got %d:\n%s", await.ExitCode, await.Combined)
 		}
@@ -554,11 +554,11 @@ func TestJob(t *testing.T) {
 		// the honest answer for work nothing erun ran was waiting on.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		attach := erun.Run(t, []string{"job", "attach", "--tenant", "team", "--environment", "dev", "--name", "overnight index", "--id", "overnight", "--pid", "2147483646"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		attach := erun.Run(t, []string{"job", "attach", "--tenant", "team", "--environment", "dev", "--name", "overnight index", "--id", "overnight", "--pid", "2147483646"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if attach.ExitCode != 0 {
 			t.Fatalf("attach: exit %d: %s", attach.ExitCode, attach.Combined)
 		}
-		status := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "overnight"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		status := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "overnight"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		golden.Equal(t, "job/attach_tracks_a_pid_without_claiming_an_outcome", normalize.Apply(attach.Combined+status.Combined))
 	})
 
@@ -592,7 +592,7 @@ func TestJob(t *testing.T) {
 	t.Run("status_of_an_unknown_id_names_the_environment", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		result := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "nothing"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "nothing"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected a non-zero exit for an unknown job, got 0:\n%s", result.Combined)
 		}
@@ -602,7 +602,7 @@ func TestJob(t *testing.T) {
 	t.Run("status_without_jobs_says_so", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		result := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -611,12 +611,12 @@ func TestJob(t *testing.T) {
 
 	t.Run("start_requires_target_and_name", func(t *testing.T) {
 		setup := env.New(t)
-		missingTarget := erun.Run(t, []string{"job", "start", "--name", "suite", "--", "work"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		missingTarget := erun.Run(t, []string{"job", "start", "--name", "suite", "--", "work"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if missingTarget.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit without target flags, got 0:\n%s", missingTarget.Combined)
 		}
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		missingName := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--", "work"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		missingName := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--", "work"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if missingName.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit without a name, got 0:\n%s", missingName.Combined)
 		}
@@ -628,7 +628,7 @@ func TestJob(t *testing.T) {
 		// longer polls again rather than parking on one call.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		result := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "suite", "--timeout", "2h"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "suite", "--timeout", "2h"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit for a timeout past the ceiling, got 0:\n%s", result.Combined)
 		}

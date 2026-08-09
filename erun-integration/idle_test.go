@@ -18,7 +18,7 @@ func TestIdle(t *testing.T) {
 	t.Run("invalid_working_hours_format_errors", func(t *testing.T) {
 		setup := env.New(t)
 		seedIdleEnvWithIdleBlock(t, setup, "idle:\n  workinghours: 9to5\n")
-		result := erun.Run(t, []string{"idle", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"idle", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit for malformed working hours, got 0:\n%s", result.Combined)
 		}
@@ -30,7 +30,7 @@ func TestIdle(t *testing.T) {
 		// not "always outside".
 		setup := env.New(t)
 		seedIdleEnvWithIdleBlock(t, setup, "idle:\n  workinghours: 08:00-08:00\n")
-		result := erun.Run(t, []string{"idle", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"idle", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit for zero-width working hours, got 0:\n%s", result.Combined)
 		}
@@ -40,7 +40,7 @@ func TestIdle(t *testing.T) {
 	t.Run("invalid_timezone_errors", func(t *testing.T) {
 		setup := env.New(t)
 		seedIdleEnvWithIdleBlock(t, setup, "idle:\n  workinghours: 08:00-20:00\n  timezone: Mars/Olympus\n")
-		result := erun.Run(t, []string{"idle", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"idle", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit for unknown timezone, got 0:\n%s", result.Combined)
 		}
@@ -54,7 +54,7 @@ func TestIdle(t *testing.T) {
 		// rather than a golden the normalizer would have to erase.
 		setup := env.New(t)
 		seedIdleEnvWithIdleBlock(t, setup, "idle:\n  workinghours: 23:59-23:58\n  timezone: UTC\n")
-		result := erun.Run(t, []string{"idle", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"idle", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -66,7 +66,7 @@ func TestIdle(t *testing.T) {
 
 	t.Run("help", func(t *testing.T) {
 		setup := env.New(t)
-		result := erun.Run(t, []string{"idle", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"idle", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -78,7 +78,7 @@ func TestIdle(t *testing.T) {
 		// lines are asserted exactly and the variable line structurally.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		result := erun.Run(t, []string{"idle", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"idle", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -107,7 +107,7 @@ func TestIdle(t *testing.T) {
 	t.Run("status_json_output", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		result := erun.Run(t, []string{"idle", "team", "dev", "--json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"idle", "team", "dev", "--json"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -119,7 +119,7 @@ func TestIdle(t *testing.T) {
 
 	t.Run("missing_env_errors", func(t *testing.T) {
 		setup := env.New(t)
-		result := erun.Run(t, []string{"idle", "missing", "missing"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"idle", "missing", "missing"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		golden.Equal(t, "idle/missing_env_errors", normalize.Apply(result.Combined))
 	})
 
@@ -133,7 +133,7 @@ func TestIdle(t *testing.T) {
 		seedManagedCloudTenantEnv(t, setup, "team", "dev")
 		seedStopPending(t, setup.Home, "team", "dev", `{"since": "2099-01-01T00:00:00Z", "graceSeconds": 600}
 `)
-		result := erun.Run(t, []string{"idle", "team", "dev", "--json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"idle", "team", "dev", "--json"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -165,7 +165,7 @@ func TestIdle(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(logDir, "idle-stop.log"), []byte(content), 0o644); err != nil {
 			t.Fatalf("write idle-stop.log: %v", err)
 		}
-		result := erun.Run(t, []string{"idle", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"idle", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -192,7 +192,7 @@ func TestIdle(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(legacyDir, "idle-stop.log"), []byte("legacy stop failure: AccessDenied"), 0o644); err != nil {
 			t.Fatalf("write legacy idle-stop.log: %v", err)
 		}
-		result := erun.Run(t, []string{"idle", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"idle", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}

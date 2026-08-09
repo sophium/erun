@@ -186,6 +186,10 @@ func registerIdleStopTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Description: "Release a lease taken by activity_lease_take once the work is done, so the env can go idle again. Releasing an unknown or already-expired lease succeeds.",
 	}, activityLeaseReleaseTool(runtime))
 	addTool(reg, &mcp.Tool{
+		Name:        "activity_lease_list",
+		Description: "List the leases currently holding this env busy. Reading the list also reclaims leases that expired or whose holder process is gone, so what it returns is what is actually deferring auto-stop.",
+	}, activityLeaseListTool(runtime))
+	addTool(reg, &mcp.Tool{
 		Name:        "idle_stop_cancel",
 		Description: "Dismiss the pending auto-stop grace warning for the env without touching AWS state. No-op when no warning is armed.",
 	}, idleStopCancelTool(runtime))

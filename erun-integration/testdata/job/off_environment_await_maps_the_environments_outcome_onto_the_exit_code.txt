@@ -1,0 +1,4 @@
+still running after <ELAPSED>: suite
+audit: erun job await --environment dev --id suite --tenant team --timeout 30s
+mcp: team/dev edge resolved to http://<LOOPBACK>:26300/mcp
+job "suite" is still running after <ELAPSED>

@@ -159,6 +159,7 @@ These wrap the [pure command primitives](/concepts/command-primitives): `build` 
 | `delete` | `erun delete` | Namespace deleted, local config removed. |
 | `activity_lease_take` | `erun activity lease take` | The lease held, plus every lease still held on the env. |
 | `activity_lease_release` | `erun activity lease release` | Every lease still held on the env. |
+| `activity_lease_list` | `erun activity lease list` | Every lease still held on the env. Reading the list also reclaims leases that expired or whose holder process is gone, so it returns what is actually deferring auto-stop. |
 
 Take an activity lease before **detaching** long work in the env — a build, a test suite, an agent run. A detached job makes no calls while it runs, so without a lease the env reads as untouched and auto-stop would kill exactly the work worth protecting; with one, the env reports as busy with the lease's name and the operator can see it. Pass the detached job's `pid` so an abandoned lease is reclaimed, and release it when the work finishes. See [Agent reference · Idle policy](/agent-reference/idle-policy#activity-leases). Work started through the job tools below takes and releases its lease for you.
 

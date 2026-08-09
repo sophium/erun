@@ -67,7 +67,8 @@ func TestReadCapabilitySeesOnlyTheReadTools(t *testing.T) {
 	got := listToolNames(t, connectWithCapabilities(t, string(eruncommon.MCPCapabilityRead)))
 
 	want := []string{
-		"cloud_list", "context_list", "diff", "idle", "idle_stop_history",
+		"activity_lease_list", "cloud_list", "context_list", "diff", "idle",
+		"idle_stop_history",
 		"job_await", "job_output", "job_status", "list",
 		"outputs_download", "outputs_list", "version",
 	}

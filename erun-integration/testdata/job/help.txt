@@ -3,6 +3,11 @@ it exited with, and what it printed. Starting a job also holds an activity
 lease for its lifetime, so the environment reports as busy and idle-stop
 leaves it alone while the work runs.
 
+The work always runs in the environment, never on the machine you type this
+on: off-environment these verbs act through the environment's MCP edge, which
+needs the port-forward `erun open` establishes. Paths are the environment's —
+--dir and the reported log path resolve inside it.
+
 Usage:
   erun job [command]
 
