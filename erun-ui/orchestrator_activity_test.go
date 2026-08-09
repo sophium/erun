@@ -274,11 +274,11 @@ func TestOrchestratorActivityHookMergePreservesOtherHooks(t *testing.T) {
 	}
 	busy, _ := orchestratorActivityHooks()
 
-	merged := mergeOrchestratorActivityHook([]any{theirs}, busy)
+	merged := mergeOrchestratorHookBlocks([]any{theirs}, busy, isOrchestratorActivityHookBlock)
 	if len(merged) != 2 {
 		t.Fatalf("expected theirs kept and ours appended, got %d: %+v", len(merged), merged)
 	}
-	again := mergeOrchestratorActivityHook(merged, busy)
+	again := mergeOrchestratorHookBlocks(merged, busy, isOrchestratorActivityHookBlock)
 	if len(again) != 2 {
 		t.Fatalf("re-installing must replace our own block, not stack it: %+v", again)
 	}

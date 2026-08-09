@@ -37,6 +37,8 @@ Where that review directory lives follows the environment's type, and you don't 
 
 An orchestrator never writes into a review directory whichever type it is: the Agent in the pod owns the worktree, and the orchestrator delegates, reviews, and verifies. For a `local-agent` env that rule matters more, not less — an edit there really would reach the pod, and land in the middle of the Agent's work.
 
+An orchestrator also does not stop to ask you. Its contract is to resolve ambiguity from the code, tests and sensible defaults and carry the task to a verified end, so a question is a defect rather than caution — one asked while you are away stalls the work until you come back. That is enforced, not merely instructed: the session is launched without the harness's question tool, and a turn that tries to end by handing you a decision anyway ("say the word and I will…") is refused and told to decide. An irreversible or cross-environment action still gets a heads-up, but it arrives as a notification while the orchestrator proceeds, never as a prompt waiting on you.
+
 ## First principles
 
 Every workflow on ERun shares the same shape, regardless of which level you're at:

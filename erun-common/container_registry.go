@@ -548,24 +548,34 @@ func (r ContainerRegistries) DistinctRegistries() []string {
 	return out
 }
 
-// ResolveEnvironmentContainerRegistries returns the marked list for an
-// environment: the per-env list carried on the env config (remote and runtime
-// envs) when set, otherwise the project's configured list resolved through the
-// env's local repo path. Best-effort and never errors; returns nil when nothing
-// is configured so callers can apply the default seed or omit the field.
+// ResolveEnvironmentContainerRegistries returns the marked list an environment
+// is configured with: the per-env list carried on the env config (remote and
+// runtime envs) when set, otherwise the project's configured list resolved
+// through the env's local repo path. Best-effort and never errors; returns nil
+// when nothing is configured so callers can apply the default seed or omit the
+// field. Callers that report what an environment will actually use must go
+// through EffectiveEnvironmentContainerRegistries instead.
 func ResolveEnvironmentContainerRegistries(env EnvConfig) ContainerRegistries {
 	if !env.ContainerRegistries.IsZero() {
 		return env.ContainerRegistries
 	}
-	repoPath := strings.TrimSpace(env.EffectiveLocalRepoPath())
-	if repoPath == "" {
-		return nil
-	}
-	projectConfig, _, err := LoadProjectConfig(repoPath)
+	configured, err := configuredContainerRegistries(env.EffectiveLocalRepoPath(), env.Name)
 	if err != nil {
 		return nil
 	}
-	return projectConfig.ContainerRegistriesForEnvironment(env.Name)
+	return configured
+}
+
+// EffectiveEnvironmentContainerRegistries returns the marked list an environment
+// actually resolves to, ending at the same default seed build and deploy execute
+// against when nothing is configured. Reporting reads through here: a reader
+// decides from it whether an environment can push at all, and showing nothing
+// for one that will in fact use the default reads as "this one cannot".
+func EffectiveEnvironmentContainerRegistries(env EnvConfig) ContainerRegistries {
+	if configured := ResolveEnvironmentContainerRegistries(env); !configured.IsZero() {
+		return configured
+	}
+	return DefaultContainerRegistries()
 }
 
 // deployTargetContainerRegistries resolves the marked list for a deploy target,
@@ -582,20 +592,34 @@ func deployTargetContainerRegistries(target OpenResult) (ContainerRegistries, er
 	return effectiveContainerRegistries(target.RepoPath, target.Environment)
 }
 
+// configuredContainerRegistries returns the list a project explicitly configures
+// for an environment, and nil when it configures none. Display and execution
+// both read the source order through here so they cannot drift apart.
+func configuredContainerRegistries(projectRoot, environment string) (ContainerRegistries, error) {
+	if strings.TrimSpace(projectRoot) == "" {
+		return nil, nil
+	}
+	projectConfig, _, err := LoadProjectConfig(projectRoot)
+	if err != nil {
+		if errors.Is(err, ErrNotInitialized) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return projectConfig.ContainerRegistriesForEnvironment(environment), nil
+}
+
 // effectiveContainerRegistries applies the default seed when nothing is
 // configured. Build and deploy both resolve through here so marker invariants
 // are enforced at the point of use.
 func effectiveContainerRegistries(projectRoot, environment string) (ContainerRegistries, error) {
 	list := DefaultContainerRegistries()
-	if strings.TrimSpace(projectRoot) != "" {
-		projectConfig, _, err := LoadProjectConfig(projectRoot)
-		if err != nil {
-			if !errors.Is(err, ErrNotInitialized) {
-				return nil, err
-			}
-		} else if configured := projectConfig.ContainerRegistriesForEnvironment(environment); !configured.IsZero() {
-			list = configured
-		}
+	configured, err := configuredContainerRegistries(projectRoot, environment)
+	if err != nil {
+		return nil, err
+	}
+	if !configured.IsZero() {
+		list = configured
 	}
 	if err := list.Validate(); err != nil {
 		return nil, fmt.Errorf("container registries for environment %q: %w", strings.TrimSpace(environment), err)
