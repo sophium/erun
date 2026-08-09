@@ -37,6 +37,17 @@ type MCPTokenClaims struct {
 	Audience  string `json:"aud,omitempty"`
 	IssuedAt  int64  `json:"iat,omitempty"`
 	ExpiresAt int64  `json:"exp,omitempty"`
+	// Scope and Roles carry what the caller may do, in the two shapes issuers
+	// actually produce: a space-delimited OAuth scope string, and a roles array
+	// of the kind project roles arrive in. Both are optional — a token carrying
+	// neither is the desktop's single-admin case.
+	Scope string   `json:"scope,omitempty"`
+	Roles []string `json:"roles,omitempty"`
+}
+
+// Capabilities resolves what this token permits at the edge.
+func (c MCPTokenClaims) Capabilities() MCPCapabilitySet {
+	return MCPCapabilitiesFromClaims(c.Scope, c.Roles)
 }
 
 // Only EdDSA is ever produced or accepted.
@@ -234,6 +245,16 @@ func mcpClaimsFromOIDC(verified OIDCClaims) MCPTokenClaims {
 	}
 	if len(verified.Audience) > 0 {
 		claims.Audience = verified.Audience[0]
+	}
+	if scope, ok := verified.Raw["scope"].(string); ok {
+		claims.Scope = scope
+	}
+	if roles, ok := verified.Raw["roles"].([]any); ok {
+		for _, role := range roles {
+			if name, ok := role.(string); ok {
+				claims.Roles = append(claims.Roles, name)
+			}
+		}
 	}
 	return claims
 }
