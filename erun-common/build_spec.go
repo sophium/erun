@@ -217,16 +217,16 @@ func multiPlatformTraceCommands(b DockerBuildSpec) []commandSpec {
 			commands = append(commands, dockerTagTraceCommand(b.ContextDir, platformTag, fingerprintTag(b.Image, b.Fingerprint, platform)))
 		}
 		commands = append(commands, stableBaseVersionTraceCommands(b.ContextDir, platformTag, baseTag, platform)...)
+		if b.Push {
+			commands = append(commands, commandSpec{
+				Dir:  b.ContextDir,
+				Name: "docker",
+				Args: dockerPushArgs(platformTag, b.Verbosity),
+			})
+		}
 	}
 	if !b.Push {
 		return commands
-	}
-	for _, platformTag := range perPlatformTags {
-		commands = append(commands, commandSpec{
-			Dir:  b.ContextDir,
-			Name: "docker",
-			Args: dockerPushArgs(platformTag, b.Verbosity),
-		})
 	}
 	commands = append(commands, commandSpec{
 		Dir:  b.ContextDir,
@@ -266,16 +266,16 @@ func promoteTraceCommands(b DockerBuildSpec) []commandSpec {
 		perPlatformTags = append(perPlatformTags, platformTag)
 		commands = append(commands, dockerTagTraceCommand(b.ContextDir, fingerprintTag(b.Image, b.Fingerprint, platform), platformTag))
 		commands = append(commands, stableBaseVersionTraceCommands(b.ContextDir, platformTag, baseTag, platform)...)
+		if b.Push {
+			commands = append(commands, commandSpec{
+				Dir:  b.ContextDir,
+				Name: "docker",
+				Args: dockerPushArgs(platformTag, b.Verbosity),
+			})
+		}
 	}
 	if !b.Push {
 		return commands
-	}
-	for _, platformTag := range perPlatformTags {
-		commands = append(commands, commandSpec{
-			Dir:  b.ContextDir,
-			Name: "docker",
-			Args: dockerPushArgs(platformTag, b.Verbosity),
-		})
 	}
 	commands = append(commands, commandSpec{
 		Dir:  b.ContextDir,
