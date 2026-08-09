@@ -112,11 +112,17 @@ func githubTokenScopes(ctx context.Context, client *http.Client, token, apiBaseU
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, false
 	}
-	raw, ok := resp.Header[http.CanonicalHeaderKey(githubOAuthScopesHeader)]
+	return parseGitHubScopesHeader(resp.Header)
+}
+
+// parseGitHubScopesHeader reads the scopes GitHub reports on a response.
+//
+// A missing header is not an empty scope list: a fine-grained PAT or a GitHub
+// App token reports no OAuth scopes at all, which is a different permission
+// model rather than an absence of permission, so it declines to answer.
+func parseGitHubScopesHeader(header http.Header) ([]string, bool) {
+	raw, ok := header[http.CanonicalHeaderKey(githubOAuthScopesHeader)]
 	if !ok {
-		// A fine-grained PAT or a GitHub App token reports no OAuth scopes at
-		// all. That is not "no permissions", it is a different permission model
-		// this check cannot read — so it declines to answer.
 		return nil, false
 	}
 	scopes := make([]string, 0, 8)
