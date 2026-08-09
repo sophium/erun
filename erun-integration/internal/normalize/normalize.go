@@ -80,6 +80,12 @@ var defaultRules = []Replacement{
 	// golden locks is that the job names a recorded process at all, never which
 	// number the kernel handed out.
 	{regexp.MustCompile(`\bpid \d+`), "pid <PID>"},
+	// The port-forward adopt/replace traces name the process holding a local
+	// port. A scenario that wants erun to actually stop that holder has to
+	// present its real PID — production kills what the probe names — so the
+	// number is whatever the kernel handed out on this run. Which process it
+	// was is asserted from the rewritten state file, not from the trace.
+	{regexp.MustCompile(`\(PID \d+\)`), "(PID <PID>)"},
 	{regexp.MustCompile(`\bprocess group \d+`), "process group <PGID>"},
 	{regexp.MustCompile(`\b(supervisor|process) \d+ is gone`), "$1 <PID> is gone"},
 	{regexp.MustCompile(`id=[A-Za-z0-9_./-]*-\d{10,}\b`), "id=<COMMAND_ID>"},

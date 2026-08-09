@@ -82,6 +82,24 @@ func portForwardStateFile(setup env.Setup, kind, tenant, environment string) str
 	return filepath.Join(base, "erun", "portforward", kind, tenant, environment+".json")
 }
 
+// writePortForwardState writes the per-env forward record erun itself would
+// have written, so a scenario can start from "erun already established this
+// forward" without a first pass. processID must name a real process: production
+// stops the recorded forward by that PID.
+func writePortForwardState(t *testing.T, setup env.Setup, kind, tenant, environment string, localPort, processID int) {
+	t.Helper()
+	path := portForwardStateFile(setup, kind, tenant, environment)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s state dir: %v", kind, err)
+	}
+	body := fmt.Sprintf(
+		`{"tenant":%q,"environment":%q,"kubernetesContext":"test-context","namespace":"%s-%s","localPort":%d,"processId":%d}`,
+		tenant, environment, tenant, environment, localPort, processID)
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write %s state: %v", kind, err)
+	}
+}
+
 // adoptHolder describes one fake TCP port holder the lsof/ps probe stubs
 // present to production's adopt-or-conflict check.
 type adoptHolder struct {
@@ -1384,16 +1402,101 @@ func TestOpen(t *testing.T) {
 		// recognise the holder as its own and reuse it instead of erroring
 		// with "already in use". The probe runs in dry-run too, so we lock
 		// the decision in the golden via the "would adopt" trace.
+		//
+		// The holder is a real listener that answers, not just an lsof claim:
+		// adoption now requires the tunnel to carry traffic, so a stubbed
+		// holder alone would leave the decision to whatever else happens to
+		// hold that port on the host. That pins the scenario to the 26100
+		// range, like every other one that binds a port.
+		skipIfPortsBusy(t, 26100, 26133)
 		setup := env.New(t)
-		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
 		// Pin DetectHost to darwin so the --no-shell preamble stays POSIX (see
 		// openHostOSOverride); the adopt holder probe is stubbed, so the pinned OS
 		// only keeps the golden deterministic across hosts.
 		envVars := append(stubKubectlNotFound(t, setup), "ERUN_HOST_OS_OVERRIDE=darwin")
-		stubAdoptHolderProbes(t, setup, adoptHolder{port: 17000, pid: 99999,
-			argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 17000:17000 --address 127.0.0.1"})
+		holderPID := fixture.StartServingPortHolder(t, 26100)
+		stubAdoptHolderProbes(t, setup, adoptHolder{port: 26100, pid: holderPID,
+			argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address 127.0.0.1"})
 		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/adopts_existing_kubectl_port_forward", normalize.Apply(result.Combined))
+	})
+
+	t.Run("previews_replacing_a_bound_but_dead_port_forward", func(t *testing.T) {
+		// The sibling decision, and the reason the one above needs a live
+		// holder at all: a holder with erun's exact port-forward argv whose
+		// far end is gone still binds the port and answers nothing through
+		// it. Adopting it would hand the caller a tunnel to a pod that no
+		// longer exists — the failure that left an environment unreachable
+		// for hours behind a listener that looked healthy. The plan must say
+		// it would replace the forward, and dry-run must stop at saying so:
+		// the holder is still bound when the run ends.
+		skipIfPortsBusy(t, 26100, 26133)
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
+		envVars := append(stubKubectlNotFound(t, setup), "ERUN_HOST_OS_OVERRIDE=darwin")
+		holderPID := fixture.StartStalePortHolder(t, 26100)
+		stubAdoptHolderProbes(t, setup, adoptHolder{port: 26100, pid: holderPID,
+			argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address 127.0.0.1"})
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "open/previews_replacing_a_bound_but_dead_port_forward", normalize.Apply(result.Combined))
+		// Side effect outside the captured streams: dry-run plans the
+		// replacement, it does not perform it.
+		if fixture.StalePortHolderStopped(26100, 500*time.Millisecond) {
+			t.Error("dry-run must leave the stale holder running; it only plans the replacement")
+		}
+	})
+
+	t.Run("real_run_reestablishes_a_bound_but_dead_port_forward", func(t *testing.T) {
+		// The reported failure, verbatim: erun's own recorded forward is
+		// still bound — its state file matches this env and its process is
+		// alive — while every request through it dies, because the pod it
+		// targeted was replaced. Reusing it on the strength of the recorded
+		// state is what let that survive for five hours, so open must stop
+		// the dead forward and start a fresh one that answers.
+		//
+		// The holder is a real process and the ps/lsof stubs name its real
+		// PID: production kills what the probe names, so a fabricated PID
+		// would aim the kill at whatever else owns that number.
+		skipIfPortsBusy(t, 26100, 26133)
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		stubsDir := filepath.Join(setup.Cwd, "stubs")
+		envVars := append(setup.Env(), fixture.StubKubectlDeployed(t, stubsDir, fixture.KubectlDeployedStubSpec{
+			DeploymentName: "team-devops",
+			ContainerName:  "team-devops",
+			RepoPath:       "/home/erun/git/cwd",
+			MCPPort:        26100,
+			SSHPort:        26122,
+			ExecExitCodes:  []int{0},
+		})...)
+		envVars = append(envVars, openHostOSOverride)
+		holderPID := fixture.StartStalePortHolder(t, 26100)
+		stubAdoptHolderProbes(t, setup, adoptHolder{port: 26100, pid: holderPID,
+			argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address 127.0.0.1"})
+		envVars = append(envVars, fixture.StubEnv(stubsDir, "lsof", "ps")...)
+		writePortForwardState(t, setup, "mcp", "team", "dev", 26100, holderPID)
+
+		// The shell form, not --no-shell: real-run --no-shell silences stderr
+		// so an `eval "$(erun open ...)"` alias stays quiet, and the decision
+		// this scenario exists to lock is a trace line. The exec stub exits 0
+		// so runShellLoop ends after one pass.
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "open/real_run_reestablishes_a_bound_but_dead_port_forward", normalize.Apply(result.Combined))
+		// Side effects outside the captured streams: the dead forward is
+		// gone, and the recorded forward is a different process — the same
+		// PID would mean erun re-adopted the corpse.
+		stateBody, err := os.ReadFile(portForwardStateFile(setup, "mcp", "team", "dev"))
+		if err != nil {
+			t.Fatalf("read rewritten mcp state: %v", err)
+		}
+		if strings.Contains(string(stateBody), fmt.Sprintf(`"processId":%d`, holderPID)) {
+			t.Errorf("expected the state file to record a fresh forward, still claims the dead PID %d:\n%s", holderPID, stateBody)
+		}
 	})
 
 	t.Run("refuses_to_bind_when_foreign_process_holds_port", func(t *testing.T) {

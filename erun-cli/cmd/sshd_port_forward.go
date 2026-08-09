@@ -47,7 +47,7 @@ func ensureSSHDPortForward(ctx common.Context, result common.OpenResult) (common
 	stopStaleSSHDPortForward(state, expectedState, info.Port)
 	args := kubectlPortForwardArgs(result, info.Port)
 	if ctx.DryRun {
-		if previewed, _ := previewAdoptOrConflict(ctx, "sshd", info.Port, args); previewed {
+		if previewed, _ := previewAdoptOrConflict(ctx, "sshd", info.Port, args, canReachLocalSSHEndpoint); previewed {
 			return info, nil
 		}
 		ctx.TraceCommand("", "kubectl", args...)
@@ -77,6 +77,12 @@ func adoptForeignSSHDPortForward(ctx common.Context, statePath string, expected 
 	}
 	if !argvMatchesExpectedKubectlPortForward(argv, expectedArgs) {
 		return false, fmt.Errorf("local SSH port %d is already in use by %s", info.Port, formatHolderForError(pid, argv))
+	}
+	if !canReachLocalSSHEndpoint(info.Port) {
+		if replaceStalePortForwardHolder(ctx, "sshd", pid, info.Port) {
+			return false, nil
+		}
+		return false, fmt.Errorf("local SSH port %d is held by a stale kubectl port-forward that could not be stopped: %s", info.Port, formatHolderForError(pid, argv))
 	}
 	adopted := expected
 	adopted.ProcessID = pid

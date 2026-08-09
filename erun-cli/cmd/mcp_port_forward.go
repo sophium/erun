@@ -44,17 +44,16 @@ func ensureMCPPortForward(ctx common.Context, result common.OpenResult) (int, er
 
 	if ctx.DryRun {
 		args := kubectlMCPPortForwardArgs(result, localPort)
-		if previewed, port := previewAdoptOrConflict(ctx, "mcp", localPort, args); previewed {
+		if previewed, port := previewAdoptOrConflict(ctx, "mcp", localPort, args, canReachLocalMCPEndpoint); previewed {
 			return port, nil
 		}
 		ctx.TraceCommand("", "kubectl", args...)
 		return localPort, nil
 	}
 
-	if stateMatchesMCPTarget(state, expectedState) && canReachLocalMCPEndpoint(localPort) {
+	if reusableRecordedPortForward(ctx, "mcp", state, expectedState, localPort, canReachLocalMCPEndpoint) {
 		return localPort, nil
 	}
-	stopStaleMCPPortForward(state, expectedState, localPort)
 	args := kubectlMCPPortForwardArgs(result, localPort)
 	if canConnectLocalPort(localPort) {
 		adopted, err := adoptForeignMCPPortForward(ctx, statePath, expectedState, args, localPort)
@@ -73,7 +72,10 @@ func ensureMCPPortForward(ctx common.Context, result common.OpenResult) (int, er
 
 // adoptForeignMCPPortForward reuses a pre-existing kubectl port-forward already
 // targeting this env so repeated opens share one forward; a port held by any
-// other process is a hard error rather than an adoption.
+// other process is a hard error rather than an adoption. A holder of erun's own
+// shape that no longer carries traffic is neither: it is the forward that
+// outlived its pod, so it is stopped and (false, nil) sends the caller on to
+// start a replacement.
 func adoptForeignMCPPortForward(ctx common.Context, statePath string, expected mcpPortForwardState, expectedArgs []string, localPort int) (bool, error) {
 	pid, argv, ok := findLocalPortHolder(localPort)
 	if !ok {
@@ -81,6 +83,12 @@ func adoptForeignMCPPortForward(ctx common.Context, statePath string, expected m
 	}
 	if !argvMatchesExpectedKubectlPortForward(argv, expectedArgs) {
 		return false, fmt.Errorf("local MCP port %d is already in use by %s", localPort, formatHolderForError(pid, argv))
+	}
+	if !canReachLocalMCPEndpoint(localPort) {
+		if replaceStalePortForwardHolder(ctx, "mcp", pid, localPort) {
+			return false, nil
+		}
+		return false, fmt.Errorf("local MCP port %d is held by a stale kubectl port-forward that could not be stopped: %s", localPort, formatHolderForError(pid, argv))
 	}
 	adopted := expected
 	adopted.ProcessID = pid
@@ -90,6 +98,26 @@ func adoptForeignMCPPortForward(ctx common.Context, statePath string, expected m
 	}
 	ctx.Trace(fmt.Sprintf("mcp: adopted existing kubectl port-forward on 127.0.0.1:%d (PID %d)", localPort, pid))
 	return true, nil
+}
+
+// reusableRecordedPortForward decides whether the forward already recorded for
+// this environment can be reused, and stops it when it cannot. The listener and
+// the tunnel behind it are separate facts: a forward whose pod was replaced
+// keeps holding the local port and answers nothing through it, so reusing it on
+// the strength of the recorded state alone leaves the environment unreachable
+// with nothing left to notice.
+func reusableRecordedPortForward(ctx common.Context, kind string, state, expected mcpPortForwardState, localPort int, carriesTraffic func(int) bool) bool {
+	bound := canConnectLocalPort(localPort)
+	health := common.ClassifyPortForward(
+		stateMatchesMCPTarget(state, expected),
+		bound,
+		bound && carriesTraffic(localPort),
+	)
+	if health.NeedsReestablishing() {
+		ctx.Trace(fmt.Sprintf("%s: the port-forward on 127.0.0.1:%d holds the local port but its edge does not answer; re-establishing it", kind, localPort))
+		stopStaleMCPPortForward(state, expected, localPort)
+	}
+	return health == common.PortForwardServing
 }
 
 func stopStaleMCPPortForward(state, expectedState mcpPortForwardState, localPort int) {

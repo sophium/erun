@@ -121,7 +121,11 @@ type App struct {
 	// envActivity is the last observation published per environment, so the
 	// sweep announces transitions rather than restating a quiet environment
 	// every tick. See environment_activity.go.
-	envActivity               map[string]environmentActivityState
+	envActivity map[string]environmentActivityState
+	// forwardRepairs tracks, per environment, the bounded repair episode for a
+	// port-forward that holds its local port while its edge answers nothing.
+	// See environment_forward_repair.go.
+	forwardRepairs            map[string]forwardRepairEpisode
 	busyEnvs                  map[string]int
 	workspaceSyncs            map[string]*workspaceSyncWorker
 	orchestrators             map[string]*orchestratorSession

@@ -52,6 +52,12 @@ type environmentActivityState struct {
 	// say "idle" on the environment's behalf.
 	observed bool
 	busy     bool
+	// stale is the one shape of reachable-but-never-observed that is
+	// diagnosable rather than merely quiet: the forward holds its local port,
+	// its edge answers nothing at all, and a bounded repair did not fix it. The
+	// row has to name it, because every other field here renders that
+	// environment exactly like an idle one.
+	stale bool
 	// detail names what is keeping the environment busy, in the operator's
 	// language, so the row can say "held by gradle-build" rather than "busy".
 	detail string
@@ -115,9 +121,11 @@ func (a *App) observeEnvironmentActivity(selection uiSelection) environmentActiv
 	// what makes a CLI-opened environment visible here at all.
 	forward, ok, err := eruncommon.LoadPortForwardState("mcp", selection.Tenant, selection.Environment)
 	if err != nil || !ok {
+		a.forgetForwardRepair(selection)
 		return observation
 	}
 	if a.deps.canConnectLocalPort == nil || !a.deps.canConnectLocalPort(forward.LocalPort) {
+		a.forgetForwardRepair(selection)
 		return observation
 	}
 	observation.state.reachable = true
@@ -138,9 +146,15 @@ func (a *App) observeEnvironmentActivity(selection uiSelection) environmentActiv
 	status, err := a.deps.loadIdleStatus(ctx, endpoint, a.mcpBearer(selection.Tenant, selection.Environment))
 	if err != nil {
 		// The port answered but the edge did not. That is not evidence of idle,
-		// so report reachable-without-a-verdict rather than inventing one.
+		// so report reachable-without-a-verdict rather than inventing one — and
+		// then find out which of the two failures it was, because they need
+		// opposite responses. An edge that replies at all (a 401 counts) is a
+		// live tunnel whose idle question failed and must be left alone; an edge
+		// that replies to nothing is a forward pointed at a pod that is gone.
+		observation.state.stale = a.reconcileForwardHealth(selection, forward.LocalPort)
 		return observation
 	}
+	a.forgetForwardRepair(selection)
 	observation.state.observed = true
 	observation.state.busy, observation.state.detail = environmentBusyFromIdleStatus(status)
 	return observation
@@ -220,6 +234,7 @@ func (a *App) emitEnvActivity(observation environmentActivity) {
 		Environment: observation.selection.Environment,
 		Reachable:   observation.state.reachable,
 		Observed:    observation.state.observed,
+		Stale:       observation.state.stale,
 		Busy:        observation.state.busy,
 		Detail:      observation.state.detail,
 	})

@@ -16,40 +16,68 @@ import (
 // reopen re-checks reachability.
 const envEnsureTTL = 30 * time.Second
 
+// envEnsureReason says why a rebind is being asked for, because the two callers
+// hold different evidence. A tab spawn is one of a burst and has no reason to
+// think anything is wrong, so a recent success stands in for it. A stale-forward
+// repair has watched the forward stop carrying traffic *since* that success, so
+// the window it stamped is exactly the thing that must not suppress it.
+type envEnsureReason int
+
+const (
+	envEnsureForTabSpawn envEnsureReason = iota
+	envEnsureForStaleForward
+)
+
 // ensureEnvRuntimeOnce rebinds the env's MCP/API forwarders against the
 // already-deployed runtime, at most once per (re)start window across every tab
 // and respawn. It does NOT deploy — deploy is the caller's job — so an
 // undeployed env stays down here rather than being brought up.
-//
-// Fire-and-forget: a failed reconnect is surfaced, not swallowed, and does not
-// stamp the success window, so the next tab open retries instead of being
-// suppressed for the whole TTL while the user stares at a dead env.
 func (a *App) ensureEnvRuntimeOnce(selection uiSelection) {
-	// a.ctx is set by startup() in both desktop and headless modes and stays
-	// nil in unit tests: the ensure must never fall back from a test app to
-	// the machine's real CLI and config.
-	if a.ctx == nil {
-		return
-	}
-	selection = normalizeSelection(selection)
-	key := selectionKey(selection)
+	a.ensureEnvRuntime(selection, envEnsureForTabSpawn)
+}
 
+// claimEnvRuntimeEnsure takes the per-env rebind latch and reports whether this
+// caller got it. The in-flight half applies to every caller — it is what keeps
+// one rebind per environment at a time — while the completed window only stands
+// in for a caller with no evidence that anything is wrong.
+func (a *App) claimEnvRuntimeEnsure(key string, reason envEnsureReason) bool {
 	a.envEnsureMu.Lock()
+	defer a.envEnsureMu.Unlock()
 	if a.envEnsureInflight == nil {
 		a.envEnsureInflight = make(map[string]struct{})
 		a.envEnsureDone = make(map[string]time.Time)
 		a.envEnsureFailNotified = make(map[string]struct{})
 	}
 	if _, inflight := a.envEnsureInflight[key]; inflight {
-		a.envEnsureMu.Unlock()
-		return
+		return false
 	}
-	if done, ok := a.envEnsureDone[key]; ok && time.Since(done) < envEnsureTTL {
-		a.envEnsureMu.Unlock()
-		return
+	if done, ok := a.envEnsureDone[key]; ok && reason == envEnsureForTabSpawn && time.Since(done) < envEnsureTTL {
+		return false
 	}
 	a.envEnsureInflight[key] = struct{}{}
-	a.envEnsureMu.Unlock()
+	return true
+}
+
+// ensureEnvRuntime is the rebind itself, and reports whether this call is the
+// one that started it. Both dedup gates stay in force for every reason: the
+// in-flight latch is what guarantees one rebind per env at a time, so a repair
+// can never race a spawn for the same local port.
+//
+// Fire-and-forget: a failed reconnect is surfaced, not swallowed, and does not
+// stamp the success window, so the next tab open retries instead of being
+// suppressed for the whole TTL while the user stares at a dead env.
+func (a *App) ensureEnvRuntime(selection uiSelection, reason envEnsureReason) bool {
+	// a.ctx is set by startup() in both desktop and headless modes and stays
+	// nil in unit tests: the ensure must never fall back from a test app to
+	// the machine's real CLI and config.
+	if a.ctx == nil {
+		return false
+	}
+	selection = normalizeSelection(selection)
+	key := selectionKey(selection)
+	if !a.claimEnvRuntimeEnsure(key, reason) {
+		return false
+	}
 
 	go func() {
 		var ensureErr error
@@ -86,6 +114,7 @@ func (a *App) ensureEnvRuntimeOnce(selection uiSelection) {
 			a.surfaceEnvRuntimeEnsureFailure(selection, ensureErr)
 		}
 	}()
+	return true
 }
 
 // surfaceEnvRuntimeEnsureFailure makes a failed runtime reconnect visible and

@@ -17,6 +17,10 @@ import (
 func main() {
 	port := flag.Int("port", 0, "Local TCP port to listen on")
 	banner := flag.String("banner", "", "Optional banner to send on each accepted connection (e.g. \"SSH-2.0-test\\r\\n\")")
+	// silent reproduces the forward that outlived its pod: the listener stays
+	// bound and accepts every connection, and nothing ever comes back. It is
+	// the state a reachability check that stops at the listener calls healthy.
+	silent := flag.Bool("silent", false, "Accept connections and never answer them")
 	flag.Parse()
 	if *port <= 0 {
 		log.Fatalf("portsim: --port is required")
@@ -41,6 +45,12 @@ func main() {
 		conn, err := listener.Accept()
 		if err != nil {
 			return
+		}
+		if *silent {
+			// Hold the connection open without answering, exactly as the stale
+			// forward did. Closing it would surface as a reset, which some
+			// probes read as a definite (if unhelpful) answer.
+			continue
 		}
 		go serve(conn, bannerBytes)
 	}

@@ -14,6 +14,7 @@ const base = {
   envState: '',
   isOpen: false,
   reachable: false,
+  stale: false,
   busy: false,
   detail: '',
 };
@@ -98,6 +99,33 @@ test('a sticky condition does not outlive the session that produced it', () => {
     const indicator = environmentIndicator({ ...base, envState });
     assert.equal(indicator.visible, false, envState);
   }
+});
+
+test('a bound-but-dead forward is reported as an outage, not as a quiet row', () => {
+  // The #973 row: the environment's port-forward still holds its local port, so
+  // every check that stops at the listener calls it reachable, and the desktop
+  // has no tabs for it. Rendered from reachable alone it is a green
+  // "in use elsewhere" light on an environment no client can talk to.
+  const indicator = environmentIndicator({ ...base, reachable: true, stale: true });
+  assert.equal(indicator.visible, true);
+  assert.equal(indicator.dot, 'failed');
+  assert.equal(
+    indicator.condition,
+    'team / dev is unreachable — its connection is dead; deploy it to bring the runtime back',
+  );
+  assert.equal(
+    indicator.activity,
+    'Unreachable — its connection is dead; deploy it to bring the runtime back',
+  );
+});
+
+test('a stale forward keeps the row visible even once the port stops answering', () => {
+  // The diagnosis outlives reachability: the forward can drop entirely between
+  // sweeps, and a row that went blank at that moment would take the only
+  // explanation of the outage with it.
+  const indicator = environmentIndicator({ ...base, stale: true });
+  assert.equal(indicator.visible, true);
+  assert.equal(indicator.dot, 'failed');
 });
 
 test('a reachable environment is reported on its own terms, not a stale condition', () => {
