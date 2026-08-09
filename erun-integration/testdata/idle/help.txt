@@ -1,9 +1,20 @@
-Show environment idle stop status
+Report the environment's own idle markers: what it last saw, which leases are
+holding it busy, and how long it has before auto-stop.
+
+The answer comes from the environment, over its MCP edge, so it is the same
+one the desktop's activity view shows. An edge that cannot be reached is
+reported as such rather than as an idle environment — safe to act on before a
+stop, a redeploy, or a delete.
 
 Usage:
   erun idle [TENANT] [ENVIRONMENT] [flags]
 
+Examples:
+  erun idle --tenant team --environment dev
+  erun idle team dev --json
+
 Flags:
+      --dry-run              Resolve and trace mutating actions without executing them.
       --environment string   Environment
   -h, --help                 help for idle
       --json                 Write JSON output

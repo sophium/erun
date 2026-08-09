@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -11,12 +12,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// The job verbs are the in-environment half of the job surface: an agent or a
-// script inside the environment starts long work, and anything else — the same
-// shell later, another agent, an orchestrator on the host over MCP — can ask
-// what happened to it. The point is that none of them re-implement detachment,
-// log redirection, polling, or exit-status capture around a general-purpose
-// escape hatch, because every one of those is a place to get it wrong.
+// The job verbs start long work in an environment and observe it by handle. The
+// work, its log, and the activity lease that keeps idle-stop off it all live in
+// the environment: inside it these act on its store directly, and anywhere else
+// they go to its own edge. What none of them re-implement is detachment, log
+// redirection, polling, or exit-status capture around a general-purpose escape
+// hatch, because every one of those is a place to get it wrong.
 
 const (
 	// jobAwaitTimeoutExitCode is the bounded wait elapsing with the work still
@@ -30,30 +31,34 @@ const (
 	jobAwaitUnknownExitCode = 125
 )
 
-func newJobCmd() *cobra.Command {
+func newJobCmd(resolveOpen OpenResolver) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "job",
 		Short: "Start long work in the environment and observe it by handle",
 		Long: "Start detached work, then ask what happened to it: whether it is running, what\n" +
 			"it exited with, and what it printed. Starting a job also holds an activity\n" +
 			"lease for its lifetime, so the environment reports as busy and idle-stop\n" +
-			"leaves it alone while the work runs.",
+			"leaves it alone while the work runs.\n\n" +
+			"The work always runs in the environment, never on the machine you type this\n" +
+			"on: off-environment these verbs act through the environment's MCP edge, which\n" +
+			"needs the port-forward `erun open` establishes. Paths are the environment's —\n" +
+			"--dir and the reported log path resolve inside it.",
 		SilenceErrors: true,
 		SilenceUsage:  true,
 	}
 	cmd.AddCommand(
-		newJobStartCmd(),
-		newJobAttachCmd(),
-		newJobStatusCmd(),
-		newJobAwaitCmd(),
-		newJobOutputCmd(),
-		newJobCancelCmd(),
+		newJobStartCmd(resolveOpen),
+		newJobAttachCmd(resolveOpen),
+		newJobStatusCmd(resolveOpen),
+		newJobAwaitCmd(resolveOpen),
+		newJobOutputCmd(resolveOpen),
+		newJobCancelCmd(resolveOpen),
 		newJobSuperviseCmd(),
 	)
 	return cmd
 }
 
-func newJobStartCmd() *cobra.Command {
+func newJobStartCmd(resolveOpen OpenResolver) *cobra.Command {
 	var tenant string
 	var environment string
 	var name string
@@ -101,13 +106,13 @@ func newJobStartCmd() *cobra.Command {
 			} else {
 				params.Command = args
 			}
-			return runJobStart(cmd, params)
+			return runJobStart(cmd, resolveOpen, params)
 		},
 	}
 	addJobTargetFlags(cmd, &tenant, &environment)
 	cmd.Flags().StringVar(&name, "name", "", "What the work is, shown wherever the environment reports as busy")
 	cmd.Flags().StringVar(&id, "id", "", "Handle to address the job by (defaults to the name)")
-	cmd.Flags().StringVar(&dir, "dir", "", "Working directory to run the command from")
+	cmd.Flags().StringVar(&dir, "dir", "", "Working directory in the environment to run the command from")
 	cmd.Flags().StringVar(&agent, "agent", "", "Run an AI tool ("+strings.Join(common.AgentJobTools, " or ")+") in streaming mode, taking the trailing arguments as its prompt")
 	cmd.Flags().Int64Var(&maxOutputBytes, "max-output-bytes", common.DefaultEnvironmentJobOutputLimitBytes, "Cap on captured output; past it output is dropped and the job says so")
 	cmd.Flags().DurationVar(&leaseTTL, "lease-ttl", common.DefaultEnvironmentActivityLeaseTTL, "Activity lease TTL the job renews inside while it runs")
@@ -115,26 +120,21 @@ func newJobStartCmd() *cobra.Command {
 	return cmd
 }
 
-func runJobStart(cmd *cobra.Command, params common.StartEnvironmentJobParams) error {
+func runJobStart(cmd *cobra.Command, resolveOpen OpenResolver, params common.StartEnvironmentJobParams) error {
 	if err := validateJobTarget(params.Tenant, params.Environment); err != nil {
 		return err
 	}
-	// The CLI binary is the supervisor: an already-resolved absolute path, so a
-	// job never depends on what the caller's PATH happens to hold.
-	supervisor, err := erunExecutablePath()
-	if err != nil {
-		return err
-	}
-	params.SupervisorPath = supervisor
-
 	ctx := commandContext(cmd)
-	job, err := common.StartEnvironmentJob(ctx, params)
+	job, resolved, err := startJob(cmd.Context(), ctx, resolveOpen, params)
 	if err != nil {
 		return err
 	}
 	// A dry run resolved a plan and started nothing, so it says nothing about a
 	// job having started; the trace above is the whole answer.
-	if !ctx.DryRun && ctx.Output != common.OutputJSON {
+	if !resolved {
+		return nil
+	}
+	if ctx.Output != common.OutputJSON {
 		if _, err := fmt.Fprintf(ctx.Stdout, "job started: %s (id %s), output at %s\n", job.Name, job.ID, job.LogPath); err != nil {
 			return err
 		}
@@ -142,7 +142,25 @@ func runJobStart(cmd *cobra.Command, params common.StartEnvironmentJobParams) er
 	return ctx.WriteResult(job)
 }
 
-func newJobAttachCmd() *cobra.Command {
+func startJob(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, params common.StartEnvironmentJobParams) (common.EnvironmentJob, bool, error) {
+	if !environmentTargetsItself() {
+		return startJobInEnvironment(ctx, commandCtx, resolveOpen, params)
+	}
+	// The CLI binary is the supervisor: an already-resolved absolute path, so a
+	// job never depends on what the caller's PATH happens to hold.
+	supervisor, err := erunExecutablePath()
+	if err != nil {
+		return common.EnvironmentJob{}, false, err
+	}
+	params.SupervisorPath = supervisor
+	job, err := common.StartEnvironmentJob(commandCtx, params)
+	if err != nil {
+		return common.EnvironmentJob{}, false, err
+	}
+	return job, !commandCtx.DryRun, nil
+}
+
+func newJobAttachCmd(resolveOpen OpenResolver) *cobra.Command {
 	var tenant string
 	var environment string
 	var name string
@@ -162,7 +180,7 @@ func newJobAttachCmd() *cobra.Command {
 		Example: "  erun job attach --tenant team --environment dev --name overnight-index --pid 4242",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runJobAttach(cmd, common.AttachEnvironmentJobParams{
+			return runJobAttach(cmd, resolveOpen, common.AttachEnvironmentJobParams{
 				Tenant:      tenant,
 				Environment: environment,
 				Name:        name,
@@ -176,23 +194,26 @@ func newJobAttachCmd() *cobra.Command {
 	addJobTargetFlags(cmd, &tenant, &environment)
 	cmd.Flags().StringVar(&name, "name", "", "What the work is, shown wherever the environment reports as busy")
 	cmd.Flags().StringVar(&id, "id", "", "Handle to address the job by (defaults to the name)")
-	cmd.Flags().IntVar(&pid, "pid", 0, "Process to track; the job resolves against this pid and nothing else")
-	cmd.Flags().StringVar(&logPath, "log", "", "File the work is already writing its output to, so job output can serve it")
+	cmd.Flags().IntVar(&pid, "pid", 0, "Process in the environment to track; the job resolves against this pid and nothing else")
+	cmd.Flags().StringVar(&logPath, "log", "", "File in the environment the work is already writing its output to, so job output can serve it")
 	cmd.Flags().DurationVar(&leaseTTL, "lease-ttl", common.DefaultEnvironmentActivityLeaseTTL, "Activity lease TTL; re-attach to renew")
 	addDryRunFlag(cmd)
 	return cmd
 }
 
-func runJobAttach(cmd *cobra.Command, params common.AttachEnvironmentJobParams) error {
+func runJobAttach(cmd *cobra.Command, resolveOpen OpenResolver, params common.AttachEnvironmentJobParams) error {
 	if err := validateJobTarget(params.Tenant, params.Environment); err != nil {
 		return err
 	}
 	ctx := commandContext(cmd)
-	job, err := common.AttachEnvironmentJob(ctx, params)
+	job, resolved, err := attachJob(cmd.Context(), ctx, resolveOpen, params)
 	if err != nil {
 		return err
 	}
-	if !ctx.DryRun && ctx.Output != common.OutputJSON {
+	if !resolved {
+		return nil
+	}
+	if ctx.Output != common.OutputJSON {
 		if _, err := fmt.Fprintf(ctx.Stdout, "job attached: %s (id %s), tracking pid %d\n", job.Name, job.ID, job.PID); err != nil {
 			return err
 		}
@@ -200,7 +221,18 @@ func runJobAttach(cmd *cobra.Command, params common.AttachEnvironmentJobParams) 
 	return ctx.WriteResult(job)
 }
 
-func newJobStatusCmd() *cobra.Command {
+func attachJob(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, params common.AttachEnvironmentJobParams) (common.EnvironmentJob, bool, error) {
+	if !environmentTargetsItself() {
+		return attachJobInEnvironment(ctx, commandCtx, resolveOpen, params)
+	}
+	job, err := common.AttachEnvironmentJob(commandCtx, params)
+	if err != nil {
+		return common.EnvironmentJob{}, false, err
+	}
+	return job, !commandCtx.DryRun, nil
+}
+
+func newJobStatusCmd(resolveOpen OpenResolver) *cobra.Command {
 	var tenant string
 	var environment string
 	var id string
@@ -216,25 +248,29 @@ func newJobStatusCmd() *cobra.Command {
 			"  erun job status --tenant team --environment dev --id suite --output json",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runJobStatus(cmd, tenant, environment, id)
+			return runJobStatus(cmd, resolveOpen, tenant, environment, id)
 		},
 	}
 	addJobTargetFlags(cmd, &tenant, &environment)
 	cmd.Flags().StringVar(&id, "id", "", "Job to report; omit for every retained job")
+	addDryRunFlag(cmd)
 	return cmd
 }
 
-func runJobStatus(cmd *cobra.Command, tenant, environment, id string) error {
+func runJobStatus(cmd *cobra.Command, resolveOpen OpenResolver, tenant, environment, id string) error {
 	if err := validateJobTarget(tenant, environment); err != nil {
 		return err
 	}
 	ctx := commandContext(cmd)
-	now := time.Now()
-	if strings.TrimSpace(id) != "" {
-		job, err := common.LoadEnvironmentJob(tenant, environment, id, now)
-		if err != nil {
-			return err
-		}
+	single := strings.TrimSpace(id) != ""
+	job, jobs, resolved, err := readJobStatus(cmd.Context(), ctx, resolveOpen, tenant, environment, id)
+	if err != nil {
+		return err
+	}
+	if !resolved {
+		return nil
+	}
+	if single {
 		if ctx.Output != common.OutputJSON {
 			if _, err := fmt.Fprintln(ctx.Stdout, jobStatusLine(job)); err != nil {
 				return err
@@ -242,19 +278,60 @@ func runJobStatus(cmd *cobra.Command, tenant, environment, id string) error {
 		}
 		return ctx.WriteResult(job)
 	}
-	jobs, err := common.LoadEnvironmentJobs(tenant, environment, now)
-	if err != nil {
-		return err
-	}
-	if jobs == nil {
-		jobs = []common.EnvironmentJob{}
-	}
 	if ctx.Output != common.OutputJSON {
 		if err := writeJobList(ctx, jobs); err != nil {
 			return err
 		}
 	}
 	return ctx.WriteResult(jobs)
+}
+
+func readJobStatus(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, tenant, environment, id string) (common.EnvironmentJob, []common.EnvironmentJob, bool, error) {
+	if !environmentTargetsItself() {
+		return readJobStatusFromEnvironment(ctx, commandCtx, resolveOpen, tenant, environment, id)
+	}
+	return readStoredJobStatus(commandCtx, tenant, environment, id)
+}
+
+func readJobStatusFromEnvironment(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, tenant, environment, id string) (common.EnvironmentJob, []common.EnvironmentJob, bool, error) {
+	result, resolved, err := jobStatusFromEnvironment(ctx, commandCtx, resolveOpen, tenant, environment, id)
+	if err != nil || !resolved {
+		return common.EnvironmentJob{}, nil, resolved, err
+	}
+	jobs := result.Jobs
+	if jobs == nil {
+		jobs = []common.EnvironmentJob{}
+	}
+	if strings.TrimSpace(id) == "" {
+		return common.EnvironmentJob{}, jobs, resolved, nil
+	}
+	if result.Job == nil {
+		return common.EnvironmentJob{}, jobs, resolved, fmt.Errorf("%s/%s returned no job for id %q", tenant, environment, id)
+	}
+	return *result.Job, jobs, resolved, nil
+}
+
+func readStoredJobStatus(commandCtx common.Context, tenant, environment, id string) (common.EnvironmentJob, []common.EnvironmentJob, bool, error) {
+	if commandCtx.DryRun {
+		commandCtx.TraceCommand("", "job", "status", tenant, environment, id)
+		return common.EnvironmentJob{}, nil, false, nil
+	}
+	now := time.Now()
+	if strings.TrimSpace(id) != "" {
+		job, err := common.LoadEnvironmentJob(tenant, environment, id, now)
+		if err != nil {
+			return common.EnvironmentJob{}, nil, false, err
+		}
+		return job, []common.EnvironmentJob{job}, true, nil
+	}
+	jobs, err := common.LoadEnvironmentJobs(tenant, environment, now)
+	if err != nil {
+		return common.EnvironmentJob{}, nil, false, err
+	}
+	if jobs == nil {
+		jobs = []common.EnvironmentJob{}
+	}
+	return common.EnvironmentJob{}, jobs, true, nil
 }
 
 func writeJobList(ctx common.Context, jobs []common.EnvironmentJob) error {
@@ -329,7 +406,7 @@ func jobExitCodeOrUnset(job common.EnvironmentJob) int {
 	return *job.ExitCode
 }
 
-func newJobAwaitCmd() *cobra.Command {
+func newJobAwaitCmd(resolveOpen OpenResolver) *cobra.Command {
 	var tenant string
 	var environment string
 	var id string
@@ -347,7 +424,7 @@ func newJobAwaitCmd() *cobra.Command {
 		Example: "  erun job await --tenant team --environment dev --id suite --timeout 2m",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runJobAwait(cmd, common.AwaitEnvironmentJobParams{
+			return runJobAwait(cmd, resolveOpen, common.AwaitEnvironmentJobParams{
 				Tenant:      tenant,
 				Environment: environment,
 				ID:          id,
@@ -358,17 +435,21 @@ func newJobAwaitCmd() *cobra.Command {
 	addJobTargetFlags(cmd, &tenant, &environment)
 	cmd.Flags().StringVar(&id, "id", "", "Job to wait for")
 	cmd.Flags().DurationVar(&timeout, "timeout", common.DefaultEnvironmentJobAwaitTimeout, "How long to wait before reporting the job as still running")
+	addDryRunFlag(cmd)
 	return cmd
 }
 
-func runJobAwait(cmd *cobra.Command, params common.AwaitEnvironmentJobParams) error {
+func runJobAwait(cmd *cobra.Command, resolveOpen OpenResolver, params common.AwaitEnvironmentJobParams) error {
 	if err := validateJobTarget(params.Tenant, params.Environment); err != nil {
 		return err
 	}
 	ctx := commandContext(cmd)
-	result, err := common.AwaitEnvironmentJob(params)
+	result, resolved, err := awaitJob(cmd.Context(), ctx, resolveOpen, params)
 	if err != nil {
 		return err
+	}
+	if !resolved {
+		return nil
 	}
 	if ctx.Output != common.OutputJSON {
 		if _, err := fmt.Fprintln(ctx.Stdout, jobAwaitLine(result)); err != nil {
@@ -379,6 +460,21 @@ func runJobAwait(cmd *cobra.Command, params common.AwaitEnvironmentJobParams) er
 		return err
 	}
 	return jobAwaitExit(result)
+}
+
+func awaitJob(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, params common.AwaitEnvironmentJobParams) (common.AwaitEnvironmentJobResult, bool, error) {
+	if !environmentTargetsItself() {
+		return awaitJobInEnvironment(ctx, commandCtx, resolveOpen, params)
+	}
+	if commandCtx.DryRun {
+		commandCtx.TraceCommand("", "job", "await", params.Tenant, params.Environment, params.ID)
+		return common.AwaitEnvironmentJobResult{}, false, nil
+	}
+	result, err := common.AwaitEnvironmentJob(params)
+	if err != nil {
+		return common.AwaitEnvironmentJobResult{}, false, err
+	}
+	return result, true, nil
 }
 
 func jobAwaitLine(result common.AwaitEnvironmentJobResult) string {
@@ -404,7 +500,7 @@ func jobAwaitExit(result common.AwaitEnvironmentJobResult) error {
 	}
 }
 
-func newJobOutputCmd() *cobra.Command {
+func newJobOutputCmd(resolveOpen OpenResolver) *cobra.Command {
 	var tenant string
 	var environment string
 	var id string
@@ -419,7 +515,7 @@ func newJobOutputCmd() *cobra.Command {
 		Example: "  erun job output --tenant team --environment dev --id suite --offset 4096",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runJobOutput(cmd, common.ReadEnvironmentJobOutputParams{
+			return runJobOutput(cmd, resolveOpen, common.ReadEnvironmentJobOutputParams{
 				Tenant:      tenant,
 				Environment: environment,
 				ID:          id,
@@ -432,17 +528,21 @@ func newJobOutputCmd() *cobra.Command {
 	cmd.Flags().StringVar(&id, "id", "", "Job whose output to read")
 	cmd.Flags().Int64Var(&offset, "offset", 0, "Byte offset to read from, so a poll continues rather than repeats")
 	cmd.Flags().Int64Var(&maxBytes, "max-bytes", common.DefaultEnvironmentJobOutputReadBytes, "Most bytes to return in this read")
+	addDryRunFlag(cmd)
 	return cmd
 }
 
-func runJobOutput(cmd *cobra.Command, params common.ReadEnvironmentJobOutputParams) error {
+func runJobOutput(cmd *cobra.Command, resolveOpen OpenResolver, params common.ReadEnvironmentJobOutputParams) error {
 	if err := validateJobTarget(params.Tenant, params.Environment); err != nil {
 		return err
 	}
 	ctx := commandContext(cmd)
-	output, err := common.ReadEnvironmentJobOutput(params)
+	output, resolved, err := readJobOutput(cmd.Context(), ctx, resolveOpen, params)
 	if err != nil {
 		return err
+	}
+	if !resolved {
+		return nil
 	}
 	if ctx.Output != common.OutputJSON {
 		if _, err := fmt.Fprint(ctx.Stdout, output.Output); err != nil {
@@ -457,7 +557,22 @@ func runJobOutput(cmd *cobra.Command, params common.ReadEnvironmentJobOutputPara
 	return ctx.WriteResult(output)
 }
 
-func newJobCancelCmd() *cobra.Command {
+func readJobOutput(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, params common.ReadEnvironmentJobOutputParams) (common.EnvironmentJobOutput, bool, error) {
+	if !environmentTargetsItself() {
+		return jobOutputFromEnvironment(ctx, commandCtx, resolveOpen, params)
+	}
+	if commandCtx.DryRun {
+		commandCtx.TraceCommand("", "job", "output", params.Tenant, params.Environment, params.ID)
+		return common.EnvironmentJobOutput{}, false, nil
+	}
+	output, err := common.ReadEnvironmentJobOutput(params)
+	if err != nil {
+		return common.EnvironmentJobOutput{}, false, err
+	}
+	return output, true, nil
+}
+
+func newJobCancelCmd(resolveOpen OpenResolver) *cobra.Command {
 	var tenant string
 	var environment string
 	var id string
@@ -474,7 +589,7 @@ func newJobCancelCmd() *cobra.Command {
 			"  erun job cancel --tenant team --environment dev --id suite --signal KILL",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runJobCancel(cmd, common.CancelEnvironmentJobParams{
+			return runJobCancel(cmd, resolveOpen, common.CancelEnvironmentJobParams{
 				Tenant:      tenant,
 				Environment: environment,
 				ID:          id,
@@ -489,16 +604,19 @@ func newJobCancelCmd() *cobra.Command {
 	return cmd
 }
 
-func runJobCancel(cmd *cobra.Command, params common.CancelEnvironmentJobParams) error {
+func runJobCancel(cmd *cobra.Command, resolveOpen OpenResolver, params common.CancelEnvironmentJobParams) error {
 	if err := validateJobTarget(params.Tenant, params.Environment); err != nil {
 		return err
 	}
 	ctx := commandContext(cmd)
-	result, err := common.CancelEnvironmentJob(ctx, params)
+	result, resolved, err := cancelJob(cmd.Context(), ctx, resolveOpen, params)
 	if err != nil {
 		return err
 	}
-	if !ctx.DryRun && ctx.Output != common.OutputJSON {
+	if !resolved {
+		return nil
+	}
+	if ctx.Output != common.OutputJSON {
 		message := fmt.Sprintf("job already finished: %s (%s)", result.Job.ID, result.Job.State)
 		if result.Signalled {
 			message = fmt.Sprintf("job cancelled: %s, SIG%s to process group %d", result.Job.ID, result.Signal, result.TargetPID)
@@ -510,9 +628,21 @@ func runJobCancel(cmd *cobra.Command, params common.CancelEnvironmentJobParams) 
 	return ctx.WriteResult(result)
 }
 
+func cancelJob(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, params common.CancelEnvironmentJobParams) (common.CancelEnvironmentJobResult, bool, error) {
+	if !environmentTargetsItself() {
+		return cancelJobInEnvironment(ctx, commandCtx, resolveOpen, params)
+	}
+	result, err := common.CancelEnvironmentJob(commandCtx, params)
+	if err != nil {
+		return common.CancelEnvironmentJobResult{}, false, err
+	}
+	return result, !commandCtx.DryRun, nil
+}
+
 // newJobSuperviseCmd is the process a started job actually runs as. It is the
 // only writer of a job record, because it is the only thing waiting on the work
-// and therefore the only thing that can observe an exit status first-hand.
+// and therefore the only thing that can observe an exit status first-hand. It
+// always runs where the work runs, so it never reaches for an environment's edge.
 // Hidden: nothing calls it but `job start`.
 func newJobSuperviseCmd() *cobra.Command {
 	var tenant string

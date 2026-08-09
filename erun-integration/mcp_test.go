@@ -63,6 +63,9 @@ type fakeMCPRequest struct {
 	Method     string
 	Authbearer string
 	SessionID  string
+	// Tool is the tool a tools/call named, which is what proves a caller reached
+	// the intended surface rather than some other one.
+	Tool string
 }
 
 func (e *fakeMCPEdge) start(t *testing.T, port int) {
@@ -83,6 +86,9 @@ func (e *fakeMCPEdge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		ID     json.RawMessage `json:"id"`
 		Method string          `json:"method"`
+		Params struct {
+			Name string `json:"name"`
+		} `json:"params"`
 	}
 	_ = json.Unmarshal(body, &request)
 
@@ -91,6 +97,7 @@ func (e *fakeMCPEdge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Method:     request.Method,
 		Authbearer: strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "),
 		SessionID:  r.Header.Get("Mcp-Session-Id"),
+		Tool:       request.Params.Name,
 	})
 	e.mu.Unlock()
 

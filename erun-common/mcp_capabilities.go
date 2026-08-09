@@ -30,18 +30,19 @@ const (
 // awake, is not here. Leases look harmless and are not: holding one defers
 // auto-stop, which spends money.
 var mcpReadOnlyTools = map[string]struct{}{
-	"version":           {},
-	"list":              {},
-	"idle":              {},
-	"idle_stop_history": {},
-	"context_list":      {},
-	"cloud_list":        {},
-	"diff":              {},
-	"outputs_list":      {},
-	"outputs_download":  {},
-	"job_status":        {},
-	"job_output":        {},
-	"job_await":         {},
+	"version":             {},
+	"list":                {},
+	"idle":                {},
+	"activity_lease_list": {},
+	"idle_stop_history":   {},
+	"context_list":        {},
+	"cloud_list":          {},
+	"diff":                {},
+	"outputs_list":        {},
+	"outputs_download":    {},
+	"job_status":          {},
+	"job_output":          {},
+	"job_await":           {},
 }
 
 // MCPToolCapability returns the capability a tool requires. An unknown tool

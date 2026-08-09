@@ -698,7 +698,7 @@ func TestActivity(t *testing.T) {
 
 	t.Run("lease_help", func(t *testing.T) {
 		setup := env.New(t)
-		result := erun.Run(t, []string{"activity", "lease", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"activity", "lease", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -712,13 +712,13 @@ func TestActivity(t *testing.T) {
 		// collapses it; the ttl itself is asserted from the JSON below.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		take := erun.Run(t, []string{"activity", "lease", "take", "--tenant", "team", "--environment", "dev", "--name", "gradle-build", "--ttl", "10m"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		take := erun.Run(t, []string{"activity", "lease", "take", "--tenant", "team", "--environment", "dev", "--name", "gradle-build", "--ttl", "10m"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if take.ExitCode != 0 {
 			t.Fatalf("take: exit %d: %s", take.ExitCode, take.Combined)
 		}
-		list := erun.Run(t, []string{"activity", "lease", "list", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		release := erun.Run(t, []string{"activity", "lease", "release", "--tenant", "team", "--environment", "dev", "--id", "gradle-build"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		empty := erun.Run(t, []string{"activity", "lease", "list", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		list := erun.Run(t, []string{"activity", "lease", "list", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		release := erun.Run(t, []string{"activity", "lease", "release", "--tenant", "team", "--environment", "dev", "--id", "gradle-build"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		empty := erun.Run(t, []string{"activity", "lease", "list", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		golden.Equal(t, "activity/lease_take_list_and_release", normalize.Apply(
 			take.Combined+list.Combined+release.Combined+empty.Combined))
 
@@ -736,7 +736,7 @@ func TestActivity(t *testing.T) {
 		// capturing the id it must release.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		result := erun.Run(t, []string{"activity", "lease", "take", "--tenant", "team", "--environment", "dev", "--name", "agent run", "--id", "agent-run", "--pid", "4242", "--json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"activity", "lease", "take", "--tenant", "team", "--environment", "dev", "--name", "agent run", "--id", "agent-run", "--pid", "4242", "--json"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -758,7 +758,7 @@ func TestActivity(t *testing.T) {
 		// why, which is the whole gap this exists to close.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		result := erun.Run(t, []string{"activity", "lease", "take", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"activity", "lease", "take", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit without a name, got 0:\n%s", result.Combined)
 		}
@@ -774,11 +774,11 @@ func TestActivity(t *testing.T) {
 		// other arm.
 		setup := env.New(t)
 		seedManagedCloudTenantEnvWithIdle(t, setup, "team", "dev", insideWorkingHoursIdleBlock)
-		take := erun.Run(t, []string{"activity", "lease", "take", "--tenant", "team", "--environment", "dev", "--name", "agent-run", "--ttl", "1h"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		take := erun.Run(t, []string{"activity", "lease", "take", "--tenant", "team", "--environment", "dev", "--name", "agent-run", "--ttl", "1h"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if take.ExitCode != 0 {
 			t.Fatalf("take: exit %d: %s", take.ExitCode, take.Combined)
 		}
-		result := erun.Run(t, []string{"activity", "stop-ready", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"activity", "stop-ready", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected a leased env to refuse the stop, got exit 0:\n%s", result.Combined)
 		}
@@ -796,11 +796,11 @@ func TestActivity(t *testing.T) {
 		// working-hours branch.
 		setup := env.New(t)
 		seedManagedCloudTenantEnvWithIdle(t, setup, "team", "dev", outsideWorkingHoursIdleBlock)
-		take := erun.Run(t, []string{"activity", "lease", "take", "--tenant", "team", "--environment", "dev", "--name", "agent-run", "--ttl", "1h"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		take := erun.Run(t, []string{"activity", "lease", "take", "--tenant", "team", "--environment", "dev", "--name", "agent-run", "--ttl", "1h"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if take.ExitCode != 0 {
 			t.Fatalf("take: exit %d: %s", take.ExitCode, take.Combined)
 		}
-		result := erun.Run(t, []string{"activity", "stop-ready", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"activity", "stop-ready", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected a leased env to refuse the stop outside working hours, got exit 0:\n%s", result.Combined)
 		}
@@ -820,10 +820,10 @@ func TestActivity(t *testing.T) {
 		writeSampleProcess(t, procRoot, 101, "java", 500, 900)
 		sampleArgs := []string{"activity", "sample", "--tenant", "team", "--environment", "dev", "--proc-root", procRoot}
 
-		first := erun.Run(t, sampleArgs, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		first := erun.Run(t, sampleArgs, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		writeSampleProcess(t, procRoot, 101, "java", 900, 900)
-		working := erun.Run(t, sampleArgs, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		quiet := erun.Run(t, sampleArgs, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		working := erun.Run(t, sampleArgs, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		quiet := erun.Run(t, sampleArgs, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		golden.Equal(t, "activity/sample_records_activity_only_when_work_advances", normalize.Apply(
 			first.Combined+working.Combined+quiet.Combined))
 
@@ -836,7 +836,7 @@ func TestActivity(t *testing.T) {
 
 	t.Run("sample_requires_target", func(t *testing.T) {
 		setup := env.New(t)
-		result := erun.Run(t, []string{"activity", "sample"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"activity", "sample"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit without target flags, got 0:\n%s", result.Combined)
 		}
@@ -845,7 +845,7 @@ func TestActivity(t *testing.T) {
 
 	t.Run("ssh_proxy_requires_tenant_and_environment", func(t *testing.T) {
 		setup := env.New(t)
-		result := erun.Run(t, []string{"activity", "ssh-proxy", "--listen", "127.0.0.1:0", "--target", "127.0.0.1:1"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"activity", "ssh-proxy", "--listen", "127.0.0.1:0", "--target", "127.0.0.1:1"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit without tenant/environment, got 0:\n%s", result.Combined)
 		}
@@ -855,7 +855,7 @@ func TestActivity(t *testing.T) {
 	t.Run("ssh_proxy_requires_listen_and_target", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		result := erun.Run(t, []string{"activity", "ssh-proxy", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"activity", "ssh-proxy", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit without addresses, got 0:\n%s", result.Combined)
 		}
@@ -866,7 +866,7 @@ func TestActivity(t *testing.T) {
 		// A negative byte threshold is a misconfiguration, not "always idle".
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		result := erun.Run(t, []string{"activity", "ssh-proxy", "--tenant", "team", "--environment", "dev", "--listen", "127.0.0.1:0", "--target", "127.0.0.1:1", "--idle-traffic-bytes=-1"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"activity", "ssh-proxy", "--tenant", "team", "--environment", "dev", "--listen", "127.0.0.1:0", "--target", "127.0.0.1:1", "--idle-traffic-bytes=-1"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit for negative threshold, got 0:\n%s", result.Combined)
 		}
@@ -879,7 +879,7 @@ func TestActivity(t *testing.T) {
 		// the accept loop.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		result := erun.Run(t, []string{"activity", "ssh-proxy", "--tenant", "team", "--environment", "dev", "--listen", "127.0.0.1", "--target", "127.0.0.1:1"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"activity", "ssh-proxy", "--tenant", "team", "--environment", "dev", "--listen", "127.0.0.1", "--target", "127.0.0.1:1"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit for unlistenable address, got 0:\n%s", result.Combined)
 		}

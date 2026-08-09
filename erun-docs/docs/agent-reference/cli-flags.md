@@ -673,7 +673,7 @@ The local port-forward state files under `<UserConfigDir>/erun/portforward/{mcp,
 
 ## `erun job` {#erun-job}
 
-`erun job` starts long work in an environment and answers what happened to it. It is the in-environment half of the job surface; the host-side half is the `job_*` [MCP tools](/mcp/overview#job-tools), which run the same shared implementation.
+`erun job` starts long work in an environment and answers what happened to it. The work always runs in the environment, wherever the command is typed: inside the environment the verbs act on its store directly, and from anywhere else they act through the environment's MCP edge, which needs the port-forward `erun open` establishes. The `job_*` [MCP tools](/mcp/overview#job-tools) are that same surface reached directly, over the same shared implementation. Paths are the environment's — `--dir` and the reported log path resolve inside it, and a pid names a process in the environment.
 
 Use it instead of hand-rolling detachment, a log redirect, a polling loop, a sentinel token, and an exit-code parse around [`erun exec raw`](/cli/exec) / the `raw` MCP tool. Three properties are the reason it exists:
 

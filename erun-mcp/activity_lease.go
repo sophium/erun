@@ -97,3 +97,19 @@ func activityLeaseResult(tenant, environment string, lease *eruncommon.Environme
 	}
 	return nil, ActivityLeaseResult{Tenant: tenant, Environment: environment, Lease: lease, Held: held}, nil
 }
+
+// ActivityLeaseListInput selects the environment to read.
+type ActivityLeaseListInput struct {
+	Tenant      string `json:"tenant,omitempty" jsonschema:"tenant whose environment to read; defaults to the server tenant context"`
+	Environment string `json:"environment,omitempty" jsonschema:"environment to read; defaults to the server environment context"`
+}
+
+func activityLeaseListTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ActivityLeaseListInput) (*mcp.CallToolResult, ActivityLeaseResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input ActivityLeaseListInput) (*mcp.CallToolResult, ActivityLeaseResult, error) {
+		tenant, environment, err := resolveActivityLeaseTarget(runtime, input.Tenant, input.Environment)
+		if err != nil {
+			return nil, ActivityLeaseResult{}, err
+		}
+		return activityLeaseResult(tenant, environment, nil)
+	}
+}

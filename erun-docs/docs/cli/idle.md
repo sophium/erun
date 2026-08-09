@@ -12,6 +12,12 @@ Show an environment's idle and auto-stop status. Read-only — it reports what t
 erun idle [TENANT] [ENVIRONMENT] [flags]
 ```
 
+## Where the answer comes from
+
+The status is the environment's own — the same one the desktop's activity view and the MCP `idle` tool report. Inside the environment it is read from its store directly; from anywhere else it is read over the environment's MCP edge, which needs the port-forward `erun open` establishes.
+
+An edge that cannot be reached is reported as an error, never as an idle environment. That distinction is the point: "idle" is a claim about the environment, and a check that cannot see the environment must not make it — an operator or agent asking before a stop, a redeploy, or a delete needs "no answer" to look different from "nothing is running".
+
 ## What it shows
 
 The resolved idle policy (timeout, working hours, timezone), whether the environment is cloud-managed, whether it's currently eligible to stop and why not if it isn't, the per-marker activity breakdown (ssh, api, mcp, cli, codex, process, lease), any activity leases currently held, and any armed auto-stop grace window.
@@ -22,6 +28,7 @@ The resolved idle policy (timeout, working hours, timezone), whether the environ
 |---|---|
 | `--json` | Emit the full status as JSON. |
 | `--tenant`, `--environment` | Target a specific tenant/environment. |
+| `--dry-run` | Resolve and trace the call to the environment without making it. |
 
 ## Examples
 
@@ -38,6 +45,8 @@ The `--json` shape (policy, markers, activity, leases, pending-stop fields) is s
 |---|---|
 | Tenant + environment not resolvable. | Errors; nothing is read. |
 | No activity recorded yet. | Reports markers as idle with no last-activity timestamp — not an error. |
+| The environment's MCP edge is unreachable. | Errors, pointing at `erun open` to bring the port-forward up. Never reported as an idle environment. |
+| The edge rejects this machine's identity. | Errors, pointing at redeploying the environment from the desktop app so it carries this machine's MCP public key. |
 
 ## Activity leases {#activity-leases}
 
