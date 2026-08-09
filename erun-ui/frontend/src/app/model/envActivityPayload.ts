@@ -6,6 +6,7 @@ export interface EnvActivityPayload {
   tenant: string;
   environment: string;
   reachable: boolean;
+  observed: boolean;
   busy: boolean;
   detail?: string;
 }

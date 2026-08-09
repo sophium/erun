@@ -34,6 +34,13 @@ export interface EnvironmentRowDerived {
   selected: boolean;
   busy: boolean;
   busyLabel: string;
+  // busyFromEnvironment says the label describes the environment's own
+  // condition rather than an operation this desktop is running. A row's spinner
+  // needs the label either way, because a screen reader has no other context;
+  // a surface that already names the environment does not, and repeating
+  // "<env> is busy — X" inside a card headed "<env>" says the same thing twice
+  // while displacing the prose the indicator already owns.
+  busyFromEnvironment: boolean;
   isLocal: boolean;
   runtimeVersion: string;
   selection: UISelection;
@@ -50,6 +57,7 @@ export function deriveEnvironmentRow(
   reconnecting: boolean,
   envBusy: boolean,
   envBusyDetail: string,
+  envObserved: boolean,
 ): EnvironmentRowDerived {
   const selected =
     selectedSelection?.tenant === tenantName && selectedSelection.environment === environmentName;
@@ -62,7 +70,23 @@ export function deriveEnvironmentRow(
   // desktop-local: they report what this desktop launched, so an environment
   // driven by `erun` from a terminal, by an orchestrator over MCP, or by a
   // detached job was doing real work behind a row that looked idle.
-  const busy = environmentRowIsBusy(isOpening, runningCommand, aiBusy, reconnecting, envBusy);
+  const busy = environmentRowIsBusy(
+    isOpening,
+    runningCommand,
+    aiBusy,
+    reconnecting,
+    envBusy,
+    envObserved,
+  );
+  const busyFromEnvironment =
+    envBusy &&
+    environmentRowCommandLabel(
+      tenantName,
+      environmentName,
+      isOpening,
+      runningCommand,
+      reconnecting,
+    ) === '';
   const busyLabel = environmentRowBusyLabel(
     tenantName,
     environmentName,
@@ -81,6 +105,7 @@ export function deriveEnvironmentRow(
     selected,
     busy,
     busyLabel,
+    busyFromEnvironment,
     isLocal,
     runtimeVersion: environment?.runtimeVersion?.trim() ?? '',
     selection: { tenant: tenantName, environment: environmentName },
@@ -90,14 +115,38 @@ export function deriveEnvironmentRow(
 // The five reasons a row spins, kept out of deriveEnvironmentRow so that
 // function stays under the complexity gate — and so the set is one named thing
 // rather than a disjunction growing inside a larger function.
+// The environment's own answer both adds and subtracts. Adding was already
+// wired: work started from a terminal or over MCP spins a row the desktop never
+// launched anything on. Subtracting was not, and that is the half that matters
+// for a row nobody can clear — every other input here is desktop-local, set when
+// this desktop starts something and cleared when it sees it end, so any path
+// that loses the ending leaves a latch with nothing to release it. One row span
+// for six hours while `erun idle` reported every marker idle.
+//
+// An observation reporting no work is therefore allowed to clear those latches.
+// It has to be the environment's own answer, not merely a reachable port: an
+// edge that has wedged behind a port that still accepts connections reports no
+// work because nobody asked it, and letting that clear a latch would trade a row
+// that never stops for one that stops while the work is still running.
+//
+// isOpening and reconnecting stay authoritative regardless. They are this
+// desktop's own in-flight operations, begun a moment ago in response to a click,
+// and the environment cannot yet have observed what has not reached it.
 function environmentRowIsBusy(
   isOpening: boolean,
   runningCommand: string,
   aiBusy: boolean,
   reconnecting: boolean,
   envBusy: boolean,
+  envObserved: boolean,
 ): boolean {
-  return isOpening || runningCommand !== '' || aiBusy || reconnecting || envBusy;
+  if (envBusy || isOpening || reconnecting) {
+    return true;
+  }
+  if (envObserved) {
+    return false;
+  }
+  return runningCommand !== '' || aiBusy;
 }
 
 function environmentRowBusyLabel(
@@ -111,21 +160,44 @@ function environmentRowBusyLabel(
   envBusyDetail: string,
 ): string {
   const target = `${tenantName} / ${environmentName}`;
-  if (runningCommand !== '') {
-    const verb = activityCommandLabel(runningCommand);
-    return `${verb} ${target}`;
-  }
-  if (isOpening) {
-    return `Opening ${target}`;
-  }
-  if (reconnecting) {
-    return `Reconnecting ${target}`;
+  const command = environmentRowCommandLabel(
+    tenantName,
+    environmentName,
+    isOpening,
+    runningCommand,
+    reconnecting,
+  );
+  if (command !== '') {
+    return command;
   }
   if (envBusy) {
     return envBusyDetail !== '' ? `${target} is busy — ${envBusyDetail}` : `${target} is busy`;
   }
   if (aiBusy) {
     return `AI tab working on ${target}`;
+  }
+  return '';
+}
+
+// The operations this desktop is running itself, in the order that decides
+// which one names the row. Split out from the label so a caller can ask whether
+// there is one at all without re-deriving the precedence.
+function environmentRowCommandLabel(
+  tenantName: string,
+  environmentName: string,
+  isOpening: boolean,
+  runningCommand: string,
+  reconnecting: boolean,
+): string {
+  const target = `${tenantName} / ${environmentName}`;
+  if (runningCommand !== '') {
+    return `${activityCommandLabel(runningCommand)} ${target}`;
+  }
+  if (isOpening) {
+    return `Opening ${target}`;
+  }
+  if (reconnecting) {
+    return `Reconnecting ${target}`;
   }
   return '';
 }

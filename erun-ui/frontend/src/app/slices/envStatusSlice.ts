@@ -20,6 +20,10 @@ const envRealStatuses: readonly string[] = ['stopped', 'runtime-stopped', 'faile
 // tab-presence check cannot see.
 export interface EnvObservedActivity {
   reachable: boolean;
+  // observed is the environment having answered the idle question. It is what
+  // separates "asked, and it reports no work" from "never got an answer" —
+  // busy is false either way, and only the first may clear a row's latch.
+  observed: boolean;
   busy: boolean;
   detail: string;
 }

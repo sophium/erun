@@ -269,6 +269,12 @@ function useEnvironmentRowSelectors(tenantName: string, environmentName: string)
   const reachable = useAppSelector(
     (state) => state.envStatus.activityByEnv[activityKey]?.reachable === true,
   );
+  // Whether the environment answered at all, which is a different question from
+  // what it answered — see environmentRowIsBusy, where only an actual answer is
+  // allowed to stop a row spinning.
+  const envObserved = useAppSelector(
+    (state) => state.envStatus.activityByEnv[activityKey]?.observed === true,
+  );
   const envBusy = useAppSelector(
     (state) => state.envStatus.activityByEnv[activityKey]?.busy === true,
   );
@@ -285,6 +291,7 @@ function useEnvironmentRowSelectors(tenantName: string, environmentName: string)
     reconnecting,
     envState,
     reachable,
+    envObserved,
     envBusy,
     envBusyDetail,
   };
@@ -307,6 +314,7 @@ export function EnvironmentRow({
     reconnecting,
     envState,
     reachable,
+    envObserved,
     envBusy,
     envBusyDetail,
   } = useEnvironmentRowSelectors(tenantName, environmentName);
@@ -314,6 +322,7 @@ export function EnvironmentRow({
     selected: selectedBySelection,
     busy,
     busyLabel,
+    busyFromEnvironment,
     isLocal,
     runtimeVersion,
     selection,
@@ -328,6 +337,7 @@ export function EnvironmentRow({
     reconnecting,
     envBusy,
     envBusyDetail,
+    envObserved,
   );
   // While an orchestrator owns the terminal pane, no environment is the focused
   // thing — suppress the env's selected highlight so the sidebar matches what the
@@ -360,7 +370,7 @@ export function EnvironmentRow({
       selection={selection}
       isLocal={isLocal}
       runtimeVersion={runtimeVersion}
-      activityLabel={busy ? busyLabel : ''}
+      activityLabel={busy && !busyFromEnvironment ? busyLabel : ''}
       indicator={indicator}
     >
       <EnvironmentRowOpenButton

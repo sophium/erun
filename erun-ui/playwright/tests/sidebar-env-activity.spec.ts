@@ -36,7 +36,7 @@ test.describe('sidebar env activity', () => {
     const dot = app.sidebar.envOpenDot(tenant, environment);
     await driveEnvActivity(
       page,
-      { tenant, environment, reachable: true, busy: false },
+      { tenant, environment, reachable: true, observed: true, busy: false },
       async () => {
         await expect(dot).toHaveAttribute('data-env-state', 'running', { timeout: 1_000 });
         // Not opened here means there is nothing to close, so the indicator is a
@@ -50,7 +50,13 @@ test.describe('sidebar env activity', () => {
     );
 
     // And it goes back to blank when the environment stops answering.
-    await emitEnvActivity(page, { tenant, environment, reachable: false, busy: false });
+    await emitEnvActivity(page, {
+      tenant,
+      environment,
+      reachable: false,
+      observed: false,
+      busy: false,
+    });
     await expect(row.getByTestId('env-open-dot')).toHaveCount(0);
   });
 
@@ -60,6 +66,7 @@ test.describe('sidebar env activity', () => {
       tenant,
       environment,
       reachable: true,
+      observed: true,
       busy: true,
       detail: 'holding: gradle-build',
     };
@@ -82,7 +89,13 @@ test.describe('sidebar env activity', () => {
       );
     });
 
-    await emitEnvActivity(page, { tenant, environment, reachable: false, busy: false });
+    await emitEnvActivity(page, {
+      tenant,
+      environment,
+      reachable: false,
+      observed: false,
+      busy: false,
+    });
     const row: Locator = app.sidebar.envRowButton(tenant, environment).locator('..');
     await expect(row.getByTestId('env-open-dot')).toHaveCount(0);
   });
@@ -92,6 +105,7 @@ interface EnvActivityEvent {
   tenant: string;
   environment: string;
   reachable: boolean;
+  observed: boolean;
   busy: boolean;
   detail?: string;
 }
