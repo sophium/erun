@@ -195,6 +195,14 @@ here happen to have files — read the config every time.
   the operator choose. For any ambiguity or fork in the road, pick the option you
   would recommend and proceed, resolving it from the code, tests, and sensible
   defaults rather than a question.
+- **A standing instruction is pre-authorization, not a request to re-ask.** Filing
+  a platform bug with the ` + "`erun-file-issue`" + ` skill is authorized every time
+  it applies. When unsure whether an action needs permission, compare it against the
+  most consequential thing you have already done unaided this turn — if it is
+  smaller, it does not.
+- **Never end a turn on an offer.** "Say the word", "let me know if", "next action
+  is yours" hand the operator a decision and stall the work exactly as a question
+  would. Do the thing, or state it as a decision already taken, and finish.
 - **Test everything end-to-end.** Verification is part of the task, not a follow-up.
   Drive the change into the real target (the in-pod agent builds/deploys it), then
   reproduce the original flow against the running artifact and watch it succeed —
@@ -205,7 +213,8 @@ here happen to have files — read the config every time.
   course-correct. This list is required, not optional.
 - The one exception to acting uninterrupted: an **irreversible or cross-env action**
   (deploy, delete, rebuild+restart, anything that mutates shared/remote state) still
-  gets a clear heads-up before you run it — you inform and proceed, you do not wait.
+  gets a clear heads-up before you run it — a notification issued as you proceed,
+  never a gate you stop on.
 `
 
 // ensureOrchestratorWorkspace makes sure the shared orchestrators root exists and
@@ -424,15 +433,78 @@ func ensureOrchestratorSessionStartHook(dir string) error {
 	// of their own, which an assignment would silently delete.
 	busyHook, idleHook := orchestratorActivityHooks()
 	for _, event := range []string{"UserPromptSubmit", "PreToolUse", "PostToolUse"} {
-		hooks[event] = mergeOrchestratorActivityHook(hooks[event], busyHook)
+		hooks[event] = mergeOrchestratorHookBlocks(hooks[event], busyHook, isOrchestratorActivityHookBlock)
 	}
-	hooks["Stop"] = mergeOrchestratorActivityHook(hooks["Stop"], idleHook)
+	stop := mergeOrchestratorHookBlocks(hooks["Stop"], idleHook, isOrchestratorActivityHookBlock)
+	hooks["Stop"] = mergeOrchestratorHookBlocks(stop, orchestratorNoAskStopGuardBlock(), isOrchestratorNoAskStopGuardBlock)
 	settings["hooks"] = hooks
 	out, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(path, append(out, '\n'), 0o644)
+}
+
+// orchestratorNoAskGuardMarker identifies the stop guard this file wrote, so a
+// rewrite replaces its own previous block instead of stacking another copy.
+const orchestratorNoAskGuardMarker = "noask_guard=1"
+
+// orchestratorNoAskStopGuardReason is fed back to the session when the guard
+// fires. ASCII-only and apostrophe-free so the single-quoted printf is safe in
+// both Git Bash (Windows) and sh (macOS/Linux).
+const orchestratorNoAskStopGuardReason = "Your closing message hands the operator a decision. " +
+	"The orchestrator contract resolves ambiguity itself and carries the task to a verified end, " +
+	"so a question is a defect, not caution. Do what you offered, or state it as a decision already taken, " +
+	"and finish. If the action is outward-facing, announce it and proceed - a heads-up is not a gate."
+
+// orchestratorNoAskStopGuardCommand refuses a turn that ends by handing the
+// operator a decision, which the launch flag cannot reach: denying the tool
+// removes the question form, not the closing sentence that stalls the work just
+// as long. Reading the turn's own last words is what puts the guarantee at the
+// layer the behaviour surfaces on.
+//
+// Every failure path exits 0. A guard that wedged a session on a transcript it
+// could not parse would cost more than the stalls it prevents, and an already
+// nudged turn (stop_hook_active) is let go so a session is corrected once rather
+// than looped. Like the activity reports it is bare shell, so it keeps working
+// when erun is not on PATH.
+func orchestratorNoAskStopGuardCommand() string {
+	return orchestratorNoAskGuardMarker + `; input=$(cat); ` +
+		`printf '%s' "$input" | grep -q '"stop_hook_active"[[:space:]]*:[[:space:]]*true' && exit 0; ` +
+		`transcript=$(printf '%s' "$input" | sed -n 's/.*"transcript_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | sed 's/\\\\/\//g'); ` +
+		`[ -f "$transcript" ] || exit 0; ` +
+		`tail -n 5 "$transcript" | grep -qiE 'say the word|let me know if|let me know whether|shall i |do you want me to|would you like me to|next action is yours|if you.d like me to|your call' || exit 0; ` +
+		`printf '%s' '` + orchestratorNoAskStopGuardReason + `' >&2; exit 2`
+}
+
+// orchestratorNoAskStopGuardBlock is the guard bound to the Stop event.
+func orchestratorNoAskStopGuardBlock() []any {
+	return []any{map[string]any{
+		"hooks": []any{map[string]any{"type": "command", "command": orchestratorNoAskStopGuardCommand()}},
+	}}
+}
+
+// isOrchestratorNoAskStopGuardBlock reports whether a settings hook block is the
+// guard. Anything it cannot read is somebody else's and is kept.
+func isOrchestratorNoAskStopGuardBlock(block any) bool {
+	group, ok := block.(map[string]any)
+	if !ok {
+		return false
+	}
+	hooks, ok := group["hooks"].([]any)
+	if !ok {
+		return false
+	}
+	for _, hook := range hooks {
+		entry, ok := hook.(map[string]any)
+		if !ok {
+			continue
+		}
+		if command, ok := entry["command"].(string); ok && strings.Contains(command, orchestratorNoAskGuardMarker) {
+			return true
+		}
+	}
+	return false
 }
 
 // orchestratorSessionStartHook is the SessionStart hook block: the contract-
@@ -536,6 +608,10 @@ const orchestratorUltracodeFlag = ` --settings '{"ultracode":true}'`
 // defect, not caution, and one asked while the operator is away stalls the work
 // indefinitely. Denying the tool makes that structural rather than a matter of
 // the agent's judgement about its own instructions.
+//
+// The flag covers the tool, not the sentence: a turn that ends "say the word and
+// I will do it" never calls the tool and stalls just as long, which is what
+// orchestratorNoAskStopGuardCommand catches. The two are halves of one guard.
 const orchestratorNoAskFlag = " --disallowedTools AskUserQuestion"
 
 // orchestratorLaunchCommand resolves how to launch the host AI harness. It runs

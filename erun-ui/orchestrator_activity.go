@@ -183,11 +183,11 @@ func orchestratorActivityHooks() (busyHook, idleHook []any) {
 // operator, so an event we write to may already carry their hooks; replacing the
 // event outright would delete them. Our own previous block is dropped first so
 // this stays idempotent across restarts.
-func mergeOrchestratorActivityHook(existing any, ours []any) []any {
+func mergeOrchestratorHookBlocks(existing any, ours []any, isOurs func(any) bool) []any {
 	current, _ := existing.([]any)
 	merged := make([]any, 0, len(current)+len(ours))
 	for _, block := range current {
-		if isOrchestratorActivityHookBlock(block) {
+		if isOurs(block) {
 			continue
 		}
 		merged = append(merged, block)
