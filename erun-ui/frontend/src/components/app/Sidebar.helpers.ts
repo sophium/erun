@@ -62,7 +62,7 @@ export function deriveEnvironmentRow(
   // desktop-local: they report what this desktop launched, so an environment
   // driven by `erun` from a terminal, by an orchestrator over MCP, or by a
   // detached job was doing real work behind a row that looked idle.
-  const busy = isOpening || runningCommand !== '' || aiBusy || reconnecting || envBusy;
+  const busy = environmentRowIsBusy(isOpening, runningCommand, aiBusy, reconnecting, envBusy);
   const busyLabel = environmentRowBusyLabel(
     tenantName,
     environmentName,
@@ -87,6 +87,19 @@ export function deriveEnvironmentRow(
   };
 }
 
+// The five reasons a row spins, kept out of deriveEnvironmentRow so that
+// function stays under the complexity gate — and so the set is one named thing
+// rather than a disjunction growing inside a larger function.
+function environmentRowIsBusy(
+  isOpening: boolean,
+  runningCommand: string,
+  aiBusy: boolean,
+  reconnecting: boolean,
+  envBusy: boolean,
+): boolean {
+  return isOpening || runningCommand !== '' || aiBusy || reconnecting || envBusy;
+}
+
 function environmentRowBusyLabel(
   tenantName: string,
   environmentName: string,
@@ -109,9 +122,7 @@ function environmentRowBusyLabel(
     return `Reconnecting ${target}`;
   }
   if (envBusy) {
-    return envBusyDetail !== ''
-      ? `${target} is busy — ${envBusyDetail}`
-      : `${target} is busy`;
+    return envBusyDetail !== '' ? `${target} is busy — ${envBusyDetail}` : `${target} is busy`;
   }
   if (aiBusy) {
     return `AI tab working on ${target}`;
