@@ -15,9 +15,12 @@ import (
 
 const orchestratorRestoreFileName = "orchestrator-restore.json"
 
-// orchestratorRestoreMaxAge bounds how long a persisted restore target stays
-// valid, so a deliberate restart restores the orchestrator while a plain launch
-// long afterwards never resurrects a stale one.
+// orchestratorRestoreMaxAge bounds how long the restart hand-off stays valid.
+// It is deliberately short because what the hand-off carries is a task to run
+// unattended: a rebuild+restart should continue its work, but a prompt fired at
+// a launch hours later would run against a world the operator has moved on
+// from. Which orchestrator to reopen is durable session state and is NOT bound
+// this way — see orchestrator_open_state.go for why the two are separate.
 const orchestratorRestoreMaxAge = 10 * time.Minute
 
 type orchestratorRestoreState struct {
@@ -90,15 +93,22 @@ func consumeOrchestratorRestoreTarget(path string, now time.Time) relaunchTarget
 	return relaunchTarget{OrchestratorID: id, ResumePrompt: strings.TrimSpace(state.ResumePrompt)}
 }
 
-// ConsumeRelaunchTarget returns the orchestrator a restart asked to reopen (and
-// any prompt to auto-run on resume), clearing it so it fires once. The frontend
-// calls this on boot (after loading the orchestrator list) and, if the id still
-// resolves to a persisted orchestrator, re-starts it — spawnOrchestratorSession
-// resumes that orchestrator's own pinned conversation, so the operator lands back
-// where they were. When ResumePrompt is set, the resumed session runs it
-// immediately so a rebuild+restart continues its task itself.
-func (a *App) ConsumeRelaunchTarget() relaunchTarget {
-	return consumeOrchestratorRestoreTarget(a.deps.orchestratorRestorePath, time.Now())
+// ResolveOrchestratorToReopen returns the orchestrator this launch should reopen
+// and any prompt to auto-run on resume. The frontend calls it on boot (after
+// loading the orchestrator list) and, if the id still resolves to a persisted
+// orchestrator, starts it — spawnOrchestratorSession resumes that orchestrator's
+// own pinned conversation, so the operator lands back where they were.
+//
+// A pending restart hand-off wins: it is the more specific intent and the only
+// source of a resume prompt, and it is consumed as it is read so it fires once.
+// Otherwise the durable record of what was open answers, carrying no prompt — so
+// a plain quit-and-relaunch, a crash or a reboot comes back to the same
+// orchestrator, idle at its prompt with nothing auto-run.
+func (a *App) ResolveOrchestratorToReopen() relaunchTarget {
+	if target := consumeOrchestratorRestoreTarget(a.deps.orchestratorRestorePath, time.Now()); target.OrchestratorID != "" {
+		return target
+	}
+	return relaunchTarget{OrchestratorID: readOpenOrchestrator(a.deps.orchestratorOpenPath)}
 }
 
 // RestartApp persists the orchestrator to return to, launches a fresh desktop

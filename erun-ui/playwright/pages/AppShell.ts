@@ -10,6 +10,7 @@ import { OutputsDialog } from './OutputsDialog';
 import { ReviewPanel } from './ReviewPanel';
 import { Sidebar } from './Sidebar';
 import { TenantDialog } from './TenantDialog';
+import { TerminalTabStrip } from './TerminalTabStrip';
 import { Titlebar } from './Titlebar';
 
 // AppShell is the tests' entry point into the rendered app.
@@ -36,6 +37,17 @@ export class AppShell {
       )
       .first()
       .waitFor({ state: 'visible' });
+  }
+
+  // reboot re-runs the boot sequence and hands control back as soon as the app
+  // chrome is up, for callers that assert on a specific surface boot produces
+  // (which session ends up owning the terminal pane). Waiting on that surface is
+  // both stricter and faster than open()'s generic settle, whose overlay wait
+  // clears only once the pane's session streams its first output.
+  async reboot(): Promise<void> {
+    await this.page.goto('/');
+    await this.page.waitForLoadState('domcontentloaded');
+    await this.titlebar.toggleButton().waitFor({ state: 'visible' });
   }
 
   // reloadEnvironments surfaces a freshly-seeded env deterministically instead
@@ -95,5 +107,9 @@ export class AppShell {
 
   get outputsDialog(): OutputsDialog {
     return new OutputsDialog(this.page);
+  }
+
+  get tabStrip(): TerminalTabStrip {
+    return new TerminalTabStrip(this.page);
   }
 }

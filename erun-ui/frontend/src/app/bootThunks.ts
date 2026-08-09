@@ -1,7 +1,7 @@
 import { stateApi } from './api/stateApi';
 import { readError } from './errors';
 import { showTerminalMessage } from './notificationThunks';
-import { loadOrchestrators, restoreOrchestratorAfterRestart } from './orchestratorThunks';
+import { loadOrchestrators, restoreOpenOrchestrator } from './orchestratorThunks';
 import { openSelection } from './sessionThunks';
 import { setSelected } from './slices/selectionSlice';
 import {
@@ -38,11 +38,12 @@ export const boot = (): AppThunk<Promise<void>> => async (dispatch, getState) =>
       return;
     }
 
-    // A rebuild+restart asks the desktop to reopen a specific orchestrator and
-    // resume its conversation. When that target is pending it owns the pane, so
-    // honor it before — and instead of — the default environment selection.
+    // The orchestrator that was open when the desktop last ran — or the one a
+    // rebuild+restart handed off — is where the operator left off, and it owns
+    // the pane, so honor it before — and instead of — the default environment
+    // selection.
     await dispatch(loadOrchestrators());
-    if (await dispatch(restoreOrchestratorAfterRestart())) {
+    if (await dispatch(restoreOpenOrchestrator())) {
       return;
     }
 

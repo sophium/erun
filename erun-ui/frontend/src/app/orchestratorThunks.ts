@@ -1,9 +1,9 @@
 import {
-  ConsumeRelaunchTarget,
   CreateOrchestrator,
   DeleteOrchestrator,
   InvestigateFailure,
   ListOrchestrators,
+  ResolveOrchestratorToReopen,
   RestartApp,
   RestartOrchestrator,
   StartOrchestrator,
@@ -12,6 +12,7 @@ import {
   UpdateOrchestrator,
 } from '../../wailsjs/go/main/App';
 import { readError } from './errors';
+import { planOrchestratorRestore } from './orchestratorRestore';
 import {
   closeOrchestratorDialog,
   type OrchestratorEnvRef,
@@ -116,32 +117,31 @@ export const restartApp =
     }
   };
 
-// restoreOrchestratorAfterRestart reopens the orchestrator a restart asked to
-// return to, if it still exists as a persisted definition, and returns whether
-// it did so the caller (boot) can skip the default environment selection.
-// One-shot: the backend clears the target on read, so a plain launch never
-// auto-starts anything. The restored orchestrator OWNS the pane, so the env
-// selection is cleared — otherwise boot's default selection and the
-// selection-sync middleware reconcile the terminal back to an environment and
-// the operator never lands in the resumed session.
-export const restoreOrchestratorAfterRestart =
+// restoreOpenOrchestrator reopens the orchestrator this launch should come back
+// to — the one that was open when the desktop last ran, or the one a restart
+// handed off — and returns whether it did, so the caller (boot) can skip the
+// default environment selection. Only a restart hand-off carries a resume
+// prompt, so a plain launch resumes the conversation idle and auto-runs nothing.
+// The restored orchestrator OWNS the pane, so the env selection is cleared —
+// otherwise boot's default selection and the selection-sync middleware reconcile
+// the terminal back to an environment and the operator never lands in the
+// resumed session.
+export const restoreOpenOrchestrator =
   (): AppThunk<Promise<boolean>> => async (dispatch, getState) => {
     try {
-      const relaunch = await ConsumeRelaunchTarget();
-      const id = relaunch.orchestratorId;
-      if (!id) {
-        return false;
-      }
-      const target = getState().orchestrators.items.find((o) => o.id === id && !o.transient);
-      if (!target) {
+      const plan = planOrchestratorRestore(
+        await ResolveOrchestratorToReopen(),
+        getState().orchestrators.items,
+      );
+      if (!plan) {
         return false;
       }
       // With a resume prompt, resume the conversation AND hand it the task so a
       // rebuild+restart continues on its own instead of idling at the prompt;
-      // without one, just resume via --continue.
-      const info = relaunch.resumePrompt
-        ? await StartOrchestratorWithResume(id, relaunch.resumePrompt, 80, 24)
-        : await StartOrchestrator(id, 80, 24);
+      // without one, just resume the orchestrator's own pinned conversation.
+      const info = plan.resumePrompt
+        ? await StartOrchestratorWithResume(plan.id, plan.resumePrompt, 80, 24)
+        : await StartOrchestrator(plan.id, 80, 24);
       dispatch(setSelected(null));
       dispatch(setSessionId(info.sessionId));
       await dispatch(loadOrchestrators());

@@ -17,6 +17,7 @@ func TestRestartAppPersistsTargetRelaunchesAndQuits(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store:                   newOrchestratorStubStore(t.TempDir()),
 		orchestratorRestorePath: restorePath,
+		orchestratorOpenPath:    filepath.Join(home, "orchestrator-open.json"),
 		relaunchApp:             func() error { relaunched = true; return nil },
 		quitApp:                 func() { quit = true },
 	})
@@ -28,12 +29,13 @@ func TestRestartAppPersistsTargetRelaunchesAndQuits(t *testing.T) {
 	if !relaunched || !quit {
 		t.Fatalf("expected relaunch and quit to fire, got relaunched=%v quit=%v", relaunched, quit)
 	}
-	// The target is restored once, then cleared — the restore is one-shot.
-	if got := app.ConsumeRelaunchTarget(); got.OrchestratorID != "agent-1" {
+	// The hand-off is honored once, then cleared. Nothing was open here, so with
+	// it gone there is no durable record to fall back to either.
+	if got := app.ResolveOrchestratorToReopen(); got.OrchestratorID != "agent-1" {
 		t.Fatalf("expected restore target agent-1, got %q", got.OrchestratorID)
 	}
-	if got := app.ConsumeRelaunchTarget(); got.OrchestratorID != "" {
-		t.Fatalf("expected the restore target to be consumed exactly once, got %q", got.OrchestratorID)
+	if got := app.ResolveOrchestratorToReopen(); got.OrchestratorID != "" {
+		t.Fatalf("expected the restart hand-off to be consumed exactly once, got %q", got.OrchestratorID)
 	}
 }
 

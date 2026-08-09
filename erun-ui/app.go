@@ -88,6 +88,7 @@ type erunUIDeps struct {
 	cloneERun                 func(context.Context, string, string) error
 	contributeStatePath       string
 	orchestratorRestorePath   string
+	orchestratorOpenPath      string
 	relaunchApp               func() error
 	quitApp                   func()
 }
@@ -424,6 +425,9 @@ func withDefaultWindowAndContributeDeps(deps erunUIDeps) erunUIDeps {
 	}
 	if deps.orchestratorRestorePath == "" {
 		deps.orchestratorRestorePath = defaultOrchestratorRestorePath()
+	}
+	if deps.orchestratorOpenPath == "" {
+		deps.orchestratorOpenPath = defaultOrchestratorOpenPath()
 	}
 	return deps
 }
