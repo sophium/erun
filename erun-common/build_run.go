@@ -1,6 +1,7 @@
 package eruncommon
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"strings"
@@ -368,6 +369,9 @@ func RunDockerPushSpec(ctx Context, pushInput DockerPushSpec, buildInput *Docker
 }
 
 func RunDockerPushExecution(ctx Context, execution DockerPushExecutionSpec, build DockerImageBuilderFunc, push DockerPushFunc) error {
+	if err := preflightRegistryPushAccess(ctx, execution); err != nil {
+		return err
+	}
 	if err := runDockerBuildsSequentially(ctx, execution.builds, build); err != nil {
 		return err
 	}
@@ -389,6 +393,39 @@ func RunDockerPushExecution(ctx Context, execution DockerPushExecutionSpec, buil
 	// discovered by directory scan rather than keyed to same-named images, so
 	// image-less component charts (a tenant's wrappers) publish too.
 	return publishComponentCharts(ctx, execution.componentCharts)
+}
+
+// preflightRegistryPushAccess refuses a publish that is already known to be
+// impossible, before it spends the build.
+//
+// A release that cannot push otherwise discovers it at the push, after every
+// image has been built for every architecture, and then offers an interactive
+// login that a detached job or an agent run can never answer. The registry
+// credential is knowable up front, so it is checked up front — the same class of
+// upfront refusal as a release whose images are not covered by a build it will
+// publish.
+//
+// Skipped in dry-run, which does no work and must keep the integration traces
+// stable. One check per distinct registry, not per image.
+func preflightRegistryPushAccess(ctx Context, execution DockerPushExecutionSpec) error {
+	if ctx.DryRun {
+		return nil
+	}
+	checked := make(map[string]struct{}, 2)
+	for _, pushInput := range execution.pushes {
+		registry := dockerRegistryFromImageTag(pushInput.Image.Tag)
+		if registry == "" {
+			continue
+		}
+		if _, seen := checked[registry]; seen {
+			continue
+		}
+		checked[registry] = struct{}{}
+		if err := VerifyGHCRPushScope(context.Background(), nil, pushInput.Image.Tag); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // publishComponentCharts packages+pushes then verifies each resolved chart.
