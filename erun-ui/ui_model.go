@@ -76,9 +76,14 @@ type envActivityPayload struct {
 	// Observed separates "the environment answered, and said no work" from
 	// "nobody got an answer": busy is false in both, and the sidebar acts on
 	// the difference when deciding whether a row may stop spinning.
-	Observed bool   `json:"observed"`
-	Busy     bool   `json:"busy"`
-	Detail   string `json:"detail,omitempty"`
+	Observed bool `json:"observed"`
+	// Stale is the diagnosis behind a reachable environment that never answers:
+	// its port-forward holds the local port while nothing replies through it,
+	// and re-establishing it did not help. Without it such a row renders
+	// exactly like a quiet environment, which is how one stayed dead for hours.
+	Stale  bool   `json:"stale"`
+	Busy   bool   `json:"busy"`
+	Detail string `json:"detail,omitempty"`
 }
 
 // uiEnvironmentStopResult is what the Runtime tab's Stop control reports back.

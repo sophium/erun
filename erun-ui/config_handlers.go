@@ -389,6 +389,14 @@ func (a *App) emitAppNotification(kind, message string) {
 // string the frontend compares in dismissNotificationForEnv.
 const notificationSourceRuntimeUnreachable = "runtime-unreachable"
 
+// notificationSourceForwardStale tags the "…/… is unreachable: its port-forward
+// …" warning the activity sweep posts once a bounded repair has failed, so the
+// same lifecycle clear retires it when the forward starts carrying traffic
+// again. Kept apart from notificationSourceRuntimeUnreachable because the two
+// describe different failures: that one is a reconnect that could not run, this
+// one is a reconnect that ran and did not help.
+const notificationSourceForwardStale = "port-forward-stale"
+
 // notificationSourceDeployFailed tags the "Deploy of …/… failed" error so the
 // same lifecycle clear retires it once a new deploy for the env starts or the
 // runtime becomes reachable.

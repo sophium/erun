@@ -69,3 +69,17 @@ func DescribeLocalMCPUnreachable(tenant, environment string, port int) string {
 	}
 	return fmt.Sprintf("no port-forward is listening for %s/%s on 127.0.0.1:%d", tenant, environment, port)
 }
+
+// DescribeUnrepairedPortForward is the line for the outcome its sibling above
+// promises and cannot always deliver: the forward was re-established and the
+// edge still answers nothing. Saying so is the point — the alternative is an
+// environment that reads as quiet while every client of it is dead, which is
+// the failure this whole family is about. The recovery named is a deploy
+// because a forward that a fresh `erun open` cannot fix is a runtime problem,
+// not a tunnel problem.
+func DescribeUnrepairedPortForward(tenant, environment string, port, attempts int) string {
+	return fmt.Sprintf(
+		"%s/%s is unreachable: its port-forward on 127.0.0.1:%d holds the local port but its edge never answers, and %d attempts to re-establish it did not fix that. Deploy the environment to bring its runtime back.",
+		tenant, environment, port, attempts,
+	)
+}

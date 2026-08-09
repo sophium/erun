@@ -62,6 +62,8 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:<localPort>/mcp
 
 A `200` (or any non-zero response) means the server is up. If the call hangs or 404s, the port-forward died — `erun open` re-establishes it. For the JSON-RPC handshake an Agent uses against the same endpoint, see [MCP overview · Worked example](/mcp/overview#worked-example).
 
+A dead port-forward keeps its local port bound, so `lsof` still shows a listener and only a real request reveals the failure. The desktop app watches for exactly that — a held port with an edge that answers nothing, which is what a replaced runtime pod leaves behind — and re-runs the reconnect itself, a few times, before giving up. When it gives up it says so: the environment's sidebar row turns to a warning triangle reading **unreachable**, and a notification names the port. That is the point to deploy the environment, because a forward a fresh `erun open` cannot fix is a runtime problem rather than a tunnel one.
+
 ## Connecting a laptop-side Agent client
 
 The Agent runs inside the env by default — the runtime pod ships the `EnvConfig.aitool` CLI pre-wired to MCP loopback, and the desktop's AI panel attaches to it. If you nevertheless want to drive an env from an Agent running on your laptop (debugging the in-pod Agent, scripting across envs, one-off testing), use this:

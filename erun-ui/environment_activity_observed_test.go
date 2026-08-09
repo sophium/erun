@@ -20,7 +20,11 @@ import (
 
 func seedMCPForward(t *testing.T, tenant, environment string, port int) {
 	t.Helper()
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	// Redirect both roots os.UserConfigDir consults, so the seeded forward is
+	// found on every host rather than only the ones that honour XDG.
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("HOME", root)
 	path, err := eruncommon.PortForwardStatePath("mcp", tenant, environment)
 	if err != nil {
 		t.Fatalf("PortForwardStatePath: %v", err)

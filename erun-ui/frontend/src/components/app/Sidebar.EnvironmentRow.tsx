@@ -16,6 +16,7 @@ import {
   deriveEnvironmentRow,
   type EnvironmentIndicator,
   environmentIndicator,
+  type EnvironmentRowDerived,
 } from '@/components/app/Sidebar.helpers';
 import { StatusDotGlyph } from '@/components/app/Sidebar.StatusDot';
 import { Button } from '@/components/ui/button';
@@ -121,7 +122,11 @@ function EnvStatusIndicator({
   envState: string;
 }): React.ReactElement {
   const dispatch = useAppDispatch();
-  const dataEnvState = envState || (indicator.dot === 'busy' ? 'busy' : 'running');
+  // Fall back to the derived indicator, not to a literal: a condition the
+  // environment reports rather than the desktop (a stale port-forward) has no
+  // envState, and hard-coding "running" for it would leave the attribute
+  // contradicting the glyph beside it.
+  const dataEnvState = envState || indicator.dot;
   // Not opened here means there are no tabs to close, so the indicator is a
   // passive status light rather than a control that would do nothing.
   if (!indicator.opened) {
@@ -275,6 +280,12 @@ function useEnvironmentRowSelectors(tenantName: string, environmentName: string)
   const envObserved = useAppSelector(
     (state) => state.envStatus.activityByEnv[activityKey]?.observed === true,
   );
+  // Whether the environment's forward is bound but dead. Kept apart from
+  // reachable because the two disagree exactly when it matters: the port still
+  // answers, and nothing behind it does.
+  const envStale = useAppSelector(
+    (state) => state.envStatus.activityByEnv[activityKey]?.stale === true,
+  );
   const envBusy = useAppSelector(
     (state) => state.envStatus.activityByEnv[activityKey]?.busy === true,
   );
@@ -292,18 +303,19 @@ function useEnvironmentRowSelectors(tenantName: string, environmentName: string)
     envState,
     reachable,
     envObserved,
+    envStale,
     envBusy,
     envBusyDetail,
   };
 }
 
-export function EnvironmentRow({
-  tenantName,
-  environmentName,
-}: {
-  tenantName: string;
-  environmentName: string;
-}): React.ReactElement {
+// useEnvironmentRowState folds the row's selectors and the two pure
+// derivations over them into the one state the markup renders, so the component
+// below stays markup.
+function useEnvironmentRowState(
+  tenantName: string,
+  environmentName: string,
+): EnvironmentRowDerived & { envState: string; indicator: EnvironmentIndicator } {
   const {
     selectedSelection,
     tenants,
@@ -315,18 +327,11 @@ export function EnvironmentRow({
     envState,
     reachable,
     envObserved,
+    envStale,
     envBusy,
     envBusyDetail,
   } = useEnvironmentRowSelectors(tenantName, environmentName);
-  const {
-    selected: selectedBySelection,
-    busy,
-    busyLabel,
-    busyFromEnvironment,
-    isLocal,
-    runtimeVersion,
-    selection,
-  } = deriveEnvironmentRow(
+  const derived = deriveEnvironmentRow(
     tenantName,
     environmentName,
     selectedSelection,
@@ -347,17 +352,41 @@ export function EnvironmentRow({
       state.terminal.sessionId > 0 &&
       state.orchestrators.items.some((o) => o.sessionId === state.terminal.sessionId),
   );
-  const selected = selectedBySelection && !orchestratorActive;
-
-  const rowLabel = `${tenantName} / ${environmentName}${isLocal ? ' (local)' : ''}`;
-  const indicator = environmentIndicator({
-    name: `${tenantName} / ${environmentName}`,
+  return {
+    ...derived,
+    selected: derived.selected && !orchestratorActive,
     envState,
-    isOpen,
-    reachable,
-    busy: envBusy,
-    detail: envBusyDetail,
-  });
+    indicator: environmentIndicator({
+      name: `${tenantName} / ${environmentName}`,
+      envState,
+      isOpen,
+      reachable,
+      stale: envStale,
+      busy: envBusy,
+      detail: envBusyDetail,
+    }),
+  };
+}
+
+export function EnvironmentRow({
+  tenantName,
+  environmentName,
+}: {
+  tenantName: string;
+  environmentName: string;
+}): React.ReactElement {
+  const {
+    selected,
+    busy,
+    busyLabel,
+    busyFromEnvironment,
+    isLocal,
+    runtimeVersion,
+    selection,
+    envState,
+    indicator,
+  } = useEnvironmentRowState(tenantName, environmentName);
+  const rowLabel = `${tenantName} / ${environmentName}${isLocal ? ' (local)' : ''}`;
   return (
     <EnvHoverCard
       className={cn(

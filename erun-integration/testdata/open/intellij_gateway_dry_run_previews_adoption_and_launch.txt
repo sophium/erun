@@ -30,8 +30,8 @@ remote-ssh-authorized-keys:
   mv "$tmp_keys" "$key_file"
   rm -f "$tmp_new"
   chmod 600 "$key_file"
-sshd: would adopt existing kubectl port-forward on <LOOPBACK>:26122 (PID 4243)
-mcp: would adopt existing kubectl port-forward on <LOOPBACK>:26100 (PID 4242)
+sshd: would adopt existing kubectl port-forward on <LOOPBACK>:26122 (PID <PID>)
+mcp: would adopt existing kubectl port-forward on <LOOPBACK>:26100 (PID <PID>)
 kubectl --context test-context --namespace team-dev get deployment team-api -o name
 kubectl --context test-context --namespace team-dev port-forward service/team-api 26133:17033 --address <LOOPBACK>
 ssh-keyscan -p 26122 <LOOPBACK>

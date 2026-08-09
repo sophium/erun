@@ -53,10 +53,9 @@ func ensureAPIPortForward(ctx common.Context, result common.OpenResult) (int, er
 		return 0, nil
 	}
 
-	if stateMatchesMCPTarget(state, expectedState) && canReachLocalAPIEndpoint(localPort) {
+	if reusableRecordedPortForward(ctx, "api", state, expectedState, localPort, canReachLocalAPIEndpoint) {
 		return localPort, nil
 	}
-	stopStaleMCPPortForward(state, expectedState, localPort)
 	args := kubectlAPIPortForwardArgs(result, localPort)
 	if canConnectLocalPort(localPort) {
 		adopted, err := adoptForeignAPIPortForward(ctx, statePath, expectedState, args, localPort)
@@ -75,7 +74,7 @@ func ensureAPIPortForward(ctx common.Context, result common.OpenResult) (int, er
 
 func ensureAPIPortForwardDryRun(ctx common.Context, result common.OpenResult, localPort int) (int, error) {
 	args := kubectlAPIPortForwardArgs(result, localPort)
-	if previewed, port := previewAdoptOrConflict(ctx, "api", localPort, args); previewed {
+	if previewed, port := previewAdoptOrConflict(ctx, "api", localPort, args, canReachLocalAPIEndpoint); previewed {
 		return port, nil
 	}
 	ctx.TraceCommand("", "kubectl", args...)
@@ -90,6 +89,12 @@ func adoptForeignAPIPortForward(ctx common.Context, statePath string, expected m
 	}
 	if !argvMatchesExpectedKubectlPortForward(argv, expectedArgs) {
 		return false, fmt.Errorf("local API port %d is already in use by %s", localPort, formatHolderForError(pid, argv))
+	}
+	if !canReachLocalAPIEndpoint(localPort) {
+		if replaceStalePortForwardHolder(ctx, "api", pid, localPort) {
+			return false, nil
+		}
+		return false, fmt.Errorf("local API port %d is held by a stale kubectl port-forward that could not be stopped: %s", localPort, formatHolderForError(pid, argv))
 	}
 	adopted := expected
 	adopted.ProcessID = pid

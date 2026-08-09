@@ -10,6 +10,6 @@ trace-log: appending the full trace to <TMP>
 open: tenant=team environment=dev kubernetes-context=test-context remote=true no-shell=false ide=intellij
 open: pure primitive — not deploying (run `erun deploy` first, or pass --deploy to deploy before opening)
 runtime run state: deployment team-devops wants 1 replica(s), 0 ready
-sshd: adopted existing kubectl port-forward on <LOOPBACK>:26122 (PID 4243)
-mcp: adopted existing kubectl port-forward on <LOOPBACK>:26100 (PID 4242)
+sshd: adopted existing kubectl port-forward on <LOOPBACK>:26122 (PID <PID>)
+mcp: adopted existing kubectl port-forward on <LOOPBACK>:26100 (PID <PID>)
 write IntelliJ SSH project config in <TMP> Support/JetBrains/IntelliJIdea2024.3/options
