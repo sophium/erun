@@ -223,6 +223,9 @@ func runReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, 
 	if err := runReleaseStages(ctx, spec, spec.Stages, runGit, syncPackagingChecksums); err != nil {
 		return err
 	}
+	if err := ensureReleaseBaseBranchUnmoved(ctx, spec, runGit); err != nil {
+		return err
+	}
 	if err := runReleasePublication(ctx, publisher); err != nil {
 		return err
 	}
@@ -279,7 +282,7 @@ func runReleaseStage(ctx Context, spec ReleaseSpec, stage ReleaseStage, runGit G
 		return err
 	}
 	for _, command := range releaseStageCommands(ctx, stage, stageFileUpdates) {
-		if err := runReleaseCommand(ctx, spec, command, runGit); err != nil {
+		if err := runReleaseCommand(ctx, spec, stage, command, runGit); err != nil {
 			return err
 		}
 	}
@@ -318,7 +321,7 @@ func releaseStageCommands(ctx Context, stage ReleaseStage, updates []ReleaseFile
 	return stage.GitCommands
 }
 
-func runReleaseCommand(ctx Context, spec ReleaseSpec, command ReleaseCommandSpec, runGit GitCommandRunnerFunc) error {
+func runReleaseCommand(ctx Context, spec ReleaseSpec, stage ReleaseStage, command ReleaseCommandSpec, runGit GitCommandRunnerFunc) error {
 	if command.Name == "git" && shouldSkipExistingReleaseTag(command.Args) {
 		skip, err := prepareReleaseTag(ctx, spec, runGit, command)
 		if err != nil {
@@ -329,12 +332,21 @@ func runReleaseCommand(ctx Context, spec ReleaseSpec, command ReleaseCommandSpec
 			return nil
 		}
 	}
+	branchPush := isReleaseBranchPush(stage, command)
+	if branchPush && ctx.DryRun {
+		// Part of the plan rather than the run: a real release says nothing here
+		// unless the push is actually rejected, and then says it as it happens.
+		ctx.Trace(fmt.Sprintf("release: a push rejected by a branch that moved during the release is rebased onto origin/%s and retried (up to %d attempts)", spec.Branch, releasePushRebaseAttempts))
+	}
 	ctx.TraceCommand(command.Dir, command.Name, command.Args...)
 	if ctx.DryRun {
 		return nil
 	}
 	if command.Name != "git" {
 		return fmt.Errorf("unsupported release command %q", command.Name)
+	}
+	if branchPush {
+		return runReleaseBranchPush(ctx, spec, command, runGit)
 	}
 	return runGit(command.Dir, ctx.Stdout, ctx.Stderr, command.Args...)
 }
@@ -1502,7 +1514,7 @@ func newPushReleaseStage(projectRoot string, config ReleaseConfig, developBranch
 	}
 
 	return ReleaseStage{
-		Name: "push",
+		Name: releasePushStageName,
 		GitCommands: []ReleaseCommandSpec{
 			releaseGitCommand(projectRoot, args...),
 		},
@@ -1516,7 +1528,7 @@ func newPushCandidateReleaseStage(projectRoot string, config ReleaseConfig) Rele
 	}
 
 	return ReleaseStage{
-		Name: "push",
+		Name: releasePushStageName,
 		GitCommands: []ReleaseCommandSpec{
 			releaseGitCommand(projectRoot, "push", "--follow-tags", "origin", developBranch),
 		},

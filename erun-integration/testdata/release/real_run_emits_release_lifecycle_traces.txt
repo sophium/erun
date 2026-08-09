@@ -18,6 +18,7 @@ publishing image: ghcr.io/sophium/api:<VERSION>
 release: worktree clean = true
 stage: sync-remote
 stage: release
+release: origin/develop could not be read; the moved-branch check is left to the push
 stage: publish
 fingerprint image present locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
 fingerprint image present locally: ghcr.io/sophium/api:fp-<HEX16>-arm64

@@ -57,4 +57,6 @@ The conventional flow on a release:
 2. `erun release` reads `<projectroot>/<tenant>-devops/VERSION`, syncs the chart `version` / `appVersion`, creates the release commit and a local tag, builds the multi-arch images, runs `push` at the release version (per-arch tags + manifest list + the runtime chart), verifies each published manifest resolves, and only then pushes the tag and advances the next patch on `release.developbranch`.
 3. A subsequent `erun deploy <env> --version <released version>` against a runtime env installs the now-published image and chart from the registry by reference.
 
+`release.mainbranch` does not have to stand still for the duration of a release. A release re-reads it just before the build and refuses if it moved, and its final push rebases onto a branch that moved while the build was running — so a pull request merging mid-release costs seconds or nothing, never a published version the repository has no commits for. See [Release version policy · Lifecycle algorithm](/agent-reference/release-policy#lifecycle-algorithm).
+
 For projects that use a single-branch trunk model, set both fields to the same branch.

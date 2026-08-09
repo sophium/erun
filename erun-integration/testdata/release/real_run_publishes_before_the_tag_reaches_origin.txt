@@ -22,6 +22,7 @@ Current branch main is up to date.
 stage: release
 [main <SHORTSHA>] [skip ci] release <VERSION>
  2 files changed, 4 insertions(+), 4 deletions(-)
+release: origin/main has not moved since sync-remote
 stage: publish
 fingerprint image present locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
 fingerprint image present locally: ghcr.io/sophium/api:fp-<HEX16>-arm64
