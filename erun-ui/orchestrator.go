@@ -1102,6 +1102,15 @@ func (a *App) spawnOrchestratorSession(id, name string, envs []eruncommon.Orches
 	a.mu.Unlock()
 
 	go a.streamSession(managed)
+	// Record what is open now rather than on the way out: the desktop is just as
+	// likely to be killed or to crash as to be quit cleanly, and only a record
+	// written here survives that. A transient (Investigate) session has no
+	// persisted definition to reopen, so it is deliberately not recorded.
+	if !transient {
+		if err := recordOpenOrchestrator(a.deps.orchestratorOpenPath, id); err != nil {
+			log.Printf("erun-app: record open orchestrator %s: %v", id, err)
+		}
+	}
 	return orchestratorInfoFor(id, name, envs, "running", serial, transient), nil
 }
 
@@ -1169,6 +1178,12 @@ func (a *App) stopOrchestratorSession(id string) bool {
 	a.mu.Unlock()
 	if managed != nil {
 		_ = managed.Close()
+	}
+	// Stopping is the operator saying this orchestrator should not come back, so
+	// it stays closed on every later launch. A restart clears and re-records in
+	// the same breath, which is the same statement about what is open.
+	if err := clearOpenOrchestrator(a.deps.orchestratorOpenPath, id); err != nil {
+		log.Printf("erun-app: clear open orchestrator %s: %v", id, err)
 	}
 	return session != nil || managed != nil
 }
