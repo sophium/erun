@@ -192,7 +192,10 @@ func TestOrchestratorActivityStillBoundsALiveSession(t *testing.T) {
 // A turn renews its report from the thing a working orchestrator does
 // constantly. Without this the busy report exists only at the turn's first
 // instant, which is the whole defect.
-func TestOrchestratorActivityRenewsFromToolCalls(t *testing.T) {
+// orchestratorSettingsHooks composes the workspace settings the desktop writes
+// and returns its hook events, so a test can assert about one thing at a time.
+func orchestratorSettingsHooks(t *testing.T) (map[string][]any, []byte) {
+	t.Helper()
 	root := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", root)
@@ -210,37 +213,54 @@ func TestOrchestratorActivityRenewsFromToolCalls(t *testing.T) {
 	if err := json.Unmarshal(data, &settings); err != nil {
 		t.Fatalf("unmarshal settings.json: %v\n%s", err, data)
 	}
+	return settings.Hooks, data
+}
 
-	for _, event := range []string{"UserPromptSubmit", "PreToolUse", "PostToolUse"} {
-		if len(settings.Hooks[event]) == 0 {
-			t.Fatalf("%s carries no hook, so a long turn stops reporting:\n%s", event, data)
-		}
-		found := false
-		for _, block := range settings.Hooks[event] {
-			if isOrchestratorActivityHookBlock(block) {
-				found = true
-			}
-		}
-		if !found {
-			t.Fatalf("%s is missing the busy report:\n%s", event, data)
+// eventCarriesActivityReport reports whether one hook event carries ours.
+func eventCarriesActivityReport(blocks []any) bool {
+	for _, block := range blocks {
+		if isOrchestratorActivityHookBlock(block) {
+			return true
 		}
 	}
+	return false
+}
 
-	// SessionStart clears an inherited "working": a session killed mid-turn never
-	// wrote its end, and the next one must not arrive already spinning.
-	idle := orchestratorActivityHookCommand(false)
-	clearsOnStart := false
-	for _, group := range settings.Hooks["SessionStart"] {
+// eventRunsCommand reports whether one hook event runs a specific command, which
+// is how the idle report is recognised among the hooks bound to SessionStart.
+func eventRunsCommand(blocks []any, command string) bool {
+	for _, group := range blocks {
 		block, _ := group.(map[string]any)
 		entries, _ := block["hooks"].([]any)
 		for _, entry := range entries {
 			hook, _ := entry.(map[string]any)
-			if command, _ := hook["command"].(string); command == idle {
-				clearsOnStart = true
+			if got, _ := hook["command"].(string); got == command {
+				return true
 			}
 		}
 	}
-	if !clearsOnStart {
+	return false
+}
+
+// A turn renews its report from the thing a working orchestrator does
+// constantly. Without this the busy report exists only at the turn's first
+// instant, which is the whole defect.
+func TestOrchestratorActivityRenewsFromToolCalls(t *testing.T) {
+	hooks, data := orchestratorSettingsHooks(t)
+
+	for _, event := range []string{"UserPromptSubmit", "PreToolUse", "PostToolUse"} {
+		if !eventCarriesActivityReport(hooks[event]) {
+			t.Fatalf("%s is missing the busy report, so a long turn stops reporting:\n%s", event, data)
+		}
+	}
+}
+
+// SessionStart clears an inherited "working": a session killed mid-turn never
+// wrote its end, and the next one must not arrive already spinning.
+func TestOrchestratorActivityClearsAnInheritedWorkingReport(t *testing.T) {
+	hooks, data := orchestratorSettingsHooks(t)
+
+	if !eventRunsCommand(hooks["SessionStart"], orchestratorActivityHookCommand(false)) {
 		t.Fatalf("SessionStart must clear an inherited working report:\n%s", data)
 	}
 }
