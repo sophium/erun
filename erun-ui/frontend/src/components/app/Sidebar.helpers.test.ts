@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { environmentIndicator } from './Sidebar.helpers';
+import { deriveEnvironmentRow, environmentIndicator } from './Sidebar.helpers';
 
 // One derived row state from three inputs: the sticky condition the desktop set,
 // what the environment reports about itself, and whether the desktop owns tabs.
@@ -105,4 +105,89 @@ test('a reachable environment is reported on its own terms, not a stale conditio
   assert.equal(indicator.visible, true);
   assert.equal(indicator.dot, 'running');
   assert.equal(indicator.activity, 'In use elsewhere — not opened here');
+});
+
+// The row's spinner is a separate question from the status dot: the dot carries
+// the environment's condition, the spinner carries whether it is working.
+//
+// Four of the five inputs are desktop-local — they report what this desktop
+// launched. The fifth is what the environment says about itself, and it is the
+// only one true regardless of who started the work. It was selected,
+// destructured, and then not passed in, so an environment driven from a
+// terminal, by an orchestrator over MCP, or by a detached job did real work
+// behind a row that looked idle.
+
+function rowArgs(overrides: {
+  isOpening?: boolean;
+  runningCommand?: string;
+  aiBusy?: boolean;
+  reconnecting?: boolean;
+  envBusy?: boolean;
+  envBusyDetail?: string;
+}) {
+  return {
+    isOpening: false,
+    runningCommand: '',
+    aiBusy: false,
+    reconnecting: false,
+    envBusy: false,
+    envBusyDetail: '',
+    ...overrides,
+  };
+}
+
+function row(overrides: Parameters<typeof rowArgs>[0]) {
+  const input = rowArgs(overrides);
+  return deriveEnvironmentRow(
+    'team',
+    'dev',
+    null,
+    [],
+    input.isOpening,
+    input.runningCommand,
+    input.aiBusy,
+    input.reconnecting,
+    input.envBusy,
+    input.envBusyDetail,
+  );
+}
+
+test('an environment working for reasons this desktop did not start still spins', () => {
+  const derived = row({ envBusy: true, envBusyDetail: 'erun release 1.0.176' });
+  assert.equal(derived.busy, true);
+  // The lease names the work, and that is the only signal saying what is
+  // actually running — so it belongs in the label rather than a generic "busy".
+  assert.equal(derived.busyLabel, 'team / dev is busy — erun release 1.0.176');
+});
+
+test('an environment reporting itself busy without a detail still spins', () => {
+  const derived = row({ envBusy: true });
+  assert.equal(derived.busy, true);
+  assert.equal(derived.busyLabel, 'team / dev is busy');
+});
+
+test('a quiet environment nobody is driving does not spin', () => {
+  const derived = row({});
+  assert.equal(derived.busy, false);
+  assert.equal(derived.busyLabel, '');
+});
+
+test('a command this desktop started keeps its own more specific label', () => {
+  // The desktop knows what it launched; the environment only knows that
+  // something holds it. The specific answer wins when both are true.
+  const derived = row({ runningCommand: 'deploy', envBusy: true, envBusyDetail: 'a lease' });
+  assert.equal(derived.busy, true);
+  assert.match(derived.busyLabel, /team \/ dev$/);
+  assert.doesNotMatch(derived.busyLabel, /a lease/);
+});
+
+test('each desktop-local reason still spins its own row on its own', () => {
+  for (const overrides of [
+    { isOpening: true },
+    { runningCommand: 'deploy' },
+    { aiBusy: true },
+    { reconnecting: true },
+  ]) {
+    assert.equal(row(overrides).busy, true, `expected busy for ${JSON.stringify(overrides)}`);
+  }
 });

@@ -326,6 +326,8 @@ export function EnvironmentRow({
     runningCommand,
     aiBusy,
     reconnecting,
+    envBusy,
+    envBusyDetail,
   );
   // While an orchestrator owns the terminal pane, no environment is the focused
   // thing — suppress the env's selected highlight so the sidebar matches what the
