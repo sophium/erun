@@ -45,7 +45,13 @@ type environmentActivity struct {
 
 type environmentActivityState struct {
 	reachable bool
-	busy      bool
+	// observed records that the environment answered the idle question, as
+	// opposed to busy's false meaning nobody got an answer. The two are not the
+	// same claim, and the sidebar clears a stale desktop latch on the strength
+	// of this one — a wedged edge whose port still answers must not be able to
+	// say "idle" on the environment's behalf.
+	observed bool
+	busy     bool
 	// detail names what is keeping the environment busy, in the operator's
 	// language, so the row can say "held by gradle-build" rather than "busy".
 	detail string
@@ -135,6 +141,7 @@ func (a *App) observeEnvironmentActivity(selection uiSelection) environmentActiv
 		// so report reachable-without-a-verdict rather than inventing one.
 		return observation
 	}
+	observation.state.observed = true
 	observation.state.busy, observation.state.detail = environmentBusyFromIdleStatus(status)
 	return observation
 }
@@ -212,6 +219,7 @@ func (a *App) emitEnvActivity(observation environmentActivity) {
 		Tenant:      observation.selection.Tenant,
 		Environment: observation.selection.Environment,
 		Reachable:   observation.state.reachable,
+		Observed:    observation.state.observed,
 		Busy:        observation.state.busy,
 		Detail:      observation.state.detail,
 	})

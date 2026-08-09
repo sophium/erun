@@ -124,6 +124,7 @@ function rowArgs(overrides: {
   reconnecting?: boolean;
   envBusy?: boolean;
   envBusyDetail?: string;
+  envObserved?: boolean;
 }) {
   return {
     isOpening: false,
@@ -132,6 +133,9 @@ function rowArgs(overrides: {
     reconnecting: false,
     envBusy: false,
     envBusyDetail: '',
+    // Unobserved by default: no answer from the environment must not clear
+    // anything, so a test that says nothing about it gets the old behaviour.
+    envObserved: false,
     ...overrides,
   };
 }
@@ -149,6 +153,7 @@ function row(overrides: Parameters<typeof rowArgs>[0]) {
     input.reconnecting,
     input.envBusy,
     input.envBusyDetail,
+    input.envObserved,
   );
 }
 
@@ -190,4 +195,58 @@ test('each desktop-local reason still spins its own row on its own', () => {
   ]) {
     assert.equal(row(overrides).busy, true, `expected busy for ${JSON.stringify(overrides)}`);
   }
+});
+
+// The defect: every other input is desktop-local, set when this desktop starts
+// something and cleared when it sees it end. A command driven from a terminal or
+// over MCP, or a session that goes away, leaves a latch nobody can clear — one
+// row span for six hours while the environment reported every marker idle.
+test('an environment that reports itself idle clears a stale desktop latch', () => {
+  const stuckCommand = row({ runningCommand: 'deploy', envObserved: true, envBusy: false });
+  assert.equal(stuckCommand.busy, false);
+
+  const stuckAI = row({ aiBusy: true, envObserved: true, envBusy: false });
+  assert.equal(stuckAI.busy, false);
+});
+
+// Silence is not an answer. This covers both an environment nobody reached and
+// one whose port answers while its edge has wedged — the poller reports no work
+// in both cases because nobody got a verdict, and neither may clear a latch.
+test('an environment that gave no verdict keeps its desktop latch', () => {
+  assert.equal(row({ runningCommand: 'deploy', envObserved: false }).busy, true);
+  assert.equal(row({ aiBusy: true, envObserved: false }).busy, true);
+});
+
+// The environment's own answer still wins upward, whoever started the work.
+test('an environment that reports work spins even when the desktop started nothing', () => {
+  assert.equal(row({ envBusy: true, envObserved: true }).busy, true);
+});
+
+// This desktop's own in-flight operations answer for themselves: the operator
+// clicked a moment ago and the environment cannot yet have observed it, so a
+// reachable-idle report must not swallow the feedback for the click.
+test("an idle report does not swallow this desktop's in-flight operation", () => {
+  assert.equal(row({ isOpening: true, envObserved: true, envBusy: false }).busy, true);
+  assert.equal(row({ reconnecting: true, envObserved: true, envBusy: false }).busy, true);
+});
+
+// The row's spinner label names its environment because a screen reader has no
+// other context for it. A hover card headed with that same environment does, so
+// it needs to know which kind of label it was handed rather than repeating
+// "<env> is busy — X" under a heading that already says "<env>".
+test('a label describing the environment is marked as the environment own', () => {
+  const derived = row({ envBusy: true, envBusyDetail: 'holding: gradle-build', envObserved: true });
+  assert.equal(derived.busyLabel, 'team / dev is busy — holding: gradle-build');
+  assert.equal(derived.busyFromEnvironment, true);
+});
+
+test('a label describing an operation this desktop is running is not', () => {
+  // A command this desktop is running names the row, so the label is about the
+  // desktop even when the environment reports busy at the same moment.
+  const withCommand = row({ runningCommand: 'build', envBusy: true, envObserved: true });
+  assert.equal(withCommand.busyLabel, 'Building team / dev');
+  assert.equal(withCommand.busyFromEnvironment, false);
+
+  assert.equal(row({ isOpening: true, envBusy: true }).busyFromEnvironment, false);
+  assert.equal(row({ reconnecting: true, envBusy: true }).busyFromEnvironment, false);
 });

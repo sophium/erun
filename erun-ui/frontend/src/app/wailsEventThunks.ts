@@ -105,6 +105,7 @@ export const handleEnvActivity =
         key,
         activity: {
           reachable: payload.reachable,
+          observed: payload.observed,
           busy: payload.busy,
           detail: (payload.detail ?? '').trim(),
         },
