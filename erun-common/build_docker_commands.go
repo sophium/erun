@@ -38,11 +38,14 @@ func runMultiPlatformBuild(buildInput DockerBuildSpec, stdout, stderr io.Writer)
 		if err := tagStableBaseVersionAfterBuild(buildInput, platform, stdout, stderr); err != nil {
 			return err
 		}
+		if err := pushPlatformImage(buildInput, platformTag, stdout, stderr); err != nil {
+			return err
+		}
 	}
 	if !buildInput.Push {
 		return nil
 	}
-	return pushMultiPlatformImage(buildInput.Image.Tag, perPlatformTags, buildInput.Verbosity, stdout, stderr)
+	return assembleMultiPlatformManifest(buildInput.Image.Tag, perPlatformTags, buildInput.Verbosity, stdout, stderr)
 }
 
 func promoteDockerImage(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
@@ -57,19 +60,36 @@ func promoteDockerImage(buildInput DockerBuildSpec, stdout, stderr io.Writer) er
 		if err := tagStableBaseVersionAfterBuild(buildInput, platform, stdout, stderr); err != nil {
 			return err
 		}
+		if err := pushPlatformImage(buildInput, platformTag, stdout, stderr); err != nil {
+			return err
+		}
 	}
 	if !buildInput.Push {
 		return nil
 	}
-	return pushMultiPlatformImage(buildInput.Image.Tag, perPlatformTags, buildInput.Verbosity, stdout, stderr)
+	return assembleMultiPlatformManifest(buildInput.Image.Tag, perPlatformTags, buildInput.Verbosity, stdout, stderr)
 }
 
-func pushMultiPlatformImage(tag string, perPlatformTags []string, verbosity int, stdout, stderr io.Writer) error {
-	for _, platformTag := range perPlatformTags {
-		if err := DockerImagePusher(platformTag, verbosity, stdout, stderr); err != nil {
-			return err
-		}
+// pushPlatformImage publishes one platform the moment it is built, instead of
+// leaving every platform for a push pass that runs after the last build.
+//
+// A daemon backed by the containerd image store is free to collect content that
+// only a tag points at, and does. With build-all-then-push the first platform's
+// manifest was routinely gone by the time its push ran, and the release failed
+// with "content digest ... not found" — after paying for every build. Publishing
+// each platform immediately means no artifact ever has to survive another build,
+// which is the property that was missing rather than anything about the content.
+//
+// The manifest list is unaffected: `docker manifest create` reads its inputs
+// back from the registry, so it does not care whether they are still local.
+func pushPlatformImage(buildInput DockerBuildSpec, platformTag string, stdout, stderr io.Writer) error {
+	if !buildInput.Push {
+		return nil
 	}
+	return DockerImagePusher(platformTag, buildInput.Verbosity, stdout, stderr)
+}
+
+func assembleMultiPlatformManifest(tag string, perPlatformTags []string, verbosity int, stdout, stderr io.Writer) error {
 	createArgs := append([]string{"manifest", "create", "--amend", tag}, perPlatformTags...)
 	if err := runDockerSimpleCommandWithVerbosity(createArgs, verbosity, stdout, stderr); err != nil {
 		return err
