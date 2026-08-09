@@ -58,14 +58,14 @@ func TestEachPlatformIsPushedBeforeTheNextIsBuilt(t *testing.T) {
 		}
 	}
 
-	if !(amd64Build < amd64Push) {
+	if amd64Build >= amd64Push {
 		t.Fatalf("a platform must be pushed after it is built, got build=%d push=%d", amd64Build, amd64Push)
 	}
 	// The whole point: nothing that was built may wait behind another build.
-	if !(amd64Push < arm64Build) {
+	if amd64Push >= arm64Build {
 		t.Fatalf("amd64 must be published before arm64 starts building, or its content need not survive; got amd64 push=%d arm64 build=%d", amd64Push, arm64Build)
 	}
-	if !(arm64Build < arm64Push) {
+	if arm64Build >= arm64Push {
 		t.Fatalf("arm64 must be pushed after it is built, got build=%d push=%d", arm64Build, arm64Push)
 	}
 }
@@ -82,7 +82,7 @@ func TestMultiArchManifestIsAssembledAfterEveryPlatformIsPushed(t *testing.T) {
 	if create < 0 || push < 0 {
 		t.Fatalf("multi-arch assembly missing: %+v", commands)
 	}
-	if !(lastPush < create && create < push) {
+	if lastPush >= create || create >= push {
 		t.Fatalf("expected every platform pushed, then manifest create, then manifest push; got lastPush=%d create=%d push=%d", lastPush, create, push)
 	}
 }
@@ -98,7 +98,7 @@ func TestPromotePublishesEachPlatformBeforeTaggingTheNext(t *testing.T) {
 	if amd64Push < 0 || arm64Tag < 0 {
 		t.Fatalf("promote trace missing a push or tag: %+v", commands)
 	}
-	if !(amd64Push < arm64Tag) {
+	if amd64Push >= arm64Tag {
 		t.Fatalf("promote must publish amd64 before it moves on to arm64; got push=%d next tag=%d", amd64Push, arm64Tag)
 	}
 }
