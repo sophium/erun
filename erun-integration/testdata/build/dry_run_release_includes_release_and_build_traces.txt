@@ -33,6 +33,9 @@ cd <TMP> && git add erun-devops/k8s/api/Chart.yaml erun-devops/k8s/base/Chart.ya
 cd <TMP> && git commit -m '[skip ci] release <VERSION>'
 git -C <TMP> rev-parse '<VERSION>^{}'
 cd <TMP> && git tag -a <VERSION> -m 'Release candidate <VERSION>'
+cd <TMP> && git fetch origin develop
+cd <TMP> && git rev-list --count HEAD..FETCH_HEAD
+release: a base branch that moved since sync-remote refuses the release here, before the build spends anything
 stage: publish
 docker image inspect ghcr.io/sophium/api:fp-<HEX16>-amd64
 fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
@@ -65,5 +68,6 @@ helm pull oci://ghcr.io/sophium/charts/base --version <VERSION> --destination <T
 stage: verify-publication
 docker manifest inspect ghcr.io/sophium/api:<VERSION>
 stage: push
+release: a push rejected by a branch that moved during the release is rebased onto origin/develop and retried (up to 2 attempts)
 cd <TMP> && git push --follow-tags origin develop
 release version: <VERSION>

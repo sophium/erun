@@ -18,15 +18,11 @@ next version: <VERSION>
 publishing image: ghcr.io/sophium/api:<VERSION>
 release: worktree clean = true
 stage: sync-remote
-Current branch main is up to date.
 stage: release
-[main <SHORTSHA>] [skip ci] release <VERSION>
- 2 files changed, 4 insertions(+), 4 deletions(-)
-release: origin/main has not moved since sync-remote
-stage: publish
-fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
-fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-arm64
-rebuilding ghcr.io/sophium/api:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
 ==> Release failed after <ELAPSED>
-verify multi-arch build capability (docker buildx inspect): exit status 1
-simulated docker failure
+origin/main has moved since this release rebased onto it: it carries 3 commit(s) this release is not built on.
+Building now would publish <VERSION> and push its tag, and only then fail at the final push with everything already public.
+Nothing is published yet, so absorb the move and re-run:
+  git -C <TMP> pull --rebase origin main
+  erun release --force
+(--force recreates the local <VERSION> tag this run already made, which the rebase leaves behind.)

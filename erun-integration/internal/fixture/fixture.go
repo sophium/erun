@@ -1179,6 +1179,28 @@ func StubBinaryWithScript(t testing.TB, dir, name, scriptBody string) string {
 	return writeStub(t, dir, name, body)
 }
 
+// StubBinaryMergingIntoRemoteOnce writes a stub for name that, on its first
+// invocation only, commits and pushes one commit from repoDir onto origin's
+// branch, then exits 0 like a plain stub. It stands in for a pull request
+// merging while a long-running command is working, so a scenario can place the
+// move at a chosen point in the command's own execution rather than before it
+// starts. git is reached through the ERUN_GIT_BIN seam the scenario already
+// routes: the scrubbed PATH holds no git for a stub to find.
+func StubBinaryMergingIntoRemoteOnce(t testing.TB, dir, name, repoDir, branch, message string) string {
+	t.Helper()
+	// Forward slashes: embedded in the sh stub, where Git Bash handles a
+	// backslash Windows path unreliably.
+	marker := shellSingleQuote(filepath.ToSlash(filepath.Join(dir, name+"-merged-once")))
+	repo := shellSingleQuote(filepath.ToSlash(repoDir))
+	script := "if [ ! -f " + marker + " ]; then\n" +
+		"  : > " + marker + "\n" +
+		"  \"$ERUN_GIT_BIN\" -C " + repo + " commit -q --allow-empty -m " + shellSingleQuote(message) + " || exit 1\n" +
+		"  \"$ERUN_GIT_BIN\" -C " + repo + " push -q origin " + shellSingleQuote(branch) + " || exit 1\n" +
+		"fi\n" +
+		"exit 0"
+	return StubBinaryWithScript(t, dir, name, script)
+}
+
 // StubBinaryFailFirstThenSucceed writes a stub that fails on its first
 // invocation — printing stderrFirst to stderr and exiting exitCode — then
 // drops a marker file so every later invocation exits 0 silently. Use it to
