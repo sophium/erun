@@ -48,13 +48,21 @@ export function deriveEnvironmentRow(
   runningCommand: string,
   aiBusy: boolean,
   reconnecting: boolean,
+  envBusy: boolean,
+  envBusyDetail: string,
 ): EnvironmentRowDerived {
   const selected =
     selectedSelection?.tenant === tenantName && selectedSelection.environment === environmentName;
   // busy is scoped to this env and independent of which env is selected, so
   // concurrent work on multiple envs shows a spinner on every row that's actually
   // doing something — not just the one in the active terminal.
-  const busy = isOpening || runningCommand !== '' || aiBusy || reconnecting;
+  //
+  // envBusy is what the environment says about itself, and it is the only input
+  // here that is true regardless of who started the work. The other four are
+  // desktop-local: they report what this desktop launched, so an environment
+  // driven by `erun` from a terminal, by an orchestrator over MCP, or by a
+  // detached job was doing real work behind a row that looked idle.
+  const busy = isOpening || runningCommand !== '' || aiBusy || reconnecting || envBusy;
   const busyLabel = environmentRowBusyLabel(
     tenantName,
     environmentName,
@@ -62,6 +70,8 @@ export function deriveEnvironmentRow(
     runningCommand,
     aiBusy,
     reconnecting,
+    envBusy,
+    envBusyDetail,
   );
   const environment = tenants
     .find((tenant) => tenant.name === tenantName)
@@ -84,6 +94,8 @@ function environmentRowBusyLabel(
   runningCommand: string,
   aiBusy: boolean,
   reconnecting: boolean,
+  envBusy: boolean,
+  envBusyDetail: string,
 ): string {
   const target = `${tenantName} / ${environmentName}`;
   if (runningCommand !== '') {
@@ -95,6 +107,11 @@ function environmentRowBusyLabel(
   }
   if (reconnecting) {
     return `Reconnecting ${target}`;
+  }
+  if (envBusy) {
+    return envBusyDetail !== ''
+      ? `${target} is busy — ${envBusyDetail}`
+      : `${target} is busy`;
   }
   if (aiBusy) {
     return `AI tab working on ${target}`;
