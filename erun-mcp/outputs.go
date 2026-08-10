@@ -31,6 +31,10 @@ type OutputsDownloadResult struct {
 	Size          int64  `json:"size"`
 	SHA256        string `json:"sha256,omitempty"`
 	Content       string `json:"content,omitempty"`
+	// Signing is present only when the download ran on a macOS host and ad-hoc
+	// code signing had something to report. macOS kills an unsigned Mach-O with
+	// SIGKILL and no message, so a caller must be able to see what was done.
+	Signing *eruncommon.HostArtifactSigning `json:"signing,omitempty"`
 }
 
 func outputsListTool() func(context.Context, *mcp.CallToolRequest, OutputsListInput) (*mcp.CallToolResult, eruncommon.RuntimeOutputsListResult, error) {
@@ -74,6 +78,7 @@ func outputsDownloadResult(out eruncommon.RuntimeOutputResult, withContent bool)
 		ArchiveFormat: out.ArchiveFormat,
 		Size:          out.Size,
 		SHA256:        out.SHA256,
+		Signing:       out.Signing,
 	}
 	if withContent {
 		result.Content = base64.StdEncoding.EncodeToString(out.Bytes)

@@ -130,7 +130,7 @@ Four categories. The protocol treats them all as MCP tools; the categorisation i
 | `version` | Build version and commit of the MCP server. |
 | `logs` | Tail logs from any container in the env's namespace, with optional filters. |
 | `outputs_list` | List the files an agent produced in the pod's outputs directory (`$ERUN_OUTPUTS_DIR`), newest-first. Read-only. |
-| `outputs_download` | Read one entry from the outputs directory and return its bytes inline as base64 (a folder as a `tar.gz`); the server is co-located with the files, so it returns the content directly. `preview` returns name/type/size without the bytes. |
+| `outputs_download` | Read one entry from the outputs directory and return its bytes inline as base64 (a folder as a `tar.gz`); the server is co-located with the files, so it returns the content directly. On a macOS host an arriving macOS binary carrying no code signature is ad-hoc signed first — the system kills an unsigned one on exec without printing anything — and the optional `signing: {path, signed, note}` field reports it; a signing failure is reported in `note` and never fails the call. `preview` returns name/type/size without the bytes. |
 
 ### Host-served — the review mirror
 

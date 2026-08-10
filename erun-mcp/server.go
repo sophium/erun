@@ -370,7 +370,7 @@ func registerInspectionTools(reg toolRegistrar, runtime RuntimeConfig) {
 	}, outputsListTool())
 	addTool(reg, &mcp.Tool{
 		Name:        "outputs_download",
-		Description: "Read one entry from the runtime pod's outputs directory and return its bytes inline as base64 (a folder as a tar.gz archive). The server runs in the pod, so it returns the content directly for the caller to save. Set preview to return name/type/size without the bytes.",
+		Description: "Read one entry from the runtime pod's outputs directory and return its bytes inline as base64 (a folder as a tar.gz archive). The server runs in the pod, so it returns the content directly for the caller to save. On a macOS host an unsigned macOS binary is ad-hoc signed first, because the system kills an unsigned one on exec without printing anything; the signing field reports it. Set preview to return name/type/size without the bytes.",
 	}, outputsDownloadTool())
 	addTool(reg, &mcp.Tool{
 		Name:        "release",

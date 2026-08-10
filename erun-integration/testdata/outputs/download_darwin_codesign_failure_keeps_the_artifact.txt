@@ -1,0 +1,4 @@
+audit: erun outputs download erun-darwin-arm64
+outputs: downloading <HOME>/.erun/outputs/erun-darwin-arm64
+Downloaded erun-darwin-arm64 (30B, sha256 <HEX>) to erun-darwin-arm64
+erun-darwin-arm64 is an unsigned Mach-O and ad-hoc signing it failed: exit status 1 (codesign: erun-darwin-arm64: no identity found); macOS kills an unsigned Mach-O with SIGKILL and no message, so sign it by hand with: codesign -s - -f erun-darwin-arm64

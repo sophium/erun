@@ -1,0 +1,4 @@
+audit: erun outputs download erun-darwin-arm64
+outputs: downloading <HOME>/.erun/outputs/erun-darwin-arm64
+Downloaded erun-darwin-arm64 (30B, sha256 <HEX>) to erun-darwin-arm64
+Ad-hoc signed erun-darwin-arm64 so macOS will run it

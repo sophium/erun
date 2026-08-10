@@ -59,7 +59,9 @@ func newOutputsDownloadCmd(resolveOpen OpenResolver) *cobra.Command {
 			"A file lands as-is; a folder lands as a <name>.tar.gz archive. The source defaults to " +
 			"the pod's $ERUN_OUTPUTS_DIR (/home/erun/.erun/outputs); pass --path to download from " +
 			"another directory. Use --dest to choose where it lands locally (default: the current " +
-			"directory) and --force to overwrite an existing local file.",
+			"directory) and --force to overwrite an existing local file.\n\n" +
+			"On macOS an arriving macOS binary that carries no code signature is ad-hoc signed and made " +
+			"executable, because the system kills an unsigned one on exec without printing anything.",
 		Example:       "  erun outputs download report.pdf\n  erun outputs download results --dest ./out",
 		Args:          cobra.ExactArgs(1),
 		SilenceErrors: true,
@@ -132,6 +134,9 @@ type outputsDownloadCLIResult struct {
 	SHA256        string `json:"sha256"`
 	IsArchive     bool   `json:"isArchive"`
 	ArchiveFormat string `json:"archiveFormat,omitempty"`
+	// Signing is present only when host-side ad-hoc code signing had something to
+	// report; see common.SignHostArtifact.
+	Signing *common.HostArtifactSigning `json:"signing,omitempty"`
 }
 
 func runOutputsDownloadCommand(ctx common.Context, resolveOpen OpenResolver, params common.OpenParams, dirPath, name, dest string, force bool, run common.RuntimeOutputsRunner) error {
@@ -152,17 +157,28 @@ func runOutputsDownloadCommand(ctx common.Context, resolveOpen OpenResolver, par
 	if err != nil {
 		return err
 	}
+	// The download is the point where a cross-built artifact becomes a file the
+	// operator runs, so it is where a darwin binary gets the signature macOS
+	// demands. A signing problem is reported, never fatal: the file has arrived.
+	signing := common.SignHostArtifact(destPath)
 	if ctx.Output == common.OutputJSON {
-		return ctx.WriteResult(outputsDownloadCLIResult{
+		result := outputsDownloadCLIResult{
 			Name:          out.Name,
 			Dest:          destPath,
 			Size:          out.Size,
 			SHA256:        out.SHA256,
 			IsArchive:     out.IsArchive,
 			ArchiveFormat: out.ArchiveFormat,
-		})
+		}
+		if signing.Describe() != "" {
+			result.Signing = &signing
+		}
+		return ctx.WriteResult(result)
 	}
 	ctx.Info(fmt.Sprintf("Downloaded %s (%s, sha256 %s) to %s", out.Name, formatOutputSize(out.Size), out.SHA256, destPath))
+	if note := signing.Describe(); note != "" {
+		ctx.Info(note)
+	}
 	return nil
 }
 

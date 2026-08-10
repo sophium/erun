@@ -173,5 +173,8 @@ func (a *App) RunHostArtifact(selection uiSelection, relPath string) error {
 	if info.IsDir() {
 		return fmt.Errorf("artifact %q is a directory", relPath)
 	}
+	// Sync signs what it mirrors, but an artifact can also predate that pass, so
+	// the launch re-checks rather than trusting the mirror to have done it.
+	a.reportHostArtifactSigning(eruncommon.SignHostArtifact(exePath))
 	return a.deps.launchHostArtifact(exePath, dir)
 }
