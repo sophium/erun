@@ -152,6 +152,17 @@ func workspaceSyncPassErrorSuffix(label string, err error) string {
 // over the same paths.
 const WorkspaceSyncArtifactsSubdir = ".erun-outputs"
 
+// workspaceSyncStagingSubdir is where a pass lands bytes that are still
+// arriving. tar extracts in place, so extracting straight into the mirror let a
+// reader open a file mid-write and get a prefix that looks complete — a
+// truncated Mach-O reads as "not signed at all" rather than as truncated, which
+// is evidence for the wrong conclusion. Staging then renaming publishes each
+// file atomically, and keeps the only partial state in a directory that says so
+// by name. It sits inside the lane it serves so the rename never crosses a
+// filesystem, and both lanes skip it so staged bytes are never mistaken for
+// mirror content.
+const workspaceSyncStagingSubdir = ".erun-sync-staging"
+
 // syncOutputsArtifacts mirrors the pod's deliverables directory
 // (DefaultRuntimeOutputsDir) into artifactsLocal as a one-way,
 // read-only host mirror. Artifacts live outside the git worktree, so they escape
@@ -167,9 +178,9 @@ func syncOutputsArtifacts(ctx context.Context, hostAlias, outputsRemote, artifac
 		if err := os.MkdirAll(artifactsLocal, 0o755); err != nil {
 			return 0, fmt.Errorf("create artifacts dir %s: %w", artifactsLocal, err)
 		}
-		// Clear the read-only bit set by the previous pass so the tar extract can
-		// overwrite the mirror in place (matters on Windows, where a read-only
-		// attribute otherwise blocks the rewrite).
+		// Clear the read-only bit set by the previous pass so the refreshed file
+		// can replace it (matters on Windows, where a read-only attribute
+		// otherwise blocks the rename onto it).
 		if err := makeArtifactsWritable(artifactsLocal); err != nil {
 			return 0, err
 		}
@@ -219,7 +230,8 @@ func pruneLocalArtifacts(artifactsLocal string, remotePaths []string) error {
 }
 
 // ListLocalArtifactFiles returns the regular files under root, relative to it and
-// slash-normalized. A missing root yields no files.
+// slash-normalized. A missing root yields no files, and the staging subdir is
+// skipped so bytes still arriving are never offered as a deliverable.
 func ListLocalArtifactFiles(root string) ([]string, error) {
 	var files []string
 	err := filepath.Walk(root, func(p string, info os.FileInfo, walkErr error) error {
@@ -229,12 +241,15 @@ func ListLocalArtifactFiles(root string) ([]string, error) {
 			}
 			return walkErr
 		}
-		if info.IsDir() {
-			return nil
-		}
 		rel, relErr := filepath.Rel(root, p)
 		if relErr != nil {
 			return relErr
+		}
+		if info.IsDir() {
+			if filepath.ToSlash(rel) == workspaceSyncStagingSubdir {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		files = append(files, filepath.ToSlash(rel))
 		return nil
@@ -478,7 +493,7 @@ func localWorkspaceSourceFileMeta(root string) (map[string]workspaceFileMeta, er
 		}
 		relSlash := filepath.ToSlash(rel)
 		if info.IsDir() {
-			if relSlash == ".git" || relSlash == WorkspaceSyncArtifactsSubdir {
+			if relSlash == ".git" || relSlash == WorkspaceSyncArtifactsSubdir || relSlash == workspaceSyncStagingSubdir {
 				return filepath.SkipDir
 			}
 			return nil
@@ -561,7 +576,66 @@ func sortedWorkspaceFileMetaKeys(meta map[string]workspaceFileMeta) []string {
 	return keys
 }
 
+// extractRemoteWorkspaceFiles fetches paths from the pod into localPath. The
+// archive lands in a staging dir and each file is renamed into place afterwards,
+// so nothing reading the mirror can observe a half-written file; a pass that
+// fails, is cancelled, or is killed leaves the mirror on its previous content.
 func extractRemoteWorkspaceFiles(ctx context.Context, hostAlias, remotePath, localPath string, paths []string) error {
+	staging, err := prepareWorkspaceSyncStaging(localPath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(staging) }()
+	if err := streamRemoteWorkspaceArchive(ctx, hostAlias, remotePath, staging, paths); err != nil {
+		return err
+	}
+	return publishStagedWorkspaceFiles(staging, localPath)
+}
+
+// prepareWorkspaceSyncStaging gives the pass an empty staging dir beside the
+// files it will publish, clearing whatever a killed pass left behind so staged
+// bytes are only ever this pass's.
+func prepareWorkspaceSyncStaging(localPath string) (string, error) {
+	staging := filepath.Join(localPath, workspaceSyncStagingSubdir)
+	if err := os.RemoveAll(staging); err != nil {
+		return "", fmt.Errorf("clear workspace sync staging %s: %w", staging, err)
+	}
+	if err := os.MkdirAll(staging, 0o755); err != nil {
+		return "", fmt.Errorf("create workspace sync staging %s: %w", staging, err)
+	}
+	return staging, nil
+}
+
+// publishStagedWorkspaceFiles moves each staged entry onto its final path with
+// rename(2), so a reader sees either the previous file or the complete new one.
+// Symlinks publish the same way — filepath.Walk lstats, so a link moves as a
+// link rather than being followed.
+func publishStagedWorkspaceFiles(staging, localPath string) error {
+	return filepath.Walk(staging, func(p string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() {
+			return nil
+		}
+		rel, relErr := filepath.Rel(staging, p)
+		if relErr != nil {
+			return relErr
+		}
+		destination := filepath.Join(localPath, rel)
+		if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+			return fmt.Errorf("create mirror directory for %s: %w", rel, err)
+		}
+		if err := os.Rename(p, destination); err != nil {
+			return fmt.Errorf("publish %s into the mirror: %w", rel, err)
+		}
+		return nil
+	})
+}
+
+// streamRemoteWorkspaceArchive pipes the pod's tar of paths into an extract
+// rooted at destination.
+func streamRemoteWorkspaceArchive(ctx context.Context, hostAlias, remotePath, destination string, paths []string) error {
 	script := fmt.Sprintf("cd %s && tar --null --ignore-failed-read -T - -cf -", shellQuote(remotePath))
 	sshCmd := CommandContext(ctx, "ssh", workspaceSyncSSHArgs(hostAlias, script)...)
 	HideConsoleWindow(sshCmd)
@@ -573,7 +647,7 @@ func extractRemoteWorkspaceFiles(ctx context.Context, hostAlias, remotePath, loc
 	var sshStderr bytes.Buffer
 	sshCmd.Stderr = &sshStderr
 
-	tarCmd := CommandContext(ctx, "tar", "-xf", "-", "-C", localPath)
+	tarCmd := CommandContext(ctx, "tar", "-xf", "-", "-C", destination)
 	HideConsoleWindow(tarCmd)
 	tarCmd.Stdin = sshStdout
 	var tarStderr bytes.Buffer
@@ -683,12 +757,15 @@ func SafeWorkspaceSyncPath(value string) bool {
 	if cleaned != value || strings.HasPrefix(cleaned, "../") || cleaned == ".." {
 		return false
 	}
-	if cleaned == ".git" || strings.HasPrefix(cleaned, ".git/") {
-		return false
+	// Three subtrees a lane must never claim: the operator's own .git, the
+	// artifact mirror the outputs lane owns, and the staging subdir, whose
+	// contents are bytes still arriving rather than mirror content.
+	for _, reserved := range []string{".git", WorkspaceSyncArtifactsSubdir, workspaceSyncStagingSubdir} {
+		if cleaned == reserved || strings.HasPrefix(cleaned, reserved+"/") {
+			return false
+		}
 	}
-	// The source lane must ignore the artifact mirror subdir so it never prunes
-	// or lists files the outputs lane owns.
-	return cleaned != WorkspaceSyncArtifactsSubdir && !strings.HasPrefix(cleaned, WorkspaceSyncArtifactsSubdir+"/")
+	return true
 }
 
 func pathClean(value string) string {

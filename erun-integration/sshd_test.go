@@ -1,10 +1,14 @@
 package integration
 
 import (
+	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sophium/erun/erun-integration/internal/env"
 	"github.com/sophium/erun/erun-integration/internal/erun"
@@ -158,6 +162,60 @@ func TestSSHD(t *testing.T) {
 		}
 	})
 
+	// The fetch lane, which the listing-only scenarios above never reach. A pass
+	// used to extract straight into the mirror, so a reader could open a file that
+	// was still arriving and get a prefix of it with no error from any step. What
+	// lands must be the whole file, and nothing half-written may be left behind.
+	// The second pass is the other half of the contract: the publish has to
+	// preserve the pod's mtime, or the fingerprint misses and every pass re-fetches
+	// the whole tree.
+	t.Run("sync_real_run_publishes_complete_files_and_refetches_nothing", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithWorkspaceSync(t, setup, "team", "dev", 47300)
+		mirror := filepath.Join(setup.Home, "mirror", "team-dev")
+
+		body := bytes.Repeat([]byte("erun mirror payload\n"), 4096)
+		archive := filepath.Join(setup.Cwd, "pod-archive.tar")
+		const podMTime = 1700000000
+		fixture.WriteTarArchive(t, archive, []fixture.TarEntry{{Path: "app/main.go", Body: body}}, time.Unix(podMTime, 0))
+
+		stubs := setup.Cwd + "/stubs"
+		envVars := append(setup.Env(), fixture.StubWorkspaceSyncSSH(t, stubs, fixture.WorkspaceSyncSSHStubSpec{
+			IndexPaths:  []string{"app/main.go"},
+			StatLines:   []string{fmt.Sprintf("%d %d app/main.go", len(body), podMTime)},
+			ArchivePath: archive,
+		})...)
+
+		result := erun.Run(t, []string{"sshd", "sync", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "copied 1 files") {
+			t.Fatalf("the pass must report the file it fetched:\n%s", result.Combined)
+		}
+		mirrored := filepath.Join(mirror, "app", "main.go")
+		got, err := os.ReadFile(mirrored)
+		if err != nil {
+			t.Fatalf("read mirrored file: %v", err)
+		}
+		if !bytes.Equal(got, body) {
+			t.Fatalf("mirrored file is %d bytes, want the complete %d", len(got), len(body))
+		}
+		// Nothing half-written survives the pass: the mirror holds the published
+		// file and nothing else.
+		if files := mirrorFiles(t, mirror); len(files) != 1 || files[0] != "app/main.go" {
+			t.Fatalf("mirror holds %v, want exactly [app/main.go]", files)
+		}
+
+		second := erun.Run(t, []string{"sshd", "sync", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if second.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", second.ExitCode, second.Combined)
+		}
+		if !strings.Contains(second.Combined, "copied 0 files") {
+			t.Fatalf("an unchanged file must not be fetched again:\n%s", second.Combined)
+		}
+	})
+
 	t.Run("init_real_run_writes_local_ssh_config", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
@@ -301,4 +359,31 @@ func TestSSHD(t *testing.T) {
 		}
 		golden.Equal(t, "sshd/init_real_run_retries_after_pod_not_found", normalize.Apply(result.Combined))
 	})
+}
+
+// mirrorFiles lists every regular file under the host mirror, relative and
+// slash-normalized, so a scenario can assert the mirror holds exactly what the
+// pass published and no leftovers.
+func mirrorFiles(t *testing.T, root string) []string {
+	t.Helper()
+	var files []string
+	err := filepath.Walk(root, func(p string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, p)
+		if relErr != nil {
+			return relErr
+		}
+		files = append(files, filepath.ToSlash(rel))
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk mirror: %v", err)
+	}
+	sort.Strings(files)
+	return files
 }
