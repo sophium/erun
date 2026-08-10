@@ -106,7 +106,7 @@ export const handleEnvActivity =
         activity: {
           reachable: payload.reachable,
           observed: payload.observed,
-          stale: payload.stale === true,
+          outage: payload.outage === true,
           busy: payload.busy,
           detail: (payload.detail ?? '').trim(),
         },

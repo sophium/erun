@@ -90,6 +90,11 @@ func TestObserveEnvironmentActivityIdleEnvironmentAnswers(t *testing.T) {
 	}
 }
 
+// A dropped forward is a repair, not a verdict: the environment cannot be asked
+// anything through a port nothing holds, so the observation stays empty while
+// the repair runs beside it. What the repair then does with it — and the
+// distinction between an environment that had a forward and one that never did
+// — belongs to environment_forward_repair_test.go.
 func TestObserveEnvironmentActivityUnreachableGivesNoVerdict(t *testing.T) {
 	got := observeWith(t, false, func(context.Context, string, string) (eruncommon.EnvironmentIdleStatus, error) {
 		t.Fatal("the idle question must not be asked when the port does not answer")

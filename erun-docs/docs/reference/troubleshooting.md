@@ -62,7 +62,9 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:<localPort>/mcp
 
 A `200` (or any non-zero response) means the server is up. If the call hangs or 404s, the port-forward died — `erun open` re-establishes it. For the JSON-RPC handshake an Agent uses against the same endpoint, see [MCP overview · Worked example](/mcp/overview#worked-example).
 
-A dead port-forward keeps its local port bound, so `lsof` still shows a listener and only a real request reveals the failure. The desktop app watches for exactly that — a held port with an edge that answers nothing, which is what a replaced runtime pod leaves behind — and re-runs the reconnect itself, a few times, before giving up. When it gives up it says so: the environment's sidebar row turns to a warning triangle reading **unreachable**, and a notification names the port. That is the point to deploy the environment, because a forward a fresh `erun open` cannot fix is a runtime problem rather than a tunnel one.
+Replacing the runtime pod breaks the forward in one of two ways, and neither announces itself. Usually `kubectl port-forward` exits along with the pod, so the local port is simply free — `lsof` shows nothing, which from the outside is indistinguishable from an environment nobody ever opened. Occasionally the listener outlives its far end instead, so `lsof` still shows it and only a real request reveals the failure.
+
+The desktop app watches for both, and re-runs the reconnect itself a few times before giving up. What tells it apart from an environment nobody opened is the recorded forward above: `erun open` writes that file, so an environment without one is never touched, and an environment you stopped is never woken. When the desktop gives up it says so: the environment's sidebar row turns to a warning triangle reading **unreachable**, and a notification names the port and which of the two faults it found. That is the point to deploy the environment, because a forward a fresh `erun open` cannot fix is a runtime problem rather than a tunnel one.
 
 ## Connecting a laptop-side Agent client
 

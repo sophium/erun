@@ -52,12 +52,12 @@ type environmentActivityState struct {
 	// say "idle" on the environment's behalf.
 	observed bool
 	busy     bool
-	// stale is the one shape of reachable-but-never-observed that is
-	// diagnosable rather than merely quiet: the forward holds its local port,
-	// its edge answers nothing at all, and a bounded repair did not fix it. The
-	// row has to name it, because every other field here renders that
-	// environment exactly like an idle one.
-	stale bool
+	// outage is the environment having lost the forward it had, past the point
+	// a bounded repair could bring it back — the local port free, or held by
+	// something that answers nothing. The row has to name it, because every
+	// other field here renders such an environment exactly like an idle one, or
+	// like one nobody ever opened.
+	outage bool
 	// detail names what is keeping the environment busy, in the operator's
 	// language, so the row can say "held by gradle-build" rather than "busy".
 	detail string
@@ -118,14 +118,28 @@ func (a *App) observeEnvironmentActivity(selection uiSelection) environmentActiv
 	// Reachability is "a forward was established for this environment and its
 	// edge answers" — not "some process holds that port". The state file is what
 	// distinguishes the two, and `erun open` writes it whoever ran it, which is
-	// what makes a CLI-opened environment visible here at all.
-	forward, ok, err := eruncommon.LoadPortForwardState("mcp", selection.Tenant, selection.Environment)
-	if err != nil || !ok {
+	// what makes a CLI-opened environment visible here at all. It is also the
+	// only record that this environment was ever open, so its absence is the
+	// line the sweep does not cross: an environment nobody opened is left alone.
+	forward, established, err := eruncommon.LoadPortForwardState("mcp", selection.Tenant, selection.Environment)
+	if err != nil || !established {
 		a.forgetForwardRepair(selection)
 		return observation
 	}
-	if a.deps.canConnectLocalPort == nil || !a.deps.canConnectLocalPort(forward.LocalPort) {
+	if a.deps.canConnectLocalPort == nil {
+		// Nothing was observed, so there is nothing to diagnose. An unanswerable
+		// question must not be recorded as a bad answer.
 		a.forgetForwardRepair(selection)
+		return observation
+	}
+	if !a.deps.canConnectLocalPort(forward.LocalPort) {
+		// The dropped forward — and the reason this sweep used to stop here.
+		// Every ordinary pod replacement makes kubectl exit outright, so the
+		// port is simply free afterwards and the environment is unreachable to
+		// every client of it. Returning "not reachable" and nothing else was
+		// true and useless: it renders as an environment nobody opened, which
+		// is the one thing this environment is not.
+		observation.state.outage = a.reconcileForwardHealth(selection, forward.LocalPort, false)
 		return observation
 	}
 	observation.state.reachable = true
@@ -151,7 +165,7 @@ func (a *App) observeEnvironmentActivity(selection uiSelection) environmentActiv
 		// opposite responses. An edge that replies at all (a 401 counts) is a
 		// live tunnel whose idle question failed and must be left alone; an edge
 		// that replies to nothing is a forward pointed at a pod that is gone.
-		observation.state.stale = a.reconcileForwardHealth(selection, forward.LocalPort)
+		observation.state.outage = a.reconcileForwardHealth(selection, forward.LocalPort, true)
 		return observation
 	}
 	a.forgetForwardRepair(selection)
@@ -234,7 +248,7 @@ func (a *App) emitEnvActivity(observation environmentActivity) {
 		Environment: observation.selection.Environment,
 		Reachable:   observation.state.reachable,
 		Observed:    observation.state.observed,
-		Stale:       observation.state.stale,
+		Outage:      observation.state.outage,
 		Busy:        observation.state.busy,
 		Detail:      observation.state.detail,
 	})

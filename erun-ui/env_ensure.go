@@ -18,14 +18,14 @@ const envEnsureTTL = 30 * time.Second
 
 // envEnsureReason says why a rebind is being asked for, because the two callers
 // hold different evidence. A tab spawn is one of a burst and has no reason to
-// think anything is wrong, so a recent success stands in for it. A stale-forward
+// think anything is wrong, so a recent success stands in for it. A forward
 // repair has watched the forward stop carrying traffic *since* that success, so
 // the window it stamped is exactly the thing that must not suppress it.
 type envEnsureReason int
 
 const (
 	envEnsureForTabSpawn envEnsureReason = iota
-	envEnsureForStaleForward
+	envEnsureForBrokenForward
 )
 
 // ensureEnvRuntimeOnce rebinds the env's MCP/API forwarders against the
