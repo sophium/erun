@@ -5,16 +5,24 @@ import (
 )
 
 // environment_forward_repair.go repairs the failure the activity sweep is the
-// first to see and the last thing that ever noticed: a kubectl port-forward
-// whose target pod was replaced keeps its local listener bound while every
-// request through it dies. The environment's MCP edge is then unreachable to
-// every client for as long as the operator does not notice — five hours, in the
-// case this was written for — because nothing that decides reachability from a
-// held port has any reason to act.
+// first to see and the last thing that ever noticed: an environment that was
+// open loses the port-forward carrying its MCP edge, and nothing starts a
+// replacement. The environment is then unreachable to every client for as long
+// as the operator does not notice — five hours, in the case this was written
+// for — because nothing that decides reachability from a held port has any
+// reason to act.
+//
+// Both shapes of that loss are repaired here, and the pairing is the point. A
+// forward whose pod was replaced usually makes kubectl exit outright, leaving
+// the port free (dropped); occasionally the listener survives its far end and
+// answers nothing through it (stale). The second is the weirder one and the one
+// that took hours to diagnose, but the first is what every ordinary rollout,
+// scale or eviction produces, so a repair that acts only on the rare shape
+// leaves the common one silent.
 //
 // The repair is `erun open --reconnect`, driven through the same ensure-runtime
 // path a tab spawn uses. That command already owns the kubectl lifecycle: it
-// recognises its own forward, stops the stale one, and starts a replacement.
+// recognises its own forward, stops a stale one, and starts a replacement.
 // Starting a forward from here instead would put two owners on one port.
 //
 // Three properties make the repair safe to run unattended, and each is load
@@ -28,7 +36,9 @@ import (
 //     second forward racing the first for the port.
 //   - Never a resurrection. A stopped environment is not a broken one; its
 //     forward is *supposed* to be dead. It ends the episode instead of starting
-//     one, and the reconnect itself refuses to wake a stopped runtime.
+//     one, and the reconnect itself refuses to wake a stopped runtime. The
+//     environment nobody ever opened is out of reach by construction: it has no
+//     recorded forward, so the sweep never arrives here for it at all.
 
 // forwardRepairAttempts bounds one episode. Three sweeps is long enough for a
 // pod that is merely mid-replacement to come back on its own — the forward
@@ -37,10 +47,11 @@ import (
 // afternoon.
 const forwardRepairAttempts = 3
 
-// forwardRepairEpisode is what one environment's stale forward has cost so far.
-// The port is part of it because a forward on a different port is a different
-// forward: re-opening an environment that picked a new local port starts a
-// fresh episode rather than inheriting the old one's exhausted attempts.
+// forwardRepairEpisode is what one environment's broken forward has cost so
+// far. The port is part of it because a forward on a different local port is a
+// different forward: re-opening an environment that picked a new local port
+// starts a fresh episode rather than inheriting the old one's exhausted
+// attempts.
 type forwardRepairEpisode struct {
 	port     int
 	attempts int
@@ -49,20 +60,20 @@ type forwardRepairEpisode struct {
 
 // reconcileForwardHealth turns one sweep's observations of an environment's MCP
 // forward into the response they call for, and reports whether the row must
-// render a diagnosed outage rather than a quiet environment. It is called only
-// when the idle question went unanswered, which is the moment the difference
-// between a fussy edge and a vanished far end starts to matter.
-func (a *App) reconcileForwardHealth(selection uiSelection, port int) bool {
-	// The caller arrives here having already established the other two facts: a
-	// forward is recorded for this environment, and something holds its local
-	// port. What is left is the one that decides.
-	const established, portIsBound = true, true
-	health := eruncommon.ClassifyPortForward(established, portIsBound, a.mcpEdgeAnswers(port))
-	if !health.NeedsReestablishing() {
+// render a diagnosed outage rather than a quiet environment.
+//
+// The caller arrives here having already established that a forward is recorded
+// for this environment — the record is what separates "was open" from "nobody
+// opened it" — and whether anything still holds its local port. Only the edge
+// question is left, and only when there is a listener to ask.
+func (a *App) reconcileForwardHealth(selection uiSelection, port int, portIsBound bool) bool {
+	const established = true
+	health := eruncommon.ClassifyPortForward(established, portIsBound, portIsBound && a.mcpEdgeAnswers(port))
+	if !health.Interrupted() {
 		a.forgetForwardRepair(selection)
 		return false
 	}
-	return a.repairStalePortForward(selection, port)
+	return a.repairInterruptedPortForward(selection, port, health)
 }
 
 // mcpEdgeAnswers reports whether anything at all replies through the forward.
@@ -74,14 +85,14 @@ func (a *App) mcpEdgeAnswers(port int) bool {
 	return a.deps.canReachMCPEndpoint == nil || a.deps.canReachMCPEndpoint(port)
 }
 
-// repairStalePortForward handles one sweep's observation that the forward holds
-// its port and its edge answers nothing, and reports whether the row must now
-// render that as a diagnosed outage.
+// repairInterruptedPortForward handles one sweep's observation that the
+// environment has lost its forward, and reports whether the row must now render
+// that as a diagnosed outage.
 //
 // It is called only from the activity sweep, which is a single goroutine, so
 // the read-decide-record sequence below needs no lock spanning the three; each
 // step takes the lock for its own map access.
-func (a *App) repairStalePortForward(selection uiSelection, port int) bool {
+func (a *App) repairInterruptedPortForward(selection uiSelection, port int, health eruncommon.PortForwardHealth) bool {
 	// Ask the cluster only on this path. A stopped environment reaching here is
 	// the expected shape of a stop, not a fault, so the read is worth its cost
 	// exactly when something looks wrong — never on every sweep of every
@@ -95,7 +106,7 @@ func (a *App) repairStalePortForward(selection uiSelection, port int) bool {
 		// Count only a rebind this call actually started. One already in flight
 		// *is* this sweep's attempt, and counting it twice would exhaust the
 		// episode against a repair that was never given time to finish.
-		if a.ensureEnvRuntime(selection, envEnsureForStaleForward) {
+		if a.ensureEnvRuntime(selection, envEnsureForBrokenForward) {
 			a.recordForwardRepairAttempt(selection)
 		}
 		return false
@@ -103,8 +114,8 @@ func (a *App) repairStalePortForward(selection uiSelection, port int) bool {
 	if !episode.reported {
 		a.recordForwardRepairReported(selection)
 		a.emitEnvNotification("warning", selection.Tenant, selection.Environment,
-			notificationSourceForwardStale,
-			eruncommon.DescribeUnrepairedPortForward(selection.Tenant, selection.Environment, port, episode.attempts))
+			notificationSourceForwardOutage,
+			eruncommon.DescribeUnrepairedPortForward(selection.Tenant, selection.Environment, port, episode.attempts, health))
 	}
 	return true
 }
@@ -154,7 +165,7 @@ func (a *App) updateForwardRepairEpisode(selection uiSelection, mutate func(*for
 }
 
 // forgetForwardRepair ends the episode, and retires its notification when there
-// was one to retire. Called for every observation that is not a stale forward —
+// was one to retire. Called for every observation that is not a broken forward —
 // a serving edge, a forward that was never established, a stopped environment —
 // so the next failure is counted and reported from zero.
 func (a *App) forgetForwardRepair(selection uiSelection) {
@@ -165,6 +176,6 @@ func (a *App) forgetForwardRepair(selection uiSelection) {
 	delete(a.forwardRepairs, key)
 	a.mu.Unlock()
 	if ok && episode.reported {
-		a.emitClearEnvNotification(selection.Tenant, selection.Environment, notificationSourceForwardStale)
+		a.emitClearEnvNotification(selection.Tenant, selection.Environment, notificationSourceForwardOutage)
 	}
 }

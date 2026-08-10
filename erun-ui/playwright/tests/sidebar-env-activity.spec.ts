@@ -65,8 +65,8 @@ test.describe('sidebar env activity', () => {
     page,
     seededEnv,
   }) => {
-    // The #973 row. The environment's port-forward still holds its local port,
-    // so the desktop's reachability check keeps saying yes while nothing
+    // The rarer shape. The environment's port-forward still holds its local
+    // port, so the desktop's reachability check keeps saying yes while nothing
     // answers through it; the desktop re-established it, that did not help, and
     // the only thing left is to say so. Rendered from reachable alone this is a
     // green "in use elsewhere" light on an environment no client can talk to.
@@ -81,7 +81,7 @@ test.describe('sidebar env activity', () => {
     const dot = app.sidebar.envOpenDot(tenant, environment);
     await driveEnvActivity(
       page,
-      { tenant, environment, reachable: true, observed: false, stale: true, busy: false },
+      { tenant, environment, reachable: true, observed: false, outage: true, busy: false },
       async () => {
         await expect(dot).toHaveAttribute('data-env-state', 'failed', { timeout: 1_000 });
         await expect(dot).toHaveAccessibleName(
@@ -94,11 +94,43 @@ test.describe('sidebar env activity', () => {
     // And the hover card says it in prose, with the recovery attached.
     await driveEnvActivity(
       page,
-      { tenant, environment, reachable: true, observed: false, stale: true, busy: false },
+      { tenant, environment, reachable: true, observed: false, outage: true, busy: false },
       async () => {
         await app.sidebar.hoverEnvironmentRow(tenant, environment);
         await expect(app.sidebar.envHoverCard(tenant, environment)).toContainText(
           'Unreachable — its connection is dead; deploy it to bring the runtime back',
+          { timeout: 1_000 },
+        );
+      },
+    );
+  });
+
+  test('a dropped forward reads as an outage, not as a row nobody opened', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    // The ordinary shape, and the one with no other tell. A pod replacement
+    // makes kubectl exit, so the local port is free and every field except the
+    // diagnosis reads exactly like an environment nobody ever opened — which is
+    // how a row the operator had open went quiet instead of reporting an
+    // outage. Note reachable is false here: the row is carried by the outage
+    // alone, so a derivation that gated on reachable would render nothing.
+    //
+    // Same harness limitation as the sibling above: producing a real dropped
+    // forward needs a cluster, so the spec drives the env-activity event the Go
+    // sweep emits. The restart and its bound are owned by
+    // erun-ui/environment_forward_repair_test.go::TestDroppedForwardIsRestarted
+    // and ::TestUnrepairableForwardReportsInsteadOfLooping.
+    const { tenant, environment } = seededEnv;
+    const dot = app.sidebar.envOpenDot(tenant, environment);
+    await driveEnvActivity(
+      page,
+      { tenant, environment, reachable: false, observed: false, outage: true, busy: false },
+      async () => {
+        await expect(dot).toHaveAttribute('data-env-state', 'failed', { timeout: 1_000 });
+        await expect(dot).toHaveAccessibleName(
+          new RegExp(`^${tenant} / ${environment} is unreachable —`),
           { timeout: 1_000 },
         );
       },
@@ -151,7 +183,7 @@ interface EnvActivityEvent {
   environment: string;
   reachable: boolean;
   observed: boolean;
-  stale?: boolean;
+  outage?: boolean;
   busy: boolean;
   detail?: string;
 }

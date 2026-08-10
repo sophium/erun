@@ -123,7 +123,7 @@ function EnvStatusIndicator({
 }): React.ReactElement {
   const dispatch = useAppDispatch();
   // Fall back to the derived indicator, not to a literal: a condition the
-  // environment reports rather than the desktop (a stale port-forward) has no
+  // environment reports rather than the desktop (a broken port-forward) has no
   // envState, and hard-coding "running" for it would leave the attribute
   // contradicting the glyph beside it.
   const dataEnvState = envState || indicator.dot;
@@ -280,11 +280,13 @@ function useEnvironmentRowSelectors(tenantName: string, environmentName: string)
   const envObserved = useAppSelector(
     (state) => state.envStatus.activityByEnv[activityKey]?.observed === true,
   );
-  // Whether the environment's forward is bound but dead. Kept apart from
-  // reachable because the two disagree exactly when it matters: the port still
-  // answers, and nothing behind it does.
-  const envStale = useAppSelector(
-    (state) => state.envStatus.activityByEnv[activityKey]?.stale === true,
+  // Whether the environment lost the forward it had. Kept apart from reachable
+  // because the two say different things: reachable is what the row already
+  // believed, and this is the environment being unable to answer at all — the
+  // port free after kubectl exited with its pod, or still bound with nothing
+  // behind it.
+  const envOutage = useAppSelector(
+    (state) => state.envStatus.activityByEnv[activityKey]?.outage === true,
   );
   const envBusy = useAppSelector(
     (state) => state.envStatus.activityByEnv[activityKey]?.busy === true,
@@ -303,7 +305,7 @@ function useEnvironmentRowSelectors(tenantName: string, environmentName: string)
     envState,
     reachable,
     envObserved,
-    envStale,
+    envOutage,
     envBusy,
     envBusyDetail,
   };
@@ -327,7 +329,7 @@ function useEnvironmentRowState(
     envState,
     reachable,
     envObserved,
-    envStale,
+    envOutage,
     envBusy,
     envBusyDetail,
   } = useEnvironmentRowSelectors(tenantName, environmentName);
@@ -361,7 +363,7 @@ function useEnvironmentRowState(
       envState,
       isOpen,
       reachable,
-      stale: envStale,
+      outage: envOutage,
       busy: envBusy,
       detail: envBusyDetail,
     }),

@@ -24,11 +24,13 @@ export interface EnvObservedActivity {
   // separates "asked, and it reports no work" from "never got an answer" —
   // busy is false either way, and only the first may clear a row's latch.
   observed: boolean;
-  // stale is the environment's forward holding its local port while nothing
-  // replies through it, after the desktop's bounded repair failed to fix it.
-  // It is the one reachable-but-never-observed case that is an outage rather
-  // than an environment with nothing to say, so the row has to render it.
-  stale: boolean;
+  // outage is the environment having lost the forward it had — the local port
+  // free, or held by something that replies to nothing — after the desktop's
+  // bounded repair failed to fix it. It is what separates an environment with
+  // nothing to say from one that cannot say anything, so the row has to render
+  // it; note it can be true while reachable is false, which is the ordinary
+  // shape after a pod replacement takes the forward with it.
+  outage: boolean;
   busy: boolean;
   detail: string;
 }
@@ -63,7 +65,7 @@ export const envStatusSlice = createSlice({
       // A quiet environment carries no entry, so a repeated "still quiet"
       // observation must leave the slice byte-identical rather than producing a
       // new state object every poll.
-      if (!activity.reachable && !activity.busy && !activity.stale) {
+      if (!activity.reachable && !activity.busy && !activity.outage) {
         if (key in state.activityByEnv) {
           Reflect.deleteProperty(state.activityByEnv, key);
         }
@@ -72,7 +74,7 @@ export const envStatusSlice = createSlice({
       const current = state.activityByEnv[key];
       if (
         current?.reachable === activity.reachable &&
-        current.stale === activity.stale &&
+        current.outage === activity.outage &&
         current.busy === activity.busy &&
         current.detail === activity.detail
       ) {

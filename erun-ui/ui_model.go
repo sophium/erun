@@ -77,11 +77,14 @@ type envActivityPayload struct {
 	// "nobody got an answer": busy is false in both, and the sidebar acts on
 	// the difference when deciding whether a row may stop spinning.
 	Observed bool `json:"observed"`
-	// Stale is the diagnosis behind a reachable environment that never answers:
-	// its port-forward holds the local port while nothing replies through it,
-	// and re-establishing it did not help. Without it such a row renders
-	// exactly like a quiet environment, which is how one stayed dead for hours.
-	Stale  bool   `json:"stale"`
+	// Outage is the diagnosis behind an environment that had a forward and no
+	// longer has a working one — the local port free after kubectl exited with
+	// its pod, or held by something that replies to nothing — once
+	// re-establishing it did not help. Without it such a row renders exactly
+	// like a quiet environment or an unopened one, which is how one stayed dead
+	// for hours. It is deliberately independent of Reachable: the dropped shape
+	// is unreachable *and* diagnosed, and only the second of those is news.
+	Outage bool   `json:"outage"`
 	Busy   bool   `json:"busy"`
 	Detail string `json:"detail,omitempty"`
 }

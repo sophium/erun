@@ -59,3 +59,18 @@ func ClassifyPortForward(established, portIsBound, edgeAnswers bool) PortForward
 func (h PortForwardHealth) NeedsReestablishing() bool {
 	return h == PortForwardStale
 }
+
+// Interrupted reports whether an environment that had a forward no longer has a
+// working one. Dropped and stale are one answer to that question and differ
+// only in whether there is a corpse to clear first — which is the acting
+// caller's problem, not the diagnosis's.
+//
+// Saying them apart is what NeedsReestablishing is for. Saying them together is
+// what this is for, because the distinction has no meaning to a client of the
+// environment: both are unreachable, and neither recovers on its own. Dropped
+// is also the ordinary one — any pod replacement makes kubectl exit outright,
+// while the bound-but-dead shape is the rarer accident — so a response that
+// acts on stale alone leaves the common case as the silent one.
+func (h PortForwardHealth) Interrupted() bool {
+	return h == PortForwardDropped || h == PortForwardStale
+}

@@ -14,7 +14,7 @@ const base = {
   envState: '',
   isOpen: false,
   reachable: false,
-  stale: false,
+  outage: false,
   busy: false,
   detail: '',
 };
@@ -102,11 +102,11 @@ test('a sticky condition does not outlive the session that produced it', () => {
 });
 
 test('a bound-but-dead forward is reported as an outage, not as a quiet row', () => {
-  // The #973 row: the environment's port-forward still holds its local port, so
-  // every check that stops at the listener calls it reachable, and the desktop
-  // has no tabs for it. Rendered from reachable alone it is a green
-  // "in use elsewhere" light on an environment no client can talk to.
-  const indicator = environmentIndicator({ ...base, reachable: true, stale: true });
+  // The bound-but-dead row: the environment's port-forward still holds its
+  // local port, so every check that stops at the listener calls it reachable,
+  // and the desktop has no tabs for it. Rendered from reachable alone it is a
+  // green "in use elsewhere" light on an environment no client can talk to.
+  const indicator = environmentIndicator({ ...base, reachable: true, outage: true });
   assert.equal(indicator.visible, true);
   assert.equal(indicator.dot, 'failed');
   assert.equal(
@@ -119,16 +119,26 @@ test('a bound-but-dead forward is reported as an outage, not as a quiet row', ()
   );
 });
 
-test('a stale forward keeps the row visible even once the port stops answering', () => {
-  // The diagnosis outlives reachability: the forward can drop entirely between
-  // sweeps, and a row that went blank at that moment would take the only
-  // explanation of the outage with it.
-  const indicator = environmentIndicator({ ...base, stale: true });
+test('a dropped forward is an outage, not the blank row of an environment nobody opened', () => {
+  // The ordinary shape: a pod replacement makes kubectl exit, so the port is
+  // free and the environment is not reachable at all. Every field except this
+  // one then reads exactly like an environment nobody ever opened, so the row
+  // has to be carried by the diagnosis alone — and it must still name the
+  // recovery, since being unreachable is the whole of what the operator sees.
+  const indicator = environmentIndicator({ ...base, reachable: false, outage: true });
   assert.equal(indicator.visible, true);
   assert.equal(indicator.dot, 'failed');
+  assert.equal(
+    indicator.condition,
+    'team / dev is unreachable — its connection is dead; deploy it to bring the runtime back',
+  );
+  assert.equal(
+    indicator.activity,
+    'Unreachable — its connection is dead; deploy it to bring the runtime back',
+  );
 });
 
-test('a reachable environment is reported on its own terms, not a stale condition', () => {
+test('a reachable environment is reported on its own terms, not a sticky condition', () => {
   const indicator = environmentIndicator({ ...base, envState: 'failed', reachable: true });
   assert.equal(indicator.visible, true);
   assert.equal(indicator.dot, 'running');

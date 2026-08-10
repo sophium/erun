@@ -324,11 +324,11 @@ const ENV_STATE_FAILED = 'failed';
 // no sticky condition contradicts it: a stopped env whose last observation was
 // busy is stopped, not busy.
 //
-// A stale forward reads as a failure wherever it appears, including on a row
+// A forward outage reads as a failure wherever it appears, including on a row
 // the desktop never opened: the environment is unreachable to every client of
 // it, which is the opposite of the quiet row it would otherwise render as.
-function environmentStatusDot(envState: string, busy = false, stale = false): StatusDotState {
-  if (envState === ENV_STATE_FAILED || stale) {
+function environmentStatusDot(envState: string, busy = false, outage = false): StatusDotState {
+  if (envState === ENV_STATE_FAILED || outage) {
     return 'failed';
   }
   if (envState === ENV_STATE_STOPPED || envState === ENV_STATE_RUNTIME_STOPPED) {
@@ -363,11 +363,12 @@ export interface EnvironmentIndicatorInputs {
   envState: string;
   isOpen: boolean;
   reachable: boolean;
-  // stale is the environment's port-forward holding its local port while
-  // nothing answers through it. It is deliberately separate from reachable:
-  // reachable is what the row already believed, and believing it is what let a
-  // dead environment render as a running one.
-  stale: boolean;
+  // outage is the environment having lost the port-forward it had, past the
+  // point a repair could bring it back. It is deliberately separate from
+  // reachable: reachable is what the row already believed, and believing it is
+  // what let a dead environment render as a running one — while a dropped
+  // forward is not reachable either, and rendered as one nobody had opened.
+  outage: boolean;
   busy: boolean;
   detail: string;
 }
@@ -378,10 +379,10 @@ export function environmentIndicator(raw: EnvironmentIndicatorInputs): Environme
   // dropped rather than left to outlive the session that produced it — a closed
   // row must not keep flying a failure triangle for a session that is gone.
   const input = raw.isOpen ? raw : { ...raw, envState: '' };
-  const dot = environmentStatusDot(input.envState, input.busy, input.stale);
+  const dot = environmentStatusDot(input.envState, input.busy, input.outage);
   // What keeps a closed row visible is the environment itself: its edge
   // answering, work in flight, or an outage it cannot report any other way.
-  const visible = input.isOpen || input.reachable || input.busy || input.stale;
+  const visible = input.isOpen || input.reachable || input.busy || input.outage;
   return {
     visible,
     dot,
@@ -395,8 +396,8 @@ export function environmentIndicator(raw: EnvironmentIndicatorInputs): Environme
 // its heading already says which environment this is, so repeating the name on
 // every row would crowd out the state itself.
 function environmentActivityLabel(input: EnvironmentIndicatorInputs, dot: StatusDotState): string {
-  if (input.stale) {
-    return `Unreachable — ${STALE_FORWARD_RECOVERY}`;
+  if (input.outage) {
+    return `Unreachable — ${FORWARD_OUTAGE_RECOVERY}`;
   }
   if (dot === 'failed') {
     return 'Deploy failed — recover from Activities';
@@ -416,15 +417,15 @@ function environmentActivityLabel(input: EnvironmentIndicatorInputs, dot: Status
   return 'Not open';
 }
 
-// STALE_FORWARD_RECOVERY names the way out of a stale forward, so the state is
+// FORWARD_OUTAGE_RECOVERY names the way out of a broken forward, so the state is
 // never shown without it (Nielsen #9). Deploying is the recovery rather than
 // re-opening because the desktop already re-opened it — repeatedly, and it did
 // not help, which is the only reason this state is rendered at all.
-const STALE_FORWARD_RECOVERY = 'its connection is dead; deploy it to bring the runtime back';
+const FORWARD_OUTAGE_RECOVERY = 'its connection is dead; deploy it to bring the runtime back';
 
 function environmentCondition(input: EnvironmentIndicatorInputs, dot: StatusDotState): string {
-  if (input.stale) {
-    return `${input.name} is unreachable — ${STALE_FORWARD_RECOVERY}`;
+  if (input.outage) {
+    return `${input.name} is unreachable — ${FORWARD_OUTAGE_RECOVERY}`;
   }
   if (dot === 'failed') {
     return `${input.name} deploy failed — ${environmentStateRecovery(input.envState)}`;
