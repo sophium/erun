@@ -84,7 +84,14 @@ func (a *App) DownloadOrchestratorOutput(id, name string) (string, error) {
 	if strings.TrimSpace(dest) == "" {
 		return "", nil // operator cancelled the dialog
 	}
-	return dest, os.WriteFile(dest, out.Bytes, 0o644)
+	if err := os.WriteFile(dest, out.Bytes, 0o644); err != nil {
+		return "", err
+	}
+	// The download already signed the source, and an ad-hoc signature travels
+	// inside the Mach-O — but the saved copy still lands 0644, so it needs the
+	// execute bit this seam applies.
+	a.reportHostArtifactSigning(eruncommon.SignHostArtifact(dest))
+	return dest, nil
 }
 
 // RunOrchestratorOutputOnHost runs one produced file here. An orchestrator's
@@ -104,5 +111,7 @@ func (a *App) RunOrchestratorOutputOnHost(id, name string) error {
 	if entry.IsArchive {
 		return fmt.Errorf("output %q is a directory", name)
 	}
-	return a.deps.launchHostArtifact(filepath.Join(dir, entry.Name), dir)
+	exePath := filepath.Join(dir, entry.Name)
+	a.reportHostArtifactSigning(eruncommon.SignHostArtifact(exePath))
+	return a.deps.launchHostArtifact(exePath, dir)
 }

@@ -1367,6 +1367,46 @@ func StubKubectlScalingRuntime(t testing.TB, dir, release string, desired int) s
 	return StubBinaryWithScript(t, dir, "kubectl", script)
 }
 
+// CodesignStubSpec configures the codesign stub. Host-side ad-hoc signing asks
+// codesign two different questions — "is this already signed?" (`codesign -d`)
+// and "sign it" (`codesign -s - -f`) — so the stub has to branch on argv, which
+// is why it lives here rather than inline in a scenario.
+type CodesignStubSpec struct {
+	// AlreadySigned makes the display probe report an existing signature, which
+	// is the branch where production must leave the artifact alone.
+	AlreadySigned bool
+	// SignExitCode and SignStderr shape the signing call's answer; a non-zero
+	// exit is the diagnosable failure that must not lose the artifact.
+	SignExitCode int
+	SignStderr   string
+}
+
+// StubCodesign writes the codesign stub and returns the path to a log file that
+// records one line per invocation ("<argv>"). The log is the only way a scenario
+// can prove a call did *not* happen — that an already-signed artifact was never
+// re-signed — because absence leaves no trace in the command's own output.
+func StubCodesign(t testing.TB, dir string, spec CodesignStubSpec) string {
+	t.Helper()
+	// Forward slashes: embedded in the sh stub, where Git Bash handles a
+	// backslash Windows path unreliably.
+	logPath := filepath.Join(dir, "codesign-calls.log")
+	quotedLog := shellSingleQuote(filepath.ToSlash(logPath))
+	displayExit := 1
+	if spec.AlreadySigned {
+		displayExit = 0
+	}
+	script := "printf '%s\\n' \"$*\" >> " + quotedLog + "\n" +
+		"case \"$1\" in\n" +
+		"  -d) printf '%s\\n' 'erun stub codesign display' >&2; exit " + strconv.Itoa(displayExit) + " ;;\n" +
+		"esac\n"
+	if spec.SignStderr != "" {
+		script += "printf '%s\\n' " + shellSingleQuote(spec.SignStderr) + " >&2\n"
+	}
+	script += "exit " + strconv.Itoa(spec.SignExitCode)
+	StubBinaryWithScript(t, dir, "codesign", script)
+	return logPath
+}
+
 // StubEnv returns the env-var pairs that route the named binary lookups to
 // the stub at dir/<name>. Pass each result through env.Setup.Env() concat.
 func StubEnv(dir string, names ...string) []string {

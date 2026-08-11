@@ -89,7 +89,9 @@ func SyncWorkspaceOnce(ctx context.Context, params WorkspaceSyncParams) (Workspa
 		pass.deleteErr = err
 		return WorkspaceSyncResult{}, err
 	}
-	artifacts, err := syncOutputsArtifacts(ctx, params.HostAlias, DefaultRuntimeOutputsDir, filepath.Join(params.LocalPath, WorkspaceSyncArtifactsSubdir))
+	artifacts, signing, err := syncOutputsArtifacts(ctx, params.HostAlias, DefaultRuntimeOutputsDir, filepath.Join(params.LocalPath, WorkspaceSyncArtifactsSubdir))
+	pass.signed = signing.signed
+	pass.signNote = signing.note
 	if err != nil {
 		pass.failure = err
 		return WorkspaceSyncResult{}, err
@@ -114,6 +116,8 @@ type workspaceSyncPassLog struct {
 	local      int
 	fetch      int
 	deleted    int
+	signed     int
+	signNote   string
 	fetchErr   error
 	deleteErr  error
 	failure    error
@@ -131,11 +135,19 @@ func (l *workspaceSyncPassLog) recordResolved(resolved workspaceSyncPaths, err e
 }
 
 func (l *workspaceSyncPassLog) emit() {
-	log.Printf("erun: workspace sync %s -> %s: notGitRepo=%t remote=%d staleIndex=%s mirror=%d fetch=%d deleted=%d%s%s%s",
-		l.params.RemotePath, l.params.LocalPath, l.notGitRepo, l.remote, l.stale, l.local, l.fetch, l.deleted,
+	log.Printf("erun: workspace sync %s -> %s: notGitRepo=%t remote=%d staleIndex=%s mirror=%d fetch=%d deleted=%d signed=%d%s%s%s%s",
+		l.params.RemotePath, l.params.LocalPath, l.notGitRepo, l.remote, l.stale, l.local, l.fetch, l.deleted, l.signed,
+		workspaceSyncPassNoteSuffix(" signNote", l.signNote),
 		workspaceSyncPassErrorSuffix(" fetchError", l.fetchErr),
 		workspaceSyncPassErrorSuffix(" deleteError", l.deleteErr),
 		workspaceSyncPassErrorSuffix(" error", l.failure))
+}
+
+func workspaceSyncPassNoteSuffix(label, note string) string {
+	if strings.TrimSpace(note) == "" {
+		return ""
+	}
+	return label + "=" + strings.TrimSpace(note)
 }
 
 func workspaceSyncPassErrorSuffix(label string, err error) string {
@@ -168,33 +180,52 @@ const workspaceSyncStagingSubdir = ".erun-sync-staging"
 // read-only host mirror. Artifacts live outside the git worktree, so they escape
 // the gitignore that hides *.exe from the source mirror — this is how a Windows
 // binary cross-built in the pod reaches the host to run/debug. Returns the number
-// of artifact files delivered; a missing or empty outputs dir is a no-op.
-func syncOutputsArtifacts(ctx context.Context, hostAlias, outputsRemote, artifactsLocal string) (int, error) {
+// of artifact files delivered plus what ad-hoc signing did to them; a missing or
+// empty outputs dir is a no-op.
+func syncOutputsArtifacts(ctx context.Context, hostAlias, outputsRemote, artifactsLocal string) (int, hostArtifactSigningSummary, error) {
+	var signing hostArtifactSigningSummary
 	remote, err := remoteOutputsFiles(ctx, hostAlias, outputsRemote)
 	if err != nil {
-		return 0, err
+		return 0, signing, err
 	}
 	if len(remote) > 0 {
 		if err := os.MkdirAll(artifactsLocal, 0o755); err != nil {
-			return 0, fmt.Errorf("create artifacts dir %s: %w", artifactsLocal, err)
+			return 0, signing, fmt.Errorf("create artifacts dir %s: %w", artifactsLocal, err)
 		}
 		// Clear the read-only bit set by the previous pass so the refreshed file
 		// can replace it (matters on Windows, where a read-only attribute
 		// otherwise blocks the rename onto it).
 		if err := makeArtifactsWritable(artifactsLocal); err != nil {
-			return 0, err
+			return 0, signing, err
 		}
 		if err := extractRemoteWorkspaceFiles(ctx, hostAlias, outputsRemote, artifactsLocal, remote); err != nil {
-			return 0, err
+			return 0, signing, err
 		}
+		// The mirror is where a darwin artifact cross-built in the Linux pod first
+		// becomes a file the operator can run, so it is where the signature macOS
+		// demands has to come from. Sign while the files are still writable.
+		signing = signHostArtifacts(localArtifactPaths(artifactsLocal, remote))
 		if err := markArtifactsReadOnly(artifactsLocal, remote); err != nil {
-			return 0, err
+			return 0, signing, err
 		}
 	}
 	if err := pruneLocalArtifacts(artifactsLocal, remote); err != nil {
-		return 0, err
+		return 0, signing, err
 	}
-	return len(remote), nil
+	return len(remote), signing, nil
+}
+
+// localArtifactPaths resolves mirror-relative artifact paths against the mirror
+// root, dropping any that do not stay inside it.
+func localArtifactPaths(artifactsLocal string, paths []string) []string {
+	resolved := make([]string, 0, len(paths))
+	for _, item := range paths {
+		if !SafeWorkspaceSyncPath(item) {
+			continue
+		}
+		resolved = append(resolved, filepath.Join(artifactsLocal, filepath.FromSlash(item)))
+	}
+	return resolved
 }
 
 // remoteOutputsFiles lists the regular files under the pod outputs dir, relative
@@ -280,18 +311,26 @@ func makeArtifactsWritable(artifactsLocal string) error {
 // markArtifactsReadOnly strips the write bit from mirrored artifact files so the
 // host copy reads as the read-only mirror it is (on Windows this sets the
 // read-only attribute), signalling the operator not to edit a copy the sync will
-// overwrite.
+// overwrite. An executable artifact stays executable: read-only is about who may
+// edit the mirror, not about whether the operator can run what it delivered.
 func markArtifactsReadOnly(artifactsLocal string, paths []string) error {
 	for _, item := range paths {
 		if !SafeWorkspaceSyncPath(item) {
 			continue
 		}
 		full := filepath.Join(artifactsLocal, filepath.FromSlash(item))
-		if err := os.Chmod(full, 0o444); err != nil && !os.IsNotExist(err) {
+		if err := os.Chmod(full, readOnlyArtifactMode(full)); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("mark artifact read-only %s: %w", full, err)
 		}
 	}
 	return nil
+}
+
+func readOnlyArtifactMode(path string) os.FileMode {
+	if info, err := os.Stat(path); err == nil && info.Mode().Perm()&0o111 != 0 {
+		return 0o555
+	}
+	return 0o444
 }
 
 // workspaceSyncPaths is one pass's view of both sides of the mirror.

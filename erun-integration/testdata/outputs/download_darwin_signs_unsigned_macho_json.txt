@@ -1,0 +1,13 @@
+{
+  "name": "erun-darwin-arm64",
+  "dest": "erun-darwin-arm64",
+  "size": 30,
+  "sha256": "<HEX>",
+  "isArchive": false,
+  "signing": {
+    "path": "erun-darwin-arm64",
+    "signed": true
+  }
+}
+audit: erun outputs download --output json erun-darwin-arm64
+outputs: downloading <HOME>/.erun/outputs/erun-darwin-arm64

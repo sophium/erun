@@ -144,6 +144,54 @@ func TestSSHD(t *testing.T) {
 		}
 	})
 
+	// The mirror is the other way a darwin artifact reaches a macOS host, and the
+	// pod that produced it has no codesign, so the pass that materialises it is
+	// where the signature has to come from. ERUN_HOST_OS_OVERRIDE pins the darwin
+	// branch; ssh answers only the outputs listing, and tar is stubbed because the
+	// artifact is seeded in the mirror rather than streamed into it.
+	t.Run("sync_real_run_signs_a_mirrored_darwin_artifact", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithWorkspaceSync(t, setup, "team", "dev", 47300)
+		artifacts := filepath.Join(setup.Home, "mirror", "team-dev", ".erun-outputs")
+		if err := os.MkdirAll(artifacts, 0o755); err != nil {
+			t.Fatalf("mkdir artifacts: %v", err)
+		}
+		artifact := filepath.Join(artifacts, "erun-darwin-arm64")
+		if err := os.WriteFile(artifact, machOPayload, 0o444); err != nil {
+			t.Fatalf("seed artifact: %v", err)
+		}
+
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "ssh", "case \"$*\" in\n"+
+			"  *.erun/outputs*) printf 'erun-darwin-arm64\\0' ;;\n"+
+			"esac\n"+
+			"exit 0")
+		fixture.StubBinary(t, stubs, "tar", "")
+		codesignLog := fixture.StubCodesign(t, stubs, fixture.CodesignStubSpec{})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "ssh", "tar", "codesign")...)
+		envVars = append(envVars, "ERUN_HOST_OS_OVERRIDE=darwin")
+
+		result := erun.Run(t, []string{"sshd", "sync", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if calls := readCodesignCalls(t, codesignLog); !strings.Contains(calls, "-s - -f") {
+			t.Fatalf("expected the mirrored artifact to be ad-hoc signed, got codesign calls:\n%s", calls)
+		}
+		// Read-only is about who may edit the mirror; it must not be what stops the
+		// operator running what the mirror delivered.
+		info, err := os.Stat(artifact)
+		if err != nil {
+			t.Fatalf("stat mirrored artifact: %v", err)
+		}
+		if info.Mode().Perm() != 0o555 {
+			t.Fatalf("expected the mirrored artifact read-only and executable, got mode %v", info.Mode().Perm())
+		}
+		if !strings.Contains(result.Combined, "signed=1") {
+			t.Fatalf("the pass log must report what it signed:\n%s", result.Combined)
+		}
+	})
+
 	// A second pass over an already-matching mirror changes nothing, which is
 	// what makes the desktop's two-second poller cheap.
 	t.Run("sync_real_run_is_a_no_op_once_the_mirror_matches", func(t *testing.T) {

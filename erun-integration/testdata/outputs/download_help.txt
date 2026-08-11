@@ -2,6 +2,8 @@ Download one entry from the runtime pod's outputs directory onto this machine.
 
 A file lands as-is; a folder lands as a <name>.tar.gz archive. The source defaults to the pod's $ERUN_OUTPUTS_DIR (<HOME>/.erun/outputs); pass --path to download from another directory. Use --dest to choose where it lands locally (default: the current directory) and --force to overwrite an existing local file.
 
+On macOS an arriving macOS binary that carries no code signature is ad-hoc signed and made executable, because the system kills an unsigned one on exec without printing anything.
+
 Usage:
   erun outputs download <name> [flags]
 

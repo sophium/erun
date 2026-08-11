@@ -64,6 +64,10 @@ type RuntimeOutputResult struct {
 	Size          int64  `json:"size"`
 	SHA256        string `json:"sha256"`
 	Bytes         []byte `json:"-"`
+	// Signing is set only when host-side ad-hoc code signing had something to
+	// report — see SignHostArtifact. It is nil on the common paths (a non-darwin
+	// host, a payload that is not a Mach-O, an artifact already signed).
+	Signing *HostArtifactSigning `json:"signing,omitempty"`
 }
 
 // RuntimeOutputsParams selects which directory `outputs list` reads.
@@ -372,11 +376,19 @@ func DownloadLocalOutput(params RuntimeOutputDownloadParams) (RuntimeOutputResul
 	if info.Size() > MaxRuntimeOutputBytes {
 		return RuntimeOutputResult{}, fmt.Errorf("runtime output %q is too large (%d bytes); the limit is %d bytes", name, info.Size(), MaxRuntimeOutputBytes)
 	}
+	// Sign before reading so the bytes the caller receives are the runnable ones:
+	// an ad-hoc signature lives inside the Mach-O, so every copy made from here
+	// inherits it.
+	signing := SignHostArtifact(target)
 	data, err := os.ReadFile(target)
 	if err != nil {
 		return RuntimeOutputResult{}, err
 	}
-	return newRuntimeOutputResult(name, false, data), nil
+	result := newRuntimeOutputResult(name, false, data)
+	if signing.Describe() != "" {
+		result.Signing = &signing
+	}
+	return result, nil
 }
 
 func resolveLocalOutputTarget(params RuntimeOutputDownloadParams) (dir, name, target string, err error) {

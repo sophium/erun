@@ -31,6 +31,8 @@ The mirror carries no git directory of its own — it is a plain directory copy,
 
 `.erun-sync-staging/` is where a pass lands bytes that are still arriving; see [Atomic publish](#atomic-publish). Both `.erun-outputs/` and `.erun-sync-staging/` are reserved names: a pod file at either path is not mirrored.
 
+On a macOS host the lane also ad-hoc signs (`codesign -s -`) each mirrored macOS binary that carries no signature, and keeps its execute bit through the read-only marking: macOS kills an unsigned binary on exec without printing anything, and the Linux pod that cross-built it has no `codesign`, so the mirror is where the signature has to come from. The rule matches [`erun outputs download`](/cli/outputs#macos-binaries-arrive-runnable) — macOS hosts only, content-detected macOS binaries only, never over an existing signature, and never fatal. The pass's log line carries `signed=<n>` and, when something went wrong, one `signNote=…`.
+
 ## One pass
 
 1. List the pod's **git-visible** files (`git ls-files --exclude-standard`). The pod applies the repo's ignore rules, so the host needs no git of its own to know what belongs in the mirror.
@@ -39,7 +41,7 @@ The mirror carries no git directory of its own — it is a plain directory copy,
 4. Walk `<localpath>` for the mirror's own `{size, mtime}` fingerprints.
 5. Fetch only the files whose fingerprint differs, streamed as a tar over the SSH channel into `<localpath>/.erun-sync-staging/`, then rename each one onto its final path. `tar` preserves mtime and `rename` keeps it, so an unchanged file matches next pass and a steady state costs one metadata listing rather than a whole-tree transfer.
 6. Delete mirror files the pod's listing omits, then prune the directories that leaves empty.
-7. Mirror the outputs directory into `.erun-outputs/` and prune artifacts the pod no longer has.
+7. Mirror the outputs directory into `.erun-outputs/`, ad-hoc sign the macOS binaries among them, and prune artifacts the pod no longer has.
 
 A fetch failure does **not** strand step 6: deletion correctness depends only on the pod's listing, not on whether every changed file transferred. One un-fetchable file must never block every deletion.
 

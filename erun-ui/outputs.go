@@ -83,5 +83,23 @@ func (a *App) DownloadAgentOutput(selection uiSelection, name string) (string, e
 	if err := os.WriteFile(dest, out.Bytes, 0o644); err != nil {
 		return "", err
 	}
+	a.reportHostArtifactSigning(eruncommon.SignHostArtifact(dest))
 	return dest, nil
+}
+
+// reportHostArtifactSigning tells the operator what ad-hoc signing did to an
+// artifact that just landed here. Success is worth one line because the file was
+// modified on its way in; a failure is worth one because the alternative is the
+// silent SIGKILL macOS answers an unsigned binary with. Both go through the
+// notification surface so the message survives the dialog that started it.
+func (a *App) reportHostArtifactSigning(signing eruncommon.HostArtifactSigning) {
+	note := signing.Describe()
+	if note == "" {
+		return
+	}
+	kind := "warning"
+	if signing.Signed {
+		kind = "info"
+	}
+	a.emitAppNotification(kind, note)
 }

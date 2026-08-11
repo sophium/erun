@@ -1,0 +1,3 @@
+audit: erun outputs download Report.class
+outputs: downloading <HOME>/.erun/outputs/Report.class
+Downloaded Report.class (20B, sha256 <HEX>) to Report.class
