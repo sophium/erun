@@ -5,8 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The host mirror deletes exactly what the pod's remote listing omits, so these
@@ -15,9 +17,15 @@ import (
 // always correct, and the listing it was handed was not.
 
 const (
-	workspaceSyncSSHStubEnv     = "ERUN_COMMON_TEST_SSH_STUB"
-	workspaceSyncStubIndexEnv   = "ERUN_COMMON_TEST_SSH_STUB_INDEX"
-	workspaceSyncStubMissingEnv = "ERUN_COMMON_TEST_SSH_STUB_MISSING"
+	workspaceSyncSSHStubEnv         = "ERUN_COMMON_TEST_SSH_STUB"
+	workspaceSyncStubIndexEnv       = "ERUN_COMMON_TEST_SSH_STUB_INDEX"
+	workspaceSyncStubMissingEnv     = "ERUN_COMMON_TEST_SSH_STUB_MISSING"
+	workspaceSyncStubStatEnv        = "ERUN_COMMON_TEST_SSH_STUB_STAT"
+	workspaceSyncStubOutputsEnv     = "ERUN_COMMON_TEST_SSH_STUB_OUTPUTS"
+	workspaceSyncStubArchiveEnv     = "ERUN_COMMON_TEST_SSH_STUB_ARCHIVE"
+	workspaceSyncStubGateEnv        = "ERUN_COMMON_TEST_SSH_STUB_GATE"
+	workspaceSyncStubTruncateEnv    = "ERUN_COMMON_TEST_SSH_STUB_TRUNCATE"
+	workspaceSyncStubFetchMarkerEnv = "ERUN_COMMON_TEST_SSH_STUB_FETCH_MARKER"
 )
 
 // TestMain doubles as the stub `ssh` binary: the test executable is copied onto
@@ -37,6 +45,11 @@ func runWorkspaceSyncSSHStub(args []string) int {
 		script = args[len(args)-1]
 	}
 	switch {
+	// The fingerprint listing pipes the index listing into stat, so it has to be
+	// matched before the plain index listing it contains.
+	case strings.Contains(script, "stat -c"):
+		_, _ = os.Stdout.WriteString(os.Getenv(workspaceSyncStubStatEnv))
+		return 0
 	case strings.Contains(script, "git ls-files -coz"):
 		// The index listing, which is what a worktree deletion does not change.
 		writeNULList(os.Getenv(workspaceSyncStubIndexEnv))
@@ -46,17 +59,74 @@ func runWorkspaceSyncSSHStub(args []string) int {
 		return 0
 	case strings.Contains(script, "git ls-files -sz"):
 		return 0
-	case strings.Contains(script, "stat -c"):
-		// No fingerprints, so every remote path counts as changed and the pass
-		// reaches the fetch step.
+	case strings.Contains(script, "find . -type f"):
+		outputs := os.Getenv(workspaceSyncStubOutputsEnv)
+		if outputs == "" {
+			// `cd` into a not-yet-created outputs dir exits non-zero.
+			return 1
+		}
+		writeNULList(outputs)
 		return 0
 	case strings.Contains(script, "tar --null"):
-		// The fetch fails: deletions must still propagate.
+		return streamWorkspaceSyncStubArchive()
+	}
+	return 1
+}
+
+// streamWorkspaceSyncStubArchive plays back a prepared archive so a pass reaches
+// its extract step for real. The gate and truncate knobs place a pass at a
+// chosen point — mid-transfer, or dead mid-transfer — which is where a mirror
+// that published in place handed out a prefix.
+func streamWorkspaceSyncStubArchive() int {
+	if marker := os.Getenv(workspaceSyncStubFetchMarkerEnv); marker != "" {
+		_ = os.WriteFile(marker, []byte("fetched"), 0o644)
+	}
+	archive := os.Getenv(workspaceSyncStubArchiveEnv)
+	if archive == "" {
 		_, _ = os.Stderr.WriteString("stub: remote archive unavailable\n")
 		return 1
 	}
-	// Anything else — the outputs listing — reports "nothing there yet".
-	return 1
+	body, err := os.ReadFile(archive)
+	if err != nil {
+		_, _ = os.Stderr.WriteString("stub: " + err.Error() + "\n")
+		return 1
+	}
+	if truncate, convErr := strconv.Atoi(os.Getenv(workspaceSyncStubTruncateEnv)); convErr == nil && truncate < len(body) {
+		_, _ = os.Stdout.Write(body[:truncate])
+		_, _ = os.Stderr.WriteString("stub: remote archive ended early\n")
+		return 1
+	}
+	gate := os.Getenv(workspaceSyncStubGateEnv)
+	if gate == "" {
+		_, _ = os.Stdout.Write(body)
+		return 0
+	}
+	half := len(body) / 2
+	if _, err := os.Stdout.Write(body[:half]); err != nil {
+		return 1
+	}
+	// Announce only once the bytes are with the extractor, then hold until the
+	// test has finished looking at the mirror.
+	_ = os.WriteFile(gate+".reached", []byte("reached"), 0o644)
+	if !awaitWorkspaceSyncStubGate(gate) {
+		return 1
+	}
+	_, _ = os.Stdout.Write(body[half:])
+	return 0
+}
+
+// awaitWorkspaceSyncStubGate blocks until the test opens the gate. The interval
+// is backoff, not synchronisation: the stub proceeds on the file existing, never
+// on elapsed time.
+func awaitWorkspaceSyncStubGate(gate string) bool {
+	deadline := time.Now().Add(60 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(gate); err == nil {
+			return true
+		}
+		time.Sleep(time.Millisecond)
+	}
+	return false
 }
 
 func writeNULList(commaSeparated string) {

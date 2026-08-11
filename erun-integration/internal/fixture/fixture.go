@@ -4,6 +4,8 @@
 package fixture
 
 import (
+	"archive/tar"
+	"bytes"
 	"fmt"
 	"net"
 	"os"
@@ -828,6 +830,91 @@ exit 0
 	return StubEnv(stubsDir, "git")
 }
 
+// WorkspaceSyncSSHStubSpec answers the several different questions one
+// workspace-sync pass asks the same `ssh` — the pod's file listing, its
+// fingerprints, and the archive its fetch step streams.
+type WorkspaceSyncSSHStubSpec struct {
+	// IndexPaths is what `git ls-files -coz` reports: the pod's Git-visible files.
+	IndexPaths []string
+	// StatLines are `stat -c '%s %Y %n'` records (size, mtime, path). They are
+	// what lets a pass skip an unchanged file; with none, everything is fetched.
+	StatLines []string
+	// ArchivePath is a tar file the fetch step receives verbatim, standing in for
+	// the pod's `tar -cf -`. Empty makes the fetch fail.
+	ArchivePath string
+}
+
+// StubWorkspaceSyncSSH writes the argv-branching `ssh` stub a real sync pass
+// needs and returns its env routing. The pass's fingerprint listing pipes the
+// index listing into stat, so the stat branch has to be matched before the index
+// listing it contains.
+func StubWorkspaceSyncSSH(t testing.TB, dir string, spec WorkspaceSyncSSHStubSpec) []string {
+	t.Helper()
+	statBranch := ":"
+	if len(spec.StatLines) > 0 {
+		statBranch = `printf '%s\n' ` + shellSingleQuoteAll(spec.StatLines)
+	}
+	indexBranch := ":"
+	if len(spec.IndexPaths) > 0 {
+		indexBranch = `printf '%s\000' ` + shellSingleQuoteAll(spec.IndexPaths)
+	}
+	archiveBranch := "exit 1"
+	if spec.ArchivePath != "" {
+		archiveBranch = "cat " + shellSingleQuote(filepath.ToSlash(spec.ArchivePath))
+	}
+	// The readiness probe runs a bare `true`; everything not answered here — the
+	// outputs listing in particular — is "nothing there yet", which is exit 1.
+	StubBinaryWithScript(t, dir, "ssh", `case "$*" in
+  *' true') : ;;
+  *'stat -c'*) `+statBranch+` ;;
+  *'git ls-files -coz'*) `+indexBranch+` ;;
+  *'git ls-files -dz'*) : ;;
+  *'git ls-files -sz'*) : ;;
+  *'tar --null'*) `+archiveBranch+` ;;
+  *) exit 1 ;;
+esac
+exit 0
+`)
+	return StubEnv(dir, "ssh")
+}
+
+// TarEntry is one regular file in an archive written by WriteTarArchive.
+type TarEntry struct {
+	Path string
+	Body []byte
+}
+
+// WriteTarArchive writes the archive a stubbed pod streams back. Entries carry
+// an explicit mtime so a scenario can assert what the mirror did with the file
+// it received rather than with whatever the host clock stamped.
+func WriteTarArchive(t testing.TB, path string, entries []TarEntry, modTime time.Time) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir for archive %s: %v", path, err)
+	}
+	var buffer bytes.Buffer
+	writer := tar.NewWriter(&buffer)
+	for _, entry := range entries {
+		header := &tar.Header{
+			Name:     entry.Path,
+			Mode:     0o644,
+			Size:     int64(len(entry.Body)),
+			ModTime:  modTime,
+			Typeflag: tar.TypeReg,
+		}
+		if err := writer.WriteHeader(header); err != nil {
+			t.Fatalf("write archive header %s: %v", entry.Path, err)
+		}
+		if _, err := writer.Write(entry.Body); err != nil {
+			t.Fatalf("write archive body %s: %v", entry.Path, err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close archive %s: %v", path, err)
+	}
+	mustWrite(t, path, buffer.String())
+}
+
 // RunGit runs git in dir so scenarios can set up branches, tags, or remotes
 // after SeedReleaseRepo.
 func RunGit(t testing.TB, dir string, args ...string) {
@@ -1160,6 +1247,16 @@ func stubRunnerExe(t testing.TB) string {
 
 func shellSingleQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
+}
+
+// shellSingleQuoteAll renders values as space-separated printf operands, so one
+// format string repeats over them.
+func shellSingleQuoteAll(values []string) string {
+	quoted := make([]string, 0, len(values))
+	for _, value := range values {
+		quoted = append(quoted, shellSingleQuote(value))
+	}
+	return strings.Join(quoted, " ")
 }
 
 // StubBinaryWithScript writes a stub binary whose POSIX-shell body is the

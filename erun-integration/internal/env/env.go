@@ -20,12 +20,15 @@ import (
 var shellUtilities = []string{"cat", "dirname", "mkdir", "sleep", "touch", "tr", "wc"}
 
 // hostTools are the host executables erun itself may resolve, forwarded through
-// their declared ERUN_<NAME>_BIN seam rather than through PATH. git is the
-// suite's one irreducible host dependency: the fixtures build real repositories
-// with it and the release/diff/exec scenarios read real git state, so no stub
-// could stand in for it. A scenario that wants a scripted git appends its own
-// ERUN_GIT_BIN after Env() (the later duplicate wins).
-var hostTools = []string{"git"}
+// their declared ERUN_<NAME>_BIN seam rather than through PATH. Both entries are
+// irreducible host dependencies: the fixtures build real repositories with git
+// and the release/diff/exec scenarios read real git state, and the workspace
+// mirror's fetch lane extracts a real archive with tar — a stub can answer a
+// listing but cannot extract, so without a real tar the lane that publishes
+// files into the mirror is unreachable from the binary. Both ship in the
+// golang image the build gate runs in. A scenario that wants a scripted tool
+// appends its own ERUN_<NAME>_BIN after Env() (the later duplicate wins).
+var hostTools = []string{"git", "tar"}
 
 // Setup is the resolved environment for a single subprocess invocation.
 type Setup struct {
