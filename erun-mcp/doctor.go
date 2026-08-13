@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -23,6 +24,7 @@ type DoctorInput struct {
 	RestoreConfigFromBackup    string                   `json:"restoreConfigFromBackup,omitempty" jsonschema:"YYYY-MM-DD or absolute path; when set, restore the root erun config from the matching daily backup before any tenant/env work"`
 	RestoreEnvConfigFromBackup string                   `json:"restoreEnvConfigFromBackup,omitempty" jsonschema:"YYYY-MM-DD or absolute path; when set, restore the target environment's config.yaml from the matching daily backup (requires explicit tenant and environment) before any tenant/env work"`
 	RepairOrphanedAliases      []DoctorRepairAliasInput `json:"repairOrphanedAliases,omitempty" jsonschema:"per-alias AWS init parameters; when present, doctor re-initializes each listed cloud provider alias before tenant/env work"`
+	SyncConfig                 bool                     `json:"syncConfig,omitempty" jsonschema:"when true, reconcile the in-pod erun config with the helm-injected ERUN_* env vars (injected wins). Only meaningful inside a runtime pod, where the projection is rewritten without those values whenever the pod is replaced, which silently changes which registry a build resolves and whether a project build script runs"`
 }
 
 // DoctorRepairAliasInput is the MCP equivalent of the interactive
@@ -67,6 +69,11 @@ func doctorTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 func runDoctorToolCommand(runtime RuntimeConfig, input DoctorInput, runCtx eruncommon.Context) (*DoctorRootConfigReport, error) {
 	if input.ClearPendingHelm && input.Rollback {
 		return nil, errors.New("clearPendingHelm and rollback are alternative recoveries; request only one")
+	}
+	// Config drift is more fundamental than anything below it: a wrong projection
+	// mis-drives every later resolution, so reconcile first and return.
+	if input.SyncConfig {
+		return nil, runDoctorConfigSync(runCtx)
 	}
 	report, fatal, err := runDoctorRootConfigToolFlow(runtime, input, runCtx)
 	if err != nil {
@@ -460,4 +467,29 @@ func doctorActionsFromInput(input DoctorInput) []eruncommon.DoctorAction {
 		actions = append(actions, eruncommon.DoctorActionPruneContainers)
 	}
 	return actions
+}
+
+// runDoctorConfigSync reconciles the in-pod config from the injected env. The
+// request is itself the confirmation, so it applies without a further prompt.
+func runDoctorConfigSync(runCtx eruncommon.Context) error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	inspection, err := eruncommon.InspectRuntimeConfigSync(eruncommon.ResolveRuntimeConfigHome(homeDir), os.Getenv)
+	if err != nil {
+		return err
+	}
+	if !inspection.HasInjected {
+		return errors.New("cannot reconcile the in-pod config: ERUN_TENANT/ERUN_ENVIRONMENT are unset, so this is not a runtime pod")
+	}
+	if inspection.InSync() {
+		runCtx.Trace("doctor: in-pod config matches the injected env; nothing to reconcile")
+		return nil
+	}
+	for _, field := range inspection.Drift {
+		runCtx.Trace(fmt.Sprintf("doctor: in-pod config drift %s %s on-disk=%q injected=%q [%s]",
+			field.Scope, field.Key, field.OnDisk, field.Injected, field.Kind))
+	}
+	return eruncommon.RunRuntimeConfigSync(runCtx, inspection)
 }

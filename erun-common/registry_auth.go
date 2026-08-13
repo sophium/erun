@@ -23,6 +23,7 @@ var (
 	dockerConfigDir             = defaultDockerConfigDir
 	dockerCredentialHelperPaths = defaultDockerCredentialHelperPaths
 	runDockerCredentialHelper   = execDockerCredentialHelper
+	runECRLoginPassword         = execECRLoginPassword
 	resolveGHCRTokenViaGH       = ghAuthToken
 )
 
@@ -273,4 +274,54 @@ func ghAuthToken(owner string) (string, bool) {
 		return token, true
 	}
 	return "", false
+}
+
+// ecrRegionFromHost returns the region embedded in an ECR registry host
+// (<account>.dkr.ecr.<region>.amazonaws.com), so a credential can be minted for
+// the right region without the caller passing one.
+func ecrRegionFromHost(host string) (string, bool) {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if !strings.HasSuffix(host, ".amazonaws.com") {
+		return "", false
+	}
+	parts := strings.Split(host, ".")
+	for i, part := range parts {
+		if part == "ecr" && i+1 < len(parts) {
+			if region := strings.TrimSpace(parts[i+1]); region != "" {
+				return region, true
+			}
+		}
+	}
+	return "", false
+}
+
+// resolveOCIRegistryBasicAuth resolves a pull credential for any registry host,
+// preferring the credential docker itself pulls with. For ECR it falls back to
+// the AWS CLI, mirroring the gh fallback for ghcr: an ECR authorization token
+// expires after twelve hours, so the docker credential is routinely stale or
+// absent, and without this fallback version listing degrades to anonymous and
+// the registry reports the image as unreadable.
+func resolveOCIRegistryBasicAuth(host string) (registryBasicAuth, bool) {
+	if auth, ok := resolveRegistryBasicAuth(host); ok {
+		return auth, true
+	}
+	if region, ok := ecrRegionFromHost(host); ok {
+		if token, ok := runECRLoginPassword(region); ok {
+			return registryBasicAuth{username: "AWS", secret: token}, true
+		}
+	}
+	return registryBasicAuth{}, false
+}
+
+func execECRLoginPassword(region string) (string, bool) {
+	cmd := exec.Command("aws", "ecr", "get-login-password", "--region", region)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", false
+	}
+	token := strings.TrimSpace(string(out))
+	if token == "" {
+		return "", false
+	}
+	return token, true
 }

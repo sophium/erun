@@ -124,6 +124,9 @@ func resolveConfiguredRuntimeRegistryVersionsOnce(ctx context.Context, resolved 
 	if owner, ok := ghcrOwnerFromNamespace(resolved.Namespace); ok {
 		return resolveGHCRRuntimeRegistryVersionsAt(ctx, client, owner, resolved.Repository, resolved.BaseURL, resolved.TokenURL)
 	}
+	if host, prefix, ok := ociRegistryHostFromNamespace(resolved.Namespace); ok {
+		return resolveOCIRuntimeRegistryVersionsAt(ctx, client, host, prefix, resolved.Repository, resolved.BaseURL)
+	}
 	return resolveDockerHubRuntimeRegistryVersionsAt(ctx, client, resolved.Namespace, resolved.Repository, resolved.BaseURL)
 }
 

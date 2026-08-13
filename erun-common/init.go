@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -70,10 +71,13 @@ type BootstrapInitParams struct {
 	Environment              string
 	RuntimeVersion           string
 	RuntimeImage             string
-	RuntimePod               RuntimePodResources
-	NoGit                    bool
-	KubernetesContext        string
-	ContainerRegistry        string
+	// ImagePullSecrets names the dockerconfigjson secrets the runtime pod pulls
+	// its image with, which a private runtime image cannot start without.
+	ImagePullSecrets  []string
+	RuntimePod        RuntimePodResources
+	NoGit             bool
+	KubernetesContext string
+	ContainerRegistry string
 	// ClusterRegistry, when set, seeds the new env with a resolvable cluster:
 	// registry entry (addresses resolved from the env's kube-context) instead of
 	// the static ContainerRegistry string. Set by `erun init --cluster-registry`.
@@ -872,6 +876,10 @@ func (s *bootstrapRunState) updateRemoteEnvConfig() {
 		s.envConfig.RuntimeImage = runtimeImage
 		s.envConfigChanged = true
 	}
+	if pullSecrets := normalizeImagePullSecrets(s.params.ImagePullSecrets); len(pullSecrets) > 0 && !slices.Equal(pullSecrets, s.envConfig.ImagePullSecrets) {
+		s.envConfig.ImagePullSecrets = pullSecrets
+		s.envConfigChanged = true
+	}
 	if runtimePod := NormalizeRuntimePodResources(s.params.RuntimePod); runtimePod != NormalizeRuntimePodResources(s.envConfig.RuntimePod) {
 		s.envConfig.RuntimePod = runtimePod
 		s.envConfigChanged = true
@@ -1492,4 +1500,18 @@ type projectContext struct {
 	tenant string
 	root   string
 	loaded bool
+}
+
+// normalizeImagePullSecrets trims and de-duplicates the requested secret names,
+// keeping the order the operator gave so the chart renders them predictably.
+func normalizeImagePullSecrets(names []string) []string {
+	normalized := make([]string, 0, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" || slices.Contains(normalized, name) {
+			continue
+		}
+		normalized = append(normalized, name)
+	}
+	return normalized
 }

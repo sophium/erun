@@ -89,8 +89,19 @@ func pushPlatformImage(buildInput DockerBuildSpec, platformTag string, stdout, s
 	return DockerImagePusher(platformTag, buildInput.Verbosity, stdout, stderr)
 }
 
+// assembleMultiPlatformManifest publishes the arch-less tag that points at the
+// per-arch images just pushed.
+//
+// The local manifest list is discarded first. docker keeps manifest lists in its
+// own store, so re-publishing a version that was pushed before would otherwise
+// merge into the cached list and republish the digests it already held: the
+// per-arch tags advance, the arch-less tag does not, and a deploy of that version
+// runs the previous image while every step reports success. Removing the cached
+// list makes the published tag a function of this run alone. It is absent on a
+// first publish, so its failure is not one.
 func assembleMultiPlatformManifest(tag string, perPlatformTags []string, verbosity int, stdout, stderr io.Writer) error {
-	createArgs := append([]string{"manifest", "create", "--amend", tag}, perPlatformTags...)
+	_ = runDockerSimpleCommandWithVerbosity([]string{"manifest", "rm", tag}, verbosity, io.Discard, io.Discard)
+	createArgs := append([]string{"manifest", "create", tag}, perPlatformTags...)
 	if err := runDockerSimpleCommandWithVerbosity(createArgs, verbosity, stdout, stderr); err != nil {
 		return err
 	}

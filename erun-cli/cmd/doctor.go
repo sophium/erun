@@ -452,7 +452,7 @@ func runDoctorInRuntime(ctx common.Context, promptRunner PromptRunner, options d
 	// fundamental (a wrong type mis-drives everything downstream), and gating it
 	// here leaves plain in-pod `erun doctor` output byte-for-byte unchanged.
 	if options.syncConfig {
-		return runRuntimeConfigSync(ctx, promptRunner, options, resolveRuntimeConfigHome(homeDir))
+		return runRuntimeConfigSync(ctx, promptRunner, options, common.ResolveRuntimeConfigHome(homeDir))
 	}
 	inspection, err := common.InspectRemoteInit(homeDir, os.Getenv)
 	if err != nil {

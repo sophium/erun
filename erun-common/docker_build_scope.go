@@ -311,13 +311,13 @@ func dockerBuildEnvironmentFromDetectedProject(store DockerStore, findProjectRoo
 func ResolveDockerBuildEnvConfig(store DockerStore, findProjectRoot ProjectFinderFunc, target DockerCommandTarget) *EnvConfig {
 	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil || strings.TrimSpace(projectRoot) == "" {
-		return nil
+		return injectedDockerBuildEnvConfig(nil)
 	}
 	cleanRoot := filepath.Clean(projectRoot)
 
 	tenants, err := store.ListTenantConfigs()
 	if err != nil {
-		return nil
+		return injectedDockerBuildEnvConfig(nil)
 	}
 	wantEnv := strings.TrimSpace(target.Environment)
 	for _, tenantConfig := range tenants {
@@ -326,10 +326,33 @@ func ResolveDockerBuildEnvConfig(store DockerStore, findProjectRoot ProjectFinde
 			continue
 		}
 		if match := matchDockerBuildEnvConfig(envs, wantEnv, cleanRoot); match != nil {
-			return match
+			return injectedDockerBuildEnvConfig(match)
 		}
 	}
-	return nil
+	return injectedDockerBuildEnvConfig(nil)
+}
+
+// injectedDockerBuildEnvConfig lets the values the chart injected win over the
+// on-disk copy when the build runs inside a runtime pod.
+//
+// That copy is a projection, and it is rewritten over the environment's life; a
+// build that trusted it resolved the default registry instead of the one the
+// environment marks for building, and stopped honouring disablebuildscript, so it
+// ran the project's own build script and minted no image version. Both failures
+// are silent and neither is recoverable from the build output, so the pod reads
+// its own identity from the env the chart set rather than from a file anything
+// else may have written since.
+func injectedDockerBuildEnvConfig(onDisk *EnvConfig) *EnvConfig {
+	injected, ok := ResolveInjectedRuntimeConfig(os.Getenv)
+	if !ok {
+		return onDisk
+	}
+	base := EnvConfig{}
+	if onDisk != nil {
+		base = *onDisk
+	}
+	merged := overlayInjectedEnvConfig(base, injected.Env)
+	return &merged
 }
 
 func matchDockerBuildEnvConfig(envs []EnvConfig, wantEnv, cleanRoot string) *EnvConfig {

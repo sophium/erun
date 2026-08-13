@@ -228,16 +228,7 @@ func multiPlatformTraceCommands(b DockerBuildSpec) []commandSpec {
 	if !b.Push {
 		return commands
 	}
-	commands = append(commands, commandSpec{
-		Dir:  b.ContextDir,
-		Name: "docker",
-		Args: append([]string{"manifest", "create", "--amend", b.Image.Tag}, perPlatformTags...),
-	})
-	commands = append(commands, commandSpec{
-		Dir:  b.ContextDir,
-		Name: "docker",
-		Args: []string{"manifest", "push", b.Image.Tag},
-	})
+	commands = append(commands, multiPlatformManifestTraceCommands(b.ContextDir, b.Image.Tag, perPlatformTags)...)
 	return commands
 }
 
@@ -277,17 +268,20 @@ func promoteTraceCommands(b DockerBuildSpec) []commandSpec {
 	if !b.Push {
 		return commands
 	}
-	commands = append(commands, commandSpec{
-		Dir:  b.ContextDir,
-		Name: "docker",
-		Args: append([]string{"manifest", "create", "--amend", b.Image.Tag}, perPlatformTags...),
-	})
-	commands = append(commands, commandSpec{
-		Dir:  b.ContextDir,
-		Name: "docker",
-		Args: []string{"manifest", "push", b.Image.Tag},
-	})
+	commands = append(commands, multiPlatformManifestTraceCommands(b.ContextDir, b.Image.Tag, perPlatformTags)...)
 	return commands
+}
+
+// multiPlatformManifestTraceCommands mirrors assembleMultiPlatformManifest so the
+// dry-run trace stays an honest preview, including the discard of the cached
+// manifest list that keeps a re-published version from resolving to the previous
+// one.
+func multiPlatformManifestTraceCommands(dir, tag string, perPlatformTags []string) []commandSpec {
+	return []commandSpec{
+		{Dir: dir, Name: "docker", Args: []string{"manifest", "rm", tag}},
+		{Dir: dir, Name: "docker", Args: append([]string{"manifest", "create", tag}, perPlatformTags...)},
+		{Dir: dir, Name: "docker", Args: []string{"manifest", "push", tag}},
+	}
 }
 
 func dockerTagTraceCommand(dir, source, target string) commandSpec {
