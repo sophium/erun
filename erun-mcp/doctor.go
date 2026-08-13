@@ -82,18 +82,30 @@ func runDoctorToolCommand(runtime RuntimeConfig, input DoctorInput, runCtx erunc
 	if fatal || onlyRootConfigDoctorInput(input) {
 		return report, nil
 	}
-	if selector := strings.TrimSpace(input.RestoreEnvConfigFromBackup); selector != "" {
-		if err := restoreDoctorEnvConfigFromBackup(runCtx, input, selector, report); err != nil {
-			return report, err
-		}
-		if onlyEnvConfigRestoreInput(input) {
-			return report, nil
-		}
+	restoreWasTheWholeRequest, err := runDoctorEnvConfigRestore(input, runCtx, report)
+	if err != nil {
+		return report, err
+	}
+	if restoreWasTheWholeRequest {
+		return report, nil
 	}
 	if err := runDoctorTenantEnvActions(runtime, input, runCtx); err != nil {
 		return report, err
 	}
 	return report, nil
+}
+
+// runDoctorEnvConfigRestore runs the backup-restore leg when one was asked for,
+// reporting whether it was the whole request and nothing else needs to run.
+func runDoctorEnvConfigRestore(input DoctorInput, runCtx eruncommon.Context, report *DoctorRootConfigReport) (bool, error) {
+	selector := strings.TrimSpace(input.RestoreEnvConfigFromBackup)
+	if selector == "" {
+		return false, nil
+	}
+	if err := restoreDoctorEnvConfigFromBackup(runCtx, input, selector, report); err != nil {
+		return false, err
+	}
+	return onlyEnvConfigRestoreInput(input), nil
 }
 
 // restoreDoctorEnvConfigFromBackup recovers a changed or corrupted env config

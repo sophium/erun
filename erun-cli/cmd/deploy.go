@@ -71,6 +71,7 @@ func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 	addDryRunFlag(cmd)
 	addDeployCommandTargetFlags(cmd, &target)
 	cmd.Flags().StringVar(&target.RuntimeImageOverride, "runtime-image", "", "Install the runtime running this image via the published erun-devops chart (imageOverrides.erun-devops), pinned to --version, even when the env has a repo-local runtime chart; mirrors `erun open --runtime-image`")
+	cmd.Flags().StringVar(&target.RuntimeChartOverride, "runtime-chart", "", "Install this runtime chart, as an OCI reference that may carry its own version (oci://registry/charts/erun-devops:1.0.178). States the chart as its own coordinate instead of deriving it from --version and the registry a previous deploy recorded, which is what lets the runtime image be versioned on a different release line than the chart")
 	cmd.Flags().BoolVar(&useCurrent, "current", false, "Redeploy the version this environment already runs (its persisted runtime version) instead of passing --version")
 	cmd.Flags().StringSliceVar(&components, "components", nil, "Deploy exactly these charts this run — chart directory names under <tenant>-devops/k8s/, or the runtime release name (<tenant>-devops); overrides the env's saved selection and the k8s.deployments plan. Empty falls back to the saved selection, then the plan, then the runtime chart alone")
 	return cmd

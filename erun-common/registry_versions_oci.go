@@ -133,22 +133,10 @@ func fetchOCITagPage(ctx context.Context, client *http.Client, endpoint string, 
 // fetchOCIPullToken exchanges the registry's bearer challenge for a pull token,
 // scoping it to this repository when the challenge omits a scope.
 func fetchOCIPullToken(ctx context.Context, client *http.Client, challenge, repoPath string, auth registryBasicAuth, hasAuth bool) (string, error) {
-	params := parseBearerChallenge(challenge)
-	realm := strings.TrimSpace(params["realm"])
-	if realm == "" {
-		return "", fmt.Errorf("registry bearer challenge has no realm")
+	tokenURL, err := bearerTokenURL(challenge, repoPath)
+	if err != nil {
+		return "", err
 	}
-	query := make([]string, 0, 2)
-	if service := strings.TrimSpace(params["service"]); service != "" {
-		query = append(query, "service="+service)
-	}
-	scope := strings.TrimSpace(params["scope"])
-	if scope == "" {
-		scope = "repository:" + repoPath + ":pull"
-	}
-	query = append(query, "scope="+scope)
-
-	tokenURL := realm + "?" + strings.Join(query, "&")
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, tokenURL, nil)
 	if err != nil {
 		return "", err
@@ -177,6 +165,26 @@ func fetchOCIPullToken(ctx context.Context, client *http.Client, challenge, repo
 		return payload.Token, nil
 	}
 	return payload.AccessToken, nil
+}
+
+// bearerTokenURL builds the token endpoint the challenge points at, scoping the
+// request to this repository when the challenge names no scope of its own.
+func bearerTokenURL(challenge, repoPath string) (string, error) {
+	params := parseBearerChallenge(challenge)
+	realm := strings.TrimSpace(params["realm"])
+	if realm == "" {
+		return "", fmt.Errorf("registry bearer challenge has no realm")
+	}
+	query := make([]string, 0, 2)
+	if service := strings.TrimSpace(params["service"]); service != "" {
+		query = append(query, "service="+service)
+	}
+	scope := strings.TrimSpace(params["scope"])
+	if scope == "" {
+		scope = "repository:" + repoPath + ":pull"
+	}
+	query = append(query, "scope="+scope)
+	return realm + "?" + strings.Join(query, "&"), nil
 }
 
 func parseBearerChallenge(challenge string) map[string]string {
