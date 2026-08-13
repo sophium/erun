@@ -302,15 +302,17 @@ func ecrRegionFromHost(host string) (string, bool) {
 // absent, and without this fallback version listing degrades to anonymous and
 // the registry reports the image as unreadable.
 func resolveOCIRegistryBasicAuth(host string) (registryBasicAuth, bool) {
-	if auth, ok := resolveRegistryBasicAuth(host); ok {
-		return auth, true
-	}
+	// ECR first, because its authorization token expires after twelve hours: the
+	// credential docker stored is routinely expired, and an expired credential is
+	// worse than none — it is found, so it shadows the fallback, and the registry
+	// then rejects the listing as unauthorized. A freshly minted token cannot be
+	// stale, and minting one is a local call.
 	if region, ok := ecrRegionFromHost(host); ok {
 		if token, ok := runECRLoginPassword(region); ok {
 			return registryBasicAuth{username: "AWS", secret: token}, true
 		}
 	}
-	return registryBasicAuth{}, false
+	return resolveRegistryBasicAuth(host)
 }
 
 func execECRLoginPassword(region string) (string, bool) {

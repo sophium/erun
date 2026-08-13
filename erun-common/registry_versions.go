@@ -86,9 +86,15 @@ func (c RuntimeRegistryConfig) Resolved() RuntimeRegistryConfig {
 		resolved.Repository = DefaultRuntimeImageName
 	}
 	if resolved.BaseURL == "" {
-		if _, ok := ghcrOwnerFromNamespace(resolved.Namespace); ok {
+		switch host, _, isRegistryHost := ociRegistryHostFromNamespace(resolved.Namespace); {
+		case namespaceIsGHCR(resolved.Namespace):
 			resolved.BaseURL = defaultGHCRRegistryBaseURL
-		} else {
+		case isRegistryHost:
+			// A namespace that names its own registry host is served by that host,
+			// not by Docker Hub; defaulting to the Hub sent the listing to a
+			// repository named after the host and answered 404.
+			resolved.BaseURL = "https://" + host
+		default:
 			resolved.BaseURL = defaultDockerHubRegistryBaseURL
 		}
 	}
@@ -175,6 +181,11 @@ func ResolveRuntimeImageRegistryVersions(ctx context.Context, namespace, reposit
 		Namespace:  namespace,
 		Repository: repository,
 	})
+}
+
+func namespaceIsGHCR(namespace string) bool {
+	_, ok := ghcrOwnerFromNamespace(namespace)
+	return ok
 }
 
 func ghcrOwnerFromNamespace(namespace string) (string, bool) {

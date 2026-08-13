@@ -79,3 +79,24 @@ func TestResolveOCIRegistryBasicAuthFallsBackToECRLogin(t *testing.T) {
 		t.Fatal("a non-ECR host must not use the ECR fallback")
 	}
 }
+
+// A namespace that names its own registry host must resolve against that host.
+// Defaulting it to Docker Hub sent the tags request to hub.docker.com and 404ed,
+// which is what made a private image look unreachable.
+func TestResolvedBaseURLFollowsTheRegistryHost(t *testing.T) {
+	for _, tc := range []struct {
+		namespace string
+		want      string
+	}{
+		{"020362606330.dkr.ecr.eu-west-2.amazonaws.com", "https://020362606330.dkr.ecr.eu-west-2.amazonaws.com"},
+		{"registry.example/team", "https://registry.example"},
+		{"localhost:5000", "https://localhost:5000"},
+		{"ghcr.io/sophium", "https://ghcr.io"},
+		{"sophium", "https://hub.docker.com"},
+	} {
+		got := RuntimeRegistryConfig{Namespace: tc.namespace, Repository: "petios-devops"}.Resolved().BaseURL
+		if got != tc.want {
+			t.Errorf("namespace %q resolved base %q, want %q", tc.namespace, got, tc.want)
+		}
+	}
+}
