@@ -449,6 +449,19 @@ func chartNameFromReference(reference string) string {
 	return reference[strings.LastIndex(reference, "/")+1:]
 }
 
+// SplitChartReference separates a stated chart reference into the repository and
+// the version it may carry, so every surface reads one the same way -- the deploy
+// that installs it and the desktop that shows what will be installed.
+func SplitChartReference(raw string) (reference, version string) {
+	return splitChartReferenceVersion(raw)
+}
+
+// ChartNameFromReference is the chart name a reference addresses, for a caller
+// outside this package that needs to name the chart a deploy will install.
+func ChartNameFromReference(reference string) string {
+	return chartNameFromReference(reference)
+}
+
 // splitChartReferenceVersion separates a chart reference from the version it may
 // carry. Only the last path segment is inspected, so a registry port is not read
 // as a version, and an oci:// scheme is added when absent so the reference is

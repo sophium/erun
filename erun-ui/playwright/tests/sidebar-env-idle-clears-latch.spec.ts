@@ -51,6 +51,13 @@ test.describe('an idle environment clears a stale desktop latch', () => {
     // The environment's own answer. The backend's sweep also runs against these
     // inert envs and reports them unreachable, so re-drive until it converges
     // rather than racing a single emit — a row that never clears still fails.
+    //
+    // The budget is sized to that sweep, not guessed: environmentActivityInterval
+    // is 20s (erun-ui/environment_activity.go), so a window of exactly one period
+    // passes or fails on where the tick happens to land — it was observed doing
+    // both, converging at 20.2s once and exhausting the budget once. Two full
+    // periods plus margin means a sweep landing anywhere inside the window still
+    // leaves a whole period for the emits to converge.
     await expect(async () => {
       await emitRunningBuild(page, tenant, environment);
       await emitEnvActivity(page, {
@@ -61,7 +68,7 @@ test.describe('an idle environment clears a stale desktop latch', () => {
         busy: false,
       });
       await expect(spinner).toHaveCount(0, { timeout: 1_000 });
-    }).toPass({ timeout: 20_000 });
+    }).toPass({ timeout: 50_000 });
   });
 
   test('an environment that reports work still spins, whoever started it', async ({

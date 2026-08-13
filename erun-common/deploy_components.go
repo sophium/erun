@@ -241,6 +241,12 @@ type DeployableComponent struct {
 
 const deployComponentSourcePublished = "published-chart"
 
+// DeployComponentSourcePublished is the Source value of a component installed by
+// reference from the registry rather than from a repo-local chart, for a caller
+// that must tell the two apart -- the desktop, deciding whether a registry has any
+// say in which chart the runtime installs.
+const DeployComponentSourcePublished = deployComponentSourcePublished
+
 // ResolvedRuntimeChartName returns the published chart a by-reference runtime
 // deploy installs: the tenant's own <tenant>-devops chart when it is published at
 // the deploy version (tenantChartPublished), else the canonical erun-devops. The

@@ -211,6 +211,30 @@ export class ManageDialog {
     return this.locator().locator('#environment-config-runtimechart');
   }
 
+  // The notice under the version row: what a deploy of the picked version would
+  // install for the runtime, or why it cannot be deployed as it stands.
+  // Page-scoped, not dialog-scoped: while the version panel is open it is a modal
+  // popover and the dialog behind it is aria-hidden, so a role-scoped query would
+  // find nothing exactly when this notice matters most.
+  runtimeChartNotice(): Locator {
+    return this.page.locator('#environment-config-runtimechart-notice');
+  }
+
+  // The same statement rendered inside the open version panel.
+  runtimeChartPanelNotice(): Locator {
+    return this.page.locator('#environment-config-runtimechart-notice-panel');
+  }
+
+  // One-click recovery offered by the blocking notice: adopt an ERun chart. Each
+  // notice owns its own button id, so the row and the panel never collide.
+  adoptRuntimeChartButton(): Locator {
+    return this.page.locator('#environment-config-runtimechart-notice-adopt');
+  }
+
+  adoptRuntimeChartButtonInPanel(): Locator {
+    return this.page.locator('#environment-config-runtimechart-notice-panel-adopt');
+  }
+
   async openRuntimeChartPicker(): Promise<void> {
     await this.locator().getByRole('button', { name: 'Show runtime chart choices' }).click();
   }

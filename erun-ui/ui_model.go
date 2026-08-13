@@ -296,6 +296,14 @@ type uiContainerRegistryCluster struct {
 	Label     string `json:"label"`
 }
 
+// uiDeployComponents is the Runtime tab's read model for a deploy at a chosen
+// version: the charts it would roll out, and which chart the runtime itself would
+// be installed from -- the second coordinate the version does not name.
+type uiDeployComponents struct {
+	Components   []eruncommon.DeployableComponent `json:"components"`
+	RuntimeChart uiRuntimeChartPlan               `json:"runtimeChart"`
+}
+
 type uiEnvironmentConfig struct {
 	Name                string                     `json:"name"`
 	Type                eruncommon.EnvironmentType `json:"type,omitempty"`

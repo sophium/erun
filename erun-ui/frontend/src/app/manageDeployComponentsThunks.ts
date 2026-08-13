@@ -1,3 +1,5 @@
+import type { UISelection } from '@/types';
+
 import { LoadDeployComponents } from '../../wailsjs/go/main/App';
 import { environmentApi } from './api/environmentApi';
 import {
@@ -9,6 +11,7 @@ import { readError } from './errors';
 import { showTerminalMessage } from './notificationThunks';
 import { runtimePodConfigToKubernetes } from './runtimeResources';
 import { patchManageDialog } from './slices/manageDialogSlice';
+import type { AppState } from './state';
 import type { AppThunk } from './store';
 
 // Debounce the version-aware component refresh so typing a deploy version does
@@ -35,6 +38,25 @@ export const scheduleManageDeployComponentsRefresh = (): AppThunk => (dispatch) 
   }, 250);
 };
 
+// probeIsStale drops a resolved probe whose answer no longer describes what the
+// dialog is showing -- the operator moved to another version, tenant, or env while
+// the registry was being read, or closed the dialog altogether.
+function probeIsStale(
+  dialog: AppState['manageDialog'],
+  selection: UISelection,
+  version: string,
+): boolean {
+  const current = dialog.selection;
+  if (!dialog.open || !current) {
+    return true;
+  }
+  return (
+    current.tenant !== selection.tenant ||
+    current.environment !== selection.environment ||
+    dialog.version.trim() !== version
+  );
+}
+
 // The checklist is version-aware: it offers only the component charts published
 // at the version this deploy would use — the picked version-to-deploy, else the
 // env's current runtime version — so the probe threads that version to the
@@ -51,24 +73,18 @@ export const refreshManageDeployComponents =
     dispatch(patchManageDialog({ deployComponentsLoading: true }));
     try {
       const raw = await LoadDeployComponents({ ...selection, version });
-      const currentDialog = getState().manageDialog;
-      const current = currentDialog.selection;
-      if (!currentDialog.open || !current) {
+      if (probeIsStale(getState().manageDialog, selection, version)) {
         return;
       }
-      if (
-        current.tenant !== selection.tenant ||
-        current.environment !== selection.environment ||
-        currentDialog.version.trim() !== version
-      ) {
-        return;
-      }
-      const options = normalizeDeployComponents(raw);
+      const options = normalizeDeployComponents(raw.components);
       dispatch(
         patchManageDialog({
           deployComponents: options,
           deployComponentSelection: deployComponentDefaultNames(options),
           deployComponentsLoading: false,
+          // Resolved with the checklist: which chart this version would install,
+          // so a version that has none is named before Deploy, not after it fails.
+          runtimeChartPlan: raw.runtimeChart,
         }),
       );
     } catch (error) {

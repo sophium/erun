@@ -17,6 +17,7 @@ import type {
   UIVersionSuggestionNotice,
 } from '@/types';
 import type { UIClusterRegistryStatus, UIEnvironmentHealth } from '@/uiDiagnosticsTypes';
+import type { UIRuntimeChartPlan } from '@/uiRuntimeChartTypes';
 
 export const MIN_SIDEBAR_WIDTH = 248;
 export const MAX_SIDEBAR_WIDTH = 520;
@@ -112,6 +113,9 @@ export interface ManageDialogState {
   deployComponents: UIDeployableComponent[];
   deployComponentSelection: string[];
   deployComponentsLoading: boolean;
+  // Which chart a deploy of the picked version would install. Dialog-owned like
+  // the suggestions above, and null until the version-aware probe answers.
+  runtimeChartPlan: UIRuntimeChartPlan | null;
   // Result of the General tab's "Check environment" health run, null until the
   // operator runs it. healthLoading gates the in-flight indicator.
   health: UIEnvironmentHealth | null;
@@ -313,6 +317,7 @@ export const defaultManageDialog = (): ManageDialogState => ({
   deployComponents: [],
   deployComponentSelection: [],
   deployComponentsLoading: false,
+  runtimeChartPlan: null,
   health: null,
   healthLoading: false,
 });
