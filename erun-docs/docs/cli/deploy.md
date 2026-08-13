@@ -69,6 +69,8 @@ deploy: runtime chart override oci://ghcr.io/sophium/charts/erun-devops version 
 
 The override applies to the runtime release only; component charts keep resolving at `--version`. It is not persisted -- pass it on each deploy that needs it, so an env's recorded state never implies a chart it was not deployed with.
 
+For an environment that rides a separately-versioned chart *permanently* -- rather than for one run -- state it once on the environment instead, with [`runtimechart`](/reference/configuration#envconfig). Every later deploy then installs that chart, including one driven from the desktop, which passes only a version. The flag beats the field for a single run and leaves it unchanged, the same way `--runtime-image` relates to `runtimeimage`.
+
 ## Flags
 
 | Flag | Description |

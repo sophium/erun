@@ -69,6 +69,9 @@ function deployRelevantSignature(config: UIEnvironmentConfig): string {
     localRepoPath: config.localRepoPath,
     containerRegistries: config.containerRegistries,
     disableBuildScript: config.disableBuildScript,
+    // The chart the runtime is installed from is one of the deploy's coordinates,
+    // so changing it changes what a redeploy installs.
+    runtimeChart: config.runtimeChart,
     // Platform account flips the runtime SA's cluster RBAC (a <release>-platform
     // ClusterRoleBinding to cluster-admin), which the next deploy renders/prunes.
     platformAccount: config.platformAccount,
@@ -120,6 +123,7 @@ export function manageDialogTabHasUnsavedChanges(
         'autoUpgrade',
         'upgradeChannel',
         'disableBuildScript',
+        'runtimeChart',
         'platformAccount',
         'mountSource',
         'repoURL',

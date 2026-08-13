@@ -431,6 +431,7 @@ export const defaultEnvironmentConfig = (): UIEnvironmentConfig => ({
   remoteHostCredentials: false,
   autoUpgrade: false,
   upgradeChannel: 'stable',
+  runtimeChart: '',
   disableBuildScript: false,
   platformAccount: false,
   mountSource: false,

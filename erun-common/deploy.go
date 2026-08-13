@@ -335,6 +335,16 @@ func PersistRuntimeVersionFromDeploySpecs(ctx Context, specs []DeploySpec, save 
 			continue
 		}
 		if spec.SkipHelm {
+			// The release's appVersion is the chart's version, which is only the
+			// runtime version while the two ride one line. When the env states its
+			// chart separately it does not, so healing from it would record the
+			// chart's number as the env's runtime version -- the exact confusion
+			// naming the coordinates separately exists to end. Leave the recorded
+			// version alone instead.
+			if strings.TrimSpace(spec.Deploy.ChartVersion) != "" {
+				ctx.Trace("persist runtime version: chart " + spec.Deploy.ChartPath + " is on its own version line; leaving the recorded runtime version untouched")
+				return nil
+			}
 			version := resolveRunningRuntimeVersion(ctx, spec, resolveDeployedVersion)
 			if version == "" {
 				return nil

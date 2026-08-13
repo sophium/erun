@@ -132,7 +132,7 @@ func (a *App) finishHelmDeployedIfActive(tenant, environment string, release hel
 	if !ok {
 		return
 	}
-	if !helmDeployedSnapshotMatchesEntry(release, active) {
+	if !helmDeployedSnapshotMatchesEntry(release, a.observedRuntimeVersion(tenant, environment, release), active) {
 		return
 	}
 	if final, finished := a.activityQueue.finish(active.ID, activityQueueStatusSucceeded, ""); finished {
@@ -140,9 +140,29 @@ func (a *App) finishHelmDeployedIfActive(tenant, environment string, release hel
 	}
 }
 
-func helmDeployedSnapshotMatchesEntry(release helmReleaseSnapshot, entry activityQueueEntry) bool {
-	expected := strings.TrimSpace(entry.Version)
+// observedRuntimeVersion is the version an observed release says the environment
+// is running. That is the release's appVersion, which is its *chart's* version --
+// the same number as the runtime image's only while the two ride one release
+// line. An env that states its chart separately (EnvConfig.runtimechart) has them
+// apart, so reporting the chart's number would label the environment with a
+// version it is not running: exactly the confusion naming the coordinates
+// separately exists to end. There the env's recorded runtime version is the
+// answer, written by the deploy that rolled it.
+func (a *App) observedRuntimeVersion(tenant, environment string, release helmReleaseSnapshot) string {
 	observed := strings.TrimSpace(release.AppVersion)
+	env, ok := a.lookupEnvConfig(tenant, environment)
+	if !ok || strings.TrimSpace(env.RuntimeChart) == "" {
+		return observed
+	}
+	if recorded := strings.TrimSpace(env.RuntimeVersion); recorded != "" {
+		return recorded
+	}
+	return observed
+}
+
+func helmDeployedSnapshotMatchesEntry(release helmReleaseSnapshot, observed string, entry activityQueueEntry) bool {
+	expected := strings.TrimSpace(entry.Version)
+	observed = strings.TrimSpace(observed)
 	if expected == "" || observed == "" || expected != observed {
 		return false
 	}
@@ -195,7 +215,7 @@ func (a *App) upsertHelmActivity(tenant, environment, kubeContext string, releas
 		Command:           "deploy",
 		Tenant:            tenant,
 		Environment:       environment,
-		Version:           strings.TrimSpace(release.AppVersion),
+		Version:           a.observedRuntimeVersion(tenant, environment, release),
 		Release:           release.Name,
 		Namespace:         release.Namespace,
 		KubernetesContext: kubeContext,

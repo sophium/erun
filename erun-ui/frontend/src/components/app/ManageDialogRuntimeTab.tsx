@@ -28,6 +28,7 @@ import { CheckboxField, TextField } from '@/components/app/ManageDialog.fields';
 import { parseIdleTrafficBytes } from '@/components/app/ManageDialog.helpers';
 import { DeployComponentsField } from '@/components/app/ManageDialogDeployComponents';
 import { RuntimeActivityField } from '@/components/app/ManageDialogRuntimeActivity';
+import { RuntimeChartField } from '@/components/app/ManageDialogRuntimeChart';
 import { RuntimePowerField } from '@/components/app/ManageDialogRuntimePower';
 import { PinVersionAction } from '@/components/app/PinVersionAction';
 import { RuntimeResourceControls } from '@/components/app/RuntimeResourceControls';
@@ -92,6 +93,9 @@ export function RuntimeTab(): React.ReactElement {
           })
         }
       />
+      {/* Directly under the version: the version names the image, this names the
+          chart, and the two together are what gets installed. */}
+      <RuntimeChartField dialog={dialog} />
       <RuntimePowerField dialog={dialog} />
       <RuntimePodFields dialog={dialog} />
       {/* Directly under the sliders: when the figures read as capped, the next

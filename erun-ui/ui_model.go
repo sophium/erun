@@ -313,18 +313,23 @@ type uiEnvironmentConfig struct {
 	CloudAliasSlots              []uiEnvironmentCloudAlias `json:"cloudAliasSlots,omitempty"`
 	CloudContext                 *uiCloudContextStatus     `json:"cloudContext,omitempty"`
 	RuntimeVersion               string                    `json:"runtimeVersion"`
-	RuntimePod                   uiRuntimePodConfig        `json:"runtimePod"`
-	SSHD                         uiSSHDConfig              `json:"sshd"`
-	Idle                         uiIdleConfig              `json:"idle"`
-	Claude                       uiClaudeConfig            `json:"claude"`
-	ClaudeDefaults               uiClaudeDefaults          `json:"claudeDefaults"`
-	AITool                       string                    `json:"aiTool,omitempty"`
-	LocalPorts                   uiEnvironmentLocalPorts   `json:"localPorts"`
-	AutoStart                    *bool                     `json:"autoStart,omitempty"`
-	RemoteHostCredentials        bool                      `json:"remoteHostCredentials"`
-	AutoUpgrade                  bool                      `json:"autoUpgrade"`
-	UpgradeChannel               string                    `json:"upgradeChannel,omitempty"`
-	DisableBuildScript           bool                      `json:"disableBuildScript"`
+	// RuntimeChart is the chart this env's runtime is installed from, stated as an
+	// OCI reference that may carry its own version. Empty means "the chart
+	// published with the deployed version", which is right whenever the chart and
+	// the runtime image ride one release line. See EnvConfig.RuntimeChart.
+	RuntimeChart          string                  `json:"runtimeChart,omitempty"`
+	RuntimePod            uiRuntimePodConfig      `json:"runtimePod"`
+	SSHD                  uiSSHDConfig            `json:"sshd"`
+	Idle                  uiIdleConfig            `json:"idle"`
+	Claude                uiClaudeConfig          `json:"claude"`
+	ClaudeDefaults        uiClaudeDefaults        `json:"claudeDefaults"`
+	AITool                string                  `json:"aiTool,omitempty"`
+	LocalPorts            uiEnvironmentLocalPorts `json:"localPorts"`
+	AutoStart             *bool                   `json:"autoStart,omitempty"`
+	RemoteHostCredentials bool                    `json:"remoteHostCredentials"`
+	AutoUpgrade           bool                    `json:"autoUpgrade"`
+	UpgradeChannel        string                  `json:"upgradeChannel,omitempty"`
+	DisableBuildScript    bool                    `json:"disableBuildScript"`
 	// PlatformAccount binds the env's runtime ServiceAccount to cluster-admin so
 	// in-pod platform Terraform (the cluster edge) and component installs can
 	// manage cluster-scoped resources. See EnvConfig.PlatformAccount.

@@ -36,6 +36,32 @@ func resolvePublishedRuntimeChartReference(ctx context.Context, containerRegistr
 	return PublishedDevopsChartOCIRepo(containerRegistry) + "/" + chartName, chartName
 }
 
+// resolveRuntimeChartCoordinate answers which runtime chart to install, at which
+// version. An env that states its chart (EnvConfig.RuntimeChart) is taken at its
+// word -- that is the coordinate, and its version, when it carries one, is the
+// chart's own rather than the deploy version. Otherwise the chart is looked up as
+// it always was: the tenant's published umbrella when one exists at the version,
+// else the shared canonical chart, both at the deploy version.
+//
+// The returned chart version is empty for the looked-up case, meaning "the deploy
+// version", so nothing changes for the envs whose chart and image were published
+// as a pair.
+func resolveRuntimeChartCoordinate(ctx Context, target OpenResult, registry, version, reason string) (reference, chartName, chartVersion string) {
+	if named := strings.TrimSpace(target.EnvConfig.RuntimeChart); named != "" {
+		reference, chartVersion = splitChartReferenceVersion(named)
+		chartName = chartNameFromReference(reference)
+		if chartVersion == "" {
+			ctx.Trace("deploy: " + reason + "; using the env's runtime chart " + reference + " at the deploy version " + version)
+			return reference, chartName, ""
+		}
+		ctx.Trace("deploy: " + reason + "; using the env's runtime chart " + reference + " version " + chartVersion)
+		return reference, chartName, chartVersion
+	}
+	reference, chartName = resolvePublishedRuntimeChartReference(context.Background(), registry, target.Tenant, version)
+	ctx.Trace("deploy: " + reason + "; using published chart " + reference + " version " + version)
+	return reference, chartName, ""
+}
+
 // publishedUmbrellaSubchartKey returns the value-scope key of the canonical
 // erun-<base> chart that a tenant's published umbrella wraps as a subchart, or
 // "" when the chart is a canonical erun-<base> chart installed directly (no
@@ -82,7 +108,15 @@ func ensureTenantChartsPublished(ctx Context, target OpenResult, versionOverride
 
 	required := make([]string, 0, len(components)+1)
 	runtimeChart := RuntimeReleaseName(target.Tenant)
-	if runtimeSelected && runtimeChart != DevopsComponentName {
+	// An env that states its runtime chart is not riding a tenant chart at this
+	// version, so requiring one here would fail a deploy that is perfectly
+	// coherent: the components run on the tenant's line, the runtime chart on the
+	// line the env named. Its components are still verified.
+	runtimeChartStated := strings.TrimSpace(target.EnvConfig.RuntimeChart) != ""
+	switch {
+	case runtimeSelected && runtimeChartStated:
+		ctx.Trace("deploy: the env states its runtime chart " + strings.TrimSpace(target.EnvConfig.RuntimeChart) + "; verifying only the tenant's component charts at " + version)
+	case runtimeSelected && runtimeChart != DevopsComponentName:
 		required = append(required, runtimeChart)
 	}
 	required = append(required, components...)
@@ -172,8 +206,7 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, 
 		return DeploySpec{}, fmt.Errorf("runtime version is required to deploy the published %s chart: pass --version or persist runtimeversion in the env config", DevopsComponentName)
 	}
 
-	chartReference, chartName := resolvePublishedRuntimeChartReference(context.Background(), registry, target.Tenant, version)
-	ctx.Trace("deploy: " + reason + "; using published chart " + chartReference + " version " + version)
+	chartReference, chartName, chartVersion := resolveRuntimeChartCoordinate(ctx, target, registry, version, reason)
 
 	deployContext := KubernetesDeployContext{
 		ComponentName: DevopsComponentName,
@@ -189,6 +222,7 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, 
 	// subchart scope, so re-scope them under erun-devops. Empty (no re-scope) when
 	// the tenant rides the shared erun-devops chart.
 	deployInput.SubchartKey = publishedUmbrellaSubchartKey(target.Tenant, chartName)
+	deployInput.ChartVersion = chartVersion
 	deployInput.ReleaseName = RuntimeReleaseName(target.Tenant)
 	deployInput.UseHostCredentials = target.EnvConfig.HasAWSCloudAlias()
 	deployInput.ContainerRegistry = registry
@@ -383,7 +417,10 @@ func (e *PublishedChartNotFoundError) Error() string {
 	}
 	msg += ": that version has no published chart in the registry. " +
 		"`erun push` publishes a version's image and chart together, so a version is deployable only after it is pushed — " +
-		"run `erun push --version " + strings.TrimSpace(e.Version) + "` (or `erun release` for a release version), then deploy."
+		"run `erun push --version " + strings.TrimSpace(e.Version) + "` (or `erun release` for a release version), then deploy. " +
+		"If this version is on your project's own release line, it names the image and never had a chart of its own: " +
+		"state the chart the environment rides instead — `runtimechart` in the env config (the desktop's Runtime tab, " +
+		"\"Runtime chart\") or `--runtime-chart <ref>` for one deploy — and the version keeps naming the image."
 	if out := strings.TrimSpace(e.HelmOutput); out != "" {
 		msg += "\n" + out
 	}

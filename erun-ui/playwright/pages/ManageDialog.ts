@@ -204,6 +204,24 @@ export class ManageDialog {
     return this.page.locator('#environment-config-save-deploy-components');
   }
 
+  // The "Runtime chart" field states the chart coordinate -- which chart the
+  // runtime is installed from -- separately from the version, which names the
+  // image. Empty means "the chart published with the deployed version".
+  runtimeChartInput(): Locator {
+    return this.locator().locator('#environment-config-runtimechart');
+  }
+
+  async openRuntimeChartPicker(): Promise<void> {
+    await this.locator().getByRole('button', { name: 'Show runtime chart choices' }).click();
+  }
+
+  // Picks an offered chart. The options carry both the label and the reference,
+  // so either matches.
+  async pickRuntimeChart(text: string): Promise<void> {
+    const escaped = text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    await this.page.getByRole('option', { name: new RegExp(escaped) }).click();
+  }
+
   async selectTab(name: ManageTab): Promise<void> {
     await this.tab(name).click();
   }

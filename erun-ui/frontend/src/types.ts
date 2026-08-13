@@ -436,6 +436,10 @@ export interface UIEnvironmentConfig {
   cloudAliasSlots?: UIEnvironmentCloudAlias[];
   cloudContext?: UICloudContextStatus;
   runtimeVersion: string;
+  // runtimeChart names the chart this env's runtime is installed from, as an OCI
+  // reference that may carry its own version. Empty means the chart published
+  // with the deployed version -- right whenever chart and image ride one line.
+  runtimeChart?: string;
   runtimePod: UIRuntimePodConfig;
   sshd: UISSHDConfig;
   idle: {

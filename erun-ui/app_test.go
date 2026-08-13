@@ -2673,6 +2673,57 @@ func TestSaveEnvironmentConfigAcceptsDeployOnlyRegistry(t *testing.T) {
 	}
 }
 
+// The chart the runtime is installed from is one of the four deploy coordinates,
+// stated by the operator rather than derived, so the dialog must both show what
+// the env rides and write a change back. Clearing it means "the chart published
+// with the deployed version", which must reach the env config as an empty field
+// rather than being ignored as a no-op.
+func TestSaveEnvironmentConfigRoundTripsRuntimeChart(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"frs": {Name: "frs"},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"frs/local": {
+				Name:              "local",
+				LocalRepoPath:     projectRoot,
+				KubernetesContext: "cluster-local",
+				RuntimeChart:      "oci://ghcr.io/sophium/charts/erun-devops:1.0.178",
+			},
+		},
+	}
+	app := NewApp(erunUIDeps{store: store})
+
+	loaded, err := app.LoadEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "local"})
+	if err != nil {
+		t.Fatalf("LoadEnvironmentConfig failed: %v", err)
+	}
+	if loaded.RuntimeChart != "oci://ghcr.io/sophium/charts/erun-devops:1.0.178" {
+		t.Fatalf("expected the env's stated chart to load, got %q", loaded.RuntimeChart)
+	}
+
+	loaded.RuntimeChart = "  oci://registry.example/charts/erun-devops:1.2.3  "
+	saved, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "local"}, loaded)
+	if err != nil {
+		t.Fatalf("SaveEnvironmentConfig failed: %v", err)
+	}
+	if saved.RuntimeChart != "oci://registry.example/charts/erun-devops:1.2.3" {
+		t.Fatalf("expected the saved chart trimmed, got %q", saved.RuntimeChart)
+	}
+	if stored := store.envs["frs/local"].RuntimeChart; stored != "oci://registry.example/charts/erun-devops:1.2.3" {
+		t.Fatalf("expected the env config to record the chart, got %q", stored)
+	}
+
+	saved.RuntimeChart = ""
+	if _, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "local"}, saved); err != nil {
+		t.Fatalf("SaveEnvironmentConfig failed clearing the chart: %v", err)
+	}
+	if stored := store.envs["frs/local"].RuntimeChart; stored != "" {
+		t.Fatalf("expected clearing the chart to reach the env config, got %q", stored)
+	}
+}
+
 func TestLoadEnvironmentConfigExposesClaudeDefaultsAndOverrides(t *testing.T) {
 	projectRoot := t.TempDir()
 	useBedrock := false
