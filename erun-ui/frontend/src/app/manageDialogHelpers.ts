@@ -38,6 +38,22 @@ export function aiSessionLaunchSignature(config: UIEnvironmentConfig): string {
   );
 }
 
+// versionSourceSignature captures what decides which registries the version
+// picker lists from, mirroring the backend's discovery: the env's own marked
+// registries, and — for an env that marks none — the local repo path whose
+// project config supplies them instead. Roles stay out because discovery reads
+// the hosts, not what each one is for, and a cluster entry names no host at all.
+// A save that changes this must re-query the picker, or a registry the operator
+// just added contributes neither versions nor a notice.
+export function versionSourceSignature(config: UIEnvironmentConfig): string {
+  return JSON.stringify({
+    registries: config.containerRegistries
+      .map((entry) => entry.registry.trim())
+      .filter((registry) => registry !== ''),
+    localRepoPath: config.localRepoPath,
+  });
+}
+
 // nextPendingRedeploy reports whether the pending-redeploy banner should be
 // up after a save: it stays up once raised (a later metadata-only save must
 // not clear a redeploy the user still owes the pod), and a save raises it

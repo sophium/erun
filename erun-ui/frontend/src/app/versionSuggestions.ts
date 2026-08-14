@@ -53,9 +53,29 @@ export function normalizeVersionSuggestions(values: UIVersionSuggestion[]): UIVe
 // registry names the failure.
 export function versionNoticeMessage(notice: UIVersionSuggestionNotice): string {
   if (notice.kind === 'auth') {
-    return `${notice.image} is private — run docker login ghcr.io (or gh auth login) to list its versions.`;
+    return `${notice.image} is private — ${registrySignInHint(notice.image)} to list its versions.`;
   }
   return `${notice.image} — couldn't reach the registry to list its versions.`;
+}
+
+// registrySignInHint names the sign-in that reaches the image's own registry.
+// One ghcr-worded hint for every source told an operator whose image lives in a
+// private registry elsewhere to authenticate against a registry the image is
+// not in, which is worse than no hint at all.
+function registrySignInHint(image: string): string {
+  const host = registryHostFromImage(image);
+  if (host === 'ghcr.io') {
+    return 'run docker login ghcr.io (or gh auth login)';
+  }
+  return `run docker login ${host || 'docker.io'}`;
+}
+
+// registryHostFromImage returns the registry an image reference names, applying
+// the rule the backend resolves by: a first segment carrying a dot or a port is
+// a registry host of its own, anything else is a Docker Hub namespace.
+function registryHostFromImage(image: string): string {
+  const first = normalizeDialogValue(image).split('/')[0] ?? '';
+  return first.includes('.') || first.includes(':') ? first : '';
 }
 
 export function normalizeVersionSuggestionNotices(

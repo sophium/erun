@@ -15,12 +15,30 @@ import { expect, test } from '../fixtures/erunApp.js';
 // environment_activity_observed_test.go; what only the running app can show is
 // that the spinner an orphaned latch produces actually goes away.
 
+// The backend sweeps every environment on its own timer (environmentActivityInterval
+// in environment_activity.go) and reports these inert ones unreachable, so an emit
+// this spec makes can be overwritten before the row settles. Re-driving until it
+// converges is the right shape; the two budgets below are what make it converge.
+// The settle wait has to cover a loaded emit → event → re-render round-trip: at 1s
+// a loaded machine missed it, and because every retry re-emits the latch first, no
+// later attempt inherited the previous one's progress. The outer budget is sized to
+// the sweep, not guessed: at exactly one period it passes or fails on where the tick
+// happens to land — observed doing both, converging at 20.2s once and exhausting the
+// budget once. Two full periods plus margin means a sweep landing anywhere inside
+// the window still leaves a whole period for the emits to converge.
+const SWEEP_PERIOD_MS = 20_000;
+const SETTLE_TIMEOUT_MS = 5_000;
+const CONVERGE_TIMEOUT_MS = SWEEP_PERIOD_MS * 2 + 10_000;
+
 test.describe('an idle environment clears a stale desktop latch', () => {
   test('an orphaned running entry stops spinning once the environment reports idle', async ({
     app: _app,
     page,
     seededEnv,
   }) => {
+    // Convergence is paced by the backend's own sweep, so this test outlasts the
+    // default budget by design rather than by accident.
+    test.slow();
     // A per-test environment, not the restored one: the harness auto-opens that
     // one, and an open in flight is this desktop's own operation, which stays
     // authoritative by design and would hold the row busy for an unrelated
@@ -51,13 +69,6 @@ test.describe('an idle environment clears a stale desktop latch', () => {
     // The environment's own answer. The backend's sweep also runs against these
     // inert envs and reports them unreachable, so re-drive until it converges
     // rather than racing a single emit — a row that never clears still fails.
-    //
-    // The budget is sized to that sweep, not guessed: environmentActivityInterval
-    // is 20s (erun-ui/environment_activity.go), so a window of exactly one period
-    // passes or fails on where the tick happens to land — it was observed doing
-    // both, converging at 20.2s once and exhausting the budget once. Two full
-    // periods plus margin means a sweep landing anywhere inside the window still
-    // leaves a whole period for the emits to converge.
     await expect(async () => {
       await emitRunningBuild(page, tenant, environment);
       await emitEnvActivity(page, {
@@ -67,8 +78,8 @@ test.describe('an idle environment clears a stale desktop latch', () => {
         observed: true,
         busy: false,
       });
-      await expect(spinner).toHaveCount(0, { timeout: 1_000 });
-    }).toPass({ timeout: 50_000 });
+      await expect(spinner).toHaveCount(0, { timeout: SETTLE_TIMEOUT_MS });
+    }).toPass({ timeout: CONVERGE_TIMEOUT_MS });
   });
 
   test('an environment that reports work still spins, whoever started it', async ({
@@ -76,6 +87,7 @@ test.describe('an idle environment clears a stale desktop latch', () => {
     page,
     seededEnv,
   }) => {
+    test.slow();
     const { tenant, environment } = seededEnv;
     const sidebar = page.locator('aside').first();
 
@@ -95,8 +107,8 @@ test.describe('an idle environment clears a stale desktop latch', () => {
         sidebar.getByRole('status', {
           name: `${tenant} / ${environment} is busy — holding: gradle-build`,
         }),
-      ).toBeVisible({ timeout: 1_000 });
-    }).toPass({ timeout: 20_000 });
+      ).toBeVisible({ timeout: SETTLE_TIMEOUT_MS });
+    }).toPass({ timeout: CONVERGE_TIMEOUT_MS });
   });
 });
 

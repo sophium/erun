@@ -207,6 +207,85 @@ test.describe('manage dialog — version picker (#756)', () => {
     // The tenant version survives; the reload's 9.9.9 never reaches this picker.
     await expect(page.getByRole('option', { name: /1\.0\.16/ })).toBeVisible();
     await expect(page.getByRole('option', { name: /9\.9\.9/ })).toHaveCount(0);
+
+    // The app keeps reloading state on its own timer, so a later LoadState can
+    // still be inside this handler's round-trip when the context tears down —
+    // which surfaces as a failure for a test whose assertions already passed.
+    // Drain the handlers first rather than racing teardown.
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+  });
+
+  test('saving a container registry re-queries the picker so the new registry contributes (#995)', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    // Regression: the picker was loaded only when the dialog opened, and a save
+    // invalidated neither it nor the RTK tag it provides. Adding a registry on
+    // the General tab therefore left the Runtime tab listing versions from the
+    // pre-save registry set — with no entry AND no notice for the registry just
+    // added, which reads as "erun cannot use this registry" rather than "this
+    // list is stale". Visibility of system status: the save's effect must show
+    // in the place it takes effect, without reopening the dialog.
+    let calls = 0;
+    await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+      const body = JSON.parse(request.postData() ?? '{}') as { method: string };
+      if (body.method === 'LoadVersionSuggestions') {
+        calls += 1;
+        // Before the save only the upstream line resolves; after it, the newly
+        // marked registry contributes its own version too.
+        const suggestions =
+          calls === 1
+            ? [{ label: 'Latest stable', version: '1.0.0', source: 'ERun', image: 'erun-devops' }]
+            : [
+                { label: 'Latest stable', version: '1.0.0', source: 'ERun', image: 'erun-devops' },
+                {
+                  label: 'Latest stable',
+                  version: '4.5.6',
+                  source: 'pw',
+                  image: 'registry.internal/pw/pw-devops',
+                },
+              ];
+        return route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { suggestions, notices: [] } }),
+        });
+      }
+      await route.continue();
+    });
+
+    await app.sidebar.openManageDialogViaKeyboard(seededEnv.tenant, seededEnv.environment);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.selectTab('Runtime');
+    await app.manageDialog.openVersionPicker();
+    await expect(page.getByRole('option', { name: /4\.5\.6/ })).toHaveCount(0);
+
+    // Add a second registry on the General tab. It is deploy-only: a second
+    // build-marked registry would be invalid, and discovery reads the host
+    // regardless of the roles it carries.
+    await app.manageDialog.selectTab('General');
+    await app.manageDialog.addRegistryButton().click();
+    await app.manageDialog.registryInput(1).fill('registry.internal/pw');
+    await page.keyboard.press('Escape');
+    await app.manageDialog.registryRoleCheckbox(1, 'build').click();
+    await expect(app.manageDialog.locator().getByRole('alert')).toHaveCount(0);
+
+    // The re-query is the save's own consequence, so wait for that response —
+    // a real signal, not a wall-clock guess. Without the fix it never arrives.
+    const requeried = page.waitForResponse(
+      (resp) =>
+        resp.url().includes('__erun_invoke') &&
+        (JSON.parse(resp.request().postData() ?? '{}') as { method?: string }).method ===
+          'LoadVersionSuggestions',
+    );
+    await app.manageDialog.save();
+    await requeried;
+
+    await app.manageDialog.selectTab('Runtime');
+    await app.manageDialog.openVersionPicker();
+    await expect(page.getByRole('option', { name: /4\.5\.6/ })).toBeVisible();
+    // The version the operator had available before the save stays offered.
+    await expect(page.getByRole('option', { name: /1\.0\.0/ })).toBeVisible();
   });
 
   test('deploying a version sends its runtime image so the deploy targets that erun-devops version (#792)', async ({
