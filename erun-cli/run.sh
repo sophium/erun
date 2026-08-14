@@ -3,7 +3,10 @@
 set -eu
 
 ORIGINAL_DIR=$(pwd)
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+# -P so every path derived from here has one spelling, whichever symlinked
+# route the caller reached this script through — the desktop build this
+# delegates to gates on that.
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd -P)
 # Where this dev wrapper writes the binaries it builds. Defaults to the
 # in-repo bin/ (gitignored), which keeps `erun app`'s sibling-directory lookup
 # for erun-app/ERun.app working unchanged. ERUN_DEV_BIN_DIR moves them out of

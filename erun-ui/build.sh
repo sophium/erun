@@ -3,7 +3,9 @@
 set -eu
 
 ORIGINAL_DIR=$(pwd)
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+# -P so a checkout reached through a symlink resolves to the one spelling the
+# lint gate below caches its findings against.
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd -P)
 TARGET=${1:-"$SCRIPT_DIR/bin/erun-app"}
 VERSION_FILE="$SCRIPT_DIR/../erun-devops/VERSION"
 WAILS_BIN="${WAILS_BIN:-$(go env GOPATH)/bin/wails}"
@@ -65,12 +67,12 @@ if [ -d frontend ]; then
 		# rather than in the shared `make check` the image runs.
 		#
 		# The cache is scoped to this checkout because golangci-lint keys it by
-		# module, not by working tree: a second checkout of erun-ui replays the
-		# first one's results, and those carry the *other* tree's paths. Those
-		# paths no longer match .golangci.yml's anchored node_modules
-		# exclusions, so vendored third-party Go that this gate deliberately
-		# ignores comes back as findings against a tree that does not contain
-		# it. Scoping the cache makes the gate judge what it is building.
+		# module, not by working tree: a second checkout of erun-ui would
+		# otherwise replay the first one's results against a tree that never
+		# produced them. Correctness does not rest on that alone — a replayed
+		# finding still renders the path of the run that cached it, so
+		# .golangci.yml matches excluded paths by segment instead of anchoring
+		# them to a working tree.
 		(cd "$SCRIPT_DIR" && GOLANGCI_LINT_CACHE="${GOLANGCI_LINT_CACHE:-$SCRIPT_DIR/.golangci-cache}" golangci-lint run ./...)
 	fi
 	"$YARN_BIN" build
