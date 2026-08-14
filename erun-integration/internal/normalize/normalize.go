@@ -41,6 +41,12 @@ var defaultRules = []Replacement{
 	// token — before the generic <TMP> rule below would swallow the whole path — so
 	// goldens still show that state lives off the (project <TMP>) playbook tree.
 	{regexp.MustCompile(`/(?:private/)?(?:var/folders|var/tmp|tmp)/[^\s'"]*?/\.erun/terraform`), "<STATE_ROOT>"},
+	// The desktop identity resolves through os.UserConfigDir(), which no test
+	// seam can pin: darwin puts it under "Library/Application Support" and Linux
+	// under the XDG dir. The generic rule below stops at the space, so the same
+	// scenario left a different remainder on each OS and its golden could only be
+	// green on whichever one recorded it. Collapse the whole path first.
+	{regexp.MustCompile(`/(?:private/)?(?:var/folders|var/tmp|tmp)/[^\s'"]*(?:/Library/Application Support)?/ERun/desktopid\.key`), "<DESKTOP_IDENTITY>"},
 	{regexp.MustCompile(`/(?:private/)?(?:var/folders|var/tmp|tmp)/[^\s'"]+`), "<TMP>"},
 	// A separate rule for temp paths whose separators are percent-escaped,
 	// which the plain-path rule above cannot match.
