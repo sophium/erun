@@ -19,25 +19,31 @@ bootstrap-script:
   mkdir -p '<HOME>/git/team'
   cd '<HOME>/git/team'
   config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
-  mkdir -p "$config_home/erun"
-  cat > "$config_home/erun/config.yaml" <<'EOF'
+  if [ ! -f "$config_home/erun/config.yaml" ]; then
+    mkdir -p "$(dirname "$config_home/erun/config.yaml")"
+    cat > "$config_home/erun/config.yaml" <<'EOF'
   defaulttenant: team
 
   EOF
-  mkdir -p "$config_home/erun/team"
-  cat > "$config_home/erun/team/config.yaml" <<'EOF'
+  fi
+  if [ ! -f "$config_home/erun/team/config.yaml" ]; then
+    mkdir -p "$(dirname "$config_home/erun/team/config.yaml")"
+    cat > "$config_home/erun/team/config.yaml" <<'EOF'
   name: team
   defaultenvironment: dev
 
   EOF
-  mkdir -p "$config_home/erun/team/dev"
-  cat > "$config_home/erun/team/dev/config.yaml" <<'EOF'
+  fi
+  if [ ! -f "$config_home/erun/team/dev/config.yaml" ]; then
+    mkdir -p "$(dirname "$config_home/erun/team/dev/config.yaml")"
+    cat > "$config_home/erun/team/dev/config.yaml" <<'EOF'
   name: dev
   type: remote-agent
   localrepopath: <HOME>/git/team
   kubernetescontext: test-context
 
   EOF
+  fi
   mkdir -p "$HOME/.erun/team/dev"
   cat > "$HOME/.erun/team/dev/bashrc" <<'EOF'
   export ERUN_SHELL_HOST='team-dev'
