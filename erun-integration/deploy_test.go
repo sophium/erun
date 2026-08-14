@@ -889,6 +889,34 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_remote_env_umbrella_ignores_stale_stock_runtimeimage", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_remote_env_stated_chart_ignores_stale_stock_runtimeimage", func(t *testing.T) {
+		// The shared-chart half of the stale-pin migration. An env that states its
+		// runtime chart at the chart's own version is deploying a version from another
+		// line, so a leftover runtimeimage naming the stock erun-devops would pin
+		// erun-devops:<tenant-version> — a tag erun's line never publishes
+		// (ImagePullBackOff). The stated chart is the signal: the pin is ignored and the
+		// version names the tenant's own image. That image resolves against the registry
+		// the cluster pulls from, not the chart's — an env states its chart precisely to
+		// keep the two apart.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+
+			"runtimeregistry: ghcr.io/sophium\n"+
+			"runtimeimage: ghcr.io/sophium/erun-devops\n"+
+			"runtimechart: oci://ghcr.io/sophium/charts/erun-devops:1.0.0\n"+
+			"containerregistries:\n    - registry: registry.example/tenant\n      roles:\n        - build\n        - deploy\n")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "2.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_stated_chart_ignores_stale_stock_runtimeimage", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_remote_env_deploys_published_components", func(t *testing.T) {
 		// A remote/runtime env has no local checkout, yet --components selects
 		// platform components: each resolves to its PUBLISHED erun-<component>
