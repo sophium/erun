@@ -927,8 +927,35 @@ func resolveReleaseVersion(baseVersion, commit string, mode ReleaseMode) string 
 	}
 }
 
+// releaseChartSearchRoot scopes chart discovery to the project's own devops
+// module when the project declares where that module lives, so a repository
+// migrating onto erun publishes the tenant module's charts and not the legacy
+// module's alongside them. A project that declares neither keeps the
+// whole-project walk.
+func releaseChartSearchRoot(projectRoot string) (string, error) {
+	k8sDir, ok, err := configuredK8sDir(projectRoot)
+	if err != nil {
+		return "", err
+	}
+	if ok {
+		return k8sDir, nil
+	}
+	dockerDir, ok, err := configuredDockerDir(projectRoot)
+	if err != nil {
+		return "", err
+	}
+	if ok {
+		return filepath.Dir(dockerDir), nil
+	}
+	return projectRoot, nil
+}
+
 func discoverReleaseCharts(projectRoot, version string) ([]ReleaseChartSpec, []ReleaseFileUpdate, error) {
-	chartPaths, err := findReleaseChartPaths(projectRoot)
+	searchRoot, err := releaseChartSearchRoot(projectRoot)
+	if err != nil {
+		return nil, nil, err
+	}
+	chartPaths, err := findReleaseChartPaths(projectRoot, searchRoot)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -951,8 +978,44 @@ func discoverReleaseCharts(projectRoot, version string) ([]ReleaseChartSpec, []R
 	return charts, updates, nil
 }
 
+// releaseDockerDir is where the release looks for the images it publishes: the
+// project's configured paths.docker when set, otherwise the conventional
+// <release root>/docker. The build side already honours the override, so
+// without this a project that relocates its build contexts resolved no images
+// to publish — the release built them, pushed nothing, and still tagged a
+// version whose verify-publication had nothing to re-resolve.
+func releaseDockerDir(projectRoot, releaseRoot string) (string, error) {
+	configured, ok, err := configuredDockerDir(projectRoot)
+	if err != nil {
+		return "", err
+	}
+	if ok {
+		return configured, nil
+	}
+	return filepath.Join(releaseRoot, "docker"), nil
+}
+
+// sameVersionFile reports whether two VERSION paths are the same file. A module
+// that symlinks the project's version line shares it, so it belongs in the
+// release; only a module carrying its own VERSION is a separately pinned
+// component the release must leave alone.
+func sameVersionFile(a, b string) bool {
+	return versionFileIdentity(a) == versionFileIdentity(b)
+}
+
+func versionFileIdentity(path string) string {
+	cleaned := filepath.Clean(strings.TrimSpace(path))
+	if resolved, err := filepath.EvalSymlinks(cleaned); err == nil {
+		return resolved
+	}
+	return cleaned
+}
+
 func discoverReleaseDockerImages(ctx Context, projectRoot, releaseRoot, versionFilePath, version string) ([]ReleaseDockerImageSpec, error) {
-	dockerDir := filepath.Join(releaseRoot, "docker")
+	dockerDir, err := releaseDockerDir(projectRoot, releaseRoot)
+	if err != nil {
+		return nil, err
+	}
 	buildContexts, err := DockerBuildContextsUnderDir(dockerDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -971,33 +1034,46 @@ func discoverReleaseDockerImages(ctx Context, projectRoot, releaseRoot, versionF
 
 	images := make([]ReleaseDockerImageSpec, 0, len(buildContexts))
 	for _, buildContext := range buildContexts {
-		_, _, candidateVersionFilePath, err := ResolveDockerBuildVersion(buildContext.Dir, releaseRoot)
+		image, included, err := releaseDockerImageForContext(buildContext, releaseRoot, versionFilePath, version, registry)
 		if err != nil {
 			return nil, err
 		}
-		if filepath.Clean(candidateVersionFilePath) != filepath.Clean(versionFilePath) {
-			continue
+		if included {
+			images = append(images, image)
 		}
-
-		imageName := strings.TrimSpace(filepath.Base(buildContext.Dir))
-		tag := imageName + ":" + version
-		if strings.TrimSpace(registry) != "" {
-			tag = strings.TrimRight(registry, "/") + "/" + tag
-		}
-		contextDir, err := ResolveDockerBuildContextDirForProject(buildContext.Dir, releaseRoot)
-		if err != nil {
-			return nil, err
-		}
-		images = append(images, ReleaseDockerImageSpec{
-			ContextDir:     contextDir,
-			DockerfilePath: buildContext.DockerfilePath,
-			ImageName:      imageName,
-			Registry:       registry,
-			Tag:            tag,
-			Version:        version,
-		})
 	}
 	return images, nil
+}
+
+// releaseDockerImageForContext resolves one build context into the image the
+// release publishes, or reports it as excluded when the context takes its
+// version from a different VERSION file than the one being released.
+func releaseDockerImageForContext(buildContext DockerBuildContext, releaseRoot, versionFilePath, version, registry string) (ReleaseDockerImageSpec, bool, error) {
+	_, _, candidateVersionFilePath, err := ResolveDockerBuildVersion(buildContext.Dir, releaseRoot)
+	if err != nil {
+		return ReleaseDockerImageSpec{}, false, err
+	}
+	if !sameVersionFile(candidateVersionFilePath, versionFilePath) {
+		return ReleaseDockerImageSpec{}, false, nil
+	}
+
+	imageName := strings.TrimSpace(filepath.Base(buildContext.Dir))
+	tag := imageName + ":" + version
+	if strings.TrimSpace(registry) != "" {
+		tag = strings.TrimRight(registry, "/") + "/" + tag
+	}
+	contextDir, err := ResolveDockerBuildContextDirForProject(buildContext.Dir, releaseRoot)
+	if err != nil {
+		return ReleaseDockerImageSpec{}, false, err
+	}
+	return ReleaseDockerImageSpec{
+		ContextDir:     contextDir,
+		DockerfilePath: buildContext.DockerfilePath,
+		ImageName:      imageName,
+		Registry:       registry,
+		Tag:            tag,
+		Version:        version,
+	}, true, nil
 }
 
 func discoverReleaseLinuxScripts(releaseRoot, version string) ([]scriptSpec, error) {
@@ -1581,13 +1657,13 @@ func fileExists(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
-func findReleaseChartPaths(projectRoot string) ([]string, error) {
+func findReleaseChartPaths(projectRoot, searchRoot string) ([]string, error) {
 	ignored, err := loadReleaseDiscoveryIgnoreSet(projectRoot)
 	if err != nil {
 		return nil, err
 	}
 	matches := make([]string, 0, 4)
-	err = filepath.WalkDir(projectRoot, func(path string, d os.DirEntry, err error) error {
+	err = filepath.WalkDir(searchRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
