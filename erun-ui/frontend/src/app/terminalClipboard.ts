@@ -1,4 +1,4 @@
-import type { Terminal } from '@xterm/xterm';
+import type { IDisposable, Terminal } from '@xterm/xterm';
 
 import { SendSessionInput } from '../../wailsjs/go/main/App';
 import { ClipboardGetText, ClipboardSetText } from '../../wailsjs/runtime/runtime';
@@ -7,7 +7,10 @@ import {
   classifyTerminalClipboardKey,
   fileToBase64,
   isTerminalPasteTarget,
+  OSC_CLIPBOARD_IDENT,
+  parseOscClipboardWrite,
   pastedFiles,
+  terminalCopyOutcome,
 } from './clipboard';
 import { readError } from './errors';
 import { showTerminalMessage } from './notificationThunks';
@@ -66,6 +69,28 @@ export class TerminalClipboard {
     return true;
   }
 
+  // A pod-side "press c to copy" affordance emits OSC 52, which xterm swallows
+  // unhandled — so the text never leaves the pod, which is the browser-less side
+  // of the pair. Handling it writes that text to the host clipboard instead.
+  // The sequence is always consumed, rejected reads and malformed payloads
+  // included, so pod-controlled bytes never land on screen as junk.
+  registerOscClipboardWrites(terminal: Terminal, isReplayParse: () => boolean): IDisposable {
+    return terminal.parser.registerOscHandler(OSC_CLIPBOARD_IDENT, (data: string): boolean => {
+      // Re-rendering a tab re-parses everything the session ever emitted;
+      // re-running the write would clobber the host clipboard with stale text.
+      if (isReplayParse()) {
+        return true;
+      }
+      const text = parseOscClipboardWrite(data);
+      if (text !== null) {
+        void ClipboardSetText(text).catch((error: unknown) => {
+          this.reportError(error);
+        });
+      }
+      return true;
+    });
+  }
+
   // Right-click copies the selection if there is one, otherwise pastes.
   handleContextMenu(event: MouseEvent): void {
     event.preventDefault();
@@ -90,20 +115,16 @@ export class TerminalClipboard {
     await this.pasteFiles(files);
   }
 
-  // Ctrl+Shift+C always copies the selection; Ctrl+C copies only when there is
-  // a selection (matching Windows Terminal) and otherwise falls through so the
-  // shell still receives ^C to interrupt.
+  // A copy chord with a selection copies it; without one, only the Shift-bearing
+  // chord is consumed, so a bare Ctrl+C (or Cmd+C on macOS) still reaches the
+  // session — Ctrl+C must stay able to interrupt.
   private handleCopyKey(event: KeyboardEvent): boolean {
-    if (event.shiftKey || this.deps.getTerminal()?.hasSelection()) {
-      if (this.copySelection()) {
-        event.preventDefault();
-        return false;
-      }
-      if (event.shiftKey) {
-        return false;
-      }
+    const outcome = terminalCopyOutcome(event, this.deps.getTerminal()?.hasSelection() === true);
+    if (outcome === 'copy' && this.copySelection()) {
+      event.preventDefault();
+      return false;
     }
-    return true;
+    return outcome === 'fallthrough';
   }
 
   // Text paste read straight off the paste event. stopImmediatePropagation keeps

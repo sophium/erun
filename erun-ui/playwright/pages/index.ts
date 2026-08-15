@@ -11,4 +11,11 @@ export { ActivityQueueDrawer } from './ActivityQueueDrawer';
 export { AutoStartPromptDialog } from './AutoStartPromptDialog';
 export { OrchestratorDialog } from './OrchestratorDialog';
 export { OutputsDialog } from './OutputsDialog';
+export {
+  captureInvokes,
+  type InvokeCall,
+  parseInvoke,
+  sessionInputs,
+  TerminalPane,
+} from './TerminalPane';
 export { TerminalTabStrip } from './TerminalTabStrip';

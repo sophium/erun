@@ -2,25 +2,14 @@ import { FitAddon } from '@xterm/addon-fit';
 import { type IDisposable, Terminal } from '@xterm/xterm';
 
 import { noop } from '@/lib/utils';
-import type { TerminalExitPayload, TerminalOutputPayload } from '@/types';
+import type { TerminalOutputPayload } from '@/types';
 
 import { RepaintSession, ResizeSession, SendSessionInput } from '../../wailsjs/go/main/App';
-import { EventsOn } from '../../wailsjs/runtime/runtime';
-import { boot, reloadStateAfterEnvironmentChange } from './bootThunks';
+import { boot } from './bootThunks';
 import { decodeBase64Bytes } from './clipboard';
 import { readError } from './errors';
 import { refreshIdleStatus } from './idleThunks';
-import type {
-  AIActivityPayload,
-  AppNotificationPayload,
-  AppStatusPayload,
-  EnvActivityPayload,
-  EnvironmentInitializedPayload,
-  EnvStatusPayload,
-  MountElements,
-  TerminalDataDisposable,
-  TerminalWriteData,
-} from './model';
+import type { MountElements, TerminalDataDisposable, TerminalWriteData } from './model';
 import { showTerminalMessage } from './notificationThunks';
 import { scrollSelectedTreeNodeIntoView, visibleDiffPath } from './reviewDiffNavigation';
 import { setSelectedDiffPath } from './slices/reviewSlice';
@@ -38,22 +27,10 @@ import { registerTerminalQueryResponseHandlers } from './terminalQueryResponses'
 import { TerminalReattachRepaint } from './terminalReattachRepaint';
 import { TerminalSessionRegistry } from './TerminalSessionRegistry';
 import { decodeTerminalOutput } from './terminalStatus';
+import { TerminalWailsEvents } from './terminalWailsEvents';
 import { TerminalWriteSourceQueue } from './TerminalWriteSourceQueue';
 import { thunkExtra } from './thunkExtra';
-import {
-  handleAIActivity,
-  handleAppNotification,
-  handleAppStatus,
-  handleEnvActivity,
-  handleEnvironmentDeployed,
-  handleEnvironmentInitFailed,
-  handleEnvironmentInitialized,
-  handleEnvStatus,
-  handleReconnectLine,
-  handleTerminalExit,
-  hideTerminalMessageIfActive,
-  updateOpenStatusFromOutput,
-} from './wailsEventThunks';
+import { hideTerminalMessageIfActive, updateOpenStatusFromOutput } from './wailsEventThunks';
 
 const REVIEW_DIFF_REFRESH_INTERVAL_MS = 5000;
 
@@ -131,18 +108,8 @@ export class TerminalController {
   private bootStarted = false;
   private terminalDataDisposable: TerminalDataDisposable | null = null;
   private terminalQueryResponseDisposables: IDisposable[] = [];
-  private terminalOutputOff: (() => void) | null = null;
-  private terminalExitOff: (() => void) | null = null;
-  private appStatusOff: (() => void) | null = null;
-  private appNotificationOff: (() => void) | null = null;
-  private reconnectLineOff: (() => void) | null = null;
-  private environmentInitializedOff: (() => void) | null = null;
-  private environmentInitFailedOff: (() => void) | null = null;
-  private environmentDeployedOff: (() => void) | null = null;
-  private environmentsChangedOff: (() => void) | null = null;
-  private aiActivityOff: (() => void) | null = null;
-  private envStatusOff: (() => void) | null = null;
-  private envActivityOff: (() => void) | null = null;
+  private clipboardOscDisposable: IDisposable | null = null;
+  private readonly wailsEvents = new TerminalWailsEvents();
   private pasteHandler: ((event: ClipboardEvent) => void) | null = null;
   private contextMenuHandler: ((event: MouseEvent) => void) | null = null;
   // When the active session ends in "main screen + cursor hidden" with no
@@ -201,66 +168,22 @@ export class TerminalController {
     this.terminalRoot.dataset.terminalRows = String(this.terminal.rows);
   }
 
-  private subscribeEnvironmentLifecycleEvents(): void {
-    this.environmentInitializedOff = EventsOn(
-      'environment-initialized',
-      (payload: EnvironmentInitializedPayload) => {
-        void store.dispatch(handleEnvironmentInitialized(payload));
-      },
-    );
-    this.environmentInitFailedOff = EventsOn(
-      'environment-init-failed',
-      (payload: EnvironmentInitializedPayload) => {
-        store.dispatch(handleEnvironmentInitFailed(payload));
-      },
-    );
-    this.environmentDeployedOff = EventsOn(
-      'environment-deployed',
-      (payload: EnvironmentInitializedPayload) => {
-        void store.dispatch(handleEnvironmentDeployed(payload));
-      },
-    );
-  }
-
-  private subscribeWailsEvents(): void {
-    this.terminalOutputOff = EventsOn('terminal-output', (payload: TerminalOutputPayload) => {
-      this.handleTerminalOutput(payload);
-    });
-    this.terminalExitOff = EventsOn('terminal-exit', (payload: TerminalExitPayload) => {
-      void store.dispatch(handleTerminalExit(payload));
-    });
-    this.appStatusOff = EventsOn('app-status', (payload: AppStatusPayload) => {
-      store.dispatch(handleAppStatus(payload));
-    });
-    this.appNotificationOff = EventsOn('app-notification', (payload: AppNotificationPayload) => {
-      store.dispatch(handleAppNotification(payload));
-    });
-    this.reconnectLineOff = EventsOn('mcp-reconnect-line', (line: string) => {
-      store.dispatch(handleReconnectLine(line));
-    });
-    this.subscribeEnvironmentLifecycleEvents();
-    this.environmentsChangedOff = EventsOn('environments-changed', () => {
-      void store.dispatch(reloadStateAfterEnvironmentChange());
-    });
-    this.aiActivityOff = EventsOn('ai-activity', (payload: AIActivityPayload) => {
-      store.dispatch(handleAIActivity(payload));
-    });
-    this.envStatusOff = EventsOn('env-status', (payload: EnvStatusPayload) => {
-      store.dispatch(handleEnvStatus(payload));
-    });
-    this.envActivityOff = EventsOn('env-activity', (payload: EnvActivityPayload) => {
-      store.dispatch(handleEnvActivity(payload));
-    });
-  }
-
   // Wires the OS-clipboard copy/paste handlers: the WebView2 embedding does not
   // deliver the browser paste event to xterm, so Ctrl+V / right-click / paste
   // route through TerminalClipboard, which reads the OS clipboard via the Wails
-  // runtime and feeds it through xterm's paste path.
+  // runtime and feeds it through xterm's paste path. The OSC 52 handler is the
+  // other direction: a program inside the session asking for text to be placed
+  // on the host clipboard.
   private installClipboardHandlers(root: HTMLDivElement): void {
-    this.terminal?.attachCustomKeyEventHandler((event: KeyboardEvent): boolean =>
-      this.clipboard.handleKeyEvent(event),
-    );
+    const terminal = this.terminal;
+    if (terminal) {
+      terminal.attachCustomKeyEventHandler((event: KeyboardEvent): boolean =>
+        this.clipboard.handleKeyEvent(event),
+      );
+      this.clipboardOscDisposable = this.clipboard.registerOscClipboardWrites(terminal, () =>
+        this.writeSources.currentIsReplay(),
+      );
+    }
     this.pasteHandler = (event: ClipboardEvent) => {
       void this.clipboard.handlePaste(event).catch((error: unknown) => {
         store.dispatch(showTerminalMessage(readError(error)));
@@ -333,7 +256,9 @@ export class TerminalController {
     this.resizeObserver.observe(elements.terminalRoot);
     window.addEventListener('resize', this.queueTerminalResize);
 
-    this.subscribeWailsEvents();
+    this.wailsEvents.subscribe((payload) => {
+      this.handleTerminalOutput(payload);
+    });
 
     if (!this.bootStarted) {
       this.bootStarted = true;
@@ -359,16 +284,11 @@ export class TerminalController {
     for (const disposable of this.terminalQueryResponseDisposables) {
       disposable.dispose();
     }
-    this.detachWailsEventListeners();
+    this.wailsEvents.detach();
     window.clearTimeout(this.idleStatusTimer);
     this.reattachRepaint.clear();
     this.stopReviewDiffRefresh();
-    if (this.pasteHandler && this.terminalRoot) {
-      this.terminalRoot.removeEventListener('paste', this.pasteHandler, true);
-    }
-    if (this.contextMenuHandler && this.terminalRoot) {
-      this.terminalRoot.removeEventListener('contextmenu', this.contextMenuHandler);
-    }
+    this.removeClipboardHandlers();
     this.terminalQueryResponseDisposables = [];
     this.terminal?.dispose();
     this.terminal = null;
@@ -378,24 +298,15 @@ export class TerminalController {
     this.writeSources.clear();
   }
 
-  private detachWailsEventListeners(): void {
-    const fields = [
-      'terminalOutputOff',
-      'terminalExitOff',
-      'appStatusOff',
-      'appNotificationOff',
-      'reconnectLineOff',
-      'environmentInitializedOff',
-      'environmentInitFailedOff',
-      'environmentDeployedOff',
-      'environmentsChangedOff',
-      'aiActivityOff',
-      'envStatusOff',
-      'envActivityOff',
-    ] as const;
-    for (const field of fields) {
-      this[field]?.();
-      this[field] = null;
+  private removeClipboardHandlers(): void {
+    this.clipboardOscDisposable?.dispose();
+    this.clipboardOscDisposable = null;
+    const root = this.terminalRoot;
+    if (this.pasteHandler && root) {
+      root.removeEventListener('paste', this.pasteHandler, true);
+    }
+    if (this.contextMenuHandler && root) {
+      root.removeEventListener('contextmenu', this.contextMenuHandler);
     }
   }
 
