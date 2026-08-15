@@ -122,6 +122,31 @@ A `local-agent` environment is defined by state that lives on your machine: the 
 
 `erun deploy` refuses that combination: deploying the **runtime** chart of a `local-agent` environment from inside that environment's own pod errors and points at the host CLI. Component-only deploys still work in-pod (a component chart carries no environment shape), and a `remote-agent` environment — which owns its worktree inside the pod — keeps deploying itself normally.
 
+## Moving the worktree onto its own volume {#worktree-adoption}
+
+A `remote-agent` environment keeps its checkout on a volume of its own. Environments created before
+that volume existed kept it alongside the rest of the home directory, so the first deploy that brings
+the volume in is also the deploy that moves the worktree between volumes.
+
+`erun deploy` neither does that silently nor loses anything doing it. The rollout adopts the existing
+checkout onto the new volume before the pod starts, keeps the pre-move copy beside it as
+`~/git/<repo>.pre-worktree-volume`, and says so up front:
+
+```
+==> Worktree volume team-devops-worktree is not in place yet for team/dev
+    /home/erun/git/team is served by that volume, not by team-devops-home
+    an existing repository there is adopted onto the new volume before the pod starts, and the pre-move copy is kept at /home/erun/git/team.pre-worktree-volume
+    the worktree starts empty when there is nothing to adopt
+```
+
+Nothing is printed once the volume is in place — every later deploy leaves the worktree exactly where
+it is. If the volume's state can't be read, the notice prints anyway rather than assuming the move
+already happened. Once you've confirmed the adopted checkout is what you expect, the
+`.pre-worktree-volume` copy is yours to delete.
+
+For the exact adoption rules, see
+[Agent reference · Worktree volume adoption](/agent-reference/conventions-spec#worktree-adoption).
+
 ## Port-forwards after a rollout
 
 A rollout replaces the runtime pod, and `kubectl port-forward` is bound to one pod: the local socket keeps listening while every request fails. `erun deploy` does not own port-forward lifecycle — [`erun open`](/cli/open) starts and tracks the forwards — so when it finds the environment's tracked MCP forward no longer answering after a rollout, it says so and names the repair:

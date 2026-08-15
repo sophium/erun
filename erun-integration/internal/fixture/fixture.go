@@ -1337,6 +1337,51 @@ func StubKubectlRuntimeRunState(t testing.TB, dir string, desired, ready int) st
 	return StubBinaryWithScript(t, dir, "kubectl", script)
 }
 
+// KubectlWorktreeClaimStubSpec shapes the answer a kubectl stub gives to the
+// deploy's worktree-volume check (`get pvc <release>-worktree -o name`).
+type KubectlWorktreeClaimStubSpec struct {
+	// ClaimName is the PVC the check reads.
+	ClaimName string
+	// Stderr and ExitCode answer that read. A NotFound stderr with exit 1 is an
+	// environment whose worktree still lives on the home volume; any other
+	// non-zero answer is a cluster the check cannot read at all, which deploy
+	// must treat as "unknown" rather than "settled".
+	Stderr   string
+	ExitCode int
+}
+
+// StubKubectlWorktreeClaim writes a kubectl stub that answers the worktree-claim
+// read as the spec says and exits 0 silently for everything else, so the rest of
+// a real-run rollout still completes. It branches on argv, which is why it lives
+// here rather than inline in a scenario.
+func StubKubectlWorktreeClaim(t testing.TB, dir string, spec KubectlWorktreeClaimStubSpec) []string {
+	t.Helper()
+	script := "case \"$*\" in\n" +
+		"  *" + shellGlobEscape("get pvc "+spec.ClaimName+" -o name") + "*)\n"
+	if spec.Stderr != "" {
+		script += "    printf '%s\\n' " + shellSingleQuote(spec.Stderr) + " >&2\n"
+	}
+	script += "    exit " + strconv.Itoa(spec.ExitCode) + " ;;\n" +
+		"esac\n" +
+		"exit 0"
+	StubBinaryWithScript(t, dir, "kubectl", script)
+	return StubEnv(dir, "kubectl")
+}
+
+// shellGlobEscape neutralizes the glob metacharacters a case pattern would
+// otherwise interpret, so a literal fragment matches as itself.
+func shellGlobEscape(literal string) string {
+	var escaped strings.Builder
+	for _, r := range literal {
+		switch r {
+		case '*', '?', '[', ']', '\\', ' ':
+			escaped.WriteRune('\\')
+		}
+		escaped.WriteRune(r)
+	}
+	return escaped.String()
+}
+
 // StubKubectlScalingRuntime writes a kubectl stub that remembers the replica
 // count `kubectl scale` last set and answers every later run-state read with
 // it. It is what lets one scenario run a whole stop → reconnect → open sequence

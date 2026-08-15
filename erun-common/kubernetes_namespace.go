@@ -120,7 +120,7 @@ func kubernetesNamespaceExists(contextName, namespace string) (bool, error) {
 	}
 
 	message := strings.TrimSpace(string(output))
-	if kubernetesNamespaceNotFound(message) {
+	if kubernetesResourceNotFound(message) {
 		return false, nil
 	}
 	if message == "" {
@@ -129,7 +129,9 @@ func kubernetesNamespaceExists(contextName, namespace string) (bool, error) {
 	return false, fmt.Errorf("failed to check kubernetes namespace %q in context %q: %w: %s", namespace, contextName, err, message)
 }
 
-func kubernetesNamespaceNotFound(message string) bool {
+// kubernetesResourceNotFound matches kubectl's absent-resource message for any
+// kind, so a caller can tell "not there" apart from "could not ask".
+func kubernetesResourceNotFound(message string) bool {
 	message = strings.ToLower(strings.TrimSpace(message))
 	return strings.Contains(message, "notfound") || strings.Contains(message, "not found")
 }

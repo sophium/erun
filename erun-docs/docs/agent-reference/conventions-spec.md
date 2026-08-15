@@ -385,3 +385,57 @@ touches the worktree, a running session, or the Agent's own process.
 
 Both tolerate absence: a pod with no Gradle and no images is a successful no-op, not an error. An
 unknown action name is rejected without running anything.
+
+## Worktree volume adoption {#worktree-adoption}
+
+A `remote-agent` environment's worktree is `worktreeStorage=pvc`: the runtime chart declares a
+`<release>-worktree` claim and mounts it at `/home/erun/git/<repo>` in both the runtime container and
+the dind sidecar. An environment created before that claim existed kept its checkout on the
+`<release>-home` volume, at the same path — so the deploy that introduces the claim mounts an empty
+volume directly over a populated checkout.
+
+The chart prevents that with an `adopt-worktree` init container, rendered only when
+`worktreeStorage=pvc`. It runs the runtime image (no extra image dependency) and stages **both**
+volumes outside `/home/erun`, where the claim cannot shadow the home tree:
+
+| Volume | Staged at |
+|---|---|
+| `<release>-home` | `/mnt/erun-home` — the legacy checkout is at `/mnt/erun-home/git/<repo>` |
+| `<release>-worktree` | `/mnt/erun-worktree` |
+
+The container runs `erun-adopt-worktree <legacy> <claim>` and decides in this order:
+
+1. The claim is not staged as a directory → nothing to adopt; exit 0.
+2. The claim holds anything other than `lost+found` or an abandoned `.erun-worktree-adopt-partial`
+   staging directory → it is already the environment's worktree; leave it untouched; exit 0.
+3. The legacy path is absent, is not a directory, or is a symlink (a sourceless runtime env's baked
+   `/opt/erun/release` link) → the worktree volume starts empty; exit 0.
+4. The legacy path holds no `.git` → it is not a repository; leave it on the home volume and start the
+   worktree volume empty; exit 0.
+5. Otherwise adopt: copy the tree into `<claim>/.erun-worktree-adopt-partial`, verify the copy landed a
+   `.git`, promote its entries into the claim, then move the original aside to
+   `/home/erun/git/<repo>.pre-worktree-volume` and recreate the empty mount point.
+
+The original is **set aside, never deleted**, and it is only touched after the copy is proven — an
+interrupted run leaves the legacy tree intact and the partial copy in the staging directory, which
+step 2 ignores, so the next boot retries. A copy that fails exits non-zero and the pod does not start,
+because starting is what masks the tree.
+
+A runtime image with no `/usr/local/bin/erun-adopt-worktree` (an older image pinned under a newer
+chart) falls back to the same rule: if the legacy path holds a `.git` the init container exits 1 and
+refuses the rollout; otherwise it logs and exits 0.
+
+### What deploy reports
+
+Before the rollout, `erun deploy` reads `kubectl get pvc <release>-worktree -o name` for a
+`worktreeStorage=pvc` runtime release and traces the command. Under `--dry-run` it stops there and
+traces the decision. On a real run:
+
+| Claim read | Output |
+|---|---|
+| Exists | Trace only: `deploy: worktree volume <claim> already exists; <path> stays on it` |
+| `NotFound` | `==> Worktree volume <claim> is not in place yet for <tenant>/<env>` plus the path, the volume it moves onto, and where the pre-move copy is kept |
+| Unreadable | The read's error is traced, then the same notice under `==> Worktree volume <claim> could not be read for <tenant>/<env>; this deploy may be the one that creates it` |
+
+The unreadable case prints the notice deliberately: a claim erun cannot read is unknown, not settled,
+and silence is what made the relocation invisible.

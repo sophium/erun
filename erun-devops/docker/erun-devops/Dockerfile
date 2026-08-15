@@ -206,6 +206,10 @@ COPY --chmod=0755 erun-devops/docker/erun-devops/release-link.sh /usr/local/bin/
 # dtach server behind them, so a replaced pod never presents a leftover socket
 # as a running session.
 COPY --chmod=0755 erun-devops/docker/erun-devops/session-prune.sh /usr/local/bin/erun-prune-sessions
+# erun-adopt-worktree runs in the chart's init container, where the home volume
+# and the worktree claim are staged side by side, so an environment whose
+# checkout predates the claim is moved onto it instead of being masked by it.
+COPY --chmod=0755 erun-devops/docker/erun-devops/worktree-adopt.sh /usr/local/bin/erun-adopt-worktree
 COPY --chmod=0755 erun-devops/docker/erun-devops/codex-wrapper.sh /usr/local/bin/codex
 COPY --chmod=0755 erun-devops/docker/erun-devops/claude-wrapper.sh /usr/local/bin/claude
 COPY --chmod=0644 erun-devops/docker/erun-devops/bash_prompt.sh /etc/erun/bash_prompt.sh

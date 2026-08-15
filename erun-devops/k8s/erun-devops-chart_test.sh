@@ -43,6 +43,10 @@ containers_section() {
     awk '/^      containers:/{inside=1;next} /^      volumes:/{inside=0} inside' "$1"
 }
 
+init_containers_section() {
+    awk '/^      initContainers:/{inside=1;next} /^      containers:/{inside=0} inside' "$1"
+}
+
 container_names() {
     containers_section "$1" | sed -n 's/^          name: \(.*\)$/\1/p'
 }
@@ -136,5 +140,45 @@ grep -q '^            - name: ERUN_CLOUD_REGION$' "${rendered}" ||
 rendered=$(render --set-string cloudContext.provider=aws --set cloudContext.useHostCredentials=true)
 grep -A1 '^            - name: AWS_PROFILE$' "${rendered}" | grep -q '"erun-host"' ||
     fail "useHostCredentials should select the erun-host profile"
+
+# --- 11. A pvc worktree adopts an existing tree instead of shadowing it ---
+# The claim is mounted at the worktree path, so a tree that predates the claim is
+# only reachable from a container where the claim does not shadow the home
+# volume. Both volumes therefore have to be staged elsewhere, at distinct paths.
+rendered=$(render)
+init_block="${work_root}/init.yaml"
+init_containers_section "${rendered}" >"${init_block}"
+grep -q '^          name: adopt-worktree$' "${init_block}" ||
+    fail "a pvc worktree should render the adoption init container"
+grep -q 'erun-adopt-worktree "/mnt/erun-home/git/petios" "/mnt/erun-worktree"' "${init_block}" ||
+    fail "the adoption init container should stage the legacy tree and the claim as separate paths"
+
+home_stage=$(awk '/^            - name: erun-home$/{getline; print}' "${init_block}" | sed -n 's/^              mountPath: "\(.*\)"$/\1/p')
+claim_stage=$(awk '/^            - name: repo-worktree$/{getline; print}' "${init_block}" | sed -n 's/^              mountPath: "\(.*\)"$/\1/p')
+[ -n "${home_stage}" ] || fail "the adoption init container must mount the home volume"
+[ -n "${claim_stage}" ] || fail "the adoption init container must mount the worktree claim"
+[ "${home_stage}" != "${claim_stage}" ] || fail "the two volumes must stage at distinct paths"
+for staged in "${home_stage}" "${claim_stage}"; do
+    [ "${staged}" = "/home/erun/git/petios" ] &&
+        fail "staging at the live worktree path would reproduce the shadowing this prevents"
+    case "${staged}" in
+        /home/erun | /home/erun/*)
+            fail "staging under /home/erun lets the worktree claim shadow the tree being adopted"
+            ;;
+    esac
+done
+
+# --- 12. A host worktree renders no adoption container ---
+# The tree lives on the node, not on either volume; there is nothing to adopt.
+rendered=$(render --set worktreeStorage=host --set-string worktreeHostPath=/host/git/petios)
+init_containers_section "${rendered}" >"${init_block}"
+grep -q 'adopt-worktree' "${init_block}" &&
+    fail "a host worktree should render no adoption init container"
+
+# --- 13. A sourceless runtime env renders no adoption container ---
+rendered=$(render --set worktreeStorage=none)
+init_containers_section "${rendered}" >"${init_block}"
+grep -q 'adopt-worktree' "${init_block}" &&
+    fail "an env with no worktree volume should render no adoption init container"
 
 echo "PASS: erun-devops chart pod shape"

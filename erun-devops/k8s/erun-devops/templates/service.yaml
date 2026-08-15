@@ -45,6 +45,19 @@ project root there. worktreePath stays gated on a mounted worktree (host/pvc).
   {{- $worktreePath = required "worktreeRepoName is required when worktreeStorage is set" $repoPath -}}
 {{- end -}}
 {{- /*
+Staging mounts for the worktree-adoption init container. An environment created
+before the worktree claim existed kept its checkout on the home volume, at the
+very path the claim mounts at — so the claim must not be able to shadow it while
+the adoption reads it. Both volumes are therefore staged outside /home/erun, at
+paths that are never the live worktree path.
+*/ -}}
+{{- $homeStagePath := "/mnt/erun-home" -}}
+{{- $worktreeStagePath := "/mnt/erun-worktree" -}}
+{{- $legacyWorktreePath := "" -}}
+{{- if ne $worktreeRepoName "" -}}
+  {{- $legacyWorktreePath = printf "%s/git/%s" $homeStagePath $worktreeRepoName -}}
+{{- end -}}
+{{- /*
 envType is the canonical environment type written into the in-pod erun config
 (EnvConfig.Type). It is the inverse of the worktreeStorage→type mapping that
 erun-common/deploy.go:resolveWorktreeStorage applies, so the pod records the
@@ -372,6 +385,40 @@ spec:
       securityContext:
         fsGroup: 1000
       initContainers:
+        {{- if eq $worktreeStorage "pvc" }}
+        # Adopt before mounting: a deploy that introduces the worktree claim to
+        # an environment whose checkout still lives on the home volume would
+        # otherwise mount an empty volume straight over that checkout, leaving it
+        # unreachable through erun and letting the one-way workspace sync
+        # propagate the empty tree over the operator's only other copy. Runs the
+        # runtime image so no new image dependency is introduced; falls back to
+        # refusing the rollout when an older image carries no adoption helper,
+        # because starting is exactly what loses the tree.
+        - image: {{ $devopsImage }}
+          name: adopt-worktree
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              if [ -x /usr/local/bin/erun-adopt-worktree ]; then
+                exec /usr/local/bin/erun-adopt-worktree {{ $legacyWorktreePath | quote }} {{ $worktreeStagePath | quote }}
+              fi
+              if [ -e {{ printf "%s/.git" $legacyWorktreePath | quote }} ]; then
+                echo "worktree-adopt: this runtime image has no adoption helper; refusing to mount an empty worktree volume over the repository at {{ $worktreePath }}" >&2
+                exit 1
+              fi
+              echo "worktree-adopt: this runtime image has no adoption helper; nothing to adopt at {{ $worktreePath }}"
+          volumeMounts:
+            - name: erun-home
+              mountPath: {{ $homeStagePath | quote }}
+            - name: repo-worktree
+              mountPath: {{ $worktreeStagePath | quote }}
+        {{- end }}
         - image: tonistiigi/binfmt:qemu-v10.0.4-56
           name: install-binfmt
           imagePullPolicy: IfNotPresent
