@@ -181,8 +181,13 @@ type HelmDeploySpec struct {
 	// that pinned both to one number could not name that pair. Empty keeps the
 	// chart on Version.
 	ChartVersion string
-	Timeout      string
-	Verbosity    int
+	// ChartCandidates records the coordinates the runtime chart ladder probed,
+	// in order, so a failed chart pull names where the deploy looked instead of
+	// blaming the version. Empty for a stated chart and for component charts,
+	// neither of which is searched for.
+	ChartCandidates []string
+	Timeout         string
+	Verbosity       int
 	// Cloudflare* deliver a delegated Cloudflare token to the runtime pod.
 	// CloudflareTokenRef is a handle into the secret store, never the token
 	// itself, resolved at execution time.
@@ -2981,6 +2986,8 @@ func classifyHelmDeployResult(params HelmDeployParams, watchOutcome podWatchOutc
 			ChartReference: params.ChartPath,
 			Version:        params.Version,
 			Registry:       params.ContainerRegistry,
+			Candidates:     params.ChartCandidates,
+			TenantChart:    searchedTenantRuntimeChart(params),
 			HelmOutput:     strings.TrimSpace(stderr.String()),
 			Err:            helmErr,
 		}
@@ -2991,6 +2998,20 @@ func classifyHelmDeployResult(params HelmDeployParams, watchOutcome podWatchOutc
 		}
 	}
 	return helmErr
+}
+
+// searchedTenantRuntimeChart names the tenant's own runtime umbrella when the
+// failed pull was a searched runtime chart, so the error can offer publishing it
+// as one way out. A component chart or a stated chart was never searched, and
+// the erun tenant's umbrella IS the shared chart, so both yield "".
+func searchedTenantRuntimeChart(params HelmDeployParams) string {
+	if len(params.ChartCandidates) == 0 {
+		return ""
+	}
+	if chart := RuntimeReleaseName(params.Tenant); chart != DevopsComponentName {
+		return chart
+	}
+	return ""
 }
 
 // isHelmChartNotFoundMessage reports whether helm's captured output indicates

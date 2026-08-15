@@ -22,6 +22,7 @@ Flags:
       --runtime-cpu string             Runtime pod CPU limit
       --runtime-image string           Runtime image repository to initialize and deploy
       --runtime-memory string          Runtime pod memory limit
+      --runtime-registry string        Registry the environment resolves erun's own artifacts from — the runtime chart and the platform images the pod pulls (e.g. ghcr.io/sophium). Set it when the environment's deploy registry holds only this project's images, so erun's chart is not there to pull; persisted as the env's runtimeregistry
       --set-default-tenant             Set the initialized tenant as the default tenant
       --tenant string                  Tenant name to initialize
       --type string                    Environment type: local-agent, remote-agent, or runtime (takes precedence over --remote)

@@ -71,6 +71,13 @@ type BootstrapInitParams struct {
 	Environment              string
 	RuntimeVersion           string
 	RuntimeImage             string
+	// RuntimeRegistry redirects the environment's runtime chart and its in-pod
+	// platform image resolution to the registry erun publishes them in, for an
+	// env whose deploy registry holds only its own app images. It is the
+	// supported way in: resolution honours the field first, but every other
+	// writer of it is a side effect of a deploy that already succeeded, which an
+	// env in that state cannot get.
+	RuntimeRegistry string
 	// ImagePullSecrets names the dockerconfigjson secrets the runtime pod pulls
 	// its image with, which a private runtime image cannot start without.
 	ImagePullSecrets  []string
@@ -779,6 +786,7 @@ func (s *bootstrapRunState) createEnvConfig() error {
 		ManagedCloud:       managedCloud,
 		RuntimeVersion:     strings.TrimSpace(s.params.RuntimeVersion),
 		RuntimeImage:       strings.TrimSpace(s.params.RuntimeImage),
+		RuntimeRegistry:    strings.TrimSpace(s.params.RuntimeRegistry),
 		// Record the key init's runtime deploy trusted, so the next redeploy
 		// rethreads it instead of dropping the env's MCP edge to unauthenticated.
 		MCPAuthPublicKeyPath: strings.TrimSpace(s.params.MCPAuthPublicKeyPath),
@@ -868,14 +876,11 @@ func (s *bootstrapRunState) updateRemoteEnvConfig() {
 	// A remote env persists no host repo path: LocalRepoPath is laptop-only and
 	// the worktree lives in-pod, so the project root is resolved from
 	// params/tenant rather than threaded through env config here.
-	if runtimeVersion := strings.TrimSpace(s.params.RuntimeVersion); runtimeVersion != "" && s.envConfig.RuntimeVersion != runtimeVersion {
-		s.envConfig.RuntimeVersion = runtimeVersion
-		s.envConfigChanged = true
-	}
-	if runtimeImage := strings.TrimSpace(s.params.RuntimeImage); runtimeImage != "" && s.envConfig.RuntimeImage != runtimeImage {
-		s.envConfig.RuntimeImage = runtimeImage
-		s.envConfigChanged = true
-	}
+	s.applyRemoteEnvSetting(s.params.RuntimeVersion, &s.envConfig.RuntimeVersion)
+	s.applyRemoteEnvSetting(s.params.RuntimeImage, &s.envConfig.RuntimeImage)
+	// Re-running init is how an env deadlocked on chart resolution gets out: the
+	// registry lands on the config before this run's own deploy resolves a chart.
+	s.applyRemoteEnvSetting(s.params.RuntimeRegistry, &s.envConfig.RuntimeRegistry)
 	if pullSecrets := normalizeImagePullSecrets(s.params.ImagePullSecrets); len(pullSecrets) > 0 && !slices.Equal(pullSecrets, s.envConfig.ImagePullSecrets) {
 		s.envConfig.ImagePullSecrets = pullSecrets
 		s.envConfigChanged = true
@@ -888,6 +893,18 @@ func (s *bootstrapRunState) updateRemoteEnvConfig() {
 		s.envConfig.Type = s.params.ResolvedType()
 		s.envConfigChanged = true
 	}
+}
+
+// applyRemoteEnvSetting records a re-init's value for one env setting. An
+// omitted flag leaves the recorded value alone, so re-running init to change one
+// thing never clears the rest.
+func (s *bootstrapRunState) applyRemoteEnvSetting(param string, recorded *string) {
+	value := strings.TrimSpace(param)
+	if value == "" || *recorded == value {
+		return
+	}
+	*recorded = value
+	s.envConfigChanged = true
 }
 
 func (s *bootstrapRunState) updateEnvKubernetesContext() (string, error) {
@@ -976,7 +993,7 @@ func (s *bootstrapRunState) ensureDevopsAssets() error {
 }
 
 func (s *bootstrapRunState) ensureRemoteDevopsAssets(projectRoot string) error {
-	req, repository, err := s.runner.ensureRemoteRepository(s.params, s.tenant, s.envName, s.envConfig.KubernetesContext, projectRoot, s.envConfig.ContainerRegistries)
+	req, repository, err := s.runner.ensureRemoteRepository(s.params, s.tenant, s.envName, s.envConfig.KubernetesContext, projectRoot, s.envConfig.RuntimeRegistry, s.envConfig.ContainerRegistries)
 	if err != nil {
 		return err
 	}
@@ -1101,6 +1118,7 @@ func normalizeBootstrapParams(params BootstrapInitParams) BootstrapInitParams {
 	params.Environment = strings.TrimSpace(params.Environment)
 	params.RuntimeVersion = strings.TrimSpace(params.RuntimeVersion)
 	params.RuntimeImage = strings.TrimSpace(params.RuntimeImage)
+	params.RuntimeRegistry = strings.TrimSpace(params.RuntimeRegistry)
 	params.RuntimePod = NormalizeRuntimePodResources(params.RuntimePod)
 	params.KubernetesContext = strings.TrimSpace(params.KubernetesContext)
 	params.ContainerRegistry = strings.TrimSpace(params.ContainerRegistry)

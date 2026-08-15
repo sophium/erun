@@ -984,4 +984,44 @@ func TestInit(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("reinit_remote_real_run_redirects_the_runtime_registry", func(t *testing.T) {
+		// The way out of the bootstrap deadlock: runtimeregistry is the only field
+		// that redirects chart resolution, and every other writer of it is a side
+		// effect of a deploy that already succeeded. --runtime-registry writes it
+		// before this run's own deploy resolves a chart, so the recovery is one
+		// command rather than a hand-edit of erun's config store. The probe seam
+		// publishes the platform chart only in the redirected registry, so the
+		// resolved chart reference is the proof the redirect took effect.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		stubRemoteInitKubectl(t, stubs, remoteInitKubectlStub{RepoExists: true})
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "git", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "git")...)
+		envVars = append(envVars, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=ghcr.io/sophium/erun-devops:1.0.0")
+		args := []string{
+			"init", "team", "dev",
+			"--remote",
+			"--version", "1.0.0",
+			"--runtime-registry", "ghcr.io/sophium",
+			"--kubernetes-context", "test-context",
+			"--container-registry", "registry.example/test",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/reinit_remote_real_run_redirects_the_runtime_registry", normalize.Apply(result.Combined))
+		raw, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml"))
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		if !strings.Contains(string(raw), "runtimeregistry: ghcr.io/sophium") {
+			t.Errorf("expected persisted env config to record the redirected runtime registry, got:\n%s", raw)
+		}
+	})
 }

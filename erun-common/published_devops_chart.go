@@ -16,50 +16,107 @@ func PublishedDevopsChartOCIRepo(containerRegistry string) string {
 	return "oci://" + strings.TrimSpace(containerRegistry) + "/charts"
 }
 
-// resolvePublishedRuntimeChartReference prefers the tenant's own published
-// <tenant>-devops chart (typically a thin umbrella wrapping erun-devops, per the
-// erun-build-env skill) and falls back to the canonical charts/erun-devops when
-// the tenant publishes none — the published analogue of the local
-// runtimeComponentNames order. The tenant chart is used
-// only when it actually publishes the deploy version, probed against the chart
-// repo (authenticated like every registry read); any probe failure or miss
-// falls back, so an offline resolve and a tenant that rides the shared chart
-// both behave exactly as before. The erun tenant's release name is erun-devops,
-// so no probe runs for it and its resolution is unchanged. It returns the
-// resolved chart name alongside the reference so the caller can decide whether
-// the chart is a wrapped umbrella that needs subchart re-scoping.
-func resolvePublishedRuntimeChartReference(ctx context.Context, containerRegistry, tenant, version string) (reference, chartName string) {
-	tenantChart := RuntimeReleaseName(tenant)
-	tenantChartPublished := tenantChart != DevopsComponentName &&
-		publishedChartHasVersion(ctx, containerRegistry, tenantChart, version)
-	chartName = ResolvedRuntimeChartName(tenant, tenantChartPublished)
-	return PublishedDevopsChartOCIRepo(containerRegistry) + "/" + chartName, chartName
+// runtimeChartCandidate is one coordinate the published-runtime-chart ladder
+// probes: a chart name, a registry it could be published in, and why that
+// registry is a place to look. The reason travels with the candidate so both
+// the resolve trace and the not-found error can say what was tried and why.
+type runtimeChartCandidate struct {
+	registry string
+	chart    string
+	why      string
+}
+
+func (c runtimeChartCandidate) reference() string {
+	return PublishedDevopsChartOCIRepo(c.registry) + "/" + c.chart
+}
+
+func (c runtimeChartCandidate) describe() string {
+	return strings.TrimSpace(c.registry) + "/charts/" + c.chart + " (" + c.why + ")"
+}
+
+// runtimeChartCandidates orders every place a by-reference runtime chart can be.
+// The tenant's own umbrella comes first, so a tenant that publishes its own
+// artifacts still resolves to them. The shared platform chart follows in the
+// same registry, then in the registry the runtime image comes from: erun
+// publishes charts/erun-devops only where it releases, so a deploy registry that
+// holds nothing but this project's own app images — its own ECR, or the
+// in-cluster erun-registry — never has it, and stopping at the deploy registry
+// left such an environment undeployable at every version.
+func runtimeChartCandidates(target OpenResult, chartRegistry string) []runtimeChartCandidate {
+	chartRegistry = strings.TrimSpace(chartRegistry)
+	candidates := make([]runtimeChartCandidate, 0, 3)
+	if tenantChart := RuntimeReleaseName(target.Tenant); tenantChart != DevopsComponentName {
+		candidates = append(candidates, runtimeChartCandidate{chartRegistry, tenantChart, "the tenant's own umbrella"})
+	}
+	candidates = append(candidates, runtimeChartCandidate{chartRegistry, DevopsComponentName, "the shared platform chart"})
+	platformRegistry, why := platformChartRegistry(target)
+	if platformRegistry != "" && platformRegistry != chartRegistry {
+		candidates = append(candidates, runtimeChartCandidate{platformRegistry, DevopsComponentName, why})
+	}
+	return candidates
+}
+
+// platformChartRegistry names the registry erun's own artifacts come from for
+// this env: the runtime image's registry when the env states one, else erun's
+// default. Both are the same claim — the platform chart is published beside the
+// platform image, never beside the tenant's app images.
+func platformChartRegistry(target OpenResult) (registry, why string) {
+	if imageRegistry := runtimeImageRegistry(target.EnvConfig.RuntimeImage); imageRegistry != "" {
+		return imageRegistry, "the shared platform chart in the runtime image's registry"
+	}
+	return DefaultContainerRegistry, "the shared platform chart in erun's own registry"
+}
+
+// resolvePublishedRuntimeChartReference walks the candidate ladder and installs
+// the first coordinate that publishes the deploy version, probed against the
+// chart repo (authenticated like every registry read). Every candidate tried and
+// passed over is traced, so a dry-run reader sees the whole search rather than
+// only its answer. When nothing answers — an offline resolve, an unreadable
+// registry, or a genuinely unpublished version — it falls back to the shared
+// chart in the env's own chart registry, which is what resolution always
+// produced, and returns the probed coordinates so the chart pull's failure can
+// name where erun looked instead of blaming the version.
+func resolvePublishedRuntimeChartReference(ctx Context, target OpenResult, chartRegistry, version string) (reference, chartName string, candidates []string) {
+	probed := runtimeChartCandidates(target, chartRegistry)
+	candidates = make([]string, 0, len(probed))
+	for _, candidate := range probed {
+		candidates = append(candidates, candidate.describe())
+	}
+	for _, candidate := range probed {
+		if publishedChartHasVersion(context.Background(), candidate.registry, candidate.chart, version) {
+			ctx.Trace("deploy: runtime chart " + candidate.chart + " " + version + " found in " + candidate.registry + " (" + candidate.why + ")")
+			return candidate.reference(), candidate.chart, candidates
+		}
+		ctx.Trace("deploy: runtime chart " + candidate.chart + " " + version + " not found in " + candidate.registry + " (" + candidate.why + ")")
+	}
+	fallback := runtimeChartCandidate{strings.TrimSpace(chartRegistry), DevopsComponentName, "the shared platform chart"}
+	ctx.Trace("deploy: no runtime chart candidate published " + version + "; falling back to " + fallback.chart + " in " + fallback.registry)
+	return fallback.reference(), fallback.chart, candidates
 }
 
 // resolveRuntimeChartCoordinate answers which runtime chart to install, at which
 // version. An env that states its chart (EnvConfig.RuntimeChart) is taken at its
 // word -- that is the coordinate, and its version, when it carries one, is the
-// chart's own rather than the deploy version. Otherwise the chart is looked up as
-// it always was: the tenant's published umbrella when one exists at the version,
-// else the shared canonical chart, both at the deploy version.
+// chart's own rather than the deploy version. Otherwise the chart is looked up
+// along the candidate ladder, at the deploy version.
 //
 // The returned chart version is empty for the looked-up case, meaning "the deploy
 // version", so nothing changes for the envs whose chart and image were published
 // as a pair.
-func resolveRuntimeChartCoordinate(ctx Context, target OpenResult, registry, version, reason string) (reference, chartName, chartVersion string) {
+func resolveRuntimeChartCoordinate(ctx Context, target OpenResult, registry, version, reason string) (reference, chartName, chartVersion string, candidates []string) {
 	if named := strings.TrimSpace(target.EnvConfig.RuntimeChart); named != "" {
 		reference, chartVersion = splitChartReferenceVersion(named)
 		chartName = chartNameFromReference(reference)
 		if chartVersion == "" {
 			ctx.Trace("deploy: " + reason + "; using the env's runtime chart " + reference + " at the deploy version " + version)
-			return reference, chartName, ""
+			return reference, chartName, "", nil
 		}
 		ctx.Trace("deploy: " + reason + "; using the env's runtime chart " + reference + " version " + chartVersion)
-		return reference, chartName, chartVersion
+		return reference, chartName, chartVersion, nil
 	}
-	reference, chartName = resolvePublishedRuntimeChartReference(context.Background(), registry, target.Tenant, version)
+	reference, chartName, candidates = resolvePublishedRuntimeChartReference(ctx, target, registry, version)
 	ctx.Trace("deploy: " + reason + "; using published chart " + reference + " version " + version)
-	return reference, chartName, ""
+	return reference, chartName, "", candidates
 }
 
 // publishedUmbrellaSubchartKey returns the value-scope key of the canonical
@@ -137,7 +194,7 @@ func ensureTenantChartsPublished(ctx Context, target OpenResult, versionOverride
 
 func publishedChartHasVersion(ctx context.Context, containerRegistry, chartName, version string) bool {
 	if override, ok := os.LookupEnv(publishedChartProbeOverrideEnv); ok {
-		return publishedChartOverrideHasVersion(override, chartName, version)
+		return publishedChartOverrideHasVersion(override, containerRegistry, chartName, version)
 	}
 	versions, err := ResolveRuntimeImageRegistryVersions(ctx, containerRegistry, "charts/"+chartName)
 	if err != nil {
@@ -150,22 +207,43 @@ func publishedChartHasVersion(ctx context.Context, containerRegistry, chartName,
 // charts/<name>:<version> exist?" registry probe from a static list instead of
 // a live registry read, so integration goldens never depend on a real
 // registry's contents. Not a production knob: when the variable is unset the
-// probe performs the real authenticated registry read. Format:
-// comma-separated "<chart>:<version>" entries treated as published; anything
-// absent (including an empty value) is treated as unpublished.
+// probe performs the real authenticated registry read. Format: comma-separated
+// "<chart>:<version>" entries treated as published in every registry, or
+// "<registry>/<chart>:<version>" to publish one only in that registry — which is
+// what lets a scenario put the same chart name in one registry and not another,
+// the shape the runtime chart ladder walks. Anything absent (including an empty
+// value) is treated as unpublished.
 const publishedChartProbeOverrideEnv = "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE"
 
-func publishedChartOverrideHasVersion(override, chartName, version string) bool {
+func publishedChartOverrideHasVersion(override, containerRegistry, chartName, version string) bool {
 	for _, entry := range strings.Split(override, ",") {
-		name, ver, ok := strings.Cut(strings.TrimSpace(entry), ":")
-		if !ok {
+		coordinate, ver, ok := cutLast(strings.TrimSpace(entry), ":")
+		if !ok || strings.TrimSpace(ver) != version {
 			continue
 		}
-		if strings.TrimSpace(name) == chartName && strings.TrimSpace(ver) == version {
+		registry, name, qualified := cutLast(strings.TrimSpace(coordinate), "/")
+		if !qualified {
+			registry, name = "", coordinate
+		}
+		if name != chartName {
+			continue
+		}
+		if registry == "" || registry == strings.TrimSpace(containerRegistry) {
 			return true
 		}
 	}
 	return false
+}
+
+// cutLast splits around the LAST separator, so a coordinate whose registry
+// carries the same separator (a port in localhost:5000, an org path in
+// ghcr.io/sophium) still parses.
+func cutLast(s, sep string) (before, after string, found bool) {
+	index := strings.LastIndex(s, sep)
+	if index < 0 {
+		return s, "", false
+	}
+	return s[:index], s[index+len(sep):], true
 }
 
 // IsOCIChartReference reports whether the chart path addresses a published
@@ -206,7 +284,7 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, 
 		return DeploySpec{}, fmt.Errorf("runtime version is required to deploy the published %s chart: pass --version or persist runtimeversion in the env config", DevopsComponentName)
 	}
 
-	chartReference, chartName, chartVersion := resolveRuntimeChartCoordinate(ctx, target, registry, version, reason)
+	chartReference, chartName, chartVersion, chartCandidates := resolveRuntimeChartCoordinate(ctx, target, registry, version, reason)
 
 	deployContext := KubernetesDeployContext{
 		ComponentName: DevopsComponentName,
@@ -223,6 +301,7 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, 
 	// the tenant rides the shared erun-devops chart.
 	deployInput.SubchartKey = publishedUmbrellaSubchartKey(target.Tenant, chartName)
 	deployInput.ChartVersion = chartVersion
+	deployInput.ChartCandidates = chartCandidates
 	deployInput.ReleaseName = RuntimeReleaseName(target.Tenant)
 	deployInput.UseHostCredentials = target.EnvConfig.HasAWSCloudAlias()
 	deployInput.ContainerRegistry = registry
@@ -395,36 +474,56 @@ func isClusterRegistryEnv(target OpenResult) bool {
 		strings.TrimSpace(target.ClusterPullRegistry) != ""
 }
 
-// PublishedChartNotFoundError reports that the published runtime chart a remote
-// deploy resolved to could not be pulled at the resolved version. The usual
-// cause is a version whose runtime image was pushed to the registry — so the
-// version picker offered it — but whose chart the release flow never published
-// (snapshots and unreleased versions are not published as charts), or a chart
-// tag that has since been pruned. It replaces helm's opaque chart-pull exit
-// status with an actionable message naming the version and registry.
+// PublishedChartNotFoundError reports that the chart a by-reference deploy
+// resolved to could not be pulled at the resolved version. For the runtime chart
+// it carries the coordinates resolution probed, because the cause is usually
+// *where* the deploy looked rather than which version it asked for: erun
+// publishes charts/erun-devops only beside the runtime image it releases, so an
+// environment whose deploy registry holds nothing but its own app images has no
+// platform chart in it at any version. It replaces helm's opaque chart-pull exit
+// status with the coordinates tried and the ways out of them.
 type PublishedChartNotFoundError struct {
 	ChartReference string
 	Version        string
 	Registry       string
-	HelmOutput     string
-	Err            error
+	// Candidates are the registry/chart coordinates the runtime chart ladder
+	// probed, in order. Empty for a component chart, which has a single
+	// coordinate and no ladder.
+	Candidates []string
+	// TenantChart is the tenant's own runtime umbrella, named so the message can
+	// point at publishing it. Empty when the tenant rides the shared chart.
+	TenantChart string
+	HelmOutput  string
+	Err         error
 }
 
 func (e *PublishedChartNotFoundError) Error() string {
-	msg := "runtime chart " + strings.TrimSpace(e.ChartReference) + " version " + strings.TrimSpace(e.Version) + " could not be pulled"
+	version := strings.TrimSpace(e.Version)
+	msg := "runtime chart " + strings.TrimSpace(e.ChartReference) + " version " + version + " could not be pulled"
 	if registry := strings.TrimSpace(e.Registry); registry != "" {
 		msg += " from " + registry
 	}
-	msg += ": that version has no published chart in the registry. " +
-		"`erun push` publishes a version's image and chart together, so a version is deployable only after it is pushed — " +
-		"run `erun push --version " + strings.TrimSpace(e.Version) + "` (or `erun release` for a release version), then deploy. " +
-		"If this version is on your project's own release line, it names the image and never had a chart of its own: " +
-		"state the chart the environment rides instead — `runtimechart` in the env config (the desktop's Runtime tab, " +
-		"\"Runtime chart\") or `--runtime-chart <ref>` for one deploy — and the version keeps naming the image."
-	if out := strings.TrimSpace(e.HelmOutput); out != "" {
-		msg += "\n" + out
+	if len(e.Candidates) == 0 {
+		msg += ": that version has no published chart in the registry. " +
+			"`erun push` publishes a version's image and chart together, so a version is deployable only after it is pushed — " +
+			"run `erun push --version " + version + "` (or `erun release` for a release version), then deploy."
+		return msg + helmOutputSuffix(e.HelmOutput)
 	}
-	return msg
+	msg += ": no chart is published at " + version + " at any coordinate the deploy probed — " + strings.Join(e.Candidates, ", ") + ". " +
+		"The " + DevopsComponentName + " platform chart is published only beside the runtime image erun releases, so a registry holding just this project's own images has it at no version: " +
+		"point the environment at the registry that does, with `erun init <tenant> <env> --runtime-registry <registry>`, which persists it as the env's runtimeregistry and redeploys."
+	if tenantChart := strings.TrimSpace(e.TenantChart); tenantChart != "" {
+		msg += " If this project publishes its own " + tenantChart + " umbrella instead, publish it at this version from the project that owns that chart — `erun push --version " + version + "` (or `erun release`) — then deploy."
+	}
+	msg += " If the environment rides a chart on another line entirely, state it outright: `runtimechart` in the env config (the desktop's Runtime tab, \"Runtime chart\") or `--runtime-chart <ref>` for one deploy, and the version keeps naming the image."
+	return msg + helmOutputSuffix(e.HelmOutput)
+}
+
+func helmOutputSuffix(helmOutput string) string {
+	if out := strings.TrimSpace(helmOutput); out != "" {
+		return "\n" + out
+	}
+	return ""
 }
 
 func (e *PublishedChartNotFoundError) Unwrap() error { return e.Err }

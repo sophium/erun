@@ -830,6 +830,10 @@ func TestDeploy(t *testing.T) {
 		// ERUN_PUBLISHED_CHART_PROBE_OVERRIDE decision-input seam (real deploys
 		// read the registry); the sibling dry_run_remote_env_uses_published_chart
 		// locks the fallback to charts/erun-devops when the tenant chart is absent.
+		// The seam also publishes the platform chart in erun's own registry, which
+		// the search would otherwise reach: the tenant's umbrella wins over it, so
+		// widening the search never diverts a self-contained tenant onto the
+		// vanilla runtime.
 		//
 		// With no runtimeimage set, preferring the umbrella also defaults the
 		// runtime image to the umbrella's own image: erun push publishes the
@@ -841,7 +845,7 @@ func TestDeploy(t *testing.T) {
 		// names the default and the helm command carries the re-scoped --set-string.
 		setup := env.New(t)
 		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
-		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-devops:1.0.0")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=registry.example/test/team-devops:1.0.0,ghcr.io/sophium/erun-devops:1.0.0")
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
 		golden.Equal(t, "deploy/dry_run_remote_env_prefers_tenant_published_runtime_chart", normalize.Apply(result.Combined))
 	})
@@ -888,6 +892,42 @@ func TestDeploy(t *testing.T) {
 		}
 		golden.Equal(t, "deploy/dry_run_remote_env_cluster_registry_chart_from_runtime_image", normalize.Apply(result.Combined))
 	})
+
+	t.Run("dry_run_runtime_chart_resolves_from_the_platform_registry", func(t *testing.T) {
+		// The reported deadlock: a tenant whose deploy registry is its own ECR
+		// holds that tenant's app images and no charts/* repository at all, so
+		// neither its umbrella nor the shared platform chart is in it and the
+		// deploy failed at every version. The ladder's last rung looks where erun
+		// actually publishes the platform chart — the runtime image's registry,
+		// ghcr.io/sophium here — and the deploy resolves there instead. The trace
+		// names each rung it passed over, so the search itself is auditable.
+		// The registry-qualified ERUN_PUBLISHED_CHART_PROBE_OVERRIDE entry is what
+		// puts erun-devops in one registry and not the other.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=ghcr.io/sophium/erun-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_runtime_chart_resolves_from_the_platform_registry", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_runtime_chart_prefers_the_deploy_registry_over_the_platform_registry", func(t *testing.T) {
+		// No-regression guard on the widened search: when the deploy registry does
+		// publish the shared platform chart, that is still what installs — the
+		// runtime image's registry is a last resort, not a preference. Both
+		// registries publish erun-devops here, and the deploy stops at the first.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=registry.example/test/erun-devops:1.0.0,ghcr.io/sophium/erun-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_runtime_chart_prefers_the_deploy_registry_over_the_platform_registry", normalize.Apply(result.Combined))
+	})
+
 
 	t.Run("dry_run_remote_env_image_pull_secrets", func(t *testing.T) {
 		// A tenant umbrella image can be a private ghcr package. The env's

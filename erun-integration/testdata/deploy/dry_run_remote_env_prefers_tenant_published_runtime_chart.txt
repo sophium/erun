@@ -2,6 +2,7 @@ audit: erun deploy --dry-run --version <VERSION> team dev
 trace-log: would append the full trace to <TMP>
 deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=false current=false
 deploy: component selection source default (runtime only); deploying the runtime chart alone
+deploy: runtime chart team-devops <VERSION> found in registry.example/test (the tenant's own umbrella)
 deploy: no local runtime chart; using published chart oci://registry.example/test/charts/team-devops version <VERSION>
 deploy: defaulting runtime image to the team-devops chart's own image registry.example/test/team-devops:<VERSION> (imageOverrides.erun-devops)
 deploy: resolved 1 spec(s)

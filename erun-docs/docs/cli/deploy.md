@@ -24,11 +24,27 @@ The deployment plan also sets ordering: steps run in order, and a list within a 
 
 ## Where the runtime chart comes from
 
-When the project repo carries its own runtime chart (`<tenant>-devops/k8s/<tenant>-devops/`, or the [`paths.k8s`](/reference/configuration#paths-block) directory when configured), that repo-local chart is what gets deployed — nothing changes for projects that have one. Environments **without** a repo-local runtime chart — every remote env, and any env whose project has no `<tenant>-devops` chart — deploy the published chart directly. Deploy prefers the tenant's own published `charts/<tenant>-devops` — a thin umbrella that wraps `erun-devops` (added by `erun-build-env` only when the pod shape needs a sidecar, extra volume, or RBAC) — when that version exists in the registry, and falls back to the shared `charts/erun-devops` when the tenant publishes none — the published mirror of the repo-local `<tenant>-devops`-first lookup:
+When the project repo carries its own runtime chart (`<tenant>-devops/k8s/<tenant>-devops/`, or the [`paths.k8s`](/reference/configuration#paths-block) directory when configured), that repo-local chart is what gets deployed — nothing changes for projects that have one. Environments **without** a repo-local runtime chart — every remote env, and any env whose project has no `<tenant>-devops` chart — deploy the published chart directly:
 
 ```
 helm upgrade --install <tenant>-devops oci://<registry>/charts/<tenant>-devops --version <runtime version> …
 ```
+
+Deploy searches for that chart in order, and installs the first coordinate that publishes the version:
+
+1. **`charts/<tenant>-devops` in the environment's chart registry** — the tenant's own umbrella, a thin chart wrapping `erun-devops` (added by `erun-build-env` only when the pod shape needs a sidecar, extra volume, or RBAC). Preferred whenever it exists, the published mirror of the repo-local `<tenant>-devops`-first lookup.
+2. **`charts/erun-devops` in the same registry** — the shared platform chart, for a project that rides ERun's runtime as-is and publishes its chart alongside its images.
+3. **`charts/erun-devops` in the registry the runtime image comes from** — where ERun actually releases the platform chart. This rung is what makes a project deployable when its `deploy` registry holds only its own application images: a private ECR with no `charts/*` repository has ERun's chart at no version, and stopping at step 2 left such an environment undeployable at every version.
+
+The chart registry in steps 1–2 is the env's `runtimeregistry` when it records one, otherwise its `deploy`-marked registry. Step 3 is the registry of the env's `runtimeimage`, or `ghcr.io/sophium` when it names none. The dry-run traces every rung it tried and passed over, so the search is auditable before you roll:
+
+```
+deploy: runtime chart acme-devops 1.0.178 not found in <acct>.dkr.ecr.eu-west-2.amazonaws.com (the tenant's own umbrella)
+deploy: runtime chart erun-devops 1.0.178 not found in <acct>.dkr.ecr.eu-west-2.amazonaws.com (the shared platform chart)
+deploy: runtime chart erun-devops 1.0.178 found in ghcr.io/sophium (the shared platform chart in erun's own registry)
+```
+
+When no rung answers — an unreadable registry, or a version genuinely published nowhere — deploy falls back to `charts/erun-devops` in the chart registry and the pull's failure names every coordinate it probed, along with the ways out: [`erun init --runtime-registry <host>`](/cli/init) to record the registry ERun's artifacts come from, publishing your own umbrella at that version, or [naming the chart outright](#runtime-chart-coordinate).
 
 Component charts resolve the same way. On a sourceless env (a remote/runtime env), a selected component chart with no repo-local copy installs by reference from the registry — `helm upgrade --install <chart> oci://<registry>/charts/<chart> --version <v>` — including a tenant's own charts (`frs-backend-api`, `frs-powerdns`, …) that [`erun push`](/cli/push) published. The sourceless path trusts the selection (there are no local charts to validate against); a name whose chart was never published surfaces at deploy time as an actionable "that version has no published chart" error rather than being rejected up front.
 
