@@ -3584,7 +3584,29 @@ func componentChartsK8sDir(projectRoot string) (string, bool, error) {
 	if dir, ok, err := configuredK8sDir(projectRoot); err != nil || ok {
 		return dir, ok, err
 	}
+	dockerDir, declared, err := configuredDockerDir(projectRoot)
+	if err != nil {
+		return "", false, err
+	}
+	if declared {
+		return declaredDevopsModuleK8sDir(dockerDir)
+	}
 	return resolveProjectRootDevopsK8sDir(FindProjectRoot, projectRoot)
+}
+
+// declaredDevopsModuleK8sDir resolves component charts inside the devops module
+// the project declares through paths.docker. Declaring that module names which
+// module erun owns, so only its charts are publishable: a module carrying no
+// k8s/ yet has nothing to publish, which is not a reason to look elsewhere.
+// Without this a tenant migrating onto erun fell through to the single -devops
+// convention match and published the legacy module it is migrating away from.
+func declaredDevopsModuleK8sDir(dockerDir string) (string, bool, error) {
+	k8sDir := filepath.Join(filepath.Dir(dockerDir), "k8s")
+	isModule, err := isKubernetesDeployModuleDir(k8sDir)
+	if err != nil || !isModule {
+		return "", false, err
+	}
+	return k8sDir, true, nil
 }
 
 func componentHelmChartCandidate(path string, d fs.DirEntry, componentName string, err error) (string, bool, error) {

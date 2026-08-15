@@ -755,6 +755,17 @@ func remoteShellConfigForRequest(req ShellLaunchParams) (remoteShellConfig, erro
 	}, nil
 }
 
+// seedRemoteConfigLines writes a config file in the pod only when it is not
+// already there. The runtime pod builds its own config from the chart-injected
+// ERUN_* values, which carry fields this host-side snapshot has no source for —
+// the marked registries, the runtime registry, and the build-script policy the
+// in-pod build reads. Overwriting it would silently narrow the pod's config to
+// the host's subset, so opening a shell seeds only what is missing, which is
+// what a pod whose chart injected nothing still needs.
+func seedRemoteConfigLines(quotedPath, content string) string {
+	return fmt.Sprintf("if [ ! -f %s ]; then\n  mkdir -p \"$(dirname %s)\"\n  cat > %s <<'EOF'\n%s\nEOF\nfi", quotedPath, quotedPath, quotedPath, content)
+}
+
 func remoteShellBaseScriptLines(req ShellLaunchParams, config remoteShellConfig, workdir, title string) []string {
 	markerDir := fmt.Sprintf("$HOME/.erun/%s/%s", req.Tenant, req.Environment)
 	bashrcPath := markerDir + "/bashrc"
@@ -766,12 +777,9 @@ func remoteShellBaseScriptLines(req ShellLaunchParams, config remoteShellConfig,
 		fmt.Sprintf("mkdir -p %s", workdir),
 		fmt.Sprintf("cd %s", workdir),
 		"config_home=\"${XDG_CONFIG_HOME:-$HOME/.config}\"",
-		"mkdir -p \"$config_home/erun\"",
-		fmt.Sprintf("cat > \"$config_home/erun/config.yaml\" <<'EOF'\n%s\nEOF", config.ToolYAML),
-		fmt.Sprintf("mkdir -p \"$config_home/erun/%s\"", req.Tenant),
-		fmt.Sprintf("cat > \"$config_home/erun/%s/config.yaml\" <<'EOF'\n%s\nEOF", req.Tenant, config.TenantYAML),
-		fmt.Sprintf("mkdir -p \"$config_home/erun/%s/%s\"", req.Tenant, req.Environment),
-		fmt.Sprintf("cat > \"$config_home/erun/%s/%s/config.yaml\" <<'EOF'\n%s\nEOF", req.Tenant, req.Environment, config.EnvYAML),
+		seedRemoteConfigLines("\"$config_home/erun/config.yaml\"", config.ToolYAML),
+		seedRemoteConfigLines(fmt.Sprintf("\"$config_home/erun/%s/config.yaml\"", req.Tenant), config.TenantYAML),
+		seedRemoteConfigLines(fmt.Sprintf("\"$config_home/erun/%s/%s/config.yaml\"", req.Tenant, req.Environment), config.EnvYAML),
 		fmt.Sprintf("mkdir -p \"%s\"", markerDir),
 		fmt.Sprintf("cat > \"%s\" <<'EOF'\nexport ERUN_SHELL_HOST=%s\nerun() {\n  if [ \"${1:-}\" = \"deploy\" ] && [ \"$#\" -eq 1 ] && [ -n \"${ERUN_SHELL_REQUEST_FILE:-}\" ]; then\n    : > \"$ERUN_SHELL_REQUEST_FILE\"\n    exit 0\n  fi\n  command erun \"$@\"\n}\nEOF", bashrcPath, title),
 		fmt.Sprintf("printf '\\033]0;%s\\007'", title),
