@@ -928,6 +928,73 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_runtime_chart_prefers_the_deploy_registry_over_the_platform_registry", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_operator_set_runtime_registry_stands_over_a_different_resolution", func(t *testing.T) {
+		// The memo is how an operator redirects the runtime chart search
+		// (`erun init --runtime-registry`), so a deploy that resolves somewhere
+		// else keeps the operator's value and says so, naming the command that
+		// would change it. Without the trace the divergence is invisible: the
+		// deploy succeeds either way, and only reading the config would show it.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		appendEnvConfig(t, setup, "team", "dev", "runtimeregistry: ghcr.io/petios\n")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=ghcr.io/sophium/erun-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_operator_set_runtime_registry_stands_over_a_different_resolution", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_records_the_registry_the_runtime_chart_resolved_from", func(t *testing.T) {
+		// The regression: the deploy memoized where the chart search STARTED, so
+		// an env whose deploy registry carries no platform chart came out of a
+		// successful deploy recording that registry as the place erun's artifacts
+		// live — the one thing the search had just disproved, twice. The memo must
+		// name the rung the chart resolved at. Real-run because the persist is the
+		// side effect under test, and the assertion reads the config the goldens
+		// cannot see.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envVars := deployStubEnv(t, setup, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=ghcr.io/sophium/erun-devops:1.0.99")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.99"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		assertEnvConfigContains(t, setup, "team", "dev", "runtimeregistry: ghcr.io/sophium")
+	})
+
+	t.Run("real_run_records_the_deploy_registry_when_the_chart_resolves_there", func(t *testing.T) {
+		// The no-regression twin: a chart found where the search started is still
+		// memoized as before, so following the resolution changed nothing for the
+		// environments whose chart is published beside their own images.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envVars := deployStubEnv(t, setup, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=registry.example/test/erun-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		assertEnvConfigContains(t, setup, "team", "dev", "runtimeregistry: registry.example/test")
+	})
+
+	t.Run("real_run_keeps_an_operator_set_runtime_registry", func(t *testing.T) {
+		// `erun init --runtime-registry` is the documented way out of an env whose
+		// deploy registry has no platform chart; a deploy that overwrote it reset
+		// the field by doing the very thing it was set to enable. The chart here
+		// resolves at ghcr.io/sophium while the operator named ghcr.io/petios, and
+		// the operator's value survives.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		appendEnvConfig(t, setup, "team", "dev", "runtimeregistry: ghcr.io/petios\n")
+		envVars := deployStubEnv(t, setup, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=ghcr.io/sophium/erun-devops:1.0.99")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.99"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		assertEnvConfigContains(t, setup, "team", "dev", "runtimeregistry: ghcr.io/petios")
+		assertEnvConfigContains(t, setup, "team", "dev", "runtimeversion: 1.0.99")
+	})
+
 
 	t.Run("dry_run_remote_env_image_pull_secrets", func(t *testing.T) {
 		// A tenant umbrella image can be a private ghcr package. The env's
@@ -2625,6 +2692,26 @@ func readEnvConfig(t *testing.T, setup env.Setup, tenant, environment string) st
 func appendEnvConfig(t *testing.T, setup env.Setup, tenant, environment, body string) {
 	t.Helper()
 	mustWriteFile(t, envConfigPathFor(setup, tenant, environment), readEnvConfig(t, setup, tenant, environment)+body)
+}
+
+func assertEnvConfigContains(t *testing.T, setup env.Setup, tenant, environment, want string) {
+	t.Helper()
+	if body := readEnvConfig(t, setup, tenant, environment); !strings.Contains(body, want) {
+		t.Fatalf("expected env config to record %q, got:\n%s", want, body)
+	}
+}
+
+// deployStubEnv declares the external binaries a real-run deploy reaches. The
+// scenario PATH is scrubbed, so nothing ambient stands in for them; the stubs
+// exit 0 so the rollout completes and the post-deploy persist runs.
+func deployStubEnv(t *testing.T, setup env.Setup, extra ...string) []string {
+	t.Helper()
+	stubs := setup.Cwd + "/stubs"
+	fixture.StubBinary(t, stubs, "kubectl", "")
+	fixture.StubBinary(t, stubs, "helm", "")
+	fixture.StubBinary(t, stubs, "docker", "")
+	envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+	return append(envVars, extra...)
 }
 
 // seedMCPPortForwardState records a tracked MCP port-forward for the env, the

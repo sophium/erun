@@ -67,6 +67,19 @@ func platformChartRegistry(target OpenResult) (registry, why string) {
 	return DefaultContainerRegistry, "the shared platform chart in erun's own registry"
 }
 
+// resolvedRuntimeChart is the coordinate a runtime deploy installs: the chart
+// reference, its name, the version to pull it at (empty means the deploy
+// version), and the registry the chart resolved from. registry is empty for a
+// chart the env states outright, which is a coordinate the operator gave rather
+// than one a search produced.
+type resolvedRuntimeChart struct {
+	reference  string
+	name       string
+	version    string
+	registry   string
+	candidates []string
+}
+
 // resolvePublishedRuntimeChartReference walks the candidate ladder and installs
 // the first coordinate that publishes the deploy version, probed against the
 // chart repo (authenticated like every registry read). Every candidate tried and
@@ -76,22 +89,22 @@ func platformChartRegistry(target OpenResult) (registry, why string) {
 // chart in the env's own chart registry, which is what resolution always
 // produced, and returns the probed coordinates so the chart pull's failure can
 // name where erun looked instead of blaming the version.
-func resolvePublishedRuntimeChartReference(ctx Context, target OpenResult, chartRegistry, version string) (reference, chartName string, candidates []string) {
+func resolvePublishedRuntimeChartReference(ctx Context, target OpenResult, chartRegistry, version string) resolvedRuntimeChart {
 	probed := runtimeChartCandidates(target, chartRegistry)
-	candidates = make([]string, 0, len(probed))
+	candidates := make([]string, 0, len(probed))
 	for _, candidate := range probed {
 		candidates = append(candidates, candidate.describe())
 	}
 	for _, candidate := range probed {
 		if publishedChartHasVersion(context.Background(), candidate.registry, candidate.chart, version) {
 			ctx.Trace("deploy: runtime chart " + candidate.chart + " " + version + " found in " + candidate.registry + " (" + candidate.why + ")")
-			return candidate.reference(), candidate.chart, candidates
+			return resolvedRuntimeChart{reference: candidate.reference(), name: candidate.chart, registry: candidate.registry, candidates: candidates}
 		}
 		ctx.Trace("deploy: runtime chart " + candidate.chart + " " + version + " not found in " + candidate.registry + " (" + candidate.why + ")")
 	}
 	fallback := runtimeChartCandidate{strings.TrimSpace(chartRegistry), DevopsComponentName, "the shared platform chart"}
 	ctx.Trace("deploy: no runtime chart candidate published " + version + "; falling back to " + fallback.chart + " in " + fallback.registry)
-	return fallback.reference(), fallback.chart, candidates
+	return resolvedRuntimeChart{reference: fallback.reference(), name: fallback.chart, registry: fallback.registry, candidates: candidates}
 }
 
 // resolveRuntimeChartCoordinate answers which runtime chart to install, at which
@@ -103,20 +116,39 @@ func resolvePublishedRuntimeChartReference(ctx Context, target OpenResult, chart
 // The returned chart version is empty for the looked-up case, meaning "the deploy
 // version", so nothing changes for the envs whose chart and image were published
 // as a pair.
-func resolveRuntimeChartCoordinate(ctx Context, target OpenResult, registry, version, reason string) (reference, chartName, chartVersion string, candidates []string) {
+func resolveRuntimeChartCoordinate(ctx Context, target OpenResult, registry, version, reason string) resolvedRuntimeChart {
 	if named := strings.TrimSpace(target.EnvConfig.RuntimeChart); named != "" {
-		reference, chartVersion = splitChartReferenceVersion(named)
-		chartName = chartNameFromReference(reference)
+		reference, chartVersion := splitChartReferenceVersion(named)
+		chart := resolvedRuntimeChart{reference: reference, name: chartNameFromReference(reference), version: chartVersion}
 		if chartVersion == "" {
 			ctx.Trace("deploy: " + reason + "; using the env's runtime chart " + reference + " at the deploy version " + version)
-			return reference, chartName, "", nil
+			return chart
 		}
 		ctx.Trace("deploy: " + reason + "; using the env's runtime chart " + reference + " version " + chartVersion)
-		return reference, chartName, chartVersion, nil
+		return chart
 	}
-	reference, chartName, candidates = resolvePublishedRuntimeChartReference(ctx, target, registry, version)
-	ctx.Trace("deploy: " + reason + "; using published chart " + reference + " version " + version)
-	return reference, chartName, "", candidates
+	chart := resolvePublishedRuntimeChartReference(ctx, target, registry, version)
+	ctx.Trace("deploy: " + reason + "; using published chart " + chart.reference + " version " + version)
+	return chart
+}
+
+// traceRuntimeRegistryMemo surfaces what this deploy does to the env's
+// runtimeregistry memo when the chart resolved somewhere other than where the
+// search started — the only case where the memo changes meaning. An env with no
+// memo gets the registry the chart actually came from, so the next search
+// short-circuits there; an env that already names one keeps it, because the memo
+// is how an operator redirects this search and a deploy must not take that choice
+// back silently.
+func traceRuntimeRegistryMemo(ctx Context, target OpenResult, searchedFrom, resolvedFrom string) {
+	resolvedFrom = strings.TrimSpace(resolvedFrom)
+	if resolvedFrom == "" || resolvedFrom == strings.TrimSpace(searchedFrom) {
+		return
+	}
+	if recorded := strings.TrimSpace(target.EnvConfig.RuntimeRegistry); recorded != "" {
+		ctx.Trace("deploy: the env's runtime registry " + recorded + " stands; the runtime chart resolved from " + resolvedFrom + " instead (`erun init " + target.Tenant + " " + target.Environment + " --runtime-registry " + resolvedFrom + "` changes it)")
+		return
+	}
+	ctx.Trace("deploy: recording runtime registry " + resolvedFrom + ", where the runtime chart resolved, rather than " + strings.TrimSpace(searchedFrom) + ", where the search started")
 }
 
 // publishedUmbrellaSubchartKey returns the value-scope key of the canonical
@@ -284,11 +316,12 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, 
 		return DeploySpec{}, fmt.Errorf("runtime version is required to deploy the published %s chart: pass --version or persist runtimeversion in the env config", DevopsComponentName)
 	}
 
-	chartReference, chartName, chartVersion, chartCandidates := resolveRuntimeChartCoordinate(ctx, target, registry, version, reason)
+	chart := resolveRuntimeChartCoordinate(ctx, target, registry, version, reason)
+	traceRuntimeRegistryMemo(ctx, target, registry, chart.registry)
 
 	deployContext := KubernetesDeployContext{
 		ComponentName: DevopsComponentName,
-		ChartPath:     chartReference,
+		ChartPath:     chart.reference,
 	}
 	valuesFilePath := publishedDevopsValuesOverlayPath(ctx, target)
 	deployInput, err := newHelmDeploySpecWithValues(target, deployContext, version, valuesFilePath)
@@ -299,13 +332,14 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, 
 	// subchart; helm won't pass this by-reference deploy's top-level --sets into
 	// subchart scope, so re-scope them under erun-devops. Empty (no re-scope) when
 	// the tenant rides the shared erun-devops chart.
-	deployInput.SubchartKey = publishedUmbrellaSubchartKey(target.Tenant, chartName)
-	deployInput.ChartVersion = chartVersion
-	deployInput.ChartCandidates = chartCandidates
+	deployInput.SubchartKey = publishedUmbrellaSubchartKey(target.Tenant, chart.name)
+	deployInput.ChartVersion = chart.version
+	deployInput.ChartCandidates = chart.candidates
 	deployInput.ReleaseName = RuntimeReleaseName(target.Tenant)
 	deployInput.UseHostCredentials = target.EnvConfig.HasAWSCloudAlias()
 	deployInput.ContainerRegistry = registry
-	if image := resolveDeployRuntimeImage(ctx, target, registry, version, chartName, chartVersion); image != "" {
+	deployInput.RuntimeChartRegistry = chart.registry
+	if image := resolveDeployRuntimeImage(ctx, target, registry, version, chart.name, chart.version); image != "" {
 		deployInput.ImageOverrides = map[string]string{DevopsComponentName: image}
 	}
 	// A runtime env that opted into a mutable source worktree clones this repo

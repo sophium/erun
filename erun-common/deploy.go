@@ -186,8 +186,16 @@ type HelmDeploySpec struct {
 	// blaming the version. Empty for a stated chart and for component charts,
 	// neither of which is searched for.
 	ChartCandidates []string
-	Timeout         string
-	Verbosity       int
+	// RuntimeChartRegistry is the registry the runtime chart search resolved
+	// from, which is not always the registry it started at — erun publishes its
+	// platform chart only where it releases, so the search can land a rung past
+	// the env's own. It is what the post-deploy persist memoizes as the env's
+	// runtimeregistry, so the memo names where erun's artifacts really are.
+	// Empty for every deploy that did not search: a repo-local chart, a chart the
+	// env states, and component charts.
+	RuntimeChartRegistry string
+	Timeout              string
+	Verbosity            int
 	// Cloudflare* deliver a delegated Cloudflare token to the runtime pod.
 	// CloudflareTokenRef is a handle into the secret store, never the token
 	// itself, resolved at execution time.
@@ -381,8 +389,28 @@ func resolveRunningRuntimeVersion(ctx Context, spec DeploySpec, resolveDeployedV
 	return strings.TrimSpace(version)
 }
 
+// RuntimeRegistryForDeploySpec answers what a deploy records as the env's
+// runtimeregistry — the memo of where this environment resolves erun's own
+// artifacts from. A by-reference runtime deploy searches for erun's chart, so it
+// records where the search resolved rather than where it started; but it only
+// fills the memo in or confirms it, never replaces a value that disagrees:
+// `erun init --runtime-registry` is how an operator redirects that search, and a
+// deploy that resolved elsewhere would otherwise take the choice back on the
+// next successful rollout. Every other deploy records the registry it pulled
+// from, which is the provenance a `--current` redeploy re-addresses.
+func RuntimeRegistryForDeploySpec(spec DeploySpec) string {
+	chartRegistry := strings.TrimSpace(spec.Deploy.RuntimeChartRegistry)
+	if chartRegistry == "" {
+		return strings.TrimSpace(spec.Deploy.ContainerRegistry)
+	}
+	if recorded := strings.TrimSpace(spec.Target.EnvConfig.RuntimeRegistry); recorded != "" {
+		return recorded
+	}
+	return chartRegistry
+}
+
 func persistRuntimeVersionIfChanged(spec DeploySpec, version string, save EnvConfigSaver) error {
-	registry := strings.TrimSpace(spec.Deploy.ContainerRegistry)
+	registry := RuntimeRegistryForDeploySpec(spec)
 	// The MCP-auth key path mirrors the deploy verbatim: recording it makes auth
 	// sticky for the next redeploy, and an explicit opt-out resolves to empty so
 	// the same write clears it.
