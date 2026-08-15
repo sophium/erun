@@ -6,6 +6,7 @@ deploy: no local runtime chart; using published chart oci://registry.internal/te
 deploy: defaulting runtime image to the tenant's team-devops image registry.internal/team/team-devops:<VERSION> (imageOverrides.erun-devops)
 deploy: resolved 1 spec(s)
 ==> Copying team-devops:<VERSION> from ghcr.io/sophium to registry.internal/team
+deploy: worktree volume team-devops-worktree already exists; <HOME>/git/team stays on it
 deploy: watching pods in team-dev on context test-context for early container failure (release team-devops)
 dedup: claim (release=test-context-team-dev-team-devops, hash=<HASH>, pid=<PID>)
 ==> Deploying team/dev <VERSION>

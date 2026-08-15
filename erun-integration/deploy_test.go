@@ -479,6 +479,52 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/real_run_remote_env_published_chart_via_stubs", normalize.Apply(result.Combined))
 	})
 
+	t.Run("real_run_new_worktree_volume_announces_the_adoption", func(t *testing.T) {
+		// The regression this exists for: a deploy that first introduces the
+		// dedicated worktree volume to an environment whose checkout still lives
+		// on the home volume reported plain success while mounting an empty
+		// claim over that checkout. The claim's absence is a decision input a
+		// trace cannot supply, so kubectl is stubbed to report it NotFound; the
+		// deploy must then name the worktree path, the volume it moves onto, and
+		// where the pre-move copy is kept.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "helm", "")
+		envVars := append(setup.Env(), fixture.StubKubectlWorktreeClaim(t, stubs, fixture.KubectlWorktreeClaimStubSpec{
+			ClaimName: "team-devops-worktree",
+			Stderr:    `Error from server (NotFound): persistentvolumeclaims "team-devops-worktree" not found`,
+			ExitCode:  1,
+		})...)
+		envVars = append(envVars, fixture.StubEnv(stubs, "helm")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/real_run_new_worktree_volume_announces_the_adoption", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_unreadable_worktree_volume_still_announces", func(t *testing.T) {
+		// A cluster the claim read fails against is "unknown", never "settled":
+		// staying quiet is the exact failure being fixed, so the notice prints
+		// anyway and the read's error is traced beside it.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "helm", "")
+		envVars := append(setup.Env(), fixture.StubKubectlWorktreeClaim(t, stubs, fixture.KubectlWorktreeClaimStubSpec{
+			ClaimName: "team-devops-worktree",
+			Stderr:    "error: You must be logged in to the server (Unauthorized)",
+			ExitCode:  1,
+		})...)
+		envVars = append(envVars, fixture.StubEnv(stubs, "helm")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/real_run_unreadable_worktree_volume_still_announces", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_remote_env_tenant_umbrella_pulls_bundled_values", func(t *testing.T) {
 		// Real-run deploy of a tenant's own published umbrella (team-backend-api,
 		// which wraps erun-backend-api as a subchart). Because top-level --sets do

@@ -718,6 +718,7 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 		return fmt.Errorf("deploy %s: %w", deployInput.ReleaseName, err)
 	}
 	TraceEnsureKubernetesNamespace(ctx, deployInput.KubernetesContext, deployInput.Namespace)
+	announceWorktreeVolumeChange(ctx, deployInput)
 	if err := applyCloudflareCredentialsSecret(ctx, deployInput); err != nil {
 		return fmt.Errorf("deploy %s: %w", deployInput.ReleaseName, err)
 	}
