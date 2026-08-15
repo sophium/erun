@@ -47,6 +47,10 @@ var defaultRules = []Replacement{
 	// scenario left a different remainder on each OS and its golden could only be
 	// green on whichever one recorded it. Collapse the whole path first.
 	{regexp.MustCompile(`/(?:private/)?(?:var/folders|var/tmp|tmp)/[^\s'"]*(?:/Library/Application Support)?/ERun/desktopid\.key`), "<DESKTOP_IDENTITY>"},
+	// Same reasoning for the public half, which a deploy refusal names as the key
+	// to re-supply. Scenarios that must prove the concrete path reached the
+	// message assert it against the un-normalized capture.
+	{regexp.MustCompile(`/(?:private/)?(?:var/folders|var/tmp|tmp)/[^\s'"]*(?:/Library/Application Support)?/ERun/desktopid\.pub`), "<DESKTOP_IDENTITY_PUBLIC>"},
 	{regexp.MustCompile(`/(?:private/)?(?:var/folders|var/tmp|tmp)/[^\s'"]+`), "<TMP>"},
 	// A separate rule for temp paths whose separators are percent-escaped,
 	// which the plain-path rule above cannot match.

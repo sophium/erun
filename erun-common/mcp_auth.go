@@ -86,8 +86,13 @@ func GenerateDesktopIdentity() (privatePEM, publicPEM []byte, err error) {
 // path (C:\dir\key.pub) must become file:///C:/dir/key.pub, or url.Parse fails to
 // recognize the file scheme and verification falls through to the OIDC path.
 func FileIssuer(publicKeyPath string) string {
-	return "file://" + fileURLPath(publicKeyPath)
+	return fileIssuerScheme + fileURLPath(publicKeyPath)
 }
+
+// fileIssuerScheme distinguishes an issuer backed by a local public key from an
+// OIDC issuer the edge fetches a JWKS from; the two have different recoveries
+// when a deploy would drop authentication.
+const fileIssuerScheme = "file://"
 
 // fileURLPath renders an OS path as the path component of a file:// URL:
 // forward-slashed with a leading slash, so a Windows drive path (C:\dir) becomes

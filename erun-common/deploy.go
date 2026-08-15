@@ -411,9 +411,10 @@ func RuntimeRegistryForDeploySpec(spec DeploySpec) string {
 
 func persistRuntimeVersionIfChanged(spec DeploySpec, version string, save EnvConfigSaver) error {
 	registry := RuntimeRegistryForDeploySpec(spec)
-	// The MCP-auth key path mirrors the deploy verbatim: recording it makes auth
-	// sticky for the next redeploy, and an explicit opt-out resolves to empty so
-	// the same write clears it.
+	// The MCP-auth key path mirrors the deploy verbatim. An enabling deploy
+	// already recorded it where helm applied it, so what this write adds is the
+	// explicit opt-out's clear — and forgetting the key is only true once the
+	// unauthenticated release actually rolled out.
 	mcpAuthKeyPath := strings.TrimSpace(spec.Deploy.MCPAuthPublicKeyPath)
 	envConfig := spec.Target.EnvConfig
 	if strings.TrimSpace(envConfig.RuntimeVersion) == version &&
@@ -756,6 +757,9 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 		return fmt.Errorf("deploy %s: %w", deployInput.ReleaseName, err)
 	}
 	if err := applyMCPAuthSecret(ctx, deployInput); err != nil {
+		return fmt.Errorf("deploy %s: %w", deployInput.ReleaseName, err)
+	}
+	if err := recordMCPAuthKeyOnEnv(ctx, deployInput); err != nil {
 		return fmt.Errorf("deploy %s: %w", deployInput.ReleaseName, err)
 	}
 	depBuild, err := chartDependencyBuildPlan(ctx, deployInput)
