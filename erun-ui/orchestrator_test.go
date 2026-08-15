@@ -813,3 +813,48 @@ func TestInvestigateFailureRejectsEmptyReport(t *testing.T) {
 		t.Fatal("expected an empty failure report to be rejected")
 	}
 }
+
+// A restart hand-off names the conversation to continue, and the launch attaches
+// to that one rather than re-deriving it from the orchestrator id — which is
+// mutable and reusable, so several conversations answer to it.
+func TestStartOrchestratorWithResumeAttachesToTheNamedConversation(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOME", home)
+	var launchedConversation, launchedPrompt string
+	app := NewApp(erunUIDeps{
+		store: newOrchestratorStubStore(t.TempDir()),
+		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+			return newStubTerminalSession(), nil
+		},
+		resolveOrchestratorLaunch: func(sessionID, _, resumePrompt, _ string) (string, []string, error) {
+			launchedConversation, launchedPrompt = sessionID, resumePrompt
+			return "claude-stub", nil, nil
+		},
+	})
+	defer app.shutdown(context.Background())
+
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}})
+	if err != nil {
+		t.Fatalf("CreateOrchestrator failed: %v", err)
+	}
+	if _, err := app.StartOrchestratorWithResume(created.ID, "conversation-that-asked", "finish the task", 80, 24); err != nil {
+		t.Fatalf("StartOrchestratorWithResume failed: %v", err)
+	}
+
+	if launchedConversation != "conversation-that-asked" {
+		t.Fatalf("expected the named conversation to be resumed, got %q", launchedConversation)
+	}
+	if launchedPrompt != "finish the task" {
+		t.Fatalf("expected the task to be handed to it, got %q", launchedPrompt)
+	}
+
+	// Without one, the orchestrator's own pinned conversation still answers.
+	app.stopOrchestratorSession(created.ID)
+	if _, err := app.StartOrchestrator(created.ID, 80, 24); err != nil {
+		t.Fatalf("StartOrchestrator failed: %v", err)
+	}
+	if launchedConversation != orchestratorSessionID(created.ID) {
+		t.Fatalf("expected the pinned conversation without a hand-off, got %q", launchedConversation)
+	}
+}

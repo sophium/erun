@@ -156,30 +156,39 @@ func TestRestartHandOffStaysOneShotAndAgeBoundedOverTheDurableRecord(t *testing.
 	defer app.shutdown(context.Background())
 
 	const prompt = "verify the rebuild is live, then finish the task"
-	if err := recordOpenOrchestrator(openPath, "agent-1"); err != nil {
+	id := createAndStartOrchestrator(t, app)
+	conversationID := orchestratorSessionID(id)
+	stageOrchestratorConversation(t, conversationID)
+	handOff := orchestratorRestoreState{
+		OrchestratorID: id,
+		ConversationID: conversationID,
+		Environments:   []string{"frs/dev"},
+		ResumePrompt:   prompt,
+	}
+	if err := recordOpenOrchestrator(openPath, id); err != nil {
 		t.Fatalf("record open orchestrator: %v", err)
 	}
-	if err := writeOrchestratorRestoreTarget(restorePath, "agent-1", prompt, time.Now()); err != nil {
+	if err := writeOrchestratorRestoreTarget(restorePath, handOff, time.Now()); err != nil {
 		t.Fatalf("write restart hand-off: %v", err)
 	}
 
 	first := app.ResolveOrchestratorToReopen()
-	if first.OrchestratorID != "agent-1" || first.ResumePrompt != prompt {
+	if first.OrchestratorID != id || first.ResumePrompt != prompt {
 		t.Fatalf("expected the restart hand-off to win with its prompt, got %+v", first)
 	}
 	// One-shot: the next launch falls back to the durable record, which runs nothing.
 	second := app.ResolveOrchestratorToReopen()
-	if second.OrchestratorID != "agent-1" || second.ResumePrompt != "" {
+	if second.OrchestratorID != id || second.ResumePrompt != "" {
 		t.Fatalf("expected the hand-off to fire once and the durable record to answer idle, got %+v", second)
 	}
 
 	// Age-bounded: a hand-off older than the bound is discarded, and the durable
 	// record still reopens the orchestrator without auto-running the prompt.
-	if err := writeOrchestratorRestoreTarget(restorePath, "agent-1", prompt, time.Now().Add(-2*orchestratorRestoreMaxAge)); err != nil {
+	if err := writeOrchestratorRestoreTarget(restorePath, handOff, time.Now().Add(-2*orchestratorRestoreMaxAge)); err != nil {
 		t.Fatalf("write stale restart hand-off: %v", err)
 	}
 	stale := app.ResolveOrchestratorToReopen()
-	if stale.OrchestratorID != "agent-1" || stale.ResumePrompt != "" {
+	if stale.OrchestratorID != id || stale.ResumePrompt != "" {
 		t.Fatalf("expected a stale hand-off to be dropped and the durable record to answer, got %+v", stale)
 	}
 }

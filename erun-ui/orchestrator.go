@@ -37,12 +37,17 @@ import (
 // keyed by their config ID; transient ones (Investigate) carry their own display
 // metadata since they have no config definition.
 type orchestratorSession struct {
-	id        string
-	serial    int
-	transient bool
-	name      string
-	envs      []eruncommon.OrchestratorEnvConfig
-	startedAt time.Time
+	id     string
+	serial int
+	// conversationID is the AI-harness conversation this PTY is attached to. It
+	// is what a restart records, so the resume continues this conversation rather
+	// than whichever one the (mutable, reusable) orchestrator id resolves to
+	// later.
+	conversationID string
+	transient      bool
+	name           string
+	envs           []eruncommon.OrchestratorEnvConfig
+	startedAt      time.Time
 	// aiBusy is the last turn-boundary report published to the sidebar, kept so
 	// the poller emits only on change rather than every tick.
 	aiBusy bool
@@ -957,17 +962,20 @@ func (a *App) UpdateOrchestrator(id, name string, envs []orchestratorEnvInput) (
 // StartOrchestrator spawns the session for a persisted orchestrator definition,
 // reusing an already-running one.
 func (a *App) StartOrchestrator(id string, cols, rows int) (orchestratorInfo, error) {
-	return a.startPersistedOrchestrator(id, "", cols, rows)
+	return a.startPersistedOrchestrator(id, "", "", cols, rows)
 }
 
-// StartOrchestratorWithResume is StartOrchestrator plus a prompt handed to the
-// resumed Claude session, so the boot restore path can make a rebuilt+restarted
-// orchestrator continue its task itself instead of idling at the prompt.
-func (a *App) StartOrchestratorWithResume(id, resumePrompt string, cols, rows int) (orchestratorInfo, error) {
-	return a.startPersistedOrchestrator(id, resumePrompt, cols, rows)
+// StartOrchestratorWithResume is StartOrchestrator plus the conversation to
+// continue and the prompt handed to it, so the boot restore path can make a
+// rebuilt+restarted orchestrator carry on with its task instead of idling at the
+// prompt. The conversation is named explicitly because a restart hand-off is the
+// one path that must reach the session that asked for it, not merely the
+// orchestrator it belongs to.
+func (a *App) StartOrchestratorWithResume(id, conversationID, resumePrompt string, cols, rows int) (orchestratorInfo, error) {
+	return a.startPersistedOrchestrator(id, conversationID, resumePrompt, cols, rows)
 }
 
-func (a *App) startPersistedOrchestrator(id, resumePrompt string, cols, rows int) (orchestratorInfo, error) {
+func (a *App) startPersistedOrchestrator(id, conversationID, resumePrompt string, cols, rows int) (orchestratorInfo, error) {
 	id = strings.TrimSpace(id)
 	if info, ok := a.runningOrchestratorInfo(id); ok {
 		return info, nil
@@ -976,7 +984,15 @@ func (a *App) startPersistedOrchestrator(id, resumePrompt string, cols, rows int
 	if err != nil {
 		return orchestratorInfo{}, err
 	}
-	return a.spawnOrchestratorSession(def.ID, def.Name, a.refreshLinkedEnvDirectories(def.Environments), "", resumePrompt, false, cols, rows)
+	return a.spawnOrchestratorSession(orchestratorSpawn{
+		id:             def.ID,
+		name:           def.Name,
+		envs:           a.refreshLinkedEnvDirectories(def.Environments),
+		conversationID: conversationID,
+		resumePrompt:   resumePrompt,
+		cols:           cols,
+		rows:           rows,
+	})
 }
 
 // refreshLinkedEnvDirectories re-derives each local-agent link's review directory
@@ -1011,7 +1027,13 @@ func (a *App) RestartOrchestrator(id string, cols, rows int) (orchestratorInfo, 
 		return orchestratorInfo{}, err
 	}
 	a.stopOrchestratorSession(id)
-	return a.spawnOrchestratorSession(def.ID, def.Name, a.refreshLinkedEnvDirectories(def.Environments), "", "", false, cols, rows)
+	return a.spawnOrchestratorSession(orchestratorSpawn{
+		id:   def.ID,
+		name: def.Name,
+		envs: a.refreshLinkedEnvDirectories(def.Environments),
+		cols: cols,
+		rows: rows,
+	})
 }
 
 func (a *App) runningOrchestratorInfo(id string) (orchestratorInfo, bool) {
@@ -1025,10 +1047,68 @@ func (a *App) runningOrchestratorInfo(id string) (orchestratorInfo, bool) {
 	return orchestratorInfoFor(session.id, session.name, session.envs, "running", session.serial, session.transient), true
 }
 
+// runningOrchestratorConversation returns the conversation a live session is
+// attached to and the scope it is wired to, so a restart records the exact
+// session that asked for it. Empty when nothing is running for that id: there is
+// then no conversation a resume could name.
+func (a *App) runningOrchestratorConversation(id string) (string, []string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	session := a.orchestrators[id]
+	managed := a.sessions[orchestratorSessionKey(id)]
+	if session == nil || managed == nil || managed.closed {
+		return "", nil
+	}
+	return session.conversationID, orchestratorScopeOf(session.envs)
+}
+
+// orchestratorScope is the environment set an orchestrator is defined with right
+// now, in the same shape a restart records, so the two can be compared on resume.
+func (a *App) orchestratorScope(id string) ([]string, error) {
+	def, err := a.findOrchestratorConfig(id)
+	if err != nil {
+		return nil, err
+	}
+	return orchestratorScopeOf(def.Environments), nil
+}
+
+// orchestratorScopeOf renders linked environments as sorted tenant/environment
+// pairs. Review directories are deliberately left out: where an environment is
+// reviewed on this host can move without changing what the orchestrator drives.
+func orchestratorScopeOf(envs []eruncommon.OrchestratorEnvConfig) []string {
+	out := make([]string, 0, len(envs))
+	for _, env := range envs {
+		tenant, environment := strings.TrimSpace(env.Tenant), strings.TrimSpace(env.Environment)
+		if tenant == "" || environment == "" {
+			continue
+		}
+		out = append(out, tenant+"/"+environment)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// orchestratorSpawn is one session launch: which orchestrator, which
+// conversation it attaches to, and what that conversation is handed on arrival.
+// An empty conversationID means the orchestrator's own pinned conversation.
+type orchestratorSpawn struct {
+	id             string
+	name           string
+	envs           []eruncommon.OrchestratorEnvConfig
+	initialPrompt  string
+	conversationID string
+	resumePrompt   string
+	transient      bool
+	cols           int
+	rows           int
+}
+
 // spawnOrchestratorSession launches the host AI harness in the shared
 // orchestrators root and tracks the live session.
-func (a *App) spawnOrchestratorSession(id, name string, envs []eruncommon.OrchestratorEnvConfig, initialPrompt, resumePrompt string, transient bool, cols, rows int) (orchestratorInfo, error) {
-	cols, rows = clampTerminalSize(cols, rows)
+func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInfo, error) {
+	id, name, envs := spawn.id, spawn.name, spawn.envs
+	transient := spawn.transient
+	cols, rows := clampTerminalSize(spawn.cols, spawn.rows)
 	// Wire each linked env's erun MCP into the orchestrator session so it drives
 	// its envs through the MCP (raw/build/deploy/…) rather than raw kubectl.
 	// Non-fatal: the orchestrator still launches without the env MCP, but an
@@ -1039,7 +1119,13 @@ func (a *App) spawnOrchestratorSession(id, name string, envs []eruncommon.Orches
 		log.Printf("erun-app: write orchestrator MCP config for %s: %v", id, mcpErr)
 		a.emitAppNotification("warning", orchestratorMCPUnwiredNotice(name, mcpErr))
 	}
-	executable, args, err := a.deps.resolveOrchestratorLaunch(orchestratorSessionID(id), initialPrompt, resumePrompt, mcpConfigPath)
+	// A restart hand-off names the conversation that asked for it; every other
+	// launch falls back to this orchestrator's own pinned one.
+	conversationID := strings.TrimSpace(spawn.conversationID)
+	if conversationID == "" {
+		conversationID = orchestratorSessionID(id)
+	}
+	executable, args, err := a.deps.resolveOrchestratorLaunch(conversationID, spawn.initialPrompt, spawn.resumePrompt, mcpConfigPath)
 	if err != nil {
 		return orchestratorInfo{}, err
 	}
@@ -1092,12 +1178,13 @@ func (a *App) spawnOrchestratorSession(id, name string, envs []eruncommon.Orches
 	}
 	a.sessions[key] = managed
 	a.orchestrators[id] = &orchestratorSession{
-		id:        id,
-		serial:    serial,
-		transient: transient,
-		name:      name,
-		envs:      envs,
-		startedAt: time.Now(),
+		id:             id,
+		serial:         serial,
+		conversationID: conversationID,
+		transient:      transient,
+		name:           name,
+		envs:           envs,
+		startedAt:      time.Now(),
 	}
 	a.mu.Unlock()
 
