@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	goruntime "runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -13,7 +14,17 @@ import (
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const orchestratorRestoreFileName = "orchestrator-restore.json"
+// orchestratorRestoreDirName holds one hand-off slot per orchestrator. A single
+// shared slot let a second restart overwrite the first, so one orchestrator's
+// resume cancelled another's with nothing said; several orchestrators run at
+// once, so the slot has to be as private as the task it carries.
+const orchestratorRestoreDirName = "orchestrator-restore"
+
+// legacyOrchestratorRestoreFileName is the single shared slot restarts wrote
+// before this. It is still read once, because the restart that first installs
+// the per-orchestrator slot is itself staged by the binary that had only this
+// one — dropping it would lose exactly the hand-off that delivers the fix.
+const legacyOrchestratorRestoreFileName = "orchestrator-restore.json"
 
 // orchestratorRestoreMaxAge bounds how long the restart hand-off stays valid.
 // It is deliberately short because what the hand-off carries is a task to run
@@ -25,12 +36,20 @@ const orchestratorRestoreMaxAge = 10 * time.Minute
 
 // orchestratorRestartResumePrompt is what a rebuild+restart hands the resumed
 // conversation. It carries no task of its own on purpose: the task lives in the
-// return note the orchestrator wrote in its working directory before triggering
-// the restart, because a conversation does not survive the restart and a file
-// does. The prompt only has to put the session back on that note.
-const orchestratorRestartResumePrompt = "The desktop just restarted to pick up a rebuild. " +
-	"Read the return note you wrote in this working directory, confirm the rebuilt code is live in the running process, " +
-	"and carry that task through to its verified end without waiting to be asked."
+// return note the orchestrator wrote before triggering the restart, because a
+// conversation does not survive the restart and a file does.
+//
+// It names that note exactly. Orchestrators share one working directory, so
+// "the note you wrote here" resolves to whichever note is there — and a session
+// following it faithfully can pick up another orchestrator's agenda and carry it
+// to a confident, wrong end.
+func orchestratorRestartResumePrompt(orchestratorID string) string {
+	return "The desktop just restarted to pick up a rebuild. " +
+		"Read " + orchestratorReturnNoteName(orchestratorID) + " in this working directory — that one is yours, " +
+		"and any other return note beside it belongs to a different orchestrator. " +
+		"Confirm the rebuilt code is live in the running process, " +
+		"and carry that task through to its verified end without waiting to be asked."
+}
 
 type orchestratorRestoreState struct {
 	OrchestratorID string `json:"orchestratorId"`
@@ -60,40 +79,106 @@ type relaunchTarget struct {
 	Notice         string `json:"notice"`
 }
 
-// defaultOrchestratorRestorePath is the sibling of window-state.json under
-// UserConfigDir()/ERun where a restart records the orchestrator to reopen.
-func defaultOrchestratorRestorePath() string {
+// defaultOrchestratorRestoreDir is the directory beside window-state.json under
+// UserConfigDir()/ERun holding the per-orchestrator restart hand-offs.
+func defaultOrchestratorRestoreDir() string {
 	configDir, err := os.UserConfigDir()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(configDir, "ERun", orchestratorRestoreFileName)
+	return filepath.Join(configDir, "ERun", orchestratorRestoreDirName)
 }
 
-func writeOrchestratorRestoreTarget(path string, state orchestratorRestoreState, now time.Time) error {
+// orchestratorRestorePath is one orchestrator's own slot. It returns "" for an
+// id that is not a plain file name: an id is a slug by construction, and this is
+// the check that keeps it one rather than a path into somewhere else.
+func orchestratorRestorePath(dir, orchestratorID string) string {
+	id := strings.TrimSpace(orchestratorID)
+	if dir == "" || id == "" || id != filepath.Base(id) || strings.HasPrefix(id, ".") {
+		return ""
+	}
+	return filepath.Join(dir, id+".json")
+}
+
+// legacyOrchestratorRestorePath is where the single shared slot sat, beside the
+// directory that replaced it.
+func legacyOrchestratorRestorePath(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(dir), legacyOrchestratorRestoreFileName)
+}
+
+func writeOrchestratorRestoreTarget(dir string, state orchestratorRestoreState, now time.Time) error {
 	state.OrchestratorID = strings.TrimSpace(state.OrchestratorID)
 	state.ResumePrompt = strings.TrimSpace(state.ResumePrompt)
 	state.SavedAtUnix = now.Unix()
-	if path == "" || state.OrchestratorID == "" {
+	path := orchestratorRestorePath(dir, state.OrchestratorID)
+	if path == "" {
 		return nil
 	}
 	data, err := json.Marshal(state)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 	return os.WriteFile(path, append(data, '\n'), 0o644)
 }
 
-// consumeOrchestratorRestoreTarget reads and deletes the restore file, returning
-// the hand-off only when it is fresh. Deleting on read makes the restore
-// one-shot: honored on the next boot and never again.
-func consumeOrchestratorRestoreTarget(path string, now time.Time) (orchestratorRestoreState, bool) {
-	if path == "" {
-		return orchestratorRestoreState{}, false
+// consumeOrchestratorRestoreTargets reads and deletes every pending hand-off,
+// answering with the one this launch delivers and the ones it cannot. Deleting
+// on read keeps each one-shot: honored on the next boot and never again.
+//
+// The newest wins, because it is the restart the operator triggered last. The
+// rest are returned rather than discarded — a launch reopens one orchestrator,
+// so a second one that restarted around the same time is left mid-task, and
+// that is something to say out loud rather than a file to quietly remove.
+func consumeOrchestratorRestoreTargets(dir string, now time.Time) (orchestratorRestoreState, []orchestratorRestoreState) {
+	fresh := make([]orchestratorRestoreState, 0, 4)
+	for _, path := range pendingOrchestratorRestorePaths(dir) {
+		state, ok := readAndClearOrchestratorRestoreTarget(path)
+		if !ok || (state.SavedAtUnix > 0 && now.Sub(time.Unix(state.SavedAtUnix, 0)) > orchestratorRestoreMaxAge) {
+			continue
+		}
+		fresh = append(fresh, state)
 	}
+	if len(fresh) == 0 {
+		return orchestratorRestoreState{}, nil
+	}
+	// Sorted by id first so hand-offs staged within the same second still resolve
+	// the same way on every launch, then by recency, which decides.
+	sort.Slice(fresh, func(i, j int) bool {
+		if fresh[i].SavedAtUnix != fresh[j].SavedAtUnix {
+			return fresh[i].SavedAtUnix > fresh[j].SavedAtUnix
+		}
+		return fresh[i].OrchestratorID < fresh[j].OrchestratorID
+	})
+	return fresh[0], fresh[1:]
+}
+
+// pendingOrchestratorRestorePaths lists every hand-off staged for this launch,
+// the one the previous release wrote to the shared slot included.
+func pendingOrchestratorRestorePaths(dir string) []string {
+	if dir == "" {
+		return nil
+	}
+	paths := []string{legacyOrchestratorRestorePath(dir)}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return paths
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		paths = append(paths, filepath.Join(dir, entry.Name()))
+	}
+	return paths
+}
+
+func readAndClearOrchestratorRestoreTarget(path string) (orchestratorRestoreState, bool) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return orchestratorRestoreState{}, false
@@ -101,9 +186,6 @@ func consumeOrchestratorRestoreTarget(path string, now time.Time) (orchestratorR
 	_ = os.Remove(path)
 	var state orchestratorRestoreState
 	if err := json.Unmarshal(data, &state); err != nil {
-		return orchestratorRestoreState{}, false
-	}
-	if state.SavedAtUnix > 0 && now.Sub(time.Unix(state.SavedAtUnix, 0)) > orchestratorRestoreMaxAge {
 		return orchestratorRestoreState{}, false
 	}
 	state.OrchestratorID = strings.TrimSpace(state.OrchestratorID)
@@ -128,23 +210,54 @@ func consumeOrchestratorRestoreTarget(path string, now time.Time) (orchestratorR
 // orchestrator, idle at its prompt with nothing auto-run.
 //
 // A hand-off that cannot be honored still reopens the orchestrator; it just
-// arrives idle, carrying the notice that says why nothing was continued.
+// arrives idle, carrying the notice that says why nothing was continued. So does
+// a hand-off from an orchestrator this launch does not reopen at all: only one
+// orchestrator owns the pane, and the ones left mid-task are named in the same
+// notice rather than dropped.
 func (a *App) ResolveOrchestratorToReopen() relaunchTarget {
-	state, ok := consumeOrchestratorRestoreTarget(a.deps.orchestratorRestorePath, time.Now())
-	if !ok {
-		return relaunchTarget{OrchestratorID: readOpenOrchestrator(a.deps.orchestratorOpenPath)}
+	state, notReopened := consumeOrchestratorRestoreTargets(a.deps.orchestratorRestoreDir, time.Now())
+	notice := orchestratorHandoffsNotReopenedNotice(notReopened)
+	if state.OrchestratorID == "" {
+		return relaunchTarget{OrchestratorID: readOpenOrchestrator(a.deps.orchestratorOpenPath), Notice: notice}
 	}
-	target := relaunchTarget{OrchestratorID: state.OrchestratorID}
+	target := relaunchTarget{OrchestratorID: state.OrchestratorID, Notice: notice}
 	if state.ResumePrompt == "" {
 		return target
 	}
-	if notice := a.resumeRefusal(state); notice != "" {
-		target.Notice = notice
+	if refusal := a.resumeRefusal(state); refusal != "" {
+		target.Notice = joinOrchestratorNotices(refusal, notice)
 		return target
 	}
 	target.ConversationID = state.ConversationID
 	target.ResumePrompt = state.ResumePrompt
 	return target
+}
+
+// orchestratorHandoffsNotReopenedNotice names the orchestrators that restarted
+// mid-task and are not being reopened. Their work is only recoverable if the
+// operator learns which sessions stopped and which note each left behind.
+func orchestratorHandoffsNotReopenedNotice(states []orchestratorRestoreState) string {
+	if len(states) == 0 {
+		return ""
+	}
+	described := make([]string, 0, len(states))
+	for _, state := range states {
+		described = append(described, fmt.Sprintf("%s (%s)", state.OrchestratorID, orchestratorReturnNoteName(state.OrchestratorID)))
+	}
+	sort.Strings(described)
+	return fmt.Sprintf("Also restarted mid-task but not reopened: %s. "+
+		"A launch reopens one orchestrator, so start each of these and have it read its return note "+
+		"in the orchestrators working directory.", strings.Join(described, ", "))
+}
+
+func joinOrchestratorNotices(parts ...string) string {
+	kept := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if strings.TrimSpace(part) != "" {
+			kept = append(kept, part)
+		}
+	}
+	return strings.Join(kept, " ")
 }
 
 // resumeRefusal reports why a restart hand-off must not be delivered, or "" when
@@ -179,7 +292,8 @@ func (a *App) resumeRefusal(state orchestratorRestoreState) string {
 // else will say so.
 func orchestratorResumeRefusedNotice(id, reason string) string {
 	return fmt.Sprintf("Reopened %s without continuing its task: %s. "+
-		"Check the return note in the orchestrator's working directory before telling it to carry on.", id, reason)
+		"Check %s in the orchestrators working directory before telling it to carry on.",
+		id, reason, orchestratorReturnNoteName(id))
 }
 
 // describeOrchestratorScope renders an environment set for an operator-facing
@@ -209,7 +323,7 @@ func equalOrchestratorScope(left, right []string) bool {
 // which is safe (no SingleInstanceLock). A headless/no-ctx build has no Wails
 // window to quit, so that step no-ops there.
 func (a *App) RestartApp(returnToOrchestratorID string) error {
-	if err := writeOrchestratorRestoreTarget(a.deps.orchestratorRestorePath, a.restartHandoff(returnToOrchestratorID), time.Now()); err != nil {
+	if err := writeOrchestratorRestoreTarget(a.deps.orchestratorRestoreDir, a.restartHandoff(returnToOrchestratorID), time.Now()); err != nil {
 		return fmt.Errorf("persist restart target: %w", err)
 	}
 	relaunch := a.deps.relaunchApp
@@ -240,7 +354,7 @@ func (a *App) restartHandoff(orchestratorID string) orchestratorRestoreState {
 	}
 	state.ConversationID = conversationID
 	state.Environments = scope
-	state.ResumePrompt = orchestratorRestartResumePrompt
+	state.ResumePrompt = orchestratorRestartResumePrompt(state.OrchestratorID)
 	return state
 }
 

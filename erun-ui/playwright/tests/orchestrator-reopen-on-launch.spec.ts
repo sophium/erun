@@ -117,13 +117,50 @@ test.describe('reopening the orchestrator that was open', () => {
   test('a refused hand-off reopens idle and says why', async ({ app, page }) => {
     const calls: string[] = [];
     const notice =
-      'Reopened pw-orch without continuing its task: its environments changed (was pw/alpha, now pw/beta).';
+      'Reopened pw-orch without continuing its task: its environments changed (was pw/alpha, now pw/beta). ' +
+      'Check RESUME-NOTE.pw-orch.md in the orchestrators working directory before telling it to carry on.';
     await stubReopen(page, { orchestratorId: SEED_ORCHESTRATOR, resumePrompt: '', notice }, calls);
     await app.reboot();
 
     await expect(app.sidebar.orchestratorsAlert()).toContainText(notice);
     expect(calls).toContain('StartOrchestrator');
     expect(calls).not.toContain('StartOrchestratorWithResume');
+  });
+
+  // Several orchestrators can restart at once and only one owns the pane, so
+  // the ones left mid-task have to be visible somewhere. The Go side decides
+  // which hand-off is delivered and which are merely reported
+  // (erun-ui/app_restart_test.go); what only the rendered app can show is that
+  // the report reaches the operator on a launch that DID resume someone — the
+  // case where the notice is easiest to lose, because the app looks correct.
+  test('hand-offs the launch could not reopen are reported beside the resumed one', async ({
+    app,
+    page,
+  }) => {
+    const calls: string[] = [];
+    const notice =
+      'Also restarted mid-task but not reopened: petios (RESUME-NOTE.petios.md). ' +
+      'A launch reopens one orchestrator, so start each of these and have it read its return ' +
+      'note in the orchestrators working directory.';
+    await stubReopen(
+      page,
+      {
+        orchestratorId: SEED_ORCHESTRATOR,
+        conversationId: 'conv-1',
+        resumePrompt: 'Read RESUME-NOTE.pw-orch.md in this working directory',
+        notice,
+      },
+      calls,
+    );
+    await app.reboot();
+
+    // The delivered hand-off still resumes with its task...
+    await expect(app.tabStrip.orchestratorMode()).toBeVisible();
+    expect(calls).toContain('StartOrchestratorWithResume');
+    // ...and the orchestrator that was not reopened is named where the operator
+    // acts on it, with the note that holds its unfinished work.
+    await expect(app.sidebar.orchestratorsAlert()).toContainText('petios');
+    await expect(app.sidebar.orchestratorsAlert()).toContainText('RESUME-NOTE.petios.md');
   });
 
   test('with nothing to reopen the launch starts no orchestrator', async ({ app, page }) => {

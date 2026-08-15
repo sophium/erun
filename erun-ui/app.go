@@ -87,7 +87,7 @@ type erunUIDeps struct {
 	windowMaximised           func(context.Context) bool
 	cloneERun                 func(context.Context, string, string) error
 	contributeStatePath       string
-	orchestratorRestorePath   string
+	orchestratorRestoreDir    string
 	orchestratorOpenPath      string
 	relaunchApp               func() error
 	quitApp                   func()
@@ -427,8 +427,8 @@ func withDefaultWindowAndContributeDeps(deps erunUIDeps) erunUIDeps {
 	if deps.contributeStatePath == "" {
 		deps.contributeStatePath = defaultContributeStatePath()
 	}
-	if deps.orchestratorRestorePath == "" {
-		deps.orchestratorRestorePath = defaultOrchestratorRestorePath()
+	if deps.orchestratorRestoreDir == "" {
+		deps.orchestratorRestoreDir = defaultOrchestratorRestoreDir()
 	}
 	if deps.orchestratorOpenPath == "" {
 		deps.orchestratorOpenPath = defaultOrchestratorOpenPath()
