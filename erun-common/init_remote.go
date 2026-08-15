@@ -25,23 +25,32 @@ type remoteRepositorySpec struct {
 
 var codeCommitHostPattern = regexp.MustCompile(`^git-codecommit\.[a-z0-9-]+\.amazonaws\.com(?:\.cn)?$`)
 
-func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tenant, envName, kubernetesContext, projectRoot, runtimeRegistry string, registries ContainerRegistries) (ShellLaunchParams, remoteRepositorySpec, error) {
-	target := s.remoteRepositoryOpenResult(tenant, envName, kubernetesContext, projectRoot, params.ResolvedType())
-	target.EnvConfig.RuntimePod = NormalizeRuntimePodResources(params.RuntimePod)
+// ensureRemoteRepository deploys the env's runtime and wires its remote checkout.
+// The env it takes is the one this run just reconciled, so init's own deploy sees
+// the settings this invocation supplied rather than the params they arrived in —
+// the two diverge whenever a flag was omitted and the stored value stands.
+func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tenant, envName, projectRoot string, env EnvConfig) (ShellLaunchParams, remoteRepositorySpec, error) {
+	target := s.remoteRepositoryOpenResult(tenant, envName, env.KubernetesContext, projectRoot, params.ResolvedType())
+	target.EnvConfig.RuntimePod = NormalizeRuntimePodResources(env.RuntimePod)
 	// The runtime registry is the one field that redirects chart resolution, so
 	// init's own deploy must see it. Without it `erun init --runtime-registry`
 	// would only take effect on the next deploy — no use to an env that cannot
 	// complete one.
-	target.EnvConfig.RuntimeRegistry = strings.TrimSpace(runtimeRegistry)
+	target.EnvConfig.RuntimeRegistry = strings.TrimSpace(env.RuntimeRegistry)
+	// A private runtime image is exactly the case the pull secrets exist for, so
+	// init's own deploy must carry them; otherwise the env init just created
+	// cannot pull, and the flag only takes effect on a redeploy the operator has
+	// to know to run.
+	target.EnvConfig.ImagePullSecrets = env.ImagePullSecrets
 	// Carry the env's configured registries onto the deploy target so the
 	// init-time runtime deploy renders the same container registry (cluster or
 	// --container-registry) the standalone `erun deploy` does; without this the
 	// target's minimal EnvConfig had no registries and the deploy fell back to the
 	// default, so an in-pod build would target the wrong registry until a redeploy.
-	target.EnvConfig.ContainerRegistries = registries
+	target.EnvConfig.ContainerRegistries = env.ContainerRegistries
 	req := ShellLaunchParamsFromResult(target)
 
-	if err := s.ensureRemoteRuntime(target, req, params.RuntimeVersion, params.RuntimeImage, params.MCPAuthPublicKeyPath); err != nil {
+	if err := s.ensureRemoteRuntime(target, req, env.RuntimeVersion, env.RuntimeImage, params.MCPAuthPublicKeyPath); err != nil {
 		return ShellLaunchParams{}, remoteRepositorySpec{}, err
 	}
 	if params.NoGit {

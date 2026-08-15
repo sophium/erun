@@ -79,9 +79,7 @@ func newRootCommand(runRoot func(*cobra.Command, []string) error) *cobra.Command
 func newRunInit(store common.BootstrapStore, findProjectRoot common.ProjectFinderFunc, promptRunner PromptRunner, selectRunner SelectRunner, listKubernetesContexts KubernetesContextsLister, ensureKubernetesNamespace common.NamespaceEnsurerFunc, waitForRemoteRuntime common.RemoteRuntimeWaitFunc, runRemoteCommand common.RemoteCommandRunnerFunc, deployHelmChart common.HelmChartDeployerFunc) func(common.Context, common.BootstrapInitParams) error {
 	return func(ctx common.Context, params common.BootstrapInitParams) error {
 		ctx = withCloudContextPreflight(ctx, store)
-		if strings.TrimSpace(params.RuntimeVersion) == "" {
-			params.RuntimeVersion = currentBuildInfo().Version
-		}
+		params.RuntimeVersionDefault = currentBuildInfo().Version
 		_, err := common.RunBootstrapInitWithDependencies(common.BootstrapInitDependencies{
 			Store:           common.TraceBootstrapStore(ctx, store),
 			FindProjectRoot: findProjectRoot,

@@ -47,17 +47,43 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 | Flag | Type | Default | Validation | Persists to |
 |---|---|---|---|---|
 | `--project-root <path>` | string (absolute path) | `<cwd>`'s git repo root (`git rev-parse --show-toplevel`) | Must be an existing directory; must contain a `.git/` directory or `.git` file. | The new env's `EnvConfig.localRepoPath` (every env type records it; #549). |
+| `--type <type>` | enum (`local-agent`, `remote-agent`, `runtime`) | unset. A **new** env then resolves to `local-agent` (or `remote-agent` when `--remote` is given); an **existing** env keeps `EnvConfig.type`. | Must be one of the three values. Conflicts with a `--remote` whose value disagrees. | `EnvConfig.type`. On an existing env this is a [retype](#init-existing-env), permitted between any two types in either direction. |
 | `--remote` | bool | `false` | Conflicts with a `--type` whose value disagrees (e.g. `--type=local-agent --remote`). | Deprecated alias for `--type=remote-agent`: sets `EnvConfig.type = remote-agent`. Init then writes the in-pod bootstrap marker. |
 | `--no-git` | bool | `false` | Only meaningful with `--remote` / `--type=remote-agent`. | Skips the in-pod `git clone` step. |
-| `--version <version>` | string (semver) | The CLI's built-in `ERUN_VERSION`. | Must satisfy `^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$`. | `EnvConfig.runtimeversion`. |
+| `--version <version>` | string (semver) | A **new** env takes the CLI's built-in `ERUN_VERSION`; an **existing** env keeps `EnvConfig.runtimeversion` (the built-in fills in only when the env records none). | Must satisfy `^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$`. | `EnvConfig.runtimeversion`. The transport's own version is a fallback, not a request — an `init` about something else never repins a running env; move a version with [`erun deploy --version`](#erun-deploy). |
 | `--runtime-image <ref>` | string | unset — deploy then [defaults the image](#deploy-runtime-image-default) from the chart (a `<tenant>-devops` umbrella → its own image; the shared `erun-devops` chart → no override). | A full OCI reference (registry path and/or tag present) is used verbatim; a bare name resolves to `<registry>/<name>:<runtime version>` at deploy time. | `EnvConfig.runtimeimage`; applied as `imageOverrides.erun-devops` on every published-chart deploy. |
 | `--runtime-registry <host>` | string (registry host, optional org path) | unset — the [runtime chart search](#deploy-runtime-chart-search) then resolves ERun's artifacts from the env's `deploy`-marked registry, widening to the runtime image's registry when the chart is not there. | Recorded verbatim (trimmed); no scheme, no `charts/` suffix. | `EnvConfig.runtimeregistry`, which the chart search and the in-pod `RUNTIME_REGISTRY` projection both honour first. Init's own runtime deploy sees it in the same run, so it is also the recovery path for an env that cannot complete a deploy. It is the only writer that replaces the field: a deploy records the registry its chart search resolved at, but only when the field is empty or already agrees — a value set here survives a deploy that resolved elsewhere, which traces `deploy: the env's runtime registry <recorded> stands; the runtime chart resolved from <resolved> instead (…)` rather than overwriting it. |
 | `--bootstrap` | bool | `false` | — | **Deprecated, ignored.** Prints a deprecation warning; `init` no longer scaffolds a `<tenant>-devops/` module — envs deploy the published `erun-devops` chart. |
-| `--runtime-cpu <value>` | Kubernetes quantity | `4` | Must match the Kubernetes `Quantity` grammar (`m`, plain integer, decimal). | `EnvConfig.runtimepod.cpu`. |
-| `--runtime-memory <value>` | Kubernetes quantity | `8916Mi` | Must match the Kubernetes `Quantity` grammar (`Ki`, `Mi`, `Gi`, …). | `EnvConfig.runtimepod.memory`. |
+| `--runtime-cpu <value>` | Kubernetes quantity | A **new** env takes `4`; an **existing** env keeps `EnvConfig.runtimepod.cpu`. | Must match the Kubernetes `Quantity` grammar (`m`, plain integer, decimal). | `EnvConfig.runtimepod.cpu`. Supplied alone it merges — naming only the CPU leaves the recorded memory where it was. |
+| `--runtime-memory <value>` | Kubernetes quantity | A **new** env takes `8916Mi`; an **existing** env keeps `EnvConfig.runtimepod.memory`. | Must match the Kubernetes `Quantity` grammar (`Ki`, `Mi`, `Gi`, …). | `EnvConfig.runtimepod.memory`. Merges with `--runtime-cpu` the same way. |
 | `--codecommit-ssh-key-id <id>` | string (`APKA…` shape) | unset | Must start with `APKA`; must be a valid IAM key id (length 21). | Stored in the in-pod bootstrap marker (`bootstrap.yaml` → `codecommitSshKeyId`). |
 | `--confirm-environment` | bool | `false` | — | Equivalent to `-y` for the env-overwrite confirmation only. |
 | `--platform-account` | bool | `false` | — | Makes the env a **cluster platform account**: `EnvConfig.platformaccount = true`, which threads `--set platformAccount=true` at deploy so the runtime chart binds the env's ServiceAccount to the built-in `cluster-admin` (a `<release>-platform` `ClusterRoleBinding`). Lets in-pod platform Terraform (the [cluster edge](/agent-reference/skills-spec#erun-enable-hosting-edge)) and component installs manage cluster-scoped resources. The first deploy that adds the binding must run from an admin-capable context (the API server's escalation check). |
+
+### Re-initializing an existing environment {#init-existing-env}
+
+When the env config already exists, `init` reconciles it against the invocation instead of creating it. Two questions are answered separately, and conflating them is what made settings vanish before: **what type is this invocation asking for**, and **which settings did it supply**.
+
+A setting is applied because it was supplied, not because of the type the invocation resolved to. Every field below describes the runtime pod, which an env of any type has, so `erun init <tenant> <env> --image-pull-secret X` lands on a `remote-agent` or `runtime` env without restating `--type`.
+
+| Input | Supplied | Omitted |
+|---|---|---|
+| `--version` | Sets `EnvConfig.runtimeversion`. Trace: `init: runtime version set to <v>` (or `… already <v>`). | Keeps it. Trace: `init: runtime version not given; keeping <v>`. The transport's built-in version fills in **only** when the env records none, tracing `init: env records no runtime version; adopting <v>`. |
+| `--runtime-image` | Sets `EnvConfig.runtimeimage`. | Keeps it. Trace: `init: runtime image not given; keeping <ref>`. |
+| `--runtime-registry` | Sets `EnvConfig.runtimeregistry`. | Keeps it. |
+| `--image-pull-secret` | Replaces `EnvConfig.imagepullsecrets` with the trimmed, de-duplicated list. | Keeps the recorded list. |
+| `--runtime-cpu` / `--runtime-memory` | Merges onto `EnvConfig.runtimepod`: the limit named is set, the other is kept. Trace: `init: runtime pod resources set to cpu=<c> memory=<m>`. | Keeps both. Trace: `init: runtime pod resources not given; keeping cpu=<c> memory=<m>`. |
+| `--type` / `--remote` | Retypes the env — see below. | **Never** retypes. Trace: `init: --type not given; keeping env type "<t>"`. |
+
+The `--type` default is the asymmetry that matters: a new env with no `--type` resolves to `local-agent`, but that fallback is a default, not a request, so an existing env is not moved by it.
+
+**Retyping.** A named `--type` that differs from `EnvConfig.type` changes it, in either direction and between any two of the three types — including `runtime` → `remote-agent`, which is what makes a runtime env orchestratable by the desktop. Trace: `init: env type "<from>" -> "<to>"` (or `init: env type already "<t>"` when they match). The rest of the run then does the work the named type implies: retyping to `remote-agent` or `runtime` runs the same runtime deploy and in-pod checkout a fresh `--type=<t>` init would.
+
+Retyping **to** `local-agent` is the one case that needs more than the field: a `local-agent` worktree is hostPath-mounted, and the path a remote env carries in `EnvConfig.localRepoPath` names an in-pod directory. The retype re-resolves the host project root (`--project-root`, else the cwd's git root) and records it (`init: local repo path set to <path>`); when neither answers, it fails with `LOCAL_AGENT_RETYPE_NEEDS_REPO_PATH` and writes nothing.
+
+Settings are reconciled before `init`'s own runtime deploy, so that deploy carries them: a re-init that adds `--image-pull-secret` deploys with the secret, and one that omits `--runtime-cpu` deploys at the env's recorded limits rather than the defaults.
+
+An env created by this same run skips the reconcile entirely — it was written from these params moments ago, so there is nothing to reconcile and no trace lines are emitted.
 
 ### Side effects
 
@@ -85,6 +111,7 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 | Code | Cause | Exit code |
 |---|---|---|
 | `NOT_IN_GIT_REPO` | `--project-root` unset and cwd is not in a git repo. | `1` |
+| `LOCAL_AGENT_RETYPE_NEEDS_REPO_PATH` | `--type=local-agent` on an existing env, with no `--project-root` and no git repo at the cwd, so there is no host path to mount as the worktree. Nothing is written. Message: ``cannot change <tenant>/<env> to type local-agent: it needs a host repo path to mount — run init from the project directory or pass --project-root``. | `1` |
 | `KUBE_CONTEXT_MISSING` | `--kubernetes-context` is not present in `~/.kube/config`. | `1` |
 | `HELM_INSTALL_FAILED` | Runtime chart install failed; the per-user config is written but the in-pod marker is not. | `2` |
 | `REGISTRY_UNREACHABLE` | `--container-registry` is set but DNS/network failed. (Warning, not abort.) | `0` (with warning) |

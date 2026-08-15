@@ -20,7 +20,7 @@ If `TENANT` and/or `ENVIRONMENT` are omitted, ERun resolves them from the curren
 |---|---|
 | `--tenant <name>` | Tenant name to initialize. |
 | `--environment <name>` | Environment name. |
-| `--type <type>` | Environment type: `local-agent` (default), `remote-agent`, or `runtime`. |
+| `--type <type>` | Environment type: `local-agent` (default for a new env), `remote-agent`, or `runtime`. On an environment that already exists this **changes** the type, in either direction and between any two types; omit it and the environment keeps the type it has. |
 | `--kubernetes-context <name>` | Kubernetes context to associate with the environment. |
 | `--container-registry <host>` | Container registry to associate with the environment (e.g. `ghcr.io/sophium`, `<acct>.dkr.ecr.<region>.amazonaws.com`). |
 | `--runtime-image <ref>` | Custom runtime image for the environment, persisted to the env config's `runtimeimage` field. Use this to run a project-built image that extends the published `erun-devops` image. |
@@ -30,6 +30,29 @@ If `TENANT` and/or `ENVIRONMENT` are omitted, ERun resolves them from the curren
 | `-y, --yes` | Auto-approve all initialization prompts. |
 
 Advanced flags (`--project-root`, `--no-git`, `--version`, `--runtime-cpu`, `--runtime-memory`, `--codecommit-ssh-key-id`, `--confirm-environment`) and the full lifecycle algorithm are on [Agent reference · CLI flag spec](/agent-reference/cli-flags#erun-init). `--remote` is a deprecated alias for `--type=remote-agent`. `--bootstrap` is deprecated and ignored — `init` no longer scaffolds a `<tenant>-devops/` module; environments deploy the published `erun-devops` chart directly, and passing the flag only prints a deprecation warning. Common root flags (`--dry-run`, `-v`/`-vv`, `--time`) apply.
+
+## Re-running `init` on an existing environment
+
+`init` is how you change an environment's settings after it exists. Run it again with only the flags you want to change: each one is applied, and everything you did not name is left exactly as it was — pod limits, runtime version, registries, and the type all survive an `init` that was about something else.
+
+```bash
+# Add a pull secret to an environment already running. Nothing else moves.
+erun init my-tenant rihards-dev --image-pull-secret ecr-pull
+
+# Point an environment at the registry ERun's own chart is published in
+# (the way out of a deploy that cannot find the runtime chart).
+erun init my-tenant rihards-dev --runtime-registry ghcr.io/sophium
+
+# Make a runtime env an agent env, so the desktop can orchestrate work in it.
+erun init my-tenant rihards-dev --type=remote-agent
+```
+
+Two rules make this safe to reach for:
+
+- **A flag you passed is applied, or the command refuses and says why.** It is never accepted and quietly dropped.
+- **A flag you omitted changes nothing.** `--type` in particular: without it the environment keeps its type, so an `init` about a pull secret never retypes anything.
+
+Changing the type does the work the new type implies — retyping to `remote-agent` deploys the runtime and sets up the in-pod checkout, exactly as creating one would. Retyping **to** `local-agent` needs a host directory to mount as the worktree: run `init` from the project directory, or pass `--project-root`, or the command refuses rather than writing a type the environment could not run. Run with `--dry-run` first to see, line by line, what a re-run would change and what it would keep.
 
 ## Examples
 
@@ -64,4 +87,4 @@ erun init my-tenant local --dry-run
 
 ## Error behaviour
 
-`init` aborts before any side effect when prerequisites are missing — `--kubernetes-context` not in kubeconfig, cwd not in a git repo, helm-install failure. Use `--dry-run` first to inspect the plan. Exact failure codes and exit-code mapping: [Agent reference · CLI flag spec · `erun init`](/agent-reference/cli-flags#erun-init).
+`init` aborts before any side effect when prerequisites are missing — `--kubernetes-context` not in kubeconfig, cwd not in a git repo, `--type=local-agent` on an existing environment with no host repo path to mount, helm-install failure. Use `--dry-run` first to inspect the plan. Exact failure codes and exit-code mapping: [Agent reference · CLI flag spec · `erun init`](/agent-reference/cli-flags#erun-init).

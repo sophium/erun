@@ -1,4 +1,4 @@
-audit: erun init --confirm-environment --container-registry registry.example/test --kubernetes-context new-context --set-default-tenant team dev
+audit: erun init --confirm-environment --runtime-registry ghcr.io/sophium --set-default-tenant team dev
 Loading erun tool configuration, configPath=<TMP>
 Loaded erun tool configuration
 Loading tenant configuration
@@ -6,8 +6,9 @@ Loaded tenant configuration
 Loading environment configuration
 ==> Initializing team/dev
 init: runtime version not given; keeping <VERSION>
+init: runtime registry set to ghcr.io/sophium
 init: runtime pod resources not given; keeping cpu=4 memory=8916Mi
-init: --type not given; keeping env type "local-agent"
+init: --type not given; keeping env type "runtime"
 init: runtime deploys use the published erun-devops chart; no devops scaffold is written
 ==> Initialized team/dev
 Configuration initialized OK

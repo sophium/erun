@@ -936,13 +936,7 @@ func TestInit(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "init/reinit_real_run_updates_kubernetes_context", normalize.Apply(result.Combined))
-		raw, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml"))
-		if err != nil {
-			t.Fatalf("read env config: %v", err)
-		}
-		if !strings.Contains(string(raw), "kubernetescontext: new-context") {
-			t.Errorf("expected persisted env config to carry the new kubernetes context, got:\n%s", raw)
-		}
+		assertEnvConfigContains(t, setup, "team", "dev", "kubernetescontext: new-context")
 	})
 
 	t.Run("reinit_remote_real_run_updates_runtime_settings", func(t *testing.T) {
@@ -974,15 +968,7 @@ func TestInit(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "init/reinit_remote_real_run_updates_runtime_settings", normalize.Apply(result.Combined))
-		raw, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml"))
-		if err != nil {
-			t.Fatalf("read env config: %v", err)
-		}
-		for _, want := range []string{"runtimeversion: 2.0.0", "cpu: \"8\"", "memory: 16Gi"} {
-			if !strings.Contains(string(raw), want) {
-				t.Errorf("expected persisted env config to contain %q, got:\n%s", want, raw)
-			}
-		}
+		assertEnvConfigContains(t, setup, "team", "dev", "runtimeversion: 2.0.0", "cpu: \"8\"", "memory: 16Gi")
 	})
 
 	t.Run("reinit_remote_real_run_redirects_the_runtime_registry", func(t *testing.T) {
@@ -1016,12 +1002,161 @@ func TestInit(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "init/reinit_remote_real_run_redirects_the_runtime_registry", normalize.Apply(result.Combined))
-		raw, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml"))
-		if err != nil {
-			t.Fatalf("read env config: %v", err)
+		assertEnvConfigContains(t, setup, "team", "dev", "runtimeregistry: ghcr.io/sophium")
+	})
+
+	t.Run("reinit_records_an_image_pull_secret_without_restating_the_type", func(t *testing.T) {
+		// A supplied setting lands on the env for having been supplied. The
+		// invocation names no --type, so it resolves to the local-agent default,
+		// and the setting still reaches an env stored as remote-agent — accepting
+		// the flag and dropping it is the failure this pins. The env keeps its
+		// type: a flag nobody passed must not retype anything.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		args := []string{
+			"init", "team", "dev",
+			"--image-pull-secret", "ecr-pull",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
 		}
-		if !strings.Contains(string(raw), "runtimeregistry: ghcr.io/sophium") {
-			t.Errorf("expected persisted env config to record the redirected runtime registry, got:\n%s", raw)
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
+		golden.Equal(t, "init/reinit_records_an_image_pull_secret_without_restating_the_type", normalize.Apply(result.Combined))
+		assertEnvConfigContains(t, setup, "team", "dev", "imagepullsecrets:", "- ecr-pull", "type: remote-agent", "runtimeversion: 1.0.0")
+	})
+
+	t.Run("reinit_runtime_env_records_a_registry_and_keeps_its_type", func(t *testing.T) {
+		// The documented escape from a chart-resolution deadlock, run the way an
+		// operator reaches for it: --runtime-registry alone. It has to land on an
+		// existing env whatever type that env is, and the runtime env has to still
+		// be a runtime env afterwards — the default an omitted --type resolves to
+		// is local-agent, and acting on it would silently retype the env.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		args := []string{
+			"init", "team", "dev",
+			"--runtime-registry", "ghcr.io/sophium",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/reinit_runtime_env_records_a_registry_and_keeps_its_type", normalize.Apply(result.Combined))
+		assertEnvConfigContains(t, setup, "team", "dev", "runtimeregistry: ghcr.io/sophium", "type: runtime")
+	})
+
+	t.Run("reinit_retypes_a_runtime_env_to_remote_agent", func(t *testing.T) {
+		// Both env types keep their worktree off the laptop, so the old reconcile
+		// could never move between them and a runtime env could never become
+		// orchestratable. Named explicitly, the type moves, and the run does the
+		// remote-agent work — the runtime deploy and the checkout — a fresh
+		// --type=remote-agent init would. The kubectl stub reports the clone
+		// already present so the flow pulls instead of prompting for a URL.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		stubRemoteInitKubectl(t, stubs, remoteInitKubectlStub{RepoExists: true})
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "git", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "git")...)
+		args := []string{
+			"init", "team", "dev",
+			"--type", "remote-agent",
+			"--kubernetes-context", "test-context",
+			"--container-registry", "registry.example/test",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/reinit_retypes_a_runtime_env_to_remote_agent", normalize.Apply(result.Combined))
+		assertEnvConfigContains(t, setup, "team", "dev", "type: remote-agent", "runtimeversion: 1.0.0")
+	})
+
+	t.Run("reinit_retypes_a_remote_env_to_local_agent", func(t *testing.T) {
+		// The other direction, which needs more than the type field: a local-agent
+		// worktree is hostPath-mounted, and the path a remote env carries names an
+		// in-pod directory. The retype adopts the host project root supplied with
+		// it, so the env it writes is one that can actually mount.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		args := []string{
+			"init", "team", "dev",
+			"--type", "local-agent",
+			"--project-root", setup.Cwd,
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/reinit_retypes_a_remote_env_to_local_agent", normalize.Apply(result.Combined))
+		assertEnvConfigContains(t, setup, "team", "dev", "type: local-agent", "localrepopath: "+setup.Cwd)
+	})
+
+	t.Run("reinit_refuses_a_local_agent_retype_with_no_host_repo_path", func(t *testing.T) {
+		// The refusal that keeps the flag honest: the run is not in a git repo and
+		// names no --project-root, so there is no host path to mount. Writing the
+		// type anyway would move the failure to a later deploy, and reporting
+		// success would drop the flag. It refuses, naming what to supply.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		args := []string{
+			"init", "team", "dev",
+			"--type", "local-agent",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "init/reinit_refuses_a_local_agent_retype_with_no_host_repo_path", normalize.Apply(result.Combined))
+		assertEnvConfigContains(t, setup, "team", "dev", "type: remote-agent")
+	})
+
+	t.Run("reinit_dry_run_traces_what_it_keeps_and_what_it_changes", func(t *testing.T) {
+		// The audit line for a re-init: every setting the run decided about shows
+		// up, whether it was supplied or deliberately left as found. The pod
+		// resources are the ones that matter most — they used to be reset to the
+		// defaults by any re-init that reached the reconcile at all, so an operator
+		// adding one flag lost limits they never mentioned.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		appendEnvConfig(t, setup, "team", "dev", "runtimepod:\n  cpu: \"8\"\n  memory: 16Gi\n")
+		args := []string{
+			"init", "team", "dev",
+			"--runtime-image", "registry.example/team-devops",
+			"--image-pull-secret", "ecr-pull",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/reinit_dry_run_traces_what_it_keeps_and_what_it_changes", normalize.Apply(result.Combined))
+		// A dry run traces the write and performs none of it: the limits it said it
+		// would keep are untouched, and what it said it would set never landed.
+		assertEnvConfigContains(t, setup, "team", "dev", "cpu: \"8\"", "memory: 16Gi")
+		assertEnvConfigLacks(t, setup, "team", "dev", "imagepullsecrets", "runtimeimage")
 	})
 }

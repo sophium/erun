@@ -1,0 +1,19 @@
+audit: erun init --confirm-environment --dry-run --image-pull-secret <redacted> --runtime-image registry.example/team-devops --set-default-tenant team dev
+Loading erun tool configuration, configPath=<TMP>
+Loaded erun tool configuration
+Loading tenant configuration
+Loaded tenant configuration
+Loading environment configuration
+==> Initializing team/dev
+init: runtime version not given; keeping <VERSION>
+init: runtime image set to registry.example/team-devops
+init: image pull secrets set to ecr-pull
+init: runtime pod resources not given; keeping cpu=8 memory=16Gi
+init: --type not given; keeping env type "remote-agent"
+init: runtime deploys use the published erun-devops chart; no devops scaffold is written
+mkdir -p <TMP>
+write-yaml <TMP>
+==> Initialized team/dev
+Configuration initialized OK
+ensure-agent-instructions
+ensure-claude-settings
