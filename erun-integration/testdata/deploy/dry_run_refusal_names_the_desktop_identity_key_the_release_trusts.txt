@@ -1,0 +1,11 @@
+audit: erun deploy --dry-run --version <VERSION> team dev
+trace-log: would append the full trace to <TMP>
+deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=false current=false
+deploy: component selection source default (runtime only); deploying the runtime chart alone
+deploy: version <VERSION> pinned; installing the published image by reference (deploy never builds)
+deploy: mcp auth: release team-devops has it enabled but this deploy resolved none; refusing to downgrade
+deploy: mcp auth: reading the key release team-devops trusts from secret team-devops-mcp-auth
+deploy: mcp auth: release team-devops trusts this host's desktop identity key <DESKTOP_IDENTITY_PUBLIC>
+deploy: spec resolution failed: deploy team/dev: MCP auth is enabled on the live team-devops release, but this deploy resolved none — it would leave the environment's MCP edge unauthenticated. The release trusts the desktop identity key on this host, <DESKTOP_IDENTITY_PUBLIC> (sha256 <HEX>); re-supply it with --mcp-auth-public-key <DESKTOP_IDENTITY_PUBLIC>, or pass --no-mcp-auth to turn authentication off on purpose
+==> Deploy failed team/dev: deploy team/dev: MCP auth is enabled on the live team-devops release, but this deploy resolved none — it would leave the environment's MCP edge unauthenticated. The release trusts the desktop identity key on this host, <DESKTOP_IDENTITY_PUBLIC> (sha256 <HEX>); re-supply it with --mcp-auth-public-key <DESKTOP_IDENTITY_PUBLIC>, or pass --no-mcp-auth to turn authentication off on purpose
+deploy team/dev: MCP auth is enabled on the live team-devops release, but this deploy resolved none — it would leave the environment's MCP edge unauthenticated. The release trusts the desktop identity key on this host, <DESKTOP_IDENTITY_PUBLIC> (sha256 <HEX>); re-supply it with --mcp-auth-public-key <DESKTOP_IDENTITY_PUBLIC>, or pass --no-mcp-auth to turn authentication off on purpose
