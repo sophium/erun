@@ -32,7 +32,7 @@
       "Pop-Location",
       "Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue",
       "if (-not (Get-Command gcc -ErrorAction SilentlyContinue)) { throw 'building erun-app.exe requires a C compiler such as MinGW for the Wails CGO build' }",
-      "$appLdflags = \"-s -w -H windowsgui -X github.com/sophium/erun/erun-ui.buildVersion=$version\"",
+      "$appLdflags = \"-s -w -H windowsgui -X main.buildVersion=$version\"",
       "Push-Location \"$dir\\erun-ui\"",
       "$wailsVersion = go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2",
       "if ($LASTEXITCODE -ne 0) { throw 'failed to resolve Wails version' }",

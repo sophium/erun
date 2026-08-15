@@ -91,7 +91,17 @@ The install both **installs a skill when absent and refreshes it when the baked 
 
 ### Host orchestrator (desktop)
 
-The desktop app installs the same canonical skills into the host's `~/.claude/skills/<name>/` for host-side orchestrator sessions, using the identical marker-based install-or-refresh — so a host orchestrator tracks the latest skill on each launch while preserving any host-side edits. It also writes a `SessionStart` hook into the shared orchestrators workspace's `.claude/settings.json` that **injects the operating contract** — it prints the workspace `CLAUDE.md` to the session on every session start and reopen (Claude Code's `SessionStart` fires on both a new session and a `--continue`/`--resume`) — so the contract is always already in context rather than a [`erun-orchestrate`](#erun-orchestrate) skill the model is merely asked to load and could skip. The hook prints the file directly (plain stdout, so no `additionalContext` size cap), falling back to a short directive if the `CLAUDE.md` is ever missing.
+The desktop app installs the same canonical skills into the host's `~/.claude/skills/<name>/` for host-side orchestrator sessions, using the identical marker-based install-or-refresh — so a host orchestrator tracks the latest skill on each launch while preserving any host-side edits.
+
+The source it installs from resolves in this order, first match wins:
+
+1. `ERUN_SKILLS_DIR`, if set — taken **verbatim, with no fallback**, so pointing it at an empty directory installs nothing rather than silently resolving something else.
+2. The `erun-skills/skills` directory of the checkout the desktop binary was built from, stamped into the binary by `erun-ui/build.sh` / `build.ps1`. This is what keeps a desktop that runs from outside its checkout — the usual case, since the built bundle is copied elsewhere to run — installing the skills its own build ships.
+3. `erun-skills/skills` found by walking up (max 8 levels) from the running executable, for a binary that was built without the stamp but sits inside a checkout.
+
+If none resolves, the orchestrator still launches and the skills already installed are left alone — but the condition is **reported, not silent**: a warning notification naming the checkout that was expected, where the executable looked, and the two recoveries (set `ERUN_SKILLS_DIR`, or rebuild with `erun-ui/build.sh` / `build.ps1`) is posted once per desktop run, and every occurrence is logged. A build that silently stopped refreshing skills is indistinguishable from one where the skill had not changed. A desktop installed from a package manager carries no checkout, so `ERUN_SKILLS_DIR` is its only source.
+
+The desktop also writes a `SessionStart` hook into the shared orchestrators workspace's `.claude/settings.json` that **injects the operating contract** — it prints the workspace `CLAUDE.md` to the session on every session start and reopen (Claude Code's `SessionStart` fires on both a new session and a `--continue`/`--resume`) — so the contract is always already in context rather than a [`erun-orchestrate`](#erun-orchestrate) skill the model is merely asked to load and could skip. The hook prints the file directly (plain stdout, so no `additionalContext` size cap), falling back to a short directive if the `CLAUDE.md` is ever missing.
 
 ### Laptop (plugin marketplace)
 

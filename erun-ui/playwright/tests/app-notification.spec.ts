@@ -86,6 +86,45 @@ test.describe('app-notification toast', () => {
     await expect(pill.getByRole('button', { name: /copy/i })).toBeVisible();
   });
 
+  test('skills-not-installed warning persists and names the recovery', async ({
+    app: _app,
+    page,
+  }) => {
+    // A desktop that cannot resolve the skills it ships stops refreshing the
+    // installed copies, and the launch itself looks untroubled — so the warning
+    // has to stay readable until the operator acts on it, recovery included.
+    // The emit is owned by TestOrchestratorSkillsReportUnresolvableSource (Go):
+    // it fires while an orchestrator's workspace is prepared, which needs a real
+    // AI harness and PTY that this harness deliberately lacks.
+    const message =
+      'Orchestrator skills were not installed or refreshed: no erun skills source resolved: ' +
+      'its build checkout /Users/op/src/erun/erun-skills/skills is not on this machine, and no ' +
+      'erun-skills/skills sits above /Users/op/.cache/erun/dev-bin/ERun.app/Contents/MacOS. ' +
+      'The orchestrator still starts, but its skills stay at whatever is already in ~/.claude/skills. ' +
+      'Set ERUN_SKILLS_DIR to an erun-skills/skills directory to install from, ' +
+      'or rebuild the desktop from its checkout with erun-ui/build.sh (build.ps1 on Windows).';
+    await page.clock.install();
+    await page.evaluate(
+      (payload) => {
+        const runtime = (
+          window as unknown as {
+            runtime: { EventsEmit: (n: string, ...a: unknown[]) => void };
+          }
+        ).runtime;
+        runtime.EventsEmit('app-notification', payload);
+      },
+      { kind: 'warning', message },
+    );
+
+    const pill = page.getByRole('status').filter({ hasText: 'Orchestrator skills were not' });
+    await expect(pill).toBeVisible();
+
+    await page.clock.fastForward(5_000);
+    await expect(pill).toBeVisible();
+    await expect(pill).toContainText('Set ERUN_SKILLS_DIR');
+    await expect(pill.getByRole('button', { name: /copy/i })).toBeVisible();
+  });
+
   test('payload with empty message is ignored', async ({ app: _app, page }) => {
     // The titlebar idle-status widget also carries role=status when an env with
     // a managed cloud context is active, so an ignored payload can't be checked

@@ -101,7 +101,21 @@ if git -C "$SCRIPT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 	fi
 fi
 
-LDFLAGS="-s -w -X github.com/sophium/erun/erun-ui.buildVersion=${BUILD_VERSION} -X github.com/sophium/erun/erun-ui.buildCommit=${BUILD_COMMIT} -X github.com/sophium/erun/erun-ui.buildDate=${BUILD_DATE}"
+# Where this build's skills come from. The desktop installs them for a host
+# orchestrator, and the binary it runs is routinely copied out of the checkout
+# (a dev build runs from ~/.cache/erun), so nothing above the running bundle
+# names a source tree. Stamping the path is what keeps an installed skill
+# tracking the checkout this binary was built from; on a machine that does not
+# carry that checkout the resolution falls back to the layout it runs in.
+# Single-quoted so a checkout path containing spaces survives -ldflags splitting.
+SKILLS_SOURCE="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd -P)/erun-skills/skills"
+
+# `main.`, not the module path. -X addresses a symbol by package path, and these
+# vars are declared in package main, whose symbols the compiler names `main.x`
+# whatever the module is called. A path nothing declares is not an error — the
+# linker drops it in silence and the binary keeps its default, which is how the
+# desktop shipped build info and a skills source it never actually carried.
+LDFLAGS="-s -w -X main.buildVersion=${BUILD_VERSION} -X main.buildCommit=${BUILD_COMMIT} -X main.buildDate=${BUILD_DATE} -X 'main.buildSkillsSource=${SKILLS_SOURCE}'"
 if [ "$TARGET_GOOS" = "windows" ]; then
 	LDFLAGS="${LDFLAGS} -H windowsgui"
 fi
