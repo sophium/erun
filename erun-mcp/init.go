@@ -17,6 +17,7 @@ type InitInput struct {
 	Environment              string   `json:"environment,omitempty" jsonschema:"optional environment name to initialize"`
 	Version                  string   `json:"version,omitempty" jsonschema:"optional runtime image version to initialize and deploy"`
 	RuntimeImage             string   `json:"runtimeImage,omitempty" jsonschema:"optional runtime image repository the environment runs; a bare name resolves against the environment registry and its runtime version, a full reference is used verbatim"`
+	RuntimeRegistry          string   `json:"runtimeRegistry,omitempty" jsonschema:"optional registry the environment resolves erun's own artifacts from — the runtime chart and the platform images the pod pulls; set it when the environment's deploy registry holds only this project's images, so erun's chart is not published there"`
 	ImagePullSecrets         []string `json:"imagePullSecrets,omitempty" jsonschema:"names of Kubernetes dockerconfigjson secrets the runtime pod pulls its image with; required when the runtime image lives in a private registry, since the pod cannot start without one"`
 	RuntimeCPU               string   `json:"runtimeCpu,omitempty" jsonschema:"optional runtime pod CPU limit"`
 	RuntimeMemory            string   `json:"runtimeMemory,omitempty" jsonschema:"optional runtime pod memory limit"`
@@ -79,6 +80,7 @@ func initTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 			ConfirmRemoteHostConfig: input.ConfirmRemoteHostConfig,
 			AutoApprove:             input.AutoApprove,
 			RuntimeImage:            strings.TrimSpace(input.RuntimeImage),
+			RuntimeRegistry:         strings.TrimSpace(input.RuntimeRegistry),
 			ImagePullSecrets:        input.ImagePullSecrets,
 			DisableBuildScript:      input.DisableBuildScript,
 			PlatformAccount:         input.PlatformAccount,

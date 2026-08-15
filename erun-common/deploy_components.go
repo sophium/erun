@@ -251,8 +251,9 @@ const DeployComponentSourcePublished = deployComponentSourcePublished
 // deploy installs: the tenant's own <tenant>-devops chart when it is published at
 // the deploy version (tenantChartPublished), else the canonical erun-devops. The
 // erun product tenant's runtime release name IS erun-devops, so it always resolves
-// there. This is the single source of truth shared by the deploy path
-// (resolvePublishedRuntimeChartReference) and the desktop picker label.
+// there. It labels the desktop picker; the deploy itself walks the candidate
+// ladder (runtimeChartCandidates), which searches the same two charts in order
+// and then widens to the registry erun publishes the platform chart in.
 func ResolvedRuntimeChartName(tenant string, tenantChartPublished bool) string {
 	chart := RuntimeReleaseName(tenant)
 	if chart != DevopsComponentName && tenantChartPublished {

@@ -4,6 +4,10 @@ open: tenant=team environment=dev kubernetes-context=test-context remote=true no
 open: pure primitive — not deploying (run `erun deploy` first, or pass --deploy to deploy before opening)
 runtime run state: deployment team-devops wants 1 replica(s), 0 ready
 deploy: component selection source default (runtime only); deploying the runtime chart alone
+deploy: runtime chart team-devops <VERSION> not found in registry.example/test (the tenant's own umbrella)
+deploy: runtime chart erun-devops <VERSION> not found in registry.example/test (the shared platform chart)
+deploy: runtime chart erun-devops <VERSION> not found in ghcr.io/sophium (the shared platform chart in erun's own registry)
+deploy: no runtime chart candidate published <VERSION>; falling back to erun-devops in registry.example/test
 deploy: no local runtime chart; using published chart oci://registry.example/test/charts/erun-devops version <VERSION>
 deploy: defaulting runtime image to the tenant's team-devops image registry.example/test/team-devops:<VERSION> (imageOverrides.erun-devops)
 deploy: worktree volume team-devops-worktree already exists; <HOME>/git/team stays on it

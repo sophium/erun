@@ -6,6 +6,7 @@ deploy: deploying tenant artifacts; verifying charts published at <VERSION> in r
 deploy: no local chart for erun-backend-postgres; using published chart oci://registry.example/test/charts/erun-backend-postgres version <VERSION>
 deploy: no local chart for erun-backend-db; using published chart oci://registry.example/test/charts/erun-backend-db version <VERSION>
 deploy: no local chart for erun-backend-api; using published chart oci://registry.example/test/charts/erun-backend-api version <VERSION>
+deploy: runtime chart team-devops <VERSION> found in registry.example/test (the tenant's own umbrella)
 deploy: no local runtime chart; using published chart oci://registry.example/test/charts/team-devops version <VERSION>
 deploy: defaulting runtime image to the team-devops chart's own image registry.example/test/team-devops:<VERSION> (imageOverrides.erun-devops)
 deploy: resolved 4 spec(s)

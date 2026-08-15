@@ -24,6 +24,7 @@ If `TENANT` and/or `ENVIRONMENT` are omitted, ERun resolves them from the curren
 | `--kubernetes-context <name>` | Kubernetes context to associate with the environment. |
 | `--container-registry <host>` | Container registry to associate with the environment (e.g. `ghcr.io/sophium`, `<acct>.dkr.ecr.<region>.amazonaws.com`). |
 | `--runtime-image <ref>` | Custom runtime image for the environment, persisted to the env config's `runtimeimage` field. Use this to run a project-built image that extends the published `erun-devops` image. |
+| `--runtime-registry <host>` | Registry the environment resolves ERun's own artifacts from — the runtime chart and the platform images the pod pulls — persisted to the env config's `runtimeregistry` field. Set it when the environment's `deploy` registry holds only your project's images, so ERun's chart is not published there. |
 | `--image-pull-secret <name>` | Kubernetes `dockerconfigjson` secret the runtime pod pulls its image with, persisted to the env config's `imagepullsecrets` field. Repeat or comma-separate for several. Required when `--runtime-image` names a **private** registry, since the pod cannot start without a pull credential. |
 | `--set-default-tenant` | Set the initialized tenant as the default for this user. |
 | `-y, --yes` | Auto-approve all initialization prompts. |

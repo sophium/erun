@@ -7,6 +7,10 @@ SSHD enabled for team/dev
 audit: erun sshd init --dry-run --local-port 64022 --public-key <TMP> team dev
 save SSHD config for team/dev
 enable SSHD workspace sync for team/dev to <TMP>
+deploy: runtime chart team-devops <VERSION> not found in registry.example/test (the tenant's own umbrella)
+deploy: runtime chart erun-devops <VERSION> not found in registry.example/test (the shared platform chart)
+deploy: runtime chart erun-devops <VERSION> not found in ghcr.io/sophium (the shared platform chart in erun's own registry)
+deploy: no runtime chart candidate published <VERSION>; falling back to erun-devops in registry.example/test
 deploy: no local runtime chart; using published chart oci://registry.example/test/charts/erun-devops version <VERSION>
 deploy: defaulting runtime image to the tenant's team-devops image registry.example/test/team-devops:<VERSION> (imageOverrides.erun-devops)
 kubectl --context test-context get namespace team-dev -o name

@@ -25,9 +25,14 @@ type remoteRepositorySpec struct {
 
 var codeCommitHostPattern = regexp.MustCompile(`^git-codecommit\.[a-z0-9-]+\.amazonaws\.com(?:\.cn)?$`)
 
-func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tenant, envName, kubernetesContext, projectRoot string, registries ContainerRegistries) (ShellLaunchParams, remoteRepositorySpec, error) {
+func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tenant, envName, kubernetesContext, projectRoot, runtimeRegistry string, registries ContainerRegistries) (ShellLaunchParams, remoteRepositorySpec, error) {
 	target := s.remoteRepositoryOpenResult(tenant, envName, kubernetesContext, projectRoot, params.ResolvedType())
 	target.EnvConfig.RuntimePod = NormalizeRuntimePodResources(params.RuntimePod)
+	// The runtime registry is the one field that redirects chart resolution, so
+	// init's own deploy must see it. Without it `erun init --runtime-registry`
+	// would only take effect on the next deploy — no use to an env that cannot
+	// complete one.
+	target.EnvConfig.RuntimeRegistry = strings.TrimSpace(runtimeRegistry)
 	// Carry the env's configured registries onto the deploy target so the
 	// init-time runtime deploy renders the same container registry (cluster or
 	// --container-registry) the standalone `erun deploy` does; without this the

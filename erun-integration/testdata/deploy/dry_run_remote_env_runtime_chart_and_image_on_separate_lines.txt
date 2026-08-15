@@ -2,6 +2,10 @@ audit: erun deploy --dry-run --runtime-chart oci://ghcr.io/sophium/charts/erun-d
 trace-log: would append the full trace to <TMP>
 deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=false current=false
 deploy: component selection source default (runtime only); deploying the runtime chart alone
+deploy: runtime chart team-devops <VERSION> not found in registry.example/test (the tenant's own umbrella)
+deploy: runtime chart erun-devops <VERSION> not found in registry.example/test (the shared platform chart)
+deploy: runtime chart erun-devops <VERSION> not found in registry.example/acme (the shared platform chart in the runtime image's registry)
+deploy: no runtime chart candidate published <VERSION>; falling back to erun-devops in registry.example/test
 deploy: no local runtime chart; using published chart oci://registry.example/test/charts/erun-devops version <VERSION>
 deploy: runtime image override registry.example/acme/team-devops:<VERSION> (imageOverrides.erun-devops)
 deploy: runtime chart override oci://ghcr.io/sophium/charts/erun-devops version <VERSION>
