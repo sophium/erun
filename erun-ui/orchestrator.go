@@ -105,6 +105,21 @@ func orchestratorsRoot() string {
 	return filepath.Join(home, "orchestrators")
 }
 
+// orchestratorReturnNoteName is the note an orchestrator leaves its unfinished
+// task in before triggering a rebuild+restart, in the shared working directory.
+// The id is in the name because that directory is shared: it is what lets a
+// woken session read its own agenda rather than whichever note happened to be
+// written last, and the session can address it without being told which one it
+// is, from the id it already carries. An unnamed session (transient) stages no
+// hand-off, so it only ever falls back to the bare name.
+func orchestratorReturnNoteName(orchestratorID string) string {
+	id := strings.TrimSpace(orchestratorID)
+	if id == "" {
+		return "RESUME-NOTE.md"
+	}
+	return "RESUME-NOTE." + id + ".md"
+}
+
 // defaultOrchestratorDirectory is the host mirror an env defaults to:
 // $HOME/orchestrators/<tenant>-<env>. Mirrors sit beside the shared CLAUDE.md,
 // keyed by env so every orchestrator linking the same env reviews one synced copy.
@@ -187,6 +202,11 @@ here happen to have files — read the config every time.
   pull them with that env's ` + "`outputs_list`" + `/` + "`outputs_download`" + ` (or the
   desktop's Outputs) first. You may build locally to help, but never edit a review
   directory.
+- **This directory is shared with every other orchestrator**, so anything here that is
+  yours alone carries your id in its name. The return note you leave before a
+  rebuild+restart is the one that matters most: erun reads it back as
+  ` + "`RESUME-NOTE.$ERUN_ORCHESTRATOR_ID.md`" + `, and a note addressed to the directory
+  alone is one any orchestrator can read as its own or overwrite.
 - File erun **platform** bugs with the ` + "`erun-file-issue`" + ` skill.
 
 ## Operating mode

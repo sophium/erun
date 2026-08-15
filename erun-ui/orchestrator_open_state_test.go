@@ -7,8 +7,9 @@ import (
 	"time"
 )
 
-// openStateTestApp is orchestratorTestApp with both restore records pinned to a
-// temp dir, so a test can assert on each half of the split independently.
+// openStateTestApp is orchestratorTestApp with the durable open record and the
+// per-orchestrator hand-off slots pinned to a temp dir, so a test can assert on
+// each half of the split independently.
 func openStateTestApp(t *testing.T) (*App, string, string) {
 	t.Helper()
 	home := t.TempDir()
@@ -16,7 +17,7 @@ func openStateTestApp(t *testing.T) (*App, string, string) {
 	t.Setenv("HOME", home)
 	state := t.TempDir()
 	openPath := filepath.Join(state, orchestratorOpenFileName)
-	restorePath := filepath.Join(state, orchestratorRestoreFileName)
+	restoreDir := filepath.Join(state, orchestratorRestoreDirName)
 	app := NewApp(erunUIDeps{
 		store: newOrchestratorStubStore(t.TempDir()),
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
@@ -25,10 +26,10 @@ func openStateTestApp(t *testing.T) (*App, string, string) {
 		resolveOrchestratorLaunch: func(string, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
-		orchestratorOpenPath:    openPath,
-		orchestratorRestorePath: restorePath,
+		orchestratorOpenPath:   openPath,
+		orchestratorRestoreDir: restoreDir,
 	})
-	return app, openPath, restorePath
+	return app, openPath, restoreDir
 }
 
 func createAndStartOrchestrator(t *testing.T, app *App) string {
@@ -152,7 +153,7 @@ func TestTransientOrchestratorIsNotRecordedAsOpen(t *testing.T) {
 // continue its task, fires exactly once, and expires — after which the durable
 // record still reopens the orchestrator, just idle at its prompt.
 func TestRestartHandOffStaysOneShotAndAgeBoundedOverTheDurableRecord(t *testing.T) {
-	app, openPath, restorePath := openStateTestApp(t)
+	app, openPath, restoreDir := openStateTestApp(t)
 	defer app.shutdown(context.Background())
 
 	const prompt = "verify the rebuild is live, then finish the task"
@@ -168,7 +169,7 @@ func TestRestartHandOffStaysOneShotAndAgeBoundedOverTheDurableRecord(t *testing.
 	if err := recordOpenOrchestrator(openPath, id); err != nil {
 		t.Fatalf("record open orchestrator: %v", err)
 	}
-	if err := writeOrchestratorRestoreTarget(restorePath, handOff, time.Now()); err != nil {
+	if err := writeOrchestratorRestoreTarget(restoreDir, handOff, time.Now()); err != nil {
 		t.Fatalf("write restart hand-off: %v", err)
 	}
 
@@ -184,7 +185,7 @@ func TestRestartHandOffStaysOneShotAndAgeBoundedOverTheDurableRecord(t *testing.
 
 	// Age-bounded: a hand-off older than the bound is discarded, and the durable
 	// record still reopens the orchestrator without auto-running the prompt.
-	if err := writeOrchestratorRestoreTarget(restorePath, handOff, time.Now().Add(-2*orchestratorRestoreMaxAge)); err != nil {
+	if err := writeOrchestratorRestoreTarget(restoreDir, handOff, time.Now().Add(-2*orchestratorRestoreMaxAge)); err != nil {
 		t.Fatalf("write stale restart hand-off: %v", err)
 	}
 	stale := app.ResolveOrchestratorToReopen()

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -18,7 +19,7 @@ func restartTestApp(t *testing.T) (*App, string) {
 	home := t.TempDir()
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("HOME", home)
-	restorePath := filepath.Join(home, orchestratorRestoreFileName)
+	restoreDir := filepath.Join(home, "state", orchestratorRestoreDirName)
 	app := NewApp(erunUIDeps{
 		store: newOrchestratorStubStore(t.TempDir()),
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
@@ -27,13 +28,13 @@ func restartTestApp(t *testing.T) (*App, string) {
 		resolveOrchestratorLaunch: func(string, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
-		orchestratorRestorePath: restorePath,
-		orchestratorOpenPath:    filepath.Join(home, orchestratorOpenFileName),
-		relaunchApp:             func() error { return nil },
-		quitApp:                 func() {},
+		orchestratorRestoreDir: restoreDir,
+		orchestratorOpenPath:   filepath.Join(home, orchestratorOpenFileName),
+		relaunchApp:            func() error { return nil },
+		quitApp:                func() {},
 	})
 	t.Cleanup(func() { app.shutdown(context.Background()) })
-	return app, restorePath
+	return app, restoreDir
 }
 
 // stageOrchestratorConversation writes the transcript the AI harness leaves for a
@@ -54,32 +55,52 @@ func stageOrchestratorConversation(t *testing.T, conversationID string) {
 	}
 }
 
-func readRestoreState(t *testing.T, path string) orchestratorRestoreState {
+// readRestoreState reads the hand-off staged in one orchestrator's own slot,
+// asserting the persisted file rather than what the resolver reports about it.
+func readRestoreState(t *testing.T, dir, orchestratorID string) orchestratorRestoreState {
 	t.Helper()
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(orchestratorRestorePath(dir, orchestratorID))
 	if err != nil {
-		t.Fatalf("read restore file: %v", err)
+		t.Fatalf("read restore file for %s: %v", orchestratorID, err)
 	}
 	var state orchestratorRestoreState
 	if err := json.Unmarshal(data, &state); err != nil {
-		t.Fatalf("decode restore file: %v", err)
+		t.Fatalf("decode restore file for %s: %v", orchestratorID, err)
 	}
 	return state
+}
+
+// stagedRestoreIDs lists the orchestrators with a hand-off still on disk, so a
+// test can assert that consuming one did not silently take another with it.
+func stagedRestoreIDs(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		t.Fatalf("read restore dir: %v", err)
+	}
+	out := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, strings.TrimSuffix(entry.Name(), ".json"))
+	}
+	sort.Strings(out)
+	return out
 }
 
 func TestRestartAppPersistsTargetRelaunchesAndQuits(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("HOME", home)
-	restorePath := filepath.Join(home, "orchestrator-restore.json")
 
 	relaunched, quit := false, false
 	app := NewApp(erunUIDeps{
-		store:                   newOrchestratorStubStore(t.TempDir()),
-		orchestratorRestorePath: restorePath,
-		orchestratorOpenPath:    filepath.Join(home, "orchestrator-open.json"),
-		relaunchApp:             func() error { relaunched = true; return nil },
-		quitApp:                 func() { quit = true },
+		store:                  newOrchestratorStubStore(t.TempDir()),
+		orchestratorRestoreDir: filepath.Join(home, "state", orchestratorRestoreDirName),
+		orchestratorOpenPath:   filepath.Join(home, "orchestrator-open.json"),
+		relaunchApp:            func() error { relaunched = true; return nil },
+		quitApp:                func() { quit = true },
 	})
 	defer app.shutdown(context.Background())
 
@@ -103,13 +124,13 @@ func TestRestartAppPersistsTargetRelaunchesAndQuits(t *testing.T) {
 // name — the restart reopens the orchestrator and hands it no task rather than
 // telling whichever conversation the id resolves to to carry on.
 func TestRestartAppWithNoLiveSessionRecordsNoTask(t *testing.T) {
-	app, restorePath := restartTestApp(t)
+	app, restoreDir := restartTestApp(t)
 
 	if err := app.RestartApp("agent-1"); err != nil {
 		t.Fatalf("RestartApp failed: %v", err)
 	}
 
-	state := readRestoreState(t, restorePath)
+	state := readRestoreState(t, restoreDir, "agent-1")
 	if state.OrchestratorID != "agent-1" {
 		t.Fatalf("expected the orchestrator to be recorded, got %+v", state)
 	}
@@ -122,21 +143,21 @@ func TestRestartAppWithNoLiveSessionRecordsNoTask(t *testing.T) {
 // conversation is wired to, and resume delivers the task to that exact
 // conversation.
 func TestRestartAppRecordsTheLiveConversationAndResumesIt(t *testing.T) {
-	app, restorePath := restartTestApp(t)
+	app, restoreDir := restartTestApp(t)
 	id := createAndStartOrchestrator(t, app)
 
 	if err := app.RestartApp(id); err != nil {
 		t.Fatalf("RestartApp failed: %v", err)
 	}
 
-	state := readRestoreState(t, restorePath)
+	state := readRestoreState(t, restoreDir, id)
 	if state.ConversationID != orchestratorSessionID(id) {
 		t.Fatalf("expected the live conversation to be recorded, got %+v", state)
 	}
 	if len(state.Environments) != 1 || state.Environments[0] != "frs/dev" {
 		t.Fatalf("expected the live scope to be recorded, got %+v", state.Environments)
 	}
-	if state.ResumePrompt != orchestratorRestartResumePrompt {
+	if state.ResumePrompt != orchestratorRestartResumePrompt(id) {
 		t.Fatalf("expected the restart to carry a task, got %q", state.ResumePrompt)
 	}
 
@@ -145,8 +166,176 @@ func TestRestartAppRecordsTheLiveConversationAndResumesIt(t *testing.T) {
 	if target.OrchestratorID != id || target.ConversationID != state.ConversationID {
 		t.Fatalf("expected the recorded conversation to be resumed, got %+v", target)
 	}
-	if target.ResumePrompt != orchestratorRestartResumePrompt || target.Notice != "" {
+	if target.ResumePrompt != orchestratorRestartResumePrompt(id) || target.Notice != "" {
 		t.Fatalf("expected the task to be delivered with no notice, got %+v", target)
+	}
+	// The resume prompt has to name the note it means: the working directory is
+	// shared, so "the note you wrote here" is satisfied by anyone's.
+	assertNamesOwnNote(t, "the resume prompt", id, target.ResumePrompt)
+	assertNoHandOffsLeftStaged(t, restoreDir)
+}
+
+// assertNamesOwnNote fails unless text points at the return note belonging to
+// this orchestrator rather than at the shared directory holding everyone's.
+func assertNamesOwnNote(t *testing.T, what, orchestratorID, text string) {
+	t.Helper()
+	note := orchestratorReturnNoteName(orchestratorID)
+	if !strings.Contains(text, note) {
+		t.Fatalf("expected %s to name %q, got %q", what, note, text)
+	}
+}
+
+// assertNoHandOffsLeftStaged checks the launch cleared every hand-off it read. A
+// hand-off left behind would fire at a later launch, against a world that has
+// moved on.
+func assertNoHandOffsLeftStaged(t *testing.T, restoreDir string) {
+	t.Helper()
+	if ids := stagedRestoreIDs(t, restoreDir); len(ids) != 0 {
+		t.Fatalf("expected every hand-off to be consumed, got %v still staged", ids)
+	}
+}
+
+// restartTwoOrchestrators starts two orchestrators and has each trigger a
+// rebuild+restart, which under the shared slot meant the second wrote over the
+// first. Returns their ids in creation order.
+func restartTwoOrchestrators(t *testing.T) (*App, string, string, string) {
+	t.Helper()
+	app, restoreDir := restartTestApp(t)
+	first := createAndStartOrchestrator(t, app)
+	second, err := app.CreateOrchestrator("other", []orchestratorEnvInput{{Tenant: "frs", Environment: "laptop"}})
+	if err != nil {
+		t.Fatalf("CreateOrchestrator failed: %v", err)
+	}
+	if _, err := app.StartOrchestrator(second.ID, 80, 24); err != nil {
+		t.Fatalf("StartOrchestrator failed: %v", err)
+	}
+	for _, id := range []string{first, second.ID} {
+		if err := app.RestartApp(id); err != nil {
+			t.Fatalf("RestartApp failed for %s: %v", id, err)
+		}
+	}
+	return app, restoreDir, first, second.ID
+}
+
+// The bug: several orchestrators shared one restart slot, so the second restart
+// replaced the first and that orchestrator was simply never resumed. Each now
+// stages its own hand-off, naming its own conversation and its own note.
+func TestConcurrentRestartsStageAHandOffEach(t *testing.T) {
+	_, restoreDir, first, second := restartTwoOrchestrators(t)
+
+	staged := stagedRestoreIDs(t, restoreDir)
+	if len(staged) != 2 || staged[0] != first || staged[1] != second {
+		t.Fatalf("expected both hand-offs staged, got %v", staged)
+	}
+	firstState := readRestoreState(t, restoreDir, first)
+	secondState := readRestoreState(t, restoreDir, second)
+	if firstState.ConversationID == secondState.ConversationID {
+		t.Fatalf("expected each hand-off to name its own conversation, got %q twice", firstState.ConversationID)
+	}
+	assertNamesOwnNote(t, first+"'s prompt", first, firstState.ResumePrompt)
+	assertNamesOwnNote(t, second+"'s prompt", second, secondState.ResumePrompt)
+}
+
+// A launch reopens one orchestrator, so one hand-off is delivered — whole, with
+// its own conversation and its own note — and the other is named in the notice
+// rather than disappearing with the session that staged it.
+func TestTheHandOffThatIsNotReopenedIsReported(t *testing.T) {
+	app, restoreDir, first, second := restartTwoOrchestrators(t)
+	stageOrchestratorConversation(t, orchestratorSessionID(first))
+	stageOrchestratorConversation(t, orchestratorSessionID(second))
+
+	target := app.ResolveOrchestratorToReopen()
+	delivered, notReopened := second, first
+	if target.OrchestratorID == first {
+		delivered, notReopened = first, second
+	} else if target.OrchestratorID != second {
+		t.Fatalf("expected one of the two restarts to be reopened, got %+v", target)
+	}
+	if target.ConversationID != orchestratorSessionID(delivered) {
+		t.Fatalf("expected %s's own conversation to be resumed, got %+v", delivered, target)
+	}
+	assertNamesOwnNote(t, "the resume prompt", delivered, target.ResumePrompt)
+	if !strings.Contains(target.Notice, notReopened) {
+		t.Fatalf("expected the notice to name %s, got %q", notReopened, target.Notice)
+	}
+	assertNamesOwnNote(t, "the notice", notReopened, target.Notice)
+	assertNoHandOffsLeftStaged(t, restoreDir)
+}
+
+// Which of several pending hand-offs a launch acts on is the most recent one —
+// the restart the operator triggered last.
+func TestTheMostRecentHandOffIsTheOneDelivered(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Unix(1_700_000_000, 0)
+	for _, staged := range []struct {
+		id  string
+		age time.Duration
+	}{{"zeta", 3 * time.Minute}, {"alpha", time.Minute}, {"mid", 2 * time.Minute}} {
+		state := orchestratorRestoreState{OrchestratorID: staged.id, ResumePrompt: "carry on"}
+		if err := writeOrchestratorRestoreTarget(dir, state, now.Add(-staged.age)); err != nil {
+			t.Fatalf("write hand-off for %s: %v", staged.id, err)
+		}
+	}
+
+	delivered, notReopened := consumeOrchestratorRestoreTargets(dir, now)
+	if delivered.OrchestratorID != "alpha" {
+		t.Fatalf("expected the newest hand-off to be delivered, got %q", delivered.OrchestratorID)
+	}
+	if len(notReopened) != 2 || notReopened[0].OrchestratorID != "mid" || notReopened[1].OrchestratorID != "zeta" {
+		t.Fatalf("expected the older hand-offs returned newest-first, got %+v", notReopened)
+	}
+}
+
+// The upgrade that introduces the per-orchestrator slot arrives through a
+// restart the previous release staged in the single shared one, so that slot is
+// still read once — otherwise the fix loses exactly the hand-off delivering it.
+func TestHandOffLeftInTheSharedSlotIsStillDeliveredOnce(t *testing.T) {
+	app, restoreDir := restartTestApp(t)
+	id := createAndStartOrchestrator(t, app)
+	conversationID := orchestratorSessionID(id)
+	stageOrchestratorConversation(t, conversationID)
+
+	legacy := legacyOrchestratorRestorePath(restoreDir)
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
+		t.Fatalf("create legacy dir: %v", err)
+	}
+	data, err := json.Marshal(orchestratorRestoreState{
+		OrchestratorID: id,
+		ConversationID: conversationID,
+		Environments:   []string{"frs/dev"},
+		ResumePrompt:   "finish the task",
+		SavedAtUnix:    time.Now().Unix(),
+	})
+	if err != nil {
+		t.Fatalf("encode legacy hand-off: %v", err)
+	}
+	if err := os.WriteFile(legacy, data, 0o644); err != nil {
+		t.Fatalf("write legacy hand-off: %v", err)
+	}
+
+	target := app.ResolveOrchestratorToReopen()
+	if target.OrchestratorID != id || target.ResumePrompt != "finish the task" {
+		t.Fatalf("expected the shared-slot hand-off to be delivered, got %+v", target)
+	}
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Fatalf("expected the shared slot to be cleared, stat err %v", err)
+	}
+}
+
+// An id is a slug by construction; a value that would resolve anywhere but its
+// own slot writes nothing rather than landing outside the restore directory.
+func TestRestoreSlotRejectsAnIDThatIsNotAPlainFileName(t *testing.T) {
+	dir := t.TempDir()
+	for _, id := range []string{"", "..", "../escape", "nested/agent"} {
+		if path := orchestratorRestorePath(dir, id); path != "" {
+			t.Fatalf("expected %q to resolve to no slot, got %q", id, path)
+		}
+		if err := writeOrchestratorRestoreTarget(dir, orchestratorRestoreState{OrchestratorID: id}, time.Now()); err != nil {
+			t.Fatalf("write with id %q: %v", id, err)
+		}
+	}
+	if entries, err := os.ReadDir(dir); err != nil || len(entries) != 0 {
+		t.Fatalf("expected nothing written, got %v (err %v)", entries, err)
 	}
 }
 
@@ -154,13 +343,13 @@ func TestRestartAppRecordsTheLiveConversationAndResumesIt(t *testing.T) {
 // under one scope must not wake a conversation into another. The refusal is
 // visible — the orchestrator still reopens, idle, carrying the reason.
 func TestResumeIsRefusedWhenTheScopeChanged(t *testing.T) {
-	app, restorePath := restartTestApp(t)
+	app, restoreDir := restartTestApp(t)
 	id := createAndStartOrchestrator(t, app)
 
 	if err := app.RestartApp(id); err != nil {
 		t.Fatalf("RestartApp failed: %v", err)
 	}
-	stageOrchestratorConversation(t, readRestoreState(t, restorePath).ConversationID)
+	stageOrchestratorConversation(t, readRestoreState(t, restoreDir, id).ConversationID)
 	if _, err := app.UpdateOrchestrator(id, "agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "laptop"}}); err != nil {
 		t.Fatalf("UpdateOrchestrator failed: %v", err)
 	}
@@ -174,6 +363,11 @@ func TestResumeIsRefusedWhenTheScopeChanged(t *testing.T) {
 	}
 	if !strings.Contains(target.Notice, "frs/dev") || !strings.Contains(target.Notice, "frs/laptop") {
 		t.Fatalf("expected the notice to name both scopes, got %q", target.Notice)
+	}
+	// A refusal points at the note it declined to act on, by name — the operator
+	// is reading it in a directory holding every orchestrator's.
+	if !strings.Contains(target.Notice, orchestratorReturnNoteName(id)) {
+		t.Fatalf("expected the notice to name %q, got %q", orchestratorReturnNoteName(id), target.Notice)
 	}
 }
 
@@ -197,23 +391,23 @@ func TestResumeIsRefusedWhenTheConversationIsGone(t *testing.T) {
 }
 
 func TestConsumeOrchestratorRestoreTargetIgnoresStale(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "orchestrator-restore.json")
+	dir := t.TempDir()
 	now := time.Unix(1_700_000_000, 0)
 
 	stale := orchestratorRestoreState{OrchestratorID: "agent-x"}
-	if err := writeOrchestratorRestoreTarget(path, stale, now.Add(-2*orchestratorRestoreMaxAge)); err != nil {
+	if err := writeOrchestratorRestoreTarget(dir, stale, now.Add(-2*orchestratorRestoreMaxAge)); err != nil {
 		t.Fatalf("write stale restore target: %v", err)
 	}
-	if _, ok := consumeOrchestratorRestoreTarget(path, now); ok {
-		t.Fatal("expected a stale target to be ignored")
+	if got, _ := consumeOrchestratorRestoreTargets(dir, now); got.OrchestratorID != "" {
+		t.Fatalf("expected a stale target to be ignored, got %+v", got)
 	}
 
 	fresh := orchestratorRestoreState{OrchestratorID: "agent-y"}
-	if err := writeOrchestratorRestoreTarget(path, fresh, now); err != nil {
+	if err := writeOrchestratorRestoreTarget(dir, fresh, now); err != nil {
 		t.Fatalf("write fresh restore target: %v", err)
 	}
-	got, ok := consumeOrchestratorRestoreTarget(path, now)
-	if !ok || got.OrchestratorID != "agent-y" {
+	got, _ := consumeOrchestratorRestoreTargets(dir, now)
+	if got.OrchestratorID != "agent-y" {
 		t.Fatalf("expected fresh target agent-y, got %+v", got)
 	}
 }
@@ -221,7 +415,7 @@ func TestConsumeOrchestratorRestoreTargetIgnoresStale(t *testing.T) {
 // The hand-off round-trips everything resume needs to decide: which conversation
 // asked, the scope it knew, and the task it staged.
 func TestConsumeOrchestratorRestoreTargetCarriesTheHandOff(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "orchestrator-restore.json")
+	dir := t.TempDir()
 	now := time.Unix(1_700_000_000, 0)
 	written := orchestratorRestoreState{
 		OrchestratorID: "va1",
@@ -230,11 +424,11 @@ func TestConsumeOrchestratorRestoreTargetCarriesTheHandOff(t *testing.T) {
 		ResumePrompt:   "verify the rebuild is live, then finish the task",
 	}
 
-	if err := writeOrchestratorRestoreTarget(path, written, now); err != nil {
+	if err := writeOrchestratorRestoreTarget(dir, written, now); err != nil {
 		t.Fatalf("write restore target: %v", err)
 	}
-	got, ok := consumeOrchestratorRestoreTarget(path, now)
-	if !ok {
+	got, _ := consumeOrchestratorRestoreTargets(dir, now)
+	if got.OrchestratorID == "" {
 		t.Fatal("expected the hand-off to be readable")
 	}
 	if got.OrchestratorID != written.OrchestratorID || got.ConversationID != written.ConversationID {
