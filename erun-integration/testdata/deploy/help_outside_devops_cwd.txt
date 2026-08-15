@@ -23,6 +23,7 @@ Flags:
       --mcp-auth-public-key string                Require the env's MCP edge to authenticate bearer tokens signed by this PEM public key, and record it on the env so later redeploys keep authenticating; omit to reuse the recorded key
       --no-mcp-auth                               Deploy the env's MCP edge unauthenticated (loopback-only) and forget its recorded public key; required to turn authentication off, which deploy otherwise refuses to do by omission
       --rollout-timeout string                    Override the helm rollout wait for this deploy (Go duration, e.g. 8m); empty uses the env's deploy.timeout or the 5m default
+      --runtime-chart string                      Install this runtime chart, as an OCI reference that may carry its own version (oci://registry/charts/erun-devops:<VERSION>). States the chart as its own coordinate instead of deriving it from --version and the registry a previous deploy recorded, which is what lets the runtime image be versioned on a different release line than the chart
       --runtime-image erun open --runtime-image   Install the runtime running this image via the published erun-devops chart (imageOverrides.erun-devops), pinned to --version, even when the env has a repo-local runtime chart; mirrors erun open --runtime-image
       --tenant string                             Deploy for a specific tenant
       --version erun build                        Version to install by reference (produced by erun build/`erun push`); fails if that version's image is absent

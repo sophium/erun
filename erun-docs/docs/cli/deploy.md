@@ -34,7 +34,7 @@ Component charts resolve the same way. On a sourceless env (a remote/runtime env
 
 A tenant's own chart is usually a thin **umbrella** that wraps the canonical `erun-<component>` chart (or, for the runtime, `erun-devops`) as a subchart. helm won't pass top-level values into a wrapped subchart, so a by-reference deploy of an umbrella forwards them for you: it re-scopes the values it sets under the subchart key **and** pulls the published chart to apply its bundled `values.<env>.yaml` — so the subchart's required `tenant`/`environment` (and your own per-env overrides authored under that key) are satisfied without a worktree. You'll see a `helm pull … --untar` step ahead of the `helm upgrade` in the dry-run. See [Agent reference · `erun deploy`](/agent-reference/cli-flags#deploy-subchart-forwarding) for the exact forwarding and precedence rules.
 
-The chart and runtime image are one contract — published together to the same registry at the same version. [`erun push`](/cli/push) publishes both at once, so whatever version `deploy` is handed already has a matching chart waiting; `deploy` only pulls and installs it, never publishes. Because push publishes the chart for *every* version it pushes — snapshot or release — any pushed version is deployable, with no chart-versus-image gap (see [Release flow](/deployment/release-flow)). The cluster pulls from the `deploy`-marked registry in the env's [registry list](/deployment/registries) (the env's recorded runtime registry wins as provenance); when the list marks a `from` and a `to`, ERun copies the image there first. The dry-run trace names the decision: `deploy: no local runtime chart; using published chart <ref> version <v>`.
+The chart and runtime image are one contract — published together to the same registry at the same version. [`erun push`](/cli/push) publishes both at once, so whatever version `deploy` is handed already has a matching chart waiting; `deploy` only pulls and installs it, never publishes. Because push publishes the chart for *every* version it pushes — snapshot or release — any pushed version is deployable, with no chart-versus-image gap (see [Release flow](/deployment/release-flow)). When a project versions its runtime image on its own release line rather than ERun’s, the pair comes apart and the chart has to be [named separately](#runtime-chart-coordinate). The cluster pulls from the `deploy`-marked registry in the env's [registry list](/deployment/registries) (the env's recorded runtime registry wins as provenance); when the list marks a `from` and a `to`, ERun copies the image there first. The dry-run trace names the decision: `deploy: no local runtime chart; using published chart <ref> version <v>`.
 
 Because the umbrella and its `<tenant>-devops` image are published together, a deploy of the tenant's own `charts/<tenant>-devops` also **defaults the runtime image to that umbrella's own image** — `<registry>/<tenant>-devops:<version>` — with no `runtimeimage` to set: building and pushing the image is enough for the deploy to run it (the dry-run traces `deploy: defaulting runtime image to the <tenant>-devops chart's own image …`). A deploy of the shared `charts/erun-devops` chart has no such signal, so an image-only build env still points at its image through `runtimeimage`. To customise either, use the env's values overlay and the `runtimeimage` field — see [Configuration · Advanced chart values](/reference/configuration#advanced-chart-values). When a tenant's umbrella image lives in a **private** registry, list its pull secret in the env's [`imagepullsecrets`](/reference/configuration#advanced-image-pull-secrets) so the runtime pod can authenticate the pull; and a stale `runtimeimage` still pointing at the stock `erun-devops` image is ignored on an umbrella deploy (it would pin a tag the tenant's version line never published) in favour of the umbrella's own image.
 
@@ -48,6 +48,31 @@ erun deploy team dev --version 1.2.3 --runtime-image ghcr.io/sophium/erun-devops
 
 This installs the published `erun-devops` chart with `ghcr.io/sophium/erun-devops:1.2.3` as the runtime image, **bypassing any repo-local `<tenant>-devops` chart**. The chosen image is recorded as the env's runtime image, so a later `open` or `deploy --current` reuses it. Once you have built and pushed the env's own image, deploy that version without the flag (or pick the tenant image in the desktop runtime dialog) to switch over. The desktop's version picker offers both the ERun base image and the env's own image and threads this flag for you when you pick the base.
 
+### Naming the chart and the image separately {#runtime-chart-coordinate}
+
+`--version` resolves both coordinates at once, which is right whenever [`erun push`](/cli/push) published the pair. A project that versions its runtime image on **its own** release line breaks that pairing: `team-devops:9.9.9-snapshot-20260101010101` is a real image, but no `erun-devops` chart carries that version and none ever will. `--runtime-chart` states the chart as its own coordinate, so each artifact is named on the line it actually ships on:
+
+```bash
+erun deploy team dev \
+  --version 9.9.9-snapshot-20260101010101 \
+  --runtime-chart oci://ghcr.io/sophium/charts/erun-devops:1.2.3 \
+  --runtime-image registry.example/acme/team-devops
+```
+
+The chart installs at `1.2.3`; `--version` still stamps the environment's runtime version and tags the image, so the pod runs `registry.example/acme/team-devops:9.9.9-snapshot-20260101010101`. Nothing is inferred -- you name the chart repository and version, and the image repository and version, and deploy uses exactly those.
+
+The reference is a chart repository with an optional `:<version>` suffix. Omit the version and the chart still resolves at `--version`, which is how you point at a different *registry* while keeping the paired version (`--runtime-chart registry.example:5000/charts/erun-devops`; a registry port is not mistaken for a version). An `oci://` scheme is added when you leave it off. The dry-run names the decision, so you can confirm it before rolling:
+
+```
+deploy: runtime chart override oci://ghcr.io/sophium/charts/erun-devops version 1.2.3
+```
+
+The override applies to the runtime release only; component charts keep resolving at `--version`. It is not persisted -- pass it on each deploy that needs it, so an env's recorded state never implies a chart it was not deployed with.
+
+The desktop resolves this before you commit: picking a version reports which chart it would install, disables Deploy when the registry says there is none, and offers the chart that fixes it — see [Desktop app](/desktop/overview).
+
+For an environment that rides a separately-versioned chart *permanently* -- rather than for one run -- state it once on the environment instead, with [`runtimechart`](/reference/configuration#envconfig). Every later deploy then installs that chart, including one driven from the desktop, which passes only a version. The flag beats the field for a single run and leaves it unchanged, the same way `--runtime-image` relates to `runtimeimage`.
+
 ## Flags
 
 | Flag | Description |
@@ -55,6 +80,7 @@ This installs the published `erun-devops` chart with `ghcr.io/sophium/erun-devop
 | `--version <version>` | The published version to install, by reference. Required unless `--current` is given. The version's image and chart must already exist (locally or in the registry) or the deploy errors — `deploy` never builds them. |
 | `--current` | Redeploy the version the environment is already recorded as running (its persisted runtime version). Use it to re-roll the same version, or after a `--force`-style retry, without retyping the number. Required unless `--version` is given. |
 | `--runtime-image <ref>` | Install the runtime running this image via the published `erun-devops` chart (`imageOverrides.erun-devops`), pinned to `--version`, **even when the env has a repo-local runtime chart** (which it bypasses). Use it to [bootstrap an env on the canonical ERun base image](#runtime-image-bootstrap) before its own image is built; mirrors [`erun open --runtime-image`](/cli/open). |
+| `--runtime-chart <ref>` | Install the runtime from this chart repository, optionally at its own version (`oci://ghcr.io/sophium/charts/erun-devops:1.2.3`). Use it when the chart and the runtime image ship on different release lines, so each is [named on its own line](#runtime-chart-coordinate) instead of both being derived from `--version`. Applies to the runtime release only, and is not persisted. |
 | `--components <name,name,...>` | The exact charts to deploy this run — chart directory names under `<tenant>-devops/k8s/`, plus the runtime release name `<tenant>-devops`. Overrides the env's saved selection and the deployment plan for this run; an unknown name (matching no chart and no runtime alias) is rejected with `unknown deploy component`. See [Agent reference · `--components`](/agent-reference/cli-flags#components-value-set). |
 | `--mcp-auth-public-key <path>` | Require the environment's [MCP edge](/agent-reference/api-protocol#mcp-edge) to authenticate bearer tokens signed by this PEM public key. The key is recorded on the environment, so later deploys keep authenticating without repeating the flag — see [MCP edge authentication is sticky](#mcp-auth-sticky). |
 | `--no-mcp-auth` | Deploy the environment's MCP edge unauthenticated (loopback-only) and forget its recorded public key. Required to turn authentication **off**; deploy refuses to do it by omission. |

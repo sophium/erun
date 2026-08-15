@@ -164,9 +164,16 @@ export function backendEnv(): Record<string, string> {
     // tenant-prefixed (the pw seed tenant publishes pw-* charts), matching
     // ResolveDeployableComponents. See erun-ui/deploy_components.go
     // chartAvailabilityOverride.
+    // erun-devops is listed wherever the runtime chart should exist: the Runtime
+    // tab now resolves which chart a version would install, and a version with no
+    // chart at all is a blocked deploy (1.0.50, deliberately empty).
     ERUN_CHART_AVAILABILITY_OVERRIDE:
-      '1.0.0=pw-backend-postgres,pw-backend-db,pw-backend-api,pw-powerdns,pw-docs;' +
-      '1.0.90=pw-backend-postgres,pw-backend-db;1.0.50=',
+      '1.0.0=erun-devops,pw-backend-postgres,pw-backend-db,pw-backend-api,pw-powerdns,pw-docs;' +
+      '1.0.90=erun-devops,pw-backend-postgres,pw-backend-db;1.0.50=;' +
+      // ERun-line versions the picker specs deploy: a real ERun version publishes
+      // its chart, so the seam has to say so or the Runtime tab would (correctly)
+      // refuse to deploy them.
+      '1.0.134=erun-devops;1.0.16=erun-devops',
   };
 }
 

@@ -1,4 +1,4 @@
-import { Check, ChevronsUpDown, Plus, Rocket } from 'lucide-react';
+import { Plus, Rocket } from 'lucide-react';
 import * as React from 'react';
 
 import {
@@ -17,34 +17,19 @@ import {
   updateManageDialog,
 } from '@/app/manageEnvironmentThunks';
 import { showTerminalMessage } from '@/app/notificationThunks';
+import { RUNTIME_CHART_NOTICE_ID, runtimeChartBlocksDeploy } from '@/app/runtimeChartPlan';
 import type { AppState } from '@/app/state';
-import {
-  groupVersionSuggestionsBySource,
-  versionChoiceImage,
-  versionChoiceKind,
-  versionChoiceLabel,
-} from '@/app/versionSuggestions';
 import { CheckboxField, TextField } from '@/components/app/ManageDialog.fields';
 import { parseIdleTrafficBytes } from '@/components/app/ManageDialog.helpers';
-import { DeployComponentsField } from '@/components/app/ManageDialogDeployComponents';
 import { RuntimeActivityField } from '@/components/app/ManageDialogRuntimeActivity';
+import { RuntimeChartField } from '@/components/app/ManageDialogRuntimeChart';
+import { RuntimeChartNotice } from '@/components/app/ManageDialogRuntimeChartNotice';
 import { RuntimePowerField } from '@/components/app/ManageDialogRuntimePower';
+import { RuntimeDeployVersionPicker } from '@/components/app/ManageDialogVersionPicker';
 import { PinVersionAction } from '@/components/app/PinVersionAction';
 import { RuntimeResourceControls } from '@/components/app/RuntimeResourceControls';
 import { SelectField } from '@/components/app/SelectField';
-import { VersionNotices } from '@/components/app/VersionNotices';
 import { Button } from '@/components/ui/button';
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from '@/components/ui/command';
-import { Input } from '@/components/ui/input';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { cn } from '@/lib/utils';
 import type { UIVersionSuggestion, UIVersionSuggestionNotice } from '@/types';
 
 type ManageDialog = AppState['manageDialog'];
@@ -92,6 +77,9 @@ export function RuntimeTab(): React.ReactElement {
           })
         }
       />
+      {/* Directly under the version: the version names the image, this names the
+          chart, and the two together are what gets installed. */}
+      <RuntimeChartField dialog={dialog} />
       <RuntimePowerField dialog={dialog} />
       <RuntimePodFields dialog={dialog} />
       {/* Directly under the sliders: when the figures read as capped, the next
@@ -372,15 +360,22 @@ function RuntimeDeployField({
           // until the operator picks one — never a build, never a guess — and
           // until that version's component charts have been probed, so it can't
           // fire the new version with the previous version's chart selection.
+          // ...and on a version the registry says has no runtime chart, with the
+          // reason named beside the button rather than discovered by failing.
           disabled={
-            disabled === true || overrideVersion.trim() === '' || dialog.deployComponentsLoading
+            disabled === true ||
+            overrideVersion.trim() === '' ||
+            dialog.deployComponentsLoading ||
+            runtimeChartBlocksDeploy(dialog)
           }
+          aria-describedby={runtimeChartBlocksDeploy(dialog) ? RUNTIME_CHART_NOTICE_ID : undefined}
           onClick={onDeploy}
         >
           <Rocket aria-hidden="true" />
           Deploy
         </Button>
       </div>
+      {!dialog.choicesOpen && <RuntimeChartNotice dialog={dialog} />}
       {/* Deploy above installs an existing published version by reference and never
           builds. Producing a new version from this env's source is this explicit,
           separate action (local-agent envs only). */}
@@ -399,131 +394,5 @@ function RuntimeDeployField({
         </Button>
       )}
     </div>
-  );
-}
-
-function RuntimeDeployVersionPicker({
-  dialog,
-  overrideVersion,
-  suggestions,
-  notices,
-  choicesOpen,
-  disabled,
-  onValueChange,
-  onChoicesOpenChange,
-  onSelect,
-}: {
-  dialog: ManageDialog;
-  overrideVersion: string;
-  suggestions: UIVersionSuggestion[];
-  notices: UIVersionSuggestionNotice[];
-  choicesOpen: boolean;
-  disabled?: boolean;
-  onValueChange: (version: string) => void;
-  onChoicesOpenChange: (open: boolean) => void;
-  onSelect: (suggestion: UIVersionSuggestion | undefined) => void;
-}): React.ReactElement {
-  // Group by source so a tenant env's two same-labelled lines — its own
-  // <tenant>-devops runtime and the upstream erun-devops fallback — are told
-  // apart. Headings only appear when there is more than one source; a single-line
-  // picker keeps the plain "Version to deploy" heading.
-  const suggestionGroups = groupVersionSuggestionsBySource(suggestions);
-  const showSourceHeadings = suggestionGroups.length > 1;
-  return (
-    <div className="relative min-w-0">
-      <Input
-        id="manage-version"
-        className="pr-10"
-        value={overrideVersion}
-        type="text"
-        autoComplete="off"
-        spellCheck={false}
-        placeholder="Version to deploy"
-        disabled={disabled}
-        onChange={(event) => {
-          onValueChange(event.target.value);
-        }}
-      />
-      <Popover open={choicesOpen} onOpenChange={onChoicesOpenChange}>
-        <PopoverTrigger asChild>
-          <Button
-            className="absolute right-1 top-1 size-7 text-muted-foreground"
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label="Show version choices"
-            disabled={disabled}
-          >
-            <ChevronsUpDown />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent
-          // Cap to the viewport's available height and scroll, so the version
-          // list plus the components checklist never overflow off-screen (which
-          // clipped the last components and the dialog buttons on shorter windows).
-          className="max-h-[var(--radix-popover-content-available-height)] w-[26rem] max-w-[calc(100vw-2rem)] overflow-y-auto p-0"
-          align="start"
-        >
-          <Command>
-            <CommandInput placeholder="Search versions..." />
-            <CommandList>
-              <CommandEmpty>No version found.</CommandEmpty>
-              {suggestionGroups.map((group) => (
-                <CommandGroup
-                  key={group.source || 'default'}
-                  heading={showSourceHeadings ? group.heading : 'Version to deploy'}
-                >
-                  {group.suggestions.map((suggestion) => (
-                    <RuntimeDeploySuggestionItem
-                      key={`${suggestion.version}:${suggestion.image ?? ''}:${suggestion.source ?? ''}:${suggestion.label}`}
-                      suggestion={suggestion}
-                      selected={suggestion.version === overrideVersion}
-                      onSelect={onSelect}
-                    />
-                  ))}
-                </CommandGroup>
-              ))}
-            </CommandList>
-          </Command>
-          <VersionNotices notices={notices} />
-          {/* Pick a version above, then choose which of its charts to roll out:
-              one panel so the component list always reads as that version's. The
-              whole popover scrolls (capped to the viewport), so no nested scroll. */}
-          <div className="border-t border-border p-3">
-            <DeployComponentsField dialog={dialog} />
-          </div>
-        </PopoverContent>
-      </Popover>
-    </div>
-  );
-}
-
-function RuntimeDeploySuggestionItem({
-  suggestion,
-  selected,
-  onSelect,
-}: {
-  suggestion: UIVersionSuggestion;
-  selected: boolean;
-  onSelect: (suggestion: UIVersionSuggestion | undefined) => void;
-}): React.ReactElement {
-  return (
-    <CommandItem
-      className="min-w-0"
-      value={versionChoiceLabel(suggestion)}
-      onSelect={() => {
-        onSelect(suggestion);
-      }}
-    >
-      <Check className={cn('size-4 shrink-0 opacity-0', selected && 'opacity-100')} />
-      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="truncate text-sm font-medium leading-tight">{suggestion.version}</span>
-        <span className="truncate text-xs leading-tight text-muted-foreground">
-          {[versionChoiceImage(suggestion), versionChoiceKind(suggestion)]
-            .filter(Boolean)
-            .join(' | ')}
-        </span>
-      </span>
-    </CommandItem>
   );
 }

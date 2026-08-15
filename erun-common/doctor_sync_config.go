@@ -190,6 +190,15 @@ func parseInjectedContainerRegistries(value string) ContainerRegistries {
 	return registries
 }
 
+// ResolveRuntimeConfigHome mirrors the entrypoint's config-home precedence so
+// every transport reads and writes the same tree the pod's config was written to.
+func ResolveRuntimeConfigHome(homeDir string) string {
+	if configHome := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); configHome != "" {
+		return configHome
+	}
+	return filepath.Join(homeDir, ".config")
+}
+
 func runtimeEnvConfigPath(configHome, tenant, environment string) string {
 	return filepath.Join(configHome, configRoot, tenant, environment, configFile)
 }

@@ -172,10 +172,17 @@ type HelmDeploySpec struct {
 	// environment re-renders replicas: 0 instead of restarting the pod the
 	// operator deliberately scaled away. deploy never decides run/stop itself —
 	// it only reconciles the recorded intent, and `erun open` is what wakes.
-	Stopped   bool
-	Version   string
-	Timeout   string
-	Verbosity int
+	Stopped bool
+	Version string
+	// ChartVersion is the runtime chart's own version, set only when it differs
+	// from Version. The two coincide for a tenant riding erun's release line and
+	// must not when the runtime image is versioned on the tenant's own line: the
+	// chart is erun's artifact and exists only at erun's versions, so a deploy
+	// that pinned both to one number could not name that pair. Empty keeps the
+	// chart on Version.
+	ChartVersion string
+	Timeout      string
+	Verbosity    int
 	// Cloudflare* deliver a delegated Cloudflare token to the runtime pod.
 	// CloudflareTokenRef is a handle into the secret store, never the token
 	// itself, resolved at execution time.
@@ -281,6 +288,11 @@ type DeployTarget struct {
 	// image exists, then switch to the tenant image once it is built. Empty
 	// leaves runtime-chart resolution untouched.
 	RuntimeImageOverride string
+	// RuntimeChartOverride names the runtime chart to install, as an OCI
+	// reference that may carry its own version. It makes the chart a coordinate
+	// the operator states rather than one derived from the deploy version and
+	// the registry a previous deploy happened to record.
+	RuntimeChartOverride string
 }
 
 // DeploySpec is a pure helm-install plan: it installs the image and chart
@@ -323,6 +335,16 @@ func PersistRuntimeVersionFromDeploySpecs(ctx Context, specs []DeploySpec, save 
 			continue
 		}
 		if spec.SkipHelm {
+			// The release's appVersion is the chart's version, which is only the
+			// runtime version while the two ride one line. When the env states its
+			// chart separately it does not, so healing from it would record the
+			// chart's number as the env's runtime version -- the exact confusion
+			// naming the coordinates separately exists to end. Leave the recorded
+			// version alone instead.
+			if strings.TrimSpace(spec.Deploy.ChartVersion) != "" {
+				ctx.Trace("persist runtime version: chart " + spec.Deploy.ChartPath + " is on its own version line; leaving the recorded runtime version untouched")
+				return nil
+			}
 			version := resolveRunningRuntimeVersion(ctx, spec, resolveDeployedVersion)
 			if version == "" {
 				return nil
@@ -373,6 +395,92 @@ func persistRuntimeVersionIfChanged(spec DeploySpec, version string, save EnvCon
 		return fmt.Errorf("persist runtime version after deploy: %w", err)
 	}
 	return nil
+}
+
+// resolvedChartVersion is the version the runtime chart is pulled at: its own
+// when the chart and the deploy are on different release lines, otherwise the
+// deploy version.
+func (d HelmDeploySpec) resolvedChartVersion() string {
+	if version := strings.TrimSpace(d.ChartVersion); version != "" {
+		return version
+	}
+	return strings.TrimSpace(d.Version)
+}
+
+// applyRuntimeChartOverride installs the runtime chart the operator named,
+// instead of the one derived from the deploy version and the registry a previous
+// deploy recorded.
+//
+// The chart and the runtime image are separate artifacts in separate registries,
+// and a tenant that versions its image on its own release line has no chart at
+// that version -- erun publishes the runtime chart on erun's line. Deriving both
+// from one version can therefore name a pair that does not exist, and the
+// operator had no way to say otherwise.
+func applyRuntimeChartOverride(ctx Context, target DeployTarget, spec *DeploySpec) {
+	override := strings.TrimSpace(target.RuntimeChartOverride)
+	if override == "" || spec == nil {
+		return
+	}
+	if spec.Deploy.ReleaseName != RuntimeReleaseName(spec.Target.Tenant) {
+		return
+	}
+	reference, version := splitChartReferenceVersion(override)
+	spec.DeployContext.ChartPath = reference
+	spec.Deploy.ChartPath = reference
+	spec.Deploy.ChartVersion = version
+	// The value scope belongs to the chart, so it is recomputed from the named
+	// one rather than left as the resolved chart's. Keeping the old key would
+	// nest every runtime --set under a subchart the named chart may not wrap (or
+	// drop the nesting one it does), and helm ignores values addressed to a
+	// subchart that is not there -- so the image override and the required
+	// tenant/environment values would land nowhere and the pod would come up
+	// wrong instead of failing loudly.
+	spec.Deploy.SubchartKey = publishedUmbrellaSubchartKey(spec.Target.Tenant, chartNameFromReference(reference))
+	if version == "" {
+		ctx.Trace("deploy: runtime chart override " + reference + " at the deploy version")
+		return
+	}
+	ctx.Trace("deploy: runtime chart override " + reference + " version " + version)
+}
+
+// chartNameFromReference is the chart name a reference addresses -- its last
+// path segment, the same reading helm gives it.
+func chartNameFromReference(reference string) string {
+	return reference[strings.LastIndex(reference, "/")+1:]
+}
+
+// SplitChartReference separates a stated chart reference into the repository and
+// the version it may carry, so every surface reads one the same way -- the deploy
+// that installs it and the desktop that shows what will be installed.
+func SplitChartReference(raw string) (reference, version string) {
+	return splitChartReferenceVersion(raw)
+}
+
+// ChartNameFromReference is the chart name a reference addresses, for a caller
+// outside this package that needs to name the chart a deploy will install.
+func ChartNameFromReference(reference string) string {
+	return chartNameFromReference(reference)
+}
+
+// splitChartReferenceVersion separates a chart reference from the version it may
+// carry. Only the last path segment is inspected, so a registry port is not read
+// as a version, and an oci:// scheme is added when absent so the reference is
+// unambiguous to helm.
+func splitChartReferenceVersion(raw string) (string, string) {
+	raw = strings.TrimSpace(raw)
+	if !strings.Contains(raw, "://") {
+		raw = "oci://" + raw
+	}
+	cut := strings.LastIndex(raw, "/")
+	if cut < 0 {
+		return raw, ""
+	}
+	last := raw[cut+1:]
+	sep := strings.LastIndex(last, ":")
+	if sep <= 0 {
+		return raw, ""
+	}
+	return raw[:cut+1] + last[:sep], last[sep+1:]
 }
 
 // HelmReleaseVersionResolverFunc reads the appVersion of a deployed helm release
@@ -575,7 +683,7 @@ func planPublishedValuesPull(ctx Context, deployInput *HelmDeploySpec) *publishe
 	dest := filepath.Join(os.TempDir(), "erun-deploy-values-"+chartName)
 	envSlug := strings.ToLower(strings.TrimSpace(deployInput.Environment))
 	deployInput.PulledValuesFilePath = filepath.Join(dest, chartName, "values."+envSlug+".yaml")
-	pull := commandSpec{Name: "helm", Args: []string{"pull", ref, "--version", deployInput.Version, "--untar", "--untardir", dest}}
+	pull := commandSpec{Name: "helm", Args: []string{"pull", ref, "--version", deployInput.resolvedChartVersion(), "--untar", "--untardir", dest}}
 	ctx.TraceCommand(pull.Dir, pull.Name, pull.Args...)
 	return &publishedValuesPull{command: pull, dest: dest}
 }
@@ -745,6 +853,7 @@ func ResolveDeploySpec(ctx Context, store DeployStore, findProjectRoot ProjectFi
 	if ok {
 		spec.Deploy.Timeout = override
 	}
+	applyRuntimeChartOverride(ctx, target, &spec)
 	if err := applyMCPAuthToRuntimeSpec(ctx, target, &spec); err != nil {
 		return DeploySpec{}, err
 	}
@@ -826,6 +935,7 @@ func resolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 	// `build --deploy` — carries the env's MCP-auth state. A path that skips this
 	// silently downgrades the edge to unauthenticated.
 	for i := range specs {
+		applyRuntimeChartOverride(ctx, target, &specs[i])
 		if err := applyMCPAuthToRuntimeSpec(ctx, target, &specs[i]); err != nil {
 			return nil, err
 		}
@@ -2029,12 +2139,14 @@ func (d HelmDeploySpec) command() commandSpec {
 		d.ReleaseName,
 		d.ChartPath,
 	)
-	// A published OCI chart is pinned by --version (one version covers
-	// chart and image, stamped at release); local charts get their
-	// Chart.yaml stamped by prepareHelmChartForDeploy instead.
+	// A published OCI chart is pinned by its own version — usually the deploy
+	// version, since one version covers chart and image when both are stamped at
+	// the same release, but separately when the chart and the runtime image are
+	// versioned on different lines. Local charts get their Chart.yaml stamped by
+	// prepareHelmChartForDeploy instead.
 	dir := d.ChartPath
 	if isOCIChartReference(d.ChartPath) {
-		args = append(args, "--version", d.Version)
+		args = append(args, "--version", d.resolvedChartVersion())
 		dir = ""
 	}
 

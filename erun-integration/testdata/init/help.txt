@@ -12,6 +12,7 @@ Flags:
       --dry-run                        Resolve and trace mutating actions without executing them.
       --environment string             Environment name
   -h, --help                           help for init
+      --image-pull-secret strings      Kubernetes dockerconfigjson secret the runtime pod pulls its image with; repeat or comma-separate for several. Required when the runtime image is in a private registry
       --kubernetes-context string      Kubernetes context to associate with the environment
       --mcp-auth-public-key string     Require the env's MCP edge to authenticate bearer tokens signed by this PEM public key; empty leaves the edge loopback-only. Folds MCP auth into init's single runtime deploy.
       --no-git                         Skip remote Git checkout setup when used with --remote or --type=remote-agent

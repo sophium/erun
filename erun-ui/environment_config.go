@@ -285,6 +285,7 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 		CloudProviderAliases:         environmentCloudProviderAliases(a.deps.store, config.CloudProviderAlias),
 		CloudAliasSlots:              environmentCloudAliasSlots(a.deps.store, config),
 		RuntimeVersion:               strings.TrimSpace(config.RuntimeVersion),
+		RuntimeChart:                 strings.TrimSpace(config.RuntimeChart),
 		RuntimePod:                   runtimePodConfigToUI(config.RuntimePod),
 		SSHD: uiSSHDConfig{
 			Enabled:                    config.SSHD.Enabled,
@@ -589,6 +590,10 @@ func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.Env
 	existing.AutoStart = copyBoolPtr(config.AutoStart)
 	existing.AutoUpgrade = config.AutoUpgrade
 	existing.DisableBuildScript = config.DisableBuildScript
+	// The chart the env rides is the operator's standing statement of one of the
+	// four deploy coordinates; a redeploy installs it, so saving it is enough --
+	// nothing derives it.
+	existing.RuntimeChart = strings.TrimSpace(config.RuntimeChart)
 	existing.PlatformAccount = config.PlatformAccount
 	existing.MountSource = config.MountSource
 	existing.RepoURL = strings.TrimSpace(config.RepoURL)

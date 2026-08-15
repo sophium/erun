@@ -59,6 +59,7 @@ export const openManageDialog =
         deployComponents: [],
         deployComponentSelection: [],
         deployComponentsLoading: true,
+        runtimeChartPlan: null,
         health: null,
         healthLoading: false,
       }),
@@ -322,6 +323,34 @@ const loadManageResourceStatus =
     }
   };
 
+// applySavedConfigSideEffects runs what a save has to reconcile beyond the form:
+// the version-aware chart probe when the environment's stated chart changed, and
+// the AI tabs when a Claude launch flag did. Both are "only when it actually
+// changed" -- a metadata-only save must not re-probe a registry or churn tabs.
+function applySavedConfigSideEffects(
+  selection: UISelection,
+  priorConfig: UIEnvironmentConfig | null,
+  savedConfig: UIEnvironmentConfig,
+): AppThunk {
+  return (dispatch) => {
+    // Stating (or clearing) the runtime chart changes which chart a deploy would
+    // install, so the probe behind the panel is re-run rather than left describing
+    // the chart the environment used to ride.
+    if ((priorConfig?.runtimeChart ?? '') !== (savedConfig.runtimeChart ?? '')) {
+      void dispatch(refreshManageDeployComponents());
+    }
+    // A changed Claude launch flag only applies when the AI session's create-time
+    // program runs, so reopen the env's open AI tabs now rather than leaving a live
+    // claude on the stale flags.
+    if (
+      priorConfig &&
+      aiSessionLaunchSignature(priorConfig) !== aiSessionLaunchSignature(savedConfig)
+    ) {
+      void dispatch(relaunchAISessionsForLaunchChange(selection));
+    }
+  };
+}
+
 export const submitManageConfig = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
   const dialog = getState().manageDialog;
   if (dialog.busy || dialog.configLoading) {
@@ -370,16 +399,7 @@ export const submitManageConfig = (): AppThunk<Promise<void>> => async (dispatch
         pendingRedeploy: nextPendingRedeploy(dialog.pendingRedeploy, priorConfig, displayConfig),
       }),
     );
-    // A changed Claude launch flag only applies when the AI session's
-    // create-time program runs, so reopen the env's open AI tabs now rather
-    // than leaving a live claude on the stale flags. A save that did not
-    // change the launch signature must not churn tabs.
-    if (
-      priorConfig &&
-      aiSessionLaunchSignature(priorConfig) !== aiSessionLaunchSignature(displayConfig)
-    ) {
-      void dispatch(relaunchAISessionsForLaunchChange(selection));
-    }
+    dispatch(applySavedConfigSideEffects(selection, priorConfig, displayConfig));
   } catch (error) {
     const message = readError(error);
     dispatch(

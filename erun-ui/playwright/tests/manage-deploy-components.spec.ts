@@ -312,15 +312,29 @@ test.describe('manage dialog — components to deploy (#718)', () => {
         return route.fulfill({
           contentType: 'application/json',
           body: JSON.stringify({
-            data: [
-              {
-                name: 'pw-devops',
-                runtime: true,
-                source: 'published-chart',
-                selected: true,
-                publishedChart,
+            // LoadDeployComponents answers with the checklist *and* which chart the
+            // runtime would be installed from -- the coordinate the version does not
+            // name. This stub keeps the plan resolved (canonical, present) so the
+            // label under test is the only thing in play.
+            data: {
+              components: [
+                {
+                  name: 'pw-devops',
+                  runtime: true,
+                  source: 'published-chart',
+                  selected: true,
+                  publishedChart,
+                },
+              ],
+              runtimeChart: {
+                reference: 'oci://ghcr.io/sophium/charts/erun-devops',
+                version: '1.0.20',
+                chart: 'erun-devops',
+                source: 'canonical',
+                missing: false,
+                unknown: false,
               },
-            ],
+            },
           }),
         });
       }

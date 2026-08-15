@@ -78,7 +78,7 @@ ERun resolves the entry into two concrete hosts, matching the `build`/`deploy` s
 
 When the desktop offers versions to deploy or upgrade, it asks only the environment's listed registries — not a global default — and labels each offered version with the registry it came from. If two registries publish different newer versions, the deploy picker and the Upgrade-all dialog let you pick which one; `erun upgrade` on the command line skips such an environment as ambiguous until you pass `--version`. See [`erun upgrade`](/cli/upgrade).
 
-Version discovery uses the same local registry credentials as build and deploy (see [Authentication](#authentication)), so a **private** runtime image's versions appear only once you are logged in to its registry. A momentary registry hiccup is retried a few times first, so a transient blip doesn't strand a tenant environment on the upstream fallback. Only when the desktop still cannot list an image — a private one you have not authenticated to, or an unreachable registry — does it show a notice under the version picker naming the image and how to sign in, instead of silently offering nothing.
+Version discovery reads the registry directly, whichever registry it is: Docker Hub, ghcr.io, or any host that speaks the OCI distribution API -- a private mirror, an in-cluster registry, or an ECR account. It uses the same local registry credentials as build and deploy (see [Authentication](#authentication)), so a **private** runtime image's versions appear once you are logged in to its registry; for ECR it mints its own credential from the AWS CLI when no docker credential is available, because an ECR token expires after twelve hours. A momentary registry hiccup is retried a few times first, so a transient blip doesn't strand a tenant environment on the upstream fallback. Only when the desktop still cannot list an image — a private one you have not authenticated to, or an unreachable registry — does it show a notice under the version picker naming the image and how to sign in, instead of silently offering nothing.
 
 ## Multi-architecture builds
 
@@ -87,7 +87,7 @@ Every `erun build`, `erun build --release`, and `erun deploy` produces both `lin
 ## Authentication
 
 - **ghcr.io** — `gh auth login` (and a `write:packages` token scope) covers it. On a machine where keychain or subprocess access is restricted, set `GH_TOKEN` (or `GITHUB_TOKEN`) instead — the desktop reads it directly, with no keychain or `gh` dependency.
-- **AWS ECR** — the cluster's IRSA role grants the runtime pod permission to push; for local `docker push` you use a profile via `aws ecr get-login-password`.
+- **AWS ECR** — the cluster's IRSA role grants the runtime pod permission to push; for local `docker push` you use a profile via `aws ecr get-login-password`. Version listing falls back to that same command when the docker credential is missing or expired, so the version picker keeps working without a fresh `docker login`.
 - **Other registries** — `docker login` once; credentials are persisted at `~/.docker/config.json`.
 
 ## Where next

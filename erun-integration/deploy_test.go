@@ -889,6 +889,34 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_remote_env_umbrella_ignores_stale_stock_runtimeimage", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_remote_env_stated_chart_ignores_stale_stock_runtimeimage", func(t *testing.T) {
+		// The shared-chart half of the stale-pin migration. An env that states its
+		// runtime chart at the chart's own version is deploying a version from another
+		// line, so a leftover runtimeimage naming the stock erun-devops would pin
+		// erun-devops:<tenant-version> — a tag erun's line never publishes
+		// (ImagePullBackOff). The stated chart is the signal: the pin is ignored and the
+		// version names the tenant's own image. That image resolves against the registry
+		// the cluster pulls from, not the chart's — an env states its chart precisely to
+		// keep the two apart.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+
+			"runtimeregistry: ghcr.io/sophium\n"+
+			"runtimeimage: ghcr.io/sophium/erun-devops\n"+
+			"runtimechart: oci://ghcr.io/sophium/charts/erun-devops:1.0.0\n"+
+			"containerregistries:\n    - registry: registry.example/tenant\n      roles:\n        - build\n        - deploy\n")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "2.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_stated_chart_ignores_stale_stock_runtimeimage", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_remote_env_deploys_published_components", func(t *testing.T) {
 		// A remote/runtime env has no local checkout, yet --components selects
 		// platform components: each resolves to its PUBLISHED erun-<component>
@@ -962,6 +990,39 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_remote_env_tenant_artifacts_require_published_charts", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_stated_runtime_chart_is_exempt_from_the_tenant_chart_mandate", func(t *testing.T) {
+		// The mandate binds a tenant-component deploy to the tenant's version line,
+		// and the tenant runtime chart is normally part of that: it must exist at the
+		// version. An env that states its runtime chart is not riding a tenant chart
+		// at all, so requiring one would fail a deploy that is entirely coherent --
+		// the component runs on the tenant's line, the runtime on the line the env
+		// named. The probe override publishes only team-backend-api at 1.0.0 (no
+		// team-devops), which without the exemption is exactly the fast failure the
+		// sibling scenario above pins. The components are still verified.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"runtimechart: oci://ghcr.io/sophium/charts/erun-devops:1.0.178\n")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-backend-api:1.0.0")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.0",
+			"--components", "team-backend-api,team-devops",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "oci://ghcr.io/sophium/charts/erun-devops --version 1.0.178") {
+			t.Fatalf("stated runtime chart not installed: %s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_stated_runtime_chart_is_exempt_from_the_tenant_chart_mandate", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_runtime_env_mount_source_clones_at_release_ref", func(t *testing.T) {
 		// A runtime env is sourceless by default (worktreeStorage=none). Opting
 		// into MountSource (with a RepoURL) flips its runtime worktree to a PVC
@@ -1009,6 +1070,170 @@ func TestDeploy(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "deploy/dry_run_remote_env_custom_runtime_image", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_env_states_its_runtime_chart_in_config", func(t *testing.T) {
+		// The durable half of the coordinate. An env whose image rides the project's
+		// own release line states its chart once, in config, so every later deploy --
+		// including one driven from the desktop, which passes only a version --
+		// installs the chart that exists instead of probing for one at a version the
+		// chart's line never published. The lookup is skipped entirely: the env was
+		// taken at its word, and the trace says so.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+
+			"runtimeimage: registry.example/acme/team-devops\n"+
+			"runtimechart: oci://ghcr.io/sophium/charts/erun-devops:1.0.178\n")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "9.9.9-snapshot-20260101010101",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "oci://ghcr.io/sophium/charts/erun-devops --version 1.0.178") {
+			t.Fatalf("env's stated chart not installed at its own version: %s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "imageOverrides.erun-devops=registry.example/acme/team-devops:9.9.9-snapshot-20260101010101") {
+			t.Fatalf("image not tagged on the deploy version: %s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_env_states_its_runtime_chart_in_config", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_runtime_chart_flag_beats_the_env_config_chart", func(t *testing.T) {
+		// Precedence, the same way --runtime-image beats runtimeimage: the config
+		// field is the env's standing statement, the flag is this run's. An operator
+		// trying a different chart must not have to edit config to do it, and must
+		// not silently leave the env changed afterwards -- the flag is not persisted.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"runtimechart: oci://ghcr.io/sophium/charts/erun-devops:1.0.178\n")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "9.9.9-snapshot-20260101010101",
+			"--runtime-chart", "oci://ghcr.io/sophium/charts/erun-devops:1.2.3",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "oci://ghcr.io/sophium/charts/erun-devops --version 1.2.3") {
+			t.Fatalf("flag did not win over the config chart: %s", result.Combined)
+		}
+		after, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config after deploy: %v", err)
+		}
+		if !strings.Contains(string(after), "runtimechart: oci://ghcr.io/sophium/charts/erun-devops:1.0.178") {
+			t.Fatalf("run-only flag changed the env's stated chart: %s", after)
+		}
+		golden.Equal(t, "deploy/dry_run_runtime_chart_flag_beats_the_env_config_chart", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_remote_env_runtime_chart_and_image_on_separate_lines", func(t *testing.T) {
+		// The chart and the runtime image are separate artifacts in separate
+		// registries. A tenant that versions its image on its own release line has
+		// no chart at that version, so --runtime-chart states the chart as its own
+		// coordinate: the trace names the override, the helm command pulls the chart
+		// at the version the reference carries, and --version still stamps the
+		// release and resolves the image.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"runtimeimage: registry.example/acme/team-devops\n")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "9.9.9-snapshot-20260101010101",
+			"--runtime-chart", "oci://ghcr.io/sophium/charts/erun-devops:1.0.0",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		// The goldens normalize every version to <VERSION>, which is exactly what
+		// this scenario is about, so the two coordinates are asserted literally:
+		// the chart at its own version, the image at the deploy version.
+		if !strings.Contains(result.Combined, "oci://ghcr.io/sophium/charts/erun-devops --version 1.0.0") {
+			t.Fatalf("chart not pulled at its own version: %s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "imageOverrides.erun-devops=registry.example/acme/team-devops:9.9.9-snapshot-20260101010101") {
+			t.Fatalf("image not held on the tenant version line: %s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_runtime_chart_and_image_on_separate_lines", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_runtime_chart_override_off_a_tenant_umbrella_drops_the_subchart_scope", func(t *testing.T) {
+		// The value scope belongs to the chart that is actually installed. This env
+		// resolves the tenant's own charts/team-devops umbrella, whose runtime
+		// values are re-scoped under the erun-devops subchart key; naming the
+		// canonical chart instead must drop that nesting, because helm silently
+		// ignores values addressed to a subchart the chart does not wrap -- the
+		// image override and the required tenant/environment values would land
+		// nowhere and the pod would come up wrong rather than failing. The bundled
+		// values pull goes with it: a canonical chart ships no per-env values.
+		//
+		// The image is deliberately untouched -- it stays the tenant's own
+		// team-devops at the deploy version. That is the whole point of naming the
+		// chart separately: the chart rides erun's release line, the image rides the
+		// tenant's, and overriding one must not move the other.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-devops:1.0.0")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.0",
+			"--runtime-chart", "oci://ghcr.io/sophium/charts/erun-devops:1.2.3",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "oci://ghcr.io/sophium/charts/erun-devops --version 1.2.3") {
+			t.Fatalf("named chart not installed at its own version: %s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "--set-string imageOverrides.erun-devops=registry.example/test/team-devops:1.0.0") {
+			t.Fatalf("image override not in the installed chart's scope: %s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "erun-devops.imageOverrides") {
+			t.Fatalf("values still nested under a subchart the named chart does not wrap: %s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_runtime_chart_override_off_a_tenant_umbrella_drops_the_subchart_scope", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_runtime_chart_without_version_keeps_the_deploy_version", func(t *testing.T) {
+		// A reference with no version names only the chart's repository, so the
+		// chart still resolves at the deploy version; a registry port in the
+		// reference must not be read as one.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.0",
+			"--runtime-chart", "registry.example:5000/charts/erun-devops",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "oci://registry.example:5000/charts/erun-devops --version 1.0.0") {
+			t.Fatalf("port read as a version, or deploy version not kept: %s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_runtime_chart_without_version_keeps_the_deploy_version", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_remote_env_runtime_image_without_tag", func(t *testing.T) {

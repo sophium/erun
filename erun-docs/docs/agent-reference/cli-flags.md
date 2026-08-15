@@ -273,7 +273,7 @@ gh auth token -u <owner> -h github.com | docker login ghcr.io -u <owner> --passw
 
 ### Common flags
 
-`--version`, `--runtime-image`, `--current`, `--components`, `--force`, `--rollout-timeout`, `--mcp-auth-public-key`, `--no-mcp-auth`, `--dry-run`, `--output`. Subcommand: `erun deploy <component>`.
+`--version`, `--runtime-image`, `--runtime-chart`, `--current`, `--components`, `--force`, `--rollout-timeout`, `--mcp-auth-public-key`, `--no-mcp-auth`, `--dry-run`, `--output`. Subcommand: `erun deploy <component>`.
 
 ### Version selection — `--version` / `--current` (required)
 
@@ -321,6 +321,22 @@ With **no** `--runtime-image` and **no** `EnvConfig.runtimeimage`, deploy resolv
 - Deploying the shared `charts/erun-devops` chart (no tenant umbrella published) → **no override** is set; the chart's own default image runs. An image-only build env therefore still points at its image through `runtimeimage`.
 
 An explicit `runtimeimage` (or `--runtime-image`) always wins over this default — so a tenant that publishes its own umbrella can still pin a *different* image (e.g. a hotfix build) by setting the field, which traces the `runtime image override` line above rather than the `defaulting` line. This default is why a `<tenant>-devops` umbrella deploy runs the tenant's own image without any `runtimeimage`, instead of silently falling back to a stock `erun-devops:<tenant-version>` the tenant line never published (which would `ImagePullBackOff`).
+
+### Runtime chart override -- `--runtime-chart` {#deploy-runtime-chart}
+
+`--runtime-chart <ref>` names the runtime chart as its own deploy coordinate instead of deriving it from `--version`. ERun has four coordinates in play -- chart repository, chart version, image repository, image version -- and `--version` normally collapses all four, which is correct whenever [`erun push`](#erun-push) published the chart and image as a pair. It is wrong the moment they ship on different release lines: a project whose `<tenant>-devops` image is versioned on the project's own line (`9.9.9-snapshot-<ts>`) has no chart at that version and never will, so the published-chart lookup resolves nothing and the deploy fails `FetchReference … not found`. With this flag the operator states the chart (repository, and optionally version) while `--version` keeps stamping the env's runtime version and tagging the image.
+
+| Flag | Type | Default | Validation | Persists to |
+|---|---|---|---|---|
+| `--runtime-chart <ref>` | string (OCI chart ref, optional `:<version>` suffix) | unset → the [published-chart lookup](#deploy-subchart-forwarding) at `--version` (tenant umbrella, else shared `erun-devops`). | An `oci://` scheme is added when absent. The version is split from the **last path segment only**, so a registry port (`registry.example:5000/charts/erun-devops`) is not read as a version. No version → the chart resolves at `--version`. | Nothing — run-only, deliberately not persisted, so an env's recorded state never implies a chart it was not deployed with. |
+
+The override applies to the **runtime release only**; component charts continue to resolve at `--version`. It composes with [`--runtime-image`](#deploy-runtime-image) and with `EnvConfig.runtimeimage`, which is how each artifact ends up on its own line — the dry-run then carries both decisions:
+
+```
+deploy: runtime image override registry.example/acme/team-devops:9.9.9-snapshot-20260101010101 (imageOverrides.erun-devops)
+deploy: runtime chart override oci://ghcr.io/sophium/charts/erun-devops version 1.2.3
+helm upgrade --install … oci://ghcr.io/sophium/charts/erun-devops --version 1.2.3 …
+```
 
 ### `--components` value set and selection precedence {#components-value-set}
 

@@ -146,6 +146,15 @@ type EnvConfig struct {
 	// published <registry>/erun-devops:<version> default. A full reference is used
 	// verbatim; a bare name resolves against the env's registry and runtime version.
 	RuntimeImage string `yaml:"runtimeimage,omitempty" json:"runtimeImage,omitempty"`
+	// RuntimeChart names the runtime chart this env rides, as an OCI reference
+	// that may carry its own version. The chart and the runtime image are separate
+	// artifacts on separate lines: the chart is erun's, published at erun's
+	// versions, while RuntimeImage may be a project's own, versioned on the
+	// project's line. Deriving both from RuntimeVersion can only name one line, so
+	// an env whose image rides its own states the chart here. Empty keeps the
+	// published lookup at the runtime version, which is right whenever push
+	// published the pair together.
+	RuntimeChart string `yaml:"runtimechart,omitempty" json:"runtimeChart,omitempty"`
 	// MCPAuthIssuer is the tenant's registered OIDC issuer (an `https://` URL)
 	// the env's erun-mcp edge trusts bearer tokens from. Set on a hosted deploy
 	// so the edge authenticates the console/agent against the tenant IdP; the

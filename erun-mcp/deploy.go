@@ -16,6 +16,7 @@ type DeployInput struct {
 	Components   []string `json:"components,omitempty" jsonschema:"opt-in components to include alongside the runtime chart (erun-backend-postgres, erun-backend-db, erun-backend-api, erun-powerdns); ignored when component is set"`
 	Version      string   `json:"version" jsonschema:"required published version to install by reference (produced by build then push); deploy installs by reference and never builds"`
 	RuntimeImage string   `json:"runtime_image,omitempty" jsonschema:"install the runtime running this image via the published erun-devops chart (imageOverrides.erun-devops), pinned to version, even when the env has a repo-local runtime chart; use it to bootstrap an env on the canonical ERun base image before its own image is built"`
+	RuntimeChart string   `json:"runtime_chart,omitempty" jsonschema:"install this runtime chart, as an OCI reference that may carry its own version; states the chart as its own coordinate instead of deriving it from version and the registry a previous deploy recorded, which is what lets the runtime image be versioned on a different release line than the chart"`
 	Force        bool     `json:"force,omitempty" jsonschema:"when true, re-run the helm upgrade even when the deployed release already matches the requested version"`
 	Timeout      string   `json:"timeout,omitempty" jsonschema:"override the helm rollout wait for this deploy as a Go duration (e.g. 8m); empty uses the env's deploy.timeout or the 5m default. The deploy keeps waiting while an image is still pulling and aborts early on a real container failure"`
 	Preview      bool     `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
@@ -48,6 +49,7 @@ func deployTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 				RepoPath:             workDir,
 				VersionOverride:      strings.TrimSpace(input.Version),
 				RuntimeImageOverride: strings.TrimSpace(input.RuntimeImage),
+				RuntimeChartOverride: strings.TrimSpace(input.RuntimeChart),
 				Components:           input.Components,
 				Force:                input.Force,
 				RolloutTimeout:       strings.TrimSpace(input.Timeout),

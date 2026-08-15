@@ -2270,10 +2270,10 @@ func TestLoadDeployComponentsLocalAgentShowsPublishedVersionView(t *testing.T) {
 		"frs-devops", "frs-backend-postgres", "frs-backend-db",
 		"frs-backend-api", "frs-powerdns", "frs-docs",
 	}
-	if got := names(at100); !reflect.DeepEqual(got, wantAt100) {
+	if got := names(at100.Components); !reflect.DeepEqual(got, wantAt100) {
 		t.Fatalf("components at 1.0.0 = %v, want %v (published-version view, runtime first)", got, wantAt100)
 	}
-	runtime := at100[0]
+	runtime := at100.Components[0]
 	if !runtime.Runtime || !runtime.Selected || runtime.Source != "published-chart" {
 		t.Fatalf("runtime item = %+v, want {frs-devops runtime selected published-chart}", runtime)
 	}
@@ -2284,7 +2284,7 @@ func TestLoadDeployComponentsLocalAgentShowsPublishedVersionView(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadDeployComponents(current) failed: %v", err)
 	}
-	if got, want := names(atCurrent), []string{"frs-devops"}; !reflect.DeepEqual(got, want) {
+	if got, want := names(atCurrent.Components), []string{"frs-devops"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("components at current 1.0.106 = %v, want %v (runtime only)", got, want)
 	}
 }
@@ -2340,7 +2340,7 @@ func TestLoadDeployComponentsVersionAwareFiltersUnavailableCharts(t *testing.T) 
 	if err != nil {
 		t.Fatalf("LoadDeployComponents(1.0.112) failed: %v", err)
 	}
-	if got, want := names(at112), []string{"frs-devops", "frs-backend-postgres", "frs-backend-api"}; !reflect.DeepEqual(got, want) {
+	if got, want := names(at112.Components), []string{"frs-devops", "frs-backend-postgres", "frs-backend-api"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("components at 1.0.112 = %v, want %v (runtime first; unpublished db/powerdns/docs filtered out)", got, want)
 	}
 
@@ -2350,7 +2350,7 @@ func TestLoadDeployComponentsVersionAwareFiltersUnavailableCharts(t *testing.T) 
 	if err != nil {
 		t.Fatalf("LoadDeployComponents(current) failed: %v", err)
 	}
-	if got, want := names(atCurrent), []string{"frs-devops"}; !reflect.DeepEqual(got, want) {
+	if got, want := names(atCurrent.Components), []string{"frs-devops"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("components at current version 1.0.106 = %v, want %v (runtime only)", got, want)
 	}
 }
@@ -2387,7 +2387,7 @@ func TestLoadDeployComponentsRuntimeChartReflectsTenantChart(t *testing.T) {
 		if err != nil {
 			t.Fatalf("LoadDeployComponents failed: %v", err)
 		}
-		for _, component := range components {
+		for _, component := range components.Components {
 			if component.Runtime {
 				return component.PublishedChart
 			}
@@ -2670,6 +2670,57 @@ func TestSaveEnvironmentConfigAcceptsDeployOnlyRegistry(t *testing.T) {
 	}
 	if uiRegistryWithRole(saved.ContainerRegistries, "deploy") != "ghcr.io/sophium" {
 		t.Fatalf("expected the deploy-only registry to persist, got %+v", saved.ContainerRegistries)
+	}
+}
+
+// The chart the runtime is installed from is one of the four deploy coordinates,
+// stated by the operator rather than derived, so the dialog must both show what
+// the env rides and write a change back. Clearing it means "the chart published
+// with the deployed version", which must reach the env config as an empty field
+// rather than being ignored as a no-op.
+func TestSaveEnvironmentConfigRoundTripsRuntimeChart(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"frs": {Name: "frs"},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"frs/local": {
+				Name:              "local",
+				LocalRepoPath:     projectRoot,
+				KubernetesContext: "cluster-local",
+				RuntimeChart:      "oci://ghcr.io/sophium/charts/erun-devops:1.0.178",
+			},
+		},
+	}
+	app := NewApp(erunUIDeps{store: store})
+
+	loaded, err := app.LoadEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "local"})
+	if err != nil {
+		t.Fatalf("LoadEnvironmentConfig failed: %v", err)
+	}
+	if loaded.RuntimeChart != "oci://ghcr.io/sophium/charts/erun-devops:1.0.178" {
+		t.Fatalf("expected the env's stated chart to load, got %q", loaded.RuntimeChart)
+	}
+
+	loaded.RuntimeChart = "  oci://registry.example/charts/erun-devops:1.2.3  "
+	saved, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "local"}, loaded)
+	if err != nil {
+		t.Fatalf("SaveEnvironmentConfig failed: %v", err)
+	}
+	if saved.RuntimeChart != "oci://registry.example/charts/erun-devops:1.2.3" {
+		t.Fatalf("expected the saved chart trimmed, got %q", saved.RuntimeChart)
+	}
+	if stored := store.envs["frs/local"].RuntimeChart; stored != "oci://registry.example/charts/erun-devops:1.2.3" {
+		t.Fatalf("expected the env config to record the chart, got %q", stored)
+	}
+
+	saved.RuntimeChart = ""
+	if _, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "local"}, saved); err != nil {
+		t.Fatalf("SaveEnvironmentConfig failed clearing the chart: %v", err)
+	}
+	if stored := store.envs["frs/local"].RuntimeChart; stored != "" {
+		t.Fatalf("expected clearing the chart to reach the env config, got %q", stored)
 	}
 }
 

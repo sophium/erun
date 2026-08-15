@@ -943,3 +943,39 @@ func TestFeedActivityTraceCapturesFailureDetail(t *testing.T) {
 		}
 	}
 }
+
+// An env that states its chart separately runs an image versioned on its own
+// line, so the release's appVersion is the chart's number, not the environment's.
+// The desktop must label the environment with what it runs -- reporting the chart
+// version is the "it shows 1.0.178" confusion that made the two coordinates
+// separate in the first place.
+func TestObservedRuntimeVersionPrefersTheRecordedVersionWhenTheChartIsStated(t *testing.T) {
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{"petios": {Name: "petios"}},
+		envs: map[string]eruncommon.EnvConfig{
+			"petios/develop": {
+				Name:           "develop",
+				RuntimeVersion: "1.0.322-snapshot-20260813072257",
+				RuntimeChart:   "oci://ghcr.io/sophium/charts/erun-devops:1.0.178",
+			},
+			"petios/paired": {
+				Name:           "paired",
+				RuntimeVersion: "1.0.178",
+			},
+		},
+	}
+	app := NewApp(erunUIDeps{store: store})
+	release := helmReleaseSnapshot{Name: "petios-devops", AppVersion: "1.0.178"}
+
+	if got := app.observedRuntimeVersion("petios", "develop", release); got != "1.0.322-snapshot-20260813072257" {
+		t.Fatalf("expected the recorded runtime version, got %q", got)
+	}
+	// An env whose chart and image ride one line is unchanged: the chart's
+	// appVersion is the environment's version, and it is the live reading.
+	if got := app.observedRuntimeVersion("petios", "paired", release); got != "1.0.178" {
+		t.Fatalf("expected the release appVersion for a paired env, got %q", got)
+	}
+	if got := app.observedRuntimeVersion("petios", "unknown", release); got != "1.0.178" {
+		t.Fatalf("expected the release appVersion when the env is unknown, got %q", got)
+	}
+}
