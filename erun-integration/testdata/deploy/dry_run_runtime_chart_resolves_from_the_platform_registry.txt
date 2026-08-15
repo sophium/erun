@@ -6,6 +6,7 @@ deploy: runtime chart team-devops <VERSION> not found in registry.example/test (
 deploy: runtime chart erun-devops <VERSION> not found in registry.example/test (the shared platform chart)
 deploy: runtime chart erun-devops <VERSION> found in ghcr.io/sophium (the shared platform chart in erun's own registry)
 deploy: no local runtime chart; using published chart oci://ghcr.io/sophium/charts/erun-devops version <VERSION>
+deploy: recording runtime registry ghcr.io/sophium, where the runtime chart resolved, rather than registry.example/test, where the search started
 deploy: defaulting runtime image to the tenant's team-devops image registry.example/test/team-devops:<VERSION> (imageOverrides.erun-devops)
 deploy: resolved 1 spec(s)
 kubectl --context test-context get namespace team-dev -o name

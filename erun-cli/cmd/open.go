@@ -493,9 +493,9 @@ func (r *resolvedOpenRunner) deployRuntime(execution common.DeploySpec) error {
 			return nil
 		}
 		r.ctx.Trace("open: runtime images all cached (no rebuild); persisting the running runtime version " + running)
-		return r.persistRuntimeVersion(running, execution.Deploy.ContainerRegistry)
+		return r.persistRuntimeVersion(running, common.RuntimeRegistryForDeploySpec(execution))
 	}
-	return r.persistRuntimeVersion(execution.Deploy.Version, execution.Deploy.ContainerRegistry)
+	return r.persistRuntimeVersion(execution.Deploy.Version, common.RuntimeRegistryForDeploySpec(execution))
 }
 
 func (r *resolvedOpenRunner) openHelmDeployer(execution common.DeploySpec) common.HelmChartDeployerFunc {
