@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { planOrchestratorRestore } from './orchestratorRestore';
+import { planOrchestratorRestore, readRestoreNotice } from './orchestratorRestore';
 import type { OrchestratorInfo } from './slices/orchestratorsSlice';
 
 function orchestrator(id: string, transient = false): OrchestratorInfo {
@@ -24,15 +24,22 @@ const persisted = [orchestrator('agent-1')];
 // and it answers without a prompt — the launch resumes idle.
 test('a plain launch reopens the orchestrator that was open, running nothing', () => {
   const plan = planOrchestratorRestore({ orchestratorId: 'agent-1', resumePrompt: '' }, persisted);
-  assert.deepEqual(plan, { id: 'agent-1', resumePrompt: '' });
+  assert.deepEqual(plan, { id: 'agent-1', conversationId: '', resumePrompt: '' });
 });
 
-test('a restart hand-off carries the prompt the resumed session auto-runs', () => {
+// The hand-off names the conversation that asked for the restart, not just the
+// orchestrator it belongs to: an id is reusable, so several conversations answer
+// to it and continuing the wrong one wakes a session in a scope it never had.
+test('a restart hand-off carries the conversation and the prompt it auto-runs', () => {
   const plan = planOrchestratorRestore(
-    { orchestratorId: 'agent-1', resumePrompt: 'finish the task' },
+    { orchestratorId: 'agent-1', conversationId: 'conv-1', resumePrompt: 'finish the task' },
     persisted,
   );
-  assert.deepEqual(plan, { id: 'agent-1', resumePrompt: 'finish the task' });
+  assert.deepEqual(plan, {
+    id: 'agent-1',
+    conversationId: 'conv-1',
+    resumePrompt: 'finish the task',
+  });
 });
 
 test('nothing to reopen leaves boot on the default environment selection', () => {
@@ -65,5 +72,16 @@ test('a whitespace-only resume prompt resumes idle', () => {
     { orchestratorId: 'agent-1', resumePrompt: '  \n ' },
     persisted,
   );
-  assert.deepEqual(plan, { id: 'agent-1', resumePrompt: '' });
+  assert.deepEqual(plan, { id: 'agent-1', conversationId: '', resumePrompt: '' });
+});
+
+// The target crosses a process boundary, so a payload without the field must
+// read as "no refusal" rather than throw and take the restore down with it.
+test('a missing notice reads as no refusal', () => {
+  assert.equal(readRestoreNotice({ orchestratorId: 'agent-1', resumePrompt: '' }), '');
+  assert.equal(readRestoreNotice(null), '');
+  assert.equal(
+    readRestoreNotice({ orchestratorId: 'agent-1', notice: '  scope changed  ' }),
+    'scope changed',
+  );
 });

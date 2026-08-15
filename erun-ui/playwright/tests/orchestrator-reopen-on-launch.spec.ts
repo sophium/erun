@@ -31,7 +31,12 @@ const runningOrchestrator = {
 // that it made none at all when there is nothing to reopen.
 async function stubReopen(
   page: Page,
-  target: { orchestratorId: string; resumePrompt: string },
+  target: {
+    orchestratorId: string;
+    conversationId?: string;
+    resumePrompt: string;
+    notice?: string;
+  },
   calls: string[],
 ): Promise<void> {
   await page.route('**/__erun_invoke', async (route, request) => {
@@ -89,7 +94,11 @@ test.describe('reopening the orchestrator that was open', () => {
     const calls: string[] = [];
     await stubReopen(
       page,
-      { orchestratorId: SEED_ORCHESTRATOR, resumePrompt: 'finish the task' },
+      {
+        orchestratorId: SEED_ORCHESTRATOR,
+        conversationId: 'conv-1',
+        resumePrompt: 'finish the task',
+      },
       calls,
     );
     await app.reboot();
@@ -97,6 +106,24 @@ test.describe('reopening the orchestrator that was open', () => {
     await expect(app.tabStrip.orchestratorMode()).toBeVisible();
     expect(calls).toContain('StartOrchestratorWithResume');
     expect(calls).not.toContain('StartOrchestrator');
+  });
+
+  // A hand-off the backend refuses — the orchestrator was re-scoped, or the
+  // conversation that asked can no longer be identified — must never be silent.
+  // The orchestrator still reopens, idle, and the reason is on screen beside the
+  // orchestrator list, where the operator acts on it. Which hand-offs get refused
+  // is the Go side's call (erun-ui/app_restart_test.go); what only the rendered
+  // app can show is that a refusal is visible and runs no task.
+  test('a refused hand-off reopens idle and says why', async ({ app, page }) => {
+    const calls: string[] = [];
+    const notice =
+      'Reopened pw-orch without continuing its task: its environments changed (was pw/alpha, now pw/beta).';
+    await stubReopen(page, { orchestratorId: SEED_ORCHESTRATOR, resumePrompt: '', notice }, calls);
+    await app.reboot();
+
+    await expect(app.sidebar.orchestratorsAlert()).toContainText(notice);
+    expect(calls).toContain('StartOrchestrator');
+    expect(calls).not.toContain('StartOrchestratorWithResume');
   });
 
   test('with nothing to reopen the launch starts no orchestrator', async ({ app, page }) => {

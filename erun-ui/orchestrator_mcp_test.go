@@ -247,7 +247,8 @@ func TestSpawnOrchestratorSignalsUnwiredEnvironments(t *testing.T) {
 			emits := newCapturedEmits()
 			app.emitFn = emits.fn()
 
-			if _, err := app.spawnOrchestratorSession("petios", "Petios", testCase.envs, "", "", false, 80, 24); err != nil {
+			spawn := orchestratorSpawn{id: "petios", name: "Petios", envs: testCase.envs, cols: 80, rows: 24}
+			if _, err := app.spawnOrchestratorSession(spawn); err != nil {
 				t.Fatalf("spawnOrchestratorSession: %v", err)
 			}
 			assertUnwiredNotice(t, emits.events(appNotificationEvent), testCase.wantNote)

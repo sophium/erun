@@ -12,7 +12,7 @@ import {
   UpdateOrchestrator,
 } from '../../wailsjs/go/main/App';
 import { readError } from './errors';
-import { planOrchestratorRestore } from './orchestratorRestore';
+import { planOrchestratorRestore, readRestoreNotice } from './orchestratorRestore';
 import {
   closeOrchestratorDialog,
   type OrchestratorEnvRef,
@@ -90,8 +90,9 @@ export const openOrchestrator =
   };
 
 // restartOrchestrator tears down a running orchestrator's session and spawns a
-// fresh one — its Claude conversation resumes via `--continue` — then re-focuses
-// the new session (a fresh serial; reusing the old one would attach to a dead PTY).
+// fresh one — which resumes that orchestrator's own pinned conversation — then
+// re-focuses the new session (a fresh serial; reusing the old one would attach to
+// a dead PTY).
 export const restartOrchestrator =
   (id: string): AppThunk<Promise<void>> =>
   async (dispatch) => {
@@ -105,8 +106,9 @@ export const restartOrchestrator =
   };
 
 // restartApp relaunches the desktop app and asks it to reopen the given
-// orchestrator on the way back up (empty id just restarts). The fresh instance
-// resumes that orchestrator's conversation via `--continue`.
+// orchestrator on the way back up (empty id just restarts). The backend records
+// which conversation is live and hands it back its task on resume, so a restart
+// taken to pick up a rebuild continues rather than idling.
 export const restartApp =
   (returnToOrchestratorId: string): AppThunk<Promise<void>> =>
   async (dispatch) => {
@@ -122,25 +124,30 @@ export const restartApp =
 // handed off — and returns whether it did, so the caller (boot) can skip the
 // default environment selection. Only a restart hand-off carries a resume
 // prompt, so a plain launch resumes the conversation idle and auto-runs nothing.
-// The restored orchestrator OWNS the pane, so the env selection is cleared —
-// otherwise boot's default selection and the selection-sync middleware reconcile
-// the terminal back to an environment and the operator never lands in the
-// resumed session.
+// A refused hand-off still reopens the orchestrator and surfaces the backend's
+// notice beside the orchestrator list, so a resume that declined to continue is
+// never silent. The restored orchestrator OWNS the pane, so the env selection is
+// cleared — otherwise boot's default selection and the selection-sync middleware
+// reconcile the terminal back to an environment and the operator never lands in
+// the resumed session.
 export const restoreOpenOrchestrator =
   (): AppThunk<Promise<boolean>> => async (dispatch, getState) => {
     try {
-      const plan = planOrchestratorRestore(
-        await ResolveOrchestratorToReopen(),
-        getState().orchestrators.items,
-      );
+      const target = await ResolveOrchestratorToReopen();
+      const notice = readRestoreNotice(target);
+      if (notice) {
+        dispatch(setOrchestratorsError(notice));
+      }
+      const plan = planOrchestratorRestore(target, getState().orchestrators.items);
       if (!plan) {
         return false;
       }
-      // With a resume prompt, resume the conversation AND hand it the task so a
-      // rebuild+restart continues on its own instead of idling at the prompt;
-      // without one, just resume the orchestrator's own pinned conversation.
+      // With a resume prompt, resume the conversation that asked for the restart
+      // AND hand it the task so a rebuild+restart continues on its own instead of
+      // idling at the prompt; without one, just resume the orchestrator's own
+      // pinned conversation.
       const info = plan.resumePrompt
-        ? await StartOrchestratorWithResume(plan.id, plan.resumePrompt, 80, 24)
+        ? await StartOrchestratorWithResume(plan.id, plan.conversationId, plan.resumePrompt, 80, 24)
         : await StartOrchestrator(plan.id, 80, 24);
       dispatch(setSelected(null));
       dispatch(setSessionId(info.sessionId));

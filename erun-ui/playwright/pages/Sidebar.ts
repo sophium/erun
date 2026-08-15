@@ -206,6 +206,13 @@ export class Sidebar {
     return this.erunSection().getByRole('button', { name: 'New orchestrator' });
   }
 
+  // The persistent alert under the orchestrator list: how the operator learns an
+  // orchestrator action failed, or that a restart hand-off was refused and the
+  // reopened session is idle rather than continuing.
+  orchestratorsAlert(): Locator {
+    return this.erunSection().getByRole('alert');
+  }
+
   // A persisted orchestrator's row is identified by its "…" details button,
   // whose aria-label carries the name — mirrors environmentRow().
   orchestratorDetailsButton(name: string): Locator {

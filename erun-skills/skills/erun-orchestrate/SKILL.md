@@ -79,6 +79,7 @@ Read what you control from erun's config store — never infer it from what happ
 - **Name a kill pattern for what it must not match.** A pattern aimed at a process will also match any path or argument that merely contains its name, and the collateral is somebody's live session.
 - **Prefer the typed tool over the general escape hatch.**
 - **Wake a stopped environment from the host.** A stopped env has no pod, so its MCP edge cannot answer and cannot start itself; that silence is not a broken env. Open it from the host CLI, then resume over MCP.
+- **When you hand an agent a long gate, tell it how to wait.** An agent left to invent its own waiting starts the work in a background shell and then spends its turns re-reading an empty output file — hundreds of turns that buy nothing and can exhaust it before the work it is waiting for even finishes. Have it run the gate as a detached job and block on that job's own completion, so waiting costs one call rather than one per poll.
 
 ## Fixing erun itself
 
@@ -94,7 +95,12 @@ When a task is blocked by a limitation in erun, the fix is to improve erun, rele
 When the change under test is to erun's own tooling, roll it into the live tooling and verify it there. Restarting the desktop is cheap: it records where to return and resumes this conversation, so treat restart-and-resume as a normal step rather than a session loss.
 
 - If only the CLI changed, replace the binary in place; a running executable can be moved aside on every platform erun supports.
-- If the desktop binary is locked while running, the rebuild has to happen *after* it exits — from a **detached** relauncher that outlives your session. Record the return target first, including what to verify on resume.
+- If the desktop binary is locked while running, the rebuild has to happen *after* it exits — from a **detached** relauncher that outlives your session.
+- **Write the return note before you trigger the restart, in the orchestrator's own working directory.** The conversation does not survive the restart; a file does. Make it enough for a cold reader: the task in the operator's words, what is already delivered, what is still *in flight* — naming every detached job by its id, so the resumed session polls it instead of starting it over — what to verify first, and the facts that were expensive to derive. Anything left only in the conversation is gone.
+- **Do not assume the restart hands your instructions back to you.** A resume can wake the conversation with nothing to act on, which is exactly why the note is the contract and not a convenience. Read it first on resume and act on it unprompted; a resume that reopens idle is a defect to file, not a shape to accept.
+- **Build from the source the tool builds from, not the directory you happen to be in.** The build reads its own checkout, so changing directory changes nothing about what gets compiled, and a checkout named for an old version is still the right one if that is where the pointer leads. Address it by the pointer, confirm the commit before building, and confirm the *running* process afterwards — a clean build log is not evidence that the new code is live.
+- **Replacing the bundle in place is safe while the app runs** — the live process keeps its unlinked image — provided the previous binary stays beside the new one. The fastest recovery from a bad desktop build is putting the old one back, which is only possible if you kept it.
+- **Expect every environment channel to drop and re-register across a restart.** Absence immediately after one is a reconnect in progress, not a capability that vanished. Re-search before concluding, and never record a tool as missing on the strength of a probe run mid-restart.
 - **Reason about a restart from where your session actually runs — process ancestry answers that.** A quit command returning is not evidence that it worked or that your session lives elsewhere; shutdown is asynchronous, and a signal the target ignores looks identical to one that landed. Confirm the restart instead: the process is gone, or its start time moved. A resume-shaped nudge, or the tool list appearing to change, proves neither.
 - On resume, confirm the new code is actually live, then finish the task without waiting to be told. Answering a resume with "nothing to do" is a defect.
 - Building the desktop on the host is the one exception to "never build on the host": its GUI toolchain is not in the pod image. The code is still authored in the pod.
@@ -109,4 +115,5 @@ When the change under test is to erun's own tooling, roll it into the live tooli
 - Never build in a review directory; the mirror deletes what the pod does not have, and a mounted worktree hands your artifacts to the agent that owns it.
 - Confirm an environment's erun version from the MCP's own version tool; an in-pod version command may be reporting the project's version, not erun's.
 - Run on this host only what the environment cross-built for this host's arch.
+- **Your own skills may be baked artifacts of a repository.** Guidance you improve belongs in the source that produces them; editing the installed copy is the same mistake as editing a mirror, and the next bake erases it silently.
 - **Keep guidance abstract and short: state the principle, not the instance.**

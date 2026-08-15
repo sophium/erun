@@ -39,7 +39,15 @@ func (a *App) InvestigateFailure(report, tenant, environment string, cols, rows 
 		name = "Investigate " + env
 	}
 	id := fmt.Sprintf("investigate-%d", time.Now().UnixNano())
-	return a.spawnOrchestratorSession(id, name, envs, prompt, "", true, cols, rows)
+	return a.spawnOrchestratorSession(orchestratorSpawn{
+		id:            id,
+		name:          name,
+		envs:          envs,
+		initialPrompt: prompt,
+		transient:     true,
+		cols:          cols,
+		rows:          rows,
+	})
 }
 
 // investigateWorkingDir resolves the env's host workspace to run the
