@@ -6,8 +6,11 @@ run:
 linters:
   exclusions:
     paths:
-      - ^frontend/node_modules/
-      - ^playwright/node_modules/
+      # Third-party Go vendored by npm sits inside this module, so `./...`
+      # analyses it. Match the segment, not an anchored prefix: a finding
+      # replayed from the content-keyed cache renders the path spelling of
+      # the run that cached it, which need not start at this working tree.
+      - (^|/)node_modules/
   enable:
     - errcheck
     - govet
