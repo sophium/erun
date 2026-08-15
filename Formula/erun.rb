@@ -58,7 +58,10 @@ class Erun < Formula
       system "go", "build",
              "-trimpath",
              "-tags", "desktop,production",
-             "-ldflags", "-s -w -X github.com/sophium/erun/erun-ui.buildVersion=#{version}",
+             # `main.`, not the module path: erun-app's build vars are declared
+             # in package main, and -X against a path no package declares is
+             # dropped in silence, leaving the binary reporting "dev".
+             "-ldflags", "-s -w -X main.buildVersion=#{version}",
              "-o", bin/"erun-app",
              "."
     end

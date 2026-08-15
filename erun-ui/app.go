@@ -125,10 +125,14 @@ type App struct {
 	// forwardRepairs tracks, per environment, the bounded repair episode for a
 	// port-forward that holds its local port while its edge answers nothing.
 	// See environment_forward_repair.go.
-	forwardRepairs            map[string]forwardRepairEpisode
-	busyEnvs                  map[string]int
-	workspaceSyncs            map[string]*workspaceSyncWorker
-	orchestrators             map[string]*orchestratorSession
+	forwardRepairs map[string]forwardRepairEpisode
+	busyEnvs       map[string]int
+	workspaceSyncs map[string]*workspaceSyncWorker
+	orchestrators  map[string]*orchestratorSession
+	// skillsSourceReported latches the one warning a run posts when the shipped
+	// skills cannot be resolved. The condition is a property of this build, so
+	// restating it on every orchestrator launch would be noise.
+	skillsSourceReported      bool
 	credentialRefreshers      map[string]*cloudCredentialsRefresher
 	activityQueue             *activityQueueStore
 	activityStatusPoller      func(activityQueueEntry)

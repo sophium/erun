@@ -85,10 +85,20 @@ try {
 
     # --- desktop binary ----------------------------------------------------
     Write-Host ">> building $([System.IO.Path]::GetFileName($Target)) ($buildVersion) ..."
+    # The skills stamp mirrors build.sh: the desktop installs these for a host
+    # orchestrator, and the binary is routinely run from outside the checkout it
+    # was built in, where no source tree sits above it. Single-quoted so a
+    # checkout path with spaces survives -ldflags splitting.
+    #
+    # `main.`, not the module path — see the same note in build.sh. A -X path no
+    # package declares is dropped in silence, so the wrong prefix stamps nothing
+    # and leaves the binary looking correctly built.
+    $skillsSource = Join-Path $RepoRoot "erun-skills\skills"
     $ldflags = "-s -w -H windowsgui " +
-               "-X github.com/sophium/erun/erun-ui.buildVersion=$buildVersion " +
-               "-X github.com/sophium/erun/erun-ui.buildCommit=$buildCommit " +
-               "-X github.com/sophium/erun/erun-ui.buildDate=$buildDate"
+               "-X main.buildVersion=$buildVersion " +
+               "-X main.buildCommit=$buildCommit " +
+               "-X main.buildDate=$buildDate " +
+               "-X 'main.buildSkillsSource=$skillsSource'"
     go build -trimpath -tags "desktop,production" -ldflags $ldflags -o $Target .
     if ($LASTEXITCODE -ne 0) { throw "failed to build erun-app.exe" }
 } finally { Pop-Location }
