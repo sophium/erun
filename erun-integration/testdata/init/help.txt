@@ -25,8 +25,8 @@ Flags:
       --runtime-registry string        Registry the environment resolves erun's own artifacts from — the runtime chart and the platform images the pod pulls (e.g. ghcr.io/sophium). Set it when the environment's deploy registry holds only this project's images, so erun's chart is not there to pull; persisted as the env's runtimeregistry
       --set-default-tenant             Set the initialized tenant as the default tenant
       --tenant string                  Tenant name to initialize
-      --type string                    Environment type: local-agent, remote-agent, or runtime (takes precedence over --remote)
-      --version string                 Runtime image version to initialize and deploy
+      --type string                    Environment type: local-agent, remote-agent, or runtime (takes precedence over --remote). On an existing env this changes the type; omit it and the env keeps the type it has
+      --version string                 Runtime image version to initialize and deploy; omitted, a new env takes this erun's version and an existing env keeps the one it runs
   -y, --yes                            Automatically approve initialization prompts
 
 Global Flags:

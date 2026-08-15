@@ -1,13 +1,13 @@
-audit: erun init --confirm-environment --container-registry registry.example/test --kubernetes-context test-context --remote --runtime-cpu 8 --runtime-memory 16Gi --set-default-tenant --version <VERSION> team dev
+audit: erun init --confirm-environment --container-registry registry.example/test --kubernetes-context test-context --set-default-tenant --type remote-agent team dev
 Loading erun tool configuration, configPath=<TMP>
 Loaded erun tool configuration
 Loading tenant configuration
 Loaded tenant configuration
 Loading environment configuration
 ==> Initializing team/dev
-init: runtime version set to <VERSION>
-init: runtime pod resources set to cpu=8 memory=16Gi
-init: env type already "remote-agent"
+init: runtime version not given; keeping <VERSION>
+init: runtime pod resources not given; keeping cpu=4 memory=8916Mi
+init: env type "runtime" -> "remote-agent"
 deploy: runtime chart team-devops <VERSION> not found in registry.example/test (the tenant's own umbrella)
 deploy: runtime chart erun-devops <VERSION> not found in registry.example/test (the shared platform chart)
 deploy: runtime chart erun-devops <VERSION> not found in ghcr.io/sophium (the shared platform chart in erun's own registry)

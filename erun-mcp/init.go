@@ -15,15 +15,15 @@ type InitInput struct {
 	InitializeCurrentProject bool     `json:"initializeCurrentProject,omitempty" jsonschema:"when true, answer the tenant selection interaction by choosing the current project"`
 	ProjectRoot              string   `json:"projectRoot,omitempty" jsonschema:"optional project root to bind to the tenant"`
 	Environment              string   `json:"environment,omitempty" jsonschema:"optional environment name to initialize"`
-	Version                  string   `json:"version,omitempty" jsonschema:"optional runtime image version to initialize and deploy"`
+	Version                  string   `json:"version,omitempty" jsonschema:"optional runtime image version to initialize and deploy; omitted, a new environment takes erun's own version and an existing environment keeps the one it runs"`
 	RuntimeImage             string   `json:"runtimeImage,omitempty" jsonschema:"optional runtime image repository the environment runs; a bare name resolves against the environment registry and its runtime version, a full reference is used verbatim"`
 	RuntimeRegistry          string   `json:"runtimeRegistry,omitempty" jsonschema:"optional registry the environment resolves erun's own artifacts from — the runtime chart and the platform images the pod pulls; set it when the environment's deploy registry holds only this project's images, so erun's chart is not published there"`
 	ImagePullSecrets         []string `json:"imagePullSecrets,omitempty" jsonschema:"names of Kubernetes dockerconfigjson secrets the runtime pod pulls its image with; required when the runtime image lives in a private registry, since the pod cannot start without one"`
-	RuntimeCPU               string   `json:"runtimeCpu,omitempty" jsonschema:"optional runtime pod CPU limit"`
-	RuntimeMemory            string   `json:"runtimeMemory,omitempty" jsonschema:"optional runtime pod memory limit"`
+	RuntimeCPU               string   `json:"runtimeCpu,omitempty" jsonschema:"optional runtime pod CPU limit; omitted, an existing environment keeps its recorded limit"`
+	RuntimeMemory            string   `json:"runtimeMemory,omitempty" jsonschema:"optional runtime pod memory limit; omitted, an existing environment keeps its recorded limit"`
 	KubernetesContext        string   `json:"kubernetesContext,omitempty" jsonschema:"optional kubernetes context to associate with the environment"`
 	ContainerRegistry        string   `json:"containerRegistry,omitempty" jsonschema:"optional container registry; seeds the project's registry list with this host marked build and deploy"`
-	Type                     string   `json:"type,omitempty" jsonschema:"optional environment type (local-agent, remote-agent, runtime); takes precedence over remote"`
+	Type                     string   `json:"type,omitempty" jsonschema:"optional environment type (local-agent, remote-agent, runtime); takes precedence over remote. On an existing environment this changes the type; omitted, the environment keeps the type it has"`
 	Remote                   bool     `json:"remote,omitempty" jsonschema:"deprecated alias for type=remote-agent; prefer type instead"`
 	NoGit                    bool     `json:"noGit,omitempty" jsonschema:"when true with remote initialization, create the remote worktree directory without configuring a Git checkout"`
 	RemoteRepositoryURL      string   `json:"remoteRepositoryURL,omitempty" jsonschema:"optional SSH repository URL used when creating the remote checkout"`
@@ -66,7 +66,8 @@ func initTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 			InitializeCurrentProject: input.InitializeCurrentProject,
 			ProjectRoot:              firstNonEmpty(strings.TrimSpace(input.ProjectRoot), strings.TrimSpace(runtime.Context.RepoPath)),
 			Environment:              environment,
-			RuntimeVersion:           firstNonEmpty(strings.TrimSpace(input.Version), CurrentBuildInfo().Version),
+			RuntimeVersion:           strings.TrimSpace(input.Version),
+			RuntimeVersionDefault:    CurrentBuildInfo().Version,
 			RuntimePod: eruncommon.RuntimePodResources{
 				CPU:    strings.TrimSpace(input.RuntimeCPU),
 				Memory: strings.TrimSpace(input.RuntimeMemory),

@@ -995,7 +995,6 @@ func TestDeploy(t *testing.T) {
 		assertEnvConfigContains(t, setup, "team", "dev", "runtimeversion: 1.0.99")
 	})
 
-
 	t.Run("dry_run_remote_env_image_pull_secrets", func(t *testing.T) {
 		// A tenant umbrella image can be a private ghcr package. The env's
 		// imagepullsecrets list rides into the runtime deploy as
@@ -2694,10 +2693,27 @@ func appendEnvConfig(t *testing.T, setup env.Setup, tenant, environment, body st
 	mustWriteFile(t, envConfigPathFor(setup, tenant, environment), readEnvConfig(t, setup, tenant, environment)+body)
 }
 
-func assertEnvConfigContains(t *testing.T, setup env.Setup, tenant, environment, want string) {
+// assertEnvConfigContains checks the env config erun persisted. Persisted state
+// sits outside the streams the goldens snapshot, so it needs its own assertion.
+func assertEnvConfigContains(t *testing.T, setup env.Setup, tenant, environment string, want ...string) {
 	t.Helper()
-	if body := readEnvConfig(t, setup, tenant, environment); !strings.Contains(body, want) {
-		t.Fatalf("expected env config to record %q, got:\n%s", want, body)
+	body := readEnvConfig(t, setup, tenant, environment)
+	for _, line := range want {
+		if !strings.Contains(body, line) {
+			t.Fatalf("expected env config to record %q, got:\n%s", line, body)
+		}
+	}
+}
+
+// assertEnvConfigLacks is the other half: a dry run traces what it would write,
+// and the proof that it wrote nothing is on disk, not in the streams.
+func assertEnvConfigLacks(t *testing.T, setup env.Setup, tenant, environment string, unwanted ...string) {
+	t.Helper()
+	body := readEnvConfig(t, setup, tenant, environment)
+	for _, line := range unwanted {
+		if strings.Contains(body, line) {
+			t.Fatalf("expected env config not to record %q, got:\n%s", line, body)
+		}
 	}
 }
 

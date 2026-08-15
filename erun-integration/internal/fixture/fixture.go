@@ -441,6 +441,24 @@ func SeedRemoteTenantEnv(t testing.TB, setup env.Setup, tenant, environment stri
 	)
 }
 
+// SeedRuntimeTenantEnv writes a runtime-type env tree pinned to a version. It is
+// the fixture for the retype lane: a runtime env is remote-worktree like a
+// remote-agent one, so it is the shape that proves a type change lands between
+// two remote-worktree types rather than only out of local-agent.
+func SeedRuntimeTenantEnv(t testing.TB, setup env.Setup, tenant, environment string) {
+	t.Helper()
+	SeedRemoteTenantEnv(t, setup, tenant, environment)
+	envDir := filepath.Join(setup.ConfigHome, "erun", tenant, environment)
+	mustWrite(t, filepath.Join(envDir, "config.yaml"),
+		"name: "+environment+"\n"+
+			"repopath: "+filepath.Join(setup.Home, "git", tenant)+"\n"+
+			"kubernetescontext: test-context\n"+
+			"containerregistry: registry.example/test\n"+
+			"runtimeversion: 1.0.0\n"+
+			"type: runtime\n",
+	)
+}
+
 // SeedRuntimeTenantEnvNoVersion writes a runtime-type env tree with NO
 // runtimeversion (and no local/published chart), reproducing the fresh-env
 // decision path that the desktop create regression hit: with no version
