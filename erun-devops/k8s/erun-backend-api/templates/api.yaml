@@ -47,6 +47,68 @@
 {{- $envDeployerEnabled := default false $envDeployer.enabled -}}
 {{- $apiServiceAccount := printf "%s-api" $tenant -}}
 {{- $envDeployerSA := default (printf "%s-env-deployer" $tenant) $envDeployer.serviceAccountName -}}
+{{- /* Opt-in server-side release queue: an accepted review enqueues a release,
+       and the API launches `erun release` as a Job in the agent environment's
+       own namespace, so the run lands beside that environment's warm fingerprint
+       cache and BuildKit state. Off by default -- triggers are recorded and
+       nothing runs -- so existing deploys are byte-for-byte unchanged. Enabling
+       it grants the API pod's SA Job management in that one namespace, not
+       cluster-wide: the release Job runs as the environment's own SA. */ -}}
+{{- $releaseQueue := default dict $api.releaseQueue -}}
+{{- $releaseQueueEnabled := default false $releaseQueue.enabled -}}
+{{- $releaseNamespace := default "" $releaseQueue.namespace -}}
+{{- $releaseSA := default (printf "%s-devops" $tenant) $releaseQueue.serviceAccountName -}}
+{{- $releaseRuntimeVersion := default .Chart.AppVersion $releaseQueue.runtimeVersion -}}
+{{- $releaseHomeClaim := default "" $releaseQueue.homeClaim -}}
+{{- $releaseWorkspaceClaim := default "" $releaseQueue.workspaceClaim -}}
+{{- $releaseRepoPath := default "" $releaseQueue.repoPath -}}
+{{- $releaseDryRun := default false $releaseQueue.dryRun -}}
+{{- if $releaseQueueEnabled }}
+{{- $_ := required "api.releaseQueue.namespace is required when the release queue is enabled: it is the agent environment's namespace the release Job runs in" $releaseNamespace }}
+{{- end }}
+{{- $apiServiceAccountNeeded := or $envDeployerEnabled $releaseQueueEnabled -}}
+{{- if and $releaseQueueEnabled (not $envDeployerEnabled) }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $apiServiceAccount }}
+  labels:
+    app: {{ $tenant }}-api
+---
+{{- end }}
+{{- if $releaseQueueEnabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $tenant }}-api-release-queue
+  namespace: {{ $releaseNamespace }}
+  labels:
+    app: {{ $tenant }}-api
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $tenant }}-api-release-queue
+  namespace: {{ $releaseNamespace }}
+  labels:
+    app: {{ $tenant }}-api
+subjects:
+  - kind: ServiceAccount
+    name: {{ $apiServiceAccount }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $tenant }}-api-release-queue
+---
+{{- end }}
 {{- if $envDeployerEnabled }}
 apiVersion: v1
 kind: ServiceAccount
@@ -139,7 +201,7 @@ spec:
       labels:
         app: {{ $tenant }}-api
     spec:
-      {{- if $envDeployerEnabled }}
+      {{- if $apiServiceAccountNeeded }}
       serviceAccountName: {{ $apiServiceAccount }}
       {{- end }}
       containers:
@@ -179,6 +241,34 @@ spec:
                   fieldPath: metadata.namespace
             - name: ERUN_ENV_DEPLOY_REGISTRY
               value: {{ $containerRegistry | quote }}
+            {{- end }}
+            {{- if $releaseQueueEnabled }}
+            {{- if not $envDeployerEnabled }}
+            - name: ERUN_ENV_DEPLOY_REGISTRY
+              value: {{ $containerRegistry | quote }}
+            {{- end }}
+            - name: ERUN_RELEASE_NAMESPACE
+              value: {{ $releaseNamespace | quote }}
+            - name: ERUN_RELEASE_SERVICE_ACCOUNT
+              value: {{ $releaseSA | quote }}
+            - name: ERUN_RELEASE_RUNTIME_VERSION
+              value: {{ $releaseRuntimeVersion | quote }}
+            {{- if $releaseHomeClaim }}
+            - name: ERUN_RELEASE_HOME_CLAIM
+              value: {{ $releaseHomeClaim | quote }}
+            {{- end }}
+            {{- if $releaseWorkspaceClaim }}
+            - name: ERUN_RELEASE_WORKSPACE_CLAIM
+              value: {{ $releaseWorkspaceClaim | quote }}
+            {{- end }}
+            {{- if $releaseRepoPath }}
+            - name: ERUN_RELEASE_REPO_PATH
+              value: {{ $releaseRepoPath | quote }}
+            {{- end }}
+            {{- if $releaseDryRun }}
+            - name: ERUN_RELEASE_DRY_RUN
+              value: "1"
+            {{- end }}
             {{- end }}
             {{- if $mcpSigningSecretName }}
             - name: ERUN_API_MCP_SIGNING_KEY_PATH
