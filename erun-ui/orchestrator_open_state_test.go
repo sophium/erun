@@ -29,6 +29,7 @@ func openStateTestApp(t *testing.T) (*App, string, string) {
 		orchestratorOpenPath:   openPath,
 		orchestratorRestoreDir: restoreDir,
 	})
+	app.investigations.reportDir = t.TempDir()
 	return app, openPath, restoreDir
 }
 
@@ -139,7 +140,7 @@ func TestTransientOrchestratorIsNotRecordedAsOpen(t *testing.T) {
 	app, _, _ := openStateTestApp(t)
 	defer app.shutdown(context.Background())
 
-	if _, err := app.InvestigateFailure("deploy blew up", "frs", "dev", 80, 24); err != nil {
+	if _, err := app.InvestigateFailure(investigateHelmTimeoutReport, "frs", "dev", 80, 24); err != nil {
 		t.Fatalf("InvestigateFailure failed: %v", err)
 	}
 
