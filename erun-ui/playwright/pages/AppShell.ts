@@ -10,6 +10,7 @@ import { OutputsDialog } from './OutputsDialog';
 import { ReviewPanel } from './ReviewPanel';
 import { Sidebar } from './Sidebar';
 import { TenantDialog } from './TenantDialog';
+import { TerminalPane } from './TerminalPane';
 import { TerminalTabStrip } from './TerminalTabStrip';
 import { Titlebar } from './Titlebar';
 
@@ -111,5 +112,24 @@ export class AppShell {
 
   get tabStrip(): TerminalTabStrip {
     return new TerminalTabStrip(this.page);
+  }
+
+  get terminalPane(): TerminalPane {
+    return new TerminalPane(this.page);
+  }
+
+  // openEnvironmentTerminal opens an env and settles on its Local session,
+  // returning the session id that owns the terminal pane. The env also spawns
+  // ERun and AI tabs and each spawn reassigns pane ownership, so all three must
+  // be up before a spec reads the id or writes into the pane.
+  async openEnvironmentTerminal(tenant: string, environment: string): Promise<number> {
+    await this.sidebar.openEnvironment(tenant, environment);
+    for (const name of ['Local', 'ERun', 'AI']) {
+      await this.page
+        .getByRole('tab', { name, exact: true })
+        .waitFor({ state: 'visible', timeout: 15_000 });
+    }
+    await this.page.getByRole('tab', { name: 'Local', exact: true }).click();
+    return this.terminalPane.selectedSessionId();
   }
 }

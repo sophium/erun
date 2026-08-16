@@ -12,6 +12,7 @@ import * as React from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { openIDE } from '@/app/ideOpenThunks';
 import { setFilesOpen, toggleReview, toggleSidebar } from '@/app/layoutThunks';
+import { isMacPlatform } from '@/app/platform';
 import { IconTooltip } from '@/components/app/IconTooltip';
 import { ContributeToggle } from '@/components/app/Titlebar.ContributeToggle';
 import {
@@ -32,9 +33,7 @@ const activeTitlebarButtonClassName =
 // macOS overlays the window traffic-light controls at the top-left, so the
 // sidebar toggle must be inset to clear them. Windows/Linux put window controls
 // on the right, so that inset would just push the toggle away from the edge and
-// misalign it — detect the platform from the WebView UA (synchronous, no flash).
-const isMacPlatform =
-  typeof navigator !== 'undefined' && /\b(Mac|iPhone|iPad|iPod)\b/.test(navigator.userAgent);
+// misalign it.
 
 // TitlebarLeftControls renders the leftmost titlebar cluster: the sidebar toggle.
 export function TitlebarLeftControls(): React.ReactElement {
