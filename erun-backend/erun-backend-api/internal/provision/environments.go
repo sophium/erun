@@ -21,6 +21,11 @@ type EnvProvisionInput struct {
 	Tenant        string `json:"tenant"`
 	Environment   string `json:"environment"`
 	Version       string `json:"version"`
+	// DeployID identifies one explicit deploy attempt. Being part of the
+	// checkpointed input is what lets a resumed workflow rebuild the same Job
+	// name and re-watch its own run. Empty on the create path, which deploys an
+	// environment exactly once.
+	DeployID string `json:"deployId,omitempty"`
 }
 
 // EnvCoordinator runs an env deploy to a terminal status — the service
@@ -66,6 +71,17 @@ func (p *EnvProvisioner) Start(input EnvProvisionInput) error {
 	return err
 }
 
+// StartDeploy runs the same durable workflow for an explicit deploy of an
+// already-registered environment. It is keyed by the attempt rather than the
+// environment: an environment-keyed id is terminal after the first deploy, which
+// would make a retry after a failure — or a re-deploy at another version — a
+// silent no-op. Concurrency is guarded by the environment's deploy claim, not by
+// the workflow id.
+func (p *EnvProvisioner) StartDeploy(input EnvProvisionInput) error {
+	_, err := dbos.RunWorkflow(p.dbosCtx, p.workflowFn, input, dbos.WithWorkflowID("deploy-env-"+input.EnvironmentID+"-"+input.DeployID))
+	return err
+}
+
 // deployJobParams renders the placement for one env-deploy Job. The env deploys
 // with the tenant's own <tenant>-devops runtime image, which carries its baked
 // deploy config (the image-baked config model), pulled from the configured
@@ -75,6 +91,7 @@ func deployJobParams(config EnvDeployConfig, input EnvProvisionInput) deployexec
 		Tenant:         input.Tenant,
 		Environment:    input.Environment,
 		Version:        input.Version,
+		DeployID:       input.DeployID,
 		Namespace:      config.PlatformNamespace,
 		Image:          fmt.Sprintf("%s/%s-devops:%s", config.Registry, input.Tenant, input.Version),
 		ServiceAccount: config.DeployerServiceAccount,

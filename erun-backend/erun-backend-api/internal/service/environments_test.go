@@ -6,15 +6,25 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/deployexec"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 )
 
 type recordingStatusWriter struct {
 	transitions []string // "status:error" per call
+	updates     []repository.EnvironmentStatusUpdate
 	err         error
+	// failFirst makes the first n calls fail, exercising the bounded retry.
+	failFirst int
+	calls     int
 }
 
-func (w *recordingStatusWriter) UpdateProvisioningStatus(_ context.Context, _, status, provisionError string) error {
-	w.transitions = append(w.transitions, status+":"+provisionError)
+func (w *recordingStatusWriter) UpdateProvisioningStatus(_ context.Context, _ string, update repository.EnvironmentStatusUpdate) error {
+	w.calls++
+	if w.calls <= w.failFirst {
+		return errors.New("database unavailable")
+	}
+	w.transitions = append(w.transitions, update.Status+":"+update.ProvisionError)
+	w.updates = append(w.updates, update)
 	return w.err
 }
 
@@ -29,7 +39,16 @@ func (r fakeRunner) Run(context.Context, deployexec.DeployJobParams) (deployexec
 
 func provision(t *testing.T, runner DeployRunner, status *recordingStatusWriter) error {
 	t.Helper()
-	return NewEnvironmentProvisioner(runner, status).Provision(context.Background(), "env-1", deployexec.DeployJobParams{})
+	return provisionVersion(t, runner, status, "")
+}
+
+// provisionVersion drives one deploy with the retry backoff removed, so the
+// bounded-retry path costs no wall-clock in tests.
+func provisionVersion(t *testing.T, runner DeployRunner, status *recordingStatusWriter, version string) error {
+	t.Helper()
+	provisioner := NewEnvironmentProvisioner(runner, status)
+	provisioner.backoff = 0
+	return provisioner.Provision(context.Background(), "env-1", deployexec.DeployJobParams{Version: version})
 }
 
 func TestProvisionMarksRunningOnSuccess(t *testing.T) {
@@ -63,6 +82,57 @@ func TestProvisionMarksFailedOnRunError(t *testing.T) {
 	}
 	if status.transitions[len(status.transitions)-1] != "failed:cluster unreachable" {
 		t.Fatalf("last transition = %q, want failed:cluster unreachable", status.transitions[len(status.transitions)-1])
+	}
+}
+
+// TestProvisionRecordsDeployedVersionOnSuccess: reaching running is what makes
+// the version live, so that is where the env records what it is running.
+func TestProvisionRecordsDeployedVersionOnSuccess(t *testing.T) {
+	status := &recordingStatusWriter{}
+	if err := provisionVersion(t, fakeRunner{outcome: deployexec.OutcomeSucceeded}, status, "1.2.3"); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	if got := status.updates[0].DeployedVersion; got != "" {
+		t.Fatalf("deployed version recorded while still provisioning: %q", got)
+	}
+	if got := status.updates[1].DeployedVersion; got != "1.2.3" {
+		t.Fatalf("running update deployedVersion = %q, want 1.2.3", got)
+	}
+}
+
+// TestProvisionLeavesDeployedVersionOnFailure: a failed deploy does not change
+// what the cluster is running, so it must not claim a new deployed version.
+func TestProvisionLeavesDeployedVersionOnFailure(t *testing.T) {
+	status := &recordingStatusWriter{}
+	if err := provisionVersion(t, fakeRunner{outcome: deployexec.OutcomeFailed}, status, "1.2.3"); err == nil {
+		t.Fatal("expected an error when the deploy job fails")
+	}
+	for i, update := range status.updates {
+		if update.DeployedVersion != "" {
+			t.Fatalf("update[%d] recorded deployedVersion %q on a failed deploy", i, update.DeployedVersion)
+		}
+	}
+}
+
+// TestProvisionRetriesTransientStatusWrite: a lost lifecycle write strands the
+// env in provisioning under an already-terminal workflow, so the write retries.
+func TestProvisionRetriesTransientStatusWrite(t *testing.T) {
+	status := &recordingStatusWriter{failFirst: 2}
+	if err := provisionVersion(t, fakeRunner{outcome: deployexec.OutcomeSucceeded}, status, "1.2.3"); err != nil {
+		t.Fatalf("provision should survive a transient status-write failure: %v", err)
+	}
+	assertTransitions(t, status.transitions, []string{"provisioning:", "running:"})
+}
+
+// TestProvisionFailsWhenStatusWriteNeverSucceeds: retries are bounded, so a
+// database that stays down surfaces the error rather than looping.
+func TestProvisionFailsWhenStatusWriteNeverSucceeds(t *testing.T) {
+	status := &recordingStatusWriter{failFirst: statusWriteAttempts}
+	if err := provisionVersion(t, fakeRunner{outcome: deployexec.OutcomeSucceeded}, status, "1.2.3"); err == nil {
+		t.Fatal("expected the exhausted status write to surface an error")
+	}
+	if status.calls != statusWriteAttempts {
+		t.Fatalf("status write attempted %d times, want %d", status.calls, statusWriteAttempts)
 	}
 }
 

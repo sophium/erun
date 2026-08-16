@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
@@ -29,6 +30,19 @@ type stubEnvironmentRepository struct {
 	count        int
 	countErr     error
 	err          error
+	// claimTaken makes ClaimDeploy report the deploy slot as already held, the
+	// shape a concurrent deploy produces.
+	claimTaken bool
+	claimErr   error
+	claimCalls int
+}
+
+func (r *stubEnvironmentRepository) ClaimDeploy(context.Context, string, time.Duration) (bool, error) {
+	r.claimCalls++
+	if r.claimErr != nil {
+		return false, r.claimErr
+	}
+	return !r.claimTaken, nil
 }
 
 func (r *stubEnvironmentRepository) List(context.Context) ([]model.Environment, error) {

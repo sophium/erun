@@ -45,6 +45,12 @@ type DeployJobParams struct {
 	Tenant      string
 	Environment string
 	Version     string
+	// DeployID scopes the Job to one deploy attempt. It is carried in the durable
+	// workflow input, so a resumed workflow rebuilds the same Job name and
+	// re-watches its in-flight Job, while a fresh attempt gets its own Job rather
+	// than re-reading the previous attempt's terminal outcome. Empty keeps the
+	// version-scoped name the create path has always used.
+	DeployID string
 	// Namespace the Job runs in (the platform namespace where the backend lives).
 	Namespace string
 	// Image is the erun-devops runtime image carrying erun + helm + kubectl.
@@ -63,7 +69,7 @@ func buildDeployJob(params DeployJobParams) *batchv1.Job {
 	ttl := jobTTLSecondsAfterFinished
 	return &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      DeployJobName(params.Tenant, params.Environment, params.Version),
+			Name:      DeployJobName(params.Tenant, params.Environment, params.Version, params.DeployID),
 			Namespace: params.Namespace,
 			Labels: map[string]string{
 				"app.kubernetes.io/managed-by": "erun-deploy-executor",
@@ -90,11 +96,39 @@ func buildDeployJob(params DeployJobParams) *batchv1.Job {
 	}
 }
 
-// DeployJobName is deterministic and version-scoped, so re-deploying the same
-// version reuses the Job (a create conflict is treated as "watch the existing
-// one"), while a new version gets its own Job.
-func DeployJobName(tenant, environment, version string) string {
-	return "erun-deploy-" + sanitizeLabel(tenant+"-"+environment+"-"+version)
+// DeployJobName is deterministic in its inputs, so a resumed workflow watches
+// the Job it already created (a create conflict is treated as "watch the
+// existing one") rather than starting a second rollout. An explicit deploy
+// passes a per-attempt deployID so a retry of the same version is a new Job
+// instead of a re-read of the previous attempt's outcome.
+func DeployJobName(tenant, environment, version, deployID string) string {
+	name := sanitizeLabel(tenant + "-" + environment + "-" + version)
+	suffix := ""
+	if deployID != "" {
+		suffix = "-" + shortID(deployID)
+	}
+	// Kubernetes caps an object name at 63 characters; trim the descriptive
+	// middle rather than the attempt suffix, which is what keeps attempts apart.
+	if budget := maxJobNameLength - len(jobNamePrefix) - len(suffix); len(name) > budget {
+		name = strings.Trim(name[:budget], "-")
+	}
+	return jobNamePrefix + name + suffix
+}
+
+const (
+	jobNamePrefix    = "erun-deploy-"
+	maxJobNameLength = 63
+	// Enough of a random attempt id to keep concurrent and successive attempts
+	// apart without crowding out the readable tenant/env/version part.
+	shortIDLength = 8
+)
+
+func shortID(deployID string) string {
+	id := sanitizeLabel(deployID)
+	if len(id) > shortIDLength {
+		id = id[:shortIDLength]
+	}
+	return id
 }
 
 // sanitizeLabel lowercases and replaces every character outside [a-z0-9-] so the
