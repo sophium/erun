@@ -35,8 +35,8 @@ KEYCHAIN="${HOME:-}/Library/Keychains/$KEYCHAIN_FILE"
 
 # Absolute defaults, overridable through the same ERUN_<NAME>_BIN seam the Go
 # side uses. openssl in particular has to be the system one: macOS ships
-# LibreSSL, whose PKCS#12 output `security import` reads, while a Homebrew
-# OpenSSL 3 earlier on PATH writes a container it cannot.
+# LibreSSL, and a Homebrew OpenSSL 3 earlier on PATH writes a PKCS#12 container
+# `security import` cannot read.
 CODESIGN_BIN=${ERUN_CODESIGN_BIN:-/usr/bin/codesign}
 SECURITY_BIN=${ERUN_SECURITY_BIN:-/usr/bin/security}
 OPENSSL_BIN=${ERUN_OPENSSL_BIN:-/usr/bin/openssl}
@@ -52,13 +52,41 @@ adhoc_consequence() {
 	printf '   (ScreenCapture, Accessibility, ...), then re-grant when prompted.\n' >&2
 }
 
+# creation_step runs one step of the identity chain and, when it fails, names the
+# step and repeats what the tool said. The chain used to be silenced end to end,
+# so the only thing a broken first build could report was that it was broken —
+# locating the actual step meant replaying seven commands by hand.
+creation_step() {
+	step_description=$1
+	shift
+	if step_output=$("$@" 2>&1); then
+		return 0
+	fi
+	printf '>> code signing: %s failed\n' "$step_description" >&2
+	if [ -n "$step_output" ]; then
+		printf '%s\n' "$step_output" | sed 's/^/   /' >&2
+	fi
+	return 1
+}
+
 # create_local_identity mints the self-signed code-signing certificate and puts
 # it in a keychain of erun's own, so nothing has to be added to the login
 # keychain and no step can stall on a GUI authorization prompt: the password is
 # erun's, so the import, the partition list, and the unlock are all answerable
 # without the operator.
+#
+# The PKCS#12 carries the same password rather than an empty one. `openssl
+# pkcs12 -passout pass:` and `security import -P ''` disagree about how an empty
+# PKCS#12 password is encoded, so the import fails MAC verification on a
+# container openssl wrote seconds earlier; a non-empty password both ends agree
+# on is what makes the identity land. It is the keychain password erun already
+# owns, so this is no new secret.
 create_local_identity() {
-	workdir=$(mktemp -d) || workdir=
+	if ! workdir=$(mktemp -d 2>&1); then
+		printf '>> code signing: preparing a working directory failed\n' >&2
+		printf '%s\n' "$workdir" | sed 's/^/   /' >&2
+		return 1
+	fi
 	# A config file rather than `openssl req -addext`: LibreSSL's support for
 	# that flag is not something a first build on a stock macOS can depend on.
 	cat > "$workdir/openssl.cnf" <<EOF
@@ -75,23 +103,28 @@ extendedKeyUsage = critical,codeSigning
 subjectKeyIdentifier = hash
 EOF
 	created=0
-	if "$OPENSSL_BIN" req -x509 -newkey rsa:2048 -nodes -days 3650 \
+	if creation_step 'generating the certificate' \
+		"$OPENSSL_BIN" req -x509 -newkey rsa:2048 -nodes -days 3650 \
 		-config "$workdir/openssl.cnf" -extensions ext \
-		-keyout "$workdir/key.pem" -out "$workdir/cert.pem" >/dev/null 2>&1 &&
-		"$OPENSSL_BIN" pkcs12 -export -inkey "$workdir/key.pem" -in "$workdir/cert.pem" \
-			-name "$IDENTITY" -out "$workdir/identity.p12" -passout pass: >/dev/null 2>&1 &&
-		"$SECURITY_BIN" create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null 2>&1 &&
-		"$SECURITY_BIN" set-keychain-settings "$KEYCHAIN" >/dev/null 2>&1 &&
-		"$SECURITY_BIN" unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null 2>&1 &&
-		"$SECURITY_BIN" import "$workdir/identity.p12" -k "$KEYCHAIN" -P '' -A \
-			-T "$CODESIGN_BIN" >/dev/null 2>&1 &&
-		"$SECURITY_BIN" set-key-partition-list -S apple-tool:,apple:,codesign: \
-			-s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null 2>&1; then
+		-keyout "$workdir/key.pem" -out "$workdir/cert.pem" &&
+		creation_step 'packaging the certificate and key' \
+			"$OPENSSL_BIN" pkcs12 -export -inkey "$workdir/key.pem" -in "$workdir/cert.pem" \
+			-name "$IDENTITY" -out "$workdir/identity.p12" -passout "pass:$KEYCHAIN_PASSWORD" &&
+		creation_step 'creating the keychain' \
+			"$SECURITY_BIN" create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN" &&
+		creation_step 'settling the keychain lock behaviour' \
+			"$SECURITY_BIN" set-keychain-settings "$KEYCHAIN" &&
+		creation_step 'unlocking the keychain' \
+			"$SECURITY_BIN" unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN" &&
+		creation_step 'importing the identity into the keychain' \
+			"$SECURITY_BIN" import "$workdir/identity.p12" -k "$KEYCHAIN" \
+			-P "$KEYCHAIN_PASSWORD" -A -T "$CODESIGN_BIN" &&
+		creation_step 'allowing codesign to use the key without a prompt' \
+			"$SECURITY_BIN" set-key-partition-list -S apple-tool:,apple:,codesign: \
+			-s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"; then
 		created=1
 	fi
-	if [ -n "$workdir" ]; then
-		rm -rf "$workdir"
-	fi
+	rm -rf "$workdir"
 	if [ "$created" != 1 ]; then
 		# A half-made keychain would be read as holding the identity on the next
 		# build, so the failed attempt takes itself back out.
@@ -100,6 +133,52 @@ EOF
 		fi
 		return 1
 	fi
+	return 0
+}
+
+# register_keychain adds erun's keychain to the user search list, because
+# `codesign --keychain` does not let an identity be resolved by name — off the
+# search list, signing fails with "no identity found" against a keychain that
+# demonstrably holds the identity.
+#
+# The addition is idempotent and is deliberately left in place rather than
+# restored: erun-common signs host artifacts by the same identity name long
+# after any build has finished, so a search list restored at the end of the
+# build would quietly send those back to ad-hoc — the grant loss this exists to
+# end. Nothing already on the list is dropped; erun's entry is appended only
+# when it is absent, and `security delete-keychain` removes it again.
+register_keychain() {
+	if ! search_list=$("$SECURITY_BIN" list-keychains -d user 2>&1); then
+		printf '>> code signing: reading the keychain search list failed\n' >&2
+		printf '%s\n' "$search_list" | sed 's/^/   /' >&2
+		return 1
+	fi
+	set --
+	already_listed=0
+	# One quoted, indented path per line; splitting on newlines alone keeps a
+	# home directory with a space in it intact.
+	saved_ifs=$IFS
+	IFS='
+'
+	for listed in $search_list; do
+		listed=$(printf '%s' "$listed" | sed -e 's/^[[:space:]]*"*//' -e 's/"*[[:space:]]*$//')
+		if [ -n "$listed" ]; then
+			if [ "$listed" = "$KEYCHAIN" ]; then
+				already_listed=1
+			fi
+			set -- "$@" "$listed"
+		fi
+	done
+	IFS=$saved_ifs
+	if [ "$already_listed" = 1 ]; then
+		return 0
+	fi
+	if ! output=$("$SECURITY_BIN" list-keychains -d user -s "$@" "$KEYCHAIN" 2>&1); then
+		printf '>> code signing: adding the keychain to the search list failed\n' >&2
+		printf '%s\n' "$output" | sed 's/^/   /' >&2
+		return 1
+	fi
+	printf '>> code signing: added %s to the keychain search list\n' "$KEYCHAIN" >&2
 	return 0
 }
 
@@ -130,6 +209,11 @@ if [ -n "${ERUN_CODESIGN_IDENTITY:-}" ]; then
 	KEYCHAIN=
 	printf '>> code signing: using identity %s from the keychain search list\n' "$IDENTITY" >&2
 elif [ -e "$KEYCHAIN" ]; then
+	# The keychain file existing is the whole reuse test. `security find-identity
+	# -v` is not usable for it: the valid filter reports zero for a self-signed
+	# identity even when it is present and signs fine, so a check written against
+	# it would re-create the identity on every build — a new signer each time,
+	# which is the grant loss this exists to end.
 	printf '>> code signing: using identity %s (%s)\n' "$IDENTITY" "$KEYCHAIN" >&2
 else
 	printf '>> code signing: creating identity %s (%s)\n' "$IDENTITY" "$KEYCHAIN" >&2
@@ -141,6 +225,10 @@ else
 fi
 
 if [ -n "$KEYCHAIN" ]; then
+	# Reconciled on every build, not only on the one that created the keychain:
+	# anything else that rewrites the search list drops erun's entry, and the
+	# next build would then fail to resolve an identity that is right there.
+	register_keychain || true
 	# The keychain relocks across a reboot, and a locked one makes every signature
 	# below fail. codesign reports the consequence if this did not help.
 	"$SECURITY_BIN" unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null 2>&1 || true
