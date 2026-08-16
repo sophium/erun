@@ -6,3 +6,13 @@ CREATE INDEX releases_tenant_status_release_idx
 
 CREATE INDEX releases_tenant_review_idx
   ON releases (tenant_id, review_id);
+
+-- At most one release in flight per tenant. This is the serialisation invariant
+-- itself, not an optimisation: `erun release` bumps a semver, writes
+-- version-bearing files, tags and pushes, so two concurrent releases on one
+-- version line corrupt it. Enforcing it as a unique index means two claimers
+-- racing lose one of the two in the database rather than both believing they
+-- won.
+CREATE UNIQUE INDEX releases_tenant_running_key
+  ON releases (tenant_id)
+  WHERE status = 'running';

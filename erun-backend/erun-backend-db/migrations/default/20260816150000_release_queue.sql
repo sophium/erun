@@ -42,6 +42,9 @@ CREATE TABLE "releases" (
 
 CREATE INDEX "releases_tenant_status_release_idx" ON "releases" ("tenant_id", "status", "release_id");
 CREATE INDEX "releases_tenant_review_idx" ON "releases" ("tenant_id", "review_id");
+-- At most one release in flight per tenant, enforced by the database so two
+-- claimers racing lose one of the two rather than both believing they won.
+CREATE UNIQUE INDEX "releases_tenant_running_key" ON "releases" ("tenant_id") WHERE status = 'running';
 
 CREATE TRIGGER releases_set_timestamps
   BEFORE INSERT OR UPDATE ON "releases"
