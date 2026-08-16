@@ -29,7 +29,7 @@ How an operator stands up a hosted erun platform (for example `erunpaas.com`). Y
 | 10 | `<tenant>-local` | Use an **erun API token** against the running platform | Set up this local env's own DNS zone + TLS certs through the deployed erun API. | Planned |
 | 11 | `<tenant>-prod` | skill **`erun-deploy-platform`** | One-shot orchestration of steps 6–9. | Planned |
 
-Alongside these, stand up the **OIDC issuer** (Zitadel) at `auth.<base-domain>` and point the API + console at it; the first sign-in bootstraps the `OPERATIONS` tenant. Zitadel as a managed erun component is `(Planned.)`.
+Alongside these, stand up the **OIDC issuer** (Zitadel) at `auth.<base-domain>` and point the API + console at it: the API trusts the issuer via `ERUN_OIDC_ALLOWED_ISSUERS`, and the console is built with `VITE_OIDC_ISSUER` plus the `VITE_OIDC_CLIENT_ID` of a public SPA client registered for it (Authorization Code + PKCE, redirect `https://console.<base-domain>/`). The first sign-in bootstraps the `OPERATIONS` tenant. Zitadel as a managed erun component is `(Planned.)`.
 
 ## Which skills, and where
 
