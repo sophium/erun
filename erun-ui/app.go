@@ -129,6 +129,10 @@ type App struct {
 	busyEnvs       map[string]int
 	workspaceSyncs map[string]*workspaceSyncWorker
 	orchestrators  map[string]*orchestratorSession
+	// investigations bounds how many failure reports become agents, for how
+	// long, and on what input. It holds its own lock; never call into it while
+	// holding a.mu, since it observes session liveness through this App.
+	investigations *investigationRegistry
 	// skillsSourceReported latches the one warning a run posts when the shipped
 	// skills cannot be resolved. The condition is a property of this build, so
 	// restating it on every orchestrator launch would be noise.
@@ -211,6 +215,12 @@ func NewApp(deps erunUIDeps) *App {
 		credentialRefreshers: make(map[string]*cloudCredentialsRefresher),
 		workingIssueCache:    make(map[string]workingIssueCacheEntry),
 	}
+	app.investigations = newInvestigationRegistry(defaultInvestigationReportDir())
+	app.investigations.live = func(id string) bool {
+		_, running := app.runningOrchestratorInfo(id)
+		return running
+	}
+	app.investigations.onExpire = app.finishExpiredInvestigation
 	app.activityQueue = newActivityQueueStore(
 		func(entry activityQueueEntry) {
 			app.emitActivityState(entry)
@@ -462,6 +472,7 @@ func (a *App) shutdown(context.Context) {
 	a.stopActivityPollers()
 	a.stopCloudContextStatusPoller()
 	a.stopActionRunners()
+	a.investigations.stopTimers()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.stopAllWorkspaceSyncsLocked()

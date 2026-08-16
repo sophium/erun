@@ -4194,6 +4194,9 @@ type stubTerminalSession struct {
 	written       []byte
 	initialOutput []byte
 	resizes       [][2]int
+	// pid is 0 unless a test needs the session to be trackable by process — the
+	// investigation job records a pid and resolves its state from it.
+	pid int
 }
 
 // stubSessionReadyOutput is the line every newStubTerminalSession emits
@@ -4262,7 +4265,7 @@ func (s *stubTerminalSession) Wait() error {
 }
 
 func (s *stubTerminalSession) Pid() int {
-	return 0
+	return s.pid
 }
 
 func (s *stubTerminalSession) Alive() bool {

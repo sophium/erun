@@ -40,6 +40,23 @@ func orchestratorTestApp(t *testing.T) *App {
 	return app
 }
 
+// investigateHelmTimeoutReport is the shape the desktop's failure card produces:
+// the command that failed, the target, the error, and the captured output. The
+// bounds in investigation_bounds.go admit it because it carries all three.
+const investigateHelmTimeoutReport = `erun deploy failed
+Target: frs/dev
+Version: 1.0.179
+Release: frs-devops
+Namespace: frs-dev
+Started: 2026-08-16T06:01:12Z
+Elapsed: 4s
+
+Error: ==> Deploy failed after 4s
+
+Output:
+helm upgrade --install frs-devops ./chart
+Error: UPGRADE FAILED: timed out waiting for the condition`
+
 // orchestratorTestAppWithLocalRepo also returns the local-agent env's worktree
 // path, for the assertions that care where that env is reviewed.
 func orchestratorTestAppWithLocalRepo(t *testing.T) (*App, string) {
@@ -53,7 +70,7 @@ func orchestratorTestAppWithLocalRepo(t *testing.T) (*App, string) {
 	// own source AFTER calling this.
 	t.Setenv("ERUN_SKILLS_DIR", t.TempDir())
 	laptopRepo := t.TempDir()
-	return NewApp(erunUIDeps{
+	app := NewApp(erunUIDeps{
 		store: newOrchestratorStubStore(laptopRepo),
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			return newStubTerminalSession(), nil
@@ -61,7 +78,13 @@ func orchestratorTestAppWithLocalRepo(t *testing.T) (*App, string) {
 		resolveOrchestratorLaunch: func(string, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
-	}), laptopRepo
+	})
+	// Stage failure reports inside the test's own directory. Left at the default
+	// they land in the shared host temp dir, which is how a suite that spawns
+	// nothing still left two reports per run behind — and made a handful of real
+	// failures read as dozens of spawned agents.
+	app.investigations.reportDir = t.TempDir()
+	return app, laptopRepo
 }
 
 // TestListOrchestratorEnvCandidatesCoversBothAgentTypes locks the capability: an
@@ -380,9 +403,10 @@ func TestInvestigateFailureSpawnsTransientTenantScopedOrchestrator(t *testing.T)
 			return "claude-stub", nil, nil
 		},
 	})
+	app.investigations.reportDir = t.TempDir()
 	defer app.shutdown(context.Background())
 
-	info, err := app.InvestigateFailure("deploy failed: helm timeout", "frs", "dev", 80, 24)
+	info, err := app.InvestigateFailure(investigateHelmTimeoutReport, "frs", "dev", 80, 24)
 	if err != nil {
 		t.Fatalf("InvestigateFailure failed: %v", err)
 	}
@@ -390,7 +414,7 @@ func TestInvestigateFailureSpawnsTransientTenantScopedOrchestrator(t *testing.T)
 		t.Fatalf("expected a transient investigator, got %+v", info)
 	}
 	assertLoneTenant(t, info.Tenants, "frs")
-	if !strings.Contains(seededPrompt, "erun-investigate") || !strings.Contains(seededPrompt, "erun-file-issue") {
+	if !strings.Contains(seededPrompt, "report-") || !strings.Contains(seededPrompt, "erun-file-issue") {
 		t.Fatalf("unexpected seed prompt: %q", seededPrompt)
 	}
 	start := strings.Index(seededPrompt, "saved at ") + len("saved at ")
@@ -402,7 +426,7 @@ func TestInvestigateFailureSpawnsTransientTenantScopedOrchestrator(t *testing.T)
 	if readErr != nil {
 		t.Fatalf("staged report file: %v", readErr)
 	}
-	if !strings.Contains(string(data), "helm timeout") {
+	if !strings.Contains(string(data), "UPGRADE FAILED") {
 		t.Fatalf("staged report missing the failure detail: %q", data)
 	}
 	assertSingleTransientOrchestrator(t, app)
