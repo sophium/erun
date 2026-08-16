@@ -88,6 +88,11 @@ emitted; type is the single source of truth.
 {{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
 {{- $devopsImage := default (printf "%s/erun-devops:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-devops") -}}
 {{- $dindImage := default "ghcr.io/sophium/erun-dind:28.1.1-1" (index $imageOverrides "erun-dind") -}}
+{{- /* The gid of the `docker` group baked into the docker:<ver>-dind base, which
+       owns the daemon socket. Surfaced as a value so an env can follow the base
+       if that group ever moves, rather than losing the daemon on the next
+       socket the daemon creates. */ -}}
+{{- $dindDockerGid := default 2375 .Values.dindDockerGid -}}
 {{- $cloudContext := default dict .Values.cloudContext -}}
 {{- $cloudContextName := default "" $cloudContext.name -}}
 {{- $cloudProvider := default "" $cloudContext.provider -}}
@@ -382,8 +387,15 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- /* The runtime container reaches the daemon by owning the socket's
+             group, not by the sidecar relaxing its mode: dockerd recreates the
+             socket 0660 root:docker every time it starts, so any one-shot
+             widening only covers the socket that existed when it ran. Applies
+             pod-wide; the sidecar runs as root and is unaffected. */}}
       securityContext:
         fsGroup: 1000
+        supplementalGroups:
+          - {{ $dindDockerGid }}
       initContainers:
         {{- if eq $worktreeStorage "pvc" }}
         # Adopt before mounting: a deploy that introduces the worktree claim to
@@ -657,13 +669,20 @@ spec:
             periodSeconds: 2
             timeoutSeconds: 2
             failureThreshold: 30
+          {{- /* Waits for a daemon that answers, not for a socket file: a
+                 SIGKILLed dockerd leaves its socket behind on the shared
+                 emptyDir, so a file-existence wait returns instantly and widens
+                 the inode the restarting daemon is about to replace. Bounded,
+                 because kubernetes never times a postStart hook out; the chmod
+                 is a courtesy for anything outside the socket's group, so its
+                 failure must not hold the container back. */}}
           lifecycle:
             postStart:
               exec:
                 command:
                   - sh
                   - -lc
-                  - while [ ! -S /var/run/docker.sock ]; do sleep 1; done; chmod 0666 /var/run/docker.sock
+                  - 'i=0; until docker -H unix:///var/run/docker.sock info >/dev/null 2>&1 || [ "$i" -ge 300 ]; do i=$((i+1)); sleep 1; done; chmod 0666 /var/run/docker.sock 2>/dev/null || true'
           # The dind sidecar is the docker daemon that resolves a tenant's
           # docker-compose bind-mount sources on its own filesystem, so it must
           # see the same home + repo tree as the erun-devops container: without

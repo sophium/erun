@@ -56,6 +56,11 @@ runtime_container() {
     containers_section "$1" | awk '/^        - image: /{c++} c==1'
 }
 
+# The second container entry, i.e. the docker daemon sidecar.
+dind_container() {
+    containers_section "$1" | awk '/^        - image: /{c++} c==2'
+}
+
 # --- 1. One application container plus the docker daemon sidecar ---
 rendered=$(render)
 names=$(container_names "${rendered}")
@@ -180,5 +185,55 @@ rendered=$(render --set worktreeStorage=none)
 init_containers_section "${rendered}" >"${init_block}"
 grep -q 'adopt-worktree' "${init_block}" &&
     fail "an env with no worktree volume should render no adoption init container"
+
+# --- 14. The pod joins the dind image's docker group ---
+# Group membership is what survives a daemon restart: dockerd recreates the
+# socket 0660 root:docker, so a runtime container that is not in that group
+# depends on something widening each new socket before it is used.
+rendered=$(render)
+pod_security_context() {
+    awk '/^      securityContext:/{inside=1;next} /^      [a-zA-Z]/{inside=0} inside' "$1"
+}
+pod_security_context "${rendered}" | grep -q '^        supplementalGroups:$' ||
+    fail "the pod securityContext should declare supplementalGroups"
+pod_security_context "${rendered}" | grep -q '^          - 2375$' ||
+    fail "the pod should join the dind image's docker gid 2375"
+
+# --- 15. The docker gid follows the dind base when it is overridden ---
+rendered=$(render --set dindDockerGid=4242)
+pod_security_context "${rendered}" | grep -q '^          - 4242$' ||
+    fail "dindDockerGid should select the pod's supplemental group"
+pod_security_context "${rendered}" | grep -q '^          - 2375$' &&
+    fail "an overridden gid should replace the default, not accompany it"
+
+# --- 16. The socket hook waits for a live daemon, not for a socket file ---
+# A SIGKILLed dockerd cannot unlink its socket, so the file outlives it on the
+# shared emptyDir: a file-existence wait returns at once and acts on the inode
+# the restarting daemon is about to replace.
+rendered=$(render)
+dind_block="${work_root}/dind.yaml"
+dind_container "${rendered}" >"${dind_block}"
+hook_line=$(awk '/^            postStart:$/{inside=1;next} inside && /^                  - /{line=$0} END{print line}' "${dind_block}")
+hook=${hook_line#*- }
+hook=${hook#\'}
+hook=${hook%\'}
+[ -n "${hook}" ] || fail "the dind container should carry a postStart socket hook"
+case "${hook}" in
+    *'! -S /var/run/docker.sock'*)
+        fail "waiting on mere socket existence is the race this replaced"
+        ;;
+esac
+case "${hook}" in
+    *"docker -H unix:///var/run/docker.sock info"*) ;;
+    *) fail "the hook should probe the daemon rather than the socket file" ;;
+esac
+case "${hook}" in
+    *'[ "$i" -ge '*) ;;
+    *) fail "the hook's wait must be bounded; kubernetes never times a postStart hook out" ;;
+esac
+case "${hook}" in
+    *"chmod 0666 /var/run/docker.sock 2>/dev/null || true"*) ;;
+    *) fail "the chmod is a fallback and must not fail the hook" ;;
+esac
 
 echo "PASS: erun-devops chart pod shape"
