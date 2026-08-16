@@ -3,7 +3,8 @@
 # Tests for the erun-devops runtime chart's pod shape: the runtime container is
 # the environment's only long-lived application container and serves the MCP
 # edge itself, the MCP auth env and key mount land on it, the runtime image
-# override still applies, and a disabled edge renders no port.
+# override still applies, a disabled edge renders no port, and the volumes the
+# runtime user writes are handed to it without a pod-wide fsGroup.
 #
 # Lives beside the chart rather than inside it: helm renders every file under
 # templates/, and the chart's own contents feed the runtime image fingerprint.
@@ -45,6 +46,22 @@ containers_section() {
 
 init_containers_section() {
     awk '/^      initContainers:/{inside=1;next} /^      containers:/{inside=0} inside' "$1"
+}
+
+init_container_names() {
+    init_containers_section "$1" | sed -n 's/^          name: \(.*\)$/\1/p'
+}
+
+# The init container entry named $2, as its own block. Comment lines are
+# dropped: they lead the entry they describe, so they would otherwise be read
+# as part of the preceding one.
+init_container() {
+    init_containers_section "$1" | awk -v want="          name: $2" '
+        /^        #/{next}
+        /^        - image: /{n++; buf[n]=""}
+        n{buf[n]=buf[n] $0 "\n"; if ($0==want) hit=n}
+        END{if (hit) printf "%s", buf[hit]}
+    '
 }
 
 container_names() {
@@ -235,5 +252,67 @@ case "${hook}" in
     *"chmod 0666 /var/run/docker.sock 2>/dev/null || true"*) ;;
     *) fail "the chmod is a fallback and must not fail the hook" ;;
 esac
+
+# --- 17. The pod declares no fsGroup, and still joins the docker group ---
+# fsGroup cannot be scoped to a subset of a pod's volumes, so it also reached
+# the docker state claim and had the kubelet rewrite every image layer under it
+# group-writable on each start, breaking sshd, postgres and any baked 0600
+# secret inside those images. Group membership must survive its removal.
+rendered=$(render)
+grep -q 'fsGroup' "${rendered}" &&
+    fail "no fsGroup may render: it relabels the docker state claim along with everything else"
+pod_security_context "${rendered}" | grep -q '^        supplementalGroups:$' ||
+    fail "dropping fsGroup must not drop the pod's docker group membership"
+
+# --- 18. An init container hands the runtime user the claims it writes ---
+# What fsGroup was actually buying: a freshly provisioned claim mounts empty and
+# root-owned, so uid 1000 has nowhere to write. Ownership of the mount points is
+# established explicitly instead, and only for the volumes the runtime user
+# writes — never the docker state claim this replaced fsGroup to protect.
+prepare_block="${work_root}/prepare.yaml"
+init_container "${rendered}" prepare-volumes >"${prepare_block}"
+[ -s "${prepare_block}" ] || fail "the runtime pod should render the volume-preparation init container"
+grep -q '^            runAsUser: 0$' "${prepare_block}" ||
+    fail "only root can chown a freshly provisioned claim"
+grep -q 'chown 1000:1000 "/mnt/erun-home"' "${prepare_block}" ||
+    fail "the home claim's mount point should be handed to the runtime user"
+grep -q 'chown 1000:1000 "/mnt/erun-worktree"' "${prepare_block}" ||
+    fail "a pvc worktree claim's mount point should be handed to the runtime user"
+grep -q '^            - name: erun-home$' "${prepare_block}" ||
+    fail "the preparation init container must mount the home volume"
+grep -q '^            - name: repo-worktree$' "${prepare_block}" ||
+    fail "the preparation init container must mount the pvc worktree claim"
+grep -q 'docker-state' "${prepare_block}" &&
+    fail "the docker state claim must stay out of the preparation container; its layer permissions are dockerd's"
+grep -q 'docker-socket' "${prepare_block}" &&
+    fail "the docker socket emptyDir is the daemon's and must stay out of the preparation container"
+
+# --- 19. Preparation runs before adoption ---
+# The adoption copies the legacy tree into the claim as uid 1000, so it has to
+# see a claim that has already been handed over.
+order="${work_root}/init-order.txt"
+init_container_names "${rendered}" >"${order}"
+prepare_index=$(grep -n '^prepare-volumes$' "${order}" | cut -d: -f1)
+adopt_index=$(grep -n '^adopt-worktree$' "${order}" | cut -d: -f1)
+[ -n "${prepare_index}" ] || fail "the preparation init container should be named in the init order"
+[ -n "${adopt_index}" ] || fail "a pvc worktree should still render the adoption init container"
+[ "${prepare_index}" -lt "${adopt_index}" ] ||
+    fail "preparation must precede adoption, which writes the claim as uid 1000"
+
+# --- 20. A host worktree is the operator's node directory and is never chowned ---
+rendered=$(render --set worktreeStorage=host --set-string worktreeHostPath=/host/git/petios)
+init_container "${rendered}" prepare-volumes >"${prepare_block}"
+grep -q 'chown 1000:1000 "/mnt/erun-home"' "${prepare_block}" ||
+    fail "the home claim needs preparing whatever the worktree storage is"
+grep -q 'repo-worktree' "${prepare_block}" &&
+    fail "a host worktree lives on the node; the chart must not take ownership of it"
+
+# --- 21. A sourceless runtime env still prepares its home claim ---
+rendered=$(render --set worktreeStorage=none)
+init_container "${rendered}" prepare-volumes >"${prepare_block}"
+grep -q 'chown 1000:1000 "/mnt/erun-home"' "${prepare_block}" ||
+    fail "an env with no worktree volume still needs its home claim prepared"
+grep -q 'repo-worktree' "${prepare_block}" &&
+    fail "an env with no worktree volume has no claim to prepare"
 
 echo "PASS: erun-devops chart pod shape"
