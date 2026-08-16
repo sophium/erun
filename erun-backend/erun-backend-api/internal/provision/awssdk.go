@@ -84,14 +84,24 @@ func (r *awsSDKRunner) run(ctx context.Context, region string, args []string) (s
 	service, verb, flags := args[0], args[1], parseAWSFlags(args[2:])
 	switch service {
 	case "ec2":
-		return runEC2(ctx, ec2.NewFromConfig(cfg), verb, flags)
+		return dispatch(ctx, ec2.NewFromConfig(cfg), service, verb, flags, ec2Verbs)
 	case "iam":
-		return runIAM(ctx, iam.NewFromConfig(cfg), verb, flags)
+		return dispatch(ctx, iam.NewFromConfig(cfg), service, verb, flags, iamVerbs)
 	case "ssm":
-		return runSSM(ctx, ssm.NewFromConfig(cfg), verb, flags)
+		return dispatch(ctx, ssm.NewFromConfig(cfg), service, verb, flags, ssmVerbs)
 	default:
 		return "", fmt.Errorf("aws: unsupported service %q in %v", service, args)
 	}
+}
+
+// dispatch resolves one verb against its service's table. An unknown verb is an
+// error naming it, so a shared sequence that grows a call fails loudly here.
+func dispatch[C any](ctx context.Context, client C, service, verb string, flags awsFlags, verbs map[string]func(context.Context, C, awsFlags) (string, error)) (string, error) {
+	handler, ok := verbs[verb]
+	if !ok {
+		return "", fmt.Errorf("aws %s: unsupported verb %q", service, verb)
+	}
+	return handler(ctx, client, flags)
 }
 
 // config caches one resolved config per region: the bootstrap makes a dozen
@@ -124,46 +134,48 @@ func (r *awsSDKRunner) config(ctx context.Context, region string) (aws.Config, e
 
 // ---- EC2 -------------------------------------------------------------------
 
-func runEC2(ctx context.Context, client *ec2.Client, verb string, flags awsFlags) (string, error) {
-	switch verb {
-	case "describe-instances":
-		return ec2DescribeInstances(ctx, client, flags)
-	case "create-security-group":
-		out, err := client.CreateSecurityGroup(ctx, &ec2.CreateSecurityGroupInput{
-			GroupName:   aws.String(flags.one("--group-name")),
-			Description: aws.String(flags.one("--description")),
-		})
-		if err != nil {
-			return "", err
-		}
-		return aws.ToString(out.GroupId), nil
-	case "describe-security-groups":
-		out, err := client.DescribeSecurityGroups(ctx, &ec2.DescribeSecurityGroupsInput{
-			GroupNames: flags.all("--group-names"),
-		})
-		if err != nil || len(out.SecurityGroups) == 0 {
-			return "", err
-		}
-		return aws.ToString(out.SecurityGroups[0].GroupId), nil
-	case "authorize-security-group-ingress":
-		port := int32(atoiOr(flags.one("--port"), 0))
-		_, err := client.AuthorizeSecurityGroupIngress(ctx, &ec2.AuthorizeSecurityGroupIngressInput{
-			GroupId: aws.String(flags.one("--group-id")),
-			IpPermissions: []ec2types.IpPermission{{
-				IpProtocol: aws.String(flags.one("--protocol")),
-				FromPort:   aws.Int32(port),
-				ToPort:     aws.Int32(port),
-				IpRanges:   []ec2types.IpRange{{CidrIp: aws.String(flags.one("--cidr"))}},
-			}},
-		})
+var ec2Verbs = map[string]func(context.Context, *ec2.Client, awsFlags) (string, error){
+	"describe-instances":               ec2DescribeInstances,
+	"create-security-group":            ec2CreateSecurityGroup,
+	"describe-security-groups":         ec2DescribeSecurityGroups,
+	"authorize-security-group-ingress": ec2AuthorizeIngress,
+	"run-instances":                    ec2RunInstances,
+	"wait":                             ec2Wait,
+}
+
+func ec2CreateSecurityGroup(ctx context.Context, client *ec2.Client, flags awsFlags) (string, error) {
+	out, err := client.CreateSecurityGroup(ctx, &ec2.CreateSecurityGroupInput{
+		GroupName:   aws.String(flags.one("--group-name")),
+		Description: aws.String(flags.one("--description")),
+	})
+	if err != nil {
 		return "", err
-	case "run-instances":
-		return ec2RunInstances(ctx, client, flags)
-	case "wait":
-		return "", ec2Wait(ctx, client, flags)
-	default:
-		return "", fmt.Errorf("aws ec2: unsupported verb %q", verb)
 	}
+	return aws.ToString(out.GroupId), nil
+}
+
+func ec2DescribeSecurityGroups(ctx context.Context, client *ec2.Client, flags awsFlags) (string, error) {
+	out, err := client.DescribeSecurityGroups(ctx, &ec2.DescribeSecurityGroupsInput{
+		GroupNames: flags.all("--group-names"),
+	})
+	if err != nil || len(out.SecurityGroups) == 0 {
+		return "", err
+	}
+	return aws.ToString(out.SecurityGroups[0].GroupId), nil
+}
+
+func ec2AuthorizeIngress(ctx context.Context, client *ec2.Client, flags awsFlags) (string, error) {
+	port := int32(atoiOr(flags.one("--port"), 0))
+	_, err := client.AuthorizeSecurityGroupIngress(ctx, &ec2.AuthorizeSecurityGroupIngressInput{
+		GroupId: aws.String(flags.one("--group-id")),
+		IpPermissions: []ec2types.IpPermission{{
+			IpProtocol: aws.String(flags.one("--protocol")),
+			FromPort:   aws.Int32(port),
+			ToPort:     aws.Int32(port),
+			IpRanges:   []ec2types.IpRange{{CidrIp: aws.String(flags.one("--cidr"))}},
+		}},
+	})
+	return "", err
 }
 
 func ec2DescribeInstances(ctx context.Context, client *ec2.Client, flags awsFlags) (string, error) {
@@ -190,6 +202,21 @@ func ec2DescribeInstances(ctx context.Context, client *ec2.Client, flags awsFlag
 }
 
 func ec2RunInstances(ctx context.Context, client *ec2.Client, flags awsFlags) (string, error) {
+	input, err := runInstancesInput(flags)
+	if err != nil {
+		return "", err
+	}
+	out, err := client.RunInstances(ctx, input)
+	if err != nil {
+		return "", err
+	}
+	if len(out.Instances) == 0 {
+		return "", nil
+	}
+	return aws.ToString(out.Instances[0].InstanceId), nil
+}
+
+func runInstancesInput(flags awsFlags) (*ec2.RunInstancesInput, error) {
 	count := int32(atoiOr(flags.one("--count"), 1))
 	input := &ec2.RunInstancesInput{
 		ImageId:      aws.String(flags.one("--image-id")),
@@ -201,13 +228,21 @@ func ec2RunInstances(ctx context.Context, client *ec2.Client, flags awsFlags) (s
 	// it already encoded.
 	userData, err := readFileArg(flags.one("--user-data"))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if userData != "" {
 		input.UserData = aws.String(base64.StdEncoding.EncodeToString([]byte(userData)))
 	}
-	if bdm, ok := parseBlockDeviceMapping(flags.one("--block-device-mappings")); ok {
-		input.BlockDeviceMappings = []ec2types.BlockDeviceMapping{bdm}
+	applyRunInstancesShorthand(input, flags)
+	applyRunInstancesReferences(input, flags)
+	return input, nil
+}
+
+// applyRunInstancesShorthand fills the structured fields the shared sequence
+// passes as aws-CLI shorthand strings.
+func applyRunInstancesShorthand(input *ec2.RunInstancesInput, flags awsFlags) {
+	if mapping, ok := parseBlockDeviceMapping(flags.one("--block-device-mappings")); ok {
+		input.BlockDeviceMappings = []ec2types.BlockDeviceMapping{mapping}
 	}
 	if options, ok := parseMetadataOptions(flags.one("--metadata-options")); ok {
 		input.MetadataOptions = options
@@ -215,6 +250,11 @@ func ec2RunInstances(ctx context.Context, client *ec2.Client, flags awsFlags) (s
 	if tags, ok := parseTagSpecification(flags.one("--tag-specifications")); ok {
 		input.TagSpecifications = []ec2types.TagSpecification{tags}
 	}
+}
+
+// applyRunInstancesReferences fills the launch's optional references to
+// resources resolved earlier in the bootstrap.
+func applyRunInstancesReferences(input *ec2.RunInstancesInput, flags awsFlags) {
 	if groups := flags.all("--security-group-ids"); len(groups) > 0 {
 		input.SecurityGroupIds = groups
 	}
@@ -227,91 +267,97 @@ func ec2RunInstances(ctx context.Context, client *ec2.Client, flags awsFlags) (s
 	if key := flags.one("--key-name"); key != "" {
 		input.KeyName = aws.String(key)
 	}
-	out, err := client.RunInstances(ctx, input)
-	if err != nil {
-		return "", err
-	}
-	if len(out.Instances) == 0 {
-		return "", nil
-	}
-	return aws.ToString(out.Instances[0].InstanceId), nil
 }
 
 // ec2WaitMaxDuration matches the aws CLI waiter's ceiling (40 polls, 15s apart),
 // so a bootstrap that hangs gives up at the same point it always did.
 const ec2WaitMaxDuration = 10 * time.Minute
 
-func ec2Wait(ctx context.Context, client *ec2.Client, flags awsFlags) error {
+func ec2Wait(ctx context.Context, client *ec2.Client, flags awsFlags) (string, error) {
 	input := &ec2.DescribeInstancesInput{InstanceIds: flags.all("--instance-ids")}
 	switch state := flags.subcommand(); state {
 	case "instance-running":
-		return ec2.NewInstanceRunningWaiter(client).Wait(ctx, input, ec2WaitMaxDuration)
+		return "", ec2.NewInstanceRunningWaiter(client).Wait(ctx, input, ec2WaitMaxDuration)
 	case "instance-stopped":
-		return ec2.NewInstanceStoppedWaiter(client).Wait(ctx, input, ec2WaitMaxDuration)
+		return "", ec2.NewInstanceStoppedWaiter(client).Wait(ctx, input, ec2WaitMaxDuration)
 	default:
-		return fmt.Errorf("aws ec2 wait: unsupported waiter %q", state)
+		return "", fmt.Errorf("aws ec2 wait: unsupported waiter %q", state)
 	}
 }
 
 // ---- IAM -------------------------------------------------------------------
 
-func runIAM(ctx context.Context, client *iam.Client, verb string, flags awsFlags) (string, error) {
-	switch verb {
-	case "get-role":
-		out, err := client.GetRole(ctx, &iam.GetRoleInput{RoleName: aws.String(flags.one("--role-name"))})
-		if err != nil || out.Role == nil {
-			return "", err
-		}
-		return aws.ToString(out.Role.RoleName), nil
-	case "create-role":
-		document, err := readFileArg(flags.one("--assume-role-policy-document"))
-		if err != nil {
-			return "", err
-		}
-		out, err := client.CreateRole(ctx, &iam.CreateRoleInput{
-			RoleName:                 aws.String(flags.one("--role-name")),
-			AssumeRolePolicyDocument: aws.String(document),
-		})
-		if err != nil || out.Role == nil {
-			return "", err
-		}
-		return aws.ToString(out.Role.RoleName), nil
-	case "put-role-policy":
-		document, err := readFileArg(flags.one("--policy-document"))
-		if err != nil {
-			return "", err
-		}
-		_, err = client.PutRolePolicy(ctx, &iam.PutRolePolicyInput{
-			RoleName:       aws.String(flags.one("--role-name")),
-			PolicyName:     aws.String(flags.one("--policy-name")),
-			PolicyDocument: aws.String(document),
-		})
+var iamVerbs = map[string]func(context.Context, *iam.Client, awsFlags) (string, error){
+	"get-role":                     iamGetRole,
+	"create-role":                  iamCreateRole,
+	"put-role-policy":              iamPutRolePolicy,
+	"get-instance-profile":         iamGetInstanceProfile,
+	"create-instance-profile":      iamCreateInstanceProfile,
+	"add-role-to-instance-profile": iamAddRoleToInstanceProfile,
+}
+
+func iamGetRole(ctx context.Context, client *iam.Client, flags awsFlags) (string, error) {
+	out, err := client.GetRole(ctx, &iam.GetRoleInput{RoleName: aws.String(flags.one("--role-name"))})
+	if err != nil || out.Role == nil {
 		return "", err
-	case "get-instance-profile":
-		out, err := client.GetInstanceProfile(ctx, &iam.GetInstanceProfileInput{
-			InstanceProfileName: aws.String(flags.one("--instance-profile-name")),
-		})
-		if err != nil || out.InstanceProfile == nil {
-			return "", err
-		}
-		return instanceProfileField(out.InstanceProfile, flags.one("--query"))
-	case "create-instance-profile":
-		out, err := client.CreateInstanceProfile(ctx, &iam.CreateInstanceProfileInput{
-			InstanceProfileName: aws.String(flags.one("--instance-profile-name")),
-		})
-		if err != nil || out.InstanceProfile == nil {
-			return "", err
-		}
-		return aws.ToString(out.InstanceProfile.Arn), nil
-	case "add-role-to-instance-profile":
-		_, err := client.AddRoleToInstanceProfile(ctx, &iam.AddRoleToInstanceProfileInput{
-			InstanceProfileName: aws.String(flags.one("--instance-profile-name")),
-			RoleName:            aws.String(flags.one("--role-name")),
-		})
-		return "", err
-	default:
-		return "", fmt.Errorf("aws iam: unsupported verb %q", verb)
 	}
+	return aws.ToString(out.Role.RoleName), nil
+}
+
+func iamCreateRole(ctx context.Context, client *iam.Client, flags awsFlags) (string, error) {
+	document, err := readFileArg(flags.one("--assume-role-policy-document"))
+	if err != nil {
+		return "", err
+	}
+	out, err := client.CreateRole(ctx, &iam.CreateRoleInput{
+		RoleName:                 aws.String(flags.one("--role-name")),
+		AssumeRolePolicyDocument: aws.String(document),
+	})
+	if err != nil || out.Role == nil {
+		return "", err
+	}
+	return aws.ToString(out.Role.RoleName), nil
+}
+
+func iamPutRolePolicy(ctx context.Context, client *iam.Client, flags awsFlags) (string, error) {
+	document, err := readFileArg(flags.one("--policy-document"))
+	if err != nil {
+		return "", err
+	}
+	_, err = client.PutRolePolicy(ctx, &iam.PutRolePolicyInput{
+		RoleName:       aws.String(flags.one("--role-name")),
+		PolicyName:     aws.String(flags.one("--policy-name")),
+		PolicyDocument: aws.String(document),
+	})
+	return "", err
+}
+
+func iamGetInstanceProfile(ctx context.Context, client *iam.Client, flags awsFlags) (string, error) {
+	out, err := client.GetInstanceProfile(ctx, &iam.GetInstanceProfileInput{
+		InstanceProfileName: aws.String(flags.one("--instance-profile-name")),
+	})
+	if err != nil || out.InstanceProfile == nil {
+		return "", err
+	}
+	return instanceProfileField(out.InstanceProfile, flags.one("--query"))
+}
+
+func iamCreateInstanceProfile(ctx context.Context, client *iam.Client, flags awsFlags) (string, error) {
+	out, err := client.CreateInstanceProfile(ctx, &iam.CreateInstanceProfileInput{
+		InstanceProfileName: aws.String(flags.one("--instance-profile-name")),
+	})
+	if err != nil || out.InstanceProfile == nil {
+		return "", err
+	}
+	return aws.ToString(out.InstanceProfile.Arn), nil
+}
+
+func iamAddRoleToInstanceProfile(ctx context.Context, client *iam.Client, flags awsFlags) (string, error) {
+	_, err := client.AddRoleToInstanceProfile(ctx, &iam.AddRoleToInstanceProfileInput{
+		InstanceProfileName: aws.String(flags.one("--instance-profile-name")),
+		RoleName:            aws.String(flags.one("--role-name")),
+	})
+	return "", err
 }
 
 // instanceProfileField renders the two projections eruncommon takes off an
@@ -333,10 +379,11 @@ func instanceProfileField(profile *iamtypes.InstanceProfile, query string) (stri
 
 // ---- SSM -------------------------------------------------------------------
 
-func runSSM(ctx context.Context, client *ssm.Client, verb string, flags awsFlags) (string, error) {
-	if verb != "get-parameter" {
-		return "", fmt.Errorf("aws ssm: unsupported verb %q", verb)
-	}
+var ssmVerbs = map[string]func(context.Context, *ssm.Client, awsFlags) (string, error){
+	"get-parameter": ssmGetParameter,
+}
+
+func ssmGetParameter(ctx context.Context, client *ssm.Client, flags awsFlags) (string, error) {
 	out, err := client.GetParameter(ctx, &ssm.GetParameterInput{Name: aws.String(flags.one("--name"))})
 	if err != nil || out.Parameter == nil {
 		return "", err

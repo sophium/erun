@@ -94,38 +94,56 @@ const (
 	fakeProfileARN = "arn:aws:iam::123456789012:instance-profile/erun-test-host-stop"
 )
 
+// queryResponders maps each action the bootstrap issues to the response the
+// fake returns. An unlisted action is an error, so a call the sequence grows
+// shows up as a failure rather than a silent success.
+var queryResponders = map[string]func(http.ResponseWriter, url.Values){
+	"CreateSecurityGroup": func(w http.ResponseWriter, _ url.Values) {
+		writeXML(w, `<CreateSecurityGroupResponse><groupId>`+fakeGroupID+`</groupId></CreateSecurityGroupResponse>`)
+	},
+	"AuthorizeSecurityGroupIngress": func(w http.ResponseWriter, _ url.Values) {
+		writeXML(w, `<AuthorizeSecurityGroupIngressResponse><return>true</return></AuthorizeSecurityGroupIngressResponse>`)
+	},
+	// A fresh account: neither the role nor the profile exists yet, so the
+	// bootstrap takes the create path a tenant's first provision takes.
+	"GetRole": func(w http.ResponseWriter, _ url.Values) {
+		writeQueryError(w, http.StatusNotFound, "NoSuchEntity", "role not found")
+	},
+	"GetInstanceProfile": func(w http.ResponseWriter, _ url.Values) {
+		writeQueryError(w, http.StatusNotFound, "NoSuchEntity", "instance profile not found")
+	},
+	"CreateRole": func(w http.ResponseWriter, form url.Values) {
+		writeXML(w, `<CreateRoleResponse><CreateRoleResult><Role><RoleName>`+form.Get("RoleName")+`</RoleName></Role></CreateRoleResult></CreateRoleResponse>`)
+	},
+	"PutRolePolicy": func(w http.ResponseWriter, _ url.Values) {
+		writeXML(w, `<PutRolePolicyResponse/>`)
+	},
+	"CreateInstanceProfile": func(w http.ResponseWriter, form url.Values) {
+		writeXML(w, `<CreateInstanceProfileResponse><CreateInstanceProfileResult><InstanceProfile><Arn>`+fakeProfileARN+`</Arn><InstanceProfileName>`+form.Get("InstanceProfileName")+`</InstanceProfileName></InstanceProfile></CreateInstanceProfileResult></CreateInstanceProfileResponse>`)
+	},
+	"AddRoleToInstanceProfile": func(w http.ResponseWriter, _ url.Values) {
+		writeXML(w, `<AddRoleToInstanceProfileResponse/>`)
+	},
+	"RunInstances": func(w http.ResponseWriter, _ url.Values) {
+		writeXML(w, `<RunInstancesResponse><instancesSet><item><instanceId>`+fakeInstanceID+`</instanceId></item></instancesSet></RunInstancesResponse>`)
+	},
+	"DescribeInstances": serveDescribeInstances,
+}
+
 func (f *fakeAWS) serveQuery(w http.ResponseWriter, action string, form url.Values) {
 	w.Header().Set("Content-Type", "text/xml")
-	switch action {
-	case "CreateSecurityGroup":
-		writeXML(w, `<CreateSecurityGroupResponse><groupId>`+fakeGroupID+`</groupId></CreateSecurityGroupResponse>`)
-	case "AuthorizeSecurityGroupIngress":
-		writeXML(w, `<AuthorizeSecurityGroupIngressResponse><return>true</return></AuthorizeSecurityGroupIngressResponse>`)
-	case "GetRole", "GetInstanceProfile":
-		// A fresh account: neither exists yet, so the bootstrap takes its create
-		// path — the same branch a first provision for a tenant takes.
-		writeQueryError(w, http.StatusNotFound, "NoSuchEntity", action+" not found")
-	case "CreateRole":
-		writeXML(w, `<CreateRoleResponse><CreateRoleResult><Role><RoleName>`+form.Get("RoleName")+`</RoleName></Role></CreateRoleResult></CreateRoleResponse>`)
-	case "PutRolePolicy":
-		writeXML(w, `<PutRolePolicyResponse/>`)
-	case "CreateInstanceProfile":
-		writeXML(w, `<CreateInstanceProfileResponse><CreateInstanceProfileResult><InstanceProfile><Arn>`+fakeProfileARN+`</Arn><InstanceProfileName>`+form.Get("InstanceProfileName")+`</InstanceProfileName></InstanceProfile></CreateInstanceProfileResult></CreateInstanceProfileResponse>`)
-	case "AddRoleToInstanceProfile":
-		writeXML(w, `<AddRoleToInstanceProfileResponse/>`)
-	case "RunInstances":
-		writeXML(w, `<RunInstancesResponse><instancesSet><item><instanceId>`+fakeInstanceID+`</instanceId></item></instancesSet></RunInstancesResponse>`)
-	case "DescribeInstances":
-		f.serveDescribeInstances(w, form)
-	default:
+	responder, ok := queryResponders[action]
+	if !ok {
 		writeQueryError(w, http.StatusBadRequest, "InvalidAction", "unexpected action "+action)
+		return
 	}
+	responder(w, form)
 }
 
 // serveDescribeInstances distinguishes the pre-launch idempotency lookup (by
 // tag filter, and empty here) from the post-launch waiter and public-IP reads
 // (by instance id).
-func (f *fakeAWS) serveDescribeInstances(w http.ResponseWriter, form url.Values) {
+func serveDescribeInstances(w http.ResponseWriter, form url.Values) {
 	if form.Get("InstanceId.1") == "" {
 		writeXML(w, `<DescribeInstancesResponse><reservationSet/></DescribeInstancesResponse>`)
 		return

@@ -152,12 +152,26 @@ func erunCommonLocalNames(file *ast.File) map[string]bool {
 // fail here and be carried across rather than quietly widening what the backend
 // may call.
 func TestBannedCommonFuncsStillExist(t *testing.T) {
-	declared := map[string]bool{}
-	entries, err := filepath.Glob(filepath.Join(erunCommonDir, "*.go"))
+	declared := erunCommonFuncNames(t)
+	if len(declared) == 0 {
+		t.Fatalf("parsed no erun-common declarations from %s — the lookup is misconfigured", erunCommonDir)
+	}
+	for _, name := range bannedCommonFuncs {
+		if !declared[name] {
+			t.Errorf("banned helper eruncommon.%s no longer exists — update bannedCommonFuncs to the name that replaced it", name)
+		}
+	}
+}
+
+// erunCommonFuncNames collects erun-common's package-level function names.
+func erunCommonFuncNames(t *testing.T) map[string]bool {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(erunCommonDir, "*.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range entries {
+	declared := map[string]bool{}
+	for _, path := range paths {
 		if strings.HasSuffix(path, "_test.go") {
 			continue
 		}
@@ -171,12 +185,5 @@ func TestBannedCommonFuncsStillExist(t *testing.T) {
 			}
 		}
 	}
-	if len(declared) == 0 {
-		t.Fatalf("parsed no erun-common declarations from %s — the lookup is misconfigured", erunCommonDir)
-	}
-	for _, name := range bannedCommonFuncs {
-		if !declared[name] {
-			t.Errorf("banned helper eruncommon.%s no longer exists — update bannedCommonFuncs to the name that replaced it", name)
-		}
-	}
+	return declared
 }
