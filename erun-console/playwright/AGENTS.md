@@ -14,7 +14,7 @@ Opt-in and skipped by default, the same convention as the backend's live env-dep
 
 ## Why a full Zitadel v4 topology (read before "simplifying" it)
 
-Zitadel **v4 has no login UI in the core container** — the interactive login is a *separate* container (`zitadel-login`, "Login V2"). A single `ghcr.io/zitadel/zitadel` container returns `{"code":5,"message":"Not Found"}` at `/ui/v2/login`, so the OIDC `authorize` endpoint has nothing to render. The faithful (and only working) topology is therefore **core + login container + a reverse proxy** unifying them under one origin:
+Zitadel **v4 has no login UI in the core container** — the interactive login is a _separate_ container (`zitadel-login`, "Login V2"). A single `ghcr.io/zitadel/zitadel` container returns `{"code":5,"message":"Not Found"}` at `/ui/v2/login`, so the OIDC `authorize` endpoint has nothing to render. The faithful (and only working) topology is therefore **core + login container + a reverse proxy** unifying them under one origin:
 
 - `zitadel/stack.sh up` runs Postgres, core, `zitadel-login`, and an nginx `proxy` that routes `/ui/v2/login` → login and everything else → core, all under `http://localhost:8080`. Plain `docker run`, not compose: `docker` is the only container tool this repository's harnesses assume.
 - Readiness is polled over **HTTP through the proxy**, not via container healthchecks — `docker run --health-cmd` always runs through `/bin/sh` and the Zitadel images are distroless. The proxy therefore starts before its upstreams; nginx's `resolver` makes upstreams resolve per request, so it tolerates that.
@@ -44,6 +44,6 @@ Prerequisites on PATH: `docker`, `go`, `atlas`, `yarn`, `python3`. Ports 8080 / 
 ## Conventions
 
 - `retries: 0`, `workers: 1`, `fullyParallel: false` — a sign-in that only passes on a retry is a determinism defect to fix, never to mask. Wait on observable conditions (URLs, visible elements, HTTP status), never wall-clock sleeps.
-- **Background services are killed by process group.** `$!` on a subshell is the subshell, not the server it starts; a dev server that survives teardown will serve the *next* run the *previous* run's client id, and the failure looks like a broken redirect rather than a leak. `setsid` + `kill -- -$PGID`, plus the free-port precondition, is what keeps that from recurring.
+- **Background services are killed by process group.** `$!` on a subshell is the subshell, not the server it starts; a dev server that survives teardown will serve the _next_ run the _previous_ run's client id, and the failure looks like a broken redirect rather than a leak. `setsid` + `kill -- -$PGID`, plus the free-port precondition, is what keeps that from recurring.
 - Pin the Zitadel image (`v4.15.3`) — core and `zitadel-login` must be the **same** tag.
 - Keep this suite a thin driver: assert on what the operator sees (the Login V2 pages, then the rendered tenant), not on internal endpoints.
