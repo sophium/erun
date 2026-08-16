@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/uptrace/bun"
@@ -11,7 +12,7 @@ type EnvironmentRepository struct {
 	txs *TxManager
 }
 
-const environmentColumns = `environment_id, tenant_id, name, type, kubernetes_context, context_id, runtime_version, status, provision_error, created_at, updated_at`
+const environmentColumns = `environment_id, tenant_id, name, type, kubernetes_context, context_id, runtime_version, status, provision_error, deployed_version, created_at, updated_at`
 
 func NewEnvironmentRepository(txs *TxManager) *EnvironmentRepository {
 	return &EnvironmentRepository{txs: txs}
@@ -56,20 +57,60 @@ func (r *EnvironmentRepository) Count(ctx context.Context) (int, error) {
 	return count, err
 }
 
+// EnvironmentStatusUpdate is one deploy-lifecycle write: the new status, the
+// failure reason (cleared on any non-failed state), and the version that
+// actually deployed. An empty DeployedVersion leaves the recorded one alone, so
+// a failed deploy does not erase the version the cluster is still running.
+type EnvironmentStatusUpdate struct {
+	Status          string
+	ProvisionError  string
+	DeployedVersion string
+}
+
 // UpdateProvisioningStatus persists an environment's provisioning-lifecycle
-// transition (registered → provisioning → running/failed), clearing the error
-// on any non-failed state. Mirrors the contexts provisioning-result update; RLS
-// keeps the write scoped to the caller's tenant.
-func (r *EnvironmentRepository) UpdateProvisioningStatus(ctx context.Context, environmentID, status, provisionError string) error {
+// transition (registered → provisioning → running/failed). Mirrors the contexts
+// provisioning-result update; RLS keeps the write scoped to the caller's tenant.
+func (r *EnvironmentRepository) UpdateProvisioningStatus(ctx context.Context, environmentID string, update EnvironmentStatusUpdate) error {
 	return r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		_, err := tx.NewRaw(`
 			UPDATE environments
 			   SET status = ?,
-			       provision_error = NULLIF(?, '')
+			       provision_error = NULLIF(?, ''),
+			       deployed_version = COALESCE(NULLIF(?, ''), deployed_version)
 			 WHERE environment_id = ?
-		`, status, provisionError, environmentID).Exec(ctx)
+		`, update.Status, update.ProvisionError, update.DeployedVersion, environmentID).Exec(ctx)
 		return err
 	})
+}
+
+// ClaimDeploy takes exclusive ownership of an environment's deploy slot,
+// returning false when another deploy already holds it. This is what makes a
+// double-submit safe: two concurrent requests would otherwise both launch a
+// rollout into the same release, and the loser's terminal write could clobber
+// the winner's. A claim that went stale past staleAfter -- a control plane that
+// crashed mid-deploy -- is re-claimable, so a wedged env is never locked out
+// permanently.
+func (r *EnvironmentRepository) ClaimDeploy(ctx context.Context, environmentID string, staleAfter time.Duration) (bool, error) {
+	claimed := false
+	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		result, err := tx.NewRaw(`
+			UPDATE environments
+			   SET status = ?,
+			       provision_error = NULL
+			 WHERE environment_id = ?
+			   AND (status <> ? OR updated_at < NOW() - MAKE_INTERVAL(secs => ?))
+		`, string(model.EnvironmentStatusProvisioning), environmentID, string(model.EnvironmentStatusProvisioning), staleAfter.Seconds()).Exec(ctx)
+		if err != nil {
+			return err
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		claimed = affected > 0
+		return nil
+	})
+	return claimed, err
 }
 
 func (r *EnvironmentRepository) Get(ctx context.Context, environmentID string) (model.Environment, error) {

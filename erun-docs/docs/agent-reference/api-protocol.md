@@ -100,6 +100,7 @@ The `(iss, org) → tenant` resolution model and first-identity bootstrap above 
 | `GET` | `/v1/environments` | List the tenant's environments. | Tenant member |
 | `POST` | `/v1/environments` | Register an environment in the caller's tenant, bound to a referenced context; when the deploy executor is configured, a runtime env with a pinned version also starts its durable server-side deploy (`202`). Body below. | Tenant member (write) |
 | `GET` | `/v1/environments/{environment_id}` | Fetch one environment by id. | Tenant member |
+| `POST` | `/v1/environments/{environment_id}/deploy` | Deploy an already-registered runtime env at a published version — the retry and version-change path (`202`). Body below. | Tenant member (write) |
 | `POST` | `/v1/environments/{environment_id}/mcp-token` | Mint a per-env MCP bearer token (`{token, audience}`) for the caller to present to the env's `erun-mcp` edge. Body-less. Response below. | Tenant member (write) |
 | `POST` | `/v1/environments/{environment_id}/dns01-token` | Mint a per-env DNS-01 broker token (`{token, audience}`), the credential the cluster's cert-manager DNS-01 webhook presents to the [DNS-01 broker](#dns01-broker). Body-less. Response below. | Tenant member (write) |
 | `GET` | `/v1/contexts` | List the tenant's cloud contexts (managed clusters). | Tenant member |
@@ -195,18 +196,23 @@ On success the endpoint persists the row and returns it. The status code tells t
   "contextId": "019a7fa5-c2c0-7c55-bc70-714873a71f20",
   "runtimeVersion": "1.2.3",
   "status": "registered",       // provisioning lifecycle: registered → provisioning → running/failed
+  "deployedVersion": "1.2.2",   // omitted until a deploy has landed; see below
   "createdAt": "2026-06-24T10:00:00Z",
   "updatedAt": "2026-06-24T10:00:00Z"
 }
 ```
 
-A newly-registered environment is `registered` — the row exists but nothing is deployed. The server-side deploy executor (#605) then moves it `provisioning` → `running`/`failed` and sets `provisionError` on failure; the same `status`/`provisionError` appear on `GET /v1/environments/{id}` and in the `GET /v1/config` read model.
+A newly-registered environment is `registered` — the row exists but nothing is deployed. The server-side deploy executor then moves it `provisioning` → `running`/`failed` and sets `provisionError` on failure; the same `status`/`provisionError` appear on `GET /v1/environments/{id}` and in the `GET /v1/config` read model.
+
+**`runtimeVersion` vs `deployedVersion`.** `runtimeVersion` is the version the environment is **pinned** to — operator-authored, set at registration. `deployedVersion` is the version a deploy **actually installed**, written when that deploy reaches `running`. They are equal in the steady state and diverge in exactly two cases: a [`POST /v1/environments/{id}/deploy`](#deploy-endpoint) that named a different version, and a failed deploy — which leaves `deployedVersion` on the version the cluster is still running, because a deploy that failed did not remove what was already there. `deployedVersion` is omitted until the environment's first successful deploy.
 
 **Per-tenant environment-count quota.** After validating the body and before persisting, the endpoint enforces the tenant's environment-count cap: it compares how many environments the tenant already has against the cap and rejects the registration with HTTP `409` once the tenant is at or over it. The cap defaults to **10** and is overridden per tenant by a `tenant_quotas.max_environments` row. That override row is set by the operations-only [`PUT /v1/tenants/{tenant_id}/quota`](#put-v1tenantstenant_idquota) endpoint (below). Both the count and the cap are read under row-level security, so each is scoped to the caller's own tenant.
 
 **Server-side deploy executor.** When configured, the backend deploys the runtime chart itself: it runs the deploy as a Kubernetes `Job` in the tenant's `<tenant>-devops` runtime image (which carries `erun` + `helm` + `kubectl`) under a cluster-admin ServiceAccount, invoking `erun deploy <tenant> <env> --version <runtimeVersion>`, and watches the Job to completion — succeeded → `running`, failed → `failed` with the reason on `provisionError`. A durable workflow (DBOS) wraps this, keyed by environment id, so a control-plane restart resumes an in-flight deploy rather than double-deploying. The deploy image is `<registry>/<tenant>-devops:<runtimeVersion>` (image-baked config model).
 
 The executor is **opt-in and off by default** — it requires the backend to run in-cluster with a durable-workflow database, a kube client, and the deployer ServiceAccount configured (chart value `api.envDeployer.enabled`, which also provisions the SA and its cluster-admin binding). When it is off, or the env is not a `runtime` env, or no `runtimeVersion` is pinned, the endpoint is register-only (`201`) exactly as before.
+
+Registration deploys an environment **once**. To deploy it again — retrying a failure, or moving it to another published version — use [`POST /v1/environments/{id}/deploy`](#deploy-endpoint).
 
 **Error behaviour.** Today the API returns a bare HTTP status with a plain-text body (no JSON envelope):
 
@@ -216,6 +222,36 @@ The executor is **opt-in and off by default** — it requires the backend to run
 | `401` / `403` | Standard auth failures (see [Errors](#errors)). The `WriteAll` permission covers `POST /v1/environments`. | Send a valid token whose roles permit the write. |
 | `409` | The tenant is at its environment-count cap (default `10` unless a `tenant_quotas` row overrides it); the body is `environment quota reached: this tenant already has N of N environments`. | Delete an unused environment, or raise the tenant's cap via [`PUT /v1/tenants/{tenant_id}/quota`](#put-v1tenantstenant_idquota) (operations-only). |
 | `500` | Persistence failed — e.g. `contextId` references a context that is not the caller's (the composite `(tenant_id, context_id)` foreign key is violated), or the request-scoped security context is missing (an internal wiring error). The row is persisted **before** the deploy is started, so a `failed to start provisioning` `500` (the deploy executor could not enqueue the durable workflow) leaves the environment registered — re-create is a no-op conflict; poll `GET /v1/environments/{id}` to confirm the row exists. | Reference a context owned by the caller's tenant; if it persists with a valid context, it is a server bug. |
+
+### `POST /v1/environments/{environment_id}/deploy` {#deploy-endpoint}
+
+Deploys an **already-registered** runtime environment. [`POST /v1/environments`](#post-v1environments) deploys an environment once, as a side effect of registering it; this endpoint is how an environment is deployed *again* — to retry a deploy that failed, or to move the environment to a different published runtime version. The environment is resolved from `{environment_id}` under row-level security, so a token can only deploy its own tenant's environments.
+
+It composes the **pure `deploy` primitive**: the version must already be published, and the endpoint never builds or pushes. Nothing here mints a version.
+
+```jsonc
+// POST /v1/environments/{environment_id}/deploy body — optional in full
+{
+  "version": "1.3.0"   // optional — defaults to the environment's pinned runtimeVersion
+}
+```
+
+A body-less request (no body at all, or `{}`) deploys the environment's own `runtimeVersion`. On success the endpoint returns **`202 Accepted`** with the environment row as it was read, having flipped it to `provisioning` and started the durable workflow. Poll `GET /v1/environments/{id}` (or the `GET /v1/config` read model) to follow it to `running`/`failed`; on `running`, `deployedVersion` names the version that landed.
+
+**One deploy at a time.** Before starting the workflow the endpoint takes an atomic **claim** on the environment — a conditional write that sets `provisioning` only when the environment is not already deploying. A second request while one is in flight gets `409` rather than launching a second rollout into the same Helm release, where the loser's terminal status write could clobber the winner's. A claim left behind by a control plane that crashed mid-deploy goes **stale after 45 minutes** (longer than the deploy Job's own 30-minute deadline, so a claim is only stale once the run behind it cannot still be live) and becomes re-claimable, so an environment is never locked out permanently.
+
+**Every deploy is a real re-run.** The deploy Job and its durable workflow are keyed by *attempt*, not by environment: each request mints an attempt id that names the Job (`erun-deploy-<tenant>-<env>-<version>-<attempt>`) and the workflow. Keying by environment would make both terminal after the first deploy, so a retry would silently replay the old outcome instead of running. The attempt id is part of the checkpointed workflow input, so a control-plane restart still resumes by re-watching the Job that attempt already created rather than starting a second one.
+
+**Error behaviour.** Bare HTTP status with a plain-text body (no JSON envelope):
+
+| Status | Condition | Recovery |
+|---|---|---|
+| `400` | The environment is not a `runtime` env (`only a runtime environment can be deployed`); no version resolves — the body omitted one and the environment has no pinned `runtimeVersion` (`version is required: …`); or the body is present but not valid JSON (`invalid request body`). | Deploy a runtime env, and name a published `version` when the environment has no pin. |
+| `401` / `403` | Standard auth failures (see [Errors](#errors)). The `WriteAll` permission covers this write. | Send a valid token whose roles permit the write. |
+| `404` | No environment with `{environment_id}` in the caller's tenant (row-level security returns not-found for another tenant's env, never leaking its existence). | Deploy an environment id the caller's tenant owns. |
+| `409` | A deploy is already in flight for this environment (`a deploy is already in progress for this environment`); the claim is held. | Poll `GET /v1/environments/{id}` until it leaves `provisioning`, or wait out the 45-minute stale window if the holder crashed. |
+| `501` | The deploy executor is not configured (`the deploy executor is not configured`) — the backend has no durable-workflow database, kube client, or deployer ServiceAccount. | Enable `api.envDeployer.enabled` on the backend chart. |
+| `500` | The claim write failed, or the durable workflow could not be enqueued (`failed to start deploy`). The claim is taken **before** the workflow starts, so this leaves the environment at `provisioning` with nothing running; it becomes re-deployable once the stale window elapses. | Retry after the stale window; if it persists, it is a server bug. |
 
 ### `POST /v1/environments/{environment_id}/mcp-token` {#mcp-token-endpoint}
 

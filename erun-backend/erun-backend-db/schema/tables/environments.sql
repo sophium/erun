@@ -8,6 +8,7 @@ CREATE TABLE environments (
   runtime_version TEXT,
   status TEXT NOT NULL DEFAULT 'registered',
   provision_error TEXT,
+  deployed_version TEXT,
   created_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ,
   FOREIGN KEY (tenant_id) REFERENCES tenants (tenant_id),

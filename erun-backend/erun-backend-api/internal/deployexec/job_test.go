@@ -2,6 +2,7 @@ package deployexec
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -85,13 +86,47 @@ func TestJobOutcome(t *testing.T) {
 	}
 }
 
+// TestDeployJobNameSeparatesAttempts: a re-deploy must be a new Job, otherwise
+// it would re-read the previous attempt's terminal outcome instead of running.
+func TestDeployJobNameSeparatesAttempts(t *testing.T) {
+	first := DeployJobName("acme", "prod", "1.0.149", "3f2a91cc-1111-2222-3333-444455556666")
+	second := DeployJobName("acme", "prod", "1.0.149", "9b7d40aa-1111-2222-3333-444455556666")
+	if first == second {
+		t.Fatalf("two attempts share the job name %q", first)
+	}
+	// The create path passes no attempt id and keeps its stable name, so a
+	// resumed workflow still re-watches the Job it already created.
+	if got := DeployJobName("acme", "prod", "1.0.149", ""); got != "erun-deploy-acme-prod-1-0-149" {
+		t.Fatalf("name without an attempt id = %q", got)
+	}
+	if !strings.HasPrefix(first, "erun-deploy-acme-prod-1-0-149-") {
+		t.Fatalf("attempt name %q lost its readable prefix", first)
+	}
+}
+
+// TestDeployJobNameFitsKubernetesLimit: names are trimmed in the descriptive
+// middle, never in the attempt suffix that keeps two deploys apart.
+func TestDeployJobNameFitsKubernetesLimit(t *testing.T) {
+	longEnv := strings.Repeat("e", 63)
+	first := DeployJobName("verylongtenantname", longEnv, "1.0.149-rc.20260816", "3f2a91cc-aaaa")
+	second := DeployJobName("verylongtenantname", longEnv, "1.0.149-rc.20260816", "9b7d40aa-bbbb")
+	for _, name := range []string{first, second} {
+		if len(name) > 63 {
+			t.Fatalf("job name %q is %d characters, over the 63 Kubernetes allows", name, len(name))
+		}
+	}
+	if first == second {
+		t.Fatal("truncation collapsed two attempts onto one job name")
+	}
+}
+
 // seededJob is the deploy Job as it would be after the cluster ran it, with a
 // terminal status, so Run's watch returns immediately (the fake client has no
 // Job controller to move status on its own).
 func seededJob(status batchv1.JobStatus) *batchv1.Job {
 	p := testParams()
 	return &batchv1.Job{
-		ObjectMeta: metav1.ObjectMeta{Name: DeployJobName(p.Tenant, p.Environment, p.Version), Namespace: p.Namespace},
+		ObjectMeta: metav1.ObjectMeta{Name: DeployJobName(p.Tenant, p.Environment, p.Version, p.DeployID), Namespace: p.Namespace},
 		Status:     status,
 	}
 }
@@ -164,7 +199,7 @@ func TestRunCreatesWhenAbsent(t *testing.T) {
 	if created == nil {
 		t.Fatal("deploy job was not created")
 	}
-	if want := DeployJobName(p.Tenant, p.Environment, p.Version); created.Name != want {
+	if want := DeployJobName(p.Tenant, p.Environment, p.Version, p.DeployID); created.Name != want {
 		t.Fatalf("created job name = %q, want %q", created.Name, want)
 	}
 	if created.Namespace != p.Namespace {

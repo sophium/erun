@@ -44,6 +44,11 @@ type Environment struct {
 	// when Status is `failed`.
 	Status         EnvironmentStatus `json:"status" bun:"status,scanonly"`
 	ProvisionError string            `json:"provisionError,omitempty" bun:"provision_error,scanonly,nullzero"`
-	CreatedAt      time.Time         `json:"createdAt" bun:"created_at,scanonly"`
-	UpdatedAt      time.Time         `json:"updatedAt" bun:"updated_at,scanonly"`
+	// DeployedVersion is the version the last successful deploy actually
+	// installed, as opposed to RuntimeVersion, which is the declared pin. Owned
+	// by the deploy executor, so it is scan-only; a failed deploy leaves it on
+	// the version still running in the cluster.
+	DeployedVersion string    `json:"deployedVersion,omitempty" bun:"deployed_version,scanonly,nullzero"`
+	CreatedAt       time.Time `json:"createdAt" bun:"created_at,scanonly"`
+	UpdatedAt       time.Time `json:"updatedAt" bun:"updated_at,scanonly"`
 }
