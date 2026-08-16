@@ -94,6 +94,22 @@ type stubInvestigationTimer struct{}
 
 func (stubInvestigationTimer) Stop() bool { return true }
 
+// investigateWithTrackedProcess spawns an investigation whose session reports a
+// live pid, which is what the job record and its lease resolve their state from.
+func (h *investigationHarness) investigateWithTrackedProcess(t *testing.T, report, tenant, environment string) orchestratorInfo {
+	t.Helper()
+	h.app.deps.startTerminal = func(startTerminalSessionParams) (terminalSession, error) {
+		session := newStubTerminalSession()
+		session.pid = os.Getpid()
+		return session, nil
+	}
+	info, err := h.app.InvestigateFailure(report, tenant, environment, 80, 24)
+	if err != nil {
+		t.Fatalf("InvestigateFailure failed: %v", err)
+	}
+	return info
+}
+
 func investigateReport(target, failure string) string {
 	return fmt.Sprintf("erun deploy failed\nTarget: %s\nVersion: 1.0.179\nStarted: 2026-08-16T06:01:12Z\nElapsed: 4s\n\nError: %s\n\nOutput:\nhelm upgrade --install devops ./chart\n%s\n", target, failure, failure)
 }
@@ -277,15 +293,7 @@ func TestConcurrentFailureEventsCannotOutrunTheCap(t *testing.T) {
 // the runaways sat at 21 hours and nearly seven days with none of that happening.
 func TestInvestigationPastItsLifetimeBoundIsTerminated(t *testing.T) {
 	harness := newInvestigationHarness(t)
-	harness.app.deps.startTerminal = func(startTerminalSessionParams) (terminalSession, error) {
-		session := newStubTerminalSession()
-		session.pid = os.Getpid()
-		return session, nil
-	}
-	info, err := harness.app.InvestigateFailure(investigateHelmTimeoutReport, "frs", "dev", 80, 24)
-	if err != nil {
-		t.Fatalf("InvestigateFailure failed: %v", err)
-	}
+	harness.investigateWithTrackedProcess(t, investigateHelmTimeoutReport, "frs", "dev")
 	if leases := activityLeaseIDs(t, "frs", "dev"); len(leases) != 1 {
 		t.Fatalf("a running investigation must hold one activity lease, got %v", leases)
 	}
@@ -311,35 +319,20 @@ func TestInvestigationPastItsLifetimeBoundIsTerminated(t *testing.T) {
 	if _, err := harness.app.InvestigateFailure(investigateReport("frs/other", "ImagePullBackOff"), "frs", "other", 80, 24); err != nil {
 		t.Fatalf("the freed slot must admit a new investigation: %v", err)
 	}
-	_ = info
 }
 
 // The population is discoverable where an operator and an agent already look:
 // as a job on the environment being investigated.
 func TestRunningInvestigationIsVisibleAsAnEnvironmentJob(t *testing.T) {
 	harness := newInvestigationHarness(t)
-	harness.app.deps.startTerminal = func(startTerminalSessionParams) (terminalSession, error) {
-		session := newStubTerminalSession()
-		session.pid = os.Getpid()
-		return session, nil
-	}
-	info, err := harness.app.InvestigateFailure(investigateHelmTimeoutReport, "frs", "dev", 80, 24)
-	if err != nil {
-		t.Fatalf("InvestigateFailure failed: %v", err)
-	}
-	jobs, err := eruncommon.LoadEnvironmentJobs("frs", "dev", time.Now())
-	if err != nil {
-		t.Fatalf("LoadEnvironmentJobs failed: %v", err)
-	}
-	if len(jobs) != 1 {
-		t.Fatalf("expected the investigation to appear as one job, got %+v", jobs)
-	}
-	job := jobs[0]
+	info := harness.investigateWithTrackedProcess(t, investigateHelmTimeoutReport, "frs", "dev")
+
+	job := soleEnvironmentJob(t, "frs", "dev")
 	if job.State != eruncommon.EnvironmentJobStateRunning {
 		t.Fatalf("expected a running job, got %+v", job)
 	}
-	if !strings.HasPrefix(job.ID, "investigate-") || job.LeaseID == "" {
-		t.Fatalf("expected an investigation job holding a lease, got %+v", job)
+	if job.ID != info.ID || job.LeaseID == "" {
+		t.Fatalf("expected the investigation to be the job, holding a lease, got %+v", job)
 	}
 	if !strings.Contains(job.Name, "Investigate") {
 		t.Fatalf("the job must name what it is, got %q", job.Name)
@@ -348,9 +341,26 @@ func TestRunningInvestigationIsVisibleAsAnEnvironmentJob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the job's output must be readable: %v", err)
 	}
-	for _, want := range []string{info.ID, "lifetime bound", "report:"} {
-		if !strings.Contains(string(output), want) {
-			t.Fatalf("the job output must carry %q, got %q", want, output)
+	assertContainsAll(t, "job output", string(output), info.ID, "lifetime bound", "report:")
+}
+
+func soleEnvironmentJob(t *testing.T, tenant, environment string) eruncommon.EnvironmentJob {
+	t.Helper()
+	jobs, err := eruncommon.LoadEnvironmentJobs(tenant, environment, time.Now())
+	if err != nil {
+		t.Fatalf("LoadEnvironmentJobs failed: %v", err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("expected the investigation to appear as one job, got %+v", jobs)
+	}
+	return jobs[0]
+}
+
+func assertContainsAll(t *testing.T, label, text string, wants ...string) {
+	t.Helper()
+	for _, want := range wants {
+		if !strings.Contains(text, want) {
+			t.Fatalf("%s must carry %q, got %q", label, want, text)
 		}
 	}
 }

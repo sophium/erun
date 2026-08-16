@@ -474,8 +474,8 @@ func investigationIdentityLines(report string) []string {
 // missing evidence is the bug, in the reporting rather than in the system that
 // failed.
 var (
-	investigationCommandLine = regexp.MustCompile(`(?im)^[\s>]*(?:\$\s+|(?:command|cmd)\s*:\s*)?(?:erun|helm|kubectl|docker|git|go|make|npm|yarn|pnpm|terraform|aws|python3?|node|sh|bash|pwsh|powershell)\s+\S`)
-	investigationExitStatus  = regexp.MustCompile(`(?i)\b(?:exit(?:ed)?\s+(?:status|code)|exitcode|exit_code|signal)\b\s*[:=]?\s*-?\d+`)
+	investigationCommandLine  = regexp.MustCompile(`(?im)^[\s>]*(?:\$\s+|(?:command|cmd)\s*:\s*)?(?:erun|helm|kubectl|docker|git|go|make|npm|yarn|pnpm|terraform|aws|python3?|node|sh|bash|pwsh|powershell)\s+\S`)
+	investigationExitStatus   = regexp.MustCompile(`(?i)\b(?:exit(?:ed)?\s+(?:status|code)|exitcode|exit_code|signal)\b\s*[:=]?\s*-?\d+`)
 	investigationFailureState = regexp.MustCompile(`(?i)(oomkilled|crashloopbackoff|imagepullbackoff|errimagepull|createcontainerconfigerror|segmentation fault|panic:|traceback \(most recent call last\))`)
 )
 
