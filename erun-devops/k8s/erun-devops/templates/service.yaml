@@ -45,11 +45,11 @@ project root there. worktreePath stays gated on a mounted worktree (host/pvc).
   {{- $worktreePath = required "worktreeRepoName is required when worktreeStorage is set" $repoPath -}}
 {{- end -}}
 {{- /*
-Staging mounts for the worktree-adoption init container. An environment created
-before the worktree claim existed kept its checkout on the home volume, at the
-very path the claim mounts at — so the claim must not be able to shadow it while
-the adoption reads it. Both volumes are therefore staged outside /home/erun, at
-paths that are never the live worktree path.
+Staging mounts for the init containers that prepare the volumes. An environment
+created before the worktree claim existed kept its checkout on the home volume,
+at the very path the claim mounts at — so the claim must not be able to shadow
+it while the adoption reads it. Both volumes are therefore staged outside
+/home/erun, at paths that are never the live worktree path.
 */ -}}
 {{- $homeStagePath := "/mnt/erun-home" -}}
 {{- $worktreeStagePath := "/mnt/erun-worktree" -}}
@@ -391,12 +391,53 @@ spec:
              group, not by the sidecar relaxing its mode: dockerd recreates the
              socket 0660 root:docker every time it starts, so any one-shot
              widening only covers the socket that existed when it ran. Applies
-             pod-wide; the sidecar runs as root and is unaffected. */}}
+             pod-wide; the sidecar runs as root and is unaffected.
+
+             Deliberately no fsGroup: it cannot be scoped to a subset of the
+             pod's volumes, so it also reached the docker state claim and had
+             the kubelet rewrite every image layer under it group-writable on
+             each start — corrupting the permissions that containerised sshd,
+             postgres and any baked 0600 secret depend on. The volumes the
+             runtime user actually writes are handed to it by prepare-volumes
+             below. fsGroupChangePolicy: OnRootMismatch is not the fix: dockerd
+             resets its own root to 0710 root:root at every start, so the root
+             permanently mismatches the fsGroup and the full sweep re-runs
+             anyway. */}}
       securityContext:
-        fsGroup: 1000
         supplementalGroups:
           - {{ $dindDockerGid }}
       initContainers:
+        {{- /* Ownership of the claims the runtime user writes, established
+               where fsGroup used to. Only the mount points are chowned: a
+               freshly provisioned claim arrives empty and root-owned, which is
+               the whole of what fsGroup was buying, while an existing claim's
+               contents already belong to uid 1000. Recursing a populated home
+               volume on every pod start would trade this bug for a slow one.
+               Runs first so the adoption below sees a writable claim. A host
+               worktree is the operator's own directory on the node and is
+               never touched. */}}
+        - image: {{ $devopsImage }}
+          name: prepare-volumes
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              chown 1000:1000 {{ $homeStagePath | quote }}
+              {{- if eq $worktreeStorage "pvc" }}
+              chown 1000:1000 {{ $worktreeStagePath | quote }}
+              {{- end }}
+          volumeMounts:
+            - name: erun-home
+              mountPath: {{ $homeStagePath | quote }}
+            {{- if eq $worktreeStorage "pvc" }}
+            - name: repo-worktree
+              mountPath: {{ $worktreeStagePath | quote }}
+            {{- end }}
         {{- if eq $worktreeStorage "pvc" }}
         # Adopt before mounting: a deploy that introduces the worktree claim to
         # an environment whose checkout still lives on the home volume would

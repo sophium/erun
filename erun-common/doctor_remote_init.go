@@ -645,13 +645,13 @@ func finishRemoteInitCodeCommitSSHConfig(ctx Context, homeDir string, repository
 }
 
 // ensureRemoteInitSSHKeyPermissions re-tightens the SSH key file modes. ssh
-// silently refuses a private key that is group- or world-accessible, and
-// runtime pods on shared PVCs keep getting permissive group bits because the
-// chart's fsGroup makes kubelet re-OR g+rw into every PVC file on each pod
-// start. Init's chmod is therefore best-effort and gets reset between runs, so
-// doctor re-applies the expected mode every time it touches the key. The
-// runtime entrypoint also heals ~/.ssh on container start, so this stays as a
-// belt-and-braces guarantee for the doctor recovery path.
+// silently refuses a private key that is group- or world-accessible, and every
+// runtime PVC that was ever mounted under the chart's former pod-wide fsGroup
+// still carries the g+rw the kubelet ORed into each file on pod start. Those
+// bits do not heal themselves when the fsGroup goes away, so doctor re-applies
+// the expected mode every time it touches the key. The runtime entrypoint also
+// heals ~/.ssh on container start, so this stays as a belt-and-braces guarantee
+// for the doctor recovery path.
 func ensureRemoteInitSSHKeyPermissions(path string) error {
 	if err := os.Chmod(path, 0o600); err != nil {
 		if os.IsNotExist(err) {

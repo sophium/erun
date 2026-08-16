@@ -816,11 +816,12 @@ EOF
 normalize_ssh_key_permissions() {
     ssh_dir="${HOME}/.ssh"
     [ -d "${ssh_dir}" ] || return 0
-    # Kubernetes' fsGroup recursively ORs g+rw into every PVC file on each
-    # pod start, so a private key that init left at 0600 comes back as 0660
-    # (and any file that ever picked up the user-x bit becomes 0760). ssh
-    # refuses to use a private key file whose perms are looser than 0600,
-    # so re-apply the canonical modes before anything tries to read them.
+    # The runtime pod no longer carries a fsGroup, but every environment that
+    # ran with one still holds the g+rw the kubelet ORed into each PVC file on
+    # pod start: a private key that init left at 0600 is on disk as 0660 (and
+    # any file that ever picked up the user-x bit as 0760). ssh refuses to use
+    # a private key whose perms are looser than 0600, so re-apply the canonical
+    # modes before anything tries to read them.
     # *.pub files stay world-readable; everything else in ~/.ssh is treated
     # as private — private keys, config, known_hosts, authorized_keys.
     chmod 700 "${ssh_dir}" 2>/dev/null || true
