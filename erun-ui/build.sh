@@ -195,4 +195,16 @@ EOF
 	plutil -lint "$APP_CONTENTS/Info.plist" >/dev/null
 fi
 
+# Sign with erun's own stable identity rather than leaving the linker's ad-hoc
+# signature in place: macOS pins a privacy grant to the signing identity, and an
+# ad-hoc one has none, so TCC pins this build's code-directory hash and the next
+# rebuild drops the grant in silence. Signing is not a build gate — the artifact
+# runs either way, and codesign.sh has already said what an unsigned-by-identity
+# build costs and how to recover — and it is a no-op off macOS.
+if [ "$TARGET_GOOS" = "darwin" ]; then
+	"$SCRIPT_DIR/codesign.sh" "$APP_BUNDLE" "$TARGET" || true
+else
+	"$SCRIPT_DIR/codesign.sh" "$TARGET" || true
+fi
+
 cd "$ORIGINAL_DIR"
