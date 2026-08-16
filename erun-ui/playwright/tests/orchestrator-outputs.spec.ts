@@ -8,7 +8,7 @@ import { SEED_ORCHESTRATOR } from '../fixtures/seedRoot.js';
 // environment ones. The filesystem behaviour (per-orchestrator directory,
 // traversal refusal, newest-first) lives in the Go tests.
 //
-// Host-side ad-hoc code signing of a downloaded macOS binary is deliberately not
+// Host-side code signing of a downloaded macOS binary is deliberately not
 // asserted here. It only runs on a macOS host, and the harness shares one
 // backend process across every spec, so pinning that process to darwin would
 // flip every other host-OS branch in the suite. The frontend is unchanged by it

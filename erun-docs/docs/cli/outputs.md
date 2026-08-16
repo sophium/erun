@@ -39,13 +39,14 @@ erun outputs download results --dest ./out # a folder, saved as results.tar.gz u
 
 ## macOS binaries arrive runnable
 
-A macOS binary cross-built inside the Linux pod arrives with no code signature, and macOS answers an unsigned one by killing it on exec — no error text, no dialog, just an immediate exit. On a macOS host, `erun outputs download` therefore ad-hoc signs (`codesign -s -`) an arriving macOS binary and gives it the execute bit, so the download is runnable as it lands.
+A macOS binary cross-built inside the Linux pod arrives with no code signature, and macOS answers an unsigned one by killing it on exec — no error text, no dialog, just an immediate exit. On a macOS host, `erun outputs download` therefore signs an arriving macOS binary and gives it the execute bit, so the download is runnable as it lands. The command names the signer it used on the line it prints.
 
 The rule is narrow by design:
 
 - Only on macOS hosts — `codesign` exists nowhere else, and neither does the problem.
 - Only for files whose *content* is a macOS binary. Archives, text, and binaries for other systems are never touched.
 - Never over an existing signature. A properly signed artifact is left exactly as it arrived.
+- With the host's **stable local identity** when there is one, ad-hoc (`codesign -s -`) otherwise. macOS pins a privacy grant to the identity that signed the code, and an ad-hoc signature has none, so a grant given to an ad-hoc-signed binary is pinned to that exact build and drops on the next one. A developer's first desktop build (`erun-ui/build.sh`) creates the local identity; on a host that has it, an arriving binary carries the same signer the desktop does. Ad-hoc remains the floor — the point of signing at all is that macOS kills an unsigned binary.
 - Never fatal. If signing cannot happen, the download still succeeds and the command prints what went wrong plus the `codesign -s - -f <file>` that repairs it.
 
 The same rule applies to the desktop's Agent outputs download, to the `outputs_download` MCP tool, and to the artifacts [workspace sync](/agent-reference/workspace-sync-spec) mirrors into `.erun-outputs/`.

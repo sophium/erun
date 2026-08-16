@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -35,29 +36,55 @@ var machOThinMagics = [][4]byte{
 	{0xCF, 0xFA, 0xED, 0xFE},
 }
 
-// HostArtifactSigning is what ad-hoc signing did to one artifact on this host.
-// Note carries the operator-facing diagnostic and is set only when something
-// needs saying; it never means the artifact failed to arrive.
+// LocalCodesignIdentity is the self-signed identity erun keeps for locally
+// built macOS artifacts. macOS pins a privacy grant to the identity that signed
+// the code; an ad-hoc signature has none, so TCC pins the code-directory hash
+// instead and every rebuild silently drops the grant. erun-ui/codesign.sh
+// creates the identity on a developer's first desktop build, and everything
+// that signs a local artifact adopts it so the two cannot disagree.
+const LocalCodesignIdentity = "ERun Local Development"
+
+// LocalCodesignKeychainFile is the keychain erun-ui/codesign.sh creates for the
+// local identity, under the user's Library/Keychains. A keychain of erun's own
+// rather than the login one is what keeps creating and using the identity free
+// of GUI authorization prompts, which a build driven by an agent cannot answer.
+const LocalCodesignKeychainFile = "erun-local-signing.keychain-db"
+
+// LocalCodesignKeychainPassword is not a secret. `security create-keychain`
+// demands a password, and this keychain holds one self-signed local identity
+// that authenticates nothing to anyone.
+const LocalCodesignKeychainPassword = "erun-local-signing"
+
+// HostArtifactSigning is what signing did to one artifact on this host. Note
+// carries the operator-facing diagnostic and is set only when something needs
+// saying; it never means the artifact failed to arrive. Identity names the
+// signer when a stable one was available, and is empty for an ad-hoc signature.
 type HostArtifactSigning struct {
-	Path   string `json:"path"`
-	Signed bool   `json:"signed"`
-	Note   string `json:"note,omitempty"`
+	Path     string `json:"path"`
+	Signed   bool   `json:"signed"`
+	Identity string `json:"identity,omitempty"`
+	Note     string `json:"note,omitempty"`
 }
 
 // Describe renders the outcome as the single line a transport shows the
-// operator, or "" when nothing happened worth reporting.
+// operator, or "" when nothing happened worth reporting. It names the signer,
+// because which identity an artifact carries is what decides whether a privacy
+// grant it is given survives the next build.
 func (s HostArtifactSigning) Describe() string {
 	if s.Note != "" {
 		return s.Note
 	}
-	if s.Signed {
-		return "Ad-hoc signed " + s.Path + " so macOS will run it"
+	if !s.Signed {
+		return ""
 	}
-	return ""
+	if s.Identity != "" {
+		return "Signed " + s.Path + " as " + s.Identity + " so macOS will run it and its privacy grants survive a rebuild"
+	}
+	return "Ad-hoc signed " + s.Path + " so macOS will run it"
 }
 
-// SignHostArtifact ad-hoc signs an unsigned Mach-O that has just landed on this
-// host, and leaves everything else alone: a non-darwin host, a file whose
+// SignHostArtifact signs an unsigned Mach-O that has just landed on this host,
+// and leaves everything else alone: a non-darwin host, a file whose
 // content is not Mach-O, and a file that already carries a signature are all
 // no-ops. A Mach-O it recognises also gets its execute bit, because an artifact
 // arrives 0644 from a download and 0444 from the read-only mirror and neither
@@ -90,12 +117,13 @@ func SignHostArtifact(path string) HostArtifactSigning {
 	if alreadySigned {
 		return signing
 	}
-	output, err = signWhileWritable(path)
+	identity, output, err := signWhileWritable(path)
 	if err != nil {
 		signing.Note = unsignedMachONote(path, "ad-hoc signing it failed", err, output)
 		return signing
 	}
 	signing.Signed = true
+	signing.Identity = identity
 	return signing
 }
 
@@ -104,14 +132,44 @@ func SignHostArtifact(path string) HostArtifactSigning {
 // mirrored artifact is exactly the darwin binary that needs signing, so the
 // signature must not depend on the mirror relaxing first. The original mode is
 // restored either way.
-func signWhileWritable(path string) (string, error) {
+//
+// It prefers the host's stable local identity and falls back to ad-hoc, so a
+// binary that lands here carries the same signer a locally built desktop does
+// and any privacy grant given to it survives the next build. Ad-hoc remains the
+// floor: the point of signing at all is that macOS SIGKILLs an unsigned Mach-O.
+func signWhileWritable(path string) (string, string, error) {
 	if info, err := os.Stat(path); err == nil && info.Mode().Perm()&0o200 == 0 {
 		mode := info.Mode().Perm()
 		if chmodErr := os.Chmod(path, mode|0o200); chmodErr == nil {
 			defer func() { _ = os.Chmod(path, mode) }()
 		}
 	}
-	return runHostCodesign("-s", "-", "-f", path)
+	if keychain := localCodesignKeychain(); keychain != "" {
+		// The keychain relocks across a reboot, and a locked one fails every
+		// signature. Its password is erun's own, so this needs no operator.
+		_, _ = Command("security", "unlock-keychain", "-p", LocalCodesignKeychainPassword, keychain).CombinedOutput()
+		if output, err := runHostCodesign("-s", LocalCodesignIdentity, "--keychain", keychain, "-f", path); err == nil {
+			return LocalCodesignIdentity, output, nil
+		}
+	}
+	output, err := runHostCodesign("-s", "-", "-f", path)
+	return "", output, err
+}
+
+// localCodesignKeychain is the keychain erun-ui/codesign.sh creates, or "" when
+// this host has no local identity yet. Presence of the file is the whole test:
+// a keychain that turns out not to hold the identity fails the signing call,
+// which falls back to ad-hoc and reports what it did.
+func localCodesignKeychain() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	path := filepath.Join(home, "Library", "Keychains", LocalCodesignKeychainFile)
+	if info, statErr := os.Stat(path); statErr != nil || info.IsDir() {
+		return ""
+	}
+	return path
 }
 
 // hostArtifactSigningSummary folds a batch of signings into the counts one

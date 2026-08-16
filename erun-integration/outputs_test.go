@@ -46,6 +46,29 @@ func stubKubectlDownloads(t *testing.T, stubs string, payload []byte) {
 	stubKubectlPrints(t, stubs, "file\n"+base64.StdEncoding.EncodeToString(payload)+"\n")
 }
 
+// localCodesignIdentity and localCodesignKeychainFile mirror the constants
+// erun-common declares (this module imports nothing, by design). A host that
+// carries the keychain has erun's stable signing identity, which is what makes a
+// macOS privacy grant survive the next build.
+const (
+	localCodesignIdentity     = "ERun Local Development"
+	localCodesignKeychainFile = "erun-local-signing.keychain-db"
+)
+
+// seedLocalCodesignIdentity puts the local signing keychain on the scenario's
+// host, the way a developer's first desktop build would.
+func seedLocalCodesignIdentity(t *testing.T, home string) string {
+	t.Helper()
+	keychain := filepath.Join(home, "Library", "Keychains", localCodesignKeychainFile)
+	if err := os.MkdirAll(filepath.Dir(keychain), 0o755); err != nil {
+		t.Fatalf("stage the keychain directory: %v", err)
+	}
+	if err := os.WriteFile(keychain, []byte("keychain"), 0o600); err != nil {
+		t.Fatalf("seed the local signing keychain: %v", err)
+	}
+	return keychain
+}
+
 func requireDownloadedFile(t *testing.T, path string, want []byte) os.FileInfo {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -222,6 +245,65 @@ func TestOutputs(t *testing.T) {
 			t.Fatalf("expected an ad-hoc signing call, got codesign calls:\n%s", calls)
 		}
 		golden.Equal(t, "outputs/download_darwin_signs_unsigned_macho", normalize.Apply(result.Combined))
+	})
+
+	// macOS pins a privacy grant to the identity that signed the code, and an
+	// ad-hoc signature has none — so it pins the code-directory hash instead and
+	// the next build silently drops the grant. A host that already carries erun's
+	// local signing identity therefore signs with it, and says which signer it
+	// used, because a grant that vanishes is otherwise unattributable.
+	t.Run("download_darwin_signs_with_the_local_identity", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		stubKubectlDownloads(t, stubs, machOPayload)
+		codesignLog := fixture.StubCodesign(t, stubs, fixture.CodesignStubSpec{})
+		fixture.StubBinaryWithScript(t, stubs, "security", "exit 0")
+		keychain := seedLocalCodesignIdentity(t, setup.Home)
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "codesign", "security")...)
+		envVars = append(envVars, "ERUN_HOST_OS_OVERRIDE=darwin")
+		result := erun.Run(t, []string{"outputs", "download", "erun-darwin-arm64"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		calls := readCodesignCalls(t, codesignLog)
+		if !strings.Contains(calls, "-s "+localCodesignIdentity+" --keychain "+keychain) {
+			t.Fatalf("expected the artifact signed with the local identity, got codesign calls:\n%s", calls)
+		}
+		if strings.Contains(calls, "-s - -f") {
+			t.Fatalf("expected no ad-hoc fallback once the identity signed it, got codesign calls:\n%s", calls)
+		}
+		golden.Equal(t, "outputs/download_darwin_signs_with_the_local_identity", normalize.Apply(result.Combined))
+	})
+
+	// A keychain that turns out not to hold the identity must not cost the
+	// artifact its signature: macOS SIGKILLs an unsigned Mach-O, so ad-hoc is the
+	// floor even when the stable identity is unusable.
+	t.Run("download_darwin_falls_back_to_adhoc_when_the_identity_fails", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		stubKubectlDownloads(t, stubs, machOPayload)
+		codesignLog := filepath.Join(stubs, "codesign-calls.log")
+		fixture.StubBinaryWithScript(t, stubs, "codesign",
+			"printf '%s\\n' \"$*\" >> '"+filepath.ToSlash(codesignLog)+"'\n"+
+				"case \"$1\" in -d) exit 1 ;; esac\n"+
+				// The signer is the second argument: `-` is ad-hoc and succeeds,
+				// the local identity is the one this host cannot actually use.
+				"case \"$2\" in -) exit 0 ;; esac\n"+
+				"exit 1\n")
+		fixture.StubBinaryWithScript(t, stubs, "security", "exit 0")
+		seedLocalCodesignIdentity(t, setup.Home)
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "codesign", "security")...)
+		envVars = append(envVars, "ERUN_HOST_OS_OVERRIDE=darwin")
+		result := erun.Run(t, []string{"outputs", "download", "erun-darwin-arm64"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if calls := readCodesignCalls(t, codesignLog); !strings.Contains(calls, "-s - -f") {
+			t.Fatalf("expected the ad-hoc fallback, got codesign calls:\n%s", calls)
+		}
+		golden.Equal(t, "outputs/download_darwin_falls_back_to_adhoc_when_the_identity_fails", normalize.Apply(result.Combined))
 	})
 
 	t.Run("download_darwin_signs_universal_macho", func(t *testing.T) {
