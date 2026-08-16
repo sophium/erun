@@ -1,4 +1,4 @@
-package deployexec
+package jobexec
 
 import (
 	"strings"
@@ -20,8 +20,10 @@ runtime chart oci://ghcr.io/acme/charts/erun-devops version 1.2.3 could not be p
 Error: failed to download oci://ghcr.io/acme/charts/erun-devops
 `
 
-func TestDeployFailureFromLogCarriesTheActionableError(t *testing.T) {
-	detail := deployFailureFromLog(chartNotFoundLog)
+const testContainerName = "deploy"
+
+func TestFailureFromLogCarriesTheActionableError(t *testing.T) {
+	detail := failureFromLog(chartNotFoundLog)
 	for _, want := range []string{"1.2.3", "ghcr.io/acme/charts/erun-devops", "ghcr.io/acme/charts/acme-devops", "could not be pulled"} {
 		if !strings.Contains(detail, want) {
 			t.Fatalf("detail = %q, want it to carry %q", detail, want)
@@ -29,11 +31,11 @@ func TestDeployFailureFromLogCarriesTheActionableError(t *testing.T) {
 	}
 }
 
-// TestDeployFailureFromLogKeepsTheEnd: erun prints its failure last, so a long
-// run must give up its leading trace rather than its error.
-func TestDeployFailureFromLogKeepsTheEnd(t *testing.T) {
+// TestFailureFromLogKeepsTheEnd: erun prints its failure last, so a long run must
+// give up its leading trace rather than its error.
+func TestFailureFromLogKeepsTheEnd(t *testing.T) {
 	noise := strings.Repeat("deploy: a trace line that says nothing about the failure\n", failureDetailLines*3)
-	detail := deployFailureFromLog(noise + chartNotFoundLog)
+	detail := failureFromLog(noise + chartNotFoundLog)
 	if !strings.Contains(detail, "could not be pulled") {
 		t.Fatalf("detail = %q, want the trailing failure to survive the trace", detail)
 	}
@@ -42,11 +44,11 @@ func TestDeployFailureFromLogKeepsTheEnd(t *testing.T) {
 	}
 }
 
-// TestDeployFailureFromLogIsBounded: provision_error is read over the API, so one
-// noisy deploy must not write an unbounded blob into the environment.
-func TestDeployFailureFromLogIsBounded(t *testing.T) {
+// TestFailureFromLogIsBounded: the reason is read over the API, so one noisy run
+// must not write an unbounded blob onto the resource it is recorded against.
+func TestFailureFromLogIsBounded(t *testing.T) {
 	long := strings.Repeat("x", maxFailureDetailLength*2) + "\nthe failure"
-	detail := deployFailureFromLog(long)
+	detail := failureFromLog(long)
 	if len(detail) > maxFailureDetailLength+len("…\n") {
 		t.Fatalf("detail is %d bytes, want it bounded at %d", len(detail), maxFailureDetailLength)
 	}
@@ -55,27 +57,27 @@ func TestDeployFailureFromLogIsBounded(t *testing.T) {
 	}
 }
 
-func TestDeployFailureFromLogIgnoresEmptyOutput(t *testing.T) {
-	if detail := deployFailureFromLog("\n  \n\t\n"); detail != "" {
+func TestFailureFromLogIgnoresEmptyOutput(t *testing.T) {
+	if detail := failureFromLog("\n  \n\t\n"); detail != "" {
 		t.Fatalf("detail = %q, want empty so the pod status can explain instead", detail)
 	}
 }
 
-// TestPodFailureDetailNamesAnUnpullableImage: a deploy Job whose runtime image
-// the cluster cannot pull never logs a line, so its pod status is the only
-// account of the failure.
+// TestPodFailureDetailNamesAnUnpullableImage: a Job whose runtime image the
+// cluster cannot pull never logs a line, so its pod status is the only account of
+// the failure.
 func TestPodFailureDetailNamesAnUnpullableImage(t *testing.T) {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "erun-deploy-acme-prod-1-2-3-abcde"},
 		Status: corev1.PodStatus{
 			Phase: corev1.PodPending,
 			ContainerStatuses: []corev1.ContainerStatus{{
-				Name:  deployContainerName,
+				Name:  testContainerName,
 				State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ImagePullBackOff", Message: `pull access denied for ghcr.io/acme/acme-devops:1.2.3`}},
 			}},
 		},
 	}
-	detail := podFailureDetail(pod)
+	detail := podFailureDetail("deploy", pod)
 	for _, want := range []string{"ImagePullBackOff", "ghcr.io/acme/acme-devops:1.2.3", pod.Name} {
 		if !strings.Contains(detail, want) {
 			t.Fatalf("detail = %q, want it to carry %q", detail, want)
@@ -88,12 +90,12 @@ func TestPodFailureDetailReportsANonZeroExit(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "erun-deploy-acme-prod-1-2-3-abcde"},
 		Status: corev1.PodStatus{
 			ContainerStatuses: []corev1.ContainerStatus{{
-				Name:  deployContainerName,
+				Name:  testContainerName,
 				State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 1, Reason: "Error"}},
 			}},
 		},
 	}
-	if detail := podFailureDetail(pod); !strings.Contains(detail, "exited 1") {
+	if detail := podFailureDetail("deploy", pod); !strings.Contains(detail, "exited 1") {
 		t.Fatalf("detail = %q, want the exit code", detail)
 	}
 }
@@ -107,12 +109,12 @@ func TestPodFailureDetailSaysNothingAboutAHealthyPod(t *testing.T) {
 		Status: corev1.PodStatus{
 			Phase: corev1.PodSucceeded,
 			ContainerStatuses: []corev1.ContainerStatus{{
-				Name:  deployContainerName,
+				Name:  testContainerName,
 				State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}},
 			}},
 		},
 	}
-	if detail := podFailureDetail(pod); detail != "" {
+	if detail := podFailureDetail("deploy", pod); detail != "" {
 		t.Fatalf("detail = %q, want empty", detail)
 	}
 }
@@ -127,11 +129,27 @@ func TestJobFailureDetailReportsTheTerminalCondition(t *testing.T) {
 			Message: "Job has reached the specified backoff limit",
 		}}},
 	}
-	detail := jobFailureDetail(job)
+	detail := jobFailureDetail("deploy", job)
 	if !strings.Contains(detail, "BackoffLimitExceeded") || !strings.Contains(detail, job.Name) {
 		t.Fatalf("detail = %q, want the job name and its terminal condition", detail)
 	}
-	if jobFailureDetail(&batchv1.Job{}) != "" {
+	if jobFailureDetail("deploy", &batchv1.Job{}) != "" {
 		t.Fatal("a job with no terminal condition reported one")
+	}
+}
+
+// TestJobFailureDetailNamesTheKind: the recorded reason has to say which kind of
+// run failed, because a release and a deploy land on different resources.
+func TestJobFailureDetailNamesTheKind(t *testing.T) {
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{Name: "erun-release-acme-main-1"},
+		Status: batchv1.JobStatus{Conditions: []batchv1.JobCondition{{
+			Type:   batchv1.JobFailed,
+			Status: corev1.ConditionTrue,
+			Reason: "DeadlineExceeded",
+		}}},
+	}
+	if detail := jobFailureDetail("release", job); !strings.HasPrefix(detail, "release job ") {
+		t.Fatalf("detail = %q, want it to name the release kind", detail)
 	}
 }

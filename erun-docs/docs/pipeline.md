@@ -84,7 +84,7 @@ The pipeline is the same whether a person or a machine runs it.
 - **CLI** — `erun build` / `release` / `push` / `deploy`, scriptable and headless. See the [CLI overview](/cli/overview).
 - **Desktop app** — the same commands behind buttons. See the [desktop app](/desktop/overview).
 - **MCP** — an Agent calls the `build` / `push` / `deploy` / `release` [tools](/mcp/overview), which run the identical logic and return structured results instead of stdout.
-- **CI** — a release-tagged commit triggers `erun release`; a later `erun deploy --version` rolls the published version out.
+- **CI** — an accepted review triggers `erun release` through ERun's own [release queue](/collaboration/builds#release-queue), which runs it in an agent env with warm caches, one release at a time per tenant; a later `erun deploy --version` rolls the published version out.
 
 ## Promotion: agent env to runtime env
 

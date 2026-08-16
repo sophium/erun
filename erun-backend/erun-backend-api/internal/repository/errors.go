@@ -3,6 +3,9 @@ package repository
 import (
 	"database/sql"
 	"errors"
+
+	"github.com/jackc/pgerrcode"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 var (
@@ -17,4 +20,13 @@ func normalizeNoRows(err error) error {
 		return ErrNotFound
 	}
 	return err
+}
+
+// isUniqueViolation reports whether PostgreSQL rejected a write because it would
+// have broken a uniqueness contract. Callers that hold an invariant in a unique
+// index — at most one release in flight per tenant — read the conflict as "the
+// other writer won", not as an error to surface.
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation
 }

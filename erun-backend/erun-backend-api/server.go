@@ -11,6 +11,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/dns01broker"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/mcptoken"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/provision"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/releaseexec"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/routes"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/secrets"
@@ -52,6 +53,11 @@ type HandlerOptions struct {
 	// platform namespace, cluster-admin deployer ServiceAccount). Env provisioning
 	// stays off until all three are set.
 	EnvDeploy provision.EnvDeployConfig
+	// Release is the per-instance placement for release Jobs: the agent
+	// environment whose warm caches the release runs beside, its ServiceAccount,
+	// and the runtime image version. Unset leaves the release queue recording
+	// triggers without running them.
+	Release provision.ReleaseConfig
 }
 
 func NewHandler(options HandlerOptions) (http.Handler, error) {
@@ -162,11 +168,14 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	environments := repository.NewEnvironmentRepository(txManager)
 	contexts := repository.NewContextRepository(txManager)
 	tenantQuotas := repository.NewTenantQuotaRepository(txManager)
+	releases := repository.NewReleaseRepository(txManager)
 	reviewService := service.NewReviewService(reviews, builds)
 	buildService := service.NewBuildService(builds, reviewService)
 	commentService := service.NewCommentService(comments)
+	releaseService := service.NewReleaseService(releases, buildService, newReleaseRunner(options))
+	releaseRoutes := routes.RegisterReleaseRoutes(register, releases, releaseService, newReleaseQueue(options, releaseService), tenants)
 	routes.RegisterTenantIssuerRoutes(register, tenantIssuers)
-	routes.RegisterReviewRoutes(register, reviews, reviewService)
+	routes.RegisterReviewRoutes(register, reviews, reviewService, builds, releaseRoutes)
 	routes.RegisterBuildRoutes(register, builds, buildService)
 	routes.RegisterCommentRoutes(register, comments, commentService)
 	routes.RegisterEnvironmentRoutes(register, environments, tenantQuotas, tenants, newEnvironmentProvisioner(options, environments))
@@ -205,6 +214,27 @@ func newEnvironmentProvisioner(options HandlerOptions, environments *repository.
 	}
 	coordinator := service.NewEnvironmentProvisioner(deployexec.NewLauncher(options.KubeClient), environments)
 	return provision.NewEnvProvisioner(options.DBOSContext, coordinator, deploy)
+}
+
+// newReleaseRunner wires the release Job launcher. Without an in-cluster client
+// there is nothing to launch, so the queue records triggers and the service
+// reports the missing executor rather than a release that silently never ran.
+func newReleaseRunner(options HandlerOptions) service.ReleaseRunner {
+	if options.KubeClient == nil {
+		return nil
+	}
+	return releaseexec.NewLauncher(options.KubeClient)
+}
+
+// newReleaseQueue wires the durable release workflow, which needs DBOS, an
+// in-cluster client, and the full release placement. Anything missing leaves the
+// dispatcher nil: triggers are still recorded and are runnable once the queue is
+// configured.
+func newReleaseQueue(options HandlerOptions, coordinator provision.ReleaseCoordinator) routes.ReleaseDispatcher {
+	if options.DBOSContext == nil || options.KubeClient == nil || !options.Release.Configured() {
+		return nil
+	}
+	return provision.NewReleaseQueue(options.DBOSContext, coordinator, options.Release)
 }
 
 func registerHealthRoute(mux *http.ServeMux) {

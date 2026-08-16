@@ -152,6 +152,23 @@ Module-specific guidance for `erun-backend-api`. Follow the repository root and 
 - Use UUIDv7 for all externally visible API IDs.
 - Keep externally visible ID generation in database defaults. Create routes and repository create methods must not accept or generate those IDs in application code.
 
+## Server-Side Executors
+
+- Work that needs the erun toolchain runs as a Kubernetes Job in the tenant's runtime image, never embedded in the API. `internal/jobexec` owns the shared half — creating the Job, watching it to a terminal outcome, and reading the run's own account of a failure off the pod before the TTL reaps it. A new executor supplies only its Job shape and its command; do not write a second launcher.
+- Key a Job and its durable workflow by the **attempt**, never by the resource. A name derived from something already terminal makes a retry re-read the previous outcome instead of running — the replay bug behind #1020.
+- Derive the attempt suffix from a hash of the whole id, not a slice of it. A UUIDv7's leading characters are its timestamp, so two ids minted milliseconds apart share them and collapse onto one Job name.
+- A Job that sets `command` replaces the image's entrypoint, so nothing the entrypoint would have exported is set. Pass what the run needs explicitly (`ERUN_REPO_PATH` is the one that has bitten).
+- Record a failure in the run's own words. A reason that says only that a Job exited names nothing an operator can act on.
+
+## Release Queue
+
+- The queue releases what has already been accepted. It does not approve, and it must not grow merge-decision logic.
+- Serialisation is per tenant and is enforced by the database (a partial unique index on running rows), not by the claim query alone: two claimers race off the same pre-claim snapshot, so the loser has to lose in PostgreSQL.
+- One release row per `(tenant, commit)` is the idempotency contract. Minting a second version for one merge commit is the worst failure this feature can have; a repeat trigger answers with the existing row.
+- Every path that hands work out is bounded — one in flight per tenant, a cooldown between consecutive releases, and a cap per dispatch pass. When a cap bites, log it: a silent cap reads as an empty queue.
+- Nothing polls the queue. A trigger dispatches, and a finished release waits out its own cooldown and then hands the slot on. If you add a claim-refusing condition, make sure something still comes back for the work behind it.
+
 ## Validation
 
 - Run `go test ./...` from this module after Go changes.
+- The queue and executor gates are opt-in and live in this module's root package. `ERUN_E2E_RELEASE_DATABASE_URL` alone runs the queue's SQL contracts against a migrated PostgreSQL; `ERUN_E2E_RELEASE_QUEUE=1` plus a cluster runs the whole pipeline. The cluster gate refuses to run unless the release target is a dry run, because cutting a real version moves public refs.
