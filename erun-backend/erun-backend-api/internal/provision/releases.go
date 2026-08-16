@@ -33,6 +33,7 @@ type ReleaseCoordinator interface {
 	Run(ctx context.Context, release model.Release, params releaseexec.ReleaseJobParams) error
 	Get(ctx context.Context, releaseID string) (model.Release, error)
 	Dispatch(ctx context.Context, start func(model.Release) error) (int, error)
+	DispatchAfterCooldown(ctx context.Context, start func(model.Release) error) (int, error)
 }
 
 // ReleaseConfig is the per-instance placement of a release Job: the environment
@@ -131,29 +132,34 @@ func (q *ReleaseQueue) releaseWorkflow(dctx dbos.DBOSContext, input ReleaseInput
 		TenantType: input.TenantType,
 		ErunUserID: input.ErunUserID,
 	}
-	return dbos.RunAsStep(dctx, func(c context.Context) (string, error) {
+	outcome, runErr := dbos.RunAsStep(dctx, func(c context.Context) (string, error) {
 		scoped := security.WithContext(c, identity)
 		release, err := q.coordinator.Get(scoped, input.ReleaseID)
 		if err != nil {
 			return "failed", err
 		}
-		runErr := q.coordinator.Run(scoped, release, params)
-		// The tenant's slot is free either way now, so the next queued release
-		// starts without waiting for another trigger — including after a failure,
-		// which must not block the queue behind it.
-		q.dispatchNext(scoped, identity, input.Tenant)
-		if runErr != nil {
-			return "failed", runErr
+		if err := q.coordinator.Run(scoped, release, params); err != nil {
+			return "failed", err
 		}
 		return "released", nil
 	})
+	// Handing the slot on is its own step, so a control plane that restarts here
+	// resumes at the dispatch rather than re-running a release that already
+	// finished. It happens after a failure too: a failed release must not block
+	// the queue behind it.
+	_, _ = dbos.RunAsStep(dctx, func(c context.Context) (string, error) {
+		q.dispatchNext(security.WithContext(c, identity), identity, input.Tenant)
+		return "dispatched", nil
+	})
+	return outcome, runErr
 }
 
-// dispatchNext hands the freed slot to whatever is queued behind this release.
-// A failure here is not this release's failure — it already reached a terminal
+// dispatchNext hands the freed slot to whatever is queued behind this release,
+// once the cooldown this release's own terminal write opened has passed. A
+// failure here is not this release's failure — it already reached a terminal
 // state — so it is logged and the queue picks the work up on the next trigger.
 func (q *ReleaseQueue) dispatchNext(ctx context.Context, identity security.Context, tenantName string) {
-	if _, err := q.coordinator.Dispatch(ctx, func(next model.Release) error {
+	if _, err := q.coordinator.DispatchAfterCooldown(ctx, func(next model.Release) error {
 		return q.start(identity, tenantName, next)
 	}); err != nil {
 		log.Printf("erun api release queue: starting the next queued release for tenant %q did not happen: %v", tenantName, err)

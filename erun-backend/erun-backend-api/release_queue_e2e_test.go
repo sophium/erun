@@ -48,7 +48,11 @@ type releaseQueueE2E struct {
 	repoPath       string
 	targetBranch   string
 	commitID       string
-	dryRun         bool
+	// secondCommit is a descendant of commitID on the same branch, so the
+	// serialisation scenario can run two real releases back to back and see them
+	// land on a coherent version line rather than racing.
+	secondCommit string
+	dryRun       bool
 }
 
 func releaseQueueE2EFromEnv(t *testing.T) releaseQueueE2E {
@@ -69,6 +73,7 @@ func releaseQueueE2EFromEnv(t *testing.T) releaseQueueE2E {
 		repoPath:       os.Getenv("ERUN_E2E_RELEASE_REPO_PATH"),
 		targetBranch:   os.Getenv("ERUN_E2E_RELEASE_TARGET_BRANCH"),
 		commitID:       os.Getenv("ERUN_E2E_RELEASE_COMMIT"),
+		secondCommit:   os.Getenv("ERUN_E2E_RELEASE_SECOND_COMMIT"),
 		dryRun:         os.Getenv("ERUN_E2E_RELEASE_DRY_RUN") == "1",
 	}
 	for name, value := range map[string]string{
@@ -82,6 +87,7 @@ func releaseQueueE2EFromEnv(t *testing.T) releaseQueueE2E {
 		"ERUN_E2E_RELEASE_REPO_PATH":       config.repoPath,
 		"ERUN_E2E_RELEASE_TARGET_BRANCH":   config.targetBranch,
 		"ERUN_E2E_RELEASE_COMMIT":          config.commitID,
+		"ERUN_E2E_RELEASE_SECOND_COMMIT":   config.secondCommit,
 	} {
 		if value == "" {
 			t.Skipf("%s is required", name)
@@ -242,18 +248,32 @@ func TestReleaseQueueRunsTwoTriggersSequentially(t *testing.T) {
 	config := releaseQueueE2EFromEnv(t)
 	srv, db, kube := startReleaseQueueAPI(t, config, "erun-release-queue-serial-e2e")
 
-	first := e2eTriggerRelease(t, srv.URL, "", config.targetBranch, config.commitID+"-serial-1", http.StatusCreated)
-	second := e2eTriggerRelease(t, srv.URL, "", config.targetBranch, config.commitID+"-serial-2", http.StatusCreated)
+	first := e2eTriggerRelease(t, srv.URL, "", config.targetBranch, config.commitID, http.StatusCreated)
+	second := e2eTriggerRelease(t, srv.URL, "", config.targetBranch, config.secondCommit, http.StatusCreated)
 
 	// The queue must never hold two running rows for one tenant. Sampling while
 	// both are in flight is what proves the second waited rather than raced.
 	assertNeverTwoRunning(t, db, srv.URL, []string{first, second})
 
+	versions := make([]string, 0, 2)
 	for _, releaseID := range []string{first, second} {
 		release := awaitReleaseTerminal(t, srv.URL, releaseID)
-		t.Logf("release %s finished: status=%s version=%s reason=%s", releaseID, release.Status, release.Version, truncate(release.FailureReason))
+		if release.Status != model.ReleaseStatusReleased {
+			t.Fatalf("release %s did not publish: status=%q reason=%s", releaseID, release.Status, truncate(release.FailureReason))
+		}
+		t.Logf("release %s published %s", releaseID, release.Version)
+		versions = append(versions, release.Version)
 	}
-	_ = kube
+	// Two releases on one version line: each names its own version, and neither
+	// re-used the other's. A race would have produced one version twice, or a
+	// version for a commit the other release had already moved past.
+	if versions[0] == versions[1] {
+		t.Fatalf("both releases published %q, so they did not run on a coherent version line", versions[0])
+	}
+	// Each ran as its own Job, so neither replayed the other.
+	if jobs := releaseJobNames(t, kube, config.namespace); len(jobs) < 2 {
+		t.Fatalf("release jobs = %v, want one per release", jobs)
+	}
 }
 
 // assertNeverTwoRunning samples the queue until both releases are terminal,

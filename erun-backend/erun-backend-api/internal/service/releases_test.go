@@ -509,3 +509,53 @@ func mustNoError(t *testing.T, err error) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+// TestDispatchAfterCooldownDrainsTheQueue is the stall this exists to prevent: a
+// release that finishes dispatches into the cooldown its own terminal write
+// opened, the claim is refused, and with no poller nothing would ever come back
+// for the work still queued.
+func TestDispatchAfterCooldownDrainsTheQueue(t *testing.T) {
+	queue := &cooldownQueue{}
+	service := NewReleaseService(queue, &recordingBuilds{}, &fakeReleaseRunner{})
+	service.cooldownWait = time.Millisecond
+
+	started := 0
+	count, err := service.DispatchAfterCooldown(context.Background(), func(model.Release) error {
+		started++
+		return nil
+	})
+	mustNoError(t, err)
+	if count != 1 || started != 1 {
+		t.Fatalf("dispatch after the cooldown started %d (reported %d), want the queued release", started, count)
+	}
+	// One claim hands the release out, the next finds the queue drained and stops.
+	if queue.claims != 2 {
+		t.Fatalf("claimed %d times, want the pass to drain the queue and stop", queue.claims)
+	}
+}
+
+// TestDispatchAfterCooldownHonoursCancellation keeps a cancelled workflow from
+// sitting out the whole cooldown.
+func TestDispatchAfterCooldownHonoursCancellation(t *testing.T) {
+	service := NewReleaseService(&cooldownQueue{}, &recordingBuilds{}, &fakeReleaseRunner{})
+	service.cooldownWait = time.Hour
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := service.DispatchAfterCooldown(ctx, func(model.Release) error { return nil }); err == nil {
+		t.Fatal("a cancelled dispatch waited out the cooldown anyway")
+	}
+}
+
+// cooldownQueue hands out exactly one release, then reports the queue drained.
+type cooldownQueue struct {
+	fakeReleaseQueue
+	claims int
+}
+
+func (q *cooldownQueue) ClaimNext(context.Context, repository.ClaimWindow) (model.Release, bool, error) {
+	q.claims++
+	if q.claims > 1 {
+		return model.Release{}, false, nil
+	}
+	return model.Release{ReleaseID: "release-a", Attempt: 1}, true, nil
+}

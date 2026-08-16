@@ -46,6 +46,10 @@ const (
 	// would otherwise spend the tenant's capacity on back-to-back runs; against a
 	// real release's duration the wait costs nothing.
 	releaseCooldown = 60 * time.Second
+	// cooldownDispatchSlack puts the follow-on dispatch just past the cooldown
+	// boundary rather than exactly on it, so the claim it makes is not refused by
+	// the window it waited out.
+	cooldownDispatchSlack = 2 * time.Second
 	// maxDispatchPerPass caps how many releases one dispatch pass may start. The
 	// per-tenant invariant already allows only one each, so this bounds the fan-out
 	// across tenants and keeps a queue full of work from starting an unbounded
@@ -82,10 +86,19 @@ type ReleaseService struct {
 	releases ReleaseQueueRepository
 	builds   ReleaseBuildRecorder
 	runner   ReleaseRunner
+	// cooldownWait is how long a finished release waits before coming back for the
+	// next one. It clears the cooldown its own terminal write opened, with enough
+	// slack to be past the boundary rather than exactly on it.
+	cooldownWait time.Duration
 }
 
 func NewReleaseService(releases ReleaseQueueRepository, builds ReleaseBuildRecorder, runner ReleaseRunner) *ReleaseService {
-	return &ReleaseService{releases: releases, builds: builds, runner: runner}
+	return &ReleaseService{
+		releases:     releases,
+		builds:       builds,
+		runner:       runner,
+		cooldownWait: releaseCooldown + cooldownDispatchSlack,
+	}
 }
 
 // Enqueue records a release request, or returns the one this merge commit
@@ -176,6 +189,20 @@ func (s *ReleaseService) Dispatch(ctx context.Context, start func(model.Release)
 	// A cap that silently drops work reads as "the queue is empty" when it is not.
 	log.Printf("erun api release queue: dispatch stopped at its cap of %d started releases; the rest stay queued until the next dispatch", maxDispatchPerPass)
 	return started, nil
+}
+
+// DispatchAfterCooldown hands the freed slot on once the cooldown the finished
+// release itself opened has passed. Without it the queue stalls: a release that
+// finishes dispatches into its own cooldown, the claim is refused, and — with no
+// poller — nothing comes back for the work still queued. Waiting here is what
+// drains the queue without one.
+func (s *ReleaseService) DispatchAfterCooldown(ctx context.Context, start func(model.Release) error) (int, error) {
+	select {
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	case <-time.After(s.cooldownWait):
+	}
+	return s.Dispatch(ctx, start)
 }
 
 // Get reads one release.

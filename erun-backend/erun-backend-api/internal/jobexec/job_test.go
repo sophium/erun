@@ -213,7 +213,27 @@ func TestSanitizeNameAndShortID(t *testing.T) {
 	if got := SanitizeName("--trimmed--"); got != "trimmed" {
 		t.Fatalf("SanitizeName left surrounding hyphens: %q", got)
 	}
-	if got := ShortID("3f2a91cc-1111-2222-3333-444455556666"); got != "3f2a91cc" {
-		t.Fatalf("ShortID = %q", got)
+	if got := ShortID("3f2a91cc-1111-2222-3333-444455556666"); len(got) != shortIDLength {
+		t.Fatalf("ShortID = %q, want %d characters", got, shortIDLength)
+	}
+}
+
+// TestShortIDSeparatesIDsThatShareAPrefix is the collision that made a second
+// release re-watch the first's Job instead of running: a UUIDv7's leading
+// characters are its timestamp, so two ids minted milliseconds apart share them.
+func TestShortIDSeparatesIDsThatShareAPrefix(t *testing.T) {
+	first := ShortID("01a00b41-0ce6-781d-8525-eb44c54da079")
+	second := ShortID("01a00b41-0cfb-75bc-9b97-51ceb20a1752")
+	if first == second {
+		t.Fatalf("two ids minted in the same millisecond share the short id %q", first)
+	}
+	// The tail differs too, so slicing from either end has to be ruled out.
+	if ShortID("aaaaaaaa-1111-2222-3333-444455556666") == ShortID("bbbbbbbb-1111-2222-3333-444455556666") {
+		t.Fatal("two ids sharing a suffix share the short id")
+	}
+	// Determinism is what lets a resumed workflow find the Job it already created.
+	const resumed = "01a00b41-0ce6-781d-8525-eb44c54da079"
+	if ShortID(resumed) != first {
+		t.Fatal("ShortID is not deterministic, so a resumed workflow would not find its own job")
 	}
 }
