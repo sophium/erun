@@ -130,8 +130,12 @@ func releaseScript(params ReleaseJobParams) string {
 	if params.DryRun {
 		command += " --dry-run"
 	}
-	script.WriteString("version=\"$(" + command + ")\"\n")
-	script.WriteString("printf '" + versionMarker + "%s\\n' \"$version\"\n")
+	// `erun release` writes its resolution trace to stdout ahead of the version and
+	// redirects everything after the version to stderr, so the version is the last
+	// line of what it printed. Captured through an assignment rather than a pipe so
+	// `set -e` still aborts on a failing release.
+	script.WriteString("output=\"$(" + command + ")\"\n")
+	script.WriteString("printf '" + versionMarker + "%s\\n' \"$(printf '%s\\n' \"$output\" | tail -n 1)\"\n")
 	return script.String()
 }
 
@@ -170,10 +174,7 @@ func buildReleaseJob(params ReleaseJobParams) *batchv1.Job {
 						Image:        params.Image,
 						Command:      []string{"sh", "-c", releaseScript(params)},
 						VolumeMounts: mounts,
-						Env: []corev1.EnvVar{
-							{Name: "ERUN_TENANT", Value: params.Tenant},
-							{Name: "ERUN_RELEASE_COMMIT", Value: params.CommitID},
-						},
+						Env:          releaseEnv(params),
 					}},
 				},
 			},
@@ -184,6 +185,21 @@ func buildReleaseJob(params ReleaseJobParams) *batchv1.Job {
 // ManagedByLabel marks the Jobs this executor owns, so a cleanup or an operator
 // listing can find exactly the release runs.
 const ManagedByLabel = "erun-release-executor"
+
+// releaseEnv is the environment the release runs under. The Job replaces the
+// image's entrypoint, so nothing else sets ERUN_REPO_PATH — without it erun
+// resolves no project and the release fails with "cannot find git project"
+// instead of releasing the checkout that was mounted for it.
+func releaseEnv(params ReleaseJobParams) []corev1.EnvVar {
+	env := []corev1.EnvVar{
+		{Name: "ERUN_TENANT", Value: params.Tenant},
+		{Name: "ERUN_RELEASE_COMMIT", Value: params.CommitID},
+	}
+	if params.RepoPath != "" {
+		env = append(env, corev1.EnvVar{Name: "ERUN_REPO_PATH", Value: params.RepoPath})
+	}
+	return env
+}
 
 // workspaceVolumes attaches the agent environment's own home and worktree
 // volumes when the caller named them. Running beside the environment's warm

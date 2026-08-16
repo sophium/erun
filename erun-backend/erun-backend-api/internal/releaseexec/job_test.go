@@ -96,6 +96,22 @@ func TestReleaseScriptHonoursDryRun(t *testing.T) {
 	}
 }
 
+// TestReleaseScriptTakesTheLastLineAsTheVersion: `erun release` prints its
+// resolution trace to stdout ahead of the version, so capturing the whole of
+// stdout would label the trace as the version. Observed against a real release
+// Job, which is why the script narrows to the last line.
+func TestReleaseScriptTakesTheLastLineAsTheVersion(t *testing.T) {
+	script := releaseScript(testParams())
+	if !strings.Contains(script, "tail -n 1") {
+		t.Fatalf("script labels the whole of stdout as the version:\n%s", script)
+	}
+	// A pipe would swallow the release's exit status under a POSIX shell, so the
+	// release itself has to be captured through an assignment.
+	if !strings.Contains(script, "output=\"$(erun release") {
+		t.Fatalf("the release is not captured through an assignment, so a failure would not abort:\n%s", script)
+	}
+}
+
 // TestBuildReleaseJobMountsTheAgentWorkspace: releasing beside the environment's
 // warm fingerprint cache and existing checkout is the reason this runs here
 // rather than on an ephemeral runner.
@@ -228,5 +244,31 @@ func TestRunReportsAFailureReason(t *testing.T) {
 	}
 	if result.Version != "" {
 		t.Fatalf("version = %q, want empty: a failed release published nothing", result.Version)
+	}
+}
+
+// TestBuildReleaseJobPointsErunAtTheMountedCheckout: the Job replaces the
+// image's entrypoint, so nothing else sets ERUN_REPO_PATH — without it erun
+// resolves no project and the release fails before it starts.
+func TestBuildReleaseJobPointsErunAtTheMountedCheckout(t *testing.T) {
+	params := testParams()
+	params.RepoPath = "/home/erun/git/erun"
+	env := map[string]string{}
+	for _, variable := range buildReleaseJob(params).Spec.Template.Spec.Containers[0].Env {
+		env[variable.Name] = variable.Value
+	}
+	if env["ERUN_REPO_PATH"] != "/home/erun/git/erun" {
+		t.Fatalf("ERUN_REPO_PATH = %q, want the mounted checkout", env["ERUN_REPO_PATH"])
+	}
+	if env["ERUN_TENANT"] != "acme" {
+		t.Fatalf("ERUN_TENANT = %q", env["ERUN_TENANT"])
+	}
+	// Without a mounted checkout the image-baked project root stands, so naming a
+	// path that is not there would break the release rather than help it.
+	bare := buildReleaseJob(testParams())
+	for _, variable := range bare.Spec.Template.Spec.Containers[0].Env {
+		if variable.Name == "ERUN_REPO_PATH" {
+			t.Fatalf("ERUN_REPO_PATH = %q set with no checkout mounted", variable.Value)
+		}
 	}
 }
