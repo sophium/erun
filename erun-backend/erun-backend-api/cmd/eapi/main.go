@@ -69,6 +69,16 @@ func run(args []string) error {
 			PlatformNamespace:      cfg.PlatformNamespace,
 			DeployerServiceAccount: cfg.EnvDeployerServiceAccount,
 		},
+		Release: provision.ReleaseConfig{
+			Registry:       cfg.EnvDeployRegistry,
+			RuntimeVersion: cfg.ReleaseRuntimeVersion,
+			Namespace:      cfg.ReleaseNamespace,
+			ServiceAccount: cfg.ReleaseServiceAccount,
+			HomeClaim:      cfg.ReleaseHomeClaim,
+			WorkspaceClaim: cfg.ReleaseWorkspaceClaim,
+			RepoPath:       cfg.ReleaseRepoPath,
+			DryRun:         cfg.ReleaseDryRun,
+		},
 	})
 	if err != nil {
 		return err
@@ -211,6 +221,22 @@ type apiConfig struct {
 	EnvDeployerServiceAccount string
 	PlatformNamespace         string
 	EnvDeployRegistry         string
+	// Server-side release executor. The release runs as a Job in the agent
+	// environment's own namespace so it lands beside that environment's warm
+	// fingerprint cache and BuildKit state -- the thing an ephemeral runner cannot
+	// offer. ReleaseRuntimeVersion tags the runtime image the release runs IN, not
+	// the version it mints. The home/worktree claims and repo path are that
+	// environment's own volumes; leaving them blank runs against the image-baked
+	// project root instead. ReleaseDryRun resolves a release without publishing or
+	// moving any public ref, which is how the executor is exercised against a
+	// scoped target.
+	ReleaseNamespace      string
+	ReleaseServiceAccount string
+	ReleaseRuntimeVersion string
+	ReleaseHomeClaim      string
+	ReleaseWorkspaceClaim string
+	ReleaseRepoPath       string
+	ReleaseDryRun         bool
 }
 
 func configFromEnv() apiConfig {
@@ -233,6 +259,14 @@ func configFromEnv() apiConfig {
 		EnvDeployerServiceAccount: strings.TrimSpace(os.Getenv("ERUN_ENV_DEPLOYER_SERVICE_ACCOUNT")),
 		PlatformNamespace:         strings.TrimSpace(os.Getenv("POD_NAMESPACE")),
 		EnvDeployRegistry:         envOrDefault("ERUN_ENV_DEPLOY_REGISTRY", "ghcr.io/sophium"),
+
+		ReleaseNamespace:      strings.TrimSpace(os.Getenv("ERUN_RELEASE_NAMESPACE")),
+		ReleaseServiceAccount: strings.TrimSpace(os.Getenv("ERUN_RELEASE_SERVICE_ACCOUNT")),
+		ReleaseRuntimeVersion: strings.TrimSpace(os.Getenv("ERUN_RELEASE_RUNTIME_VERSION")),
+		ReleaseHomeClaim:      strings.TrimSpace(os.Getenv("ERUN_RELEASE_HOME_CLAIM")),
+		ReleaseWorkspaceClaim: strings.TrimSpace(os.Getenv("ERUN_RELEASE_WORKSPACE_CLAIM")),
+		ReleaseRepoPath:       strings.TrimSpace(os.Getenv("ERUN_RELEASE_REPO_PATH")),
+		ReleaseDryRun:         strings.TrimSpace(os.Getenv("ERUN_RELEASE_DRY_RUN")) == "1",
 	}
 }
 
@@ -242,7 +276,7 @@ func configFromEnv() apiConfig {
 // misconfiguration (the SA is only ever set by the in-cluster deploy), so we
 // fail fast rather than silently disabling.
 func optionalKubeClient(cfg apiConfig) (kubernetes.Interface, error) {
-	if cfg.EnvDeployerServiceAccount == "" {
+	if cfg.EnvDeployerServiceAccount == "" && cfg.ReleaseServiceAccount == "" {
 		return nil, nil
 	}
 	restConfig, err := rest.InClusterConfig()
