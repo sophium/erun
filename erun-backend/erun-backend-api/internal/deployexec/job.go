@@ -32,13 +32,27 @@ const (
 	jobTTLSecondsAfterFinished int32 = 10 * 60
 )
 
-// Outcome is the terminal result of a deploy Job.
+// Outcome is the terminal state of a deploy Job.
 type Outcome string
 
 const (
 	OutcomeSucceeded Outcome = "succeeded"
 	OutcomeFailed    Outcome = "failed"
 )
+
+// Result is the terminal result of a deploy Job. Failure carries the deploy's
+// own account of why it did not succeed, read back from the Job's pod, so the
+// control plane records something an operator can act on instead of the fact
+// that a Job exited. Empty on success, and on a failure whose pod left nothing
+// behind.
+type Result struct {
+	Outcome Outcome
+	Failure string
+}
+
+// deployContainerName is the Job's single container, named so the log read can
+// address it explicitly.
+const deployContainerName = "deploy"
 
 // DeployJobParams is the input to one hosted-env deploy Job.
 type DeployJobParams struct {
@@ -86,7 +100,7 @@ func buildDeployJob(params DeployJobParams) *batchv1.Job {
 					RestartPolicy:      corev1.RestartPolicyNever,
 					ServiceAccountName: params.ServiceAccount,
 					Containers: []corev1.Container{{
-						Name:    "deploy",
+						Name:    deployContainerName,
 						Image:   params.Image,
 						Command: []string{"erun", "deploy", params.Tenant, params.Environment, "--version", params.Version},
 					}},
@@ -156,29 +170,35 @@ func NewLauncher(kube kubernetes.Interface) *Launcher {
 }
 
 // Run creates the deploy Job and blocks until it reaches a terminal state,
-// returning the outcome. A create conflict (the Job already exists) is tolerated
+// returning the result. A create conflict (the Job already exists) is tolerated
 // so a resumed workflow watches the in-flight Job rather than erroring.
-func (l *Launcher) Run(ctx context.Context, params DeployJobParams) (Outcome, error) {
+func (l *Launcher) Run(ctx context.Context, params DeployJobParams) (Result, error) {
 	job := buildDeployJob(params)
 	_, err := l.kube.BatchV1().Jobs(params.Namespace).Create(ctx, job, metav1.CreateOptions{})
 	if err != nil && !apierrors.IsAlreadyExists(err) {
-		return "", fmt.Errorf("create deploy job %s: %w", job.Name, err)
+		return Result{}, fmt.Errorf("create deploy job %s: %w", job.Name, err)
 	}
 	return l.watch(ctx, params.Namespace, job.Name)
 }
 
-func (l *Launcher) watch(ctx context.Context, namespace, name string) (Outcome, error) {
+func (l *Launcher) watch(ctx context.Context, namespace, name string) (Result, error) {
 	for {
 		job, err := l.kube.BatchV1().Jobs(namespace).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
-			return "", fmt.Errorf("get deploy job %s: %w", name, err)
+			return Result{}, fmt.Errorf("get deploy job %s: %w", name, err)
 		}
 		if outcome, done := jobOutcome(job); done {
-			return outcome, nil
+			result := Result{Outcome: outcome}
+			if outcome != OutcomeSucceeded {
+				// Read the reason while the Job's pod is still around: the TTL
+				// reaps it shortly after, and the reason is unrecoverable then.
+				result.Failure = l.failureDetail(ctx, job)
+			}
+			return result, nil
 		}
 		select {
 		case <-ctx.Done():
-			return "", ctx.Err()
+			return Result{}, ctx.Err()
 		case <-time.After(l.pollEvery):
 		}
 	}

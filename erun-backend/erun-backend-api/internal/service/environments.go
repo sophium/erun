@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/deployexec"
@@ -17,10 +18,10 @@ type EnvironmentStatusWriter interface {
 	UpdateProvisioningStatus(ctx context.Context, environmentID string, update repository.EnvironmentStatusUpdate) error
 }
 
-// DeployRunner runs a hosted-env deploy to a terminal outcome — satisfied by the
+// DeployRunner runs a hosted-env deploy to a terminal result — satisfied by the
 // deployexec Job launcher, which the durable workflow supplies.
 type DeployRunner interface {
-	Run(ctx context.Context, params deployexec.DeployJobParams) (deployexec.Outcome, error)
+	Run(ctx context.Context, params deployexec.DeployJobParams) (deployexec.Result, error)
 }
 
 const (
@@ -54,12 +55,12 @@ func (p *EnvironmentProvisioner) Provision(ctx context.Context, environmentID st
 	}); err != nil {
 		return fmt.Errorf("mark provisioning: %w", err)
 	}
-	outcome, runErr := p.runner.Run(ctx, params)
+	result, runErr := p.runner.Run(ctx, params)
 	if runErr != nil {
 		return p.fail(ctx, environmentID, runErr.Error(), runErr)
 	}
-	if outcome != deployexec.OutcomeSucceeded {
-		return p.fail(ctx, environmentID, fmt.Sprintf("deploy job %s", outcome), fmt.Errorf("deploy job outcome %q", outcome))
+	if result.Outcome != deployexec.OutcomeSucceeded {
+		return p.fail(ctx, environmentID, deployFailureReason(params, result), fmt.Errorf("deploy job outcome %q", result.Outcome))
 	}
 	// The env is now running this version, so record it here rather than after
 	// any later step: a run that fails past this point still leaves the cluster
@@ -71,6 +72,19 @@ func (p *EnvironmentProvisioner) Provision(ctx context.Context, environmentID st
 		return fmt.Errorf("mark running: %w", err)
 	}
 	return nil
+}
+
+// deployFailureReason is what the environment records when a deploy Job does not
+// succeed. The version is named here because it is the control plane's own fact;
+// everything actionable about *why* comes from the deploy itself, which already
+// knows the coordinates it probed. Without that detail the record says only that
+// a Job exited, which is nothing to act on.
+func deployFailureReason(params deployexec.DeployJobParams, result deployexec.Result) string {
+	reason := fmt.Sprintf("deploy job %s for version %s", result.Outcome, params.Version)
+	if detail := strings.TrimSpace(result.Failure); detail != "" {
+		return reason + ": " + detail
+	}
+	return reason + " and left no reason behind (its pod was already reclaimed); `kubectl -n " + params.Namespace + " logs job/" + deployexec.DeployJobName(params.Tenant, params.Environment, params.Version, params.DeployID) + "` while a deploy is in flight shows what it is doing"
 }
 
 // fail records the failed status best-effort and returns the underlying cause,

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/deployexec"
@@ -30,11 +31,12 @@ func (w *recordingStatusWriter) UpdateProvisioningStatus(_ context.Context, _ st
 
 type fakeRunner struct {
 	outcome deployexec.Outcome
+	failure string
 	err     error
 }
 
-func (r fakeRunner) Run(context.Context, deployexec.DeployJobParams) (deployexec.Outcome, error) {
-	return r.outcome, r.err
+func (r fakeRunner) Run(context.Context, deployexec.DeployJobParams) (deployexec.Result, error) {
+	return deployexec.Result{Outcome: r.outcome, Failure: r.failure}, r.err
 }
 
 func provision(t *testing.T, runner DeployRunner, status *recordingStatusWriter) error {
@@ -82,6 +84,45 @@ func TestProvisionMarksFailedOnRunError(t *testing.T) {
 	}
 	if status.transitions[len(status.transitions)-1] != "failed:cluster unreachable" {
 		t.Fatalf("last transition = %q, want failed:cluster unreachable", status.transitions[len(status.transitions)-1])
+	}
+}
+
+// TestProvisionRecordsTheDeploysOwnFailure: the whole point of reading the Job's
+// output back is that the environment's recorded error names what an operator
+// must change — here the version and every registry the chart pull probed — so
+// the reason must carry that text, not just the fact that a Job exited.
+func TestProvisionRecordsTheDeploysOwnFailure(t *testing.T) {
+	const chartFailure = "runtime chart oci://ghcr.io/acme/charts/erun-devops version 1.2.3 could not be pulled from ghcr.io/acme: " +
+		"no chart is published at 1.2.3 at any coordinate the deploy probed — ghcr.io/acme/charts/acme-devops (the tenant's own umbrella), ghcr.io/acme/charts/erun-devops (the shared platform chart)"
+	status := &recordingStatusWriter{}
+	runner := fakeRunner{outcome: deployexec.OutcomeFailed, failure: chartFailure}
+	if err := provisionVersion(t, runner, status, "1.2.3"); err == nil {
+		t.Fatal("expected an error when the deploy job fails")
+	}
+	recorded := status.updates[len(status.updates)-1].ProvisionError
+	if !strings.Contains(recorded, chartFailure) {
+		t.Fatalf("provisionError = %q, want it to carry the deploy's own failure", recorded)
+	}
+	if !strings.Contains(recorded, "1.2.3") {
+		t.Fatalf("provisionError = %q, want it to name the version", recorded)
+	}
+}
+
+// TestProvisionSaysWhereToLookWhenTheJobLeftNothing: a reason of last resort must
+// still be actionable, so it names the Job an operator can read for themselves.
+func TestProvisionSaysWhereToLookWhenTheJobLeftNothing(t *testing.T) {
+	status := &recordingStatusWriter{}
+	provisioner := NewEnvironmentProvisioner(fakeRunner{outcome: deployexec.OutcomeFailed}, status)
+	provisioner.backoff = 0
+	params := deployexec.DeployJobParams{Tenant: "acme", Environment: "prod", Version: "1.2.3", Namespace: "acme-platform"}
+	if err := provisioner.Provision(context.Background(), "env-1", params); err == nil {
+		t.Fatal("expected an error when the deploy job fails")
+	}
+	recorded := status.updates[len(status.updates)-1].ProvisionError
+	for _, want := range []string{"1.2.3", "acme-platform", deployexec.DeployJobName("acme", "prod", "1.2.3", "")} {
+		if !strings.Contains(recorded, want) {
+			t.Fatalf("provisionError = %q, want it to mention %q", recorded, want)
+		}
 	}
 }
 

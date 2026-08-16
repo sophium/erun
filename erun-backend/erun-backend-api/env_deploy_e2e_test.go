@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -73,6 +74,32 @@ func envDeployE2EFromEnv(t *testing.T) envDeployE2E {
 // `running` naming the version it deployed.
 func TestDeployEnvironmentEndToEnd(t *testing.T) {
 	config := envDeployE2EFromEnv(t)
+	srv, db, kube := startEnvDeployAPI(t, config, "erun-env-deploy-e2e")
+
+	tenant := e2eTenantName(t, srv.URL)
+	// Registered without a pinned version, so nothing deploys on create and the
+	// explicit endpoint is unambiguously what performs the deploy.
+	environmentID := e2eRegisterEnvironment(t, srv.URL, "prod")
+
+	assertDeployClaimIsExclusive(t, db, environmentID)
+
+	code, body := e2eRequest(t, srv.URL, http.MethodPost, "/v1/environments/"+environmentID+"/deploy",
+		map[string]any{"version": config.version})
+	if code != http.StatusAccepted {
+		t.Fatalf("deploy: HTTP %d (want 202): %s", code, body)
+	}
+
+	awaitEnvironmentRunning(t, srv.URL, environmentID, config.version)
+	assertRuntimeChartInstalled(t, kube, tenant)
+	assertRedeployReruns(t, kube, srv.URL, config, environmentID)
+	assertDeployRejectedWhileInFlight(t, db, srv.URL, environmentID, config.version)
+}
+
+// startEnvDeployAPI wires the API the way the control plane runs it — real
+// Kubernetes client, real Postgres, real durable workflow — and hands back the
+// pieces a scenario asserts against.
+func startEnvDeployAPI(t *testing.T, config envDeployE2E, appName string) (*httptest.Server, *sql.DB, kubernetes.Interface) {
+	t.Helper()
 
 	kubeConfig, err := clientcmd.BuildConfigFromFlags("", config.kubeconfig)
 	mustNoErr(t, err, "build kube config")
@@ -82,7 +109,7 @@ func TestDeployEnvironmentEndToEnd(t *testing.T) {
 	db, err := sql.Open("pgx", config.databaseURL)
 	mustNoErr(t, err, "open db")
 	t.Cleanup(func() { _ = db.Close() })
-	dbosCtx, err := dbos.NewDBOSContext(context.Background(), dbos.Config{AppName: "erun-env-deploy-e2e", DatabaseURL: config.dbosURL})
+	dbosCtx, err := dbos.NewDBOSContext(context.Background(), dbos.Config{AppName: appName, DatabaseURL: config.dbosURL})
 	mustNoErr(t, err, "dbos context")
 
 	handler, err := NewHandler(HandlerOptions{
@@ -109,24 +136,101 @@ func TestDeployEnvironmentEndToEnd(t *testing.T) {
 
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
+	return srv, db, kube
+}
 
-	tenant := e2eTenantName(t, srv.URL)
-	// Registered without a pinned version, so nothing deploys on create and the
-	// explicit endpoint is unambiguously what performs the deploy.
-	environmentID := e2eRegisterEnvironment(t, srv.URL)
+// TestDeployEnvironmentRecordsAnUnpullableChart is the failure this hardening
+// exists for. erun publishes its runtime chart only beside the runtime image it
+// releases, so a version whose chart was never pushed — or a deploy registry that
+// only ever holds the tenant's own app images — cannot be installed at all. The
+// in-Job `erun deploy` already says so, naming the version and every coordinate
+// its resolution ladder probed; what the control plane must do is put that in the
+// environment's provisionError instead of recording that a Job exited.
+//
+// It needs a version whose <tenant>-devops IMAGE the cluster can pull but whose
+// chart is not published, because the deploy has to get far enough to attempt the
+// chart pull. Re-tagging the runtime image under an unpublished version is the
+// cheapest way to produce one.
+func TestDeployEnvironmentRecordsAnUnpullableChart(t *testing.T) {
+	config := envDeployE2EFromEnv(t)
+	version := os.Getenv("ERUN_E2E_ENV_DEPLOY_UNPUBLISHED_VERSION")
+	if version == "" {
+		t.Skip("ERUN_E2E_ENV_DEPLOY_UNPUBLISHED_VERSION is required: a version whose <tenant>-devops image is pullable but whose runtime chart is not published")
+	}
+	srv, _, kube := startEnvDeployAPI(t, config, "erun-env-deploy-chart-gap-e2e")
 
-	assertDeployClaimIsExclusive(t, db, environmentID)
+	environmentID := e2eRegisterEnvironment(t, srv.URL, "chartgap")
+	t.Cleanup(func() { deleteDeployJobs(t, kube, config.namespace, environmentID) })
 
 	code, body := e2eRequest(t, srv.URL, http.MethodPost, "/v1/environments/"+environmentID+"/deploy",
-		map[string]any{"version": config.version})
+		map[string]any{"version": version})
 	if code != http.StatusAccepted {
 		t.Fatalf("deploy: HTTP %d (want 202): %s", code, body)
 	}
 
-	awaitEnvironmentRunning(t, srv.URL, environmentID, config.version)
-	assertRuntimeChartInstalled(t, kube, tenant)
-	assertRedeployReruns(t, kube, srv.URL, config, environmentID)
-	assertDeployRejectedWhileInFlight(t, db, srv.URL, environmentID, config.version)
+	reason := awaitEnvironmentFailed(t, srv.URL, environmentID)
+	t.Logf("recorded provisionError:\n%s", reason)
+	// The version and the registry are what an operator has to change, so an
+	// error that names neither is the opaque Job exit this test exists to reject.
+	for _, want := range []string{version, config.registry, "chart"} {
+		if !strings.Contains(reason, want) {
+			t.Fatalf("provisionError does not mention %q, so it is not actionable:\n%s", want, reason)
+		}
+	}
+	if len(strings.TrimSpace(strings.TrimPrefix(reason, "deploy job failed for version "+version))) <= len(version) {
+		t.Fatalf("provisionError carries no detail beyond the job outcome:\n%s", reason)
+	}
+}
+
+// awaitEnvironmentFailed polls until the durable workflow reports a terminal
+// state and returns the reason it recorded, failing if the deploy somehow
+// succeeded.
+func awaitEnvironmentFailed(t *testing.T, baseURL, environmentID string) string {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Minute)
+	for time.Now().Before(deadline) {
+		code, body := e2eRequest(t, baseURL, http.MethodGet, "/v1/environments/"+environmentID, nil)
+		if code != http.StatusOK {
+			t.Fatalf("get environment: HTTP %d: %s", code, body)
+		}
+		var got struct {
+			Status         string `json:"status"`
+			ProvisionError string `json:"provisionError"`
+		}
+		mustNoErr(t, json.Unmarshal([]byte(body), &got), "parse environment response")
+		switch got.Status {
+		case "failed":
+			return got.ProvisionError
+		case "running":
+			t.Fatal("the deploy succeeded, so its chart was published after all — pick a version with no published chart")
+		}
+		time.Sleep(3 * time.Second)
+	}
+	t.Fatal("timed out waiting for the deploy to reach a terminal state")
+	return ""
+}
+
+// deleteDeployJobs clears the Jobs a scenario left in the platform namespace, so
+// a failed deploy does not leave its pod sitting in the operator's cluster until
+// the TTL reaps it.
+func deleteDeployJobs(t *testing.T, kube kubernetes.Interface, namespace, environmentID string) {
+	t.Helper()
+	jobs, err := kube.BatchV1().Jobs(namespace).List(context.Background(), metav1.ListOptions{
+		LabelSelector: "app.kubernetes.io/managed-by=erun-deploy-executor",
+	})
+	if err != nil {
+		t.Logf("listing deploy jobs to clean up environment %s: %v", environmentID, err)
+		return
+	}
+	policy := metav1.DeletePropagationBackground
+	for _, job := range jobs.Items {
+		if job.Labels["erun.io/environment"] != "chartgap" {
+			continue
+		}
+		if err := kube.BatchV1().Jobs(namespace).Delete(context.Background(), job.Name, metav1.DeleteOptions{PropagationPolicy: &policy}); err != nil {
+			t.Logf("deleting deploy job %s: %v", job.Name, err)
+		}
+	}
 }
 
 // assertRedeployReruns is the reason the endpoint exists: deploying the same
@@ -207,10 +311,10 @@ func e2eTenantName(t *testing.T, baseURL string) string {
 	return config.Tenant.Name
 }
 
-func e2eRegisterEnvironment(t *testing.T, baseURL string) string {
+func e2eRegisterEnvironment(t *testing.T, baseURL, name string) string {
 	t.Helper()
 	code, body := e2eRequest(t, baseURL, http.MethodPost, "/v1/environments",
-		map[string]any{"name": "prod", "type": "runtime"})
+		map[string]any{"name": name, "type": "runtime"})
 	if code != http.StatusCreated {
 		t.Fatalf("register environment: HTTP %d (want 201): %s", code, body)
 	}
