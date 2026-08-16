@@ -56,9 +56,84 @@ Recording builds on the server (instead of treating them as ephemeral CI artifac
 
 ## Triggering builds
 
-Recording a build is decoupled from running one. ERun deliberately doesn't bake "CI" into the API; the Agent or pipeline that produced the build (often `erun build --release` or a downstream CI job) is responsible for calling `POST /builds` once the build completes.
+Recording a build is decoupled from running one. Any Agent or pipeline that produced a build (often `erun build --release`, or build infrastructure you already have) can call `POST /builds` once it completes, and the outcome funnels into the same review/merge-queue model.
 
-This gives organizations freedom to plug in whatever build infrastructure they already have — GitHub Actions, GitLab CI, Buildkite, a custom agent — while still funneling outcomes into the same review/merge-queue model.
+ERun also ships its own trigger for the one case it owns end to end: an accepted review on a target branch. That is the [release queue](#release-queue), below.
+
+## Release queue
+
+When a review reaches `MERGED`, the commit it merged on is enqueued for release. The queue runs `erun release` as a Kubernetes Job in an [agent env](/concepts/environment-types), records the version it minted as a build against the review, and moves the review with it.
+
+The queue runs **one release at a time per tenant**, first in, first out. This is not a throughput choice: `release` bumps a semver, writes version-bearing files, tags, and pushes, so two concurrent releases on one version line corrupt it. Two reviews accepted seconds apart produce two sequential releases, never a race.
+
+### Resource shape
+
+```json
+{
+  "releaseId": "018f3a2b-7c41-7e93-b8d2-1f9c4e5a6b70",
+  "tenantId": "018f3a2b-1111-7e93-b8d2-1f9c4e5a6b70",
+  "reviewId": "018f3a2b-2222-7e93-b8d2-1f9c4e5a6b70",
+  "targetBranch": "main",
+  "commitId": "9f1c2b3d4e5f60718293a4b5c6d7e8f901234567",
+  "status": "released",
+  "attempt": 1,
+  "version": "1.4.2",
+  "buildId": "018f3a2b-3333-7e93-b8d2-1f9c4e5a6b70",
+  "createdAt": "2026-08-16T09:12:44Z",
+  "updatedAt": "2026-08-16T09:31:07Z"
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `reviewId` | The accepted review that earned the release. Absent when a merge to the target branch was triggered directly. |
+| `commitId` | The merge commit being released. Unique per tenant — see [Idempotency](#idempotency). |
+| `status` | `queued` → `running` → `released` \| `failed`. |
+| `attempt` | Incremented each time a failed release is re-queued. Keys the Job and the durable workflow, so a retry runs instead of replaying. |
+| `version` | The version the release published. Set only on `released`; a run that failed published nothing. |
+| `buildId` | The build recorded against the review for this release. |
+| `failureReason` | Present on `failed`: the release's own output, not "the job exited". |
+
+### Endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/v1/releases` | Enqueue a release for a merge commit. `201` when queued, `200` when the commit already has one. |
+| `GET` | `/v1/releases` | List releases. Filter with `targetBranch`, `reviewId`, `status`. |
+| `GET` | `/v1/releases/{releaseId}` | Read one release. |
+| `GET` | `/v1/reviews/{reviewId}/releases` | The releases a review produced — where a failed release's reason lives. |
+
+`POST /v1/releases` takes `{ "reviewId": "...", "targetBranch": "main", "commitId": "<40 hex>" }`; `reviewId` is optional.
+
+### Idempotency
+
+There is at most one release per `(tenant, commitId)`, so **minting a second version for one merge commit cannot happen**. Re-triggering the same commit answers `200` with the row that already exists:
+
+| Existing status | What a repeat trigger does |
+|---|---|
+| `released` | Nothing. The response names the version already minted for that commit. |
+| `queued` / `running` | Nothing. The response is the release already in flight. |
+| `failed` | Re-queues the same row with `attempt` incremented, so a transient failure never locks a commit out. |
+
+### Bounds
+
+| Bound | Value | Why |
+|---|---|---|
+| In flight per tenant | 1 | Two concurrent releases corrupt one version line. Enforced in the database, not just in the query. |
+| Cooldown between consecutive releases | 60s | A trigger stuck in a loop cannot spend a tenant's capacity on back-to-back runs; negligible against a real release's duration. |
+| Releases started per dispatch | 4 | Bounds fan-out across tenants. When the cap bites it is logged, never silently dropped. |
+| Job deadline | 3h | Past this a release is wedged, not slow. |
+
+A release whose control plane stops reporting for 4 hours is failed with a reason saying so, and the queue moves on — a crashed control plane never holds a tenant's slot permanently.
+
+### Error behaviour
+
+| Failure mode | What happens | Recovery |
+|---|---|---|
+| The release Job fails | `status: failed`, `failureReason` carries the run's own output (read off the pod before it is reclaimed). The next queued release still runs. | Fix the cause, re-trigger the same commit — it re-queues as a new attempt. |
+| The Job exits 0 but names no version | `status: failed`. A release nothing can name is not recorded as a success. | Re-trigger the commit. |
+| The queue is not configured | The trigger is still recorded as `queued`; nothing runs. | Enable the queue on the control plane, then re-trigger. |
+| Moving the review to `MERGED` succeeds but the trigger fails | `500`, naming that the review **is** merged and that the recovery is `POST /v1/releases`. The transition is not rolled back. | `POST /v1/releases` with the merge commit. |
 
 ## Validation rules
 
