@@ -70,6 +70,11 @@ CREATE TRIGGER builds_set_timestamps
   FOR EACH ROW
   EXECUTE FUNCTION erun_set_timestamps();
 
+CREATE TRIGGER releases_set_timestamps
+  BEFORE INSERT OR UPDATE ON releases
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();
+
 CREATE TRIGGER comments_set_timestamps
   BEFORE INSERT OR UPDATE ON comments
   FOR EACH ROW
