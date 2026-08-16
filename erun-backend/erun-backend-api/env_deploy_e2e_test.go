@@ -125,7 +125,41 @@ func TestDeployEnvironmentEndToEnd(t *testing.T) {
 
 	awaitEnvironmentRunning(t, srv.URL, environmentID, config.version)
 	assertRuntimeChartInstalled(t, kube, tenant)
+	assertRedeployReruns(t, kube, srv.URL, config, environmentID)
 	assertDeployRejectedWhileInFlight(t, db, srv.URL, environmentID, config.version)
+}
+
+// assertRedeployReruns is the reason the endpoint exists: deploying the same
+// version again must actually run again. An environment-keyed Job and workflow
+// would both be terminal by now, so a replay would report the old outcome
+// without touching the cluster — this holds the second deploy to producing its
+// own Job.
+func assertRedeployReruns(t *testing.T, kube kubernetes.Interface, baseURL string, config envDeployE2E, environmentID string) {
+	t.Helper()
+	before := deployJobNames(t, kube, config.namespace)
+	code, body := e2eRequest(t, baseURL, http.MethodPost, "/v1/environments/"+environmentID+"/deploy",
+		map[string]any{"version": config.version})
+	if code != http.StatusAccepted {
+		t.Fatalf("re-deploy: HTTP %d (want 202): %s", code, body)
+	}
+	awaitEnvironmentRunning(t, baseURL, environmentID, config.version)
+	after := deployJobNames(t, kube, config.namespace)
+	if len(after) <= len(before) {
+		t.Fatalf("re-deploy ran no new job: jobs before %v, after %v", before, after)
+	}
+}
+
+func deployJobNames(t *testing.T, kube kubernetes.Interface, namespace string) []string {
+	t.Helper()
+	jobs, err := kube.BatchV1().Jobs(namespace).List(context.Background(), metav1.ListOptions{
+		LabelSelector: "app.kubernetes.io/managed-by=erun-deploy-executor",
+	})
+	mustNoErr(t, err, "list deploy jobs")
+	names := make([]string, 0, len(jobs.Items))
+	for _, job := range jobs.Items {
+		names = append(names, job.Name)
+	}
+	return names
 }
 
 // assertDeployRejectedWhileInFlight holds the claim directly rather than racing
@@ -145,6 +179,11 @@ func assertDeployRejectedWhileInFlight(t *testing.T, db *sql.DB, baseURL, enviro
 	if code != http.StatusConflict {
 		t.Fatalf("deploy while one is in flight: HTTP %d (want 409): %s", code, body)
 	}
+	// Hand the claim back, so the test does not leave behind an environment that
+	// looks wedged mid-deploy.
+	mustNoErr(t, environments.UpdateProvisioningStatus(ctx, environmentID, repository.EnvironmentStatusUpdate{
+		Status: "running",
+	}), "release the held claim")
 }
 
 // e2eTenantName reads the tenant the bootstrap identity resolved to. It decides
