@@ -8,9 +8,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
-	k8stesting "k8s.io/client-go/testing"
 )
 
 func testParams() DeployJobParams {
@@ -64,28 +62,6 @@ func assertCommand(t *testing.T, got, want []string) {
 	}
 }
 
-func TestJobOutcome(t *testing.T) {
-	cases := []struct {
-		name    string
-		status  batchv1.JobStatus
-		outcome Outcome
-		done    bool
-	}{
-		{"succeeded", batchv1.JobStatus{Succeeded: 1}, OutcomeSucceeded, true},
-		{"failed", batchv1.JobStatus{Failed: 1}, OutcomeFailed, true},
-		{"running", batchv1.JobStatus{Active: 1}, "", false},
-		{"pending", batchv1.JobStatus{}, "", false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			outcome, done := jobOutcome(&batchv1.Job{Status: tc.status})
-			if done != tc.done || outcome != tc.outcome {
-				t.Fatalf("jobOutcome = (%q,%v), want (%q,%v)", outcome, done, tc.outcome, tc.done)
-			}
-		})
-	}
-}
-
 // TestDeployJobNameSeparatesAttempts: a re-deploy must be a new Job, otherwise
 // it would re-read the previous attempt's terminal outcome instead of running.
 func TestDeployJobNameSeparatesAttempts(t *testing.T) {
@@ -120,131 +96,25 @@ func TestDeployJobNameFitsKubernetesLimit(t *testing.T) {
 	}
 }
 
-// seededJob is the deploy Job as it would be after the cluster ran it, with a
-// terminal status, so Run's watch returns immediately (the fake client has no
-// Job controller to move status on its own).
-func seededJob(status batchv1.JobStatus) *batchv1.Job {
+// TestRunWatchesTheDeployJob holds the launcher to creating and watching the Job
+// its params describe; the watch and failure read-back themselves belong to
+// jobexec and are covered there.
+func TestRunWatchesTheDeployJob(t *testing.T) {
 	p := testParams()
-	return &batchv1.Job{
-		ObjectMeta: metav1.ObjectMeta{Name: DeployJobName(p.Tenant, p.Environment, p.Version, p.DeployID), Namespace: p.Namespace},
-		Status:     status,
-	}
-}
-
-func TestRunWatchesToSuccess(t *testing.T) {
-	kube := fake.NewSimpleClientset(seededJob(batchv1.JobStatus{Succeeded: 1}))
-	result, err := NewLauncher(kube).Run(context.Background(), testParams())
-	if err != nil {
-		t.Fatalf("run: %v", err)
-	}
-	if result.Outcome != OutcomeSucceeded {
-		t.Fatalf("outcome = %q, want succeeded", result.Outcome)
-	}
-	if result.Failure != "" {
-		t.Fatalf("a succeeded deploy reported a failure: %q", result.Failure)
-	}
-}
-
-// TestRunWatchesToFailure also holds the failed path to reading the deploy's own
-// output back: without it the control plane records a bare Job exit, which names
-// nothing an operator can act on. The fake client's pod log is a fixed body, so
-// the assertion is that the log was read and reported, not what it said.
-func TestRunWatchesToFailure(t *testing.T) {
-	p := testParams()
-	job := seededJob(batchv1.JobStatus{Failed: 1})
-	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
-		Name:      job.Name + "-abcde",
-		Namespace: p.Namespace,
-		Labels:    map[string]string{"job-name": job.Name},
-	}}
-	kube := fake.NewSimpleClientset(job, pod)
-	result, err := NewLauncher(kube).Run(context.Background(), p)
-	if err != nil {
-		t.Fatalf("run: %v", err)
-	}
-	if result.Outcome != OutcomeFailed {
-		t.Fatalf("outcome = %q, want failed", result.Outcome)
-	}
-	if result.Failure == "" {
-		t.Fatal("a failed deploy reported no reason, so the environment would record a bare job exit")
-	}
-}
-
-// TestRunReportsTheJobConditionWhenThePodIsGone: a deadline overrun reclaims the
-// pod, so the Job's own terminal condition is the only reason left and must not
-// be dropped.
-func TestRunReportsTheJobConditionWhenThePodIsGone(t *testing.T) {
-	job := seededJob(batchv1.JobStatus{
-		Failed: 1,
-		Conditions: []batchv1.JobCondition{{
-			Type:    batchv1.JobFailed,
-			Status:  corev1.ConditionTrue,
-			Reason:  "DeadlineExceeded",
-			Message: "Job was active longer than specified deadline",
-		}},
+	kube := fake.NewSimpleClientset(&batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      DeployJobName(p.Tenant, p.Environment, p.Version, p.DeployID),
+			Namespace: p.Namespace,
+		},
+		Status: batchv1.JobStatus{Succeeded: 1},
 	})
-	result, err := NewLauncher(fake.NewSimpleClientset(job)).Run(context.Background(), testParams())
-	if err != nil {
-		t.Fatalf("run: %v", err)
-	}
-	if !strings.Contains(result.Failure, "DeadlineExceeded") {
-		t.Fatalf("failure = %q, want the job's terminal condition", result.Failure)
-	}
-}
-
-// TestRunCreatesWhenAbsent proves the Job is actually created when it doesn't
-// exist, and that Run keeps polling until it turns terminal. The reactions below
-// stand in for the cluster's Job controller: the Job is admitted Active and only
-// completes once Run has already observed it running. Driving the transition off
-// the client calls, rather than off a status update racing the watch, keeps the
-// test free of any timing assumption.
-func TestRunCreatesWhenAbsent(t *testing.T) {
-	kube := fake.NewSimpleClientset()
 	launcher := NewLauncher(kube)
-	launcher.pollEvery = 0 // the reactions advance the Job, so nothing waits on the clock
-
-	jobsResource := batchv1.SchemeGroupVersion.WithResource("jobs")
-	var created *batchv1.Job
-	kube.PrependReactor("create", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
-		created = action.(k8stesting.CreateAction).GetObject().(*batchv1.Job).DeepCopy()
-		admitted := created.DeepCopy()
-		admitted.Status.Active = 1
-		if err := kube.Tracker().Add(admitted); err != nil {
-			return true, nil, err
-		}
-		return true, admitted, nil
-	})
-	polls := 0
-	kube.PrependReactor("get", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
-		polls++
-		if polls > 1 {
-			completed := created.DeepCopy()
-			completed.Status.Succeeded = 1
-			if err := kube.Tracker().Update(jobsResource, completed, completed.Namespace); err != nil {
-				return true, nil, err
-			}
-		}
-		return false, nil, nil
-	})
-
-	p := testParams()
+	launcher.PollEvery(0)
 	result, err := launcher.Run(context.Background(), p)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	if result.Outcome != OutcomeSucceeded {
 		t.Fatalf("outcome = %q, want succeeded", result.Outcome)
-	}
-	if created == nil {
-		t.Fatal("deploy job was not created")
-	}
-	if want := DeployJobName(p.Tenant, p.Environment, p.Version, p.DeployID); created.Name != want {
-		t.Fatalf("created job name = %q, want %q", created.Name, want)
-	}
-	if created.Namespace != p.Namespace {
-		t.Fatalf("created job namespace = %q, want %q", created.Namespace, p.Namespace)
-	}
-	if polls < 2 {
-		t.Fatalf("polls = %d, want Run to poll past the still-active Job", polls)
 	}
 }

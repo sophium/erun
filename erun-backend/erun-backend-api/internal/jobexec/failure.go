@@ -1,4 +1,4 @@
-package deployexec
+package jobexec
 
 import (
 	"context"
@@ -13,50 +13,53 @@ import (
 )
 
 const (
-	// How much of the deploy's output to pull back. An actionable erun error runs
-	// to several lines — a runtime chart that cannot be pulled enumerates every
-	// registry and chart the deploy probed — and helm appends its own output under
-	// it, so the window has to be wider than a one-line error.
+	// How much of the run's output to pull back. An actionable erun error runs to
+	// several lines — a runtime chart that cannot be pulled enumerates every
+	// registry and chart the deploy probed — and the tooling under it appends its
+	// own output, so the window has to be wider than a one-line error.
 	failureLogTailLines int64 = 200
-	// What survives into the environment's recorded reason. `erun deploy` writes
-	// its failure last, so the tail of the log is the failure; the leading lines
-	// are the trace that led there and are dropped first when the cap bites.
+	// What survives into the recorded reason. erun writes its failure last, so the
+	// tail of the log is the failure; the leading lines are the trace that led
+	// there and are dropped first when the cap bites.
 	failureDetailLines     = 40
 	maxFailureDetailLength = 4000
+	// maxFailureLogBytes bounds what one failing run can pull into the control
+	// plane's memory; the detail is drawn from the end of the window regardless.
+	maxFailureLogBytes int64 = 256 * 1024
 )
 
-// failureDetail explains why a deploy Job did not succeed, in the words of the
-// deploy itself. The Job runs `erun deploy` in the tenant's runtime image, so the
+// failureDetail explains why a Job did not succeed, in the words of the run
+// itself. The Job runs erun in the tenant's runtime image, so the
 // operator-actionable error — the version, the registries probed, the way out —
 // is already printed there; without pulling it back the control plane can only
 // record that a Job exited, which names nothing an operator can act on. When the
 // pod produced no output (it never ran, or the Job outlived it) the pod's own
 // status and then the Job's terminal condition stand in.
-func (l *Launcher) failureDetail(ctx context.Context, job *batchv1.Job) string {
-	pod := l.newestJobPod(ctx, job)
+func (r *Runner) failureDetail(ctx context.Context, job *batchv1.Job) string {
+	pod := r.newestJobPod(ctx, job)
 	if pod != nil {
-		if detail := deployFailureFromLog(l.podLog(ctx, pod)); detail != "" {
+		if detail := failureFromLog(r.podLog(ctx, pod)); detail != "" {
 			return detail
 		}
-		if detail := podFailureDetail(pod); detail != "" {
+		if detail := podFailureDetail(r.options.Kind, pod); detail != "" {
 			return detail
 		}
 	}
-	return jobFailureDetail(job)
+	return jobFailureDetail(r.options.Kind, job)
 }
 
 // newestJobPod finds the pod that ran this attempt. The Job's own selector is
 // authoritative once the API server has defaulted it; a Job that was never
 // admitted (or a fake in tests) has none, so the conventional per-Job pod label
 // stands in.
-func (l *Launcher) newestJobPod(ctx context.Context, job *batchv1.Job) *corev1.Pod {
+func (r *Runner) newestJobPod(ctx context.Context, job *batchv1.Job) *corev1.Pod {
 	selector := "job-name=" + job.Name
 	if job.Spec.Selector != nil {
 		if formatted := metav1.FormatLabelSelector(job.Spec.Selector); formatted != "" && formatted != "<none>" {
 			selector = formatted
 		}
 	}
-	pods, err := l.kube.CoreV1().Pods(job.Namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	pods, err := r.kube.CoreV1().Pods(job.Namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
 	if err != nil || len(pods.Items) == 0 {
 		return nil
 	}
@@ -67,13 +70,13 @@ func (l *Launcher) newestJobPod(ctx context.Context, job *batchv1.Job) *corev1.P
 	return &items[len(items)-1]
 }
 
-// podLog reads the tail of the deploy container's output. A read failure is not
+// podLog reads the tail of the run container's output. A read failure is not
 // itself reportable — the pod may never have started a container — so it yields
 // nothing and lets the pod status explain instead.
-func (l *Launcher) podLog(ctx context.Context, pod *corev1.Pod) string {
+func (r *Runner) podLog(ctx context.Context, pod *corev1.Pod) string {
 	tail := failureLogTailLines
-	stream, err := l.kube.CoreV1().Pods(pod.Namespace).
-		GetLogs(pod.Name, &corev1.PodLogOptions{Container: deployContainerName, TailLines: &tail}).
+	stream, err := r.kube.CoreV1().Pods(pod.Namespace).
+		GetLogs(pod.Name, &corev1.PodLogOptions{Container: r.options.Container, TailLines: &tail}).
 		Stream(ctx)
 	if err != nil {
 		return ""
@@ -86,14 +89,10 @@ func (l *Launcher) podLog(ctx context.Context, pod *corev1.Pod) string {
 	return string(content)
 }
 
-// maxFailureLogBytes bounds what one failing deploy can pull into the control
-// plane's memory; the detail is drawn from the end of the window regardless.
-const maxFailureLogBytes int64 = 256 * 1024
-
-// deployFailureFromLog distils the recorded reason out of the deploy's output.
-// `erun deploy` prints its trace as it works and its failure last, so the
-// trailing lines are the failure plus just enough of the run to place it.
-func deployFailureFromLog(logText string) string {
+// failureFromLog distils the recorded reason out of the run's output. erun prints
+// its trace as it works and its failure last, so the trailing lines are the
+// failure plus just enough of the run to place it.
+func failureFromLog(logText string) string {
 	lines := make([]string, 0, failureDetailLines)
 	for _, line := range strings.Split(logText, "\n") {
 		if trimmed := strings.TrimRight(line, " \t\r"); strings.TrimSpace(trimmed) != "" {
@@ -119,21 +118,21 @@ func truncateFailureDetail(detail string) string {
 	return "…\n" + detail[len(detail)-maxFailureDetailLength:]
 }
 
-// podFailureDetail reports why the deploy pod produced no output — an image the
+// podFailureDetail reports why the run's pod produced no output — an image the
 // cluster cannot pull, a scheduling refusal, a container that died before
-// writing. Without it those failures are indistinguishable from a silent deploy.
-func podFailureDetail(pod *corev1.Pod) string {
+// writing. Without it those failures are indistinguishable from a silent run.
+func podFailureDetail(kind string, pod *corev1.Pod) string {
 	statuses := append(append([]corev1.ContainerStatus{}, pod.Status.InitContainerStatuses...), pod.Status.ContainerStatuses...)
 	for _, status := range statuses {
 		if waiting := status.State.Waiting; waiting != nil && waiting.Reason != "" {
-			return fmt.Sprintf("deploy pod %s: container %s is waiting: %s", pod.Name, status.Name, joinReasonMessage(waiting.Reason, waiting.Message))
+			return fmt.Sprintf("%s pod %s: container %s is waiting: %s", kind, pod.Name, status.Name, joinReasonMessage(waiting.Reason, waiting.Message))
 		}
 		if terminated := status.State.Terminated; terminated != nil && terminated.ExitCode != 0 {
-			return fmt.Sprintf("deploy pod %s: container %s exited %d: %s", pod.Name, status.Name, terminated.ExitCode, joinReasonMessage(terminated.Reason, terminated.Message))
+			return fmt.Sprintf("%s pod %s: container %s exited %d: %s", kind, pod.Name, status.Name, terminated.ExitCode, joinReasonMessage(terminated.Reason, terminated.Message))
 		}
 	}
 	if pod.Status.Reason != "" || pod.Status.Message != "" {
-		return fmt.Sprintf("deploy pod %s is %s: %s", pod.Name, pod.Status.Phase, joinReasonMessage(pod.Status.Reason, pod.Status.Message))
+		return fmt.Sprintf("%s pod %s is %s: %s", kind, pod.Name, pod.Status.Phase, joinReasonMessage(pod.Status.Reason, pod.Status.Message))
 	}
 	return ""
 }
@@ -141,11 +140,11 @@ func podFailureDetail(pod *corev1.Pod) string {
 // jobFailureDetail is the last resort: a Job whose pods the cluster already
 // reclaimed (a deadline overrun is the usual one) still carries its terminal
 // condition, and naming it beats recording nothing.
-func jobFailureDetail(job *batchv1.Job) string {
+func jobFailureDetail(kind string, job *batchv1.Job) string {
 	for _, condition := range job.Status.Conditions {
 		if condition.Type == batchv1.JobFailed && condition.Status == corev1.ConditionTrue {
 			if detail := joinReasonMessage(condition.Reason, condition.Message); detail != "" {
-				return "deploy job " + job.Name + " failed: " + detail
+				return kind + " job " + job.Name + " failed: " + detail
 			}
 		}
 	}
