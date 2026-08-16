@@ -370,7 +370,7 @@ Registers a **cloud context** (a managed cluster) for the caller's tenant and re
 }
 ```
 
-**Async, durable provisioning (issue #605).** The live bootstrap runs as a **durable DBOS workflow** — it survives a control-plane restart, resuming from its last completed step. It executes the real (non-dry-run) `InitCloudContext` against the tenant's BYO-cloud alias (security group + IAM instance-profile, `run-instances` with the k3s install user-data, `wait`, resolve the public IP), then takes **server-side custody of the k3s admin token** — encrypted at rest in `context_credentials`, never returned — and sets the context `status`:
+**Async, durable provisioning (issue #605).** The live bootstrap runs as a **durable DBOS workflow** — it survives a control-plane restart, resuming from its last completed step. It executes the real (non-dry-run) `InitCloudContext` against the tenant's BYO-cloud alias (security group + IAM instance-profile, `run-instances` with the k3s install user-data, `wait`, resolve the public IP), driving EC2, IAM, and SSM **in-process through the AWS SDK** — the control-plane image ships no `aws`, `kubectl`, or `helm` binary — then takes **server-side custody of the k3s admin token** — encrypted at rest in `context_credentials`, never returned — and sets the context `status`:
 
 - `provisioning` → in flight.
 - `running` → the cluster is up; `instanceId` and `publicIp` are populated.
@@ -391,17 +391,27 @@ Registers a **cloud context** (a managed cluster) for the caller's tenant and re
 
 ### `PUT /v1/cloud-provider-aliases/{alias}`
 
-Registers (upserts) the caller tenant's **BYO-cloud credentials** under a named alias — the secret the provisioning executor resolves to talk to the tenant's cloud (issue #605). The credentials blob is **opaque to the API** (a provider-specific JSON the executor hands to the cloud SDK/CLI) and is **encrypted at rest**: the `credentials_encrypted` column never holds plaintext. Tenant-owned (row-level security binds the alias to the caller), so any authorized tenant manages its own aliases; no operations gate.
+Registers (upserts) the caller tenant's **BYO-cloud credentials** under a named alias — the secret the provisioning executor resolves to talk to the tenant's cloud (issue #605). The blob is **opaque to this endpoint** (stored and validated only as a non-empty string) and is **encrypted at rest**: the `credentials_encrypted` column never holds plaintext. Tenant-owned (row-level security binds the alias to the caller), so any authorized tenant manages its own aliases; no operations gate.
 
 ```jsonc
 // PUT /v1/cloud-provider-aliases/{alias} body
 {
   "provider": "aws",   // optional — defaults to aws; must be aws today
-  "credentials": "{\"accessKeyId\":\"…\",\"secretAccessKey\":\"…\"}" // required — opaque, encrypted at rest
+  "credentials": "{\"accessKeyId\":\"…\",\"secretAccessKey\":\"…\",\"sessionToken\":\"…\"}" // required — encrypted at rest
 }
 ```
 
 Returns `204 No Content`. Available only when the platform is configured with a secrets key (`ERUN_SECRETS_KEY`).
+
+**What the AWS executor requires of the blob.** The provisioning executor parses it as JSON and uses those keys as the **only** identity it acts as:
+
+| Key | Required | Meaning |
+|---|---|---|
+| `accessKeyId` | yes | AWS access key id. |
+| `secretAccessKey` | yes | AWS secret access key. |
+| `sessionToken` | no | Session token for temporary credentials; omit for long-lived keys. |
+
+There is **no fallback to an ambient credential chain**. A blob that is not JSON, or that omits either required key, fails the provision immediately with `provisionError` naming the alias — it does not fall through to a shared config file, an instance profile, or a web-identity role the control plane itself might hold, because a tenant's provisioning must never act as another identity. Temporary credentials must outlast the bootstrap: they are not refreshed mid-workflow, so an expired token surfaces as an AWS authentication failure in `provisionError`.
 
 **Error behaviour.**
 
