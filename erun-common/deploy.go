@@ -221,8 +221,9 @@ type HelmDeploySpec struct {
 	PlatformAccount bool
 	// Platform is the resolved per-instance platform config. Zero for
 	// non-platform projects; when set, deploy threads it to every chart as
-	// platform.* values so the PowerDNS singleton can bootstrap its authoritative
-	// zone.
+	// platform.* values so the platform singletons can resolve their
+	// per-instance identity — PowerDNS its authoritative zone, Zitadel the auth
+	// host it issues tokens for.
 	Platform PlatformConfig
 	// MCPAuth* require the per-env erun-mcp edge to authenticate bearer tokens
 	// against a trusted public key, delivered out-of-band as a Secret like the
@@ -1348,7 +1349,7 @@ func configureDeployInputMetadata(store DeployStore, target OpenResult, deployIn
 	if err != nil {
 		return err
 	}
-	deployInput.OIDCAllowedIssuers = strings.Join(issuers, ",")
+	deployInput.OIDCAllowedIssuers = joinOIDCAllowedIssuers(issuers, deployInput.Platform)
 	managedCloud, err := managedCloudEnvironment(store, target.EnvConfig)
 	if err != nil {
 		return err
@@ -1361,6 +1362,23 @@ func configureDeployInputMetadata(store DeployStore, target OpenResult, deployIn
 		applyCloudContextStopMetadata(store, target.EnvConfig, deployInput)
 	}
 	return nil
+}
+
+// joinOIDCAllowedIssuers renders the API's trusted-issuer list: the tenant's
+// cloud-provider issuers plus, for a platform deployment, its own hosted IdP.
+// The platform's IdP is the issuer its own control plane authenticates operators
+// against, and the auth host is already declared in the platform block, so a
+// deploy that left it out resolved a list the console's issuer was absent from —
+// every hosted sign-in rejected until someone patched the Deployment by hand.
+func joinOIDCAllowedIssuers(cloudIssuers []string, platform PlatformConfig) string {
+	issuers := slices.Clone(cloudIssuers)
+	if authHost := strings.TrimSpace(platform.Resolve().AuthHost); authHost != "" {
+		issuer := "https://" + authHost
+		if !slices.Contains(issuers, issuer) {
+			issuers = append(issuers, issuer)
+		}
+	}
+	return strings.Join(issuers, ",")
 }
 
 // resolveDeploySpecForCurrentDockerBuild builds the pure deploy plan for a
@@ -1866,9 +1884,9 @@ func resolveProjectContainerRegistry(projectRoot, environment string) string {
 // (loadProjectK8sPlanForRepo), so a malformed block fails the plan before
 // reaching here. The open-runtime deploy path does not pass through that plan
 // step, so it reaches here unvalidated — harmless today because the runtime
-// chart it deploys ignores the threaded platform.* values (only the PowerDNS
-// singleton reads them, and open never deploys it). Do not rely on this function
-// having validated the block.
+// chart it deploys ignores the threaded platform.* values (only the platform
+// singletons read them, and open never deploys one). Do not rely on this
+// function having validated the block.
 func resolveProjectPlatform(projectRoot string) PlatformConfig {
 	projectRoot = strings.TrimSpace(projectRoot)
 	if projectRoot == "" {
@@ -2446,8 +2464,8 @@ func helmStoppedSetArgs(stopped bool) []string {
 
 // helmPlatformSetArgs returns the per-instance platform.* helm --set args,
 // guarded on presence so non-platform deploys (every existing env) render none.
-// Threaded to every chart; only the PowerDNS singleton reads them (to bootstrap
-// its services zone).
+// Threaded to every chart; only the platform singletons read them — PowerDNS to
+// bootstrap its services zone, Zitadel to resolve its auth host.
 func helmPlatformSetArgs(p PlatformConfig) []string {
 	if p.IsZero() {
 		return nil

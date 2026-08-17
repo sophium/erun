@@ -153,7 +153,7 @@ paths:
 
 #### `platform:` block {#platform-block}
 
-The `platform:` block configures an **erunpaas platform deployment** — an installation that runs the global DNS singleton (PowerDNS) and exposes tenant services under a delegated zone. ERun's platform is generic, installable software: any vendor deploys it under their **own** names, so every value is configuration — nothing (not even the base domain) is hardcoded. `erun deploy` threads these as `platform.*` helm values (only the `erun-powerdns` chart reads them today); [`erun expose`](/cli/expose) reads them to resolve service hostnames.
+The `platform:` block configures an **erunpaas platform deployment** — an installation that runs the global singletons (the PowerDNS nameserver, the hosted IdP) and exposes tenant services under a delegated zone. ERun's platform is generic, installable software: any vendor deploys it under their **own** names, so every value is configuration — nothing (not even the base domain) is hardcoded. `erun deploy` threads these as `platform.*` helm values (the `erun-powerdns` and `erun-zitadel` charts read them); [`erun expose`](/cli/expose) reads them to resolve service hostnames.
 
 The whole block is optional. An empty block means the project runs no platform deployment. Once any field is set the block is "in use" and is validated at deploy/expose time — a malformed block fails fast.
 
@@ -164,7 +164,7 @@ The whole block is optional. An empty block means the project runs no platform d
 | `serviceszone` | string | no | The child zone delegated to this deployment's PowerDNS, under which tenant services are exposed. Default `services.<basedomain>`. Must be a valid domain at or under `basedomain`. |
 | `authoritativeip` | string | no | The public IP this deployment's authoritative nameserver answers on (the glue-record target for `serviceszone`). Must parse as an IP when set. |
 | `nameservers` | list | no | The NS hostnames the parent zone delegates `serviceszone` to. Default `[ns1.<basedomain>, ns2.<basedomain>]`. |
-| `authhost` | string | no | The hosted-IdP host, served from the apex zone (not `serviceszone`). Default `auth.<basedomain>`. Must be a valid domain at or under `basedomain`. |
+| `authhost` | string | no | The hosted-IdP host, served from the apex zone (not `serviceszone`). Default `auth.<basedomain>`. Must be a valid domain at or under `basedomain`. The `erun-zitadel` chart issues tokens for this origin, and a platform deploy adds `https://<authhost>` to the API's `ERUN_OIDC_ALLOWED_ISSUERS` so the control plane trusts its own IdP. |
 | `acmeemail` | string | no | The account email for this deployment's Let's Encrypt registration (LE rate limits are per registered domain, so each deployment uses its own account). |
 | `caaissuer` | string | no | CA domain the services zone authorizes via apex `CAA` records (`issue` + `issuewild`), e.g. `letsencrypt.org`. Empty (default) writes no CAA — any CA may issue. Opt-in because it must match the CA the cluster edge's ACME server uses; a mismatched CAA blocks issuance. When set, the `erun-powerdns` zone-bootstrap also gives per-env empty-non-terminal names a definitive CAA answer instead of an ambiguous `NODATA`. |
 

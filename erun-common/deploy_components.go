@@ -9,16 +9,17 @@ import (
 
 // deployComponentBaseOrder is the tenant-agnostic base of each platform
 // component chart, ordered so backend charts precede their dependents: powerdns
-// deploys after backend-postgres (its backend store), and docs — a one-shot Job
-// with no in-cluster dependency — orders last. A component's published chart is
-// named <prefix>-<base> where prefix is the tenant's release base (see
-// componentChartPrefix), e.g. erun-backend-postgres or frs-backend-api. Governs
-// ordering only, not which components deploy.
+// and zitadel deploy after backend-postgres (their backend store), and docs — a
+// one-shot Job with no in-cluster dependency — orders last. A component's
+// published chart is named <prefix>-<base> where prefix is the tenant's release
+// base (see componentChartPrefix), e.g. erun-backend-postgres or
+// frs-backend-api. Governs ordering only, not which components deploy.
 var deployComponentBaseOrder = []string{
 	"backend-postgres",
 	"backend-db",
 	"backend-api",
 	"powerdns",
+	"zitadel",
 	"docs",
 }
 

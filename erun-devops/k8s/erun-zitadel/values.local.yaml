@@ -1,0 +1,6 @@
+# Local-environment overlay for erun-zitadel. Empty by default: the hosted IdP
+# is a platform singleton, so the values that matter (the external auth host,
+# the operator-supplied masterkey Secret, the cert issuer) come from the
+# platform environment's config at deploy time, not from this overlay. A local
+# deploy still needs zitadel.masterkeySecretName and an external domain, and the
+# render fails loudly without them.

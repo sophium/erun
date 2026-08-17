@@ -1623,8 +1623,11 @@ func TestDeploy(t *testing.T) {
 		// A valid `platform:` block flows into every chart's helm command as
 		// guarded platform.* --set args, with Resolve's defaults filled in
 		// (serviceszone/authhost/nameservers derived from basedomain). Only the
-		// PowerDNS singleton reads them; the runtime chart ignores them. Proves
-		// the deploy -> platform-config -> helm wiring end to end.
+		// platform singletons read them; the runtime chart ignores them. Proves
+		// the deploy -> platform-config -> helm wiring end to end, including the
+		// resolved auth host reaching the API's trusted-issuer list as
+		// api.oidcAllowedIssuers=https://auth.<basedomain> — a platform's control
+		// plane trusts its own hosted IdP without an operator patching anything.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
