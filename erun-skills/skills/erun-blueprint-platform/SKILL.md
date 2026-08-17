@@ -19,7 +19,7 @@ copy them, pinned to the erun version the environment runs:
 
 This skill is for the tenant that **deploys the erun platform itself**
 (erunpaas) — its umbrellas wrap erun's *own* component charts (`erun-backend-*`,
-`erun-powerdns`, `erun-docs`). A regular tenant that only runs agent envs never
+`erun-powerdns`, `erun-zitadel`, `erun-docs`). A regular tenant that only runs agent envs never
 uses it, and it never wraps the runtime `erun-devops` chart (see What this is
 not).
 
@@ -281,7 +281,7 @@ erun-backend-api:
 Do this for **every** platform component you deploy — one `<tenant>-<component>`
 umbrella dir per wrapped erun chart. This is the closed set of the erun
 platform's components (`erun-backend-api`, `erun-backend-postgres`,
-`erun-backend-db`, `erun-powerdns`, `erun-docs`) — **never** the runtime
+`erun-backend-db`, `erun-powerdns`, `erun-zitadel`, `erun-docs`) — **never** the runtime
 `erun-devops` chart (see What this is not). E.g. `acme-backend-api/` wraps
 `erun-backend-api`. Keep each values file to genuinely env-specific
 overrides; the published charts carry the defaults.
@@ -325,7 +325,13 @@ saved `deploy.components`. Two real cases: `<tenant>-powerdns` binds `:53` via
 in the runtime env with a ghcr pull secret, not a local agent env (orbstack has
 neither); `<tenant>-docs` is a no-op locally. For a local platform, select the
 backend trio (`--components <tenant>-backend-postgres,<tenant>-backend-db,<tenant>-backend-api`);
-add `<tenant>-powerdns` only where `:53` + the pull secret exist. The runtime
+add `<tenant>-powerdns` only where `:53` + the pull secret exist. `<tenant>-zitadel`
+is the hosted IdP and needs three things the cluster must already have — a
+32-character masterkey in an existing Secret (named to it as
+`zitadel.masterkeySecretName`; erun never generates one), a public DNS record for
+the platform's auth host, and a cert for it from the edge's DNS-01 Issuer
+(`zitadel.certManagerIssuer`) — so it belongs in the runtime env after the edge,
+never in a local agent env. The runtime
 chart deploys on its own with an empty selection, so a bare `erun deploy <tenant>
 <env>` bootstraps or heals the runtime without touching the components.
 
@@ -350,7 +356,7 @@ The override is honored on every erun-powerdns version; only the empty-value
 default differs (node IP on current erun, `0.0.0.0` on pre-hostIP pins).
 
 **Every** erun chart — the runtime `erun-devops` chart *and* every component
-chart (`erun-powerdns`, `erun-backend-*`, `erun-docs`) — publishes under the
+chart (`erun-powerdns`, `erun-zitadel`, `erun-backend-*`, `erun-docs`) — publishes under the
 registry's `/charts` path, kept separate from the same-named image repo
 (`<registry>/<component>`) so a chart never collides with its image at the same
 ref. So every dependency `repository` is `oci://<registry>/charts`, and every

@@ -25,11 +25,44 @@ How an operator stands up a hosted erun platform (for example `erunpaas.com`). Y
 | 6 | `<tenant>-prod` | `erun deploy --version <version>` | Deploy the platform components: the **erun API**, Postgres, DB migrations, PowerDNS, and the docs publish. | Ready (API + edge land with PRs #681/#688) |
 | 7 | `<tenant>-prod` | Provide the Cloudflare API token **here** | Supply the token in prod, not local, so the edge can bootstrap the DNS zones. | Ready |
 | 8 | `<tenant>-prod` | `erun terraform apply <tenant> prod` (or skill **`erun-enable-hosting-edge`**) | Apply the env's scaffolded `terraform-<tenant>/prod/` root — Traefik + cert-manager + the Cloudflare DNS-01 wildcard-TLS issuer — using the supplied token. You type the environment name to confirm before it applies. The skill is the guided alternative (references erun's module directly). | Ready (PR #688) |
-| 9 | `<tenant>-prod` | `erun expose <tenant> <env> mcp --ip <ingress-ip>` | Publish an environment's MCP at `mcp.<tenant>-<env>.services.<base-domain>`. | Ready (HTTPS once the `expose` TLS wiring lands) |
-| 10 | `<tenant>-local` | Use an **erun API token** against the running platform | Set up this local env's own DNS zone + TLS certs through the deployed erun API. | Planned |
-| 11 | `<tenant>-prod` | skill **`erun-deploy-platform`** | One-shot orchestration of steps 6–9. | Planned |
+| 9 | `<tenant>-prod` | `erun deploy --version <version> --components <tenant>-zitadel` | Deploy the **hosted IdP** that serves OIDC at `auth.<base-domain>`. See [Hosted IdP](#hosted-idp) — it needs a masterkey Secret and a DNS record first. | Ready |
+| 10 | `<tenant>-prod` | `erun expose <tenant> <env> mcp --ip <ingress-ip>` | Publish an environment's MCP at `mcp.<tenant>-<env>.services.<base-domain>`. | Ready (HTTPS once the `expose` TLS wiring lands) |
+| 11 | `<tenant>-local` | Use an **erun API token** against the running platform | Set up this local env's own DNS zone + TLS certs through the deployed erun API. | Planned |
+| 12 | `<tenant>-prod` | skill **`erun-deploy-platform`** | One-shot orchestration of steps 6–10. | Planned |
 
-Alongside these, stand up the **OIDC issuer** (Zitadel) at `auth.<base-domain>` and point the API + console at it: the API trusts the issuer via `ERUN_OIDC_ALLOWED_ISSUERS`, and the console is built with `VITE_OIDC_ISSUER` plus the `VITE_OIDC_CLIENT_ID` of a public SPA client registered for it (Authorization Code + PKCE, redirect `https://console.<base-domain>/`). The first sign-in bootstraps the `OPERATIONS` tenant. Zitadel as a managed erun component is `(Planned.)`.
+## Hosted IdP {#hosted-idp}
+
+Without an OIDC issuer nobody can sign in to the platform, so the IdP is not optional: the erun API rejects every call and the console has nothing to redirect to. ERun ships it as the version-pinned `erun-zitadel` component — Zitadel core plus its separate Login V2 container in one pod behind one origin — which you deploy like any other component, after the edge is up (the cert comes from the edge's issuer) and after Postgres (it stores its data there, in its own `zitadel` database).
+
+Four things are yours to supply; the chart does the rest.
+
+**1. The masterkey.** Zitadel encrypts its own secrets with a 32-character key that erun deliberately never generates, defaults, or commits. Create it once, in the platform env's namespace, and keep a copy somewhere you can restore from — losing it means losing the instance:
+
+```bash
+kubectl -n <tenant>-prod create secret generic <tenant>-zitadel-masterkey \
+  --from-literal=masterkey="$(openssl rand -hex 16)"
+```
+
+Name it to the component as `zitadel.masterkeySecretName` in the env's `<tenant>-zitadel` values. The deploy fails loudly, before it changes anything, if the value is unset.
+
+**2. DNS.** `auth.<base-domain>` lives in the Cloudflare-managed apex zone, not the delegated `services.` subzone, so add its `A` record alongside the other apex hosts, pointing at the cluster's ingress IP. `erun expose` does not manage this one.
+
+**3. The certificate.** Set `zitadel.certManagerIssuer` to the edge's DNS-01 Issuer (the one `erun-enable-hosting-edge` created in the same namespace) and cert-manager fills the Ingress's TLS Secret for you. Leave it empty only if you issued the certificate yourself and named it in `zitadel.tlsSecretName`.
+
+**4. The console's SPA client.** After the first deploy, sign in to Zitadel's own console at `https://auth.<base-domain>/ui/console` as the bootstrap admin — the username and generated password are in the `<tenant>-zitadel-admin` Secret the component created, and the first sign-in makes you change the password. Sign in with the **domain-qualified** login name the instance assigns (`<username>@<org-domain>`, shown on the user in Zitadel's console), not the bare username from the Secret. Register a project with one application: type **User Agent**, **Authorization Code + PKCE**, no client secret, redirect and post-logout-redirect `https://console.<base-domain>/`. The console is then built with `VITE_OIDC_ISSUER=https://auth.<base-domain>` and that application's `VITE_OIDC_CLIENT_ID`.
+
+The API side needs nothing: a platform deploy already trusts its own auth host, threading `https://<auth-host>` into the API's `ERUN_OIDC_ALLOWED_ISSUERS` from the [`platform:` block](/reference/configuration#platform-block) alongside any cloud issuers. The first sign-in bootstraps the `OPERATIONS` tenant.
+
+### Error behaviour
+
+| Failure mode | What happens | Recovery |
+|---|---|---|
+| No masterkey named | `erun deploy` aborts at the chart render with `zitadel.masterkeySecretName is required`; exit code 1, nothing applied | Create the Secret and set the value |
+| No auth host resolvable | Aborts with `an external domain is required`; exit code 1, nothing applied | Set `basedomain` (or `authhost`) in the env's `platform:` block, or `zitadel.externalDomain` |
+| Postgres not up yet | The pod's `wait-for-postgres` init container blocks, logging `waiting for postgres`; the rollout times out rather than corrupting state | Deploy `<tenant>-backend-postgres` first — the deploy plan sequences it ahead of the IdP |
+| Login container restarts on first boot | Expected and self-healing: it needs a token core writes during initialisation, so it restarts until core is up. Its startup probe reports the wait | None; watch for the pod going Ready |
+| `/ui/v2/login` returns `{"code":5,"message":"Not Found"}` | Core answered a path only the Login V2 container serves — the Ingress route or the login container is missing | Confirm both containers are running and the Ingress still carries the `/ui/v2/login` path |
+| Sign-in redirects to an unreachable host | The issuer names something other than the public origin | Confirm the auth host in the `platform:` block matches the DNS record and the certificate |
 
 ## Which skills, and where
 
