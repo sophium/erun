@@ -1121,6 +1121,52 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_remote_env_deploys_tenant_component_charts_by_reference", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_remote_env_component_threads_resolved_oidc_issuer", func(t *testing.T) {
+		// Regression for sophium#1039: an empty computed api.oidcAllowedIssuers used
+		// to be passed as `--set-string api.oidcAllowedIssuers=` regardless, and
+		// helm's --set always beats -f, so it silently clobbered whatever the
+		// operator configured under that key in the published chart's
+		// values.<env>.yaml. Its sibling above
+		// (dry_run_remote_env_deploys_published_components) locks the empty case —
+		// no --set-string for the key at all, so -f wins. Here a cloud-provider
+		// alias resolves a real issuer for this same sourceless component-deploy
+		// path, and the flag must still appear, re-scoped under the wrapped
+		// erun-backend-api subchart exactly as it did before the fix.
+		setup := env.New(t)
+		root := filepath.Join(setup.ConfigHome, "erun")
+		tenantDir := filepath.Join(root, "team")
+		envDir := filepath.Join(tenantDir, "dev")
+		for _, dir := range []string{root, tenantDir, envDir} {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", dir, err)
+			}
+		}
+		mustWriteFile(t, filepath.Join(root, "config.yaml"),
+			"defaulttenant: team\n"+
+				"cloudproviders:\n"+
+				"  - alias: alpha\n"+
+				"    provider: aws\n"+
+				"    profile: alpha\n"+
+				"    oidcissuerurl: https://oidc.example/shared\n")
+		mustWriteFile(t, filepath.Join(tenantDir, "config.yaml"),
+			"projectroot: "+setup.Cwd+"\nname: team\ndefaultenvironment: dev\n"+
+				"cloudprovideraliases:\n  - alpha\n")
+		mustWriteFile(t, filepath.Join(envDir, "config.yaml"),
+			"name: dev\nrepopath: /nonexistent-remote/team\nkubernetescontext: test-context\n"+
+				"containerregistry: registry.example/test\nruntimeversion: 1.0.0\ntype: remote-agent\n")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-backend-api:1.0.0")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.0",
+			"--components", "team-backend-api",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_component_threads_resolved_oidc_issuer", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_remote_env_tenant_artifacts_require_published_charts", func(t *testing.T) {
 		// The tenant-chart mandate: deploying the tenant's own component charts binds
 		// the deploy to the tenant's version line, so the tenant runtime chart and

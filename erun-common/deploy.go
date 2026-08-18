@@ -1381,6 +1381,20 @@ func joinOIDCAllowedIssuers(cloudIssuers []string, platform PlatformConfig) stri
 	return strings.Join(issuers, ",")
 }
 
+// helmOIDCAllowedIssuersSetArgs renders the trusted-issuer --set, guarded on a
+// non-empty computed value so an env with no resolved issuer leaves
+// api.oidcAllowedIssuers unset. helm's --set always wins over -f, so an
+// unconditional empty --set-string silently clobbered whatever the operator
+// configured under that key in values.<env>.yaml; omitting the flag lets -f
+// apply, and this same guard still emits the flag whenever the computation
+// does resolve at least one issuer.
+func helmOIDCAllowedIssuersSetArgs(issuers string) []string {
+	if strings.TrimSpace(issuers) == "" {
+		return nil
+	}
+	return []string{"--set-string", "api.oidcAllowedIssuers=" + escapeHelmSetValue(issuers)}
+}
+
 // resolveDeploySpecForCurrentDockerBuild builds the pure deploy plan for a
 // `build --deploy` orchestration: the working-tree image has already been
 // built and pushed by the build phase, so deploy references it by tag via an
@@ -2129,8 +2143,8 @@ func (d HelmDeploySpec) command() commandSpec {
 		"--set", "managedCloud="+formatHelmBool(d.ManagedCloud),
 	)
 	args = append(args, helmCloudContextSetArgs(d)...)
+	args = append(args, helmOIDCAllowedIssuersSetArgs(d.OIDCAllowedIssuers)...)
 	args = append(args,
-		"--set-string", "api.oidcAllowedIssuers="+escapeHelmSetValue(d.OIDCAllowedIssuers),
 		"--set", "api.postgres.reset="+formatHelmBool(d.ResetDatabase),
 	)
 	// Runtime source mount: only a runtime env that opted into MountSource
