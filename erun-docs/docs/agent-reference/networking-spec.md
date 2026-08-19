@@ -128,7 +128,7 @@ For the public form, each segment must match:
 
 `erun expose <tenant> <env> <service>` (CLI and the `expose` MCP tool) automates Pattern 3 for a platform deployment — an install that runs the `erun-powerdns` singleton and declares a [`platform:` block](/reference/configuration#platform-block). For the Operator view see [Networking · Platform service exposure](/concepts/networking#platform-service-exposure).
 
-**Inputs.** `tenant`, `env`, `service` (positional — the **logical** service name: the hostname label, resolved to the tenant-scoped backend Service `<tenant>-<service>`); `--ip` (the env's ingress IP the wildcard record points at; required); `--port` (Service port, default `80`); `--dry-run`.
+**Inputs.** `tenant`, `env`, `service` (positional — the **logical** service name: the hostname label, resolved to the tenant-scoped backend Service `<tenant>-<service>`); `--ip` (the env's ingress IP the wildcard record points at; required); `--port` (Service port, default `80`); `--skip-if-unconfigured` (succeed as a no-op instead of failing when the project declares no `platform:` block at all — for a caller composing `expose` after another command without knowing in advance whether the target is a platform deployment; see [Hosted platform · Automatic exposure](/concepts/hosted-platform#automatic-exposure) for its one caller today); `--dry-run`.
 
 **Resolved plan.**
 
@@ -139,6 +139,8 @@ For the public form, each segment must match:
 | Per-env wildcard record | `*.<tenant>-<env>.<servicesZone>` `A` `<ip>`, TTL `60` |
 | Services zone | `platform.serviceszone` (defaults to `services.<platform.basedomain>`) |
 | Ingress | `expose-<service>` in namespace `<tenant>-<env>`, Host-routing the hostname to `<tenant>-<service>:<port>` |
+
+For `service = mcp`, the backend Service `<tenant>-mcp` is not application-specific — the `erun-devops` runtime chart itself renders it (gated on `mcpEnabled`, the default), fronting the runtime pod's named `mcp` container port on port `80`. Every other `service` value depends on that service's own component chart having rendered `<tenant>-<service>`.
 
 **Execution.** Two side effects, in order:
 

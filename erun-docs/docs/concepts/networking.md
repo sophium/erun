@@ -39,7 +39,9 @@ erun expose team dev api --ip 203.0.113.10
 
 This exposes the `api` Service in `team-dev` at `api.team-dev.services.<base-domain>`. ERun ensures a per-environment wildcard DNS record (`*.team-dev.services.<base-domain>` → the env's ingress IP) in the platform's authoritative zone and applies a Host-routing Ingress for the Service. The wildcard covers every service in the env, so exposing more services only adds an Ingress. The platform is generic: any vendor installs it under their own base domain and services zone — nothing is hardcoded.
 
-The exposed URL is HTTP today; a wildcard TLS certificate (making it `https://`) arrives with the DNS-01 broker. See [`erun expose`](/cli/expose) for the workflow and [Networking spec · Platform service exposure](/agent-reference/networking-spec#platform-service-exposure) for the exact records and Ingress.
+The exposed URL is `https://` by default: the Ingress references the env's per-env wildcard cert Secret, issued once by the cluster edge. Pass `--no-tls` for `http://`. See [`erun expose`](/cli/expose) for the workflow and [Networking spec · Platform service exposure](/agent-reference/networking-spec#platform-service-exposure) for the exact records and Ingress.
+
+A [hosted platform](/concepts/hosted-platform)'s runtime environments run this same `expose` step automatically as part of their server-side deploy — see [Hosted platform · Automatic exposure](/concepts/hosted-platform#automatic-exposure) — so a newly-created hosted environment's MCP edge needs no manual `erun expose` call.
 
 ## Inter-env communication
 

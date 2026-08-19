@@ -102,6 +102,37 @@ func TestExpose(t *testing.T) {
 		golden.Equal(t, "expose/real_run_via_stubs", normalize.Apply(result.Combined))
 	})
 
+	t.Run("skip_if_unconfigured_no_platform", func(t *testing.T) {
+		// --skip-if-unconfigured turns the missing-platform-block hard failure
+		// (see requires_platform_config above) into a traced no-op success, the
+		// behavior a caller composing expose after another command needs when it
+		// cannot know in advance whether the target project is a platform
+		// deployment.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		result := erun.Run(t, []string{"expose", "team", "dev", "api", "--ip", "127.0.0.1", "--skip-if-unconfigured", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "expose/skip_if_unconfigured_no_platform", normalize.Apply(result.Combined))
+	})
+
+	t.Run("skip_if_unconfigured_with_platform", func(t *testing.T) {
+		// --skip-if-unconfigured must not change behavior for an actual platform
+		// deployment: with a platform block present, it resolves and traces the
+		// full plan exactly like the plain dry_run scenario above.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectK8sConfig(t, setup, "platform:\n  basedomain: erunpaas.com\n  env: frs-prod\n  authoritativeip: 203.0.113.10\n")
+		result := erun.Run(t, []string{"expose", "team", "dev", "api", "--ip", "203.0.113.10", "--skip-if-unconfigured", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "expose/skip_if_unconfigured_with_platform", normalize.Apply(result.Combined))
+	})
+
 	t.Run("requires_ip", func(t *testing.T) {
 		// The per-env wildcard record needs a target IP (the env's ingress IP);
 		// omitting --ip fails clearly instead of writing an empty record.

@@ -67,6 +67,12 @@ type ExposeServiceParams struct {
 	// "<tenant>-<env>-wildcard-tls", the name the cluster-edge module issues into
 	// the env namespace).
 	TLSSecretName string
+	// SkipIfUnconfigured turns the hard failures for a missing/incomplete
+	// platform block into a traced no-op success. It exists for a caller that
+	// composes expose after another primitive (deploy) without knowing whether
+	// the target project is a platform deployment at all — an explicit,
+	// interactive `erun expose` still fails fast on a misconfigured project.
+	SkipIfUnconfigured bool
 }
 
 // ExposeServiceResult is the resolved exposure plan: the public hostname, the
@@ -130,6 +136,11 @@ const defaultExposeWildcardTTL = 60
 // a complete, side-effect-free plan.
 func RunExposeService(ctx Context, params ExposeServiceParams, store ExposeStore, upsertDNSRecord DNSRecordUpserterFunc, applyIngress IngressApplierFunc) (ExposeServiceResult, error) {
 	store, upsertDNSRecord, applyIngress = normalizeExposeDependencies(store, upsertDNSRecord, applyIngress)
+
+	if params.SkipIfUnconfigured && !projectHasExposablePlatform(params.ProjectRoot) {
+		ctx.Trace("expose: skipped, no platform block configured")
+		return ExposeServiceResult{}, nil
+	}
 
 	result, err := resolveExposeServicePlan(params, store)
 	if err != nil {
@@ -219,6 +230,17 @@ func validateExposeTarget(params ExposeServiceParams) (tenant, environment, serv
 		return "", "", "", fmt.Errorf("service name %q must be a DNS-1035 label: lowercase letters, digits, and hyphens, not starting or ending with a hyphen, at most 63 characters", service)
 	}
 	return tenant, environment, service, nil
+}
+
+// projectHasExposablePlatform reports whether projectRoot declares enough of a
+// platform block for expose to resolve a hostname: the same three conditions
+// resolveExposeServicePlan otherwise fails on (missing block, missing base
+// domain, missing platform.env). Mirrors those checks rather than calling
+// resolveExposeServicePlan, since that also validates the store's env config —
+// SkipIfUnconfigured only asks "is this a platform deployment at all".
+func projectHasExposablePlatform(projectRoot string) bool {
+	platform := resolveProjectPlatform(projectRoot)
+	return !platform.IsZero() && strings.TrimSpace(platform.ServicesZone) != "" && strings.TrimSpace(platform.Env) != ""
 }
 
 // resolveExposeServicePlan does no tracing or mutation, so RunExposeService keeps

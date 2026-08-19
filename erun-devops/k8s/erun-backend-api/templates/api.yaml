@@ -65,6 +65,12 @@
 {{- $envDeployerEnabled := default false $envDeployer.enabled -}}
 {{- $apiServiceAccount := printf "%s-api" $tenant -}}
 {{- $envDeployerSA := default (printf "%s-env-deployer" $tenant) $envDeployer.serviceAccountName -}}
+{{- /* Opt-in automatic exposure: the platform's ingress IP, threaded to every
+       env-deploy Job so it chains `erun expose` (the env's MCP edge) after a
+       successful deploy. Empty (the default) leaves deploys exactly as they
+       were before this existed -- no attempt to expose, independent of
+       whether the executor above is enabled. */ -}}
+{{- $envDeployerExposeTargetIP := default "" $envDeployer.exposeTargetIp -}}
 {{- /* Opt-in server-side release queue: an accepted review enqueues a release,
        and the API launches `erun release` as a Job in the agent environment's
        own namespace, so the run lands beside that environment's warm fingerprint
@@ -323,6 +329,10 @@ spec:
                   fieldPath: metadata.namespace
             - name: ERUN_ENV_DEPLOY_REGISTRY
               value: {{ $containerRegistry | quote }}
+            {{- if $envDeployerExposeTargetIP }}
+            - name: ERUN_ENV_EXPOSE_TARGET_IP
+              value: {{ $envDeployerExposeTargetIP | quote }}
+            {{- end }}
             {{- end }}
             {{- if $releaseQueueEnabled }}
             {{- if not $envDeployerEnabled }}

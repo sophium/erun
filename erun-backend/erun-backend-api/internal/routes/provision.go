@@ -186,9 +186,10 @@ func (in provisionPlanInput) quotaOk() bool {
 // provisionPlan renders the ordered preview: authz (the resolved tenant),
 // quota, placement, namespace, registration, and — for a runtime environment
 // only, since that is the only type this platform ever server-side deploys —
-// the deploy and its auth-edge wiring. This is the single plan renderer both
-// POST /v1/provision and POST /v1/environments?preview=true call, so the plan
-// an operator audits can never diverge from what the executing path does.
+// the deploy, its auth-edge wiring, and its exposure (DNS + Ingress for the
+// env's MCP edge). This is the single plan renderer both POST /v1/provision
+// and POST /v1/environments?preview=true call, so the plan an operator audits
+// can never diverge from what the executing path does.
 func provisionPlan(in provisionPlanInput) []string {
 	plan := make([]string, 0, 8+len(in.contextPlan))
 
@@ -217,7 +218,8 @@ func provisionPlan(in provisionPlanInput) []string {
 		return plan
 	}
 	plan = append(plan, fmt.Sprintf("deploy: would helm install the erun-devops runtime chart (release %s) into %s", eruncommon.RuntimeReleaseName(in.tenantName), namespace))
-	return append(plan, "auth: would wire the runtime's OIDC auth edge (issuer, client id) via the erun-devops chart values")
+	plan = append(plan, "auth: would wire the runtime's OIDC auth edge (issuer, client id) via the erun-devops chart values")
+	return append(plan, fmt.Sprintf("expose: would wire mcp.%s.<services zone> via a per-env wildcard DNS record and Host-routing Ingress (skipped when the platform has no services zone configured)", namespace))
 }
 
 // contextPlanLine describes where the environment lands and the reference

@@ -159,6 +159,7 @@ func TestProvisionRuntimeWithNoContextDescribesSingleClusterPlacement(t *testing
 	mustPlanLine(t, response.Plan, "register: would persist environment prod (runtime) in tenant acme referencing context ", "plan missing the register line")
 	mustPlanLine(t, response.Plan, "deploy: would helm install the erun-devops runtime chart (release acme-devops) into acme-prod", "plan missing the deploy line")
 	mustPlanLine(t, response.Plan, "auth: would wire the runtime's OIDC auth edge", "plan missing the auth-edge wiring line")
+	mustPlanLine(t, response.Plan, "expose: would wire mcp.acme-prod.<services zone>", "plan missing the exposure wiring line")
 }
 
 // TestProvisionReusesExistingContext proves the existing-context path emits no cloud bootstrap argv.
@@ -181,6 +182,7 @@ func TestProvisionReusesExistingContext(t *testing.T) {
 	mustNotPlanLine(t, response.Plan, "ec2 run-instances", "existing-context provision must not emit bootstrap argv")
 	mustPlanLine(t, response.Plan, "namespace: would create acme-staging", "plan missing the namespace line")
 	mustPlanLine(t, response.Plan, "register: would persist environment staging (remote-agent) in tenant acme referencing context acme-prod", "plan missing the register line")
+	mustNotPlanLine(t, response.Plan, "expose:", "a non-runtime environment is never server-side deployed, so it must plan no exposure")
 }
 
 // TestProvisionOverCapReturnsPlanWithQuotaBlocked proves over-cap provisioning still returns a 200 preview with quotaOk=false, not a 4xx.

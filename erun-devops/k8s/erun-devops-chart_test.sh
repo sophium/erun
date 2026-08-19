@@ -3,8 +3,9 @@
 # Tests for the erun-devops runtime chart's pod shape: the runtime container is
 # the environment's only long-lived application container and serves the MCP
 # edge itself, the MCP auth env and key mount land on it, the runtime image
-# override still applies, a disabled edge renders no port, and the volumes the
-# runtime user writes are handed to it without a pod-wide fsGroup.
+# override still applies, a disabled edge renders no port and no fronting
+# Service (an enabled one gets both), and the volumes the runtime user writes
+# are handed to it without a pod-wide fsGroup.
 #
 # Lives beside the chart rather than inside it: helm renders every file under
 # templates/, and the chart's own contents feed the runtime image fingerprint.
@@ -127,6 +128,27 @@ grep -A1 '^            - name: ERUN_MCP_ENABLED$' "${rendered}" | grep -q '"fals
     fail "mcpEnabled=false should reach the container env"
 grep -q '^              name: mcp$' "${rendered}" &&
     fail "a disabled edge should advertise no mcp containerPort"
+grep -q '^kind: Service$' "${rendered}" &&
+    fail "a disabled edge should render no fronting Service"
+
+# --- 6b. An enabled edge is fronted by a Service `erun expose` can route to:
+# named team-mcp (TenantResourcePrefix(tenant)+"-mcp", what expose.go derives
+# from tenant + service name alone), selecting this release's pods, port 80
+# (the public hostname's default, no --port needed) mapped onto the named mcp
+# containerPort. ---
+rendered=$(render)
+grep -q '^kind: Service$' "${rendered}" ||
+    fail "an enabled edge should render a fronting Service"
+service_block="${work_root}/service.yaml"
+awk '/^kind: Service$/{f=1} f{print} f && /^---$/{exit}' "${rendered}" >"${service_block}"
+grep -q '^  name: team-mcp$' "${service_block}" ||
+    fail "the fronting Service should be named team-mcp"
+grep -q '^    app: test$' "${service_block}" ||
+    fail "the fronting Service should select this release's pods"
+grep -q '^      port: 80$' "${service_block}" ||
+    fail "the fronting Service should listen on port 80"
+grep -q '^      targetPort: mcp$' "${service_block}" ||
+    fail "the fronting Service should target the named mcp containerPort"
 
 # --- 7. A stopped environment renders replicas: 0, a running one replicas: 1 ---
 # This is what makes a stop durable: without the chart value the scale patch is

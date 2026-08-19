@@ -20,6 +20,11 @@ type ExposeInput struct {
 	TLSSecret    string `json:"tlsSecret,omitempty" jsonschema:"override the per-env wildcard cert Secret name (default <tenant>-<env>-wildcard-tls)"`
 	Preview      bool   `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
 	Verbosity    int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+	// SkipIfUnconfigured mirrors the CLI's --skip-if-unconfigured: succeed as a
+	// no-op instead of failing when the project declares no platform block, for
+	// an Agent composing expose after deploy without knowing whether the target
+	// is a platform deployment.
+	SkipIfUnconfigured bool `json:"skipIfUnconfigured,omitempty" jsonschema:"succeed as a no-op instead of failing when the project declares no platform block"`
 }
 
 func exposeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ExposeInput) (*mcp.CallToolResult, CommandOutput, error) {
@@ -35,15 +40,16 @@ func exposeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 
 		output, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, func(runCtx eruncommon.Context, _ string) error {
 			_, err := eruncommon.RunExposeService(runCtx, eruncommon.ExposeServiceParams{
-				Tenant:        tenant,
-				Environment:   environment,
-				Service:       strings.TrimSpace(input.Service),
-				ProjectRoot:   projectRoot,
-				TargetIP:      strings.TrimSpace(input.IP),
-				ServicePort:   input.Port,
-				NoTLS:         input.NoTLS,
-				IngressClass:  strings.TrimSpace(input.IngressClass),
-				TLSSecretName: strings.TrimSpace(input.TLSSecret),
+				Tenant:             tenant,
+				Environment:        environment,
+				Service:            strings.TrimSpace(input.Service),
+				ProjectRoot:        projectRoot,
+				TargetIP:           strings.TrimSpace(input.IP),
+				ServicePort:        input.Port,
+				NoTLS:              input.NoTLS,
+				IngressClass:       strings.TrimSpace(input.IngressClass),
+				TLSSecretName:      strings.TrimSpace(input.TLSSecret),
+				SkipIfUnconfigured: input.SkipIfUnconfigured,
 			}, exposeStore, nil, nil)
 			return err
 		})

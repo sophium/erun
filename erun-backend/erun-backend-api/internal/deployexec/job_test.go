@@ -48,6 +48,57 @@ func TestBuildDeployJobSpec(t *testing.T) {
 	}
 }
 
+// TestBuildDeployJobSpecWithExpose: a configured ExposeTargetIP chains a
+// second, independently-skippable `erun expose` after the deploy rather than
+// teaching deploy itself about exposure — the Job is the caller composing
+// pure primitives.
+func TestBuildDeployJobSpecWithExpose(t *testing.T) {
+	params := testParams()
+	params.ExposeTargetIP = "203.0.113.10"
+	job := buildDeployJob(params)
+	pod := job.Spec.Template.Spec
+	if len(pod.Containers) != 1 {
+		t.Fatalf("containers = %+v", pod.Containers)
+	}
+	command := pod.Containers[0].Command
+	assertCommand(t, command[:2], []string{"sh", "-c"})
+	if len(command) != 3 {
+		t.Fatalf("command = %v, want sh -c '<script>'", command)
+	}
+	script := command[2]
+	wantDeploy := "'erun' 'deploy' 'acme' 'prod' '--version' '1.0.149'"
+	wantExpose := "'erun' 'expose' 'acme' 'prod' 'mcp' '--ip' '203.0.113.10' '--skip-if-unconfigured'"
+	if !strings.Contains(script, wantDeploy) {
+		t.Fatalf("script %q missing deploy stage %q", script, wantDeploy)
+	}
+	if !strings.Contains(script, wantExpose) {
+		t.Fatalf("script %q missing expose stage %q", script, wantExpose)
+	}
+	deployIdx := strings.Index(script, wantDeploy)
+	exposeIdx := strings.Index(script, wantExpose)
+	if deployIdx < 0 || exposeIdx < 0 || deployIdx > exposeIdx {
+		t.Fatalf("script %q must run deploy before expose", script)
+	}
+	if !strings.Contains(script, " && ") {
+		t.Fatalf("script %q must short-circuit on a failed deploy", script)
+	}
+}
+
+// TestBuildDeployCommandQuotesArguments guards the shell-injection surface: an
+// argument carrying a single quote must stay a single shell word — the
+// canonical way a naively-quoted value breaks out of its own quoting.
+func TestBuildDeployCommandQuotesArguments(t *testing.T) {
+	params := testParams()
+	params.Environment = "prod'; rm -rf /; echo"
+	params.ExposeTargetIP = "203.0.113.10"
+	command := buildDeployCommand(params)
+	script := command[2]
+	want := `'prod'\''; rm -rf /; echo'`
+	if !strings.Contains(script, want) {
+		t.Fatalf("script %q should quote the argument as %q", script, want)
+	}
+}
+
 // assertCommand compares the deploy argv element by element, so a mismatch names
 // the position that differs.
 func assertCommand(t *testing.T, got, want []string) {

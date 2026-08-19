@@ -450,6 +450,7 @@ func TestCreateEnvironmentPreviewRendersProvisionPlanWithoutPersisting(t *testin
 	}
 	mustPlanLine(t, response.Plan, "context: deploys into this platform's own cluster (v1 single-cluster placement)", "preview plan missing the placement line")
 	mustPlanLine(t, response.Plan, "deploy: would helm install the erun-devops runtime chart", "preview plan missing the deploy line")
+	mustPlanLine(t, response.Plan, "expose: would wire mcp.", "preview plan missing the exposure wiring line")
 }
 
 // TestCreateEnvironmentPreviewStillEnforcesPlacement: preview must apply the

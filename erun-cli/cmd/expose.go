@@ -14,6 +14,7 @@ func newExposeCmd(store common.ExposeStore, findProjectRoot common.ProjectFinder
 	var noTLS bool
 	var ingressClass string
 	var tlsSecret string
+	var skipIfUnconfigured bool
 	cmd := &cobra.Command{
 		Use:   "expose TENANT ENVIRONMENT SERVICE",
 		Short: "Expose an environment's Service at a public HTTPS hostname",
@@ -32,7 +33,7 @@ func newExposeCmd(store common.ExposeStore, findProjectRoot common.ProjectFinder
 		Args:         cobra.ExactArgs(3),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runExposeCommand(withCloudContextPreflight(commandContext(cmd), store), store, findProjectRoot, args[0], args[1], args[2], targetIP, servicePort, noTLS, ingressClass, tlsSecret)
+			return runExposeCommand(withCloudContextPreflight(commandContext(cmd), store), store, findProjectRoot, args[0], args[1], args[2], targetIP, servicePort, noTLS, ingressClass, tlsSecret, skipIfUnconfigured)
 		},
 	}
 	addDryRunFlag(cmd)
@@ -41,10 +42,11 @@ func newExposeCmd(store common.ExposeStore, findProjectRoot common.ProjectFinder
 	cmd.Flags().BoolVar(&noTLS, "no-tls", false, "Serve http instead of https (skip the tls block on the Ingress)")
 	cmd.Flags().StringVar(&ingressClass, "ingress-class", "", "Ingress controller class (default traefik)")
 	cmd.Flags().StringVar(&tlsSecret, "tls-secret", "", "Override the per-env wildcard cert Secret name (default <tenant>-<env>-wildcard-tls)")
+	cmd.Flags().BoolVar(&skipIfUnconfigured, "skip-if-unconfigured", false, "Succeed as a no-op instead of failing when the project declares no platform block (for scripted callers composing expose after another command)")
 	return cmd
 }
 
-func runExposeCommand(ctx common.Context, store common.ExposeStore, findProjectRoot common.ProjectFinderFunc, tenant, environment, service, targetIP string, servicePort int, noTLS bool, ingressClass, tlsSecret string) error {
+func runExposeCommand(ctx common.Context, store common.ExposeStore, findProjectRoot common.ProjectFinderFunc, tenant, environment, service, targetIP string, servicePort int, noTLS bool, ingressClass, tlsSecret string, skipIfUnconfigured bool) error {
 	if findProjectRoot == nil {
 		findProjectRoot = common.FindProjectRoot
 	}
@@ -53,20 +55,21 @@ func runExposeCommand(ctx common.Context, store common.ExposeStore, findProjectR
 		return err
 	}
 	result, err := common.RunExposeService(ctx, common.ExposeServiceParams{
-		Tenant:        strings.TrimSpace(tenant),
-		Environment:   strings.TrimSpace(environment),
-		Service:       strings.TrimSpace(service),
-		ProjectRoot:   projectRoot,
-		TargetIP:      strings.TrimSpace(targetIP),
-		ServicePort:   servicePort,
-		NoTLS:         noTLS,
-		IngressClass:  strings.TrimSpace(ingressClass),
-		TLSSecretName: strings.TrimSpace(tlsSecret),
+		Tenant:             strings.TrimSpace(tenant),
+		Environment:        strings.TrimSpace(environment),
+		Service:            strings.TrimSpace(service),
+		ProjectRoot:        projectRoot,
+		TargetIP:           strings.TrimSpace(targetIP),
+		ServicePort:        servicePort,
+		NoTLS:              noTLS,
+		IngressClass:       strings.TrimSpace(ingressClass),
+		TLSSecretName:      strings.TrimSpace(tlsSecret),
+		SkipIfUnconfigured: skipIfUnconfigured,
 	}, store, nil, nil)
 	if err != nil {
 		return err
 	}
-	if !ctx.DryRun {
+	if !ctx.DryRun && result.Hostname != "" {
 		_, _ = fmt.Fprintf(ctx.Stdout, "exposed %s/%s service %s at %s://%s\n", result.Tenant, result.Environment, result.Service, result.Scheme, result.Hostname)
 	}
 	return nil

@@ -28,3 +28,27 @@ func TestDeployJobParams(t *testing.T) {
 		t.Fatalf("deploy coordinates = %+v", params)
 	}
 }
+
+// TestDeployJobParamsExposeTargetIP: the platform's ingress IP threads through
+// to every deploy Job unchanged, so deployexec decides whether to chain
+// expose. An empty config (the default) leaves it empty too, matching a
+// platform with no ERUN_ENV_EXPOSE_TARGET_IP configured.
+func TestDeployJobParamsExposeTargetIP(t *testing.T) {
+	params := deployJobParams(
+		EnvDeployConfig{
+			Registry:               "ghcr.io/sophium",
+			PlatformNamespace:      "erun-prod",
+			DeployerServiceAccount: "erun-env-deployer",
+			ExposeTargetIP:         "203.0.113.10",
+		},
+		EnvProvisionInput{Tenant: "acme", Environment: "prod", Version: "1.2.3"},
+	)
+	if params.ExposeTargetIP != "203.0.113.10" {
+		t.Fatalf("exposeTargetIP = %q, want 203.0.113.10", params.ExposeTargetIP)
+	}
+
+	unset := deployJobParams(EnvDeployConfig{}, EnvProvisionInput{Tenant: "acme", Environment: "prod", Version: "1.2.3"})
+	if unset.ExposeTargetIP != "" {
+		t.Fatalf("exposeTargetIP = %q, want empty when unconfigured", unset.ExposeTargetIP)
+	}
+}

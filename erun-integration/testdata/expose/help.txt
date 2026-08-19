@@ -17,6 +17,7 @@ Flags:
       --ip string              Ingress IP the per-env wildcard record points at (e.g. <LOOPBACK> for a local cluster, the public LB IP for remote)
       --no-tls                 Serve http instead of https (skip the tls block on the Ingress)
       --port int               Service port to route to (default 80)
+      --skip-if-unconfigured   Succeed as a no-op instead of failing when the project declares no platform block (for scripted callers composing expose after another command)
       --tls-secret string      Override the per-env wildcard cert Secret name (default <tenant>-<env>-wildcard-tls)
 
 Global Flags:
