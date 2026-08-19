@@ -93,6 +93,7 @@ The `(iss, org) → tenant` resolution model and first-identity bootstrap above 
 
 | Method | Path | Description | Required scope |
 |---|---|---|---|
+| `GET` | `/v1/platform` | The per-instance platform config a caller resolves **before** signing in — issuer, brand, client ids. Response below. | **Unauthenticated** |
 | `GET` | `/v1/tenant-issuers` | List all issuers trusted by the caller's tenant. | Tenant member |
 | `PATCH` | `/v1/tenant-issuers` | Rename a trusted issuer's display name. Body below. | Tenant admin |
 | `GET` | `/v1/whoami` | Resolved identity for the calling token. Response below. | Tenant member |
@@ -111,6 +112,26 @@ The `(iss, org) → tenant` resolution model and first-identity bootstrap above 
 | `POST` | `/v1/tenants` | Register a new tenant plus its OIDC issuer mapping. Operations-only. Body below. | Operations only |
 
 `GET /v1/config` is the console's read model over the per-tenant erun config — the backend DB is the system of record for the tenant's environments and cloud contexts, and this endpoint returns them denormalized as the on-disk erun config shape. All of these reads are tenant-scoped by row-level security, so a token only ever sees its own tenant's rows.
+
+### `GET /v1/platform` {#platform-endpoint}
+
+The **only unauthenticated endpoint** besides `/healthz` — a caller (chiefly the console SPA) has to resolve it *before* it can sign in, so it carries no bearer token and no tenant scoping. It exists so one built console image can serve **any** erunpaas instance (issue #603): the issuer, brand, and OIDC client ids are runtime config the API answers with, never baked into the frontend build.
+
+```jsonc
+// 200 response — every field optional; unset ones are empty strings, never omitted
+{
+  "issuer": "https://auth.acme.erunpaas.com",
+  "apiUrl": "https://console.acme.erunpaas.com",
+  "consoleUrl": "https://console.acme.erunpaas.com",
+  "consoleClientId": "console-app-id",
+  "cliClientId": "cli-app-id",
+  "brand": "Acme"
+}
+```
+
+**How the console uses it.** On load, before rendering the sign-in prompt, the console fetches this endpoint and drives its OIDC Authorization Code + PKCE flow from `issuer` + `consoleClientId` (see [`api-protocol.md` § Sign-in](#sign-in-oidc) for the flow itself; `src/auth/auth.ts` is the implementation). A console built against an **older API with no `/v1/platform`** gets a `404`, and against a **newer API with the fields left unset** gets `200` with empty strings — both fall back to its own build-time `VITE_OIDC_ISSUER`/`VITE_OIDC_CLIENT_ID` (a local-dev override only), rather than failing to render. `apiUrl`/`consoleUrl`/`cliClientId`/`brand` are carried for forward compatibility (a future branded sign-in page, a CLI `erun login` flow); the console does not consume them yet.
+
+**Error behaviour.** No input, so no `400`s. A `404` means an older API predates this endpoint — the recovery is the client-side fallback above, not an operator action.
 
 ### `GET /v1/whoami`
 

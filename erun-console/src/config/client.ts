@@ -68,6 +68,7 @@ function parseEnvironment(raw: Record<string, unknown>): Environment {
     runtimeVersion: asOptionalString(raw.runtimeVersion),
     status: asEnvironmentStatus(raw.status),
     provisionError: asOptionalString(raw.provisionError),
+    deployedVersion: asOptionalString(raw.deployedVersion),
   };
 }
 
@@ -262,4 +263,101 @@ export async function requestMcpToken(token: string, environmentId: string): Pro
     throw new ConfigFetchError('mcp token response was not in the expected shape');
   }
   return { token: asString(body.token), audience: asString(body.audience) };
+}
+
+// The operator-authored fields to register an environment. The tenant is
+// resolved from the caller's token server-side and is never sent from here.
+export interface CreateEnvironmentInput {
+  name: string;
+  type: string;
+  contextId?: string;
+  kubernetesContext?: string;
+  runtimeVersion?: string;
+}
+
+// createEnvironment registers an environment (201) or, for a runtime env with a
+// pinned version, kicks off its first deploy server-side and returns while
+// still provisioning (202) — either way the created row is returned.
+export async function createEnvironment(
+  token: string,
+  input: CreateEnvironmentInput,
+): Promise<Environment> {
+  const response = await authedFetch('/v1/environments', token, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    throw new ConfigFetchError(
+      `register environment request failed (${String(response.status)})`,
+      response.status,
+    );
+  }
+  const body: unknown = await response.json();
+  if (!isRecord(body)) {
+    throw new ConfigFetchError('register environment response was not in the expected shape');
+  }
+  return parseEnvironment(body);
+}
+
+// getEnvironment fetches one environment by id; the deploy controller polls it
+// after deployEnvironment until `status` reaches running/failed.
+export async function getEnvironment(token: string, environmentId: string): Promise<Environment> {
+  const response = await authedFetch(`/v1/environments/${encodeURIComponent(environmentId)}`, token);
+  if (!response.ok) {
+    throw new ConfigFetchError(
+      `environment request failed (${String(response.status)})`,
+      response.status,
+    );
+  }
+  const body: unknown = await response.json();
+  if (!isRecord(body)) {
+    throw new ConfigFetchError('environment response was not in the expected shape');
+  }
+  return parseEnvironment(body);
+}
+
+// DeployOutcome distinguishes the two states a caller must render specially
+// from a genuine error: `conflict` (409 — a deploy is already in flight for
+// this environment, a real expected state, not a failure) and `unavailable`
+// (501 — the control plane has no deploy executor configured). Both resolve
+// rather than throw, so the controller can render them without an error path.
+export type DeployOutcome =
+  | { kind: 'accepted'; environment: Environment }
+  | { kind: 'conflict' }
+  | { kind: 'unavailable' };
+
+// deployEnvironment (re-)deploys an already-registered environment. Omitting
+// version deploys the environment's own pinned runtimeVersion.
+export async function deployEnvironment(
+  token: string,
+  environmentId: string,
+  version?: string,
+): Promise<DeployOutcome> {
+  const response = await authedFetch(
+    `/v1/environments/${encodeURIComponent(environmentId)}/deploy`,
+    token,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ version: version ?? '' }),
+    },
+  );
+  if (response.status === 409) {
+    return { kind: 'conflict' };
+  }
+  if (response.status === 501) {
+    return { kind: 'unavailable' };
+  }
+  if (!response.ok) {
+    throw new ConfigFetchError(
+      `deploy request failed (${String(response.status)})`,
+      response.status,
+    );
+  }
+  const body: unknown = await response.json();
+  if (!isRecord(body)) {
+    throw new ConfigFetchError('deploy response was not in the expected shape');
+  }
+  return { kind: 'accepted', environment: parseEnvironment(body) };
 }

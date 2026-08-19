@@ -26,6 +26,10 @@ export interface Environment {
   runtimeVersion?: string;
   status?: EnvironmentStatus;
   provisionError?: string;
+  // The version the last successful deploy actually installed, distinct from
+  // runtimeVersion (the declared pin) — a failed or in-flight deploy leaves
+  // this on whatever version is still running in the cluster.
+  deployedVersion?: string;
 }
 
 // The provisioning lifecycle a context moves through: `provisioning` → `running`

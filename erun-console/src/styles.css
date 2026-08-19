@@ -263,3 +263,64 @@ th {
   font-size: 0.85rem;
   color: var(--muted);
 }
+
+.platform-fallback-note {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-top: 0.5rem;
+}
+
+.deploy-list {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  max-width: 480px;
+}
+
+.deploy-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.deploy-row label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.deploy-row input {
+  font: inherit;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.deploy-row button {
+  align-self: flex-start;
+  padding: 0.4rem 0.9rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--bg);
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.deploy-row button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.deploy-env-name {
+  font-weight: 600;
+}
+
+.deploy-status {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 0.1rem 0 0;
+}

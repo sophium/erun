@@ -1,0 +1,218 @@
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import type { Environment } from '../config/types';
+import { EnvironmentsPanel } from './EnvironmentsPanel';
+
+// fetch is mocked at the boundary so each flow exercises the real client +
+// controller against the api-protocol.md contract.
+
+interface MockReq {
+  method: string;
+  url: string;
+  body: unknown;
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: () => Promise.resolve(body),
+  } as unknown as Response;
+}
+
+function requestUrl(input: string | URL): string {
+  return input instanceof URL ? input.href : input;
+}
+
+function mockFetch(handler: (req: MockReq) => Response): MockReq[] {
+  const calls: MockReq[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((input: string | URL, init?: RequestInit) => {
+      const req: MockReq = {
+        method: init?.method ?? 'GET',
+        url: requestUrl(input),
+        body: init?.body !== undefined ? JSON.parse(init.body as string) : undefined,
+      };
+      calls.push(req);
+      return Promise.resolve(handler(req));
+    }),
+  );
+  return calls;
+}
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
+
+const RUNTIME_ENV: Environment = {
+  environmentId: 'env-1',
+  name: 'prod',
+  type: 'runtime',
+  runtimeVersion: '1.2.3',
+  status: 'running',
+};
+
+describe('EnvironmentsPanel register form', () => {
+  it('POSTs the create request with only operator-authored fields (no tenant)', async () => {
+    const calls = mockFetch(() =>
+      jsonResponse({ environmentId: 'env-2', name: 'staging', type: 'runtime', status: 'registered' }, 201),
+    );
+    render(
+      <EnvironmentsPanel token="dev-token" contexts={[]} environments={[]} onChanged={vi.fn()} />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'staging' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Register environment' }));
+
+    expect(await screen.findByText('Environment staging registered.')).toBeInTheDocument();
+
+    const post = calls.find((c) => c.method === 'POST');
+    expect(post?.url).toBe('/v1/environments');
+    expect(post?.body).toEqual({
+      name: 'staging',
+      type: 'runtime',
+      contextId: undefined,
+      kubernetesContext: undefined,
+      runtimeVersion: undefined,
+    });
+  });
+
+  it('calls onChanged after a successful register so the parent refreshes the read model', async () => {
+    mockFetch(() => jsonResponse({ environmentId: 'env-2', name: 'staging', type: 'runtime' }, 201));
+    const onChanged = vi.fn();
+    render(
+      <EnvironmentsPanel token="dev-token" contexts={[]} environments={[]} onChanged={onChanged} />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'staging' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Register environment' }));
+
+    await screen.findByText('Environment staging registered.');
+    expect(onChanged).toHaveBeenCalled();
+  });
+
+  it('surfaces a 400 register error', async () => {
+    mockFetch(() => jsonResponse('name must be a DNS-1123 label', 400));
+    render(
+      <EnvironmentsPanel token="dev-token" contexts={[]} environments={[]} onChanged={vi.fn()} />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Bad Name' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Register environment' }));
+
+    expect(
+      await screen.findByText('Could not register environment: register environment request failed (400)'),
+    ).toBeInTheDocument();
+  });
+});
+
+describe('EnvironmentsPanel deploy flow', () => {
+  it('POSTs to the deploy endpoint then polls to running, showing the deployed vs pinned version', async () => {
+    vi.useFakeTimers();
+    let getCount = 0;
+    const deploying = { ...RUNTIME_ENV, status: 'provisioning' as const };
+    const running = { ...RUNTIME_ENV, status: 'running' as const, deployedVersion: '1.2.2' };
+    const calls = mockFetch((req) => {
+      if (req.method === 'POST') {
+        return jsonResponse(deploying, 202);
+      }
+      getCount += 1;
+      return getCount === 1 ? jsonResponse(deploying) : jsonResponse(running);
+    });
+    render(
+      <EnvironmentsPanel
+        token="dev-token"
+        contexts={[]}
+        environments={[RUNTIME_ENV]}
+        onChanged={vi.fn()}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Deploy' }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByText('Deploying prod…')).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(
+      screen.getByText('prod is running — deployed 1.2.2 (pinned 1.2.3).'),
+    ).toBeInTheDocument();
+
+    const post = calls.find((c) => c.method === 'POST');
+    expect(post?.url).toBe('/v1/environments/env-1/deploy');
+    expect(calls.some((c) => c.method === 'GET' && c.url === '/v1/environments/env-1')).toBe(true);
+  });
+
+  it('shows a failed deploy with its full, untruncated provision error', async () => {
+    const failed = {
+      ...RUNTIME_ENV,
+      status: 'failed',
+      provisionError:
+        'deploy job failed for version 1.2.3: probed registries ghcr.io/acme, docker.io/acme — pull denied; publish the version or grant pull access',
+    };
+    mockFetch((req) => (req.method === 'POST' ? jsonResponse(failed, 202) : jsonResponse(failed)));
+    render(
+      <EnvironmentsPanel
+        token="dev-token"
+        contexts={[]}
+        environments={[RUNTIME_ENV]}
+        onChanged={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Deploy' }));
+
+    expect(await screen.findByText('prod failed to deploy.')).toBeInTheDocument();
+    expect(screen.getByText(failed.provisionError)).toBeInTheDocument();
+  });
+
+  it('renders a 409 as an in-flight deploy, not an error toast', async () => {
+    mockFetch(() => jsonResponse('a deploy is already in progress for this environment', 409));
+    render(
+      <EnvironmentsPanel
+        token="dev-token"
+        contexts={[]}
+        environments={[RUNTIME_ENV]}
+        onChanged={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Deploy' }));
+
+    const status = await screen.findByText('A deploy is already in progress for prod.');
+    expect(status.closest('[role]')).toHaveAttribute('role', 'status');
+  });
+
+  it('renders a 501 by naming the missing deploy executor plainly', async () => {
+    mockFetch(() => jsonResponse('the deploy executor is not configured', 501));
+    render(
+      <EnvironmentsPanel
+        token="dev-token"
+        contexts={[]}
+        environments={[RUNTIME_ENV]}
+        onChanged={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Deploy' }));
+
+    expect(
+      await screen.findByText('The deploy executor is not configured on this control plane.'),
+    ).toBeInTheDocument();
+  });
+
+  it('shows an empty state when there are no runtime environments', () => {
+    render(
+      <EnvironmentsPanel token="dev-token" contexts={[]} environments={[]} onChanged={vi.fn()} />,
+    );
+    expect(screen.getByText('No runtime environments to deploy.')).toBeInTheDocument();
+  });
+});
