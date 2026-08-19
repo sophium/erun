@@ -8,8 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -154,8 +155,12 @@ type mcpSession struct {
 	client        *http.Client
 	sessionID     string
 	nextID        int
-	// recovering suppresses a nested re-handshake so one lost session costs at
-	// most one retry.
+	// localPort is the loopback port the endpoint names, or 0 when the endpoint
+	// is not a local port-forward (e.g. a hosted platform edge). Only a local
+	// port-forward can go stale in the way ensureTunnelLive checks for.
+	localPort int
+	// recovering suppresses a nested re-handshake or tunnel retry so one bad
+	// request costs at most one retry.
 	recovering bool
 	// notice reports a recovery the caller would otherwise never see; nil when
 	// the caller has nowhere to put diagnostics.
@@ -183,7 +188,27 @@ func newMCPSession(endpoint string, mintToken MCPTokenMinter, clientVersion stri
 		mintToken:     mintToken,
 		clientVersion: clientVersion,
 		client:        &http.Client{},
+		localPort:     localMCPEndpointPort(endpoint),
 	}, nil
+}
+
+// localMCPEndpointPort extracts the loopback port an endpoint names, or 0 for
+// any endpoint that is not a plain http://127.0.0.1:<port> or
+// http://localhost:<port> URL — the shape only a local port-forward has.
+func localMCPEndpointPort(endpoint string) int {
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return 0
+	}
+	host := parsed.Hostname()
+	if host != "127.0.0.1" && host != "localhost" {
+		return 0
+	}
+	port, err := strconv.Atoi(parsed.Port())
+	if err != nil || port <= 0 {
+		return 0
+	}
+	return port
 }
 
 func openMCPSession(ctx context.Context, endpoint string, mintToken MCPTokenMinter, clientVersion string) (*mcpSession, error) {
@@ -252,15 +277,37 @@ func (s *mcpSession) post(ctx context.Context, payload mcpJSONRPCRequest) (*mcpJ
 // Bearer minting and session-id capture live here so a raw relay and a typed
 // call cannot drift apart on either.
 //
-// A session the edge has forgotten is recovered rather than surfaced: a
-// long-lived relay pins one session id for its whole lifetime, so treating the
-// edge's 404 as terminal would kill every request for the environment until the
-// relay itself was restarted. The re-handshake happens at most once per request.
+// Two failures are recovered rather than surfaced on the first attempt, each at
+// most once per request so a bad edge cannot turn into a retry loop:
+//
+// A session the edge has forgotten is re-handshaked: a long-lived relay pins
+// one session id for its whole lifetime, so treating the edge's 404 as
+// terminal would kill every request for the environment until the relay
+// itself was restarted.
+//
+// A local port-forward that drops mid-request — kubectl logs "lost connection
+// to pod" and reconnects on its own — is retried on the same session, with no
+// re-handshake: the remote MCP server process never restarted, only the local
+// tunnel blipped, so a plain resend is enough once the tunnel answers again.
+// This is what turns a stale tunnel from a hang into a fast, actionable
+// failure (or, when it self-corrects fast enough, into nothing the caller
+// notices at all) — see issue reports of a bound-but-dead forward silently
+// swallowing long-held calls.
 func (s *mcpSession) postRaw(ctx context.Context, body []byte) ([]byte, error) {
 	raw, err := s.postOnce(ctx, body)
-	if err == nil || s.recovering || !errors.Is(err, errMCPSessionLost) {
+	if err == nil || s.recovering {
 		return raw, err
 	}
+	if errors.Is(err, errMCPSessionLost) {
+		return s.recoverLostSession(ctx, body)
+	}
+	if errors.Is(err, ErrMCPEndpointUnreachable) && s.localPort > 0 && CanReachLocalMCPEndpoint(s.localPort) {
+		return s.retryAfterTunnelRecovery(ctx, body)
+	}
+	return raw, err
+}
+
+func (s *mcpSession) recoverLostSession(ctx context.Context, body []byte) ([]byte, error) {
 	s.recovering = true
 	defer func() { s.recovering = false }()
 	s.sessionID = ""
@@ -271,6 +318,13 @@ func (s *mcpSession) postRaw(ctx context.Context, body []byte) ([]byte, error) {
 	return s.postOnce(ctx, body)
 }
 
+func (s *mcpSession) retryAfterTunnelRecovery(ctx context.Context, body []byte) ([]byte, error) {
+	s.recovering = true
+	defer func() { s.recovering = false }()
+	s.report(fmt.Sprintf("the local port-forward to %s answers again after dropping mid-request; retrying", s.endpoint))
+	return s.postOnce(ctx, body)
+}
+
 func (s *mcpSession) report(message string) {
 	if s.notice == nil {
 		return
@@ -278,7 +332,16 @@ func (s *mcpSession) report(message string) {
 	s.notice(message)
 }
 
+// postOnce fails fast when the local port a session targets is bound but not
+// answering, rather than handing a request to a tunnel already known to be
+// dead: the caller's context deadline (or, with none, no bound at all) would
+// otherwise be the only thing that ever ends the wait. A port nothing holds at
+// all is a different, ordinary case (no port-forward was ever established) and
+// is left to the real request's own dial failure, unchanged.
 func (s *mcpSession) postOnce(ctx context.Context, body []byte) ([]byte, error) {
+	if s.localPort > 0 && !CanReachLocalMCPEndpoint(s.localPort) && LocalPortIsBound(s.localPort) {
+		return nil, s.staleTunnelError()
+	}
 	token, err := s.mintToken()
 	if err != nil {
 		return nil, err
@@ -321,14 +384,22 @@ func (s *mcpSession) newRequest(ctx context.Context, body []byte, token string) 
 	return req, nil
 }
 
-// A failure to dial the loopback port is reported as unreachable rather than as a
-// generic error, because the operator's fix is to bring the port-forward up.
+// staleTunnelError names a local port that is bound but not answering — the
+// preflight failure postOnce refuses to spend a request on, and the shape a
+// caller sees when the tunnel was already dead before this request started.
+func (s *mcpSession) staleTunnelError() error {
+	return fmt.Errorf("%w: %s (127.0.0.1:%d is held but the edge never answers — a stale port-forward)", ErrMCPEndpointUnreachable, s.endpoint, s.localPort)
+}
+
+// transportError covers every way client.Do can fail without an HTTP status to
+// classify: a refused dial, and — the shape a flapping local port-forward
+// leaves an in-flight request in — a connection that was accepted and then
+// dropped. Both get the operator the same fix (the port-forward is not
+// carrying traffic), so both are reported as unreachable rather than as a
+// generic error; postRaw is what tells a dial failure and a mid-request drop
+// apart when deciding whether a retry is worth attempting.
 func (s *mcpSession) transportError(err error) error {
-	var opErr *net.OpError
-	if errors.As(err, &opErr) && opErr.Op == "dial" {
-		return fmt.Errorf("%w: %s (%v)", ErrMCPEndpointUnreachable, s.endpoint, err)
-	}
-	return fmt.Errorf("call MCP endpoint %s: %w", s.endpoint, err)
+	return fmt.Errorf("%w: %s (%v)", ErrMCPEndpointUnreachable, s.endpoint, err)
 }
 
 // sessionPinned says the request carried a session id, which is what separates

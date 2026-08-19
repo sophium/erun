@@ -34,7 +34,7 @@ Flags:
   -h, --help                   help for start
       --id string              Handle to address the job by (defaults to the name)
       --lease-ttl duration     Activity lease TTL the job renews inside while it runs (default 15m0s)
-      --max-output-bytes int   Cap on captured output; past it output is dropped and the job says so (default 4194304)
+      --max-output-bytes int   Cap on captured output; past it output is dropped and the job says so (default 16777216)
       --name string            What the work is, shown wherever the environment reports as busy
       --tenant string          Tenant whose environment the job belongs to
 

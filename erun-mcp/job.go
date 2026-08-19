@@ -27,7 +27,7 @@ type JobStartInput struct {
 	Agent           string   `json:"agent,omitempty" jsonschema:"run an AI tool instead of a command: claude or codex. erun invokes it in its streaming mode, so job_output returns events while the agent works and job_status reports its current activity rather than only running. Requires prompt and excludes command"`
 	Prompt          string   `json:"prompt,omitempty" jsonschema:"what the agent should do; only valid with agent"`
 	Dir             string   `json:"dir,omitempty" jsonschema:"working directory to run from; defaults to the runtime repo root"`
-	MaxOutputBytes  int64    `json:"maxOutputBytes,omitempty" jsonschema:"cap on captured output in bytes; past it output is dropped and the job reports outputTruncated. Defaults to 4194304"`
+	MaxOutputBytes  int64    `json:"maxOutputBytes,omitempty" jsonschema:"cap on captured output in bytes; past it output is dropped and the job reports outputTruncated. Does not affect an agent job's progress, which is folded from the tool's stream directly and keeps updating past the cap. Defaults to 16777216"`
 	LeaseTTLSeconds int64    `json:"leaseTtlSeconds,omitempty" jsonschema:"activity lease TTL the job renews inside while it runs; defaults to 900"`
 	Preview         bool     `json:"preview,omitempty" jsonschema:"when true, resolve and trace the job without starting it"`
 }

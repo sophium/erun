@@ -405,27 +405,83 @@ func RunDockerPushExecution(ctx Context, execution DockerPushExecutionSpec, buil
 // upfront refusal as a release whose images are not covered by a build it will
 // publish.
 //
+// Two checks run here, and they answer different questions: VerifyGHCRPushScope
+// is a per-registry check of the credential's own write:packages scope (cheap,
+// one request per registry); VerifyGHCRCanPushImage/VerifyGHCRCanPushChart is a
+// per-artifact check of whether the registry would actually grant push for that
+// specific repository, including creating it for the first time — a token can
+// have write:packages and still be denied create_package by org policy on a
+// component nothing has ever published before, which the scope check alone
+// cannot see.
+//
 // Skipped in dry-run, which does no work and must keep the integration traces
-// stable. One check per distinct registry, not per image.
+// stable.
 func preflightRegistryPushAccess(ctx Context, execution DockerPushExecutionSpec) error {
 	if ctx.DryRun {
 		return nil
 	}
-	checked := make(map[string]struct{}, 2)
+	checker := &registryPushAccessChecker{
+		checkedRegistries: make(map[string]struct{}, 2),
+		checkedTags:       make(map[string]struct{}, len(execution.builds)+len(execution.pushes)),
+	}
+	// A build that pushes inline (buildInput.Push) and a promoted fingerprint
+	// push (execution.pushes) are both real pushes this run will make — the
+	// same union RunDockerPushExecution treats as "will be pushed" just below
+	// this preflight, so both need the same check.
+	for _, buildInput := range execution.builds {
+		if !buildInput.Push {
+			continue
+		}
+		if err := checker.checkImageTag(buildInput.Image.Tag); err != nil {
+			return err
+		}
+	}
 	for _, pushInput := range execution.pushes {
-		registry := dockerRegistryFromImageTag(pushInput.Image.Tag)
-		if registry == "" {
-			continue
+		if err := checker.checkImageTag(pushInput.Image.Tag); err != nil {
+			return err
 		}
-		if _, seen := checked[registry]; seen {
-			continue
-		}
-		checked[registry] = struct{}{}
-		if err := VerifyGHCRPushScope(context.Background(), nil, pushInput.Image.Tag); err != nil {
+	}
+	for _, chart := range execution.componentCharts {
+		if err := VerifyGHCRCanPushChart(context.Background(), nil, chart.OCIRepo, chart.ChartName); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// registryPushAccessChecker dedups the two per-image checks preflightRegistryPushAccess
+// runs, so a version with the same tag built for multiple platforms is only
+// checked once.
+type registryPushAccessChecker struct {
+	checkedRegistries map[string]struct{}
+	checkedTags       map[string]struct{}
+}
+
+func (c *registryPushAccessChecker) checkImageTag(tag string) error {
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return nil
+	}
+	if _, seen := c.checkedTags[tag]; seen {
+		return nil
+	}
+	c.checkedTags[tag] = struct{}{}
+	if err := c.checkRegistryScopeOnce(tag); err != nil {
+		return err
+	}
+	return VerifyGHCRCanPushImage(context.Background(), nil, tag)
+}
+
+func (c *registryPushAccessChecker) checkRegistryScopeOnce(tag string) error {
+	registry := dockerRegistryFromImageTag(tag)
+	if registry == "" {
+		return nil
+	}
+	if _, seen := c.checkedRegistries[registry]; seen {
+		return nil
+	}
+	c.checkedRegistries[registry] = struct{}{}
+	return VerifyGHCRPushScope(context.Background(), nil, tag)
 }
 
 // publishComponentCharts packages+pushes then verifies each resolved chart.
