@@ -28,6 +28,18 @@ function TenantHeader({ tenant }: { tenant: Tenant }): React.ReactElement {
   );
 }
 
+// deployedVersionCell renders the version the last successful deploy actually
+// installed, distinct from the declared pin (the "Runtime version" column) —
+// a failed or in-flight deploy leaves this on whatever is still running.
+function deployedVersionCell(env: Environment): string {
+  if (env.deployedVersion === undefined) {
+    return '—';
+  }
+  return env.deployedVersion !== env.runtimeVersion
+    ? `${env.deployedVersion} (pin: ${placeholder(env.runtimeVersion)})`
+    : env.deployedVersion;
+}
+
 function EnvironmentRow({ env }: { env: Environment }): React.ReactElement {
   return (
     <tr>
@@ -35,6 +47,7 @@ function EnvironmentRow({ env }: { env: Environment }): React.ReactElement {
       <td>{env.type}</td>
       <td>{placeholder(env.kubernetesContext)}</td>
       <td>{placeholder(env.runtimeVersion)}</td>
+      <td>{deployedVersionCell(env)}</td>
       <td>
         <StatusBadge status={env.status} labels={ENV_STATUS_LABELS} />
         {env.status === 'failed' && env.provisionError !== undefined && (
@@ -63,6 +76,7 @@ function EnvironmentsSection({
               <th scope="col">Type</th>
               <th scope="col">Kubernetes context</th>
               <th scope="col">Runtime version</th>
+              <th scope="col">Deployed version</th>
               <th scope="col">Status</th>
             </tr>
           </thead>

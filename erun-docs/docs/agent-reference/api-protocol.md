@@ -93,7 +93,7 @@ The `(iss, org) → tenant` resolution model and first-identity bootstrap above 
 
 | Method | Path | Description | Required scope |
 |---|---|---|---|
-| `GET` | `/v1/platform` | Unauthenticated self-discovery: this instance's own `issuer`, `apiUrl`, `consoleUrl`, OIDC client ids, and `brand`. Response below. | None — no bearer required |
+| `GET` | `/v1/platform` | Unauthenticated self-discovery a caller resolves **before** signing in: this instance's own `issuer`, `apiUrl`, `consoleUrl`, OIDC client ids, and `brand`. Response below. | None — no bearer required |
 | `GET` | `/v1/tenant-issuers` | List all issuers trusted by the caller's tenant. | Tenant member |
 | `PATCH` | `/v1/tenant-issuers` | Rename a trusted issuer's display name. Body below. | Tenant admin |
 | `GET` | `/v1/whoami` | Resolved identity for the calling token. Response below. | Tenant member |
@@ -118,26 +118,29 @@ The `(iss, org) → tenant` resolution model and first-identity bootstrap above 
 
 `GET /v1/config` is the console's read model over the per-tenant erun config — the backend DB is the system of record for the tenant's environments and cloud contexts, and this endpoint returns them denormalized as the on-disk erun config shape. All of these reads are tenant-scoped by row-level security, so a token only ever sees its own tenant's rows.
 
-### `GET /v1/platform`
+### `GET /v1/platform` {#platform-endpoint}
 
-Unauthenticated — this is what a client discovers **before** it has a token: this instance's own issuer, API/console URLs, the OIDC client ids to authenticate with, and its display brand. Registered outside the auth middleware, directly on the mux next to `/healthz`. No instance's name is ever hardcoded in a client; this endpoint is how one discovers it.
+The **only unauthenticated endpoint** besides `/healthz` — registered outside the auth middleware, directly on the mux next to it. A caller (chiefly the console SPA, but also the `erun cloud` provider below) has to resolve this instance's own issuer, API/console URLs, OIDC client ids, and display brand *before* it can sign in, so the endpoint carries no bearer token and no tenant scoping. No instance's name is ever hardcoded in a client; this is how one discovers it. It exists so **one built console image can serve any erunpaas instance** (issue #603): issuer, brand, and OIDC client ids are runtime config the API answers with, never baked into the frontend build.
 
 ```jsonc
+// 200 response — every field optional; unset ones are empty strings, never omitted
 {
-  "issuer": "https://auth.erunpaas.com",
-  "apiUrl": "https://api.frs-prod.services.erunpaas.com",
-  "consoleUrl": "https://console.frs-prod.services.erunpaas.com",
-  "consoleClientId": "12345@erun-platform",
-  "cliClientId": "67890@erun-platform",
-  "brand": ""
+  "issuer": "https://auth.acme.erunpaas.com",
+  "apiUrl": "https://api.acme.erunpaas.com",
+  "consoleUrl": "https://console.acme.erunpaas.com",
+  "consoleClientId": "console-app-id",
+  "cliClientId": "cli-app-id",
+  "brand": "Acme"
 }
 ```
 
 Every field is optional and independently sourced. `issuer`/`apiUrl`/`consoleUrl`/`brand` come from the env's [`platform:` block](/reference/configuration#platform-block) (threaded in at deploy via `--set-string platform.*`); an unset value renders as an empty string, **never** an error or a missing field. `consoleClientId`/`cliClientId` come from the `erun-zitadel` chart's OIDC application bootstrap (see [below](#zitadel-oidc-bootstrap)) via an optional ConfigMap — absent when that chart hasn't run, or on a platform with no hosted IdP, again rendering as `""` rather than failing the response.
 
-A caller (an `erun cloud init <platform-api-url>`-style flow) uses this response to then fetch `<issuer>/.well-known/openid-configuration` and proceed with the Device Authorization Grant (falling back to Authorization Code + PKCE when the issuer advertises no device endpoint) against `cliClientId`. See the [erun cloud provider](#erun-cloud-provider) section below.
+**How the console uses it.** On load, before rendering the sign-in prompt, the console fetches this endpoint and drives its OIDC Authorization Code + PKCE flow from `issuer` + `consoleClientId` (see [Sign-in](#sign-in-oidc) for the flow itself; `src/auth/auth.ts` is the implementation). A console built against an **older API with no `/v1/platform`** gets a `404`, and against a **newer API with the fields left unset** gets `200` with empty strings — both fall back to its own build-time `VITE_OIDC_ISSUER`/`VITE_OIDC_CLIENT_ID` (a local-dev override only), rather than failing to render. `apiUrl`/`consoleUrl`/`cliClientId`/`brand` are carried for forward compatibility (a future branded sign-in page, a CLI `erun login` flow); the console does not consume them yet.
 
-Errors: none — the endpoint has no input to validate and performs no authentication, so it always returns `200`.
+**How `erun cloud` uses it.** A caller (an `erun cloud init <platform-api-url>`-style flow) uses this response to then fetch `<issuer>/.well-known/openid-configuration` and proceed with the Device Authorization Grant (falling back to Authorization Code + PKCE when the issuer advertises no device endpoint) against `cliClientId`. See the [erun cloud provider](#erun-cloud-provider) section below.
+
+**Error behaviour.** No input to validate and no authentication performed, so a server that implements this endpoint always returns `200`. A `404` instead means an older API predates the endpoint entirely — the recovery is the client-side fallback described above, not an operator action.
 
 #### Zitadel OIDC application bootstrap {#zitadel-oidc-bootstrap}
 

@@ -5,6 +5,7 @@ import {
   devBearerToken,
   isAuthCallback,
   oidcConfig,
+  resolveOidcConfig,
   resolveToken,
   storedToken,
 } from './auth';
@@ -143,5 +144,57 @@ describe('devBearerToken', () => {
   it('reads VITE_DEV_BEARER_TOKEN', () => {
     vi.stubEnv('VITE_DEV_BEARER_TOKEN', 'tok');
     expect(devBearerToken()).toBe('tok');
+  });
+});
+
+describe('resolveOidcConfig', () => {
+  it('prefers platform discovery (GET /v1/platform) over the VITE_* override', async () => {
+    vi.stubEnv('VITE_OIDC_ISSUER', 'http://should-not-be-used');
+    vi.stubEnv('VITE_OIDC_CLIENT_ID', 'should-not-be-used');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve(
+          jsonResponse({ issuer: 'https://auth.platform.example', consoleClientId: 'platform-client' }),
+        ),
+      ),
+    );
+
+    const resolution = await resolveOidcConfig();
+    expect(resolution).toEqual({
+      config: {
+        issuer: 'https://auth.platform.example',
+        clientId: 'platform-client',
+        redirectUri: window.location.origin + '/',
+      },
+    });
+  });
+
+  it('falls back to the VITE_* override with a reason when discovery is absent (404)', async () => {
+    vi.stubEnv('VITE_OIDC_ISSUER', 'http://localhost:8080');
+    vi.stubEnv('VITE_OIDC_CLIENT_ID', 'console-client');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(jsonResponse('not found', 404))),
+    );
+
+    const resolution = await resolveOidcConfig();
+    expect(resolution.config).toEqual({
+      issuer: 'http://localhost:8080',
+      clientId: 'console-client',
+      redirectUri: window.location.origin + '/',
+    });
+    expect(resolution.fallbackReason).toMatch(/platform discovery/i);
+  });
+
+  it('resolves to no config (dev-token fallback applies) when neither source is configured', async () => {
+    vi.stubEnv('VITE_OIDC_ISSUER', '');
+    vi.stubEnv('VITE_OIDC_CLIENT_ID', '');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(jsonResponse('not found', 404))),
+    );
+
+    expect(await resolveOidcConfig()).toEqual({ config: undefined });
   });
 });
