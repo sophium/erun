@@ -2,7 +2,9 @@ package backendapi
 
 import (
 	"database/sql"
+	"log"
 	"net/http"
+	"strings"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	"k8s.io/client-go/kubernetes"
@@ -214,15 +216,40 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 
 // newEnvironmentProvisioner wires live env provisioning, which needs durable
 // workflows, an in-cluster client, and the full deploy placement. Anything
-// missing leaves it nil, so env creation only registers the row.
+// missing leaves it nil, so env creation only registers the row. Without a
+// startup log naming which precondition failed, an operator sees only a 501
+// at call time with no way to tell which of the five is unmet.
 func newEnvironmentProvisioner(options HandlerOptions, environments *repository.EnvironmentRepository) routes.EnvironmentProvisioner {
 	deploy := options.EnvDeploy
-	if options.DBOSContext == nil || options.KubeClient == nil ||
-		deploy.DeployerServiceAccount == "" || deploy.PlatformNamespace == "" || deploy.Registry == "" {
+	if reasons := missingEnvProvisionerConfig(options, deploy); len(reasons) > 0 {
+		log.Printf("erun api live env provisioning disabled: %s", strings.Join(reasons, "; "))
 		return nil
 	}
 	coordinator := service.NewEnvironmentProvisioner(deployexec.NewLauncher(options.KubeClient), environments)
 	return provision.NewEnvProvisioner(options.DBOSContext, coordinator, deploy)
+}
+
+// missingEnvProvisionerConfig names every unmet precondition for live env
+// provisioning, so the startup log can point at exactly what is missing
+// rather than leaving an operator to infer it from a 501 at call time.
+func missingEnvProvisionerConfig(options HandlerOptions, deploy provision.EnvDeployConfig) []string {
+	var reasons []string
+	if options.DBOSContext == nil {
+		reasons = append(reasons, "DBOS_SYSTEM_DATABASE_URL is not set")
+	}
+	if options.KubeClient == nil {
+		reasons = append(reasons, "no in-cluster Kubernetes client (the env-deployer service account is not set)")
+	}
+	if deploy.DeployerServiceAccount == "" {
+		reasons = append(reasons, "the env-deployer service account is not set")
+	}
+	if deploy.PlatformNamespace == "" {
+		reasons = append(reasons, "the platform namespace is not set")
+	}
+	if deploy.Registry == "" {
+		reasons = append(reasons, "the env-deploy image registry is not set")
+	}
+	return reasons
 }
 
 // newEnvironmentLifecycle wires live stop/delete, which needs an in-cluster

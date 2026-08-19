@@ -65,6 +65,21 @@ document() {
     awk -v want="kind: $2" 'BEGIN{RS="\n---\n"} $0 ~ ("(^|\n)" want "(\n|$)") {print}' "$1"
 }
 
+# The pod's initContainers: section only, so an assertion about restore-pats
+# cannot pass by matching a line that belongs to a regular container.
+init_containers_section() {
+    awk '/^      initContainers:/{inside=1;next} /^      containers:/{inside=0} inside' "$1"
+}
+
+# One initContainer entry as its own block.
+init_container() {
+    init_containers_section "$1" | awk -v want="        - name: $2" '
+        $0 == want {inside=1;print;next}
+        /^        - name: /{inside=0}
+        inside {print}
+    '
+}
+
 rendered=$(render)
 
 # --- 1. Three containers: core has no login UI, and a sidecar bootstraps the
@@ -258,5 +273,66 @@ container "${rendered}" oidc-bootstrap | grep -q 'image: reg.test/erun-devops:v9
 rendered=$(render --set-string platform.consoleUrl=https://console.example.test)
 container "${rendered}" oidc-bootstrap | grep -q 'value: "https://console.example.test"' ||
     fail "the console app's redirect URI must default to platform.consoleUrl"
+
+# --- 18. Every Management API call carries an explicit Host header (#1047) ---
+# Core resolves the instance a call targets from Host, not from the loopback
+# address the call is actually addressed to; a call with no Host header 404s.
+rendered=$(render)
+bootstrap="${work_root}/oidc-bootstrap.yaml"
+container "${rendered}" oidc-bootstrap >"${bootstrap}"
+grep -q 'name: EXTERNAL_DOMAIN' "${bootstrap}" ||
+    fail "the OIDC bootstrap sidecar must know the external domain to send as Host"
+grep -A1 'name: EXTERNAL_DOMAIN' "${bootstrap}" | grep -q 'value: "auth.example.test"' ||
+    fail "EXTERNAL_DOMAIN must be the platform's external domain"
+grep -q -- '-H "Host: \${EXTERNAL_DOMAIN}"' "${bootstrap}" ||
+    fail "every Management API call must carry an explicit Host header naming the external domain"
+
+# --- 19. A failed resolution never publishes an empty client id (#1047) ---
+# Publishing unconditionally would overwrite a working platform's ConfigMap
+# with empty strings the next time the Management API 404s.
+grep -q 'return 1' "${bootstrap}" ||
+    fail "reconcile must abort before touching the ConfigMap when resolution is incomplete"
+grep -B5 'kubectl create configmap' "${bootstrap}" | grep -q 'if \[ -z "\${project_id}" \] || \[ -z "\${cli_client_id}" \]' ||
+    fail "the ConfigMap publish must be guarded on the project and CLI app actually resolving"
+grep -q 'reconcile || echo "oidc-bootstrap: initial reconcile incomplete' "${bootstrap}" ||
+    fail "the initial reconcile must not exit the sidecar under set -e when resolution is incomplete"
+
+# --- 20. The bootstrap PATs survive a pod restart (#1047, sophium/erun#1047) ---
+# Core writes both PATs only once, at first-instance init, into an emptyDir
+# that does not survive a restart; without persistence a restarted pod's login
+# and oidc-bootstrap containers wait forever on files that never reappear.
+restore="${work_root}/restore-pats.yaml"
+init_container "${rendered}" restore-pats >"${restore}"
+[ -s "${restore}" ] || fail "the pod must run a restore-pats init container before core starts"
+grep -q '^              mountPath: /zitadel/bootstrap$' "${restore}" ||
+    fail "restore-pats must mount the shared bootstrap volume to seed it"
+grep -q 'name: PATS_SECRET_NAME' "${restore}" ||
+    fail "restore-pats must know which Secret durably holds the PATs"
+grep -A1 'name: PATS_SECRET_NAME' "${restore}" | grep -q 'value: "team-zitadel-pats"' ||
+    fail "the PATs Secret must default to <tenant>-zitadel-pats"
+grep -q 'kubectl get secret' "${restore}" ||
+    fail "restore-pats must read the durable PATs Secret"
+grep -q 'first-instance init will mint the PATs' "${restore}" ||
+    fail "restore-pats must no-op (not fail) when the Secret does not exist yet, i.e. on true first init"
+
+grep -q 'name: PATS_SECRET_NAME' "${bootstrap}" ||
+    fail "the OIDC bootstrap sidecar must know which Secret to persist the PATs into"
+grep -q 'persist_pats' "${bootstrap}" ||
+    fail "the OIDC bootstrap sidecar must persist both PATs into the durable Secret"
+grep -q 'kubectl create secret generic "\${PATS_SECRET_NAME}"' "${bootstrap}" ||
+    fail "persisting the PATs must target the configured Secret name"
+grep -q -- '--from-file="admin-sa.pat=' "${bootstrap}" ||
+    fail "the persisted Secret must hold the org-owner PAT"
+grep -q -- '--from-file="login-client.pat=' "${bootstrap}" ||
+    fail "the persisted Secret must hold the login-client PAT"
+
+# --- 21. Least-privilege RBAC for the durable PATs Secret ---
+role="${work_root}/pat-persist-role.yaml"
+document "${rendered}" Role | awk '/name: team-zitadel-pat-persist/{f=1} f{print} f && /^---$/{exit}' >"${role}"
+[ -s "${role}" ] || fail "a dedicated Role for the PATs Secret must render"
+grep -q 'resourceNames: \["team-zitadel-pats"\]' "${role}" ||
+    fail "get/update/patch on the PATs Secret must be scoped to its own name"
+grep -q 'verbs: \["create"\]' "${role}" ||
+    fail "create cannot be name-scoped (the object does not exist yet) so it must stay a separate rule"
 
 echo "PASS: erun-zitadel chart topology"
