@@ -83,6 +83,18 @@ func (r *EnvironmentRepository) UpdateProvisioningStatus(ctx context.Context, en
 	})
 }
 
+// MarkDeployFailed records a deploy that never made it to the durable
+// workflow — a synchronous precondition (e.g. the tenant's runtime image is
+// confirmed missing) refused it after ClaimDeploy already moved the row to
+// provisioning. Without this the environment would be stranded in
+// provisioning forever, since no workflow run exists to mark it failed.
+func (r *EnvironmentRepository) MarkDeployFailed(ctx context.Context, environmentID, reason string) error {
+	return r.UpdateProvisioningStatus(ctx, environmentID, EnvironmentStatusUpdate{
+		Status:         string(model.EnvironmentStatusFailed),
+		ProvisionError: reason,
+	})
+}
+
 // ClaimDeploy takes exclusive ownership of an environment's deploy slot,
 // returning false when another deploy already holds it. This is what makes a
 // double-submit safe: two concurrent requests would otherwise both launch a

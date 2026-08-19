@@ -3,10 +3,18 @@ package provision
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/deployexec"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 )
+
+// UsageRecorder records a per-tenant metering event (#605). Optional: a nil
+// recorder simply records nothing.
+type UsageRecorder interface {
+	Record(ctx context.Context, event model.UsageEvent) error
+}
 
 // EnvLifecycleRunner runs a hosted env's stop/delete Job to a terminal result —
 // satisfied by the deployexec Launcher.
@@ -44,10 +52,22 @@ type EnvLifecycle struct {
 	runner EnvLifecycleRunner
 	rows   EnvironmentRowDeleter
 	config EnvDeployConfig
+	usage  UsageRecorder
 }
 
-func NewEnvLifecycle(runner EnvLifecycleRunner, rows EnvironmentRowDeleter, config EnvDeployConfig) *EnvLifecycle {
-	return &EnvLifecycle{runner: runner, rows: rows, config: config}
+// NewEnvLifecycle wires stop/delete. usage may be nil, which records no
+// metering event.
+func NewEnvLifecycle(runner EnvLifecycleRunner, rows EnvironmentRowDeleter, config EnvDeployConfig, usage UsageRecorder) *EnvLifecycle {
+	return &EnvLifecycle{runner: runner, rows: rows, config: config, usage: usage}
+}
+
+func (l *EnvLifecycle) recordUsage(ctx context.Context, environmentID string, eventType model.UsageEventType) {
+	if l.usage == nil {
+		return
+	}
+	if err := l.usage.Record(ctx, model.UsageEvent{EnvironmentID: environmentID, EventType: string(eventType)}); err != nil {
+		log.Printf("erun api env lifecycle: recording usage event for environment=%q did not persist: %v", environmentID, err)
+	}
 }
 
 func (l *EnvLifecycle) image(tenant, version string) string {
@@ -74,6 +94,7 @@ func (l *EnvLifecycle) Stop(ctx context.Context, input EnvLifecycleInput) error 
 	if result.Outcome != deployexec.OutcomeSucceeded {
 		return fmt.Errorf("stop job %s: %s", result.Outcome, lifecycleFailureDetail(result))
 	}
+	l.recordUsage(ctx, input.EnvironmentID, model.UsageEventEnvironmentStopped)
 	return nil
 }
 
@@ -97,6 +118,7 @@ func (l *EnvLifecycle) Delete(ctx context.Context, input EnvLifecycleInput) erro
 			return fmt.Errorf("delete job %s: %s", result.Outcome, lifecycleFailureDetail(result))
 		}
 	}
+	l.recordUsage(ctx, input.EnvironmentID, model.UsageEventEnvironmentDeleted)
 	return l.rows.Delete(ctx, input.EnvironmentID)
 }
 

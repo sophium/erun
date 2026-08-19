@@ -24,6 +24,12 @@ type DeployRunner interface {
 	Run(ctx context.Context, params deployexec.DeployJobParams) (deployexec.Result, error)
 }
 
+// UsageRecorder records a per-tenant metering event (#605). Optional: a nil
+// recorder simply records nothing, matching behavior before metering existed.
+type UsageRecorder interface {
+	Record(ctx context.Context, event model.UsageEvent) error
+}
+
 const (
 	// A lifecycle write that loses to a transient database blip would strand the
 	// env in `provisioning` under a workflow that has already run to a terminal
@@ -39,11 +45,15 @@ const (
 type EnvironmentProvisioner struct {
 	runner  DeployRunner
 	status  EnvironmentStatusWriter
+	usage   UsageRecorder
 	backoff time.Duration
 }
 
-func NewEnvironmentProvisioner(runner DeployRunner, status EnvironmentStatusWriter) *EnvironmentProvisioner {
-	return &EnvironmentProvisioner{runner: runner, status: status, backoff: statusWriteBackoff}
+// NewEnvironmentProvisioner wires the provisioner. usage may be nil, which
+// records no metering event (Provision behaves exactly as before metering
+// existed).
+func NewEnvironmentProvisioner(runner DeployRunner, status EnvironmentStatusWriter, usage UsageRecorder) *EnvironmentProvisioner {
+	return &EnvironmentProvisioner{runner: runner, status: status, usage: usage, backoff: statusWriteBackoff}
 }
 
 // Provision moves the env → provisioning → running/failed. A run error or a
@@ -71,7 +81,26 @@ func (p *EnvironmentProvisioner) Provision(ctx context.Context, environmentID st
 	}); err != nil {
 		return fmt.Errorf("mark running: %w", err)
 	}
+	p.recordUsage(ctx, environmentID, params)
 	return nil
+}
+
+// recordUsage is best-effort: a metering write failing must never turn a
+// successful deploy into a reported failure, so it only logs.
+func (p *EnvironmentProvisioner) recordUsage(ctx context.Context, environmentID string, params deployexec.DeployJobParams) {
+	if p.usage == nil {
+		return
+	}
+	err := p.usage.Record(ctx, model.UsageEvent{
+		EnvironmentID: environmentID,
+		EventType:     string(model.UsageEventEnvironmentProvisioned),
+		CPUMillicores: params.MaxCPUMillicores,
+		MemoryMB:      params.MaxMemoryMB,
+		StorageGB:     params.MaxStorageGB,
+	})
+	if err != nil {
+		log.Printf("erun api env deploy: recording usage event for environment=%q did not persist: %v", environmentID, err)
+	}
 }
 
 // deployFailureReason is what the environment records when a deploy Job does not

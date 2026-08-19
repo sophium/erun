@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
@@ -210,6 +211,84 @@ func TestCreateEnvironmentStartsDeployWhenWired(t *testing.T) {
 	}
 }
 
+// TestCreateEnvironmentStartsDeployWithResourceCaps: the tenant's quota row
+// (env count plus the per-environment CPU/memory/storage namespace ceiling)
+// threads through to the provisioner input unchanged (#605), not just the
+// tenant/environment/version coordinates TestCreateEnvironmentStartsDeployWhenWired
+// already locks.
+func TestCreateEnvironmentStartsDeployWithResourceCaps(t *testing.T) {
+	environments := &stubEnvironmentRepository{created: model.Environment{
+		EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime, RuntimeVersion: "1.2.3",
+	}}
+	prov := &stubEnvironmentProvisioner{}
+	req := httptest.NewRequest(http.MethodPost, "/v1/environments", bytes.NewBufferString(`{"name":"prod","type":"runtime","runtimeVersion":"1.2.3"}`))
+	req = req.WithContext(security.WithContext(req.Context(), security.Context{TenantID: "t1", TenantType: string(model.TenantTypeCompany), ErunUserID: "u1"}))
+	rec := httptest.NewRecorder()
+	EnvironmentRoutes{
+		environments: environments,
+		quotas:       stubTenantQuotaRepository{maxEnvironments: 10, maxCPUMillicores: 6000, maxMemoryMB: 12000, maxStorageGB: 100},
+		tenants:      stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
+		provisioner:  prov,
+	}.createEnvironment(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d (body %s), want 202", rec.Code, rec.Body.String())
+	}
+	if len(prov.started) != 1 {
+		t.Fatalf("Start called %d times, want 1", len(prov.started))
+	}
+	got := prov.started[0]
+	if got.MaxCPUMillicores != 6000 || got.MaxMemoryMB != 12000 || got.MaxStorageGB != 100 {
+		t.Fatalf("resource caps = %+v, want 6000/12000/100", got)
+	}
+}
+
+// TestCreateEnvironmentRejectsQuotaBelowRuntimeFloor: a tenant quota configured
+// below what a stock runtime pod needs is refused at create time with a clear
+// 409, instead of the Job later failing to admit the pod under its own
+// ResourceQuota (#605).
+func TestCreateEnvironmentRejectsQuotaBelowRuntimeFloor(t *testing.T) {
+	environments := &stubEnvironmentRepository{created: model.Environment{
+		EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime, RuntimeVersion: "1.2.3",
+	}}
+	prov := &stubEnvironmentProvisioner{}
+	req := httptest.NewRequest(http.MethodPost, "/v1/environments", bytes.NewBufferString(`{"name":"prod","type":"runtime","runtimeVersion":"1.2.3"}`))
+	req = req.WithContext(security.WithContext(req.Context(), security.Context{TenantID: "t1", TenantType: string(model.TenantTypeCompany), ErunUserID: "u1"}))
+	rec := httptest.NewRecorder()
+	EnvironmentRoutes{
+		environments: environments,
+		quotas:       stubTenantQuotaRepository{maxEnvironments: 10, maxCPUMillicores: 500, maxMemoryMB: 9216, maxStorageGB: 80},
+		tenants:      stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
+		provisioner:  prov,
+	}.createEnvironment(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d (body %s), want 409", rec.Code, rec.Body.String())
+	}
+	if environments.createCalls != 0 || len(prov.started) != 0 {
+		t.Fatalf("createCalls=%d Start calls=%d, want 0/0: a quota below the floor must refuse before creating anything", environments.createCalls, len(prov.started))
+	}
+}
+
+// TestCreateEnvironmentReportsMissingRuntimeImage locks writeStartProvisioningError:
+// a confirmed-missing runtime image answers 409 naming it, and the row created
+// just before stays registered (persistAndMaybeProvision already wrote it) —
+// there is nothing to unwind since the deploy Job was never started.
+func TestCreateEnvironmentReportsMissingRuntimeImage(t *testing.T) {
+	environments := &stubEnvironmentRepository{created: model.Environment{
+		EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime, RuntimeVersion: "1.2.3",
+	}}
+	prov := &stubEnvironmentProvisioner{err: &provision.MissingRuntimeImageError{Image: "ghcr.io/sophium/acme-devops:1.2.3"}}
+	rec := postCreateEnvironmentWired(t, environments, prov, `{"name":"prod","type":"runtime","runtimeVersion":"1.2.3"}`)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d (body %s), want 409", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "ghcr.io/sophium/acme-devops:1.2.3") {
+		t.Fatalf("body = %s, want it to name the missing image", rec.Body.String())
+	}
+}
+
 // TestCreateEnvironmentRegistersOnlyWithoutVersion: nothing to deploy without a
 // pinned runtime version, so create stays a plain 201 registration.
 func TestCreateEnvironmentRegistersOnlyWithoutVersion(t *testing.T) {
@@ -348,6 +427,27 @@ func TestDeployEnvironmentClaimsBeforeStarting(t *testing.T) {
 	postDeployEnvironment(t, environments, &stubEnvironmentProvisioner{}, "")
 	if environments.claimCalls != 1 {
 		t.Fatalf("ClaimDeploy called %d times, want 1", environments.claimCalls)
+	}
+}
+
+// TestDeployEnvironmentReportsMissingRuntimeImageAndMarksFailed locks
+// writeStartDeployError: ClaimDeploy already moved the row to provisioning
+// before StartDeploy ran, so a confirmed-missing image must also mark the
+// environment failed — otherwise it would be stranded in provisioning with no
+// workflow left to ever move it out (#605).
+func TestDeployEnvironmentReportsMissingRuntimeImageAndMarksFailed(t *testing.T) {
+	environments := runtimeEnvironment()
+	prov := &stubEnvironmentProvisioner{err: &provision.MissingRuntimeImageError{Image: "ghcr.io/sophium/acme-devops:1.2.3"}}
+	rec := postDeployEnvironment(t, environments, prov, "")
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d (body %s), want 409", rec.Code, rec.Body.String())
+	}
+	if environments.markFailedCalls != 1 {
+		t.Fatalf("MarkDeployFailed called %d times, want 1", environments.markFailedCalls)
+	}
+	if !strings.Contains(environments.markFailedReason, "ghcr.io/sophium/acme-devops:1.2.3") {
+		t.Fatalf("markFailedReason = %q, want it to name the missing image", environments.markFailedReason)
 	}
 }
 

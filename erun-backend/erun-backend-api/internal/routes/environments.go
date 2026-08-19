@@ -22,6 +22,10 @@ type EnvironmentRepository interface {
 	Create(ctx context.Context, environment model.Environment) (model.Environment, error)
 	Count(ctx context.Context) (int, error)
 	ClaimDeploy(ctx context.Context, environmentID string, staleAfter time.Duration) (bool, error)
+	// MarkDeployFailed records a deploy claim that never reached the durable
+	// workflow (see writeStartProvisioningError), so the environment does not
+	// stay stranded in provisioning.
+	MarkDeployFailed(ctx context.Context, environmentID, reason string) error
 }
 
 // EnvironmentProvisioner starts the durable server-side deploy of an
@@ -46,11 +50,12 @@ type EnvironmentLifecycle interface {
 // only looks stale once the run behind it cannot still be live.
 const deployClaimStaleAfter = 45 * time.Minute
 
-// TenantQuotaRepository reports the caller's environment-count cap. When the
-// tenant has no quota row the repository returns the default cap, so the route
+// TenantQuotaRepository reports the caller's full quota row (env count plus
+// the per-environment CPU/memory/storage namespace ceiling). When the tenant
+// has no quota row the repository returns the defaulted caps, so the route
 // never needs to distinguish "unconfigured" from "explicit".
 type TenantQuotaRepository interface {
-	MaxEnvironments(ctx context.Context) (int, error)
+	Get(ctx context.Context) (model.TenantQuota, error)
 }
 
 type EnvironmentRoutes struct {
@@ -204,7 +209,7 @@ func (r EnvironmentRoutes) deployEnvironment(w http.ResponseWriter, req *http.Re
 		return
 	}
 	if err := r.startDeploy(ctx, environment, version); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to start deploy")
+		r.writeStartDeployError(w, ctx, environment.EnvironmentID, err)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, environment)
@@ -298,18 +303,47 @@ func namespaceLabelRune(r rune) bool {
 	return (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-'
 }
 
+// The erun-devops chart's own default runtime pod resource limits (cpu "4",
+// memory "8916Mi") and default PVCs (home 2Gi + docker 50Gi + worktree 20Gi =
+// 72Gi) — see erun-devops/k8s/erun-devops/templates/service.yaml. A tenant
+// quota below this floor cannot host a stock runtime environment: Kubernetes
+// would reject the pod at admission once the namespace ResourceQuota is
+// applied. Checking it before the deploy Job starts turns that into a clear
+// 409 naming the cap, instead of a Job that ImagePullBackOffs its way to a
+// pending pod the ResourceQuota then silently blocks.
+const (
+	minRuntimeCPUMillicores = 4000
+	minRuntimeMemoryMB      = 8916
+	minRuntimeStorageGB     = 72
+)
+
+// validateNamespaceQuotaFloor rejects a tenant quota that cannot fit the
+// stock runtime pod, naming which cap is insufficient.
+func validateNamespaceQuotaFloor(quota model.TenantQuota) error {
+	switch {
+	case quota.MaxCPUMillicores < minRuntimeCPUMillicores:
+		return fmt.Errorf("tenant CPU quota (%dm) is below the runtime environment's minimum (%dm); raise maxCpuMillicores", quota.MaxCPUMillicores, minRuntimeCPUMillicores)
+	case quota.MaxMemoryMB < minRuntimeMemoryMB:
+		return fmt.Errorf("tenant memory quota (%dMi) is below the runtime environment's minimum (%dMi); raise maxMemoryMb", quota.MaxMemoryMB, minRuntimeMemoryMB)
+	case quota.MaxStorageGB < minRuntimeStorageGB:
+		return fmt.Errorf("tenant storage quota (%dGi) is below the runtime environment's minimum (%dGi); raise maxStorageGb", quota.MaxStorageGB, minRuntimeStorageGB)
+	}
+	return nil
+}
+
 // environmentQuotaUsage reports how many environments the caller's tenant has
-// and its cap. Creation enforces the cap; the provision preview reports it.
-func environmentQuotaUsage(ctx context.Context, environments EnvironmentRepository, quotas TenantQuotaRepository) (count int, maxEnvironments int, err error) {
-	maxEnvironments, err = quotas.MaxEnvironments(ctx)
+// and its full quota row. Creation enforces the env-count cap; the provision
+// preview reports it; the deploy path threads the resource caps to the Job.
+func environmentQuotaUsage(ctx context.Context, environments EnvironmentRepository, quotas TenantQuotaRepository) (count int, quota model.TenantQuota, err error) {
+	quota, err = quotas.Get(ctx)
 	if err != nil {
-		return 0, 0, err
+		return 0, model.TenantQuota{}, err
 	}
 	count, err = environments.Count(ctx)
 	if err != nil {
-		return 0, 0, err
+		return 0, model.TenantQuota{}, err
 	}
-	return count, maxEnvironments, nil
+	return count, quota, nil
 }
 
 var validEnvironmentTypes = map[model.EnvironmentType]struct{}{
@@ -357,18 +391,24 @@ func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Re
 		return
 	}
 
-	count, maxEnvironments, err := environmentQuotaUsage(req.Context(), r.environments, r.quotas)
+	count, quota, err := environmentQuotaUsage(req.Context(), r.environments, r.quotas)
 	if err != nil {
 		writeRepositoryError(w, err)
 		return
 	}
 	if preview {
-		r.previewCreateEnvironment(w, req, environment, count, maxEnvironments)
+		r.previewCreateEnvironment(w, req, environment, count, quota)
 		return
 	}
-	if count >= maxEnvironments {
-		writeError(w, http.StatusConflict, fmt.Sprintf("environment quota reached: this tenant already has %d of %d environments", count, maxEnvironments))
+	if count >= quota.MaxEnvironments {
+		writeError(w, http.StatusConflict, fmt.Sprintf("environment quota reached: this tenant already has %d of %d environments", count, quota.MaxEnvironments))
 		return
+	}
+	if environment.Type == model.EnvironmentTypeRuntime {
+		if err := validateNamespaceQuotaFloor(quota); err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
 	}
 	r.persistAndMaybeProvision(w, req, environment)
 }
@@ -395,10 +435,40 @@ func (r EnvironmentRoutes) persistAndMaybeProvision(w http.ResponseWriter, req *
 		return
 	}
 	if err := r.startProvisioning(req.Context(), created); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to start provisioning")
+		writeStartProvisioningError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, created)
+}
+
+// writeStartProvisioningError answers a known, actionable precondition (the
+// tenant's runtime image is confirmed missing) with a 409 naming it, leaving
+// the environment row exactly as persistAndMaybeProvision already left it
+// (registered, not provisioning) — nothing was attempted, so nothing needs
+// unwinding. Any other failure to even enqueue the durable workflow is an
+// internal error.
+func writeStartProvisioningError(w http.ResponseWriter, err error) {
+	var missingImage *provision.MissingRuntimeImageError
+	if errors.As(err, &missingImage) {
+		writeError(w, http.StatusConflict, missingImage.Error())
+		return
+	}
+	writeError(w, http.StatusInternalServerError, "failed to start provisioning")
+}
+
+// writeStartDeployError is writeStartProvisioningError's counterpart for an
+// explicit deploy: ClaimDeploy already moved the row to provisioning before
+// startDeploy ran, so a known precondition failure also records it as failed —
+// otherwise the environment is stranded in provisioning with no workflow run
+// left to ever move it out.
+func (r EnvironmentRoutes) writeStartDeployError(w http.ResponseWriter, ctx context.Context, environmentID string, err error) {
+	var missingImage *provision.MissingRuntimeImageError
+	if errors.As(err, &missingImage) {
+		_ = r.environments.MarkDeployFailed(ctx, environmentID, missingImage.Error())
+		writeError(w, http.StatusConflict, missingImage.Error())
+		return
+	}
+	writeError(w, http.StatusInternalServerError, "failed to start deploy")
 }
 
 // previewCreateEnvironment resolves and returns the same ordered plan
@@ -407,7 +477,7 @@ func (r EnvironmentRoutes) persistAndMaybeProvision(w http.ResponseWriter, req *
 // way this diverges from what a non-preview call would do is the quota
 // check, which — like /v1/provision — reports rather than 409s so the full
 // intended plan is still visible.
-func (r EnvironmentRoutes) previewCreateEnvironment(w http.ResponseWriter, req *http.Request, environment model.Environment, count, maxEnvironments int) {
+func (r EnvironmentRoutes) previewCreateEnvironment(w http.ResponseWriter, req *http.Request, environment model.Environment, count int, quota model.TenantQuota) {
 	tenant, err := r.tenants.Current(req.Context())
 	if err != nil {
 		writeRepositoryError(w, err)
@@ -423,7 +493,7 @@ func (r EnvironmentRoutes) previewCreateEnvironment(w http.ResponseWriter, req *
 		envType:           environment.Type,
 		kubernetesContext: contextRef,
 		count:             count,
-		maxEnvironments:   maxEnvironments,
+		quota:             quota,
 	}
 	writeJSON(w, http.StatusOK, provisionResponse{Plan: provisionPlan(plan), QuotaOk: plan.quotaOk()})
 }
@@ -463,13 +533,20 @@ func (r EnvironmentRoutes) deployInput(ctx context.Context, environment model.En
 	if !ok {
 		return provision.EnvProvisionInput{}, fmt.Errorf("missing security context")
 	}
+	quota, err := r.quotas.Get(ctx)
+	if err != nil {
+		return provision.EnvProvisionInput{}, err
+	}
 	return provision.EnvProvisionInput{
-		TenantID:      securityContext.TenantID,
-		TenantType:    securityContext.TenantType,
-		ErunUserID:    securityContext.ErunUserID,
-		EnvironmentID: environment.EnvironmentID,
-		Tenant:        strings.TrimSpace(tenant.Name),
-		Environment:   environment.Name,
-		Version:       version,
+		TenantID:         securityContext.TenantID,
+		TenantType:       securityContext.TenantType,
+		ErunUserID:       securityContext.ErunUserID,
+		EnvironmentID:    environment.EnvironmentID,
+		Tenant:           strings.TrimSpace(tenant.Name),
+		Environment:      environment.Name,
+		Version:          version,
+		MaxCPUMillicores: quota.MaxCPUMillicores,
+		MaxMemoryMB:      quota.MaxMemoryMB,
+		MaxStorageGB:     quota.MaxStorageGB,
 	}, nil
 }

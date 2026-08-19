@@ -101,7 +101,7 @@ func (r ProvisionRoutes) provision(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	count, maxEnvironments, err := environmentQuotaUsage(req.Context(), r.environments, r.quotas)
+	count, quota, err := environmentQuotaUsage(req.Context(), r.environments, r.quotas)
 	if err != nil {
 		writeRepositoryError(w, err)
 		return
@@ -120,7 +120,7 @@ func (r ProvisionRoutes) provision(w http.ResponseWriter, req *http.Request) {
 		contextPlan:       contextPlan,
 		kubernetesContext: strings.TrimSpace(body.KubernetesContext),
 		count:             count,
-		maxEnvironments:   maxEnvironments,
+		quota:             quota,
 	}
 	writeJSON(w, http.StatusOK, provisionResponse{Plan: provisionPlan(preview), QuotaOk: preview.quotaOk()})
 }
@@ -176,11 +176,11 @@ type provisionPlanInput struct {
 	contextPlan       []string
 	kubernetesContext string
 	count             int
-	maxEnvironments   int
+	quota             model.TenantQuota
 }
 
 func (in provisionPlanInput) quotaOk() bool {
-	return in.count < in.maxEnvironments
+	return in.count < in.quota.MaxEnvironments
 }
 
 // provisionPlan renders the ordered preview: authz (the resolved tenant),
@@ -195,13 +195,16 @@ func provisionPlan(in provisionPlanInput) []string {
 
 	plan = append(plan, fmt.Sprintf("provision: tenant %s (resolved from token)", in.tenantName))
 
-	quotaLine := fmt.Sprintf("quota: tenant has %d of %d environments", in.count, in.maxEnvironments)
+	quotaLine := fmt.Sprintf("quota: tenant has %d of %d environments", in.count, in.quota.MaxEnvironments)
 	if in.quotaOk() {
 		quotaLine += " — within quota"
 	} else {
 		quotaLine += " — WOULD EXCEED, provisioning blocked"
 	}
 	plan = append(plan, quotaLine)
+	if in.envType == model.EnvironmentTypeRuntime {
+		plan = append(plan, fmt.Sprintf("quota: namespace capped at %dm CPU / %dMi memory / %dGi storage", in.quota.MaxCPUMillicores, in.quota.MaxMemoryMB, in.quota.MaxStorageGB))
+	}
 
 	contextRef, contextLine := contextPlanLine(in)
 	plan = append(plan, contextLine)

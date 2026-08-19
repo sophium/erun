@@ -176,6 +176,7 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	environments := repository.NewEnvironmentRepository(txManager)
 	contexts := repository.NewContextRepository(txManager)
 	tenantQuotas := repository.NewTenantQuotaRepository(txManager)
+	usageEvents := repository.NewUsageEventRepository(txManager)
 	releases := repository.NewReleaseRepository(txManager)
 	reviewService := service.NewReviewService(reviews, builds)
 	buildService := service.NewBuildService(builds, reviewService)
@@ -186,7 +187,8 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	routes.RegisterReviewRoutes(register, reviews, reviewService, builds, releaseRoutes)
 	routes.RegisterBuildRoutes(register, builds, buildService)
 	routes.RegisterCommentRoutes(register, comments, commentService)
-	routes.RegisterEnvironmentRoutes(register, environments, tenantQuotas, tenants, newEnvironmentProvisioner(options, environments), newEnvironmentLifecycle(options, environments))
+	routes.RegisterEnvironmentRoutes(register, environments, tenantQuotas, tenants, newEnvironmentProvisioner(options, environments, usageEvents), newEnvironmentLifecycle(options, environments, usageEvents))
+	routes.RegisterUsageEventRoutes(register, usageEvents)
 	routes.RegisterMCPTokenRoutes(register, environments, tenants, options.MCPSigner)
 	routes.RegisterDNS01TokenRoutes(register, environments, tenants, options.MCPSigner)
 	var contextProvisioner routes.ContextProvisioner
@@ -215,27 +217,27 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 // newEnvironmentProvisioner wires live env provisioning, which needs durable
 // workflows, an in-cluster client, and the full deploy placement. Anything
 // missing leaves it nil, so env creation only registers the row.
-func newEnvironmentProvisioner(options HandlerOptions, environments *repository.EnvironmentRepository) routes.EnvironmentProvisioner {
+func newEnvironmentProvisioner(options HandlerOptions, environments *repository.EnvironmentRepository, usage *repository.UsageEventRepository) routes.EnvironmentProvisioner {
 	deploy := options.EnvDeploy
 	if options.DBOSContext == nil || options.KubeClient == nil ||
 		deploy.DeployerServiceAccount == "" || deploy.PlatformNamespace == "" || deploy.Registry == "" {
 		return nil
 	}
-	coordinator := service.NewEnvironmentProvisioner(deployexec.NewLauncher(options.KubeClient), environments)
-	return provision.NewEnvProvisioner(options.DBOSContext, coordinator, deploy)
+	coordinator := service.NewEnvironmentProvisioner(deployexec.NewLauncher(options.KubeClient), environments, usage)
+	return provision.NewEnvProvisioner(options.DBOSContext, coordinator, deploy, provision.NewGHCRImageChecker())
 }
 
 // newEnvironmentLifecycle wires live stop/delete, which needs an in-cluster
 // client and the full deploy placement but no durable workflow (see
 // provision.EnvLifecycle). Anything missing leaves it nil, so stop/delete
 // report the executor as unconfigured rather than acting on partial config.
-func newEnvironmentLifecycle(options HandlerOptions, environments *repository.EnvironmentRepository) routes.EnvironmentLifecycle {
+func newEnvironmentLifecycle(options HandlerOptions, environments *repository.EnvironmentRepository, usage *repository.UsageEventRepository) routes.EnvironmentLifecycle {
 	deploy := options.EnvDeploy
 	if options.KubeClient == nil ||
 		deploy.DeployerServiceAccount == "" || deploy.PlatformNamespace == "" || deploy.Registry == "" {
 		return nil
 	}
-	return provision.NewEnvLifecycle(deployexec.NewLauncher(options.KubeClient), environments, deploy)
+	return provision.NewEnvLifecycle(deployexec.NewLauncher(options.KubeClient), environments, deploy, usage)
 }
 
 // newReleaseRunner wires the release Job launcher. Without an in-cluster client

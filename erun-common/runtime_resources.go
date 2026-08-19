@@ -40,6 +40,52 @@ func ValidateRuntimePodResources(resources RuntimePodResources) error {
 	return nil
 }
 
+// NamespaceResourceQuota is a hard per-environment-namespace ceiling on
+// CPU/memory/storage, enforced by Kubernetes via a ResourceQuota + LimitRange
+// applied to the namespace at deploy time (kubernetes_resource_quota.go). It is
+// distinct from RuntimePodResources: RuntimePodResources sizes the runtime
+// pod's own container; NamespaceResourceQuota caps everything that namespace
+// can ever hold, including future non-runtime workloads. All three fields must
+// be set together — a namespace ResourceQuota is meaningless with only some
+// resources capped, since Kubernetes then admits unbounded amounts of the
+// uncapped ones.
+type NamespaceResourceQuota struct {
+	CPU     string `yaml:"cpu,omitempty" json:"cpu,omitempty"`
+	Memory  string `yaml:"memory,omitempty" json:"memory,omitempty"`
+	Storage string `yaml:"storage,omitempty" json:"storage,omitempty"`
+}
+
+// IsZero reports whether no cap was configured, so deploy applies no
+// ResourceQuota/LimitRange at all rather than an incomplete one.
+func (q NamespaceResourceQuota) IsZero() bool {
+	return q == NamespaceResourceQuota{}
+}
+
+func ValidateNamespaceResourceQuota(quota NamespaceResourceQuota) error {
+	if quota.IsZero() {
+		return nil
+	}
+	if strings.TrimSpace(quota.CPU) == "" {
+		return fmt.Errorf("namespace quota CPU is required when a namespace quota is set")
+	}
+	if strings.TrimSpace(quota.Memory) == "" {
+		return fmt.Errorf("namespace quota memory is required when a namespace quota is set")
+	}
+	if strings.TrimSpace(quota.Storage) == "" {
+		return fmt.Errorf("namespace quota storage is required when a namespace quota is set")
+	}
+	if _, err := ParseKubernetesCPUToMilli(quota.CPU); err != nil {
+		return fmt.Errorf("namespace quota CPU: %w", err)
+	}
+	if _, err := ParseKubernetesMemoryToMi(quota.Memory); err != nil {
+		return fmt.Errorf("namespace quota memory: %w", err)
+	}
+	if _, err := ParseKubernetesMemoryToMi(quota.Storage); err != nil {
+		return fmt.Errorf("namespace quota storage: %w", err)
+	}
+	return nil
+}
+
 func ParseKubernetesCPUToMilli(value string) (int64, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {

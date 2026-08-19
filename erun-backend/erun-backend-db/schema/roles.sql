@@ -21,5 +21,5 @@ GRANT SELECT, INSERT, UPDATE, DELETE, REFERENCES
   TO erun_tenant, erun_operations;
 
 GRANT SELECT, INSERT, REFERENCES
-  ON audit_events
+  ON audit_events, usage_events
   TO erun_tenant, erun_operations;

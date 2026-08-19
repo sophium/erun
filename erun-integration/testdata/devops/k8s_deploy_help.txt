@@ -8,6 +8,9 @@ Flags:
       --environment string           Deploy for a specific environment; requires --tenant
       --force                        Re-run the helm upgrade even when the deployed release already matches the requested version
   -h, --help                         help for deploy
+      --max-cpu string               Cap the environment's namespace to this much CPU (Kubernetes quantity, e.g. 4) via a ResourceQuota+LimitRange; requires --max-memory and --max-storage too, and overrides the env's saved namespace quota for this deploy only
+      --max-memory string            Cap the environment's namespace to this much memory (Kubernetes quantity, e.g. 8Gi); requires --max-cpu and --max-storage too
+      --max-storage string           Cap the environment's namespace to this much storage (Kubernetes quantity, e.g. 80Gi); requires --max-cpu and --max-memory too
       --mcp-auth-public-key string   Require the env's MCP edge to authenticate bearer tokens signed by this PEM public key, and record it on the env so later redeploys keep authenticating; omit to reuse the recorded key
       --no-mcp-auth                  Deploy the env's MCP edge unauthenticated (loopback-only) and forget its recorded public key; required to turn authentication off, which deploy otherwise refuses to do by omission
       --rollout-timeout string       Override the helm rollout wait for this deploy (Go duration, e.g. 8m); empty uses the env's deploy.timeout or the 5m default

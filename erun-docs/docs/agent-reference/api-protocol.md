@@ -260,7 +260,13 @@ A newly-registered environment is `registered` — the row exists but nothing is
 
 **Per-tenant environment-count quota.** After validating the body and before persisting, the endpoint enforces the tenant's environment-count cap: it compares how many environments the tenant already has against the cap and rejects the registration with HTTP `409` once the tenant is at or over it. The cap defaults to **10** and is overridden per tenant by a `tenant_quotas.max_environments` row. That override row is set by the operations-only [`PUT /v1/tenants/{tenant_id}/quota`](#put-v1tenantstenant_idquota) endpoint (below). Both the count and the cap are read under row-level security, so each is scoped to the caller's own tenant.
 
-**Server-side deploy executor.** When configured, the backend deploys the runtime chart itself: it runs the deploy as a Kubernetes `Job` in the tenant's `<tenant>-devops` runtime image (which carries `erun` + `helm` + `kubectl`) under a curated `<tenant>-env-provisioner` ClusterRole ServiceAccount (see [Provisioner RBAC](/concepts/hosted-platform#provisioner-rbac) — not `cluster-admin`), invoking `erun deploy <tenant> <env> --version <runtimeVersion>` and, when the platform is configured for it, chaining `erun expose <tenant> <env> mcp --ip <ip> --skip-if-unconfigured` (see [Automatic exposure](/concepts/hosted-platform#automatic-exposure)) — and watches the Job to completion — succeeded → `running`, failed → `failed` with the reason on `provisionError` (a failed expose fails the whole Job, so the environment is never recorded `running` while unreachable). `stop`/`delete` run the same way with `erun stop`/`erun delete -y` (see [`POST .../stop`](#stop-endpoint) and [`DELETE`](#delete-endpoint) below). A durable workflow (DBOS) wraps deploy, keyed by environment id, so a control-plane restart resumes an in-flight deploy rather than double-deploying; `stop`/`delete` run synchronously within the request instead (their Jobs are short kubectl operations, not a multi-minute helm rollout). The deploy image is `<registry>/<tenant>-devops:<runtimeVersion>` (image-baked config model).
+**Per-environment resource-cap floor.** For a `runtime` environment, the endpoint also checks the tenant's `maxCpuMillicores`/`maxMemoryMb`/`maxStorageGb` caps against the `erun-devops` chart's own minimum requirement (cpu `4000m`, memory `8916Mi`, storage `72Gi`) and rejects with `409` if the tenant's cap is configured below it. This catches a knowable failure before it happens: a namespace `ResourceQuota` sized under the stock runtime pod's own footprint would otherwise let the create/deploy call succeed and only fail later, when Kubernetes refuses to admit the pod. See [Quotas](/concepts/hosted-platform#quotas) for how the caps are enforced.
+
+**Published runtime image precondition.** Also for a `runtime` environment with a pinned `runtimeVersion` (or an explicit [`POST .../deploy`](#deploy-endpoint)), the endpoint best-effort checks that `<registry>/<tenant>-devops:<runtimeVersion>` — the exact image the deploy Job pulls — resolves in the registry, and rejects with `409` when it is **confirmed** absent (a `ghcr.io` `404` on an anonymous-pull-token manifest request). This is deliberately conservative: a private image, an unreachable registry, or any other inconclusive outcome never blocks the call, so the check only ever catches the one case it can prove — a tenant that has never published a runtime image at all — instead of gating every deploy on a registry probe succeeding. Registries other than `ghcr.io` are not checked and always pass.
+
+**Server-side deploy executor.** When configured, the backend deploys the runtime chart itself: it runs the deploy as a Kubernetes `Job` in the tenant's `<tenant>-devops` runtime image (which carries `erun` + `helm` + `kubectl`) under a curated `<tenant>-env-provisioner` ClusterRole ServiceAccount (see [Provisioner RBAC](/concepts/hosted-platform#provisioner-rbac) — not `cluster-admin`), invoking `erun deploy <tenant> <env> --version <runtimeVersion>` (plus `--max-cpu`/`--max-memory`/`--max-storage` when the tenant's quota resolves — see [Quotas](/concepts/hosted-platform#quotas)) and, when the platform is configured for it, chaining `erun expose <tenant> <env> mcp --ip <ip> --skip-if-unconfigured` (see [Automatic exposure](/concepts/hosted-platform#automatic-exposure)) — and watches the Job to completion — succeeded → `running`, failed → `failed` with the reason on `provisionError` (a failed expose fails the whole Job, so the environment is never recorded `running` while unreachable). `stop`/`delete` run the same way with `erun stop`/`erun delete -y` (see [`POST .../stop`](#stop-endpoint) and [`DELETE`](#delete-endpoint) below). A durable workflow (DBOS) wraps deploy, keyed by environment id, so a control-plane restart resumes an in-flight deploy rather than double-deploying; `stop`/`delete` run synchronously within the request instead (their Jobs are short kubectl operations, not a multi-minute helm rollout). The deploy image is `<registry>/<tenant>-devops:<runtimeVersion>`.
+
+**Bootstrapping the Job's own environment.** The Job's `command` replaces the image's entrypoint, so none of the entrypoint's usual setup runs — no in-cluster kubeconfig, and no `~/.config/erun/<tenant>/<env>/config.yaml` for `erun deploy` to resolve (a freshly-registered environment was never baked into any image). The Job's command therefore seeds both explicitly before running `erun deploy`: an in-cluster kubeconfig context built from the pod's own mounted ServiceAccount token (mirroring the runtime image's own entrypoint script), and a minimal `type: runtime` config for the tenant and environment. This keeps `erun deploy` itself an unchanged pure primitive — the Job is the caller supplying the environment's shape explicitly, the primitive still only ever consumes on-disk config exactly as it always has.
 
 **What `provisionError` carries on a failed deploy.** The failure happens inside the Job, so the executor reads it back before the Job's TTL reaps the pod and records it verbatim under a `deploy job failed for version <version>:` prefix. Three sources, in order — the first that yields anything wins:
 
@@ -281,6 +287,8 @@ Registration deploys an environment **once**. To deploy it again — retrying a 
 | `400` | `name` is not a DNS-1123 label (the env forms the `<tenant>-<env>` namespace), `type` is not one of `runtime`/`remote-agent`/`local-agent`, the body is not valid JSON, or a `runtime` environment set `contextId`/`kubernetesContext` (see [single-cluster placement](/concepts/hosted-platform#single-cluster-placement) above). | Send a DNS-1123 `name` and a valid `type`; leave `contextId`/`kubernetesContext` unset for a `runtime` environment. |
 | `401` / `403` | Standard auth failures (see [Errors](#errors)). The `WriteAll` permission covers `POST /v1/environments`. | Send a valid token whose roles permit the write. |
 | `409` | The tenant is at its environment-count cap (default `10` unless a `tenant_quotas` row overrides it); the body is `environment quota reached: this tenant already has N of N environments`. Not raised when `preview` is `true`. | Delete an unused environment, or raise the tenant's cap via [`PUT /v1/tenants/{tenant_id}/quota`](#put-v1tenantstenant_idquota) (operations-only). |
+| `409` | The tenant's resource caps are below the runtime pod's minimum (see "Per-environment resource-cap floor" above); the body names which cap (`maxCpuMillicores`/`maxMemoryMb`/`maxStorageGb`) and the required floor. | Raise the named cap via `PUT /v1/tenants/{tenant_id}/quota`. |
+| `409` | The tenant's `<tenant>-devops:<runtimeVersion>` runtime image is confirmed absent from `ghcr.io` (see "Published runtime image precondition" above); the body is `runtime image … is not published: …`. Only raised once the row is already created and the deploy would otherwise start — the row stays `registered`, nothing to unwind. | Publish the image (`erun push` at that version) and retry via [`POST .../deploy`](#deploy-endpoint). |
 | `500` | Persistence failed — e.g. `contextId` references a context that is not the caller's (the composite `(tenant_id, context_id)` foreign key is violated), or the request-scoped security context is missing (an internal wiring error). The row is persisted **before** the deploy is started, so a `failed to start provisioning` `500` (the deploy executor could not enqueue the durable workflow) leaves the environment registered — re-create is a no-op conflict; poll `GET /v1/environments/{id}` to confirm the row exists. | Reference a context owned by the caller's tenant; if it persists with a valid context, it is a server bug. |
 
 ### `POST /v1/environments/{environment_id}/deploy` {#deploy-endpoint}
@@ -310,6 +318,7 @@ A body-less request (no body at all, or `{}`) deploys the environment's own `run
 | `401` / `403` | Standard auth failures (see [Errors](#errors)). The `WriteAll` permission covers this write. | Send a valid token whose roles permit the write. |
 | `404` | No environment with `{environment_id}` in the caller's tenant (row-level security returns not-found for another tenant's env, never leaking its existence). | Deploy an environment id the caller's tenant owns. |
 | `409` | A deploy is already in flight for this environment (`a deploy is already in progress for this environment`); the claim is held. | Poll `GET /v1/environments/{id}` until it leaves `provisioning`, or wait out the 45-minute stale window if the holder crashed. |
+| `409` | The tenant's `<tenant>-devops:<version>` runtime image is confirmed absent from `ghcr.io` (see [`POST /v1/environments`](#post-v1environments)'s "Published runtime image precondition"). Unlike the create path, the claim already moved the row to `provisioning`, so this endpoint also marks it `failed` with the reason before responding — otherwise the environment would be stranded in `provisioning` with no workflow left to ever move it out. | Publish the image and retry. |
 | `501` | The deploy executor is not configured (`the deploy executor is not configured`) — the backend has no durable-workflow database, kube client, or deployer ServiceAccount. | Enable `api.envDeployer.enabled` on the backend chart. |
 | `500` | The claim write failed, or the durable workflow could not be enqueued (`failed to start deploy`). The claim is taken **before** the workflow starts, so this leaves the environment at `provisioning` with nothing running; it becomes re-deployable once the stale window elapses. | Retry after the stale window; if it persists, it is a server bug. |
 
@@ -675,27 +684,65 @@ Omitting `issuer`/`subject` enrolls a username with **no external identity yet**
 
 ### `PUT /v1/tenants/{tenant_id}/quota` {#put-v1tenantstenant_idquota}
 
-Sets a tenant's **environment-count cap** — the per-tenant override the [`POST /v1/environments`](#post-v1environments) quota guardrail enforces. **Operations-only**, like tenant registration: the caller's resolved tenant must be `OPERATIONS`, because it writes another tenant's `tenant_quotas` row (the operations role's RLS policy permits cross-tenant writes; the row's `tenant_id` is set explicitly to the path's `{tenant_id}`, not the operations caller's own tenant). The write upserts, so it both creates and updates the cap.
+Sets a tenant's full quota row — the environment-count cap the [`POST /v1/environments`](#post-v1environments) quota guardrail enforces, plus the per-environment CPU/memory/storage namespace ceiling. **Operations-only**, like tenant registration: the caller's resolved tenant must be `OPERATIONS`, because it writes another tenant's `tenant_quotas` row (the operations role's RLS policy permits cross-tenant writes; the row's `tenant_id` is set explicitly to the path's `{tenant_id}`, not the operations caller's own tenant). The write **fully replaces** the row — it is not a merge, so every field is required on every call.
 
 ```jsonc
 // PUT /v1/tenants/019a7fa5-…/quota body
-{ "maxEnvironments": 50 }   // required — the cap (>= 0); 0 blocks all new environments
+{
+  "maxEnvironments": 50,      // required — the env-count cap (>= 0); 0 blocks all new environments
+  "maxCpuMillicores": 4000,   // required — per-environment namespace CPU ceiling in millicores (> 0)
+  "maxMemoryMb": 9216,        // required — per-environment namespace memory ceiling in MiB (> 0)
+  "maxStorageGb": 80          // required — per-environment namespace storage ceiling in GiB (> 0)
+}
 
 // 200 response
 {
   "tenantId": "019a7fa5-c2c0-7c55-bc70-714873a71f50",
   "maxEnvironments": 50,
+  "maxCpuMillicores": 4000,
+  "maxMemoryMb": 9216,
+  "maxStorageGb": 80,
   "createdAt": "2026-06-24T10:00:00Z",
   "updatedAt": "2026-06-24T10:05:00Z"
 }
 ```
 
+**What the resource caps mean.** `maxCpuMillicores`/`maxMemoryMb`/`maxStorageGb` are a **per-environment namespace ceiling**, not an aggregate tenant budget: every `runtime` environment this tenant provisions gets its own Kubernetes `ResourceQuota` + `LimitRange` capped at these same values (see [Quotas](/concepts/hosted-platform#quotas)), so a tenant with ten environments can use up to this cap in *each* of the ten namespaces, not this cap split across all ten. Absent a `tenant_quotas` row, a tenant gets the default cap: `maxEnvironments: 10`, `maxCpuMillicores: 4000`, `maxMemoryMb: 9216`, `maxStorageGb: 80` — sized to fit the `erun-devops` chart's own default runtime pod (cpu limit `4`, memory limit `8916Mi`) plus its three default PVCs (`2Gi + 50Gi + 20Gi = 72Gi`).
+
 **Error behaviour.** Today the API returns a bare HTTP status with a plain-text body (no JSON envelope):
 
 | Status | Condition | Recovery |
 |---|---|---|
-| `400` | `tenant_id` is empty, `maxEnvironments` is negative, or the body is not valid JSON. | Send a non-negative `maxEnvironments`. |
+| `400` | `tenant_id` is empty, `maxEnvironments` is negative, any of `maxCpuMillicores`/`maxMemoryMb`/`maxStorageGb` is `<= 0` (a PUT replaces the whole row, so these must be sent explicitly on every call), or the body is not valid JSON. | Send a non-negative `maxEnvironments` and positive resource caps. |
 | `403` | The caller's resolved tenant is not an `OPERATIONS` tenant (the explicit operations gate). | Call from an operations-tenant token. |
+
+### `GET /v1/usage-events` {#get-v1usage-events}
+
+Lists the caller's tenant's metering events, most recent first — the usage-metering hook for hosted environments. Read-only: events are recorded automatically by the provisioning/lifecycle workflows on a successful deploy, stop, or delete, never written directly by a route.
+
+```jsonc
+// 200 response
+[
+  {
+    "usageEventId": "019a7fa5-c2c0-7c55-bc70-714873a71f60",
+    "tenantId": "019a7fa5-c2c0-7c55-bc70-714873a71f10",
+    "environmentId": "019a7fa5-c2c0-7c55-bc70-714873a71f30",
+    "eventType": "environment_provisioned",   // "environment_provisioned" | "environment_stopped" | "environment_deleted"
+    "cpuMillicores": 4000,    // the namespace cap applied at the time — only "environment_provisioned" carries these
+    "memoryMb": 9216,
+    "storageGb": 80,
+    "createdAt": "2026-06-24T10:00:00Z"
+  }
+]
+```
+
+`environmentId` is set `null` if the environment was later deleted — the append-only metering trail outlives the row it described (the FK is `ON DELETE SET NULL`, not a hard reference), so `eventType`/`createdAt`/the tenant's own scope still say what happened even after the environment is gone. `environment_stopped`/`environment_deleted` events carry no resource-cap fields, since they do not apply a namespace cap.
+
+**Error behaviour.**
+
+| Status | Condition | Recovery |
+|---|---|---|
+| `401` / `403` | Standard auth failures (see [Errors](#errors)). | Send a valid token. |
 
 ### Service-account flow for Agents
 

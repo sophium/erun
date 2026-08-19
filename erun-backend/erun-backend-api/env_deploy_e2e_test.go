@@ -1,10 +1,13 @@
 package backendapi
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,7 +19,12 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/portforward"
+	"k8s.io/client-go/transport/spdy"
+
+	eruncommon "github.com/sophium/erun/erun-common"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/provision"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
@@ -74,7 +82,7 @@ func envDeployE2EFromEnv(t *testing.T) envDeployE2E {
 // `running` naming the version it deployed.
 func TestDeployEnvironmentEndToEnd(t *testing.T) {
 	config := envDeployE2EFromEnv(t)
-	srv, db, kube := startEnvDeployAPI(t, config, "erun-env-deploy-e2e")
+	srv, db, kube, kubeConfig := startEnvDeployAPI(t, config, "erun-env-deploy-e2e")
 
 	tenant := e2eTenantName(t, srv.URL)
 	// Registered without a pinned version, so nothing deploys on create and the
@@ -90,15 +98,113 @@ func TestDeployEnvironmentEndToEnd(t *testing.T) {
 	}
 
 	awaitEnvironmentRunning(t, srv.URL, environmentID, config.version)
+	namespace := tenant + "-prod"
 	assertRuntimeChartInstalled(t, kube, tenant)
+	assertMCPReachable(t, kubeConfig, kube, namespace, tenant)
 	assertRedeployReruns(t, kube, srv.URL, config, environmentID)
 	assertDeployRejectedWhileInFlight(t, db, srv.URL, environmentID, config.version)
+	// Teardown last: this is the full lifecycle #605's e2e gate asks for — a
+	// provisioned env reaching Running with its MCP reachable, then torn down.
+	assertEnvironmentTornDown(t, srv.URL, kube, environmentID, namespace)
+}
+
+// assertMCPReachable proves the per-env MCP edge (erun-devops/AGENTS.md: it
+// runs inside the runtime container, sharing its toolchain) is actually
+// serving requests, not just that a pod landed. It port-forwards to the
+// runtime pod's MCP port and drives a real JSON-RPC `initialize` call — the
+// same handshake `erun-mcp/AGENTS.md`'s in-pod diagnostic recipe uses.
+func assertMCPReachable(t *testing.T, kubeConfig *rest.Config, kube kubernetes.Interface, namespace, tenant string) {
+	t.Helper()
+	ctx := context.Background()
+	releaseName := tenant + "-devops"
+	pods, err := kube.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: "app=" + releaseName})
+	mustNoErr(t, err, "list runtime pods")
+	if len(pods.Items) == 0 {
+		t.Fatalf("no runtime pod found in %s for app=%s", namespace, releaseName)
+	}
+	podName := pods.Items[0].Name
+
+	localPort := forwardToPod(t, kubeConfig, kube, namespace, podName, eruncommon.LowerServicePort)
+
+	initBody := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"erun-e2e","version":"1.0.0"}}}`
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/mcp", localPort), bytes.NewBufferString(initBody))
+	mustNoErr(t, err, "build mcp initialize request")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	mustNoErr(t, err, "call mcp initialize")
+	defer func() { _ = resp.Body.Close() }()
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("mcp initialize: HTTP %d: %s", resp.StatusCode, respBody)
+	}
+	if resp.Header.Get("Mcp-Session-Id") == "" {
+		t.Fatalf("mcp initialize response carries no Mcp-Session-Id header: %s", respBody)
+	}
+}
+
+// forwardToPod opens a client-go SPDY port-forward to the pod's targetPort and
+// returns the local port it picked, cleaned up when the test ends.
+func forwardToPod(t *testing.T, kubeConfig *rest.Config, kube kubernetes.Interface, namespace, podName string, targetPort int) int {
+	t.Helper()
+	transport, upgrader, err := spdy.RoundTripperFor(kubeConfig)
+	mustNoErr(t, err, "build spdy round tripper")
+	req := kube.CoreV1().RESTClient().Post().Resource("pods").Namespace(namespace).Name(podName).SubResource("portforward")
+	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, http.MethodPost, req.URL())
+
+	stopCh := make(chan struct{})
+	readyCh := make(chan struct{})
+	t.Cleanup(func() { close(stopCh) })
+
+	fw, err := portforward.New(dialer, []string{fmt.Sprintf("0:%d", targetPort)}, stopCh, readyCh, io.Discard, io.Discard)
+	mustNoErr(t, err, "build port forwarder")
+	go func() {
+		if err := fw.ForwardPorts(); err != nil {
+			t.Logf("port-forward to %s/%s:%d ended: %v", namespace, podName, targetPort, err)
+		}
+	}()
+	select {
+	case <-readyCh:
+	case <-time.After(30 * time.Second):
+		t.Fatalf("port-forward to %s/%s:%d never became ready", namespace, podName, targetPort)
+	}
+	ports, err := fw.GetPorts()
+	mustNoErr(t, err, "get forwarded ports")
+	if len(ports) != 1 {
+		t.Fatalf("forwarded ports = %+v, want exactly one", ports)
+	}
+	return int(ports[0].Local)
+}
+
+// assertEnvironmentTornDown drives the stop then delete lifecycle endpoints —
+// #605's acceptance criterion ends with "tear it down" — and confirms the
+// namespace is actually gone, not just that the API answered.
+func assertEnvironmentTornDown(t *testing.T, baseURL string, kube kubernetes.Interface, environmentID, namespace string) {
+	t.Helper()
+	code, body := e2eRequest(t, baseURL, http.MethodPost, "/v1/environments/"+environmentID+"/stop", nil)
+	if code != http.StatusOK {
+		t.Fatalf("stop: HTTP %d (want 200): %s", code, body)
+	}
+	code, body = e2eRequest(t, baseURL, http.MethodDelete, "/v1/environments/"+environmentID, nil)
+	if code != http.StatusNoContent {
+		t.Fatalf("delete: HTTP %d (want 204): %s", code, body)
+	}
+	ctx := context.Background()
+	deadline := time.Now().Add(2 * time.Minute)
+	for time.Now().Before(deadline) {
+		if _, err := kube.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{}); err != nil {
+			return // namespace gone (NotFound), teardown confirmed
+		}
+		time.Sleep(3 * time.Second)
+	}
+	t.Fatalf("namespace %s still exists after delete", namespace)
 }
 
 // startEnvDeployAPI wires the API the way the control plane runs it — real
 // Kubernetes client, real Postgres, real durable workflow — and hands back the
 // pieces a scenario asserts against.
-func startEnvDeployAPI(t *testing.T, config envDeployE2E, appName string) (*httptest.Server, *sql.DB, kubernetes.Interface) {
+func startEnvDeployAPI(t *testing.T, config envDeployE2E, appName string) (*httptest.Server, *sql.DB, kubernetes.Interface, *rest.Config) {
 	t.Helper()
 
 	kubeConfig, err := clientcmd.BuildConfigFromFlags("", config.kubeconfig)
@@ -136,7 +242,7 @@ func startEnvDeployAPI(t *testing.T, config envDeployE2E, appName string) (*http
 
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
-	return srv, db, kube
+	return srv, db, kube, kubeConfig
 }
 
 // TestDeployEnvironmentRecordsAnUnpullableChart is the failure this hardening
@@ -157,7 +263,7 @@ func TestDeployEnvironmentRecordsAnUnpullableChart(t *testing.T) {
 	if version == "" {
 		t.Skip("ERUN_E2E_ENV_DEPLOY_UNPUBLISHED_VERSION is required: a version whose <tenant>-devops image is pullable but whose runtime chart is not published")
 	}
-	srv, _, kube := startEnvDeployAPI(t, config, "erun-env-deploy-chart-gap-e2e")
+	srv, _, kube, _ := startEnvDeployAPI(t, config, "erun-env-deploy-chart-gap-e2e")
 
 	environmentID := e2eRegisterEnvironment(t, srv.URL, "chartgap")
 	t.Cleanup(func() { deleteDeployJobs(t, kube, config.namespace, environmentID) })

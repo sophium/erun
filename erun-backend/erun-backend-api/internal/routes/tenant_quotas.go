@@ -2,6 +2,7 @@ package routes
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -9,18 +10,28 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
-// TenantQuotaWriter sets a tenant's environment-count cap (the per-tenant
-// override the quota guardrail enforces on env registration).
+// TenantQuotaWriter sets a tenant's caps (env count plus the per-environment
+// CPU/memory/storage namespace ceiling the quota guardrail enforces on env
+// registration and provisioning).
 type TenantQuotaWriter interface {
-	Set(ctx context.Context, tenantID string, maxEnvironments int) (model.TenantQuota, error)
+	Set(ctx context.Context, tenantID string, quota model.TenantQuota) (model.TenantQuota, error)
 }
 
 type TenantQuotaRoutes struct {
 	quotas TenantQuotaWriter
 }
 
+// setTenantQuotaRequest carries every cap explicitly: a PUT always fully
+// replaces the row, never merges. maxEnvironments may be 0 (a real "no
+// environments" cap, matching its pre-existing validation); the three
+// resource caps must be positive — 0 has no sane operational meaning for a
+// namespace ResourceQuota and almost always means the caller omitted the
+// field rather than intending to allow nothing.
 type setTenantQuotaRequest struct {
-	MaxEnvironments int `json:"maxEnvironments"`
+	MaxEnvironments  int `json:"maxEnvironments"`
+	MaxCPUMillicores int `json:"maxCpuMillicores"`
+	MaxMemoryMB      int `json:"maxMemoryMb"`
+	MaxStorageGB     int `json:"maxStorageGb"`
 }
 
 func RegisterTenantQuotaRoute(register ProtectedRouteRegistrar, quotas TenantQuotaWriter) {
@@ -50,14 +61,33 @@ func (r TenantQuotaRoutes) setQuota(w http.ResponseWriter, req *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if body.MaxEnvironments < 0 {
-		writeError(w, http.StatusBadRequest, "maxEnvironments must be >= 0")
+	if err := validateSetTenantQuotaRequest(body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	quota, err := r.quotas.Set(req.Context(), tenantID, body.MaxEnvironments)
+	quota, err := r.quotas.Set(req.Context(), tenantID, model.TenantQuota{
+		MaxEnvironments:  body.MaxEnvironments,
+		MaxCPUMillicores: body.MaxCPUMillicores,
+		MaxMemoryMB:      body.MaxMemoryMB,
+		MaxStorageGB:     body.MaxStorageGB,
+	})
 	if err != nil {
 		writeRepositoryError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, quota)
+}
+
+func validateSetTenantQuotaRequest(body setTenantQuotaRequest) error {
+	switch {
+	case body.MaxEnvironments < 0:
+		return errors.New("maxEnvironments must be >= 0")
+	case body.MaxCPUMillicores <= 0:
+		return errors.New("maxCpuMillicores must be > 0: a PUT fully replaces the quota row, so it must be sent explicitly on every request")
+	case body.MaxMemoryMB <= 0:
+		return errors.New("maxMemoryMb must be > 0: a PUT fully replaces the quota row, so it must be sent explicitly on every request")
+	case body.MaxStorageGB <= 0:
+		return errors.New("maxStorageGb must be > 0: a PUT fully replaces the quota row, so it must be sent explicitly on every request")
+	}
+	return nil
 }
