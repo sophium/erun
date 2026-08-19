@@ -185,6 +185,7 @@ func TestHTTPHandlerExposesVersionTool(t *testing.T) {
 		"cloud_clear_aws_credentials",
 		"cloud_init_aws",
 		"cloud_init_cloudflare",
+		"cloud_init_erun",
 		"cloud_inject_aws_credentials",
 		"cloud_list",
 		"cloud_login",

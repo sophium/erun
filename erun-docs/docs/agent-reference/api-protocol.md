@@ -88,11 +88,12 @@ When no trust anchor is configured the edge stays loopback-only (legacy, unauthe
 ### Endpoints
 
 :::note Shipped vs planned
-The `(iss, org) → tenant` resolution model and first-identity bootstrap above are **shipped**, as are `GET /v1/whoami`, `GET /v1/tenant-issuers` (list), and `PATCH /v1/tenant-issuers` (rename a trusted issuer's display name). New tenants and their issuer mapping can be registered through the operations-only `POST /v1/tenants` below; for an existing tenant, additional issuers and their org-scoping mode are still provisioned directly in the `issuers` / `tenant_issuers` tables (migrations or the bootstrap path), not via a tenant-self-service endpoint. A tenant-self-service **trust-management** API (a tenant adding/removing its own issuers with `audience`/`tenantClaim`/`allowedSubjects`, and the `409`/`422` codes below) is `(Planned.)`, as is the structured machine-readable error `code` field — today the API returns bare HTTP status codes with a plain-text body (see [Errors](#errors) below).
+The `(iss, org) → tenant` resolution model and first-identity bootstrap above are **shipped**, as are `GET /v1/whoami`, `GET /v1/tenant-issuers` (list), and `PATCH /v1/tenant-issuers` (rename a trusted issuer's display name). New tenants and their issuer mapping can be registered through the operations-only `POST /v1/tenants` below; for an existing tenant, additional issuers and their org-scoping mode are still provisioned directly in the `issuers` / `tenant_issuers` tables (migrations or the bootstrap path), not via a tenant-self-service endpoint. `POST /v1/users` enrolls additional users beyond the first-user bootstrap. A tenant-self-service **trust-management** API (a tenant adding/removing its own issuers with `audience`/`tenantClaim`/`allowedSubjects`, and the `409`/`422` codes below) is `(Planned.)`, as is the structured machine-readable error `code` field — today the API returns bare HTTP status codes with a plain-text body (see [Errors](#errors) below).
 :::
 
 | Method | Path | Description | Required scope |
 |---|---|---|---|
+| `GET` | `/v1/platform` | Unauthenticated self-discovery: this instance's own `issuer`, `apiUrl`, `consoleUrl`, OIDC client ids, and `brand`. Response below. | None — no bearer required |
 | `GET` | `/v1/tenant-issuers` | List all issuers trusted by the caller's tenant. | Tenant member |
 | `PATCH` | `/v1/tenant-issuers` | Rename a trusted issuer's display name. Body below. | Tenant admin |
 | `GET` | `/v1/whoami` | Resolved identity for the calling token. Response below. | Tenant member |
@@ -109,8 +110,48 @@ The `(iss, org) → tenant` resolution model and first-identity bootstrap above 
 | `PUT` | `/v1/cloud-provider-aliases/{alias}` | Register/update the tenant's BYO-cloud credentials (encrypted at rest), resolved when provisioning a context. Body below. | Tenant member (write) |
 | `POST` | `/v1/provision` | Return the complete, ordered **plan** to provision a hosted env (quota check → context bootstrap → namespace → env registration → runtime deploy) for the caller's tenant. Preview-only; no execution, no writes. Body below. | Tenant member (write) |
 | `POST` | `/v1/tenants` | Register a new tenant plus its OIDC issuer mapping. Operations-only. Body below. | Operations only |
+| `POST` | `/v1/users` | Enroll a user in the caller's tenant, or — operations-only — an explicitly named other tenant. Body below. | Tenant member (write); cross-tenant needs Operations |
+| `GET` | `/v1/users` | List the caller's tenant's users, or — operations-only — an explicitly named other tenant's via `?tenantId=`. | Tenant member (read); cross-tenant needs Operations |
 
 `GET /v1/config` is the console's read model over the per-tenant erun config — the backend DB is the system of record for the tenant's environments and cloud contexts, and this endpoint returns them denormalized as the on-disk erun config shape. All of these reads are tenant-scoped by row-level security, so a token only ever sees its own tenant's rows.
+
+### `GET /v1/platform`
+
+Unauthenticated — this is what a client discovers **before** it has a token: this instance's own issuer, API/console URLs, the OIDC client ids to authenticate with, and its display brand. Registered outside the auth middleware, directly on the mux next to `/healthz`. No instance's name is ever hardcoded in a client; this endpoint is how one discovers it.
+
+```jsonc
+{
+  "issuer": "https://auth.erunpaas.com",
+  "apiUrl": "https://api.frs-prod.services.erunpaas.com",
+  "consoleUrl": "https://console.frs-prod.services.erunpaas.com",
+  "consoleClientId": "12345@erun-platform",
+  "cliClientId": "67890@erun-platform",
+  "brand": ""
+}
+```
+
+Every field is optional and independently sourced. `issuer`/`apiUrl`/`consoleUrl`/`brand` come from the env's [`platform:` block](/reference/configuration#platform-block) (threaded in at deploy via `--set-string platform.*`); an unset value renders as an empty string, **never** an error or a missing field. `consoleClientId`/`cliClientId` come from the `erun-zitadel` chart's OIDC application bootstrap (see [below](#zitadel-oidc-bootstrap)) via an optional ConfigMap — absent when that chart hasn't run, or on a platform with no hosted IdP, again rendering as `""` rather than failing the response.
+
+A caller (an `erun cloud init <platform-api-url>`-style flow) uses this response to then fetch `<issuer>/.well-known/openid-configuration` and proceed with the Device Authorization Grant (falling back to Authorization Code + PKCE when the issuer advertises no device endpoint) against `cliClientId`. See the [erun cloud provider](#erun-cloud-provider) section below.
+
+Errors: none — the endpoint has no input to validate and performs no authentication, so it always returns `200`.
+
+#### Zitadel OIDC application bootstrap {#zitadel-oidc-bootstrap}
+
+The `erun-zitadel` chart provisions the two OIDC applications `consoleClientId`/`cliClientId` above resolve to, idempotently, via a sidecar in the same pod as Zitadel core (it needs the shared bootstrap volume to read the org-owner PAT core writes):
+
+- **`erun-console`** — a `OIDC_APP_TYPE_USER_AGENT` (SPA) app, Authorization Code + PKCE, redirect/post-logout URI derived from the env's `platform.consoleUrl`.
+- **`erun-cli`** — a `OIDC_APP_TYPE_NATIVE` (public) app supporting both the Device Authorization Grant (`OIDC_GRANT_TYPE_DEVICE_CODE`) and Authorization Code + PKCE with loopback redirect URIs (`http://127.0.0.1/callback`, `http://localhost/callback`).
+
+Both are configured with `accessTokenType: OIDC_TOKEN_TYPE_JWT` — load-bearing, since erun's bearer verifier validates a JWT via OIDC discovery + JWKS and rejects Zitadel's default opaque access token with `401 invalid bearer token`. The sidecar publishes the resulting client ids to a `<tenant>-zitadel-oidc-clients` ConfigMap in the release namespace, which the `erun-backend-api` chart reads via an optional `configMapKeyRef` (`optional: true` — absent ConfigMap, absent env var, empty string in the `/v1/platform` response above).
+
+#### erun cloud provider {#erun-cloud-provider}
+
+`erun-common` models a hosted erun platform as a fourth cloud provider type (`CloudProviderERun = "erun"`, alongside `aws` and `cloudflare`) — this is how an operator or Agent authenticates to a hosted erun platform with the `erun` CLI/MCP transports (landing in a later stage on top of this API surface):
+
+- **Init** (`InitERunCloudProvider`) calls `GET /v1/platform` then the issuer's `.well-known/openid-configuration`, and records the alias, API URL, issuer, and `cliClientId` — no sign-in yet.
+- **Login** tries the Device Authorization Grant first (the only flow that works with no browser, e.g. from inside a pod): it surfaces `user_code` and `verification_uri_complete` and polls the token endpoint honoring `authorization_pending`/`slow_down`/`expired_token`. When the issuer's discovery advertises no device endpoint, it falls back to Authorization Code + PKCE on a loopback listener.
+- The refresh token is persisted through the same `CloudSecretStore`/`TokenRef` pattern the Cloudflare provider uses — the secret never lands in `erun-config.yaml` — and the access token is cached with its expiry, refreshed silently via the `refresh_token` grant when it expires.
 
 ### `GET /v1/whoami`
 
@@ -525,6 +566,59 @@ The three identity rows — the `tenants` row, the `issuers` registry row (the g
 | `400` | `name` is empty or contains anything other than lowercase letters and digits (no hyphens — so the `<tenant>-<env>` namespace stays injective), `issuer` is empty/missing, `type` is not one of `COMPANY`/`OPERATIONS`, or the body is not valid JSON. | Send a hyphen-free lowercase-alphanumeric `name`, a non-empty `issuer`, and a valid `type`. |
 | `403` | The caller's resolved tenant is not an `OPERATIONS` tenant (the explicit operations gate, beyond the standard auth failures in [Errors](#errors)). | Call from an operations-tenant token whose roles permit the write. |
 | `500` | Persistence failed — e.g. the tenant `name` or the `(issuer, org_field_value)` mapping already exists (a uniqueness violation), or the request-scoped security context is missing (an internal wiring error). | Use a unique tenant name and issuer mapping; if it persists with unique inputs, it is a server bug. |
+
+### `POST /v1/users` and `GET /v1/users`
+
+Enrolls or lists users. Today the **only** other way a user comes to exist is the per-tenant first-user bootstrap (see [above](#tenant-issuers)) — this endpoint is how an authorized caller enrolls additional users beyond that first one.
+
+Both act on the caller's own resolved tenant by default. An explicit `tenantId` (body field for the `POST`, `?tenantId=` query param for the `GET`) targets a **different** tenant, and is honored only when the caller's resolved tenant is `OPERATIONS` — the same cross-tenant precedent as [`PUT /v1/tenants/{tenant_id}/quota`](#put-v1tenantstenant_idquota): a non-operations caller naming another tenant is rejected with `403` before any read or write.
+
+```jsonc
+// POST /v1/users body
+{
+  "username": "alice",              // required
+  "issuer": "https://idp.example",  // optional — links the external identity so the enrollee can actually sign in
+  "subject": "alice@idp.example",   // optional — required together with issuer
+  "tenantId": "019a…"               // optional — operations-only cross-tenant target
+}
+
+// 201 response
+{
+  "userId": "019a7fa5-c2c0-7c55-bc70-714873a71f60",
+  "tenantId": "019a7fa5-c2c0-7c55-bc70-714873a71f10",
+  "username": "alice",
+  "issuer": "https://idp.example",
+  "subject": "alice@idp.example",
+  "createdAt": "2026-06-24T10:00:00Z",
+  "updatedAt": "2026-06-24T10:00:00Z"
+}
+```
+
+Omitting `issuer`/`subject` enrolls a username with **no external identity yet** — the row exists, but no token can resolve to it until one is linked, and there is no separate endpoint to link one after the fact in this build. Enrollment grants the same predefined `ReadAll`/`WriteAll` roles every bootstrapped user gets — there is no finer-grained role-assignment surface yet.
+
+```jsonc
+// GET /v1/users?tenantId=019a… (operations-only cross-tenant; omit tenantId for the caller's own tenant)
+// 200 response
+[
+  {
+    "userId": "019a7fa5-c2c0-7c55-bc70-714873a71f60",
+    "tenantId": "019a7fa5-c2c0-7c55-bc70-714873a71f10",
+    "username": "alice",
+    "issuer": "https://idp.example",
+    "subject": "alice@idp.example",
+    "createdAt": "2026-06-24T10:00:00Z",
+    "updatedAt": "2026-06-24T10:00:00Z"
+  }
+]
+```
+
+**Error behaviour.** Today the API returns a bare HTTP status with a plain-text body (no JSON envelope):
+
+| Status | Condition | Recovery |
+|---|---|---|
+| `400` | `username` is empty, or the body is not valid JSON. | Send a non-empty `username`. |
+| `403` | `tenantId` (or `?tenantId=`) names a different tenant than the caller's own, and the caller's resolved tenant is not `OPERATIONS`. | Omit `tenantId` to act on your own tenant, or call from an operations-tenant token. |
+| `409` | `POST /v1/users`: a user with that `username` already exists in the target tenant (`users_tenant_username_key`). | Use a different username, or omit `tenantId` if you meant your own tenant. |
 
 ### `PUT /v1/tenants/{tenant_id}/quota` {#put-v1tenantstenant_idquota}
 

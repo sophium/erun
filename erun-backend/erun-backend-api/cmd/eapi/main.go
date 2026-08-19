@@ -21,6 +21,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/mcptoken"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/provision"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/routes"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/secrets"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -79,6 +80,14 @@ func run(args []string) error {
 			RepoPath:       cfg.ReleaseRepoPath,
 			DryRun:         cfg.ReleaseDryRun,
 		},
+		Platform: routes.PlatformInfo{
+			Issuer:          cfg.PlatformIssuer,
+			APIURL:          cfg.PlatformAPIURL,
+			ConsoleURL:      cfg.PlatformConsoleURL,
+			ConsoleClientID: cfg.PlatformConsoleClientID,
+			CLIClientID:     cfg.PlatformCLIClientID,
+			Brand:           cfg.PlatformBrand,
+		},
 	})
 	if err != nil {
 		return err
@@ -113,6 +122,12 @@ func resolveConfig(args []string) (apiConfig, error) {
 	flags.StringVar(&cfg.AllowedIssuers, "oidc-allowed-issuers", cfg.AllowedIssuers, "Comma-separated OIDC issuer allow-list; empty allows any issuer resolved from a token")
 	flags.StringVar(&cfg.DesktopPublicKeyPath, "desktop-public-key-path", cfg.DesktopPublicKeyPath, "Path to the desktop Ed25519 public key; when set, the API trusts file://<path> desktop-signed tokens (issue #674), the same auth the MCP edge uses")
 	flags.StringVar(&cfg.MCPSigningKeyPath, "mcp-signing-key-path", cfg.MCPSigningKeyPath, "Path to the backend's Ed25519 MCP signing private key; when set, the mcp-token endpoint mints per-env MCP bearer tokens for the console (unset disables it: the endpoint reports 501)")
+	flags.StringVar(&cfg.PlatformIssuer, "platform-issuer", cfg.PlatformIssuer, "This instance's OIDC issuer URL, served unauthenticated at GET /v1/platform")
+	flags.StringVar(&cfg.PlatformAPIURL, "platform-api-url", cfg.PlatformAPIURL, "This instance's own API base URL, served unauthenticated at GET /v1/platform")
+	flags.StringVar(&cfg.PlatformConsoleURL, "platform-console-url", cfg.PlatformConsoleURL, "This instance's hosted console URL, served unauthenticated at GET /v1/platform")
+	flags.StringVar(&cfg.PlatformConsoleClientID, "platform-console-client-id", cfg.PlatformConsoleClientID, "The OIDC client id the hosted console authenticates with, served unauthenticated at GET /v1/platform")
+	flags.StringVar(&cfg.PlatformCLIClientID, "platform-cli-client-id", cfg.PlatformCLIClientID, "The OIDC client id an erun CLI/agent authenticates with, served unauthenticated at GET /v1/platform")
+	flags.StringVar(&cfg.PlatformBrand, "platform-brand", cfg.PlatformBrand, "This instance's display name, served unauthenticated at GET /v1/platform")
 	if err := flags.Parse(args); err != nil {
 		return apiConfig{}, err
 	}
@@ -237,6 +252,18 @@ type apiConfig struct {
 	ReleaseWorkspaceClaim string
 	ReleaseRepoPath       string
 	ReleaseDryRun         bool
+	// Platform is this instance's own self-describing config, served
+	// unauthenticated at GET /v1/platform so a client can discover it (issuer,
+	// API/console URLs, OIDC client ids, brand) before it has a token. Every
+	// field is optional; an absent value renders as an empty string, never an
+	// error. ConsoleClientID/CLIClientID are typically sourced from the
+	// erun-zitadel bootstrap's published ConfigMap, threaded in by the chart.
+	PlatformIssuer          string
+	PlatformAPIURL          string
+	PlatformConsoleURL      string
+	PlatformConsoleClientID string
+	PlatformCLIClientID     string
+	PlatformBrand           string
 }
 
 func configFromEnv() apiConfig {
@@ -267,6 +294,13 @@ func configFromEnv() apiConfig {
 		ReleaseWorkspaceClaim: strings.TrimSpace(os.Getenv("ERUN_RELEASE_WORKSPACE_CLAIM")),
 		ReleaseRepoPath:       strings.TrimSpace(os.Getenv("ERUN_RELEASE_REPO_PATH")),
 		ReleaseDryRun:         strings.TrimSpace(os.Getenv("ERUN_RELEASE_DRY_RUN")) == "1",
+
+		PlatformIssuer:          strings.TrimSpace(os.Getenv("ERUN_PLATFORM_ISSUER")),
+		PlatformAPIURL:          strings.TrimSpace(os.Getenv("ERUN_PLATFORM_API_URL")),
+		PlatformConsoleURL:      strings.TrimSpace(os.Getenv("ERUN_PLATFORM_CONSOLE_URL")),
+		PlatformConsoleClientID: strings.TrimSpace(os.Getenv("ERUN_PLATFORM_CONSOLE_CLIENT_ID")),
+		PlatformCLIClientID:     strings.TrimSpace(os.Getenv("ERUN_PLATFORM_CLI_CLIENT_ID")),
+		PlatformBrand:           strings.TrimSpace(os.Getenv("ERUN_PLATFORM_BRAND")),
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 const (
 	CloudProviderAWS        = "aws"
 	CloudProviderCloudflare = "cloudflare"
+	CloudProviderERun       = "erun"
 
 	CloudProviderBearerAudience = "erun-api"
 
@@ -58,6 +59,10 @@ type CloudProviderConfig struct {
 	// scoped API token is never stored inline, only a reference to the secret
 	// store.
 	Cloudflare *CloudflareProviderConfig `json:"cloudflare,omitempty" yaml:"cloudflare,omitempty"`
+
+	// ERun is set only when Provider == CloudProviderERun; the refresh token is
+	// never stored inline, only a reference to the secret store.
+	ERun *ERunProviderConfig `json:"erun,omitempty" yaml:"erun,omitempty"`
 }
 
 // CloudflareProviderConfig is the Cloudflare-specific identity for a cloud
@@ -126,11 +131,21 @@ type CloudDependencies struct {
 	ResolveAWSIdentity      func(Context, string) (AWSIdentity, error)
 	CheckAWSStatus          func(Context, CloudProviderConfig) CloudProviderStatus
 
-	// CloudSecretStore is nil unless a transport wires one; Cloudflare operations
-	// that need it fail clearly when it is absent.
+	// CloudSecretStore is nil unless a transport wires one; Cloudflare and erun
+	// operations that need it fail clearly when it is absent.
 	VerifyCloudflareToken  func(Context, string) (CloudflareTokenInfo, error)
 	ListCloudflareAccounts func(Context, string) ([]CloudflareAccount, error)
 	CloudSecretStore       CloudSecretStore
+
+	// erun cloud provider: platform/OIDC discovery, the device authorization
+	// grant, the Authorization Code + PKCE fallback, and the refresh_token
+	// grant. See cloud_erun.go / cloud_erun_oidc.go.
+	FetchPlatformInfo            func(Context, string) (PlatformInfo, error)
+	FetchOIDCDiscovery           func(Context, string) (OIDCDiscovery, error)
+	StartERunDeviceAuthorization func(Context, OIDCDiscovery, string) (ERunDeviceAuthorization, error)
+	PollERunDeviceToken          func(Context, OIDCDiscovery, string, ERunDeviceAuthorization) (ERunTokens, error)
+	RunERunAuthCodeLogin         func(Context, OIDCDiscovery, string) (ERunTokens, error)
+	RefreshERunTokens            func(Context, OIDCDiscovery, string, string) (ERunTokens, error)
 }
 
 // CloudProviderCredentials is a snapshot of temporary AWS credentials derived
@@ -167,6 +182,11 @@ func NormalizeCloudProviderConfig(config CloudProviderConfig) CloudProviderConfi
 		config.Cloudflare.AccountID = strings.TrimSpace(config.Cloudflare.AccountID)
 		config.Cloudflare.TokenName = strings.TrimSpace(config.Cloudflare.TokenName)
 		config.Cloudflare.TokenRef = strings.TrimSpace(config.Cloudflare.TokenRef)
+	}
+	if config.ERun != nil {
+		config.ERun.APIURL = strings.TrimRight(strings.TrimSpace(config.ERun.APIURL), "/")
+		config.ERun.ClientID = strings.TrimSpace(config.ERun.ClientID)
+		config.ERun.RefreshTokenRef = strings.TrimSpace(config.ERun.RefreshTokenRef)
 	}
 	if config.Alias == "" && config.Provider != "" && config.Username != "" && config.AccountID != "" {
 		config.Alias = CloudProviderAlias(config.Username, config.AccountID, config.Provider)
@@ -353,6 +373,11 @@ func LoginCloudProviderAlias(ctx Context, store CloudStore, params CloudLoginPar
 	case CloudProviderCloudflare:
 		// Cloudflare has no interactive login; fall through to the token
 		// status re-check.
+	case CloudProviderERun:
+		// erunCloudProviderLogin resolves its own final status (it may have
+		// just persisted a new refresh token ref onto provider), so it returns
+		// directly rather than falling through to the stale pre-login value.
+		return erunCloudProviderLogin(ctx, store, provider, deps)
 	default:
 		return status, fmt.Errorf("unsupported cloud provider %q", provider.Provider)
 	}
@@ -375,6 +400,10 @@ func LogoutCloudProviderAlias(ctx Context, store CloudStore, params CloudLoginPa
 		// Cloudflare has no SSO session; "logout" removes the stored token so
 		// the alias keeps its identity but loses its credential.
 		if err := deleteCloudflareToken(ctx, provider, deps); err != nil {
+			return status, err
+		}
+	case CloudProviderERun:
+		if err := erunCloudProviderLogout(ctx, provider, deps); err != nil {
 			return status, err
 		}
 	default:
@@ -421,6 +450,8 @@ func CloudProviderBearerToken(ctx Context, store CloudReadStore, params CloudBea
 		return awsCloudProviderBearerToken(ctx, provider, params, deps)
 	case CloudProviderCloudflare:
 		return CloudBearerToken{}, ErrCloudProviderNoOIDC
+	case CloudProviderERun:
+		return erunCloudProviderBearerToken(ctx, provider, deps)
 	default:
 		return CloudBearerToken{}, fmt.Errorf("unsupported cloud provider %q", provider.Provider)
 	}
@@ -705,6 +736,9 @@ func CloudProviderTokenStatus(provider CloudProviderConfig, deps CloudDependenci
 	if provider.Provider == CloudProviderCloudflare {
 		return cloudflareCloudProviderTokenStatus(provider, deps)
 	}
+	if provider.Provider == CloudProviderERun {
+		return erunCloudProviderTokenStatus(provider, deps)
+	}
 	if provider.Provider != CloudProviderAWS {
 		return CloudProviderStatus{CloudProviderConfig: provider, Status: CloudTokenStatusUnknown, Message: "unsupported provider"}
 	}
@@ -832,6 +866,32 @@ func issuerFromJWT(token string) (string, error) {
 func normalizeCloudDependencies(deps CloudDependencies) CloudDependencies {
 	deps = normalizeAWSCloudDependencies(deps)
 	deps = normalizeCloudflareCloudDependencies(deps)
+	deps = normalizeERunCloudDependencies(deps)
+	return deps
+}
+
+// normalizeERunCloudDependencies leaves CloudSecretStore nil on purpose: only
+// a transport wires one, and erun operations that need it fail clearly when
+// it is absent (same convention as Cloudflare).
+func normalizeERunCloudDependencies(deps CloudDependencies) CloudDependencies {
+	if deps.FetchPlatformInfo == nil {
+		deps.FetchPlatformInfo = defaultFetchPlatformInfo
+	}
+	if deps.FetchOIDCDiscovery == nil {
+		deps.FetchOIDCDiscovery = defaultFetchOIDCDiscovery
+	}
+	if deps.StartERunDeviceAuthorization == nil {
+		deps.StartERunDeviceAuthorization = defaultStartERunDeviceAuthorization
+	}
+	if deps.PollERunDeviceToken == nil {
+		deps.PollERunDeviceToken = pollERunDeviceToken
+	}
+	if deps.RunERunAuthCodeLogin == nil {
+		deps.RunERunAuthCodeLogin = runERunAuthorizationCodeLogin
+	}
+	if deps.RefreshERunTokens == nil {
+		deps.RefreshERunTokens = defaultRefreshERunTokens
+	}
 	return deps
 }
 

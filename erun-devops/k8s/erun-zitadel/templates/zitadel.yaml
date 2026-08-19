@@ -127,6 +127,58 @@
 {{- $zitadelImage := default (printf "%s/erun-zitadel:v4.15.3" $containerRegistry) (index $imageOverrides "erun-zitadel") -}}
 {{- $loginImage := default (printf "%s/erun-zitadel-login:v4.15.3" $containerRegistry) (index $imageOverrides "erun-zitadel-login") -}}
 {{- $postgresImage := default (printf "%s/erun-backend-postgres:18.3" $containerRegistry) (index $imageOverrides "erun-backend-postgres") -}}
+{{- /* OIDC application bootstrap (#605): the console and an erun CLI/agent each
+       need a real OIDC client to authenticate against, and until now this chart
+       created only the two machine-user PATs, never an application. A sidecar
+       (not a hook Job) is what can reach the org-owner PAT: it lives on the
+       shared bootstrap emptyDir inside this pod, which a separate Job cannot
+       mount. It reuses the erun-devops runtime image (curl + jq + kubectl
+       already baked in) rather than shipping a new one. It idempotently
+       ensures a project and two apps via the Management API over the core
+       container's loopback, both issuing JWT access tokens (erun's bearer
+       verifier rejects Zitadel's default opaque token), then publishes the
+       client ids to a ConfigMap the erun-backend-api chart reads optionally
+       (absent -> empty platform.*ClientId, never a failed deploy). It
+       reconciles on a timer rather than exiting, so a ConfigMap or app deleted
+       out of band is restored without a redeploy. */ -}}
+{{- $oidc := default dict $zitadel.oidc -}}
+{{- $oidcProjectName := default (printf "%s-platform" $tenant) $oidc.projectName -}}
+{{- $oidcConfigMapName := default (printf "%s-zitadel-oidc-clients" $tenant) $oidc.configMapName -}}
+{{- $oidcConsoleRedirectURI := default (default "" $platform.consoleUrl) $oidc.consoleRedirectUri -}}
+{{- $oidcBootstrapImage := default (printf "%s/erun-devops:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-devops") -}}
+{{- $oidcServiceAccount := printf "%s-zitadel" $tenant -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $oidcServiceAccount }}
+  labels:
+    app: {{ $tenant }}-zitadel
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $tenant }}-zitadel-oidc-bootstrap
+  labels:
+    app: {{ $tenant }}-zitadel
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $tenant }}-zitadel-oidc-bootstrap
+  labels:
+    app: {{ $tenant }}-zitadel
+subjects:
+  - kind: ServiceAccount
+    name: {{ $oidcServiceAccount }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $tenant }}-zitadel-oidc-bootstrap
+---
 apiVersion: v1
 kind: Secret
 metadata:
@@ -222,6 +274,7 @@ spec:
       labels:
         app: {{ $tenant }}-zitadel
     spec:
+      serviceAccountName: {{ $oidcServiceAccount }}
       securityContext:
         # The two containers hand the login-client PAT over through the shared
         # emptyDir, and they do not run as the same uid, so the volume is
@@ -406,6 +459,125 @@ spec:
               port: login
             periodSeconds: 5
             timeoutSeconds: 2
+          volumeMounts:
+            - name: bootstrap
+              mountPath: {{ $bootstrapDir }}
+              readOnly: true
+        - name: oidc-bootstrap
+          image: {{ $oidcBootstrapImage }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: CORE_PORT
+              value: {{ $corePort | quote }}
+            - name: PROJECT_NAME
+              value: {{ $oidcProjectName | quote }}
+            - name: CONSOLE_REDIRECT_URI
+              value: {{ $oidcConsoleRedirectURI | quote }}
+            - name: CONFIGMAP_NAME
+              value: {{ $oidcConfigMapName | quote }}
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              pat_file="{{ $bootstrapDir }}/admin-sa.pat"
+              echo "oidc-bootstrap: waiting for the org-owner PAT"
+              until [ -s "$pat_file" ]; do sleep 2; done
+              pat="$(cat "$pat_file")"
+              base="http://localhost:${CORE_PORT}"
+
+              call() {
+                curl -fsS -H "Authorization: Bearer ${pat}" -H 'Content-Type: application/json' "$@"
+              }
+
+              find_project_id() {
+                call -X POST "${base}/management/v1/projects/_search" -d '{}' \
+                  | jq -r --arg name "${PROJECT_NAME}" '.result[]? | select(.name == $name) | .id' | head -n1
+              }
+
+              ensure_project() {
+                id="$(find_project_id || true)"
+                if [ -n "${id:-}" ]; then
+                  echo "$id"
+                  return
+                fi
+                call -X POST "${base}/management/v1/projects" \
+                  -d "$(jq -n --arg name "${PROJECT_NAME}" '{name:$name}')" | jq -r '.id'
+              }
+
+              find_app_client_id() {
+                name=$1
+                app_id="$(call -X POST "${base}/management/v1/projects/${project_id}/apps/_search" -d '{}' \
+                  | jq -r --arg name "$name" '.result[]? | select(.name == $name) | .id' | head -n1)"
+                [ -n "$app_id" ] || return 1
+                call "${base}/management/v1/projects/${project_id}/apps/${app_id}" | jq -r '.app.oidcConfig.clientId'
+              }
+
+              ensure_console_app() {
+                cid="$(find_app_client_id erun-console || true)"
+                if [ -n "${cid:-}" ]; then
+                  echo "$cid"
+                  return
+                fi
+                if [ -z "${CONSOLE_REDIRECT_URI}" ]; then
+                  echo "oidc-bootstrap: platform.consoleUrl is not set; skipping the erun-console app" >&2
+                  echo ""
+                  return
+                fi
+                call -X POST "${base}/management/v1/projects/${project_id}/apps/oidc" -d "$(
+                  jq -n --arg redirect "${CONSOLE_REDIRECT_URI}" '{
+                    name: "erun-console",
+                    redirectUris: [$redirect],
+                    responseTypes: ["OIDC_RESPONSE_TYPE_CODE"],
+                    grantTypes: ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE"],
+                    appType: "OIDC_APP_TYPE_USER_AGENT",
+                    authMethodType: "OIDC_AUTH_METHOD_TYPE_NONE",
+                    postLogoutRedirectUris: [$redirect],
+                    accessTokenType: "OIDC_TOKEN_TYPE_JWT"
+                  }'
+                )" | jq -r '.clientId'
+              }
+
+              ensure_cli_app() {
+                cid="$(find_app_client_id erun-cli || true)"
+                if [ -n "${cid:-}" ]; then
+                  echo "$cid"
+                  return
+                fi
+                call -X POST "${base}/management/v1/projects/${project_id}/apps/oidc" -d '{
+                  "name": "erun-cli",
+                  "redirectUris": ["http://127.0.0.1/callback", "http://localhost/callback"],
+                  "responseTypes": ["OIDC_RESPONSE_TYPE_CODE"],
+                  "grantTypes": ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE", "OIDC_GRANT_TYPE_DEVICE_CODE"],
+                  "appType": "OIDC_APP_TYPE_NATIVE",
+                  "authMethodType": "OIDC_AUTH_METHOD_TYPE_NONE",
+                  "accessTokenType": "OIDC_TOKEN_TYPE_JWT"
+                }' | jq -r '.clientId'
+              }
+
+              reconcile() {
+                project_id="$(ensure_project)"
+                console_client_id="$(ensure_console_app)"
+                cli_client_id="$(ensure_cli_app)"
+                kubectl create configmap "${CONFIGMAP_NAME}" \
+                  --from-literal=consoleClientId="${console_client_id}" \
+                  --from-literal=cliClientId="${cli_client_id}" \
+                  --namespace "${POD_NAMESPACE}" \
+                  --dry-run=client -o yaml | kubectl apply -f -
+                echo "oidc-bootstrap: ready project=${project_id} console=${console_client_id} cli=${cli_client_id}"
+              }
+
+              reconcile
+              # Reconcile periodically rather than exiting, so an app or the
+              # ConfigMap deleted out of band is restored without a redeploy.
+              while true; do
+                sleep 300
+                reconcile || echo "oidc-bootstrap: reconcile failed, retrying next tick" >&2
+              done
           volumeMounts:
             - name: bootstrap
               mountPath: {{ $bootstrapDir }}

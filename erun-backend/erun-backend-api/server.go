@@ -58,6 +58,10 @@ type HandlerOptions struct {
 	// and the runtime image version. Unset leaves the release queue recording
 	// triggers without running them.
 	Release provision.ReleaseConfig
+	// Platform is this instance's own self-describing config, served
+	// unauthenticated at GET /v1/platform so a client can discover it before it
+	// has a token. Unset fields render as empty strings, never as an error.
+	Platform routes.PlatformInfo
 }
 
 func NewHandler(options HandlerOptions) (http.Handler, error) {
@@ -72,6 +76,10 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 
 	mux := http.NewServeMux()
 	registerHealthRoute(mux)
+	// A client needs this instance's own config (issuer, client ids, ...) before
+	// it has a token to authenticate with, so it is registered unauthenticated,
+	// directly on the mux, next to the health check.
+	routes.RegisterPlatformRoute(mux, options.Platform)
 	// The DNS-01 broker authenticates its own per-env M2M token (not a user OIDC
 	// token), so it is registered directly on the mux rather than behind the
 	// user-auth/authorize/audit middleware the protected routes use.
@@ -201,6 +209,7 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	routes.RegisterTenantQuotaRoute(register, tenantQuotas)
 	routes.RegisterConfigRoute(register, tenants, environments, contexts)
 	routes.RegisterProvisionRoute(register, tenants, environments, tenantQuotas)
+	routes.RegisterUserRoutes(register, repository.NewUserRepository(txManager))
 }
 
 // newEnvironmentProvisioner wires live env provisioning, which needs durable

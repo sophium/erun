@@ -167,6 +167,9 @@ The whole block is optional. An empty block means the project runs no platform d
 | `authhost` | string | no | The hosted-IdP host, served from the apex zone (not `serviceszone`). Default `auth.<basedomain>`. Must be a valid domain at or under `basedomain`. The `erun-zitadel` chart issues tokens for this origin, and a platform deploy adds `https://<authhost>` to the API's `ERUN_OIDC_ALLOWED_ISSUERS` so the control plane trusts its own IdP. |
 | `acmeemail` | string | no | The account email for this deployment's Let's Encrypt registration (LE rate limits are per registered domain, so each deployment uses its own account). |
 | `caaissuer` | string | no | CA domain the services zone authorizes via apex `CAA` records (`issue` + `issuewild`), e.g. `letsencrypt.org`. Empty (default) writes no CAA — any CA may issue. Opt-in because it must match the CA the cluster edge's ACME server uses; a mismatched CAA blocks issuance. When set, the `erun-powerdns` zone-bootstrap also gives per-env empty-non-terminal names a definitive CAA answer instead of an ambiguous `NODATA`. |
+| `apiurl` | string | no | This deployment's own API base URL, e.g. `https://api.frs-prod.services.erunpaas.com`. Served unauthenticated at [`GET /v1/platform`](/agent-reference/api-protocol#get-v1platform) so a client can discover it; an unset value renders as an empty string, never an error. |
+| `consoleurl` | string | no | This deployment's hosted web console URL. Same discovery contract as `apiurl`. |
+| `brand` | string | no | This deployment's display name, if set. Same discovery contract as `apiurl`. |
 
 ```yaml
 # <repo>/.erun/config.yaml
@@ -175,6 +178,8 @@ platform:
   env: frs-prod
   authoritativeip: 203.0.113.10
   caaissuer: letsencrypt.org   # optional; authorizes only this CA on the zone
+  apiurl: https://api.frs-prod.services.erunpaas.com     # optional; served at GET /v1/platform
+  consoleurl: https://console.frs-prod.services.erunpaas.com # optional; served at GET /v1/platform
   # serviceszone, authhost, and nameservers default from basedomain:
   #   serviceszone: services.erunpaas.com
   #   authhost:     auth.erunpaas.com

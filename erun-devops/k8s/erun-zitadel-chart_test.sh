@@ -67,14 +67,17 @@ document() {
 
 rendered=$(render)
 
-# --- 1. Two containers, because core has no login UI ---
+# --- 1. Three containers: core has no login UI, and a sidecar bootstraps the
+#        OIDC applications the console/CLI need (#605) ---
 names="${work_root}/containers.txt"
 container_names "${rendered}" >"${names}"
 grep -qx 'erun-zitadel' "${names}" || fail "the pod must run Zitadel core"
 grep -qx 'erun-zitadel-login' "${names}" ||
     fail "the pod must run the separate Login V2 container; core alone answers Not Found at /ui/v2/login"
-[ "$(wc -l <"${names}" | tr -d ' ')" = "2" ] ||
-    fail "the IdP pod is exactly core + login; anything else is a topology change"
+grep -qx 'oidc-bootstrap' "${names}" ||
+    fail "the pod must run the OIDC application bootstrap sidecar"
+[ "$(wc -l <"${names}" | tr -d ' ')" = "3" ] ||
+    fail "the IdP pod is exactly core + login + oidc-bootstrap; anything else is a topology change"
 
 # --- 2. The PAT handoff: one volume, written by core, read by login ---
 core="${work_root}/core.yaml"
@@ -206,5 +209,54 @@ container "${rendered}" erun-zitadel | grep -q 'value: "http://auth.example.test
     fail "the Login V2 base URI must follow the scheme of the origin"
 document "${rendered}" Ingress | grep -q 'secretName:' &&
     fail "an insecure origin has no TLS Secret to reference"
+
+# --- 14. The OIDC bootstrap sidecar: present, shares the PAT volume, uses the
+#         dedicated ServiceAccount, and reconciles into the configured ConfigMap ---
+rendered=$(render)
+bootstrap="${work_root}/oidc-bootstrap.yaml"
+container "${rendered}" oidc-bootstrap >"${bootstrap}"
+[ -s "${bootstrap}" ] || fail "the pod must run the OIDC application bootstrap sidecar"
+grep -q '^              mountPath: /zitadel/bootstrap$' "${bootstrap}" ||
+    fail "the OIDC bootstrap sidecar must mount the shared bootstrap volume to read the org-owner PAT"
+grep -q 'admin-sa.pat' "${bootstrap}" ||
+    fail "the OIDC bootstrap sidecar must read the org-owner PAT the core container writes"
+grep -q 'name: CONFIGMAP_NAME' "${bootstrap}" ||
+    fail "the OIDC bootstrap sidecar must know which ConfigMap to publish client ids to"
+grep -A1 'name: CONFIGMAP_NAME' "${bootstrap}" | grep -q 'value: "team-zitadel-oidc-clients"' ||
+    fail "the ConfigMap must default to <tenant>-zitadel-oidc-clients"
+grep -q 'OIDC_TOKEN_TYPE_JWT' "${bootstrap}" ||
+    fail "both OIDC apps must issue JWT access tokens, not Zitadel's default opaque token"
+grep -q 'OIDC_GRANT_TYPE_DEVICE_CODE' "${bootstrap}" ||
+    fail "the CLI app must support the device authorization grant"
+grep -q 'OIDC_APP_TYPE_NATIVE' "${bootstrap}" ||
+    fail "the CLI app must be a native/public client"
+grep -q '127.0.0.1/callback' "${bootstrap}" ||
+    fail "the CLI app must carry a loopback redirect for the Authorization Code + PKCE fallback"
+grep -q 'kubectl apply' "${bootstrap}" ||
+    fail "the sidecar must publish the resolved client ids to a ConfigMap"
+
+# --- 15. The bootstrap sidecar has its own least-privilege ServiceAccount ---
+sa="${work_root}/oidc-sa.yaml"
+document "${rendered}" ServiceAccount >"${sa}"
+grep -q '^  name: team-zitadel$' "${sa}" ||
+    fail "the tenant-scoped ServiceAccount for the OIDC bootstrap sidecar must render"
+grep -q 'serviceAccountName: team-zitadel$' "${rendered}" ||
+    fail "the pod must run as the dedicated ServiceAccount, not the namespace default"
+role="${work_root}/oidc-role.yaml"
+document "${rendered}" Role >"${role}"
+grep -q 'resources: \["configmaps"\]' "${role}" ||
+    fail "the bootstrap ServiceAccount's Role must be scoped to configmaps only"
+grep -q 'verbs: \["get", "create", "update", "patch"\]' "${role}" ||
+    fail "the bootstrap Role must not carry delete or list-everything verbs it does not need"
+
+# --- 16. The bootstrap sidecar's image rides imageOverrides too ---
+rendered=$(render --set-string imageOverrides.erun-devops=reg.test/erun-devops:v9.9.9)
+container "${rendered}" oidc-bootstrap | grep -q 'image: reg.test/erun-devops:v9.9.9' ||
+    fail "the OIDC bootstrap sidecar's image must be overridable via imageOverrides.erun-devops"
+
+# --- 17. The console app's redirect URI follows platform.consoleUrl ---
+rendered=$(render --set-string platform.consoleUrl=https://console.example.test)
+container "${rendered}" oidc-bootstrap | grep -q 'value: "https://console.example.test"' ||
+    fail "the console app's redirect URI must default to platform.consoleUrl"
 
 echo "PASS: erun-zitadel chart topology"

@@ -261,6 +261,10 @@ func registerCloudTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Description: "Initialize a Cloudflare cloud provider alias from a delegated API token (Zone + DNS edit, plus any other scopes the operator will use such as Cloudflare Pages for static sites). The token is verified against the Cloudflare API and held in a local secret store referenced from erun config, never written into erun-config.yaml; environments that attach the alias receive it as CLOUDFLARE_API_TOKEN. Supports preview.",
 	}, cloudInitCloudflareTool(runtime))
 	addTool(reg, &mcp.Tool{
+		Name:        "cloud_init_erun",
+		Description: "Initialize a hosted erun platform cloud provider alias: discovers the platform's own config (OIDC issuer, CLI client id) from its unauthenticated GET /v1/platform endpoint and saves the alias — no instance's name is hardcoded. Call cloud_login afterward to sign in (Device Authorization Grant, falling back to Authorization Code + PKCE). Supports preview.",
+	}, cloudInitERunTool(runtime))
+	addTool(reg, &mcp.Tool{
 		Name:        "cloud_login",
 		Description: "Login to a configured cloud provider alias, with preview support",
 	}, cloudLoginTool(runtime))

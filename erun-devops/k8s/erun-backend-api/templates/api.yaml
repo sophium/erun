@@ -2,6 +2,24 @@
 {{- $apiPort := default 17033 .Values.apiPort -}}
 {{- $api := default dict .Values.api -}}
 {{- $oidcAllowedIssuers := default "" $api.oidcAllowedIssuers -}}
+{{- /* GET /v1/platform discovery (#605): served unauthenticated so a client can
+       discover this instance before it has a token. issuer derives from the
+       env's platform.authHost (the hosted IdP host every platform deploy
+       already threads in) rather than a separate value to keep in sync.
+       consoleClientId/cliClientId come from the erun-zitadel chart's OIDC
+       bootstrap, which publishes them to a ConfigMap in this namespace; that
+       chart may not have run yet (or at all, for a non-platform env), so the
+       ConfigMap read is optional and absent values render as empty strings. */ -}}
+{{- $platform := default dict .Values.platform -}}
+{{- $platformAuthHost := default "" $platform.authHost -}}
+{{- $platformIssuer := "" -}}
+{{- if $platformAuthHost -}}
+{{- $platformIssuer = printf "https://%s" $platformAuthHost -}}
+{{- end -}}
+{{- $platformAPIURL := default "" $platform.apiUrl -}}
+{{- $platformConsoleURL := default "" $platform.consoleUrl -}}
+{{- $platformBrand := default "" $platform.brand -}}
+{{- $zitadelOIDCClientsConfigMap := default (printf "%s-zitadel-oidc-clients" $tenant) $api.zitadelOIDCClientsConfigMap -}}
 {{- $awsIdentityStoreID := default "" $api.awsIdentityStoreID -}}
 {{- $awsIdentityStoreRegion := default "" $api.awsIdentityStoreRegion -}}
 {{- $postgres := default dict $api.postgres -}}
@@ -224,6 +242,26 @@ spec:
               value: {{ $databaseURL | quote }}
             - name: ERUN_OIDC_ALLOWED_ISSUERS
               value: {{ $oidcAllowedIssuers | quote }}
+            - name: ERUN_PLATFORM_ISSUER
+              value: {{ $platformIssuer | quote }}
+            - name: ERUN_PLATFORM_API_URL
+              value: {{ $platformAPIURL | quote }}
+            - name: ERUN_PLATFORM_CONSOLE_URL
+              value: {{ $platformConsoleURL | quote }}
+            - name: ERUN_PLATFORM_BRAND
+              value: {{ $platformBrand | quote }}
+            - name: ERUN_PLATFORM_CONSOLE_CLIENT_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ $zitadelOIDCClientsConfigMap }}
+                  key: consoleClientId
+                  optional: true
+            - name: ERUN_PLATFORM_CLI_CLIENT_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ $zitadelOIDCClientsConfigMap }}
+                  key: cliClientId
+                  optional: true
             - name: ERUN_AWS_IDENTITY_STORE_ID
               value: {{ $awsIdentityStoreID | quote }}
             - name: ERUN_AWS_IDENTITY_STORE_REGION

@@ -13,6 +13,7 @@ var (
 	ErrInvalidInput           = errors.New("invalid input")
 	ErrNotFound               = errors.New("not found")
 	ErrMissingSecurityContext = errors.New("missing security context")
+	ErrConflict               = errors.New("conflict")
 )
 
 func normalizeNoRows(err error) error {

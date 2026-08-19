@@ -413,56 +413,107 @@ func (r *IdentityRepository) insertUser(ctx context.Context, tx bun.Tx, username
 	return user, nil
 }
 
+// insertDefaultUserAccess links the bootstrapped user's external identity and
+// grants it the predefined roles. It only ever runs against a tenant with no
+// prior users (first-identity/first-tenant-user bootstrap), so grantPredefinedRoles
+// always takes its create-fresh-roles path here.
 func (r *IdentityRepository) insertDefaultUserAccess(ctx context.Context, tx bun.Tx, userID string, issuer string, subject string) error {
-	readRoleID, err := r.insertRole(ctx, tx, "ReadAll")
-	if err != nil {
+	if _, err := tx.NewRaw(`INSERT INTO user_external_ids (user_id, issuer, external_id) VALUES (?, ?, ?)`, userID, issuer, subject).Exec(ctx); err != nil {
 		return err
 	}
-	writeRoleID, err := r.insertRole(ctx, tx, "WriteAll")
-	if err != nil {
-		return err
-	}
-	statements := []struct {
-		query string
-		args  []any
+	return grantPredefinedRoles(ctx, tx, "", userID)
+}
+
+// grantPredefinedRoles grants a user the two predefined roles every enrolled
+// user gets today (there is no finer-grained role assignment surface yet).
+// tenantID, when non-empty, targets a tenant other than the caller's own
+// session tenant (an operations-scoped enrollment): every row this writes then
+// needs the target tenant set explicitly, because relying on the tenant-owned
+// default would write the caller's own tenant instead. findOrCreateRole makes
+// this safe to call for a tenant's second and later users too, since
+// ReadAll/WriteAll are created once per tenant and reused after that.
+func grantPredefinedRoles(ctx context.Context, tx bun.Tx, tenantID string, userID string) error {
+	specs := []struct {
+		name          string
+		methodPattern string
+		pathPattern   string
 	}{
-		{
-			query: `INSERT INTO user_external_ids (user_id, issuer, external_id) VALUES (?, ?, ?)`,
-			args:  []any{userID, issuer, subject},
-		},
-		{
-			query: `INSERT INTO role_permissions (role_id, api_method_pattern, api_path_pattern) VALUES (?, ?, ?)`,
-			args:  []any{readRoleID, "^(GET|HEAD|OPTIONS)$", "^/.*$"},
-		},
-		{
-			query: `INSERT INTO role_permissions (role_id, api_method_pattern, api_path_pattern) VALUES (?, ?, ?)`,
-			args:  []any{writeRoleID, "^(POST|PUT|PATCH|DELETE)$", "^/.*$"},
-		},
-		{
-			query: `INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)`,
-			args:  []any{userID, readRoleID},
-		},
-		{
-			query: `INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)`,
-			args:  []any{userID, writeRoleID},
-		},
+		{name: "ReadAll", methodPattern: "^(GET|HEAD|OPTIONS)$", pathPattern: "^/.*$"},
+		{name: "WriteAll", methodPattern: "^(POST|PUT|PATCH|DELETE)$", pathPattern: "^/.*$"},
 	}
-	for _, stmt := range statements {
-		if _, err := tx.NewRaw(stmt.query, stmt.args...).Exec(ctx); err != nil {
+	for _, spec := range specs {
+		roleID, err := findOrCreateRole(ctx, tx, tenantID, spec.name)
+		if err != nil {
+			return err
+		}
+		if err := grantRolePermissionPattern(ctx, tx, tenantID, roleID, spec.methodPattern, spec.pathPattern); err != nil {
+			return err
+		}
+		if err := grantUserRole(ctx, tx, tenantID, userID, roleID); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (r *IdentityRepository) insertRole(ctx context.Context, tx bun.Tx, name string) (string, error) {
+// findOrCreateRole returns the named role's id, creating it if this is the
+// tenant's first caller to need it.
+func findOrCreateRole(ctx context.Context, tx bun.Tx, tenantID string, name string) (string, error) {
 	var roleID string
-	err := tx.NewRaw(`
-		INSERT INTO roles (name)
-		VALUES (?)
-		RETURNING role_id
-	`, name).Scan(ctx, &roleID)
+	var err error
+	if tenantID != "" {
+		err = tx.NewRaw(`SELECT role_id FROM roles WHERE tenant_id = ? AND name = ?`, tenantID, name).Scan(ctx, &roleID)
+	} else {
+		err = tx.NewRaw(`SELECT role_id FROM roles WHERE name = ?`, name).Scan(ctx, &roleID)
+	}
+	if err == nil {
+		return roleID, nil
+	}
+	if !errors.Is(normalizeNoRows(err), ErrNotFound) {
+		return "", err
+	}
+	if tenantID != "" {
+		err = tx.NewRaw(`INSERT INTO roles (tenant_id, name) VALUES (?, ?) RETURNING role_id`, tenantID, name).Scan(ctx, &roleID)
+	} else {
+		err = tx.NewRaw(`INSERT INTO roles (name) VALUES (?) RETURNING role_id`, name).Scan(ctx, &roleID)
+	}
 	return roleID, err
+}
+
+// grantRolePermissionPattern is idempotent (ON CONFLICT DO NOTHING) because
+// findOrCreateRole may hand back a role that already carries this permission.
+func grantRolePermissionPattern(ctx context.Context, tx bun.Tx, tenantID string, roleID string, methodPattern string, pathPattern string) error {
+	var err error
+	if tenantID != "" {
+		_, err = tx.NewRaw(
+			`INSERT INTO role_permissions (tenant_id, role_id, api_method_pattern, api_path_pattern) VALUES (?, ?, ?, ?)
+			 ON CONFLICT (tenant_id, role_id, api_method_pattern, api_path_pattern) DO NOTHING`,
+			tenantID, roleID, methodPattern, pathPattern,
+		).Exec(ctx)
+	} else {
+		_, err = tx.NewRaw(
+			`INSERT INTO role_permissions (role_id, api_method_pattern, api_path_pattern) VALUES (?, ?, ?)
+			 ON CONFLICT (tenant_id, role_id, api_method_pattern, api_path_pattern) DO NOTHING`,
+			roleID, methodPattern, pathPattern,
+		).Exec(ctx)
+	}
+	return err
+}
+
+func grantUserRole(ctx context.Context, tx bun.Tx, tenantID string, userID string, roleID string) error {
+	var err error
+	if tenantID != "" {
+		_, err = tx.NewRaw(
+			`INSERT INTO user_roles (tenant_id, user_id, role_id) VALUES (?, ?, ?) ON CONFLICT (tenant_id, user_id, role_id) DO NOTHING`,
+			tenantID, userID, roleID,
+		).Exec(ctx)
+	} else {
+		_, err = tx.NewRaw(
+			`INSERT INTO user_roles (user_id, role_id) VALUES (?, ?) ON CONFLICT (tenant_id, user_id, role_id) DO NOTHING`,
+			userID, roleID,
+		).Exec(ctx)
+	}
+	return err
 }
 
 func (r *IdentityRepository) ResolveUserByExternalID(ctx context.Context, tenantID string, issuer string, externalID string) (model.User, error) {

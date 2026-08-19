@@ -1,0 +1,2 @@
+audit: erun cloud oidc --alias test+host@erun
+cloud provider alias "test+host@erun" is a "erun"-type alias, which does not use AWS web-identity federation; its OIDC issuer is set at `cloud init`
