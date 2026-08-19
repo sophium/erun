@@ -69,6 +69,7 @@ func run(args []string) error {
 			Registry:               cfg.EnvDeployRegistry,
 			PlatformNamespace:      cfg.PlatformNamespace,
 			DeployerServiceAccount: cfg.EnvDeployerServiceAccount,
+			ExposeTargetIP:         cfg.EnvExposeTargetIP,
 		},
 		Release: provision.ReleaseConfig{
 			Registry:       cfg.EnvDeployRegistry,
@@ -236,6 +237,11 @@ type apiConfig struct {
 	EnvDeployerServiceAccount string
 	PlatformNamespace         string
 	EnvDeployRegistry         string
+	// EnvExposeTargetIP is the platform's ingress IP: set, every env-deploy Job
+	// also chains an `erun expose` for the env's MCP edge after a successful
+	// deploy; unset (the default), deploys stay exactly as they were before —
+	// no attempt to expose, independent of whether the executor above is on.
+	EnvExposeTargetIP string
 	// Server-side release executor. The release runs as a Job in the agent
 	// environment's own namespace so it lands beside that environment's warm
 	// fingerprint cache and BuildKit state -- the thing an ephemeral runner cannot
@@ -286,6 +292,7 @@ func configFromEnv() apiConfig {
 		EnvDeployerServiceAccount: strings.TrimSpace(os.Getenv("ERUN_ENV_DEPLOYER_SERVICE_ACCOUNT")),
 		PlatformNamespace:         strings.TrimSpace(os.Getenv("POD_NAMESPACE")),
 		EnvDeployRegistry:         envOrDefault("ERUN_ENV_DEPLOY_REGISTRY", "ghcr.io/sophium"),
+		EnvExposeTargetIP:         strings.TrimSpace(os.Getenv("ERUN_ENV_EXPOSE_TARGET_IP")),
 
 		ReleaseNamespace:      strings.TrimSpace(os.Getenv("ERUN_RELEASE_NAMESPACE")),
 		ReleaseServiceAccount: strings.TrimSpace(os.Getenv("ERUN_RELEASE_SERVICE_ACCOUNT")),

@@ -775,3 +775,25 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
       restartPolicy: Always
+{{- if eq $mcpEnabled "true" }}
+---
+# Fronts the runtime container's MCP port so `erun expose <tenant> <env> mcp`
+# has a real Service to route to (TenantResourcePrefix(tenant)+"-mcp", the
+# BackendService name the expose primitive derives from tenant + service name
+# alone, independent of this chart's own release naming). Port 80 keeps the
+# public hostname's default port (no --port needed) mapped onto the named
+# "mcp" containerPort declared above.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ printf "%s-mcp" (required "tenant is required" .Values.tenant) }}
+  labels:
+    app: {{ .Release.Name }}
+spec:
+  selector:
+    app: {{ .Release.Name }}
+  ports:
+    - name: mcp
+      port: 80
+      targetPort: mcp
+{{- end }}

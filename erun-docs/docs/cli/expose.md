@@ -6,6 +6,8 @@ title: erun expose
 
 Expose an in-namespace Service at a stable public hostname under the platform's services zone. `erun expose` is for [platform deployments](/concepts/networking#platform-service-exposure) — installations that run the PowerDNS singleton and declare a [`platform:` block](/reference/configuration#platform-block). It does two things: it ensures a **per-environment wildcard DNS record** points at the env's ingress IP, and it applies a **Host-routing Ingress** for the Service.
 
+A [hosted platform](/collaboration/hosted-environments) already runs this for you against its runtime environments' MCP edge as part of their server-side deploy — see [Hosted platform · Automatic exposure](/concepts/hosted-platform#automatic-exposure). Run this command by hand for any other service you want to expose, or on a platform that predates automatic exposure.
+
 ```bash
 erun expose team dev api --ip 203.0.113.10
 erun expose team dev api --ip 203.0.113.10 --port 8080
@@ -29,6 +31,7 @@ The exposed URL is **HTTPS** by default: the Ingress references the env's per-en
 |---|---|
 | `--ip <ip>` | **Required.** The env's ingress IP the per-env wildcard record points at — `127.0.0.1` for a VM-backed local cluster, a node/LAN IP, or the public LB IP for a remote cluster. |
 | `--port <int>` | Service port the Ingress routes to. Default `80`. |
+| `--skip-if-unconfigured` | Succeed as a no-op instead of the "no platform block" error below, for a script that calls `expose` after another command without knowing whether the target project is a platform deployment. |
 | `--dry-run` | Resolve and print the full plan — the hostname, the `pdnsutil` exec, and the Ingress apply — without touching DNS or the cluster. |
 
 ## Error behaviour

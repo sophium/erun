@@ -41,6 +41,13 @@ type EnvDeployConfig struct {
 	Registry               string
 	PlatformNamespace      string
 	DeployerServiceAccount string
+	// ExposeTargetIP is the platform's ingress IP, threaded to every deploy Job
+	// as DeployJobParams.ExposeTargetIP. Empty (the default) leaves env deploys
+	// exactly as they were before #605's automatic exposure: this field, unlike
+	// the three above, does not gate the executor itself (newEnvironmentProvisioner
+	// stays enabled without it) — it only decides whether a deploy also chains
+	// an expose.
+	ExposeTargetIP string
 }
 
 // EnvProvisioner runs the durable env-deploy workflow, so a control-plane restart
@@ -95,6 +102,7 @@ func deployJobParams(config EnvDeployConfig, input EnvProvisionInput) deployexec
 		Namespace:      config.PlatformNamespace,
 		Image:          fmt.Sprintf("%s/%s-devops:%s", config.Registry, input.Tenant, input.Version),
 		ServiceAccount: config.DeployerServiceAccount,
+		ExposeTargetIP: config.ExposeTargetIP,
 	}
 }
 

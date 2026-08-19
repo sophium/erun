@@ -154,7 +154,7 @@ These wrap the [pure command primitives](/concepts/command-primitives): `build` 
 | `release` | `erun release` | Released version, tag, multi-arch confirmation, and the read-back that proves the published version resolves. |
 | `pin` | `erun pin` | The resolved plan: every erun version reference for the env, its current value and its new one, plus whether it was applied. Verifies the target is published first. `preview` returns the plan without writing. |
 | `open` | `erun open` | Local SSH + MCP ports, status (`opened` / `already_open`). |
-| `expose` | `erun expose` | Resolved public hostname, per-env wildcard record, Host-routing Ingress. Requires a `platform:` block. Supports preview (dry-run). |
+| `expose` | `erun expose` | Resolved public hostname, per-env wildcard record, Host-routing Ingress. Requires a `platform:` block, unless `skipIfUnconfigured` turns that into a no-op. Supports preview (dry-run). |
 | `init` | `erun init` | Created files, deployed namespace. |
 | `delete` | `erun delete` | Namespace deleted, local config removed. |
 | `activity_lease_take` | `erun activity lease take` | The lease held, plus every lease still held on the env. |

@@ -29,7 +29,7 @@ The platform starts a server-side deploy immediately; poll its status until it s
 erun platform env get <environment-id>
 ```
 
-`status` moves `registered` → `provisioning` → `running` (or `failed`, with a `provisionError` explaining why). Re-deploy at a different version later with:
+`status` moves `registered` → `provisioning` → `running` (or `failed`, with a `provisionError` explaining why). A `running` environment is already reachable at its MCP hostname — the platform wires exposure (DNS + Ingress) into the same deploy, so there is no separate step to run once status settles. See [Hosted platform · Automatic exposure](/concepts/hosted-platform#automatic-exposure) for when that wiring runs and how it fails safely on a platform not configured for it. Re-deploy at a different version later with:
 
 ```bash
 erun platform env deploy <environment-id> --version 1.5.0

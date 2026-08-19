@@ -48,9 +48,17 @@ The Job launcher's ServiceAccount (`<tenant>-env-deployer`) is bound to a curate
 
 `tenant_quotas.max_environments` caps how many environments a tenant may register; `POST /v1/environments` refuses a create at the cap (`409`), and `POST /v1/provision` reports `quotaOk: false` in the same preview rather than failing the call. CPU/memory/storage caps applied as a `ResourceQuota`/`LimitRange` on the provisioned namespace, and usage metering, are `(Planned.)`.
 
-## Automatic exposure
+## Automatic exposure {#automatic-exposure}
 
-Making a newly-created runtime environment reachable at `mcp.<tenant>-<env>.services.<zone>` without a follow-up [`erun expose`](/cli/expose) call is `(Planned.)`. Today the runtime chart renders no `Ingress` for a hosted environment, and DNS + certificate provisioning remain a manual step after deploy.
+A newly-created runtime environment is reachable at `mcp.<tenant>-<env>.<services zone>` with no follow-up [`erun expose`](/cli/expose) call, whenever the platform is configured for it. The runtime chart renders a `Service` fronting the runtime pod's MCP port (`<tenant>-mcp`, port `80` → the named `mcp` container port), which is what gives `erun expose`'s Ingress something real to route to; when the deploy Job's placement carries a configured ingress IP, it composes the deploy Job's command as `erun deploy <tenant> <env> --version <runtimeVersion> && erun expose <tenant> <env> mcp --ip <ip> --skip-if-unconfigured` rather than teaching `erun deploy` itself about exposure — `deploy` and `expose` both stay pure, single-purpose primitives, and the Job is what composes them.
+
+**Configuring it.** Set the platform's ingress IP as `api.envDeployer.exposeTargetIp` on the `erun-backend-api` chart (rendered as `ERUN_ENV_EXPOSE_TARGET_IP` on the API pod). Unset (the default), every deploy Job stays exactly the plain `erun deploy` it always ran — no attempt to expose, independent of whether the server-side executor itself is enabled.
+
+**Safe on an unconfigured tenant.** `--skip-if-unconfigured` turns expose's usual hard failure for a missing `platform:` block into a traced no-op success. So even with the platform's ingress IP configured, a tenant whose own project declares no platform block deploys with no exposure attempt and no failure — the same "deploy exactly as before" guarantee, scoped per tenant rather than per platform.
+
+**Failure is not silent.** `erun expose` runs as the second half of the same shell chain as `erun deploy`, so a real exposure failure (a platform that *is* configured, whose DNS or Ingress write errors) fails the whole Job. The environment is then recorded `failed` with the reason on `provisionError`, never `running` while actually unreachable.
+
+**Idempotent by construction.** Re-running the deploy Job — an explicit re-deploy, or a workflow resuming after a control-plane restart — re-runs the same `erun expose` call. The underlying writes already converge rather than duplicate: the DNS record is a `replace-rrset`, and the Ingress is a `kubectl apply`. Neither invokes cert-manager — the Ingress only *references* the per-env wildcard cert Secret the cluster edge already issued, so there is nothing for a redeploy to fight.
 
 ## See also
 

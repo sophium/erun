@@ -66,7 +66,21 @@ type DeployJobParams struct {
 	// ServiceAccount is a cluster-admin SA so the in-Job `erun deploy` can create
 	// the target namespace and install the runtime chart.
 	ServiceAccount string
+	// ExposeTargetIP is the platform's ingress IP the per-env wildcard DNS record
+	// points at. Empty (the default, unset ERUN_ENV_EXPOSE_TARGET_IP) leaves the
+	// Job at the plain `erun deploy` it has always run — no attempt to expose,
+	// no new failure mode. Set, the Job chains `erun expose <tenant> <environment>
+	// mcp --ip <ExposeTargetIP> --skip-if-unconfigured` after a successful
+	// deploy: --skip-if-unconfigured makes the chain a no-op success for any
+	// tenant whose own project declares no platform block, so this only ever
+	// wires DNS+Ingress for an actual erunpaas platform deployment.
+	ExposeTargetIP string
 }
+
+// mcpExposeService is the logical service name the deploy Job exposes: the
+// env's MCP edge, reachable at mcp.<tenant>-<environment>.<services zone> —
+// the hostname #605's acceptance criterion names.
+const mcpExposeService = "mcp"
 
 // buildDeployJob renders the deploy Job. The container runs a non-interactive
 // `erun deploy <tenant> <env> --version <version>`; in-cluster, erun resolves
@@ -96,12 +110,41 @@ func buildDeployJob(params DeployJobParams) *batchv1.Job {
 					Containers: []corev1.Container{{
 						Name:    deployContainerName,
 						Image:   params.Image,
-						Command: []string{"erun", "deploy", params.Tenant, params.Environment, "--version", params.Version},
+						Command: buildDeployCommand(params),
 					}},
 				},
 			},
 		},
 	}
+}
+
+// buildDeployCommand composes the Job's argv. Plain `erun deploy` when no
+// ExposeTargetIP is configured — byte-for-byte what this Job has always run,
+// so an unconfigured platform (no ERUN_ENV_EXPOSE_TARGET_IP) deploys exactly
+// as before. Configured, it chains a second, independently-skippable primitive
+// after a successful deploy rather than teaching deploy itself about exposure:
+// this Job is the caller composing pure primitives (root AGENTS.md § "Command
+// primitives vs orchestration"), not a new deploy behavior.
+func buildDeployCommand(params DeployJobParams) []string {
+	deploy := []string{"erun", "deploy", params.Tenant, params.Environment, "--version", params.Version}
+	ip := strings.TrimSpace(params.ExposeTargetIP)
+	if ip == "" {
+		return deploy
+	}
+	expose := []string{"erun", "expose", params.Tenant, params.Environment, mcpExposeService, "--ip", ip, "--skip-if-unconfigured"}
+	return []string{"sh", "-c", shellJoin(deploy) + " && " + shellJoin(expose)}
+}
+
+// shellJoin renders argv as a POSIX shell command line, single-quoting every
+// argument so tenant/environment/version/IP values (already validated as
+// DNS-1123 labels or IPs upstream, but not this function's job to trust) can
+// never be interpreted as shell syntax.
+func shellJoin(argv []string) string {
+	quoted := make([]string, len(argv))
+	for i, arg := range argv {
+		quoted[i] = "'" + strings.ReplaceAll(arg, "'", `'\''`) + "'"
+	}
+	return strings.Join(quoted, " ")
 }
 
 // DeployJobName is deterministic in its inputs, so a resumed workflow watches
