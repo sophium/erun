@@ -32,6 +32,12 @@ type CloudInitCloudflareInput struct {
 	Verbosity int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
 
+type CloudInitERunInput struct {
+	APIURL    string `json:"apiUrl" jsonschema:"base URL of the hosted erun platform's API; its own config (issuer, CLI OIDC client id) is discovered from GET /v1/platform"`
+	Preview   bool   `json:"preview,omitempty" jsonschema:"when true, return the planned operation without discovering the platform or saving config"`
+	Verbosity int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+}
+
 type CloudLoginInput struct {
 	Alias     string `json:"alias" jsonschema:"configured cloud provider alias to login"`
 	Preview   bool   `json:"preview,omitempty" jsonschema:"when true, return the planned operation without executing login"`
@@ -141,6 +147,28 @@ func cloudInitCloudflareTool(runtime RuntimeConfig) func(context.Context, *mcp.C
 			return nil, CloudActionResult{}, err
 		}
 		status := eruncommon.CloudProviderTokenStatus(provider, cloudDependencies())
+		return nil, CloudActionResult{Alias: provider.Alias, Provider: status, Trace: normalizeTraceLines(traceOutput.String())}, nil
+	}
+}
+
+func cloudInitERunTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudInitERunInput) (*mcp.CallToolResult, CloudActionResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input CloudInitERunInput) (*mcp.CallToolResult, CloudActionResult, error) {
+		traceOutput := strings.Builder{}
+		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		params := eruncommon.InitERunCloudProviderParams{APIURL: input.APIURL}
+		if input.Preview {
+			plan := []string{
+				"GET " + strings.TrimRight(strings.TrimSpace(input.APIURL), "/") + "/v1/platform",
+				"GET <issuer>/.well-known/openid-configuration",
+				"save cloud provider alias erun+<platform-host>@erun",
+			}
+			return nil, CloudActionResult{Preview: true, Plan: plan}, nil
+		}
+		provider, err := eruncommon.InitERunCloudProvider(ctx, runtime.Store, params, eruncommon.CloudDependencies{})
+		if err != nil {
+			return nil, CloudActionResult{}, err
+		}
+		status := eruncommon.CloudProviderTokenStatus(provider, eruncommon.CloudDependencies{})
 		return nil, CloudActionResult{Alias: provider.Alias, Provider: status, Trace: normalizeTraceLines(traceOutput.String())}, nil
 	}
 }

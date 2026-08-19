@@ -26,9 +26,10 @@ How an operator stands up a hosted erun platform (for example `erunpaas.com`). Y
 | 7 | `<tenant>-prod` | Provide the Cloudflare API token **here** | Supply the token in prod, not local, so the edge can bootstrap the DNS zones. | Ready |
 | 8 | `<tenant>-prod` | `erun terraform apply <tenant> prod` (or skill **`erun-enable-hosting-edge`**) | Apply the env's scaffolded `terraform-<tenant>/prod/` root — Traefik + cert-manager + the Cloudflare DNS-01 wildcard-TLS issuer — using the supplied token. You type the environment name to confirm before it applies. The skill is the guided alternative (references erun's module directly). | Ready (PR #688) |
 | 9 | `<tenant>-prod` | `erun deploy --version <version> --components <tenant>-zitadel` | Deploy the **hosted IdP** that serves OIDC at `auth.<base-domain>`. See [Hosted IdP](#hosted-idp) — it needs a masterkey Secret and a DNS record first. | Ready |
-| 10 | `<tenant>-prod` | `erun expose <tenant> <env> mcp --ip <ingress-ip>` | Publish an environment's MCP at `mcp.<tenant>-<env>.services.<base-domain>`. | Ready (HTTPS once the `expose` TLS wiring lands) |
-| 11 | `<tenant>-local` | Use an **erun API token** against the running platform | Set up this local env's own DNS zone + TLS certs through the deployed erun API. | Planned |
-| 12 | `<tenant>-prod` | skill **`erun-deploy-platform`** | One-shot orchestration of steps 6–10. | Planned |
+| 10 | `<tenant>-prod` | `erun deploy --version <version> --components <tenant>-console` | Deploy the **hosted web console** at `console.<base-domain>`. See [The console](#the-console) — it needs a DNS record and (in production) a cert-manager issuer name first. | Ready |
+| 11 | `<tenant>-prod` | `erun expose <tenant> <env> mcp --ip <ingress-ip>` | Publish an environment's MCP at `mcp.<tenant>-<env>.services.<base-domain>`. | Ready (HTTPS once the `expose` TLS wiring lands) |
+| 12 | `<tenant>-local` | Use an **erun API token** against the running platform | Set up this local env's own DNS zone + TLS certs through the deployed erun API. | Planned |
+| 13 | `<tenant>-prod` | skill **`erun-deploy-platform`** | One-shot orchestration of steps 6–11. | Planned |
 
 ## Hosted IdP {#hosted-idp}
 
@@ -49,7 +50,7 @@ Name it to the component as `zitadel.masterkeySecretName` in the env's `<tenant>
 
 **3. The certificate.** Set `zitadel.certManagerIssuer` to the edge's DNS-01 Issuer (the one `erun-enable-hosting-edge` created in the same namespace) and cert-manager fills the Ingress's TLS Secret for you. Leave it empty only if you issued the certificate yourself and named it in `zitadel.tlsSecretName`.
 
-**4. The console's SPA client.** After the first deploy, sign in to Zitadel's own console at `https://auth.<base-domain>/ui/console` as the bootstrap admin — the username and generated password are in the `<tenant>-zitadel-admin` Secret the component created, and the first sign-in makes you change the password. Sign in with the **domain-qualified** login name the instance assigns (`<username>@<org-domain>`, shown on the user in Zitadel's console), not the bare username from the Secret. Register a project with one application: type **User Agent**, **Authorization Code + PKCE**, no client secret, redirect and post-logout-redirect `https://console.<base-domain>/`. The console is then built with `VITE_OIDC_ISSUER=https://auth.<base-domain>` and that application's `VITE_OIDC_CLIENT_ID`.
+**4. The console's SPA client.** After the first deploy, sign in to Zitadel's own console at `https://auth.<base-domain>/ui/console` as the bootstrap admin — the username and generated password are in the `<tenant>-zitadel-admin` Secret the component created, and the first sign-in makes you change the password. Sign in with the **domain-qualified** login name the instance assigns (`<username>@<org-domain>`, shown on the user in Zitadel's console), not the bare username from the Secret. Register a project with one application: type **User Agent**, **Authorization Code + PKCE**, no client secret, redirect and post-logout-redirect `https://console.<base-domain>/`. The console no longer needs rebuilding with these values — it resolves the issuer and this application's client id at runtime from [`GET /v1/platform`](/agent-reference/api-protocol#platform-endpoint), so one built console image serves any instance. See [The console](#the-console) below for wiring that endpoint's values.
 
 The API side needs nothing: a platform deploy already trusts its own auth host, threading `https://<auth-host>` into the API's `ERUN_OIDC_ALLOWED_ISSUERS` from the [`platform:` block](/reference/configuration#platform-block) alongside any cloud issuers. The first sign-in bootstraps the `OPERATIONS` tenant.
 
@@ -63,6 +64,30 @@ The API side needs nothing: a platform deploy already trusts its own auth host, 
 | Login container restarts on first boot | Expected and self-healing: it needs a token core writes during initialisation, so it restarts until core is up. Its startup probe reports the wait | None; watch for the pod going Ready |
 | `/ui/v2/login` returns `{"code":5,"message":"Not Found"}` | Core answered a path only the Login V2 container serves — the Ingress route or the login container is missing | Confirm both containers are running and the Ingress still carries the `/ui/v2/login` path |
 | Sign-in redirects to an unreachable host | The issuer names something other than the public origin | Confirm the auth host in the `platform:` block matches the DNS record and the certificate |
+
+## The console {#the-console}
+
+The hosted web console (`erun-console` chart) is a static SPA served **same-origin** with the erun API — its own nginx proxies `/v1/*` to the API's in-cluster Service, so the browser never makes a cross-origin call and the API needs no CORS headers. Deploy it like any other component:
+
+```bash
+erun deploy --version <version> --components <tenant>-console
+```
+
+Two things are yours to supply; the chart does the rest.
+
+**1. DNS.** `console.<base-domain>` needs an `A` record pointing at the cluster's ingress IP, the same way `auth.<base-domain>` does for the hosted IdP.
+
+**2. The certificate.** Set `console.certManagerIssuer` to the edge's DNS-01 Issuer and cert-manager fills the Ingress's TLS Secret for you. Leave it empty only if you issued the certificate yourself and named it in `console.tlsSecretName`. The host itself defaults to `console.<base-domain>` from the env's `platform:` block; set `console.externalDomain` explicitly to override it.
+
+**Signing in needs no console rebuild.** Unlike before, the console does not need `VITE_OIDC_ISSUER`/`VITE_OIDC_CLIENT_ID` baked into its image — it resolves the issuer and its OIDC client id at runtime from [`GET /v1/platform`](/agent-reference/api-protocol#platform-endpoint), so the same built image serves every instance. **(Planned.)** The operator-facing config for populating that endpoint's `issuer`/`consoleClientId` (so it reflects the SPA client registered in [Hosted IdP § step 4](#hosted-idp) above) is landing alongside the backend work this depends on; until it does, an unset or absent `/v1/platform` falls back to the console's own `VITE_OIDC_ISSUER`/`VITE_OIDC_CLIENT_ID` build-time values, which remain a local-dev override.
+
+### Error behaviour
+
+| Failure mode | What happens | Recovery |
+|---|---|---|
+| No external domain resolvable | `erun deploy` aborts at the chart render with `an external domain is required`; exit code 1, nothing applied | Set `basedomain` in the env's `platform:` block, or `console.externalDomain` |
+| `GET /v1/platform` is absent or empty | The console falls back to its build-time `VITE_OIDC_ISSUER`/`VITE_OIDC_CLIENT_ID`; with neither configured it shows the signed-out message with no Sign in button | Configure the backend's platform discovery, or set the console's `VITE_OIDC_*` build args as a stopgap |
+| `/v1/config` returns `502` through the console | The API Service the console's nginx proxies to isn't up yet, or `console.apiServiceName`/`console.apiServicePort` don't match the deployed API | Confirm `<tenant>-api` is running and the chart's proxy target matches its Service name/port |
 
 ## Which skills, and where
 

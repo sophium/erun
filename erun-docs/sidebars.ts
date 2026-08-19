@@ -46,6 +46,7 @@ const sidebars: SidebarsConfig = {
         'cli/upgrade',
         'cli/cloud',
         'cli/context',
+        'cli/platform',
         'cli/sshd',
         'cli/list',
         'cli/outputs',
@@ -72,6 +73,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'collaboration/workflow',
         'collaboration/overview',
+        'collaboration/hosted-environments',
         'collaboration/skills',
         'collaboration/operator-in-the-loop',
       ],
@@ -107,6 +109,7 @@ const sidebars: SidebarsConfig = {
             'concepts/conventions',
             'concepts/skills',
             'concepts/cloud-contexts',
+            'concepts/hosted-platform',
           ],
         },
         {

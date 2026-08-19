@@ -2,6 +2,24 @@
 {{- $apiPort := default 17033 .Values.apiPort -}}
 {{- $api := default dict .Values.api -}}
 {{- $oidcAllowedIssuers := default "" $api.oidcAllowedIssuers -}}
+{{- /* GET /v1/platform discovery (#605): served unauthenticated so a client can
+       discover this instance before it has a token. issuer derives from the
+       env's platform.authHost (the hosted IdP host every platform deploy
+       already threads in) rather than a separate value to keep in sync.
+       consoleClientId/cliClientId come from the erun-zitadel chart's OIDC
+       bootstrap, which publishes them to a ConfigMap in this namespace; that
+       chart may not have run yet (or at all, for a non-platform env), so the
+       ConfigMap read is optional and absent values render as empty strings. */ -}}
+{{- $platform := default dict .Values.platform -}}
+{{- $platformAuthHost := default "" $platform.authHost -}}
+{{- $platformIssuer := "" -}}
+{{- if $platformAuthHost -}}
+{{- $platformIssuer = printf "https://%s" $platformAuthHost -}}
+{{- end -}}
+{{- $platformAPIURL := default "" $platform.apiUrl -}}
+{{- $platformConsoleURL := default "" $platform.consoleUrl -}}
+{{- $platformBrand := default "" $platform.brand -}}
+{{- $zitadelOIDCClientsConfigMap := default (printf "%s-zitadel-oidc-clients" $tenant) $api.zitadelOIDCClientsConfigMap -}}
 {{- $awsIdentityStoreID := default "" $api.awsIdentityStoreID -}}
 {{- $awsIdentityStoreRegion := default "" $api.awsIdentityStoreRegion -}}
 {{- $postgres := default dict $api.postgres -}}
@@ -152,6 +170,50 @@ roleRef:
   kind: Role
   name: {{ $tenant }}-api-env-deployer
 ---
+{{/* The env-deployer ran as cluster-admin (#605 acceptance criterion: replace
+     with a curated, isolated, audited provisioner role carrying exactly the
+     verbs provisioning needs). Its Job runs one thing — erun deploy/stop/
+     delete for one tenant's runtime chart — never a component chart, so the
+     verb list is scoped to what that install actually touches: namespace
+     lifecycle, the ResourceQuota/LimitRange a provisioned namespace gets
+     (tenant_quotas, #605), the runtime chart's own resources (Deployment,
+     PVCs, ServiceAccount, Service, its Secrets/ConfigMaps, and Helm's own
+     release-state Secrets), and RoleBindings. Binding the runtime SA to the
+     built-in admin ClusterRole is what the chart renders for every env (see
+     erun-devops/AGENTS.md "Runtime SA RBAC is namespaced by default");
+     granting only bind on that one named ClusterRole (not the verbs admin
+     itself carries) is the RBAC escalation-check's documented way to let a
+     granter hand out a ClusterRole it does not hold outright, keeping this
+     role's own footprint far short of admin-equivalent. It does not cover
+     platformAccount's cluster-admin ClusterRoleBinding — that opt-in stays
+     gated on an admin-capable context, unchanged. */}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $tenant }}-env-provisioner
+  labels:
+    app: {{ $tenant }}-api
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["resourcequotas", "limitranges"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims", "serviceaccounts", "services", "secrets", "configmaps"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles"]
+    resourceNames: ["admin"]
+    verbs: ["bind"]
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -165,7 +227,7 @@ subjects:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: cluster-admin
+  name: {{ $tenant }}-env-provisioner
 ---
 {{- end }}
 apiVersion: v1
@@ -224,6 +286,26 @@ spec:
               value: {{ $databaseURL | quote }}
             - name: ERUN_OIDC_ALLOWED_ISSUERS
               value: {{ $oidcAllowedIssuers | quote }}
+            - name: ERUN_PLATFORM_ISSUER
+              value: {{ $platformIssuer | quote }}
+            - name: ERUN_PLATFORM_API_URL
+              value: {{ $platformAPIURL | quote }}
+            - name: ERUN_PLATFORM_CONSOLE_URL
+              value: {{ $platformConsoleURL | quote }}
+            - name: ERUN_PLATFORM_BRAND
+              value: {{ $platformBrand | quote }}
+            - name: ERUN_PLATFORM_CONSOLE_CLIENT_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ $zitadelOIDCClientsConfigMap }}
+                  key: consoleClientId
+                  optional: true
+            - name: ERUN_PLATFORM_CLI_CLIENT_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ $zitadelOIDCClientsConfigMap }}
+                  key: cliClientId
+                  optional: true
             - name: ERUN_AWS_IDENTITY_STORE_ID
               value: {{ $awsIdentityStoreID | quote }}
             - name: ERUN_AWS_IDENTITY_STORE_REGION

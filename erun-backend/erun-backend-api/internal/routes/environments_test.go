@@ -2,6 +2,7 @@ package routes
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -85,7 +86,11 @@ func TestCreateEnvironmentRejectsInvalidInput(t *testing.T) {
 }
 
 func TestCreateEnvironmentPersistsAndReturnsRow(t *testing.T) {
-	for _, envType := range []string{"runtime", "remote-agent", "local-agent"} {
+	// Only remote-agent/local-agent environments accept a context reference on
+	// create: they are never server-side deployed, so the v1 single-cluster
+	// placement refusal (TestCreateEnvironmentRejectsCrossClusterPlacement)
+	// does not apply to them.
+	for _, envType := range []string{"remote-agent", "local-agent"} {
 		t.Run(envType, func(t *testing.T) {
 			environments := &stubEnvironmentRepository{created: model.Environment{EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentType(envType)}}
 			rec := postCreateEnvironment(t, environments, underCapQuota, `{
@@ -118,11 +123,39 @@ func TestCreateEnvironmentPersistsAndReturnsRow(t *testing.T) {
 	}
 }
 
+// TestCreateEnvironmentRejectsCrossClusterPlacement: the v1 single-cluster
+// placement decision (#605) — the deploy Job has no mechanism to target any
+// cluster but the control plane's own, so a runtime environment naming a
+// context or kubernetes context must be refused explicitly rather than
+// silently accepted and ignored.
+func TestCreateEnvironmentRejectsCrossClusterPlacement(t *testing.T) {
+	cases := map[string]string{
+		"contextId":         `{"name":"prod","type":"runtime","contextId":"ctx-1","runtimeVersion":"1.2.3"}`,
+		"kubernetesContext": `{"name":"prod","type":"runtime","kubernetesContext":"primary","runtimeVersion":"1.2.3"}`,
+	}
+	for label, body := range cases {
+		t.Run(label, func(t *testing.T) {
+			environments := &stubEnvironmentRepository{created: model.Environment{EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime}}
+			rec := postCreateEnvironment(t, environments, underCapQuota, body)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d (body %s), want 400 Bad Request", rec.Code, rec.Body.String())
+			}
+			if environments.createCalls != 0 {
+				t.Fatal("a rejected placement must not persist a row that can never deploy")
+			}
+		})
+	}
+}
+
 func TestCreateEnvironmentSurfacesRepositoryError(t *testing.T) {
 	// A context_id from another tenant violates the composite foreign key; the
 	// repository error is surfaced as a clean HTTP error, not a SQL leak.
+	// remote-agent (not runtime) so the request clears the v1 single-cluster
+	// placement check, which now refuses a runtime environment's contextId
+	// outright before the repository is ever reached.
 	environments := &stubEnvironmentRepository{err: errForeignKey{}}
-	rec := postCreateEnvironment(t, environments, underCapQuota, `{"name":"prod","type":"runtime","contextId":"ctx-other"}`)
+	rec := postCreateEnvironment(t, environments, underCapQuota, `{"name":"prod","type":"remote-agent","contextId":"ctx-other"}`)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("unexpected status: %d", rec.Code)
 	}
@@ -371,3 +404,215 @@ func TestDeployEnvironmentReportsUnconfiguredExecutor(t *testing.T) {
 type errForeignKey struct{}
 
 func (errForeignKey) Error() string { return "foreign key violation" }
+
+// postCreateEnvironmentPreview posts through a fully-wired route (tenant
+// resolver, no provisioner needed since preview never reaches it) with a
+// request-scoped security context, the shape the live server builds.
+func postCreateEnvironmentPreview(t *testing.T, environments *stubEnvironmentRepository, quotas stubTenantQuotaRepository, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/v1/environments", bytes.NewBufferString(body))
+	req = req.WithContext(security.WithContext(req.Context(), security.Context{
+		TenantID:   "t1",
+		TenantType: string(model.TenantTypeCompany),
+		ErunUserID: "u1",
+	}))
+	rec := httptest.NewRecorder()
+	EnvironmentRoutes{
+		environments: environments,
+		quotas:       quotas,
+		tenants:      stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
+	}.createEnvironment(rec, req)
+	return rec
+}
+
+// TestCreateEnvironmentPreviewRendersProvisionPlanWithoutPersisting: the
+// executing path's preview flag must resolve and return the same ordered
+// plan POST /v1/provision renders, without ever calling Create — the plan an
+// operator audits here is the plan a non-preview call then runs.
+func TestCreateEnvironmentPreviewRendersProvisionPlanWithoutPersisting(t *testing.T) {
+	environments := &stubEnvironmentRepository{count: 2}
+	rec := postCreateEnvironmentPreview(t, environments, stubTenantQuotaRepository{maxEnvironments: 10}, `{
+		"name": "prod", "type": "runtime", "preview": true
+	}`)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (body %s), want 200", rec.Code, rec.Body.String())
+	}
+	if environments.createCalls != 0 {
+		t.Fatal("preview must never call Create")
+	}
+	var response provisionResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !response.QuotaOk {
+		t.Fatalf("expected quotaOk=true under the cap: %v", response.Plan)
+	}
+	mustPlanLine(t, response.Plan, "context: deploys into this platform's own cluster (v1 single-cluster placement)", "preview plan missing the placement line")
+	mustPlanLine(t, response.Plan, "deploy: would helm install the erun-devops runtime chart", "preview plan missing the deploy line")
+}
+
+// TestCreateEnvironmentPreviewStillEnforcesPlacement: preview must apply the
+// same v1 single-cluster placement check as a real create, not a laxer one.
+func TestCreateEnvironmentPreviewStillEnforcesPlacement(t *testing.T) {
+	environments := &stubEnvironmentRepository{}
+	rec := postCreateEnvironmentPreview(t, environments, underCapQuota, `{
+		"name": "prod", "type": "runtime", "contextId": "ctx-1", "preview": true
+	}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 Bad Request", rec.Code)
+	}
+}
+
+type stubEnvironmentLifecycle struct {
+	stopped []provision.EnvLifecycleInput
+	deleted []provision.EnvLifecycleInput
+	err     error
+}
+
+func (s *stubEnvironmentLifecycle) Stop(_ context.Context, in provision.EnvLifecycleInput) error {
+	s.stopped = append(s.stopped, in)
+	return s.err
+}
+
+func (s *stubEnvironmentLifecycle) Delete(_ context.Context, in provision.EnvLifecycleInput) error {
+	s.deleted = append(s.deleted, in)
+	return s.err
+}
+
+func postStopEnvironment(t *testing.T, environments *stubEnvironmentRepository, lifecycle EnvironmentLifecycle) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/v1/environments/env-1/stop", nil)
+	req.SetPathValue("environment_id", "env-1")
+	req = req.WithContext(security.WithContext(req.Context(), security.Context{
+		TenantID:   "t1",
+		TenantType: string(model.TenantTypeCompany),
+		ErunUserID: "u1",
+	}))
+	rec := httptest.NewRecorder()
+	EnvironmentRoutes{
+		environments: environments,
+		quotas:       underCapQuota,
+		tenants:      stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
+		lifecycle:    lifecycle,
+	}.stopEnvironment(rec, req)
+	return rec
+}
+
+func deleteEnvironmentRequest(t *testing.T, environments *stubEnvironmentRepository, lifecycle EnvironmentLifecycle) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodDelete, "/v1/environments/env-1", nil)
+	req.SetPathValue("environment_id", "env-1")
+	req = req.WithContext(security.WithContext(req.Context(), security.Context{
+		TenantID:   "t1",
+		TenantType: string(model.TenantTypeCompany),
+		ErunUserID: "u1",
+	}))
+	rec := httptest.NewRecorder()
+	EnvironmentRoutes{
+		environments: environments,
+		quotas:       underCapQuota,
+		tenants:      stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
+		lifecycle:    lifecycle,
+	}.deleteEnvironment(rec, req)
+	return rec
+}
+
+func TestStopEnvironmentRunsLifecycleStop(t *testing.T) {
+	lifecycle := &stubEnvironmentLifecycle{}
+	rec := postStopEnvironment(t, runtimeEnvironment(), lifecycle)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (body %s), want 200", rec.Code, rec.Body.String())
+	}
+	if len(lifecycle.stopped) != 1 {
+		t.Fatalf("Stop called %d times, want 1", len(lifecycle.stopped))
+	}
+	got := lifecycle.stopped[0]
+	if got.Tenant != "acme" || got.Environment != "prod" || got.EnvironmentID != "env-1" || got.RunningVersion != "1.2.3" {
+		t.Fatalf("stop input = %+v", got)
+	}
+}
+
+func TestStopEnvironmentRejectsNonRuntime(t *testing.T) {
+	environments := &stubEnvironmentRepository{environment: model.Environment{
+		EnvironmentID: "env-1", Name: "agents", Type: model.EnvironmentTypeRemoteAgent,
+	}}
+	lifecycle := &stubEnvironmentLifecycle{}
+	rec := postStopEnvironment(t, environments, lifecycle)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 Bad Request", rec.Code)
+	}
+	if len(lifecycle.stopped) != 0 {
+		t.Fatal("a non-runtime environment must never reach the stop lifecycle")
+	}
+}
+
+func TestStopEnvironmentReportsUnconfiguredExecutor(t *testing.T) {
+	rec := postStopEnvironment(t, runtimeEnvironment(), nil)
+	if rec.Code != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want 501 Not Implemented", rec.Code)
+	}
+}
+
+func TestStopEnvironmentSurfacesLifecycleFailure(t *testing.T) {
+	lifecycle := &stubEnvironmentLifecycle{err: errForeignKey{}}
+	rec := postStopEnvironment(t, runtimeEnvironment(), lifecycle)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502 Bad Gateway", rec.Code)
+	}
+}
+
+func TestDeleteEnvironmentRunsLifecycleDelete(t *testing.T) {
+	lifecycle := &stubEnvironmentLifecycle{}
+	rec := deleteEnvironmentRequest(t, runtimeEnvironment(), lifecycle)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d (body %s), want 204", rec.Code, rec.Body.String())
+	}
+	if len(lifecycle.deleted) != 1 {
+		t.Fatalf("Delete called %d times, want 1", len(lifecycle.deleted))
+	}
+	got := lifecycle.deleted[0]
+	if got.Tenant != "acme" || got.Environment != "prod" || got.EnvironmentID != "env-1" || got.RunningVersion != "1.2.3" {
+		t.Fatalf("delete input = %+v", got)
+	}
+}
+
+// TestDeleteEnvironmentAllowsNonRuntime: a remote-agent/local-agent row was
+// never server-side deployed, so deleting it is a plain row removal — still
+// routed through the lifecycle, which skips the Job when RunningVersion is
+// empty.
+func TestDeleteEnvironmentAllowsNonRuntime(t *testing.T) {
+	environments := &stubEnvironmentRepository{environment: model.Environment{
+		EnvironmentID: "env-1", Name: "agents", Type: model.EnvironmentTypeRemoteAgent,
+	}}
+	lifecycle := &stubEnvironmentLifecycle{}
+	rec := deleteEnvironmentRequest(t, environments, lifecycle)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d (body %s), want 204", rec.Code, rec.Body.String())
+	}
+	if len(lifecycle.deleted) != 1 {
+		t.Fatalf("Delete called %d times, want 1", len(lifecycle.deleted))
+	}
+	if lifecycle.deleted[0].RunningVersion != "" {
+		t.Fatalf("running version = %q, want empty for a never-deployed environment", lifecycle.deleted[0].RunningVersion)
+	}
+}
+
+func TestDeleteEnvironmentReportsUnconfiguredExecutor(t *testing.T) {
+	rec := deleteEnvironmentRequest(t, runtimeEnvironment(), nil)
+	if rec.Code != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want 501 Not Implemented", rec.Code)
+	}
+}
+
+func TestDeleteEnvironmentSurfacesLifecycleFailure(t *testing.T) {
+	lifecycle := &stubEnvironmentLifecycle{err: errForeignKey{}}
+	rec := deleteEnvironmentRequest(t, runtimeEnvironment(), lifecycle)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502 Bad Gateway", rec.Code)
+	}
+}

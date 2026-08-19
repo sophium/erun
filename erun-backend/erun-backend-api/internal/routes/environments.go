@@ -33,6 +33,14 @@ type EnvironmentProvisioner interface {
 	StartDeploy(provision.EnvProvisionInput) error
 }
 
+// EnvironmentLifecycle stops or deletes an already-registered runtime
+// environment. Optional: when nil, the stop/delete routes report 501, the
+// same "executor not configured" shape as a nil EnvironmentProvisioner.
+type EnvironmentLifecycle interface {
+	Stop(ctx context.Context, input provision.EnvLifecycleInput) error
+	Delete(ctx context.Context, input provision.EnvLifecycleInput) error
+}
+
 // deployClaimStaleAfter bounds how long a deploy may hold its environment's
 // claim. It is longer than the deploy Job's own 30-minute deadline, so a claim
 // only looks stale once the run behind it cannot still be live.
@@ -54,24 +62,107 @@ type EnvironmentRoutes struct {
 	// provisioner is nil when live env provisioning is not wired; then create
 	// only registers the row.
 	provisioner EnvironmentProvisioner
+	// lifecycle is nil when live env provisioning is not wired; then stop and
+	// delete are unavailable rather than acting on config no Job can realize.
+	lifecycle EnvironmentLifecycle
 }
 
 // createEnvironmentRequest carries only operator-authored fields; the tenant is
-// resolved from the caller's token, never trusted from the body.
+// resolved from the caller's token, never trusted from the body. Preview
+// resolves and returns the same ordered plan POST /v1/provision renders,
+// without creating the row — the executing path previewing itself, so the
+// plan an operator audits here is the plan a non-preview call then runs.
 type createEnvironmentRequest struct {
 	Name              string `json:"name"`
 	Type              string `json:"type"`
 	ContextID         string `json:"contextId"`
 	KubernetesContext string `json:"kubernetesContext"`
 	RuntimeVersion    string `json:"runtimeVersion"`
+	Preview           bool   `json:"preview"`
 }
 
-func RegisterEnvironmentRoutes(register ProtectedRouteRegistrar, environments EnvironmentRepository, quotas TenantQuotaRepository, tenants ConfigTenantRepository, provisioner EnvironmentProvisioner) {
-	routes := EnvironmentRoutes{environments: environments, quotas: quotas, tenants: tenants, provisioner: provisioner}
+func RegisterEnvironmentRoutes(register ProtectedRouteRegistrar, environments EnvironmentRepository, quotas TenantQuotaRepository, tenants ConfigTenantRepository, provisioner EnvironmentProvisioner, lifecycle EnvironmentLifecycle) {
+	routes := EnvironmentRoutes{environments: environments, quotas: quotas, tenants: tenants, provisioner: provisioner, lifecycle: lifecycle}
 	register(http.MethodGet, "/v1/environments", http.HandlerFunc(routes.listEnvironments))
 	register(http.MethodPost, "/v1/environments", http.HandlerFunc(routes.createEnvironment))
 	register(http.MethodGet, "/v1/environments/{environment_id}", http.HandlerFunc(routes.getEnvironment))
 	register(http.MethodPost, "/v1/environments/{environment_id}/deploy", http.HandlerFunc(routes.deployEnvironment))
+	register(http.MethodPost, "/v1/environments/{environment_id}/stop", http.HandlerFunc(routes.stopEnvironment))
+	register(http.MethodDelete, "/v1/environments/{environment_id}", http.HandlerFunc(routes.deleteEnvironment))
+}
+
+// stopEnvironment scales a runtime environment's Deployment to zero, the
+// server-side equivalent of `erun stop`.
+func (r EnvironmentRoutes) stopEnvironment(w http.ResponseWriter, req *http.Request) {
+	if r.lifecycle == nil {
+		writeError(w, http.StatusNotImplemented, "the deploy executor is not configured")
+		return
+	}
+	ctx := req.Context()
+	environment, err := r.environments.Get(ctx, req.PathValue("environment_id"))
+	if err != nil {
+		writeRepositoryError(w, err)
+		return
+	}
+	if environment.Type != model.EnvironmentTypeRuntime {
+		writeError(w, http.StatusBadRequest, "only a runtime environment can be stopped")
+		return
+	}
+	input, err := r.lifecycleInput(ctx, environment)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve environment placement")
+		return
+	}
+	if err := r.lifecycle.Stop(ctx, input); err != nil {
+		writeError(w, http.StatusBadGateway, "failed to stop environment: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, environment)
+}
+
+// deleteEnvironment tears down a runtime environment's namespace (when it has
+// one) and removes its row, the server-side equivalent of `erun delete`.
+func (r EnvironmentRoutes) deleteEnvironment(w http.ResponseWriter, req *http.Request) {
+	if r.lifecycle == nil {
+		writeError(w, http.StatusNotImplemented, "the deploy executor is not configured")
+		return
+	}
+	ctx := req.Context()
+	environment, err := r.environments.Get(ctx, req.PathValue("environment_id"))
+	if err != nil {
+		writeRepositoryError(w, err)
+		return
+	}
+	input, err := r.lifecycleInput(ctx, environment)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve environment placement")
+		return
+	}
+	if err := r.lifecycle.Delete(ctx, input); err != nil {
+		writeError(w, http.StatusBadGateway, "failed to delete environment: "+err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// lifecycleInput resolves the placement a stop/delete Job needs: the tenant
+// name (RLS-scoped to the caller) and the version the environment last
+// actually deployed, mirroring deployInput's tenant resolution.
+func (r EnvironmentRoutes) lifecycleInput(ctx context.Context, environment model.Environment) (provision.EnvLifecycleInput, error) {
+	tenant, err := r.tenants.Current(ctx)
+	if err != nil {
+		return provision.EnvLifecycleInput{}, err
+	}
+	version := environment.DeployedVersion
+	if version == "" {
+		version = environment.RuntimeVersion
+	}
+	return provision.EnvLifecycleInput{
+		Tenant:         strings.TrimSpace(tenant.Name),
+		Environment:    environment.Name,
+		EnvironmentID:  environment.EnvironmentID,
+		RunningVersion: version,
+	}, nil
 }
 
 // deployEnvironmentRequest re-deploys at an explicit version; omitted, the
@@ -119,11 +210,41 @@ func (r EnvironmentRoutes) deployEnvironment(w http.ResponseWriter, req *http.Re
 	writeJSON(w, http.StatusAccepted, environment)
 }
 
+// errCrossClusterPlacementUnsupported is the actionable v1 refusal for a
+// runtime environment that names a cluster context: the deploy Job has no
+// mechanism to target any cluster but the one the control plane itself runs
+// in (see deployexec.Launcher and provision.deployJobParams, which never
+// reference a context at all), so honoring a different one would silently
+// deploy to the wrong place instead. Refusing at request time — rather than
+// accepting the field and failing the async deploy later — gives the caller
+// the answer synchronously instead of a poll loop's eventual "failed" status.
+var errCrossClusterPlacementUnsupported = errors.New(
+	"deploying into a specific cluster context is not supported yet: this platform can only deploy runtime environments into its own cluster (v1 single-cluster placement); leave context/kubernetesContext unset",
+)
+
+// resolveDeployPlacement is the explicit v1 single-cluster placement decision
+// (#605): a runtime environment that names a context or kubernetes context is
+// refused, rather than the field being silently accepted and ignored. Only
+// applies to runtime environments — the only type this platform ever
+// server-side deploys.
+func resolveDeployPlacement(environment model.Environment) error {
+	if environment.Type != model.EnvironmentTypeRuntime {
+		return nil
+	}
+	if strings.TrimSpace(environment.ContextID) != "" || strings.TrimSpace(environment.KubernetesContext) != "" {
+		return errCrossClusterPlacementUnsupported
+	}
+	return nil
+}
+
 // resolveDeployVersion picks the version to deploy and rejects the requests that
 // have nothing deployable. Its error message is the operator-facing 400 reason.
 func resolveDeployVersion(req *http.Request, environment model.Environment) (string, error) {
 	if environment.Type != model.EnvironmentTypeRuntime {
 		return "", errors.New("only a runtime environment can be deployed")
+	}
+	if err := resolveDeployPlacement(environment); err != nil {
+		return "", err
 	}
 	var body deployEnvironmentRequest
 	// A body-less deploy is the common case (deploy what the env is pinned to),
@@ -198,22 +319,23 @@ var validEnvironmentTypes = map[model.EnvironmentType]struct{}{
 }
 
 // decodeCreateEnvironmentInput validates the create body and returns the
-// environment it describes. Its error message is the operator-facing 400 reason.
-func decodeCreateEnvironmentInput(req *http.Request) (model.Environment, error) {
+// environment it describes plus whether the caller asked for a preview.
+// Its error message is the operator-facing 400 reason.
+func decodeCreateEnvironmentInput(req *http.Request) (model.Environment, bool, error) {
 	var body createEnvironmentRequest
 	if err := decodeJSON(req, &body); err != nil {
-		return model.Environment{}, errors.New("invalid request body")
+		return model.Environment{}, false, errors.New("invalid request body")
 	}
 	name := strings.TrimSpace(body.Name)
 	// The tenant is hyphen-free (enforced at tenant registration), so allowing
 	// internal hyphens in the env keeps the first-hyphen split of the
 	// <tenant>-<env> namespace unambiguous.
 	if !validNamespaceLabel(name) {
-		return model.Environment{}, errors.New("name must be a DNS-1123 label: lowercase letters, digits, and internal hyphens, not starting or ending with a hyphen, at most 63 characters")
+		return model.Environment{}, false, errors.New("name must be a DNS-1123 label: lowercase letters, digits, and internal hyphens, not starting or ending with a hyphen, at most 63 characters")
 	}
 	envType := model.EnvironmentType(strings.TrimSpace(body.Type))
 	if _, ok := validEnvironmentTypes[envType]; !ok {
-		return model.Environment{}, errors.New("type must be one of runtime, remote-agent, local-agent")
+		return model.Environment{}, false, errors.New("type must be one of runtime, remote-agent, local-agent")
 	}
 	return model.Environment{
 		Name:              name,
@@ -221,12 +343,16 @@ func decodeCreateEnvironmentInput(req *http.Request) (model.Environment, error) 
 		ContextID:         strings.TrimSpace(body.ContextID),
 		KubernetesContext: strings.TrimSpace(body.KubernetesContext),
 		RuntimeVersion:    strings.TrimSpace(body.RuntimeVersion),
-	}, nil
+	}, body.Preview, nil
 }
 
 func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Request) {
-	environment, err := decodeCreateEnvironmentInput(req)
+	environment, preview, err := decodeCreateEnvironmentInput(req)
 	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := resolveDeployPlacement(environment); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -236,11 +362,21 @@ func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Re
 		writeRepositoryError(w, err)
 		return
 	}
+	if preview {
+		r.previewCreateEnvironment(w, req, environment, count, maxEnvironments)
+		return
+	}
 	if count >= maxEnvironments {
 		writeError(w, http.StatusConflict, fmt.Sprintf("environment quota reached: this tenant already has %d of %d environments", count, maxEnvironments))
 		return
 	}
+	r.persistAndMaybeProvision(w, req, environment)
+}
 
+// persistAndMaybeProvision creates the row and, for a runtime env with a
+// pinned version and a wired provisioner, starts the durable server-side
+// deploy — the non-preview tail of createEnvironment.
+func (r EnvironmentRoutes) persistAndMaybeProvision(w http.ResponseWriter, req *http.Request, environment model.Environment) {
 	created, err := r.environments.Create(req.Context(), environment)
 	if err != nil {
 		// A context belonging to another tenant is rejected here — the
@@ -263,6 +399,33 @@ func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Re
 		return
 	}
 	writeJSON(w, http.StatusAccepted, created)
+}
+
+// previewCreateEnvironment resolves and returns the same ordered plan
+// POST /v1/provision renders for this environment, without creating the row.
+// Since resolveDeployPlacement already ran before this is reached, the only
+// way this diverges from what a non-preview call would do is the quota
+// check, which — like /v1/provision — reports rather than 409s so the full
+// intended plan is still visible.
+func (r EnvironmentRoutes) previewCreateEnvironment(w http.ResponseWriter, req *http.Request, environment model.Environment, count, maxEnvironments int) {
+	tenant, err := r.tenants.Current(req.Context())
+	if err != nil {
+		writeRepositoryError(w, err)
+		return
+	}
+	contextRef := environment.KubernetesContext
+	if contextRef == "" {
+		contextRef = environment.ContextID
+	}
+	plan := provisionPlanInput{
+		tenantName:        strings.TrimSpace(tenant.Name),
+		envName:           environment.Name,
+		envType:           environment.Type,
+		kubernetesContext: contextRef,
+		count:             count,
+		maxEnvironments:   maxEnvironments,
+	}
+	writeJSON(w, http.StatusOK, provisionResponse{Plan: provisionPlan(plan), QuotaOk: plan.quotaOk()})
 }
 
 // startProvisioning kicks off the durable deploy workflow for a newly-created

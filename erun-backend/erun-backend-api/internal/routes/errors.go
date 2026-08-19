@@ -21,6 +21,8 @@ func writeRepositoryError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, http.StatusText(http.StatusBadRequest))
 	case errors.Is(err, repository.ErrMissingSecurityContext):
 		writeError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+	case errors.Is(err, repository.ErrConflict):
+		writeError(w, http.StatusConflict, http.StatusText(http.StatusConflict))
 	default:
 		writeError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
 	}

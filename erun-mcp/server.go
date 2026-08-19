@@ -153,6 +153,7 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig, identity authId
 	registerJobTools(reg, runtime)
 	registerCloudTools(reg, runtime)
 	registerContextTools(reg, runtime)
+	registerPlatformTools(reg, runtime)
 	registerDeliveryTools(reg, runtime)
 	registerInspectionTools(reg, runtime)
 
@@ -261,6 +262,10 @@ func registerCloudTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Description: "Initialize a Cloudflare cloud provider alias from a delegated API token (Zone + DNS edit, plus any other scopes the operator will use such as Cloudflare Pages for static sites). The token is verified against the Cloudflare API and held in a local secret store referenced from erun config, never written into erun-config.yaml; environments that attach the alias receive it as CLOUDFLARE_API_TOKEN. Supports preview.",
 	}, cloudInitCloudflareTool(runtime))
 	addTool(reg, &mcp.Tool{
+		Name:        "cloud_init_erun",
+		Description: "Initialize a hosted erun platform cloud provider alias: discovers the platform's own config (OIDC issuer, CLI client id) from its unauthenticated GET /v1/platform endpoint and saves the alias — no instance's name is hardcoded. Call cloud_login afterward to sign in (Device Authorization Grant, falling back to Authorization Code + PKCE). Supports preview.",
+	}, cloudInitERunTool(runtime))
+	addTool(reg, &mcp.Tool{
 		Name:        "cloud_login",
 		Description: "Login to a configured cloud provider alias, with preview support",
 	}, cloudLoginTool(runtime))
@@ -304,6 +309,69 @@ func registerContextTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Name:        "context_start",
 		Description: "Start a managed ERun cloud Kubernetes context, with preview support",
 	}, contextStartTool(runtime))
+}
+
+func registerPlatformTools(reg toolRegistrar, runtime RuntimeConfig) {
+	addTool(reg, &mcp.Tool{
+		Name:        "platform_whoami",
+		Description: "Resolve the caller's identity against a hosted erun platform (erun-backend-api) over the erun-type cloud alias erun cloud init erun / erun cloud login set up. Supports preview.",
+	}, platformWhoamiTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "platform_tenant_create",
+		Description: "Register a new tenant on the erun platform. Requires an operations-tenant caller. A real, immediate write, not a preview, unless preview is set.",
+	}, platformTenantCreateTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "platform_tenant_list",
+		Description: "List tenants visible to the caller on the erun platform: every tenant for an operations-tenant caller, or just the caller's own tenant otherwise. Supports preview.",
+	}, platformTenantListTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "platform_user_enroll",
+		Description: "Enroll a user in a tenant on the erun platform. tenantId targets another tenant and is honored only for an operations-tenant caller. Supports preview.",
+	}, platformUserEnrollTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "platform_user_list",
+		Description: "List a tenant's users on the erun platform. tenantId targets another tenant and is honored only for an operations-tenant caller. Supports preview.",
+	}, platformUserListTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "platform_env_list",
+		Description: "List the caller's tenant's hosted environments on the erun platform. Supports preview.",
+	}, platformEnvListTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "platform_env_get",
+		Description: "Fetch one hosted environment by id from the erun platform. Supports preview.",
+	}, platformEnvGetTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "platform_env_register",
+		Description: "Register a hosted environment on the erun platform. A real, immediate write, not a preview, unless preview is set. For a runtime environment with runtimeVersion set and a deploy executor configured on the platform, this also starts a server-side deploy: poll platform_env_get to watch status move registered -> provisioning -> running/failed.",
+	}, platformEnvRegisterTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "platform_env_deploy",
+		Description: "Start a server-side deploy of an already-registered environment on the erun platform. Fails with a conflict if a deploy is already in progress. Supports preview.",
+	}, platformEnvDeployTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "platform_env_stop",
+		Description: "Scale a hosted environment's runtime to zero on the erun platform, the server-side equivalent of `erun stop`. Supports preview.",
+	}, platformEnvStopTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "platform_env_delete",
+		Description: "Delete a hosted environment and tear down its remote namespace on the erun platform, the server-side equivalent of `erun delete`. Not recoverable. This call never prompts: pass confirm=true to actually delete. Supports preview (confirm is ignored when preview is true).",
+	}, platformEnvDeleteTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "platform_context_list",
+		Description: "List the caller's tenant's cloud contexts (managed clusters) on the erun platform. Supports preview.",
+	}, platformContextListTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "platform_context_get",
+		Description: "Fetch one cloud context by id from the erun platform. Supports preview.",
+	}, platformContextGetTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "platform_context_create",
+		Description: "Bootstrap a cloud context (managed cluster) on the erun platform: without planOnly this launches a real cloud VM and provisions k3s on it, billing the tenant's cloud account until stopped. planOnly asks the platform to resolve and return the bootstrap plan without creating anything — a real API call, distinct from preview, which skips the network call entirely.",
+	}, platformContextCreateTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "platform_provision",
+		Description: "Resolve and return the ordered plan for provisioning a hosted environment on the erun platform — tenant, quota, context bootstrap or reuse, namespace, register, deploy — without executing any of it or writing to the database. Pass either contextName (with contextAlias and contextRegion) to bootstrap a new cluster, or kubernetesContext to reuse an existing one.",
+	}, platformProvisionTool(runtime))
 }
 
 func registerDeliveryTools(reg toolRegistrar, runtime RuntimeConfig) {

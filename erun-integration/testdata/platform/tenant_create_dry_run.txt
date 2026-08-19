@@ -1,0 +1,3 @@
+Dry run: erun platform tenant creation planned.
+audit: erun platform tenant create --dry-run --issuer https://idp.example --name acme
+platform: POST https://api.example.test/v1/tenants (name=acme, type=COMPANY, issuer=https://idp.example)

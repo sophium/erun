@@ -6,16 +6,22 @@
 // api-protocol.md § Sign-in). The id_token is used as the bearer because it is
 // always a JWT; an issuer's access tokens may be opaque.
 //
-// The issuer + client id are configuration (Vite env), never hardcoded — the
-// console is installable as an independent PaaS instance. With OIDC unconfigured
-// the dev token (VITE_DEV_BEARER_TOKEN) applies so local dev can drive the read
-// view with a desktop-signed token.
+// The issuer + client id are resolved at runtime from GET /v1/platform
+// (resolveOidcConfig below) — a single built image must be able to serve any
+// PaaS instance (#603), so nothing instance-specific can be baked in at build
+// time. oidcConfig()'s VITE_* env vars remain only as the local-dev override
+// (set them to skip a live backend), and as the fallback resolveOidcConfig uses
+// when the discovery endpoint is absent (an older backend) or unreachable. With
+// neither source configured the dev token (VITE_DEV_BEARER_TOKEN) applies so
+// local dev can still drive the read view with a desktop-signed token.
 //
 // Driving each env's per-env MCP tools over the live edge
 // (mcp.<tenant>-<env>.services.<base-domain>) stays a later increment: it is
 // RCE-sensitive (its `raw` tool can `kubectl exec`) and needs a deployed env
 // carrying the backend's public key to verify against. Minting the token is
 // already implemented (src/mcp/).
+
+import { fetchPlatformConfig } from '../config/platform';
 
 const TOKEN_STORAGE_KEY = 'erun.console.idToken';
 const PKCE_VERIFIER_KEY = 'erun.console.pkceVerifier';
@@ -38,6 +44,40 @@ export function oidcConfig(): OidcConfig | undefined {
     return undefined;
   }
   return { issuer, clientId, redirectUri: window.location.origin + '/' };
+}
+
+// Resolving the OIDC config from platform discovery vs. the VITE_* override —
+// the App surfaces `fallbackReason` so an operator debugging a misconfigured
+// instance can see why the local-dev values are in play instead of silently
+// running against a possibly-wrong client id.
+export interface OidcConfigResolution {
+  config: OidcConfig | undefined;
+  fallbackReason?: string;
+}
+
+// resolveOidcConfig fetches GET /v1/platform for the issuer + console client id
+// (so one built image serves any PaaS instance), falling back to the VITE_*
+// local-dev override when discovery has nothing usable — an older backend
+// (404), an unreachable one, or one with the fields unset all resolve to the
+// override rather than a hard failure.
+export async function resolveOidcConfig(): Promise<OidcConfigResolution> {
+  const platform = await fetchPlatformConfig();
+  const issuer = trimmed(platform?.issuer);
+  const clientId = trimmed(platform?.consoleClientId);
+  if (issuer !== undefined && clientId !== undefined) {
+    return { config: { issuer, clientId, redirectUri: window.location.origin + '/' } };
+  }
+  const envConfig = oidcConfig();
+  if (envConfig === undefined) {
+    return { config: undefined };
+  }
+  return {
+    config: envConfig,
+    fallbackReason:
+      platform === undefined
+        ? 'Platform discovery (GET /v1/platform) is unavailable; using the local VITE_OIDC_* configuration.'
+        : 'Platform discovery returned no issuer/console client id; using the local VITE_OIDC_* configuration.',
+  };
 }
 
 function trimmed(value: string | undefined): string | undefined {

@@ -50,19 +50,34 @@ type PlatformConfig struct {
 	// no CAA (any CA may issue). Opt-in because the value must match the CA the
 	// cluster edge's ACME server actually uses — a mismatched CAA blocks issuance.
 	CAAIssuer string `yaml:"caaissuer,omitempty"`
+	// APIURL is this deployment's own API base URL, e.g.
+	// "https://api.frs-prod.services.erunpaas.com". Served unauthenticated at
+	// GET /v1/platform so a client can discover it. Optional: an empty value
+	// renders as an empty string in that response, never an error.
+	APIURL string `yaml:"apiurl,omitempty"`
+	// ConsoleURL is this deployment's hosted web console URL. Same discovery
+	// contract as APIURL.
+	ConsoleURL string `yaml:"consoleurl,omitempty"`
+	// Brand is this deployment's display name, if the operator set one. Same
+	// discovery contract as APIURL.
+	Brand string `yaml:"brand,omitempty"`
 }
 
 // IsZero reports whether no platform configuration is set, i.e. the project
 // does not run a platform deployment.
 func (c PlatformConfig) IsZero() bool {
-	return strings.TrimSpace(c.BaseDomain) == "" &&
-		strings.TrimSpace(c.Env) == "" &&
-		strings.TrimSpace(c.ServicesZone) == "" &&
-		strings.TrimSpace(c.AuthoritativeIP) == "" &&
-		len(c.Nameservers) == 0 &&
-		strings.TrimSpace(c.AuthHost) == "" &&
-		strings.TrimSpace(c.ACMEEmail) == "" &&
-		strings.TrimSpace(c.CAAIssuer) == ""
+	if len(c.Nameservers) != 0 {
+		return false
+	}
+	for _, field := range []string{
+		c.BaseDomain, c.Env, c.ServicesZone, c.AuthoritativeIP,
+		c.AuthHost, c.ACMEEmail, c.CAAIssuer, c.APIURL, c.ConsoleURL, c.Brand,
+	} {
+		if strings.TrimSpace(field) != "" {
+			return false
+		}
+	}
+	return true
 }
 
 // Resolve returns a copy with defaults derived from BaseDomain. It never invents
@@ -76,6 +91,9 @@ func (c PlatformConfig) Resolve() PlatformConfig {
 	resolved.AuthHost = strings.TrimSpace(c.AuthHost)
 	resolved.ACMEEmail = strings.TrimSpace(c.ACMEEmail)
 	resolved.CAAIssuer = strings.TrimSpace(c.CAAIssuer)
+	resolved.APIURL = strings.TrimSpace(c.APIURL)
+	resolved.ConsoleURL = strings.TrimSpace(c.ConsoleURL)
+	resolved.Brand = strings.TrimSpace(c.Brand)
 	if resolved.BaseDomain == "" {
 		return resolved
 	}

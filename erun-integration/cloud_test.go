@@ -1,7 +1,13 @@
 package integration
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,6 +39,121 @@ func stubAWSCallerIdentityAndJWT(t testing.TB, setup env.Setup) (envVars []strin
 	fixture.StubBinaryWithScript(t, stubs, "aws", script)
 	envVars = append(setup.Env(), fixture.StubEnv(stubs, "aws")...)
 	return envVars, issuer
+}
+
+// erunPlatformStubServer runs a minimal hosted erun platform + OIDC provider
+// for real-run `cloud init erun`/`cloud login` scenarios: the unauthenticated
+// GET /v1/platform discovery endpoint, OIDC discovery, the device
+// authorization grant, and the token endpoint's device_code grant. The
+// device flow's interval is 1s so the real-run scenario stays fast.
+func erunPlatformStubServer(t testing.TB) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	var issuer string
+	mux.HandleFunc("GET /v1/platform", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"issuer": issuer, "cliClientId": "cli-test-client"})
+	})
+	mux.HandleFunc("GET /.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"issuer":                        issuer,
+			"authorization_endpoint":        issuer + "/authorize",
+			"token_endpoint":                issuer + "/token",
+			"device_authorization_endpoint": issuer + "/device",
+		})
+	})
+	mux.HandleFunc("POST /device", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"device_code":               "test-device-code",
+			"user_code":                 "TEST-CODE",
+			"verification_uri":          issuer + "/device",
+			"verification_uri_complete": issuer + "/device?user_code=TEST-CODE",
+			"expires_in":                600,
+			"interval":                  1,
+		})
+	})
+	// The first device-token poll answers authorization_pending — the poll
+	// loop's ordinary steady state — and only the second succeeds, so the
+	// scenario exercises pollERunDeviceToken's retry branch for free instead
+	// of only ever reaching the loop on its first iteration.
+	deviceTokenPolls := 0
+	mux.HandleFunc("POST /token", func(w http.ResponseWriter, r *http.Request) {
+		if r.FormValue("refresh_token") != "" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"access_token": "test-access-token",
+				"expires_in":   3600,
+			})
+			return
+		}
+		deviceTokenPolls++
+		if deviceTokenPolls == 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "authorization_pending"})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  "test-access-token",
+			"refresh_token": "test-refresh-token",
+			"expires_in":    3600,
+		})
+	})
+	mux.HandleFunc("GET /v1/whoami", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-access-token" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"tenantId": "test-tenant-id",
+			"userId":   "test-user-id",
+			"username": "test-user",
+		})
+	})
+	mux.HandleFunc("GET /v1/config", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-access-token" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"tenant":       map[string]string{"tenantId": "test-tenant-id", "name": "test-tenant"},
+			"environments": []any{map[string]string{"environmentId": "env-1", "name": "prod"}},
+			"contexts":     []any{},
+		})
+	})
+	server := httptest.NewServer(mux)
+	issuer = server.URL
+	t.Cleanup(server.Close)
+	return server
+}
+
+func seedERunCloudProviderAlias(t testing.TB, setup env.Setup, alias, issuer, clientID string) {
+	t.Helper()
+	root := filepath.Join(setup.ConfigHome, "erun")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", root, err)
+	}
+	body := "cloudproviders:\n" +
+		"  - alias: " + alias + "\n" +
+		"    provider: erun\n" +
+		"    oidcissuerurl: " + issuer + "\n" +
+		"    erun:\n" +
+		"      apiurl: " + issuer + "\n" +
+		"      clientid: " + clientID + "\n"
+	if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write erun config: %v", err)
+	}
+}
+
+// eraseCachedERunAccessToken deletes the cached access token file for alias
+// (ref "erun/access/<alias>", hashed the same way erun-common's file-backed
+// CloudSecretStore names it) without touching the refresh token, forcing the
+// next status check or bearer-token resolution through the refresh_token
+// grant.
+func eraseCachedERunAccessToken(t testing.TB, setup env.Setup, alias string) {
+	t.Helper()
+	sum := sha256.Sum256([]byte("erun/access/" + alias))
+	path := filepath.Join(setup.ConfigHome, "erun", "cloud-secrets", hex.EncodeToString(sum[:])+".token")
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("erase cached access token %s: %v", path, err)
+	}
 }
 
 func TestCloud(t *testing.T) {
@@ -172,6 +293,188 @@ func TestCloud(t *testing.T) {
 		}
 		golden.Equal(t, "cloud/init_cloudflare_dry_run_api_base_url_seam", normalize.Apply(result.Combined))
 	})
+
+	t.Run("init_erun_help", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"cloud", "init", "erun", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "cloud/init_erun_help", normalize.Apply(result.Combined))
+	})
+
+	t.Run("init_erun_dry_run_traces_discovery_plan", func(t *testing.T) {
+		// No server is started: a dry run must never depend on the platform
+		// being reachable, unlike AWS/Cloudflare init whose identity/verify
+		// calls always run for real regardless of --dry-run.
+		setup := env.New(t)
+		args := []string{"cloud", "init", "erun", "--api-url", "https://api.example.test", "--dry-run"}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "cloud/init_erun_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("init_erun_real_run_and_login_completes_device_flow", func(t *testing.T) {
+		// A real hosted-platform + OIDC provider stub, reached over real
+		// loopback HTTP (erun's design takes the API URL as an explicit
+		// input, so no ERUN_*_BASE_URL seam or stub binary is needed): init
+		// discovers the platform and persists the alias, then login runs the
+		// device authorization grant end to end and persists the resulting
+		// refresh token.
+		setup := env.New(t)
+		server := erunPlatformStubServer(t)
+
+		initResult := erun.Run(t, []string{"cloud", "init", "erun", "--api-url", server.URL}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if initResult.ExitCode != 0 {
+			t.Fatalf("init exit %d: %s", initResult.ExitCode, initResult.Combined)
+		}
+		alias := "erun+" + strings.TrimPrefix(server.URL, "http://") + "@erun"
+		if !strings.Contains(initResult.Combined, "Saved cloud provider alias "+alias) {
+			t.Fatalf("expected init to save alias %s, got:\n%s", alias, initResult.Combined)
+		}
+
+		loginResult := erun.Run(t, []string{"cloud", "login", "--alias", alias}, erun.RunOptions{
+			Cwd:   setup.Cwd,
+			Env:   setup.Env(),
+			Stdin: "y\n",
+		})
+		if loginResult.ExitCode != 0 {
+			t.Fatalf("login exit %d: %s", loginResult.ExitCode, loginResult.Combined)
+		}
+		if !strings.Contains(loginResult.Combined, alias+": active") {
+			t.Fatalf("expected login to report active status, got:\n%s", loginResult.Combined)
+		}
+		// The end-to-end proof: login also calls GET /v1/whoami against the
+		// real platform stub, so a token that merely decodes but doesn't
+		// authenticate would fail here.
+		if !strings.Contains(loginResult.Combined, "Signed in to "+alias+" as test-user (tenant test-tenant-id)") {
+			t.Fatalf("expected login to confirm sign-in via whoami, got:\n%s", loginResult.Combined)
+		}
+		// Same proof, one step further: GET /v1/config also round-trips
+		// against the real platform stub.
+		if !strings.Contains(loginResult.Combined, "Tenant test-tenant: 1 environment(s), 0 cloud context(s)") {
+			t.Fatalf("expected login to confirm config readback, got:\n%s", loginResult.Combined)
+		}
+
+		raw, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", "config.yaml"))
+		if err != nil {
+			t.Fatalf("read root config: %v", err)
+		}
+		body := string(raw)
+		for _, want := range []string{
+			"alias: " + alias,
+			"clientid: cli-test-client",
+			"refreshtokenref: erun/refresh/" + alias,
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("expected persisted config to contain %q, got:\n%s", want, body)
+			}
+		}
+
+		// Erase only the cached access token (not the refresh token config
+		// just persisted above) so the next `cloud login` is forced through
+		// the refresh_token grant instead of finding an already-active
+		// cache — exercising the token-refresh path end to end, including
+		// the whoami/config re-verification with the freshly refreshed
+		// token. No confirm prompt is expected: a successful refresh reports
+		// "active" before the command ever reaches that prompt.
+		eraseCachedERunAccessToken(t, setup, alias)
+		refreshLoginResult := erun.Run(t, []string{"cloud", "login", "--alias", alias}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if refreshLoginResult.ExitCode != 0 {
+			t.Fatalf("refresh login exit %d: %s", refreshLoginResult.ExitCode, refreshLoginResult.Combined)
+		}
+		if !strings.Contains(refreshLoginResult.Combined, alias+": active") {
+			t.Fatalf("expected refreshed login to report active status, got:\n%s", refreshLoginResult.Combined)
+		}
+	})
+
+	t.Run("login_erun_dry_run_traces_discovery_and_device_flow_plan", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "test+host@erun", "https://auth.example.test", "cli-test")
+		result := erun.Run(t, []string{"cloud", "login", "--alias", "test+host@erun", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "cloud/login_erun_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("oidc_erun_alias_fails", func(t *testing.T) {
+		// `cloud oidc` is AWS-only web-identity federation setup; an erun
+		// alias's issuer is already set at `cloud init erun` and never uses
+		// this path.
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "test+host@erun", "https://auth.example.test", "cli-test")
+		result := erun.Run(t, []string{"cloud", "oidc", "--alias", "test+host@erun"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "cloud/oidc_erun_alias_fails", normalize.Apply(result.Combined))
+	})
+
+	// The device flow's token round-trip can succeed while the platform still
+	// rejects the resulting bearer at the actual API (e.g. a backend-side
+	// authorization mismatch, a not-yet-provisioned tenant, a conflicting
+	// concurrent request, or an unconfigured executor) — platformStatusError's
+	// mapping, distinct from the token endpoint's own error mapping
+	// (oauthTokenError), which a passing token exchange never reaches here.
+	for _, statusCase := range []struct {
+		name   string
+		status int
+	}{
+		{"unauthorized", http.StatusUnauthorized},
+		{"forbidden", http.StatusForbidden},
+		{"not_found", http.StatusNotFound},
+		{"conflict", http.StatusConflict},
+		{"not_implemented", http.StatusNotImplemented},
+		// Unmapped status: platformStatusError's default branch, a generic
+		// error carrying the server's message with no sentinel to match.
+		{"internal_server_error", http.StatusInternalServerError},
+	} {
+		t.Run("login_erun_real_run_whoami_verification_maps_platform_error_"+statusCase.name, func(t *testing.T) {
+			setup := env.New(t)
+			mux := http.NewServeMux()
+			var issuer string
+			mux.HandleFunc("GET /v1/platform", func(w http.ResponseWriter, _ *http.Request) {
+				_ = json.NewEncoder(w).Encode(map[string]string{"issuer": issuer, "cliClientId": "cli-test-client"})
+			})
+			mux.HandleFunc("GET /.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
+				_ = json.NewEncoder(w).Encode(map[string]string{
+					"issuer":                        issuer,
+					"token_endpoint":                issuer + "/token",
+					"device_authorization_endpoint": issuer + "/device",
+				})
+			})
+			mux.HandleFunc("POST /device", func(w http.ResponseWriter, _ *http.Request) {
+				_ = json.NewEncoder(w).Encode(map[string]any{"device_code": "dc", "user_code": "UC", "expires_in": 600, "interval": 1})
+			})
+			mux.HandleFunc("POST /token", func(w http.ResponseWriter, _ *http.Request) {
+				_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "tok", "refresh_token": "rtok", "expires_in": 3600})
+			})
+			mux.HandleFunc("GET /v1/whoami", func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, http.StatusText(statusCase.status), statusCase.status)
+			})
+			server := httptest.NewServer(mux)
+			t.Cleanup(server.Close)
+			issuer = server.URL
+
+			initResult := erun.Run(t, []string{"cloud", "init", "erun", "--api-url", server.URL}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+			if initResult.ExitCode != 0 {
+				t.Fatalf("init exit %d: %s", initResult.ExitCode, initResult.Combined)
+			}
+			alias := "erun+" + strings.TrimPrefix(server.URL, "http://") + "@erun"
+
+			loginResult := erun.Run(t, []string{"cloud", "login", "--alias", alias}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "y\n"})
+			if loginResult.ExitCode == 0 {
+				t.Fatalf("expected a non-zero exit when whoami verification fails, got 0:\n%s", loginResult.Combined)
+			}
+			wantStatus := fmt.Sprintf("%d", statusCase.status)
+			if !strings.Contains(loginResult.Combined, "verify erun platform sign-in") || !strings.Contains(loginResult.Combined, wantStatus) {
+				t.Fatalf("expected the platform's %s to surface, got:\n%s", wantStatus, loginResult.Combined)
+			}
+		})
+	}
 
 	t.Run("init_aws_dry_run_traces_sso_setup_and_oidc_persistence", func(t *testing.T) {
 		setup := env.New(t)

@@ -125,20 +125,29 @@ func DeployJobName(tenant, environment, version, deployID string) string {
 
 const jobNamePrefix = "erun-deploy-"
 
-// Launcher creates and watches deploy Jobs.
+// Launcher creates and watches deploy, stop, and delete Jobs. One instance
+// covers all three lifecycle actions; each gets its own jobexec.Runner only
+// because Kind/Container differ, not a second launcher.
 type Launcher struct {
-	runner *jobexec.Runner
+	runner       *jobexec.Runner
+	stopRunner   *jobexec.Runner
+	deleteRunner *jobexec.Runner
 }
 
 func NewLauncher(kube kubernetes.Interface) *Launcher {
-	return &Launcher{runner: jobexec.NewRunner(kube, jobexec.Options{
-		Kind:      "deploy",
-		Container: deployContainerName,
-	})}
+	return &Launcher{
+		runner:       jobexec.NewRunner(kube, jobexec.Options{Kind: "deploy", Container: deployContainerName}),
+		stopRunner:   jobexec.NewRunner(kube, jobexec.Options{Kind: "stop", Container: stopContainerName}),
+		deleteRunner: jobexec.NewRunner(kube, jobexec.Options{Kind: "delete", Container: deleteContainerName}),
+	}
 }
 
-// PollEvery sets how often the watch re-reads the Job's status.
-func (l *Launcher) PollEvery(every time.Duration) { l.runner.PollEvery = every }
+// PollEvery sets how often every runner's watch re-reads its Job's status.
+func (l *Launcher) PollEvery(every time.Duration) {
+	l.runner.PollEvery = every
+	l.stopRunner.PollEvery = every
+	l.deleteRunner.PollEvery = every
+}
 
 // Run creates the deploy Job and blocks until it reaches a terminal state,
 // returning the result.

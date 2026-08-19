@@ -14,6 +14,7 @@ import (
 
 type TenantRepository interface {
 	Create(ctx context.Context, params repository.CreateTenantParams) (model.Tenant, error)
+	List(ctx context.Context) ([]model.Tenant, error)
 }
 
 type TenantRoutes struct {
@@ -35,6 +36,18 @@ type createTenantRequest struct {
 func RegisterTenantRoutes(register ProtectedRouteRegistrar, tenants TenantRepository) {
 	routes := TenantRoutes{tenants: tenants}
 	register(http.MethodPost, "/v1/tenants", http.HandlerFunc(routes.createTenant))
+	register(http.MethodGet, "/v1/tenants", http.HandlerFunc(routes.listTenants))
+}
+
+// listTenants returns every tenant for an operations-scoped caller, or a
+// single-item list containing only the caller's own tenant otherwise.
+func (r TenantRoutes) listTenants(w http.ResponseWriter, req *http.Request) {
+	tenants, err := r.tenants.List(req.Context())
+	if err != nil {
+		writeRepositoryError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, tenants)
 }
 
 // createTenant gates on an OPERATIONS tenant beyond the WriteAll permission POST

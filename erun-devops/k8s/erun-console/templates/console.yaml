@@ -1,0 +1,134 @@
+{{/*
+  erun-console — the hosted web console, served same-origin with
+  erun-backend-api (its production design; see erun-console/vite.config.ts and
+  erun-devops/docker/erun-console/Dockerfile). The API itself has no Ingress
+  (it sets no CORS headers by design and is reached only in-cluster, e.g. by
+  this chart's own nginx proxying /v1), so this is the platform's public HTTPS
+  edge for both the console UI and the API it talks to.
+
+  externalDomain has no PlatformConfig field to default from the way
+  erun-zitadel's does from platform.authHost (no platform.consoleHost exists),
+  so it defaults instead to "console.<platform.baseDomain>" when the platform
+  block is configured, or must be set explicitly via console.externalDomain.
+*/}}
+{{- $tenant := default "erun" .Values.tenant -}}
+{{- $platform := default dict .Values.platform -}}
+{{- $baseDomain := default "" $platform.baseDomain -}}
+{{- $console := default dict .Values.console -}}
+{{- $externalDomain := default (ternary (printf "console.%s" $baseDomain) "" (ne $baseDomain "")) $console.externalDomain -}}
+{{- $externalDomain = required "erun-console: an external domain is required — set console.externalDomain, or ensure platform.baseDomain is set so it defaults to console.<baseDomain>" $externalDomain -}}
+{{- $ingressClass := default "traefik" $console.ingressClass -}}
+{{- $ingressAnnotations := default dict $console.ingressAnnotations -}}
+{{- $certManagerIssuer := default "" $console.certManagerIssuer -}}
+{{- $tlsSecretName := default (printf "%s-console-tls" $tenant) $console.tlsSecretName -}}
+{{- $nginxPort := default 8080 $console.port -}}
+{{- $apiServiceName := default (printf "%s-api" $tenant) $console.apiServiceName -}}
+{{- $apiPort := default 17033 .Values.apiPort -}}
+{{- $apiServicePort := default $apiPort $console.apiServicePort -}}
+{{- $replicas := default 1 $console.replicas -}}
+{{- $imageOverrides := default dict .Values.imageOverrides -}}
+{{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
+{{- $consoleImage := default (printf "%s/erun-console:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-console") -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $tenant }}-console
+  labels:
+    app: {{ $tenant }}-console
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ $tenant }}-console
+  ports:
+    - name: http
+      port: {{ $nginxPort }}
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $tenant }}-console
+  labels:
+    app: {{ $tenant }}-console
+  {{- if or $certManagerIssuer $ingressAnnotations }}
+  annotations:
+    {{- if $certManagerIssuer }}
+    cert-manager.io/issuer: {{ $certManagerIssuer | quote }}
+    {{- end }}
+    {{- range $key, $value := $ingressAnnotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+  {{- end }}
+spec:
+  {{- if $ingressClass }}
+  ingressClassName: {{ $ingressClass }}
+  {{- end }}
+  {{- if $tlsSecretName }}
+  tls:
+    - hosts:
+        - {{ $externalDomain }}
+      secretName: {{ $tlsSecretName }}
+  {{- end }}
+  rules:
+    - host: {{ $externalDomain }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $tenant }}-console
+                port:
+                  name: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $tenant }}-console
+  labels:
+    app: {{ $tenant }}-console
+spec:
+  replicas: {{ $replicas }}
+  selector:
+    matchLabels:
+      app: {{ $tenant }}-console
+  template:
+    metadata:
+      labels:
+        app: {{ $tenant }}-console
+    spec:
+      containers:
+        - name: erun-console
+          image: {{ $consoleImage }}
+          imagePullPolicy: IfNotPresent
+          env:
+            # In-cluster Service DNS: no CORS, no cross-origin call ever
+            # leaves the pod — nginx proxies /v1 to the API Service directly.
+            - name: API_PROXY_HOST
+              value: {{ $apiServiceName | quote }}
+            - name: API_PROXY_PORT
+              value: {{ $apiServicePort | quote }}
+            - name: NGINX_PORT
+              value: {{ $nginxPort | quote }}
+          ports:
+            - name: http
+              containerPort: {{ $nginxPort }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+          resources:
+            limits:
+              cpu: "500m"
+              memory: 256Mi
+            requests:
+              cpu: "50m"
+              memory: 64Mi

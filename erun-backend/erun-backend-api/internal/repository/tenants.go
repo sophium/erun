@@ -89,6 +89,34 @@ func nullIfEmpty(value string) any {
 	return value
 }
 
+// List returns every tenant for an operations-scoped caller, or a
+// single-item list containing only the caller's own tenant otherwise.
+// tenants is a root resolution table (not RLS-scoped), so a non-operations
+// caller must be filtered in application code rather than relying on the
+// database to scope the query.
+func (r *TenantRepository) List(ctx context.Context) ([]model.Tenant, error) {
+	securityContext, ok := security.FromContext(ctx)
+	if !ok {
+		return nil, ErrMissingSecurityContext
+	}
+	if securityContext.TenantType != string(model.TenantTypeOperations) {
+		tenant, err := r.Current(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return []model.Tenant{tenant}, nil
+	}
+	var tenants []model.Tenant
+	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		return tx.NewRaw(`
+			SELECT tenant_id, name, type, created_at, updated_at
+			  FROM tenants
+			 ORDER BY created_at ASC
+		`).Scan(ctx, &tenants)
+	})
+	return tenants, err
+}
+
 // Current returns the row for the caller's resolved tenant. Because tenants is a
 // root resolution table (not RLS-scoped), the query must scope explicitly by the
 // security context's tenant ID.

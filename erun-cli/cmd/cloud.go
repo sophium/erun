@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -111,6 +112,7 @@ func newCloudInitCmd(store common.CloudStore, promptRunner PromptRunner, selectR
 		"Initialize cloud provider configuration",
 		newCloudInitAWSCmd(store, promptRunner, deps),
 		newCloudInitCloudflareCmd(store, promptRunner, selectRunner, deps),
+		newCloudInitERunCmd(store, deps),
 	)
 }
 
@@ -231,6 +233,44 @@ func runCloudInitCloudflareCommand(ctx common.Context, store common.CloudStore, 
 	}
 	if ctx.DryRun {
 		_, err := fmt.Fprintln(ctx.Stdout, "Dry run: Cloudflare cloud provider initialization planned.")
+		return err
+	}
+	return writeCloudProviderSaved(ctx, provider)
+}
+
+func newCloudInitERunCmd(store common.CloudStore, deps common.CloudDependencies) *cobra.Command {
+	var params common.InitERunCloudProviderParams
+	cmd := &cobra.Command{
+		Use:   "erun",
+		Short: "Set up a hosted erun platform cloud provider alias",
+		Long: "Set up a hosted erun platform cloud provider alias.\n\n" +
+			"Discovers the platform's own config (OIDC issuer, CLI client id) from its unauthenticated " +
+			"GET /v1/platform endpoint and saves the alias — no instance's name is hardcoded. Run " +
+			"`erun cloud login --alias <alias>` afterward to sign in: the Device Authorization Grant " +
+			"(the only flow that works with no browser), falling back to Authorization Code + PKCE on " +
+			"a loopback listener when the issuer advertises no device endpoint.",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		Example:      "  erun cloud init erun --api-url https://api.frs-prod.services.erunpaas.com",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runCloudInitERunCommand(commandContext(cmd), store, params, deps)
+		},
+	}
+	cmd.Flags().StringVar(&params.APIURL, "api-url", "", "Base URL of the hosted erun platform's API")
+	if err := cmd.MarkFlagRequired("api-url"); err != nil {
+		panic(err)
+	}
+	addDryRunFlag(cmd)
+	return cmd
+}
+
+func runCloudInitERunCommand(ctx common.Context, store common.CloudStore, params common.InitERunCloudProviderParams, deps common.CloudDependencies) error {
+	provider, err := common.InitERunCloudProvider(ctx, store, params, deps)
+	if err != nil {
+		return err
+	}
+	if ctx.DryRun {
+		_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun cloud provider initialization planned.")
 		return err
 	}
 	return writeCloudProviderSaved(ctx, provider)
@@ -543,7 +583,7 @@ func runCloudLoginCommand(ctx common.Context, store common.CloudStore, promptRun
 	}
 	status := common.CloudProviderTokenStatus(provider, deps)
 	if status.Status == common.CloudTokenStatusActive {
-		return writeCloudStatus(ctx, status)
+		return finishCloudLogin(ctx, store, status, deps)
 	}
 	login, err := confirmPrompt(promptRunner, fmt.Sprintf("Login to %s", provider.Alias))
 	if err != nil {
@@ -556,13 +596,60 @@ func runCloudLoginCommand(ctx common.Context, store common.CloudStore, promptRun
 	if err != nil {
 		return err
 	}
-	return writeCloudStatus(ctx, status)
+	return finishCloudLogin(ctx, store, status, deps)
+}
+
+// finishCloudLogin writes the resolved status and, for an active erun-hosted
+// alias, additionally proves the session actually authenticates against the
+// real platform by calling GET /v1/whoami — the smallest end-to-end evidence
+// that a token round-trip worked, not just that a token was obtained.
+func finishCloudLogin(ctx common.Context, store common.CloudStore, status common.CloudProviderStatus, deps common.CloudDependencies) error {
+	if err := writeCloudStatus(ctx, status); err != nil {
+		return err
+	}
+	if status.Provider != common.CloudProviderERun || status.Status != common.CloudTokenStatusActive {
+		return nil
+	}
+	return writeERunWhoami(ctx, store, status.Alias, deps)
+}
+
+func writeERunWhoami(ctx common.Context, store common.CloudStore, alias string, deps common.CloudDependencies) error {
+	provider, err := common.ResolveCloudProvider(store, alias)
+	if err != nil {
+		return err
+	}
+	if provider.ERun == nil {
+		return nil
+	}
+	client := common.NewPlatformClient(provider.ERun.APIURL, func() (string, error) {
+		token, err := common.CloudProviderBearerToken(ctx, store, common.CloudBearerParams{Alias: alias}, deps)
+		if err != nil {
+			return "", err
+		}
+		return token.Token, nil
+	})
+	whoami, err := client.Whoami(context.Background())
+	if err != nil {
+		return fmt.Errorf("verify erun platform sign-in: %w", err)
+	}
+	if _, err := fmt.Fprintf(ctx.Stdout, "Signed in to %s as %s (tenant %s)\n", alias, whoami.Username, whoami.TenantID); err != nil {
+		return err
+	}
+	config, err := client.Config(context.Background())
+	if err != nil {
+		return fmt.Errorf("read erun platform config: %w", err)
+	}
+	_, err = fmt.Fprintf(ctx.Stdout, "Tenant %s: %d environment(s), %d cloud context(s)\n", config.Tenant.Name, len(config.Environments), len(config.Contexts))
+	return err
 }
 
 func traceCloudLoginPlan(ctx common.Context, provider common.CloudProviderConfig) {
 	switch provider.Provider {
 	case common.CloudProviderCloudflare:
 		ctx.Trace("verify cloudflare api token via the Cloudflare API")
+	case common.CloudProviderERun:
+		ctx.Trace("GET " + provider.OIDCIssuerURL + "/.well-known/openid-configuration")
+		ctx.Trace("start the device authorization grant (or the authorization code + pkce fallback if the issuer advertises no device endpoint)")
 	default:
 		ctx.TraceCommand("", "aws", "sso", "login", "--profile", provider.Profile)
 	}
@@ -602,8 +689,8 @@ func runCloudOIDCCommand(ctx common.Context, store common.CloudStore, _ PromptRu
 	if err != nil {
 		return err
 	}
-	if provider.Provider == common.CloudProviderCloudflare {
-		return fmt.Errorf("cloud provider alias %q is a Cloudflare alias, which does not use OIDC web-identity federation", provider.Alias)
+	if provider.Provider != common.CloudProviderAWS {
+		return fmt.Errorf("cloud provider alias %q is a %q-type alias, which does not use AWS web-identity federation; its OIDC issuer is set at `cloud init`", provider.Alias, provider.Provider)
 	}
 	if ctx.DryRun {
 		audience := strings.TrimSpace(params.Audience)

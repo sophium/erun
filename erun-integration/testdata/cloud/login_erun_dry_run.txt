@@ -1,0 +1,5 @@
+Dry run: cloud login planned for test+host@erun.
+audit: erun cloud login --alias test+host@erun --dry-run
+check cloud provider token status
+GET https://auth.example.test/.well-known/openid-configuration
+start the device authorization grant (or the authorization code + pkce fallback if the issuer advertises no device endpoint)

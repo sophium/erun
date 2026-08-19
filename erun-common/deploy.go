@@ -2479,7 +2479,8 @@ func helmStoppedSetArgs(stopped bool) []string {
 // helmPlatformSetArgs returns the per-instance platform.* helm --set args,
 // guarded on presence so non-platform deploys (every existing env) render none.
 // Threaded to every chart; only the platform singletons read them — PowerDNS to
-// bootstrap its services zone, Zitadel to resolve its auth host.
+// bootstrap its services zone, Zitadel to resolve its auth host, erun-backend-api
+// to serve them at the unauthenticated GET /v1/platform discovery endpoint.
 func helmPlatformSetArgs(p PlatformConfig) []string {
 	if p.IsZero() {
 		return nil
@@ -2491,6 +2492,9 @@ func helmPlatformSetArgs(p PlatformConfig) []string {
 		"--set-string", "platform.authoritativeIP=" + escapeHelmSetValue(p.AuthoritativeIP),
 		"--set-string", "platform.authHost=" + escapeHelmSetValue(p.AuthHost),
 		"--set-string", "platform.caaIssuer=" + escapeHelmSetValue(p.CAAIssuer),
+		"--set-string", "platform.apiUrl=" + escapeHelmSetValue(p.APIURL),
+		"--set-string", "platform.consoleUrl=" + escapeHelmSetValue(p.ConsoleURL),
+		"--set-string", "platform.brand=" + escapeHelmSetValue(p.Brand),
 	}
 	if len(p.Nameservers) > 0 {
 		if encoded, marshalErr := json.Marshal(p.Nameservers); marshalErr == nil {
