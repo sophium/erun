@@ -2,7 +2,10 @@ ARG ERUN_VERSION=1.0.0
 
 # Stage 1: build the Vite/React SPA. Needs a newer Node 20 than erun-docs pins
 # (20.18.1) — @vitejs/plugin-react@6 requires >=20.19.0.
-FROM node:20.19.0-alpine AS builder
+# Pinned to the build host's platform: the bundle it emits is static assets with
+# no architecture, so building it once natively beats building it again under
+# emulation for the foreign arch every multi-arch build.
+FROM --platform=$BUILDPLATFORM node:20.19.0-alpine AS builder
 
 WORKDIR /src
 
