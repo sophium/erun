@@ -140,6 +140,73 @@ func TestEndpointURL(t *testing.T) {
 	}
 }
 
+// wantRegisteredTools is this module's registered tool surface, asserted by
+// name in TestHTTPHandlerExposesVersionTool: a bare count cannot say which
+// tool appeared or vanished, and its failure message prints unreadable struct
+// pointers. Kept at package scope so the test function stays within funlen.
+var wantRegisteredTools = []string{
+	"activity_lease_list",
+	"activity_lease_release",
+	"activity_lease_take",
+	"build",
+	"cloud_clear_aws_credentials",
+	"cloud_init_aws",
+	"cloud_init_cloudflare",
+	"cloud_init_erun",
+	"cloud_inject_aws_credentials",
+	"cloud_list",
+	"cloud_login",
+	"cloud_oidc",
+	"cloud_set",
+	"context_init",
+	"context_list",
+	"context_start",
+	"context_stop",
+	"contribute_clone",
+	"delete",
+	"deploy",
+	"diff",
+	"doctor",
+	"expose",
+	"idle",
+	"idle_stop_cancel",
+	"idle_stop_history",
+	"idle_stop_record",
+	"init",
+	"job_attach",
+	"job_await",
+	"job_cancel",
+	"job_output",
+	"job_start",
+	"job_status",
+	"list",
+	"outputs_download",
+	"outputs_list",
+	"pin",
+	"platform_context_create",
+	"platform_context_get",
+	"platform_context_list",
+	"platform_env_delete",
+	"platform_env_deploy",
+	"platform_env_get",
+	"platform_env_list",
+	"platform_env_register",
+	"platform_env_stop",
+	"platform_provision",
+	"platform_tenant_create",
+	"platform_tenant_list",
+	"platform_user_enroll",
+	"platform_user_list",
+	"platform_whoami",
+	"publish",
+	"push",
+	"raw",
+	"release",
+	"terraform",
+	"upgrade",
+	"version",
+}
+
 func TestHTTPHandlerExposesVersionTool(t *testing.T) {
 	// newHTTPHandler resolves its auth trust anchor from the ambient environment,
 	// so running this test inside an erun runtime pod (which sets
@@ -175,62 +242,16 @@ func TestHTTPHandlerExposesVersionTool(t *testing.T) {
 		t.Fatalf("ListTools failed: %v", err)
 	}
 	// The registered tool set is this module's public surface, so it is asserted
-	// by name: a bare count cannot say which tool appeared or vanished, and its
-	// failure message prints unreadable struct pointers.
-	wantTools := []string{
-		"activity_lease_list",
-		"activity_lease_release",
-		"activity_lease_take",
-		"build",
-		"cloud_clear_aws_credentials",
-		"cloud_init_aws",
-		"cloud_init_cloudflare",
-		"cloud_init_erun",
-		"cloud_inject_aws_credentials",
-		"cloud_list",
-		"cloud_login",
-		"cloud_oidc",
-		"cloud_set",
-		"context_init",
-		"context_list",
-		"context_start",
-		"context_stop",
-		"contribute_clone",
-		"delete",
-		"deploy",
-		"diff",
-		"doctor",
-		"expose",
-		"idle",
-		"idle_stop_cancel",
-		"idle_stop_history",
-		"idle_stop_record",
-		"init",
-		"job_attach",
-		"job_await",
-		"job_cancel",
-		"job_output",
-		"job_start",
-		"job_status",
-		"list",
-		"outputs_download",
-		"outputs_list",
-		"pin",
-		"publish",
-		"push",
-		"raw",
-		"release",
-		"terraform",
-		"upgrade",
-		"version",
-	}
+	// by name against wantRegisteredTools: a bare count cannot say which tool
+	// appeared or vanished, and its failure message prints unreadable struct
+	// pointers.
 	gotTools := make([]string, 0, len(tools.Tools))
 	for _, tool := range tools.Tools {
 		gotTools = append(gotTools, tool.Name)
 	}
 	slices.Sort(gotTools)
-	if !slices.Equal(gotTools, wantTools) {
-		t.Fatalf("exposed tools = %v, want %v", gotTools, wantTools)
+	if !slices.Equal(gotTools, wantRegisteredTools) {
+		t.Fatalf("exposed tools = %v, want %v", gotTools, wantRegisteredTools)
 	}
 
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "version"})

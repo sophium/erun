@@ -17,6 +17,7 @@ type stubTenantRepository struct {
 	created      model.Tenant
 	createCalls  int
 	createParams repository.CreateTenantParams
+	list         []model.Tenant
 	err          error
 }
 
@@ -31,6 +32,13 @@ func (r *stubTenantRepository) Create(_ context.Context, params repository.Creat
 		created = model.Tenant{TenantID: "tenant-created", Name: params.Name, Type: params.Type}
 	}
 	return created, nil
+}
+
+func (r *stubTenantRepository) List(_ context.Context) ([]model.Tenant, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	return r.list, nil
 }
 
 func postCreateTenant(t *testing.T, tenants *stubTenantRepository, tenantType string, body string) *httptest.ResponseRecorder {
@@ -114,5 +122,35 @@ func TestCreateTenantOperationsCallerPersists(t *testing.T) {
 	}
 	if response.TenantID != "tenant-1" {
 		t.Fatalf("unexpected persisted tenant: %+v", response)
+	}
+}
+
+func TestListTenants(t *testing.T) {
+	want := []model.Tenant{{TenantID: "tenant-1", Name: "acme"}, {TenantID: "tenant-2", Name: "beta"}}
+	tenants := &stubTenantRepository{list: want}
+	req := httptest.NewRequest(http.MethodGet, "/v1/tenants", nil)
+	rec := httptest.NewRecorder()
+	TenantRoutes{tenants: tenants}.listTenants(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var response []model.Tenant
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(response) != 2 || response[0].TenantID != "tenant-1" || response[1].TenantID != "tenant-2" {
+		t.Fatalf("unexpected tenant list: %+v", response)
+	}
+}
+
+func TestListTenantsSurfacesRepositoryError(t *testing.T) {
+	tenants := &stubTenantRepository{err: errForeignKey{}}
+	req := httptest.NewRequest(http.MethodGet, "/v1/tenants", nil)
+	rec := httptest.NewRecorder()
+	TenantRoutes{tenants: tenants}.listTenants(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
 	}
 }

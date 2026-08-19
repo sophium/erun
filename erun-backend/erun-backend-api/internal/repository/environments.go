@@ -113,6 +113,15 @@ func (r *EnvironmentRepository) ClaimDeploy(ctx context.Context, environmentID s
 	return claimed, err
 }
 
+// Delete hard-deletes an environment row, once its namespace (if any) has
+// been torn down. RLS keeps the delete scoped to the caller's tenant.
+func (r *EnvironmentRepository) Delete(ctx context.Context, environmentID string) error {
+	return r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		_, err := tx.NewRaw(`DELETE FROM environments WHERE environment_id = ?`, environmentID).Exec(ctx)
+		return err
+	})
+}
+
 func (r *EnvironmentRepository) Get(ctx context.Context, environmentID string) (model.Environment, error) {
 	var environment model.Environment
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {

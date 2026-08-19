@@ -1,0 +1,108 @@
+package provision
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/deployexec"
+)
+
+// EnvLifecycleRunner runs a hosted env's stop/delete Job to a terminal result —
+// satisfied by the deployexec Launcher.
+type EnvLifecycleRunner interface {
+	RunStop(ctx context.Context, params deployexec.StopJobParams) (deployexec.Result, error)
+	RunDelete(ctx context.Context, params deployexec.DeleteJobParams) (deployexec.Result, error)
+}
+
+// EnvironmentRowDeleter hard-deletes an environment's row once its namespace
+// (if any) is confirmed torn down.
+type EnvironmentRowDeleter interface {
+	Delete(ctx context.Context, environmentID string) error
+}
+
+// EnvLifecycleInput is the non-secret placement a stop or delete Job needs:
+// the same coordinates a deploy Job uses, without a target version — stop and
+// delete act on whatever the environment is already running.
+type EnvLifecycleInput struct {
+	Tenant        string
+	Environment   string
+	EnvironmentID string
+	// RunningVersion picks the runtime image the Job runs erun from: the last
+	// version this environment actually deployed. Empty means the environment
+	// never successfully deployed, so there is no namespace to touch.
+	RunningVersion string
+}
+
+// EnvLifecycle runs a hosted env's stop/delete synchronously, unlike
+// EnvProvisioner's durable DBOS workflow: the underlying Jobs are short
+// kubectl operations (scale to zero, delete namespace), not a multi-minute
+// helm rollout, so a blocking HTTP handler with a bounded request context is
+// an acceptable v1 shape. Revisit if a tenant's teardown routinely runs long
+// (stuck namespace finalizers, for example).
+type EnvLifecycle struct {
+	runner EnvLifecycleRunner
+	rows   EnvironmentRowDeleter
+	config EnvDeployConfig
+}
+
+func NewEnvLifecycle(runner EnvLifecycleRunner, rows EnvironmentRowDeleter, config EnvDeployConfig) *EnvLifecycle {
+	return &EnvLifecycle{runner: runner, rows: rows, config: config}
+}
+
+func (l *EnvLifecycle) image(tenant, version string) string {
+	return fmt.Sprintf("%s/%s-devops:%s", l.config.Registry, tenant, version)
+}
+
+// Stop scales the environment's runtime Deployment to zero. It does not touch
+// the environment's provisioning-lifecycle status: a stopped runtime
+// environment stays "running" — paused, not torn down.
+func (l *EnvLifecycle) Stop(ctx context.Context, input EnvLifecycleInput) error {
+	if strings.TrimSpace(input.RunningVersion) == "" {
+		return fmt.Errorf("environment has never been deployed; nothing to stop")
+	}
+	result, err := l.runner.RunStop(ctx, deployexec.StopJobParams{
+		Tenant:         input.Tenant,
+		Environment:    input.Environment,
+		Namespace:      l.config.PlatformNamespace,
+		Image:          l.image(input.Tenant, input.RunningVersion),
+		ServiceAccount: l.config.DeployerServiceAccount,
+	})
+	if err != nil {
+		return err
+	}
+	if result.Outcome != deployexec.OutcomeSucceeded {
+		return fmt.Errorf("stop job %s: %s", result.Outcome, lifecycleFailureDetail(result))
+	}
+	return nil
+}
+
+// Delete tears down the environment's namespace (skipped when it never
+// deployed, since there is nothing to tear down) and, only once that
+// succeeds, removes its row. A failed teardown must not silently forget an
+// environment whose namespace may still exist.
+func (l *EnvLifecycle) Delete(ctx context.Context, input EnvLifecycleInput) error {
+	if strings.TrimSpace(input.RunningVersion) != "" {
+		result, err := l.runner.RunDelete(ctx, deployexec.DeleteJobParams{
+			Tenant:         input.Tenant,
+			Environment:    input.Environment,
+			Namespace:      l.config.PlatformNamespace,
+			Image:          l.image(input.Tenant, input.RunningVersion),
+			ServiceAccount: l.config.DeployerServiceAccount,
+		})
+		if err != nil {
+			return err
+		}
+		if result.Outcome != deployexec.OutcomeSucceeded {
+			return fmt.Errorf("delete job %s: %s", result.Outcome, lifecycleFailureDetail(result))
+		}
+	}
+	return l.rows.Delete(ctx, input.EnvironmentID)
+}
+
+func lifecycleFailureDetail(result deployexec.Result) string {
+	if detail := strings.TrimSpace(result.Failure); detail != "" {
+		return detail
+	}
+	return "no reason recorded (its pod was already reclaimed)"
+}

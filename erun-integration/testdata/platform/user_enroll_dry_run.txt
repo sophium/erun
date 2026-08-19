@@ -1,0 +1,3 @@
+Dry run: erun platform user enrollment planned.
+audit: erun platform user enroll --dry-run --username jane
+platform: POST https://api.example.test/v1/users (username=jane)

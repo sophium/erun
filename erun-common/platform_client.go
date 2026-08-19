@@ -182,6 +182,15 @@ func (c *PlatformClient) CreateTenant(ctx context.Context, params PlatformCreate
 	return tenant, err
 }
 
+// ListTenants lists tenants visible to the caller: every tenant for an
+// operations-scoped caller, or a single-item list containing only the
+// caller's own tenant otherwise.
+func (c *PlatformClient) ListTenants(ctx context.Context) ([]PlatformTenant, error) {
+	var tenants []PlatformTenant
+	err := c.do(ctx, http.MethodGet, "/v1/tenants", nil, true, &tenants)
+	return tenants, err
+}
+
 // PlatformCreateUserParams is the user-enrollment input. TenantID, when set,
 // targets a tenant other than the caller's own and is honored only for an
 // operations-scoped caller.
@@ -263,6 +272,23 @@ func (c *PlatformClient) DeployEnvironment(ctx context.Context, environmentID st
 	var environment PlatformEnvironment
 	err := c.do(ctx, http.MethodPost, "/v1/environments/"+url.PathEscape(environmentID)+"/deploy", params, true, &environment)
 	return environment, err
+}
+
+// StopEnvironment scales a runtime environment's Deployment to zero, the
+// server-side equivalent of `erun stop`. Errors ErrPlatformNotImplemented
+// when the platform has no deploy executor configured.
+func (c *PlatformClient) StopEnvironment(ctx context.Context, environmentID string) (PlatformEnvironment, error) {
+	var environment PlatformEnvironment
+	err := c.do(ctx, http.MethodPost, "/v1/environments/"+url.PathEscape(environmentID)+"/stop", nil, true, &environment)
+	return environment, err
+}
+
+// DeleteEnvironment tears down a runtime environment's namespace and removes
+// its row, the server-side equivalent of `erun delete`. Errors
+// ErrPlatformNotImplemented when the platform has no deploy executor
+// configured.
+func (c *PlatformClient) DeleteEnvironment(ctx context.Context, environmentID string) error {
+	return c.do(ctx, http.MethodDelete, "/v1/environments/"+url.PathEscape(environmentID), nil, true, nil)
 }
 
 // ListContexts lists the caller's tenant's cloud contexts (managed clusters).

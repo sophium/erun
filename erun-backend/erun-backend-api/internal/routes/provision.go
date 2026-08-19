@@ -80,6 +80,18 @@ func (r ProvisionRoutes) provision(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// The v1 single-cluster placement decision (#605): reuse the exact check
+	// the executing POST /v1/environments applies, so this preview can never
+	// promise a placement the real create/deploy path would then refuse.
+	placementContext := strings.TrimSpace(body.KubernetesContext)
+	if newCluster != nil {
+		placementContext = newCluster.name
+	}
+	if err := resolveDeployPlacement(model.Environment{Type: envType, KubernetesContext: placementContext}); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	// The tenant name (not the UUID) forms the <tenant>-<env> namespace and the
 	// runtime release name; it is RLS-scoped to the caller, so it always belongs
 	// to the caller's tenant.
@@ -171,8 +183,12 @@ func (in provisionPlanInput) quotaOk() bool {
 	return in.count < in.maxEnvironments
 }
 
-// provisionPlan renders the ordered preview: who provisions, whether quota
-// allows it, where the env lands, and what would be deployed.
+// provisionPlan renders the ordered preview: authz (the resolved tenant),
+// quota, placement, namespace, registration, and — for a runtime environment
+// only, since that is the only type this platform ever server-side deploys —
+// the deploy and its auth-edge wiring. This is the single plan renderer both
+// POST /v1/provision and POST /v1/environments?preview=true call, so the plan
+// an operator audits can never diverge from what the executing path does.
 func provisionPlan(in provisionPlanInput) []string {
 	plan := make([]string, 0, 8+len(in.contextPlan))
 
@@ -186,13 +202,10 @@ func provisionPlan(in provisionPlanInput) []string {
 	}
 	plan = append(plan, quotaLine)
 
-	contextRef := in.kubernetesContext
+	contextRef, contextLine := contextPlanLine(in)
+	plan = append(plan, contextLine)
 	if in.newCluster != nil {
-		contextRef = in.newCluster.name
-		plan = append(plan, fmt.Sprintf("context: bootstrap cluster %s via alias %s", in.newCluster.name, in.newCluster.alias))
 		plan = append(plan, in.contextPlan...)
-	} else {
-		plan = append(plan, fmt.Sprintf("context: reuse existing kubernetes context %s", in.kubernetesContext))
 	}
 
 	namespace := eruncommon.KubernetesNamespaceName(in.tenantName, in.envName)
@@ -200,5 +213,26 @@ func provisionPlan(in provisionPlanInput) []string {
 
 	plan = append(plan, fmt.Sprintf("register: would persist environment %s (%s) in tenant %s referencing context %s", in.envName, in.envType, in.tenantName, contextRef))
 
-	return append(plan, fmt.Sprintf("deploy: would helm install the erun-devops runtime chart (release %s) into %s", eruncommon.RuntimeReleaseName(in.tenantName), namespace))
+	if in.envType != model.EnvironmentTypeRuntime {
+		return plan
+	}
+	plan = append(plan, fmt.Sprintf("deploy: would helm install the erun-devops runtime chart (release %s) into %s", eruncommon.RuntimeReleaseName(in.tenantName), namespace))
+	return append(plan, "auth: would wire the runtime's OIDC auth edge (issuer, client id) via the erun-devops chart values")
+}
+
+// contextPlanLine describes where the environment lands and the reference
+// the register line carries. An explicit context or kubernetes context is
+// only reachable here for a non-runtime environment: resolveDeployPlacement
+// already refused the request before provisionPlan runs for a runtime one.
+func contextPlanLine(in provisionPlanInput) (contextRef, line string) {
+	switch {
+	case in.newCluster != nil:
+		return in.newCluster.name, fmt.Sprintf("context: bootstrap cluster %s via alias %s", in.newCluster.name, in.newCluster.alias)
+	case in.kubernetesContext != "":
+		return in.kubernetesContext, fmt.Sprintf("context: reuse existing kubernetes context %s", in.kubernetesContext)
+	case in.envType == model.EnvironmentTypeRuntime:
+		return "", "context: deploys into this platform's own cluster (v1 single-cluster placement)"
+	default:
+		return "", "context: none (not server-side deployed)"
+	}
 }

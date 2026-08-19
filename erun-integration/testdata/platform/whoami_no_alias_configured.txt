@@ -1,0 +1,2 @@
+audit: erun platform whoami
+no erun platform cloud provider alias is configured; run `erun cloud init erun --api-url <url>` first

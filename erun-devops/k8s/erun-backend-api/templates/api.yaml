@@ -170,6 +170,50 @@ roleRef:
   kind: Role
   name: {{ $tenant }}-api-env-deployer
 ---
+{{/* The env-deployer ran as cluster-admin (#605 acceptance criterion: replace
+     with a curated, isolated, audited provisioner role carrying exactly the
+     verbs provisioning needs). Its Job runs one thing — erun deploy/stop/
+     delete for one tenant's runtime chart — never a component chart, so the
+     verb list is scoped to what that install actually touches: namespace
+     lifecycle, the ResourceQuota/LimitRange a provisioned namespace gets
+     (tenant_quotas, #605), the runtime chart's own resources (Deployment,
+     PVCs, ServiceAccount, Service, its Secrets/ConfigMaps, and Helm's own
+     release-state Secrets), and RoleBindings. Binding the runtime SA to the
+     built-in admin ClusterRole is what the chart renders for every env (see
+     erun-devops/AGENTS.md "Runtime SA RBAC is namespaced by default");
+     granting only bind on that one named ClusterRole (not the verbs admin
+     itself carries) is the RBAC escalation-check's documented way to let a
+     granter hand out a ClusterRole it does not hold outright, keeping this
+     role's own footprint far short of admin-equivalent. It does not cover
+     platformAccount's cluster-admin ClusterRoleBinding — that opt-in stays
+     gated on an admin-capable context, unchanged. */}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $tenant }}-env-provisioner
+  labels:
+    app: {{ $tenant }}-api
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["resourcequotas", "limitranges"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims", "serviceaccounts", "services", "secrets", "configmaps"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles"]
+    resourceNames: ["admin"]
+    verbs: ["bind"]
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -183,7 +227,7 @@ subjects:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: cluster-admin
+  name: {{ $tenant }}-env-provisioner
 ---
 {{- end }}
 apiVersion: v1

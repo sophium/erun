@@ -102,14 +102,17 @@ The `(iss, org) → tenant` resolution model and first-identity bootstrap above 
 | `POST` | `/v1/environments` | Register an environment in the caller's tenant, bound to a referenced context; when the deploy executor is configured, a runtime env with a pinned version also starts its durable server-side deploy (`202`). Body below. | Tenant member (write) |
 | `GET` | `/v1/environments/{environment_id}` | Fetch one environment by id. | Tenant member |
 | `POST` | `/v1/environments/{environment_id}/deploy` | Deploy an already-registered runtime env at a published version — the retry and version-change path (`202`). Body below. | Tenant member (write) |
+| `POST` | `/v1/environments/{environment_id}/stop` | Scale a runtime env's Deployment to zero — the server-side equivalent of `erun stop`. Does not change the env's provisioning `status`. Body-less. | Tenant member (write) |
+| `DELETE` | `/v1/environments/{environment_id}` | Tear down a runtime env's namespace (skipped if it never deployed) and remove its row — the server-side equivalent of `erun delete`. `204 No Content`. Not recoverable. | Tenant member (write) |
 | `POST` | `/v1/environments/{environment_id}/mcp-token` | Mint a per-env MCP bearer token (`{token, audience}`) for the caller to present to the env's `erun-mcp` edge. Body-less. Response below. | Tenant member (write) |
 | `POST` | `/v1/environments/{environment_id}/dns01-token` | Mint a per-env DNS-01 broker token (`{token, audience}`), the credential the cluster's cert-manager DNS-01 webhook presents to the [DNS-01 broker](#dns01-broker). Body-less. Response below. | Tenant member (write) |
 | `GET` | `/v1/contexts` | List the tenant's cloud contexts (managed clusters). | Tenant member |
 | `POST` | `/v1/contexts` | Register a cloud context (managed cluster) and, when provisioning is configured, start its durable live bootstrap (`202`). Body below. | Tenant member (write) |
 | `GET` | `/v1/contexts/{context_id}` | Fetch one cloud context by id, including its provisioning `status`. | Tenant member |
 | `PUT` | `/v1/cloud-provider-aliases/{alias}` | Register/update the tenant's BYO-cloud credentials (encrypted at rest), resolved when provisioning a context. Body below. | Tenant member (write) |
-| `POST` | `/v1/provision` | Return the complete, ordered **plan** to provision a hosted env (quota check → context bootstrap → namespace → env registration → runtime deploy) for the caller's tenant. Preview-only; no execution, no writes. Body below. | Tenant member (write) |
+| `POST` | `/v1/provision` | Return the complete, ordered **plan** to provision a hosted env (quota check → placement → context bootstrap → namespace → env registration → runtime deploy → auth-edge wiring) for the caller's tenant. Preview-only; no execution, no writes. Body below. | Tenant member (write) |
 | `POST` | `/v1/tenants` | Register a new tenant plus its OIDC issuer mapping. Operations-only. Body below. | Operations only |
+| `GET` | `/v1/tenants` | List every tenant (operations-only caller), or a single-item list containing just the caller's own tenant otherwise. | Tenant member (read) |
 | `POST` | `/v1/users` | Enroll a user in the caller's tenant, or — operations-only — an explicitly named other tenant. Body below. | Tenant member (write); cross-tenant needs Operations |
 | `GET` | `/v1/users` | List the caller's tenant's users, or — operations-only — an explicitly named other tenant's via `?tenantId=`. | Tenant member (read); cross-tenant needs Operations |
 
@@ -215,11 +218,16 @@ Registers an **environment** in the caller's tenant. The tenant is resolved from
 {
   "name": "prod",              // required — a DNS-1123 label (lowercase letters, digits, internal hyphens)
   "type": "runtime",           // required — one of "runtime", "remote-agent", "local-agent"
-  "contextId": "019a7fa5-…",   // optional — the cloud context (cluster) the env runs in
-  "kubernetesContext": "primary", // optional — the kube context bound to the env
-  "runtimeVersion": "1.2.3"    // optional — pinned runtime chart version
+  "contextId": "019a7fa5-…",   // optional — see "Single-cluster placement (v1)" below
+  "kubernetesContext": "primary", // optional — see "Single-cluster placement (v1)" below
+  "runtimeVersion": "1.2.3",   // optional — pinned runtime chart version
+  "preview": false             // optional — resolve and return the POST /v1/provision plan instead of creating the row
 }
 ```
+
+**Single-cluster placement (v1).** A `runtime` environment must leave both `contextId` and `kubernetesContext` unset: the server-side deploy executor's Job authenticates in-cluster via its own ServiceAccount, with no per-Job kubeconfig to reach any other cluster, so every `runtime` environment deploys into **the same cluster the control plane itself runs in**. Naming either field on a `runtime` environment is refused with `400` (see the error table below) rather than silently accepted and ignored — multi-cluster placement is `(Planned.)`. `remote-agent`/`local-agent` environments — never server-side deployed — are unaffected and may set either field freely.
+
+**`preview`.** When `true`, the endpoint validates the body (including the placement check above) and returns the identical `{plan, quotaOk}` shape [`POST /v1/provision`](#post-v1provision) returns, **without creating the row** — the executing path previewing itself, on the same `resolveDeployPlacement`/plan-rendering code `POST /v1/provision` calls, so the two can never disagree about what a real call would do. `preview: true` short-circuits before the quota check would otherwise `409`; like `POST /v1/provision`, an at-cap tenant still gets the full plan back, with `quotaOk: false`.
 
 On success the endpoint persists the row and returns it. The status code tells the caller whether a deploy started:
 
@@ -249,7 +257,7 @@ A newly-registered environment is `registered` — the row exists but nothing is
 
 **Per-tenant environment-count quota.** After validating the body and before persisting, the endpoint enforces the tenant's environment-count cap: it compares how many environments the tenant already has against the cap and rejects the registration with HTTP `409` once the tenant is at or over it. The cap defaults to **10** and is overridden per tenant by a `tenant_quotas.max_environments` row. That override row is set by the operations-only [`PUT /v1/tenants/{tenant_id}/quota`](#put-v1tenantstenant_idquota) endpoint (below). Both the count and the cap are read under row-level security, so each is scoped to the caller's own tenant.
 
-**Server-side deploy executor.** When configured, the backend deploys the runtime chart itself: it runs the deploy as a Kubernetes `Job` in the tenant's `<tenant>-devops` runtime image (which carries `erun` + `helm` + `kubectl`) under a cluster-admin ServiceAccount, invoking `erun deploy <tenant> <env> --version <runtimeVersion>`, and watches the Job to completion — succeeded → `running`, failed → `failed` with the reason on `provisionError`. A durable workflow (DBOS) wraps this, keyed by environment id, so a control-plane restart resumes an in-flight deploy rather than double-deploying. The deploy image is `<registry>/<tenant>-devops:<runtimeVersion>` (image-baked config model).
+**Server-side deploy executor.** When configured, the backend deploys the runtime chart itself: it runs the deploy as a Kubernetes `Job` in the tenant's `<tenant>-devops` runtime image (which carries `erun` + `helm` + `kubectl`) under a curated `<tenant>-env-provisioner` ClusterRole ServiceAccount (see [Provisioner RBAC](/concepts/hosted-platform#provisioner-rbac) — not `cluster-admin`), invoking `erun deploy <tenant> <env> --version <runtimeVersion>`, and watches the Job to completion — succeeded → `running`, failed → `failed` with the reason on `provisionError`. `stop`/`delete` run the same way with `erun stop`/`erun delete -y` (see [`POST .../stop`](#stop-endpoint) and [`DELETE`](#delete-endpoint) below). A durable workflow (DBOS) wraps deploy, keyed by environment id, so a control-plane restart resumes an in-flight deploy rather than double-deploying; `stop`/`delete` run synchronously within the request instead (their Jobs are short kubectl operations, not a multi-minute helm rollout). The deploy image is `<registry>/<tenant>-devops:<runtimeVersion>` (image-baked config model).
 
 **What `provisionError` carries on a failed deploy.** The failure happens inside the Job, so the executor reads it back before the Job's TTL reaps the pod and records it verbatim under a `deploy job failed for version <version>:` prefix. Three sources, in order — the first that yields anything wins:
 
@@ -259,7 +267,7 @@ A newly-registered environment is `registered` — the row exists but nothing is
 
 When none of the three yields anything, `provisionError` says so and names the `kubectl -n <platform-namespace> logs job/<job-name>` an Operator can run while a deploy is in flight. Reading the reason needs `pods` + `pods/log` `get`/`list`/`watch` in the platform namespace, which the `api.envDeployer.enabled` chart value already grants the API's ServiceAccount.
 
-The executor is **opt-in and off by default** — it requires the backend to run in-cluster with a durable-workflow database, a kube client, and the deployer ServiceAccount configured (chart value `api.envDeployer.enabled`, which also provisions the SA and its cluster-admin binding). When it is off, or the env is not a `runtime` env, or no `runtimeVersion` is pinned, the endpoint is register-only (`201`) exactly as before.
+The executor is **opt-in and off by default** — it requires the backend to run in-cluster with a durable-workflow database, a kube client, and the deployer ServiceAccount configured (chart value `api.envDeployer.enabled`, which also provisions the SA and its curated `<tenant>-env-provisioner` ClusterRoleBinding). When it is off, or the env is not a `runtime` env, or no `runtimeVersion` is pinned, the endpoint is register-only (`201`) exactly as before.
 
 Registration deploys an environment **once**. To deploy it again — retrying a failure, or moving it to another published version — use [`POST /v1/environments/{id}/deploy`](#deploy-endpoint).
 
@@ -267,9 +275,9 @@ Registration deploys an environment **once**. To deploy it again — retrying a 
 
 | Status | Condition | Recovery |
 |---|---|---|
-| `400` | `name` is not a DNS-1123 label (the env forms the `<tenant>-<env>` namespace), `type` is not one of `runtime`/`remote-agent`/`local-agent`, or the body is not valid JSON. | Send a DNS-1123 `name` and a valid `type`. |
+| `400` | `name` is not a DNS-1123 label (the env forms the `<tenant>-<env>` namespace), `type` is not one of `runtime`/`remote-agent`/`local-agent`, the body is not valid JSON, or a `runtime` environment set `contextId`/`kubernetesContext` (see [single-cluster placement](/concepts/hosted-platform#single-cluster-placement) above). | Send a DNS-1123 `name` and a valid `type`; leave `contextId`/`kubernetesContext` unset for a `runtime` environment. |
 | `401` / `403` | Standard auth failures (see [Errors](#errors)). The `WriteAll` permission covers `POST /v1/environments`. | Send a valid token whose roles permit the write. |
-| `409` | The tenant is at its environment-count cap (default `10` unless a `tenant_quotas` row overrides it); the body is `environment quota reached: this tenant already has N of N environments`. | Delete an unused environment, or raise the tenant's cap via [`PUT /v1/tenants/{tenant_id}/quota`](#put-v1tenantstenant_idquota) (operations-only). |
+| `409` | The tenant is at its environment-count cap (default `10` unless a `tenant_quotas` row overrides it); the body is `environment quota reached: this tenant already has N of N environments`. Not raised when `preview` is `true`. | Delete an unused environment, or raise the tenant's cap via [`PUT /v1/tenants/{tenant_id}/quota`](#put-v1tenantstenant_idquota) (operations-only). |
 | `500` | Persistence failed — e.g. `contextId` references a context that is not the caller's (the composite `(tenant_id, context_id)` foreign key is violated), or the request-scoped security context is missing (an internal wiring error). The row is persisted **before** the deploy is started, so a `failed to start provisioning` `500` (the deploy executor could not enqueue the durable workflow) leaves the environment registered — re-create is a no-op conflict; poll `GET /v1/environments/{id}` to confirm the row exists. | Reference a context owned by the caller's tenant; if it persists with a valid context, it is a server bug. |
 
 ### `POST /v1/environments/{environment_id}/deploy` {#deploy-endpoint}
@@ -301,6 +309,29 @@ A body-less request (no body at all, or `{}`) deploys the environment's own `run
 | `409` | A deploy is already in flight for this environment (`a deploy is already in progress for this environment`); the claim is held. | Poll `GET /v1/environments/{id}` until it leaves `provisioning`, or wait out the 45-minute stale window if the holder crashed. |
 | `501` | The deploy executor is not configured (`the deploy executor is not configured`) — the backend has no durable-workflow database, kube client, or deployer ServiceAccount. | Enable `api.envDeployer.enabled` on the backend chart. |
 | `500` | The claim write failed, or the durable workflow could not be enqueued (`failed to start deploy`). The claim is taken **before** the workflow starts, so this leaves the environment at `provisioning` with nothing running; it becomes re-deployable once the stale window elapses. | Retry after the stale window; if it persists, it is a server bug. |
+
+### `POST /v1/environments/{environment_id}/stop` {#stop-endpoint}
+
+Scales a `runtime` environment's Deployment to zero — the server-side equivalent of `erun stop`. Body-less. Runs a short-lived `erun stop <tenant> <env>` Job synchronously within the request (no durable workflow, unlike deploy — the underlying `kubectl scale` is seconds, not minutes) and returns the environment row as it was read; `status` is **not** changed — a stopped environment stays `running`, paused rather than torn down, so a later deploy or open wakes it without re-provisioning.
+
+| Status | Condition | Recovery |
+|---|---|---|
+| `400` | The environment is not a `runtime` env. | Stop a runtime environment. |
+| `401` / `403` | Standard auth failures (see [Errors](#errors)). | Send a valid token whose roles permit the write. |
+| `404` | No environment with `{environment_id}` in the caller's tenant. | Stop an environment id the caller's tenant owns. |
+| `501` | The deploy/lifecycle executor is not configured. | Enable `api.envDeployer.enabled` on the backend chart. |
+| `502` | The stop Job failed or could not be created; the response body carries the Job's own outcome. | Retry; if it persists, inspect the Job's pod log while it is still live. |
+
+### `DELETE /v1/environments/{environment_id}` {#delete-endpoint}
+
+Tears down a `runtime` environment's namespace and removes its row — the server-side equivalent of `erun delete`. An environment that never successfully deployed (no `runtimeVersion`/`deployedVersion` to resolve a teardown image from) skips the Job entirely and the row is removed directly; a `remote-agent`/`local-agent` environment is never server-side deployed, so it is always a plain row removal. **Not recoverable.** Body-less; `204 No Content` on success.
+
+| Status | Condition | Recovery |
+|---|---|---|
+| `401` / `403` | Standard auth failures (see [Errors](#errors)). | Send a valid token whose roles permit the write. |
+| `404` | No environment with `{environment_id}` in the caller's tenant. | Delete an environment id the caller's tenant owns. |
+| `501` | The deploy/lifecycle executor is not configured. | Enable `api.envDeployer.enabled` on the backend chart. |
+| `502` | The delete Job failed or could not be created; the response body carries the Job's own outcome. The row is **not** removed on a failed teardown, so the environment is never silently forgotten while its namespace may still exist. | Retry; if the namespace is genuinely gone, a retry's `kubectl delete namespace --ignore-not-found` succeeds and the row is then removed. |
 
 ### `POST /v1/environments/{environment_id}/mcp-token` {#mcp-token-endpoint}
 
@@ -486,21 +517,38 @@ This endpoint is **preview-only** in this build: it resolves and shows the concr
 }
 ```
 
-Provide **either** a `context` block (provision a new cluster — its bootstrap plan is the real `InitCloudContext` dry-run argv) **or** a `kubernetesContext` (reuse an existing context). When a `context` block is present it wins and `kubernetesContext` is ignored.
+Provide **either** a `context` block (provision a new cluster — its bootstrap plan is the real `InitCloudContext` dry-run argv) **or** a `kubernetesContext` (reuse an existing context). When a `context` block is present it wins and `kubernetesContext` is ignored. **For a `runtime` environment, leave both unset** — see [single-cluster placement](/concepts/hosted-platform#single-cluster-placement): the endpoint refuses either with `400` before building a plan, using the identical check [`POST /v1/environments`](#post-v1environments) applies, so this preview can never promise a placement the executing path would then refuse. `remote-agent`/`local-agent` environments — never server-side deployed — may still preview a `context`/`kubernetesContext` freely.
 
 **The ordered `plan`.** The response is `{ "plan": [ … ], "quotaOk": <bool> }`. `plan` is the human-readable, audit-style ordered list of every action the live provision would take, in this exact order:
 
 1. **authz/tenant** — `provision: tenant <tenant> (resolved from token)`.
 2. **quota** — `quota: tenant has <count> of <cap> environments` followed by ` — within quota` or ` — WOULD EXCEED, provisioning blocked`. The cap is the tenant's `tenant_quotas.max_environments` (default `10`); both reads are row-level-security-scoped to the caller's tenant.
-3. **context** — when a `context` block was given: a `context: bootstrap cluster <name> via alias <alias>` header line followed by the full `InitCloudContext` dry-run argv (the security-group + IAM instance-profile setup, `ec2 run-instances`, the k3s install user-data, the kube-context wiring), exactly the plan [`POST /v1/contexts`](#post-v1contexts) returns. Otherwise: `context: reuse existing kubernetes context <kubernetesContext>`.
+3. **placement** — one of three lines, depending on the request: `context: bootstrap cluster <name> via alias <alias>` (a `context` block was given — non-runtime only) followed by the full `InitCloudContext` dry-run argv, exactly the plan [`POST /v1/contexts`](#post-v1contexts) returns; `context: reuse existing kubernetes context <kubernetesContext>` (non-runtime only); or, for a `runtime` environment with neither set, `context: deploys into this platform's own cluster (v1 single-cluster placement)`. A non-runtime environment with neither set gets `context: none (not server-side deployed)`.
 4. **namespace** — `namespace: would create <tenant>-<env>`.
-5. **register** — `register: would persist environment <name> (<type>) in tenant <tenant> referencing context <ref>`.
-6. **deploy** — `deploy: would helm install the erun-devops runtime chart (release <tenant>-devops) into <tenant>-<env>`.
+5. **register** — `register: would persist environment <name> (<type>) in tenant <tenant> referencing context <ref>` (`<ref>` is empty for the platform's-own-cluster and none cases above).
+6. **deploy** — `deploy: would helm install the erun-devops runtime chart (release <tenant>-devops) into <tenant>-<env>`. Present **only for a `runtime` environment** — a `remote-agent`/`local-agent` plan ends at the register line, since the platform never server-side deploys them.
+7. **auth** — `auth: would wire the runtime's OIDC auth edge (issuer, client id) via the erun-devops chart values`. Present only alongside the deploy line.
 
 **`quotaOk`.** `true` when the provision fits under the tenant's environment-count cap, `false` when it would exceed it. When `quotaOk` is `false` the endpoint **still returns the full plan** with HTTP `200` (it is a preview, not a write), and the quota line names the block — surfacing the blocking decision the way a dry-run does, rather than rejecting with a `409`. A caller gating on the quota should check `quotaOk`, not the status code.
 
 ```jsonc
-// 200 response (new cluster, within quota)
+// 200 response — runtime environment, no context (the only valid shape for runtime in v1), within quota
+{
+  "plan": [
+    "provision: tenant acme (resolved from token)",
+    "quota: tenant has 2 of 10 environments — within quota",
+    "context: deploys into this platform's own cluster (v1 single-cluster placement)",
+    "namespace: would create acme-prod",
+    "register: would persist environment prod (runtime) in tenant acme referencing context ",
+    "deploy: would helm install the erun-devops runtime chart (release acme-devops) into acme-prod",
+    "auth: would wire the runtime's OIDC auth edge (issuer, client id) via the erun-devops chart values"
+  ],
+  "quotaOk": true
+}
+```
+
+```jsonc
+// 200 response — remote-agent environment bootstrapping a new cluster (never server-side deployed, so no deploy/auth line)
 {
   "plan": [
     "provision: tenant acme (resolved from token)",
@@ -509,15 +557,14 @@ Provide **either** a `context` block (provision a new cluster — its bootstrap 
     "aws ec2 create-security-group …",
     "aws ec2 run-instances …",
     "kubectl config set-context acme-prod …",
-    "namespace: would create acme-prod",
-    "register: would persist environment prod (runtime) in tenant acme referencing context acme-prod",
-    "deploy: would helm install the erun-devops runtime chart (release acme-devops) into acme-prod"
+    "namespace: would create acme-staging",
+    "register: would persist environment staging (remote-agent) in tenant acme referencing context acme-prod"
   ],
   "quotaOk": true
 }
 ```
 
-**Live orchestration is `(Planned.)`.** This endpoint only resolves and returns the plan. The live orchestration — `InitCloudContext` with `DryRun=false` → ensure the namespace → `RunBootstrapInitWithDependencies` / deploy the runtime chart → wire the env exposure and the per-env auth edge — requires a live AWS account and cluster and is **not executed** in this build. It composes the same dry-run primitives as `POST /v1/contexts` plus the registration endpoints, so the live path is the composition of their live paths.
+**This endpoint itself only resolves and returns the plan — it never executes it or writes to the database.** But the discrete endpoints it composes are executing paths in their own right: [`POST /v1/environments`](#post-v1environments) (with `preview: false`, the default) really registers the row and, for a pinned `runtime` environment, really starts the deploy; [`POST /v1/environments/{id}/deploy`](#deploy-endpoint), [`.../stop`](#stop-endpoint), and [`DELETE`](#delete-endpoint) really run their Jobs; [`POST /v1/contexts`](#post-v1contexts) (with `preview: false`) really bootstraps a cluster. Exposure and the per-env auth-edge DNS/cert wiring beyond the chart-values line above remain `(Planned.)` — see [Automatic exposure](/concepts/hosted-platform#automatic-exposure).
 
 **Error behaviour.** Today the API returns a bare HTTP status with a plain-text body (no JSON envelope):
 
@@ -525,6 +572,7 @@ Provide **either** a `context` block (provision a new cluster — its bootstrap 
 |---|---|---|
 | `400` | `environment.name` is not a DNS-1123 label, `environment.type` is not one of `runtime`/`remote-agent`/`local-agent`, a `context` block is present but missing `name`/`cloudProviderAlias`/`region`, or the body is not valid JSON. | Send a valid `environment` and, if provisioning a new cluster, a complete `context` block. |
 | `400` | The context bootstrap plan could not be resolved (e.g. an unsupported `region`, `instanceType`, or `diskSizeGb`). | Use a supported region/instance type/disk size. |
+| `400` | A `runtime` environment named a `context` block or `kubernetesContext` (see [single-cluster placement](/concepts/hosted-platform#single-cluster-placement) above). | Leave both unset for a `runtime` environment. |
 | `401` / `403` | Standard auth failures (see [Errors](#errors)). The `WriteAll` permission covers `POST /v1/provision`. | Send a valid token whose roles permit the write. |
 | `500` | The tenant or quota read failed (e.g. missing request-scoped security context — an internal wiring error, never a client fault). | Retry; if it persists, it is a server bug. |
 

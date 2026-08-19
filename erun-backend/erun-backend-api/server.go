@@ -186,7 +186,7 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	routes.RegisterReviewRoutes(register, reviews, reviewService, builds, releaseRoutes)
 	routes.RegisterBuildRoutes(register, builds, buildService)
 	routes.RegisterCommentRoutes(register, comments, commentService)
-	routes.RegisterEnvironmentRoutes(register, environments, tenantQuotas, tenants, newEnvironmentProvisioner(options, environments))
+	routes.RegisterEnvironmentRoutes(register, environments, tenantQuotas, tenants, newEnvironmentProvisioner(options, environments), newEnvironmentLifecycle(options, environments))
 	routes.RegisterMCPTokenRoutes(register, environments, tenants, options.MCPSigner)
 	routes.RegisterDNS01TokenRoutes(register, environments, tenants, options.MCPSigner)
 	var contextProvisioner routes.ContextProvisioner
@@ -223,6 +223,19 @@ func newEnvironmentProvisioner(options HandlerOptions, environments *repository.
 	}
 	coordinator := service.NewEnvironmentProvisioner(deployexec.NewLauncher(options.KubeClient), environments)
 	return provision.NewEnvProvisioner(options.DBOSContext, coordinator, deploy)
+}
+
+// newEnvironmentLifecycle wires live stop/delete, which needs an in-cluster
+// client and the full deploy placement but no durable workflow (see
+// provision.EnvLifecycle). Anything missing leaves it nil, so stop/delete
+// report the executor as unconfigured rather than acting on partial config.
+func newEnvironmentLifecycle(options HandlerOptions, environments *repository.EnvironmentRepository) routes.EnvironmentLifecycle {
+	deploy := options.EnvDeploy
+	if options.KubeClient == nil ||
+		deploy.DeployerServiceAccount == "" || deploy.PlatformNamespace == "" || deploy.Registry == "" {
+		return nil
+	}
+	return provision.NewEnvLifecycle(deployexec.NewLauncher(options.KubeClient), environments, deploy)
 }
 
 // newReleaseRunner wires the release Job launcher. Without an in-cluster client
