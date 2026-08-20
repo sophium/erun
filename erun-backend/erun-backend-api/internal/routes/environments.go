@@ -11,6 +11,8 @@ import (
 
 	"github.com/google/uuid"
 
+	eruncommon "github.com/sophium/erun/erun-common"
+
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/provision"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
@@ -197,6 +199,20 @@ func (r EnvironmentRoutes) deployEnvironment(w http.ResponseWriter, req *http.Re
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// Re-checked here, not just at create: an operator can lower a tenant's
+	// quota (TenantQuotaRepository.Set) after the environment already exists,
+	// and a redeploy is the next thing that would hit the now-insufficient
+	// floor. Failing here is a clear 409 instead of the Job's Deployment
+	// sitting at 0/1 until the rollout times out (#1061).
+	quota, err := r.quotas.Get(ctx)
+	if err != nil {
+		writeRepositoryError(w, err)
+		return
+	}
+	if err := validateNamespaceQuotaFloor(quota); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
 	// Claiming before starting the workflow is what keeps a double-submit from
 	// running two rollouts into the same release.
 	claimed, err := r.environments.ClaimDeploy(ctx, environment.EnvironmentID, deployClaimStaleAfter)
@@ -303,30 +319,34 @@ func namespaceLabelRune(r rune) bool {
 	return (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-'
 }
 
-// The erun-devops chart's own default runtime pod resource limits (cpu "4",
-// memory "8916Mi") and default PVCs (home 2Gi + docker 50Gi + worktree 20Gi =
-// 72Gi) — see erun-devops/k8s/erun-devops/templates/service.yaml. A tenant
-// quota below this floor cannot host a stock runtime environment: Kubernetes
-// would reject the pod at admission once the namespace ResourceQuota is
-// applied. Checking it before the deploy Job starts turns that into a clear
-// 409 naming the cap, instead of a Job that ImagePullBackOffs its way to a
-// pending pod the ResourceQuota then silently blocks.
-const (
-	minRuntimeCPUMillicores = 4000
-	minRuntimeMemoryMB      = 8916
-	minRuntimeStorageGB     = 72
-)
+// minRuntimeCPUMillicores/MemoryMB/StorageGB are the smallest tenant quota
+// that can host a stock runtime environment, derived from
+// eruncommon.MinimumRuntimeNamespaceQuota rather than restated as independent
+// literals — the erun-devops chart's own runtime pod, summed across BOTH its
+// containers (erun-devops + erun-dind; a ResourceQuota counts every container
+// in the pod), plus its PVCs. A tenant quota below this floor cannot host a
+// stock runtime environment: Kubernetes would reject the pod at admission
+// once the namespace ResourceQuota is applied. Checking it before the deploy
+// Job starts (validateNamespaceQuotaFloor, called from both the create and
+// the deploy path) turns that into a clear 409 naming the quota and the
+// shortfall, instead of a Job whose Deployment sits at 0/1 until the rollout
+// times out five minutes later with the real cause in a FailedCreate event on
+// a ReplicaSet the caller never sees (#1061).
+var minRuntimeCPUMillicores, minRuntimeMemoryMB, minRuntimeStorageGB = func() (int, int, int) {
+	cpu, memory, storage := eruncommon.MinimumRuntimeNamespaceQuota()
+	return int(cpu), int(memory), int(storage)
+}()
 
 // validateNamespaceQuotaFloor rejects a tenant quota that cannot fit the
-// stock runtime pod, naming which cap is insufficient.
+// stock runtime pod, naming which cap is insufficient and by how much.
 func validateNamespaceQuotaFloor(quota model.TenantQuota) error {
 	switch {
 	case quota.MaxCPUMillicores < minRuntimeCPUMillicores:
-		return fmt.Errorf("tenant CPU quota (%dm) is below the runtime environment's minimum (%dm); raise maxCpuMillicores", quota.MaxCPUMillicores, minRuntimeCPUMillicores)
+		return fmt.Errorf("tenant CPU quota (%dm) is below the runtime environment's minimum (%dm), short by %dm; raise maxCpuMillicores", quota.MaxCPUMillicores, minRuntimeCPUMillicores, minRuntimeCPUMillicores-quota.MaxCPUMillicores)
 	case quota.MaxMemoryMB < minRuntimeMemoryMB:
-		return fmt.Errorf("tenant memory quota (%dMi) is below the runtime environment's minimum (%dMi); raise maxMemoryMb", quota.MaxMemoryMB, minRuntimeMemoryMB)
+		return fmt.Errorf("tenant memory quota (%dMi) is below the runtime environment's minimum (%dMi), short by %dMi; raise maxMemoryMb", quota.MaxMemoryMB, minRuntimeMemoryMB, minRuntimeMemoryMB-quota.MaxMemoryMB)
 	case quota.MaxStorageGB < minRuntimeStorageGB:
-		return fmt.Errorf("tenant storage quota (%dGi) is below the runtime environment's minimum (%dGi); raise maxStorageGb", quota.MaxStorageGB, minRuntimeStorageGB)
+		return fmt.Errorf("tenant storage quota (%dGi) is below the runtime environment's minimum (%dGi), short by %dGi; raise maxStorageGb", quota.MaxStorageGB, minRuntimeStorageGB, minRuntimeStorageGB-quota.MaxStorageGB)
 	}
 	return nil
 }

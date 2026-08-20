@@ -12,6 +12,54 @@ const (
 	DefaultRuntimePodMemory = "8916Mi"
 )
 
+// DefaultRuntimeDindCPU/Memory size the erun-dind sidecar's own resource
+// limits (erun-devops/k8s/erun-devops/templates/service.yaml). Until #1061 the
+// sidecar declared no resources of its own, so a namespace ResourceQuota's
+// LimitRange silently defaulted it to the *entire* configured quota width
+// (namespaceResourceQuotaManifest in kubernetes_resource_quota.go) — doubling
+// what the two-container pod actually asked a ResourceQuota to admit. Sized to
+// match the erun-devops container's own defaults: that is the shape the
+// sidecar was already implicitly assigned while the bug was live, and it is
+// dind that runs the actual docker builds, so it is not the smaller of the
+// two containers. Not operator-configurable today, unlike DefaultRuntimePodCPU/
+// Memory: no caller sizes the sidecar independently of the main container.
+const (
+	DefaultRuntimeDindCPU           = "4"
+	DefaultRuntimeDindMemory        = "8916Mi"
+	DefaultRuntimeDindRequestCPU    = "0.25"
+	DefaultRuntimeDindRequestMemory = "1024Mi"
+)
+
+// DefaultRuntimeHomePVCGi/DockerPVCGi/WorktreePVCGi mirror the erun-devops
+// chart's own PVC sizes (service.yaml's release-home, release-docker, and —
+// rendered only when worktreeStorage=pvc — release-worktree claims). Kept as
+// named constants, rather than re-derived magic numbers, so
+// MinimumRuntimeNamespaceQuota moves if the chart's PVC sizes ever do.
+const (
+	DefaultRuntimeHomePVCGi     = 2
+	DefaultRuntimeDockerPVCGi   = 50
+	DefaultRuntimeWorktreePVCGi = 20
+)
+
+// MinimumRuntimeNamespaceQuota is the smallest per-environment namespace
+// ResourceQuota that can admit the stock erun-devops chart's runtime pod: the
+// erun-devops and erun-dind containers' limits summed (a ResourceQuota counts
+// every container in the pod, not just the first), plus every PVC the chart
+// can render — the worktree claim included, so the floor is never short for a
+// remote-agent (worktreeStorage=pvc) environment. #1061 was this floor being
+// sized for one container instead of two: erun-backend-api's default tenant
+// quota (repository.DefaultMax*) and its pre-provision admission check
+// (routes.validateNamespaceQuotaFloor) both derive from this function so they
+// cannot drift back out of sync with each other or with the chart.
+func MinimumRuntimeNamespaceQuota() (cpuMillicores, memoryMB, storageGB int64) {
+	devopsCPU, _ := ParseKubernetesCPUToMilli(DefaultRuntimePodCPU)
+	dindCPU, _ := ParseKubernetesCPUToMilli(DefaultRuntimeDindCPU)
+	devopsMemory, _ := ParseKubernetesMemoryToMi(DefaultRuntimePodMemory)
+	dindMemory, _ := ParseKubernetesMemoryToMi(DefaultRuntimeDindMemory)
+	storageGB = int64(DefaultRuntimeHomePVCGi + DefaultRuntimeDockerPVCGi + DefaultRuntimeWorktreePVCGi)
+	return devopsCPU + dindCPU, devopsMemory + dindMemory, storageGB
+}
+
 type RuntimePodResources struct {
 	CPU    string `yaml:"cpu,omitempty" json:"cpu,omitempty"`
 	Memory string `yaml:"memory,omitempty" json:"memory,omitempty"`

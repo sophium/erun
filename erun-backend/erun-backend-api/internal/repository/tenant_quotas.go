@@ -4,21 +4,36 @@ import (
 	"context"
 	"errors"
 
+	eruncommon "github.com/sophium/erun/erun-common"
+
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/uptrace/bun"
 )
 
-// Default caps for a tenant that has no tenant_quotas row yet. The resource
-// caps mirror the DB column defaults (schema/tables/tenant_quotas.sql): the
-// erun-devops chart's own default runtime pod (cpu limit 4, memory limit
-// 8916Mi) plus its three default PVCs (2Gi+50Gi+20Gi=72Gi), so a tenant with no
-// quota row set can still provision a stock runtime environment.
-const (
-	DefaultMaxEnvironments  = 10
-	DefaultMaxCPUMillicores = 4000
-	DefaultMaxMemoryMB      = 9216
-	DefaultMaxStorageGB     = 80
+// DefaultMaxEnvironments is the environment-count cap for a tenant that has no
+// tenant_quotas row yet.
+const DefaultMaxEnvironments = 10
+
+// DefaultMaxCPUMillicores/MemoryMB/StorageGB are the resource caps for a
+// tenant that has no tenant_quotas row yet, derived from
+// eruncommon.MinimumRuntimeNamespaceQuota rather than restated as independent
+// literals: they are exactly the floor a stock runtime environment's own pod
+// needs (the erun-devops and erun-dind containers' limits summed, plus its
+// PVCs), so a tenant with no quota row set can still provision one — and if
+// the chart's pod shape changes, this default moves with it instead of
+// quietly falling back below the new floor (#1061).
+var (
+	DefaultMaxCPUMillicores int
+	DefaultMaxMemoryMB      int
+	DefaultMaxStorageGB     int
 )
+
+func init() {
+	cpu, memory, storage := eruncommon.MinimumRuntimeNamespaceQuota()
+	DefaultMaxCPUMillicores = int(cpu)
+	DefaultMaxMemoryMB = int(memory)
+	DefaultMaxStorageGB = int(storage)
+}
 
 type TenantQuotaRepository struct {
 	txs *TxManager
