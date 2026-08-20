@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"log"
 	"strings"
+	"sync"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -41,6 +43,7 @@ type KubeImagePullSecretCredentials struct {
 	kube      kubernetes.Interface
 	namespace string
 	names     []string
+	warnOnce  sync.Once
 }
 
 func NewKubeImagePullSecretCredentials(kube kubernetes.Interface, namespace string, names []string) *KubeImagePullSecretCredentials {
@@ -67,7 +70,23 @@ func (c *KubeImagePullSecretCredentials) For(ctx context.Context, host string) (
 			return credential, true
 		}
 	}
+	c.warnCredentialMiss(host)
 	return RegistryCredential{}, false
+}
+
+// warnCredentialMiss reports, once per process, that none of the configured
+// pull secrets yielded a usable credential for host. Fail-open behaviour does
+// not change -- ConfirmedMissing still stays inconclusive -- but the operator
+// otherwise has no way to tell a deliberate "no probe configured" state (no
+// names configured at all, which is not logged) apart from an unreadable or
+// misnamed secret, since both leave the registry probe unauthenticated.
+func (c *KubeImagePullSecretCredentials) warnCredentialMiss(host string) {
+	if len(c.names) == 0 {
+		return
+	}
+	c.warnOnce.Do(func() {
+		log.Printf("erun api registry credentials: no usable pull credential for host %q among secrets %v in namespace %q -- the runtime image probe stays unauthenticated and will not confirm a missing tenant image; confirm the ServiceAccount can get these secrets", host, c.names, c.namespace)
+	})
 }
 
 // dockerConfigCredential pulls host's entry out of a `.dockerconfigjson`

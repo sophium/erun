@@ -1,8 +1,11 @@
 package provision
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
+	"log"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -67,4 +70,59 @@ func TestKubeImagePullSecretCredentials(t *testing.T) {
 			}
 		}
 	})
+}
+
+// captureLog redirects the standard logger for the duration of fn and returns
+// what it wrote, so a test can assert on the one place an operator would see
+// why the registry probe stayed unauthenticated.
+func captureLog(t *testing.T, fn func()) string {
+	t.Helper()
+	var buf bytes.Buffer
+	original := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(original)
+	fn()
+	return buf.String()
+}
+
+func TestKubeImagePullSecretCredentialsLogsAnUnreadableSecretOnce(t *testing.T) {
+	// missing-role stands in for #1058: the Secret exists but the
+	// ServiceAccount's Role does not grant "get" on it, so the fake client
+	// (which has no RBAC of its own) is instead given no such secret at all --
+	// the same "cannot read it" outcome the checker sees either way.
+	kube := fake.NewSimpleClientset()
+	credentials := NewKubeImagePullSecretCredentials(kube, "erun-prod", []string{"missing-role"})
+
+	output := captureLog(t, func() {
+		for i := 0; i < 3; i++ {
+			if _, ok := credentials.For(context.Background(), "ghcr.io"); ok {
+				t.Fatal("For(ghcr.io) unexpectedly reported a credential")
+			}
+		}
+	})
+
+	if strings.Count(output, "missing-role") != 1 {
+		t.Fatalf("expected exactly one log line naming the secret it looked for, got: %q", output)
+	}
+	if !strings.Contains(output, "erun-prod") || !strings.Contains(output, "ghcr.io") {
+		t.Fatalf("expected the log line to name the namespace and host, got: %q", output)
+	}
+}
+
+func TestKubeImagePullSecretCredentialsDoesNotLogWhenNoSecretsAreConfigured(t *testing.T) {
+	// Empty is the deliberate "no probe configured" state (see
+	// EnvDeployConfig.ImagePullSecrets) -- not a misconfiguration, so it must
+	// stay silent.
+	kube := fake.NewSimpleClientset()
+	credentials := NewKubeImagePullSecretCredentials(kube, "erun-prod", nil)
+
+	output := captureLog(t, func() {
+		if _, ok := credentials.For(context.Background(), "ghcr.io"); ok {
+			t.Fatal("For(ghcr.io) unexpectedly reported a credential")
+		}
+	})
+
+	if output != "" {
+		t.Fatalf("expected no log output when no pull secrets are configured, got: %q", output)
+	}
 }
