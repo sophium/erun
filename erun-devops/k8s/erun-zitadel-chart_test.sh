@@ -335,4 +335,22 @@ grep -q 'resourceNames: \["team-zitadel-pats"\]' "${role}" ||
 grep -q 'verbs: \["create"\]' "${role}" ||
     fail "create cannot be name-scoped (the object does not exist yet) so it must stay a separate rule"
 
+# --- 22. The dedicated ServiceAccount carries the env's image-pull credentials ---
+# The pod runs as team-zitadel rather than the namespace default, so it stops
+# inheriting whatever registry secret default carries; the private core/login
+# images (and the oidc-bootstrap sidecar's erun-devops image) never pull unless
+# this ServiceAccount names the same credential explicitly.
+rendered=$(render)
+sa="${work_root}/sa-no-secret.yaml"
+document "${rendered}" ServiceAccount >"${sa}"
+grep -q 'imagePullSecrets' "${sa}" &&
+    fail "no imagePullSecrets should render when none are configured"
+
+rendered=$(render --set-string 'imagePullSecrets[0].name=ghcr-pull')
+document "${rendered}" ServiceAccount >"${sa}"
+grep -q '^imagePullSecrets:$' "${sa}" ||
+    fail "a configured image pull secret should render on the dedicated ServiceAccount"
+grep -q '^  - name: ghcr-pull$' "${sa}" ||
+    fail "the ServiceAccount's imagePullSecrets should name the configured secret"
+
 echo "PASS: erun-zitadel chart topology"

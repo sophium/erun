@@ -337,4 +337,24 @@ grep -q 'chown 1000:1000 "/mnt/erun-home"' "${prepare_block}" ||
 grep -q 'repo-worktree' "${prepare_block}" &&
     fail "an env with no worktree volume has no claim to prepare"
 
+# --- 22. The rendered ServiceAccount carries the env's image-pull credentials ---
+# A pod that gets its own ServiceAccount stops inheriting the namespace's
+# `default` SA and whatever registry secret it holds — the runtime SA has to
+# carry the same credential explicitly, or a private runtime image never pulls.
+service_account_block() {
+    awk '/^kind: ServiceAccount$/{f=1} f{print} f && /^---$/{exit}' "$1"
+}
+
+rendered=$(render)
+service_account_block "${rendered}" | grep -q 'imagePullSecrets' &&
+    fail "no imagePullSecrets should render on the ServiceAccount when none are configured"
+
+rendered=$(render --set-string 'imagePullSecrets[0].name=ghcr-pull')
+sa_block="${work_root}/sa.yaml"
+service_account_block "${rendered}" >"${sa_block}"
+grep -q '^imagePullSecrets:$' "${sa_block}" ||
+    fail "a configured image pull secret should render on the runtime ServiceAccount"
+grep -q '^  - name: ghcr-pull$' "${sa_block}" ||
+    fail "the runtime ServiceAccount's imagePullSecrets should name the configured secret"
+
 echo "PASS: erun-devops chart pod shape"
