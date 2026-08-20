@@ -44,6 +44,10 @@ type envDeployE2E struct {
 	version        string
 	namespace      string
 	serviceAccount string
+	// pullSecrets names dockerconfigjson secrets in the platform namespace. Only
+	// the bootstrap scenario needs them: confirming a tenant image absent from a
+	// private registry namespace is impossible without the credential.
+	pullSecrets []string
 }
 
 func envDeployE2EFromEnv(t *testing.T) envDeployE2E {
@@ -59,6 +63,7 @@ func envDeployE2EFromEnv(t *testing.T) envDeployE2E {
 		version:        os.Getenv("ERUN_E2E_ENV_DEPLOY_VERSION"),
 		namespace:      os.Getenv("ERUN_E2E_ENV_DEPLOY_NAMESPACE"),
 		serviceAccount: os.Getenv("ERUN_E2E_ENV_DEPLOY_SERVICE_ACCOUNT"),
+		pullSecrets:    e2ePullSecretNames(os.Getenv("ERUN_E2E_ENV_DEPLOY_IMAGE_PULL_SECRETS")),
 	}
 	for name, value := range map[string]string{
 		"ERUN_E2E_ENV_DEPLOY_DATABASE_URL":    config.databaseURL,
@@ -74,6 +79,18 @@ func envDeployE2EFromEnv(t *testing.T) envDeployE2E {
 		}
 	}
 	return config
+}
+
+// e2ePullSecretNames splits the comma-separated secret names the deploy Job's
+// registry credential lives in, matching how the chart names them to the API.
+func e2ePullSecretNames(value string) []string {
+	var names []string
+	for _, name := range strings.Split(value, ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 // TestDeployEnvironmentEndToEnd drives the deploy endpoint against a live
@@ -115,12 +132,18 @@ func TestDeployEnvironmentEndToEnd(t *testing.T) {
 // <tenant>-devops image never was (any real erun release version the bootstrap
 // tenant never built its own image at qualifies), because that gap is exactly
 // what RuntimeImageChecker confirms missing and what selects the bootstrap
-// path instead of refusing the request.
+// path instead of refusing the request. It also needs the registry pull
+// credential: without it the probe cannot tell an image that was never
+// published from one in a namespace it may not read, so nothing is confirmed
+// and no deploy is diverted.
 func TestDeployEnvironmentBootstrapsOnCanonicalImage(t *testing.T) {
 	config := envDeployE2EFromEnv(t)
 	version := os.Getenv("ERUN_E2E_ENV_DEPLOY_BOOTSTRAP_VERSION")
 	if version == "" {
 		t.Skip("ERUN_E2E_ENV_DEPLOY_BOOTSTRAP_VERSION is required: a version whose canonical erun-devops image+chart are published but whose <tenant>-devops image never was")
+	}
+	if len(config.pullSecrets) == 0 {
+		t.Skip("ERUN_E2E_ENV_DEPLOY_IMAGE_PULL_SECRETS is required: the probe needs the registry credential to confirm the tenant image absent rather than merely unreadable")
 	}
 	srv, _, kube, kubeConfig := startEnvDeployAPI(t, config, "erun-env-deploy-bootstrap-e2e")
 
@@ -272,6 +295,7 @@ func startEnvDeployAPI(t *testing.T, config envDeployE2E, appName string) (*http
 			Registry:               config.registry,
 			PlatformNamespace:      config.namespace,
 			DeployerServiceAccount: config.serviceAccount,
+			ImagePullSecrets:       config.pullSecrets,
 		},
 	})
 	mustNoErr(t, err, "new handler")

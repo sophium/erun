@@ -70,6 +70,7 @@ func run(args []string) error {
 			PlatformNamespace:      cfg.PlatformNamespace,
 			DeployerServiceAccount: cfg.EnvDeployerServiceAccount,
 			ExposeTargetIP:         cfg.EnvExposeTargetIP,
+			ImagePullSecrets:       splitCSV(cfg.EnvDeployImagePullSecrets),
 		},
 		Release: provision.ReleaseConfig{
 			Registry:       cfg.EnvDeployRegistry,
@@ -242,6 +243,12 @@ type apiConfig struct {
 	// deploy; unset (the default), deploys stay exactly as they were before —
 	// no attempt to expose, independent of whether the executor above is on.
 	EnvExposeTargetIP string
+	// EnvDeployImagePullSecrets names the dockerconfigjson secrets in the
+	// platform namespace the deploy Job pulls with. The published-image probe
+	// reads them so it can interrogate a private registry namespace with the
+	// same credential; unset, the probe stays unauthenticated and can never
+	// confirm an image absent, so no deploy is diverted to the canonical image.
+	EnvDeployImagePullSecrets string
 	// Server-side release executor. The release runs as a Job in the agent
 	// environment's own namespace so it lands beside that environment's warm
 	// fingerprint cache and BuildKit state -- the thing an ephemeral runner cannot
@@ -293,6 +300,7 @@ func configFromEnv() apiConfig {
 		PlatformNamespace:         strings.TrimSpace(os.Getenv("POD_NAMESPACE")),
 		EnvDeployRegistry:         envOrDefault("ERUN_ENV_DEPLOY_REGISTRY", "ghcr.io/sophium"),
 		EnvExposeTargetIP:         strings.TrimSpace(os.Getenv("ERUN_ENV_EXPOSE_TARGET_IP")),
+		EnvDeployImagePullSecrets: strings.TrimSpace(os.Getenv("ERUN_ENV_DEPLOY_IMAGE_PULL_SECRETS")),
 
 		ReleaseNamespace:      strings.TrimSpace(os.Getenv("ERUN_RELEASE_NAMESPACE")),
 		ReleaseServiceAccount: strings.TrimSpace(os.Getenv("ERUN_RELEASE_SERVICE_ACCOUNT")),

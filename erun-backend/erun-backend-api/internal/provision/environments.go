@@ -67,6 +67,13 @@ type EnvDeployConfig struct {
 	// stays enabled without it) — it only decides whether a deploy also chains
 	// an expose.
 	ExposeTargetIP string
+	// ImagePullSecrets names the dockerconfigjson Secrets in PlatformNamespace
+	// that hold the registry credentials the deploy Job pulls with. The
+	// published-image precondition probes the registry with the same credential,
+	// which is the only way it can tell a tenant image that was never published
+	// from one in a private namespace it may not look into. Empty leaves the
+	// probe unauthenticated, so it stays inconclusive and no deploy is diverted.
+	ImagePullSecrets []string
 }
 
 // EnvProvisioner runs the durable env-deploy workflow, so a control-plane restart
@@ -118,19 +125,25 @@ func (p *EnvProvisioner) StartDeploy(input EnvProvisionInput) error {
 // enqueueing the durable workflow: whether this deploy must bootstrap on the
 // canonical erun-devops image because the tenant's own <tenant>-devops image is
 // confirmed missing from the registry — a control-plane tenant with no
-// project has never run `erun push`, so its own image can never exist. A nil
-// checker (not wired) or an inconclusive probe leaves Bootstrap false, matching
+// project has never run `erun push`, so its own image can never exist. The
+// canonical image is handed to the checker as the control reference, since it
+// is the one image this deploy already requires to exist. A nil checker (not
+// wired) or an inconclusive probe leaves Bootstrap false, matching
 // RuntimeImageChecker's fail-open contract: only a registry-confirmed absence
-// selects the fallback, never a network hiccup or an unreachable host.
+// selects the fallback, never a network hiccup or an unreadable namespace.
 func (p *EnvProvisioner) resolveBootstrapImage(input EnvProvisionInput) bool {
 	if p.imageChecker == nil {
 		return false
 	}
-	exists, err := p.imageChecker.Exists(context.Background(), deployJobImage(p.config, input))
+	missing, err := p.imageChecker.ConfirmedMissing(
+		context.Background(),
+		deployJobImage(p.config, input),
+		canonicalRuntimeImage(p.config, input),
+	)
 	if err != nil {
 		return false
 	}
-	return !exists
+	return missing
 }
 
 // deployJobImage is the tenant's own <tenant>-devops runtime image at the
