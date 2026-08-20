@@ -58,6 +58,8 @@ Today every hosted runtime environment deploys into the platform's own cluster �
 
 Your tenant has a cap on how many environments it may register at once. `erun platform env register` reports a clear conflict at the cap; `erun platform provision` shows you the same quota decision in its preview before you commit.
 
+Each of your environments also runs inside a namespace capped on CPU, memory, and storage — enforced by Kubernetes itself, not just recorded. If your platform operator has set your tenant's cap unusually low, registering a new runtime environment is refused with a clear conflict naming the cap, rather than succeeding and failing to actually come up. Both caps are set by your platform operator (operations-only); reach out to them to raise either one. See [Hosted platform · Quotas](/concepts/hosted-platform#quotas) for the full spec.
+
 ## Where next
 
 - [`erun platform` CLI reference](/cli/platform) — every subcommand and flag.

@@ -5,7 +5,17 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/deployexec"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 )
+
+type recordingUsageRecorder struct {
+	events []model.UsageEvent
+}
+
+func (r *recordingUsageRecorder) Record(_ context.Context, event model.UsageEvent) error {
+	r.events = append(r.events, event)
+	return nil
+}
 
 type stubLifecycleRunner struct {
 	stopCalls    []deployexec.StopJobParams
@@ -47,7 +57,7 @@ func testLifecycleConfig() EnvDeployConfig {
 
 func TestEnvLifecycleStopRunsJobWithRunningVersion(t *testing.T) {
 	runner := &stubLifecycleRunner{stopResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
-	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig())
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil)
 
 	err := lifecycle.Stop(context.Background(), EnvLifecycleInput{
 		Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3",
@@ -66,7 +76,7 @@ func TestEnvLifecycleStopRunsJobWithRunningVersion(t *testing.T) {
 
 func TestEnvLifecycleStopRejectsNeverDeployed(t *testing.T) {
 	runner := &stubLifecycleRunner{}
-	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig())
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil)
 
 	err := lifecycle.Stop(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "prod", EnvironmentID: "env-1"})
 	if err == nil {
@@ -79,7 +89,7 @@ func TestEnvLifecycleStopRejectsNeverDeployed(t *testing.T) {
 
 func TestEnvLifecycleStopSurfacesJobFailure(t *testing.T) {
 	runner := &stubLifecycleRunner{stopResult: deployexec.Result{Outcome: deployexec.OutcomeFailed, Failure: "namespace not found"}}
-	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig())
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil)
 
 	err := lifecycle.Stop(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3"})
 	if err == nil {
@@ -90,7 +100,7 @@ func TestEnvLifecycleStopSurfacesJobFailure(t *testing.T) {
 func TestEnvLifecycleDeleteRunsJobThenDeletesRow(t *testing.T) {
 	runner := &stubLifecycleRunner{deleteResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
 	rows := &stubRowDeleter{}
-	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig())
+	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil)
 
 	err := lifecycle.Delete(context.Background(), EnvLifecycleInput{
 		Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3",
@@ -112,7 +122,7 @@ func TestEnvLifecycleDeleteRunsJobThenDeletesRow(t *testing.T) {
 func TestEnvLifecycleDeleteSkipsJobWhenNeverDeployed(t *testing.T) {
 	runner := &stubLifecycleRunner{}
 	rows := &stubRowDeleter{}
-	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig())
+	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil)
 
 	err := lifecycle.Delete(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "agents", EnvironmentID: "env-2"})
 	if err != nil {
@@ -131,7 +141,7 @@ func TestEnvLifecycleDeleteSkipsJobWhenNeverDeployed(t *testing.T) {
 func TestEnvLifecycleDeleteDoesNotDropRowOnJobFailure(t *testing.T) {
 	runner := &stubLifecycleRunner{deleteResult: deployexec.Result{Outcome: deployexec.OutcomeFailed, Failure: "namespace stuck terminating"}}
 	rows := &stubRowDeleter{}
-	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig())
+	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil)
 
 	err := lifecycle.Delete(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3"})
 	if err == nil {
@@ -139,5 +149,45 @@ func TestEnvLifecycleDeleteDoesNotDropRowOnJobFailure(t *testing.T) {
 	}
 	if len(rows.deleted) != 0 {
 		t.Fatal("the row must survive a failed teardown so the environment is not silently forgotten")
+	}
+}
+
+// TestEnvLifecycleStopRecordsUsageEvent and TestEnvLifecycleDeleteRecordsUsageEvent
+// lock the metering hook for #605: a successful stop/delete records the event,
+// a failed one does not.
+func TestEnvLifecycleStopRecordsUsageEvent(t *testing.T) {
+	runner := &stubLifecycleRunner{stopResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
+	usage := &recordingUsageRecorder{}
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), usage)
+
+	if err := lifecycle.Stop(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3"}); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if len(usage.events) != 1 || usage.events[0].EnvironmentID != "env-1" || usage.events[0].EventType != string(model.UsageEventEnvironmentStopped) {
+		t.Fatalf("usage events = %+v", usage.events)
+	}
+}
+
+func TestEnvLifecycleStopRecordsNoUsageEventOnFailure(t *testing.T) {
+	runner := &stubLifecycleRunner{stopResult: deployexec.Result{Outcome: deployexec.OutcomeFailed}}
+	usage := &recordingUsageRecorder{}
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), usage)
+
+	_ = lifecycle.Stop(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3"})
+	if len(usage.events) != 0 {
+		t.Fatalf("usage events = %+v, want none on a failed stop", usage.events)
+	}
+}
+
+func TestEnvLifecycleDeleteRecordsUsageEvent(t *testing.T) {
+	runner := &stubLifecycleRunner{deleteResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
+	usage := &recordingUsageRecorder{}
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), usage)
+
+	if err := lifecycle.Delete(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3"}); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if len(usage.events) != 1 || usage.events[0].EnvironmentID != "env-1" || usage.events[0].EventType != string(model.UsageEventEnvironmentDeleted) {
+		t.Fatalf("usage events = %+v", usage.events)
 	}
 }

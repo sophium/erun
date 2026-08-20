@@ -7,8 +7,19 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/deployexec"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 )
+
+type recordingUsageRecorder struct {
+	events []model.UsageEvent
+	err    error
+}
+
+func (r *recordingUsageRecorder) Record(_ context.Context, event model.UsageEvent) error {
+	r.events = append(r.events, event)
+	return r.err
+}
 
 type recordingStatusWriter struct {
 	transitions []string // "status:error" per call
@@ -48,7 +59,7 @@ func provision(t *testing.T, runner DeployRunner, status *recordingStatusWriter)
 // bounded-retry path costs no wall-clock in tests.
 func provisionVersion(t *testing.T, runner DeployRunner, status *recordingStatusWriter, version string) error {
 	t.Helper()
-	provisioner := NewEnvironmentProvisioner(runner, status)
+	provisioner := NewEnvironmentProvisioner(runner, status, nil)
 	provisioner.backoff = 0
 	return provisioner.Provision(context.Background(), "env-1", deployexec.DeployJobParams{Version: version})
 }
@@ -112,7 +123,7 @@ func TestProvisionRecordsTheDeploysOwnFailure(t *testing.T) {
 // still be actionable, so it names the Job an operator can read for themselves.
 func TestProvisionSaysWhereToLookWhenTheJobLeftNothing(t *testing.T) {
 	status := &recordingStatusWriter{}
-	provisioner := NewEnvironmentProvisioner(fakeRunner{outcome: deployexec.OutcomeFailed}, status)
+	provisioner := NewEnvironmentProvisioner(fakeRunner{outcome: deployexec.OutcomeFailed}, status, nil)
 	provisioner.backoff = 0
 	params := deployexec.DeployJobParams{Tenant: "acme", Environment: "prod", Version: "1.2.3", Namespace: "acme-platform"}
 	if err := provisioner.Provision(context.Background(), "env-1", params); err == nil {
@@ -174,6 +185,54 @@ func TestProvisionFailsWhenStatusWriteNeverSucceeds(t *testing.T) {
 	}
 	if status.calls != statusWriteAttempts {
 		t.Fatalf("status write attempted %d times, want %d", status.calls, statusWriteAttempts)
+	}
+}
+
+// TestProvisionRecordsUsageEventOnSuccess: a successful deploy records the
+// namespace resource caps that were applied, the metering hook for #605.
+func TestProvisionRecordsUsageEventOnSuccess(t *testing.T) {
+	status := &recordingStatusWriter{}
+	usage := &recordingUsageRecorder{}
+	provisioner := NewEnvironmentProvisioner(fakeRunner{outcome: deployexec.OutcomeSucceeded}, status, usage)
+	provisioner.backoff = 0
+	params := deployexec.DeployJobParams{Version: "1.2.3", MaxCPUMillicores: 4000, MaxMemoryMB: 9216, MaxStorageGB: 80}
+	if err := provisioner.Provision(context.Background(), "env-1", params); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	if len(usage.events) != 1 {
+		t.Fatalf("usage events recorded = %d, want 1", len(usage.events))
+	}
+	got := usage.events[0]
+	if got.EnvironmentID != "env-1" || got.EventType != string(model.UsageEventEnvironmentProvisioned) ||
+		got.CPUMillicores != 4000 || got.MemoryMB != 9216 || got.StorageGB != 80 {
+		t.Fatalf("usage event = %+v", got)
+	}
+}
+
+// TestProvisionRecordsNoUsageEventOnFailure: only a successful deploy is
+// metered — a failed one never ran the environment.
+func TestProvisionRecordsNoUsageEventOnFailure(t *testing.T) {
+	status := &recordingStatusWriter{}
+	usage := &recordingUsageRecorder{}
+	provisioner := NewEnvironmentProvisioner(fakeRunner{outcome: deployexec.OutcomeFailed}, status, usage)
+	provisioner.backoff = 0
+	if err := provisioner.Provision(context.Background(), "env-1", deployexec.DeployJobParams{Version: "1.2.3"}); err == nil {
+		t.Fatal("expected an error when the deploy job fails")
+	}
+	if len(usage.events) != 0 {
+		t.Fatalf("usage events recorded = %d, want 0 on a failed deploy", len(usage.events))
+	}
+}
+
+// TestProvisionSurvivesUsageRecordFailure: a metering write failing must never
+// turn a successful deploy into a reported failure.
+func TestProvisionSurvivesUsageRecordFailure(t *testing.T) {
+	status := &recordingStatusWriter{}
+	usage := &recordingUsageRecorder{err: errors.New("usage store unavailable")}
+	provisioner := NewEnvironmentProvisioner(fakeRunner{outcome: deployexec.OutcomeSucceeded}, status, usage)
+	provisioner.backoff = 0
+	if err := provisioner.Provision(context.Background(), "env-1", deployexec.DeployJobParams{Version: "1.2.3"}); err != nil {
+		t.Fatalf("provision should survive a usage-record failure: %v", err)
 	}
 }
 

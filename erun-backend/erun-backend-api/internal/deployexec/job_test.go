@@ -41,10 +41,58 @@ func TestBuildDeployJobSpec(t *testing.T) {
 	if len(pod.Containers) != 1 || pod.Containers[0].Image != "ghcr.io/sophium/acme-devops:1.0.149" {
 		t.Fatalf("container image = %+v", pod.Containers)
 	}
-	assertCommand(t, pod.Containers[0].Command, []string{"erun", "deploy", "acme", "prod", "--version", "1.0.149"})
+	assertDeployBootstrapScript(t, pod.Containers[0].Command)
 	// No in-Job retries: a failed deploy must surface, not silently retry.
 	if job.Spec.BackoffLimit == nil || *job.Spec.BackoffLimit != 0 {
 		t.Fatalf("backoffLimit = %v, want 0", job.Spec.BackoffLimit)
+	}
+}
+
+// assertDeployBootstrapScript checks the Job's command seeds the in-cluster
+// kubeconfig and the environment's config before running the real `erun
+// deploy` — the Job's command replaces the image's entrypoint, so nothing
+// else seeds either.
+func assertDeployBootstrapScript(t *testing.T, command []string) {
+	t.Helper()
+	assertCommand(t, command[:2], []string{"sh", "-c"})
+	if len(command) != 3 {
+		t.Fatalf("command = %v, want sh -c '<script>'", command)
+	}
+	script := command[2]
+	for _, want := range []string{
+		"$HOME/.kube/config",
+		"name: in-cluster",
+		"$HOME/.config/erun/acme/config.yaml",
+		"$HOME/.config/erun/acme/prod/config.yaml",
+		"type: runtime",
+		"kubernetescontext: in-cluster",
+		"runtimeversion: 1.0.149",
+		"'erun' 'deploy' 'acme' 'prod' '--version' '1.0.149'",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("script %q missing %q", script, want)
+		}
+	}
+}
+
+// TestBuildDeployJobSpecWithNamespaceQuota: all three of MaxCPU/MaxMemory/
+// MaxStorage append the --max-cpu/--max-memory/--max-storage flags; a partial
+// set (only one configured) appends none, since erun deploy validates the
+// three together.
+func TestBuildDeployJobSpecWithNamespaceQuota(t *testing.T) {
+	params := testParams()
+	params.MaxCPU, params.MaxMemory, params.MaxStorage = "4000m", "9216Mi", "80Gi"
+	script := buildDeployCommand(params)[2]
+	want := "'erun' 'deploy' 'acme' 'prod' '--version' '1.0.149' '--max-cpu' '4000m' '--max-memory' '9216Mi' '--max-storage' '80Gi'"
+	if !strings.Contains(script, want) {
+		t.Fatalf("script %q missing %q", script, want)
+	}
+
+	partial := testParams()
+	partial.MaxCPU = "4000m"
+	partialScript := buildDeployCommand(partial)[2]
+	if strings.Contains(partialScript, "--max-cpu") {
+		t.Fatalf("script %q should not apply a partial namespace quota", partialScript)
 	}
 }
 

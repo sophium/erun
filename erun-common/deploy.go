@@ -168,6 +168,11 @@ type HelmDeploySpec struct {
 	Idle             EnvironmentIdleConfig
 	Claude           EnvironmentClaudeConfig
 	RuntimePod       RuntimePodResources
+	// NamespaceQuota is a hard per-namespace ceiling applied via a Kubernetes
+	// ResourceQuota + LimitRange (kubernetes_resource_quota.go), distinct from
+	// RuntimePod which only sizes the runtime container itself. Zero applies no
+	// ResourceQuota/LimitRange, so an env with no cap configured is unaffected.
+	NamespaceQuota NamespaceResourceQuota
 	// Stopped mirrors EnvConfig.Stopped so a helm upgrade of a stopped
 	// environment re-renders replicas: 0 instead of restarting the pod the
 	// operator deliberately scaled away. deploy never decides run/stop itself —
@@ -288,6 +293,10 @@ type DeployTarget struct {
 	// DefaultHelmDeploymentTimeout. Empty leaves the resolved per-env/default
 	// value untouched.
 	RolloutTimeout string
+	// NamespaceQuotaOverride overrides the env's saved namespace resource
+	// ceiling for this deploy only (see NamespaceResourceQuota). Zero leaves the
+	// env's own EnvConfig.NamespaceQuota untouched.
+	NamespaceQuotaOverride NamespaceResourceQuota
 	// MCPAuthPublicKeyPath, when set, points at a PEM public key the runtime
 	// chart trusts so the per-env erun-mcp edge requires a bearer token signed by
 	// it. Empty rethreads the key the env recorded on its last authenticated
@@ -753,6 +762,7 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 		return fmt.Errorf("deploy %s: %w", deployInput.ReleaseName, err)
 	}
 	TraceEnsureKubernetesNamespace(ctx, deployInput.KubernetesContext, deployInput.Namespace)
+	TraceApplyKubernetesResourceQuota(ctx, deployInput.KubernetesContext, deployInput.Namespace, deployInput.NamespaceQuota)
 	announceWorktreeVolumeChange(ctx, deployInput)
 	if err := applyCloudflareCredentialsSecret(ctx, deployInput); err != nil {
 		return fmt.Errorf("deploy %s: %w", deployInput.ReleaseName, err)
@@ -892,6 +902,12 @@ func ResolveDeploySpec(ctx Context, store DeployStore, findProjectRoot ProjectFi
 	if ok {
 		spec.Deploy.Timeout = override
 	}
+	if !target.NamespaceQuotaOverride.IsZero() {
+		if err := ValidateNamespaceResourceQuota(target.NamespaceQuotaOverride); err != nil {
+			return DeploySpec{}, fmt.Errorf("namespace quota override: %w", err)
+		}
+		spec.Deploy.NamespaceQuota = target.NamespaceQuotaOverride
+	}
 	applyRuntimeChartOverride(ctx, target, &spec)
 	if err := applyMCPAuthToRuntimeSpec(ctx, target, &spec); err != nil {
 		return DeploySpec{}, err
@@ -916,6 +932,14 @@ func ResolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 	if ok {
 		for i := range specs {
 			specs[i].Deploy.Timeout = override
+		}
+	}
+	if !target.NamespaceQuotaOverride.IsZero() {
+		if err := ValidateNamespaceResourceQuota(target.NamespaceQuotaOverride); err != nil {
+			return nil, fmt.Errorf("namespace quota override: %w", err)
+		}
+		for i := range specs {
+			specs[i].Deploy.NamespaceQuota = target.NamespaceQuotaOverride
 		}
 	}
 	return specs, nil
@@ -1862,6 +1886,7 @@ func newHelmDeploySpecWithValues(target OpenResult, deployContext KubernetesDepl
 		Idle:                target.EnvConfig.Idle,
 		Claude:              target.EnvConfig.Claude,
 		RuntimePod:          NormalizeRuntimePodResources(target.EnvConfig.RuntimePod),
+		NamespaceQuota:      target.EnvConfig.NamespaceQuota,
 		Stopped:             target.EnvConfig.Stopped,
 		Version:             version,
 		Timeout:             rolloutTimeout,

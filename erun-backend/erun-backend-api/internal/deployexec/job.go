@@ -11,6 +11,7 @@ package deployexec
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -75,6 +76,24 @@ type DeployJobParams struct {
 	// tenant whose own project declares no platform block, so this only ever
 	// wires DNS+Ingress for an actual erunpaas platform deployment.
 	ExposeTargetIP string
+	// MaxCPU/MaxMemory/MaxStorage are Kubernetes quantity strings (e.g. "4",
+	// "8Gi", "80Gi") threaded to `erun deploy` as --max-cpu/--max-memory/
+	// --max-storage, capping the environment's namespace with a ResourceQuota +
+	// LimitRange (erun-common/kubernetes_resource_quota.go). Empty leaves the
+	// Job's deploy command unchanged from before these existed. All three are
+	// set together or not at all (routes.validateNamespaceQuotaFloor and
+	// eruncommon.ValidateNamespaceResourceQuota both require completeness).
+	MaxCPU     string
+	MaxMemory  string
+	MaxStorage string
+	// MaxCPUMillicores/MaxMemoryMB/MaxStorageGB are the same cap as
+	// MaxCPU/MaxMemory/MaxStorage in their original numeric form, carried
+	// alongside the Kubernetes quantity strings so a usage-metering caller
+	// (service.EnvironmentProvisioner) can record the applied cap without
+	// re-parsing a quantity string.
+	MaxCPUMillicores int
+	MaxMemoryMB      int
+	MaxStorageGB     int
 }
 
 // mcpExposeService is the logical service name the deploy Job exposes: the
@@ -118,21 +137,80 @@ func buildDeployJob(params DeployJobParams) *batchv1.Job {
 	}
 }
 
-// buildDeployCommand composes the Job's argv. Plain `erun deploy` when no
-// ExposeTargetIP is configured — byte-for-byte what this Job has always run,
-// so an unconfigured platform (no ERUN_ENV_EXPOSE_TARGET_IP) deploys exactly
-// as before. Configured, it chains a second, independently-skippable primitive
-// after a successful deploy rather than teaching deploy itself about exposure:
-// this Job is the caller composing pure primitives (root AGENTS.md § "Command
-// primitives vs orchestration"), not a new deploy behavior.
+// buildDeployCommand composes the Job's argv. The Job's `command` replaces the
+// image's entrypoint, so none of the entrypoint's usual setup runs: no
+// in-cluster kubeconfig (entrypoint.sh's write_kubeconfig) and no
+// ~/.config/erun/<tenant>/<environment>/config.yaml for `erun deploy` to
+// resolve — a freshly-registered environment was never baked into any image,
+// so nothing on disk describes it. bootstrapDeployEnvironmentScript seeds both
+// explicitly before `erun deploy` runs, keeping `deploy` itself an unchanged
+// pure primitive: the Job (this caller) supplies the environment's shape, the
+// primitive still only consumes on-disk config exactly as it always has.
 func buildDeployCommand(params DeployJobParams) []string {
 	deploy := []string{"erun", "deploy", params.Tenant, params.Environment, "--version", params.Version}
-	ip := strings.TrimSpace(params.ExposeTargetIP)
-	if ip == "" {
-		return deploy
+	deploy = append(deploy, namespaceQuotaFlags(params)...)
+	script := bootstrapDeployEnvironmentScript(params) + shellJoin(deploy)
+	if ip := strings.TrimSpace(params.ExposeTargetIP); ip != "" {
+		expose := []string{"erun", "expose", params.Tenant, params.Environment, mcpExposeService, "--ip", ip, "--skip-if-unconfigured"}
+		script += " && " + shellJoin(expose)
 	}
-	expose := []string{"erun", "expose", params.Tenant, params.Environment, mcpExposeService, "--ip", ip, "--skip-if-unconfigured"}
-	return []string{"sh", "-c", shellJoin(deploy) + " && " + shellJoin(expose)}
+	return []string{"sh", "-c", script}
+}
+
+// namespaceQuotaFlags appends --max-cpu/--max-memory/--max-storage when all
+// three are configured. Deliberately all-or-nothing: a partial set would leave
+// erun deploy validating an incomplete NamespaceResourceQuota.
+func namespaceQuotaFlags(params DeployJobParams) []string {
+	cpu, memory, storage := strings.TrimSpace(params.MaxCPU), strings.TrimSpace(params.MaxMemory), strings.TrimSpace(params.MaxStorage)
+	if cpu == "" || memory == "" || storage == "" {
+		return nil
+	}
+	return []string{"--max-cpu", cpu, "--max-memory", memory, "--max-storage", storage}
+}
+
+// bootstrapDeployEnvironmentScript seeds the in-cluster kubeconfig context
+// (mirroring entrypoint.sh's write_kubeconfig, from the ServiceAccount token
+// Kubernetes auto-mounts into every pod) and a minimal tenant/env config for
+// `erun deploy` to resolve, then chains the real command with `&&`. Tenant,
+// environment, and version are DNS-1123-label/semver-shaped values already
+// validated upstream (routes.decodeCreateEnvironmentInput et al.), so they are
+// safe to interpolate directly into the generated YAML.
+func bootstrapDeployEnvironmentScript(params DeployJobParams) string {
+	return fmt.Sprintf(`set -e
+mkdir -p "$HOME/.kube"
+erun_deploy_ns="$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)"
+cat > "$HOME/.kube/config" <<KUBECONFIG_EOF
+apiVersion: v1
+kind: Config
+clusters:
+  - cluster:
+      certificate-authority: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+      server: https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT_HTTPS:-443}
+    name: in-cluster
+contexts:
+  - context:
+      cluster: in-cluster
+      namespace: ${erun_deploy_ns}
+      user: erun-deploy
+    name: in-cluster
+current-context: in-cluster
+users:
+  - name: erun-deploy
+    user:
+      tokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+KUBECONFIG_EOF
+mkdir -p "$HOME/.config/erun/%[1]s/%[2]s"
+cat > "$HOME/.config/erun/%[1]s/config.yaml" <<TENANT_EOF
+name: %[1]s
+defaultenvironment: %[2]s
+TENANT_EOF
+cat > "$HOME/.config/erun/%[1]s/%[2]s/config.yaml" <<ENV_EOF
+name: %[2]s
+type: runtime
+kubernetescontext: in-cluster
+runtimeversion: %[3]s
+ENV_EOF
+`, params.Tenant, params.Environment, params.Version)
 }
 
 // shellJoin renders argv as a POSIX shell command line, single-quoting every

@@ -730,6 +730,35 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/rollout_timeout_flag_invalid_duration_errors", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_max_cpu_memory_storage_flags_apply_namespace_quota", func(t *testing.T) {
+		// All three of --max-cpu/--max-memory/--max-storage together trace the
+		// kubectl apply that would create the namespace's ResourceQuota +
+		// LimitRange (#605), alongside the existing namespace-ensure trace.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--max-cpu", "4", "--max-memory", "8Gi", "--max-storage", "80Gi", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_max_cpu_memory_storage_flags_apply_namespace_quota", normalize.Apply(result.Combined))
+	})
+
+	t.Run("max_cpu_memory_storage_flags_partial_set_errors", func(t *testing.T) {
+		// A namespace ResourceQuota with only some resources capped would leave
+		// Kubernetes to admit unbounded amounts of the rest, so a partial set
+		// (here, --max-cpu alone) fails loudly rather than silently applying an
+		// incomplete quota.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--max-cpu", "4", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit on a partial namespace quota:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/max_cpu_memory_storage_flags_partial_set_errors", normalize.Apply(result.Combined))
+	})
+
 	t.Run("env_deploy_timeout_invalid_duration_errors", func(t *testing.T) {
 		// A malformed per-env deploy.timeout fails the deploy loudly at spec
 		// resolution (EnvironmentDeployConfig.Resolve) rather than reverting to

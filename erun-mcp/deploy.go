@@ -25,6 +25,12 @@ type DeployInput struct {
 	// a plain version bump can never leave the edge unauthenticated by accident.
 	MCPAuthPublicKey string `json:"mcp_auth_public_key,omitempty" jsonschema:"path to a PEM public key the env's MCP edge must accept bearer tokens signed by; recorded on the env so later redeploys keep authenticating. Omit to reuse the recorded key"`
 	NoMCPAuth        bool   `json:"no_mcp_auth,omitempty" jsonschema:"when true, deploy the env's MCP edge unauthenticated (loopback-only) and forget its recorded public key; required to turn authentication off, which deploy otherwise refuses to do by omission"`
+	// MaxCPU/MaxMemory/MaxStorage cap the environment's namespace with a
+	// Kubernetes ResourceQuota+LimitRange for this deploy; all three must be set
+	// together (eruncommon.ValidateNamespaceResourceQuota), or none.
+	MaxCPU     string `json:"max_cpu,omitempty" jsonschema:"Kubernetes CPU quantity (e.g. 4) capping the environment's namespace via a ResourceQuota+LimitRange; requires max_memory and max_storage too. Omit all three to use the env's saved namespace quota, if any"`
+	MaxMemory  string `json:"max_memory,omitempty" jsonschema:"Kubernetes memory quantity (e.g. 8Gi) capping the environment's namespace; requires max_cpu and max_storage too"`
+	MaxStorage string `json:"max_storage,omitempty" jsonschema:"Kubernetes storage quantity (e.g. 80Gi) capping the environment's namespace; requires max_cpu and max_memory too"`
 }
 
 func deployTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, DeployInput) (*mcp.CallToolResult, CommandOutput, error) {
@@ -55,6 +61,11 @@ func deployTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 				RolloutTimeout:       strings.TrimSpace(input.Timeout),
 				MCPAuthPublicKeyPath: strings.TrimSpace(input.MCPAuthPublicKey),
 				DisableMCPAuth:       input.NoMCPAuth,
+				NamespaceQuotaOverride: eruncommon.NamespaceResourceQuota{
+					CPU:     strings.TrimSpace(input.MaxCPU),
+					Memory:  strings.TrimSpace(input.MaxMemory),
+					Storage: strings.TrimSpace(input.MaxStorage),
+				},
 			}
 
 			component := strings.TrimSpace(input.Component)

@@ -103,6 +103,9 @@ func WrapHelmChartDeployerWithNamespaceEnsure(ensure NamespaceEnsurerFunc, deplo
 		if err := ensure(params.KubernetesContext, params.Namespace); err != nil {
 			return err
 		}
+		if err := EnsureKubernetesResourceQuota(params.KubernetesContext, params.Namespace, params.NamespaceQuota); err != nil {
+			return err
+		}
 		return deploy(params)
 	}
 }
