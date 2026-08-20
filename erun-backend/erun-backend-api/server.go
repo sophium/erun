@@ -64,6 +64,10 @@ type HandlerOptions struct {
 	// unauthenticated at GET /v1/platform so a client can discover it before it
 	// has a token. Unset fields render as empty strings, never as an error.
 	Platform routes.PlatformInfo
+	// BootstrapTenantName is this instance's own declared tenant identity
+	// (ERUN_TENANT), used to name the tenant empty-database bootstrap enrols
+	// instead of a generic placeholder. Empty falls back to that placeholder.
+	BootstrapTenantName string
 }
 
 func NewHandler(options HandlerOptions) (http.Handler, error) {
@@ -117,7 +121,7 @@ func resolveIdentityResolvers(options HandlerOptions) identityResolvers {
 	if options.DB == nil || resolvers.complete() {
 		return resolvers
 	}
-	resolvers.defaultTo(repository.NewIdentityRepository(options.DB, options.DBDialect))
+	resolvers.defaultTo(repository.NewIdentityRepository(options.DB, options.DBDialect, options.BootstrapTenantName))
 	return resolvers
 }
 

@@ -20,13 +20,22 @@ type IdentityRepository struct {
 	db      *bun.DB
 	dialect Dialect
 	orgKeys *issuerOrgKeyCache
+	// platformTenant is this instance's own declared tenant identity
+	// (ERUN_TENANT), used to name the tenant empty-database bootstrap enrols.
+	// Empty means that configuration is genuinely absent.
+	platformTenant string
 }
 
-func NewIdentityRepository(db *sql.DB, dialect Dialect) *IdentityRepository {
+func NewIdentityRepository(db *sql.DB, dialect Dialect, platformTenant string) *IdentityRepository {
 	if dialect == "" {
 		dialect = DialectPostgres
 	}
-	return &IdentityRepository{db: bun.NewDB(db, pgdialect.New()), dialect: dialect, orgKeys: newIssuerOrgKeyCache()}
+	return &IdentityRepository{
+		db:             bun.NewDB(db, pgdialect.New()),
+		dialect:        dialect,
+		orgKeys:        newIssuerOrgKeyCache(),
+		platformTenant: strings.TrimSpace(platformTenant),
+	}
 }
 
 // issuerOrgKeyCacheTTL bounds staleness so an issuer reconfigured between
@@ -249,8 +258,37 @@ func (r *IdentityRepository) bootstrapFirstIdentity(ctx context.Context, claims 
 	if err != nil {
 		return model.Tenant{}, model.User{}, err
 	}
-	log.Printf("erun api identity enrolled first tenant/user tenant=%q tenantName=%q tenantType=%q user=%q issuer=%q subject=%q username=%q", tenant.TenantID, tenant.Name, tenant.Type, user.UserID, claims.Issuer, claims.Subject, user.Username)
+	log.Printf("erun api identity enrolled first tenant/user tenant=%q tenantName=%q tenantNameSource=%q tenantType=%q user=%q issuer=%q subject=%q username=%q", tenant.TenantID, tenant.Name, bootstrapTenantNameSource(r.platformTenant), tenant.Type, user.UserID, claims.Issuer, claims.Subject, user.Username)
 	return tenant, user, nil
+}
+
+// defaultBootstrapTenantName is used when the platform's own tenant identity
+// (ERUN_TENANT) is not configured. Platforms already bootstrapped under this
+// name before ERUN_TENANT was read here keep working, since bootstrap only
+// ever runs once against an empty tenants table.
+const defaultBootstrapTenantName = "operations"
+
+// bootstrapTenantName resolves the name empty-database bootstrap enrols the
+// platform's own tenant under. The platform already declares which tenant it
+// is via ERUN_TENANT, and hosted provisioning resolves a tenant's runtime
+// image as <registry>/<tenant>-devops:<version>, so enrolling under that same
+// name is what lets the platform's first provision resolve an image it has
+// actually published instead of hunting for one nobody will ever publish.
+func bootstrapTenantName(platformTenant string) string {
+	if platformTenant != "" {
+		return platformTenant
+	}
+	return defaultBootstrapTenantName
+}
+
+// bootstrapTenantNameSource names which of the two bootstrapTenantName
+// branches produced the enrolled tenant's name, so the bootstrap log line
+// says why the name is what it is rather than just what it is.
+func bootstrapTenantNameSource(platformTenant string) string {
+	if platformTenant != "" {
+		return "ERUN_TENANT"
+	}
+	return "fallback"
 }
 
 // insertFirstIdentity creates the initial OPERATIONS tenant, its issuer, and the
@@ -266,7 +304,7 @@ func (r *IdentityRepository) insertFirstIdentity(ctx context.Context, tx bun.Tx,
 		return model.Tenant{}, model.User{}, ErrNotFound
 	}
 
-	tenant, err := r.insertTenant(ctx, tx, "operations", model.TenantTypeOperations)
+	tenant, err := r.insertTenant(ctx, tx, bootstrapTenantName(r.platformTenant), model.TenantTypeOperations)
 	if err != nil {
 		return model.Tenant{}, model.User{}, err
 	}

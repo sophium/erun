@@ -7,9 +7,37 @@ import (
 )
 
 func TestIdentityRepositoryKeepsPostgresDialect(t *testing.T) {
-	repo := NewIdentityRepository(nil, DialectPostgres)
+	repo := NewIdentityRepository(nil, DialectPostgres, "")
 	if repo.dialect != DialectPostgres {
 		t.Fatalf("expected postgres dialect, got %q", repo.dialect)
+	}
+}
+
+func TestIdentityRepositoryTrimsPlatformTenant(t *testing.T) {
+	repo := NewIdentityRepository(nil, DialectPostgres, "  frs  ")
+	if repo.platformTenant != "frs" {
+		t.Fatalf("expected trimmed platform tenant %q, got %q", "frs", repo.platformTenant)
+	}
+}
+
+func TestBootstrapTenantNameUsesPlatformTenantWhenConfigured(t *testing.T) {
+	if got := bootstrapTenantName("frs"); got != "frs" {
+		t.Fatalf("expected platform tenant name, got %q", got)
+	}
+}
+
+func TestBootstrapTenantNameFallsBackWhenPlatformTenantAbsent(t *testing.T) {
+	if got := bootstrapTenantName(""); got != defaultBootstrapTenantName {
+		t.Fatalf("expected fallback name %q, got %q", defaultBootstrapTenantName, got)
+	}
+}
+
+func TestBootstrapTenantNameSourceReflectsWhichBranchRan(t *testing.T) {
+	if got := bootstrapTenantNameSource("frs"); got != "ERUN_TENANT" {
+		t.Fatalf("expected ERUN_TENANT source, got %q", got)
+	}
+	if got := bootstrapTenantNameSource(""); got != "fallback" {
+		t.Fatalf("expected fallback source, got %q", got)
 	}
 }
 

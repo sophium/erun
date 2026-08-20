@@ -90,6 +90,7 @@ func run(args []string) error {
 			CLIClientID:     cfg.PlatformCLIClientID,
 			Brand:           cfg.PlatformBrand,
 		},
+		BootstrapTenantName: cfg.BootstrapTenantName,
 	})
 	if err != nil {
 		return err
@@ -277,6 +278,13 @@ type apiConfig struct {
 	PlatformConsoleClientID string
 	PlatformCLIClientID     string
 	PlatformBrand           string
+	// BootstrapTenantName is this pod's own declared tenant identity
+	// (ERUN_TENANT: the tenant this control plane runs as, e.g. "frs" on
+	// erunpaas.com). Empty-database bootstrap enrols the platform's own
+	// tenant under this name so hosted provisioning's first resolve of
+	// <tenant>-devops finds an image the platform actually publishes,
+	// instead of a synthetic placeholder falling back only when it is unset.
+	BootstrapTenantName string
 }
 
 func configFromEnv() apiConfig {
@@ -316,6 +324,8 @@ func configFromEnv() apiConfig {
 		PlatformConsoleClientID: strings.TrimSpace(os.Getenv("ERUN_PLATFORM_CONSOLE_CLIENT_ID")),
 		PlatformCLIClientID:     strings.TrimSpace(os.Getenv("ERUN_PLATFORM_CLI_CLIENT_ID")),
 		PlatformBrand:           strings.TrimSpace(os.Getenv("ERUN_PLATFORM_BRAND")),
+
+		BootstrapTenantName: strings.TrimSpace(os.Getenv("ERUN_TENANT")),
 	}
 }
 
