@@ -109,4 +109,36 @@ service_account "${rendered}" team-api >"${sa}"
 grep -q '^imagePullSecrets:$' "${sa}" ||
     fail "a configured image pull secret should render on the API ServiceAccount too"
 
+# --- 7. The API also needs to *read* those secrets, not just pull with them:
+#        its published-image probe interrogates the registry with the same
+#        credential, which is the only way it can tell a tenant image that was
+#        never published from one in a private namespace it may not read (#1055) ---
+container "${rendered}" >"${core}"
+grep -q 'name: ERUN_ENV_DEPLOY_IMAGE_PULL_SECRETS' "${core}" ||
+    fail "a configured image pull secret must be named to the API, or its published-image probe stays unauthenticated and the bootstrap path is unreachable"
+grep -A1 'name: ERUN_ENV_DEPLOY_IMAGE_PULL_SECRETS' "${core}" | grep -q 'value: "ghcr-pull"' ||
+    fail "ERUN_ENV_DEPLOY_IMAGE_PULL_SECRETS must carry the configured secret names"
+
+role() {
+    awk -v want="  name: $2" '
+        BEGIN{RS="\n---\n"}
+        $0 ~ /(^|\n)kind: Role(\n|$)/ && $0 ~ ("(^|\n)" want "(\n|$)") {print}
+    ' "$1"
+}
+
+deployer_role="${work_root}/role.yaml"
+role "${rendered}" team-api-env-deployer >"${deployer_role}"
+[ -s "${deployer_role}" ] || fail "the env-deployer Role must render when envDeployer is enabled"
+grep -q 'resources: \["secrets"\]' "${deployer_role}" ||
+    fail "the API's Role must grant reading the pull secret, or the probe can never authenticate"
+grep -q '      - "ghcr-pull"' "${deployer_role}" ||
+    fail "the secrets grant must be scoped by name to the configured pull secrets"
+
+rendered=$(render --set-string api.envDeployer.enabled=true)
+container "${rendered}" | grep -q 'ERUN_ENV_DEPLOY_IMAGE_PULL_SECRETS' &&
+    fail "no pull-secret env var should render when none are configured"
+role "${rendered}" team-api-env-deployer >"${deployer_role}"
+grep -q 'secrets' "${deployer_role}" &&
+    fail "no secrets grant should render when no pull secrets are configured"
+
 echo "PASS: erun-backend-api DBOS wiring"

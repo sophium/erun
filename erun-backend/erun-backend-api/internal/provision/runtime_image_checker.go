@@ -3,6 +3,7 @@ package provision
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -17,33 +18,47 @@ import (
 // deployJobParams names the image every hosted deploy pulls) is the
 // precondition this exists to catch.
 type RuntimeImageChecker interface {
-	// Exists reports false only when the registry affirmatively confirms the
-	// tag is absent (HTTP 404 from a manifest request the checker could
-	// actually make). Any other outcome — network error, auth required, a
-	// host this checker does not know how to query — reports true: this is a
-	// best-effort catch of the *knowable* failure, not a gate that blocks a
-	// deploy whenever a registry probe is inconclusive.
-	Exists(ctx context.Context, image string) (bool, error)
+	// ConfirmedMissing reports true only when the registry affirmatively
+	// confirms the tag is absent. control names a reference in the same
+	// registry that must exist — the canonical image the bootstrap would run —
+	// and is probed with the same credential, because "absent" only means
+	// absent when the probe that said so can still see something that is
+	// there: a private namespace answers an unauthenticated (or under-scoped)
+	// caller identically whether or not the repository exists. Any other
+	// outcome — no usable credential, a network error, a host this checker
+	// cannot query — reports false: this is a best-effort catch of the
+	// *knowable* failure, not a gate that blocks a deploy whenever a registry
+	// probe is inconclusive.
+	ConfirmedMissing(ctx context.Context, image, control string) (bool, error)
 }
 
-// ghcrAPIBase and ghcrTokenURL are declared as vars so tests can point them at
+// ghcrHost is the only registry this checker knows how to interrogate.
+const ghcrHost = "ghcr.io"
+
+// ghcrAPIBase and ghcrTokenBase are declared as vars so tests can point them at
 // an httptest server instead of the real ghcr.io.
 var (
-	ghcrAPIBase   = "https://ghcr.io"
-	ghcrTokenBase = "https://ghcr.io/token"
+	ghcrAPIBase   = "https://" + ghcrHost
+	ghcrTokenBase = "https://" + ghcrHost + "/token"
 )
 
-// GHCRImageChecker probes a ghcr.io-hosted image with the anonymous pull-token
-// flow (the same one an unauthenticated `docker pull` uses for a public
-// package). It is deliberately conservative: a private package or a host it
-// cannot reach reports "cannot verify" (true), never a false negative that
-// would block a legitimate deploy.
+// errProbeInconclusive marks every outcome that leaves the question open, so a
+// caller can only ever act on a status the registry actually returned.
+var errProbeInconclusive = errors.New("registry probe inconclusive")
+
+// GHCRImageChecker probes a ghcr.io-hosted image with the registry pull-token
+// flow, authenticated with the same pull credential the deploy Job's own
+// ServiceAccount carries. The credential is what makes the probe decisive: an
+// anonymous caller cannot even obtain a pull token for a private namespace, so
+// it can never tell a missing image from one it is not allowed to see, and a
+// private namespace is the normal case for a tenant's runtime image.
 type GHCRImageChecker struct {
-	Client *http.Client
+	Client      *http.Client
+	Credentials RegistryCredentials
 }
 
-func NewGHCRImageChecker() *GHCRImageChecker {
-	return &GHCRImageChecker{Client: &http.Client{Timeout: 10 * time.Second}}
+func NewGHCRImageChecker(credentials RegistryCredentials) *GHCRImageChecker {
+	return &GHCRImageChecker{Client: &http.Client{Timeout: 10 * time.Second}, Credentials: credentials}
 }
 
 func (c *GHCRImageChecker) httpClient() *http.Client {
@@ -53,37 +68,67 @@ func (c *GHCRImageChecker) httpClient() *http.Client {
 	return http.DefaultClient
 }
 
-// Exists implements RuntimeImageChecker for `<host>/<repo>:<tag>` references.
-// Hosts other than ghcr.io (a private mirror, a self-hosted registry) are not
-// this checker's responsibility and always report true.
-func (c *GHCRImageChecker) Exists(ctx context.Context, image string) (bool, error) {
+// ConfirmedMissing implements RuntimeImageChecker for `<host>/<repo>:<tag>`
+// references. Hosts other than ghcr.io (a private mirror, a self-hosted
+// registry) are not this checker's responsibility and are never confirmed.
+func (c *GHCRImageChecker) ConfirmedMissing(ctx context.Context, image, control string) (bool, error) {
 	host, repo, tag, ok := parseImageReference(image)
-	if !ok || host != "ghcr.io" {
-		return true, nil
+	if !ok || host != ghcrHost {
+		return false, nil
 	}
-	token, err := c.anonymousPullToken(ctx, repo)
+	controlHost, controlRepo, controlTag, ok := parseImageReference(control)
+	if !ok || controlHost != host {
+		return false, nil
+	}
+	credential, _ := c.credentialFor(ctx, host)
+	// The control probe proves the credential can read this registry at all.
+	// Without it a 404 is indistinguishable from "you may not look", which is
+	// what made this check unreachable against a private namespace; it also
+	// means bootstrap is only ever selected when the image it would run has
+	// been seen to resolve.
+	if status, err := c.manifestStatus(ctx, controlRepo, controlTag, credential); err != nil || status != http.StatusOK {
+		return false, nil
+	}
+	status, err := c.manifestStatus(ctx, repo, tag, credential)
+	if err != nil {
+		return false, nil
+	}
+	return status == http.StatusNotFound, nil
+}
+
+// manifestStatus returns the registry's own status for one manifest request, or
+// errProbeInconclusive when the exchange never got far enough to produce one.
+func (c *GHCRImageChecker) manifestStatus(ctx context.Context, repo, tag string, credential RegistryCredential) (int, error) {
+	token, err := c.pullToken(ctx, repo, credential)
 	if err != nil || strings.TrimSpace(token) == "" {
-		return true, nil
+		return 0, errProbeInconclusive
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, ghcrAPIBase+"/v2/"+repo+"/manifests/"+tag, nil)
 	if err != nil {
-		return true, nil
+		return 0, errProbeInconclusive
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json")
 	resp, err := c.httpClient().Do(req)
 	if err != nil {
-		return true, nil
+		return 0, errProbeInconclusive
 	}
 	defer func() { _ = resp.Body.Close() }()
-	return resp.StatusCode != http.StatusNotFound, nil
+	return resp.StatusCode, nil
 }
 
-func (c *GHCRImageChecker) anonymousPullToken(ctx context.Context, repo string) (string, error) {
-	tokenURL := ghcrTokenBase + "?scope=" + url.QueryEscape("repository:"+repo+":pull") + "&service=ghcr.io"
+// pullToken exchanges the registry credential for a repository-scoped pull
+// token. Presenting the credential as basic auth is what lets the exchange
+// succeed for a private repository — and what makes the registry answer for a
+// repository that does not exist at all, which it refuses to do anonymously.
+func (c *GHCRImageChecker) pullToken(ctx context.Context, repo string, credential RegistryCredential) (string, error) {
+	tokenURL := ghcrTokenBase + "?scope=" + url.QueryEscape("repository:"+repo+":pull") + "&service=" + ghcrHost
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, tokenURL, nil)
 	if err != nil {
 		return "", err
+	}
+	if credential.Usable() {
+		req.SetBasicAuth(credential.Username, credential.Password)
 	}
 	resp, err := c.httpClient().Do(req)
 	if err != nil {
@@ -100,6 +145,13 @@ func (c *GHCRImageChecker) anonymousPullToken(ctx context.Context, repo string) 
 		return "", err
 	}
 	return body.Token, nil
+}
+
+func (c *GHCRImageChecker) credentialFor(ctx context.Context, host string) (RegistryCredential, bool) {
+	if c.Credentials == nil {
+		return RegistryCredential{}, false
+	}
+	return c.Credentials.For(ctx, host)
 }
 
 // parseImageReference splits a `<host>/<repo>:<tag>` image reference. It

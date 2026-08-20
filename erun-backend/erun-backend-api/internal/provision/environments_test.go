@@ -6,18 +6,20 @@ import (
 	"testing"
 )
 
-// stubImageChecker reports a fixed existence answer, or an error when set.
+// stubImageChecker reports a fixed answer, or an error when set.
 type stubImageChecker struct {
-	exists   bool
-	err      error
-	calls    int
-	gotImage string
+	missing    bool
+	err        error
+	calls      int
+	gotImage   string
+	gotControl string
 }
 
-func (c *stubImageChecker) Exists(_ context.Context, image string) (bool, error) {
+func (c *stubImageChecker) ConfirmedMissing(_ context.Context, image, control string) (bool, error) {
 	c.calls++
 	c.gotImage = image
-	return c.exists, c.err
+	c.gotControl = control
+	return c.missing, c.err
 }
 
 // TestResolveBootstrapImage locks the synchronous precondition Start/StartDeploy
@@ -35,7 +37,7 @@ func TestResolveBootstrapImage(t *testing.T) {
 	})
 
 	t.Run("confirmed missing selects bootstrap", func(t *testing.T) {
-		checker := &stubImageChecker{exists: false}
+		checker := &stubImageChecker{missing: true}
 		p := &EnvProvisioner{config: config, imageChecker: checker}
 		if !p.resolveBootstrapImage(input) {
 			t.Fatal("resolveBootstrapImage = false, want true on a confirmed-missing tenant image")
@@ -43,17 +45,23 @@ func TestResolveBootstrapImage(t *testing.T) {
 		if checker.gotImage != "ghcr.io/sophium/acme-devops:1.2.3" {
 			t.Fatalf("checker probed %q", checker.gotImage)
 		}
+		// The control reference is the image the bootstrap itself would run, so
+		// the probe's credential is proven against something this deploy already
+		// depends on resolving.
+		if checker.gotControl != "ghcr.io/sophium/erun-devops:1.2.3" {
+			t.Fatalf("checker control reference = %q, want the canonical ghcr.io/sophium/erun-devops:1.2.3", checker.gotControl)
+		}
 	})
 
 	t.Run("confirmed present does not bootstrap", func(t *testing.T) {
-		p := &EnvProvisioner{config: config, imageChecker: &stubImageChecker{exists: true}}
+		p := &EnvProvisioner{config: config, imageChecker: &stubImageChecker{missing: false}}
 		if p.resolveBootstrapImage(input) {
 			t.Fatal("resolveBootstrapImage = true, want false when the tenant's own image exists")
 		}
 	})
 
 	t.Run("checker error does not bootstrap", func(t *testing.T) {
-		p := &EnvProvisioner{config: config, imageChecker: &stubImageChecker{err: errors.New("network down")}}
+		p := &EnvProvisioner{config: config, imageChecker: &stubImageChecker{missing: true, err: errors.New("network down")}}
 		if p.resolveBootstrapImage(input) {
 			t.Fatal("resolveBootstrapImage = true, want false (fail open on checker error)")
 		}

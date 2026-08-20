@@ -228,7 +228,11 @@ func newEnvironmentProvisioner(options HandlerOptions, environments *repository.
 		return nil
 	}
 	coordinator := service.NewEnvironmentProvisioner(deployexec.NewLauncher(options.KubeClient), environments, usage)
-	return provision.NewEnvProvisioner(options.DBOSContext, coordinator, deploy, provision.NewGHCRImageChecker())
+	// The published-image probe runs with the deploy Job's own pull credential,
+	// read from the platform namespace, so a private registry namespace answers
+	// it decisively instead of identically for absent and forbidden.
+	credentials := provision.NewKubeImagePullSecretCredentials(options.KubeClient, deploy.PlatformNamespace, deploy.ImagePullSecrets)
+	return provision.NewEnvProvisioner(options.DBOSContext, coordinator, deploy, provision.NewGHCRImageChecker(credentials))
 }
 
 // missingEnvProvisionerConfig names every unmet precondition for live env

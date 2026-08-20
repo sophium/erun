@@ -82,6 +82,20 @@
        were before this existed -- no attempt to expose, independent of
        whether the executor above is enabled. */ -}}
 {{- $envDeployerExposeTargetIP := default "" $envDeployer.exposeTargetIp -}}
+{{- /* The names of the env's image-pull secrets, threaded to the API so its
+       published-image precondition can probe the registry with the same
+       credential the deploy Job pulls with. A private registry namespace
+       answers an anonymous probe identically whether the tenant's own
+       <tenant>-devops image is absent or merely invisible, which is what made
+       the bootstrap path unreachable there; with the credential the two
+       separate. Empty leaves the probe unauthenticated and inconclusive, so no
+       deploy is diverted. */ -}}
+{{- $pullSecretNames := list -}}
+{{- range default (list) .Values.imagePullSecrets -}}
+{{- if .name -}}
+{{- $pullSecretNames = append $pullSecretNames .name -}}
+{{- end -}}
+{{- end -}}
 {{- /* Opt-in server-side release queue: an accepted review enqueues a release,
        and the API launches `erun release` as a Job in the agent environment's
        own namespace, so the run lands beside that environment's warm fingerprint
@@ -185,6 +199,17 @@ rules:
   - apiGroups: [""]
     resources: ["pods", "pods/log"]
     verbs: ["get", "list", "watch"]
+  {{- if $pullSecretNames }}
+  {{- /* Read access to the env's pull secrets by name only -- the credential
+         the published-image probe needs, and nothing else in the namespace. */}}
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      {{- range $pullSecretNames }}
+      - {{ . | quote }}
+      {{- end }}
+    verbs: ["get"]
+  {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -357,6 +382,10 @@ spec:
                   fieldPath: metadata.namespace
             - name: ERUN_ENV_DEPLOY_REGISTRY
               value: {{ $containerRegistry | quote }}
+            {{- if $pullSecretNames }}
+            - name: ERUN_ENV_DEPLOY_IMAGE_PULL_SECRETS
+              value: {{ join "," $pullSecretNames | quote }}
+            {{- end }}
             {{- if $envDeployerExposeTargetIP }}
             - name: ERUN_ENV_EXPOSE_TARGET_IP
               value: {{ $envDeployerExposeTargetIP | quote }}
