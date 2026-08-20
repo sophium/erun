@@ -29,6 +29,17 @@
 {{- $postgresPasswordSecretName := default (printf "%s-backend-postgres" $tenant) $postgres.passwordSecretName -}}
 {{- $postgresPasswordSecretKey := default "password" $postgres.passwordSecretKey -}}
 {{- $databaseURL := default (printf "postgres://%s:$(ERUN_POSTGRES_PASSWORD)@%s-postgres:%v/%s?sslmode=disable" $postgresUser $tenant $postgresPort $postgresDatabase) $api.databaseURL -}}
+{{- /* DBOS (durable workflows) needs its own database, separate from
+       ERUN_DATABASE_URL -- DBOS owns and migrates its own system tables there.
+       It creates the database itself on first connect if missing, using the
+       same superuser credentials core already uses to create its own "zitadel"
+       database, so no separate bootstrap step is required. Rendered only when
+       a feature that actually needs DBOSContext is enabled (server.go's
+       newEnvironmentProvisioner/newReleaseQueue both require it); an env with
+       neither enabled stays byte-for-byte unchanged. */ -}}
+{{- $dbos := default dict $api.dbos -}}
+{{- $dbosDatabase := default (printf "%s_dbos_sys" $postgresDatabase) $dbos.database -}}
+{{- $dbosDatabaseURL := default (printf "postgres://%s:$(ERUN_POSTGRES_PASSWORD)@%s-postgres:%v/%s?sslmode=disable" $postgresUser $tenant $postgresPort $dbosDatabase) $dbos.databaseURL -}}
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
 {{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
 {{- $backendAPIImage := default (printf "%s/erun-backend-api:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-backend-api") -}}
@@ -91,6 +102,7 @@
 {{- $_ := required "api.releaseQueue.namespace is required when the release queue is enabled: it is the agent environment's namespace the release Job runs in" $releaseNamespace }}
 {{- end }}
 {{- $apiServiceAccountNeeded := or $envDeployerEnabled $releaseQueueEnabled -}}
+{{- $dbosNeeded := or $envDeployerEnabled $releaseQueueEnabled -}}
 {{- if and $releaseQueueEnabled (not $envDeployerEnabled) }}
 apiVersion: v1
 kind: ServiceAccount
@@ -290,6 +302,10 @@ spec:
                   key: {{ $postgresPasswordSecretKey }}
             - name: ERUN_DATABASE_URL
               value: {{ $databaseURL | quote }}
+            {{- if $dbosNeeded }}
+            - name: DBOS_SYSTEM_DATABASE_URL
+              value: {{ $dbosDatabaseURL | quote }}
+            {{- end }}
             - name: ERUN_OIDC_ALLOWED_ISSUERS
               value: {{ $oidcAllowedIssuers | quote }}
             - name: ERUN_PLATFORM_ISSUER

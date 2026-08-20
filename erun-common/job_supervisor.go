@@ -165,6 +165,60 @@ func resolveEnvironmentJobWork(agent, prompt string, command []string) (string, 
 	return tool, built, nil
 }
 
+// ensureAgentJobToolAvailable refuses an agent job before anything is spent —
+// no activity lease, no log file, no supervisor process — when the named tool
+// is not installed in this environment. That precondition is knowable up
+// front; starting anyway trades a direct, actionable refusal for the tool's
+// own failure a minute later, which for an unconfigured environment reads as
+// a credential problem with no credential fix.
+func ensureAgentJobToolAvailable(ctx Context, tool string) error {
+	if strings.TrimSpace(tool) == "" {
+		return nil
+	}
+	ctx.Trace(fmt.Sprintf("job: resolving agent tool %q in this environment", tool))
+	// cmd.Err carries Go's own exec.LookPath phrasing, which is an
+	// implementation detail rather than something to hand to the caller
+	// verbatim; the tool name and "not available" already say what happened.
+	if cmd := Command(tool); cmd.Err != nil {
+		err := fmt.Errorf("agent tool %q is not available in this environment; install and configure it here, or start the job with a different --agent", tool)
+		ctx.Trace(fmt.Sprintf("job: resolving agent tool %q failed: %v", tool, err))
+		return err
+	}
+	return nil
+}
+
+// agentAuthFailureSignatures are phrases the AI tools use for their own auth
+// failures. Matching one against a failed agent job's folded progress is what
+// turns "the tool's raw message" into "this environment's credentials for
+// that tool are missing or stale" — the actual problem, since there is often
+// no in-band way to refresh them, unlike what the raw message suggests.
+var agentAuthFailureSignatures = []string{
+	"oauth session expired",
+	"failed to authenticate",
+	"authentication_error",
+	"invalid api key",
+	"please run /login",
+	"not logged in",
+}
+
+// agentAuthFailureReason returns a clarified failure reason when a failed
+// agent job's own folded error looks like an authentication problem, and ""
+// otherwise — never guessing on a message that does not match one of the
+// tools' own known phrasings.
+func agentAuthFailureReason(tool, message string) string {
+	trimmed := strings.TrimSpace(message)
+	if trimmed == "" {
+		return ""
+	}
+	lower := strings.ToLower(trimmed)
+	for _, signature := range agentAuthFailureSignatures {
+		if strings.Contains(lower, signature) {
+			return fmt.Sprintf("%s reported an authentication failure (%s); this environment's %s credentials are missing or stale, not a problem with the work itself", tool, trimmed, tool)
+		}
+	}
+	return ""
+}
+
 // environmentJobKind names the kind a recorded tool implies, so the record and
 // every reader agree without either re-deriving it.
 func environmentJobKind(agentTool string) string {
@@ -198,6 +252,9 @@ func normalizeEnvironmentJobLeaseTTL(ttl time.Duration) (time.Duration, error) {
 func StartEnvironmentJob(ctx Context, params StartEnvironmentJobParams) (EnvironmentJob, error) {
 	params, err := params.normalize()
 	if err != nil {
+		return EnvironmentJob{}, err
+	}
+	if err := ensureAgentJobToolAvailable(ctx, params.Agent); err != nil {
 		return EnvironmentJob{}, err
 	}
 	dir, err := environmentJobDir(params.Tenant, params.Environment)
@@ -446,10 +503,17 @@ func RunEnvironmentJobSupervisor(params EnvironmentJobSupervisorParams) error {
 	if err != nil {
 		return err
 	}
-	beat, stop := startEnvironmentJobHeartbeat(params.Tenant, params.Environment, recorder, ttl)
+	// The agent reader is shared between the writer that feeds it every byte the
+	// child process writes and the heartbeat that reads its current snapshot —
+	// that sharing is what keeps progress moving after the log hits its cap.
+	var agent *agentProgressReader
+	if job.Kind == EnvironmentJobKindAgent {
+		agent = newAgentProgressReader(job.AgentTool)
+	}
+	beat, stop := startEnvironmentJobHeartbeat(params.Tenant, params.Environment, recorder, ttl, agent)
 	defer stop()
 
-	writer := &jobOutputWriter{file: log, limit: job.OutputLimitBytes, onTruncate: func() {
+	writer := &jobOutputWriter{file: log, limit: job.OutputLimitBytes, agent: agent, onTruncate: func() {
 		recorder.update(func(job *EnvironmentJob) { job.OutputTruncated = true })
 	}}
 
@@ -497,6 +561,9 @@ func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *job
 		job.OutputBytes = writer.written()
 		job.OutputTruncated = writer.truncated()
 		job.Signal = signal
+		if reason == "" && code != 0 && job.Kind == EnvironmentJobKindAgent && job.Progress != nil {
+			reason = agentAuthFailureReason(job.AgentTool, job.Progress.Error)
+		}
 		job.Reason = reason
 		job.ExitCode = &code
 	})
@@ -532,12 +599,14 @@ type jobHeartbeat struct {
 // design: if this process is killed instead, the lease records this pid, so the
 // lease store reclaims it on the next read exactly as it would for any other
 // abandoned holder.
-func startEnvironmentJobHeartbeat(tenant, environment string, recorder *jobRecorder, ttl time.Duration) (*jobHeartbeat, func()) {
+//
+// agent is the same reader the output writer feeds, so the heartbeat's snapshot
+// reflects everything the process wrote, not only what the output cap retained.
+func startEnvironmentJobHeartbeat(tenant, environment string, recorder *jobRecorder, ttl time.Duration, agent *agentProgressReader) (*jobHeartbeat, func()) {
 	job := recorder.snapshot()
-	beat := &jobHeartbeat{tenant: tenant, environment: environment, ttl: ttl, recorder: recorder}
+	beat := &jobHeartbeat{tenant: tenant, environment: environment, ttl: ttl, recorder: recorder, agent: agent}
 	interval := beat.leaseInterval()
-	if job.Kind == EnvironmentJobKindAgent {
-		beat.agent = newAgentProgressReader(job.AgentTool, job.LogPath)
+	if agent != nil {
 		interval = agentJobProgressInterval
 	}
 	beat.refresh(true)
@@ -578,7 +647,7 @@ func (h *jobHeartbeat) refresh(force bool) {
 	job := h.recorder.snapshot()
 	name := job.Name
 	if h.agent != nil {
-		progress := h.agent.read()
+		progress := h.agent.snapshot()
 		if progress != h.progress {
 			h.progress = progress
 			h.recorder.update(func(job *EnvironmentJob) {
@@ -617,10 +686,13 @@ func (h *jobHeartbeat) leaseInterval() time.Duration {
 
 // jobOutputWriter captures the work's merged stdout and stderr up to the cap.
 // Past the cap it stops writing and says so once, so a bounded log can never be
-// mistaken for the whole story.
+// mistaken for the whole story. agent, when set, is fed every byte regardless
+// of the cap: an agent's progress fields are small and bounded on their own, so
+// the log's disk cap must not be what silently freezes them.
 type jobOutputWriter struct {
 	file       *os.File
 	limit      int64
+	agent      *agentProgressReader
 	onTruncate func()
 
 	mu      sync.Mutex
@@ -628,7 +700,17 @@ type jobOutputWriter struct {
 	dropped bool
 }
 
+// Write feeds the agent reader (if any) with every byte, then applies the cap
+// to what actually reaches the log file. The two are independent so the cap
+// can bound the file without also bounding progress.
 func (w *jobOutputWriter) Write(p []byte) (int, error) {
+	if w.agent != nil {
+		w.agent.feed(p)
+	}
+	return w.writeCapped(p)
+}
+
+func (w *jobOutputWriter) writeCapped(p []byte) (int, error) {
 	w.mu.Lock()
 	room := w.limit - w.count
 	if room <= 0 {

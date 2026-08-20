@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
+	"sync"
 	"unicode/utf8"
 )
 
@@ -123,51 +123,44 @@ func (p AgentJobProgress) Summary() string {
 	return strings.Join(parts, ", ")
 }
 
-// agentProgressReader folds an agent's event stream into progress as the log
-// grows. It keeps its own offset so the supervisor polling on a short interval
-// re-reads only what arrived rather than the whole log each time.
+// agentProgressReader folds an agent's event stream into progress as bytes
+// arrive. It is fed directly from the child process's stdout/stderr writes
+// (agentProgressReader.feed), independent of whatever the job's output log
+// retains — the byte cap that bounds the log on disk must not also silence
+// progress, since the progress fields it folds into are themselves small and
+// bounded. Two of the process's own pipe-copying goroutines can write
+// concurrently, so every method locks.
 type agentProgressReader struct {
-	tool     string
-	path     string
-	offset   int64
+	tool string
+
+	mu       sync.Mutex
 	pending  []byte
 	progress AgentJobProgress
 }
 
-func newAgentProgressReader(tool, path string) *agentProgressReader {
-	return &agentProgressReader{tool: tool, path: path, progress: AgentJobProgress{Tool: tool}}
+func newAgentProgressReader(tool string) *agentProgressReader {
+	return &agentProgressReader{tool: tool, progress: AgentJobProgress{Tool: tool}}
 }
 
-// read folds whatever arrived since the last call and returns progress as it now
-// stands. A log that is missing or unreadable yields the progress already folded
-// rather than an error: a run that has not written yet is not a failure.
-func (r *agentProgressReader) read() AgentJobProgress {
-	if strings.TrimSpace(r.path) == "" {
-		return r.progress
-	}
-	file, err := os.Open(r.path)
-	if err != nil {
-		return r.progress
-	}
-	defer func() { _ = file.Close() }()
-
-	info, err := file.Stat()
-	if err != nil || info.Size() <= r.offset {
-		return r.progress
-	}
-	chunk := make([]byte, info.Size()-r.offset)
-	read, err := file.ReadAt(chunk, r.offset)
-	if read <= 0 && err != nil {
-		return r.progress
-	}
-	r.offset += int64(read)
-	r.consume(chunk[:read])
+// snapshot returns progress as it currently stands.
+func (r *agentProgressReader) snapshot() AgentJobProgress {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return r.progress
 }
 
+// feed folds newly-arrived bytes into progress. It is called from the same
+// writer that captures the job's output, but it sees every byte the process
+// wrote, not only the bytes the output cap kept.
+func (r *agentProgressReader) feed(chunk []byte) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.consume(chunk)
+}
+
 // consume splits the arrived bytes on newlines, folding complete lines and
-// carrying the partial trailing one — a poll routinely lands mid-line, and
-// re-reading it from the start would double-count everything before it.
+// carrying the partial trailing one — a feed can land mid-line, and re-reading
+// it from the start would double-count everything before it. Caller holds mu.
 func (r *agentProgressReader) consume(chunk []byte) {
 	buffer := append(r.pending, chunk...)
 	for {

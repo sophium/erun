@@ -69,6 +69,13 @@ func (r *TenantRepository) Create(ctx context.Context, params CreateTenantParams
 			`INSERT INTO tenant_issuers (tenant_id, issuer, org_field_value, name) VALUES (?, ?, ?, ?)`,
 			tenant.TenantID, issuer, nullIfEmpty(orgFieldValue), displayName,
 		).Exec(ctx); err != nil {
+			// (issuer, org_field_value) is the token-resolution key: a caller that
+			// repeats an already-mapped issuer with the same org discriminator (or
+			// no discriminator at all) collides here, not on (tenant_id, issuer) —
+			// this insert always mints a fresh tenant_id first.
+			if isUniqueViolation(err) {
+				return ErrConflict
+			}
 			return err
 		}
 		return nil
