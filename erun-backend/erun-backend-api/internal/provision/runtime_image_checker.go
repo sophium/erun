@@ -10,11 +10,12 @@ import (
 )
 
 // RuntimeImageChecker reports whether an environment's runtime image is known
-// to be missing from its registry, so create/deploy can fail clearly instead
-// of starting a Job that can only ImagePullBackOff. A tenant that never
+// to be missing from its registry, so create/deploy can bootstrap on the
+// canonical published erun-devops image instead of starting a Job that can
+// only ImagePullBackOff on an image nobody ever published. A tenant that never
 // published a `<tenant>-devops` image (internal/provision/environments.go's
 // deployJobParams names the image every hosted deploy pulls) is the
-// precondition this exists to catch (#605).
+// precondition this exists to catch.
 type RuntimeImageChecker interface {
 	// Exists reports false only when the registry affirmatively confirms the
 	// tag is absent (HTTP 404 from a manifest request the checker could

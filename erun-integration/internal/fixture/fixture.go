@@ -496,6 +496,38 @@ func SeedRuntimeTenantEnvNoVersion(t testing.TB, setup env.Setup, tenant, enviro
 	)
 }
 
+// SeedRuntimeTenantEnvNoRepoPath writes a runtime-type env tree with NO
+// repopath at all, reproducing the shape the backend's provisioning deploy Job
+// seeds for a control-plane-created tenant with no project
+// (deployexec.bootstrapDeployEnvironmentScript writes exactly this: type,
+// kubernetescontext, and runtimeversion — never repopath, since nothing on the
+// tenant's side was ever `erun init`ed). Every other runtime fixture pins a
+// repopath, so this is the single fixture that locks the repo-path-optional
+// resolution for a genuinely projectless env.
+func SeedRuntimeTenantEnvNoRepoPath(t testing.TB, setup env.Setup, tenant, environment string) {
+	t.Helper()
+	root := filepath.Join(setup.ConfigHome, "erun")
+	tenantDir := filepath.Join(root, tenant)
+	envDir := filepath.Join(tenantDir, environment)
+	for _, dir := range []string{root, tenantDir, envDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	mustWrite(t, filepath.Join(root, "config.yaml"), "defaulttenant: "+tenant+"\n")
+	mustWrite(t, filepath.Join(tenantDir, "config.yaml"),
+		"name: "+tenant+"\n"+
+			"defaultenvironment: "+environment+"\n",
+	)
+	mustWrite(t, filepath.Join(envDir, "config.yaml"),
+		"name: "+environment+"\n"+
+			"type: runtime\n"+
+			"kubernetescontext: test-context\n"+
+			"runtimeversion: 1.0.0\n",
+	)
+}
+
 // SeedLegacyRemoteTenantEnv writes a tenant/env tree whose env config carries
 // the retired `remote: true` shape with no `type` and no `snapshot`.
 // It exists to exercise EnvConfig.UnmarshalYAML's legacy migration on read:

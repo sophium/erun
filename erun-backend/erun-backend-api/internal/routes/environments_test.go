@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -270,22 +271,22 @@ func TestCreateEnvironmentRejectsQuotaBelowRuntimeFloor(t *testing.T) {
 	}
 }
 
-// TestCreateEnvironmentReportsMissingRuntimeImage locks writeStartProvisioningError:
-// a confirmed-missing runtime image answers 409 naming it, and the row created
-// just before stays registered (persistAndMaybeProvision already wrote it) —
-// there is nothing to unwind since the deploy Job was never started.
-func TestCreateEnvironmentReportsMissingRuntimeImage(t *testing.T) {
+// TestCreateEnvironmentStartFailureLeavesRowRegistered locks
+// writeStartProvisioningError: any failure to enqueue the durable workflow
+// answers 500, and the row created just before stays registered
+// (persistAndMaybeProvision already wrote it) — there is nothing to unwind
+// since the deploy Job was never started. A confirmed-missing tenant runtime
+// image is no longer this path: it now selects the canonical-image bootstrap
+// instead of failing Start.
+func TestCreateEnvironmentStartFailureLeavesRowRegistered(t *testing.T) {
 	environments := &stubEnvironmentRepository{created: model.Environment{
 		EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime, RuntimeVersion: "1.2.3",
 	}}
-	prov := &stubEnvironmentProvisioner{err: &provision.MissingRuntimeImageError{Image: "ghcr.io/sophium/acme-devops:1.2.3"}}
+	prov := &stubEnvironmentProvisioner{err: errors.New("dbos: workflow start failed")}
 	rec := postCreateEnvironmentWired(t, environments, prov, `{"name":"prod","type":"runtime","runtimeVersion":"1.2.3"}`)
 
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("status = %d (body %s), want 409", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "ghcr.io/sophium/acme-devops:1.2.3") {
-		t.Fatalf("body = %s, want it to name the missing image", rec.Body.String())
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d (body %s), want 500", rec.Code, rec.Body.String())
 	}
 }
 
@@ -430,24 +431,26 @@ func TestDeployEnvironmentClaimsBeforeStarting(t *testing.T) {
 	}
 }
 
-// TestDeployEnvironmentReportsMissingRuntimeImageAndMarksFailed locks
-// writeStartDeployError: ClaimDeploy already moved the row to provisioning
-// before StartDeploy ran, so a confirmed-missing image must also mark the
-// environment failed — otherwise it would be stranded in provisioning with no
-// workflow left to ever move it out (#605).
-func TestDeployEnvironmentReportsMissingRuntimeImageAndMarksFailed(t *testing.T) {
+// TestDeployEnvironmentStartFailureMarksFailed locks writeStartDeployError:
+// ClaimDeploy already moved the row to provisioning before StartDeploy ran, so
+// any failure to enqueue the durable workflow must also mark the environment
+// failed — otherwise it would be stranded in provisioning with no workflow
+// left to ever move it out. A confirmed-missing tenant runtime image is no
+// longer this path: it now selects the canonical-image bootstrap instead of
+// failing StartDeploy.
+func TestDeployEnvironmentStartFailureMarksFailed(t *testing.T) {
 	environments := runtimeEnvironment()
-	prov := &stubEnvironmentProvisioner{err: &provision.MissingRuntimeImageError{Image: "ghcr.io/sophium/acme-devops:1.2.3"}}
+	prov := &stubEnvironmentProvisioner{err: errors.New("dbos: workflow start failed")}
 	rec := postDeployEnvironment(t, environments, prov, "")
 
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("status = %d (body %s), want 409", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d (body %s), want 500", rec.Code, rec.Body.String())
 	}
 	if environments.markFailedCalls != 1 {
 		t.Fatalf("MarkDeployFailed called %d times, want 1", environments.markFailedCalls)
 	}
-	if !strings.Contains(environments.markFailedReason, "ghcr.io/sophium/acme-devops:1.2.3") {
-		t.Fatalf("markFailedReason = %q, want it to name the missing image", environments.markFailedReason)
+	if !strings.Contains(environments.markFailedReason, "dbos: workflow start failed") {
+		t.Fatalf("markFailedReason = %q, want it to name the failure", environments.markFailedReason)
 	}
 }
 

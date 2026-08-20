@@ -29,7 +29,11 @@ The platform starts a server-side deploy immediately; poll its status until it s
 erun platform env get <environment-id>
 ```
 
-`status` moves `registered` → `provisioning` → `running` (or `failed`, with a `provisionError` explaining why). A `running` environment is already reachable at its MCP hostname — the platform wires exposure (DNS + Ingress) into the same deploy, so there is no separate step to run once status settles. See [Hosted platform · Automatic exposure](/concepts/hosted-platform#automatic-exposure) for when that wiring runs and how it fails safely on a platform not configured for it. Re-deploy at a different version later with:
+`status` moves `registered` → `provisioning` → `running` (or `failed`, with a `provisionError` explaining why). A `running` environment is already reachable at its MCP hostname — the platform wires exposure (DNS + Ingress) into the same deploy, so there is no separate step to run once status settles. See [Hosted platform · Automatic exposure](/concepts/hosted-platform#automatic-exposure) for when that wiring runs and how it fails safely on a platform not configured for it.
+
+New to erun and haven't run `erun push` yet? Registering an environment still works: it bootstraps on the canonical ERun runtime image instead of a project image you haven't published. Once you publish your own `<tenant>-devops` image at a version, deploying that version gets your own image and plan instead. See [Hosted platform · Provisioning lifecycle](/concepts/hosted-platform#provisioning-lifecycle) for the mechanism.
+
+Re-deploy at a different version later with:
 
 ```bash
 erun platform env deploy <environment-id> --version 1.5.0
