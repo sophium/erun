@@ -6,6 +6,8 @@ import (
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 
+	eruncommon "github.com/sophium/erun/erun-common"
+
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/deployexec"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
@@ -35,6 +37,14 @@ type EnvProvisionInput struct {
 	MaxCPUMillicores int `json:"maxCpuMillicores,omitempty"`
 	MaxMemoryMB      int `json:"maxMemoryMb,omitempty"`
 	MaxStorageGB     int `json:"maxStorageGb,omitempty"`
+	// Bootstrap is decided once, synchronously, before the durable workflow is
+	// enqueued (resolveBootstrapImage), and checkpointed here so a resumed
+	// workflow does not re-probe the registry: true means the tenant's own
+	// <tenant>-devops image was confirmed missing at Start/StartDeploy time, so
+	// the deploy Job installs the canonical published erun-devops image+chart by
+	// reference instead — the same bootstrap `erun deploy --runtime-image`
+	// already supports for an operator's own machine.
+	Bootstrap bool `json:"bootstrap,omitempty"`
 }
 
 // EnvCoordinator runs an env deploy to a terminal status — the service
@@ -87,9 +97,7 @@ func NewEnvProvisioner(dbosCtx dbos.DBOSContext, coordinator EnvCoordinator, con
 // immediately while the durable workflow runs the deploy. The environment id is
 // the idempotency key, so a retried create does not start a second deploy.
 func (p *EnvProvisioner) Start(input EnvProvisionInput) error {
-	if err := p.checkImagePublished(input); err != nil {
-		return err
-	}
+	input.Bootstrap = p.resolveBootstrapImage(input)
 	_, err := dbos.RunWorkflow(p.dbosCtx, p.workflowFn, input, dbos.WithWorkflowID("provision-env-"+input.EnvironmentID))
 	return err
 }
@@ -101,38 +109,28 @@ func (p *EnvProvisioner) Start(input EnvProvisionInput) error {
 // silent no-op. Concurrency is guarded by the environment's deploy claim, not by
 // the workflow id.
 func (p *EnvProvisioner) StartDeploy(input EnvProvisionInput) error {
-	if err := p.checkImagePublished(input); err != nil {
-		return err
-	}
+	input.Bootstrap = p.resolveBootstrapImage(input)
 	_, err := dbos.RunWorkflow(p.dbosCtx, p.workflowFn, input, dbos.WithWorkflowID("deploy-env-"+input.EnvironmentID+"-"+input.DeployID))
 	return err
 }
 
-// MissingRuntimeImageError is returned synchronously by Start/StartDeploy when
-// the tenant's runtime image is confirmed absent from the registry, so the
-// route can answer with a clear 4xx instead of a 202 the Job then
-// ImagePullBackOffs on (#605).
-type MissingRuntimeImageError struct {
-	Image string
-}
-
-func (e *MissingRuntimeImageError) Error() string {
-	return fmt.Sprintf("runtime image %s is not published: this tenant has never run `erun push` at this version; publish it before provisioning or deploying this environment", e.Image)
-}
-
-// checkImagePublished runs the synchronous, best-effort precondition before
-// enqueueing the durable workflow. A nil checker (not wired) or an
-// inconclusive probe never blocks — only a registry-confirmed absence does.
-func (p *EnvProvisioner) checkImagePublished(input EnvProvisionInput) error {
+// resolveBootstrapImage runs the synchronous, best-effort precondition before
+// enqueueing the durable workflow: whether this deploy must bootstrap on the
+// canonical erun-devops image because the tenant's own <tenant>-devops image is
+// confirmed missing from the registry — a control-plane tenant with no
+// project has never run `erun push`, so its own image can never exist. A nil
+// checker (not wired) or an inconclusive probe leaves Bootstrap false, matching
+// RuntimeImageChecker's fail-open contract: only a registry-confirmed absence
+// selects the fallback, never a network hiccup or an unreachable host.
+func (p *EnvProvisioner) resolveBootstrapImage(input EnvProvisionInput) bool {
 	if p.imageChecker == nil {
-		return nil
+		return false
 	}
-	image := deployJobImage(p.config, input)
-	exists, err := p.imageChecker.Exists(context.Background(), image)
-	if err != nil || exists {
-		return nil
+	exists, err := p.imageChecker.Exists(context.Background(), deployJobImage(p.config, input))
+	if err != nil {
+		return false
 	}
-	return &MissingRuntimeImageError{Image: image}
+	return !exists
 }
 
 // deployJobImage is the tenant's own <tenant>-devops runtime image at the
@@ -141,26 +139,45 @@ func deployJobImage(config EnvDeployConfig, input EnvProvisionInput) string {
 	return fmt.Sprintf("%s/%s-devops:%s", config.Registry, input.Tenant, input.Version)
 }
 
-// deployJobParams renders the placement for one env-deploy Job. The env deploys
-// with the tenant's own <tenant>-devops runtime image, which carries its baked
-// deploy config (the image-baked config model), pulled from the configured
-// registry at the requested version.
+// canonicalRuntimeImage is the published erun-devops image every hosted deploy
+// falls back to when the tenant has never published its own <tenant>-devops
+// image — the same canonical image `erun deploy --runtime-image` installs on an
+// operator's own machine.
+func canonicalRuntimeImage(config EnvDeployConfig, input EnvProvisionInput) string {
+	return fmt.Sprintf("%s/%s:%s", config.Registry, eruncommon.DevopsComponentName, input.Version)
+}
+
+// deployJobParams renders the placement for one env-deploy Job. A tenant that
+// has published its own image deploys with it, carrying its baked deploy
+// config (the image-baked config model), pulled from the configured registry
+// at the requested version. A tenant with no image (input.Bootstrap, decided
+// once by resolveBootstrapImage before the durable workflow runs) instead runs
+// the Job on the canonical published erun-devops image and threads
+// --runtime-image so the installed runtime chart matches it, rather than
+// resolving artifacts that were never published.
 func deployJobParams(config EnvDeployConfig, input EnvProvisionInput) deployexec.DeployJobParams {
+	image := deployJobImage(config, input)
+	runtimeImageOverride := ""
+	if input.Bootstrap {
+		image = canonicalRuntimeImage(config, input)
+		runtimeImageOverride = image
+	}
 	return deployexec.DeployJobParams{
-		Tenant:           input.Tenant,
-		Environment:      input.Environment,
-		Version:          input.Version,
-		DeployID:         input.DeployID,
-		Namespace:        config.PlatformNamespace,
-		Image:            deployJobImage(config, input),
-		ServiceAccount:   config.DeployerServiceAccount,
-		ExposeTargetIP:   config.ExposeTargetIP,
-		MaxCPU:           namespaceQuotaCPUQuantity(input.MaxCPUMillicores),
-		MaxMemory:        namespaceQuotaMemoryQuantity(input.MaxMemoryMB),
-		MaxStorage:       namespaceQuotaStorageQuantity(input.MaxStorageGB),
-		MaxCPUMillicores: input.MaxCPUMillicores,
-		MaxMemoryMB:      input.MaxMemoryMB,
-		MaxStorageGB:     input.MaxStorageGB,
+		Tenant:               input.Tenant,
+		Environment:          input.Environment,
+		Version:              input.Version,
+		DeployID:             input.DeployID,
+		Namespace:            config.PlatformNamespace,
+		Image:                image,
+		RuntimeImageOverride: runtimeImageOverride,
+		ServiceAccount:       config.DeployerServiceAccount,
+		ExposeTargetIP:       config.ExposeTargetIP,
+		MaxCPU:               namespaceQuotaCPUQuantity(input.MaxCPUMillicores),
+		MaxMemory:            namespaceQuotaMemoryQuantity(input.MaxMemoryMB),
+		MaxStorage:           namespaceQuotaStorageQuantity(input.MaxStorageGB),
+		MaxCPUMillicores:     input.MaxCPUMillicores,
+		MaxMemoryMB:          input.MaxMemoryMB,
+		MaxStorageGB:         input.MaxStorageGB,
 	}
 }
 

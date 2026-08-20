@@ -405,6 +405,14 @@ func loadOpenEnvConfig(store OpenStore, tenant, environment string) (EnvConfig, 
 func resolveOpenRepoPath(envConfig EnvConfig) (string, error) {
 	repoPath := envConfig.EffectiveLocalRepoPath()
 	if repoPath == "" {
+		// A runtime env with no mounted source worktree genuinely has no repo path
+		// (RemoteWorktree's doc: "none for runtime") — a control-plane-provisioned
+		// tenant with no project never has one to configure. Every other type has a
+		// real worktree (hostPath for local-agent, a PVC for remote-agent, or a
+		// runtime env's own opted-in mutable-source clone), so those still require it.
+		if envConfig.Type == EnvironmentTypeRuntime && !envConfig.MountsRuntimeSource() {
+			return "", nil
+		}
 		return "", ErrRepoPathNotConfigured
 	}
 	// A remote/PVC-worktree env's repo path is a POSIX path inside the pod, not a

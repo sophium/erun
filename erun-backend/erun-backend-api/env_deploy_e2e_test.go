@@ -108,6 +108,44 @@ func TestDeployEnvironmentEndToEnd(t *testing.T) {
 	assertEnvironmentTornDown(t, srv.URL, kube, environmentID, namespace)
 }
 
+// TestDeployEnvironmentBootstrapsOnCanonicalImage drives the core hosted PaaS
+// promise: a tenant that never ran `erun push` — so its own <tenant>-devops
+// image was never published — still gets a real environment. It needs a
+// version whose canonical erun-devops image and chart ARE published but whose
+// <tenant>-devops image never was (any real erun release version the bootstrap
+// tenant never built its own image at qualifies), because that gap is exactly
+// what RuntimeImageChecker confirms missing and what selects the bootstrap
+// path instead of refusing the request.
+func TestDeployEnvironmentBootstrapsOnCanonicalImage(t *testing.T) {
+	config := envDeployE2EFromEnv(t)
+	version := os.Getenv("ERUN_E2E_ENV_DEPLOY_BOOTSTRAP_VERSION")
+	if version == "" {
+		t.Skip("ERUN_E2E_ENV_DEPLOY_BOOTSTRAP_VERSION is required: a version whose canonical erun-devops image+chart are published but whose <tenant>-devops image never was")
+	}
+	srv, _, kube, kubeConfig := startEnvDeployAPI(t, config, "erun-env-deploy-bootstrap-e2e")
+
+	tenant := e2eTenantName(t, srv.URL)
+	environmentID := e2eRegisterEnvironment(t, srv.URL, "bootstrap")
+
+	code, body := e2eRequest(t, srv.URL, http.MethodPost, "/v1/environments/"+environmentID+"/deploy",
+		map[string]any{"version": version})
+	if code != http.StatusAccepted {
+		t.Fatalf("deploy: HTTP %d (want 202): %s", code, body)
+	}
+
+	awaitEnvironmentRunning(t, srv.URL, environmentID, version)
+	namespace := tenant + "-bootstrap"
+	// The release is still named <tenant>-devops even though the pod runs the
+	// canonical erun-devops image: resolvePublishedDevopsDeploySpecWithReason
+	// keeps ReleaseName on RuntimeReleaseName(tenant) regardless of which image
+	// backs it, so this stays the same assertion the tenant's-own-image path uses.
+	assertRuntimeChartInstalled(t, kube, tenant)
+	assertMCPReachable(t, kubeConfig, kube, namespace, tenant)
+	// Teardown last: this is the full lifecycle a provisioned env reaching
+	// Running with its MCP reachable, then torn down, should complete cleanly.
+	assertEnvironmentTornDown(t, srv.URL, kube, environmentID, namespace)
+}
+
 // assertMCPReachable proves the per-env MCP edge (erun-devops/AGENTS.md: it
 // runs inside the runtime container, sharing its toolchain) is actually
 // serving requests, not just that a pod landed. It port-forwards to the

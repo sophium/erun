@@ -96,6 +96,26 @@ func TestBuildDeployJobSpecWithNamespaceQuota(t *testing.T) {
 	}
 }
 
+// TestBuildDeployCommandWithRuntimeImageOverride: a bootstrap deploy
+// threads --runtime-image at the in-Job `erun deploy` so the installed runtime
+// chart matches the canonical image the Job's own container runs, rather than
+// resolving the tenant's own (never-published) artifacts. Unset leaves the
+// command exactly as it was before this existed.
+func TestBuildDeployCommandWithRuntimeImageOverride(t *testing.T) {
+	params := testParams()
+	params.RuntimeImageOverride = "ghcr.io/sophium/erun-devops:1.0.149"
+	script := buildDeployCommand(params)[2]
+	want := "'erun' 'deploy' 'acme' 'prod' '--version' '1.0.149' '--runtime-image' 'ghcr.io/sophium/erun-devops:1.0.149'"
+	if !strings.Contains(script, want) {
+		t.Fatalf("script %q missing %q", script, want)
+	}
+
+	unset := buildDeployCommand(testParams())[2]
+	if strings.Contains(unset, "--runtime-image") {
+		t.Fatalf("script %q should carry no --runtime-image when unset", unset)
+	}
+}
+
 // TestBuildDeployJobSpecWithExpose: a configured ExposeTargetIP chains a
 // second, independently-skippable `erun expose` after the deploy rather than
 // teaching deploy itself about exposure — the Job is the caller composing

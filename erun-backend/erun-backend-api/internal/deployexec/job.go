@@ -76,6 +76,13 @@ type DeployJobParams struct {
 	// tenant whose own project declares no platform block, so this only ever
 	// wires DNS+Ingress for an actual erunpaas platform deployment.
 	ExposeTargetIP string
+	// RuntimeImageOverride, when set, threads `--runtime-image <value>` to the
+	// in-Job `erun deploy` — the caller's bootstrap decision for a tenant with no
+	// published <tenant>-devops image: install the canonical published
+	// erun-devops chart+image by reference instead of resolving artifacts that do
+	// not exist. Empty leaves the Job's deploy command exactly as it was before
+	// this existed, deploying the tenant's own artifacts.
+	RuntimeImageOverride string
 	// MaxCPU/MaxMemory/MaxStorage are Kubernetes quantity strings (e.g. "4",
 	// "8Gi", "80Gi") threaded to `erun deploy` as --max-cpu/--max-memory/
 	// --max-storage, capping the environment's namespace with a ResourceQuota +
@@ -148,6 +155,9 @@ func buildDeployJob(params DeployJobParams) *batchv1.Job {
 // primitive still only consumes on-disk config exactly as it always has.
 func buildDeployCommand(params DeployJobParams) []string {
 	deploy := []string{"erun", "deploy", params.Tenant, params.Environment, "--version", params.Version}
+	if override := strings.TrimSpace(params.RuntimeImageOverride); override != "" {
+		deploy = append(deploy, "--runtime-image", override)
+	}
 	deploy = append(deploy, namespaceQuotaFlags(params)...)
 	script := bootstrapDeployEnvironmentScript(params) + shellJoin(deploy)
 	if ip := strings.TrimSpace(params.ExposeTargetIP); ip != "" {

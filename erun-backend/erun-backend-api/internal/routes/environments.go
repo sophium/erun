@@ -441,33 +441,21 @@ func (r EnvironmentRoutes) persistAndMaybeProvision(w http.ResponseWriter, req *
 	writeJSON(w, http.StatusAccepted, created)
 }
 
-// writeStartProvisioningError answers a known, actionable precondition (the
-// tenant's runtime image is confirmed missing) with a 409 naming it, leaving
-// the environment row exactly as persistAndMaybeProvision already left it
-// (registered, not provisioning) — nothing was attempted, so nothing needs
-// unwinding. Any other failure to even enqueue the durable workflow is an
-// internal error.
-func writeStartProvisioningError(w http.ResponseWriter, err error) {
-	var missingImage *provision.MissingRuntimeImageError
-	if errors.As(err, &missingImage) {
-		writeError(w, http.StatusConflict, missingImage.Error())
-		return
-	}
+// writeStartProvisioningError answers a failure to enqueue the durable
+// workflow. The environment row stays exactly as persistAndMaybeProvision
+// already left it (registered, not provisioning) — nothing was attempted, so
+// nothing needs unwinding. A missing tenant runtime image is no longer this
+// path: it now selects the canonical-image bootstrap instead of failing here.
+func writeStartProvisioningError(w http.ResponseWriter, _ error) {
 	writeError(w, http.StatusInternalServerError, "failed to start provisioning")
 }
 
-// writeStartDeployError is writeStartProvisioningError's counterpart for an
-// explicit deploy: ClaimDeploy already moved the row to provisioning before
-// startDeploy ran, so a known precondition failure also records it as failed —
-// otherwise the environment is stranded in provisioning with no workflow run
-// left to ever move it out.
+// writeStartDeployError marks the environment failed and answers 500:
+// ClaimDeploy already moved the row to provisioning before startDeploy ran, so
+// any failure to even enqueue the durable workflow would otherwise strand the
+// environment there with no workflow run left to move it out.
 func (r EnvironmentRoutes) writeStartDeployError(w http.ResponseWriter, ctx context.Context, environmentID string, err error) {
-	var missingImage *provision.MissingRuntimeImageError
-	if errors.As(err, &missingImage) {
-		_ = r.environments.MarkDeployFailed(ctx, environmentID, missingImage.Error())
-		writeError(w, http.StatusConflict, missingImage.Error())
-		return
-	}
+	_ = r.environments.MarkDeployFailed(ctx, environmentID, err.Error())
 	writeError(w, http.StatusInternalServerError, "failed to start deploy")
 }
 

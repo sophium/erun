@@ -20,47 +20,42 @@ func (c *stubImageChecker) Exists(_ context.Context, image string) (bool, error)
 	return c.exists, c.err
 }
 
-// TestCheckImagePublished locks the synchronous precondition Start/StartDeploy
-// run before enqueueing the durable workflow (#605): only a registry-confirmed
-// absence blocks, matching RuntimeImageChecker's fail-open contract.
-func TestCheckImagePublished(t *testing.T) {
+// TestResolveBootstrapImage locks the synchronous precondition Start/StartDeploy
+// run before enqueueing the durable workflow: only a registry-confirmed
+// absence selects bootstrap, matching RuntimeImageChecker's fail-open contract.
+func TestResolveBootstrapImage(t *testing.T) {
 	config := EnvDeployConfig{Registry: "ghcr.io/sophium"}
 	input := EnvProvisionInput{Tenant: "acme", Version: "1.2.3"}
 
-	t.Run("nil checker never blocks", func(t *testing.T) {
+	t.Run("nil checker never bootstraps", func(t *testing.T) {
 		p := &EnvProvisioner{config: config}
-		if err := p.checkImagePublished(input); err != nil {
-			t.Fatalf("checkImagePublished: %v, want nil", err)
+		if p.resolveBootstrapImage(input) {
+			t.Fatal("resolveBootstrapImage = true, want false with no checker wired")
 		}
 	})
 
-	t.Run("confirmed missing blocks with the image named", func(t *testing.T) {
+	t.Run("confirmed missing selects bootstrap", func(t *testing.T) {
 		checker := &stubImageChecker{exists: false}
 		p := &EnvProvisioner{config: config, imageChecker: checker}
-		err := p.checkImagePublished(input)
-		var missing *MissingRuntimeImageError
-		if !errors.As(err, &missing) {
-			t.Fatalf("checkImagePublished = %v, want *MissingRuntimeImageError", err)
-		}
-		if missing.Image != "ghcr.io/sophium/acme-devops:1.2.3" {
-			t.Fatalf("missing.Image = %q", missing.Image)
+		if !p.resolveBootstrapImage(input) {
+			t.Fatal("resolveBootstrapImage = false, want true on a confirmed-missing tenant image")
 		}
 		if checker.gotImage != "ghcr.io/sophium/acme-devops:1.2.3" {
 			t.Fatalf("checker probed %q", checker.gotImage)
 		}
 	})
 
-	t.Run("confirmed present does not block", func(t *testing.T) {
+	t.Run("confirmed present does not bootstrap", func(t *testing.T) {
 		p := &EnvProvisioner{config: config, imageChecker: &stubImageChecker{exists: true}}
-		if err := p.checkImagePublished(input); err != nil {
-			t.Fatalf("checkImagePublished: %v, want nil", err)
+		if p.resolveBootstrapImage(input) {
+			t.Fatal("resolveBootstrapImage = true, want false when the tenant's own image exists")
 		}
 	})
 
-	t.Run("checker error does not block", func(t *testing.T) {
+	t.Run("checker error does not bootstrap", func(t *testing.T) {
 		p := &EnvProvisioner{config: config, imageChecker: &stubImageChecker{err: errors.New("network down")}}
-		if err := p.checkImagePublished(input); err != nil {
-			t.Fatalf("checkImagePublished: %v, want nil (fail open on checker error)", err)
+		if p.resolveBootstrapImage(input) {
+			t.Fatal("resolveBootstrapImage = true, want false (fail open on checker error)")
 		}
 	})
 }
@@ -110,6 +105,32 @@ func TestDeployJobParams(t *testing.T) {
 	}
 	if params.Tenant != "acme" || params.Environment != "prod" || params.Version != "1.2.3" {
 		t.Fatalf("deploy coordinates = %+v", params)
+	}
+	if params.RuntimeImageOverride != "" {
+		t.Fatalf("runtimeImageOverride = %q, want empty when the tenant publishes its own image (unbootstrapped)", params.RuntimeImageOverride)
+	}
+}
+
+// TestDeployJobParamsBootstrap locks the fallback: a tenant confirmed to
+// have never published its own image (Bootstrap, set by resolveBootstrapImage
+// before the durable workflow runs) gets a Job that runs the canonical
+// erun-devops image and threads --runtime-image at it, instead of a Job that
+// can only ImagePullBackOff on an image nobody ever pushed.
+func TestDeployJobParamsBootstrap(t *testing.T) {
+	params := deployJobParams(
+		EnvDeployConfig{
+			Registry:               "ghcr.io/sophium",
+			PlatformNamespace:      "erun-prod",
+			DeployerServiceAccount: "erun-env-deployer",
+		},
+		EnvProvisionInput{Tenant: "acme", Environment: "prod", Version: "1.2.3", Bootstrap: true},
+	)
+
+	if params.Image != "ghcr.io/sophium/erun-devops:1.2.3" {
+		t.Fatalf("image = %q, want the canonical ghcr.io/sophium/erun-devops:1.2.3", params.Image)
+	}
+	if params.RuntimeImageOverride != "ghcr.io/sophium/erun-devops:1.2.3" {
+		t.Fatalf("runtimeImageOverride = %q, want it to match the canonical image", params.RuntimeImageOverride)
 	}
 }
 

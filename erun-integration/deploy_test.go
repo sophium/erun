@@ -1530,6 +1530,23 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_runtime_image_override_no_k8s_tree_uses_published_chart", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_remote_env_no_repo_path_deploys_published_chart", func(t *testing.T) {
+		// A control-plane-provisioned tenant with no project has no repopath at
+		// all (fixture.SeedRuntimeTenantEnvNoRepoPath mirrors the backend's
+		// bootstrapDeployEnvironmentScript seed exactly). `--runtime-image` must
+		// still install the canonical published erun-devops chart by reference:
+		// resolveOpenRepoPath must not require a repo path for a runtime env with
+		// no mounted source worktree, or this fails with "repo path is not
+		// configured" before ever reaching the override.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnvNoRepoPath(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--runtime-image", "ghcr.io/sophium/erun-devops", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_no_repo_path_deploys_published_chart", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_remote_env_values_overlay", func(t *testing.T) {
 		// A published-chart deploy has no chart directory to host the
 		// operator's values.<env>.yaml overlay; the env config dir's
