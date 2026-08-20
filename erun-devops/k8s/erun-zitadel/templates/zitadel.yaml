@@ -20,6 +20,17 @@
     which its startupProbe on /ui/v2/login/healthy makes legible instead of a
     bare CrashLoop. One pod rather than two Deployments over a shared PVC keeps
     that handoff a local file, and this is a declared singleton anyway.
+  - Core only ever writes those PATs once, during first-instance init — a
+    restarted instance finds its database already initialised and skips that
+    step entirely, so nothing rewrites the file. An emptyDir does not survive a
+    pod restart either, so without more a restarted pod's login and
+    oidc-bootstrap containers wait forever on files that will never reappear
+    again (the pod sits at 2/3, sign-in dead). A `restore-pats` init container
+    seeds the emptyDir from a durable `<tenant>-zitadel-pats` Secret before core
+    starts — a no-op on the very first init, when the Secret does not exist yet
+    — and the oidc-bootstrap sidecar persists both PATs into that Secret the
+    same way it already publishes the OIDC client-id ConfigMap below, so first
+    init is unmodified and every later restart has both PATs immediately.
   - ONE Ingress with two paths: /ui/v2/login -> the login container, everything
     else (discovery, authorize, token, jwks, the Management API) -> core.
   - Login V2 must be switched on explicitly (LOGINV2_REQUIRED / LOGINV2_BASEURI
@@ -83,6 +94,11 @@
 {{- $loginPort := default 3000 $zitadel.loginPort -}}
 {{- $loginBasePath := "/ui/v2/login" -}}
 {{- $bootstrapDir := "/zitadel/bootstrap" -}}
+{{- /* Durable home for the two bootstrap PATs (see the file header). Chart
+       templating cannot pre-generate their value the way it does the admin
+       password — they are minted by Zitadel core itself — so this only names
+       where the runtime persists and restores them. */ -}}
+{{- $patsSecretName := default (printf "%s-zitadel-pats" $tenant) $zitadel.patsSecretName -}}
 {{- $ingressClass := default "traefik" $zitadel.ingressClass -}}
 {{- $ingressAnnotations := default dict $zitadel.ingressAnnotations -}}
 {{- /* The auth host sits in the Cloudflare-managed apex zone, not the delegated
@@ -138,8 +154,17 @@
        container's loopback, both issuing JWT access tokens (erun's bearer
        verifier rejects Zitadel's default opaque token), then publishes the
        client ids to a ConfigMap the erun-backend-api chart reads optionally
-       (absent -> empty platform.*ClientId, never a failed deploy). It
-       reconciles on a timer rather than exiting, so a ConfigMap or app deleted
+       (absent -> empty platform.*ClientId, never a failed deploy). Every call
+       carries an explicit Host header naming the external domain: Zitadel
+       resolves the instance the Management API call targets from that header,
+       not from the loopback address the call is actually addressed to, and a
+       call with no Host header 404s against every path. It never publishes a
+       result unless the project and the erun-cli app genuinely resolved —
+       the console app id is empty on purpose when platform.consoleUrl is
+       unset, but any other empty id aborts the reconcile before it touches
+       the ConfigMap, so a resolution failure leaves prior good data alone
+       instead of overwriting it with empty strings. It reconciles on a timer
+       rather than exiting, so a ConfigMap, an app, or the PATs Secret deleted
        out of band is restored without a redeploy. */ -}}
 {{- $oidc := default dict $zitadel.oidc -}}
 {{- $oidcProjectName := default (printf "%s-platform" $tenant) $oidc.projectName -}}
@@ -178,6 +203,39 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: {{ $tenant }}-zitadel-oidc-bootstrap
+---
+# A separate least-privilege Role for the durable PATs Secret, rather than
+# widening the ConfigMap Role above: `create` cannot be scoped by
+# resourceNames (the object does not exist yet), so the two secrets verbs that
+# can be name-scoped are split from it.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $tenant }}-zitadel-pat-persist
+  labels:
+    app: {{ $tenant }}-zitadel
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: [{{ $patsSecretName | quote }}]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $tenant }}-zitadel-pat-persist
+  labels:
+    app: {{ $tenant }}-zitadel
+subjects:
+  - kind: ServiceAccount
+    name: {{ $oidcServiceAccount }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $tenant }}-zitadel-pat-persist
 ---
 apiVersion: v1
 kind: Secret
@@ -303,6 +361,36 @@ spec:
             - sh
             - -c
             - until pg_isready -q; do echo "waiting for postgres"; sleep 2; done
+        # Seeds the shared emptyDir from the durable PATs Secret before core
+        # starts, so a restarted pod's login and oidc-bootstrap containers find
+        # both PATs immediately instead of waiting forever on files core will
+        # never rewrite (see the file header). A no-op on the very first init,
+        # when the Secret does not exist yet.
+        - name: restore-pats
+          image: {{ $oidcBootstrapImage }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PATS_SECRET_NAME
+              value: {{ $patsSecretName | quote }}
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              if kubectl get secret "${PATS_SECRET_NAME}" --namespace "${POD_NAMESPACE}" >/dev/null 2>&1; then
+                echo "restore-pats: restoring bootstrap PATs from ${PATS_SECRET_NAME}"
+                kubectl get secret "${PATS_SECRET_NAME}" --namespace "${POD_NAMESPACE}" -o jsonpath='{.data.admin-sa\.pat}' | base64 -d > "{{ $bootstrapDir }}/admin-sa.pat"
+                kubectl get secret "${PATS_SECRET_NAME}" --namespace "${POD_NAMESPACE}" -o jsonpath='{.data.login-client\.pat}' | base64 -d > "{{ $bootstrapDir }}/login-client.pat"
+              else
+                echo "restore-pats: no ${PATS_SECRET_NAME} Secret yet; first-instance init will mint the PATs"
+              fi
+          volumeMounts:
+            - name: bootstrap
+              mountPath: {{ $bootstrapDir }}
       containers:
         - name: erun-zitadel
           image: {{ $zitadelImage }}
@@ -469,12 +557,16 @@ spec:
           env:
             - name: CORE_PORT
               value: {{ $corePort | quote }}
+            - name: EXTERNAL_DOMAIN
+              value: {{ $externalDomain | quote }}
             - name: PROJECT_NAME
               value: {{ $oidcProjectName | quote }}
             - name: CONSOLE_REDIRECT_URI
               value: {{ $oidcConsoleRedirectURI | quote }}
             - name: CONFIGMAP_NAME
               value: {{ $oidcConfigMapName | quote }}
+            - name: PATS_SECRET_NAME
+              value: {{ $patsSecretName | quote }}
             - name: POD_NAMESPACE
               valueFrom:
                 fieldRef:
@@ -485,13 +577,30 @@ spec:
             - |
               set -eu
               pat_file="{{ $bootstrapDir }}/admin-sa.pat"
+              login_pat_file="{{ $bootstrapDir }}/login-client.pat"
               echo "oidc-bootstrap: waiting for the org-owner PAT"
               until [ -s "$pat_file" ]; do sleep 2; done
               pat="$(cat "$pat_file")"
               base="http://localhost:${CORE_PORT}"
 
+              # Core resolves the instance a Management API call targets from
+              # the Host header, not from the loopback address the call is
+              # actually addressed to; a call with no Host header 404s against
+              # every path.
               call() {
-                curl -fsS -H "Authorization: Bearer ${pat}" -H 'Content-Type: application/json' "$@"
+                curl -fsS -H "Authorization: Bearer ${pat}" -H "Host: ${EXTERNAL_DOMAIN}" -H 'Content-Type: application/json' "$@"
+              }
+
+              persist_pats() {
+                if [ ! -s "$login_pat_file" ]; then
+                  echo "oidc-bootstrap: login-client PAT not yet written, skipping persist" >&2
+                  return 1
+                fi
+                kubectl create secret generic "${PATS_SECRET_NAME}" \
+                  --from-file="admin-sa.pat=${pat_file}" \
+                  --from-file="login-client.pat=${login_pat_file}" \
+                  --namespace "${POD_NAMESPACE}" \
+                  --dry-run=client -o yaml | kubectl apply -f -
               }
 
               find_project_id() {
@@ -560,9 +669,23 @@ spec:
               }
 
               reconcile() {
-                project_id="$(ensure_project)"
-                console_client_id="$(ensure_console_app)"
-                cli_client_id="$(ensure_cli_app)"
+                persist_pats || echo "oidc-bootstrap: PATs Secret not persisted this tick" >&2
+
+                project_id="$(ensure_project || true)"
+                console_client_id="$(ensure_console_app || true)"
+                cli_client_id="$(ensure_cli_app || true)"
+
+                # The console app id is legitimately empty when
+                # platform.consoleUrl is unset; the project and the CLI app are
+                # not optional. Publishing on a partial resolution would
+                # overwrite good client ids with empty strings on every
+                # subsequent tick, so a failed resolution leaves the ConfigMap
+                # untouched instead.
+                if [ -z "${project_id}" ] || [ -z "${cli_client_id}" ]; then
+                  echo "oidc-bootstrap: resolution incomplete (project=${project_id:-<empty>} cli=${cli_client_id:-<empty>}), leaving ${CONFIGMAP_NAME} untouched" >&2
+                  return 1
+                fi
+
                 kubectl create configmap "${CONFIGMAP_NAME}" \
                   --from-literal=consoleClientId="${console_client_id}" \
                   --from-literal=cliClientId="${cli_client_id}" \
@@ -571,9 +694,10 @@ spec:
                 echo "oidc-bootstrap: ready project=${project_id} console=${console_client_id} cli=${cli_client_id}"
               }
 
-              reconcile
-              # Reconcile periodically rather than exiting, so an app or the
-              # ConfigMap deleted out of band is restored without a redeploy.
+              reconcile || echo "oidc-bootstrap: initial reconcile incomplete, retrying next tick" >&2
+              # Reconcile periodically rather than exiting, so a ConfigMap, an
+              # app, or the PATs Secret deleted out of band is restored
+              # without a redeploy.
               while true; do
                 sleep 300
                 reconcile || echo "oidc-bootstrap: reconcile failed, retrying next tick" >&2

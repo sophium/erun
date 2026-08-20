@@ -1,7 +1,10 @@
 ARG ERUN_VERSION=1.0.0
 
 # Stage 1: build the Docusaurus static site.
-FROM node:20.18.1-alpine AS builder
+# Pinned to the build host's platform: the site it emits is static assets with
+# no architecture, so building it once natively beats building it again under
+# emulation for the foreign arch every multi-arch build.
+FROM --platform=$BUILDPLATFORM node:20.18.1-alpine AS builder
 
 WORKDIR /src
 

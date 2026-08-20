@@ -125,6 +125,40 @@ func TestCreateTenantOperationsCallerPersists(t *testing.T) {
 	}
 }
 
+func TestCreateTenantDuplicateIssuerReturnsConflict(t *testing.T) {
+	tenants := &stubTenantRepository{err: repository.ErrConflict}
+	rec := postCreateTenant(t, tenants, string(model.TenantTypeOperations), `{
+		"name": "acme",
+		"type": "COMPANY",
+		"issuer": "https://idp.example"
+	}`)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", rec.Code, rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte("https://idp.example")) {
+		t.Fatalf("expected the conflict message to name the issuer, got %s", rec.Body.String())
+	}
+}
+
+func TestCreateTenantDuplicateOrgScopedIssuerReturnsConflict(t *testing.T) {
+	tenants := &stubTenantRepository{err: repository.ErrConflict}
+	rec := postCreateTenant(t, tenants, string(model.TenantTypeOperations), `{
+		"name": "acme",
+		"type": "COMPANY",
+		"issuer": "https://idp.example",
+		"orgFieldKey": "org_id",
+		"orgFieldValue": "42"
+	}`)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", rec.Code, rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte("42")) {
+		t.Fatalf("expected the conflict message to name the org value, got %s", rec.Body.String())
+	}
+}
+
 func TestListTenants(t *testing.T) {
 	want := []model.Tenant{{TenantID: "tenant-1", Name: "acme"}, {TenantID: "tenant-2", Name: "beta"}}
 	tenants := &stubTenantRepository{list: want}

@@ -2,6 +2,8 @@ package routes
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -67,10 +69,32 @@ func (r TenantRoutes) createTenant(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	params, status, msg := parseCreateTenantParams(req)
+	if msg != "" {
+		writeError(w, status, msg)
+		return
+	}
+
+	created, err := r.tenants.Create(req.Context(), params)
+	if err != nil {
+		if errors.Is(err, repository.ErrConflict) {
+			writeError(w, http.StatusConflict, duplicateIssuerMessage(params.Issuer, params.OrgFieldValue))
+			return
+		}
+		writeRepositoryError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, created)
+}
+
+// parseCreateTenantParams decodes and validates the tenant-registration body,
+// returning a non-empty message (with its HTTP status) when the input must be
+// rejected before ever reaching the repository.
+func parseCreateTenantParams(req *http.Request) (repository.CreateTenantParams, int, string) {
 	var body createTenantRequest
 	if err := decodeJSON(req, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
+		return repository.CreateTenantParams{}, http.StatusBadRequest, "invalid request body"
 	}
 
 	name := strings.TrimSpace(body.Name)
@@ -81,34 +105,36 @@ func (r TenantRoutes) createTenant(w http.ResponseWriter, req *http.Request) {
 	// cross-tenant namespace-collision/takeover vector on a public
 	// provisioning surface.
 	if err := eruncommon.ValidateTenantName(name); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+		return repository.CreateTenantParams{}, http.StatusBadRequest, err.Error()
 	}
 	if issuer == "" {
-		writeError(w, http.StatusBadRequest, "issuer is required")
-		return
+		return repository.CreateTenantParams{}, http.StatusBadRequest, "issuer is required"
 	}
 	tenantType := model.TenantType(strings.TrimSpace(body.Type))
 	if tenantType == "" {
 		tenantType = model.TenantTypeCompany
 	}
 	if tenantType != model.TenantTypeCompany && tenantType != model.TenantTypeOperations {
-		writeError(w, http.StatusBadRequest, "type must be one of COMPANY, OPERATIONS")
-		return
+		return repository.CreateTenantParams{}, http.StatusBadRequest, "type must be one of COMPANY, OPERATIONS"
 	}
 
-	created, err := r.tenants.Create(req.Context(), repository.CreateTenantParams{
+	return repository.CreateTenantParams{
 		Name:          name,
 		Type:          tenantType,
 		Issuer:        issuer,
 		OrgFieldKey:   strings.TrimSpace(body.OrgFieldKey),
 		OrgFieldValue: strings.TrimSpace(body.OrgFieldValue),
 		DisplayName:   strings.TrimSpace(body.DisplayName),
-	})
-	if err != nil {
-		writeRepositoryError(w, err)
-		return
-	}
+	}, 0, ""
+}
 
-	writeJSON(w, http.StatusCreated, created)
+// duplicateIssuerMessage names the (issuer, org) mapping a create collided
+// with, since a caller re-registering an already-mapped issuer needs to know
+// whether to pick a different org discriminator or that the issuer is simply
+// taken.
+func duplicateIssuerMessage(issuer, orgFieldValue string) string {
+	if orgFieldValue == "" {
+		return fmt.Sprintf("issuer %q is already mapped to a tenant with no org discriminator; pass --org-field-key/--org-field-value to scope a shared issuer to a different org", issuer)
+	}
+	return fmt.Sprintf("issuer %q is already mapped for org value %q", issuer, orgFieldValue)
 }

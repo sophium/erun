@@ -7,7 +7,31 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	k8sfake "k8s.io/client-go/kubernetes/fake"
+
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/provision"
 )
+
+func TestMissingEnvProvisionerConfigReportsAllFiveWhenUnset(t *testing.T) {
+	reasons := missingEnvProvisionerConfig(HandlerOptions{}, provision.EnvDeployConfig{})
+	if len(reasons) != 5 {
+		t.Fatalf("expected all five preconditions to be reported missing, got %v", reasons)
+	}
+}
+
+func TestMissingEnvProvisionerConfigReportsOnlyDBOSWhenEverythingElseSet(t *testing.T) {
+	options := HandlerOptions{KubeClient: k8sfake.NewSimpleClientset()}
+	deploy := provision.EnvDeployConfig{
+		Registry:               "ghcr.io/sophium",
+		PlatformNamespace:      "team-devops",
+		DeployerServiceAccount: "team-env-deployer",
+	}
+	reasons := missingEnvProvisionerConfig(options, deploy)
+	if len(reasons) != 1 || !strings.Contains(reasons[0], "DBOS_SYSTEM_DATABASE_URL") {
+		t.Fatalf("expected exactly one reason naming the missing DBOS config, got %v", reasons)
+	}
+}
 
 func TestHandlerRequiresBearerTokenForAPIEndpoint(t *testing.T) {
 	handler, err := NewHandler(HandlerOptions{
