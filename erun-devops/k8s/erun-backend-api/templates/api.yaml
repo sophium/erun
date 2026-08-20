@@ -110,6 +110,10 @@ metadata:
   name: {{ $apiServiceAccount }}
   labels:
     app: {{ $tenant }}-api
+{{- with .Values.imagePullSecrets }}
+imagePullSecrets:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
 ---
 {{- end }}
 {{- if $releaseQueueEnabled }}
@@ -152,6 +156,10 @@ metadata:
   name: {{ $apiServiceAccount }}
   labels:
     app: {{ $tenant }}-api
+{{- with .Values.imagePullSecrets }}
+imagePullSecrets:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -159,6 +167,10 @@ metadata:
   name: {{ $envDeployerSA }}
   labels:
     app: {{ $tenant }}-api
+{{- with .Values.imagePullSecrets }}
+imagePullSecrets:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

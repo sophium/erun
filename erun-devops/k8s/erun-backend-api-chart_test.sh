@@ -42,6 +42,15 @@ container() {
     awk '/^      containers:/{inside=1} inside' "$1"
 }
 
+# The ServiceAccount manifest named $2, as its own block, so an assertion about
+# one ServiceAccount cannot pass by matching a line that belongs to another.
+service_account() {
+    awk -v want="  name: $2" '
+        BEGIN{RS="\n---\n"}
+        $0 ~ /(^|\n)kind: ServiceAccount(\n|$)/ && $0 ~ ("(^|\n)" want "(\n|$)") {print}
+    ' "$1"
+}
+
 # --- 1. Neither envDeployer nor the release queue is on: no DBOS wiring at all,
 #        byte-for-byte unchanged from before #1047 ---
 rendered=$(render)
@@ -75,5 +84,29 @@ rendered=$(render --set-string api.envDeployer.enabled=true --set-string api.dbo
 container "${rendered}" >"${core}"
 grep -A1 'name: DBOS_SYSTEM_DATABASE_URL' "${core}" | grep -q 'value: "postgres://custom/url"' ||
     fail "api.dbos.databaseURL must override the whole DBOS connection string"
+
+
+# --- 5. The env-deployer ServiceAccount carries the env's image-pull
+#        credentials, so the deploy Job it runs as can pull a private tenant
+#        runtime image instead of relying on the namespace default SA ---
+rendered=$(render --set-string api.envDeployer.enabled=true)
+sa="${work_root}/sa-no-secret.yaml"
+service_account "${rendered}" team-env-deployer >"${sa}"
+[ -s "${sa}" ] || fail "the env-deployer ServiceAccount must render when envDeployer is enabled"
+grep -q 'imagePullSecrets' "${sa}" &&
+    fail "no imagePullSecrets should render when none are configured"
+
+rendered=$(render --set-string api.envDeployer.enabled=true --set-string 'imagePullSecrets[0].name=ghcr-pull')
+service_account "${rendered}" team-env-deployer >"${sa}"
+grep -q '^imagePullSecrets:$' "${sa}" ||
+    fail "a configured image pull secret should render on the env-deployer ServiceAccount"
+grep -q '^  - name: ghcr-pull$' "${sa}" ||
+    fail "the env-deployer ServiceAccount's imagePullSecrets should name the configured secret"
+
+# --- 6. The API's own ServiceAccount gets the same credentials ---
+service_account "${rendered}" team-api >"${sa}"
+[ -s "${sa}" ] || fail "the API ServiceAccount must render when envDeployer is enabled"
+grep -q '^imagePullSecrets:$' "${sa}" ||
+    fail "a configured image pull secret should render on the API ServiceAccount too"
 
 echo "PASS: erun-backend-api DBOS wiring"

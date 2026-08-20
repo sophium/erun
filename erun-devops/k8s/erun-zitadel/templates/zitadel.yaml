@@ -178,6 +178,10 @@ metadata:
   name: {{ $oidcServiceAccount }}
   labels:
     app: {{ $tenant }}-zitadel
+{{- with .Values.imagePullSecrets }}
+imagePullSecrets:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

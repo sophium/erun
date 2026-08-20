@@ -18,6 +18,10 @@ metadata:
   name: {{ $tenant }}-docs-deployer
   labels:
     app: {{ $tenant }}-docs
+{{- with .Values.imagePullSecrets }}
+imagePullSecrets:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
 ---
 apiVersion: batch/v1
 kind: Job
