@@ -46,8 +46,12 @@ const (
 
 	// DefaultEnvironmentJobOutputLimitBytes bounds one job's captured output so a
 	// chatty run cannot fill the environment's home volume. The outcome never
-	// comes from the log, so hitting the cap costs detail, never the result.
-	DefaultEnvironmentJobOutputLimitBytes int64 = 4 << 20
+	// comes from the log, so hitting the cap costs detail, never the result. A
+	// long agent run in stream-json mode blows through 4 MiB well under an hour,
+	// so the default is wide enough to cover most single-session runs; progress
+	// itself no longer depends on this cap at all (agentProgressReader is fed
+	// directly from the process's own writes).
+	DefaultEnvironmentJobOutputLimitBytes int64 = 16 << 20
 
 	// DefaultEnvironmentJobAwaitTimeout is short enough that a caller polls
 	// rather than parks on a connection.

@@ -234,4 +234,50 @@ func TestDelete(t *testing.T) {
 		}
 		golden.Equal(t, "delete/real_run_with_yes_flag_skips_confirmation_and_removes_config", normalize.Apply(result.Combined))
 	})
+
+	t.Run("real_run_removes_the_environments_port_forward_state", func(t *testing.T) {
+		// A port-forward state file names a local port, and that port range is
+		// freed and reissued to whichever environment is created next. Leaving
+		// the file behind after delete lets it resolve to a live forward that
+		// now belongs to somebody else, so delete must clear it the same way it
+		// clears the rest of the environment's footprint.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		seedMCPPortForwardState(t, setup, "team", "dev", 26100)
+		statePath := portForwardStateFile(setup, "mcp", "team", "dev")
+		if _, err := os.Stat(statePath); err != nil {
+			t.Fatalf("seeded port-forward state missing before delete: %v", err)
+		}
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+
+		result := erun.Run(t, []string{"delete", "team", "dev", "--yes"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		// Filesystem state — golden cannot assert this; keep the os.Stat check
+		// (mirrors real_run_with_yes_flag_skips_confirmation_and_removes_config).
+		if _, err := os.Stat(statePath); !os.IsNotExist(err) {
+			t.Errorf("expected the port-forward state file to be removed at %s, stat err: %v", statePath, err)
+		}
+	})
+
+	t.Run("dry_run_traces_the_port_forward_state_removal_without_deleting_it", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		seedMCPPortForwardState(t, setup, "team", "dev", 26100)
+		statePath := portForwardStateFile(setup, "mcp", "team", "dev")
+
+		result := erun.Run(t, []string{"delete", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "y\n"})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, statePath) {
+			t.Fatalf("expected the dry-run plan to name the port-forward state file, got:\n%s", result.Combined)
+		}
+		if _, err := os.Stat(statePath); err != nil {
+			t.Errorf("a dry run must not remove the port-forward state file, stat err: %v", err)
+		}
+	})
 }

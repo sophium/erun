@@ -176,17 +176,89 @@ func TestJob(t *testing.T) {
 		// where that argv is auditable, and the streaming flags are the whole point:
 		// without them the tool prints nothing until it exits, so a multi-hour run
 		// would report no output while it is actively editing files.
+		//
+		// Both tools are stubbed present: the dry-run plan also resolves whether the
+		// named tool is available in this environment, which is a real
+		// filesystem/PATH check that runs regardless of --dry-run, the same way the
+		// job dir check does.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		claude := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "sweep", "--agent", "claude", "--dry-run", "--", "fix the failing tests"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		fixture.StubBinary(t, stubs, "claude", "")
+		fixture.StubBinary(t, stubs, "codex", "")
+		envVars := inEnvironment(append(setup.Env(), fixture.StubEnv(stubs, "claude", "codex")...))
+		claude := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "sweep", "--agent", "claude", "--dry-run", "--", "fix the failing tests"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if claude.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", claude.ExitCode, claude.Combined)
 		}
-		codex := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "sweep", "--agent", "codex", "--dry-run", "--", "fix the failing tests"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		codex := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "sweep", "--agent", "codex", "--dry-run", "--", "fix the failing tests"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if codex.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", codex.ExitCode, codex.Combined)
 		}
 		golden.Equal(t, "job/agent_start_dry_run_plans_the_streaming_invocation", normalize.Apply(claude.Combined+codex.Combined))
+	})
+
+	t.Run("agent_start_refuses_when_the_tool_is_not_available", func(t *testing.T) {
+		// A knowable-before-spend precondition: an agent job naming a tool this
+		// environment does not have refuses before it takes a lease or starts a
+		// supervisor, rather than accepting the job and failing a minute later on
+		// the tool's own (often credential-shaped) error.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "sweep", "--agent", "claude", "--", "fix the failing tests"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a refusal when claude is not installed in this environment, got 0:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, `agent tool "claude" is not available in this environment`) {
+			t.Fatalf("the refusal must name the tool and say it is unavailable, got:\n%s", result.Combined)
+		}
+		if _, err := os.Stat(jobRecordPath(setup, "team", "dev", "sweep")); !os.IsNotExist(err) {
+			t.Errorf("a refused start must not register a job, stat err: %v", err)
+		}
+	})
+
+	t.Run("agent_progress_reports_an_authentication_failure_as_the_reason", func(t *testing.T) {
+		// The tool is present but its credentials are stale — a real failure the
+		// preflight above cannot catch (the tool is installed). The job's own
+		// folded progress already carries the tool's raw auth message; the failed
+		// job's reason must say plainly that this looks like a credential problem
+		// in the environment, not a bug in the work, rather than leaving the raw
+		// vendor string to speak for itself.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		fixture.StubBinaryWithScript(t, stubs, "claude",
+			`printf '{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":1,"result":"Failed to authenticate: OAuth session expired and could not be refreshed"}\n'`+"\n"+
+				"exit 1")
+		envVars := inEnvironment(append(setup.Env(), fixture.StubEnv(stubs, "claude")...))
+
+		start := startJob(t, setup, envVars, "sweep", "--agent", "claude", "--", "fix the failing tests")
+		if start.ExitCode != 0 {
+			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
+		}
+		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "sweep", "--timeout", "30s"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if await.ExitCode != 1 {
+			t.Fatalf("await: exit %d: %s", await.ExitCode, await.Combined)
+		}
+		status := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "sweep", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if status.ExitCode != 0 {
+			t.Fatalf("status: exit %d: %s", status.ExitCode, status.Combined)
+		}
+		var payload struct {
+			Reason   string `json:"reason"`
+			Progress struct {
+				Error string `json:"error"`
+			} `json:"progress"`
+		}
+		if err := json.Unmarshal([]byte(status.Stdout), &payload); err != nil {
+			t.Fatalf("parse job status JSON: %v\n%s", err, status.Stdout)
+		}
+		if !strings.Contains(payload.Progress.Error, "OAuth session expired") {
+			t.Fatalf("expected the raw vendor message preserved in progress.error, got %q", payload.Progress.Error)
+		}
+		if !strings.Contains(payload.Reason, "credentials are missing or stale") {
+			t.Fatalf("expected the reason to reframe the failure as a credential problem, got %q", payload.Reason)
+		}
 	})
 
 	t.Run("agent_start_refuses_an_unsupported_tool_or_a_command", func(t *testing.T) {
@@ -681,5 +753,82 @@ func TestJob(t *testing.T) {
 			t.Fatalf("expected the captured non-zero exit to survive the output cap, got %d:\n%s", await.ExitCode, await.Combined)
 		}
 		golden.Equal(t, "job/output_past_the_cap_is_reported_as_truncated", normalize.Apply(await.Combined))
+	})
+
+	t.Run("agent_progress_keeps_moving_after_the_output_cap", func(t *testing.T) {
+		// The defect this closes: once outputTruncated flips, progress used to
+		// freeze at whatever it last read, because it was derived from the same
+		// capped log the raw output writer had stopped growing. The cap is set
+		// small enough that the very first event already exceeds it, so every
+		// later event proves progress is fed straight from the stream rather than
+		// by re-reading the (now-frozen) log file.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		flushed := filepath.Join(setup.Cwd, "flushed")
+		release := filepath.Join(setup.Cwd, "release")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		fixture.StubBinaryWithScript(t, stubs, "claude",
+			`printf '{"type":"assistant","message":{"id":"msg_1","content":[{"type":"tool_use","id":"t1","name":"Edit","input":{"file_path":"erun-common/mcp_client.go"}}]}}\n'`+"\n"+
+				"printf '"+jobStubSignal+"' > '"+flushed+"'\n"+
+				"while [ ! -f '"+release+"' ]; do sleep 0.05; done\n"+
+				`printf '{"type":"assistant","message":{"id":"msg_2","content":[{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"go test ./..."}}]}}\n'`+"\n"+
+				`printf '{"type":"result","subtype":"success","is_error":false,"num_turns":2,"result":"Fixed the client."}\n'`+"\n"+
+				"exit 0")
+		envVars := inEnvironment(append(setup.Env(), fixture.StubEnv(stubs, "claude")...))
+
+		start := startJob(t, setup, envVars, "sweep", "--max-output-bytes", "8", "--agent", "claude", "--", "fix the failing tests")
+		if start.ExitCode != 0 {
+			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
+		}
+		waitForFile(t, flushed, 30*time.Second)
+		waitForJobActivity(t, setup, envVars, "sweep", 30*time.Second)
+
+		midRun := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "sweep", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		var midPayload struct {
+			OutputTruncated bool `json:"outputTruncated"`
+			Progress        struct {
+				Activity string `json:"activity"`
+			} `json:"progress"`
+		}
+		if err := json.Unmarshal([]byte(midRun.Stdout), &midPayload); err != nil {
+			t.Fatalf("parse mid-run job status JSON: %v\n%s", err, midRun.Stdout)
+		}
+		if !midPayload.OutputTruncated {
+			t.Fatalf("expected the 8-byte cap to already be hit by the first event, got %s", midRun.Stdout)
+		}
+		if !strings.Contains(midPayload.Progress.Activity, "erun-common/mcp_client.go") {
+			t.Fatalf("expected progress to reflect the first tool call despite the cap, got %q", midPayload.Progress.Activity)
+		}
+
+		if err := os.WriteFile(release, []byte("go\n"), 0o644); err != nil {
+			t.Fatalf("release the stub: %v", err)
+		}
+		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "sweep", "--timeout", "30s"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if await.ExitCode != 0 {
+			t.Fatalf("await: exit %d: %s", await.ExitCode, await.Combined)
+		}
+		finished := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "sweep", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		var finishedPayload struct {
+			OutputTruncated bool `json:"outputTruncated"`
+			Progress        struct {
+				Turns  int    `json:"turns"`
+				Result string `json:"result"`
+			} `json:"progress"`
+		}
+		if err := json.Unmarshal([]byte(finished.Stdout), &finishedPayload); err != nil {
+			t.Fatalf("parse finished job status JSON: %v\n%s", err, finished.Stdout)
+		}
+		if !finishedPayload.OutputTruncated {
+			t.Fatalf("expected the job to still report outputTruncated at the end, got %s", finished.Stdout)
+		}
+		// This is the assertion the bug report's freeze would fail: the second
+		// tool call and the final result both arrived well after the 8-byte cap,
+		// so seeing them here proves progress kept moving past it.
+		if finishedPayload.Progress.Turns != 2 {
+			t.Fatalf("expected both turns folded despite the cap, got %+v", finishedPayload.Progress)
+		}
+		if finishedPayload.Progress.Result != "Fixed the client." {
+			t.Fatalf("expected the closing result folded despite the cap, got %+v", finishedPayload.Progress)
+		}
 	})
 }

@@ -48,6 +48,15 @@ func PortForwardStatePath(kind, tenant, environment string) (string, error) {
 
 // LoadPortForwardState reads a forward's state. A missing file is reported as
 // "no forward", not an error: an environment nobody opened is the ordinary case.
+//
+// A file naming an environment no longer in the config store reads the same
+// way: deleting an environment is supposed to remove its state files (see
+// RunDeleteEnvironment), but a file that predates that cleanup, or one left by
+// a delete that failed partway, must not resolve as a live forward either. The
+// local port range a deleted environment's file names is freed and reissued to
+// whichever environment is created next, so trusting an orphaned file would
+// hand back a forward that now belongs to somebody else — a stale record has
+// to read as "no forward", not as a wrong one.
 func LoadPortForwardState(kind, tenant, environment string) (PortForwardState, bool, error) {
 	path, err := PortForwardStatePath(kind, tenant, environment)
 	if err != nil {
@@ -64,5 +73,17 @@ func LoadPortForwardState(kind, tenant, environment string) (PortForwardState, b
 	if err := json.Unmarshal(data, &state); err != nil {
 		return PortForwardState{}, false, fmt.Errorf("%s: %w", path, err)
 	}
+	if !environmentIsConfigured(tenant, environment) {
+		return PortForwardState{}, false, nil
+	}
 	return state, state.LocalPort > 0, nil
+}
+
+// environmentIsConfigured reports whether the config store still knows this
+// tenant/environment. Any error reading it — including "not initialized" —
+// is treated as "cannot confirm this is live", the same conservative reading
+// LoadPortForwardState itself gives a file it cannot read.
+func environmentIsConfigured(tenant, environment string) bool {
+	_, _, err := ConfigStore{}.LoadEnvConfig(tenant, environment)
+	return err == nil
 }

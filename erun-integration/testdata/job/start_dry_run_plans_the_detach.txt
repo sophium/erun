@@ -1,4 +1,4 @@
 audit: erun job start --dry-run --environment dev --name suite --tenant team work --all
 job: detaching "suite" as job suite, output at <TMP>
 job: holding activity lease job-suite for the job's lifetime
-<TMP> job supervise --tenant team --environment dev --id suite --name suite --max-output-bytes 4194304 --lease-ttl 15m0s -- work --all
+<TMP> job supervise --tenant team --environment dev --id suite --name suite --max-output-bytes 16777216 --lease-ttl 15m0s -- work --all

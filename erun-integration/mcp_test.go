@@ -25,6 +25,29 @@ import (
 // developer's live erun session on the default 17000 range.
 const mcpEdgeLocalPort = 26100
 
+// startSilentPortForward binds port and holds every connection open without
+// ever answering it — a stale kubectl port-forward, as opposed to nothing
+// listening at all (dial refused) or an edge that answers with an error. Every
+// held connection is closed together on cleanup, once the listener itself
+// closes and the accept loop's deferred closes run.
+func startSilentPortForward(t *testing.T, port int) {
+	t.Helper()
+	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		t.Fatalf("listen on 127.0.0.1:%d: %v", port, err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		for {
+			conn, acceptErr := listener.Accept()
+			if acceptErr != nil {
+				return
+			}
+			defer func() { _ = conn.Close() }()
+		}
+	}()
+}
+
 // fakeMCPEdge stands in for the per-env erun-mcp server: it speaks the
 // streamable-HTTP handshake (initialize, then a 202 for the initialized
 // notification, then the call) and records what each request carried, so a
@@ -52,11 +75,18 @@ type fakeMCPEdge struct {
 	// ForgetSessionAlways never accepts a session id, so a client that keeps
 	// re-handshaking would loop forever.
 	ForgetSessionAlways bool
+	// DropFirstRequest, when set, closes the raw connection for the very first
+	// request without answering it at all — a connection that was accepted and
+	// then cut, the shape a flapping local port-forward leaves an in-flight
+	// request in (as opposed to AcceptEverything, which answers but with an
+	// empty envelope).
+	DropFirstRequest bool
 
 	mu         sync.Mutex
 	requests   []fakeMCPRequest
 	handshakes int
 	forgot     bool
+	dropped    bool
 }
 
 type fakeMCPRequest struct {
@@ -82,6 +112,14 @@ func (e *fakeMCPEdge) start(t *testing.T, port int) {
 }
 
 func (e *fakeMCPEdge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if e.DropFirstRequest && e.dropOnce() {
+		if hijacker, ok := w.(http.Hijacker); ok {
+			if conn, _, err := hijacker.Hijack(); err == nil {
+				_ = conn.Close()
+			}
+		}
+		return
+	}
 	body, _ := io.ReadAll(r.Body)
 	var request struct {
 		ID     json.RawMessage `json:"id"`
@@ -138,6 +176,16 @@ func (e *fakeMCPEdge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = fmt.Fprintln(w, reply)
+}
+
+func (e *fakeMCPEdge) dropOnce() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.dropped {
+		return false
+	}
+	e.dropped = true
+	return true
 }
 
 func (e *fakeMCPEdge) forgetSession() bool {
@@ -669,6 +717,32 @@ exit 3`)
 		golden.Equal(t, "mcp/call_real_run_unreachable_edge_points_at_open", normalize.Apply(result.Combined))
 	})
 
+	t.Run("call_real_run_stale_forward_fails_fast_instead_of_hanging", func(t *testing.T) {
+		// A stale kubectl port-forward keeps the local port bound and accepts
+		// every connection, but never answers — the exact shape a dial-based
+		// check cannot see, and the one that used to hang a call for its full
+		// timeout (or forever, with none) instead of failing. The listener here
+		// holds every connection open and never writes to it, so the only way
+		// this scenario passes is if the client's own reachability probe — not
+		// the caller's timeout — is what ends the wait.
+		skipIfPortsBusy(t, mcpEdgeLocalPort)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
+		fixture.SeedDesktopIdentity(t, setup)
+		startSilentPortForward(t, mcpEdgeLocalPort)
+
+		result := erun.Run(t, []string{"mcp", "call", "--tool", "version"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a stale port-forward, got 0:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "held but the edge never answers") {
+			t.Fatalf("expected the stale forward to be named as such, distinct from a missing one, got:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "erun open team dev") {
+			t.Fatalf("expected the same recovery guidance a missing forward gets, got:\n%s", result.Combined)
+		}
+	})
+
 	t.Run("proxy_dry_run_traces_the_resolved_edge", func(t *testing.T) {
 		// The plan must name the edge the relay would reach, and must neither read
 		// stdin nor touch the network.
@@ -871,6 +945,34 @@ exit 3`)
 		}
 		if lists[0].SessionID != "test-session" || lists[1].SessionID != "test-session-2" {
 			t.Fatalf("tools/list sessions = %q then %q, want the dead session then the re-established one", lists[0].SessionID, lists[1].SessionID)
+		}
+	})
+
+	t.Run("call_real_run_recovers_when_the_local_forward_drops_mid_request", func(t *testing.T) {
+		// A flapping kubectl port-forward ("lost connection to pod", then a fresh
+		// forward) drops a request that was already in flight. The remote MCP
+		// server process itself never restarted — only the local tunnel blipped —
+		// so the retry needs no re-handshake, just one resend once the tunnel
+		// answers again, which is exactly what the still-live edge below proves.
+		skipIfPortsBusy(t, mcpEdgeLocalPort)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
+		fixture.SeedDesktopIdentity(t, setup)
+		edge := &fakeMCPEdge{DropFirstRequest: true, Results: map[string]string{
+			"initialize": `{"protocolVersion":"2025-06-18","capabilities":{"tools":{}}}`,
+		}}
+		edge.start(t, mcpEdgeLocalPort)
+
+		result := erun.Run(t, []string{"mcp", "call", "--tool", "version"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("expected the dropped first request to recover, got exit %d:\n%s", result.ExitCode, result.Combined)
+		}
+		// The dropped connection carries no readable request (it was hijacked and
+		// closed before any body was parsed), so exactly one *readable* initialize
+		// reaching the edge is what proves this succeeded via a plain retry, not
+		// by the edge happening to answer the doomed connection after all.
+		if handshakes := edge.requestsFor("initialize"); len(handshakes) != 1 {
+			t.Fatalf("edge saw %d readable initialize requests, want exactly one (the retry): %+v", len(handshakes), edge.recorded())
 		}
 	})
 
