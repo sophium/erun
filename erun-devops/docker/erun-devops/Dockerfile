@@ -36,7 +36,12 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     make check && touch /test-ok
 
-FROM golang:1.26.0 AS builder
+# Pinned to BUILDPLATFORM: every RUN below cross-compiles via explicit
+# GOOS/GOARCH with CGO disabled, so the compiler itself can run natively on
+# the build host instead of under qemu emulation for the target arch. The
+# final image's own `go` binary comes from the separate `goroot` stage below,
+# not from here, so pinning this stage does not affect its arch.
+FROM --platform=$BUILDPLATFORM golang:1.26.0 AS builder
 
 WORKDIR /src
 
@@ -86,6 +91,12 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # Gate the artefacts on the test stage: the runtime stage copies from /out,
 # so an image can only be tagged when the integration gate passed.
 COPY --from=test /test-ok /tmp/erun-test-ok
+
+# Target-arch Go toolchain for the final image's own `go` binary (needed for
+# in-pod contribute-mode builds, e.g. erun-ui). Deliberately not pinned to
+# BUILDPLATFORM: this stage ships into the runtime image and runs no RUN
+# instructions, so sourcing it costs a per-arch layer pull, not emulation.
+FROM golang:1.26.0 AS goroot
 
 FROM ghcr.io/sophium/erun-ubuntu:noble-20260217
 
@@ -192,7 +203,7 @@ RUN apt-get update && \
 RUN npx --yes "playwright@${PLAYWRIGHT_VERSION}" install-deps chromium && \
     rm -rf /var/lib/apt/lists/* /root/.npm
 
-COPY --from=builder /usr/local/go /usr/local/go
+COPY --from=goroot /usr/local/go /usr/local/go
 COPY --from=builder --chmod=0755 /out/erun /usr/local/bin/erun
 COPY --from=builder --chmod=0755 /out/emcp /usr/local/bin/emcp
 COPY --from=builder --chmod=0755 /out/golangci-lint /usr/local/bin/golangci-lint
