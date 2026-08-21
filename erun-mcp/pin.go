@@ -44,6 +44,9 @@ func pinTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, 
 			for _, site := range plan.Sites {
 				runCtx.Trace(fmt.Sprintf("pin %s %s: %s -> %s", site.Kind, site.Path+site.Detail, site.Current, site.Target))
 			}
+			for _, note := range plan.Skipped {
+				runCtx.Trace("pin skipped: " + note)
+			}
 			out, err := applyPinPlanUnlessPreviewing(runCtx, plan, workDir, runtime.Context.Tenant, runtime.Context.Environment)
 			if err != nil {
 				return err
