@@ -83,10 +83,18 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # golangci-lint maintainers used at release time, which drifts behind
 # erun's go.mod bumps and aborts pre-commit with "go language version
 # used to build golangci-lint is lower than the targeted Go version".
+#
+# GOBIN is intentionally left unset: `go install` refuses to write to an
+# explicit GOBIN when cross-compiling, so with the stage pinned to
+# BUILDPLATFORM (TARGETARCH != host on the foreign-arch pass) the install
+# instead lands under $(go env GOPATH)/bin/, in a <GOOS>_<GOARCH>/ subdir
+# when cross-compiling or directly in bin/ when it matches the host.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    GOBIN=/out go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
+    go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}" && \
+    mkdir -p /out && \
+    find "$(go env GOPATH)/bin" -name golangci-lint -exec cp {} /out/golangci-lint \;
 
 # Gate the artefacts on the test stage: the runtime stage copies from /out,
 # so an image can only be tagged when the integration gate passed.
