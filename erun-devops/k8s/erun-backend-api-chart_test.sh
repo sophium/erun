@@ -179,4 +179,41 @@ require_role_resource '.BatchV1().Jobs(' jobs "${queue_role}"
 require_role_resource '.CoreV1().Pods(' pods "${queue_role}"
 require_role_resource '.GetLogs(' 'pods/log' "${queue_role}"
 
+cluster_role() {
+    awk -v want="  name: $2" '
+        BEGIN{RS="\n---\n"}
+        $0 ~ /(^|\n)kind: ClusterRole(\n|$)/ && $0 ~ ("(^|\n)" want "(\n|$)") {print}
+    ' "$1"
+}
+
+# --- 9. The env-provisioner ClusterRole backs the ServiceAccount that the
+#        deploy/stop/delete Jobs run the `erun` binary as -- a different
+#        identity from api.envDeployer's own Role above, and one that this
+#        chart test previously never asserted anything about. That gap is
+#        exactly how #1080 shipped: erun stop's `kubectl scale
+#        deployment/... --replicas=0` (erun-common/stop.go) and erun deploy's
+#        early-failure pod watch (erun-common/deploy_pod_watch.go) both shell
+#        out to kubectl rather than calling client-go, so the require_role_
+#        resource pattern above (grep a literal client-go call in
+#        erun-backend-api's own Go source) does not apply here -- kubectl argv
+#        text has no comparably stable literal to grep for without inventing a
+#        brittle mapping. Pin the three grants #1080 asks for directly instead. ---
+rendered=$(render --set-string api.envDeployer.enabled=true)
+provisioner_role="${work_root}/provisioner-role.yaml"
+cluster_role "${rendered}" team-env-provisioner >"${provisioner_role}"
+[ -s "${provisioner_role}" ] || fail "the env-provisioner ClusterRole must render when envDeployer is enabled"
+
+grep -q 'resources: \["deployments/scale"\]' "${provisioner_role}" ||
+    fail "the env-provisioner ClusterRole must grant deployments/scale, or erun stop's kubectl scale is forbidden in every provisioned namespace (#1080)"
+grep -A1 'resources: \["deployments/scale"\]' "${provisioner_role}" | grep -q '"patch"' ||
+    fail "the deployments/scale grant must include patch, the verb kubectl scale issues"
+
+grep -q 'resources: \["pods"\]' "${provisioner_role}" ||
+    fail "the env-provisioner ClusterRole must grant pods read, or erun deploy's early-failure pod watch and erun stop's desktop-session listing stay silently inert (#1080)"
+grep -A1 'resources: \["pods"\]' "${provisioner_role}" | grep -q '"watch"' ||
+    fail "the pods grant must include watch"
+
+grep -q 'resources: \["events"\]' "${provisioner_role}" ||
+    fail "the env-provisioner ClusterRole must grant events read, or a stuck pod's reason never reaches the recorded provision error (#1080)"
+
 echo "PASS: erun-backend-api DBOS wiring"
