@@ -141,4 +141,42 @@ role "${rendered}" team-api-env-deployer >"${deployer_role}"
 grep -q 'secrets' "${deployer_role}" &&
     fail "no secrets grant should render when no pull secrets are configured"
 
+# --- 8. Pin each Role the API's own Kubernetes client can run under against
+#        what erun-backend-api's production Go source actually calls
+#        (internal/jobexec, internal/provision), so a future call to a new
+#        resource fails this local gate instead of surfacing as a live RBAC
+#        denial only discovered by deploying (#1058's recurrence: this is the
+#        third time a chart's Role fell out of step with the identity it
+#        backs -- see erun-devops/AGENTS.md "Runtime Chart Rules") ---
+go_internal="${script_dir}/../../erun-backend/erun-backend-api/internal"
+
+go_source_matches() {
+    find "${go_internal}" -name '*.go' ! -name '*_test.go' -print0 2>/dev/null |
+        xargs -0 grep -F -l -- "$1" 2>/dev/null
+}
+
+require_role_resource() {
+    # $1 = literal client-go call in erun-backend-api's own source
+    # $2 = k8s resource string that call needs granted
+    # $3 = rendered Role file to check it against
+    if [ -n "$(go_source_matches "$1")" ]; then
+        grep -q "\"$2\"" "$3" ||
+            fail "erun-backend-api calls $1 (needs resource \"$2\"), but $3 does not grant it -- when code starts calling the Kubernetes API for a new resource, move the chart's Role in the same commit (see erun-devops/AGENTS.md)"
+    fi
+}
+
+rendered=$(render --set-string api.envDeployer.enabled=true --set-string 'imagePullSecrets[0].name=ghcr-pull')
+role "${rendered}" team-api-env-deployer >"${deployer_role}"
+require_role_resource '.BatchV1().Jobs(' jobs "${deployer_role}"
+require_role_resource '.CoreV1().Pods(' pods "${deployer_role}"
+require_role_resource '.GetLogs(' 'pods/log' "${deployer_role}"
+require_role_resource '.CoreV1().Secrets(' secrets "${deployer_role}"
+
+rendered=$(render --set-string api.releaseQueue.enabled=true --set-string api.releaseQueue.namespace=team-ux)
+queue_role="${work_root}/queue-role.yaml"
+role "${rendered}" team-api-release-queue >"${queue_role}"
+require_role_resource '.BatchV1().Jobs(' jobs "${queue_role}"
+require_role_resource '.CoreV1().Pods(' pods "${queue_role}"
+require_role_resource '.GetLogs(' 'pods/log' "${queue_role}"
+
 echo "PASS: erun-backend-api DBOS wiring"
