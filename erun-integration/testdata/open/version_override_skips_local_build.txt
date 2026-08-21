@@ -18,7 +18,7 @@ runtime run state: deployment team-devops is absent from namespace team-dev
 open: team-devops is not deployed, so there is nothing to wake
 kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 17000:17000 --address <LOOPBACK>
 kubectl --context test-context --namespace team-dev get deployment team-api -o name
-kubectl --context test-context --namespace team-dev port-forward service/team-api 17033:17033 --address <LOOPBACK>
+open: port-forwarding service/team-api if the check above finds the deployment present
 open: --no-shell selected, emitting setup commands instead of launching shell
 kubectl config use-context test-context
 kubectl config set-context --current --namespace=team-dev
