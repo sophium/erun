@@ -48,6 +48,15 @@ if grep -qF 'COPY --from=builder /usr/local/go' "${devops_dockerfile}"; then
     fail "${devops_dockerfile}: /usr/local/go must be sourced from the unpinned goroot stage, not the BUILDPLATFORM-pinned builder stage"
 fi
 
+# The builder stage's golangci-lint install cross-compiles like erun/emcp, so it
+# must not set an explicit GOBIN: `go install` refuses to write to GOBIN when
+# cross-compiling, which broke the arm64 pass of a BUILDPLATFORM-pinned builder
+# even though the amd64 pass, matching the host, kept working.
+if grep -qF 'GOBIN=/out go install' "${devops_dockerfile}"; then
+    fail "${devops_dockerfile}: golangci-lint install must not set GOBIN when cross-compiling (go install rejects it)"
+fi
+assert_line "${devops_dockerfile}" 'find "$(go env GOPATH)/bin" -name golangci-lint -exec cp {} /out/golangci-lint \;'
+
 # erun-backend-api and erun-dns01-webhook: single builder stage, only the
 # compiled binary is copied into the final image, so pinning is unconditional.
 assert_line "${docker_dir}/erun-backend-api/Dockerfile" 'FROM --platform=$BUILDPLATFORM golang:1.26.0 AS builder'
