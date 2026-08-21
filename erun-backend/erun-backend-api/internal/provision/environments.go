@@ -6,8 +6,6 @@ import (
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 
-	eruncommon "github.com/sophium/erun/erun-common"
-
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/deployexec"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
@@ -132,32 +130,8 @@ func (p *EnvProvisioner) StartDeploy(input EnvProvisionInput) error {
 // RuntimeImageChecker's fail-open contract: only a registry-confirmed absence
 // selects the fallback, never a network hiccup or an unreadable namespace.
 func (p *EnvProvisioner) resolveBootstrapImage(input EnvProvisionInput) bool {
-	if p.imageChecker == nil {
-		return false
-	}
-	missing, err := p.imageChecker.ConfirmedMissing(
-		context.Background(),
-		deployJobImage(p.config, input),
-		canonicalRuntimeImage(p.config, input),
-	)
-	if err != nil {
-		return false
-	}
-	return missing
-}
-
-// deployJobImage is the tenant's own <tenant>-devops runtime image at the
-// requested version, pulled from the configured registry.
-func deployJobImage(config EnvDeployConfig, input EnvProvisionInput) string {
-	return fmt.Sprintf("%s/%s-devops:%s", config.Registry, input.Tenant, input.Version)
-}
-
-// canonicalRuntimeImage is the published erun-devops image every hosted deploy
-// falls back to when the tenant has never published its own <tenant>-devops
-// image — the same canonical image `erun deploy --runtime-image` installs on an
-// operator's own machine.
-func canonicalRuntimeImage(config EnvDeployConfig, input EnvProvisionInput) string {
-	return fmt.Sprintf("%s/%s:%s", config.Registry, eruncommon.DevopsComponentName, input.Version)
+	_, bootstrap := ResolveRuntimeImage(context.Background(), p.imageChecker, p.config.Registry, input.Tenant, input.Version)
+	return bootstrap
 }
 
 // deployJobParams renders the placement for one env-deploy Job. A tenant that
@@ -169,10 +143,10 @@ func canonicalRuntimeImage(config EnvDeployConfig, input EnvProvisionInput) stri
 // --runtime-image so the installed runtime chart matches it, rather than
 // resolving artifacts that were never published.
 func deployJobParams(config EnvDeployConfig, input EnvProvisionInput) deployexec.DeployJobParams {
-	image := deployJobImage(config, input)
+	image := TenantRuntimeImage(config.Registry, input.Tenant, input.Version)
 	runtimeImageOverride := ""
 	if input.Bootstrap {
-		image = canonicalRuntimeImage(config, input)
+		image = CanonicalRuntimeImage(config.Registry, input.Version)
 		runtimeImageOverride = image
 	}
 	return deployexec.DeployJobParams{

@@ -57,7 +57,7 @@ func testLifecycleConfig() EnvDeployConfig {
 
 func TestEnvLifecycleStopRunsJobWithRunningVersion(t *testing.T) {
 	runner := &stubLifecycleRunner{stopResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
-	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil)
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, nil)
 
 	err := lifecycle.Stop(context.Background(), EnvLifecycleInput{
 		Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3",
@@ -76,7 +76,7 @@ func TestEnvLifecycleStopRunsJobWithRunningVersion(t *testing.T) {
 
 func TestEnvLifecycleStopRejectsNeverDeployed(t *testing.T) {
 	runner := &stubLifecycleRunner{}
-	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil)
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, nil)
 
 	err := lifecycle.Stop(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "prod", EnvironmentID: "env-1"})
 	if err == nil {
@@ -89,7 +89,7 @@ func TestEnvLifecycleStopRejectsNeverDeployed(t *testing.T) {
 
 func TestEnvLifecycleStopSurfacesJobFailure(t *testing.T) {
 	runner := &stubLifecycleRunner{stopResult: deployexec.Result{Outcome: deployexec.OutcomeFailed, Failure: "namespace not found"}}
-	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil)
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, nil)
 
 	err := lifecycle.Stop(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3"})
 	if err == nil {
@@ -97,10 +97,51 @@ func TestEnvLifecycleStopSurfacesJobFailure(t *testing.T) {
 	}
 }
 
+// TestEnvLifecycleStopFallsBackToCanonicalImage and
+// TestEnvLifecycleDeleteFallsBackToCanonicalImage lock the stop/delete image
+// fallback: an environment that was bootstrapped onto the canonical
+// erun-devops image at deploy time (because the tenant never published its
+// own <tenant>-devops image) is still running that image, so its stop/delete
+// Jobs must name it too — not the tenant's own image, which the registry
+// already confirmed does not exist and which would only ImagePullBackOff.
+func TestEnvLifecycleStopFallsBackToCanonicalImage(t *testing.T) {
+	runner := &stubLifecycleRunner{stopResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
+	checker := &stubImageChecker{missing: true}
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, checker)
+
+	err := lifecycle.Stop(context.Background(), EnvLifecycleInput{
+		Tenant: "operations", Environment: "probe7", EnvironmentID: "env-1", RunningVersion: "1.0.185",
+	})
+	if err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	got := runner.stopCalls[0]
+	if got.Image != "ghcr.io/sophium/erun-devops:1.0.185" {
+		t.Fatalf("stop job image = %q, want the canonical ghcr.io/sophium/erun-devops:1.0.185", got.Image)
+	}
+}
+
+func TestEnvLifecycleDeleteFallsBackToCanonicalImage(t *testing.T) {
+	runner := &stubLifecycleRunner{deleteResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
+	checker := &stubImageChecker{missing: true}
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, checker)
+
+	err := lifecycle.Delete(context.Background(), EnvLifecycleInput{
+		Tenant: "operations", Environment: "probe7", EnvironmentID: "env-1", RunningVersion: "1.0.185",
+	})
+	if err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	got := runner.deleteCalls[0]
+	if got.Image != "ghcr.io/sophium/erun-devops:1.0.185" {
+		t.Fatalf("delete job image = %q, want the canonical ghcr.io/sophium/erun-devops:1.0.185", got.Image)
+	}
+}
+
 func TestEnvLifecycleDeleteRunsJobThenDeletesRow(t *testing.T) {
 	runner := &stubLifecycleRunner{deleteResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
 	rows := &stubRowDeleter{}
-	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil)
+	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil, nil)
 
 	err := lifecycle.Delete(context.Background(), EnvLifecycleInput{
 		Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3",
@@ -122,7 +163,7 @@ func TestEnvLifecycleDeleteRunsJobThenDeletesRow(t *testing.T) {
 func TestEnvLifecycleDeleteSkipsJobWhenNeverDeployed(t *testing.T) {
 	runner := &stubLifecycleRunner{}
 	rows := &stubRowDeleter{}
-	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil)
+	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil, nil)
 
 	err := lifecycle.Delete(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "agents", EnvironmentID: "env-2"})
 	if err != nil {
@@ -141,7 +182,7 @@ func TestEnvLifecycleDeleteSkipsJobWhenNeverDeployed(t *testing.T) {
 func TestEnvLifecycleDeleteDoesNotDropRowOnJobFailure(t *testing.T) {
 	runner := &stubLifecycleRunner{deleteResult: deployexec.Result{Outcome: deployexec.OutcomeFailed, Failure: "namespace stuck terminating"}}
 	rows := &stubRowDeleter{}
-	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil)
+	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil, nil)
 
 	err := lifecycle.Delete(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3"})
 	if err == nil {
@@ -158,7 +199,7 @@ func TestEnvLifecycleDeleteDoesNotDropRowOnJobFailure(t *testing.T) {
 func TestEnvLifecycleStopRecordsUsageEvent(t *testing.T) {
 	runner := &stubLifecycleRunner{stopResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
 	usage := &recordingUsageRecorder{}
-	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), usage)
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), usage, nil)
 
 	if err := lifecycle.Stop(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3"}); err != nil {
 		t.Fatalf("stop: %v", err)
@@ -171,7 +212,7 @@ func TestEnvLifecycleStopRecordsUsageEvent(t *testing.T) {
 func TestEnvLifecycleStopRecordsNoUsageEventOnFailure(t *testing.T) {
 	runner := &stubLifecycleRunner{stopResult: deployexec.Result{Outcome: deployexec.OutcomeFailed}}
 	usage := &recordingUsageRecorder{}
-	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), usage)
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), usage, nil)
 
 	_ = lifecycle.Stop(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3"})
 	if len(usage.events) != 0 {
@@ -182,7 +223,7 @@ func TestEnvLifecycleStopRecordsNoUsageEventOnFailure(t *testing.T) {
 func TestEnvLifecycleDeleteRecordsUsageEvent(t *testing.T) {
 	runner := &stubLifecycleRunner{deleteResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
 	usage := &recordingUsageRecorder{}
-	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), usage)
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), usage, nil)
 
 	if err := lifecycle.Delete(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3"}); err != nil {
 		t.Fatalf("delete: %v", err)

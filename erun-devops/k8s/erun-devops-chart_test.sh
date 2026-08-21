@@ -399,4 +399,57 @@ done
 [ "${total_storage_gb}" = "72" ] ||
     fail "the pod's PVCs should sum to 72Gi (home 2Gi + docker 50Gi + worktree 20Gi), got ${total_storage_gb}Gi"
 
+# --- 24. A build-capable env (local-agent / remote-agent) gets the dind
+# sidecar, its docker state PVC, and the socket volume; the sidecar declares
+# explicit resource limits rather than inheriting whatever the namespace's
+# LimitRange hands an unbounded container. ---
+for storage_args in "--set worktreeStorage=pvc --set worktreeRepoName=petios" "--set worktreeStorage=host --set-string worktreeHostPath=/host/git/petios"; do
+    # shellcheck disable=SC2086
+    rendered=$(render ${storage_args})
+    names=$(container_names "${rendered}")
+    [ "${names}" = "erun-devops
+erun-dind" ] || fail "a build-capable env (${storage_args}) should render erun-devops + erun-dind, got: ${names}"
+
+    grep -q '^kind: PersistentVolumeClaim$' "${rendered}" &&
+        grep -q '^  name: test-docker$' "${rendered}" ||
+        fail "a build-capable env (${storage_args}) should render the docker state PVC"
+
+    grep -q '^        - name: docker-socket$' "${rendered}" ||
+        fail "a build-capable env (${storage_args}) should render the docker-socket volume"
+
+    dind_container "${rendered}" >"${dind_block}"
+    [ -s "${dind_block}" ] || fail "a build-capable env (${storage_args}) should render the dind container"
+    grep -q '^          resources:$' "${dind_block}" ||
+        fail "the dind sidecar should declare explicit resources rather than inheriting a LimitRange default"
+    grep -A3 '^          resources:$' "${dind_block}" | grep -q 'cpu:' ||
+        fail "the dind sidecar should declare an explicit cpu limit"
+    grep -A3 '^          resources:$' "${dind_block}" | grep -q 'memory:' ||
+        fail "the dind sidecar should declare an explicit memory limit"
+done
+
+# --- 25. A `type: runtime` env (worktreeStorage=none) never builds, so it gets
+# no dind sidecar, no docker state PVC, no docker-socket volume, no binfmt
+# installer, and no dind-group membership: none of it has anything to do on a
+# pod that only ever installs a published version by reference. ---
+rendered=$(render --set worktreeStorage=none)
+names=$(container_names "${rendered}")
+[ "${names}" = "erun-devops" ] ||
+    fail "a runtime env should render only the erun-devops container, got: ${names}"
+
+grep -q 'erun-dind' "${rendered}" &&
+    fail "a runtime env should render no erun-dind reference at all"
+
+grep -q '^  name: test-docker$' "${rendered}" &&
+    fail "a runtime env should render no docker state PVC"
+
+grep -q 'docker-socket' "${rendered}" &&
+    fail "a runtime env should render no docker-socket volume or mount"
+
+init_containers_section "${rendered}" >"${init_block}"
+grep -q 'install-binfmt' "${init_block}" &&
+    fail "a runtime env builds nothing, so it needs no binfmt installer"
+
+pod_security_context "${rendered}" | grep -q 'supplementalGroups' &&
+    fail "a runtime env has no docker daemon to join the group of"
+
 echo "PASS: erun-devops chart pod shape"

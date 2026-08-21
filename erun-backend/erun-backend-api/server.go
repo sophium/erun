@@ -232,11 +232,23 @@ func newEnvironmentProvisioner(options HandlerOptions, environments *repository.
 		return nil
 	}
 	coordinator := service.NewEnvironmentProvisioner(deployexec.NewLauncher(options.KubeClient), environments, usage)
-	// The published-image probe runs with the deploy Job's own pull credential,
-	// read from the platform namespace, so a private registry namespace answers
-	// it decisively instead of identically for absent and forbidden.
-	credentials := provision.NewKubeImagePullSecretCredentials(options.KubeClient, deploy.PlatformNamespace, deploy.ImagePullSecrets)
-	return provision.NewEnvProvisioner(options.DBOSContext, coordinator, deploy, provision.NewGHCRImageChecker(credentials))
+	return provision.NewEnvProvisioner(options.DBOSContext, coordinator, deploy, newRuntimeImageChecker(options))
+}
+
+// newRuntimeImageChecker wires the one published-image probe every Job that
+// runs a tenant's erun toolchain shares (deploy, stop, delete, the
+// release-queue runner) — each used to make its own image decision, and only
+// deploy fell back. It runs with the deploy Job's own pull credential, read
+// from the platform namespace, so a private registry namespace answers it
+// decisively instead of identically for absent and forbidden. Nil without an
+// in-cluster client to read the credential Secret with, which leaves every
+// caller on its fail-open default (the tenant's own image, unconditionally).
+func newRuntimeImageChecker(options HandlerOptions) provision.RuntimeImageChecker {
+	if options.KubeClient == nil {
+		return nil
+	}
+	credentials := provision.NewKubeImagePullSecretCredentials(options.KubeClient, options.EnvDeploy.PlatformNamespace, options.EnvDeploy.ImagePullSecrets)
+	return provision.NewGHCRImageChecker(credentials)
 }
 
 // missingEnvProvisionerConfig names every unmet precondition for live env
@@ -272,7 +284,7 @@ func newEnvironmentLifecycle(options HandlerOptions, environments *repository.En
 		deploy.DeployerServiceAccount == "" || deploy.PlatformNamespace == "" || deploy.Registry == "" {
 		return nil
 	}
-	return provision.NewEnvLifecycle(deployexec.NewLauncher(options.KubeClient), environments, deploy, usage)
+	return provision.NewEnvLifecycle(deployexec.NewLauncher(options.KubeClient), environments, deploy, usage, newRuntimeImageChecker(options))
 }
 
 // newReleaseRunner wires the release Job launcher. Without an in-cluster client
@@ -293,7 +305,7 @@ func newReleaseQueue(options HandlerOptions, coordinator provision.ReleaseCoordi
 	if options.DBOSContext == nil || options.KubeClient == nil || !options.Release.Configured() {
 		return nil
 	}
-	return provision.NewReleaseQueue(options.DBOSContext, coordinator, options.Release)
+	return provision.NewReleaseQueue(options.DBOSContext, coordinator, options.Release, newRuntimeImageChecker(options))
 }
 
 func registerHealthRoute(mux *http.ServeMux) {
