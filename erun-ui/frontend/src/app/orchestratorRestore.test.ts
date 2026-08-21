@@ -13,6 +13,7 @@ function orchestrator(id: string, transient = false): OrchestratorInfo {
     directories: [],
     sessionId: 0,
     status: 'stopped',
+    busy: false,
     transient,
   };
 }

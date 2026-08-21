@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/adrg/xdg"
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
@@ -25,6 +26,19 @@ func seedMCPForward(t *testing.T, tenant, environment string, port int) {
 	root := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", root)
 	t.Setenv("HOME", root)
+	// LoadPortForwardState's environmentIsConfigured guard (added for #1049) reads
+	// through the real on-disk ConfigStore, not any App-injected store stub — on
+	// purpose, so a stale record for a deleted environment reads as "no forward"
+	// rather than a live one. adrg/xdg caches ConfigHome at process init instead
+	// of re-reading the environment per call, so the Setenv calls above alone do
+	// not redirect it; Reload is what makes it honour this test's temp root, and
+	// SaveEnvConfig is what makes the guard see this tenant/environment as
+	// configured there.
+	xdg.Reload()
+	t.Cleanup(xdg.Reload)
+	if err := eruncommon.SaveEnvConfig(tenant, eruncommon.EnvConfig{Name: environment}); err != nil {
+		t.Fatalf("SaveEnvConfig: %v", err)
+	}
 	path, err := eruncommon.PortForwardStatePath("mcp", tenant, environment)
 	if err != nil {
 		t.Fatalf("PortForwardStatePath: %v", err)

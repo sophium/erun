@@ -12,7 +12,9 @@ import {
   UpdateOrchestrator,
 } from '../../wailsjs/go/main/App';
 import { readError } from './errors';
+import { planOrchestratorBusySeed } from './orchestratorBusySeed';
 import { planOrchestratorRestore, readRestoreNotice } from './orchestratorRestore';
+import { setAIBusyForSession } from './slices/aiActivitySlice';
 import {
   closeOrchestratorDialog,
   type OrchestratorEnvRef,
@@ -25,10 +27,19 @@ import { setSelected } from './slices/selectionSlice';
 import { setSessionId } from './slices/terminalSlice';
 import type { AppThunk } from './store';
 
+// loadOrchestrators fetches the current list and, in the same pass, seeds the
+// AI-busy store from each orchestrator's own `busy` snapshot field (#1087) —
+// the same store field the ai-activity event writes to, so a fetch that lands
+// after a busy transition (boot, a dialog close-and-reload, a manual refresh)
+// renders the true state even if that event was never observed.
 export const loadOrchestrators = (): AppThunk<Promise<void>> => async (dispatch) => {
   try {
     const list = (await ListOrchestrators()) as OrchestratorInfo[] | null;
-    dispatch(setOrchestrators(list ?? []));
+    const items = list ?? [];
+    dispatch(setOrchestrators(items));
+    for (const seed of planOrchestratorBusySeed(items)) {
+      dispatch(setAIBusyForSession(seed));
+    }
   } catch (error) {
     dispatch(setOrchestratorsError(readError(error)));
   }
