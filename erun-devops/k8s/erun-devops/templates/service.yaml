@@ -101,6 +101,24 @@ emitted; type is the single source of truth.
 {{- $dindMemory := default "8916Mi" $dindLimits.memory -}}
 {{- $dindRequestCPU := default "0.25" $dindRequests.cpu -}}
 {{- $dindRequestMemory := default "1024Mi" $dindRequests.memory -}}
+{{- /* Every init container below (prepare-volumes, adopt-worktree,
+       install-binfmt) declares the same small explicit resources rather than
+       relying on the namespace LimitRange's default: Kubernetes admits a pod
+       on max(max(init container requests), sum(container requests)), so one
+       unsized init container's inherited request can become the pod's entire
+       effective request (#1076 — this is what #1061 already fixed for the
+       dind sidecar above). Each does a few seconds of chown, file copy, or
+       qemu binary registration, so one shared budget covers all three.
+       Defaults mirror eruncommon.DefaultRuntimeInitContainerCPU/Memory in
+       erun-common/runtime_resources.go — keep the two in sync. */ -}}
+{{- $initContainers := default dict $runtime.initContainers -}}
+{{- $initContainerResources := default dict $initContainers.resources -}}
+{{- $initContainerLimits := default dict $initContainerResources.limits -}}
+{{- $initContainerRequests := default dict $initContainerResources.requests -}}
+{{- $initContainerCPU := default "0.5" $initContainerLimits.cpu -}}
+{{- $initContainerMemory := default "256Mi" $initContainerLimits.memory -}}
+{{- $initContainerRequestCPU := default "0.1" $initContainerRequests.cpu -}}
+{{- $initContainerRequestMemory := default "64Mi" $initContainerRequests.memory -}}
 {{- $managedCloud := default false .Values.managedCloud -}}
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
 {{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
@@ -448,6 +466,13 @@ spec:
           securityContext:
             runAsUser: 0
             runAsGroup: 0
+          resources:
+            limits:
+              cpu: {{ $initContainerCPU | quote }}
+              memory: {{ $initContainerMemory | quote }}
+            requests:
+              cpu: {{ $initContainerRequestCPU | quote }}
+              memory: {{ $initContainerRequestMemory | quote }}
           command:
             - sh
             - -c
@@ -479,6 +504,13 @@ spec:
           securityContext:
             runAsUser: 1000
             runAsGroup: 1000
+          resources:
+            limits:
+              cpu: {{ $initContainerCPU | quote }}
+              memory: {{ $initContainerMemory | quote }}
+            requests:
+              cpu: {{ $initContainerRequestCPU | quote }}
+              memory: {{ $initContainerRequestMemory | quote }}
           command:
             - sh
             - -c
@@ -507,6 +539,13 @@ spec:
             - amd64,arm64
           securityContext:
             privileged: true
+          resources:
+            limits:
+              cpu: {{ $initContainerCPU | quote }}
+              memory: {{ $initContainerMemory | quote }}
+            requests:
+              cpu: {{ $initContainerRequestCPU | quote }}
+              memory: {{ $initContainerRequestMemory | quote }}
         {{- end }}
       containers:
         - image: {{ $devopsImage }}

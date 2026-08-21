@@ -16,9 +16,13 @@ const (
 // for one namespace's cap. The LimitRange supplies a default/defaultRequest so
 // a pod that declares no resources of its own (nothing in this namespace is
 // assumed to) still gets sane values instead of the ResourceQuota rejecting it
-// outright for omitting requests. The default equals the cap itself divided
-// across a small fixed pod budget, keeping this generic rather than baking in
-// the runtime chart's own values.
+// outright for omitting requests. `default` (the limit) equals the namespace
+// cap: that only bounds an unsized container and costs nothing at scheduling
+// time. `defaultRequest` must not follow the cap the same way — a request is a
+// reservation, and a defaultRequest equal to the cap turns the quota into a
+// minimum node size for the whole namespace (#1076), so it is instead the
+// small fixed value in DefaultLimitRangeDefaultRequestCPU/Memory, independent
+// of how large the cap is configured.
 func namespaceResourceQuotaManifest(namespace string, quota NamespaceResourceQuota) string {
 	return fmt.Sprintf(`apiVersion: v1
 kind: ResourceQuota
@@ -50,7 +54,7 @@ spec:
 		quota.CPU, quota.Memory, quota.Storage,
 		limitRangeName, namespace,
 		quota.CPU, quota.Memory,
-		quota.CPU, quota.Memory,
+		DefaultLimitRangeDefaultRequestCPU, DefaultLimitRangeDefaultRequestMemory,
 	)
 }
 

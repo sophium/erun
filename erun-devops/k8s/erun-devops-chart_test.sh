@@ -452,4 +452,54 @@ grep -q 'install-binfmt' "${init_block}" &&
 pod_security_context "${rendered}" | grep -q 'supplementalGroups' &&
     fail "a runtime env has no docker daemon to join the group of"
 
+# --- 26. Every container and init container the template can render declares
+# both resources.limits and resources.requests. This is the structural version
+# of #1061 (the dind sidecar) and #1076 (every init container): both bugs were
+# "a container was added to the pod and nobody sized it", left to inherit
+# whatever the namespace LimitRange defaults an unsized container to — which
+# can equal the entire configured quota width. Checked across every
+# envType/worktreeStorage permutation the template supports, so the next
+# container added to the pod cannot reintroduce the pattern silently. ---
+all_container_blocks() {
+    awk '
+        /^      (initContainers|containers):$/ { insec=1; next }
+        /^      volumes:$/ { insec=0 }
+        insec && /^        #/ { next }
+        insec && /^        - image: /{ if (n>0) print "\f"; n++ }
+        insec && n { print }
+    ' "$1"
+}
+
+assert_every_container_sized() {
+    file="$1"
+    label="$2"
+    all_container_blocks "${file}" | awk -v label="${label}" '
+        BEGIN { RS="\f"; failed=0 }
+        NF==0 { next }
+        {
+            name="(unnamed)"
+            if (match($0, /\n          name: [^\n]+/)) {
+                name = substr($0, RSTART+17, RLENGTH-17)
+            }
+            has_resources = ($0 ~ /\n          resources:\n/)
+            has_limits = ($0 ~ /\n            limits:\n/)
+            has_requests = ($0 ~ /\n            requests:\n/)
+            if (!has_resources || !has_limits || !has_requests) {
+                printf "FAIL: %s container %s is missing resources.limits/requests\n", label, name > "/dev/stderr"
+                failed=1
+            }
+        }
+        END { exit failed }
+    ' || fail "${label}: a container renders without both resources.limits and resources.requests"
+}
+
+for storage_args in \
+    "--set worktreeStorage=pvc --set worktreeRepoName=petios" \
+    "--set worktreeStorage=host --set-string worktreeHostPath=/host/git/petios" \
+    "--set worktreeStorage=none"; do
+    # shellcheck disable=SC2086
+    rendered=$(render ${storage_args})
+    assert_every_container_sized "${rendered}" "storage(${storage_args})"
+done
+
 echo "PASS: erun-devops chart pod shape"
