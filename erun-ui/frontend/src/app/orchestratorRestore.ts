@@ -1,30 +1,37 @@
 import type { OrchestratorInfo } from './slices/orchestratorsSlice';
 
-// What the backend answers when boot asks which orchestrator to reopen: the one
-// that was open when the desktop last ran, or the one a restart handed off —
-// only the hand-off names a conversation and carries a prompt to auto-run. A
-// notice means the hand-off was refused: the orchestrator still reopens, idle,
-// and the notice says why nothing is being continued.
+// What the backend answers when boot asks which orchestrators to reopen:
+// orchestratorId is the one that OWNS THE TERMINAL PANE — the pane is single,
+// so exactly one orchestrator gets it — and alsoReopen lists every other
+// orchestrator that was open too, restored alongside it but idle. Only the
+// pane owner can carry a conversation/prompt to resume; that is why those
+// fields live on the target itself rather than per id in alsoReopen. A notice
+// means a hand-off was refused: the pane owner still reopens, idle, and the
+// notice says why nothing is being continued.
 export interface OrchestratorReopenTarget {
   orchestratorId?: string;
   conversationId?: string;
   resumePrompt?: string;
+  alsoReopen?: string[];
   notice?: string;
 }
 
-// How boot should reopen an orchestrator: which one, which of its conversations,
-// and whether that conversation is handed a task on resume.
+// How boot should reopen one orchestrator: which one, which of its
+// conversations, and whether that conversation is handed a task on resume.
 export interface OrchestratorRestorePlan {
   id: string;
   conversationId: string;
   resumePrompt: string;
 }
 
-// planOrchestratorRestore decides what a launch actually restores, given the
-// target and the definitions that exist right now. A target naming an
-// orchestrator that has since been deleted restores nothing, and neither does a
-// transient (Investigate) session, which has no definition to resume — in both
-// cases boot falls through to the default environment selection instead.
+// OrchestratorRestoreOutcome is what a launch actually restores: the
+// orchestrator that ends up owning the pane (or null if there is nothing valid
+// to reopen), and every other orchestrator that comes back idle beside it.
+export interface OrchestratorRestoreOutcome {
+  primary: OrchestratorRestorePlan | null;
+  alsoReopen: string[];
+}
+
 const trimmed = (value: string | undefined): string => value?.trim() ?? '';
 
 // readRestoreNotice is the refusal the backend attached to the target, if any.
@@ -35,21 +42,57 @@ export function readRestoreNotice(target: OrchestratorReopenTarget | null | unde
   return trimmed(target?.notice);
 }
 
+// planOrchestratorRestore decides what a launch actually restores, given the
+// target and the definitions that exist right now. A candidate naming an
+// orchestrator that has since been deleted restores nothing for that
+// candidate, and neither does a transient (Investigate) session, which has no
+// definition to resume — both are dropped rather than starting a session for
+// an id that cannot come back.
+//
+// If the backend's chosen pane owner cannot be honored this way (deleted
+// between shutdown and this launch), the next most-recently-opened surviving
+// orchestrator takes the pane instead — the same recency rule the backend used
+// to pick a pane owner, just re-applied to the ones still around — rather than
+// silently dropping to the default environment selection while other
+// orchestrators still start up in the background. Only when nothing in the
+// whole set survives does boot fall through to that default.
 export function planOrchestratorRestore(
   target: OrchestratorReopenTarget | null | undefined,
   orchestrators: readonly OrchestratorInfo[],
-): OrchestratorRestorePlan | null {
+): OrchestratorRestoreOutcome {
   const source: OrchestratorReopenTarget = target ?? {};
-  const id = trimmed(source.orchestratorId);
-  if (!id) {
-    return null;
+  const exists = (id: string): boolean =>
+    orchestrators.some((orchestrator) => orchestrator.id === id && !orchestrator.transient);
+
+  const primaryID = trimmed(source.orchestratorId);
+  const seen = new Set<string>();
+  const survivingAlso = (source.alsoReopen ?? []).reduce<string[]>((kept, raw) => {
+    const id = trimmed(raw);
+    if (id === '' || id === primaryID || seen.has(id) || !exists(id)) {
+      return kept;
+    }
+    seen.add(id);
+    kept.push(id);
+    return kept;
+  }, []);
+
+  if (primaryID && exists(primaryID)) {
+    return {
+      primary: {
+        id: primaryID,
+        conversationId: trimmed(source.conversationId),
+        resumePrompt: trimmed(source.resumePrompt),
+      },
+      alsoReopen: survivingAlso,
+    };
   }
-  if (!orchestrators.some((orchestrator) => orchestrator.id === id && !orchestrator.transient)) {
-    return null;
+  const rest = [...survivingAlso];
+  const promoted = rest.pop();
+  if (promoted === undefined) {
+    return { primary: null, alsoReopen: [] };
   }
   return {
-    id,
-    conversationId: trimmed(source.conversationId),
-    resumePrompt: trimmed(source.resumePrompt),
+    primary: { id: promoted, conversationId: '', resumePrompt: '' },
+    alsoReopen: rest,
   };
 }

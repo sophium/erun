@@ -69,14 +69,20 @@ type orchestratorRestoreState struct {
 	ResumePrompt string `json:"resumePrompt,omitempty"`
 }
 
-// relaunchTarget is the JSON-safe view the frontend reads on boot: which
-// orchestrator to reopen, which of its conversations, the prompt to auto-run on
-// resume, and — when the hand-off was refused — why nothing is being continued.
+// relaunchTarget is the JSON-safe view the frontend reads on boot. OrchestratorID
+// is the one this launch resumes and that OWNS THE TERMINAL PANE — the pane is
+// single, so exactly one orchestrator gets it. AlsoReopen lists every other
+// orchestrator that was open and comes back too, started idle alongside it with
+// no conversation named and no prompt: only the pane-owning orchestrator can
+// carry a resume prompt, by construction, because ConversationID/ResumePrompt
+// are fields of this one target, not of each id in AlsoReopen. Notice explains,
+// when non-empty, why the pane owner is not continuing a task it asked to.
 type relaunchTarget struct {
-	OrchestratorID string `json:"orchestratorId"`
-	ConversationID string `json:"conversationId"`
-	ResumePrompt   string `json:"resumePrompt"`
-	Notice         string `json:"notice"`
+	OrchestratorID string   `json:"orchestratorId"`
+	ConversationID string   `json:"conversationId"`
+	ResumePrompt   string   `json:"resumePrompt"`
+	AlsoReopen     []string `json:"alsoReopen,omitempty"`
+	Notice         string   `json:"notice"`
 }
 
 // defaultOrchestratorRestoreDir is the directory beside window-state.json under
@@ -196,31 +202,53 @@ func readAndClearOrchestratorRestoreTarget(path string) (orchestratorRestoreStat
 	return state, true
 }
 
-// ResolveOrchestratorToReopen returns the orchestrator this launch should reopen,
-// which of its conversations, and any prompt to auto-run on resume. The frontend
-// calls it on boot (after loading the orchestrator list) and, if the id still
-// resolves to a persisted orchestrator, starts it — resuming the named
-// conversation, or that orchestrator's own pinned one when none is named, so the
-// operator lands back where they were.
+// ResolveOrchestratorToReopen returns every orchestrator this launch should
+// reopen: one that OWNS THE TERMINAL PANE (OrchestratorID), plus any others that
+// were open too (AlsoReopen). The frontend calls it on boot (after loading the
+// orchestrator list); for each id that still resolves to a persisted
+// orchestrator it starts a session, resuming that orchestrator's own pinned
+// conversation — except the pane owner, which resumes the named conversation
+// when the hand-off supplies one — so the operator lands back where they were,
+// with everything else they had open still running behind it.
 //
-// A pending restart hand-off wins: it is the more specific intent and the only
-// source of a resume prompt, and it is consumed as it is read so it fires once.
-// Otherwise the durable record of what was open answers, carrying no prompt — so
-// a plain quit-and-relaunch, a crash or a reboot comes back to the same
-// orchestrator, idle at its prompt with nothing auto-run.
+// Which orchestrator owns the pane is answered in one of two ways:
 //
-// A hand-off that cannot be honored still reopens the orchestrator; it just
-// arrives idle, carrying the notice that says why nothing was continued. So does
-// a hand-off from an orchestrator this launch does not reopen at all: only one
-// orchestrator owns the pane, and the ones left mid-task are named in the same
-// notice rather than dropped.
+//   - A pending restart hand-off wins outright: it names the exact orchestrator
+//     the operator just restarted from, it is the only source of a resume
+//     prompt, and it is consumed as it is read so it fires once. A hand-off that
+//     cannot be honored still makes that orchestrator the pane owner; it just
+//     arrives idle, carrying the notice that says why nothing was continued. A
+//     hand-off from an orchestrator this launch does not choose as pane owner at
+//     all (a second restart racing the first) is named in the same notice
+//     instead — it still comes back, but via AlsoReopen, not as the owner.
+//   - Otherwise the durable record of what was open decides: the most recently
+//     (re)started orchestrator owns the pane (see orchestrator_open_state.go for
+//     why the record keeps that order), and it carries no prompt — so a plain
+//     quit-and-relaunch, a crash or a reboot comes back to the same session,
+//     idle, with nothing auto-run.
+//
+// Every other orchestrator the durable record names — everyone but the pane
+// owner — is returned in AlsoReopen and comes back too, idle, so the tab strip
+// and the live sessions agree instead of a tab surviving with no session behind
+// it.
 func (a *App) ResolveOrchestratorToReopen() relaunchTarget {
 	state, notReopened := consumeOrchestratorRestoreTargets(a.deps.orchestratorRestoreDir, time.Now())
 	notice := orchestratorHandoffsNotReopenedNotice(notReopened)
+	openIDs := readOpenOrchestrators(a.deps.orchestratorOpenPath)
+
 	if state.OrchestratorID == "" {
-		return relaunchTarget{OrchestratorID: readOpenOrchestrator(a.deps.orchestratorOpenPath), Notice: notice}
+		if len(openIDs) == 0 {
+			return relaunchTarget{Notice: notice}
+		}
+		owner := openIDs[len(openIDs)-1]
+		return relaunchTarget{OrchestratorID: owner, AlsoReopen: removeOrchestratorID(openIDs, owner), Notice: notice}
 	}
-	target := relaunchTarget{OrchestratorID: state.OrchestratorID, Notice: notice}
+
+	target := relaunchTarget{
+		OrchestratorID: state.OrchestratorID,
+		AlsoReopen:     removeOrchestratorID(openIDs, state.OrchestratorID),
+		Notice:         notice,
+	}
 	if state.ResumePrompt == "" {
 		return target
 	}
@@ -231,6 +259,20 @@ func (a *App) ResolveOrchestratorToReopen() relaunchTarget {
 	target.ConversationID = state.ConversationID
 	target.ResumePrompt = state.ResumePrompt
 	return target
+}
+
+// removeOrchestratorID returns ids without id, preserving order.
+func removeOrchestratorID(ids []string, id string) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(ids))
+	for _, existing := range ids {
+		if existing != id {
+			out = append(out, existing)
+		}
+	}
+	return out
 }
 
 // orchestratorHandoffsNotReopenedNotice names the orchestrators that restarted

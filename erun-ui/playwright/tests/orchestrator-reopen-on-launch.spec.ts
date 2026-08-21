@@ -14,33 +14,44 @@ import { SEED_ORCHESTRATOR } from '../fixtures/seedRoot.js';
 // without a real Claude process, which the inert harness deliberately lacks.
 
 const RESTORED_SESSION_ID = 4242;
+const SEED_ORCHESTRATOR_2 = 'pw-orch-2';
 
-const runningOrchestrator = {
-  id: SEED_ORCHESTRATOR,
-  name: SEED_ORCHESTRATOR,
-  environments: [],
-  tenants: [],
-  directories: [],
-  sessionId: RESTORED_SESSION_ID,
-  status: 'running',
-  transient: false,
-};
+function runningOrchestratorInfo(id: string, sessionId: number) {
+  return {
+    id,
+    name: id,
+    environments: [],
+    tenants: [],
+    directories: [],
+    sessionId,
+    status: 'running',
+    transient: false,
+  };
+}
+
+const runningOrchestrator = runningOrchestratorInfo(SEED_ORCHESTRATOR, RESTORED_SESSION_ID);
 
 // stubReopen answers the boot restore round-trip and records every method the
 // frontend invoked, so a spec can assert which start call the launch made — and
-// that it made none at all when there is nothing to reopen.
+// that it made none at all when there is nothing to reopen. `running` maps every
+// orchestrator id the launch may start to the session it comes back with, so a
+// multi-orchestrator restore can give each one its own answer.
 async function stubReopen(
   page: Page,
   target: {
     orchestratorId: string;
     conversationId?: string;
     resumePrompt: string;
+    alsoReopen?: string[];
     notice?: string;
   },
   calls: string[],
+  running: Record<string, ReturnType<typeof runningOrchestratorInfo>> = {
+    [SEED_ORCHESTRATOR]: runningOrchestrator,
+  },
 ): Promise<void> {
   await page.route('**/__erun_invoke', async (route, request) => {
-    const body = JSON.parse(request.postData() ?? '{}') as { method: string };
+    const body = JSON.parse(request.postData() ?? '{}') as { method: string; args?: unknown[] };
     calls.push(body.method);
     if (body.method === 'ResolveOrchestratorToReopen') {
       return route.fulfill({
@@ -48,21 +59,23 @@ async function stubReopen(
         body: JSON.stringify({ data: target }),
       });
     }
-    if (target.orchestratorId === '') {
+    if (target.orchestratorId === '' && !target.alsoReopen?.length) {
       return route.continue();
+    }
+    if (body.method === 'ListOrchestrators') {
+      return route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ data: Object.values(running) }),
+      });
     }
     // Once a restore is expected, the orchestrator has to read as running for
     // the pane to be its own — the strip keys off the live session id.
-    if (
-      body.method === 'ListOrchestrators' ||
-      body.method === 'StartOrchestrator' ||
-      body.method === 'StartOrchestratorWithResume'
-    ) {
-      const data =
-        body.method === 'ListOrchestrators' ? [runningOrchestrator] : runningOrchestrator;
+    if (body.method === 'StartOrchestrator' || body.method === 'StartOrchestratorWithResume') {
+      const rawId = body.args?.[0];
+      const id = typeof rawId === 'string' ? rawId : '';
       return route.fulfill({
         contentType: 'application/json',
-        body: JSON.stringify({ data }),
+        body: JSON.stringify({ data: running[id] ?? runningOrchestrator }),
       });
     }
     await route.continue();
@@ -175,6 +188,48 @@ test.describe('reopening the orchestrator that was open', () => {
     await expect(app.tabStrip.orchestratorMode()).toBeHidden();
     expect(calls).toContain('ResolveOrchestratorToReopen');
     expect(calls).not.toContain('StartOrchestrator');
+    expect(calls).not.toContain('StartOrchestratorWithResume');
+  });
+});
+
+// The durable record used to be a single id, so starting a second orchestrator
+// silently discarded the record that the first was open, and a launch restored
+// exactly one — every other tab came back with no session behind it. The Go
+// side owns the durable set and the recency rule that picks a pane owner when
+// there is no restart hand-off (erun-ui/orchestrator_open_state_test.go); what
+// only the rendered app can show is that every id the backend names actually
+// gets a live session and that exactly one of them ends up owning the pane.
+test.describe('restoring every orchestrator that was open', () => {
+  test('every orchestrator that was open is restored; only the pane owner is selected', async ({
+    app,
+    page,
+  }) => {
+    const calls: string[] = [];
+    const owner = runningOrchestratorInfo(SEED_ORCHESTRATOR_2, RESTORED_SESSION_ID + 1);
+    await stubReopen(
+      page,
+      { orchestratorId: SEED_ORCHESTRATOR_2, resumePrompt: '', alsoReopen: [SEED_ORCHESTRATOR] },
+      calls,
+      { [SEED_ORCHESTRATOR]: runningOrchestrator, [SEED_ORCHESTRATOR_2]: owner },
+    );
+    await app.reboot();
+
+    // Both orchestrators are live sessions, not just tabs — the tab strip and
+    // the sidebar's running dots have to agree with each other.
+    await expect(app.tabStrip.tab(SEED_ORCHESTRATOR)).toBeVisible();
+    await expect(app.tabStrip.tab(SEED_ORCHESTRATOR_2)).toBeVisible();
+    await expect(app.sidebar.orchestratorStatusDot(SEED_ORCHESTRATOR, 'running')).toBeVisible();
+    await expect(app.sidebar.orchestratorStatusDot(SEED_ORCHESTRATOR_2, 'running')).toBeVisible();
+
+    // Only the named pane owner is selected; the other reopened idle, off the
+    // pane.
+    await expect(app.tabStrip.tab(SEED_ORCHESTRATOR_2)).toHaveAttribute('aria-selected', 'true');
+    await expect(app.tabStrip.tab(SEED_ORCHESTRATOR)).toHaveAttribute('aria-selected', 'false');
+
+    // Both were started — an idle StartOrchestrator for the one alongside, and
+    // for the pane owner too, since a plain launch (no restart hand-off) carries
+    // no prompt to auto-run.
+    expect(calls).toContain('StartOrchestrator');
     expect(calls).not.toContain('StartOrchestratorWithResume');
   });
 });
