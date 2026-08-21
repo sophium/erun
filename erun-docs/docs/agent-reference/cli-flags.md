@@ -59,6 +59,7 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 | `--codecommit-ssh-key-id <id>` | string (`APKA…` shape) | unset | Must start with `APKA`; must be a valid IAM key id (length 21). | Stored in the in-pod bootstrap marker (`bootstrap.yaml` → `codecommitSshKeyId`). |
 | `--confirm-environment` | bool | `false` | — | Equivalent to `-y` for the env-overwrite confirmation only. |
 | `--platform-account` | bool | `false` | — | Makes the env a **cluster platform account**: `EnvConfig.platformaccount = true`, which threads `--set platformAccount=true` at deploy so the runtime chart binds the env's ServiceAccount to the built-in `cluster-admin` (a `<release>-platform` `ClusterRoleBinding`). Lets in-pod platform Terraform (the [cluster edge](/agent-reference/skills-spec#erun-enable-hosting-edge)) and component installs manage cluster-scoped resources. The first deploy that adds the binding must run from an admin-capable context (the API server's escalation check). |
+| `--components <a,b,…>` | list of strings | unset — nothing changes. | Any string; not validated against a chart universe at init time (that check happens at deploy time). | `EnvConfig.deploy.components`, the [saved deploy selection](/reference/configuration#envconfig) — the same field `erun deploy --components` overrides per run but never persists. An explicit empty value (`--components ''`), distinct from omitting the flag, clears a saved selection and returns the env to its repo [`k8s.deployments`](#components-value-set) plan; there is no other command that resets it. |
 
 ### Re-initializing an existing environment {#init-existing-env}
 
@@ -69,11 +70,12 @@ A setting is applied because it was supplied, not because of the type the invoca
 | Input | Supplied | Omitted |
 |---|---|---|
 | `--version` | Sets `EnvConfig.runtimeversion`. Trace: `init: runtime version set to <v>` (or `… already <v>`). | Keeps it. Trace: `init: runtime version not given; keeping <v>`. The transport's built-in version fills in **only** when the env records none, tracing `init: env records no runtime version; adopting <v>`. |
-| `--runtime-image` | Sets `EnvConfig.runtimeimage`. | Keeps it. Trace: `init: runtime image not given; keeping <ref>`. |
+| `--runtime-image` | Sets `EnvConfig.runtimeimage` — **tagless**, even when the flag value carries a tag (a trailing `:<tag>`/digest is stripped before persisting). [Deploy resolution](/reference/configuration#advanced-image-overrides) already pins a tagless reference to the env's own runtime version on every deploy; persisting the tag is what leaves a stale pin behind after the env's version moves on, so init never records one. | Keeps it. Trace: `init: runtime image not given; keeping <ref>`. |
 | `--runtime-registry` | Sets `EnvConfig.runtimeregistry`. | Keeps it. |
 | `--image-pull-secret` | Replaces `EnvConfig.imagepullsecrets` with the trimmed, de-duplicated list. | Keeps the recorded list. |
 | `--runtime-cpu` / `--runtime-memory` | Merges onto `EnvConfig.runtimepod`: the limit named is set, the other is kept. Trace: `init: runtime pod resources set to cpu=<c> memory=<m>`. | Keeps both. Trace: `init: runtime pod resources not given; keeping cpu=<c> memory=<m>`. |
 | `--type` / `--remote` | Retypes the env — see below. | **Never** retypes. Trace: `init: --type not given; keeping env type "<t>"`. |
+| `--components` | Replaces `EnvConfig.deploy.components` outright, including with an empty list when the value is explicitly empty (`--components ''`) — that clears a saved selection and returns deploy to the repo plan. Trace: `init: deploy components set to <a,b,…>` (or `… (cleared — deploy now follows the repo k8s.deployments plan)`). | Keeps the recorded selection. Trace: `init: deploy components not given; keeping <a,b,…>` (silent when there was none). |
 
 The `--type` default is the asymmetry that matters: a new env with no `--type` resolves to `local-agent`, but that fallback is a default, not a request, so an existing env is not moved by it.
 
@@ -400,11 +402,13 @@ helm upgrade --install … oci://ghcr.io/sophium/charts/erun-devops --version 1.
 The selection resolves by **precedence** — the first non-empty tier wins entirely; tiers do not merge:
 
 1. `--components <a,b,…>` — the explicit one-shot selection for this run.
-2. `EnvConfig.deploy.components` — the environment's saved per-machine default (the desktop app's Runtime-tab checklist writes it; see [Configuration · `deploy.components`](/reference/configuration#envconfig)).
+2. `EnvConfig.deploy.components` — the environment's saved per-machine default (`erun init --components <a,b,…>`, or the desktop app's Runtime-tab checklist; see [Configuration · `deploy.components`](/reference/configuration#envconfig)).
 3. `ProjectConfig.environments.<env>.k8s.deployments[]` — the repo deployment plan.
 4. Empty (none of the above name anything) → the runtime chart alone, which bootstraps or heals the environment.
 
 A chart deploys **iff** its component name is in the resolved selection. The runtime deploys only when the selection names a runtime alias, or when the selection is empty (tier 4) — an explicit selection that omits the runtime deploys the named components without it. `erun-powerdns` is the platform's authoritative DNS singleton; it runs the gpgsql backend against `erun-backend-postgres`, so sequence it after postgres in the plan. `erun-zitadel` is the platform's hosted IdP singleton, sequenced after postgres for the same reason (its own `zitadel` database on the shared instance); it renders one pod carrying both Zitadel core and the separate Login V2 container, a Service, and one Ingress routing `/ui/v2/login` to login and everything else to core, and it refuses to render without `zitadel.masterkeySecretName` naming an existing Secret and an auth host resolvable from the [`platform:` block](/reference/configuration#platform-block). The dry-run trace names the tier: `deploy: component selection source <tier>; deploying the runtime chart alone` (empty selection) or `deploy: component selection source <tier>; components <a, b, …>`.
+
+Tiers never merge, so a saved tier-2 selection permanently shadows a richer tier-3 plan — the same divergence a `--components` flag run once and never cleared can leave behind. Whenever the resolved source is tier 2 and the repo plan (tier 3) names components the saved set omits, a second trace line says so at normal verbosity: `deploy: saved components shadow the repo plan; plan also names <a, b, …>`. `erun init --components ''` (an explicit empty value, not an omitted flag) clears the saved selection outright and returns the environment to the plan; nothing else exists today that resets it.
 
 ### MCP-auth stickiness and the downgrade guard {#deploy-mcp-auth}
 

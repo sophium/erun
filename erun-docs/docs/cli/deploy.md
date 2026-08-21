@@ -18,7 +18,9 @@ A version is **required**: pass `--version <v>` to install a specific published 
 
 ## What gets deployed
 
-`erun deploy` is **opt-in**: it rolls out exactly the charts you select and nothing else. The selection resolves by precedence — the `--components` flag first, then the environment's saved default (set in the desktop app's Runtime tab), then the `.erun/config.yaml` deployment plan. When none of those name anything, deploy rolls out the environment's runtime chart alone, which bootstraps or heals it.
+`erun deploy` is **opt-in**: it rolls out exactly the charts you select and nothing else. The selection resolves by precedence — the `--components` flag first, then the environment's saved default (set with `erun init --components`, or from the desktop app's Runtime tab), then the `.erun/config.yaml` deployment plan. When none of those name anything, deploy rolls out the environment's runtime chart alone, which bootstraps or heals it.
+
+A saved default wins over the plan permanently, so if the plan has grown since the selection was saved, deploy keeps rolling out only the saved subset — silently, unless you're watching the trace. When that happens, deploy names what the plan asks for beyond the saved set; `erun init --components ''` clears the saved selection and returns the environment to the plan.
 
 The deployment plan also sets ordering: steps run in order, and a list within a step deploys in parallel; when the plan is absent, deploy falls back to chart-dependency-based ordering. For the full precedence rules and the plan's YAML schema, see [Configuration · `environments.<env>.k8s.deployments[]`](/reference/configuration#per-project-config) and [Agent reference · CLI flag spec · `erun deploy`](/agent-reference/cli-flags#erun-deploy).
 
