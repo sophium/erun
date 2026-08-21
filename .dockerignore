@@ -42,6 +42,10 @@ __debug_bin*
 /erun-ui/frontend/node_modules
 /erun-ui/frontend/dist
 /erun-ui/frontend/wailsjs
+/erun-ui/playwright/node_modules
+/erun-ui/playwright/test-results
+/erun-ui/playwright/playwright-report
+/erun-ui/.golangci-cache
 
 # Docs site dependencies and build outputs. The erun-docs image runs
 # `yarn install` + `yarn build` inside its Dockerfile, so these are
