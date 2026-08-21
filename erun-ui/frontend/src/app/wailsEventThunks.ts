@@ -10,6 +10,7 @@ import type {
   EnvActivityPayload,
   EnvironmentInitializedPayload,
   EnvStatusPayload,
+  OrchestratorShellActivityPayload,
   TerminalExitSelections,
 } from './model';
 import {
@@ -28,6 +29,7 @@ import { openSelection, selectTerminalTab, startInitialDeploySelection } from '.
 import { setAIBusyForEnv, setAIBusyForSession } from './slices/aiActivitySlice';
 import { setDoctorAll } from './slices/doctorSlice';
 import { setEnvActivityForEnv, setEnvStatusForEnv } from './slices/envStatusSlice';
+import { setShellActivityForSession } from './slices/orchestratorShellActivitySlice';
 import { appendReconnectLine } from './slices/reviewSlice';
 import {
   clearPendingOpenAfterDeploy,
@@ -70,6 +72,28 @@ export const handleAIActivity =
     }
     const key = selectionKey({ tenant, environment });
     dispatch(setAIBusyForEnv({ key, busy: payload.busy }));
+  };
+
+// handleOrchestratorShellActivity surfaces that an orchestrator has a
+// background shell running even after its own turn has gone idle (#1068) —
+// the case a plain busy spinner cannot show, since backgrounding a shell is
+// what lets the turn end without waiting for it.
+export const handleOrchestratorShellActivity =
+  (payload: OrchestratorShellActivityPayload): AppThunk =>
+  (dispatch) => {
+    if (payload.sessionId <= 0) {
+      return;
+    }
+    dispatch(
+      setShellActivityForSession({
+        sessionId: payload.sessionId,
+        activity: {
+          running: payload.running,
+          command: payload.command,
+          startedAtUnix: payload.startedAtUnix,
+        },
+      }),
+    );
   };
 
 // handleEnvStatus keeps the sidebar's open dot reflecting the env's real

@@ -17,6 +17,10 @@ export interface OrchestratorEnvRef {
 // seeds aiBusyBySession from this field on every fetch — see planOrchestratorBusySeed
 // — so the event and the snapshot write the same store field instead of
 // competing for it.
+//
+// `shellRunning`/`shellCommand`/`shellStartedAtUnix` are the same treatment for
+// a background shell (#1068), independent of `busy`: a shell can outlive the
+// turn that started it. See planOrchestratorShellSeed.
 export interface OrchestratorInfo {
   id: string;
   name: string;
@@ -27,6 +31,9 @@ export interface OrchestratorInfo {
   status: string;
   busy: boolean;
   transient: boolean;
+  shellRunning: boolean;
+  shellCommand: string;
+  shellStartedAtUnix: number;
 }
 
 export interface OrchestratorsState {

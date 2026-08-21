@@ -42,7 +42,7 @@ async function stubReopen(
     orchestratorId: string;
     conversationId?: string;
     resumePrompt: string;
-    alsoReopen?: string[];
+    alsoReopen?: { orchestratorId: string; conversationId?: string }[];
     notice?: string;
   },
   calls: string[],
@@ -83,9 +83,19 @@ async function stubReopen(
 }
 
 test.describe('reopening the orchestrator that was open', () => {
-  test('a plain launch lands in the orchestrator, running no prompt', async ({ app, page }) => {
+  // #1096: a plain launch must resume the exact conversation the backend
+  // resolved as live for this orchestrator, never a blind StartOrchestrator
+  // that would leave the CLI to derive (or mis-derive) a session id itself.
+  test('a plain launch resumes the recorded conversation, running no prompt', async ({
+    app,
+    page,
+  }) => {
     const calls: string[] = [];
-    await stubReopen(page, { orchestratorId: SEED_ORCHESTRATOR, resumePrompt: '' }, calls);
+    await stubReopen(
+      page,
+      { orchestratorId: SEED_ORCHESTRATOR, conversationId: 'conv-recorded', resumePrompt: '' },
+      calls,
+    );
     await app.reboot();
 
     // The restored orchestrator owns the pane: the strip is in orchestrator
@@ -97,8 +107,27 @@ test.describe('reopening the orchestrator that was open', () => {
     await expect(app.tabStrip.environmentMode()).toBeHidden();
     await expect(app.sidebar.orchestratorStatusDot(SEED_ORCHESTRATOR, 'running')).toBeVisible();
 
-    // Idle at the prompt: a plain launch resumes the conversation and hands it
-    // no task. The prompt-carrying call belongs to the restart hand-off alone.
+    // Resumed explicitly, idle: a plain launch resumes the recorded
+    // conversation and hands it no task. The prompt-carrying call belongs to
+    // the restart hand-off alone.
+    expect(calls).toContain('StartOrchestratorWithResume');
+    expect(calls).not.toContain('StartOrchestrator');
+  });
+
+  // #1096: when the backend has nothing safe to resume (no live session was
+  // ever recorded, or the recorded one no longer exists), it answers with no
+  // conversationId — and the launch must start the orchestrator fresh rather
+  // than resuming whatever the frontend, or the CLI, would otherwise guess.
+  test('with no recorded conversation the launch starts the orchestrator fresh', async ({
+    app,
+    page,
+  }) => {
+    const calls: string[] = [];
+    await stubReopen(page, { orchestratorId: SEED_ORCHESTRATOR, resumePrompt: '' }, calls);
+    await app.reboot();
+
+    await expect(app.tabStrip.orchestratorMode()).toBeVisible();
+    await expect(app.tabStrip.tab(SEED_ORCHESTRATOR)).toHaveAttribute('aria-selected', 'true');
     expect(calls).toContain('StartOrchestrator');
     expect(calls).not.toContain('StartOrchestratorWithResume');
   });
@@ -123,21 +152,29 @@ test.describe('reopening the orchestrator that was open', () => {
 
   // A hand-off the backend refuses — the orchestrator was re-scoped, or the
   // conversation that asked can no longer be identified — must never be silent.
-  // The orchestrator still reopens, idle, and the reason is on screen beside the
-  // orchestrator list, where the operator acts on it. Which hand-offs get refused
-  // is the Go side's call (erun-ui/app_restart_test.go); what only the rendered
-  // app can show is that a refusal is visible and runs no task.
-  test('a refused hand-off reopens idle and says why', async ({ app, page }) => {
+  // The orchestrator still reopens idle, resuming its own recorded conversation
+  // rather than the one the refused hand-off named, and the reason is on screen
+  // beside the orchestrator list, where the operator acts on it. Which hand-offs
+  // get refused is the Go side's call (erun-ui/app_restart_test.go); what only
+  // the rendered app can show is that a refusal is visible and runs no task.
+  test('a refused hand-off reopens idle, resuming its own conversation, and says why', async ({
+    app,
+    page,
+  }) => {
     const calls: string[] = [];
     const notice =
       'Reopened pw-orch without continuing its task: its environments changed (was pw/alpha, now pw/beta). ' +
       'Check RESUME-NOTE.pw-orch.md in the orchestrators working directory before telling it to carry on.';
-    await stubReopen(page, { orchestratorId: SEED_ORCHESTRATOR, resumePrompt: '', notice }, calls);
+    await stubReopen(
+      page,
+      { orchestratorId: SEED_ORCHESTRATOR, conversationId: 'conv-own', resumePrompt: '', notice },
+      calls,
+    );
     await app.reboot();
 
     await expect(app.sidebar.orchestratorsAlert()).toContainText(notice);
-    expect(calls).toContain('StartOrchestrator');
-    expect(calls).not.toContain('StartOrchestratorWithResume');
+    expect(calls).toContain('StartOrchestratorWithResume');
+    expect(calls).not.toContain('StartOrchestrator');
   });
 
   // Several orchestrators can restart at once and only one owns the pane, so
@@ -208,7 +245,12 @@ test.describe('restoring every orchestrator that was open', () => {
     const owner = runningOrchestratorInfo(SEED_ORCHESTRATOR_2, RESTORED_SESSION_ID + 1);
     await stubReopen(
       page,
-      { orchestratorId: SEED_ORCHESTRATOR_2, resumePrompt: '', alsoReopen: [SEED_ORCHESTRATOR] },
+      {
+        orchestratorId: SEED_ORCHESTRATOR_2,
+        conversationId: 'conv-owner',
+        resumePrompt: '',
+        alsoReopen: [{ orchestratorId: SEED_ORCHESTRATOR, conversationId: 'conv-also' }],
+      },
       calls,
       { [SEED_ORCHESTRATOR]: runningOrchestrator, [SEED_ORCHESTRATOR_2]: owner },
     );
@@ -226,10 +268,10 @@ test.describe('restoring every orchestrator that was open', () => {
     await expect(app.tabStrip.tab(SEED_ORCHESTRATOR_2)).toHaveAttribute('aria-selected', 'true');
     await expect(app.tabStrip.tab(SEED_ORCHESTRATOR)).toHaveAttribute('aria-selected', 'false');
 
-    // Both were started — an idle StartOrchestrator for the one alongside, and
-    // for the pane owner too, since a plain launch (no restart hand-off) carries
-    // no prompt to auto-run.
-    expect(calls).toContain('StartOrchestrator');
-    expect(calls).not.toContain('StartOrchestratorWithResume');
+    // Both were resumed explicitly, idle, at their own recorded conversation
+    // (#1096) — the pane owner's and the one alongside it, since a plain
+    // launch (no restart hand-off) carries no prompt to auto-run.
+    expect(calls).toContain('StartOrchestratorWithResume');
+    expect(calls).not.toContain('StartOrchestrator');
   });
 });
