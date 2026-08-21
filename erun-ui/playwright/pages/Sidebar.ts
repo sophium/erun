@@ -237,6 +237,14 @@ export class Sidebar {
     return this.erunSection().getByRole('img', { name: `Orchestrator ${name} is ${state}` });
   }
 
+  // The row's busy spinner (BusyRowSpinner), rendered whenever the store's
+  // aiBusyBySession has this orchestrator's session flagged — whether that
+  // came from the ai-activity event or from the list snapshot's own busy
+  // field (#1087).
+  orchestratorBusySpinner(name: string): Locator {
+    return this.erunSection().getByRole('status', { name: `${name} is working` });
+  }
+
   // Open the orchestrator's management dialog via its "…" button. Like the env
   // edit button it is pointer-events-none until hover/focus and a hover opens
   // the IconTooltip popper that would swallow a click — so focus it and press

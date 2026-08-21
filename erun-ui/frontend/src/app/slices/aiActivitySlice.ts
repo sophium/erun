@@ -11,6 +11,14 @@ export interface AIActivityState {
   // Orchestrator sessions have no tenant/environment to key by, so their latch
   // is keyed by session id. Same event, same debounce policy — only the address
   // differs, because an orchestrator row is not an env row.
+  //
+  // Two writers feed this map, deliberately kept as one field so they cannot
+  // disagree (#1087): the ai-activity event (handleAIActivity) and
+  // loadOrchestrators seeding it from each orchestrator's own `busy` snapshot
+  // field (planOrchestratorBusySeed). The event is the fast path while a
+  // session runs; the snapshot is what makes a fetch that lands after a
+  // transition — boot, a reload, a reconnect — render the true state without
+  // having witnessed that transition.
   aiBusyBySession: Record<number, true>;
 }
 

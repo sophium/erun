@@ -67,15 +67,38 @@ func (a *App) runSessionHeartbeatPoller(stop <-chan struct{}) {
 
 // reconcileOrchestratorActivity publishes what each orchestrator said about
 // itself. The agent writes a turn-boundary report; this turns it into the
-// sidebar's spinner. Emitted only on change, so a quiet orchestrator costs one
-// file read per tick and no events.
+// sidebar's spinner.
+//
+// It re-emits every tick, busy or not, rather than only when the state
+// changes (#1087). The spinner used to be lit exclusively by the one
+// false→true transition, and orchestratorInfo — the snapshot the frontend
+// boots and re-renders from — carried no busy flag at all, so anything that
+// lost that single event (a remount after the transition, a window reopen, a
+// listener that attached a beat late, one dropped event on a days-old
+// process) left the row reading "idle" for however long the rest of the turn
+// ran, which for a long turn is tens of minutes or more. At a 15s tick over a
+// handful of orchestrators the extra events are inexpensive, and they make a
+// dropped or mistimed one self-heal within one tick instead of staying wrong
+// until the busy state itself next changes. session.aiBusy is still recorded
+// on every pass — that is the other half of the fix: it is what
+// orchestratorInfoFor now reads into orchestratorInfo.Busy, so a snapshot
+// (ListOrchestrators, runningOrchestratorInfo) carries the true state
+// directly instead of depending solely on this event ever reaching the
+// frontend's listener.
+//
+// The environment rows (recordAIActivity and friends in terminal_sessions.go)
+// have this exact same latent hazard — their busy signal is event-only too,
+// with no equivalent snapshot field — and are only masked by traffic: an
+// env's busy state churns often enough in practice that a missed transition
+// is quickly followed by another. That is luck, not a difference in design.
+// Don't copy the env path's event-only shape when touching it later; fix it
+// the same way this one was fixed instead.
 func (a *App) reconcileOrchestratorActivity() {
 	now := time.Now()
 	a.mu.Lock()
 	type row struct {
 		id     string
 		serial int
-		busy   bool
 		alive  bool
 	}
 	rows := make([]row, 0, len(a.orchestrators))
@@ -91,7 +114,6 @@ func (a *App) reconcileOrchestratorActivity() {
 		rows = append(rows, row{
 			id:     id,
 			serial: session.serial,
-			busy:   session.aiBusy,
 			alive:  managed != nil && !managed.closed,
 		})
 	}
@@ -100,9 +122,6 @@ func (a *App) reconcileOrchestratorActivity() {
 	for _, r := range rows {
 		activity, ok := readOrchestratorActivity(r.id, now, r.alive)
 		busy := ok && activity.Busy
-		if busy == r.busy {
-			continue
-		}
 		a.mu.Lock()
 		if session := a.orchestrators[r.id]; session != nil {
 			session.aiBusy = busy

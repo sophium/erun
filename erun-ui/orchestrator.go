@@ -48,8 +48,12 @@ type orchestratorSession struct {
 	name           string
 	envs           []eruncommon.OrchestratorEnvConfig
 	startedAt      time.Time
-	// aiBusy is the last turn-boundary report published to the sidebar, kept so
-	// the poller emits only on change rather than every tick.
+	// aiBusy is the last turn-boundary report the poller observed. It is what
+	// orchestratorInfoFor's Busy field reads for every snapshot this session
+	// appears in (ListOrchestrators, runningOrchestratorInfo, ...), so a fresh
+	// mount or reconnect renders the true state directly rather than depending
+	// on having witnessed the ai-activity event that last changed it. See
+	// reconcileOrchestratorActivity in session_heartbeat.go.
 	aiBusy bool
 }
 
@@ -78,6 +82,12 @@ type orchestratorEnvInfo struct {
 }
 
 // orchestratorInfo is the JSON-safe view the frontend renders and attaches to.
+// Busy carries the same signal as the ai-activity event this orchestrator's
+// SessionID is keyed by, so a snapshot fetched after a busy transition — a
+// fresh mount, a window reopen, a reconnecting listener — renders the true
+// state without having had to witness that event. The frontend seeds its
+// event-keyed store from this field on every fetch (loadOrchestrators) rather
+// than keeping a second source of truth; see aiActivitySlice.ts.
 type orchestratorInfo struct {
 	ID           string                `json:"id"`
 	Name         string                `json:"name"`
@@ -86,6 +96,7 @@ type orchestratorInfo struct {
 	Directories  []string              `json:"directories"`
 	SessionID    int                   `json:"sessionId"`
 	Status       string                `json:"status"`
+	Busy         bool                  `json:"busy"`
 	Transient    bool                  `json:"transient"`
 }
 
@@ -703,7 +714,7 @@ func directoriesFromEnvs(envs []eruncommon.OrchestratorEnvConfig) []string {
 	return out
 }
 
-func orchestratorInfoFor(id, name string, envs []eruncommon.OrchestratorEnvConfig, status string, sessionID int, transient bool) orchestratorInfo {
+func orchestratorInfoFor(id, name string, envs []eruncommon.OrchestratorEnvConfig, status string, sessionID int, busy, transient bool) orchestratorInfo {
 	return orchestratorInfo{
 		ID:           id,
 		Name:         name,
@@ -712,6 +723,7 @@ func orchestratorInfoFor(id, name string, envs []eruncommon.OrchestratorEnvConfi
 		Directories:  directoriesFromEnvs(envs),
 		SessionID:    sessionID,
 		Status:       status,
+		Busy:         busy,
 		Transient:    transient,
 	}
 }
@@ -1035,7 +1047,7 @@ func (a *App) CreateOrchestrator(name string, envs []orchestratorEnvInput) (orch
 	if err := a.saveOrchestratorConfigs(append(configs, def)); err != nil {
 		return orchestratorInfo{}, err
 	}
-	return orchestratorInfoFor(id, displayName, refs, "stopped", 0, false), nil
+	return orchestratorInfoFor(id, displayName, refs, "stopped", 0, false, false), nil
 }
 
 // UpdateOrchestrator edits an existing orchestrator's linked environments and
@@ -1072,11 +1084,13 @@ func (a *App) UpdateOrchestrator(id, name string, envs []orchestratorEnvInput) (
 	}
 	status := "stopped"
 	sessionID := 0
+	busy := false
 	if info, ok := a.runningOrchestratorInfo(id); ok {
 		status = "running"
 		sessionID = info.SessionID
+		busy = info.Busy
 	}
-	return orchestratorInfoFor(id, displayName, refs, status, sessionID, false), nil
+	return orchestratorInfoFor(id, displayName, refs, status, sessionID, busy, false), nil
 }
 
 // StartOrchestrator spawns the session for a persisted orchestrator definition,
@@ -1164,7 +1178,7 @@ func (a *App) runningOrchestratorInfo(id string) (orchestratorInfo, bool) {
 	if session == nil || managed == nil || managed.closed {
 		return orchestratorInfo{}, false
 	}
-	return orchestratorInfoFor(session.id, session.name, session.envs, "running", session.serial, session.transient), true
+	return orchestratorInfoFor(session.id, session.name, session.envs, "running", session.serial, session.aiBusy, session.transient), true
 }
 
 // runningOrchestratorConversation returns the conversation a live session is
@@ -1318,7 +1332,7 @@ func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInf
 			log.Printf("erun-app: record open orchestrator %s: %v", id, err)
 		}
 	}
-	return orchestratorInfoFor(id, name, envs, "running", serial, transient), nil
+	return orchestratorInfoFor(id, name, envs, "running", serial, false, transient), nil
 }
 
 // ListOrchestrators merges the persisted definitions (each tagged running or
@@ -1335,13 +1349,15 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 	for _, config := range configs {
 		status := "stopped"
 		sessionID := 0
+		busy := false
 		if session := a.orchestrators[config.ID]; session != nil {
 			if managed := a.sessions[orchestratorSessionKey(config.ID)]; managed != nil && !managed.closed {
 				status = "running"
 				sessionID = session.serial
+				busy = session.aiBusy
 			}
 		}
-		out = append(out, orchestratorInfoFor(config.ID, config.Name, config.Environments, status, sessionID, false))
+		out = append(out, orchestratorInfoFor(config.ID, config.Name, config.Environments, status, sessionID, busy, false))
 		seen[config.ID] = struct{}{}
 	}
 	for id, session := range a.orchestrators {
@@ -1352,7 +1368,7 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 		if managed == nil || managed.closed {
 			continue
 		}
-		out = append(out, orchestratorInfoFor(id, session.name, session.envs, "running", session.serial, true))
+		out = append(out, orchestratorInfoFor(id, session.name, session.envs, "running", session.serial, session.aiBusy, true))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
