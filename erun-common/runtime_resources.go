@@ -30,6 +30,41 @@ const (
 	DefaultRuntimeDindRequestMemory = "1024Mi"
 )
 
+// DefaultLimitRangeDefaultRequestCPU/Memory size the namespace LimitRange's
+// defaultRequest (namespaceResourceQuotaManifest in
+// kubernetes_resource_quota.go) — the value an unsized container in the
+// namespace is assigned as its own request. Unlike the LimitRange's `default`
+// (a limit, which safely equals the namespace cap: it only bounds an unsized
+// container and costs nothing at scheduling time), a defaultRequest equal to
+// the cap turns the quota into a minimum node size — one unsized container
+// reserves the namespace's entire allowance. #1076 was exactly this: an
+// unsized init container inherited a request equal to the full quota width,
+// and Kubernetes schedules a pod on max(max(init container requests),
+// sum(container requests)), so the pod's effective request became the whole
+// quota and it could only land on a node at least that large. Sized to the
+// runtime container's own small fixed request rather than derived from the
+// cap, so an unsized container reserves little regardless of how large the
+// namespace quota is configured.
+const (
+	DefaultLimitRangeDefaultRequestCPU    = "0.25"
+	DefaultLimitRangeDefaultRequestMemory = "1024Mi"
+)
+
+// DefaultRuntimeInitContainerCPU/Memory and
+// DefaultRuntimeInitContainerRequestCPU/Memory size the runtime chart's init
+// containers (prepare-volumes, adopt-worktree, install-binfmt in
+// erun-devops/k8s/erun-devops/templates/service.yaml). Before #1076 none of
+// them declared resources of their own, so each depended entirely on the
+// namespace LimitRange's defaults. Each does a few seconds of chown, a file
+// copy, or qemu binary registration — none of it CPU- or memory-heavy — so a
+// small fixed budget, independent of the namespace cap, covers all three.
+const (
+	DefaultRuntimeInitContainerCPU           = "0.5"
+	DefaultRuntimeInitContainerMemory        = "256Mi"
+	DefaultRuntimeInitContainerRequestCPU    = "0.1"
+	DefaultRuntimeInitContainerRequestMemory = "64Mi"
+)
+
 // DefaultRuntimeHomePVCGi/DockerPVCGi/WorktreePVCGi mirror the erun-devops
 // chart's own PVC sizes (service.yaml's release-home, release-docker, and —
 // rendered only when worktreeStorage=pvc — release-worktree claims). Kept as
