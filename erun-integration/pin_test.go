@@ -93,6 +93,32 @@ func TestPin(t *testing.T) {
 		}
 	})
 
+	// #1073: a tenant's own runtimeimage tag rides the tenant's own release
+	// line, not erun's. Rewriting it to the erun target version would name a
+	// tag that line never publishes, guaranteeing an ImagePullBackOff on the
+	// very next deploy — produced by the command whose whole purpose is
+	// keeping version references consistent. pin must leave it alone and say
+	// so in the plan, so the operator is not left assuming it was covered.
+	t.Run("skips_a_tenant_runtimeimage_tag_and_says_so", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		seedDriftedPins(t, setup.Cwd, filepath.Join(setup.ConfigHome, "erun"))
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		if err := os.WriteFile(envConfigPath, append(existing, []byte("runtimeimage: ghcr.io/sophium/team-devops:old-tag\n")...), 0o644); err != nil {
+			t.Fatalf("write env config: %v", err)
+		}
+
+		result := erun.Run(t, []string{"pin", "team", "dev", "--version", "1.0.175", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "pin/skips_a_tenant_runtimeimage_tag_and_says_so", normalize.Apply(result.Combined))
+	})
+
 	// Discovery answers "what can I pin to" from the registry, so choosing a
 	// version is recognition rather than recall. Served locally: a scenario that
 	// asks a real registry measures the host.

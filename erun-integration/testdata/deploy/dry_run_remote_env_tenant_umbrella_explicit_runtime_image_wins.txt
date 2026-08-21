@@ -7,7 +7,7 @@ deploy: no local runtime chart; using published chart oci://registry.example/tes
 deploy: runtime image override registry.example/acme/hotfix-devops:<VERSION> (imageOverrides.erun-devops)
 deploy: resolved 1 spec(s)
 kubectl --context test-context get namespace team-dev -o name
-kubectl --context test-context create namespace team-dev
+deploy: namespace team-dev is created if the check above reports it missing
 kubectl --context test-context --namespace team-dev get pvc team-devops-worktree -o name
 deploy: worktree <HOME>/git/team is served by the team-devops-worktree volume; a deploy that creates that volume adopts an existing tree from the team-devops-home volume before the pod starts
 helm pull oci://registry.example/test/charts/team-devops --version <VERSION> --untar --untardir <TMP>

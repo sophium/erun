@@ -1047,6 +1047,31 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_remote_env_umbrella_ignores_stale_stock_runtimeimage", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_remote_env_umbrella_ignores_stale_tenant_runtimeimage_tag", func(t *testing.T) {
+		// #1072: the staleness guard used to fire only for a leftover pin naming
+		// the STOCK erun-devops image. A pin naming the tenant's OWN team-devops
+		// image at an older tag was honoured unconditionally forever, even though
+		// this deploy's own line already resolves the same image correctly with
+		// no override at all. The saved pin is provably redundant — it names
+		// exactly the image defaultDeployRuntimeImage would have picked, just at
+		// a stale tag — so it must be ignored and traced the same as the stock
+		// case, and the deploy must roll out the current version's tag.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"runtimeimage: registry.example/test/team-devops:old-tag\n")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-devops:1.0.51")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.51", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_umbrella_ignores_stale_tenant_runtimeimage_tag", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_remote_env_stated_chart_ignores_stale_stock_runtimeimage", func(t *testing.T) {
 		// The shared-chart half of the stale-pin migration. An env that states its
 		// runtime chart at the chart's own version is deploying a version from another
@@ -1765,6 +1790,20 @@ func TestDeploy(t *testing.T) {
 		fixture.SeedDevopsBackendCharts(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		golden.Equal(t, "deploy/saved_deploy_components_drive_selection_without_flag", normalize.Apply(result.Combined))
+	})
+
+	t.Run("saved_deploy_components_shadowing_plan_reports_what_was_lost", func(t *testing.T) {
+		// #1074: when a saved deploy.components set wins over a repo
+		// k8s.deployments plan that names more, the divergence from the reviewed
+		// plan must be visible at normal (non -vv) verbosity, naming exactly what
+		// the plan asked for beyond the saved set.
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithDeployComponents(t, setup, "team", "dev", []string{"erun-backend-postgres"})
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsBackendCharts(t, setup, "team", "dev")
+		fixture.SeedProjectK8sConfig(t, setup, "environments:\n  dev:\n    k8s:\n      deployments:\n        - [team-devops, erun-backend-postgres]\n        - erun-backend-db\n        - erun-backend-api\n")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "deploy/saved_deploy_components_shadowing_plan_reports_what_was_lost", normalize.Apply(result.Combined))
 	})
 
 	t.Run("real_run_via_stubs", func(t *testing.T) {

@@ -4,7 +4,7 @@ deploy: tenant=team environment=dev version-override=<VERSION> components=[] for
 deploy: component selection source default (runtime only); deploying the runtime chart alone
 deploy: runtime chart team-devops <VERSION> found in registry.example/test (the tenant's own umbrella)
 deploy: no local runtime chart; using published chart oci://registry.example/test/charts/team-devops version <VERSION>
-deploy: ignoring stale runtimeimage ghcr.io/sophium/erun-devops:<VERSION> on the team-devops umbrella deploy (the stock erun-devops image is not published on this version line); defaulting to the umbrella's own image
+deploy: ignoring stale runtimeimage registry.example/test/team-devops:old-tag (this deploy's own line already publishes registry.example/test/team-devops:<VERSION>; the saved pin just names an older tag); defaulting to registry.example/test/team-devops:<VERSION>
 deploy: defaulting runtime image to the team-devops chart's own image registry.example/test/team-devops:<VERSION> (imageOverrides.erun-devops)
 deploy: resolved 1 spec(s)
 kubectl --context test-context get namespace team-dev -o name

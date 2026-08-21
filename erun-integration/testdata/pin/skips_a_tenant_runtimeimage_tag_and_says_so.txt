@@ -1,0 +1,7 @@
+audit: erun pin --dry-run --version <VERSION> team dev
+could not read the published versions, so <VERSION> is pinned unverified: Get "http://<LOOPBACK>:1/token?service=ghcr.io&scope=repository:sophium/erun-devops:pull": dial tcp <LOOPBACK>:1: connect: connection refused
+pin team/dev -> <VERSION> (project root <TMP>
+  change runtime-version team/dev: <VERSION> -> <VERSION>
+  change helm-dependency team-api/Chart.yaml (erun-backend-api): <VERSION> -> <VERSION>
+  change terraform-ref terraform-team/dev/main.tf (github.com/sophium/erun.git//erun-devops/terraform-erun/modules/terraform-erun-cluster-edge?ref=<VERSION>): <VERSION> -> <VERSION>
+  skipped: runtimeimage ghcr.io/sophium/team-devops:old-tag is not the stock erun-devops image; its tag rides the tenant's own release line, not erun's, so pin leaves it alone
