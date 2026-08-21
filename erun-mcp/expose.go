@@ -15,7 +15,7 @@ type ExposeInput struct {
 	ProjectRoot  string `json:"projectRoot,omitempty" jsonschema:"project root holding the platform config (.erun/config.yaml); defaults to the runtime repo path"`
 	IP           string `json:"ip" jsonschema:"required ingress IP the per-env wildcard record points at (e.g. 127.0.0.1 for a local cluster, the public LB IP for remote)"`
 	Port         int    `json:"port,omitempty" jsonschema:"Service port to route to (default 80)"`
-	NoTLS        bool   `json:"noTls,omitempty" jsonschema:"serve http instead of https; by default the Ingress references the env's per-env wildcard cert Secret (<tenant>-<env>-wildcard-tls) so the host serves https"`
+	NoTLS        bool   `json:"noTls,omitempty" jsonschema:"serve http instead of https; https is requested by default but only takes effect when dns01TokenFile/dns01BrokerUrl/acmeEmail are all set, since nothing else provisions the env's per-env wildcard cert Secret"`
 	IngressClass string `json:"ingressClass,omitempty" jsonschema:"ingress controller class (default traefik)"`
 	TLSSecret    string `json:"tlsSecret,omitempty" jsonschema:"override the per-env wildcard cert Secret name (default <tenant>-<env>-wildcard-tls)"`
 	Preview      bool   `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
@@ -34,8 +34,9 @@ type ExposeInput struct {
 	// DNS01TokenFile/DNS01BrokerURL/ACMEEmail/ACMEServer/DNS01WebhookGroupName
 	// provision the env's per-env wildcard TLS certificate through erun's
 	// DNS-01 broker so the Ingress's wildcard TLS secret actually gets
-	// populated. Leave all empty to skip TLS provisioning (the Ingress still
-	// applies, serving the cluster's default certificate).
+	// populated. Leave any of the first three empty and the Ingress resolves
+	// to http-only instead — the same posture NoTLS asks for explicitly —
+	// rather than referencing a Secret nothing will ever populate.
 	DNS01TokenFile        string `json:"dns01TokenFile,omitempty" jsonschema:"path to a file holding the per-env DNS-01 broker token; with dns01BrokerUrl and acmeEmail, provisions a namespaced cert-manager Issuer + Certificate"`
 	DNS01BrokerURL        string `json:"dns01BrokerUrl,omitempty" jsonschema:"base URL of the DNS-01 broker the cluster's cert-manager webhook shim forwards challenges to (requires dns01TokenFile and acmeEmail)"`
 	ACMEEmail             string `json:"acmeEmail,omitempty" jsonschema:"ACME account contact email for the provisioned per-env certificate (requires dns01TokenFile and dns01BrokerUrl)"`

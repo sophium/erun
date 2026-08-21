@@ -22,7 +22,11 @@ func TestExpose(t *testing.T) {
 	})
 
 	t.Run("dry_run", func(t *testing.T) {
-		// Happy path: a platform block plus an env yields a complete expose plan with no side effects.
+		// Happy path: a platform block plus an env yields a complete expose plan
+		// with no side effects. TLS is requested by default (no --no-tls) but no
+		// DNS-01 broker flags are set, so the plan resolves to http-only and says
+		// why, rather than the Ingress claiming https with nothing to ever
+		// populate the certificate Secret.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedGitRepo(t, setup.Cwd)

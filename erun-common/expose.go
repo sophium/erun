@@ -190,7 +190,18 @@ type ExposeServiceResult struct {
 	Scheme        string `json:"scheme"`
 	IngressClass  string `json:"ingressClass"`
 	TLSSecretName string `json:"tlsSecretName,omitempty"`
-	TLSEnabled    bool   `json:"tlsEnabled"`
+	// TLSEnabled is the resolved answer, not merely the operator's request: it
+	// is true only when something will actually populate TLSSecretName.
+	// Requesting TLS (not passing --no-tls) with no DNS-01 broker configured
+	// resolves to false here, same as --no-tls itself — TLSDisabledReason says
+	// which. Writing a tls.secretName nothing provisions is the defect this
+	// distinction exists to prevent: traefik would serve its own self-signed
+	// certificate while the Ingress claimed https.
+	TLSEnabled bool `json:"tlsEnabled"`
+	// TLSDisabledReason names why TLSEnabled is false: "--no-tls" for an
+	// explicit request, or that no DNS-01 broker is configured to provision
+	// the certificate. Empty when TLSEnabled is true.
+	TLSDisabledReason string `json:"tlsDisabledReason,omitempty"`
 	// PlatformNamespace is the namespace the platform's PowerDNS singleton runs
 	// in, where the per-env wildcard record is written.
 	PlatformNamespace string `json:"platformNamespace"`
@@ -239,7 +250,10 @@ func RunExposeService(ctx Context, params ExposeServiceParams, store ExposeStore
 	dnsParams := exposeDNSParams(result)
 	ingressParams := exposeIngressParams(result)
 	tlsParams := exposeTLSParams(result, params.TLS)
-	provisionTLS := result.TLSEnabled && params.TLS.configured()
+	// TLSEnabled already means "a DNS-01 broker is configured to provision
+	// this" (resolveExposeTLSPlan), so provisioning is simply whether the
+	// resolved plan enabled TLS at all.
+	provisionTLS := result.TLSEnabled
 
 	// Trace the real commands, not synthetic verbs, so the dry-run plan is
 	// faithful to the live run.
@@ -269,7 +283,7 @@ func traceExposePlan(ctx Context, result ExposeServiceResult, dnsParams DNSRecor
 	if result.TLSEnabled {
 		ctx.Trace(fmt.Sprintf("expose: tls secret %s (namespace %s) -> https", result.TLSSecretName, result.Namespace))
 	} else {
-		ctx.Trace("expose: http-only (--no-tls)")
+		ctx.Trace(fmt.Sprintf("expose: http-only (%s)", result.TLSDisabledReason))
 	}
 	ctx.Trace(fmt.Sprintf("expose: platform powerdns namespace %s", result.PlatformNamespace))
 	ctx.TraceCommand("", "kubectl", powerDNSUpsertArgs(dnsParams)...)
@@ -428,7 +442,7 @@ func resolveExposeServicePlan(params ExposeServiceParams, store ExposeStore) (Ex
 		servicePort = defaultExposeServicePort
 	}
 	envLabel := KubernetesNamespaceName(tenant, environment)
-	tlsEnabled, ingressClass, tlsSecret, scheme := resolveExposeTLSPlan(params, envLabel)
+	tlsEnabled, ingressClass, tlsSecret, scheme, tlsDisabledReason := resolveExposeTLSPlan(params, envLabel)
 	result := ExposeServiceResult{
 		Tenant:                     tenant,
 		Environment:                environment,
@@ -446,6 +460,7 @@ func resolveExposeServicePlan(params ExposeServiceParams, store ExposeStore) (Ex
 		IngressClass:               ingressClass,
 		TLSSecretName:              tlsSecret,
 		TLSEnabled:                 tlsEnabled,
+		TLSDisabledReason:          tlsDisabledReason,
 		PlatformNamespace:          platformNamespace,
 		PlatformPowerDNSDeployment: platformPowerDNS,
 		PlatformContext:            platformContext,
@@ -502,24 +517,41 @@ func resolveExposePlatformCoordinates(params ExposeServiceParams, store ExposeSt
 }
 
 // resolveExposeTLSPlan resolves the Ingress TLS wiring: https by default,
-// referencing the env's per-env wildcard cert Secret
-// ("<tenant>-<env>-wildcard-tls" the cluster-edge module issues). No env-type
-// branching — the primitive always resolves the same way.
-func resolveExposeTLSPlan(params ExposeServiceParams, envLabel string) (tlsEnabled bool, ingressClass, tlsSecret, scheme string) {
-	tlsEnabled = !params.NoTLS
+// referencing the env's own per-env wildcard cert Secret
+// ("<tenant>-<env>-wildcard-tls", the name the DNS-01 broker path in
+// TLSCertParams provisions it under). TLS resolves to disabled — the Ingress
+// omits the tls: block and traefik serves plain http — for either of two
+// reasons: the operator asked for that explicitly (--no-tls), or nothing can
+// actually populate the secret because no DNS-01 broker is configured.
+// Writing tls.secretName regardless of whether TLSCertParams is configured is
+// exactly the defect this second case exists to prevent: the Ingress would
+// claim https while traefik falls back to its own self-signed certificate.
+// disabledReason is empty when TLS is enabled, else names which case applied,
+// for the trace and the resolved result alike. No env-type branching — the
+// primitive always resolves the same way.
+func resolveExposeTLSPlan(params ExposeServiceParams, envLabel string) (tlsEnabled bool, ingressClass, tlsSecret, scheme, disabledReason string) {
 	ingressClass = strings.TrimSpace(params.IngressClass)
 	if ingressClass == "" {
 		ingressClass = defaultExposeIngressClass
 	}
-	tlsSecret = strings.TrimSpace(params.TLSSecretName)
-	if tlsSecret == "" {
-		tlsSecret = fmt.Sprintf("%s-wildcard-tls", envLabel)
+
+	switch {
+	case params.NoTLS:
+		disabledReason = "--no-tls"
+	case !params.TLS.configured():
+		disabledReason = "no DNS-01 broker configured to provision the certificate"
 	}
+	tlsEnabled = disabledReason == ""
+
 	scheme = "http"
 	if tlsEnabled {
 		scheme = "https"
+		tlsSecret = strings.TrimSpace(params.TLSSecretName)
+		if tlsSecret == "" {
+			tlsSecret = fmt.Sprintf("%s-wildcard-tls", envLabel)
+		}
 	}
-	return tlsEnabled, ingressClass, tlsSecret, scheme
+	return tlsEnabled, ingressClass, tlsSecret, scheme, disabledReason
 }
 
 // resolvePlatformContext finds the kube context of the platform env's own
