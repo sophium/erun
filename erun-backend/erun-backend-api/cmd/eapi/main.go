@@ -70,7 +70,14 @@ func run(args []string) error {
 			PlatformNamespace:      cfg.PlatformNamespace,
 			DeployerServiceAccount: cfg.EnvDeployerServiceAccount,
 			ExposeTargetIP:         cfg.EnvExposeTargetIP,
-			ImagePullSecrets:       splitCSV(cfg.EnvDeployImagePullSecrets),
+			// The deploy Job's chained `erun expose` has no git checkout to resolve
+			// these from (#1086), so the control plane threads what it already
+			// knows for its own purposes: DNS01ServicesZone is the same services
+			// zone its DNS-01 cert issuance uses, and PlatformNamespace is where its
+			// own Jobs (and, in a self-hosted platform, the PowerDNS singleton) run.
+			ExposeServicesZone:      cfg.DNS01ServicesZone,
+			ExposePlatformNamespace: cfg.PlatformNamespace,
+			ImagePullSecrets:        splitCSV(cfg.EnvDeployImagePullSecrets),
 		},
 		Release: provision.ReleaseConfig{
 			Registry:       cfg.EnvDeployRegistry,

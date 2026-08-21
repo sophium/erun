@@ -43,11 +43,12 @@ func (w *recordingStatusWriter) UpdateProvisioningStatus(_ context.Context, _ st
 type fakeRunner struct {
 	outcome deployexec.Outcome
 	failure string
+	output  string
 	err     error
 }
 
 func (r fakeRunner) Run(context.Context, deployexec.DeployJobParams) (deployexec.Result, error) {
-	return deployexec.Result{Outcome: r.outcome, Failure: r.failure}, r.err
+	return deployexec.Result{Outcome: r.outcome, Failure: r.failure, Output: r.output}, r.err
 }
 
 func provision(t *testing.T, runner DeployRunner, status *recordingStatusWriter) error {
@@ -163,6 +164,43 @@ func TestProvisionLeavesDeployedVersionOnFailure(t *testing.T) {
 		if update.DeployedVersion != "" {
 			t.Fatalf("update[%d] recorded deployedVersion %q on a failed deploy", i, update.DeployedVersion)
 		}
+	}
+}
+
+// TestProvisionRecordsExposeErrorButStaysRunning: a deploy Job that succeeds
+// overall (deployexec's chained expose never fails the Job itself — #1086)
+// must still land the environment in `running`, with the chained expose
+// step's own failure recorded distinctly rather than as a provision failure.
+func TestProvisionRecordsExposeErrorButStaysRunning(t *testing.T) {
+	status := &recordingStatusWriter{}
+	output := "audit: erun expose --ip 203.0.113.10 --skip-if-unconfigured acme prod mcp\n" +
+		"ERUN_EXPOSE_FAILED: cannot find git project\n"
+	runner := fakeRunner{outcome: deployexec.OutcomeSucceeded, output: output}
+	if err := provisionVersion(t, runner, status, "1.2.3"); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	assertTransitions(t, status.transitions, []string{"provisioning:", "running:"})
+	last := status.updates[len(status.updates)-1]
+	if last.ExposeError != "cannot find git project" {
+		t.Fatalf("exposeError = %q, want the chained expose step's own failure", last.ExposeError)
+	}
+	if last.DeployedVersion != "1.2.3" {
+		t.Fatalf("deployedVersion = %q, want 1.2.3 despite the expose failure", last.DeployedVersion)
+	}
+}
+
+// TestProvisionLeavesExposeErrorEmptyOnCleanSuccess: no expose marker in the
+// Job's output means exposure was never attempted or fully succeeded, so
+// nothing should be recorded against it.
+func TestProvisionLeavesExposeErrorEmptyOnCleanSuccess(t *testing.T) {
+	status := &recordingStatusWriter{}
+	runner := fakeRunner{outcome: deployexec.OutcomeSucceeded, output: "==> Deployed acme/prod 1.2.3 in 4s\n"}
+	if err := provisionVersion(t, runner, status, "1.2.3"); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	last := status.updates[len(status.updates)-1]
+	if last.ExposeError != "" {
+		t.Fatalf("exposeError = %q, want empty on a clean success", last.ExposeError)
 	}
 }
 

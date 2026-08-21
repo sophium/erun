@@ -157,6 +157,12 @@ Probe artifacts the agent leaves behind during verification (injected files, man
 - Add regression tests for each release failure mode that was fixed. When a release bug is caused by ordering, missing metadata, or missing platform support, encode that contract in tests so the next release cannot regress silently.
 - When a change affects generated runtime charts or embedded templates, test both the shared template source and the concrete runtime chart when practical. Treat them as one contract.
 
+## Kubernetes RBAC For Server-Side Executors
+
+- **A role that lets helm install is not a role that lets helm wait.** `helm --wait` decides a Deployment is ready by walking Deployment → ReplicaSet → Pods. A role with full `apps/deployments` and no `apps/replicasets` installs fine and then times out on a healthy release, reporting a timeout rather than the Forbidden it swallowed. When adding or auditing a role that runs helm, enumerate the object graph helm traverses, not the objects the chart declares. (#1080, #1083)
+- **`kubectl auth can-i <verb> <resource>/<subresource>` gives false positives.** It answered `yes` for `patch deployments/scale` against a role granting only `deployments`, while the live call was Forbidden. Use `kubectl auth can-i --list --as=<sa> -n <ns>` and trust a real impersonated call over either. RBAC treats a subresource as a distinct resource. (#1080)
+- **A test that pins a role's rule list only confirms the rules somebody already thought of.** Two consecutive releases shipped a broken provisioner role while such a test passed. Prefer a test that exercises the operation and asserts it succeeds. (#1081, #1083)
+
 ## Refactoring Rules
 
 - Treat refactoring as behavior-preserving by default.

@@ -25,6 +25,12 @@ type ExposeInput struct {
 	// an Agent composing expose after deploy without knowing whether the target
 	// is a platform deployment.
 	SkipIfUnconfigured bool `json:"skipIfUnconfigured,omitempty" jsonschema:"succeed as a no-op instead of failing when the project declares no platform block"`
+	// ServicesZone/PlatformNamespace mirror the CLI's --services-zone/
+	// --platform-namespace: an explicit override for the platform coordinates
+	// expose would otherwise read from ProjectRoot, for a caller with no project
+	// to resolve.
+	ServicesZone      string `json:"servicesZone,omitempty" jsonschema:"override the platform services zone tenant hostnames live under, so expose needs no project (requires platformNamespace too)"`
+	PlatformNamespace string `json:"platformNamespace,omitempty" jsonschema:"override the namespace running the platform's PowerDNS singleton, so expose needs no project (requires servicesZone too)"`
 }
 
 func exposeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ExposeInput) (*mcp.CallToolResult, CommandOutput, error) {
@@ -50,6 +56,8 @@ func exposeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 				IngressClass:       strings.TrimSpace(input.IngressClass),
 				TLSSecretName:      strings.TrimSpace(input.TLSSecret),
 				SkipIfUnconfigured: input.SkipIfUnconfigured,
+				ServicesZone:       strings.TrimSpace(input.ServicesZone),
+				PlatformNamespace:  strings.TrimSpace(input.PlatformNamespace),
 			}, exposeStore, nil, nil)
 			return err
 		})

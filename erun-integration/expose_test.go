@@ -133,6 +133,64 @@ func TestExpose(t *testing.T) {
 		golden.Equal(t, "expose/skip_if_unconfigured_with_platform", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_platform_override_no_project", func(t *testing.T) {
+		// --services-zone/--platform-namespace supply what a project checkout
+		// would otherwise resolve, so expose runs from a directory with no git
+		// repo at all -- the shape a hosted deploy Job runs in, which has no
+		// checkout to read .erun/config.yaml from (#1086).
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"expose", "team", "dev", "api", "--ip", "203.0.113.10",
+			"--services-zone", "services.erunpaas.com", "--platform-namespace", "frs-prod", "--dry-run"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "expose/dry_run_platform_override_no_project", normalize.Apply(result.Combined))
+	})
+
+	t.Run("platform_override_requires_both", func(t *testing.T) {
+		// Half the override configured is the same as neither: expose refuses
+		// rather than resolving a plan from an incomplete pair.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"expose", "team", "dev", "api", "--ip", "203.0.113.10",
+			"--services-zone", "services.erunpaas.com", "--dry-run"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit with only --services-zone set, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "expose/platform_override_requires_both", normalize.Apply(result.Combined))
+	})
+
+	t.Run("skip_if_unconfigured_no_project", func(t *testing.T) {
+		// --skip-if-unconfigured must cover "no project at all", not just "a
+		// project with no platform block" -- the hole #1086 reported: the deploy
+		// Job's --skip-if-unconfigured could not save it because project
+		// resolution itself failed outright with "cannot find git project"
+		// before the skip decision ever ran.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"expose", "team", "dev", "api", "--ip", "127.0.0.1", "--skip-if-unconfigured", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "expose/skip_if_unconfigured_no_project", normalize.Apply(result.Combined))
+	})
+
+	t.Run("requires_project_without_override_or_skip", func(t *testing.T) {
+		// Interactive `erun expose` from a plain, non-git directory still fails
+		// fast -- the override flags and --skip-if-unconfigured are opt-in, not
+		// a silent relaxation of the default project requirement.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"expose", "team", "dev", "api", "--ip", "127.0.0.1", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit outside a git project, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "expose/requires_project_without_override_or_skip", normalize.Apply(result.Combined))
+	})
+
 	t.Run("requires_ip", func(t *testing.T) {
 		// The per-env wildcard record needs a target IP (the env's ingress IP);
 		// omitting --ip fails clearly instead of writing an empty record.

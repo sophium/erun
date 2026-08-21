@@ -73,6 +73,18 @@ type ExposeServiceParams struct {
 	// the target project is a platform deployment at all — an explicit,
 	// interactive `erun expose` still fails fast on a misconfigured project.
 	SkipIfUnconfigured bool
+	// ServicesZone and PlatformNamespace, when both set, override the platform
+	// coordinates expose would otherwise read from ProjectRoot's .erun/config.yaml
+	// (platform.serviceszone and platform.env respectively) — the PowerDNS
+	// Deployment name is then derived from PlatformNamespace the same way it is
+	// derived from platform.env. A caller that already has this information (the
+	// hosted deploy Job, which runs a sourceless container with no git checkout to
+	// resolve a project from — issue #1086) supplies it directly, the same way
+	// TargetIP already carries the operator-composed --ip rather than resolving
+	// one from a project. Left empty (the default), expose resolves the platform
+	// block from ProjectRoot exactly as it always has.
+	ServicesZone      string
+	PlatformNamespace string
 }
 
 // ExposeServiceResult is the resolved exposure plan: the public hostname, the
@@ -137,7 +149,7 @@ const defaultExposeWildcardTTL = 60
 func RunExposeService(ctx Context, params ExposeServiceParams, store ExposeStore, upsertDNSRecord DNSRecordUpserterFunc, applyIngress IngressApplierFunc) (ExposeServiceResult, error) {
 	store, upsertDNSRecord, applyIngress = normalizeExposeDependencies(store, upsertDNSRecord, applyIngress)
 
-	if params.SkipIfUnconfigured && !projectHasExposablePlatform(params.ProjectRoot) {
+	if params.SkipIfUnconfigured && !exposePlatformConfigured(params) {
 		ctx.Trace("expose: skipped, no platform block configured")
 		return ExposeServiceResult{}, nil
 	}
@@ -232,6 +244,19 @@ func validateExposeTarget(params ExposeServiceParams) (tenant, environment, serv
 	return tenant, environment, service, nil
 }
 
+// exposePlatformConfigured reports whether expose has enough platform
+// information to resolve a hostname, either from the caller's explicit
+// ServicesZone/PlatformNamespace override or from ProjectRoot's platform
+// block. SkipIfUnconfigured only asks "is this a platform deployment at all",
+// so an explicit override — which by definition names a real platform deploy —
+// always counts, with no project needed to confirm it.
+func exposePlatformConfigured(params ExposeServiceParams) bool {
+	if strings.TrimSpace(params.ServicesZone) != "" && strings.TrimSpace(params.PlatformNamespace) != "" {
+		return true
+	}
+	return projectHasExposablePlatform(params.ProjectRoot)
+}
+
 // projectHasExposablePlatform reports whether projectRoot declares enough of a
 // platform block for expose to resolve a hostname: the same three conditions
 // resolveExposeServicePlan otherwise fails on (missing block, missing base
@@ -250,21 +275,9 @@ func resolveExposeServicePlan(params ExposeServiceParams, store ExposeStore) (Ex
 	if err != nil {
 		return ExposeServiceResult{}, err
 	}
-	platform := resolveProjectPlatform(params.ProjectRoot)
-	if platform.IsZero() || strings.TrimSpace(platform.ServicesZone) == "" {
-		return ExposeServiceResult{}, fmt.Errorf("expose requires a platform block with a base domain in .erun/config.yaml (the services zone tenant hostnames live under)")
-	}
-	// Fail fast on a malformed platform block (matching deploy's contract) before
-	// deriving any hostnames or zone names from it.
-	if err := platform.Validate(); err != nil {
+	servicesZone, platformNamespace, platformPowerDNS, platformContext, err := resolveExposePlatformCoordinates(params, store)
+	if err != nil {
 		return ExposeServiceResult{}, err
-	}
-	// platform.env is optional for the deploy/PowerDNS chart (it deploys into the
-	// release namespace), but expose derives the PowerDNS pod's namespace from it
-	// to exec the DNS write. Without it the write would run `kubectl -n "" exec`
-	// and silently target the current/default namespace, so require it here.
-	if strings.TrimSpace(platform.Env) == "" {
-		return ExposeServiceResult{}, fmt.Errorf("expose requires platform.env in .erun/config.yaml (the platform environment that runs the PowerDNS singleton)")
 	}
 	envConfig, _, err := store.LoadEnvConfig(tenant, environment)
 	if err != nil {
@@ -279,11 +292,6 @@ func resolveExposeServicePlan(params ExposeServiceParams, store ExposeStore) (Ex
 		servicePort = defaultExposeServicePort
 	}
 	envLabel := KubernetesNamespaceName(tenant, environment)
-	// The PowerDNS Deployment is scoped to the platform env's tenant by its chart
-	// (<tenant>-powerdns); platform.Env is that env's "<tenant>-<env>" namespace
-	// label, so its tenant prefix gives the Deployment name the exec targets.
-	platTenant, _, _ := splitTenantEnv(platform.Env)
-	platformPowerDNS := TenantResourcePrefix(platTenant) + "-powerdns"
 	tlsEnabled, ingressClass, tlsSecret, scheme := resolveExposeTLSPlan(params, envLabel)
 	result := ExposeServiceResult{
 		Tenant:                     tenant,
@@ -292,9 +300,9 @@ func resolveExposeServicePlan(params ExposeServiceParams, store ExposeStore) (Ex
 		BackendService:             fmt.Sprintf("%s-%s", TenantResourcePrefix(tenant), service),
 		Namespace:                  envLabel,
 		KubernetesContext:          strings.TrimSpace(envConfig.KubernetesContext),
-		Hostname:                   fmt.Sprintf("%s.%s.%s", service, envLabel, platform.ServicesZone),
-		ServicesZone:               platform.ServicesZone,
-		WildcardName:               fmt.Sprintf("*.%s.%s", envLabel, platform.ServicesZone),
+		Hostname:                   fmt.Sprintf("%s.%s.%s", service, envLabel, servicesZone),
+		ServicesZone:               servicesZone,
+		WildcardName:               fmt.Sprintf("*.%s.%s", envLabel, servicesZone),
 		TargetIP:                   targetIP,
 		IngressName:                fmt.Sprintf("expose-%s", service),
 		ServicePort:                servicePort,
@@ -302,11 +310,59 @@ func resolveExposeServicePlan(params ExposeServiceParams, store ExposeStore) (Ex
 		IngressClass:               ingressClass,
 		TLSSecretName:              tlsSecret,
 		TLSEnabled:                 tlsEnabled,
-		PlatformNamespace:          normalizeNamespaceName(platform.Env),
+		PlatformNamespace:          platformNamespace,
 		PlatformPowerDNSDeployment: platformPowerDNS,
-		PlatformContext:            resolvePlatformContext(store, platform.Env),
+		PlatformContext:            platformContext,
 	}
 	return result, nil
+}
+
+// resolveExposePlatformCoordinates resolves the platform coordinates expose
+// needs — the services zone tenant hostnames live under, the namespace running
+// the platform's PowerDNS singleton, the Deployment name the DNS write execs
+// into, and (best-effort) the platform cluster's own kube context — from either
+// an explicit override or ProjectRoot's platform block. See
+// ExposeServiceParams.ServicesZone/PlatformNamespace: a caller with no project
+// to resolve (the deploy Job) supplies these directly instead.
+func resolveExposePlatformCoordinates(params ExposeServiceParams, store ExposeStore) (zone, namespace, powerDNSDeployment, platformContext string, err error) {
+	zone = strings.TrimSpace(params.ServicesZone)
+	namespace = strings.TrimSpace(params.PlatformNamespace)
+	if zone != "" || namespace != "" {
+		if zone == "" || namespace == "" {
+			return "", "", "", "", fmt.Errorf("expose requires both a services zone and a platform namespace override when either is set")
+		}
+		platTenant, _, ok := splitTenantEnv(namespace)
+		if !ok {
+			return "", "", "", "", fmt.Errorf("platform namespace override %q must be a \"<tenant>-<env>\" namespace label", namespace)
+		}
+		// No platform.env to resolve a distinct platform-cluster context from, so
+		// the DNS write falls back to kubectl's current context — correct for the
+		// single-cluster hosted deployment a deploy Job (the caller this override
+		// exists for) always runs in.
+		return zone, normalizeNamespaceName(namespace), TenantResourcePrefix(platTenant) + "-powerdns", "", nil
+	}
+
+	platform := resolveProjectPlatform(params.ProjectRoot)
+	if platform.IsZero() || strings.TrimSpace(platform.ServicesZone) == "" {
+		return "", "", "", "", fmt.Errorf("expose requires a platform block with a base domain in .erun/config.yaml (the services zone tenant hostnames live under)")
+	}
+	// Fail fast on a malformed platform block (matching deploy's contract) before
+	// deriving any hostnames or zone names from it.
+	if err := platform.Validate(); err != nil {
+		return "", "", "", "", err
+	}
+	// platform.env is optional for the deploy/PowerDNS chart (it deploys into the
+	// release namespace), but expose derives the PowerDNS pod's namespace from it
+	// to exec the DNS write. Without it the write would run `kubectl -n "" exec`
+	// and silently target the current/default namespace, so require it here.
+	if strings.TrimSpace(platform.Env) == "" {
+		return "", "", "", "", fmt.Errorf("expose requires platform.env in .erun/config.yaml (the platform environment that runs the PowerDNS singleton)")
+	}
+	// The PowerDNS Deployment is scoped to the platform env's tenant by its chart
+	// (<tenant>-powerdns); platform.Env is that env's "<tenant>-<env>" namespace
+	// label, so its tenant prefix gives the Deployment name the exec targets.
+	platTenant, _, _ := splitTenantEnv(platform.Env)
+	return platform.ServicesZone, normalizeNamespaceName(platform.Env), TenantResourcePrefix(platTenant) + "-powerdns", resolvePlatformContext(store, platform.Env), nil
 }
 
 // resolveExposeTLSPlan resolves the Ingress TLS wiring: https by default,
