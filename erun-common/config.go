@@ -566,7 +566,8 @@ func SaveERunConfig(config ERunConfig) error {
 		return ErrNoUserDataFolder
 	}
 
-	data, err := yaml.Marshal(config)
+	existing, _ := os.ReadFile(configFilePath)
+	data, err := marshalConfigPreservingUnknownFields(existing, config)
 	if err != nil {
 		return ErrFailedToSaveConfig
 	}
@@ -624,7 +625,8 @@ func SaveTenantConfig(config TenantConfig) error {
 		return ErrNoUserDataFolder
 	}
 
-	data, err := yaml.Marshal(config)
+	existing, _ := os.ReadFile(configFilePath)
+	data, err := marshalConfigPreservingUnknownFields(existing, config)
 	if err != nil {
 		return ErrFailedToSaveConfig
 	}
@@ -729,7 +731,8 @@ func SaveEnvConfig(tenant string, config EnvConfig) error {
 		return ErrNoUserDataFolder
 	}
 
-	data, err := yaml.Marshal(config)
+	existing, _ := os.ReadFile(configFilePath)
+	data, err := marshalConfigPreservingUnknownFields(existing, config)
 	if err != nil {
 		return ErrFailedToSaveConfig
 	}
@@ -834,7 +837,8 @@ func SaveProjectConfig(projectRoot string, config ProjectConfig) error {
 		return ErrFailedToSaveConfig
 	}
 
-	data, err := yaml.Marshal(config)
+	existing, _ := os.ReadFile(configFilePath)
+	data, err := marshalConfigPreservingUnknownFields(existing, config)
 	if err != nil {
 		return ErrFailedToSaveConfig
 	}

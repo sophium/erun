@@ -58,7 +58,13 @@ func newPlatformClientForAlias(ctx Context, store CloudReadStore, alias string, 
 		return nil, CloudProviderConfig{}, err
 	}
 	if provider.ERun == nil || strings.TrimSpace(provider.ERun.APIURL) == "" {
-		return nil, CloudProviderConfig{}, fmt.Errorf("erun platform alias %q has no api url configured", provider.Alias)
+		// A nil/empty ERun block on an alias whose Provider is already
+		// CloudProviderERun is not "never configured" — init always writes it
+		// together with Provider — it is incomplete: most likely truncated by a
+		// config.yaml write from a component that doesn't know this field exists
+		// (see #1075). Point at re-login rather than `cloud init`, which would
+		// read as "start over" and paper over the real defect.
+		return nil, CloudProviderConfig{}, fmt.Errorf("erun platform alias %q is incomplete (its erun api configuration is missing, likely dropped by a config write from an older erun component); run `erun cloud login %s` to restore it", provider.Alias, provider.Alias)
 	}
 	client := NewPlatformClient(provider.ERun.APIURL, func() (string, error) {
 		token, err := CloudProviderBearerToken(ctx, store, CloudBearerParams{Alias: provider.Alias}, deps)

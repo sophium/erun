@@ -464,7 +464,8 @@ func writeRuntimeYAML(ctx Context, path string, config any) error {
 	if ctx.DryRun {
 		return nil
 	}
-	data, err := yaml.Marshal(config)
+	existing, _ := os.ReadFile(path)
+	data, err := marshalConfigPreservingUnknownFields(existing, config)
 	if err != nil {
 		return ErrFailedToSaveConfig
 	}
