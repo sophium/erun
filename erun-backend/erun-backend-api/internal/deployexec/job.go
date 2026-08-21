@@ -149,7 +149,7 @@ func buildDeployJob(params DeployJobParams) *batchv1.Job {
 // in-cluster kubeconfig (entrypoint.sh's write_kubeconfig) and no
 // ~/.config/erun/<tenant>/<environment>/config.yaml for `erun deploy` to
 // resolve — a freshly-registered environment was never baked into any image,
-// so nothing on disk describes it. bootstrapDeployEnvironmentScript seeds both
+// so nothing on disk describes it. bootstrapEnvironmentScript seeds both
 // explicitly before `erun deploy` runs, keeping `deploy` itself an unchanged
 // pure primitive: the Job (this caller) supplies the environment's shape, the
 // primitive still only consumes on-disk config exactly as it always has.
@@ -159,7 +159,7 @@ func buildDeployCommand(params DeployJobParams) []string {
 		deploy = append(deploy, "--runtime-image", override)
 	}
 	deploy = append(deploy, namespaceQuotaFlags(params)...)
-	script := bootstrapDeployEnvironmentScript(params) + shellJoin(deploy)
+	script := bootstrapEnvironmentScript(params.Tenant, params.Environment) + shellJoin(deploy)
 	if ip := strings.TrimSpace(params.ExposeTargetIP); ip != "" {
 		expose := []string{"erun", "expose", params.Tenant, params.Environment, mcpExposeService, "--ip", ip, "--skip-if-unconfigured"}
 		script += " && " + shellJoin(expose)
@@ -178,14 +178,22 @@ func namespaceQuotaFlags(params DeployJobParams) []string {
 	return []string{"--max-cpu", cpu, "--max-memory", memory, "--max-storage", storage}
 }
 
-// bootstrapDeployEnvironmentScript seeds the in-cluster kubeconfig context
+// bootstrapEnvironmentScript seeds the in-cluster kubeconfig context
 // (mirroring entrypoint.sh's write_kubeconfig, from the ServiceAccount token
 // Kubernetes auto-mounts into every pod) and a minimal tenant/env config for
-// `erun deploy` to resolve, then chains the real command with `&&`. Tenant,
-// environment, and version are DNS-1123-label/semver-shaped values already
-// validated upstream (routes.decodeCreateEnvironmentInput et al.), so they are
-// safe to interpolate directly into the generated YAML.
-func bootstrapDeployEnvironmentScript(params DeployJobParams) string {
+// erun's CLI verbs to resolve, then chains the real command with `&&`. Every
+// lifecycle Job — deploy, stop, delete — sets `command`, which replaces the
+// image's entrypoint, so none of the entrypoint's usual setup runs; this is
+// the one seeding path all three share, so a Job that skips it is a caller
+// bug, not a second copy that can drift out of sync. It deliberately does not
+// carry a runtime version: nothing this seeds it for reads it back (deploy
+// gets its version from the explicit `--version` this seeds a command line
+// for, never from the config it writes), so a version here would just be a
+// second, unused place to keep in sync. Tenant and environment are
+// DNS-1123-label-shaped values already validated upstream
+// (routes.decodeCreateEnvironmentInput et al.), so they are safe to
+// interpolate directly into the generated YAML.
+func bootstrapEnvironmentScript(tenant, environment string) string {
 	return fmt.Sprintf(`set -e
 mkdir -p "$HOME/.kube"
 erun_deploy_ns="$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)"
@@ -218,9 +226,8 @@ cat > "$HOME/.config/erun/%[1]s/%[2]s/config.yaml" <<ENV_EOF
 name: %[2]s
 type: runtime
 kubernetescontext: in-cluster
-runtimeversion: %[3]s
 ENV_EOF
-`, params.Tenant, params.Environment, params.Version)
+`, tenant, environment)
 }
 
 // shellJoin renders argv as a POSIX shell command line, single-quoting every

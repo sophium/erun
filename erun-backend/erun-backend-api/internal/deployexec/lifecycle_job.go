@@ -88,6 +88,15 @@ func lifecycleJobLabels(tenant, environment string) map[string]string {
 	}
 }
 
+// buildLifecycleCommand wraps a non-interactive erun verb the same way
+// buildDeployCommand wraps `erun deploy`: seed the in-cluster kubeconfig and
+// on-disk env config first, then run the real command. Deploy composes extra
+// flags and an optional chained `erun expose`, so it builds its own `sh -c`
+// string; stop and delete need nothing beyond one command and share this.
+func buildLifecycleCommand(tenant, environment string, argv []string) []string {
+	return []string{"sh", "-c", bootstrapEnvironmentScript(tenant, environment) + shellJoin(argv)}
+}
+
 // buildStopJob's container runs a non-interactive `erun stop <tenant> <env>`.
 func buildStopJob(params StopJobParams) *batchv1.Job {
 	return &batchv1.Job{
@@ -99,7 +108,7 @@ func buildStopJob(params StopJobParams) *batchv1.Job {
 		Spec: lifecycleJobSpec(corev1.Container{
 			Name:    stopContainerName,
 			Image:   params.Image,
-			Command: []string{"erun", "stop", params.Tenant, params.Environment},
+			Command: buildLifecycleCommand(params.Tenant, params.Environment, []string{"erun", "stop", params.Tenant, params.Environment}),
 		}, params.ServiceAccount),
 	}
 }
@@ -117,7 +126,7 @@ func buildDeleteJob(params DeleteJobParams) *batchv1.Job {
 		Spec: lifecycleJobSpec(corev1.Container{
 			Name:    deleteContainerName,
 			Image:   params.Image,
-			Command: []string{"erun", "delete", params.Tenant, params.Environment, "-y"},
+			Command: buildLifecycleCommand(params.Tenant, params.Environment, []string{"erun", "delete", params.Tenant, params.Environment, "-y"}),
 		}, params.ServiceAccount),
 	}
 }

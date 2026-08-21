@@ -66,7 +66,6 @@ func assertDeployBootstrapScript(t *testing.T, command []string) {
 		"$HOME/.config/erun/acme/prod/config.yaml",
 		"type: runtime",
 		"kubernetescontext: in-cluster",
-		"runtimeversion: 1.0.149",
 		"'erun' 'deploy' 'acme' 'prod' '--version' '1.0.149'",
 	} {
 		if !strings.Contains(script, want) {

@@ -1533,7 +1533,7 @@ func TestDeploy(t *testing.T) {
 	t.Run("dry_run_remote_env_no_repo_path_deploys_published_chart", func(t *testing.T) {
 		// A control-plane-provisioned tenant with no project has no repopath at
 		// all (fixture.SeedRuntimeTenantEnvNoRepoPath mirrors the backend's
-		// bootstrapDeployEnvironmentScript seed exactly). `--runtime-image` must
+		// bootstrapEnvironmentScript seed exactly). `--runtime-image` must
 		// still install the canonical published erun-devops chart by reference:
 		// resolveOpenRepoPath must not require a repo path for a runtime env with
 		// no mounted source worktree, or this fails with "repo path is not
