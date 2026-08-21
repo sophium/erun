@@ -1370,7 +1370,7 @@ func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInf
 	// written here survives that. A transient (Investigate) session has no
 	// persisted definition to reopen, so it is deliberately not recorded.
 	if !transient {
-		if err := recordOpenOrchestrator(a.deps.orchestratorOpenPath, id, conversationID); err != nil {
+		if err := recordOpenOrchestrator(a.deps.orchestratorOpenPath, id, conversationID, orchestratorScopeOf(envs)); err != nil {
 			log.Printf("erun-app: record open orchestrator %s: %v", id, err)
 		}
 	}

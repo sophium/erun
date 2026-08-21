@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -285,7 +286,7 @@ func TestRestartHandOffStaysOneShotAndAgeBoundedOverTheDurableRecord(t *testing.
 		Environments:   []string{"frs/dev"},
 		ResumePrompt:   prompt,
 	}
-	if err := recordOpenOrchestrator(openPath, id, conversationID); err != nil {
+	if err := recordOpenOrchestrator(openPath, id, conversationID, []string{"frs/dev"}); err != nil {
 		t.Fatalf("record open orchestrator: %v", err)
 	}
 	if err := writeOrchestratorRestoreTarget(restoreDir, handOff, time.Now()); err != nil {
@@ -328,7 +329,7 @@ func TestPlainLaunchResumesTheRecordedConversationNotADerivedOne(t *testing.T) {
 	stageOrchestratorConversation(t, staleDerived)
 	liveConversation := "diverged-session-actually-running"
 	stageOrchestratorConversation(t, liveConversation)
-	if err := recordOpenOrchestrator(openPath, id, liveConversation); err != nil {
+	if err := recordOpenOrchestrator(openPath, id, liveConversation, []string{"frs/dev"}); err != nil {
 		t.Fatalf("record open orchestrator: %v", err)
 	}
 
@@ -353,7 +354,7 @@ func TestPlainLaunchStartsFreshWhenTheRecordedConversationIsGone(t *testing.T) {
 	id := createAndStartOrchestrator(t, app)
 	staleDerived := orchestratorSessionID(id)
 	stageOrchestratorConversation(t, staleDerived)
-	if err := recordOpenOrchestrator(openPath, id, "vanished-session"); err != nil {
+	if err := recordOpenOrchestrator(openPath, id, "vanished-session", []string{"frs/dev"}); err != nil {
 		t.Fatalf("record open orchestrator: %v", err)
 	}
 
@@ -388,5 +389,70 @@ func TestUpgradingFromARecordWithNoSessionIDStartsFresh(t *testing.T) {
 	}
 	if target.ConversationID == "" || target.ConversationID == staleDerived {
 		t.Fatalf("expected a fresh conversation rather than the stale derived id, got %q", target.ConversationID)
+	}
+}
+
+// The defect as actually reported: a plain restore (not a restart hand-off)
+// reopened a re-scoped orchestrator's stale conversation with no note and no
+// task — nothing at all said its environments had moved out from under it. A
+// plain reopen still resumes that conversation idle (the same
+// conservative-but-not-destructive choice a refused hand-off makes), but the
+// scope change must be visible in the notice.
+func TestPlainReopenSurfacesANoticeWhenScopeChanged(t *testing.T) {
+	app, _, _ := openStateTestApp(t)
+	defer app.shutdown(context.Background())
+
+	id := createAndStartOrchestrator(t, app)
+	liveConversation := orchestratorSessionID(id)
+	stageOrchestratorConversation(t, liveConversation)
+	if _, err := app.UpdateOrchestrator(id, "agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "laptop"}}); err != nil {
+		t.Fatalf("UpdateOrchestrator failed: %v", err)
+	}
+
+	target := app.ResolveOrchestratorToReopen()
+	if target.OrchestratorID != id {
+		t.Fatalf("expected %q to be reopened, got %q", id, target.OrchestratorID)
+	}
+	if target.ConversationID != liveConversation {
+		t.Fatalf("expected the orchestrator's own conversation to still be resumed idle, got %+v", target)
+	}
+	if target.ResumePrompt != "" {
+		t.Fatalf("expected no task delivered on a plain reopen, got %+v", target)
+	}
+	if !strings.Contains(target.Notice, "frs/dev") || !strings.Contains(target.Notice, "frs/laptop") {
+		t.Fatalf("expected the notice to name both scopes, got %q", target.Notice)
+	}
+}
+
+// The AlsoReopen case: restoring every orchestrator that was open means an
+// entry there is exactly the no-note, no-task case a re-scoped id can
+// silently resume into — the tabs that were not the reason for the restart
+// are the ones a resume prompt never reaches, so the scope check on them
+// cannot piggyback on a hand-off refusal and has to run on its own.
+func TestAlsoReopenSurfacesANoticeWhenScopeChanged(t *testing.T) {
+	app, _, _ := openStateTestApp(t)
+	defer app.shutdown(context.Background())
+
+	stale := createAndStartOrchestrator(t, app)
+	staleConversation := orchestratorSessionID(stale)
+	stageOrchestratorConversation(t, staleConversation)
+	current := createAndStartNamedOrchestrator(t, app, "other", "laptop")
+	if _, err := app.UpdateOrchestrator(stale, "agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "laptop"}}); err != nil {
+		t.Fatalf("UpdateOrchestrator failed: %v", err)
+	}
+
+	// current owns the pane (started last); stale comes back via AlsoReopen.
+	target := app.ResolveOrchestratorToReopen()
+	if target.OrchestratorID != current {
+		t.Fatalf("expected %q (started last) to own the pane, got %q", current, target.OrchestratorID)
+	}
+	if len(target.AlsoReopen) != 1 || target.AlsoReopen[0].OrchestratorID != stale {
+		t.Fatalf("expected %q to also be reopened, got %v", stale, target.AlsoReopen)
+	}
+	if target.AlsoReopen[0].ConversationID != staleConversation {
+		t.Fatalf("expected %q to still resume its own conversation idle, got %q", stale, target.AlsoReopen[0].ConversationID)
+	}
+	if !strings.Contains(target.Notice, stale) || !strings.Contains(target.Notice, "frs/dev") || !strings.Contains(target.Notice, "frs/laptop") {
+		t.Fatalf("expected the notice to name %q and both scopes, got %q", stale, target.Notice)
 	}
 }

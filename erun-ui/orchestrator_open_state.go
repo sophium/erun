@@ -51,6 +51,15 @@ const orchestratorOpenFileName = "orchestrator-open.json"
 type orchestratorOpenEntry struct {
 	OrchestratorID string `json:"orchestratorId"`
 	SessionID      string `json:"sessionId,omitempty"`
+	// Environments is the scope (sorted tenant/environment pairs, see
+	// orchestratorScopeOf) the recorded session was actually wired to when this
+	// entry was written. An orchestrator id is mutable and reusable, so restore
+	// compares this against the orchestrator's CURRENT scope: a re-scoped id must
+	// not silently resume a conversation carrying context for environments it no
+	// longer has, with nothing said about it. Empty for an entry a pre-scope-aware
+	// release wrote, which restore treats as unknown rather than a guaranteed
+	// match.
+	Environments []string `json:"environments,omitempty"`
 }
 
 type orchestratorOpenState struct {
@@ -86,7 +95,7 @@ func defaultOrchestratorOpenPath() string {
 // recent) with that conversation id if it was already there. Called every time
 // a session is spawned, so the record always names the conversation this
 // launch is actually running rather than one a restore would have to derive.
-func recordOpenOrchestrator(path, orchestratorID, sessionID string) error {
+func recordOpenOrchestrator(path, orchestratorID, sessionID string, scope []string) error {
 	orchestratorID = strings.TrimSpace(orchestratorID)
 	if path == "" || orchestratorID == "" {
 		return nil
@@ -98,7 +107,7 @@ func recordOpenOrchestrator(path, orchestratorID, sessionID string) error {
 			out = append(out, entry)
 		}
 	}
-	out = append(out, orchestratorOpenEntry{OrchestratorID: orchestratorID, SessionID: strings.TrimSpace(sessionID)})
+	out = append(out, orchestratorOpenEntry{OrchestratorID: orchestratorID, SessionID: strings.TrimSpace(sessionID), Environments: scope})
 	return writeOpenOrchestrators(path, out)
 }
 
@@ -175,7 +184,7 @@ func dedupOrchestratorEntries(entries []orchestratorOpenEntry) []orchestratorOpe
 			continue
 		}
 		seen[id] = struct{}{}
-		out = append(out, orchestratorOpenEntry{OrchestratorID: id, SessionID: strings.TrimSpace(entry.SessionID)})
+		out = append(out, orchestratorOpenEntry{OrchestratorID: id, SessionID: strings.TrimSpace(entry.SessionID), Environments: entry.Environments})
 	}
 	if len(out) == 0 {
 		return nil

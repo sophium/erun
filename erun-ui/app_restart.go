@@ -252,19 +252,24 @@ func (a *App) ResolveOrchestratorToReopen() relaunchTarget {
 			return relaunchTarget{Notice: notice}
 		}
 		owner := openEntries[len(openEntries)-1]
+		alsoRefs, alsoNotices := a.reopenRefs(removeOrchestratorEntry(openEntries, owner.OrchestratorID))
+		notices := append([]string{orchestratorScopeChangedNoticeIfAny(owner, a.currentOrchestratorScope(owner.OrchestratorID))}, alsoNotices...)
+		notices = append(notices, notice)
 		return relaunchTarget{
 			OrchestratorID: owner.OrchestratorID,
 			ConversationID: resolveReopenSessionID(owner),
-			AlsoReopen:     reopenRefs(removeOrchestratorEntry(openEntries, owner.OrchestratorID)),
-			Notice:         notice,
+			AlsoReopen:     alsoRefs,
+			Notice:         joinOrchestratorNotices(notices...),
 		}
 	}
 
+	alsoRefs, alsoNotices := a.reopenRefs(removeOrchestratorEntry(openEntries, state.OrchestratorID))
 	target := relaunchTarget{
 		OrchestratorID: state.OrchestratorID,
-		AlsoReopen:     reopenRefs(removeOrchestratorEntry(openEntries, state.OrchestratorID)),
-		Notice:         notice,
+		AlsoReopen:     alsoRefs,
+		Notice:         joinOrchestratorNotices(append(alsoNotices, notice)...),
 	}
+	entry := orchestratorEntryOrEmpty(openEntries, state.OrchestratorID)
 	if state.ResumePrompt != "" {
 		refusal := a.resumeRefusal(state)
 		if refusal == "" {
@@ -272,13 +277,19 @@ func (a *App) ResolveOrchestratorToReopen() relaunchTarget {
 			target.ResumePrompt = state.ResumePrompt
 			return target
 		}
-		target.Notice = joinOrchestratorNotices(refusal, notice)
+		// The refusal above already covers a scope mismatch (it compares the
+		// hand-off's own recorded scope against the orchestrator's current one),
+		// so the durable-record scope check below is skipped here to avoid saying
+		// the same thing twice.
+		target.Notice = joinOrchestratorNotices(refusal, target.Notice)
+	} else if n := orchestratorScopeChangedNoticeIfAny(entry, a.currentOrchestratorScope(state.OrchestratorID)); n != "" {
+		target.Notice = joinOrchestratorNotices(n, target.Notice)
 	}
 	// No prompt to deliver, or the hand-off was refused: still resume the exact
 	// conversation the durable record last saw running for this orchestrator,
 	// rather than leaving it for a re-derivation that can land on a different,
 	// older one.
-	target.ConversationID = resolveReopenSessionID(orchestratorEntryOrEmpty(openEntries, state.OrchestratorID))
+	target.ConversationID = resolveReopenSessionID(entry)
 	return target
 }
 
@@ -325,19 +336,62 @@ func removeOrchestratorEntry(entries []orchestratorOpenEntry, id string) []orche
 // reopenRefs resolves each entry's conversation the same way the pane owner's
 // is, so every orchestrator AlsoReopen names arrives at the exact conversation
 // that was really running for it rather than one the frontend would otherwise
-// have to derive.
-func reopenRefs(entries []orchestratorOpenEntry) []orchestratorReopenRef {
+// have to derive. It also collects a scope-changed notice for any entry whose
+// recorded environments no longer match: restoring every open orchestrator
+// means an AlsoReopen entry is exactly the no-note, no-task case a re-scoped
+// id can silently resume into, so it gets the same scope check as the pane
+// owner rather than a silent pass.
+func (a *App) reopenRefs(entries []orchestratorOpenEntry) ([]orchestratorReopenRef, []string) {
 	if len(entries) == 0 {
-		return nil
+		return nil, nil
 	}
 	out := make([]orchestratorReopenRef, 0, len(entries))
+	var notices []string
 	for _, entry := range entries {
 		out = append(out, orchestratorReopenRef{
 			OrchestratorID: entry.OrchestratorID,
 			ConversationID: resolveReopenSessionID(entry),
 		})
+		if n := orchestratorScopeChangedNoticeIfAny(entry, a.currentOrchestratorScope(entry.OrchestratorID)); n != "" {
+			notices = append(notices, n)
+		}
 	}
-	return out
+	return out, notices
+}
+
+// currentOrchestratorScope reads an orchestrator's scope as configured right
+// now. An error (deleted, unreadable config) reads as an empty scope, which is
+// a mismatch against any entry that recorded a non-empty one — the same
+// conservative default resolveReopenSessionID already applies to a stale or
+// absent session id.
+func (a *App) currentOrchestratorScope(id string) []string {
+	scope, err := a.orchestratorScope(id)
+	if err != nil {
+		return nil
+	}
+	return scope
+}
+
+// orchestratorScopeChangedNoticeIfAny reports, for one reopened entry, that its
+// recorded scope no longer matches the orchestrator's current one — or "" when
+// it does, or when the entry predates scope recording (Environments empty,
+// read as unknown rather than a guaranteed match).
+func orchestratorScopeChangedNoticeIfAny(entry orchestratorOpenEntry, currentScope []string) string {
+	if len(entry.Environments) == 0 || equalOrchestratorScope(entry.Environments, currentScope) {
+		return ""
+	}
+	return orchestratorScopeChangedNotice(entry.OrchestratorID, entry.Environments, currentScope)
+}
+
+// orchestratorScopeChangedNotice explains that a reopened orchestrator's
+// recorded conversation carries context for a scope it is no longer wired to.
+// It still resumes that conversation idle — see resolveReopenSessionID — so
+// this is the only thing that will tell the operator the environments
+// underneath it moved before they treat it as current.
+func orchestratorScopeChangedNotice(id string, was, now []string) string {
+	return fmt.Sprintf("Reopened %s: its environments changed since its last session (was %s, now %s). "+
+		"Its conversation may hold context for environments it is no longer wired to; check %s before treating it as current.",
+		id, describeOrchestratorScope(was), describeOrchestratorScope(now), orchestratorReturnNoteName(id))
 }
 
 // orchestratorHandoffsNotReopenedNotice names the orchestrators that restarted
