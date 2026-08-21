@@ -63,6 +63,13 @@
 {{- $dns01TsigSecretKey := default "tsig-secret" $dns01Tsig.secretKey -}}
 {{- $dns01TsigKeyName := default (printf "%s-dnsupdate" $tenant) $dns01Tsig.keyName -}}
 {{- $dns01TsigAlgorithm := default "hmac-sha256" $dns01Tsig.algorithm -}}
+{{- /* Opt-in per-env TLS certificate provisioning (#1093): riding the same
+       DNS-01 broker, so it only needs the ACME account email on top of the
+       broker config above. acmeServer/webhookGroupName default to Let's
+       Encrypt production and the webhook shim's own default group name. */ -}}
+{{- $acmeEmail := default "" $dns01.acmeEmail -}}
+{{- $acmeServer := default "" $dns01.acmeServer -}}
+{{- $dns01WebhookGroupName := default "" $dns01.webhookGroupName -}}
 {{- /* Opt-in server-side env-deploy executor (#605): the API launches an
        `erun deploy` Job per hosted env. Off by default — the API pod keeps the
        namespace `default` SA and env creation only registers the row, so
@@ -299,6 +306,15 @@ rules:
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingresses"]
     verbs: ["create", "get", "update", "patch"]
+  {{- /* The deploy Job's post-deploy `erun expose` also provisions the env's own
+         namespaced cert-manager Issuer + Certificate through the DNS-01 broker
+         (#1093), so the Ingress's wildcard TLS secretName actually gets
+         populated. Namespaced resources in the provisioned env's own namespace,
+         like everything else on this ClusterRole; update/patch ride alongside
+         create for the same idempotent-reapply reason as the Ingress above. */}}
+  - apiGroups: ["cert-manager.io"]
+    resources: ["issuers", "certificates"]
+    verbs: ["create", "get", "update", "patch"]
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["rolebindings"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
@@ -516,6 +532,18 @@ spec:
                 secretKeyRef:
                   name: {{ $dns01TsigSecretName }}
                   key: {{ $dns01TsigSecretKey }}
+            {{- if $acmeEmail }}
+            - name: ERUN_ACME_EMAIL
+              value: {{ $acmeEmail | quote }}
+            {{- end }}
+            {{- if $acmeServer }}
+            - name: ERUN_ACME_SERVER
+              value: {{ $acmeServer | quote }}
+            {{- end }}
+            {{- if $dns01WebhookGroupName }}
+            - name: ERUN_DNS01_WEBHOOK_GROUP_NAME
+              value: {{ $dns01WebhookGroupName | quote }}
+            {{- end }}
             {{- end }}
           {{- if $mcpSigningSecretName }}
           volumeMounts:

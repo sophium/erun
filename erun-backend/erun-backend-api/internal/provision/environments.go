@@ -3,12 +3,23 @@ package provision
 import (
 	"context"
 	"fmt"
+	"log"
+	"strings"
+	"time"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/deployexec"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
+
+// DNS01TokenSigner mints the per-env DNS-01 broker token deployJobParams
+// threads to the deploy Job so it can provision the env's own per-env TLS
+// Issuer+Certificate through the DNS-01 broker (#1093). Satisfied by
+// *mcptoken.Signer without this package importing it.
+type DNS01TokenSigner interface {
+	SignDNS01(tenant, environment string, now time.Time) (token, audience string, err error)
+}
 
 // EnvProvisionInput is the durable workflow input DBOS checkpoints: tenant
 // identity plus the env's non-secret deploy coordinates. No secret is carried —
@@ -79,6 +90,25 @@ type EnvDeployConfig struct {
 	// from one in a private namespace it may not look into. Empty leaves the
 	// probe unauthenticated, so it stays inconclusive and no deploy is diverted.
 	ImagePullSecrets []string
+	// MCPAuthPublicKeyPEM is the backend's own MCP-signing public key,
+	// threaded to every deploy Job as DeployJobParams.MCPAuthPublicKeyPEM so
+	// the runtime's MCP edge trusts tokens the backend mints for the console
+	// (#1084). Empty (no MCP signing key configured) leaves every deploy Job
+	// exactly as it was before this existed — the edge stays loopback-only.
+	MCPAuthPublicKeyPEM string
+	// TLSCertSigner/TLSBrokerURL/TLSWebhookGroup/ACMEEmail/ACMEServer provision
+	// the env's per-env wildcard TLS certificate through the DNS-01 broker
+	// (#1093): deployJobParams mints a per-env token with TLSCertSigner and
+	// threads it plus these coordinates to the deploy Job, which passes them to
+	// the chained `erun expose` (see deployexec.DeployJobParams). A nil signer
+	// or an empty TLSBrokerURL/ACMEEmail leaves every deploy Job exactly as it
+	// was before this existed — expose still applies the Ingress/DNS, its TLS
+	// secretName just never gets populated.
+	TLSCertSigner   DNS01TokenSigner
+	TLSBrokerURL    string
+	TLSWebhookGroup string
+	ACMEEmail       string
+	ACMEServer      string
 }
 
 // EnvProvisioner runs the durable env-deploy workflow, so a control-plane restart
@@ -156,7 +186,7 @@ func deployJobParams(config EnvDeployConfig, input EnvProvisionInput) deployexec
 		image = CanonicalRuntimeImage(config.Registry, input.Version)
 		runtimeImageOverride = image
 	}
-	return deployexec.DeployJobParams{
+	params := deployexec.DeployJobParams{
 		Tenant:                  input.Tenant,
 		Environment:             input.Environment,
 		Version:                 input.Version,
@@ -174,7 +204,32 @@ func deployJobParams(config EnvDeployConfig, input EnvProvisionInput) deployexec
 		MaxCPUMillicores:        input.MaxCPUMillicores,
 		MaxMemoryMB:             input.MaxMemoryMB,
 		MaxStorageGB:            input.MaxStorageGB,
+		MCPAuthPublicKeyPEM:     config.MCPAuthPublicKeyPEM,
 	}
+	applyTLSCertParams(&params, config, input)
+	return params
+}
+
+// applyTLSCertParams mints the per-env DNS-01 broker token and threads the
+// broker/ACME coordinates onto the deploy Job params when TLS provisioning is
+// configured (#1093). A signing failure is logged and skipped rather than
+// failing the deploy — the same best-effort posture #1086 gave exposure: a
+// missing per-env certificate leaves the env reachable over self-signed TLS
+// rather than not running at all.
+func applyTLSCertParams(params *deployexec.DeployJobParams, config EnvDeployConfig, input EnvProvisionInput) {
+	if config.TLSCertSigner == nil || strings.TrimSpace(config.TLSBrokerURL) == "" || strings.TrimSpace(config.ACMEEmail) == "" {
+		return
+	}
+	token, _, err := config.TLSCertSigner.SignDNS01(input.Tenant, input.Environment, time.Now())
+	if err != nil {
+		log.Printf("erun api: mint dns01 token for %s/%s: %v", input.Tenant, input.Environment, err)
+		return
+	}
+	params.TLSDNS01Token = token
+	params.TLSDNS01BrokerURL = config.TLSBrokerURL
+	params.TLSDNS01WebhookGroupName = config.TLSWebhookGroup
+	params.TLSACMEEmail = config.ACMEEmail
+	params.TLSACMEServer = config.ACMEServer
 }
 
 // namespaceQuotaCPUQuantity/MemoryQuantity/StorageQuantity render the tenant's

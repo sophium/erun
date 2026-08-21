@@ -409,8 +409,12 @@ func registerDeliveryTools(reg toolRegistrar, runtime RuntimeConfig) {
 	}, deleteTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "expose",
-		Description: "Expose an in-namespace Service at a stable public hostname under the platform's services zone (requires a platform block in .erun/config.yaml): ensure the per-environment wildcard DNS record points at the env's ingress IP and apply a Host-routing Ingress. Supports preview.",
+		Description: "Expose an in-namespace Service at a stable public hostname under the platform's services zone (requires a platform block in .erun/config.yaml): ensure the per-environment wildcard DNS record points at the env's ingress IP and apply a Host-routing Ingress. The Ingress references a per-env wildcard TLS Secret by default; nothing populates it unless dns01TokenFile, dns01BrokerUrl, and acmeEmail are also set, in which case it also provisions a namespaced cert-manager Issuer + Certificate through erun's DNS-01 broker. Supports preview.",
 	}, exposeTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "unexpose",
+		Description: "Remove an environment's per-env wildcard DNS record — the DNS-side counterpart to expose, run at environment teardown so records don't accumulate for environments that no longer exist. Touches only the platform DNS zone; the Ingress that referenced the record lives in the environment's own namespace and is torn down with it. Requires a platform block in .erun/config.yaml unless servicesZone and platformNamespace are both set. Supports preview.",
+	}, unexposeTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name: "pin",
 		Description: "Re-pin every erun version reference for this environment in one motion: the Terraform module ?ref, each umbrella chart's erun chart dependencies, the build-env image tag, and the environment's own runtime version. " +

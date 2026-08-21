@@ -15,6 +15,10 @@ type ExposeStore interface {
 // platform's authoritative zone via the PowerDNS API.
 type DNSRecordUpserterFunc func(params DNSRecordUpsertParams) error
 
+// DNSRecordDeleterFunc removes a single DNS record from the platform's
+// authoritative zone (#1094), symmetric with DNSRecordUpserterFunc.
+type DNSRecordDeleterFunc func(params DNSRecordDeleteParams) error
+
 // IngressApplierFunc applies the Host-routing Ingress that fronts the exposed
 // Service.
 type IngressApplierFunc func(params IngressApplyParams) error
@@ -27,6 +31,18 @@ type DNSRecordUpsertParams struct {
 	Type               string
 	TTL                int
 	Value              string
+	PlatformNamespace  string
+	PowerDNSDeployment string
+	KubernetesContext  string
+}
+
+// DNSRecordDeleteParams is the per-env wildcard A-record removal the unexpose
+// flow performs against the platform's PowerDNS singleton (#1094), symmetric
+// with DNSRecordUpsertParams.
+type DNSRecordDeleteParams struct {
+	Zone               string
+	Name               string
+	Type               string
 	PlatformNamespace  string
 	PowerDNSDeployment string
 	KubernetesContext  string
@@ -85,6 +101,67 @@ type ExposeServiceParams struct {
 	// block from ProjectRoot exactly as it always has.
 	ServicesZone      string
 	PlatformNamespace string
+	// TLS provisions the env's own per-env wildcard TLS certificate through
+	// erun's DNS-01 broker (#1093), so the wildcard Secret the Ingress above
+	// references actually gets populated. A zero value skips TLS provisioning
+	// outright: the Ingress still applies exactly as it always has.
+	TLS TLSCertParams
+}
+
+// TLSCertParams provisions a namespaced cert-manager Issuer + Certificate into
+// the env's own namespace, authorized by a per-env DNS-01 broker token that
+// only ever authorizes ACME challenge writes within that env's own subzone —
+// so one tenant's environment can never prove control of another's hostnames
+// even though every environment's certificate is issued through the same
+// central broker (see erun-backend-api/internal/dns01broker). Any field left
+// empty skips provisioning outright: expose still applies the Ingress/DNS as
+// before, the TLS secretName it references just never gets populated.
+type TLSCertParams struct {
+	// DNS01TokenPath points at a file holding the per-env broker token
+	// (mcptoken.Signer.SignDNS01) the provisioned Issuer's webhook solver
+	// presents to the broker. A path, like --mcp-auth-public-key, so the raw
+	// token never rides through a CLI flag's argv or a process listing —
+	// only read (at apply time) from the file it names.
+	DNS01TokenPath string
+	// DNS01BrokerURL is the broker's base URL the cluster's cert-manager
+	// DNS-01 webhook shim forwards challenges to.
+	DNS01BrokerURL string
+	// DNS01WebhookGroupName is the API group the webhook shim registers
+	// under. Empty defaults to "acme.erun.io", the shim's own default.
+	DNS01WebhookGroupName string
+	// ACMEEmail is the ACME account contact email. Required for provisioning
+	// to run at all — an empty value is what marks TLS as unconfigured.
+	ACMEEmail string
+	// ACMEServer is the ACME directory URL. Empty defaults to Let's Encrypt
+	// production.
+	ACMEServer string
+}
+
+func (p TLSCertParams) configured() bool {
+	return strings.TrimSpace(p.DNS01TokenPath) != "" && strings.TrimSpace(p.DNS01BrokerURL) != "" && strings.TrimSpace(p.ACMEEmail) != ""
+}
+
+const (
+	// defaultACMEServer/defaultDNS01WebhookGroupName mirror
+	// terraform-erun-cluster-edge's chart-issuer/chart-dns01-webhook defaults,
+	// so a caller that leaves them unset gets the same behavior the one-time
+	// platform edge setup does.
+	defaultACMEServer            = "https://acme-v02.api.letsencrypt.org/directory"
+	defaultDNS01WebhookGroupName = "acme.erun.io"
+)
+
+func (p TLSCertParams) acmeServer() string {
+	if s := strings.TrimSpace(p.ACMEServer); s != "" {
+		return s
+	}
+	return defaultACMEServer
+}
+
+func (p TLSCertParams) webhookGroupName() string {
+	if g := strings.TrimSpace(p.DNS01WebhookGroupName); g != "" {
+		return g
+	}
+	return defaultDNS01WebhookGroupName
 }
 
 // ExposeServiceResult is the resolved exposure plan: the public hostname, the
@@ -161,9 +238,31 @@ func RunExposeService(ctx Context, params ExposeServiceParams, store ExposeStore
 
 	dnsParams := exposeDNSParams(result)
 	ingressParams := exposeIngressParams(result)
+	tlsParams := exposeTLSParams(result, params.TLS)
+	provisionTLS := result.TLSEnabled && params.TLS.configured()
 
 	// Trace the real commands, not synthetic verbs, so the dry-run plan is
 	// faithful to the live run.
+	traceExposePlan(ctx, result, dnsParams, ingressParams)
+	if provisionTLS {
+		traceTLSCertPlan(ctx, tlsParams)
+	}
+	if ctx.DryRun {
+		return result, nil
+	}
+
+	if err := applyExposeWrites(ctx, result, dnsParams, ingressParams, upsertDNSRecord, applyIngress); err != nil {
+		return result, err
+	}
+	if provisionTLS {
+		if err := applyTLSCertPlan(tlsParams); err != nil {
+			return result, fmt.Errorf("provision tls certificate for %s: %w", tlsParams.WildcardHost, err)
+		}
+	}
+	return result, nil
+}
+
+func traceExposePlan(ctx Context, result ExposeServiceResult, dnsParams DNSRecordUpsertParams, ingressParams IngressApplyParams) {
 	ctx.Trace(fmt.Sprintf("expose: %s -> service %s.%s.svc:%d", result.Hostname, result.BackendService, result.Namespace, result.ServicePort))
 	ctx.Trace(fmt.Sprintf("expose: per-env wildcard %s A %s ttl %d (zone %s)", result.WildcardName, result.TargetIP, dnsParams.TTL, result.ServicesZone))
 	ctx.Trace(fmt.Sprintf("expose: ingress class %s", result.IngressClass))
@@ -178,23 +277,23 @@ func RunExposeService(ctx Context, params ExposeServiceParams, store ExposeStore
 	// The Ingress manifest is piped to `kubectl apply -f -` on stdin, so trace
 	// its body too — the argv alone hides the exact resource the real run applies.
 	ctx.TraceBlock("expose: ingress manifest", renderHostRoutingIngress(ingressParams))
-	if ctx.DryRun {
-		return result, nil
-	}
+}
 
-	// The Ingress lands in the target env's cluster, so require that context here.
-	// The DNS write targets the platform cluster and is left to kubectl's
-	// resolution (explicit platform context or current).
+// applyExposeWrites performs the DNS and Ingress side effects. The Ingress
+// lands in the target env's cluster, so require that context here; the DNS
+// write targets the platform cluster and is left to kubectl's resolution
+// (explicit platform context or current).
+func applyExposeWrites(ctx Context, result ExposeServiceResult, dnsParams DNSRecordUpsertParams, ingressParams IngressApplyParams, upsertDNSRecord DNSRecordUpserterFunc, applyIngress IngressApplierFunc) error {
 	if err := ctx.RequireKubernetesContext(result.KubernetesContext); err != nil {
-		return result, fmt.Errorf("expose %s/%s: %w", result.Tenant, result.Environment, err)
+		return fmt.Errorf("expose %s/%s: %w", result.Tenant, result.Environment, err)
 	}
 	if err := upsertDNSRecord(dnsParams); err != nil {
-		return result, fmt.Errorf("upsert wildcard DNS record %s: %w", result.WildcardName, err)
+		return fmt.Errorf("upsert wildcard DNS record %s: %w", result.WildcardName, err)
 	}
 	if err := applyIngress(ingressParams); err != nil {
-		return result, fmt.Errorf("apply ingress %s: %w", result.IngressName, err)
+		return fmt.Errorf("apply ingress %s: %w", result.IngressName, err)
 	}
-	return result, nil
+	return nil
 }
 
 func exposeDNSParams(result ExposeServiceResult) DNSRecordUpsertParams {
@@ -207,6 +306,43 @@ func exposeDNSParams(result ExposeServiceResult) DNSRecordUpsertParams {
 		PlatformNamespace:  result.PlatformNamespace,
 		PowerDNSDeployment: result.PlatformPowerDNSDeployment,
 		KubernetesContext:  result.PlatformContext,
+	}
+}
+
+// TLSCertApplyParams is the resolved per-env TLS provisioning plan: the
+// namespaced Issuer + Certificate + token Secret expose applies into the
+// env's own namespace when TLSCertParams is configured.
+type TLSCertApplyParams struct {
+	KubernetesContext string
+	Namespace         string
+	ServicesZone      string
+	// EnvLabel is the env's own DNS-01 subzone label ("<tenant>-<env>"),
+	// which equals Namespace but is named separately since the two describe
+	// different things (a Kubernetes namespace vs. a DNS subzone label).
+	EnvLabel string
+	// WildcardHost is the Certificate's dnsName, "*.<envLabel>.<zone>".
+	WildcardHost string
+	// SecretName is the Ingress TLS Secret this Certificate must populate.
+	SecretName      string
+	TokenSecretName string
+	IssuerName      string
+	CertificateName string
+	Cert            TLSCertParams
+}
+
+func exposeTLSParams(result ExposeServiceResult, cert TLSCertParams) TLSCertApplyParams {
+	envLabel := result.Namespace
+	return TLSCertApplyParams{
+		KubernetesContext: result.KubernetesContext,
+		Namespace:         result.Namespace,
+		ServicesZone:      result.ServicesZone,
+		EnvLabel:          envLabel,
+		WildcardHost:      result.WildcardName,
+		SecretName:        result.TLSSecretName,
+		TokenSecretName:   envLabel + "-dns01-token",
+		IssuerName:        envLabel + "-wildcard-issuer",
+		CertificateName:   envLabel + "-wildcard",
+		Cert:              cert,
 	}
 }
 
@@ -329,7 +465,7 @@ func resolveExposePlatformCoordinates(params ExposeServiceParams, store ExposeSt
 	namespace = strings.TrimSpace(params.PlatformNamespace)
 	if zone != "" || namespace != "" {
 		if zone == "" || namespace == "" {
-			return "", "", "", "", fmt.Errorf("expose requires both a services zone and a platform namespace override when either is set")
+			return "", "", "", "", fmt.Errorf("a services zone and a platform namespace override are both required when either is set")
 		}
 		platTenant, _, ok := splitTenantEnv(namespace)
 		if !ok {
@@ -344,7 +480,7 @@ func resolveExposePlatformCoordinates(params ExposeServiceParams, store ExposeSt
 
 	platform := resolveProjectPlatform(params.ProjectRoot)
 	if platform.IsZero() || strings.TrimSpace(platform.ServicesZone) == "" {
-		return "", "", "", "", fmt.Errorf("expose requires a platform block with a base domain in .erun/config.yaml (the services zone tenant hostnames live under)")
+		return "", "", "", "", fmt.Errorf("a platform block with a base domain is required in .erun/config.yaml (the services zone tenant hostnames live under)")
 	}
 	// Fail fast on a malformed platform block (matching deploy's contract) before
 	// deriving any hostnames or zone names from it.
@@ -356,7 +492,7 @@ func resolveExposePlatformCoordinates(params ExposeServiceParams, store ExposeSt
 	// to exec the DNS write. Without it the write would run `kubectl -n "" exec`
 	// and silently target the current/default namespace, so require it here.
 	if strings.TrimSpace(platform.Env) == "" {
-		return "", "", "", "", fmt.Errorf("expose requires platform.env in .erun/config.yaml (the platform environment that runs the PowerDNS singleton)")
+		return "", "", "", "", fmt.Errorf("platform.env is required in .erun/config.yaml (the platform environment that runs the PowerDNS singleton)")
 	}
 	// The PowerDNS Deployment is scoped to the platform env's tenant by its chart
 	// (<tenant>-powerdns); platform.Env is that env's "<tenant>-<env>" namespace

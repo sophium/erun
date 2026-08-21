@@ -158,8 +158,9 @@ func TestProvisionRuntimeWithNoContextDescribesSingleClusterPlacement(t *testing
 	mustPlanLine(t, response.Plan, "context: deploys into this platform's own cluster (v1 single-cluster placement)", "plan missing the single-cluster placement line")
 	mustPlanLine(t, response.Plan, "register: would persist environment prod (runtime) in tenant acme referencing context ", "plan missing the register line")
 	mustPlanLine(t, response.Plan, "deploy: would helm install the erun-devops runtime chart (release acme-devops) into acme-prod", "plan missing the deploy line")
-	mustPlanLine(t, response.Plan, "auth: would wire the runtime's OIDC auth edge", "plan missing the auth-edge wiring line")
+	mustPlanLine(t, response.Plan, "auth: would inject this backend's MCP-signing public key", "plan missing the auth-edge wiring line")
 	mustPlanLine(t, response.Plan, "expose: would wire mcp.acme-prod.<services zone>", "plan missing the exposure wiring line")
+	mustPlanLine(t, response.Plan, "tls: would provision a per-env wildcard certificate", "plan missing the tls provisioning line")
 }
 
 // TestProvisionReusesExistingContext proves the existing-context path emits no cloud bootstrap argv.

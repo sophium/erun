@@ -119,21 +119,27 @@ func fileURLPathToOSPath(p string) string {
 }
 
 const (
-	// DesktopMCPPublicKeyDir is the in-pod directory the desktop's public key is
-	// mounted into by the runtime chart.
+	// DesktopMCPPublicKeyDir is the in-pod directory the local-key signer's
+	// public key is mounted into by the runtime chart — the desktop's own key
+	// for a desktop deploy, or the hosted backend's MCP-signing public key for
+	// a hosted deploy (#1084).
 	DesktopMCPPublicKeyDir  = "/etc/erun/mcp-auth"
 	desktopMCPPublicKeyFile = "desktopid.pub"
 )
 
-// DesktopMCPPublicKeyPath is the in-pod path the desktop public key is mounted
-// at — the single location the chart mount, the signer's `iss` claim, and the
-// server's trusted-issuer env all derive from, so they cannot drift.
+// DesktopMCPPublicKeyPath is the in-pod path the local-key signer's public key
+// is mounted at — the single location the chart mount, the signer's `iss`
+// claim, and the server's trusted-issuer env all derive from, so they cannot
+// drift.
 func DesktopMCPPublicKeyPath() string {
 	return DesktopMCPPublicKeyDir + "/" + desktopMCPPublicKeyFile
 }
 
-// DesktopMCPIssuer is the `file://` issuer the desktop stamps in its tokens and
-// the MCP server is configured to trust for a desktop deployment.
+// DesktopMCPIssuer is the fixed `file://` issuer every local-key-signed MCP
+// token carries and the MCP server is configured to trust: the desktop signs
+// with it directly, and the hosted backend signs with it too when minting
+// per-env tokens on the console's behalf (mcptoken.Signer) — same mechanism,
+// two signers, one issuer. Despite the name, this is not desktop-only.
 func DesktopMCPIssuer() string {
 	return FileIssuer(DesktopMCPPublicKeyPath())
 }
@@ -172,8 +178,9 @@ func SignMCPToken(privatePEM []byte, claims MCPTokenClaims) (string, error) {
 
 // VerifyMCPToken verifies an MCP bearer token against trustedIssuer — the issuer
 // the MCP server is configured to trust, never an arbitrary issuer from the
-// token — dispatching file:// to the Ed25519 desktop path and https:// to OIDC
-// JWKS verification.
+// token — dispatching file:// to Ed25519 local-key verification (used by both
+// the desktop and a hosted backend's signer) and https:// to OIDC JWKS
+// verification.
 func VerifyMCPToken(ctx context.Context, oidc *OIDCVerifier, token, trustedIssuer, expectedAudience string, now time.Time) (MCPTokenClaims, error) {
 	trustedIssuer = strings.TrimSpace(trustedIssuer)
 	if trustedIssuer == "" {

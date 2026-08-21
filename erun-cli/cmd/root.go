@@ -160,6 +160,7 @@ func (d rootDependencies) commands() []*cobra.Command {
 		newDoctorCmd(d.resolveOpen, d.configStore, cloudDependencies(), common.CloudContextDependencies{}, runPrompt),
 		newDeleteCmd(d.configStore, runPrompt, common.DeleteKubernetesNamespace),
 		newExposeCmd(d.configStore, common.FindProjectRoot),
+		newUnexposeCmd(d.configStore, common.FindProjectRoot),
 		newTerraformCmd(d.configStore, common.FindProjectRoot),
 		newContributeCmd(common.GitCommandRunner),
 		newIdleCmd(d.configStore, d.resolveOpen),

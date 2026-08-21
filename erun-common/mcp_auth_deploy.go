@@ -32,6 +32,13 @@ func resolveMCPAuthPublicKey(path string) (string, bool, error) {
 // does not re-supply the key rethreads the env's persisted one — and turning it
 // off is explicit, so a routine version bump can never quietly downgrade a
 // publicly-reachable edge to unauthenticated.
+//
+// There is one signing mechanism here (a `file://`-issued key this function
+// injects), used by two callers: the desktop signs locally with its own key,
+// and a hosted deploy's Job injects the backend's own MCP-signing public key
+// (mcptoken.Signer) so the edge trusts tokens the backend mints for the
+// console. No key resolved (and no explicit opt-out) leaves the deploy
+// unauthenticated, matching every deploy before this existed.
 func applyMCPAuthToRuntimeSpec(ctx Context, target DeployTarget, spec *DeploySpec) error {
 	if spec == nil || spec.Deploy.ReleaseName != RuntimeReleaseName(target.Tenant) {
 		return nil
@@ -42,16 +49,7 @@ func applyMCPAuthToRuntimeSpec(ctx Context, target DeployTarget, spec *DeploySpe
 		return err
 	}
 	if ok {
-		// Desktop path: a local public key → trust a file:// issuer.
 		applyMCPAuthDeployMetadata(&spec.Deploy, pem, keyPath)
-		return nil
-	}
-	if !target.DisableMCPAuth {
-		// Hosted path: trust the tenant's registered OIDC issuer (https://). No
-		// local key — the MCP edge fetches the issuer's JWKS. Mutually exclusive
-		// with the desktop key above; empty issuer leaves the deploy
-		// unauthenticated.
-		applyMCPAuthOIDCMetadata(&spec.Deploy, spec.Target.EnvConfig.MCPAuthIssuer)
 	}
 	return nil
 }
@@ -151,7 +149,7 @@ func mcpAuthDowngradeRecovery(ctx Context, deployInput HelmDeploySpec, live live
 	const optOut = ", or pass --no-mcp-auth to turn authentication off on purpose"
 	if issuer := strings.TrimSpace(live.issuer); issuer != "" && !strings.HasPrefix(issuer, fileIssuerScheme) {
 		ctx.Trace("deploy: mcp auth: release " + deployInput.ReleaseName + " authenticates against the OIDC issuer " + issuer + "; no local key is involved")
-		return "The release authenticates against the OIDC issuer " + issuer + ", not a local key, so restore the env's mcpauthissuer instead of supplying --mcp-auth-public-key" + optOut
+		return "The release authenticates against the OIDC issuer " + issuer + ", not a local key; erun has no supported way to configure that issuer, so switch the release to the key-based path with --mcp-auth-public-key <path>" + optOut
 	}
 	secret := strings.TrimSpace(live.secretName)
 	if secret == "" {
@@ -296,21 +294,6 @@ func parseLiveMCPAuthOverride(override string) (liveMCPAuth, bool) {
 	default:
 		return liveMCPAuth{}, false
 	}
-}
-
-// applyMCPAuthOIDCMetadata configures the runtime MCP edge to trust the tenant's
-// registered OIDC issuer, with the per-env audience from the shared convention.
-// No Secret is applied (the edge verifies against the issuer's published JWKS),
-// which is why the chart mounts the desktop key only when a secretName is set.
-// A blank issuer is a no-op, leaving a non-desktop deploy unauthenticated.
-func applyMCPAuthOIDCMetadata(deployInput *HelmDeploySpec, issuer string) {
-	issuer = strings.TrimSpace(issuer)
-	if deployInput == nil || issuer == "" {
-		return
-	}
-	deployInput.MCPAuthEnabled = true
-	deployInput.MCPAuthIssuer = issuer
-	deployInput.MCPAuthAudience = MCPTokenAudience(deployInput.Tenant, deployInput.Environment)
 }
 
 // mcpAuthSecretName derives the per-release Secret that carries the desktop

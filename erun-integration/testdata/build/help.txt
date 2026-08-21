@@ -49,6 +49,7 @@ Available Commands:
   sshd        Remote SSH utilities
   stop        Stop an environment's runtime and return its capacity to the node
   terraform   Run a platform's per-env Terraform from the right folder automatically
+  unexpose    Remove an environment's per-env wildcard DNS record
   upgrade     Redeploy opted-in environments to the latest version for their channel
   version     Print build information
 

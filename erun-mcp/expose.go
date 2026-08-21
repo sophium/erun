@@ -31,6 +31,16 @@ type ExposeInput struct {
 	// to resolve.
 	ServicesZone      string `json:"servicesZone,omitempty" jsonschema:"override the platform services zone tenant hostnames live under, so expose needs no project (requires platformNamespace too)"`
 	PlatformNamespace string `json:"platformNamespace,omitempty" jsonschema:"override the namespace running the platform's PowerDNS singleton, so expose needs no project (requires servicesZone too)"`
+	// DNS01TokenFile/DNS01BrokerURL/ACMEEmail/ACMEServer/DNS01WebhookGroupName
+	// provision the env's per-env wildcard TLS certificate through erun's
+	// DNS-01 broker so the Ingress's wildcard TLS secret actually gets
+	// populated. Leave all empty to skip TLS provisioning (the Ingress still
+	// applies, serving the cluster's default certificate).
+	DNS01TokenFile        string `json:"dns01TokenFile,omitempty" jsonschema:"path to a file holding the per-env DNS-01 broker token; with dns01BrokerUrl and acmeEmail, provisions a namespaced cert-manager Issuer + Certificate"`
+	DNS01BrokerURL        string `json:"dns01BrokerUrl,omitempty" jsonschema:"base URL of the DNS-01 broker the cluster's cert-manager webhook shim forwards challenges to (requires dns01TokenFile and acmeEmail)"`
+	ACMEEmail             string `json:"acmeEmail,omitempty" jsonschema:"ACME account contact email for the provisioned per-env certificate (requires dns01TokenFile and dns01BrokerUrl)"`
+	ACMEServer            string `json:"acmeServer,omitempty" jsonschema:"ACME directory URL for the provisioned per-env certificate (default Let's Encrypt production)"`
+	DNS01WebhookGroupName string `json:"dns01WebhookGroupName,omitempty" jsonschema:"API group the cluster's cert-manager DNS-01 webhook shim registers under (default acme.erun.io)"`
 }
 
 func exposeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ExposeInput) (*mcp.CallToolResult, CommandOutput, error) {
@@ -58,6 +68,13 @@ func exposeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 				SkipIfUnconfigured: input.SkipIfUnconfigured,
 				ServicesZone:       strings.TrimSpace(input.ServicesZone),
 				PlatformNamespace:  strings.TrimSpace(input.PlatformNamespace),
+				TLS: eruncommon.TLSCertParams{
+					DNS01TokenPath:        strings.TrimSpace(input.DNS01TokenFile),
+					DNS01BrokerURL:        strings.TrimSpace(input.DNS01BrokerURL),
+					DNS01WebhookGroupName: strings.TrimSpace(input.DNS01WebhookGroupName),
+					ACMEEmail:             strings.TrimSpace(input.ACMEEmail),
+					ACMEServer:            strings.TrimSpace(input.ACMEServer),
+				},
 			}, exposeStore, nil, nil)
 			return err
 		})

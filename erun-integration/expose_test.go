@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/sophium/erun/erun-integration/internal/env"
@@ -39,6 +40,28 @@ func TestExpose(t *testing.T) {
 		fixture.SeedProjectK8sConfig(t, setup, "platform:\n  basedomain: erunpaas.com\n  env: frs-prod\n  authoritativeip: 203.0.113.10\n")
 		result := erun.Run(t, []string{"expose", "team", "dev", "api", "--ip", "203.0.113.10", "--no-tls", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		golden.Equal(t, "expose/dry_run_no_tls", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_with_tls_provisioning", func(t *testing.T) {
+		// --dns01-token-file + --dns01-broker-url + --acme-email together
+		// provision a per-env cert-manager Issuer + Certificate through the
+		// DNS-01 broker, so the wildcard TLS Secret the Ingress references
+		// actually gets populated (#1093). The token file's content never
+		// appears in the trace -- only its path.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectK8sConfig(t, setup, "platform:\n  basedomain: erunpaas.com\n  env: frs-prod\n  authoritativeip: 203.0.113.10\n")
+		tokenPath := filepath.Join(setup.Cwd, "dns01-token")
+		mustWriteFile(t, tokenPath, "test-dns01-broker-token\n")
+		result := erun.Run(t, []string{
+			"expose", "team", "dev", "api", "--ip", "203.0.113.10",
+			"--dns01-token-file", tokenPath,
+			"--dns01-broker-url", "https://api.frs-prod.services.erunpaas.com/v1/dns01",
+			"--acme-email", "admin@example.com",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "expose/dry_run_with_tls_provisioning", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_cross_cluster", func(t *testing.T) {

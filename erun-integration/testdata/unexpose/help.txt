@@ -1,0 +1,20 @@
+Removes the per-env wildcard DNS record `erun expose` created — the DNS-side counterpart to that primitive, run at environment teardown so records don't accumulate for environments that no longer exist and a later environment reusing the same name doesn't inherit a stale one. It touches only the platform DNS zone; the Ingress that referenced the record lives in the environment's own namespace and is torn down with it, so unexpose has nothing to do there. Requires a platform block in .erun/config.yaml unless --services-zone and --platform-namespace are both set. Use --dry-run to preview the action.
+
+Usage:
+  erun unexpose TENANT ENVIRONMENT [flags]
+
+Examples:
+  erun unexpose team dev
+  erun unexpose team dev --services-zone services.example.com --platform-namespace frs-prod
+
+Flags:
+      --dry-run                     Resolve and trace mutating actions without executing them.
+  -h, --help                        help for unexpose
+      --platform-namespace string   Override the namespace running the platform's PowerDNS singleton, so unexpose needs no project checkout (requires --services-zone too)
+      --services-zone string        Override the platform services zone tenant hostnames live under, so unexpose needs no project checkout (requires --platform-namespace too)
+      --skip-if-unconfigured        Succeed as a no-op instead of failing when the project declares no platform block (for scripted callers composing unexpose after another command)
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

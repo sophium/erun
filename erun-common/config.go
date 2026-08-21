@@ -155,13 +155,6 @@ type EnvConfig struct {
 	// published lookup at the runtime version, which is right whenever push
 	// published the pair together.
 	RuntimeChart string `yaml:"runtimechart,omitempty" json:"runtimeChart,omitempty"`
-	// MCPAuthIssuer is the tenant's registered OIDC issuer (an `https://` URL)
-	// the env's erun-mcp edge trusts bearer tokens from. Set on a hosted deploy
-	// so the edge authenticates the console/agent against the tenant IdP; the
-	// per-env audience is derived (MCPTokenAudience). Empty leaves a non-desktop
-	// deploy unauthenticated (loopback-only), preserving back-compat. Distinct
-	// from the desktop `file://` path, which threads a local public key instead.
-	MCPAuthIssuer string `yaml:"mcpauthissuer,omitempty" json:"mcpAuthIssuer,omitempty"`
 	// MCPAuthPublicKeyPath records the desktop public key a deploy last enabled
 	// MCP auth with, so a later redeploy that does not re-supply the key rethreads
 	// it instead of falling back to the chart default and silently turning the

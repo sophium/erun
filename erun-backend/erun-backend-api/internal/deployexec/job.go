@@ -117,6 +117,29 @@ type DeployJobParams struct {
 	MaxCPUMillicores int
 	MaxMemoryMB      int
 	MaxStorageGB     int
+	// MCPAuthPublicKeyPEM is the backend's own MCP-signing public key
+	// (mcptoken.Signer), threaded to the in-Job `erun deploy` as
+	// --mcp-auth-public-key so the runtime's MCP edge trusts tokens the backend
+	// mints for the console (#1084) — the same file://-issuer mechanism the
+	// desktop uses with its own key, not the OIDC issuer path. Empty leaves the
+	// Job's deploy command unchanged, so the edge stays loopback-only exactly as
+	// before this existed.
+	MCPAuthPublicKeyPEM string
+	// TLSDNS01Token/TLSDNS01BrokerURL/TLSDNS01WebhookGroupName/TLSACMEEmail/
+	// TLSACMEServer thread a per-env TLS certificate through erun's DNS-01
+	// broker (#1093): the deploy Job writes the token to disk and passes it to
+	// the chained `erun expose`, which provisions the env's own namespaced
+	// cert-manager Issuer + Certificate so the Ingress's wildcard TLS secret
+	// actually gets populated. All empty (the default, no DNS-01 broker
+	// configured) leaves the chained expose exactly as it was before this
+	// existed — the Ingress still references the wildcard secret, nothing
+	// provisions it. Only takes effect alongside ExposeTargetIP, since there is
+	// no Ingress to serve the cert without one.
+	TLSDNS01Token            string
+	TLSDNS01BrokerURL        string
+	TLSDNS01WebhookGroupName string
+	TLSACMEEmail             string
+	TLSACMEServer            string
 }
 
 // mcpExposeService is the logical service name the deploy Job exposes: the
@@ -175,15 +198,62 @@ func buildDeployCommand(params DeployJobParams) []string {
 		deploy = append(deploy, "--runtime-image", override)
 	}
 	deploy = append(deploy, namespaceQuotaFlags(params)...)
-	script := bootstrapEnvironmentScript(params.Tenant, params.Environment) + shellJoin(deploy)
-	if ip := strings.TrimSpace(params.ExposeTargetIP); ip != "" {
-		expose := []string{"erun", "expose", params.Tenant, params.Environment, mcpExposeService, "--ip", ip, "--skip-if-unconfigured"}
-		if zone, ns := strings.TrimSpace(params.ExposeServicesZone), strings.TrimSpace(params.ExposePlatformNamespace); zone != "" && ns != "" {
-			expose = append(expose, "--services-zone", zone, "--platform-namespace", ns)
-		}
-		script += exposeChainScript(expose)
+	script := bootstrapEnvironmentScript(params.Tenant, params.Environment)
+	if pem := strings.TrimSpace(params.MCPAuthPublicKeyPEM); pem != "" {
+		script += writeMCPAuthPublicKeyScript(pem)
+		deploy = append(deploy, "--mcp-auth-public-key", mcpAuthPublicKeyJobPath)
 	}
+	script += shellJoin(deploy)
+	script += buildExposeChain(params)
 	return []string{"sh", "-c", script}
+}
+
+// dns01TokenJobPath is where the per-env DNS-01 broker token is written inside
+// the deploy Job before the chained `erun expose --dns01-token-file` reads it.
+// Fixed, outside $HOME, for the same reasons as mcpAuthPublicKeyJobPath.
+const dns01TokenJobPath = "/tmp/erun-deploy-dns01-token"
+
+// writeDNS01TokenScript writes the token to disk via a quoted heredoc — never
+// through argv or shellJoin — so it never appears in the Job's command line or
+// a process listing.
+func writeDNS01TokenScript(token string) string {
+	return fmt.Sprintf("cat > %s <<'DNS01_TOKEN_EOF'\n%s\nDNS01_TOKEN_EOF\n", dns01TokenJobPath, strings.TrimRight(token, "\n"))
+}
+
+// buildExposeChain composes the deploy Job's chained `erun expose` step
+// (empty when ExposeTargetIP is unset), including the per-env TLS flags when
+// configured (#1093).
+func buildExposeChain(params DeployJobParams) string {
+	ip := strings.TrimSpace(params.ExposeTargetIP)
+	if ip == "" {
+		return ""
+	}
+	expose := []string{"erun", "expose", params.Tenant, params.Environment, mcpExposeService, "--ip", ip, "--skip-if-unconfigured"}
+	if zone, ns := strings.TrimSpace(params.ExposeServicesZone), strings.TrimSpace(params.ExposePlatformNamespace); zone != "" && ns != "" {
+		expose = append(expose, "--services-zone", zone, "--platform-namespace", ns)
+	}
+	tlsScript, tlsFlags := tlsExposeFlags(params)
+	expose = append(expose, tlsFlags...)
+	return tlsScript + exposeChainScript(expose)
+}
+
+// tlsExposeFlags returns the heredoc that writes the per-env DNS-01 broker
+// token to disk (empty when TLS provisioning is unconfigured) plus the flags
+// that thread it and the broker/ACME coordinates onto the chained `erun
+// expose` (#1093).
+func tlsExposeFlags(params DeployJobParams) (script string, flags []string) {
+	token, broker, email := strings.TrimSpace(params.TLSDNS01Token), strings.TrimSpace(params.TLSDNS01BrokerURL), strings.TrimSpace(params.TLSACMEEmail)
+	if token == "" || broker == "" || email == "" {
+		return "", nil
+	}
+	flags = []string{"--dns01-token-file", dns01TokenJobPath, "--dns01-broker-url", broker, "--acme-email", email}
+	if server := strings.TrimSpace(params.TLSACMEServer); server != "" {
+		flags = append(flags, "--acme-server", server)
+	}
+	if group := strings.TrimSpace(params.TLSDNS01WebhookGroupName); group != "" {
+		flags = append(flags, "--dns01-webhook-group-name", group)
+	}
+	return writeDNS01TokenScript(token), flags
 }
 
 // exposeFailureMarker prefixes the line exposeChainScript prints when the
@@ -227,6 +297,20 @@ func namespaceQuotaFlags(params DeployJobParams) []string {
 		return nil
 	}
 	return []string{"--max-cpu", cpu, "--max-memory", memory, "--max-storage", storage}
+}
+
+// mcpAuthPublicKeyJobPath is where the backend's MCP public key PEM is written
+// inside the deploy Job before `erun deploy --mcp-auth-public-key` reads it. A
+// fixed path outside $HOME so it never rides through shellJoin's single-quoting
+// (which would defeat variable expansion) and works regardless of the image's
+// HOME.
+const mcpAuthPublicKeyJobPath = "/tmp/erun-deploy-mcp-auth-public-key.pem"
+
+// writeMCPAuthPublicKeyScript writes the PEM to disk via a quoted heredoc —
+// never through argv or shellJoin — so the key never appears in the Job's
+// command line or a process listing.
+func writeMCPAuthPublicKeyScript(pem string) string {
+	return fmt.Sprintf("cat > %s <<'MCP_AUTH_PUBLIC_KEY_EOF'\n%s\nMCP_AUTH_PUBLIC_KEY_EOF\n", mcpAuthPublicKeyJobPath, strings.TrimRight(pem, "\n"))
 }
 
 // bootstrapEnvironmentScript seeds the in-cluster kubeconfig context
@@ -328,9 +412,12 @@ func NewLauncher(kube kubernetes.Interface) *Launcher {
 		// CaptureOutput: a successful deploy Job's own log is where
 		// ExposeFailureFromOutput finds the chained expose step's marker, since a
 		// best-effort expose failure never turns the Job itself into a failure.
-		runner:       jobexec.NewRunner(kube, jobexec.Options{Kind: "deploy", Container: deployContainerName, CaptureOutput: true}),
-		stopRunner:   jobexec.NewRunner(kube, jobexec.Options{Kind: "stop", Container: stopContainerName}),
-		deleteRunner: jobexec.NewRunner(kube, jobexec.Options{Kind: "delete", Container: deleteContainerName}),
+		runner:     jobexec.NewRunner(kube, jobexec.Options{Kind: "deploy", Container: deployContainerName, CaptureOutput: true}),
+		stopRunner: jobexec.NewRunner(kube, jobexec.Options{Kind: "stop", Container: stopContainerName}),
+		// CaptureOutput: a successful delete Job's own log is where
+		// UnexposeFailureFromOutput finds the chained unexpose step's marker,
+		// mirroring the deploy runner above (#1094).
+		deleteRunner: jobexec.NewRunner(kube, jobexec.Options{Kind: "delete", Container: deleteContainerName, CaptureOutput: true}),
 	}
 }
 

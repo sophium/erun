@@ -1,0 +1,2 @@
+audit: erun unexpose --dry-run --skip-if-unconfigured team dev
+unexpose: skipped, no platform block configured

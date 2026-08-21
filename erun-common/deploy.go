@@ -241,7 +241,7 @@ type HelmDeploySpec struct {
 	MCPAuthSecretName   string
 	// MCPAuthPublicKeyPath is the key's on-host location, recorded on the env
 	// after the deploy so a later redeploy rethreads the same key instead of
-	// dropping the edge back to unauthenticated. Empty on the OIDC-issuer path.
+	// dropping the edge back to unauthenticated.
 	MCPAuthPublicKeyPath string
 }
 

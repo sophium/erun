@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -10,23 +11,41 @@ import (
 // pdnsutil exec carries no connection flags and interpolates no secret.
 const powerDNSConfigDir = "/etc/pdns-shared"
 
+// powerDNSExecPrefix is shared by every pdnsutil invocation (upsert, delete):
+// the kubectl exec argv up to and including pdnsutil's --config-dir flag,
+// which is what makes pdnsutil read the shared PowerDNS config instead of its
+// own default. A second hand-written invocation without this flag is exactly
+// how the flag gets forgotten (#1094) — pdnsutil then reports the zone itself
+// as missing rather than reporting that it looked in the wrong place.
+func powerDNSExecPrefix(kubernetesContext, platformNamespace, powerDNSDeployment string) []string {
+	args := []string{}
+	if ctxName := strings.TrimSpace(kubernetesContext); ctxName != "" {
+		args = append(args, "--context", ctxName)
+	}
+	deployment := strings.TrimSpace(powerDNSDeployment)
+	if deployment == "" {
+		deployment = TenantResourcePrefix("") + "-powerdns"
+	}
+	return append(args, "-n", platformNamespace, "exec", "deploy/"+deployment, "--",
+		"pdnsutil", "--config-dir="+powerDNSConfigDir)
+}
+
 // powerDNSUpsertArgs is shared by the dry-run trace and the live exec so they stay
 // identical. Tokens pass as direct argv (no `sh -c`), so the wildcard name needs no
 // shell quoting.
 func powerDNSUpsertArgs(params DNSRecordUpsertParams) []string {
 	relName := strings.TrimSuffix(params.Name, "."+params.Zone)
-	args := []string{}
-	if ctxName := strings.TrimSpace(params.KubernetesContext); ctxName != "" {
-		args = append(args, "--context", ctxName)
-	}
-	deployment := strings.TrimSpace(params.PowerDNSDeployment)
-	if deployment == "" {
-		deployment = TenantResourcePrefix("") + "-powerdns"
-	}
-	args = append(args, "-n", params.PlatformNamespace, "exec", "deploy/"+deployment, "--",
-		"pdnsutil", "--config-dir="+powerDNSConfigDir, "replace-rrset",
-		params.Zone, relName, params.Type, strconv.Itoa(params.TTL), params.Value)
-	return args
+	args := powerDNSExecPrefix(params.KubernetesContext, params.PlatformNamespace, params.PowerDNSDeployment)
+	return append(args, "replace-rrset", params.Zone, relName, params.Type, strconv.Itoa(params.TTL), params.Value)
+}
+
+// powerDNSDeleteArgs is the delete-side counterpart to powerDNSUpsertArgs
+// (#1094), built from the same powerDNSExecPrefix so the --config-dir flag
+// can never drift between the two.
+func powerDNSDeleteArgs(params DNSRecordDeleteParams) []string {
+	relName := strings.TrimSuffix(params.Name, "."+params.Zone)
+	args := powerDNSExecPrefix(params.KubernetesContext, params.PlatformNamespace, params.PowerDNSDeployment)
+	return append(args, "delete-rrset", params.Zone, relName, params.Type)
 }
 
 // ingressApplyArgs is shared by the dry-run trace and the live exec. Reading the
@@ -49,6 +68,15 @@ func upsertPowerDNSRecord(params DNSRecordUpsertParams) error {
 	return nil
 }
 
+// deletePowerDNSRecord is live-only: RunUnexposeService short-circuits before
+// calling it, so it never runs under a dry-run.
+func deletePowerDNSRecord(params DNSRecordDeleteParams) error {
+	if out, err := Command("kubectl", powerDNSDeleteArgs(params)...).CombinedOutput(); err != nil {
+		return fmt.Errorf("kubectl exec pdnsutil delete-rrset: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // applyHostRoutingIngress is live-only: RunExposeService short-circuits before
 // calling it, so it never runs under a dry-run.
 func applyHostRoutingIngress(params IngressApplyParams) error {
@@ -58,6 +86,160 @@ func applyHostRoutingIngress(params IngressApplyParams) error {
 		return fmt.Errorf("kubectl apply ingress: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// tlsApplyArgs is shared by every TLS-provisioning apply (the token Secret,
+// the Issuer, the Certificate) — `kubectl apply -f -` takes its manifest from
+// stdin regardless of kind, so the argv is identical across all three.
+func tlsApplyArgs(context, namespace string) []string {
+	args := []string{}
+	if ctxName := strings.TrimSpace(context); ctxName != "" {
+		args = append(args, "--context", ctxName)
+	}
+	return append(args, "-n", namespace, "apply", "-f", "-")
+}
+
+// traceTLSCertPlan traces the per-env TLS provisioning plan a dry-run would
+// perform: the token Secret's apply command only (its content is a credential
+// and stays redacted, matching applyMCPAuthSecret), and the Issuer/Certificate
+// commands plus their non-secret manifests in full.
+func traceTLSCertPlan(ctx Context, params TLSCertApplyParams) {
+	args := tlsApplyArgs(params.KubernetesContext, params.Namespace)
+	ctx.Trace(fmt.Sprintf("expose: tls: dns01 token secret %s (namespace %s, token read from %s, content redacted)", params.TokenSecretName, params.Namespace, params.Cert.DNS01TokenPath))
+	ctx.TraceCommand("", "kubectl", args...)
+	ctx.Trace(fmt.Sprintf("expose: tls: namespaced issuer %s -> broker %s (subzone %s.%s)", params.IssuerName, params.Cert.DNS01BrokerURL, params.EnvLabel, params.ServicesZone))
+	ctx.TraceCommand("", "kubectl", args...)
+	ctx.TraceBlock("expose: tls: issuer manifest", renderPerEnvIssuer(params))
+	ctx.Trace(fmt.Sprintf("expose: tls: certificate %s -> secret %s", params.WildcardHost, params.SecretName))
+	ctx.TraceCommand("", "kubectl", args...)
+	ctx.TraceBlock("expose: tls: certificate manifest", renderPerEnvCertificate(params))
+}
+
+// applyTLSCertPlan is live-only: RunExposeService short-circuits before
+// calling it, so it never runs under a dry-run. Applies in dependency order —
+// the token Secret and Issuer must exist before the Certificate that
+// references them, though cert-manager would simply retry a Certificate
+// created first.
+func applyTLSCertPlan(params TLSCertApplyParams) error {
+	if err := applyDNS01TokenSecret(params); err != nil {
+		return err
+	}
+	if err := applyPerEnvIssuer(params); err != nil {
+		return err
+	}
+	return applyPerEnvCertificate(params)
+}
+
+func applyDNS01TokenSecret(params TLSCertApplyParams) error {
+	manifest, err := renderDNS01TokenSecret(params)
+	if err != nil {
+		return err
+	}
+	cmd := Command("kubectl", tlsApplyArgs(params.KubernetesContext, params.Namespace)...)
+	cmd.Stdin = strings.NewReader(manifest)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("kubectl apply dns01 token secret: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func applyPerEnvIssuer(params TLSCertApplyParams) error {
+	cmd := Command("kubectl", tlsApplyArgs(params.KubernetesContext, params.Namespace)...)
+	cmd.Stdin = strings.NewReader(renderPerEnvIssuer(params))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("kubectl apply per-env issuer: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func applyPerEnvCertificate(params TLSCertApplyParams) error {
+	cmd := Command("kubectl", tlsApplyArgs(params.KubernetesContext, params.Namespace)...)
+	cmd.Stdin = strings.NewReader(renderPerEnvCertificate(params))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("kubectl apply per-env certificate: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// renderDNS01TokenSecret reads the broker token from the file
+// TLSCertParams.DNS01TokenPath names and carries it under the key the
+// provisioned Issuer's webhook solver config references. Read at apply time
+// (never during dry-run) so the token itself never appears in a trace.
+func renderDNS01TokenSecret(params TLSCertApplyParams) (string, error) {
+	token, err := os.ReadFile(params.Cert.DNS01TokenPath)
+	if err != nil {
+		return "", fmt.Errorf("read dns01 token %s: %w", params.Cert.DNS01TokenPath, err)
+	}
+	return fmt.Sprintf(`apiVersion: v1
+kind: Secret
+metadata:
+  name: %s
+  namespace: %s
+  labels:
+    app.kubernetes.io/managed-by: erun-expose
+type: Opaque
+stringData:
+  token: %q
+`, params.TokenSecretName, params.Namespace, strings.TrimSpace(string(token))), nil
+}
+
+// renderPerEnvIssuer is a namespaced Issuer, not a cluster-scoped
+// ClusterIssuer: a Certificate can only reference an Issuer in its own
+// namespace, so this env can never use another env's issuer, and another
+// env's namespace-admin RBAC can never reach it either (#818's multi-tenant-
+// safe shape, mirrored from terraform-erun-cluster-edge's chart-issuer). The
+// selector scopes solving to this env's own subzone specifically — narrower
+// than the broker's own per-token authorization, which is the real security
+// boundary, but it means cert-manager itself never even offers this Issuer a
+// challenge outside its own env.
+func renderPerEnvIssuer(params TLSCertApplyParams) string {
+	return fmt.Sprintf(`apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: %s
+  namespace: %s
+  labels:
+    app.kubernetes.io/managed-by: erun-expose
+spec:
+  acme:
+    email: %q
+    server: %q
+    privateKeySecretRef:
+      name: %s-account-key
+    solvers:
+      - dns01:
+          webhook:
+            groupName: %q
+            solverName: powerdns-broker
+            config:
+              brokerURL: %q
+              tokenSecretRef:
+                name: %s
+                key: token
+        selector:
+          dnsZones:
+            - %q
+`, params.IssuerName, params.Namespace, params.Cert.ACMEEmail, params.Cert.acmeServer(), params.IssuerName,
+		params.Cert.webhookGroupName(), params.Cert.DNS01BrokerURL, params.TokenSecretName, params.EnvLabel+"."+params.ServicesZone)
+}
+
+func renderPerEnvCertificate(params TLSCertApplyParams) string {
+	return fmt.Sprintf(`apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: %s
+  namespace: %s
+  labels:
+    app.kubernetes.io/managed-by: erun-expose
+spec:
+  secretName: %s
+  issuerRef:
+    name: %s
+    kind: Issuer
+  commonName: %q
+  dnsNames:
+    - %q
+`, params.CertificateName, params.Namespace, params.SecretName, params.IssuerName, params.WildcardHost, params.WildcardHost)
 }
 
 func renderHostRoutingIngress(params IngressApplyParams) string {

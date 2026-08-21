@@ -203,6 +203,7 @@ var wantRegisteredTools = []string{
 	"raw",
 	"release",
 	"terraform",
+	"unexpose",
 	"upgrade",
 	"version",
 }

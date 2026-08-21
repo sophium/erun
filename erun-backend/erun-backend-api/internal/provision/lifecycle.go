@@ -114,17 +114,25 @@ func (l *EnvLifecycle) Stop(ctx context.Context, input EnvLifecycleInput) error 
 func (l *EnvLifecycle) Delete(ctx context.Context, input EnvLifecycleInput) error {
 	if strings.TrimSpace(input.RunningVersion) != "" {
 		result, err := l.runner.RunDelete(ctx, deployexec.DeleteJobParams{
-			Tenant:         input.Tenant,
-			Environment:    input.Environment,
-			Namespace:      l.config.PlatformNamespace,
-			Image:          l.image(ctx, input.Tenant, input.RunningVersion),
-			ServiceAccount: l.config.DeployerServiceAccount,
+			Tenant:                  input.Tenant,
+			Environment:             input.Environment,
+			Namespace:               l.config.PlatformNamespace,
+			Image:                   l.image(ctx, input.Tenant, input.RunningVersion),
+			ServiceAccount:          l.config.DeployerServiceAccount,
+			ExposeServicesZone:      l.config.ExposeServicesZone,
+			ExposePlatformNamespace: l.config.ExposePlatformNamespace,
 		})
 		if err != nil {
 			return err
 		}
 		if result.Outcome != deployexec.OutcomeSucceeded {
 			return fmt.Errorf("delete job %s: %s", result.Outcome, lifecycleFailureDetail(result))
+		}
+		// The environment row is about to be removed, so a failed DNS cleanup
+		// (best-effort, #1094) has nowhere to be recorded once this returns —
+		// the server log is the only place left to name it.
+		if reason := deployexec.UnexposeFailureFromOutput(result.Output); reason != "" {
+			log.Printf("erun api env lifecycle: dns cleanup for %s/%s did not succeed: %s", input.Tenant, input.Environment, reason)
 		}
 	}
 	l.recordUsage(ctx, input.EnvironmentID, model.UsageEventEnvironmentDeleted)

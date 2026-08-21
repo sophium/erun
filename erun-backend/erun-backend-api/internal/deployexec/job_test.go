@@ -211,6 +211,75 @@ func TestExposeFailureFromOutput(t *testing.T) {
 	}
 }
 
+// TestBuildDeployCommandWithMCPAuthPublicKey: the backend's own MCP-signing
+// public key is written to a fixed path via heredoc (never argv) and threaded
+// to `erun deploy` as --mcp-auth-public-key, so the runtime's MCP edge trusts
+// tokens the backend mints for the console (#1084).
+func TestBuildDeployCommandWithMCPAuthPublicKey(t *testing.T) {
+	params := testParams()
+	params.MCPAuthPublicKeyPEM = "-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n"
+	script := buildDeployCommand(params)[2]
+	if !strings.Contains(script, "cat > "+mcpAuthPublicKeyJobPath+" <<'MCP_AUTH_PUBLIC_KEY_EOF'") {
+		t.Fatalf("script %q must write the public key via heredoc", script)
+	}
+	if !strings.Contains(script, "-----BEGIN PUBLIC KEY-----") {
+		t.Fatalf("script %q must carry the key content", script)
+	}
+	want := "'--mcp-auth-public-key' '" + mcpAuthPublicKeyJobPath + "'"
+	if !strings.Contains(script, want) {
+		t.Fatalf("script %q missing %q", script, want)
+	}
+	// Empty stays exactly the plain deploy — no heredoc, no flag.
+	plain := buildDeployCommand(testParams())[2]
+	if strings.Contains(plain, "mcp-auth-public-key") {
+		t.Fatalf("script %q should not thread an empty key", plain)
+	}
+}
+
+// TestBuildDeployCommandWithTLSCertProvisioning: when the control plane mints
+// a per-env DNS-01 broker token and supplies the broker/ACME coordinates, the
+// deploy Job writes the token via heredoc and threads it plus the coordinates
+// onto the chained `erun expose` so it can provision the env's own TLS
+// Issuer+Certificate (#1093). Only takes effect alongside ExposeTargetIP.
+func TestBuildDeployCommandWithTLSCertProvisioning(t *testing.T) {
+	params := testParams()
+	params.ExposeTargetIP = "203.0.113.10"
+	params.TLSDNS01Token = "test-token"
+	params.TLSDNS01BrokerURL = "https://api.acme-platform.services.example.com/v1/dns01"
+	params.TLSACMEEmail = "admin@example.com"
+	script := buildDeployCommand(params)[2]
+	if !strings.Contains(script, "cat > "+dns01TokenJobPath+" <<'DNS01_TOKEN_EOF'") {
+		t.Fatalf("script %q must write the dns01 token via heredoc", script)
+	}
+	if !strings.Contains(script, "test-token") {
+		t.Fatalf("script %q must carry the token content", script)
+	}
+	want := "'--dns01-token-file' '" + dns01TokenJobPath + "' '--dns01-broker-url' 'https://api.acme-platform.services.example.com/v1/dns01' '--acme-email' 'admin@example.com'"
+	if !strings.Contains(script, want) {
+		t.Fatalf("script %q missing %q", script, want)
+	}
+
+	// Without ExposeTargetIP there is no chained expose to thread the TLS
+	// flags onto at all.
+	noExpose := testParams()
+	noExpose.TLSDNS01Token = "test-token"
+	noExpose.TLSDNS01BrokerURL = "https://api.example.com/v1/dns01"
+	noExpose.TLSACMEEmail = "admin@example.com"
+	noExposeScript := buildDeployCommand(noExpose)[2]
+	if strings.Contains(noExposeScript, "dns01-token-file") {
+		t.Fatalf("script %q should not thread tls flags without ExposeTargetIP", noExposeScript)
+	}
+
+	// A partial TLS config is the same as none: expose stays plain.
+	partial := testParams()
+	partial.ExposeTargetIP = "203.0.113.10"
+	partial.TLSDNS01Token = "test-token"
+	partialScript := buildDeployCommand(partial)[2]
+	if strings.Contains(partialScript, "dns01-token-file") {
+		t.Fatalf("script %q should not apply a partial tls config", partialScript)
+	}
+}
+
 // TestBuildDeployCommandQuotesArguments guards the shell-injection surface: an
 // argument carrying a single quote must stay a single shell word — the
 // canonical way a naively-quoted value breaks out of its own quoting.

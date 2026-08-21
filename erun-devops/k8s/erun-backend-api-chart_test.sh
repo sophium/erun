@@ -255,6 +255,17 @@ grep -A1 'resources: \["ingresses"\]' "${provisioner_role}" | grep -q '"update"'
 grep -A1 'resources: \["ingresses"\]' "${provisioner_role}" | grep -q '"patch"' ||
     fail "the ingresses grant must include patch, or re-exposing an already-exposed env fails"
 
+# --- 11b. the deploy Job's post-deploy `erun expose` also provisions the
+#          env's own namespaced cert-manager Issuer + Certificate through the
+#          DNS-01 broker (#1093), so the Ingress's wildcard TLS secretName
+#          actually gets populated ---
+grep -q 'resources: \["issuers", "certificates"\]' "${provisioner_role}" ||
+    fail "the env-provisioner ClusterRole must grant cert-manager.io/issuers+certificates, or the per-env TLS Issuer/Certificate apply is forbidden in every provisioned env namespace (#1093)"
+grep -A1 'resources: \["issuers", "certificates"\]' "${provisioner_role}" | grep -q '"create"' ||
+    fail "the issuers/certificates grant must include create"
+grep -A1 'resources: \["issuers", "certificates"\]' "${provisioner_role}" | grep -q '"update"' ||
+    fail "the issuers/certificates grant must include update, or re-exposing an already-exposed env fails"
+
 # --- 12. pods/exec for the PowerDNS DNS write is scoped to a
 #         namespaced Role bound in this chart's own release namespace (the
 #         platform namespace), not the cluster-wide ClusterRole above -- a
@@ -278,5 +289,28 @@ awk -v want="  name: team-env-provisioner-platform" '
 [ -s "${platform_binding}" ] || fail "the env-provisioner-platform RoleBinding must render when envDeployer is enabled"
 grep -q 'name: team-env-deployer' "${platform_binding}" ||
     fail "the env-provisioner-platform RoleBinding must bind the env-deployer ServiceAccount that the deploy Job -- and its chained erun expose -- runs as"
+
+# --- 13. per-env TLS certificate provisioning (#1093) rides the dns01 broker
+#         values block: acmeEmail/acmeServer/webhookGroupName render as env
+#         vars only when the broker itself is enabled, since the webhook shim
+#         has nothing to call without it ---
+rendered=$(render \
+    --set-string api.dns01.enabled=true \
+    --set-string api.dns01.servicesZone=services.example.com \
+    --set-string api.dns01.acmeEmail=admin@example.com \
+    --set-string api.dns01.acmeServer=https://acme-staging-v02.api.letsencrypt.org/directory \
+    --set-string api.dns01.webhookGroupName=acme.example.io)
+container "${rendered}" >"${core}"
+grep -A1 'name: ERUN_ACME_EMAIL' "${core}" | grep -q 'value: "admin@example.com"' ||
+    fail "api.dns01.acmeEmail must render as ERUN_ACME_EMAIL, or the deploy Job never mints a per-env TLS certificate (#1093)"
+grep -A1 'name: ERUN_ACME_SERVER' "${core}" | grep -q 'value: "https://acme-staging-v02.api.letsencrypt.org/directory"' ||
+    fail "api.dns01.acmeServer must render as ERUN_ACME_SERVER"
+grep -A1 'name: ERUN_DNS01_WEBHOOK_GROUP_NAME' "${core}" | grep -q 'value: "acme.example.io"' ||
+    fail "api.dns01.webhookGroupName must render as ERUN_DNS01_WEBHOOK_GROUP_NAME"
+
+rendered=$(render --set-string api.dns01.acmeEmail=admin@example.com)
+container "${rendered}" >"${core}"
+grep -q 'ERUN_ACME_EMAIL' "${core}" &&
+    fail "acmeEmail must not render when the dns01 broker itself is disabled -- there is no broker for the webhook shim to call"
 
 echo "PASS: erun-backend-api DBOS wiring"
