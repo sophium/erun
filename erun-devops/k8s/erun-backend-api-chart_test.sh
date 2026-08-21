@@ -29,9 +29,14 @@ fail() {
     exit 1
 }
 
+# --namespace pins .Release.Namespace to a known value: helm falls back to the
+# ambient kubeconfig context's namespace otherwise, which makes any assertion
+# about a chart-rendered release-namespace value (section 12 below) depend on
+# whoever's machine runs this script.
 render() {
     out="${work_root}/render.yaml"
     helm template test "${chart_dir}" \
+        --namespace test \
         --set tenant=team \
         --set environment=prod \
         "$@" >"${out}" || fail "helm template failed"
@@ -233,5 +238,45 @@ grep -A1 'resources: \["replicasets"\]' "${provisioner_role}" | grep -q '"list"'
     fail "the replicasets grant must include list, the verb helm's readiness wait issues"
 grep -A1 'resources: \["replicasets"\]' "${provisioner_role}" | grep -q '"watch"' ||
     fail "the replicasets grant must include watch"
+
+# --- 11. the deploy Job's post-deploy `erun expose` was refused twice
+#         over by RBAC the provisioner role never granted -- creating the
+#         Host-routing Ingress in the env namespace, and the `kubectl exec`
+#         DNS write against the platform's PowerDNS singleton. The ingresses
+#         grant belongs on this same ClusterRole (it is per-env, like
+#         everything else here); the pods/exec grant does not (see the next
+#         section) ---
+grep -q 'resources: \["ingresses"\]' "${provisioner_role}" ||
+    fail "the env-provisioner ClusterRole must grant networking.k8s.io/ingresses, or erun expose's Host-routing Ingress apply is forbidden in every provisioned env namespace (#1089)"
+grep -A1 'resources: \["ingresses"\]' "${provisioner_role}" | grep -q '"create"' ||
+    fail "the ingresses grant must include create"
+grep -A1 'resources: \["ingresses"\]' "${provisioner_role}" | grep -q '"update"' ||
+    fail "the ingresses grant must include update, or re-exposing an already-exposed env fails"
+grep -A1 'resources: \["ingresses"\]' "${provisioner_role}" | grep -q '"patch"' ||
+    fail "the ingresses grant must include patch, or re-exposing an already-exposed env fails"
+
+# --- 12. pods/exec for the PowerDNS DNS write is scoped to a
+#         namespaced Role bound in this chart's own release namespace (the
+#         platform namespace), not the cluster-wide ClusterRole above -- a
+#         cluster-wide grant would hand the deployer exec into every pod in
+#         every provisioned tenant namespace ---
+platform_role="${work_root}/platform-role.yaml"
+role "${rendered}" team-env-provisioner-platform >"${platform_role}"
+[ -s "${platform_role}" ] || fail "the env-provisioner-platform Role must render when envDeployer is enabled"
+grep -q 'namespace: test' "${platform_role}" ||
+    fail "the env-provisioner-platform Role must render in this chart's own release namespace, not a tenant env namespace"
+grep -q 'resources: \["pods/exec"\]' "${platform_role}" ||
+    fail "the env-provisioner-platform Role must grant pods/exec, or erun expose's PowerDNS DNS write is forbidden (#1089)"
+grep -A1 'resources: \["pods/exec"\]' "${platform_role}" | grep -q '"create"' ||
+    fail "the pods/exec grant must include create, the verb kubectl exec issues"
+
+platform_binding="${work_root}/platform-binding.yaml"
+awk -v want="  name: team-env-provisioner-platform" '
+    BEGIN{RS="\n---\n"}
+    $0 ~ /(^|\n)kind: RoleBinding(\n|$)/ && $0 ~ ("(^|\n)" want "(\n|$)") {print}
+' "${rendered}" >"${platform_binding}"
+[ -s "${platform_binding}" ] || fail "the env-provisioner-platform RoleBinding must render when envDeployer is enabled"
+grep -q 'name: team-env-deployer' "${platform_binding}" ||
+    fail "the env-provisioner-platform RoleBinding must bind the env-deployer ServiceAccount that the deploy Job -- and its chained erun expose -- runs as"
 
 echo "PASS: erun-backend-api DBOS wiring"

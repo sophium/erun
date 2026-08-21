@@ -257,7 +257,14 @@ roleRef:
      timeout on an otherwise healthy release. This is what #1080's
      deployments/pods/events grants missed: they cover the parent object,
      the failure-diagnostics pods/events, and the scale subresource, but not
-     the one object in the middle of helm's own walk. */}}
+     the one object in the middle of helm's own walk.
+
+     networking.k8s.io/ingresses is granted here, not narrowed further: the
+     deploy Job's post-deploy `erun expose` applies the Host-routing Ingress
+     into the provisioned env's own namespace (erun-common/expose.go), which
+     is genuinely a per-env action like everything else on this ClusterRole.
+     update/patch ride alongside create because re-exposing an already-
+     exposed env must be idempotent. */}}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -289,6 +296,9 @@ rules:
   - apiGroups: ["apps"]
     resources: ["replicasets"]
     verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["create", "get", "update", "patch"]
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["rolebindings"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
@@ -311,6 +321,47 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: {{ $tenant }}-env-provisioner
+---
+{{/* pods/exec is deliberately not on the ClusterRole above: the deploy Job's
+     post-deploy `erun expose` also runs `kubectl exec deploy/<powerdns> --
+     pdnsutil replace-rrset` (erun-common/expose_exec.go's
+     upsertPowerDNSRecord) to write the wildcard DNS record, but that exec
+     always targets the platform's own PowerDNS singleton in this release's
+     namespace -- never a tenant's provisioned env namespace. A cluster-wide
+     grant would hand the deployer exec into every pod in every namespace,
+     undoing much of the point of curating this role away from cluster-admin,
+     so it is a namespaced Role bound only in this namespace instead.
+     resourceNames cannot narrow it further: the PowerDNS pod's name carries
+     its ReplicaSet's generated hash and is not known at grant time, so this
+     stays a namespace-wide exec grant rather than a resourceNames list that
+     would only look tighter. */}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $tenant }}-env-provisioner-platform
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ $tenant }}-api
+rules:
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $tenant }}-env-provisioner-platform
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ $tenant }}-api
+subjects:
+  - kind: ServiceAccount
+    name: {{ $envDeployerSA }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $tenant }}-env-provisioner-platform
 ---
 {{- end }}
 apiVersion: v1
