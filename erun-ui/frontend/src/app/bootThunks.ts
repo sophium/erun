@@ -1,7 +1,7 @@
 import { stateApi } from './api/stateApi';
 import { readError } from './errors';
 import { showTerminalMessage } from './notificationThunks';
-import { loadOrchestrators, restoreOpenOrchestrator } from './orchestratorThunks';
+import { loadOrchestrators, restoreOpenOrchestrators } from './orchestratorThunks';
 import { openSelection } from './sessionThunks';
 import { setSelected } from './slices/selectionSlice';
 import {
@@ -38,12 +38,12 @@ export const boot = (): AppThunk<Promise<void>> => async (dispatch, getState) =>
       return;
     }
 
-    // The orchestrator that was open when the desktop last ran — or the one a
-    // rebuild+restart handed off — is where the operator left off, and it owns
-    // the pane, so honor it before — and instead of — the default environment
-    // selection.
+    // Every orchestrator that was open when the desktop last ran — plus the one
+    // a rebuild+restart handed off, if any — is where the operator left off, so
+    // honor all of it before — and instead of — the default environment
+    // selection. One of them ends up owning the pane; the rest come back idle.
     await dispatch(loadOrchestrators());
-    if (await dispatch(restoreOpenOrchestrator())) {
+    if (await dispatch(restoreOpenOrchestrators())) {
       return;
     }
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -67,8 +68,125 @@ func TestPlainLaunchReopensTheOrchestratorThatWasOpen(t *testing.T) {
 	if again := app.ResolveOrchestratorToReopen(); again.OrchestratorID != id {
 		t.Fatalf("expected the record to survive being read, got %q", again.OrchestratorID)
 	}
-	if got := readOpenOrchestrator(openPath); got != id {
-		t.Fatalf("expected %q on disk, got %q", id, got)
+	if got := readOpenOrchestrators(openPath); len(got) != 1 || got[0] != id {
+		t.Fatalf("expected [%q] on disk, got %v", id, got)
+	}
+}
+
+// createAndStartNamedOrchestrator is createAndStartOrchestrator for a second
+// orchestrator definition, so multi-orchestrator tests can start two distinct
+// ones without colliding ids.
+func createAndStartNamedOrchestrator(t *testing.T, app *App, name, environment string) string {
+	t.Helper()
+	created, err := app.CreateOrchestrator(name, []orchestratorEnvInput{{Tenant: "frs", Environment: environment}})
+	if err != nil {
+		t.Fatalf("CreateOrchestrator failed: %v", err)
+	}
+	if _, err := app.StartOrchestrator(created.ID, 80, 24); err != nil {
+		t.Fatalf("StartOrchestrator failed: %v", err)
+	}
+	return created.ID
+}
+
+// The defect this issue fixes: the durable record was a scalar, so starting a
+// second orchestrator discarded the record that the first was open, and a
+// launch restored exactly one. Both must come back — one owning the pane, the
+// other reopened alongside it — and the tab strip and the live sessions must
+// agree about it.
+func TestTwoOpenOrchestratorsAreBothRestoredOnPlainLaunch(t *testing.T) {
+	app, openPath, _ := openStateTestApp(t)
+	defer app.shutdown(context.Background())
+
+	first := createAndStartOrchestrator(t, app)
+	second := createAndStartNamedOrchestrator(t, app, "other", "laptop")
+
+	target := app.ResolveOrchestratorToReopen()
+	// The most recently started owns the pane; see app_restart.go for why.
+	if target.OrchestratorID != second {
+		t.Fatalf("expected %q (started last) to own the pane, got %q", second, target.OrchestratorID)
+	}
+	if len(target.AlsoReopen) != 1 || target.AlsoReopen[0] != first {
+		t.Fatalf("expected %q to also be reopened, got %v", first, target.AlsoReopen)
+	}
+	if got := readOpenOrchestrators(openPath); len(got) != 2 || got[0] != first || got[1] != second {
+		t.Fatalf("expected both ids recorded oldest-first, got %v", got)
+	}
+}
+
+// Stopping one orchestrator must not forget that the other is still open —
+// the second, quieter bug the scalar shape caused: stopping the one currently
+// recorded emptied the file entirely.
+func TestStoppingOneOrchestratorLeavesTheOtherRecordedAndRestored(t *testing.T) {
+	app, _, _ := openStateTestApp(t)
+	defer app.shutdown(context.Background())
+
+	first := createAndStartOrchestrator(t, app)
+	second := createAndStartNamedOrchestrator(t, app, "other", "laptop")
+
+	if err := app.StopOrchestrator(second); err != nil {
+		t.Fatalf("StopOrchestrator failed: %v", err)
+	}
+
+	target := app.ResolveOrchestratorToReopen()
+	if target.OrchestratorID != first {
+		t.Fatalf("expected %q to still be recorded and reopened, got %q", first, target.OrchestratorID)
+	}
+	if len(target.AlsoReopen) != 0 {
+		t.Fatalf("expected nothing else to reopen, got %v", target.AlsoReopen)
+	}
+}
+
+// An operator upgrading from a release that only ever wrote the single-id shape
+// must not lose the one orchestrator they had open: the legacy scalar field is
+// still understood, not discarded for being the wrong shape.
+func TestLegacySingleIDFileIsHonoured(t *testing.T) {
+	app, openPath, _ := openStateTestApp(t)
+	defer app.shutdown(context.Background())
+
+	id := createAndStartOrchestrator(t, app)
+	if err := os.WriteFile(openPath, []byte(`{"orchestratorId":"`+id+`"}`), 0o644); err != nil {
+		t.Fatalf("write legacy open file: %v", err)
+	}
+
+	target := app.ResolveOrchestratorToReopen()
+	if target.OrchestratorID != id {
+		t.Fatalf("expected the legacy scalar id to be reopened, got %q", target.OrchestratorID)
+	}
+	if len(target.AlsoReopen) != 0 {
+		t.Fatalf("expected no others alongside a single legacy id, got %v", target.AlsoReopen)
+	}
+}
+
+// The restart hand-off still names exactly one orchestrator to hand a prompt
+// to, even when several were open: the rest of the set comes back too, but idle.
+func TestRestartHandOffOverASetOfOpenOrchestratorsLeavesTheRestIdle(t *testing.T) {
+	app, openPath, restoreDir := openStateTestApp(t)
+	defer app.shutdown(context.Background())
+
+	const prompt = "verify the rebuild is live, then finish the task"
+	first := createAndStartOrchestrator(t, app)
+	second := createAndStartNamedOrchestrator(t, app, "other", "laptop")
+	conversationID := orchestratorSessionID(second)
+	stageOrchestratorConversation(t, conversationID)
+	handOff := orchestratorRestoreState{
+		OrchestratorID: second,
+		ConversationID: conversationID,
+		Environments:   []string{"frs/laptop"},
+		ResumePrompt:   prompt,
+	}
+	if err := writeOrchestratorRestoreTarget(restoreDir, handOff, time.Now()); err != nil {
+		t.Fatalf("write restart hand-off: %v", err)
+	}
+
+	target := app.ResolveOrchestratorToReopen()
+	if target.OrchestratorID != second || target.ResumePrompt != prompt {
+		t.Fatalf("expected %q to own the pane with its prompt, got %+v", second, target)
+	}
+	if len(target.AlsoReopen) != 1 || target.AlsoReopen[0] != first {
+		t.Fatalf("expected %q to reopen idle alongside it, got %v", first, target.AlsoReopen)
+	}
+	if got := readOpenOrchestrators(openPath); len(got) != 2 {
+		t.Fatalf("expected both still recorded open, got %v", got)
 	}
 }
 
