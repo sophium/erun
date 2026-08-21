@@ -233,8 +233,13 @@ roleRef:
      lifecycle, the ResourceQuota/LimitRange a provisioned namespace gets
      (tenant_quotas, #605), the runtime chart's own resources (Deployment,
      PVCs, ServiceAccount, Service, its Secrets/ConfigMaps, and Helm's own
-     release-state Secrets), and RoleBindings. Binding the runtime SA to the
-     built-in admin ClusterRole is what the chart renders for every env (see
+     release-state Secrets), RoleBindings, scaling the runtime Deployment to
+     0/1 (erun stop/erun platform env wake, #1080 -- RBAC treats
+     deployments/scale as a distinct resource from deployments, so patch on
+     the parent does not carry it), and reading pods/events so erun deploy's
+     early-failure pod watch and erun stop's desktop-session listing are not
+     silently inert (#1080). Binding the runtime SA to the built-in admin
+     ClusterRole is what the chart renders for every env (see
      erun-devops/AGENTS.md "Runtime SA RBAC is namespaced by default");
      granting only bind on that one named ClusterRole (not the verbs admin
      itself carries) is the RBAC escalation-check's documented way to let a
@@ -258,9 +263,18 @@ rules:
   - apiGroups: [""]
     resources: ["persistentvolumeclaims", "serviceaccounts", "services", "secrets", "configmaps"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: ["apps"]
     resources: ["deployments"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale"]
+    verbs: ["get", "update", "patch"]
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["rolebindings"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
