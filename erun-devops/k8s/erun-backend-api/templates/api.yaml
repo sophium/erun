@@ -246,7 +246,18 @@ roleRef:
      granter hand out a ClusterRole it does not hold outright, keeping this
      role's own footprint far short of admin-equivalent. It does not cover
      platformAccount's cluster-admin ClusterRoleBinding — that opt-in stays
-     gated on an admin-capable context, unchanged. */}}
+     gated on an admin-capable context, unchanged.
+
+     apps/replicasets read is granted separately from apps/deployments: helm's
+     own readiness wait for a Deployment does not stop at the Deployment
+     object -- it walks Deployment -> the Deployment's current ReplicaSet ->
+     that ReplicaSet's ready count, because a Deployment has no direct
+     pod/ready signal of its own. Without list/watch on ReplicaSets, `helm
+     --wait` can never observe a rollout finishing and rides out its full
+     timeout on an otherwise healthy release. This is what #1080's
+     deployments/pods/events grants missed: they cover the parent object,
+     the failure-diagnostics pods/events, and the scale subresource, but not
+     the one object in the middle of helm's own walk. */}}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -275,6 +286,9 @@ rules:
   - apiGroups: ["apps"]
     resources: ["deployments/scale"]
     verbs: ["get", "update", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["rolebindings"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]

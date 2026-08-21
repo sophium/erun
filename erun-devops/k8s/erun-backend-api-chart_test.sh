@@ -216,4 +216,22 @@ grep -A1 'resources: \["pods"\]' "${provisioner_role}" | grep -q '"watch"' ||
 grep -q 'resources: \["events"\]' "${provisioner_role}" ||
     fail "the env-provisioner ClusterRole must grant events read, or a stuck pod's reason never reaches the recorded provision error (#1080)"
 
+# --- 10. #1083: apps/replicasets read, separate from the deployments grant
+#         above. Adding only pods/events/deployments-scale (#1080/#1081) left
+#         provisioning completely broken: helm's own readiness wait for a
+#         Deployment walks Deployment -> its ReplicaSet -> that ReplicaSet's
+#         ready count, so without list/watch on ReplicaSets `helm --wait`
+#         never observes a healthy rollout finishing and rides out its full
+#         timeout. This grant is necessary but -- like the #1081 grants before
+#         it -- pinning it here only confirms a rule somebody already thought
+#         of; it does not prove helm's wait actually succeeds against it. See
+#         env_provisioner_rbac_e2e_test.go for a test that exercises the real
+#         object graph against a live cluster's RBAC engine. ---
+grep -q 'resources: \["replicasets"\]' "${provisioner_role}" ||
+    fail "the env-provisioner ClusterRole must grant apps/replicasets read, or helm --wait can never observe a Deployment rollout finishing and every provision fails at the timeout (#1083)"
+grep -A1 'resources: \["replicasets"\]' "${provisioner_role}" | grep -q '"list"' ||
+    fail "the replicasets grant must include list, the verb helm's readiness wait issues"
+grep -A1 'resources: \["replicasets"\]' "${provisioner_role}" | grep -q '"watch"' ||
+    fail "the replicasets grant must include watch"
+
 echo "PASS: erun-backend-api DBOS wiring"
