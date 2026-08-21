@@ -130,18 +130,24 @@ export const restartApp =
     }
   };
 
-// restoreOpenOrchestrator reopens the orchestrator this launch should come back
-// to — the one that was open when the desktop last ran, or the one a restart
-// handed off — and returns whether it did, so the caller (boot) can skip the
-// default environment selection. Only a restart hand-off carries a resume
-// prompt, so a plain launch resumes the conversation idle and auto-runs nothing.
-// A refused hand-off still reopens the orchestrator and surfaces the backend's
-// notice beside the orchestrator list, so a resume that declined to continue is
-// never silent. The restored orchestrator OWNS the pane, so the env selection is
-// cleared — otherwise boot's default selection and the selection-sync middleware
-// reconcile the terminal back to an environment and the operator never lands in
-// the resumed session.
-export const restoreOpenOrchestrator =
+// restoreOpenOrchestrators reopens every orchestrator this launch should come
+// back to — everything that was open when the desktop last ran, or a restart's
+// hand-off plus everything else that was open alongside it — and returns
+// whether one of them ended up owning the terminal pane, so the caller (boot)
+// can skip the default environment selection. The pane is single but the
+// restored set is not: exactly one orchestrator (the restart hand-off's target,
+// or the most recently (re)started one) owns it, resumes its conversation and
+// clears the env selection — otherwise boot's default selection and the
+// selection-sync middleware would reconcile the terminal back to an
+// environment — while every other orchestrator in the set is started too but
+// left idle, off the pane, so the tab strip and the live sessions agree instead
+// of a tab surviving with no session behind it. Only the pane owner can carry a
+// resume prompt, so a plain launch resumes every restored orchestrator idle; a
+// restart hand-off's prompt auto-runs for the one orchestrator it named, never
+// for the rest of the set. A refused hand-off still reopens its orchestrator
+// and surfaces the backend's notice beside the orchestrator list, so a resume
+// that declined to continue is never silent.
+export const restoreOpenOrchestrators =
   (): AppThunk<Promise<boolean>> => async (dispatch, getState) => {
     try {
       const target = await ResolveOrchestratorToReopen();
@@ -149,21 +155,43 @@ export const restoreOpenOrchestrator =
       if (notice) {
         dispatch(setOrchestratorsError(notice));
       }
-      const plan = planOrchestratorRestore(target, getState().orchestrators.items);
-      if (!plan) {
+      const { primary, alsoReopen } = planOrchestratorRestore(
+        target,
+        getState().orchestrators.items,
+      );
+      if (!primary && alsoReopen.length === 0) {
         return false;
       }
-      // With a resume prompt, resume the conversation that asked for the restart
-      // AND hand it the task so a rebuild+restart continues on its own instead of
-      // idling at the prompt; without one, just resume the orchestrator's own
-      // pinned conversation.
-      const info = plan.resumePrompt
-        ? await StartOrchestratorWithResume(plan.id, plan.conversationId, plan.resumePrompt, 80, 24)
-        : await StartOrchestrator(plan.id, 80, 24);
-      dispatch(setSelected(null));
-      dispatch(setSessionId(info.sessionId));
+
+      for (const id of alsoReopen) {
+        try {
+          await StartOrchestrator(id, 80, 24);
+        } catch (error) {
+          dispatch(setOrchestratorsError(readError(error)));
+        }
+      }
+
+      let restoredPane = false;
+      if (primary) {
+        // With a resume prompt, resume the conversation that asked for the
+        // restart AND hand it the task so a rebuild+restart continues on its own
+        // instead of idling at the prompt; without one, just resume the
+        // orchestrator's own pinned conversation.
+        const info = primary.resumePrompt
+          ? await StartOrchestratorWithResume(
+              primary.id,
+              primary.conversationId,
+              primary.resumePrompt,
+              80,
+              24,
+            )
+          : await StartOrchestrator(primary.id, 80, 24);
+        dispatch(setSelected(null));
+        dispatch(setSessionId(info.sessionId));
+        restoredPane = true;
+      }
       await dispatch(loadOrchestrators());
-      return true;
+      return restoredPane;
     } catch (error) {
       dispatch(setOrchestratorsError(readError(error)));
       return false;
