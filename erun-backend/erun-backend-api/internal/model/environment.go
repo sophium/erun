@@ -48,7 +48,14 @@ type Environment struct {
 	// installed, as opposed to RuntimeVersion, which is the declared pin. Owned
 	// by the deploy executor, so it is scan-only; a failed deploy leaves it on
 	// the version still running in the cluster.
-	DeployedVersion string    `json:"deployedVersion,omitempty" bun:"deployed_version,scanonly,nullzero"`
-	CreatedAt       time.Time `json:"createdAt" bun:"created_at,scanonly"`
-	UpdatedAt       time.Time `json:"updatedAt" bun:"updated_at,scanonly"`
+	DeployedVersion string `json:"deployedVersion,omitempty" bun:"deployed_version,scanonly,nullzero"`
+	// ExposeError carries why the deploy Job's best-effort chained exposure
+	// (DNS + Ingress) did not succeed, distinct from ProvisionError: it never
+	// moves Status away from `running`, since exposure failing does not mean
+	// the deployed workload is unhealthy (#1086). Owned by the deploy executor,
+	// so scan-only; empty means exposure succeeded, was never attempted, or the
+	// environment predates chaining an expose at all.
+	ExposeError string    `json:"exposeError,omitempty" bun:"expose_error,scanonly,nullzero"`
+	CreatedAt   time.Time `json:"createdAt" bun:"created_at,scanonly"`
+	UpdatedAt   time.Time `json:"updatedAt" bun:"updated_at,scanonly"`
 }

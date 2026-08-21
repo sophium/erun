@@ -151,6 +151,66 @@ func TestBuildDeployJobSpecWithExpose(t *testing.T) {
 	}
 }
 
+// TestBuildDeployJobSpecWithExposePlatformCoordinates: when the control plane
+// supplies the services zone and platform namespace it already knows, they
+// thread onto the chained `erun expose` as --services-zone/--platform-namespace
+// so the sourceless Job can resolve a hostname without a git checkout (#1086).
+func TestBuildDeployJobSpecWithExposePlatformCoordinates(t *testing.T) {
+	params := testParams()
+	params.ExposeTargetIP = "203.0.113.10"
+	params.ExposeServicesZone = "services.erunpaas.com"
+	params.ExposePlatformNamespace = "frs-prod"
+	script := buildDeployCommand(params)[2]
+	want := "'erun' 'expose' 'acme' 'prod' 'mcp' '--ip' '203.0.113.10' '--skip-if-unconfigured' " +
+		"'--services-zone' 'services.erunpaas.com' '--platform-namespace' 'frs-prod'"
+	if !strings.Contains(script, want) {
+		t.Fatalf("script %q missing %q", script, want)
+	}
+
+	// Half the pair configured is the same as neither: expose falls back to its
+	// own project-based resolution rather than running with an incomplete
+	// override.
+	partial := testParams()
+	partial.ExposeTargetIP = "203.0.113.10"
+	partial.ExposeServicesZone = "services.erunpaas.com"
+	partialScript := buildDeployCommand(partial)[2]
+	if strings.Contains(partialScript, "--services-zone") {
+		t.Fatalf("script %q should not apply a partial platform-coordinates override", partialScript)
+	}
+}
+
+// TestExposeChainScriptIsBestEffort: the chained expose step must never fail
+// the Job it rides on (#1086) — a healthy deploy must not be recorded as a
+// failed provision just because DNS/Ingress wiring failed. On failure it
+// prints a marker line ExposeFailureFromOutput reads back out of the Job's
+// captured output.
+func TestExposeChainScriptIsBestEffort(t *testing.T) {
+	params := testParams()
+	params.ExposeTargetIP = "203.0.113.10"
+	script := buildDeployCommand(params)[2]
+	if !strings.Contains(script, "|| printf '"+exposeFailureMarker+": %s\\n' \"$expose_out\"") {
+		t.Fatalf("script %q must swallow a failing expose behind the marker", script)
+	}
+	if strings.HasSuffix(strings.TrimSpace(script), "&& "+shellJoin([]string{"erun", "expose"})) {
+		t.Fatalf("script %q must not let expose's own exit status end the script", script)
+	}
+}
+
+// TestExposeFailureFromOutput: the marker line is how a *successful* Job
+// (deploy landed, expose did not) hands back the reason, since the Job's own
+// outcome no longer reflects an expose failure.
+func TestExposeFailureFromOutput(t *testing.T) {
+	output := "==> Deployed acme/prod 1.2.3 in 4s\n" +
+		"audit: erun expose --ip 203.0.113.10 --skip-if-unconfigured acme prod mcp\n" +
+		exposeFailureMarker + ": cannot find git project\n"
+	if got := ExposeFailureFromOutput(output); got != "cannot find git project" {
+		t.Fatalf("ExposeFailureFromOutput = %q, want %q", got, "cannot find git project")
+	}
+	if got := ExposeFailureFromOutput("==> Deployed acme/prod 1.2.3 in 4s\n"); got != "" {
+		t.Fatalf("ExposeFailureFromOutput = %q, want empty when no marker is present", got)
+	}
+}
+
 // TestBuildDeployCommandQuotesArguments guards the shell-injection surface: an
 // argument carrying a single quote must stay a single shell word — the
 // canonical way a naively-quoted value breaks out of its own quoting.

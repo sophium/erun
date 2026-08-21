@@ -1,4 +1,4 @@
-h1:qa+Ou2O9q+o5+eE8/Ut+QQgEmKaHhJDuWWBqBeF0wWc=
+h1:j9yGrSJfA1FRyAG+i07xDqt6j2jIrm2H6neK25SHtVU=
 20260501120000_initial_tenant_identity.sql h1:RpS03/4sFjbCggwYgcGNn6k3jNZCNTNl0BD/afOKFzo=
 20260503143000_tenant_issuer_names.sql h1:VEZjICG3/jU2YtEx0XX05l9Q8lJyWKeiRY8f4dXOkvE=
 20260503170000_audit_events.sql h1:OLjiGP/FhLTWvkx1bxS2xCcJK6tExdufnEC8R6LsKWA=
@@ -11,3 +11,4 @@ h1:qa+Ou2O9q+o5+eE8/Ut+QQgEmKaHhJDuWWBqBeF0wWc=
 20260816150000_release_queue.sql h1:scuDr9Xmf4Lrw2nLQb4vM8lkMEXQXGy1WsKYc3K4LM0=
 20260819120000_tenant_resource_quotas_and_usage_events.sql h1:CTZNZTVqG0sIoXFsjAYwDR2aViOGMc+3GsVSdJbrYZ8=
 20260820120000_tenant_quota_runtime_pod_floor.sql h1:zAiv3FCU07QJS1d/w50u9yt2xvIYA9q7DsLoy5JLHaA=
+20260821120000_env_expose_error.sql h1:BxDvAJWcbRwFmtBdw5I5mXSytdY1YNeuleNX5PJgvpg=

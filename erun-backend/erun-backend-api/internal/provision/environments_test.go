@@ -165,3 +165,32 @@ func TestDeployJobParamsExposeTargetIP(t *testing.T) {
 		t.Fatalf("exposeTargetIP = %q, want empty when unconfigured", unset.ExposeTargetIP)
 	}
 }
+
+// TestDeployJobParamsExposePlatformCoordinates: the services zone and
+// platform namespace the control plane already knows for its own purposes
+// (DNS-01 cert issuance, Job placement) thread through so the chained expose
+// step can resolve a hostname without a git checkout (#1086).
+func TestDeployJobParamsExposePlatformCoordinates(t *testing.T) {
+	params := deployJobParams(
+		EnvDeployConfig{
+			Registry:                "ghcr.io/sophium",
+			PlatformNamespace:       "erun-prod",
+			DeployerServiceAccount:  "erun-env-deployer",
+			ExposeTargetIP:          "203.0.113.10",
+			ExposeServicesZone:      "services.erunpaas.com",
+			ExposePlatformNamespace: "frs-prod",
+		},
+		EnvProvisionInput{Tenant: "acme", Environment: "prod", Version: "1.2.3"},
+	)
+	if params.ExposeServicesZone != "services.erunpaas.com" {
+		t.Fatalf("exposeServicesZone = %q, want services.erunpaas.com", params.ExposeServicesZone)
+	}
+	if params.ExposePlatformNamespace != "frs-prod" {
+		t.Fatalf("exposePlatformNamespace = %q, want frs-prod", params.ExposePlatformNamespace)
+	}
+
+	unset := deployJobParams(EnvDeployConfig{}, EnvProvisionInput{Tenant: "acme", Environment: "prod", Version: "1.2.3"})
+	if unset.ExposeServicesZone != "" || unset.ExposePlatformNamespace != "" {
+		t.Fatalf("exposeServicesZone/exposePlatformNamespace = %q/%q, want both empty when unconfigured", unset.ExposeServicesZone, unset.ExposePlatformNamespace)
+	}
+}

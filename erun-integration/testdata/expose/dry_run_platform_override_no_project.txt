@@ -1,0 +1,33 @@
+audit: erun expose --dry-run --ip <VERSION>.10 --platform-namespace frs-prod --services-zone services.erunpaas.com team dev api
+expose: api.team-dev.services.erunpaas.com -> service team-api.team-dev.svc:80
+expose: per-env wildcard *.team-dev.services.erunpaas.com A <VERSION>.10 ttl 60 (zone services.erunpaas.com)
+expose: ingress class traefik
+expose: tls secret team-dev-wildcard-tls (namespace team-dev) -> https
+expose: platform powerdns namespace frs-prod
+kubectl -n frs-prod exec deploy/frs-powerdns -- pdnsutil --config-dir=/etc/pdns-shared replace-rrset services.erunpaas.com '*.team-dev' A 60 <VERSION>.10
+kubectl --context test-context -n team-dev apply -f -
+expose: ingress manifest:
+  apiVersion: networking.k8s.io/v1
+  kind: Ingress
+  metadata:
+    name: expose-api
+    namespace: team-dev
+    labels:
+      app.kubernetes.io/managed-by: erun-expose
+  spec:
+    ingressClassName: traefik
+    tls:
+      - hosts:
+          - api.team-dev.services.erunpaas.com
+        secretName: team-dev-wildcard-tls
+    rules:
+      - host: api.team-dev.services.erunpaas.com
+        http:
+          paths:
+            - path: /
+              pathType: Prefix
+              backend:
+                service:
+                  name: team-api
+                  port:
+                    number: 80

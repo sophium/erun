@@ -76,6 +76,22 @@ type DeployJobParams struct {
 	// tenant whose own project declares no platform block, so this only ever
 	// wires DNS+Ingress for an actual erunpaas platform deployment.
 	ExposeTargetIP string
+	// ExposeServicesZone/ExposePlatformNamespace thread expose's --services-zone/
+	// --platform-namespace: the deploy Job has no git checkout, so `erun expose`
+	// cannot resolve these from a project's .erun/config.yaml the way an
+	// interactive run does (#1086 — project resolution fails outright with
+	// "cannot find git project", which --skip-if-unconfigured cannot cover
+	// because the skip decision itself needs a resolved project). The control
+	// plane already carries both for its own purposes — ExposeServicesZone from
+	// the same services zone its DNS-01 cert issuance uses, ExposePlatformNamespace
+	// from the namespace its own Jobs (and, in a self-hosted platform, the
+	// PowerDNS singleton) run in — so this reuses that knowledge rather than
+	// inventing a second source for it. Either left empty falls the chained
+	// expose back to project-based resolution, which fails exactly as it always
+	// has for a sourceless Job; since exposure is best-effort (see
+	// exposeChainScript), that failure no longer takes the deploy down with it.
+	ExposeServicesZone      string
+	ExposePlatformNamespace string
 	// RuntimeImageOverride, when set, threads `--runtime-image <value>` to the
 	// in-Job `erun deploy` — the caller's bootstrap decision for a tenant with no
 	// published <tenant>-devops image: install the canonical published
@@ -162,9 +178,44 @@ func buildDeployCommand(params DeployJobParams) []string {
 	script := bootstrapEnvironmentScript(params.Tenant, params.Environment) + shellJoin(deploy)
 	if ip := strings.TrimSpace(params.ExposeTargetIP); ip != "" {
 		expose := []string{"erun", "expose", params.Tenant, params.Environment, mcpExposeService, "--ip", ip, "--skip-if-unconfigured"}
-		script += " && " + shellJoin(expose)
+		if zone, ns := strings.TrimSpace(params.ExposeServicesZone), strings.TrimSpace(params.ExposePlatformNamespace); zone != "" && ns != "" {
+			expose = append(expose, "--services-zone", zone, "--platform-namespace", ns)
+		}
+		script += exposeChainScript(expose)
 	}
 	return []string{"sh", "-c", script}
+}
+
+// exposeFailureMarker prefixes the line exposeChainScript prints when the
+// chained expose step does not succeed. ExposeFailureFromOutput reads it back
+// out of the Job's captured output.
+const exposeFailureMarker = "ERUN_EXPOSE_FAILED"
+
+// exposeChainScript runs expose after a successful deploy without letting its
+// failure fail the Job (#1086). Exposure (DNS + Ingress) is best-effort: the
+// deploy already landed a healthy workload, so failing the whole Job over a
+// DNS/Ingress problem would record a running environment as a failed
+// provision, exactly the misdirection the issue reported. `{ ... || printf
+// ...; }` always exits 0, so the deploy's own `&&` is the only thing that can
+// still fail the script; on a real expose failure the marker line carries
+// expose's own combined output so ExposeFailureFromOutput can recover it from
+// the Job's log after a successful run, instead of the environment silently
+// losing the reason it is not exposed.
+func exposeChainScript(expose []string) string {
+	return " && { expose_out=$(" + shellJoin(expose) + " 2>&1) || printf '" + exposeFailureMarker + ": %s\\n' \"$expose_out\"; }"
+}
+
+// ExposeFailureFromOutput extracts the chained expose step's failure detail
+// from the deploy Job's captured stdout (jobexec.Options.CaptureOutput), or ""
+// when exposure succeeded, was never attempted (ExposeTargetIP unset), or the
+// Job predates chaining an expose at all.
+func ExposeFailureFromOutput(output string) string {
+	marker := exposeFailureMarker + ": "
+	idx := strings.Index(output, marker)
+	if idx < 0 {
+		return ""
+	}
+	return strings.TrimSpace(output[idx+len(marker):])
 }
 
 // namespaceQuotaFlags appends --max-cpu/--max-memory/--max-storage when all
@@ -274,7 +325,10 @@ type Launcher struct {
 
 func NewLauncher(kube kubernetes.Interface) *Launcher {
 	return &Launcher{
-		runner:       jobexec.NewRunner(kube, jobexec.Options{Kind: "deploy", Container: deployContainerName}),
+		// CaptureOutput: a successful deploy Job's own log is where
+		// ExposeFailureFromOutput finds the chained expose step's marker, since a
+		// best-effort expose failure never turns the Job itself into a failure.
+		runner:       jobexec.NewRunner(kube, jobexec.Options{Kind: "deploy", Container: deployContainerName, CaptureOutput: true}),
 		stopRunner:   jobexec.NewRunner(kube, jobexec.Options{Kind: "stop", Container: stopContainerName}),
 		deleteRunner: jobexec.NewRunner(kube, jobexec.Options{Kind: "delete", Container: deleteContainerName}),
 	}

@@ -75,9 +75,15 @@ func (p *EnvironmentProvisioner) Provision(ctx context.Context, environmentID st
 	// The env is now running this version, so record it here rather than after
 	// any later step: a run that fails past this point still leaves the cluster
 	// carrying it, and an operator recovering needs the env to name it.
+	// deployexec chains the environment's exposure onto the same Job but never
+	// lets its failure fail the Job (#1086) — the deploy already landed a
+	// healthy workload, so a DNS/Ingress problem downstream of it must not read
+	// as a failed provision. ExposeError names that failure distinctly instead,
+	// leaving Status/ProvisionError to mean exactly "did the deploy land".
 	if err := p.write(ctx, environmentID, repository.EnvironmentStatusUpdate{
 		Status:          string(model.EnvironmentStatusRunning),
 		DeployedVersion: params.Version,
+		ExposeError:     deployexec.ExposeFailureFromOutput(result.Output),
 	}); err != nil {
 		return fmt.Errorf("mark running: %w", err)
 	}

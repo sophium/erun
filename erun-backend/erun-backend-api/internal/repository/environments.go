@@ -12,7 +12,7 @@ type EnvironmentRepository struct {
 	txs *TxManager
 }
 
-const environmentColumns = `environment_id, tenant_id, name, type, kubernetes_context, context_id, runtime_version, status, provision_error, deployed_version, created_at, updated_at`
+const environmentColumns = `environment_id, tenant_id, name, type, kubernetes_context, context_id, runtime_version, status, provision_error, deployed_version, expose_error, created_at, updated_at`
 
 func NewEnvironmentRepository(txs *TxManager) *EnvironmentRepository {
 	return &EnvironmentRepository{txs: txs}
@@ -61,10 +61,16 @@ func (r *EnvironmentRepository) Count(ctx context.Context) (int, error) {
 // failure reason (cleared on any non-failed state), and the version that
 // actually deployed. An empty DeployedVersion leaves the recorded one alone, so
 // a failed deploy does not erase the version the cluster is still running.
+// ExposeError is distinct from ProvisionError: it names why the deploy Job's
+// best-effort chained exposure did not succeed, without moving Status away
+// from `running` — the deploy itself landed a healthy workload (#1086).
+// Cleared (like ProvisionError) whenever a write carries no expose failure, so
+// a later successful expose overwrites a stale one.
 type EnvironmentStatusUpdate struct {
 	Status          string
 	ProvisionError  string
 	DeployedVersion string
+	ExposeError     string
 }
 
 // UpdateProvisioningStatus persists an environment's provisioning-lifecycle
@@ -76,9 +82,10 @@ func (r *EnvironmentRepository) UpdateProvisioningStatus(ctx context.Context, en
 			UPDATE environments
 			   SET status = ?,
 			       provision_error = NULLIF(?, ''),
-			       deployed_version = COALESCE(NULLIF(?, ''), deployed_version)
+			       deployed_version = COALESCE(NULLIF(?, ''), deployed_version),
+			       expose_error = NULLIF(?, '')
 			 WHERE environment_id = ?
-		`, update.Status, update.ProvisionError, update.DeployedVersion, environmentID).Exec(ctx)
+		`, update.Status, update.ProvisionError, update.DeployedVersion, update.ExposeError, environmentID).Exec(ctx)
 		return err
 	})
 }

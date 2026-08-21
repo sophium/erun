@@ -65,6 +65,13 @@ type EnvDeployConfig struct {
 	// stays enabled without it) — it only decides whether a deploy also chains
 	// an expose.
 	ExposeTargetIP string
+	// ExposeServicesZone/ExposePlatformNamespace thread deployexec.DeployJobParams'
+	// fields of the same name — the platform coordinates the chained `erun
+	// expose` needs but the sourceless deploy Job cannot resolve on its own
+	// (#1086). See deployexec.DeployJobParams for why the control plane already
+	// carries both.
+	ExposeServicesZone      string
+	ExposePlatformNamespace string
 	// ImagePullSecrets names the dockerconfigjson Secrets in PlatformNamespace
 	// that hold the registry credentials the deploy Job pulls with. The
 	// published-image precondition probes the registry with the same credential,
@@ -150,21 +157,23 @@ func deployJobParams(config EnvDeployConfig, input EnvProvisionInput) deployexec
 		runtimeImageOverride = image
 	}
 	return deployexec.DeployJobParams{
-		Tenant:               input.Tenant,
-		Environment:          input.Environment,
-		Version:              input.Version,
-		DeployID:             input.DeployID,
-		Namespace:            config.PlatformNamespace,
-		Image:                image,
-		RuntimeImageOverride: runtimeImageOverride,
-		ServiceAccount:       config.DeployerServiceAccount,
-		ExposeTargetIP:       config.ExposeTargetIP,
-		MaxCPU:               namespaceQuotaCPUQuantity(input.MaxCPUMillicores),
-		MaxMemory:            namespaceQuotaMemoryQuantity(input.MaxMemoryMB),
-		MaxStorage:           namespaceQuotaStorageQuantity(input.MaxStorageGB),
-		MaxCPUMillicores:     input.MaxCPUMillicores,
-		MaxMemoryMB:          input.MaxMemoryMB,
-		MaxStorageGB:         input.MaxStorageGB,
+		Tenant:                  input.Tenant,
+		Environment:             input.Environment,
+		Version:                 input.Version,
+		DeployID:                input.DeployID,
+		Namespace:               config.PlatformNamespace,
+		Image:                   image,
+		RuntimeImageOverride:    runtimeImageOverride,
+		ServiceAccount:          config.DeployerServiceAccount,
+		ExposeTargetIP:          config.ExposeTargetIP,
+		ExposeServicesZone:      config.ExposeServicesZone,
+		ExposePlatformNamespace: config.ExposePlatformNamespace,
+		MaxCPU:                  namespaceQuotaCPUQuantity(input.MaxCPUMillicores),
+		MaxMemory:               namespaceQuotaMemoryQuantity(input.MaxMemoryMB),
+		MaxStorage:              namespaceQuotaStorageQuantity(input.MaxStorageGB),
+		MaxCPUMillicores:        input.MaxCPUMillicores,
+		MaxMemoryMB:             input.MaxMemoryMB,
+		MaxStorageGB:            input.MaxStorageGB,
 	}
 }
 

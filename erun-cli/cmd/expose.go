@@ -15,6 +15,8 @@ func newExposeCmd(store common.ExposeStore, findProjectRoot common.ProjectFinder
 	var ingressClass string
 	var tlsSecret string
 	var skipIfUnconfigured bool
+	var servicesZone string
+	var platformNamespace string
 	cmd := &cobra.Command{
 		Use:   "expose TENANT ENVIRONMENT SERVICE",
 		Short: "Expose an environment's Service at a public HTTPS hostname",
@@ -25,15 +27,17 @@ func newExposeCmd(store common.ExposeStore, findProjectRoot common.ProjectFinder
 			"real Service. Ensures the per-environment wildcard DNS record points at the env's ingress IP and applies a " +
 			"Host-routing Ingress for the Service. TLS is on by default: the Ingress references the env's per-env " +
 			"wildcard cert Secret (<tenant>-<env>-wildcard-tls, issued by the cluster edge), so the host serves https " +
-			"with no per-service cert step. Pass --no-tls for http. Requires a platform block in .erun/config.yaml; it " +
-			"mutates the platform DNS zone and applies to the env's cluster. Use --dry-run to preview the actions.",
+			"with no per-service cert step. Pass --no-tls for http. Requires a platform block in .erun/config.yaml " +
+			"unless --services-zone and --platform-namespace are both set; it mutates the platform DNS zone and " +
+			"applies to the env's cluster. Use --dry-run to preview the actions.",
 		Example: "  erun expose team dev api --ip 127.0.0.1\n" +
 			"  erun expose team prod api --ip 203.0.113.10 --port 8080\n" +
-			"  erun expose team dev api --ip 127.0.0.1 --no-tls",
+			"  erun expose team dev api --ip 127.0.0.1 --no-tls\n" +
+			"  erun expose team dev api --ip 127.0.0.1 --services-zone services.example.com --platform-namespace frs-prod",
 		Args:         cobra.ExactArgs(3),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runExposeCommand(withCloudContextPreflight(commandContext(cmd), store), store, findProjectRoot, args[0], args[1], args[2], targetIP, servicePort, noTLS, ingressClass, tlsSecret, skipIfUnconfigured)
+			return runExposeCommand(withCloudContextPreflight(commandContext(cmd), store), store, findProjectRoot, args[0], args[1], args[2], targetIP, servicePort, noTLS, ingressClass, tlsSecret, skipIfUnconfigured, servicesZone, platformNamespace)
 		},
 	}
 	addDryRunFlag(cmd)
@@ -43,16 +47,38 @@ func newExposeCmd(store common.ExposeStore, findProjectRoot common.ProjectFinder
 	cmd.Flags().StringVar(&ingressClass, "ingress-class", "", "Ingress controller class (default traefik)")
 	cmd.Flags().StringVar(&tlsSecret, "tls-secret", "", "Override the per-env wildcard cert Secret name (default <tenant>-<env>-wildcard-tls)")
 	cmd.Flags().BoolVar(&skipIfUnconfigured, "skip-if-unconfigured", false, "Succeed as a no-op instead of failing when the project declares no platform block (for scripted callers composing expose after another command)")
+	cmd.Flags().StringVar(&servicesZone, "services-zone", "", "Override the platform services zone tenant hostnames live under, so expose needs no project checkout (requires --platform-namespace too)")
+	cmd.Flags().StringVar(&platformNamespace, "platform-namespace", "", "Override the namespace running the platform's PowerDNS singleton, so expose needs no project checkout (requires --services-zone too)")
 	return cmd
 }
 
-func runExposeCommand(ctx common.Context, store common.ExposeStore, findProjectRoot common.ProjectFinderFunc, tenant, environment, service, targetIP string, servicePort int, noTLS bool, ingressClass, tlsSecret string, skipIfUnconfigured bool) error {
-	if findProjectRoot == nil {
-		findProjectRoot = common.FindProjectRoot
-	}
-	_, projectRoot, err := findProjectRoot()
-	if err != nil {
-		return err
+func runExposeCommand(ctx common.Context, store common.ExposeStore, findProjectRoot common.ProjectFinderFunc, tenant, environment, service, targetIP string, servicePort int, noTLS bool, ingressClass, tlsSecret string, skipIfUnconfigured bool, servicesZone, platformNamespace string) error {
+	servicesZone = strings.TrimSpace(servicesZone)
+	platformNamespace = strings.TrimSpace(platformNamespace)
+	// --services-zone/--platform-namespace supply what a project checkout would
+	// otherwise resolve, precisely so a caller with no checkout at all (the
+	// hosted deploy Job, which has no git repo to find — #1086) can still run
+	// expose. Skip the project lookup entirely in that case, rather than failing
+	// on it before RunExposeService even gets a chance to use the override.
+	projectRoot := ""
+	if servicesZone == "" && platformNamespace == "" {
+		if findProjectRoot == nil {
+			findProjectRoot = common.FindProjectRoot
+		}
+		_, root, err := findProjectRoot()
+		if err != nil {
+			// --skip-if-unconfigured exists to make expose a no-op when the
+			// target is not set up for exposure — no project at all is the
+			// strongest case of that, not a reason to fail before
+			// RunExposeService gets to decide (#1086). Fall through with an
+			// empty ProjectRoot: its platform-configured check on "" resolves
+			// to false, same as a project with no platform block.
+			if !skipIfUnconfigured {
+				return err
+			}
+		} else {
+			projectRoot = root
+		}
 	}
 	result, err := common.RunExposeService(ctx, common.ExposeServiceParams{
 		Tenant:             strings.TrimSpace(tenant),
@@ -65,6 +91,8 @@ func runExposeCommand(ctx common.Context, store common.ExposeStore, findProjectR
 		IngressClass:       strings.TrimSpace(ingressClass),
 		TLSSecretName:      strings.TrimSpace(tlsSecret),
 		SkipIfUnconfigured: skipIfUnconfigured,
+		ServicesZone:       servicesZone,
+		PlatformNamespace:  platformNamespace,
 	}, store, nil, nil)
 	if err != nil {
 		return err
