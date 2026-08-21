@@ -25,6 +25,15 @@ type ReleaseInput struct {
 	Tenant       string `json:"tenant"`
 	TargetBranch string `json:"targetBranch"`
 	CommitID     string `json:"commitId"`
+	// Bootstrap is decided once, synchronously, before the durable workflow is
+	// enqueued (resolveBootstrapImage), and checkpointed here so a resumed
+	// workflow does not re-probe the registry — the same pattern
+	// EnvProvisionInput.Bootstrap uses for the deploy Job. True means the
+	// tenant's own <tenant>-devops image was confirmed missing at dispatch
+	// time, so the release Job runs the canonical published erun-devops image
+	// instead of one that can only ImagePullBackOff on an image nobody ever
+	// pushed.
+	Bootstrap bool `json:"bootstrap,omitempty"`
 }
 
 // ReleaseCoordinator runs one claimed release attempt to a recorded terminal
@@ -75,14 +84,18 @@ func (c ReleaseConfig) Configured() bool {
 // alone is terminal after the first run, which would make a retry a silent
 // replay of the previous attempt's outcome instead of a new run.
 type ReleaseQueue struct {
-	dbosCtx     dbos.DBOSContext
-	coordinator ReleaseCoordinator
-	config      ReleaseConfig
-	workflowFn  func(dbos.DBOSContext, ReleaseInput) (string, error)
+	dbosCtx      dbos.DBOSContext
+	coordinator  ReleaseCoordinator
+	config       ReleaseConfig
+	imageChecker RuntimeImageChecker
+	workflowFn   func(dbos.DBOSContext, ReleaseInput) (string, error)
 }
 
-func NewReleaseQueue(dbosCtx dbos.DBOSContext, coordinator ReleaseCoordinator, config ReleaseConfig) *ReleaseQueue {
-	q := &ReleaseQueue{dbosCtx: dbosCtx, coordinator: coordinator, config: config}
+// NewReleaseQueue wires the durable release workflow. imageChecker may be
+// nil, which skips the published-image fallback and always names the
+// tenant's own image.
+func NewReleaseQueue(dbosCtx dbos.DBOSContext, coordinator ReleaseCoordinator, config ReleaseConfig, imageChecker RuntimeImageChecker) *ReleaseQueue {
+	q := &ReleaseQueue{dbosCtx: dbosCtx, coordinator: coordinator, config: config, imageChecker: imageChecker}
 	// One stable function value shared by RegisterWorkflow and RunWorkflow, which
 	// is how DBOS names the workflow and recovers it across restarts.
 	q.workflowFn = q.releaseWorkflow
@@ -116,10 +129,19 @@ func (q *ReleaseQueue) start(identity security.Context, tenantName string, relea
 		Tenant:       tenantName,
 		TargetBranch: release.TargetBranch,
 		CommitID:     release.CommitID,
+		Bootstrap:    q.resolveBootstrapImage(tenantName),
 	}
 	_, err := dbos.RunWorkflow(q.dbosCtx, q.workflowFn, input,
 		dbos.WithWorkflowID("release-"+release.ReleaseID+"-"+strconv.Itoa(release.Attempt)))
 	return err
+}
+
+// resolveBootstrapImage mirrors EnvProvisioner.resolveBootstrapImage: the
+// synchronous, best-effort precondition run before enqueueing the durable
+// workflow, so a resumed workflow does not re-probe the registry.
+func (q *ReleaseQueue) resolveBootstrapImage(tenant string) bool {
+	_, bootstrap := ResolveRuntimeImage(context.Background(), q.imageChecker, q.config.Registry, tenant, q.config.RuntimeVersion)
+	return bootstrap
 }
 
 func (q *ReleaseQueue) releaseWorkflow(dctx dbos.DBOSContext, input ReleaseInput) (string, error) {
@@ -166,8 +188,16 @@ func (q *ReleaseQueue) dispatchNext(ctx context.Context, identity security.Conte
 	}
 }
 
-// releaseJobParams renders the placement for one release Job.
+// releaseJobParams renders the placement for one release Job. A tenant with
+// no published image (input.Bootstrap, decided once by resolveBootstrapImage
+// before the durable workflow runs) instead runs the Job on the canonical
+// published erun-devops image, the same fallback the deploy/stop/delete Jobs
+// apply.
 func releaseJobParams(config ReleaseConfig, input ReleaseInput) releaseexec.ReleaseJobParams {
+	image := TenantRuntimeImage(config.Registry, input.Tenant, config.RuntimeVersion)
+	if input.Bootstrap {
+		image = CanonicalRuntimeImage(config.Registry, config.RuntimeVersion)
+	}
 	return releaseexec.ReleaseJobParams{
 		Tenant:         input.Tenant,
 		TargetBranch:   input.TargetBranch,
@@ -175,7 +205,7 @@ func releaseJobParams(config ReleaseConfig, input ReleaseInput) releaseexec.Rele
 		ReleaseID:      input.ReleaseID,
 		Attempt:        input.Attempt,
 		Namespace:      config.Namespace,
-		Image:          fmt.Sprintf("%s/%s-devops:%s", config.Registry, input.Tenant, config.RuntimeVersion),
+		Image:          image,
 		ServiceAccount: config.ServiceAccount,
 		HomeClaim:      config.HomeClaim,
 		WorkspaceClaim: config.WorkspaceClaim,

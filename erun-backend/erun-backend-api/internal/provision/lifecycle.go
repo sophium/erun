@@ -49,16 +49,18 @@ type EnvLifecycleInput struct {
 // an acceptable v1 shape. Revisit if a tenant's teardown routinely runs long
 // (stuck namespace finalizers, for example).
 type EnvLifecycle struct {
-	runner EnvLifecycleRunner
-	rows   EnvironmentRowDeleter
-	config EnvDeployConfig
-	usage  UsageRecorder
+	runner       EnvLifecycleRunner
+	rows         EnvironmentRowDeleter
+	config       EnvDeployConfig
+	usage        UsageRecorder
+	imageChecker RuntimeImageChecker
 }
 
 // NewEnvLifecycle wires stop/delete. usage may be nil, which records no
-// metering event.
-func NewEnvLifecycle(runner EnvLifecycleRunner, rows EnvironmentRowDeleter, config EnvDeployConfig, usage UsageRecorder) *EnvLifecycle {
-	return &EnvLifecycle{runner: runner, rows: rows, config: config, usage: usage}
+// metering event. imageChecker may be nil, which skips the published-image
+// fallback and always names the tenant's own image.
+func NewEnvLifecycle(runner EnvLifecycleRunner, rows EnvironmentRowDeleter, config EnvDeployConfig, usage UsageRecorder, imageChecker RuntimeImageChecker) *EnvLifecycle {
+	return &EnvLifecycle{runner: runner, rows: rows, config: config, usage: usage, imageChecker: imageChecker}
 }
 
 func (l *EnvLifecycle) recordUsage(ctx context.Context, environmentID string, eventType model.UsageEventType) {
@@ -70,8 +72,15 @@ func (l *EnvLifecycle) recordUsage(ctx context.Context, environmentID string, ev
 	}
 }
 
-func (l *EnvLifecycle) image(tenant, version string) string {
-	return fmt.Sprintf("%s/%s-devops:%s", l.config.Registry, tenant, version)
+// image resolves the runtime image a stop/delete Job runs erun from, applying
+// the same tenant-image-with-published-fallback decision the deploy Job uses
+// (ResolveRuntimeImage) — an environment that was bootstrapped onto the
+// canonical erun-devops image at deploy time is still running it, so its stop
+// and delete Jobs must name the same image rather than the tenant's own image
+// that was already confirmed missing.
+func (l *EnvLifecycle) image(ctx context.Context, tenant, version string) string {
+	image, _ := ResolveRuntimeImage(ctx, l.imageChecker, l.config.Registry, tenant, version)
+	return image
 }
 
 // Stop scales the environment's runtime Deployment to zero. It does not touch
@@ -85,7 +94,7 @@ func (l *EnvLifecycle) Stop(ctx context.Context, input EnvLifecycleInput) error 
 		Tenant:         input.Tenant,
 		Environment:    input.Environment,
 		Namespace:      l.config.PlatformNamespace,
-		Image:          l.image(input.Tenant, input.RunningVersion),
+		Image:          l.image(ctx, input.Tenant, input.RunningVersion),
 		ServiceAccount: l.config.DeployerServiceAccount,
 	})
 	if err != nil {
@@ -108,7 +117,7 @@ func (l *EnvLifecycle) Delete(ctx context.Context, input EnvLifecycleInput) erro
 			Tenant:         input.Tenant,
 			Environment:    input.Environment,
 			Namespace:      l.config.PlatformNamespace,
-			Image:          l.image(input.Tenant, input.RunningVersion),
+			Image:          l.image(ctx, input.Tenant, input.RunningVersion),
 			ServiceAccount: l.config.DeployerServiceAccount,
 		})
 		if err != nil {
