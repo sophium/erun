@@ -564,64 +564,95 @@ func (e *PublishedChartNotFoundError) Unwrap() error { return e.Err }
 
 // resolveDeployRuntimeImage resolves the image the runtime pod's erun-devops
 // container runs, as the imageOverrides.erun-devops the deploy sets. An explicit
-// runtimeimage (the operator's choice) wins, except where it names the stock
-// erun-devops image on a deploy that is not on erun's own release line — see
-// staleStockRuntimeImageTrace. Otherwise the deploy's own line names the image.
+// runtimeimage (the operator's choice) wins, except where it is stale by
+// construction — see staleRuntimeImageTrace. Otherwise the deploy's own line
+// names the image.
 func resolveDeployRuntimeImage(ctx Context, target OpenResult, chartRegistry, version, chartName, chartVersion string) string {
 	chartName = strings.TrimSpace(chartName)
 	version = strings.TrimSpace(version)
 	registry := deployRuntimeImageRegistry(target, chartRegistry)
+	tenant := strings.TrimSpace(target.Tenant)
 	if image := resolveRuntimeImageOverride(registry, version, target.EnvConfig.RuntimeImage); image != "" {
-		stale := staleStockRuntimeImageTrace(image, chartName, version, strings.TrimSpace(chartVersion))
+		defaultImage := defaultDeployRuntimeImageName(registry, version, tenant, chartName)
+		stale := staleRuntimeImageTrace(image, defaultImage, chartName, version, strings.TrimSpace(chartVersion))
 		if stale == "" {
 			ctx.Trace("deploy: runtime image override " + image + " (imageOverrides." + DevopsComponentName + ")")
 			return image
 		}
 		ctx.Trace(stale)
 	}
-	return defaultDeployRuntimeImage(ctx, registry, version, strings.TrimSpace(target.Tenant), chartName)
+	return defaultDeployRuntimeImage(ctx, registry, version, tenant, chartName)
 }
 
-// staleStockRuntimeImageTrace explains why a runtimeimage naming the stock
-// erun-devops image cannot be honored on this deploy, or "" when it can be. Two
-// deploys are not on erun's own release line: a tenant umbrella, which publishes
-// its own image beside its own chart, and a chart stated at its own version,
-// which is the operator saying so outright. Neither line publishes the stock
-// image at its version, so a runtimeimage still naming it is a leftover from when
-// the env rode the shared chart, and honoring it would pin a tag that never
-// existed (ImagePullBackOff).
-func staleStockRuntimeImageTrace(image, chartName, version, chartVersion string) string {
-	if !runtimeImageIsStockDevops(image) {
+// staleRuntimeImageTrace explains why a saved runtimeimage override cannot be
+// honored on this deploy, or "" when it can be. Two shapes are stale by
+// construction, both a leftover pin rather than a deliberate current choice:
+//
+//   - It names the stock erun-devops image on a deploy that is not on erun's
+//     own release line: a tenant umbrella, which publishes its own image beside
+//     its own chart, or a chart stated at its own version, which is the operator
+//     saying so outright. Neither line publishes the stock image at its
+//     version, so a runtimeimage still naming it is a leftover from when the env
+//     rode the shared chart, and honoring it would pin a tag that never existed
+//     (ImagePullBackOff).
+//   - It names the very image this deploy's own line already resolves with no
+//     override at all (defaultImage) — just at some other tag. That pin is
+//     provably redundant: defaultDeployRuntimeImage would have named the right
+//     image unaided, so the saved tag can only be stale (#1072).
+func staleRuntimeImageTrace(image, defaultImage, chartName, version, chartVersion string) string {
+	if runtimeImageIsStockDevops(image) {
+		switch {
+		case chartName != "" && chartName != DevopsComponentName:
+			return "deploy: ignoring stale runtimeimage " + image + " on the " + chartName + " umbrella deploy (the stock " + DevopsComponentName + " image is not published on this version line); defaulting to the umbrella's own image"
+		case chartVersion != "" && chartVersion != version:
+			return "deploy: ignoring stale runtimeimage " + image + " (the env states its runtime chart at " + chartVersion + ", so version " + version + " is on another line and the stock " + DevopsComponentName + " image is not published at it); defaulting to the tenant's own image"
+		}
 		return ""
 	}
-	switch {
-	case chartName != "" && chartName != DevopsComponentName:
-		return "deploy: ignoring stale runtimeimage " + image + " on the " + chartName + " umbrella deploy (the stock " + DevopsComponentName + " image is not published on this version line); defaulting to the umbrella's own image"
-	case chartVersion != "" && chartVersion != version:
-		return "deploy: ignoring stale runtimeimage " + image + " (the env states its runtime chart at " + chartVersion + ", so version " + version + " is on another line and the stock " + DevopsComponentName + " image is not published at it); defaulting to the tenant's own image"
+	if defaultImage == "" || image == defaultImage || !sameImageRepository(image, defaultImage) {
+		return ""
 	}
-	return ""
+	return "deploy: ignoring stale runtimeimage " + image + " (this deploy's own line already publishes " + defaultImage + "; the saved pin just names an older tag); defaulting to " + defaultImage
 }
 
-// defaultDeployRuntimeImage names the image the deploy's own line publishes: the
-// umbrella's, when the tenant deploys its own <tenant>-devops chart, else the
-// tenant's own <tenant>-devops image, which erun-build-env builds and erun push
-// publishes on the tenant's version line. Defaulting to it keeps a deploy with no
-// explicit runtimeimage off the stock erun-devops, which carries none of the
-// tenant's customizations. The erun product tenant rides the stock image itself,
-// so it emits no override and the chart's own default wins.
-func defaultDeployRuntimeImage(ctx Context, registry, version, tenant, chartName string) string {
+// sameImageRepository reports whether two tagged image references name the
+// same registry + image, ignoring the tag itself.
+func sameImageRepository(a, b string) bool {
+	registryA, nameA, _, okA := parseDockerImageReference(a)
+	registryB, nameB, _, okB := parseDockerImageReference(b)
+	return okA && okB && registryA == registryB && nameA == nameB
+}
+
+// defaultDeployRuntimeImageName names the image the deploy's own line
+// publishes: the umbrella's, when the tenant deploys its own <tenant>-devops
+// chart, else the tenant's own <tenant>-devops image, which erun-build-env
+// builds and erun push publishes on the tenant's version line. Empty means the
+// deploy has no line of its own to default to (the erun product tenant rides
+// the stock image itself, so it emits no override and the chart's own default
+// wins).
+func defaultDeployRuntimeImageName(registry, version, tenant, chartName string) string {
 	if chartName != "" && chartName != DevopsComponentName {
-		image := registry + "/" + chartName + ":" + version
-		ctx.Trace("deploy: defaulting runtime image to the " + chartName + " chart's own image " + image + " (imageOverrides." + DevopsComponentName + ")")
-		return image
+		return registry + "/" + chartName + ":" + version
 	}
 	tenantImage := RuntimeReleaseName(tenant)
 	if tenant == "" || tenantImage == DevopsComponentName {
 		return ""
 	}
-	image := registry + "/" + tenantImage + ":" + version
-	ctx.Trace("deploy: defaulting runtime image to the tenant's " + tenantImage + " image " + image + " (imageOverrides." + DevopsComponentName + ")")
+	return registry + "/" + tenantImage + ":" + version
+}
+
+// defaultDeployRuntimeImage resolves defaultDeployRuntimeImageName and traces
+// the decision. See that function for the resolution itself.
+func defaultDeployRuntimeImage(ctx Context, registry, version, tenant, chartName string) string {
+	image := defaultDeployRuntimeImageName(registry, version, tenant, chartName)
+	if image == "" {
+		return ""
+	}
+	if chartName != "" && chartName != DevopsComponentName {
+		ctx.Trace("deploy: defaulting runtime image to the " + chartName + " chart's own image " + image + " (imageOverrides." + DevopsComponentName + ")")
+	} else {
+		ctx.Trace("deploy: defaulting runtime image to the tenant's " + RuntimeReleaseName(tenant) + " image " + image + " (imageOverrides." + DevopsComponentName + ")")
+	}
 	return image
 }
 
@@ -674,4 +705,28 @@ func imageReferenceHasTagOrDigest(ref string) bool {
 	}
 	lastSegment := ref[strings.LastIndex(ref, "/")+1:]
 	return strings.Contains(lastSegment, ":")
+}
+
+// stripRuntimeImageTag drops a trailing tag or digest from an operator-supplied
+// runtime image reference, e.g. for `erun init --runtime-image` to persist. A
+// tagged reference sticks at that tag forever: resolveRuntimeImageOverride
+// already pins a tagless reference to the env's own runtime version on every
+// deploy, so recording the tag is what lets the pin drift from that version and
+// rot, while recording it tagless is self-maintaining (#1072).
+func stripRuntimeImageTag(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return ""
+	}
+	if idx := strings.Index(ref, "@"); idx >= 0 {
+		return ref[:idx]
+	}
+	prefix, repo := "", ref
+	if lastSlash := strings.LastIndex(ref, "/"); lastSlash >= 0 {
+		prefix, repo = ref[:lastSlash+1], ref[lastSlash+1:]
+	}
+	if idx := strings.LastIndex(repo, ":"); idx >= 0 {
+		repo = repo[:idx]
+	}
+	return prefix + repo
 }
