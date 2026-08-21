@@ -61,10 +61,10 @@ if [ -d frontend ]; then
 		# cannot isolate (stream parsing, row-state derivation). They were
 		# runnable but ungated, which is the same as absent.
 		"$YARN_BIN" test
-		# Go-side lint gate. erun-ui's Go module is not built by the
-		# erun-devops image (it needs this CGO/webkit + frontend toolchain),
-		# so its golangci-lint gate lives here next to the frontend checks
-		# rather than in the shared `make check` the image runs.
+		# Go-side lint gate, kept here too (redundant with `make check`'s own
+		# LINT_MODULES entry for erun-ui) as a fast local signal for anyone
+		# iterating on the desktop build directly without running the full
+		# repo gate.
 		#
 		# The cache is scoped to this checkout because golangci-lint keys it by
 		# module, not by working tree: a second checkout of erun-ui would
@@ -99,6 +99,17 @@ if git -C "$SCRIPT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 	if [ -n "$(git -C "$SCRIPT_DIR" status --porcelain 2>/dev/null)" ]; then
 		BUILD_COMMIT="${BUILD_COMMIT}-dirty"
 	fi
+fi
+
+# The macOS bundle's own "Get Info" / About panel is the one place a released
+# build ever surfaces its version with no way to also ask `erun version` for
+# the commit — so a build that shipped from a stale checkout would look
+# exactly as legitimate there as one that did not. CFBundleVersion carries the
+# commit alongside the marketing version for that reason; CFBundleShortVersionString
+# stays the plain version so it keeps reading as one everywhere else it is used.
+BUNDLE_VERSION="$BUILD_VERSION"
+if [ -n "$BUILD_COMMIT" ]; then
+	BUNDLE_VERSION="${BUILD_VERSION}+${BUILD_COMMIT}"
 fi
 
 # Where this build's skills come from. The desktop installs them for a host
@@ -184,7 +195,7 @@ if [ "$TARGET_GOOS" = "darwin" ]; then
     <key>CFBundleShortVersionString</key>
     <string>$BUILD_VERSION</string>
     <key>CFBundleVersion</key>
-    <string>$BUILD_VERSION</string>
+    <string>$BUNDLE_VERSION</string>
     <key>LSMinimumSystemVersion</key>
     <string>11.0</string>
     <key>NSHighResolutionCapable</key>
