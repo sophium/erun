@@ -56,8 +56,7 @@ func TestOrchestratorShellActivityIsReadFromTheReportNotTheTerminal(t *testing.T
 // ended, no shell survives it) must not keep spinning past a long safety
 // bound — hours, since a legitimate background build or poll loop can
 // reasonably run that long, and the operator seeing the real elapsed time is
-// the point (#1068) — but it must still eventually age out if nothing ever
-// clears it.
+// the point — but it must still eventually age out if nothing ever clears it.
 func TestOrchestratorShellActivitySurvivesALongRunButStillBounds(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())

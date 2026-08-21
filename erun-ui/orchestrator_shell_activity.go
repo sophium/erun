@@ -13,7 +13,7 @@ import (
 // whole point of backgrounding it. orchestratorActivity (this orchestrator's
 // own turn) cannot answer "is a shell still running" for that reason: the turn
 // can read idle while a shell it started keeps going, and the desktop had no
-// affordance at all for that case (#1068).
+// affordance at all for that case.
 //
 // Like orchestratorActivity, this is a report the agent's hooks write, not
 // something read off its terminal — the same reason applies here: a

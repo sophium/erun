@@ -34,7 +34,7 @@ import (
 // transcript, can leave the live conversation at a different id than the one
 // derived from the orchestrator's own. Recording the conversation id at spawn
 // time (see recordOpenOrchestrator's caller) is what lets a restore resume the
-// conversation that was actually there instead of guessing (#1096).
+// conversation that was actually there instead of guessing.
 //
 // app_restart.go owns the OTHER record: the one-shot hand-off an in-app restart
 // writes, which carries the prompt the resumed session should auto-run. That one
@@ -58,14 +58,16 @@ type orchestratorOpenState struct {
 	// running, oldest first, each carrying the conversation id it was actually
 	// spawned with.
 	Orchestrators []orchestratorOpenEntry `json:"orchestrators,omitempty"`
-	// OrchestratorIDs is the shape this file had under #1098, before an entry
-	// carried a session id at all. Only read, never written again: an operator
-	// upgrading from that release must not lose the orchestrators they had
-	// open — they come back with no recorded session, so restore starts each of
-	// them on a fresh conversation rather than guessing which one was theirs.
+	// OrchestratorIDs is the shape this file had under an earlier release,
+	// before an entry carried a session id at all. Only read, never written
+	// again: an operator upgrading from that release must not lose the
+	// orchestrators they had open — they come back with no recorded session,
+	// so restore starts each of them on a fresh conversation rather than
+	// guessing which one was theirs.
 	OrchestratorIDs []string `json:"orchestratorIds,omitempty"`
-	// OrchestratorID is the shape from #971, before the file could hold more
-	// than one id at all. Same treatment: read, never written again.
+	// OrchestratorID is the shape from a release before that, before the file
+	// could hold more than one id at all. Same treatment: read, never written
+	// again.
 	OrchestratorID string `json:"orchestratorId,omitempty"`
 }
 
@@ -145,10 +147,10 @@ func readOpenOrchestrators(path string) []orchestratorOpenEntry {
 	if entries := dedupOrchestratorEntries(state.Orchestrators); len(entries) > 0 {
 		return entries
 	}
-	// A legacy file (the #971 scalar, or the #1098 id-only set) never recorded a
-	// session id, so every id it names comes back with none — restore must
-	// start each of them fresh rather than resolving to whatever its derived id
-	// happens to already name on disk.
+	// A legacy file (the older scalar shape, or the later id-only set) never
+	// recorded a session id, so every id it names comes back with none —
+	// restore must start each of them fresh rather than resolving to whatever
+	// its derived id happens to already name on disk.
 	legacy := make([]orchestratorOpenEntry, 0, len(state.OrchestratorIDs)+1)
 	if id := strings.TrimSpace(state.OrchestratorID); id != "" {
 		legacy = append(legacy, orchestratorOpenEntry{OrchestratorID: id})

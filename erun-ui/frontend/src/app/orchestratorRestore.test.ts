@@ -44,8 +44,8 @@ test('a plain launch reopens the orchestrator that was open, running nothing', (
   });
 });
 
-// The bug #1098 fixed: the durable record was a scalar, so only one
-// orchestrator ever came back. Every id in alsoReopen must be restored too.
+// The bug an earlier fix addressed: the durable record was a scalar, so only
+// one orchestrator ever came back. Every id in alsoReopen must be restored too.
 test('every orchestrator that was open is restored, not just the pane owner', () => {
   const outcome = planOrchestratorRestore(
     {
@@ -177,10 +177,10 @@ test('a whitespace-only resume prompt resumes idle', () => {
   });
 });
 
-// The backend may resolve nothing safe to resume (#1096: no live session was
-// ever recorded, or the recorded one is gone) — the plan must carry that
-// through as an empty conversationId rather than inventing one, so the caller
-// starts the orchestrator fresh instead of resuming a guess.
+// The backend may resolve nothing safe to resume (no live session was ever
+// recorded, or the recorded one is gone) — the plan must carry that through as
+// an empty conversationId rather than inventing one, so the caller starts the
+// orchestrator fresh instead of resuming a guess.
 test('no resolved conversation plans a fresh start, not a guessed one', () => {
   const outcome = planOrchestratorRestore(
     { orchestratorId: 'agent-1', resumePrompt: '' },

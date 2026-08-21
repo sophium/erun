@@ -19,7 +19,7 @@ export interface OrchestratorEnvRef {
 // competing for it.
 //
 // `shellRunning`/`shellCommand`/`shellStartedAtUnix` are the same treatment for
-// a background shell (#1068), independent of `busy`: a shell can outlive the
+// a background shell, independent of `busy`: a shell can outlive the
 // turn that started it. See planOrchestratorShellSeed.
 export interface OrchestratorInfo {
   id: string;

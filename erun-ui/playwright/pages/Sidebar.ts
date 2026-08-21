@@ -245,10 +245,10 @@ export class Sidebar {
     return this.erunSection().getByRole('status', { name: `${name} is working` });
   }
 
-  // The row's background-shell indicator (#1068), rendered whenever the
-  // store's orchestratorShellActivity.bySession has this orchestrator's
-  // session flagged running — from the orchestrator-shell-activity event or
-  // from the list snapshot's own shellRunning field, the same #1087 treatment
+  // The row's background-shell indicator, rendered whenever the store's
+  // orchestratorShellActivity.bySession has this orchestrator's session
+  // flagged running — from the orchestrator-shell-activity event or from the
+  // list snapshot's own shellRunning field, the same treatment
   // orchestratorBusySpinner gets. Matched by prefix since the label carries a
   // live elapsed time.
   orchestratorShellSpinner(name: string): Locator {

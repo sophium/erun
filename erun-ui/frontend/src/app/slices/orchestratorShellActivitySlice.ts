@@ -1,13 +1,13 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 
-// Per-orchestrator-session "background shell running" state (#1068), driven
+// Per-orchestrator-session "background shell running" state, driven
 // passively from the Go side (the orchestrator-shell-activity Wails event).
 // Independent of aiActivitySlice's busy latch: a background shell can outlive
 // the turn that started it, so the sidebar row needs to spin on this even
 // while the orchestrator itself reads idle.
 //
 // Two writers feed this map, deliberately kept as one field so they cannot
-// disagree (the same #1087 treatment aiActivitySlice documents): the
+// disagree (the same treatment aiActivitySlice documents): the
 // orchestrator-shell-activity event (handleOrchestratorShellActivity) and
 // loadOrchestrators seeding it from each orchestrator's own
 // shellRunning/shellCommand/shellStartedAtUnix snapshot fields

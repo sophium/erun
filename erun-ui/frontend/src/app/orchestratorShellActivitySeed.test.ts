@@ -26,10 +26,10 @@ function orchestrator(
   };
 }
 
-// The point of the snapshot half of the fix (#1068, the same #1087 treatment):
-// a fetch that lands after the shell started (boot, a reload) must render the
-// running shell without ever having witnessed the orchestrator-shell-activity
-// event that announced it.
+// The point of the snapshot half of the fix (the same treatment the busy
+// signal already gets): a fetch that lands after the shell started (boot, a
+// reload) must render the running shell without ever having witnessed the
+// orchestrator-shell-activity event that announced it.
 test('a running orchestrator seeds its shell activity from the snapshot alone', () => {
   const seed = planOrchestratorShellSeed([orchestrator(7, true, 'sleep 300', 1_700_000_000)]);
   assert.deepEqual(seed, [

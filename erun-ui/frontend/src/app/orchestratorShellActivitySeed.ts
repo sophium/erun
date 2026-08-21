@@ -1,7 +1,7 @@
 import type { OrchestratorInfo } from './slices/orchestratorsSlice';
 
 // planOrchestratorShellSeed derives the shell-activity-by-session entries a
-// freshly fetched orchestrator list implies (#1068), the same snapshot
+// freshly fetched orchestrator list implies, the same snapshot
 // treatment planOrchestratorBusySeed applies to the busy signal: the
 // orchestratorInfo shell fields carry the same signal as the
 // orchestrator-shell-activity event, so loadOrchestrators can seed the

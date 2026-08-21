@@ -646,11 +646,11 @@ type aiActivityPayload struct {
 // orchestratorShellActivityPayload carries whether an orchestrator's
 // background shell is running, its command and when it started, so the
 // sidebar can spin and show elapsed time for a shell the orchestrator's own
-// turn may already have gone idle around (#1068). Emitted every heartbeat
-// tick, busy or not, the same re-emit-regardless-of-change treatment
-// aiActivityPayload was given in #1087 and for the same reason: a snapshot
-// field (orchestratorInfo.ShellRunning) carries the same signal so a missed
-// or mistimed event self-heals within one tick instead of staying wrong until
+// turn may already have gone idle around. Emitted every heartbeat tick, busy
+// or not, the same re-emit-regardless-of-change treatment aiActivityPayload
+// was given earlier and for the same reason: a snapshot field
+// (orchestratorInfo.ShellRunning) carries the same signal so a missed or
+// mistimed event self-heals within one tick instead of staying wrong until
 // the state itself next changes.
 type orchestratorShellActivityPayload struct {
 	SessionID     int    `json:"sessionId"`

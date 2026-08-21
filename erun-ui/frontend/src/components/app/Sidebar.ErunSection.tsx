@@ -185,7 +185,7 @@ function OrchestratorRow({
       orchestrator.sessionId > 0 &&
       state.aiActivity.aiBusyBySession[orchestrator.sessionId] === true,
   );
-  // A background shell (#1068) is independent of the turn's own busy state —
+  // A background shell is independent of the turn's own busy state —
   // it can keep running after the turn that started it goes idle, which is
   // exactly the case that had no affordance at all before this. Shown only
   // when the turn itself is not already spinning, so the row never carries
@@ -234,8 +234,8 @@ function OrchestratorRow({
 // turn or a busy environment (Nielsen #4, consistency). The aria-label — and
 // the hover tooltip, since elapsed time and the command are worth seeing at a
 // glance, not just to a screen reader — name what is running and for how
-// long, which is the whole point of #1068: "1 shell" alone cannot tell the
-// operator whether it is doing something or just spinning its wheels.
+// long, which is the whole point of this indicator: "1 shell" alone cannot
+// tell the operator whether it is doing something or just spinning its wheels.
 function OrchestratorShellIndicator({
   name,
   activity,

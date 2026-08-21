@@ -75,9 +75,9 @@ export const handleAIActivity =
   };
 
 // handleOrchestratorShellActivity surfaces that an orchestrator has a
-// background shell running even after its own turn has gone idle (#1068) —
-// the case a plain busy spinner cannot show, since backgrounding a shell is
-// what lets the turn end without waiting for it.
+// background shell running even after its own turn has gone idle — the case a
+// plain busy spinner cannot show, since backgrounding a shell is what lets the
+// turn end without waiting for it.
 export const handleOrchestratorShellActivity =
   (payload: OrchestratorShellActivityPayload): AppThunk =>
   (dispatch) => {

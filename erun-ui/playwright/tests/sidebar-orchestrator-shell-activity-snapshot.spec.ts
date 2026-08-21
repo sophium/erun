@@ -3,9 +3,9 @@ import type { Page } from '@playwright/test';
 import { expect, test } from '../fixtures/erunApp.js';
 import { SEED_ORCHESTRATOR } from '../fixtures/seedRoot.js';
 
-// #1068: a running background shell had no activity affordance at all — the
+// A running background shell had no activity affordance at all — the
 // desktop rendered it as static text, so working and wedged looked identical.
-// The fix follows the exact #1087 pattern this mirrors: orchestratorInfo
+// The fix follows the exact busy-snapshot pattern this mirrors: orchestratorInfo
 // carries shellRunning/shellCommand/shellStartedAtUnix directly, so a snapshot
 // taken after the shell started reflects it even when the
 // orchestrator-shell-activity event that announced it was never observed —
@@ -60,7 +60,7 @@ async function stubOrchestratorList(
   });
 }
 
-test.describe('orchestrator background shell renders from the list snapshot (#1068)', () => {
+test.describe('orchestrator background shell renders from the list snapshot', () => {
   test('a running-shell snapshot shows the indicator on a fresh mount, with no event ever emitted', async ({
     app,
     page,

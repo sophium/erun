@@ -313,7 +313,7 @@ func TestRestartHandOffStaysOneShotAndAgeBoundedOverTheDurableRecord(t *testing.
 	}
 }
 
-// The bug (#1096): a plain launch used to re-derive a session id from the
+// The bug: a plain launch used to re-derive a session id from the
 // orchestrator id (uuid5(namespace, id)) and resume THAT, rather than the
 // conversation actually recorded as running. A stale transcript that happens
 // to sit at the derived id — left over from before the live session diverged
@@ -368,9 +368,9 @@ func TestPlainLaunchStartsFreshWhenTheRecordedConversationIsGone(t *testing.T) {
 }
 
 // An operator upgrading from a release that recorded only the orchestrator id
-// (#1098's shape, or #971's before it) must not have that silence read as
-// permission to resume whatever the derived id names. The very first restore
-// under the new record starts every such orchestrator fresh.
+// (an earlier shape, or the scalar one before it) must not have that silence
+// read as permission to resume whatever the derived id names. The very first
+// restore under the new record starts every such orchestrator fresh.
 func TestUpgradingFromARecordWithNoSessionIDStartsFresh(t *testing.T) {
 	app, openPath, _ := openStateTestApp(t)
 	defer app.shutdown(context.Background())

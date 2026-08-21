@@ -83,7 +83,7 @@ async function stubReopen(
 }
 
 test.describe('reopening the orchestrator that was open', () => {
-  // #1096: a plain launch must resume the exact conversation the backend
+  // A plain launch must resume the exact conversation the backend
   // resolved as live for this orchestrator, never a blind StartOrchestrator
   // that would leave the CLI to derive (or mis-derive) a session id itself.
   test('a plain launch resumes the recorded conversation, running no prompt', async ({
@@ -114,7 +114,7 @@ test.describe('reopening the orchestrator that was open', () => {
     expect(calls).not.toContain('StartOrchestrator');
   });
 
-  // #1096: when the backend has nothing safe to resume (no live session was
+  // When the backend has nothing safe to resume (no live session was
   // ever recorded, or the recorded one no longer exists), it answers with no
   // conversationId — and the launch must start the orchestrator fresh rather
   // than resuming whatever the frontend, or the CLI, would otherwise guess.
@@ -268,9 +268,9 @@ test.describe('restoring every orchestrator that was open', () => {
     await expect(app.tabStrip.tab(SEED_ORCHESTRATOR_2)).toHaveAttribute('aria-selected', 'true');
     await expect(app.tabStrip.tab(SEED_ORCHESTRATOR)).toHaveAttribute('aria-selected', 'false');
 
-    // Both were resumed explicitly, idle, at their own recorded conversation
-    // (#1096) — the pane owner's and the one alongside it, since a plain
-    // launch (no restart hand-off) carries no prompt to auto-run.
+    // Both were resumed explicitly, idle, at their own recorded conversation —
+    // the pane owner's and the one alongside it, since a plain launch (no
+    // restart hand-off) carries no prompt to auto-run.
     expect(calls).toContain('StartOrchestratorWithResume');
     expect(calls).not.toContain('StartOrchestrator');
   });

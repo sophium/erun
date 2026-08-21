@@ -56,7 +56,7 @@ type orchestratorSession struct {
 	// reconcileOrchestratorActivity in session_heartbeat.go.
 	aiBusy bool
 	// shellRunning, shellCommand and shellStartedAtUnix are the last background
-	// shell report the poller observed (#1068) — a fact independent of aiBusy,
+	// shell report the poller observed — a fact independent of aiBusy,
 	// since a shell can keep running after the turn that started it ends. Same
 	// snapshot treatment as aiBusy and for the same reason: orchestratorInfoFor
 	// reads these directly so a fresh mount or reconnect renders the true state
@@ -99,7 +99,7 @@ type orchestratorEnvInfo struct {
 // than keeping a second source of truth; see aiActivitySlice.ts.
 //
 // ShellRunning/ShellCommand/ShellStartedAtUnix are the same treatment for a
-// background shell (#1068): independent of Busy, since a shell can outlive the
+// background shell: independent of Busy, since a shell can outlive the
 // turn that started it, and carried directly rather than left to the
 // orchestrator-shell-activity event alone. ShellStartedAtUnix is when the
 // running shell was reported started, unix seconds, 0 when ShellRunning is
@@ -740,10 +740,10 @@ func directoriesFromEnvs(envs []eruncommon.OrchestratorEnvConfig) []string {
 	return out
 }
 
-// orchestratorShellSnapshot is the background-shell half of orchestratorInfo
-// (#1068), grouped into one value so orchestratorInfoFor's call sites read as
-// "this session's shell state" rather than three more positional bools and
-// strings indistinguishable from the ones beside them.
+// orchestratorShellSnapshot is the background-shell half of orchestratorInfo,
+// grouped into one value so orchestratorInfoFor's call sites read as "this
+// session's shell state" rather than three more positional bools and strings
+// indistinguishable from the ones beside them.
 type orchestratorShellSnapshot struct {
 	Running       bool
 	Command       string

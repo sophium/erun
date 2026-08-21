@@ -30,9 +30,9 @@ import { setSessionId } from './slices/terminalSlice';
 import type { AppThunk } from './store';
 
 // loadOrchestrators fetches the current list and, in the same pass, seeds the
-// AI-busy store from each orchestrator's own `busy` snapshot field (#1087),
+// AI-busy store from each orchestrator's own `busy` snapshot field,
 // and the shell-activity store from its shellRunning/shellCommand/
-// shellStartedAtUnix fields (#1068) — the same store fields the ai-activity and
+// shellStartedAtUnix fields — the same store fields the ai-activity and
 // orchestrator-shell-activity events write to, so a fetch that lands after a
 // transition (boot, a dialog close-and-reload, a manual refresh) renders the
 // true state even if that event was never observed.
@@ -163,8 +163,8 @@ export const restartApp =
 // for the rest of the set. A refused hand-off still reopens its orchestrator
 // and surfaces the backend's notice beside the orchestrator list, so a resume
 // that declined to continue is never silent. Which conversation each
-// orchestrator resumes is the backend's call, not a re-derivation here (#1096):
-// this thunk just resumes whatever conversationId the target names, or starts
+// orchestrator resumes is the backend's call, not a re-derivation here: this
+// thunk just resumes whatever conversationId the target names, or starts
 // fresh when none was resolved.
 export const restoreOpenOrchestrators =
   (): AppThunk<Promise<boolean>> => async (dispatch, getState) => {
@@ -185,8 +185,8 @@ export const restoreOpenOrchestrators =
       for (const ref of alsoReopen) {
         try {
           // A resolved conversation id resumes exactly that conversation; its
-          // absence means the backend found nothing safe to resume (#1096), so
-          // this orchestrator starts fresh instead.
+          // absence means the backend found nothing safe to resume, so this
+          // orchestrator starts fresh instead.
           if (ref.conversationId) {
             await StartOrchestratorWithResume(ref.orchestratorId, ref.conversationId, '', 80, 24);
           } else {

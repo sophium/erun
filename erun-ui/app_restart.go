@@ -78,7 +78,7 @@ type orchestratorRestoreState struct {
 // because ResumePrompt is a field of this one target, not of each entry in
 // AlsoReopen — but every entry, owner included, carries the conversation id it
 // should resume: see resolveReopenSessionID for how that id is decided, which
-// is never a re-derivation from the orchestrator id (#1096). Notice explains,
+// is never a re-derivation from the orchestrator id. Notice explains,
 // when non-empty, why the pane owner is not continuing a task it asked to.
 type relaunchTarget struct {
 	OrchestratorID string                  `json:"orchestratorId"`
@@ -277,7 +277,7 @@ func (a *App) ResolveOrchestratorToReopen() relaunchTarget {
 	// No prompt to deliver, or the hand-off was refused: still resume the exact
 	// conversation the durable record last saw running for this orchestrator,
 	// rather than leaving it for a re-derivation that can land on a different,
-	// older one (#1096).
+	// older one.
 	target.ConversationID = resolveReopenSessionID(orchestratorEntryOrEmpty(openEntries, state.OrchestratorID))
 	return target
 }
@@ -286,7 +286,7 @@ func (a *App) ResolveOrchestratorToReopen() relaunchTarget {
 // resumes: the one durably recorded as live for it, but only when that
 // conversation still exists on disk — never a re-derivation from the
 // orchestrator id, which can land on a different, older conversation that
-// happens to share the derived id (#1096). Absent or stale, it mints a fresh
+// happens to share the derived id. Absent or stale, it mints a fresh
 // id instead of guessing: resuming nothing is safer than resuming the wrong
 // conversation, and the fresh session gets recorded correctly the moment it
 // spawns.

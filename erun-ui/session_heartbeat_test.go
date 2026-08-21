@@ -298,10 +298,10 @@ func TestReconcileOrchestratorActivityReEmitsEveryTick(t *testing.T) {
 }
 
 // TestOrchestratorShellSnapshotRendersRunningWithoutTheEvent is the shell-report
-// half of the #1087 treatment (#1068): orchestratorInfo carries ShellRunning
-// directly, so a snapshot taken after the state changed reflects it even when
-// the orchestrator-shell-activity event that announced the change was never
-// observed — the same remount/reopen/late-listener path
+// half of the same busy-snapshot treatment: orchestratorInfo carries
+// ShellRunning directly, so a snapshot taken after the state changed reflects
+// it even when the orchestrator-shell-activity event that announced the
+// change was never observed — the same remount/reopen/late-listener path
 // TestOrchestratorSnapshotRendersBusyWithoutTheEvent locks for the turn's own
 // busy signal, but for a fact that is independent of it: a shell can be
 // running while the turn itself already reads idle.
@@ -337,8 +337,8 @@ func TestOrchestratorShellSnapshotRendersRunningWithoutTheEvent(t *testing.T) {
 }
 
 // TestReconcileOrchestratorActivityReEmitsShellStateEveryTick is the shell-report
-// half of #1087's other lock: the shell signal is republished every tick
-// regardless of whether it changed, so a dropped or mistimed
+// half of the busy-signal re-emit lock: the shell signal is republished every
+// tick regardless of whether it changed, so a dropped or mistimed
 // orchestrator-shell-activity event self-heals within one tick.
 func TestReconcileOrchestratorActivityReEmitsShellStateEveryTick(t *testing.T) {
 	app := orchestratorTestApp(t)

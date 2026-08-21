@@ -4,7 +4,7 @@ import type { OrchestratorInfo } from './slices/orchestratorsSlice';
 // backend resolves conversationId the same way for every entry, owner
 // included — the exact conversation last known to be running for that
 // orchestrator, never a re-derivation from its id, which can land on a
-// different, older conversation (#1096). Empty only when the backend found
+// different, older conversation. Empty only when the backend found
 // nothing safe to resume, in which case the orchestrator starts fresh.
 export interface OrchestratorReopenRef {
   orchestratorId: string;
