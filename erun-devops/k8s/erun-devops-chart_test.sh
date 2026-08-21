@@ -357,4 +357,46 @@ grep -q '^imagePullSecrets:$' "${sa_block}" ||
 grep -q '^  - name: ghcr-pull$' "${sa_block}" ||
     fail "the runtime ServiceAccount's imagePullSecrets should name the configured secret"
 
+# --- 23. The pod's total resource ceiling matches the namespace quota floor
+# both erun-common (MinimumRuntimeNamespaceQuota) and erun-backend-api
+# (repository.DefaultMax*) derive from it. A ResourceQuota sums every
+# container in the pod, so this locks in that the runtime container's limits,
+# the dind sidecar's limits, and all three PVCs add up to exactly what those
+# Go sources expect to admit (#1061: they used to assume one container and one
+# quota-width default, and silently drifted apart from the pod's real shape). --
+container_limit_cpu() {
+    awk '/^          resources:/{f=1} f && /cpu:/{print; exit}' "$1" | sed -n 's/.*cpu: "\(.*\)"/\1/p'
+}
+container_limit_memory() {
+    awk '/^          resources:/{f=1} f && /memory:/{print; exit}' "$1" | sed -n 's/.*memory: "\(.*\)"/\1/p'
+}
+pvc_storage_requests() {
+    awk '/^kind: PersistentVolumeClaim$/{f=1} f && /storage:/{print; f=0}' "$1" |
+        sed -n 's/.*storage: "\{0,1\}\([0-9]*\)Gi"\{0,1\}/\1/p'
+}
+
+rendered=$(render --set worktreeStorage=pvc)
+runtime_block="${work_root}/runtime-resources.yaml"
+runtime_container "${rendered}" >"${runtime_block}"
+dind_block="${work_root}/dind-resources.yaml"
+dind_container "${rendered}" >"${dind_block}"
+
+runtime_cpu=$(container_limit_cpu "${runtime_block}")
+dind_cpu=$(container_limit_cpu "${dind_block}")
+runtime_memory=$(container_limit_memory "${runtime_block}" | sed 's/Mi$//')
+dind_memory=$(container_limit_memory "${dind_block}" | sed 's/Mi$//')
+total_cpu_millicores=$(awk -v a="${runtime_cpu}" -v b="${dind_cpu}" 'BEGIN{printf "%d", (a+b)*1000}')
+total_memory_mb=$((runtime_memory + dind_memory))
+total_storage_gb=0
+for gb in $(pvc_storage_requests "${rendered}"); do
+    total_storage_gb=$((total_storage_gb + gb))
+done
+
+[ "${total_cpu_millicores}" = "8000" ] ||
+    fail "pod cpu limits should sum to 8000m (erun-devops ${runtime_cpu} + erun-dind ${dind_cpu}), got ${total_cpu_millicores}m"
+[ "${total_memory_mb}" = "17832" ] ||
+    fail "pod memory limits should sum to 17832Mi (erun-devops ${runtime_memory}Mi + erun-dind ${dind_memory}Mi), got ${total_memory_mb}Mi"
+[ "${total_storage_gb}" = "72" ] ||
+    fail "the pod's PVCs should sum to 72Gi (home 2Gi + docker 50Gi + worktree 20Gi), got ${total_storage_gb}Gi"
+
 echo "PASS: erun-devops chart pod shape"

@@ -83,6 +83,20 @@ emitted; type is the single source of truth.
 {{- $runtimeMemory := default "8916Mi" $runtimeLimits.memory -}}
 {{- $runtimeRequestCPU := default "0.25" $runtimeRequests.cpu -}}
 {{- $runtimeRequestMemory := default "1024Mi" $runtimeRequests.memory -}}
+{{- /* The erun-dind sidecar declares its own resources rather than relying on
+       the namespace LimitRange's default: an unsized container in a quota'd
+       namespace is defaulted to the *entire* configured quota width, so an
+       unsized dind silently doubled the pod's real ResourceQuota consumption
+       (#1061). Defaults mirror eruncommon.DefaultRuntimeDindCPU/Memory in
+       erun-common/runtime_resources.go — keep the two in sync. */ -}}
+{{- $dind := default dict $runtime.dind -}}
+{{- $dindResources := default dict $dind.resources -}}
+{{- $dindLimits := default dict $dindResources.limits -}}
+{{- $dindRequests := default dict $dindResources.requests -}}
+{{- $dindCPU := default "4" $dindLimits.cpu -}}
+{{- $dindMemory := default "8916Mi" $dindLimits.memory -}}
+{{- $dindRequestCPU := default "0.25" $dindRequests.cpu -}}
+{{- $dindRequestMemory := default "1024Mi" $dindRequests.memory -}}
 {{- $managedCloud := default false .Values.managedCloud -}}
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
 {{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
@@ -691,6 +705,13 @@ spec:
         - image: {{ $dindImage }}
           name: erun-dind
           imagePullPolicy: IfNotPresent
+          resources:
+            limits:
+              cpu: {{ $dindCPU | quote }}
+              memory: {{ $dindMemory | quote }}
+            requests:
+              cpu: {{ $dindRequestCPU | quote }}
+              memory: {{ $dindRequestMemory | quote }}
           {{- /* A context-resolved local cluster registry is plain HTTP at a
                  non-loopback ClusterIP; the docker:dind entrypoint forwards these
                  args to dockerd so an in-pod build can push to it. Empty for

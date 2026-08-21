@@ -227,7 +227,7 @@ func TestCreateEnvironmentStartsDeployWithResourceCaps(t *testing.T) {
 	rec := httptest.NewRecorder()
 	EnvironmentRoutes{
 		environments: environments,
-		quotas:       stubTenantQuotaRepository{maxEnvironments: 10, maxCPUMillicores: 6000, maxMemoryMB: 12000, maxStorageGB: 100},
+		quotas:       stubTenantQuotaRepository{maxEnvironments: 10, maxCPUMillicores: 9000, maxMemoryMB: 20000, maxStorageGB: 100},
 		tenants:      stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
 		provisioner:  prov,
 	}.createEnvironment(rec, req)
@@ -239,8 +239,8 @@ func TestCreateEnvironmentStartsDeployWithResourceCaps(t *testing.T) {
 		t.Fatalf("Start called %d times, want 1", len(prov.started))
 	}
 	got := prov.started[0]
-	if got.MaxCPUMillicores != 6000 || got.MaxMemoryMB != 12000 || got.MaxStorageGB != 100 {
-		t.Fatalf("resource caps = %+v, want 6000/12000/100", got)
+	if got.MaxCPUMillicores != 9000 || got.MaxMemoryMB != 20000 || got.MaxStorageGB != 100 {
+		t.Fatalf("resource caps = %+v, want 9000/20000/100", got)
 	}
 }
 
@@ -418,6 +418,36 @@ func TestDeployEnvironmentRejectsConcurrentDeploy(t *testing.T) {
 	}
 	if len(prov.deployed) != 0 {
 		t.Fatalf("StartDeploy called %d times, want 0 when the claim is held", len(prov.deployed))
+	}
+}
+
+// TestDeployEnvironmentRejectsQuotaBelowRuntimeFloor: an operator can lower a
+// tenant's quota (PUT .../quota) after the environment already exists; the
+// next deploy must refuse before claiming, rather than claim the environment
+// and only discover the shortfall as a five-minute rollout timeout (#1061).
+func TestDeployEnvironmentRejectsQuotaBelowRuntimeFloor(t *testing.T) {
+	environments := runtimeEnvironment()
+	prov := &stubEnvironmentProvisioner{}
+	req := httptest.NewRequest(http.MethodPost, "/v1/environments/env-1/deploy", bytes.NewBufferString(""))
+	req.SetPathValue("environment_id", "env-1")
+	req = req.WithContext(security.WithContext(req.Context(), security.Context{
+		TenantID:   "t1",
+		TenantType: string(model.TenantTypeCompany),
+		ErunUserID: "u1",
+	}))
+	rec := httptest.NewRecorder()
+	EnvironmentRoutes{
+		environments: environments,
+		quotas:       stubTenantQuotaRepository{maxEnvironments: 10, maxCPUMillicores: 500, maxMemoryMB: 9216, maxStorageGB: 80},
+		tenants:      stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
+		provisioner:  prov,
+	}.deployEnvironment(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d (body %s), want 409", rec.Code, rec.Body.String())
+	}
+	if environments.claimCalls != 0 || len(prov.deployed) != 0 {
+		t.Fatalf("claimCalls=%d StartDeploy calls=%d, want 0/0: a quota below the floor must refuse before claiming anything", environments.claimCalls, len(prov.deployed))
 	}
 }
 
