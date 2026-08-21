@@ -71,7 +71,8 @@ func SaveRemoteInitMarker(homeDir string, marker RemoteInitMarker) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	data, err := yaml.Marshal(&marker)
+	existing, _ := os.ReadFile(path)
+	data, err := marshalConfigPreservingUnknownFields(existing, &marker)
 	if err != nil {
 		return err
 	}
