@@ -497,13 +497,14 @@ func SeedRuntimeTenantEnvNoVersion(t testing.TB, setup env.Setup, tenant, enviro
 }
 
 // SeedRuntimeTenantEnvNoRepoPath writes a runtime-type env tree with NO
-// repopath at all, reproducing the shape the backend's provisioning deploy Job
-// seeds for a control-plane-created tenant with no project
-// (deployexec.bootstrapDeployEnvironmentScript writes exactly this: type,
-// kubernetescontext, and runtimeversion — never repopath, since nothing on the
-// tenant's side was ever `erun init`ed). Every other runtime fixture pins a
-// repopath, so this is the single fixture that locks the repo-path-optional
-// resolution for a genuinely projectless env.
+// repopath at all, reproducing the shape the backend's provisioning deploy,
+// stop, and delete Jobs seed for a control-plane-created tenant with no
+// project (deployexec.bootstrapEnvironmentScript writes exactly this: type
+// and kubernetescontext — never repopath, since nothing on the tenant's side
+// was ever `erun init`ed, and never a runtime version, which nothing on this
+// path reads back). Every other runtime fixture pins a repopath, so this is
+// the single fixture that locks the repo-path-optional resolution for a
+// genuinely projectless env.
 func SeedRuntimeTenantEnvNoRepoPath(t testing.TB, setup env.Setup, tenant, environment string) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -523,8 +524,7 @@ func SeedRuntimeTenantEnvNoRepoPath(t testing.TB, setup env.Setup, tenant, envir
 	mustWrite(t, filepath.Join(envDir, "config.yaml"),
 		"name: "+environment+"\n"+
 			"type: runtime\n"+
-			"kubernetescontext: test-context\n"+
-			"runtimeversion: 1.0.0\n",
+			"kubernetescontext: test-context\n",
 	)
 }
 

@@ -2,6 +2,7 @@ package deployexec
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -46,7 +47,7 @@ func TestBuildStopJobSpec(t *testing.T) {
 	if pod.RestartPolicy != corev1.RestartPolicyNever {
 		t.Fatalf("restart policy = %q, want Never", pod.RestartPolicy)
 	}
-	assertCommand(t, pod.Containers[0].Command, []string{"erun", "stop", "acme", "prod"})
+	assertLifecycleBootstrapScript(t, "stop", pod.Containers[0].Command, "'erun' 'stop' 'acme' 'prod'")
 }
 
 func TestBuildDeleteJobSpec(t *testing.T) {
@@ -58,7 +59,64 @@ func TestBuildDeleteJobSpec(t *testing.T) {
 	pod := job.Spec.Template.Spec
 	// -y skips the CLI's interactive confirmation: the Job has no terminal to
 	// answer a prompt on.
-	assertCommand(t, pod.Containers[0].Command, []string{"erun", "delete", "acme", "prod", "-y"})
+	assertLifecycleBootstrapScript(t, "delete", pod.Containers[0].Command, "'erun' 'delete' 'acme' 'prod' '-y'")
+}
+
+// assertLifecycleBootstrapScript checks a lifecycle Job's command seeds the
+// in-cluster kubeconfig and the environment's config before running the real
+// command — the same prelude assertDeployBootstrapScript checks for deploy,
+// since #1077 was exactly this prelude missing from stop and delete.
+func assertLifecycleBootstrapScript(t *testing.T, name string, command []string, wantCommand string) {
+	t.Helper()
+	assertCommand(t, command[:2], []string{"sh", "-c"})
+	if len(command) != 3 {
+		t.Fatalf("%s command = %v, want sh -c '<script>'", name, command)
+	}
+	script := command[2]
+	for _, want := range []string{
+		"$HOME/.kube/config",
+		"name: in-cluster",
+		"$HOME/.config/erun/acme/config.yaml",
+		"$HOME/.config/erun/acme/prod/config.yaml",
+		"kubernetescontext: in-cluster",
+		wantCommand,
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("%s script %q missing %q", name, script, want)
+		}
+	}
+}
+
+// TestAllLifecycleJobsShareTheBootstrapPrelude is the structural regression
+// test for #1077: every Job builder's command must be `sh -c` carrying the
+// bootstrap prelude, checked generically over the builders rather than one
+// hand-written assertion per Job, so a lifecycle Job added later cannot ship
+// without it.
+func TestAllLifecycleJobsShareTheBootstrapPrelude(t *testing.T) {
+	builders := []struct {
+		name    string
+		command []string
+	}{
+		{"deploy", buildDeployJob(testParams()).Spec.Template.Spec.Containers[0].Command},
+		{"stop", buildStopJob(testStopParams()).Spec.Template.Spec.Containers[0].Command},
+		{"delete", buildDeleteJob(testDeleteParams()).Spec.Template.Spec.Containers[0].Command},
+	}
+	for _, b := range builders {
+		assertCommand(t, b.command[:2], []string{"sh", "-c"})
+		if len(b.command) != 3 {
+			t.Fatalf("%s command = %v, want sh -c '<script>'", b.name, b.command)
+		}
+		script := b.command[2]
+		if !strings.Contains(script, "$HOME/.kube/config") || !strings.Contains(script, "$HOME/.config/erun/acme/prod/config.yaml") {
+			t.Fatalf("%s script %q missing the bootstrap prelude", b.name, script)
+		}
+		// The seed script carries no version: nothing it seeds a config for
+		// reads RuntimeVersion back, so it stays out to avoid a second,
+		// unused place to keep in sync.
+		if strings.Contains(script, "runtimeversion") {
+			t.Fatalf("%s script %q should not seed a runtime version", b.name, script)
+		}
+	}
 }
 
 // TestLauncherRunsStopAndDelete holds the launcher to creating and watching
