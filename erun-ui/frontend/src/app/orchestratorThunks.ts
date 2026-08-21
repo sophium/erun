@@ -14,7 +14,9 @@ import {
 import { readError } from './errors';
 import { planOrchestratorBusySeed } from './orchestratorBusySeed';
 import { planOrchestratorRestore, readRestoreNotice } from './orchestratorRestore';
+import { planOrchestratorShellSeed } from './orchestratorShellActivitySeed';
 import { setAIBusyForSession } from './slices/aiActivitySlice';
+import { setShellActivityForSession } from './slices/orchestratorShellActivitySlice';
 import {
   closeOrchestratorDialog,
   type OrchestratorEnvRef,
@@ -28,10 +30,12 @@ import { setSessionId } from './slices/terminalSlice';
 import type { AppThunk } from './store';
 
 // loadOrchestrators fetches the current list and, in the same pass, seeds the
-// AI-busy store from each orchestrator's own `busy` snapshot field (#1087) —
-// the same store field the ai-activity event writes to, so a fetch that lands
-// after a busy transition (boot, a dialog close-and-reload, a manual refresh)
-// renders the true state even if that event was never observed.
+// AI-busy store from each orchestrator's own `busy` snapshot field,
+// and the shell-activity store from its shellRunning/shellCommand/
+// shellStartedAtUnix fields — the same store fields the ai-activity and
+// orchestrator-shell-activity events write to, so a fetch that lands after a
+// transition (boot, a dialog close-and-reload, a manual refresh) renders the
+// true state even if that event was never observed.
 export const loadOrchestrators = (): AppThunk<Promise<void>> => async (dispatch) => {
   try {
     const list = (await ListOrchestrators()) as OrchestratorInfo[] | null;
@@ -39,6 +43,18 @@ export const loadOrchestrators = (): AppThunk<Promise<void>> => async (dispatch)
     dispatch(setOrchestrators(items));
     for (const seed of planOrchestratorBusySeed(items)) {
       dispatch(setAIBusyForSession(seed));
+    }
+    for (const seed of planOrchestratorShellSeed(items)) {
+      dispatch(
+        setShellActivityForSession({
+          sessionId: seed.sessionId,
+          activity: {
+            running: seed.running,
+            command: seed.command,
+            startedAtUnix: seed.startedAtUnix,
+          },
+        }),
+      );
     }
   } catch (error) {
     dispatch(setOrchestratorsError(readError(error)));
@@ -146,7 +162,10 @@ export const restartApp =
 // restart hand-off's prompt auto-runs for the one orchestrator it named, never
 // for the rest of the set. A refused hand-off still reopens its orchestrator
 // and surfaces the backend's notice beside the orchestrator list, so a resume
-// that declined to continue is never silent.
+// that declined to continue is never silent. Which conversation each
+// orchestrator resumes is the backend's call, not a re-derivation here: this
+// thunk just resumes whatever conversationId the target names, or starts
+// fresh when none was resolved.
 export const restoreOpenOrchestrators =
   (): AppThunk<Promise<boolean>> => async (dispatch, getState) => {
     try {
@@ -163,9 +182,16 @@ export const restoreOpenOrchestrators =
         return false;
       }
 
-      for (const id of alsoReopen) {
+      for (const ref of alsoReopen) {
         try {
-          await StartOrchestrator(id, 80, 24);
+          // A resolved conversation id resumes exactly that conversation; its
+          // absence means the backend found nothing safe to resume, so this
+          // orchestrator starts fresh instead.
+          if (ref.conversationId) {
+            await StartOrchestratorWithResume(ref.orchestratorId, ref.conversationId, '', 80, 24);
+          } else {
+            await StartOrchestrator(ref.orchestratorId, 80, 24);
+          }
         } catch (error) {
           dispatch(setOrchestratorsError(readError(error)));
         }
@@ -173,11 +199,13 @@ export const restoreOpenOrchestrators =
 
       let restoredPane = false;
       if (primary) {
-        // With a resume prompt, resume the conversation that asked for the
-        // restart AND hand it the task so a rebuild+restart continues on its own
-        // instead of idling at the prompt; without one, just resume the
-        // orchestrator's own pinned conversation.
-        const info = primary.resumePrompt
+        // A resolved conversation id resumes exactly that conversation — with
+        // the resume prompt handed to it so a rebuild+restart continues on its
+        // own instead of idling, or with none for a plain launch that just
+        // lands the operator back where they were. Its absence means the
+        // backend found nothing safe to resume, so this orchestrator starts
+        // fresh instead of a re-derivation that could land on the wrong one.
+        const info = primary.conversationId
           ? await StartOrchestratorWithResume(
               primary.id,
               primary.conversationId,

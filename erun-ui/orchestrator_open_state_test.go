@@ -68,7 +68,7 @@ func TestPlainLaunchReopensTheOrchestratorThatWasOpen(t *testing.T) {
 	if again := app.ResolveOrchestratorToReopen(); again.OrchestratorID != id {
 		t.Fatalf("expected the record to survive being read, got %q", again.OrchestratorID)
 	}
-	if got := readOpenOrchestrators(openPath); len(got) != 1 || got[0] != id {
+	if got := readOpenOrchestrators(openPath); len(got) != 1 || got[0].OrchestratorID != id {
 		t.Fatalf("expected [%q] on disk, got %v", id, got)
 	}
 }
@@ -105,10 +105,10 @@ func TestTwoOpenOrchestratorsAreBothRestoredOnPlainLaunch(t *testing.T) {
 	if target.OrchestratorID != second {
 		t.Fatalf("expected %q (started last) to own the pane, got %q", second, target.OrchestratorID)
 	}
-	if len(target.AlsoReopen) != 1 || target.AlsoReopen[0] != first {
+	if len(target.AlsoReopen) != 1 || target.AlsoReopen[0].OrchestratorID != first {
 		t.Fatalf("expected %q to also be reopened, got %v", first, target.AlsoReopen)
 	}
-	if got := readOpenOrchestrators(openPath); len(got) != 2 || got[0] != first || got[1] != second {
+	if got := readOpenOrchestrators(openPath); len(got) != 2 || got[0].OrchestratorID != first || got[1].OrchestratorID != second {
 		t.Fatalf("expected both ids recorded oldest-first, got %v", got)
 	}
 }
@@ -182,7 +182,7 @@ func TestRestartHandOffOverASetOfOpenOrchestratorsLeavesTheRestIdle(t *testing.T
 	if target.OrchestratorID != second || target.ResumePrompt != prompt {
 		t.Fatalf("expected %q to own the pane with its prompt, got %+v", second, target)
 	}
-	if len(target.AlsoReopen) != 1 || target.AlsoReopen[0] != first {
+	if len(target.AlsoReopen) != 1 || target.AlsoReopen[0].OrchestratorID != first {
 		t.Fatalf("expected %q to reopen idle alongside it, got %v", first, target.AlsoReopen)
 	}
 	if got := readOpenOrchestrators(openPath); len(got) != 2 {
@@ -285,7 +285,7 @@ func TestRestartHandOffStaysOneShotAndAgeBoundedOverTheDurableRecord(t *testing.
 		Environments:   []string{"frs/dev"},
 		ResumePrompt:   prompt,
 	}
-	if err := recordOpenOrchestrator(openPath, id); err != nil {
+	if err := recordOpenOrchestrator(openPath, id, conversationID); err != nil {
 		t.Fatalf("record open orchestrator: %v", err)
 	}
 	if err := writeOrchestratorRestoreTarget(restoreDir, handOff, time.Now()); err != nil {
@@ -310,5 +310,83 @@ func TestRestartHandOffStaysOneShotAndAgeBoundedOverTheDurableRecord(t *testing.
 	stale := app.ResolveOrchestratorToReopen()
 	if stale.OrchestratorID != id || stale.ResumePrompt != "" {
 		t.Fatalf("expected a stale hand-off to be dropped and the durable record to answer, got %+v", stale)
+	}
+}
+
+// The bug: a plain launch used to re-derive a session id from the
+// orchestrator id (uuid5(namespace, id)) and resume THAT, rather than the
+// conversation actually recorded as running. A stale transcript that happens
+// to sit at the derived id — left over from before the live session diverged
+// from it, e.g. a resume that fell through to an unpinned launch — was
+// silently resumed while the real, divergent conversation was left behind.
+func TestPlainLaunchResumesTheRecordedConversationNotADerivedOne(t *testing.T) {
+	app, openPath, _ := openStateTestApp(t)
+	defer app.shutdown(context.Background())
+
+	id := createAndStartOrchestrator(t, app)
+	staleDerived := orchestratorSessionID(id)
+	stageOrchestratorConversation(t, staleDerived)
+	liveConversation := "diverged-session-actually-running"
+	stageOrchestratorConversation(t, liveConversation)
+	if err := recordOpenOrchestrator(openPath, id, liveConversation); err != nil {
+		t.Fatalf("record open orchestrator: %v", err)
+	}
+
+	target := app.ResolveOrchestratorToReopen()
+	if target.OrchestratorID != id {
+		t.Fatalf("expected %q to be reopened, got %q", id, target.OrchestratorID)
+	}
+	if target.ConversationID != liveConversation {
+		t.Fatalf("expected the recorded live conversation %q to be resumed, not the derived id %q, got %q",
+			liveConversation, staleDerived, target.ConversationID)
+	}
+}
+
+// An orchestrator whose recorded conversation no longer exists on disk (pruned,
+// deleted, never actually staged) starts fresh instead of falling back to
+// whatever the derived id happens to already name — resuming nothing is safer
+// than resuming a stale conversation.
+func TestPlainLaunchStartsFreshWhenTheRecordedConversationIsGone(t *testing.T) {
+	app, openPath, _ := openStateTestApp(t)
+	defer app.shutdown(context.Background())
+
+	id := createAndStartOrchestrator(t, app)
+	staleDerived := orchestratorSessionID(id)
+	stageOrchestratorConversation(t, staleDerived)
+	if err := recordOpenOrchestrator(openPath, id, "vanished-session"); err != nil {
+		t.Fatalf("record open orchestrator: %v", err)
+	}
+
+	target := app.ResolveOrchestratorToReopen()
+	if target.OrchestratorID != id {
+		t.Fatalf("expected %q to be reopened, got %q", id, target.OrchestratorID)
+	}
+	if target.ConversationID == "" || target.ConversationID == staleDerived || target.ConversationID == "vanished-session" {
+		t.Fatalf("expected a fresh conversation, neither the stale derived id nor the vanished one, got %q",
+			target.ConversationID)
+	}
+}
+
+// An operator upgrading from a release that recorded only the orchestrator id
+// (an earlier shape, or the scalar one before it) must not have that silence
+// read as permission to resume whatever the derived id names. The very first
+// restore under the new record starts every such orchestrator fresh.
+func TestUpgradingFromARecordWithNoSessionIDStartsFresh(t *testing.T) {
+	app, openPath, _ := openStateTestApp(t)
+	defer app.shutdown(context.Background())
+
+	id := createAndStartOrchestrator(t, app)
+	staleDerived := orchestratorSessionID(id)
+	stageOrchestratorConversation(t, staleDerived)
+	if err := os.WriteFile(openPath, []byte(`{"orchestratorIds":["`+id+`"]}`), 0o644); err != nil {
+		t.Fatalf("write legacy open file: %v", err)
+	}
+
+	target := app.ResolveOrchestratorToReopen()
+	if target.OrchestratorID != id {
+		t.Fatalf("expected %q to be reopened, got %q", id, target.OrchestratorID)
+	}
+	if target.ConversationID == "" || target.ConversationID == staleDerived {
+		t.Fatalf("expected a fresh conversation rather than the stale derived id, got %q", target.ConversationID)
 	}
 }

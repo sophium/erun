@@ -22,6 +22,7 @@ const (
 	environmentDeployedEvent    = "environment-deployed"
 	environmentsChangedEvent    = "environments-changed"
 	aiActivityEvent             = "ai-activity"
+	orchestratorShellEvent      = "orchestrator-shell-activity"
 	envStatusEvent              = "env-status"
 	envActivityEvent            = "env-activity"
 	appSessionEnvVar            = "ERUN_UI_SESSION"

@@ -15,6 +15,9 @@ function orchestrator(sessionId: number, busy: boolean): OrchestratorInfo {
     status: sessionId > 0 ? 'running' : 'stopped',
     busy,
     transient: false,
+    shellRunning: false,
+    shellCommand: '',
+    shellStartedAtUnix: 0,
   };
 }
 

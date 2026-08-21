@@ -30,6 +30,7 @@ import idleReducer from './slices/idleSlice';
 import layoutReducer from './slices/layoutSlice';
 import manageDialogReducer from './slices/manageDialogSlice';
 import notificationReducer from './slices/notificationSlice';
+import orchestratorShellActivityReducer from './slices/orchestratorShellActivitySlice';
 import orchestratorsReducer from './slices/orchestratorsSlice';
 import outputsDialogReducer from './slices/outputsDialogSlice';
 import pinVersionReducer from './slices/pinVersionSlice';
@@ -74,6 +75,7 @@ export const store = configureStore({
     outputsDialog: outputsDialogReducer,
     pinVersion: pinVersionReducer,
     orchestrators: orchestratorsReducer,
+    orchestratorShellActivity: orchestratorShellActivityReducer,
     [wailsApi.reducerPath]: wailsApi.reducer,
   },
   middleware: (getDefaultMiddleware) =>
