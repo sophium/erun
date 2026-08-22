@@ -46,37 +46,22 @@ type RuntimeInputUploadRunner func(req ShellLaunchParams, script string, stdin i
 // no in-pod MCP counterpart — the edge in erun-mcp runs inside the pod and
 // has no path back to the operator's filesystem.
 func UploadRuntimeInput(ctx Context, req ShellLaunchParams, params UploadRuntimeInputParams, run RuntimeInputUploadRunner) (UploadRuntimeInputResult, error) {
-	localPath := strings.TrimSpace(params.LocalPath)
-	if localPath == "" {
-		return UploadRuntimeInputResult{}, fmt.Errorf("local path is required")
-	}
-	remotePath := strings.TrimSpace(params.RemotePath)
-	if remotePath == "" {
-		return UploadRuntimeInputResult{}, fmt.Errorf("remote path is required")
-	}
-	dir, name, err := splitRuntimeInputDestination(remotePath)
+	dir, name, info, err := resolveRuntimeInputUpload(params)
 	if err != nil {
 		return UploadRuntimeInputResult{}, err
-	}
-	info, err := os.Stat(localPath)
-	if err != nil {
-		return UploadRuntimeInputResult{}, fmt.Errorf("local file %q: %w", localPath, err)
-	}
-	if info.IsDir() {
-		return UploadRuntimeInputResult{}, fmt.Errorf("local path %q is a directory; inputs upload transfers one file at a time", localPath)
 	}
 	if run == nil {
 		run = RunRemoteCommandWithStdin
 	}
 	target := path.Join(dir, name)
-	ctx.Trace(fmt.Sprintf("inputs: uploading %s (%d bytes) to %s", localPath, info.Size(), target))
+	ctx.Trace(fmt.Sprintf("inputs: uploading %s (%d bytes) to %s", params.LocalPath, info.Size(), target))
 	script := runtimeInputUploadScript(dir, name)
 	if traced := traceRuntimeInputUploadScript(ctx, req, "inputs upload script", script); traced {
 		return UploadRuntimeInputResult{RemotePath: target, Bytes: info.Size()}, nil
 	}
-	f, err := os.Open(localPath)
+	f, err := os.Open(params.LocalPath)
 	if err != nil {
-		return UploadRuntimeInputResult{}, fmt.Errorf("local file %q: %w", localPath, err)
+		return UploadRuntimeInputResult{}, fmt.Errorf("local file %q: %w", params.LocalPath, err)
 	}
 	defer func() { _ = f.Close() }()
 	hasher := sha256.New()
@@ -84,18 +69,54 @@ func UploadRuntimeInput(ctx Context, req ShellLaunchParams, params UploadRuntime
 	if err != nil {
 		return UploadRuntimeInputResult{}, fmt.Errorf("upload runtime input %q%s: %w", target, formatRemoteCommandStderr(out.Stderr), err)
 	}
-	remoteSize, remoteSHA, err := parseRuntimeInputUploadResponse(out.Stdout)
-	if err != nil {
-		return UploadRuntimeInputResult{}, fmt.Errorf("upload runtime input %q: %w", target, err)
-	}
 	localSHA := hex.EncodeToString(hasher.Sum(nil))
-	if !strings.EqualFold(remoteSHA, localSHA) {
-		return UploadRuntimeInputResult{}, fmt.Errorf("upload runtime input %q: checksum mismatch after transfer (local %s, remote %s)", target, localSHA, remoteSHA)
-	}
-	if remoteSize != info.Size() {
-		return UploadRuntimeInputResult{}, fmt.Errorf("upload runtime input %q: size mismatch after transfer (local %d bytes, remote %d bytes)", target, info.Size(), remoteSize)
+	if err := verifyRuntimeInputUpload(target, localSHA, info.Size(), out.Stdout); err != nil {
+		return UploadRuntimeInputResult{}, err
 	}
 	return UploadRuntimeInputResult{RemotePath: target, Bytes: info.Size(), SHA256: localSHA}, nil
+}
+
+// resolveRuntimeInputUpload validates params and stats the local source,
+// isolated from UploadRuntimeInput so its own branching doesn't inflate that
+// function's complexity.
+func resolveRuntimeInputUpload(params UploadRuntimeInputParams) (dir, name string, info os.FileInfo, err error) {
+	localPath := strings.TrimSpace(params.LocalPath)
+	if localPath == "" {
+		return "", "", nil, fmt.Errorf("local path is required")
+	}
+	remotePath := strings.TrimSpace(params.RemotePath)
+	if remotePath == "" {
+		return "", "", nil, fmt.Errorf("remote path is required")
+	}
+	dir, name, err = splitRuntimeInputDestination(remotePath)
+	if err != nil {
+		return "", "", nil, err
+	}
+	info, err = os.Stat(localPath)
+	if err != nil {
+		return "", "", nil, fmt.Errorf("local file %q: %w", localPath, err)
+	}
+	if info.IsDir() {
+		return "", "", nil, fmt.Errorf("local path %q is a directory; inputs upload transfers one file at a time", localPath)
+	}
+	return dir, name, info, nil
+}
+
+// verifyRuntimeInputUpload decodes the upload script's response and confirms
+// it matches what was sent, so a transfer never reports success on a
+// corrupted or partial write.
+func verifyRuntimeInputUpload(target, localSHA string, localSize int64, stdout string) error {
+	remoteSize, remoteSHA, err := parseRuntimeInputUploadResponse(stdout)
+	if err != nil {
+		return fmt.Errorf("upload runtime input %q: %w", target, err)
+	}
+	if !strings.EqualFold(remoteSHA, localSHA) {
+		return fmt.Errorf("upload runtime input %q: checksum mismatch after transfer (local %s, remote %s)", target, localSHA, remoteSHA)
+	}
+	if remoteSize != localSize {
+		return fmt.Errorf("upload runtime input %q: size mismatch after transfer (local %d bytes, remote %d bytes)", target, localSize, remoteSize)
+	}
+	return nil
 }
 
 // splitRuntimeInputDestination validates the remote path and splits it into
