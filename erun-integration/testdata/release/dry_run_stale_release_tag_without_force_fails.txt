@@ -35,4 +35,5 @@ cd <TMP> && git add erun-devops/k8s/api/Chart.yaml erun-devops/k8s/base/Chart.ya
 cd <TMP> && git commit -m '[skip ci] release <VERSION>'
 git -C <TMP> rev-parse '<VERSION>^{}'
 git -C <TMP> rev-parse HEAD
+git -C <TMP> ls-remote --tags --refs origin refs/tags/<VERSION>
 release tag "<VERSION>" already exists at <HEX>, expected current HEAD <HEX>

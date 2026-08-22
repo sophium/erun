@@ -32,6 +32,9 @@ cd <TMP> && git commit -m '[skip ci] release <VERSION>'
 git -C <TMP> rev-parse '<VERSION>^{}'
 git -C <TMP> rev-parse HEAD
 release tag already exists at HEAD; skipping <VERSION>
+docker builder prune -f
+release: docker root free disk space is not observable from this process; skipping the headroom check
+docker manifest inspect ghcr.io/sophium/api:<VERSION>
 stage: publish
 docker image inspect ghcr.io/sophium/api:fp-<HEX16>-amd64
 fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64

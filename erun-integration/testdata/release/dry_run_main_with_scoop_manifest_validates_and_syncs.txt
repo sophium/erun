@@ -67,6 +67,8 @@ cd <TMP> && git tag -a <VERSION> -m 'Release <VERSION>'
 cd <TMP> && git fetch origin main
 cd <TMP> && git rev-list --count HEAD..FETCH_HEAD
 release: a base branch that moved since sync-remote refuses the release here, before the build spends anything
+docker builder prune -f
+docker manifest inspect ghcr.io/sophium/api:<VERSION>
 stage: publish
 docker image inspect ghcr.io/sophium/api:fp-<HEX16>-amd64
 fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64

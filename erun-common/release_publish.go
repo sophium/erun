@@ -71,6 +71,7 @@ func runReleasePublication(ctx Context, publisher ReleasePublisher) error {
 	if publisher.Publish == nil {
 		return nil
 	}
+	reportAlreadyPublishedReleaseArtifacts(ctx, publisher.Tags)
 	ctx.Trace("stage: publish")
 	if err := publisher.Publish(ctx); err != nil {
 		return err
@@ -80,6 +81,46 @@ func runReleasePublication(ctx Context, publisher ReleasePublisher) error {
 	}
 	ctx.Trace("stage: verify-publication")
 	return publisher.Verify(ctx)
+}
+
+// reportAlreadyPublishedReleaseArtifacts probes the registry for each image
+// this release resolves, before Publish does anything, so a release re-run
+// after an interruption (#1051: the pod holding the local build/fingerprint
+// cache was replaced mid-release) tells the operator up front what already
+// landed, rather than depending on that cache to have survived and leaving
+// the operator to infer progress from how quickly the rebuild finishes.
+//
+// This is reporting only — a single, non-retried existence probe — and does
+// not change what gets rebuilt: that stays the fingerprint-based
+// promote-and-skip decision inside Publish, which compares content, not just
+// tag existence. A probe here cannot tell "already published with exactly
+// this content" from "a tag with this name exists for some other reason", so
+// it is not trusted to skip work, only to report.
+func reportAlreadyPublishedReleaseArtifacts(ctx Context, tags []string) {
+	for _, tag := range tags {
+		tag = strings.TrimSpace(tag)
+		if tag == "" {
+			continue
+		}
+		ctx.TraceCommand("", "docker", "manifest", "inspect", tag)
+		if ctx.DryRun {
+			continue
+		}
+		if dockerImageManifestResolves(ctx, tag) {
+			ctx.Info("==> Already published: " + tag)
+		}
+	}
+}
+
+// dockerImageManifestResolves is a single, non-retried existence probe: unlike
+// readBackPublishedArtifact (used to confirm a tag this run just pushed, where
+// a 404 is a transient read-after-write race worth retrying), a tag probed
+// before anything is published is expected to 404 on a first release, and
+// retrying that would slow down every release for the common case.
+func dockerImageManifestResolves(ctx Context, tag string) bool {
+	spec := commandSpec{Name: "docker", Args: []string{"manifest", "inspect", tag}}
+	_, err := runCommandCapturingOutput(ctx, spec)
+	return err == nil
 }
 
 // verifyPublishedReleaseArtifacts closes the release's definition of done by
