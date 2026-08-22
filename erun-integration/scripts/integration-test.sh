@@ -33,7 +33,7 @@
 
 set -euo pipefail
 
-threshold="${COVERAGE_THRESHOLD:-75.8}"
+threshold="${COVERAGE_THRESHOLD:-76.0}"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -threshold=*) threshold="${1#-threshold=}" ;;

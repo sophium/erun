@@ -405,6 +405,66 @@ func TestBuild(t *testing.T) {
 		golden.Equal(t, "build/real_run_fails_when_daemon_cannot_build_required_platform", normalize.Apply(result.Combined))
 	})
 
+	t.Run("real_run_default_verbosity_stays_quiet_when_the_build_succeeds", func(t *testing.T) {
+		// #1069: docker build always runs with --progress=plain now (never
+		// --quiet, which suppressed a failing step's own output at the source),
+		// so quiet-on-success below debug verbosity has to come from erun
+		// capturing the output itself rather than replaying it. This is the
+		// success half of that contract: BuildKit's plain-progress chatter must
+		// not leak into a plain `erun build` even though docker produced it.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  image) case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			`  buildx) case "$2" in inspect) echo "Platforms: linux/arm64*, linux/amd64" ;; *) exit 0 ;; esac ;;`,
+			`  build) echo "#1 [internal] load build definition" ; exit 0 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		envVars = append(envVars, stubHelmSilent(t, setup)...)
+		result := erun.Run(t, []string{"build"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "internal] load build definition") {
+			t.Fatalf("a successful build at default verbosity must stay quiet, got docker's own output leaked:\n%s", result.Combined)
+		}
+	})
+
+	t.Run("real_run_default_verbosity_surfaces_docker_builds_own_output_on_failure", func(t *testing.T) {
+		// #1069: the release path builds quietly, so when the in-build `make
+		// check` test stage failed, all that survived was
+		// `process "/bin/sh -c make check ..." did not complete successfully:
+		// exit code: 2` — no lint finding, no failing test name. docker build's
+		// own output (what BuildKit's plain progress captured, including a
+		// failing RUN step's stdout/stderr) must now reach the user even at
+		// default verbosity, since a failed build is the one time quiet is the
+		// wrong default.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  image) case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			`  buildx) case "$2" in inspect) echo "Platforms: linux/arm64*, linux/amd64" ;; *) exit 0 ;; esac ;;`,
+			`  build) echo "make check: FAIL erun-cli/cmd TestSomething" >&2 ; exit 1 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		envVars = append(envVars, stubHelmSilent(t, setup)...)
+		result := erun.Run(t, []string{"build"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected the build failure to fail the command, got exit 0:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "make check: FAIL erun-cli/cmd TestSomething") {
+			t.Fatalf("a failed build at default verbosity must surface docker's own output, got:\n%s", result.Combined)
+		}
+	})
+
 	t.Run("dry_run_no_incremental_skips_fingerprint_short_circuit", func(t *testing.T) {
 		// --no-incremental forces `docker build` for every image even when a
 		// fingerprint tag exists — no `docker image inspect` short-circuit, no
@@ -679,6 +739,19 @@ func TestBuild(t *testing.T) {
 			// platforms so `docker buildx inspect` passes.
 			`  buildx)`,
 			`    case "$2" in inspect) echo "Platforms: linux/amd64, linux/arm64" ;; *) exit 0 ;; esac ;;`,
+			// manifest inspect backs both the #1051 pre-publish probe and the
+			// post-publish verify; marker-file-tracked so this scenario (a
+			// first-ever release, per "fingerprint image not found locally"
+			// below) does not falsely report the image as already published
+			// before manifest push has run.
+			`  manifest)`,
+			`    marker="` + stubs + `/manifest-published-$(printf '%s' "$3" | tr '/:' '__')"`,
+			`    case "$2" in`,
+			`      inspect) [ -f "$marker" ] && exit 0 || exit 1 ;;`,
+			`      push) touch "$marker" ; exit 0 ;;`,
+			`      *) exit 0 ;;`,
+			`    esac`,
+			`    ;;`,
 			`  *) exit 0 ;;`,
 			`esac`,
 		}, "\n"))
@@ -1116,6 +1189,18 @@ func TestBuild(t *testing.T) {
 			`    exit 0 ;;`,
 			`  image)`,
 			`    case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			// manifest inspect backs both the #1051 pre-publish probe and the
+			// post-publish verify; marker-file-tracked so this scenario does
+			// not falsely report the image as already published before
+			// manifest push has run.
+			`  manifest)`,
+			`    marker="` + stubs + `/manifest-published-$(printf '%s' "$3" | tr '/:' '__')"`,
+			`    case "$2" in`,
+			`      inspect) [ -f "$marker" ] && exit 0 || exit 1 ;;`,
+			`      push) touch "$marker" ; exit 0 ;;`,
+			`      *) exit 0 ;;`,
+			`    esac`,
+			`    ;;`,
 			`  *) exit 0 ;;`,
 			`esac`,
 		}, "\n"))
