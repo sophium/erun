@@ -108,7 +108,23 @@ Read what you control from erun's config store — never infer it from what happ
 - **Observe a mounted environment from the host, not from inside it.** Probing a pod on a short interval spends the capacity you are trying to measure, and the resulting timeouts look like a broken channel. Where the worktree lives on this machine, its files answer for free; where it does not, use the environment's own progress reporting rather than reaching in.
 - **A one-shot agent has no "later".** Work it starts in the background and promises to report is work nobody reports. Require the result in the run that produced it.
 - **Name a kill pattern for what it must not match.** A pattern aimed at a process will also match any path or argument that merely contains its name, and the collateral is somebody's live session.
-- **Prefer the typed tool over the general escape hatch.**
+- **Prefer the typed tool over the general escape hatch — and when the tool does not exist, build
+  it rather than living in the hatch.** `raw` is an escape hatch, not a workspace. Reaching for it
+  twice for the same operation is the signal that a command is missing, not that shell is the
+  answer. A typed command validates its inputs, records what it did in terms an operator can read
+  afterwards, composes its argv directly instead of through a shell that will expand what it should
+  not, and — the part that matters most on a shared or hosted environment — **can be authorized on
+  its own**. Granting `raw` grants arbitrary execution in the pod; granting a named operation grants
+  that operation, so fine-grained access to exactly the commands an environment needs to be managed
+  is only possible once those commands exist as commands. It is also the difference between the next
+  orchestrator inheriting the capability and re-deriving your shell from scratch.
+  Add it in both transports over shared logic, the way the repo requires of any new command, and
+  state the exception explicitly if one transport genuinely cannot host it.
+- **The same rule applies to waiting.** A hand-written poll loop around a job is a shell
+  reimplementation of a bounded wait that already exists, and it will be worse: it re-derives
+  "finished" from whatever it can scrape, so it reads a dropped channel as an outcome and a
+  frozen counter as a hang. Use the bounded wait the environment offers and let it tell you
+  running, exited, or unreachable.
 - **Wake a stopped environment from the host.** A stopped env has no pod, so its MCP edge cannot answer and cannot start itself; that silence is not a broken env. Open it from the host CLI, then resume over MCP.
 - **When you hand an agent a long gate, tell it how to wait.** An agent left to invent its own waiting starts the work in a background shell and then spends its turns re-reading an empty output file — hundreds of turns that buy nothing and can exhaust it before the work it is waiting for even finishes. Have it run the gate as a detached job and block on that job's own completion, so waiting costs one call rather than one per poll.
 
