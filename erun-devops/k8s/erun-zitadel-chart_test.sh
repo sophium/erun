@@ -226,29 +226,23 @@ document "${rendered}" Ingress | grep -q 'secretName:' &&
     fail "an insecure origin has no TLS Secret to reference"
 
 # --- 14. The OIDC bootstrap sidecar: present, shares the PAT volume, uses the
-#         dedicated ServiceAccount, and reconciles into the configured ConfigMap ---
+#         dedicated ServiceAccount, and knows the configured ConfigMap ---
+# The reconcile logic itself (project/app resolution, JWT token types, grant
+# types, the ConfigMap publish guard) lives in the baked erun-oidc-bootstrap
+# script (erun-devops/docker/erun-devops/oidc-bootstrap.sh) and is locked by
+# its own oidc-bootstrap_test.sh, not by grepping this chart's render.
 rendered=$(render)
 bootstrap="${work_root}/oidc-bootstrap.yaml"
 container "${rendered}" oidc-bootstrap >"${bootstrap}"
 [ -s "${bootstrap}" ] || fail "the pod must run the OIDC application bootstrap sidecar"
 grep -q '^              mountPath: /zitadel/bootstrap$' "${bootstrap}" ||
     fail "the OIDC bootstrap sidecar must mount the shared bootstrap volume to read the org-owner PAT"
-grep -q 'admin-sa.pat' "${bootstrap}" ||
-    fail "the OIDC bootstrap sidecar must read the org-owner PAT the core container writes"
+grep -q -- '- erun-oidc-bootstrap$' "${bootstrap}" ||
+    fail "the sidecar must run the baked erun-oidc-bootstrap script"
 grep -q 'name: CONFIGMAP_NAME' "${bootstrap}" ||
     fail "the OIDC bootstrap sidecar must know which ConfigMap to publish client ids to"
 grep -A1 'name: CONFIGMAP_NAME' "${bootstrap}" | grep -q 'value: "team-zitadel-oidc-clients"' ||
     fail "the ConfigMap must default to <tenant>-zitadel-oidc-clients"
-grep -q 'OIDC_TOKEN_TYPE_JWT' "${bootstrap}" ||
-    fail "both OIDC apps must issue JWT access tokens, not Zitadel's default opaque token"
-grep -q 'OIDC_GRANT_TYPE_DEVICE_CODE' "${bootstrap}" ||
-    fail "the CLI app must support the device authorization grant"
-grep -q 'OIDC_APP_TYPE_NATIVE' "${bootstrap}" ||
-    fail "the CLI app must be a native/public client"
-grep -q '127.0.0.1/callback' "${bootstrap}" ||
-    fail "the CLI app must carry a loopback redirect for the Authorization Code + PKCE fallback"
-grep -q 'kubectl apply' "${bootstrap}" ||
-    fail "the sidecar must publish the resolved client ids to a ConfigMap"
 
 # --- 15. The bootstrap sidecar has its own least-privilege ServiceAccount ---
 sa="${work_root}/oidc-sa.yaml"
@@ -269,14 +263,22 @@ rendered=$(render --set-string imageOverrides.erun-devops=reg.test/erun-devops:v
 container "${rendered}" oidc-bootstrap | grep -q 'image: reg.test/erun-devops:v9.9.9' ||
     fail "the OIDC bootstrap sidecar's image must be overridable via imageOverrides.erun-devops"
 
-# --- 17. The console app's redirect URI follows platform.consoleUrl ---
+# --- 17. The console app's redirect URI(s) follow platform.consoleUrl and
+#         zitadel.oidc.additionalConsoleRedirectUris, registered alongside it
+#         rather than replacing it (#1131) ---
 rendered=$(render --set-string platform.consoleUrl=https://console.example.test)
-container "${rendered}" oidc-bootstrap | grep -q 'value: "https://console.example.test"' ||
+container "${rendered}" oidc-bootstrap | grep -q 'value: "\[\\"https://console.example.test\\"\]"' ||
     fail "the console app's redirect URI must default to platform.consoleUrl"
 
-# --- 18. Every Management API call carries an explicit Host header (#1047) ---
-# Core resolves the instance a call targets from Host, not from the loopback
-# address the call is actually addressed to; a call with no Host header 404s.
+rendered=$(render \
+    --set-string platform.consoleUrl=https://console.example.test \
+    --set-string 'zitadel.oidc.additionalConsoleRedirectUris[0]=https://console2.example.test')
+container "${rendered}" oidc-bootstrap | grep -q 'https://console.example.test\\",\\"https://console2.example.test' ||
+    fail "additionalConsoleRedirectUris must register alongside consoleRedirectUri, not replace it"
+
+# --- 18. The external domain, EXTERNAL_DOMAIN, is what the sidecar sends as
+#         the Management API's Host header (see oidc-bootstrap_test.sh for the
+#         header itself, which is the baked script's behavior) ---
 rendered=$(render)
 bootstrap="${work_root}/oidc-bootstrap.yaml"
 container "${rendered}" oidc-bootstrap >"${bootstrap}"
@@ -284,18 +286,6 @@ grep -q 'name: EXTERNAL_DOMAIN' "${bootstrap}" ||
     fail "the OIDC bootstrap sidecar must know the external domain to send as Host"
 grep -A1 'name: EXTERNAL_DOMAIN' "${bootstrap}" | grep -q 'value: "auth.example.test"' ||
     fail "EXTERNAL_DOMAIN must be the platform's external domain"
-grep -q -- '-H "Host: \${EXTERNAL_DOMAIN}"' "${bootstrap}" ||
-    fail "every Management API call must carry an explicit Host header naming the external domain"
-
-# --- 19. A failed resolution never publishes an empty client id (#1047) ---
-# Publishing unconditionally would overwrite a working platform's ConfigMap
-# with empty strings the next time the Management API 404s.
-grep -q 'return 1' "${bootstrap}" ||
-    fail "reconcile must abort before touching the ConfigMap when resolution is incomplete"
-grep -B5 'kubectl create configmap' "${bootstrap}" | grep -q 'if \[ -z "\${project_id}" \] || \[ -z "\${cli_client_id}" \]' ||
-    fail "the ConfigMap publish must be guarded on the project and CLI app actually resolving"
-grep -q 'reconcile || echo "oidc-bootstrap: initial reconcile incomplete' "${bootstrap}" ||
-    fail "the initial reconcile must not exit the sidecar under set -e when resolution is incomplete"
 
 # --- 20. The bootstrap PATs survive a pod restart (#1047, sophium/erun#1047) ---
 # Core writes both PATs only once, at first-instance init, into an emptyDir
@@ -317,14 +307,10 @@ grep -q 'first-instance init will mint the PATs' "${restore}" ||
 
 grep -q 'name: PATS_SECRET_NAME' "${bootstrap}" ||
     fail "the OIDC bootstrap sidecar must know which Secret to persist the PATs into"
-grep -q 'persist_pats' "${bootstrap}" ||
-    fail "the OIDC bootstrap sidecar must persist both PATs into the durable Secret"
-grep -q 'kubectl create secret generic "\${PATS_SECRET_NAME}"' "${bootstrap}" ||
-    fail "persisting the PATs must target the configured Secret name"
-grep -q -- '--from-file="admin-sa.pat=' "${bootstrap}" ||
-    fail "the persisted Secret must hold the org-owner PAT"
-grep -q -- '--from-file="login-client.pat=' "${bootstrap}" ||
-    fail "the persisted Secret must hold the login-client PAT"
+grep -A1 'name: PATS_SECRET_NAME' "${bootstrap}" | grep -q 'value: "team-zitadel-pats"' ||
+    fail "the sidecar's PATs Secret name must match restore-pats'"
+# Persisting the PATs into that Secret is the baked script's behavior, locked
+# by oidc-bootstrap_test.sh, not by grepping this chart's render.
 
 # --- 21. Least-privilege RBAC for the durable PATs Secret ---
 role="${work_root}/pat-persist-role.yaml"
