@@ -144,6 +144,14 @@ resource "helm_release" "dns01_webhook" {
     value = var.broker_url
   }
 
+  dynamic "set" {
+    for_each = var.dns01_webhook_image_pull_secrets
+    content {
+      name  = "imagePullSecrets[${set.key}].name"
+      value = set.value
+    }
+  }
+
   lifecycle {
     precondition {
       condition     = var.broker_url != "" && var.dns01_webhook_image != ""

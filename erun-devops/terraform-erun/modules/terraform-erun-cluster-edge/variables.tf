@@ -96,6 +96,12 @@ variable "install_dns01_webhook" {
   default     = null
 }
 
+variable "dns01_webhook_image_pull_secrets" {
+  description = "Names of image pull secrets for the DNS-01 webhook shim's image, in the cert-manager namespace. Empty for a public registry. Needed because the shim's image can be private while the rest of a release is not -- an unauthenticated pull leaves the APIService at MissingEndpoints, and a webhook that cannot start makes hosted environments undeletable."
+  type        = list(string)
+  default     = []
+}
+
 variable "broker_url" {
   description = "Base URL of the DNS-01 broker the webhook shim forwards to (the shim appends /present and /cleanup), e.g. \"https://api.frs-prod.services.example.com/v1/dns01\". Required when the webhook shim is installed (install_dns01_webhook)."
   type        = string
