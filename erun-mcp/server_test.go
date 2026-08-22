@@ -749,7 +749,26 @@ func TestInitToolReturnsInteractionWhenSharedInitNeedsInput(t *testing.T) {
 	}
 }
 
+// stubKubectlAlwaysSucceeds points the ERUN_KUBECTL_BIN seam (eruncommon.Command)
+// at a script that exits 0 unconditionally, so eruncommon.RunHelmDeploy's own
+// namespace-ensure — which runs before the pre-rollout secret applies and is not
+// reachable through RuntimeConfig.EnsureKubernetesNamespace (see
+// eruncommon.WrapHelmChartDeployerWithNamespaceEnsure and
+// TestRunHelmDeployEnsuresTheNamespaceBeforeApplyingSecrets) — never shells out to
+// a real cluster. Without it, these tests depend on the host's kubeconfig
+// happening to have a context named "cluster-remote"/"cluster-dev", which no real
+// machine does.
+func stubKubectlAlwaysSucceeds(t *testing.T) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "kubectl")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write kubectl stub: %v", err)
+	}
+	t.Setenv("ERUN_KUBECTL_BIN", path)
+}
+
 func TestInitToolReturnsRepositoryInteractionForRemoteInit(t *testing.T) {
+	stubKubectlAlwaysSucceeds(t)
 	handler := initTool(normalizeRuntimeConfig(RuntimeConfig{
 		Context: RuntimeContext{},
 		Store:   initInteractionStore{},
@@ -790,6 +809,7 @@ func TestInitToolReturnsRepositoryInteractionForRemoteInit(t *testing.T) {
 }
 
 func TestInitToolUsesExplicitRuntimeVersionOverride(t *testing.T) {
+	stubKubectlAlwaysSucceeds(t)
 	var deployedVersion string
 	handler := initTool(normalizeRuntimeConfig(RuntimeConfig{
 		Context: RuntimeContext{},

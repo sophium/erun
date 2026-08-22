@@ -303,6 +303,58 @@ func TestTerraform(t *testing.T) {
 		golden.Equal(t, "terraform/apply_real_run_via_stub", normalize.Apply(result.Combined))
 	})
 
+	t.Run("apply_dry_run_rfc2136_injects_tsig_secret", func(t *testing.T) {
+		// A resolved dns01_provider of "powerdns-rfc2136" makes erun read the
+		// cluster-edge module's own materialized TSIG Secret back and inject it as
+		// TF_VAR_rfc2136_tsig_secret, the same way it already injects the Cloudflare
+		// token — so the operator never has to export it by hand. The Secret name is
+		// derived from issuer_name (default "erun-cloudflare"), never hardcoded.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTerraformEnvRoot(t, setup, "team", "dev")
+		tfvars := filepath.Join(setup.Cwd, "terraform-team", "dev", "dev.tfvars")
+		if err := os.WriteFile(tfvars, []byte("base_domain = \"erunpaas.com\"\ndns01_provider = \"powerdns-rfc2136\"\nenv_label = \"team-dev\"\n"), 0o644); err != nil {
+			t.Fatalf("write tfvars: %v", err)
+		}
+		stubs := setup.Cwd + "/stubs"
+		// base64 of "supersecret", read back from data.tsig-secret.
+		fixture.StubBinaryAdvanced(t, stubs, "kubectl", fixture.StubBinarySpec{Stdout: "c3VwZXJzZWNyZXQ="})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		result := erun.Run(t, []string{"terraform", "apply", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "terraform/apply_dry_run_rfc2136_injects_tsig_secret", normalize.Apply(result.Combined))
+	})
+
+	t.Run("apply_dry_run_rfc2136_missing_secret_fails_up_front", func(t *testing.T) {
+		// terraform itself would only fail this precondition mid-plan, after
+		// printing a partial plan whose "N to add" summary omits every module it
+		// never reached — reviewing that summary reviews an incomplete plan. erun
+		// must fail before tracing or running any terraform command at all, naming
+		// the Secret and key that are missing.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTerraformEnvRoot(t, setup, "team", "dev")
+		tfvars := filepath.Join(setup.Cwd, "terraform-team", "dev", "dev.tfvars")
+		if err := os.WriteFile(tfvars, []byte("base_domain = \"erunpaas.com\"\ndns01_provider = \"powerdns-rfc2136\"\nenv_label = \"team-dev\"\n"), 0o644); err != nil {
+			t.Fatalf("write tfvars: %v", err)
+		}
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryAdvanced(t, stubs, "kubectl", fixture.StubBinarySpec{
+			Stderr:   `Error from server (NotFound): secrets "erun-cloudflare-rfc2136-tsig" not found`,
+			ExitCode: 1,
+		})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		result := erun.Run(t, []string{"terraform", "plan", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a missing RFC2136 TSIG secret, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "terraform/apply_dry_run_rfc2136_missing_secret_fails_up_front", normalize.Apply(result.Combined))
+	})
+
 	t.Run("apply_confirm_mismatch", func(t *testing.T) {
 		// A confirm value that doesn't match the target env aborts before the
 		// mutating apply.

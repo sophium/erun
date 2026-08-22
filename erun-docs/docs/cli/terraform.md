@@ -38,6 +38,8 @@ Run `erun terraform init <tenant> <env>` **once** first (and again after you cha
 
 When the env has a Cloudflare alias, its `CLOUDFLARE_API_TOKEN` is forwarded to Terraform as `TF_VAR_cloudflare_api_token` (so the edge module's cert-manager DNS-01 solver can prove control of the zone). The token rides in the environment — it never appears in the command line or the trace.
 
+When the env's `<env>.tfvars` sets `dns01_provider = "powerdns-rfc2136"`, erun reads the cluster-edge module's own RFC2136 TSIG secret back from its Kubernetes Secret and forwards it as `TF_VAR_rfc2136_tsig_secret` — you never export or type it yourself. Before running any `terraform` command, erun checks that the Secret exists and holds a value; if it doesn't, the command aborts up front naming the missing Secret and key, instead of letting Terraform print a partial plan and fail its own precondition mid-run.
+
 ## Flags
 
 | Flag | Description |
@@ -58,6 +60,7 @@ When the env has a Cloudflare alias, its `CLOUDFLARE_API_TOKEN` is forwarded to 
 | Confirmation doesn't match the env name | Aborts before the apply step: `confirmation "…" does not match environment "…"; aborting <operation>`; exit 1. The earlier read-only steps (`plan`, plus `fmt` for `apply`) have already run; only the apply is gated. | Re-run and type the exact environment name (or pass `--confirm-environment <env>`). |
 | Providers not initialized (`init` not run) | A `plan`/`apply`/`destroy` `terraform` step stops with Terraform's *"Module not installed / please run terraform init"* error; exit 1. | Run `erun terraform init <tenant> <env>` first — once per environment, and again after changing providers. |
 | `init` on a read-only tree with no committed lock | `erun terraform init` aborts before running Terraform: the playbook tree is not writable and has no `.terraform.lock.hcl` to init read-only from; exit 1. | Run `erun terraform init` on a writable env (e.g. `<tenant>-local`), commit the generated `.terraform.lock.hcl`, and rebuild/redeploy so it bakes into the image. |
+| `dns01_provider` is `powerdns-rfc2136` but its RFC2136 TSIG Secret is missing or empty | Aborts before any `terraform` command runs, naming the Secret and key it looked for; exit 1. | Apply once with the TSIG secret supplied directly (see [`erun-enable-hosting-edge`](/agent-reference/skills-spec#erun-enable-hosting-edge)) so the module materializes its Secret, then re-run. |
 | A `terraform` step fails (live run) | Surfaces the underlying `terraform` error and stops at that step; exit 1. | Fix the reported Terraform/cloud issue and re-run — `init`/`plan`/`apply` are safe to repeat. |
 
 ## See also
