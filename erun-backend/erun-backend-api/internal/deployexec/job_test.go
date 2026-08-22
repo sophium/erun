@@ -280,6 +280,43 @@ func TestBuildDeployCommandWithTLSCertProvisioning(t *testing.T) {
 	}
 }
 
+// TestBuildDeployCommandWritesChainedStepFilesBeforeTheDeploy guards the
+// script's composition rather than its contents. exposeChainScript opens with
+// " && " so exposure stays conditional on the deploy succeeding, which means
+// anything appended after shellJoin(deploy) welds itself onto the deploy's last
+// quoted argument instead of becoming its own command. That turned
+// --mcp-auth-public-key into a path ending "pemcat" and failed every hosted
+// provision, while assertions asking only whether the script *contained* each
+// piece stayed green -- the corruption is a boundary, not a missing piece.
+func TestBuildDeployCommandWritesChainedStepFilesBeforeTheDeploy(t *testing.T) {
+	params := testParams()
+	params.MCPAuthPublicKeyPEM = "-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----"
+	params.ExposeTargetIP = "203.0.113.10"
+	params.TLSDNS01Token = "test-token"
+	params.TLSDNS01BrokerURL = "https://api.example.com/v1/dns01"
+	params.TLSACMEEmail = "admin@example.com"
+	script := buildDeployCommand(params)[2]
+
+	tokenWrite := strings.Index(script, "cat > "+dns01TokenJobPath)
+	deployRun := strings.Index(script, "\x27erun\x27 \x27deploy\x27")
+	exposeChain := strings.Index(script, "&& { expose_out=")
+	if tokenWrite < 0 || deployRun < 0 || exposeChain < 0 {
+		t.Fatalf("script must write the token, run the deploy and chain expose, got %q", script)
+	}
+	if tokenWrite > deployRun {
+		t.Errorf("the token heredoc must run before the deploy, got token at %d, deploy at %d in %q", tokenWrite, deployRun, script)
+	}
+	if exposeChain < deployRun {
+		t.Errorf("expose must chain after the deploy so it stays conditional on it, got %q", script)
+	}
+	if strings.Contains(script, "\x27cat > ") {
+		t.Errorf("a heredoc is welded onto the preceding shell word in %q", script)
+	}
+	if want := "\x27--mcp-auth-public-key\x27 \x27" + mcpAuthPublicKeyJobPath + "\x27"; !strings.Contains(script, want) {
+		t.Errorf("script %q must pass the mcp auth key path as its own shell word", script)
+	}
+}
+
 // TestBuildDeployCommandQuotesArguments guards the shell-injection surface: an
 // argument carrying a single quote must stay a single shell word — the
 // canonical way a naively-quoted value breaks out of its own quoting.

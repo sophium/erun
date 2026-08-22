@@ -202,8 +202,15 @@ func buildDeployCommand(params DeployJobParams) []string {
 		script += writeMCPAuthPublicKeyScript(pem)
 		deploy = append(deploy, "--mcp-auth-public-key", mcpAuthPublicKeyJobPath)
 	}
+	// Every file a chained step reads is written BEFORE the deploy command, never
+	// between it and the chain. exposeChainScript opens with " && " so exposure
+	// stays conditional on the deploy succeeding; anything appended after
+	// shellJoin(deploy) instead glues itself onto the deploy's last argument,
+	// which silently corrupted --mcp-auth-public-key into a path ending "pemcat".
+	exposeFiles, exposeChain := buildExposeChain(params)
+	script += exposeFiles
 	script += shellJoin(deploy)
-	script += buildExposeChain(params)
+	script += exposeChain
 	return []string{"sh", "-c", script}
 }
 
@@ -222,10 +229,10 @@ func writeDNS01TokenScript(token string) string {
 // buildExposeChain composes the deploy Job's chained `erun expose` step
 // (empty when ExposeTargetIP is unset), including the per-env TLS flags when
 // configured.
-func buildExposeChain(params DeployJobParams) string {
+func buildExposeChain(params DeployJobParams) (exposeFiles, chain string) {
 	ip := strings.TrimSpace(params.ExposeTargetIP)
 	if ip == "" {
-		return ""
+		return "", ""
 	}
 	expose := []string{"erun", "expose", params.Tenant, params.Environment, mcpExposeService, "--ip", ip, "--skip-if-unconfigured"}
 	if zone, ns := strings.TrimSpace(params.ExposeServicesZone), strings.TrimSpace(params.ExposePlatformNamespace); zone != "" && ns != "" {
@@ -233,7 +240,7 @@ func buildExposeChain(params DeployJobParams) string {
 	}
 	tlsScript, tlsFlags := tlsExposeFlags(params)
 	expose = append(expose, tlsFlags...)
-	return tlsScript + exposeChainScript(expose)
+	return tlsScript, exposeChainScript(expose)
 }
 
 // tlsExposeFlags returns the heredoc that writes the per-env DNS-01 broker
