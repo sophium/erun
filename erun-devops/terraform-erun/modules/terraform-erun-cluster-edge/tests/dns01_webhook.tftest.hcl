@@ -106,3 +106,46 @@ run "broker_mode_without_a_token_secret_is_rejected" {
 
   expect_failures = [helm_release.issuer]
 }
+
+# A private shim image needs a pull secret, and nothing renders one unless the
+# module threads it. Asserted at the module level because module charts have no
+# render harness -- see the PR for why that gap is left alone here.
+run "webhook_shim_threads_image_pull_secrets" {
+  command = plan
+
+  variables {
+    dns01_provider                   = "powerdns-rfc2136"
+    install_dns01_webhook            = true
+    powerdns_nameserver              = "erun-powerdns.frs-prod.svc.cluster.local:53"
+    rfc2136_tsig_key_name            = "erun-tsig"
+    rfc2136_tsig_secret              = "c2VjcmV0"
+    broker_url                       = "https://api.frs-prod.services.example.com/v1/dns01"
+    dns01_webhook_image              = "ghcr.io/sophium/erun-dns01-webhook:1.0.0"
+    dns01_webhook_image_pull_secrets = ["ghcr-pull"]
+  }
+
+  assert {
+    condition     = length([for s in helm_release.dns01_webhook[0].set : s if s.name == "imagePullSecrets[0].name" && s.value == "ghcr-pull"]) == 1
+    error_message = "the shim must receive its image pull secrets, or a private image leaves the APIService at MissingEndpoints"
+  }
+}
+
+# Default stays empty so a public-registry install is unchanged.
+run "webhook_shim_sets_no_pull_secrets_by_default" {
+  command = plan
+
+  variables {
+    dns01_provider        = "powerdns-rfc2136"
+    install_dns01_webhook = true
+    powerdns_nameserver   = "erun-powerdns.frs-prod.svc.cluster.local:53"
+    rfc2136_tsig_key_name = "erun-tsig"
+    rfc2136_tsig_secret   = "c2VjcmV0"
+    broker_url            = "https://api.frs-prod.services.example.com/v1/dns01"
+    dns01_webhook_image   = "ghcr.io/sophium/erun-dns01-webhook:1.0.0"
+  }
+
+  assert {
+    condition     = length([for s in helm_release.dns01_webhook[0].set : s if strcontains(s.name, "imagePullSecrets")]) == 0
+    error_message = "no pull secrets must be set when none are configured"
+  }
+}
