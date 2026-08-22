@@ -79,9 +79,15 @@ type TerraformResult struct {
 	LockReadonly bool `json:"lockReadonly,omitempty"`
 	// LegacyStateInTree flags a pre-relocation terraform.tfstate left in the root;
 	// it is ignored (state now lives at StateFile) and surfaced as a warning.
-	LegacyStateInTree    bool       `json:"legacyStateInTree,omitempty"`
-	Commands             [][]string `json:"commands"`
-	RequiresConfirmation bool       `json:"requiresConfirmation"`
+	LegacyStateInTree bool `json:"legacyStateInTree,omitempty"`
+	// RFC2136SecretName and RFC2136SecretNamespace name the Kubernetes Secret
+	// TF_VAR_rfc2136_tsig_secret was read from when the resolved dns01_provider
+	// is "powerdns-rfc2136"; empty otherwise. The secret's value never appears
+	// here or anywhere else erun logs or serializes.
+	RFC2136SecretName      string     `json:"rfc2136SecretName,omitempty"`
+	RFC2136SecretNamespace string     `json:"rfc2136SecretNamespace,omitempty"`
+	Commands               [][]string `json:"commands"`
+	RequiresConfirmation   bool       `json:"requiresConfirmation"`
 }
 
 // terraformRootSource records which candidate location the per-env Terraform
@@ -116,14 +122,47 @@ func RunTerraform(ctx Context, params TerraformParams, store TerraformStore, con
 		return TerraformResult{}, err
 	}
 
+	rfc2136Secret, err := prepareTerraformRFC2136Secret(&result)
+	if err != nil {
+		return TerraformResult{}, err
+	}
+
 	traceTerraformPlan(ctx, result, steps)
 	if ctx.DryRun {
 		return result, nil
 	}
-	if err := executeTerraformSteps(ctx, result, steps, confirm); err != nil {
+	if err := executeTerraformSteps(ctx, result, steps, confirm, rfc2136Secret); err != nil {
 		return result, err
 	}
 	return result, nil
+}
+
+// prepareTerraformRFC2136Secret resolves whether this env's dns01_provider
+// needs the RFC2136 TSIG secret and, if so, reads it back from its Kubernetes
+// Secret before anything is traced — the "fail up front" half of the
+// contract, so a missing secret is reported by name instead of surfacing as
+// terraform's own mid-plan precondition after a partial plan is already
+// printed. init never uses a var file, so it is exempt. The returned value is
+// never stored on result (which --output json can serialize); only the
+// Secret's name/namespace ride there.
+func prepareTerraformRFC2136Secret(result *TerraformResult) (string, error) {
+	if result.Operation == string(TerraformInit) {
+		return "", nil
+	}
+	requirement, err := resolveTerraformRFC2136Requirement(result.Directory, result.VarFile)
+	if err != nil {
+		return "", err
+	}
+	if !requirement.Needed {
+		return "", nil
+	}
+	secret, err := readTerraformRFC2136Secret(requirement)
+	if err != nil {
+		return "", err
+	}
+	result.RFC2136SecretName = requirement.SecretName
+	result.RFC2136SecretNamespace = requirement.Namespace
+	return secret, nil
 }
 
 func traceTerraformPlan(ctx Context, result TerraformResult, steps []terraformStep) {
@@ -152,6 +191,10 @@ func traceTerraformPlan(ctx Context, result TerraformResult, steps []terraformSt
 	traceTerraformInitLock(ctx, result)
 	if cloudflareTokenPresent() {
 		ctx.Trace("terraform: injecting TF_VAR_cloudflare_api_token from CLOUDFLARE_API_TOKEN")
+	}
+	if result.RFC2136SecretName != "" {
+		ctx.Trace(fmt.Sprintf("terraform: injecting TF_VAR_rfc2136_tsig_secret from Secret %s/%s (key %s)",
+			result.RFC2136SecretNamespace, result.RFC2136SecretName, terraformRFC2136SecretKey))
 	}
 	ctx.TraceCommand("", "mkdir", "-p", result.WorkDir)
 	for _, step := range steps {
@@ -217,7 +260,7 @@ func traceTerraformInitLock(ctx Context, result TerraformResult) {
 	ctx.Trace("terraform: no .terraform.lock.hcl yet — init will generate it and record provider hashes for " + strings.Join(terraformLockPlatforms, ", ") + "; commit it so read-only envs can init with -lockfile=readonly")
 }
 
-func executeTerraformSteps(ctx Context, result TerraformResult, steps []terraformStep, confirm TerraformConfirmFunc) error {
+func executeTerraformSteps(ctx Context, result TerraformResult, steps []terraformStep, confirm TerraformConfirmFunc, rfc2136Secret string) error {
 	// The durable state + data dir live on the home PVC; create it before init so
 	// terraform can write the local-backend state and TF_DATA_DIR there.
 	if err := os.MkdirAll(result.WorkDir, 0o755); err != nil {
@@ -231,7 +274,7 @@ func executeTerraformSteps(ctx Context, result TerraformResult, steps []terrafor
 			return err
 		}
 	}
-	extraEnv := terraformExtraEnv(result.DataDir)
+	extraEnv := terraformExtraEnv(result.DataDir, rfc2136Secret)
 	for _, step := range steps {
 		if step.confirm {
 			if confirm == nil {
@@ -479,12 +522,16 @@ func cloudflareTokenPresent() bool {
 
 // terraformExtraEnv sets TF_DATA_DIR to the durable home-PVC data dir (so
 // providers/modules/backend record survive a pod restart) and supplies the
-// Cloudflare API token the edge module's cert-manager DNS-01 solver needs. The
-// token rides in the environment, never in argv, so it never lands in the trace.
-func terraformExtraEnv(dataDir string) []string {
+// Cloudflare API token and, when the resolved dns01_provider needs it, the
+// RFC2136 TSIG secret the edge module's cert-manager DNS-01 solver needs.
+// Both ride in the environment, never in argv, so neither lands in the trace.
+func terraformExtraEnv(dataDir, rfc2136Secret string) []string {
 	env := []string{"TF_DATA_DIR=" + dataDir}
 	if token := strings.TrimSpace(os.Getenv("CLOUDFLARE_API_TOKEN")); token != "" {
 		env = append(env, "TF_VAR_cloudflare_api_token="+token)
+	}
+	if rfc2136Secret != "" {
+		env = append(env, "TF_VAR_rfc2136_tsig_secret="+rfc2136Secret)
 	}
 	return env
 }
