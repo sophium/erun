@@ -238,6 +238,9 @@ COPY --chmod=0755 erun-devops/docker/erun-devops/session-prune.sh /usr/local/bin
 # and the worktree claim are staged side by side, so an environment whose
 # checkout predates the claim is moved onto it instead of being masked by it.
 COPY --chmod=0755 erun-devops/docker/erun-devops/worktree-adopt.sh /usr/local/bin/erun-adopt-worktree
+# erun-oidc-bootstrap runs as the erun-zitadel chart's oidc-bootstrap sidecar,
+# reconciling the platform's OIDC applications against the Management API.
+COPY --chmod=0755 erun-devops/docker/erun-devops/oidc-bootstrap.sh /usr/local/bin/erun-oidc-bootstrap
 COPY --chmod=0755 erun-devops/docker/erun-devops/codex-wrapper.sh /usr/local/bin/codex
 COPY --chmod=0755 erun-devops/docker/erun-devops/claude-wrapper.sh /usr/local/bin/claude
 COPY --chmod=0644 erun-devops/docker/erun-devops/bash_prompt.sh /etc/erun/bash_prompt.sh
