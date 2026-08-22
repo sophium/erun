@@ -96,17 +96,31 @@ Read what you control from erun's config store — never infer it from what happ
   `grep`, or a `tail` reports success over a failed build. End such a wrapper with
   `rc=$?; …; exit $rc`, and still read the log for the tool's own verdict — a released version, a
   pushed tag, a published image — before believing it.
+- **Check that the issue actually closed.** A `Closes #N` reference in a PR body does not reliably
+  close the issue on every merge strategy — it can fire across several merges in a row and then
+  silently miss one, and a tracker that stays open looks identical to work nobody did. Read the
+  issue back after the merge instead of trusting the reference to have worked.
 - **A liveness check that can match the observer is not a check**, and a finished-but-unreaped process is finished, not alive.
 - **A readiness flag that never exercises its dependency is not evidence.** A resource can report
   ready because its *configuration* parsed, while the thing it delegates to does not exist — so the
   work it exists to do can never happen. Verify the outcome (the certificate, the token, the
   record), not the object that promises it.
+- **A status array's first element is not the condition you asked about.** Selecting a condition by
+  index instead of by `type` can read `Issuing` as `Ready` when both are present and only one is
+  true, misreporting a pending challenge as an issued certificate. Select by `type` —
+  `conditions[?(@.type=="Ready")]`, or `kubectl wait --for=condition=Ready`, which cannot be indexed
+  wrongly — for any status array, not just certificates.
 - **One agent per working tree.** Check for a live one before starting another, and never assume a
   branch is based where you think. The rule governs *your* hands too, and in every environment, not
   just the one you are driving: uncommitted work in an idle-looking tree may be a running job's, and
   a release in flight owns its build host until it exits. Check for live work before you touch a
   tree, prune a cache, or move a HEAD.
 - **Check capacity before launching heavy work.** Limits cap, they do not reserve, and a process killed inside a container may leave no trace on the container.
+- **A tree you did not look for is not a tree that does not exist.** "No tree is free" is a claim
+  about the world, not a memory of one, and it is cheap to check: a leftover clone from an earlier
+  task, a mirror sitting idle in another environment, both count as capacity and neither shows up if
+  you only recall what you have instead of enumerating it. Stalling on a remembered constraint
+  instead of a checked one wastes a task you could already have started.
 - **Run a command where the state it mutates lives.** An environment's durable state — a
   Terraform state file, a provider cache, a baked playbook tree — can live on the pod rather than
   the host, and the same command run from the wrong side silently addresses *different* state: a
@@ -116,6 +130,13 @@ Read what you control from erun's config store — never infer it from what happ
   repair.** A step that records progress may consider itself done while a later step never ran, so
   a re-run reports nothing to do over an inconsistent tree. After an interruption, verify the
   invariant the command exists to hold rather than trusting its second exit code.
+- **A stale taint is not a reason to destroy something healthy.** A failed apply can leave a
+  resource tainted long after the underlying cause was repaired by hand, and a plan that inherits
+  the taint proposes destroying and recreating something already working — deleting a healthy
+  release only to reinstall it into the failure it had just recovered from. When a plan wants to
+  replace a resource you believe is healthy, verify which one is stale, the resource or the state's
+  opinion of it, and clear the opinion (`untaint`) instead of acting on it. Planning before applying
+  is what catches this; applying first is how it gets missed.
 - **Observe a mounted environment from the host, not from inside it.** Probing a pod on a short interval spends the capacity you are trying to measure, and the resulting timeouts look like a broken channel. Where the worktree lives on this machine, its files answer for free; where it does not, use the environment's own progress reporting rather than reaching in.
 - **A one-shot agent has no "later".** Work it starts in the background and promises to report is work nobody reports. Require the result in the run that produced it.
 - **Name a kill pattern for what it must not match.** A pattern aimed at a process will also match any path or argument that merely contains its name, and the collateral is somebody's live session.
@@ -144,6 +165,14 @@ Read what you control from erun's config store — never infer it from what happ
   credential a pod is deliberately denied. Only the last is a standing exception, and it is one you
   state with the evidence that establishes it — what was reachable, what was denied, what is
   missing — not one you assume the moment something red appears.
+- **A tool that reports only an exit code makes its own failure undiagnosable.** An exit status
+  without the underlying command's output tells you that something failed and nothing about what,
+  and the only way to find out becomes reproducing the run through the very escape hatch the typed
+  tool was supposed to replace. The principle cuts both ways: as a caller, when a typed tool fails
+  opaquely, recover its output rather than guessing at the cause; as the author of a typed command,
+  capture and return the wrapped tool's output on failure, because an operator cannot act on a bare
+  exit code. This is the counterpart to judging a tool by its artifacts — an artifact you cannot
+  read is not an artifact.
 - **The same rule applies to waiting.** A hand-written poll loop around a job is a shell
   reimplementation of a bounded wait that already exists, and it will be worse: it re-derives
   "finished" from whatever it can scrape, so it reads a dropped channel as an outcome and a
