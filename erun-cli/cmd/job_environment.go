@@ -45,6 +45,7 @@ func startJobInEnvironment(ctx context.Context, commandCtx common.Context, resol
 	putEnvironmentToolArgument(arguments, "agent", params.Agent)
 	putEnvironmentToolArgument(arguments, "prompt", params.Prompt)
 	putEnvironmentToolArgument(arguments, "dir", params.Dir)
+	putEnvironmentToolArgument(arguments, "env", params.Env)
 	putEnvironmentToolArgument(arguments, "maxOutputBytes", params.MaxOutputBytes)
 	putEnvironmentToolArgument(arguments, "leaseTtlSeconds", leaseTTLSeconds(params.LeaseTTL))
 	result, resolved, err := callEnvironmentTool[environmentJobResult](ctx, commandCtx, resolveOpen, params.Tenant, params.Environment, "job_start", arguments)

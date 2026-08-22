@@ -213,7 +213,8 @@ func registerJobTools(reg toolRegistrar, runtime RuntimeConfig) {
 			"The job also holds an activity lease for its lifetime, so the env reports as busy and idle-stop leaves it alone. " +
 			"Then use job_await (bounded) and job_output (incremental) rather than holding this call open. " +
 			"The id defaults to the name; re-using the id of a job that is still running is refused, while re-using a finished one replaces it. " +
-			"For an agent run pass agent (claude or codex) plus prompt instead of command: erun invokes the tool in its streaming mode, so job_output returns events while the agent works and job_status reports what it is doing. Running the tool yourself through command would report nothing at all until it exits.",
+			"For an agent run pass agent (claude or codex) plus prompt instead of command: erun invokes the tool in its streaming mode, so job_output returns events while the agent works and job_status reports what it is doing. Running the tool yourself through command would report nothing at all until it exits. " +
+			"env sets additional environment for just this job's process (e.g. raising CLAUDE_CODE_MAX_OUTPUT_TOKENS for one agent run that will write large files) — see the env parameter description for what it refuses and why it is not for secrets.",
 	}, jobStartTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name: "job_attach",

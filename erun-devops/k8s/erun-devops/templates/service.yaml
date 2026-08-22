@@ -168,7 +168,8 @@ emitted; type is the single source of truth.
 {{- $claudeSkipMantleAuth := default "" $claude.skipMantleAuth -}}
 {{- $claudeDisablePromptCaching := default "" $claude.disablePromptCaching -}}
 {{- $claudeEnablePromptCaching1H := default "" $claude.enablePromptCaching1H -}}
-{{- $claudeMaxOutputTokens := default "4096" $claude.maxOutputTokens -}}
+{{- /* Mirrors eruncommon.DefaultClaudeMaxOutputTokens (erun-common/claude.go); move both together. */ -}}
+{{- $claudeMaxOutputTokens := default "32000" $claude.maxOutputTokens -}}
 {{- $claudeMaxThinkingTokens := default "1024" $claude.maxThinkingTokens -}}
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -598,6 +599,13 @@ spec:
             {{- end }}
             - name: ERUN_DISABLE_BUILD_SCRIPT
               value: {{ default false .Values.disableBuildScript | quote }}
+            {{- /* These two are plain Claude Code tuning knobs, not AWS/Bedrock/Mantle
+                   routing, so they render for every env regardless of cloud provider
+                   (#1104) — unlike the block below them, which is genuinely AWS-only. */}}
+            - name: CLAUDE_CODE_MAX_OUTPUT_TOKENS
+              value: {{ $claudeMaxOutputTokens | quote }}
+            - name: MAX_THINKING_TOKENS
+              value: {{ $claudeMaxThinkingTokens | quote }}
             {{ if eq $cloudProvider "aws" }}
             {{ if $useHostCredentials }}
             - name: AWS_PROFILE
@@ -626,10 +634,6 @@ spec:
             {{- end }}
             - name: ERUN_CLAUDE_AVAILABLE_MODELS
               value: {{ $claudeAvailableModels | quote }}
-            - name: CLAUDE_CODE_MAX_OUTPUT_TOKENS
-              value: {{ $claudeMaxOutputTokens | quote }}
-            - name: MAX_THINKING_TOKENS
-              value: {{ $claudeMaxThinkingTokens | quote }}
             {{ if $claudeModel }}
             - name: ANTHROPIC_MODEL
               value: {{ $claudeModel | quote }}

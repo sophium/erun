@@ -5,7 +5,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -45,6 +47,13 @@ type StartEnvironmentJobParams struct {
 	Agent  string
 	Prompt string
 	Dir    string
+	// Env is additional environment for the job's own process, on top of what it
+	// inherits from the environment's runtime pod (e.g. raising
+	// CLAUDE_CODE_MAX_OUTPUT_TOKENS for one agent run). Values land in the
+	// supervisor's argv, which anything able to list processes in this
+	// environment can read — this is not where secrets belong. See
+	// normalizeEnvironmentJobEnv for the names it refuses to set.
+	Env map[string]string
 	// MaxOutputBytes caps the captured output; zero takes the default.
 	MaxOutputBytes int64
 	// LeaseTTL is how long the job's activity lease holds between renewals; the
@@ -67,6 +76,9 @@ func (p StartEnvironmentJobParams) normalize() (StartEnvironmentJobParams, error
 	}
 	p.ID = id
 	if p.Agent, p.Command, err = resolveEnvironmentJobWork(p.Agent, p.Prompt, p.Command); err != nil {
+		return p, err
+	}
+	if p.Env, err = normalizeEnvironmentJobEnv(p.Env); err != nil {
 		return p, err
 	}
 	if strings.TrimSpace(p.SupervisorPath) == "" {
@@ -163,6 +175,65 @@ func resolveEnvironmentJobWork(agent, prompt string, command []string) (string, 
 		return "", nil, err
 	}
 	return tool, built, nil
+}
+
+// jobEnvKeyPattern is the shape a caller-supplied job env var name must take:
+// a plain identifier, the only thing that is ever a real environment variable
+// name on the platforms erun runs on.
+var jobEnvKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// jobEnvDeniedKeys are names a caller-supplied job env must never override.
+// PATH/LD_PRELOAD/LD_LIBRARY_PATH/DYLD_* can redirect what the job's own
+// process executes or dynamically loads — a code-execution hijack, not a
+// tuning knob — and HOME/SHELL/IFS can subvert whatever script the job's
+// command runs.
+var jobEnvDeniedKeys = map[string]struct{}{
+	"PATH": {}, "LD_PRELOAD": {}, "LD_LIBRARY_PATH": {},
+	"DYLD_INSERT_LIBRARIES": {}, "DYLD_LIBRARY_PATH": {},
+	"HOME": {}, "SHELL": {}, "IFS": {},
+}
+
+// normalizeEnvironmentJobEnv validates a caller-supplied job environment
+// override. An `ERUN_` name is refused outright: that prefix is erun's own
+// seam for redirecting its subprocess lookups (`ERUN_<NAME>_BIN`) and its
+// detection overrides, and a job that later shells out to erun itself must not
+// be able to redirect those from the outside.
+func normalizeEnvironmentJobEnv(env map[string]string) (map[string]string, error) {
+	if len(env) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]string, len(env))
+	for key, value := range env {
+		key = strings.TrimSpace(key)
+		if !jobEnvKeyPattern.MatchString(key) {
+			return nil, fmt.Errorf("job env var name %q is not a valid environment variable name", key)
+		}
+		upper := strings.ToUpper(key)
+		if _, denied := jobEnvDeniedKeys[upper]; denied || strings.HasPrefix(upper, "ERUN_") {
+			return nil, fmt.Errorf("job env var %q may not be set: it can redirect what the job's process executes or loads", key)
+		}
+		out[key] = value
+	}
+	return out, nil
+}
+
+// sortedEnvironmentJobEnvPairs renders a job env override as "KEY=VALUE"
+// pairs in a stable order, so the supervisor argv and its dry-run trace never
+// reorder between runs of the same request.
+func sortedEnvironmentJobEnvPairs(env map[string]string) []string {
+	if len(env) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(env))
+	for key := range env {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	pairs := make([]string, 0, len(keys))
+	for _, key := range keys {
+		pairs = append(pairs, key+"="+env[key])
+	}
+	return pairs
 }
 
 // ensureAgentJobToolAvailable refuses an agent job before anything is spent —
@@ -310,7 +381,7 @@ func reserveEnvironmentJobID(ctx Context, dir string, params StartEnvironmentJob
 	if err != nil {
 		return nil
 	}
-	resolved := reconcileEnvironmentJob(dir, existing, time.Now(), processAlive)
+	resolved := reconcileEnvironmentJob(dir, existing, time.Now(), processAlive, currentJobHostname())
 	if !resolved.Finished() {
 		return fmt.Errorf("job %q is already running (pid %d); pass a different id or cancel it first", params.ID, resolved.PID)
 	}
@@ -376,6 +447,9 @@ func environmentJobSupervisorArgs(params StartEnvironmentJobParams) []string {
 	if strings.TrimSpace(params.Agent) != "" {
 		args = append(args, "--agent", params.Agent)
 	}
+	for _, pair := range sortedEnvironmentJobEnvPairs(params.Env) {
+		args = append(args, "--env", pair)
+	}
 	args = append(args, "--")
 	return append(args, params.Command...)
 }
@@ -391,6 +465,7 @@ type EnvironmentJobSupervisorParams struct {
 	// supervisor folds its event stream into progress. Empty for a command job.
 	Agent          string
 	Command        []string
+	Env            map[string]string
 	MaxOutputBytes int64
 	LeaseTTL       time.Duration
 }
@@ -475,6 +550,7 @@ func registerEnvironmentJob(params EnvironmentJobSupervisorParams) (*jobRecorder
 		LogPath:          filepath.Join(dir, id+".log"),
 		OutputLimitBytes: limit,
 		LeaseID:          environmentJobLeaseID(id),
+		Hostname:         currentJobHostname(),
 	}
 	if err := writeEnvironmentJob(dir, job); err != nil {
 		return nil, err
@@ -488,6 +564,11 @@ func registerEnvironmentJob(params EnvironmentJobSupervisorParams) (*jobRecorder
 // durable, so the caller of this function is the process whose liveness the job
 // record is reconciled against.
 func RunEnvironmentJobSupervisor(params EnvironmentJobSupervisorParams) error {
+	env, err := normalizeEnvironmentJobEnv(params.Env)
+	if err != nil {
+		return err
+	}
+	params.Env = env
 	recorder, err := registerEnvironmentJob(params)
 	if err != nil {
 		return err
@@ -519,6 +600,9 @@ func RunEnvironmentJobSupervisor(params EnvironmentJobSupervisorParams) error {
 
 	cmd := Command(params.Command[0], params.Command[1:]...)
 	cmd.Dir = params.Dir
+	if len(params.Env) > 0 {
+		cmd.Env = append(os.Environ(), sortedEnvironmentJobEnvPairs(params.Env)...)
+	}
 	cmd.Stdin = nil
 	cmd.Stdout = writer
 	cmd.Stderr = writer
@@ -1001,7 +1085,10 @@ func ValidateEnvironmentJobStart(params StartEnvironmentJobParams) error {
 	if _, err := normalizeEnvironmentJobIdentity(params.Tenant, params.Environment, params.Name, params.ID); err != nil {
 		return err
 	}
-	_, _, err := resolveEnvironmentJobWork(params.Agent, params.Prompt, params.Command)
+	if _, _, err := resolveEnvironmentJobWork(params.Agent, params.Prompt, params.Command); err != nil {
+		return err
+	}
+	_, err := normalizeEnvironmentJobEnv(params.Env)
 	return err
 }
 

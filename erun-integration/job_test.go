@@ -160,6 +160,58 @@ func TestJob(t *testing.T) {
 		}
 	})
 
+	t.Run("start_env_dry_run_plans_the_supervisor_argv", func(t *testing.T) {
+		// --env (#1104) must show up in the supervisor argv the plan traces, sorted
+		// so the plan is deterministic regardless of flag order.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envVars := jobStubEnv(t, setup, "exit 0")
+		result := erun.Run(t, []string{
+			"job", "start", "--tenant", "team", "--environment", "dev", "--name", "suite", "--dry-run",
+			"--env", "CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000", "--env", "SOME_FLAG=1",
+			"--", "work",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "job/start_env_dry_run_plans_the_supervisor_argv", normalize.Apply(result.Combined))
+	})
+
+	t.Run("start_env_refuses_a_name_that_could_redirect_the_job", func(t *testing.T) {
+		// PATH/LD_PRELOAD/etc. are refused up front (#1104): letting a caller
+		// override them would let it redirect what the job's own process executes
+		// or loads, which is a hijack rather than a tuning knob.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envVars := jobStubEnv(t, setup, "exit 0")
+		result := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "suite", "--dry-run", "--env", "PATH=/tmp/evil", "--", "work"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a refusal for --env PATH=..., got 0:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, `"PATH"`) {
+			t.Fatalf("the refusal must name the rejected var, got:\n%s", result.Combined)
+		}
+		if _, err := os.Stat(jobRecordPath(setup, "team", "dev", "suite")); !os.IsNotExist(err) {
+			t.Errorf("a refused start must not register a job, stat err: %v", err)
+		}
+	})
+
+	t.Run("start_env_reaches_the_jobs_own_process", func(t *testing.T) {
+		// The real point of --env (#1104): the value is not just traced, it is set
+		// on the job's actual process, on top of what it inherits.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envVars := jobStubEnv(t, setup, `printf '%s' "$SOME_JOB_VAR" > seen.txt`)
+		result := startJob(t, setup, envVars, "envcheck", "--env", "SOME_JOB_VAR=hello-job", "--", "work")
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		got := waitForFile(t, filepath.Join(setup.Cwd, "seen.txt"), 30*time.Second)
+		if got != "hello-job" {
+			t.Fatalf("job process saw SOME_JOB_VAR=%q, want %q", got, "hello-job")
+		}
+	})
+
 	t.Run("start_help", func(t *testing.T) {
 		// The agent switch and what it does to the invocation are only discoverable
 		// here, so the help that states them is locked.
@@ -617,6 +669,60 @@ func TestJob(t *testing.T) {
 		}
 		if !strings.Contains(string(body), `"state": "unknown"`) {
 			t.Errorf("expected the reconciled record to persist the unknown state, got:\n%s", body)
+		}
+	})
+
+	t.Run("a_job_started_on_a_different_pod_reads_back_as_pod_replaced_not_a_guess", func(t *testing.T) {
+		// #1051: the supervisor stamps the pod's hostname at start, so a record
+		// read back from a different hostname is definitive proof of pod
+		// replacement, not the pre-#1051 "most likely" guess. Seeded directly for
+		// the same reason as the sibling "abandoned" scenario: the state under
+		// test is the record's hostname mismatch, not how a real pod eviction
+		// would produce one. hostname is a value this suite's own host can never
+		// report, so the mismatch is guaranteed.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		dir := filepath.Dir(jobRecordPath(setup, "team", "dev", "evicted"))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+		record := `{
+  "id": "evicted",
+  "name": "overnight release",
+  "state": "running",
+  "pid": 2147483646,
+  "startedAt": "2026-01-01T00:00:00Z",
+  "exitCode": null,
+  "leaseId": "job-evicted",
+  "hostname": "team-devops-original-pod-58f9c7d9b6-abcde"
+}
+`
+		if err := os.WriteFile(filepath.Join(dir, "evicted.json"), []byte(record), 0o644); err != nil {
+			t.Fatalf("seed job record: %v", err)
+		}
+		status := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "evicted", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if status.ExitCode != 0 {
+			t.Fatalf("status: exit %d: %s", status.ExitCode, status.Combined)
+		}
+		var payload struct {
+			State             string `json:"state"`
+			UnknownReasonKind string `json:"unknownReasonKind"`
+			Reason            string `json:"reason"`
+		}
+		if err := json.Unmarshal([]byte(status.Stdout), &payload); err != nil {
+			t.Fatalf("parse job status JSON: %v\n%s", err, status.Stdout)
+		}
+		if payload.State != "unknown" {
+			t.Fatalf("state = %q, want unknown", payload.State)
+		}
+		if payload.UnknownReasonKind != "pod-replaced" {
+			t.Fatalf("unknownReasonKind = %q, want pod-replaced", payload.UnknownReasonKind)
+		}
+		if strings.Contains(payload.Reason, "most likely") {
+			t.Fatalf("expected a definite reason (hostname mismatch), not a guess, got: %s", payload.Reason)
+		}
+		if !strings.Contains(payload.Reason, "team-devops-original-pod-58f9c7d9b6-abcde") {
+			t.Fatalf("expected the reason to name the pod the job started on, got: %s", payload.Reason)
 		}
 	})
 
