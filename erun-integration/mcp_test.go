@@ -706,15 +706,21 @@ exit 3`)
 	t.Run("call_real_run_unreachable_edge_points_at_open", func(t *testing.T) {
 		// Nothing listening on the env's local MCP port means the port-forward is
 		// missing; the fix is `erun open`, and the error must say that instead of
-		// leaking a raw dial error.
+		// leaking a raw dial error. A one-shot reattach is attempted first (there
+		// is no kubectl on this scrubbed PATH, so it fails fast rather than
+		// hanging); the unreachable channel must still exit on the exit code
+		// distinct from a plain error (mcpChannelUnreachableExitCode, 126 —
+		// erun-cli/cmd/environment_call.go), never a job/tool outcome's own code,
+		// so a caller looping on this command cannot misread "channel down" as
+		// "finished".
 		skipIfPortsBusy(t, mcpEdgeLocalPort)
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
 		fixture.SeedDesktopIdentity(t, setup)
 
 		result := erun.Run(t, []string{"mcp", "call", "--tool", "version"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode == 0 {
-			t.Fatalf("expected non-zero exit for an unreachable edge, got 0:\n%s", result.Combined)
+		if result.ExitCode != 126 {
+			t.Fatalf("expected exit 126 (channel unreachable) for an unreachable edge, got %d:\n%s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "mcp/call_real_run_unreachable_edge_points_at_open", normalize.Apply(result.Combined))
 	})
@@ -734,8 +740,8 @@ exit 3`)
 		startSilentPortForward(t, mcpEdgeLocalPort)
 
 		result := erun.Run(t, []string{"mcp", "call", "--tool", "version"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode == 0 {
-			t.Fatalf("expected non-zero exit for a stale port-forward, got 0:\n%s", result.Combined)
+		if result.ExitCode != 126 {
+			t.Fatalf("expected exit 126 (channel unreachable) for a stale port-forward, got %d:\n%s", result.ExitCode, result.Combined)
 		}
 		if !strings.Contains(result.Combined, "held but the edge never answers") {
 			t.Fatalf("expected the stale forward to be named as such, distinct from a missing one, got:\n%s", result.Combined)

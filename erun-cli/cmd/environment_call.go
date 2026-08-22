@@ -39,15 +39,9 @@ func callEnvironmentTool[T any](ctx context.Context, commandCtx common.Context, 
 	if commandCtx.DryRun {
 		return decoded, false, nil
 	}
-	result, err := common.CallMCPTool(ctx, common.MCPToolCallParams{
-		Endpoint:      target.endpoint,
-		MintToken:     mcpEdgeTokenMinter(target),
-		ClientVersion: currentBuildInfo().Version,
-		Tool:          tool,
-		Arguments:     arguments,
-	})
+	result, err := callMCPToolWithReattach(ctx, commandCtx, target, tool, arguments)
 	if err != nil {
-		return decoded, false, mcpEdgeError(target, err)
+		return decoded, false, mcpEdgeErrorWithExitCode(target, err)
 	}
 	// An edge that answered without a payload is not an empty answer about the
 	// environment; treating it as one is the failure these verbs exist to close.

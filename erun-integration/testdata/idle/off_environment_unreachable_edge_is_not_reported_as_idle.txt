@@ -1,3 +1,4 @@
 audit: erun idle team dev
 mcp: team/dev edge resolved to http://<LOOPBACK>:26200/mcp
+mcp: team/dev channel unreachable, reattaching with `erun open --reconnect`
 MCP endpoint is not reachable: http://<LOOPBACK>:26200/mcp (Post "http://<LOOPBACK>:26200/mcp": dial tcp <LOOPBACK>:26200: connect: connection refused); run `erun open team dev` so the local MCP port-forward is up
