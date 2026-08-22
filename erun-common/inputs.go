@@ -40,11 +40,11 @@ type RuntimeInputUploadRunner func(req ShellLaunchParams, script string, stdin i
 // stdin, so the bytes never pass through the model's context and never touch
 // a command line. Dry-run returns a preview result with no bytes sent.
 //
-// This is a CLI-only capability. An in-pod MCP tool cannot read a path on the
-// operator's host, and for a remote-agent env there is no host filesystem
-// path into the pod at all — so the host CLI is the only side that can
-// originate this transfer. See root AGENTS.md § "Command primitives vs
-// orchestration" for the both-transports default this deviates from.
+// The source file lives on the host, so this always runs host-side: from the
+// erun-cli command, or from the inputs_upload local tool erun mcp proxy
+// serves (mirroring workspace_sync) for an MCP-connected orchestrator. It has
+// no in-pod MCP counterpart — the edge in erun-mcp runs inside the pod and
+// has no path back to the operator's filesystem.
 func UploadRuntimeInput(ctx Context, req ShellLaunchParams, params UploadRuntimeInputParams, run RuntimeInputUploadRunner) (UploadRuntimeInputResult, error) {
 	localPath := strings.TrimSpace(params.LocalPath)
 	if localPath == "" {

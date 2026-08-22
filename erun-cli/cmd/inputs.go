@@ -7,12 +7,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// newInputsCmd is deliberately CLI-only, with no MCP counterpart: an in-pod
-// MCP tool cannot read a path on the operator's host, and a tool taking the
-// file's content as an argument would push the bytes through the model's
-// context — exactly what this command exists to avoid. See root AGENTS.md
-// § "Command primitives vs orchestration" for the both-transports default
-// this is the stated exception to.
+// newInputsCmd has no in-pod MCP counterpart: the edge in erun-mcp runs
+// inside the pod and cannot read a path on the operator's host. An
+// MCP-connected orchestrator reaches the same transfer through the
+// inputs_upload local tool erun mcp proxy serves (see mcp_proxy.go),
+// mirroring how workspace_sync is host-served rather than edge-served.
 func newInputsCmd(resolveOpen OpenResolver) *cobra.Command {
 	return newCommandGroup(
 		"inputs",

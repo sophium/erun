@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -58,8 +59,53 @@ func runMCPProxyCommand(ctx context.Context, commandCtx common.Context, resolveO
 		Out:           commandCtx.Stdout,
 		Diagnostics:   commandCtx.Stderr,
 		DescribeError: func(err error) string { return mcpEdgeError(target, err).Error() },
-		LocalTools:    []common.MCPLocalTool{workspaceSyncLocalTool(resolveOpen, params)},
+		LocalTools:    []common.MCPLocalTool{workspaceSyncLocalTool(resolveOpen, params), inputsUploadLocalTool(resolveOpen, params)},
 	})
+}
+
+// inputsUploadLocalTool exposes erun inputs upload over the same MCP an
+// orchestrator already drives the environment through, mirroring
+// workspaceSyncLocalTool: it is served here rather than by the edge because
+// the source file is on this host, and the edge runs in the pod with no path
+// back to it.
+func inputsUploadLocalTool(resolveOpen OpenResolver, params common.OpenParams) common.MCPLocalTool {
+	return common.MCPLocalTool{
+		Name: "inputs_upload",
+		Description: "Stream a local file on this host into the environment's runtime pod at an explicit destination, byte-identical, without the bytes passing through this call's arguments or your context. " +
+			"Runs on the host, where the source file lives. remotePath is the full absolute destination inside the pod, including the file name — there is no default, so it can never silently land somewhere a background process (such as workspace_sync's mirror) reconciles away. Set preview to resolve the transfer and trace what would happen without sending anything. Refuses clearly, naming why, when the local file is missing, remotePath is not absolute, the channel to the pod is down, or the destination directory is not writable.",
+		InputSchema: json.RawMessage(`{"type":"object","required":["localPath","remotePath"],"properties":{"localPath":{"type":"string","description":"path to the file on this host"},"remotePath":{"type":"string","description":"absolute destination path inside the pod, including the file name"},"preview":{"type":"boolean","description":"when true, resolve and describe the transfer without sending anything"}}}`),
+		Call: func(_ context.Context, arguments json.RawMessage) (string, error) {
+			var call struct {
+				LocalPath  string `json:"localPath"`
+				RemotePath string `json:"remotePath"`
+				Preview    bool   `json:"preview"`
+			}
+			if len(arguments) == 0 {
+				return "", fmt.Errorf("inputs_upload requires localPath and remotePath")
+			}
+			if err := json.Unmarshal(arguments, &call); err != nil {
+				return "", fmt.Errorf("read inputs_upload arguments: %w", err)
+			}
+			result, err := resolveOpen(params)
+			if err != nil {
+				return "", err
+			}
+			req := common.ShellLaunchParamsFromResult(result)
+			var trace bytes.Buffer
+			toolCtx := common.Context{
+				Logger: common.NewLoggerWithWriters(common.VerbosityTrace, &trace, &trace),
+				DryRun: call.Preview,
+			}
+			out, err := common.UploadRuntimeInput(toolCtx, req, common.UploadRuntimeInputParams{LocalPath: call.LocalPath, RemotePath: call.RemotePath}, common.RunRemoteCommandWithStdin)
+			if err != nil {
+				return "", err
+			}
+			if call.Preview {
+				return trace.String(), nil
+			}
+			return fmt.Sprintf("Uploaded %s (%d bytes, sha256 %s) to %s", call.LocalPath, out.Bytes, out.SHA256, out.RemotePath), nil
+		},
+	}
 }
 
 // workspaceSyncLocalTool exposes the host mirror's refresh over the same MCP an
