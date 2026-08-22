@@ -12,11 +12,13 @@ import (
 )
 
 // One erun version is written down in several places in a tenant repo — the
-// Terraform module refs, every umbrella chart's erun dependencies, the build-env
-// image tag, and the environment's own runtimeversion — and they only work when
-// they agree. Nothing enforced that, so they drifted: a repo was found pinned to
-// three different versions at once, and realigning it meant editing seven files
-// by hand.
+// Terraform module refs, an erun image reference a tenant's own Terraform
+// variables set directly (e.g. the cluster-edge module's dns01_webhook_image),
+// every umbrella chart's erun dependencies, the build-env image tag, and the
+// environment's own runtimeversion — and they only work when they agree.
+// Nothing enforced that, so they drifted: a repo was found pinned to three
+// different versions at once, and realigning it meant editing seven files by
+// hand.
 //
 // The sites are found by pattern rather than by walking a fixed layout. The
 // Terraform root alone has three legitimate locations, and a tenant is free to
@@ -32,6 +34,7 @@ const (
 	PinSiteTerraformRef   PinSiteKind = "terraform-ref"
 	PinSiteHelmDependency PinSiteKind = "helm-dependency"
 	PinSiteRuntimeImage   PinSiteKind = "runtime-image"
+	PinSiteImageReference PinSiteKind = "image-reference"
 )
 
 // PinSite is one place a version is recorded, and what it would become.
@@ -92,6 +95,16 @@ var erunHelmDependencyPattern = regexp.MustCompile(`(?ms)(-\s+name:\s*(\S+)[^\n]
 
 // erunDevopsImagePattern matches a build-env base image tag.
 var erunDevopsImagePattern = regexp.MustCompile(`(erun-devops:)([0-9][^\s"']*)`)
+
+// erunImageReferencePattern matches a published erun image reference
+// (ghcr.io/sophium/erun-<component>:<version>) inside a Terraform file or
+// variables file. A tenant's own terraform can set one of these directly — the
+// cluster-edge module's dns01_webhook_image is the reported case — and it names
+// an erun release exactly like the module ref above it, just as a variable's
+// value instead of a module source string. erun-devops is excluded: a bare
+// build-env tag is already the dedicated site above, and matching it here too
+// would report the same reference twice.
+var erunImageReferencePattern = regexp.MustCompile(`(ghcr\.io/sophium/(erun-[a-zA-Z0-9_-]+):)([0-9][^\s"']*)`)
 
 // ResolvePinPlan reads every pin site under projectRoot and reports what moving
 // to target would change. It never writes, so a caller can render the plan,
@@ -225,12 +238,20 @@ func pinSitesInFile(path, relative, name, target string) ([]PinSite, error) {
 	for _, match := range erunDevopsImagePattern.FindAllStringSubmatch(content, -1) {
 		sites = append(sites, PinSite{Kind: PinSiteRuntimeImage, Path: relative, Detail: "erun-devops", Current: match[2], Target: target})
 	}
+	if pinTerraformFile(name) {
+		for _, match := range erunImageReferencePattern.FindAllStringSubmatch(content, -1) {
+			if match[2] == "erun-devops" {
+				continue
+			}
+			sites = append(sites, PinSite{Kind: PinSiteImageReference, Path: relative, Detail: match[2], Current: match[3], Target: target})
+		}
+	}
 	return sites, nil
 }
 
 func pinScannableFile(name string) bool {
 	switch {
-	case strings.HasSuffix(name, ".tf"):
+	case pinTerraformFile(name):
 		return true
 	case name == "Chart.yaml":
 		return true
@@ -238,6 +259,13 @@ func pinScannableFile(name string) bool {
 		return true
 	}
 	return false
+}
+
+// pinTerraformFile reports whether name is a Terraform configuration or
+// variables file — the two places a tenant's own terraform can carry an erun
+// image reference directly, alongside a module ref.
+func pinTerraformFile(name string) bool {
+	return strings.HasSuffix(name, ".tf") || strings.HasSuffix(name, ".tfvars")
 }
 
 // ApplyPinPlan rewrites every file site to the target. The environment's own
@@ -284,6 +312,7 @@ func rewritePinnedVersions(content, target string) string {
 	content = erunTerraformRefPattern.ReplaceAllString(content, "${1}v"+target)
 	content = erunHelmDependencyPattern.ReplaceAllString(content, "${1}"+target)
 	content = erunDevopsImagePattern.ReplaceAllString(content, "${1}"+target)
+	content = erunImageReferencePattern.ReplaceAllString(content, "${1}"+target)
 	return content
 }
 

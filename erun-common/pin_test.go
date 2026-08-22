@@ -51,6 +51,12 @@ dependencies:
 	write("acme-devops/docker/erun-devops/Dockerfile", `FROM ghcr.io/sophium/erun-devops:1.0.102
 RUN apt-get update
 `)
+	// The reported gap: a tenant's own terraform variables set an erun-published
+	// image directly (the cluster-edge module's dns01_webhook_image), not just a
+	// module ref — and it names an erun release just as much as the ref above it.
+	write("terraform-acme/prod/prod.tfvars", `dns01_webhook_image = "ghcr.io/sophium/erun-dns01-webhook:1.0.102"
+broker_url          = "https://api.acme-prod.services.example.com/v1/dns01"
+`)
 	// A vendored copy of a pulled chart: a build artifact of a pin, not a pin.
 	write("acme-api/charts/erun-backend-api/Chart.yaml", `apiVersion: v2
 name: erun-backend-api
@@ -90,6 +96,30 @@ func TestResolvePinPlanFindsEveryErunReferenceAndLeavesTheTenantsOwnAlone(t *tes
 	}
 	if len(byKind[PinSiteRuntimeVersion]) != 1 || byKind[PinSiteRuntimeVersion][0].Current != "1.0.115" {
 		t.Fatalf("expected the env's own runtimeversion as a site, got %+v", byKind[PinSiteRuntimeVersion])
+	}
+}
+
+// The reported gap: dns01_webhook_image, set directly in a tenant's own
+// terraform variables, is an erun-published image reference just like the
+// module ref above it, and must surface as a site of its own.
+func TestResolvePinPlanFindsAnErunImageReferenceInTerraformVariables(t *testing.T) {
+	root := seedPinnedTenantRepo(t)
+	plan, err := ResolvePinPlan(root, "acme", "dev", EnvConfig{Name: "dev"}, "1.0.175")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+
+	var found []PinSite
+	for _, site := range plan.Sites {
+		if site.Kind == PinSiteImageReference {
+			found = append(found, site)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("expected the dns01_webhook_image reference in the tfvars file, got %+v", found)
+	}
+	if found[0].Detail != "erun-dns01-webhook" || found[0].Current != "1.0.102" {
+		t.Fatalf("image reference = %+v, want erun-dns01-webhook at 1.0.102", found[0])
 	}
 }
 
@@ -157,6 +187,44 @@ func TestApplyPinPlanRewritesTheBuildEnvImageWithoutDisturbingTheDockerfile(t *t
 	}
 	if !strings.Contains(dockerfile, "RUN apt-get update") {
 		t.Fatalf("the Dockerfile's own content was disturbed:\n%s", dockerfile)
+	}
+}
+
+// The reported bug: a re-pin moved every other reference but left the
+// dns01_webhook_image line in a tenant's own tfvars untouched, creating exactly
+// the skew between the cluster-edge module and the shim it ships beside that
+// pin exists to prevent.
+func TestApplyPinPlanRewritesErunImageReferencesInTerraformVariableFiles(t *testing.T) {
+	tfvars := readPinFile(t, applyPinnedRepo(t), "terraform-acme/prod/prod.tfvars")
+	if !strings.Contains(tfvars, "ghcr.io/sophium/erun-dns01-webhook:1.0.175") {
+		t.Fatalf("dns01_webhook_image not re-pinned:\n%s", tfvars)
+	}
+	if !strings.Contains(tfvars, `broker_url          = "https://api.acme-prod.services.example.com/v1/dns01"`) {
+		t.Fatalf("an unrelated tfvars line was disturbed:\n%s", tfvars)
+	}
+}
+
+// erun-devops already has its own dedicated runtime-image site; a
+// registry-qualified reference to it in a tfvars file must not also be
+// reported as a second, redundant image-reference site.
+func TestResolvePinPlanDoesNotDoubleCountAnErunDevopsImageReferenceInTerraformVariables(t *testing.T) {
+	root := t.TempDir()
+	full := filepath.Join(root, "terraform-acme", "prod", "prod.tfvars")
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(full, []byte(`devops_image = "ghcr.io/sophium/erun-devops:1.0.102"`+"\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	plan, err := ResolvePinPlan(root, "acme", "dev", EnvConfig{}, "1.0.175")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	for _, site := range plan.Sites {
+		if site.Kind == PinSiteImageReference {
+			t.Fatalf("erun-devops must not also surface as an image-reference site: %+v", site)
+		}
 	}
 }
 

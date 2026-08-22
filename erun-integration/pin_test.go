@@ -34,17 +34,43 @@ func seedDriftedPins(t *testing.T, root, rootConfigDir string) {
 			t.Fatalf("write %s: %v", relative, err)
 		}
 	}
-	// A closed port, so version discovery is deterministic and offline. An
-	// unreachable registry means "could not verify", which is what lets an
-	// explicit target still pin.
-	rootConfigFile := filepath.Join(rootConfigDir, "config.yaml")
-	if existing, err := os.ReadFile(rootConfigFile); err == nil && !strings.Contains(string(existing), "runtimeregistry") {
-		if err := os.WriteFile(rootConfigFile, append(existing, []byte("runtimeregistry:\n  baseurl: http://127.0.0.1:1\n  tokenurl: http://127.0.0.1:1\n")...), 0o644); err != nil {
-			t.Fatalf("write root config: %v", err)
-		}
-	}
+	seedUnreachableRuntimeRegistry(t, rootConfigDir)
 	write("terraform-team/dev/main.tf", "module \"edge\" {\n  source = \"git::https://github.com/sophium/erun.git//erun-devops/terraform-erun/modules/terraform-erun-cluster-edge?ref=v1.0.102\"\n}\n\nmodule \"own\" {\n  source = \"git::https://github.com/team/infra.git//modules/thing?ref=v9.9.9\"\n}\n")
 	write("team-api/Chart.yaml", "apiVersion: v2\nname: team-api\nversion: 0.1.0\ndependencies:\n  - name: erun-backend-api\n    repository: oci://ghcr.io/sophium/charts\n    version: 1.0.106\n  - name: team-internal\n    repository: oci://ghcr.io/team/charts\n    version: 3.2.1\n")
+}
+
+// seedUnreachableRuntimeRegistry points the root config's registry lookup at a
+// closed port, so version discovery is deterministic and offline. An
+// unreachable registry means "could not verify", which is what lets an
+// explicit target still pin.
+func seedUnreachableRuntimeRegistry(t *testing.T, rootConfigDir string) {
+	t.Helper()
+	rootConfigFile := filepath.Join(rootConfigDir, "config.yaml")
+	existing, err := os.ReadFile(rootConfigFile)
+	if err != nil || strings.Contains(string(existing), "runtimeregistry") {
+		return
+	}
+	if err := os.WriteFile(rootConfigFile, append(existing, []byte("runtimeregistry:\n  baseurl: http://127.0.0.1:1\n  tokenurl: http://127.0.0.1:1\n")...), 0o644); err != nil {
+		t.Fatalf("write root config: %v", err)
+	}
+}
+
+// seedDns01WebhookImageDrift writes the shape the reported issue hit: a
+// tenant's own terraform variables set the cluster-edge module's
+// dns01_webhook_image directly, pinned to an old erun release — the one
+// reference a repin left behind because nothing recognised it.
+func seedDns01WebhookImageDrift(t *testing.T, root, rootConfigDir string) {
+	t.Helper()
+	seedUnreachableRuntimeRegistry(t, rootConfigDir)
+	full := filepath.Join(root, "terraform-team", "prod", "prod.tfvars")
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	body := "dns01_webhook_image = \"ghcr.io/sophium/erun-dns01-webhook:1.0.102\"\n" +
+		"broker_url          = \"https://api.team-prod.services.example.com/v1/dns01\"\n"
+	if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
 }
 
 func TestPin(t *testing.T) {
@@ -117,6 +143,41 @@ func TestPin(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "pin/skips_a_tenant_runtimeimage_tag_and_says_so", normalize.Apply(result.Combined))
+	})
+
+	// The reported gap: dns01_webhook_image, set directly in a tenant's own
+	// terraform variables, is an erun-published image reference just like the
+	// module ref above it, and pin's dry-run must name it as a site to move
+	// rather than reporting a plan that looks complete while leaving it behind.
+	t.Run("dry_run_reports_a_stale_dns01_webhook_image_reference", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		seedDns01WebhookImageDrift(t, setup.Cwd, filepath.Join(setup.ConfigHome, "erun"))
+
+		result := erun.Run(t, []string{"pin", "team", "dev", "--version", "1.0.175", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "pin/dry_run_reports_a_stale_dns01_webhook_image_reference", normalize.Apply(result.Combined))
+	})
+
+	// The real run must actually move it, not just name it.
+	t.Run("real_run_pins_the_dns01_webhook_image_reference", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		seedDns01WebhookImageDrift(t, setup.Cwd, filepath.Join(setup.ConfigHome, "erun"))
+
+		result := erun.Run(t, []string{"pin", "team", "dev", "--version", "1.0.175"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		tfvars := readPinnedFile(t, setup.Cwd, "terraform-team/prod/prod.tfvars")
+		if !strings.Contains(tfvars, "ghcr.io/sophium/erun-dns01-webhook:1.0.175") {
+			t.Fatalf("dns01_webhook_image not re-pinned:\n%s", tfvars)
+		}
+		if !strings.Contains(tfvars, `broker_url          = "https://api.team-prod.services.example.com/v1/dns01"`) {
+			t.Fatalf("an unrelated tfvars line was disturbed:\n%s", tfvars)
+		}
 	})
 
 	// Discovery answers "what can I pin to" from the registry, so choosing a

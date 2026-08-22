@@ -121,7 +121,7 @@ variable "dns01_webhook_group_name" {
 }
 
 variable "dns01_webhook_image" {
-  description = "Container image (repository:tag) for the DNS-01 webhook shim, e.g. \"ghcr.io/sophium/erun-dns01-webhook:1.0.150\". Required when the webhook shim is installed (install_dns01_webhook); pin to the running erun version."
+  description = "Container image (repository:tag) for the DNS-01 webhook shim, e.g. \"ghcr.io/sophium/erun-dns01-webhook:1.0.150\". Optional: left empty (the default), it resolves to ghcr.io/sophium/erun-dns01-webhook at the version chart-dns01-webhook/Chart.yaml (bundled in this module) is itself released at, so the shim can never disagree with the module it ships beside. Set it only to override that — e.g. to test a build ahead of a release."
   type        = string
   default     = ""
 }
