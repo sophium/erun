@@ -116,13 +116,44 @@ terraform apply -input=false -auto-approve \
 **Brokered DNS-01 (multi-tenant clusters).** RFC2136 above hands the cluster one
 zone-wide TSIG key — safe only on the single-tenant platform cluster. On a cluster
 shared by multiple tenants that key is an impersonation hole (any namespace could
-issue any tenant's cert). Use `powerdns-broker` instead: a per-tenant namespaced
-Issuer whose challenges route through a per-cluster cert-manager webhook shim to the
-DNS-01 broker (`erun-backend-api`), which authorizes each challenge against the
-caller's own subzone. The env presents a scoped token, not a DNS credential.
+issue any tenant's cert). Per-tenant Issuers instead need a namespaced Issuer whose
+challenges route through a per-cluster cert-manager webhook shim to the DNS-01
+broker (`erun-backend-api`), which authorizes each challenge against the caller's
+own subzone — the env presents a scoped token, not a DNS credential. `erun expose`
+provisions those per-tenant Issuers itself (not this module), but they can only ever
+reach `Ready` once the webhook shim is installed, so this module needs to install it
+even when the *platform's own* wildcard stays on `cloudflare` or `powerdns-rfc2136`.
 
-Per env (tenant), mint the env's DNS-01 token from the backend and land it as the
-Secret the Issuer's webhook solver reads, then apply in broker mode:
+**`dns01_provider` and `install_dns01_webhook` are independent switches.**
+`dns01_provider` picks the solver for the platform's *own* wildcard Issuer only.
+`install_dns01_webhook` (unset by default) installs the per-cluster webhook shim;
+left unset it defaults to `true` exactly when `dns01_provider = "powerdns-broker"`
+(back-compat with the module's original single-switch behavior). Set it explicitly
+to decouple the two — the shape a multi-tenant platform on RFC2136 needs:
+
+```sh
+terraform apply -input=false -auto-approve \
+  -var "services_zone=<services-zone>" -var "acme_email=<acme-email>" \
+  -var dns01_provider=powerdns-rfc2136 \
+  -var "powerdns_nameserver=$NS.$TNS.svc.cluster.local:53" \
+  -var "rfc2136_tsig_key_name=$KEYNAME" \
+  -var install_dns01_webhook=true \
+  -var "broker_url=https://api.<platform-tenant>-<platform-env>.services.<services-zone>/v1/dns01" \
+  -var "dns01_webhook_image=ghcr.io/sophium/erun-dns01-webhook:${version:-latest}" \
+  -var per_env_certificate_enabled=true -var "env_label=<tenant>-<env>"
+```
+
+This keeps the platform's own wildcard on the proven RFC2136 path (see the TSIG
+setup above) while making the webhook shim available for every tenant's own
+brokered Issuer. Setting `dns01_provider=powerdns-broker` *without*
+`install_dns01_webhook=true` is refused at apply time (a precondition) — it would
+render the platform's own Issuer against a solver group nothing serves, which is
+what leaves a namespace undeletable when its Challenge can never be presented or
+cleaned up.
+
+To route the platform's own wildcard through the broker too, apply in full broker
+mode instead. Per env (tenant), mint the env's DNS-01 token from the backend and
+land it as the Secret the Issuer's webhook solver reads, then apply:
 
 ```sh
 # Mint the per-env DNS-01 token (caller must hold a token for <tenant>/<env>).
@@ -143,7 +174,8 @@ terraform apply -input=false -auto-approve \
 ```
 
 The webhook shim installs once per cluster; each tenant adds only its own Issuer +
-token Secret. Neither `cloudflare_api_token` nor the TSIG key is needed here.
+token Secret. Neither `cloudflare_api_token` nor the TSIG key is needed in either
+broker-adjacent mode above.
 
 ## Verify
 

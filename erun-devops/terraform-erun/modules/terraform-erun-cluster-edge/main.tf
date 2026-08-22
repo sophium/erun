@@ -4,7 +4,13 @@ locals {
   wildcard_secret_name    = "${var.issuer_name}-wildcard-tls"
   use_rfc2136             = var.dns01_provider == "powerdns-rfc2136"
   use_broker              = var.dns01_provider == "powerdns-broker"
-  tsig_secret_name        = "${var.issuer_name}-rfc2136-tsig"
+  # install_dns01_webhook left unset (null) preserves the historical behavior
+  # of installing the shim exactly when the platform's own Issuer uses the
+  # broker solver; setting it explicitly decouples the two, so a platform can
+  # install the shim for per-tenant brokered Issuers (e.g. erun expose's)
+  # while its own Issuer stays on cloudflare or rfc2136.
+  install_dns01_webhook = var.install_dns01_webhook != null ? var.install_dns01_webhook : local.use_broker
+  tsig_secret_name      = "${var.issuer_name}-rfc2136-tsig"
   # Per-env wildcard: *.<env_label>.<services_zone> → Secret <env_label>-wildcard-tls
   # in the env namespace, which `erun expose` references from its Ingress.
   env_namespace       = var.env_namespace != "" ? var.env_namespace : var.env_label
@@ -62,7 +68,9 @@ resource "helm_release" "cert_manager" {
 # it in-cluster; the namespaced Issuer references it by name + key from its own
 # namespace.
 resource "kubernetes_secret" "cloudflare_api_token" {
-  count = local.use_rfc2136 ? 0 : 1
+  # Only the cloudflare solver (chart-issuer's default branch) ever reads this
+  # secret; rfc2136 and broker both reference a different credential.
+  count = local.use_rfc2136 || local.use_broker ? 0 : 1
 
   metadata {
     name      = local.cloudflare_token_secret
@@ -106,10 +114,14 @@ resource "kubernetes_secret" "rfc2136_tsig" {
 
 # The per-cluster cert-manager DNS-01 webhook shim (multi-tenant broker path).
 # One per cluster: it forwards each per-tenant Issuer's challenge to the DNS-01
-# broker, carrying the env's scoped token. Only installed for powerdns-broker;
-# depends on cert-manager (its CRDs back the shim's serving-cert PKI).
+# broker, carrying the env's scoped token. Installed whenever
+# install_dns01_webhook resolves true — independent of the platform's own
+# Issuer solver, so a per-tenant Issuer elsewhere (e.g. erun expose's) can use
+# the broker even while dns01_provider keeps the platform's own Issuer on
+# cloudflare or rfc2136. Depends on cert-manager (its CRDs back the shim's
+# serving-cert PKI).
 resource "helm_release" "dns01_webhook" {
-  count = local.use_broker ? 1 : 0
+  count = local.install_dns01_webhook ? 1 : 0
 
   name      = "${var.issuer_name}-dns01-webhook"
   chart     = "${path.module}/chart-dns01-webhook"
@@ -135,7 +147,7 @@ resource "helm_release" "dns01_webhook" {
   lifecycle {
     precondition {
       condition     = var.broker_url != "" && var.dns01_webhook_image != "" && var.dns01_token_secret_name != ""
-      error_message = "dns01_provider \"powerdns-broker\" requires broker_url, dns01_webhook_image, and dns01_token_secret_name."
+      error_message = "install_dns01_webhook requires broker_url, dns01_webhook_image, and dns01_token_secret_name."
     }
   }
 
@@ -245,6 +257,13 @@ resource "helm_release" "issuer" {
   set {
     name  = "envLabel"
     value = var.env_label
+  }
+
+  lifecycle {
+    precondition {
+      condition     = !local.use_broker || local.install_dns01_webhook
+      error_message = "dns01_provider \"powerdns-broker\" makes the platform's own Issuer solve through the DNS-01 webhook shim, but install_dns01_webhook resolved to false. Rendering that Certificate without the shim's APIService/RBAC leaves cert-manager denied at admission and the resulting namespace undeletable — leave install_dns01_webhook unset (it defaults to true here) or set it to true."
+    }
   }
 
   # The CRDs must exist (cert-manager installed) before the issuer/cert apply;

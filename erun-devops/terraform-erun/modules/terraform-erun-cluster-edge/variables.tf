@@ -1,5 +1,5 @@
 variable "cloudflare_api_token" {
-  description = "Cloudflare API token cert-manager's DNS-01 solver uses to prove control of the services zone, when dns01_provider is \"cloudflare\". The same account-scoped token erun injects as CLOUDFLARE_API_TOKEN (Zone:Read + DNS:Edit); pass it as TF_VAR_cloudflare_api_token. Materialized into a Kubernetes Secret because cert-manager needs it in-cluster. Leave empty when dns01_provider is \"powerdns-rfc2136\" (a precondition still requires it for the cloudflare provider)."
+  description = "Cloudflare API token cert-manager's DNS-01 solver uses to prove control of the services zone, when dns01_provider is \"cloudflare\". The same account-scoped token erun injects as CLOUDFLARE_API_TOKEN (Zone:Read + DNS:Edit); pass it as TF_VAR_cloudflare_api_token. Materialized into a Kubernetes Secret because cert-manager needs it in-cluster. Leave empty when dns01_provider is \"powerdns-rfc2136\" or \"powerdns-broker\" (only the cloudflare solver reads this secret; a precondition still requires it for the cloudflare provider)."
   type        = string
   sensitive   = true
   default     = ""
@@ -80,7 +80,7 @@ variable "traefik_chart_version" {
 }
 
 variable "dns01_provider" {
-  description = "cert-manager DNS-01 solver provider. \"cloudflare\" (default, back-compat) solves in the Cloudflare zone; \"powerdns-rfc2136\" solves via DNS UPDATE + TSIG directly against the self-hosted PowerDNS (single-tenant platform cluster only — the zone-wide TSIG key is an impersonation hole on a shared cluster); \"powerdns-broker\" is the multi-tenant-safe path (#818): a per-tenant namespaced Issuer whose challenges are brokered through the DNS-01 broker via a per-cluster webhook shim, authorized against the env's own subzone."
+  description = "cert-manager DNS-01 solver used by the platform's OWN wildcard Issuer (this module's issuer_name Issuer) — not the per-cluster webhook shim, which install_dns01_webhook controls independently. \"cloudflare\" (default, back-compat) solves in the Cloudflare zone; \"powerdns-rfc2136\" solves via DNS UPDATE + TSIG directly against the self-hosted PowerDNS (single-tenant platform cluster only — the zone-wide TSIG key is an impersonation hole on a shared cluster); \"powerdns-broker\" routes the platform's own Issuer through the same brokered webhook path a multi-tenant platform's per-tenant Issuers use, authorized against the env's own subzone. A hosted platform typically keeps its own Issuer on \"cloudflare\" or \"powerdns-rfc2136\" while still setting install_dns01_webhook = true so the per-tenant brokered Issuers erun expose provisions can solve."
   type        = string
   default     = "cloudflare"
 
@@ -90,14 +90,20 @@ variable "dns01_provider" {
   }
 }
 
+variable "install_dns01_webhook" {
+  description = "Install the per-cluster cert-manager DNS-01 webhook shim (the powerdns-broker solver's APIService, RBAC, and serving-cert PKI) — independent of which solver the platform's own Issuer (dns01_provider) uses. Left unset (null), it defaults to true exactly when dns01_provider is \"powerdns-broker\", matching the module's prior behavior where the two were one switch. Set explicitly to install the shim for per-tenant brokered Issuers (e.g. the ones erun expose provisions) while the platform's own Issuer stays on \"cloudflare\" or \"powerdns-rfc2136\"."
+  type        = bool
+  default     = null
+}
+
 variable "broker_url" {
-  description = "Base URL of the DNS-01 broker the webhook shim forwards to (the shim appends /present and /cleanup), e.g. \"https://api.frs-prod.services.example.com/v1/dns01\". Required when dns01_provider is \"powerdns-broker\"."
+  description = "Base URL of the DNS-01 broker the webhook shim forwards to (the shim appends /present and /cleanup), e.g. \"https://api.frs-prod.services.example.com/v1/dns01\". Required when the webhook shim is installed (install_dns01_webhook)."
   type        = string
   default     = ""
 }
 
 variable "dns01_token_secret_name" {
-  description = "Name of the Secret, in the env (Issuer) namespace, holding this env's DNS-01 broker token under key \"token\" (minted by the backend's POST /v1/environments/{id}/dns01-token). The per-tenant Issuer's webhook solver references it. Required when dns01_provider is \"powerdns-broker\"."
+  description = "Name of the Secret, in the env (Issuer) namespace, holding this env's DNS-01 broker token under key \"token\" (minted by the backend's POST /v1/environments/{id}/dns01-token). The per-tenant Issuer's webhook solver references it. Required when the webhook shim is installed (install_dns01_webhook)."
   type        = string
   default     = ""
 }
@@ -109,7 +115,7 @@ variable "dns01_webhook_group_name" {
 }
 
 variable "dns01_webhook_image" {
-  description = "Container image (repository:tag) for the DNS-01 webhook shim, e.g. \"ghcr.io/sophium/erun-dns01-webhook:1.0.150\". Required when dns01_provider is \"powerdns-broker\"; pin to the running erun version."
+  description = "Container image (repository:tag) for the DNS-01 webhook shim, e.g. \"ghcr.io/sophium/erun-dns01-webhook:1.0.150\". Required when the webhook shim is installed (install_dns01_webhook); pin to the running erun version."
   type        = string
   default     = ""
 }
