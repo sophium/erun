@@ -5,4 +5,4 @@ git -C <TMP> diff --cached --name-only
 git -C <TMP> ls-files --others --exclude-standard
 cd <TMP> && git add -A
 cd <TMP> && git commit -m '<message>'
-commit: no changes to commit
+commit: would commit values.yaml

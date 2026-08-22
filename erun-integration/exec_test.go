@@ -518,4 +518,70 @@ func TestExec(t *testing.T) {
 		}
 		golden.Equal(t, "exec/commit_refuses_when_nothing_to_commit", normalize.Apply(result.Combined))
 	})
+
+	t.Run("commit_scoped_paths_refuses_unrelated_dirty_file", func(t *testing.T) {
+		// The motivating case: the caller wrote values.yaml and asks to commit
+		// only that, but the tree also carries unrelated.txt from some other
+		// writer. Before scoping existed, `git add -A` swept both into the
+		// commit; now the unrelated change must never land, and the whole
+		// commit is refused, loudly, rather than silently dropping it.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		mustWriteFile(t, filepath.Join(setup.Cwd, "values.yaml"), "typo: fixed\n")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "unrelated.txt"), "someone else's in-flight work\n")
+		result := erun.Run(t, []string{"exec", "commit", "main", "values.yaml"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "fix the values typo\n"})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a scoped commit with unrelated changes present, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/commit_scoped_paths_refuses_unrelated_dirty_file", normalize.Apply(result.Combined))
+		if log := captureGit(t, setup.Cwd, "log", "--oneline"); strings.Count(strings.TrimSpace(log), "\n") != 0 {
+			t.Fatalf("expected no new commit after refusal, got log: %q", log)
+		}
+		if status := captureGit(t, setup.Cwd, "status", "--porcelain"); strings.TrimSpace(status) == "" {
+			t.Fatalf("expected both files to remain uncommitted after refusal")
+		}
+	})
+
+	t.Run("commit_scoped_paths_commits_only_the_declared_file", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		mustWriteFile(t, filepath.Join(setup.Cwd, "values.yaml"), "typo: fixed\n")
+		result := erun.Run(t, []string{"exec", "commit", "main", "values.yaml", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "fix the values typo\n"})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		var parsed common.CommitWorkingTreeResult
+		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
+			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
+		}
+		if len(parsed.Files) != 1 || parsed.Files[0] != "values.yaml" {
+			t.Fatalf("expected committed files [values.yaml], got %+v", parsed.Files)
+		}
+	})
+
+	t.Run("commit_dry_run_names_files_that_would_be_committed", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		mustWriteFile(t, filepath.Join(setup.Cwd, "values.yaml"), "typo: fixed\n")
+		result := erun.Run(t, []string{"exec", "commit", "main", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "fix the values typo\n"})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/commit_dry_run_names_files_that_would_be_committed", normalize.Apply(result.Combined))
+		if log := captureGit(t, setup.Cwd, "log", "--oneline"); strings.Count(strings.TrimSpace(log), "\n") != 0 {
+			t.Fatalf("dry-run must not commit anything, got log: %q", log)
+		}
+	})
+
+	t.Run("commit_dry_run_scoped_paths_refuses_unrelated_dirty_file", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		mustWriteFile(t, filepath.Join(setup.Cwd, "values.yaml"), "typo: fixed\n")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "unrelated.txt"), "someone else's in-flight work\n")
+		result := erun.Run(t, []string{"exec", "commit", "main", "values.yaml", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "fix the values typo\n"})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a scoped dry-run with unrelated changes present, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/commit_dry_run_scoped_paths_refuses_unrelated_dirty_file", normalize.Apply(result.Combined))
+	})
 }

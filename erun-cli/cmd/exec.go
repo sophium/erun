@@ -166,25 +166,29 @@ func runExecWriteCommand(ctx common.Context, findProjectRoot common.ProjectFinde
 
 func newExecCommitCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "commit BRANCH",
-		Short: "Commit every change in the project working tree",
+		Use:   "commit BRANCH [PATH...]",
+		Short: "Commit every change, or only the declared paths, in the project working tree",
 		Long: "Stage every change in the project working tree and commit it with a message read verbatim from " +
 			"stdin — never a shell, so nothing in the message is reinterpreted. BRANCH must match the working " +
 			"tree's actual current branch; the commit is refused, loudly, when it does not, rather than landing " +
 			"on whatever branch HEAD happens to be on.\n\n" +
-			"--dry-run verifies the branch and traces what would run, without staging or committing.",
-		Example:      "  echo 'fix the values typo' | erun exec commit main",
-		Args:         cobra.ExactArgs(1),
+			"Pass one or more PATH arguments to stage and commit only those paths instead of every change. A " +
+			"scoped commit is also refused, loudly, if the tree has changes outside the declared paths — an " +
+			"unrelated writer's edits can never be absorbed into a commit that did not ask for them.\n\n" +
+			"--dry-run verifies the branch and traces the files that would be committed, without staging or committing.",
+		Example: "  echo 'fix the values typo' | erun exec commit main\n" +
+			"  echo 'fix the values typo' | erun exec commit main values.yaml",
+		Args:         cobra.MinimumNArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runExecCommitCommand(commandContext(cmd), findProjectRoot, args[0])
+			return runExecCommitCommand(commandContext(cmd), findProjectRoot, args[0], args[1:])
 		},
 	}
 	addDryRunFlag(cmd)
 	return cmd
 }
 
-func runExecCommitCommand(ctx common.Context, findProjectRoot common.ProjectFinderFunc, branch string) error {
+func runExecCommitCommand(ctx common.Context, findProjectRoot common.ProjectFinderFunc, branch string, paths []string) error {
 	if findProjectRoot == nil {
 		findProjectRoot = common.FindProjectRoot
 	}
@@ -199,6 +203,7 @@ func runExecCommitCommand(ctx common.Context, findProjectRoot common.ProjectFind
 	result, err := common.CommitWorkingTree(ctx, projectRoot, common.CommitWorkingTreeParams{
 		Branch:  branch,
 		Message: string(message),
+		Paths:   paths,
 	}, common.CommitWorkingTreeDependencies{})
 	if err != nil {
 		return err

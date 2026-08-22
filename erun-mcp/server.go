@@ -447,7 +447,7 @@ func registerInspectionTools(reg toolRegistrar, runtime RuntimeConfig) {
 	}, writeTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "commit",
-		Description: "Stage every change in the runtime repo's working tree and commit it with a message taken as data — never through a shell. branch must match the tree's actual current branch; the commit is refused, loudly, when it does not, rather than landing on whichever branch HEAD happens to be on. Reports the branch, commit id, and files committed. Set preview to verify the branch and trace what would be committed without committing.",
+		Description: "Stage every change (or, with paths set, only those paths) in the runtime repo's working tree and commit it with a message taken as data — never through a shell. branch must match the tree's actual current branch; the commit is refused, loudly, when it does not, rather than landing on whichever branch HEAD happens to be on. When paths is set, the commit is refused just as loudly if the tree has changes outside the declared paths, so an unrelated writer's edits can never be absorbed into it. Reports the branch, commit id, and files committed. Set preview to verify the branch and trace the files that would be committed without committing.",
 	}, commitTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "outputs_list",
