@@ -254,11 +254,7 @@ func cloudSetTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequ
 // wired here; a missing config dir intentionally leaves it nil so Cloudflare
 // operations fail clearly downstream rather than here.
 func cloudDependencies() eruncommon.CloudDependencies {
-	deps := eruncommon.CloudDependencies{}
-	if store, err := eruncommon.DefaultCloudSecretStore(); err == nil {
-		deps.CloudSecretStore = store
-	}
-	return deps
+	return eruncommon.DefaultCloudDependencies()
 }
 
 func cloudAudienceForPlan(audience string) string {

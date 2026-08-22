@@ -311,6 +311,15 @@ func TestERunCloudProviderTokenStatusReflectsResolution(t *testing.T) {
 		}
 	})
 
+	t.Run("unknown rather than expired when the secret store is absent (#1109)", func(t *testing.T) {
+		provider := erunTestProvider()
+		provider.ERun.RefreshTokenRef = erunRefreshTokenRef(provider.Alias)
+		status := erunCloudProviderTokenStatus(provider, CloudDependencies{})
+		if status.Status != CloudTokenStatusUnknown {
+			t.Fatalf("Status = %q, want unknown: a provider with a refresh token but no store to check it against was never actually verified", status.Status)
+		}
+	})
+
 	t.Run("expired when refresh fails", func(t *testing.T) {
 		secrets := NewFileCloudSecretStore(t.TempDir())
 		provider := erunTestProvider()

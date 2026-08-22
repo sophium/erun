@@ -281,9 +281,7 @@ func withDefaultCoreDeps(deps erunUIDeps) erunUIDeps {
 // directory), so Cloudflare token operations fail unless it is wired here.
 func withDefaultCloudDeps(deps erunUIDeps) erunUIDeps {
 	if deps.cloudDeps.CloudSecretStore == nil {
-		if store, err := eruncommon.DefaultCloudSecretStore(); err == nil {
-			deps.cloudDeps.CloudSecretStore = store
-		}
+		deps.cloudDeps.CloudSecretStore = eruncommon.DefaultCloudDependencies().CloudSecretStore
 	}
 	return deps
 }
