@@ -73,6 +73,17 @@ Read what you control from erun's config store — never infer it from what happ
   substituted, and say which of the above you tried. A gap that names no
   attempted mechanism is a stop wearing an honest face.
 - **Bound your waits.** Every gate, build, and e2e gets an explicit timeout so a hang fails fast.
+- **Pace yourself: come back roughly every five minutes and check nothing has gone stale.** A long
+  single wait is not patience, it is blindness — while you block, the work you are waiting on
+  settles, a channel drops, a pod is replaced, and another actor moves a branch or a HEAD you were
+  reasoning about. Everything you believed at the start of the wait is a claim about a world that
+  has since changed, and the longer the wait the more of it is wrong.
+  On each pass re-read the things that go stale rather than the thing you are waiting for: the
+  job's own state, the channel, the tree's HEAD and cleanliness, and whether anything you were told
+  earlier is still true. Two failures come specifically from not doing this — declaring work stalled
+  that had already finished, and acting on a branch someone else had moved — and both read, at the
+  time, like careful diagnosis.
+  Short repeated checks also keep the operator informed, which a single silent block does not.
 - **On completion, list the assumptions you took** in place of asking. This is what keeps "don't ask" accountable.
 
 ## Working in a pod
