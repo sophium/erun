@@ -10,7 +10,17 @@ locals {
   # install the shim for per-tenant brokered Issuers (e.g. erun expose's)
   # while its own Issuer stays on cloudflare or rfc2136.
   install_dns01_webhook = var.install_dns01_webhook != null ? var.install_dns01_webhook : local.use_broker
-  tsig_secret_name      = "${var.issuer_name}-rfc2136-tsig"
+  # The shim ships as one release with this module — chart-dns01-webhook's own
+  # Chart.yaml is stamped to the erun version at every release, the same way
+  # every umbrella chart's dependency versions are. Reading it here is this
+  # module's equivalent of a Helm template's `.Chart.AppVersion` default (see
+  # erun-zitadel's bootstrap image): the shim's image can no longer disagree
+  # with the module by construction, because they are pinned by the same file.
+  # var.dns01_webhook_image still overrides it, for testing a build ahead of a
+  # release.
+  dns01_webhook_chart_app_version = yamldecode(file("${path.module}/chart-dns01-webhook/Chart.yaml")).appVersion
+  dns01_webhook_image             = var.dns01_webhook_image != "" ? var.dns01_webhook_image : "ghcr.io/sophium/erun-dns01-webhook:${local.dns01_webhook_chart_app_version}"
+  tsig_secret_name                = "${var.issuer_name}-rfc2136-tsig"
   # Per-env wildcard: *.<env_label>.<services_zone> → Secret <env_label>-wildcard-tls
   # in the env namespace, which `erun expose` references from its Ingress.
   env_namespace       = var.env_namespace != "" ? var.env_namespace : var.env_label
@@ -187,7 +197,7 @@ resource "helm_release" "dns01_webhook" {
   }
   set {
     name  = "image"
-    value = var.dns01_webhook_image
+    value = local.dns01_webhook_image
   }
   set {
     name  = "brokerURL"
@@ -204,8 +214,8 @@ resource "helm_release" "dns01_webhook" {
 
   lifecycle {
     precondition {
-      condition     = var.broker_url != "" && var.dns01_webhook_image != ""
-      error_message = "install_dns01_webhook requires broker_url and dns01_webhook_image."
+      condition     = var.broker_url != ""
+      error_message = "install_dns01_webhook requires broker_url."
     }
   }
 

@@ -153,9 +153,14 @@ terraform apply -input=false -auto-approve \
   -var "rfc2136_tsig_key_name=$KEYNAME" \
   -var install_dns01_webhook=true \
   -var "broker_url=https://api.<platform-tenant>-<platform-env>.services.<services-zone>/v1/dns01" \
-  -var "dns01_webhook_image=ghcr.io/sophium/erun-dns01-webhook:${version:-latest}" \
   -var per_env_certificate_enabled=true -var "env_label=<tenant>-<env>"
 ```
+
+`dns01_webhook_image` is left unset above on purpose: the module defaults it to
+`ghcr.io/sophium/erun-dns01-webhook` at the version its own bundled
+`chart-dns01-webhook/Chart.yaml` is released at, so the shim can never disagree
+with the module — no pin required. Pass `-var "dns01_webhook_image=..."` only to
+override that (e.g. to test a build ahead of a release).
 
 This keeps the platform's own wildcard on the proven RFC2136 path (see the TSIG
 setup above) while making the webhook shim available for every tenant's own
@@ -176,16 +181,16 @@ TOKEN=$(curl -fsS -X POST -H "Authorization: Bearer $ERUN_API_TOKEN" \
 kubectl -n "<tenant>-<env>" create secret generic "<tenant>-<env>-dns01-token" \
   --from-literal=token="$TOKEN" --dry-run=client -o yaml | kubectl apply -f -
 
-version=$(erun version --no-registry 2>/dev/null | head -n1 | awk '{print $2}')
 terraform apply -input=false -auto-approve \
   -var "services_zone=<services-zone>" -var "acme_email=<acme-email>" \
   -var dns01_provider=powerdns-broker \
   -var "broker_url=https://api.<platform-tenant>-<platform-env>.services.<services-zone>/v1/dns01" \
-  -var "dns01_webhook_image=ghcr.io/sophium/erun-dns01-webhook:${version:-latest}" \
   -var "dns01_token_secret_name=<tenant>-<env>-dns01-token" \
   -var per_env_certificate_enabled=true -var "env_label=<tenant>-<env>" \
   -var "env_namespace=<tenant>-<env>"
 ```
+
+As above, `dns01_webhook_image` is left to the module's own default.
 
 The webhook shim installs once per cluster; each tenant adds only its own Issuer +
 token Secret. Neither `cloudflare_api_token` nor the TSIG key is needed in either

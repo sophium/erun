@@ -107,6 +107,29 @@ run "broker_mode_without_a_token_secret_is_rejected" {
   expect_failures = [helm_release.issuer]
 }
 
+# Leaving dns01_webhook_image unset must not fail, and must not leave the shim
+# on some previous erun release: the module resolves it from its own bundled
+# chart-dns01-webhook/Chart.yaml appVersion, so the shim and the module can never
+# disagree without deliberately overriding the variable.
+run "webhook_shim_image_defaults_to_the_bundled_charts_own_release" {
+  command = plan
+
+  variables {
+    dns01_provider        = "powerdns-rfc2136"
+    install_dns01_webhook = true
+    powerdns_nameserver   = "erun-powerdns.frs-prod.svc.cluster.local:53"
+    rfc2136_tsig_key_name = "erun-tsig"
+    rfc2136_tsig_secret   = "c2VjcmV0"
+    broker_url            = "https://api.frs-prod.services.example.com/v1/dns01"
+    # dns01_webhook_image is intentionally omitted.
+  }
+
+  assert {
+    condition     = length([for s in helm_release.dns01_webhook[0].set : s if s.name == "image" && startswith(s.value, "ghcr.io/sophium/erun-dns01-webhook:") && s.value != "ghcr.io/sophium/erun-dns01-webhook:"]) == 1
+    error_message = "an unset dns01_webhook_image must default the shim's image to ghcr.io/sophium/erun-dns01-webhook at this module's own chart-dns01-webhook/Chart.yaml appVersion"
+  }
+}
+
 # A private shim image needs a pull secret, and nothing renders one unless the
 # module threads it. Asserted at the module level because module charts have no
 # render harness -- see the PR for why that gap is left alone here.

@@ -27,8 +27,9 @@ func newPinCmd(prepareContext func(common.Context) common.Context, resolveOpen f
 		Use:   "pin [TENANT] [ENVIRONMENT]",
 		Short: "Re-pin every erun version reference for an environment",
 		Long: "Re-pin every erun version reference for an environment: the Terraform module refs, " +
-			"each umbrella chart's erun dependencies, the build-env image tag, and the environment's " +
-			"own runtime version.\n\n" +
+			"an erun image reference set directly in Terraform variables (e.g. the cluster-edge " +
+			"module's dns01_webhook_image), each umbrella chart's erun dependencies, the build-env " +
+			"image tag, and the environment's own runtime version.\n\n" +
 			"Idempotent, and a no-op once aligned. It rewrites the source of truth only — realizing " +
 			"the new version (terraform apply, deploy) stays a separate explicit step.",
 		Example: "  erun pin --list\n  erun pin acme dev --dry-run\n  erun pin acme dev --version 1.0.175\n  erun pin acme dev --revert",
