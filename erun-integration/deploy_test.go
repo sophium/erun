@@ -2173,6 +2173,39 @@ func TestDeploy(t *testing.T) {
 		}
 	})
 
+	t.Run("real_run_pod_watch_waits_out_the_unschedulable_grace_period", func(t *testing.T) {
+		// kubectl stub reports a pod stuck PodScheduled=False/Unschedulable on
+		// every poll. A brief unschedulable window is normal (the scheduler
+		// re-evaluates on cluster changes), so the watcher must not abort on the
+		// first observation — only once the grace period elapses. The grace is
+		// shrunk via ERUN_DEPLOY_POD_WATCH_UNSCHEDULED_GRACE (the production
+		// default is 30s, too slow for a test) rather than asserting a wall-clock
+		// sleep tied to that default; see resolveUnscheduledGracePeriod.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryAdvanced(t, stubs, "kubectl", fixture.StubBinarySpec{Stdout: unschedulablePodJSON})
+		fixture.StubBinaryWithScript(t, stubs, "helm", "exec sleep 30\n")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		envVars = append(envVars, "ERUN_DEPLOY_POD_WATCH_INTERVAL=50ms", "ERUN_DEPLOY_POD_WATCH_UNSCHEDULED_GRACE=150ms")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit once the grace period elapses, got 0:\n%s", result.Combined)
+		}
+		out := normalize.Apply(result.Combined)
+		if !strings.Contains(out, "deploy failed early: pod team-devops-pending Unschedulable") {
+			t.Fatalf("missing structured early-fail error naming the pod-level (no container) reason, got:\n%s", out)
+		}
+		if !strings.Contains(out, "0/1 nodes are available: 1 Insufficient cpu, 1 Insufficient memory") {
+			t.Fatalf("missing the scheduler's own message verbatim, got:\n%s", out)
+		}
+		if !strings.Contains(out, "    pod team-devops-pending: Pending (Unschedulable: 0/1 nodes are available: 1 Insufficient cpu, 1 Insufficient memory)") {
+			t.Fatalf("missing the pod-status summary line surfacing the reason during the grace period, got:\n%s", out)
+		}
+	})
+
 	t.Run("real_run_published_chart_not_found_reports_actionable_error", func(t *testing.T) {
 		// Safety net: when the resolved published runtime chart is not pullable
 		// at the requested version (a snapshot image whose chart was never
@@ -3143,6 +3176,26 @@ const crashLoopPodJSON = `{
             "state": {"waiting": {"reason": "CrashLoopBackOff", "message": "back-off 5m restarting failed container"}},
             "lastState": {"terminated": {"reason": "Error", "exitCode": 137, "message": "exited with code 137"}}
           }
+        ]
+      }
+    }
+  ]
+}`
+
+// unschedulablePodJSON has no containerStatuses at all: the pod was never
+// admitted to a node, so the only place its failure reason lives is
+// status.conditions (#1082).
+const unschedulablePodJSON = `{
+  "items": [
+    {
+      "metadata": {
+        "name": "team-devops-pending",
+        "annotations": {"meta.helm.sh/release-name": "team-devops"}
+      },
+      "status": {
+        "phase": "Pending",
+        "conditions": [
+          {"type": "PodScheduled", "status": "False", "reason": "Unschedulable", "message": "0/1 nodes are available: 1 Insufficient cpu, 1 Insufficient memory"}
         ]
       }
     }
