@@ -442,6 +442,14 @@ func registerInspectionTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Description: "Run an arbitrary command from the runtime repo root and return captured stdout, stderr, and trace output",
 	}, rawTool(runtime))
 	addTool(reg, &mcp.Tool{
+		Name:        "write",
+		Description: "Write content to a path in the runtime repo's working tree, taking the content as data — never through a shell, so nothing in it is reinterpreted. Refuses if the resolved path would land outside the repo root. Reports the resolved path and byte count written. Set preview to trace the write without performing it.",
+	}, writeTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "commit",
+		Description: "Stage every change in the runtime repo's working tree and commit it with a message taken as data — never through a shell. branch must match the tree's actual current branch; the commit is refused, loudly, when it does not, rather than landing on whichever branch HEAD happens to be on. Reports the branch, commit id, and files committed. Set preview to verify the branch and trace what would be committed without committing.",
+	}, commitTool(runtime))
+	addTool(reg, &mcp.Tool{
 		Name:        "outputs_list",
 		Description: "List the files and folders an agent produced in the runtime pod's outputs directory ($ERUN_OUTPUTS_DIR, default /home/erun/.erun/outputs), newest-first. Read-only.",
 	}, outputsListTool())

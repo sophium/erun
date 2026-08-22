@@ -4,13 +4,15 @@ title: erun exec
 
 # `erun exec`
 
-Repository helpers that run from the project root. Two subcommands: `diff` (a structured git diff) and `raw` (run an arbitrary command).
+Repository helpers that run from the project root. Four subcommands: `diff` (a structured git diff), `raw` (run an arbitrary command), `write` (write file content), and `commit` (commit every change).
 
 ## Synopsis
 
 ```
 erun exec diff [flags]
 erun exec raw COMMAND [ARG...] [flags]
+erun exec write PATH [flags]
+erun exec commit BRANCH [flags]
 ```
 
 ## Subcommands
@@ -29,12 +31,22 @@ Shows the current git diff, including untracked files. Outputs raw diff text by 
 
 Runs an arbitrary command from the project root. The command runs **directly, not through a shell** — wrap it in `sh -c "…"` if you need shell features. `--dry-run` traces the command (with secret-looking arguments redacted) without running it. Use `--` to pass flags through to the wrapped command rather than to `erun`.
 
+### `exec write`
+
+Writes stdin to PATH inside the project working tree, byte-for-byte, creating parent directories as needed. Content is read from stdin, never a flag value, so nothing in it is ever composed into a shell command — a backtick, a `$(...)`, or a trailing newline in the content lands exactly as given. The write is refused if PATH would resolve outside the project root. `--dry-run` resolves the path and traces the write without performing it. Reports the resolved path and byte count written; add `--output json` for a structured result.
+
+### `exec commit`
+
+Stages every change in the project working tree (`git add -A`) and commits it with a message read verbatim from stdin — same shell-avoidance property as `write`. BRANCH must match the working tree's actual current branch: the commit is **refused, loudly**, when it does not, rather than landing on whatever branch HEAD happens to be on. `--dry-run` verifies the branch and traces what would run without staging or committing. Reports the branch, commit id, and files committed; add `--output json` for a structured result.
+
 ## Examples
 
 ```bash
 erun exec diff --scope all
 erun exec raw go test ./...
 erun exec raw --dry-run -- kubectl get pods --all-namespaces
+erun exec write values.yaml < new-values.yaml
+echo 'fix the values typo' | erun exec commit main
 ```
 
 ## Error behaviour
@@ -44,3 +56,6 @@ erun exec raw --dry-run -- kubectl get pods --all-namespaces
 | Not inside a git project. | Errors with "cannot find git project"; nothing runs. |
 | `--selected-commit` without `--scope=commit`. | Errors before running git. |
 | Wrapped command exits non-zero (`raw`). | Its exit code and stderr propagate; `erun` adds nothing. |
+| PATH resolves outside the project root (`write`). | Refuses with `path "..." is outside the working tree "..."`; nothing is written. |
+| BRANCH does not match the current branch (`commit`). | Refuses with `refusing to commit: working tree is on branch "X", not the declared "Y"`; nothing is staged. |
+| Nothing changed to commit (`commit`). | Refuses with `nothing to commit: the working tree has no changes`. |

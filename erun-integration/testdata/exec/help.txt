@@ -4,8 +4,10 @@ Usage:
   erun exec [command]
 
 Available Commands:
+  commit      Commit every change in the project working tree
   diff        Show the current git diff
   raw         Run a raw command from the project root
+  write       Write stdin to a file in the project working tree
 
 Flags:
   -h, --help   help for exec

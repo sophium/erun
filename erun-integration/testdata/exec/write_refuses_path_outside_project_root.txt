@@ -1,0 +1,2 @@
+audit: erun exec write ../escape.txt
+path "../escape.txt" is outside the working tree "<TMP>"

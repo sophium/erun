@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/adrg/xdg"
@@ -158,6 +159,7 @@ var wantRegisteredTools = []string{
 	"cloud_login",
 	"cloud_oidc",
 	"cloud_set",
+	"commit",
 	"context_init",
 	"context_list",
 	"context_start",
@@ -207,6 +209,7 @@ var wantRegisteredTools = []string{
 	"unexpose",
 	"upgrade",
 	"version",
+	"write",
 }
 
 func TestHTTPHandlerExposesVersionTool(t *testing.T) {
@@ -435,6 +438,99 @@ func assertStructuredDiffOutput(t *testing.T, output eruncommon.DiffResult, proj
 	}
 	if len(output.Tree) != 1 || output.Tree[0].Name != "app.txt" {
 		t.Fatalf("unexpected tree: %+v", output.Tree)
+	}
+}
+
+// dangerousExecContent carries the constructs a shell would reinterpret —
+// backticks, command substitution, embedded quotes, a trailing newline — so a
+// round trip through write/commit demonstrates the property that justifies
+// bypassing raw for these two operations: nothing here is ever shell-parsed.
+const dangerousExecContent = "line one\n`echo pwned` $(echo pwned) \"quoted\" 'quoted'\ntrailing\n\n"
+
+func TestWriteToolWritesContentByteIdenticallyAndRefusesOutsideRoot(t *testing.T) {
+	projectRoot := t.TempDir()
+
+	handler := writeTool(normalizeRuntimeConfig(RuntimeConfig{
+		Context: RuntimeContext{RepoPath: projectRoot},
+	}))
+	_, output, err := handler(context.Background(), nil, WriteInput{Path: "config/values.yaml", Content: dangerousExecContent})
+	if err != nil {
+		t.Fatalf("writeTool failed: %v", err)
+	}
+	if output.Write == nil {
+		t.Fatalf("expected Write result, got %+v", output)
+	}
+	wantPath := filepath.Join(projectRoot, "config", "values.yaml")
+	if output.Write.Path != wantPath {
+		t.Fatalf("Path = %q, want %q", output.Write.Path, wantPath)
+	}
+	if output.Write.Bytes != int64(len(dangerousExecContent)) {
+		t.Fatalf("Bytes = %d, want %d", output.Write.Bytes, len(dangerousExecContent))
+	}
+	got, err := os.ReadFile(wantPath)
+	if err != nil {
+		t.Fatalf("read written file: %v", err)
+	}
+	if string(got) != dangerousExecContent {
+		t.Fatalf("written content = %q, want byte-identical %q", got, dangerousExecContent)
+	}
+
+	_, _, err = handler(context.Background(), nil, WriteInput{Path: "../escape.txt", Content: "x"})
+	if err == nil {
+		t.Fatalf("expected refusal for a path outside the repo root")
+	}
+	if _, statErr := os.Stat(filepath.Join(filepath.Dir(projectRoot), "escape.txt")); !os.IsNotExist(statErr) {
+		t.Fatalf("expected no file to land outside the repo root")
+	}
+}
+
+func TestCommitToolCommitsAndRefusesBranchMismatch(t *testing.T) {
+	projectRoot := t.TempDir()
+	runGitTestCommand(t, projectRoot, "init", "-b", "main")
+	runGitTestCommand(t, projectRoot, "config", "user.email", "codex@example.com")
+	runGitTestCommand(t, projectRoot, "config", "user.name", "Codex")
+	runGitTestCommand(t, projectRoot, "commit", "--allow-empty", "-m", "initial")
+	if err := os.WriteFile(filepath.Join(projectRoot, "app.txt"), []byte("new\n"), 0o644); err != nil {
+		t.Fatalf("write app.txt: %v", err)
+	}
+
+	handler := commitTool(normalizeRuntimeConfig(RuntimeConfig{
+		Context: RuntimeContext{RepoPath: projectRoot},
+	}))
+
+	_, _, err := handler(context.Background(), nil, CommitInput{Branch: "not-main", Message: dangerousExecContent})
+	if err == nil {
+		t.Fatalf("expected refusal when the declared branch does not match the current branch")
+	}
+
+	_, output, err := handler(context.Background(), nil, CommitInput{Branch: "main", Message: dangerousExecContent})
+	if err != nil {
+		t.Fatalf("commitTool failed: %v", err)
+	}
+	assertCommitToolOutput(t, output, projectRoot)
+}
+
+func assertCommitToolOutput(t *testing.T, output CommandOutput, projectRoot string) {
+	t.Helper()
+
+	if output.Commit == nil {
+		t.Fatalf("expected Commit result, got %+v", output)
+	}
+	if output.Commit.Branch != "main" || output.Commit.Commit == "" {
+		t.Fatalf("unexpected commit result: %+v", output.Commit)
+	}
+	if len(output.Commit.Files) != 1 || output.Commit.Files[0] != "app.txt" {
+		t.Fatalf("unexpected committed files: %+v", output.Commit.Files)
+	}
+
+	messageCmd := exec.Command("git", "log", "-1", "--format=%B")
+	messageCmd.Dir = projectRoot
+	messageOut, err := messageCmd.Output()
+	if err != nil {
+		t.Fatalf("read commit message: %v", err)
+	}
+	if !strings.Contains(string(messageOut), "`echo pwned` $(echo pwned) \"quoted\" 'quoted'") {
+		t.Fatalf("commit message lost dangerous content verbatim: %q", messageOut)
 	}
 }
 

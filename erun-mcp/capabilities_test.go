@@ -81,7 +81,7 @@ func TestReadCapabilitySeesOnlyTheReadTools(t *testing.T) {
 func TestReadCapabilityCannotSeeExecutionOrMutation(t *testing.T) {
 	got := listToolNames(t, connectWithCapabilities(t, string(eruncommon.MCPCapabilityRead)))
 
-	for _, forbidden := range []string{"raw", "deploy", "delete", "build", "push", "release", "context_init", "job_start"} {
+	for _, forbidden := range []string{"raw", "write", "commit", "deploy", "delete", "build", "push", "release", "context_init", "job_start"} {
 		if slices.Contains(got, forbidden) {
 			t.Fatalf("a read-only caller must not be offered %q: %v", forbidden, got)
 		}

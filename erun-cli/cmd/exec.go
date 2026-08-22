@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 
 	common "github.com/sophium/erun/erun-common"
 	"github.com/spf13/cobra"
@@ -14,6 +15,8 @@ func newExecCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitComma
 		"Repository execution utilities",
 		newExecDiffCmd(findProjectRoot, runGit),
 		newExecRawCmd(findProjectRoot, runRaw),
+		newExecWriteCmd(findProjectRoot),
+		newExecCommitCmd(findProjectRoot),
 	)
 }
 
@@ -114,6 +117,97 @@ func extractDryRunFlag(args []string) ([]string, bool) {
 		}
 	}
 	return cleaned, dryRun
+}
+
+func newExecWriteCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "write PATH",
+		Short: "Write stdin to a file in the project working tree",
+		Long: "Write stdin to PATH inside the project working tree, byte-for-byte, creating parent directories as " +
+			"needed. Content never passes through a shell, so nothing in it is reinterpreted. The write is refused " +
+			"if PATH would resolve outside the project root.\n\n" +
+			"--dry-run resolves the path and reports the byte count it would write, without writing.",
+		Example:      "  erun exec write values.yaml < new-values.yaml\n  printf 'hello\\n' | erun exec write notes/todo.txt",
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runExecWriteCommand(commandContext(cmd), findProjectRoot, args[0])
+		},
+	}
+	addDryRunFlag(cmd)
+	return cmd
+}
+
+func runExecWriteCommand(ctx common.Context, findProjectRoot common.ProjectFinderFunc, path string) error {
+	if findProjectRoot == nil {
+		findProjectRoot = common.FindProjectRoot
+	}
+	_, projectRoot, err := findProjectRoot()
+	if err != nil {
+		return err
+	}
+	content, err := io.ReadAll(ctx.Stdin)
+	if err != nil {
+		return fmt.Errorf("read content from stdin: %w", err)
+	}
+	result, err := common.WriteWorkingTreeFile(ctx, projectRoot, common.WriteWorkingTreeFileParams{
+		Path:    path,
+		Content: string(content),
+	})
+	if err != nil {
+		return err
+	}
+	if ctx.DryRun {
+		return nil
+	}
+	ctx.Info(fmt.Sprintf("Wrote %s (%d bytes).", result.Path, result.Bytes))
+	return ctx.WriteResult(result)
+}
+
+func newExecCommitCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "commit BRANCH",
+		Short: "Commit every change in the project working tree",
+		Long: "Stage every change in the project working tree and commit it with a message read verbatim from " +
+			"stdin — never a shell, so nothing in the message is reinterpreted. BRANCH must match the working " +
+			"tree's actual current branch; the commit is refused, loudly, when it does not, rather than landing " +
+			"on whatever branch HEAD happens to be on.\n\n" +
+			"--dry-run verifies the branch and traces what would run, without staging or committing.",
+		Example:      "  echo 'fix the values typo' | erun exec commit main",
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runExecCommitCommand(commandContext(cmd), findProjectRoot, args[0])
+		},
+	}
+	addDryRunFlag(cmd)
+	return cmd
+}
+
+func runExecCommitCommand(ctx common.Context, findProjectRoot common.ProjectFinderFunc, branch string) error {
+	if findProjectRoot == nil {
+		findProjectRoot = common.FindProjectRoot
+	}
+	_, projectRoot, err := findProjectRoot()
+	if err != nil {
+		return err
+	}
+	message, err := io.ReadAll(ctx.Stdin)
+	if err != nil {
+		return fmt.Errorf("read commit message from stdin: %w", err)
+	}
+	result, err := common.CommitWorkingTree(ctx, projectRoot, common.CommitWorkingTreeParams{
+		Branch:  branch,
+		Message: string(message),
+	}, common.CommitWorkingTreeDependencies{})
+	if err != nil {
+		return err
+	}
+	if ctx.DryRun {
+		return nil
+	}
+	ctx.Info(fmt.Sprintf("Committed %d file(s) as %s on %s.", len(result.Files), result.Commit, result.Branch))
+	return ctx.WriteResult(result)
 }
 
 type execDiffOptions struct {

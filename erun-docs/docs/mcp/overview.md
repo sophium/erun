@@ -213,6 +213,17 @@ Two things follow with no change to any other tool's contract:
 
 `cloud_inject_aws_credentials` takes the access key, secret, and session token as **tool arguments**, so **do not call it from anything that records its arguments** — an Agent transcript, a session log, an audit trail. It exists for the desktop app's credential refresher, which holds the values in memory. Everything else refreshes an environment's host credentials with [`erun cloud refresh <tenant> <environment>`](/cli/cloud#cloud-refresh), which reads the operator's own AWS profile and streams the credentials to the pod on stdin, so nothing sensitive passes through the caller.
 
+### Working tree — typed mutations, no shell
+
+The two mutations an orchestrator performs constantly on an environment's own repository — writing file content and committing — used to have no name of their own: doing either through `raw` meant composing a heredoc or a `python3 -` script and passing it through a shell, so a backtick or a `$(...)` in the content changed the meaning of the command. Neither tool below ever interprets its payload as a shell fragment.
+
+| Tool | Purpose |
+|---|---|
+| `write` | Write `content` to `path` in the runtime repo's working tree, byte-for-byte. `content` is a JSON string field, never composed into a command line, so it round-trips verbatim regardless of what it contains. Refuses if `path` would resolve outside the repo root. Reports the resolved path and byte count written. Set `preview` to trace the write without performing it. |
+| `commit` | Stage every change in the runtime repo's working tree (`git add -A`) and commit it with `message`, taken the same way as `write`'s content. `branch` is the caller's claim about the current branch, verified against `git rev-parse --abbrev-ref HEAD` rather than assumed — a mismatch is refused, loudly, instead of landing the commit on whichever branch HEAD happens to be on. Reports the branch, commit id, and files committed. Set `preview` to verify the branch and trace what would be committed without committing. |
+
+Same command as [`erun exec write`](/cli/exec#exec-write) / [`erun exec commit`](/cli/exec#exec-commit).
+
 ### Escape hatch
 
 | Tool | Purpose |
@@ -221,7 +232,7 @@ Two things follow with no change to any other tool's contract:
 
 ### Tool selection rule
 
-In order of preference: **inspection > action > jobs > raw.**
+In order of preference: **inspection > action > working tree > jobs > raw.**
 
 - If a question is "what's the state of X" — reach for an inspection tool.
 - If you're invoking a known CLI command — reach for the action wrapper, not `raw`.
