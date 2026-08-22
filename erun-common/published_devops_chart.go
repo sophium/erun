@@ -598,7 +598,7 @@ func resolveDeployRuntimeImage(ctx Context, target OpenResult, chartRegistry, ve
 //   - It names the very image this deploy's own line already resolves with no
 //     override at all (defaultImage) — just at some other tag. That pin is
 //     provably redundant: defaultDeployRuntimeImage would have named the right
-//     image unaided, so the saved tag can only be stale (#1072).
+//     image unaided, so the saved tag can only be stale.
 func staleRuntimeImageTrace(image, defaultImage, chartName, version, chartVersion string) string {
 	if runtimeImageIsStockDevops(image) {
 		switch {
@@ -712,7 +712,7 @@ func imageReferenceHasTagOrDigest(ref string) bool {
 // tagged reference sticks at that tag forever: resolveRuntimeImageOverride
 // already pins a tagless reference to the env's own runtime version on every
 // deploy, so recording the tag is what lets the pin drift from that version and
-// rot, while recording it tagless is self-maintaining (#1072).
+// rot, while recording it tagless is self-maintaining.
 func stripRuntimeImageTag(ref string) string {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {

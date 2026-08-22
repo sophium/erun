@@ -80,7 +80,7 @@ func (r ProvisionRoutes) provision(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// The v1 single-cluster placement decision (#605): reuse the exact check
+	// The v1 single-cluster placement decision: reuse the exact check
 	// the executing POST /v1/environments applies, so this preview can never
 	// promise a placement the real create/deploy path would then refuse.
 	placementContext := strings.TrimSpace(body.KubernetesContext)

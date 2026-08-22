@@ -79,7 +79,7 @@ type DeployJobParams struct {
 	// ExposeServicesZone/ExposePlatformNamespace thread expose's --services-zone/
 	// --platform-namespace: the deploy Job has no git checkout, so `erun expose`
 	// cannot resolve these from a project's .erun/config.yaml the way an
-	// interactive run does (#1086 — project resolution fails outright with
+	// interactive run does — project resolution fails outright with
 	// "cannot find git project", which --skip-if-unconfigured cannot cover
 	// because the skip decision itself needs a resolved project). The control
 	// plane already carries both for its own purposes — ExposeServicesZone from
@@ -120,14 +120,14 @@ type DeployJobParams struct {
 	// MCPAuthPublicKeyPEM is the backend's own MCP-signing public key
 	// (mcptoken.Signer), threaded to the in-Job `erun deploy` as
 	// --mcp-auth-public-key so the runtime's MCP edge trusts tokens the backend
-	// mints for the console (#1084) — the same file://-issuer mechanism the
+	// mints for the console — the same file://-issuer mechanism the
 	// desktop uses with its own key, not the OIDC issuer path. Empty leaves the
 	// Job's deploy command unchanged, so the edge stays loopback-only exactly as
 	// before this existed.
 	MCPAuthPublicKeyPEM string
 	// TLSDNS01Token/TLSDNS01BrokerURL/TLSDNS01WebhookGroupName/TLSACMEEmail/
 	// TLSACMEServer thread a per-env TLS certificate through erun's DNS-01
-	// broker (#1093): the deploy Job writes the token to disk and passes it to
+	// broker: the deploy Job writes the token to disk and passes it to
 	// the chained `erun expose`, which provisions the env's own namespaced
 	// cert-manager Issuer + Certificate so the Ingress's wildcard TLS secret
 	// actually gets populated. All empty (the default, no DNS-01 broker
@@ -143,8 +143,7 @@ type DeployJobParams struct {
 }
 
 // mcpExposeService is the logical service name the deploy Job exposes: the
-// env's MCP edge, reachable at mcp.<tenant>-<environment>.<services zone> —
-// the hostname #605's acceptance criterion names.
+// env's MCP edge, reachable at mcp.<tenant>-<environment>.<services zone>.
 const mcpExposeService = "mcp"
 
 // buildDeployJob renders the deploy Job. The container runs a non-interactive
@@ -222,7 +221,7 @@ func writeDNS01TokenScript(token string) string {
 
 // buildExposeChain composes the deploy Job's chained `erun expose` step
 // (empty when ExposeTargetIP is unset), including the per-env TLS flags when
-// configured (#1093).
+// configured.
 func buildExposeChain(params DeployJobParams) string {
 	ip := strings.TrimSpace(params.ExposeTargetIP)
 	if ip == "" {
@@ -240,7 +239,7 @@ func buildExposeChain(params DeployJobParams) string {
 // tlsExposeFlags returns the heredoc that writes the per-env DNS-01 broker
 // token to disk (empty when TLS provisioning is unconfigured) plus the flags
 // that thread it and the broker/ACME coordinates onto the chained `erun
-// expose` (#1093).
+// expose`.
 func tlsExposeFlags(params DeployJobParams) (script string, flags []string) {
 	token, broker, email := strings.TrimSpace(params.TLSDNS01Token), strings.TrimSpace(params.TLSDNS01BrokerURL), strings.TrimSpace(params.TLSACMEEmail)
 	if token == "" || broker == "" || email == "" {
@@ -262,7 +261,7 @@ func tlsExposeFlags(params DeployJobParams) (script string, flags []string) {
 const exposeFailureMarker = "ERUN_EXPOSE_FAILED"
 
 // exposeChainScript runs expose after a successful deploy without letting its
-// failure fail the Job (#1086). Exposure (DNS + Ingress) is best-effort: the
+// failure fail the Job. Exposure (DNS + Ingress) is best-effort: the
 // deploy already landed a healthy workload, so failing the whole Job over a
 // DNS/Ingress problem would record a running environment as a failed
 // provision, exactly the misdirection the issue reported. `{ ... || printf
@@ -416,7 +415,7 @@ func NewLauncher(kube kubernetes.Interface) *Launcher {
 		stopRunner: jobexec.NewRunner(kube, jobexec.Options{Kind: "stop", Container: stopContainerName}),
 		// CaptureOutput: a successful delete Job's own log is where
 		// UnexposeFailureFromOutput finds the chained unexpose step's marker,
-		// mirroring the deploy runner above (#1094).
+		// mirroring the deploy runner above.
 		deleteRunner: jobexec.NewRunner(kube, jobexec.Options{Kind: "delete", Container: deleteContainerName, CaptureOutput: true}),
 	}
 }

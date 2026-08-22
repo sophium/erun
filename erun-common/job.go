@@ -45,7 +45,7 @@ const (
 	EnvironmentJobStateUnknown = "unknown"
 
 	// UnknownReasonKind values are what an orchestrator branches on instead of
-	// pattern-matching the free-text Reason (#1051). Each names a distinct,
+	// pattern-matching the free-text Reason. Each names a distinct,
 	// attributable cause for a job that ended in EnvironmentJobStateUnknown.
 	//
 	// UnknownReasonPodReplaced is certain, not a guess: the job recorded the
@@ -141,7 +141,7 @@ type EnvironmentJob struct {
 	// UnknownReasonKind is Reason's machine-readable twin, set only when State is
 	// unknown: one of UnknownReasonPodReplaced, UnknownReasonSupervisorGone, or
 	// UnknownReasonAttachedProcessGone. A caller branches on this rather than
-	// pattern-matching Reason's free text (#1051).
+	// pattern-matching Reason's free text.
 	UnknownReasonKind string `json:"unknownReasonKind,omitempty"`
 	// Attached marks work erun did not start. Its outcome is never captured,
 	// because nothing erun ran was in a position to observe it.
@@ -276,7 +276,7 @@ func reconcileEnvironmentJob(dir string, job EnvironmentJob, now time.Time, aliv
 // currentJobHostname is the pod hostname a job supervisor stamps at start and
 // compares against at reconcile. Empty on error rather than failing the
 // caller: a job record's Hostname is then left unset, and reconciliation
-// falls back to the pre-#1051 "most likely replaced" guess instead of
+// falls back to the older "most likely replaced" guess instead of
 // hard-failing on it.
 func currentJobHostname() string {
 	name, err := os.Hostname()

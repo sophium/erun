@@ -10,7 +10,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 )
 
-// UsageRecorder records a per-tenant metering event (#605). Optional: a nil
+// UsageRecorder records a per-tenant metering event. Optional: a nil
 // recorder simply records nothing.
 type UsageRecorder interface {
 	Record(ctx context.Context, event model.UsageEvent) error
@@ -128,8 +128,8 @@ func (l *EnvLifecycle) Delete(ctx context.Context, input EnvLifecycleInput) erro
 		if result.Outcome != deployexec.OutcomeSucceeded {
 			return fmt.Errorf("delete job %s: %s", result.Outcome, lifecycleFailureDetail(result))
 		}
-		// The environment row is about to be removed, so a failed DNS cleanup
-		// (best-effort, #1094) has nowhere to be recorded once this returns —
+		// The environment row is about to be removed, so a failed best-effort
+		// DNS cleanup has nowhere to be recorded once this returns —
 		// the server log is the only place left to name it.
 		if reason := deployexec.UnexposeFailureFromOutput(result.Output); reason != "" {
 			log.Printf("erun api env lifecycle: dns cleanup for %s/%s did not succeed: %s", input.Tenant, input.Environment, reason)

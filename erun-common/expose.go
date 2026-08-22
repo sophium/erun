@@ -16,7 +16,7 @@ type ExposeStore interface {
 type DNSRecordUpserterFunc func(params DNSRecordUpsertParams) error
 
 // DNSRecordDeleterFunc removes a single DNS record from the platform's
-// authoritative zone (#1094), symmetric with DNSRecordUpserterFunc.
+// authoritative zone, symmetric with DNSRecordUpserterFunc.
 type DNSRecordDeleterFunc func(params DNSRecordDeleteParams) error
 
 // IngressApplierFunc applies the Host-routing Ingress that fronts the exposed
@@ -37,7 +37,7 @@ type DNSRecordUpsertParams struct {
 }
 
 // DNSRecordDeleteParams is the per-env wildcard A-record removal the unexpose
-// flow performs against the platform's PowerDNS singleton (#1094), symmetric
+// flow performs against the platform's PowerDNS singleton, symmetric
 // with DNSRecordUpsertParams.
 type DNSRecordDeleteParams struct {
 	Zone               string
@@ -95,14 +95,14 @@ type ExposeServiceParams struct {
 	// Deployment name is then derived from PlatformNamespace the same way it is
 	// derived from platform.env. A caller that already has this information (the
 	// hosted deploy Job, which runs a sourceless container with no git checkout to
-	// resolve a project from — issue #1086) supplies it directly, the same way
+	// resolve a project from) supplies it directly, the same way
 	// TargetIP already carries the operator-composed --ip rather than resolving
 	// one from a project. Left empty (the default), expose resolves the platform
 	// block from ProjectRoot exactly as it always has.
 	ServicesZone      string
 	PlatformNamespace string
 	// TLS provisions the env's own per-env wildcard TLS certificate through
-	// erun's DNS-01 broker (#1093), so the wildcard Secret the Ingress above
+	// erun's DNS-01 broker, so the wildcard Secret the Ingress above
 	// references actually gets populated. A zero value skips TLS provisioning
 	// outright: the Ingress still applies exactly as it always has.
 	TLS TLSCertParams

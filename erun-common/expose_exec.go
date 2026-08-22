@@ -15,7 +15,7 @@ const powerDNSConfigDir = "/etc/pdns-shared"
 // the kubectl exec argv up to and including pdnsutil's --config-dir flag,
 // which is what makes pdnsutil read the shared PowerDNS config instead of its
 // own default. A second hand-written invocation without this flag is exactly
-// how the flag gets forgotten (#1094) — pdnsutil then reports the zone itself
+// how the flag gets forgotten — pdnsutil then reports the zone itself
 // as missing rather than reporting that it looked in the wrong place.
 func powerDNSExecPrefix(kubernetesContext, platformNamespace, powerDNSDeployment string) []string {
 	args := []string{}
@@ -39,8 +39,8 @@ func powerDNSUpsertArgs(params DNSRecordUpsertParams) []string {
 	return append(args, "replace-rrset", params.Zone, relName, params.Type, strconv.Itoa(params.TTL), params.Value)
 }
 
-// powerDNSDeleteArgs is the delete-side counterpart to powerDNSUpsertArgs
-// (#1094), built from the same powerDNSExecPrefix so the --config-dir flag
+// powerDNSDeleteArgs is the delete-side counterpart to powerDNSUpsertArgs,
+// built from the same powerDNSExecPrefix so the --config-dir flag
 // can never drift between the two.
 func powerDNSDeleteArgs(params DNSRecordDeleteParams) []string {
 	relName := strings.TrimSuffix(params.Name, "."+params.Zone)
@@ -186,7 +186,7 @@ stringData:
 // renderPerEnvIssuer is a namespaced Issuer, not a cluster-scoped
 // ClusterIssuer: a Certificate can only reference an Issuer in its own
 // namespace, so this env can never use another env's issuer, and another
-// env's namespace-admin RBAC can never reach it either (#818's multi-tenant-
+// env's namespace-admin RBAC can never reach it either (a multi-tenant-
 // safe shape, mirrored from terraform-erun-cluster-edge's chart-issuer). The
 // selector scopes solving to this env's own subzone specifically — narrower
 // than the broker's own per-token authorization, which is the real security

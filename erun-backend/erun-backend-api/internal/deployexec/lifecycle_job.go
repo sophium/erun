@@ -42,7 +42,7 @@ type DeleteJobParams struct {
 	ServiceAccount string
 	// ExposeServicesZone/ExposePlatformNamespace thread the same platform
 	// coordinates as DeployJobParams' fields of the same name, so the delete
-	// Job can chain `erun unexpose` (#1094) — removing the per-env wildcard
+	// Job can chain `erun unexpose` — removing the per-env wildcard
 	// DNS record `erun expose` created, symmetric with the deploy Job chaining
 	// `erun expose` itself. Either left empty skips the chain entirely: the
 	// delete Job stays exactly the plain `erun delete` it always ran.
@@ -124,7 +124,7 @@ func buildStopJob(params StopJobParams) *batchv1.Job {
 // buildDeleteJob's container runs a non-interactive `erun delete <tenant>
 // <env> -y`, skipping the CLI's interactive confirmation the same way the
 // deploy Job's command is already non-interactive, then — when platform
-// coordinates are configured — chains a best-effort `erun unexpose` (#1094) so
+// coordinates are configured — chains a best-effort `erun unexpose` so
 // the per-env wildcard DNS record `erun expose` created does not outlive the
 // namespace it pointed at.
 func buildDeleteJob(params DeleteJobParams) *batchv1.Job {
@@ -156,7 +156,7 @@ func buildDeleteCommand(params DeleteJobParams) []string {
 	return []string{"sh", "-c", script}
 }
 
-// unexposeFailureMarker mirrors exposeFailureMarker (#1094): the chained
+// unexposeFailureMarker mirrors exposeFailureMarker: the chained
 // `erun unexpose` step is best-effort, so a DNS cleanup failure must not fail
 // the delete Job — the namespace already tore down successfully — but its
 // reason is still worth capturing for an operator reading the Job's logs,

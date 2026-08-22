@@ -406,7 +406,7 @@ func TestBuild(t *testing.T) {
 	})
 
 	t.Run("real_run_default_verbosity_stays_quiet_when_the_build_succeeds", func(t *testing.T) {
-		// #1069: docker build always runs with --progress=plain now (never
+		// docker build always runs with --progress=plain now (never
 		// --quiet, which suppressed a failing step's own output at the source),
 		// so quiet-on-success below debug verbosity has to come from erun
 		// capturing the output itself rather than replaying it. This is the
@@ -435,7 +435,7 @@ func TestBuild(t *testing.T) {
 	})
 
 	t.Run("real_run_default_verbosity_surfaces_docker_builds_own_output_on_failure", func(t *testing.T) {
-		// #1069: the release path builds quietly, so when the in-build `make
+		// The release path builds quietly, so when the in-build `make
 		// check` test stage failed, all that survived was
 		// `process "/bin/sh -c make check ..." did not complete successfully:
 		// exit code: 2` — no lint finding, no failing test name. docker build's
@@ -739,7 +739,7 @@ func TestBuild(t *testing.T) {
 			// platforms so `docker buildx inspect` passes.
 			`  buildx)`,
 			`    case "$2" in inspect) echo "Platforms: linux/amd64, linux/arm64" ;; *) exit 0 ;; esac ;;`,
-			// manifest inspect backs both the #1051 pre-publish probe and the
+			// manifest inspect backs both the pre-publish probe and the
 			// post-publish verify; marker-file-tracked so this scenario (a
 			// first-ever release, per "fingerprint image not found locally"
 			// below) does not falsely report the image as already published
@@ -1189,7 +1189,7 @@ func TestBuild(t *testing.T) {
 			`    exit 0 ;;`,
 			`  image)`,
 			`    case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
-			// manifest inspect backs both the #1051 pre-publish probe and the
+			// manifest inspect backs both the pre-publish probe and the
 			// post-publish verify; marker-file-tracked so this scenario does
 			// not falsely report the image as already published before
 			// manifest push has run.

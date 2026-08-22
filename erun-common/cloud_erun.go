@@ -225,7 +225,7 @@ func erunCloudProviderTokenStatus(provider CloudProviderConfig, deps CloudDepend
 	// Checked here, ahead of resolveERunAccessToken, because that call also
 	// reports a missing store as an error, and a configured provider with a
 	// refresh token then reads as "expired" — asserting the token was checked
-	// and rejected when it was never checked at all (#1109). unknown/"not
+	// and rejected when it was never checked at all. unknown/"not
 	// checked" is the honest answer when nothing was actually verified.
 	if deps.CloudSecretStore == nil {
 		return CloudProviderStatus{CloudProviderConfig: provider, Status: CloudTokenStatusUnknown, Message: "cloud secret store is not configured"}

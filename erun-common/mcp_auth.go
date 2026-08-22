@@ -122,7 +122,7 @@ const (
 	// DesktopMCPPublicKeyDir is the in-pod directory the local-key signer's
 	// public key is mounted into by the runtime chart — the desktop's own key
 	// for a desktop deploy, or the hosted backend's MCP-signing public key for
-	// a hosted deploy (#1084).
+	// a hosted deploy.
 	DesktopMCPPublicKeyDir  = "/etc/erun/mcp-auth"
 	desktopMCPPublicKeyFile = "desktopid.pub"
 )

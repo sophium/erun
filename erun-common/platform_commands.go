@@ -62,7 +62,7 @@ func newPlatformClientForAlias(ctx Context, store CloudReadStore, alias string, 
 		// CloudProviderERun is not "never configured" — init always writes it
 		// together with Provider — it is incomplete: most likely truncated by a
 		// config.yaml write from a component that doesn't know this field exists
-		// (see #1075). Point at re-login rather than `cloud init`, which would
+		// Point at re-login rather than `cloud init`, which would
 		// read as "start over" and paper over the real defect.
 		return nil, CloudProviderConfig{}, fmt.Errorf("erun platform alias %q is incomplete (its erun api configuration is missing, likely dropped by a config write from an older erun component); run `erun cloud login %s` to restore it", provider.Alias, provider.Alias)
 	}

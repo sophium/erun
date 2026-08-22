@@ -98,7 +98,7 @@ func TestJob(t *testing.T) {
 		// An unusable working directory used to reach exec, where Go reports it
 		// as an ENOENT naming the *binary* — so a dir the supervisor could not
 		// resolve surfaced as a missing shell and sent the reader after a broken
-		// image instead of a bad path (#932).
+		// image instead of a bad path.
 		setup := env.New(t)
 		envVars := jobStubEnv(t, setup, "printf '"+jobStubSignal+"'")
 		result := startJob(t, setup, envVars, "baddir", "--dir", "no-such-subdir", "--", "work")
@@ -116,7 +116,7 @@ func TestJob(t *testing.T) {
 	t.Run("start_runs_the_work_in_a_relative_dir", func(t *testing.T) {
 		// The supervisor is detached with no inherited working directory, so a
 		// relative dir has to be anchored before it is handed over, the same way
-		// every other repo-facing surface reads a path (#932).
+		// every other repo-facing surface reads a path.
 		setup := env.New(t)
 		workdir := filepath.Join(setup.Cwd, "workdir-sub")
 		if err := os.MkdirAll(workdir, 0o755); err != nil {
@@ -161,7 +161,7 @@ func TestJob(t *testing.T) {
 	})
 
 	t.Run("start_env_dry_run_plans_the_supervisor_argv", func(t *testing.T) {
-		// --env (#1104) must show up in the supervisor argv the plan traces, sorted
+		// --env must show up in the supervisor argv the plan traces, sorted
 		// so the plan is deterministic regardless of flag order.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -178,7 +178,7 @@ func TestJob(t *testing.T) {
 	})
 
 	t.Run("start_env_refuses_a_name_that_could_redirect_the_job", func(t *testing.T) {
-		// PATH/LD_PRELOAD/etc. are refused up front (#1104): letting a caller
+		// PATH/LD_PRELOAD/etc. are refused up front: letting a caller
 		// override them would let it redirect what the job's own process executes
 		// or loads, which is a hijack rather than a tuning knob.
 		setup := env.New(t)
@@ -197,7 +197,7 @@ func TestJob(t *testing.T) {
 	})
 
 	t.Run("start_env_reaches_the_jobs_own_process", func(t *testing.T) {
-		// The real point of --env (#1104): the value is not just traced, it is set
+		// The real point of --env: the value is not just traced, it is set
 		// on the job's actual process, on top of what it inherits.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -673,9 +673,9 @@ func TestJob(t *testing.T) {
 	})
 
 	t.Run("a_job_started_on_a_different_pod_reads_back_as_pod_replaced_not_a_guess", func(t *testing.T) {
-		// #1051: the supervisor stamps the pod's hostname at start, so a record
+		// The supervisor stamps the pod's hostname at start, so a record
 		// read back from a different hostname is definitive proof of pod
-		// replacement, not the pre-#1051 "most likely" guess. Seeded directly for
+		// replacement, not the older "most likely" guess. Seeded directly for
 		// the same reason as the sibling "abandoned" scenario: the state under
 		// test is the record's hostname mismatch, not how a real pod eviction
 		// would produce one. hostname is a value this suite's own host can never

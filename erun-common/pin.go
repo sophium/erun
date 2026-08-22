@@ -62,7 +62,7 @@ type PinPlan struct {
 	Sites       []PinSite `json:"sites"`
 	// Skipped explains, in order, why something that looked like a version
 	// reference was deliberately left out of Sites, so a caller reading the
-	// plan is not left assuming it was covered (#1073).
+	// plan is not left assuming it was covered.
 	Skipped []string `json:"skipped,omitempty"`
 }
 
@@ -124,7 +124,7 @@ func ResolvePinPlan(projectRoot, tenant, environment string, env EnvConfig, targ
 			// Only the stock erun-devops image's tag is an erun version; a
 			// tenant's own <tenant>-devops image rides the tenant's own release
 			// line, and rewriting its tag to an erun version would name a tag
-			// that line never publishes (#1073).
+			// that line never publishes.
 			if runtimeImageIsStockDevops(image) {
 				plan.Sites = append(plan.Sites, PinSite{
 					Kind:    PinSiteRuntimeImage,

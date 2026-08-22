@@ -85,7 +85,7 @@ func runReleasePublication(ctx Context, publisher ReleasePublisher) error {
 
 // reportAlreadyPublishedReleaseArtifacts probes the registry for each image
 // this release resolves, before Publish does anything, so a release re-run
-// after an interruption (#1051: the pod holding the local build/fingerprint
+// after an interruption (the pod holding the local build/fingerprint
 // cache was replaced mid-release) tells the operator up front what already
 // landed, rather than depending on that cache to have survived and leaving
 // the operator to infer progress from how quickly the rebuild finishes.

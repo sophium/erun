@@ -18,7 +18,7 @@ import (
 //
 // A mixed-version install (desktop and CLI updating on separate cadences) is
 // the normal state, not an edge case, so every config.yaml writer routes
-// through this before writing (see erun-common/AGENTS.md, and #1075).
+// through this before writing (see erun-common/AGENTS.md).
 func marshalConfigPreservingUnknownFields(existing []byte, config any) ([]byte, error) {
 	fresh, err := yaml.Marshal(config)
 	if err != nil {

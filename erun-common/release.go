@@ -242,7 +242,7 @@ func runReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, 
 // ensureReleaseReadyToPublish runs the checks that must pass immediately
 // before the build spends anything: the base branch has not moved since
 // sync-remote re-established it, and the node has room for the build that is
-// about to start (#1051).
+// about to start.
 func ensureReleaseReadyToPublish(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc) error {
 	if err := ensureReleaseBaseBranchUnmoved(ctx, spec, runGit); err != nil {
 		return err
@@ -411,7 +411,7 @@ func canSkipExistingReleaseTag(ctx Context, spec ReleaseSpec, projectRoot, tag s
 // releaseTagMismatchError diagnoses a tag that exists but not at HEAD. When it
 // is unpushed and the release branch's remote history has never incorporated
 // it, that is not a real collision — it is a leftover local tag+commit from a
-// release that was interrupted before it published anything (#1051: e.g. the
+// release that was interrupted before it published anything (e.g. the
 // pod holding the worktree was replaced mid-release). Reclaiming it
 // automatically is judged too aggressive for a git tag inside a release flow,
 // so the refusal instead names the diagnosis and the exact remedy, rather than

@@ -93,7 +93,7 @@ func TestPin(t *testing.T) {
 		}
 	})
 
-	// #1073: a tenant's own runtimeimage tag rides the tenant's own release
+	// A tenant's own runtimeimage tag rides the tenant's own release
 	// line, not erun's. Rewriting it to the erun target version would name a
 	// tag that line never publishes, guaranteeing an ImagePullBackOff on the
 	// very next deploy — produced by the command whose whole purpose is

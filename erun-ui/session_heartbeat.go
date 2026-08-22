@@ -70,7 +70,7 @@ func (a *App) runSessionHeartbeatPoller(stop <-chan struct{}) {
 // sidebar's spinner.
 //
 // It re-emits every tick, busy or not, rather than only when the state
-// changes (#1087). The spinner used to be lit exclusively by the one
+// changes. The spinner used to be lit exclusively by the one
 // false→true transition, and orchestratorInfo — the snapshot the frontend
 // boots and re-renders from — carried no busy flag at all, so anything that
 // lost that single event (a remount after the transition, a window reopen, a

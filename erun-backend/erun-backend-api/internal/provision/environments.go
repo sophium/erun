@@ -15,7 +15,7 @@ import (
 
 // DNS01TokenSigner mints the per-env DNS-01 broker token deployJobParams
 // threads to the deploy Job so it can provision the env's own per-env TLS
-// Issuer+Certificate through the DNS-01 broker (#1093). Satisfied by
+// Issuer+Certificate through the DNS-01 broker. Satisfied by
 // *mcptoken.Signer without this package importing it.
 type DNS01TokenSigner interface {
 	SignDNS01(tenant, environment string, now time.Time) (token, audience string, err error)
@@ -40,7 +40,7 @@ type EnvProvisionInput struct {
 	// MaxCPUMillicores/MaxMemoryMB/MaxStorageGB are the caller's tenant_quotas
 	// row at request time, threaded into the deploy Job as --max-cpu/
 	// --max-memory/--max-storage so the namespace gets a real ResourceQuota +
-	// LimitRange (#605). Zero on all three (should not happen: routes always
+	// LimitRange. Zero on all three (should not happen: routes always
 	// populates them from TenantQuotaRepository.Get, which defaults an absent
 	// row) skips the flags entirely, matching the pre-existing plain command.
 	MaxCPUMillicores int `json:"maxCpuMillicores,omitempty"`
@@ -71,15 +71,15 @@ type EnvDeployConfig struct {
 	DeployerServiceAccount string
 	// ExposeTargetIP is the platform's ingress IP, threaded to every deploy Job
 	// as DeployJobParams.ExposeTargetIP. Empty (the default) leaves env deploys
-	// exactly as they were before #605's automatic exposure: this field, unlike
+	// exactly as they were before automatic exposure existed: this field, unlike
 	// the three above, does not gate the executor itself (newEnvironmentProvisioner
 	// stays enabled without it) — it only decides whether a deploy also chains
 	// an expose.
 	ExposeTargetIP string
 	// ExposeServicesZone/ExposePlatformNamespace thread deployexec.DeployJobParams'
 	// fields of the same name — the platform coordinates the chained `erun
-	// expose` needs but the sourceless deploy Job cannot resolve on its own
-	// (#1086). See deployexec.DeployJobParams for why the control plane already
+	// expose` needs but the sourceless deploy Job cannot resolve on its own.
+	// See deployexec.DeployJobParams for why the control plane already
 	// carries both.
 	ExposeServicesZone      string
 	ExposePlatformNamespace string
@@ -93,12 +93,12 @@ type EnvDeployConfig struct {
 	// MCPAuthPublicKeyPEM is the backend's own MCP-signing public key,
 	// threaded to every deploy Job as DeployJobParams.MCPAuthPublicKeyPEM so
 	// the runtime's MCP edge trusts tokens the backend mints for the console
-	// (#1084). Empty (no MCP signing key configured) leaves every deploy Job
+	// Empty (no MCP signing key configured) leaves every deploy Job
 	// exactly as it was before this existed — the edge stays loopback-only.
 	MCPAuthPublicKeyPEM string
 	// TLSCertSigner/TLSBrokerURL/TLSWebhookGroup/ACMEEmail/ACMEServer provision
-	// the env's per-env wildcard TLS certificate through the DNS-01 broker
-	// (#1093): deployJobParams mints a per-env token with TLSCertSigner and
+	// the env's per-env wildcard TLS certificate through the DNS-01 broker:
+	// deployJobParams mints a per-env token with TLSCertSigner and
 	// threads it plus these coordinates to the deploy Job, which passes them to
 	// the chained `erun expose` (see deployexec.DeployJobParams). A nil signer
 	// or an empty TLSBrokerURL/ACMEEmail leaves every deploy Job exactly as it
@@ -212,8 +212,8 @@ func deployJobParams(config EnvDeployConfig, input EnvProvisionInput) deployexec
 
 // applyTLSCertParams mints the per-env DNS-01 broker token and threads the
 // broker/ACME coordinates onto the deploy Job params when TLS provisioning is
-// configured (#1093). A signing failure is logged and skipped rather than
-// failing the deploy — the same best-effort posture #1086 gave exposure: a
+// configured. A signing failure is logged and skipped rather than
+// failing the deploy — the same best-effort posture exposure already has: a
 // missing per-env certificate leaves the env reachable over self-signed TLS
 // rather than not running at all.
 func applyTLSCertParams(params *deployexec.DeployJobParams, config EnvDeployConfig, input EnvProvisionInput) {

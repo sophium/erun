@@ -21,7 +21,7 @@ function orchestrator(sessionId: number, busy: boolean): OrchestratorInfo {
   };
 }
 
-// The bug (#1087): the sidebar spinner was lit only by the ai-activity event,
+// The bug: the sidebar spinner was lit only by the ai-activity event,
 // so a fetch that lands after the transition — a fresh mount, a window
 // reopen, a listener that attached a beat late — never saw it and the row
 // read idle for the rest of the turn. The fix is that the snapshot itself now

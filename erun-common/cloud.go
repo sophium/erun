@@ -153,7 +153,7 @@ type CloudDependencies struct {
 // left nil otherwise. Every transport needs this same tolerant-nil
 // construction (the store's directory may not exist, or may be otherwise
 // unavailable) — call this from each rather than open-coding it again, which
-// is how the listing path went a full release without it (#1109).
+// is how the listing path went a full release without it.
 // Cloudflare/erun operations that need the store fail clearly downstream when
 // it stays nil, rather than here.
 func DefaultCloudDependencies() CloudDependencies {

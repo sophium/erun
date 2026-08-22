@@ -35,7 +35,7 @@ func TestUnexpose(t *testing.T) {
 	t.Run("dry_run_with_platform_override", func(t *testing.T) {
 		// --services-zone/--platform-namespace let a sourceless caller (the
 		// hosted delete Job, with no git checkout) run unexpose without a
-		// project, mirroring expose's own override (#1086).
+		// project, mirroring expose's own override.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{

@@ -68,8 +68,7 @@ func TestBuildDeleteJobSpec(t *testing.T) {
 // TestBuildDeleteJobSpecWithUnexpose: when the control plane supplies the
 // platform coordinates it already knows, the delete Job chains a best-effort
 // `erun unexpose` after a successful delete, so the per-env wildcard DNS
-// record `erun expose` created does not outlive the namespace it pointed at
-// (#1094).
+// record `erun expose` created does not outlive the namespace it pointed at.
 func TestBuildDeleteJobSpecWithUnexpose(t *testing.T) {
 	params := testDeleteParams()
 	params.ExposeServicesZone = "services.erunpaas.com"
@@ -130,7 +129,7 @@ func TestUnexposeFailureFromOutput(t *testing.T) {
 // assertLifecycleBootstrapScript checks a lifecycle Job's command seeds the
 // in-cluster kubeconfig and the environment's config before running the real
 // command — the same prelude assertDeployBootstrapScript checks for deploy,
-// since #1077 was exactly this prelude missing from stop and delete.
+// since a missing prelude on stop and delete was exactly this kind of gap.
 func assertLifecycleBootstrapScript(t *testing.T, name string, command []string, wantCommand string) {
 	t.Helper()
 	assertCommand(t, command[:2], []string{"sh", "-c"})
@@ -153,7 +152,7 @@ func assertLifecycleBootstrapScript(t *testing.T, name string, command []string,
 }
 
 // TestAllLifecycleJobsShareTheBootstrapPrelude is the structural regression
-// test for #1077: every Job builder's command must be `sh -c` carrying the
+// test ensuring every Job builder's command is `sh -c` carrying the
 // bootstrap prelude, checked generically over the builders rather than one
 // hand-written assertion per Job, so a lifecycle Job added later cannot ship
 // without it.

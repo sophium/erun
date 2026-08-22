@@ -71,7 +71,7 @@ func run(args []string) error {
 			DeployerServiceAccount: cfg.EnvDeployerServiceAccount,
 			ExposeTargetIP:         cfg.EnvExposeTargetIP,
 			// The deploy Job's chained `erun expose` has no git checkout to resolve
-			// these from (#1086), so the control plane threads what it already
+			// these from, so the control plane threads what it already
 			// knows for its own purposes: DNS01ServicesZone is the same services
 			// zone its DNS-01 cert issuance uses, and PlatformNamespace is where its
 			// own Jobs (and, in a self-hosted platform, the PowerDNS singleton) run.
@@ -240,7 +240,7 @@ type apiConfig struct {
 	DNS01TSIGAlgorithm string
 	DNS01TSIGSecret    string
 	// ACMEEmail/ACMEServer/DNS01WebhookGroupName configure the per-env TLS
-	// certificate a deploy Job provisions through the DNS-01 broker (#1093): the
+	// certificate a deploy Job provisions through the DNS-01 broker: the
 	// same ACME account and per-cluster webhook shim
 	// (terraform-erun-cluster-edge's chart-dns01-webhook) the platform's own
 	// per-env certificate already uses. ACMEEmail is required for a deploy Job
@@ -257,7 +257,7 @@ type apiConfig struct {
 	SecretsKey      string
 	DBOSDatabaseURL string
 	AWSEndpoint     string
-	// Server-side env-deploy executor (#605). EnvDeployerServiceAccount is the
+	// Server-side env-deploy executor. EnvDeployerServiceAccount is the
 	// cluster-admin SA the deploy Job runs as; setting it enables live env
 	// provisioning (which then also needs an in-cluster kube client and
 	// DBOSContext). PlatformNamespace is the namespace the Jobs run in (the
@@ -399,7 +399,7 @@ func optionalMCPSigner(path string) (*mcptoken.Signer, error) {
 
 // mcpAuthPublicKeyPEM returns the backend's own MCP-signing public key when a
 // signer is configured, empty otherwise — threaded into every deploy Job so
-// the runtime's MCP edge trusts backend-minted tokens (#1084).
+// the runtime's MCP edge trusts backend-minted tokens.
 func mcpAuthPublicKeyPEM(signer *mcptoken.Signer) string {
 	if signer == nil {
 		return ""
@@ -408,7 +408,7 @@ func mcpAuthPublicKeyPEM(signer *mcptoken.Signer) string {
 }
 
 // dns01TokenSigner adapts the backend's MCP signer to provision.DNS01TokenSigner
-// for per-env TLS cert provisioning (#1093), returning a genuinely nil
+// for per-env TLS cert provisioning, returning a genuinely nil
 // interface when no signer is configured. Assigning a nil *mcptoken.Signer
 // directly to the interface field would produce a non-nil interface wrapping a
 // nil pointer, which applyTLSCertParams's nil check would miss.

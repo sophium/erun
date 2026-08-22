@@ -240,7 +240,7 @@ export class Sidebar {
   // The row's busy spinner (BusyRowSpinner), rendered whenever the store's
   // aiBusyBySession has this orchestrator's session flagged — whether that
   // came from the ai-activity event or from the list snapshot's own busy
-  // field (#1087).
+  // field.
   orchestratorBusySpinner(name: string): Locator {
     return this.erunSection().getByRole('status', { name: `${name} is working` });
   }

@@ -154,7 +154,7 @@ func TestBuildDeployJobSpecWithExpose(t *testing.T) {
 // TestBuildDeployJobSpecWithExposePlatformCoordinates: when the control plane
 // supplies the services zone and platform namespace it already knows, they
 // thread onto the chained `erun expose` as --services-zone/--platform-namespace
-// so the sourceless Job can resolve a hostname without a git checkout (#1086).
+// so the sourceless Job can resolve a hostname without a git checkout.
 func TestBuildDeployJobSpecWithExposePlatformCoordinates(t *testing.T) {
 	params := testParams()
 	params.ExposeTargetIP = "203.0.113.10"
@@ -180,7 +180,7 @@ func TestBuildDeployJobSpecWithExposePlatformCoordinates(t *testing.T) {
 }
 
 // TestExposeChainScriptIsBestEffort: the chained expose step must never fail
-// the Job it rides on (#1086) — a healthy deploy must not be recorded as a
+// the Job it rides on — a healthy deploy must not be recorded as a
 // failed provision just because DNS/Ingress wiring failed. On failure it
 // prints a marker line ExposeFailureFromOutput reads back out of the Job's
 // captured output.
@@ -214,7 +214,7 @@ func TestExposeFailureFromOutput(t *testing.T) {
 // TestBuildDeployCommandWithMCPAuthPublicKey: the backend's own MCP-signing
 // public key is written to a fixed path via heredoc (never argv) and threaded
 // to `erun deploy` as --mcp-auth-public-key, so the runtime's MCP edge trusts
-// tokens the backend mints for the console (#1084).
+// tokens the backend mints for the console.
 func TestBuildDeployCommandWithMCPAuthPublicKey(t *testing.T) {
 	params := testParams()
 	params.MCPAuthPublicKeyPEM = "-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n"
@@ -240,7 +240,7 @@ func TestBuildDeployCommandWithMCPAuthPublicKey(t *testing.T) {
 // a per-env DNS-01 broker token and supplies the broker/ACME coordinates, the
 // deploy Job writes the token via heredoc and threads it plus the coordinates
 // onto the chained `erun expose` so it can provision the env's own TLS
-// Issuer+Certificate (#1093). Only takes effect alongside ExposeTargetIP.
+// Issuer+Certificate. Only takes effect alongside ExposeTargetIP.
 func TestBuildDeployCommandWithTLSCertProvisioning(t *testing.T) {
 	params := testParams()
 	params.ExposeTargetIP = "203.0.113.10"

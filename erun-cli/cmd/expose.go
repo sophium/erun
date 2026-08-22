@@ -73,7 +73,7 @@ func newExposeCmd(store common.ExposeStore, findProjectRoot common.ProjectFinder
 }
 
 // exposeCommandArgs bundles runExposeCommand's growing input set — TLS/DNS-01
-// cert provisioning added five related flags at once (#1093), past the point
+// cert provisioning added five related flags at once, past the point
 // a flat parameter list stays readable.
 type exposeCommandArgs struct {
 	tenant, environment, service                                                 string
@@ -91,7 +91,7 @@ func runExposeCommand(ctx common.Context, store common.ExposeStore, findProjectR
 	platformNamespace := strings.TrimSpace(a.platformNamespace)
 	// --services-zone/--platform-namespace supply what a project checkout would
 	// otherwise resolve, precisely so a caller with no checkout at all (the
-	// hosted deploy Job, which has no git repo to find — #1086) can still run
+	// hosted deploy Job, which has no git repo to find) can still run
 	// expose. Skip the project lookup entirely in that case, rather than failing
 	// on it before RunExposeService even gets a chance to use the override.
 	projectRoot := ""
@@ -104,7 +104,7 @@ func runExposeCommand(ctx common.Context, store common.ExposeStore, findProjectR
 			// --skip-if-unconfigured exists to make expose a no-op when the
 			// target is not set up for exposure — no project at all is the
 			// strongest case of that, not a reason to fail before
-			// RunExposeService gets to decide (#1086). Fall through with an
+			// RunExposeService gets to decide. Fall through with an
 			// empty ProjectRoot: its platform-configured check on "" resolves
 			// to false, same as a project with no platform block.
 			if !a.skipIfUnconfigured {

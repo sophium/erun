@@ -41,8 +41,8 @@ func runUnexposeCommand(ctx common.Context, store common.ExposeStore, findProjec
 	platformNamespace = strings.TrimSpace(platformNamespace)
 	// --services-zone/--platform-namespace supply what a project checkout would
 	// otherwise resolve, precisely so a caller with no checkout at all (the
-	// hosted delete Job, which has no git repo to find — mirroring #1086 on the
-	// expose side) can still run unexpose. Skip the project lookup entirely in
+	// hosted delete Job, which has no git repo to find — mirroring the expose
+	// side) can still run unexpose. Skip the project lookup entirely in
 	// that case, rather than failing on it before RunUnexposeService even gets
 	// a chance to use the override.
 	projectRoot := ""

@@ -222,7 +222,7 @@ func TestReclaimRuntimeResourcesRunsTheNamedActionOnly(t *testing.T) {
 }
 
 // TestOrchestratorSnapshotRendersBusyWithoutTheEvent locks the first half of
-// the #1087 fix: orchestratorInfo carries Busy directly, so a snapshot taken
+// the fix: orchestratorInfo carries Busy directly, so a snapshot taken
 // after the state changed reflects it even when the ai-activity event that
 // announced the change was never observed. That is the path a frontend
 // remount, a window reopen, or a listener that attached a beat late actually
@@ -260,7 +260,7 @@ func TestOrchestratorSnapshotRendersBusyWithoutTheEvent(t *testing.T) {
 }
 
 // TestReconcileOrchestratorActivityReEmitsEveryTick locks the second half of
-// the #1087 fix: the busy signal is republished on every tick regardless of
+// the fix: the busy signal is republished on every tick regardless of
 // whether it changed, so a dropped or mistimed ai-activity event self-heals
 // within one tick instead of staying wrong until the busy state itself next
 // changes. The old code's `if busy == r.busy { continue }` would have emitted

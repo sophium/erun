@@ -50,7 +50,7 @@ func TestExpose(t *testing.T) {
 		// --dns01-token-file + --dns01-broker-url + --acme-email together
 		// provision a per-env cert-manager Issuer + Certificate through the
 		// DNS-01 broker, so the wildcard TLS Secret the Ingress references
-		// actually gets populated (#1093). The token file's content never
+		// actually gets populated. The token file's content never
 		// appears in the trace -- only its path.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -164,7 +164,7 @@ func TestExpose(t *testing.T) {
 		// --services-zone/--platform-namespace supply what a project checkout
 		// would otherwise resolve, so expose runs from a directory with no git
 		// repo at all -- the shape a hosted deploy Job runs in, which has no
-		// checkout to read .erun/config.yaml from (#1086).
+		// checkout to read .erun/config.yaml from.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"expose", "team", "dev", "api", "--ip", "203.0.113.10",
@@ -192,7 +192,7 @@ func TestExpose(t *testing.T) {
 
 	t.Run("skip_if_unconfigured_no_project", func(t *testing.T) {
 		// --skip-if-unconfigured must cover "no project at all", not just "a
-		// project with no platform block" -- the hole #1086 reported: the deploy
+		// project with no platform block" -- a gap that used to mean the deploy
 		// Job's --skip-if-unconfigured could not save it because project
 		// resolution itself failed outright with "cannot find git project"
 		// before the skip decision ever ran.

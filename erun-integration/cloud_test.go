@@ -349,7 +349,7 @@ func TestCloud(t *testing.T) {
 			t.Errorf("cloud-secrets should be a directory, not a file")
 		}
 
-		// #1109: `erun list` must report this healthy, just-signed-in alias as
+		// `erun list` must report this healthy, just-signed-in alias as
 		// active — not "expired"/"unknown" with "cloud secret store is not
 		// configured", which is what ListCloudProviderStatuses reported before
 		// it was given a real CloudDependencies (DefaultCloudDependencies).
@@ -502,7 +502,7 @@ func TestCloud(t *testing.T) {
 			t.Fatalf("expected refreshed login to report active status, got:\n%s", refreshLoginResult.Combined)
 		}
 
-		// #1109: `erun list` must agree with `cloud login` about this alias —
+		// `erun list` must agree with `cloud login` about this alias —
 		// before ListCloudProviderStatuses was given a real CloudDependencies,
 		// this row read "expired" with "cloud secret store is not configured"
 		// even though the platform login above is demonstrably working.

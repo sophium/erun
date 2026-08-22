@@ -9,7 +9,7 @@ import (
 )
 
 // A multi-arch, many-image release is the single build most likely to fill a
-// node's disk — exactly what evicted the pod mid-release in #1051 (a 12-image
+// node's disk — exactly what evicted the pod mid-release once before (a 12-image
 // multi-arch build filled the node, kubelet raised DiskPressure, pods were
 // evicted, and the release that filled the disk was the one killed by it).
 // This file is the preflight that exists to keep a release from doing that to

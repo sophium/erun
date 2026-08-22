@@ -9,7 +9,7 @@ import (
 
 // staleCloudProviderConfig models a binary built before CloudProviderConfig
 // grew its ERun field: same shape, minus the field this test's "old" binary
-// cannot represent. Marshaling it is exactly what #1075's desktop build did.
+// cannot represent. Marshaling it is exactly what an old desktop build did.
 type staleCloudProviderConfig struct {
 	Alias         string `yaml:"alias"`
 	Provider      string `yaml:"provider"`
@@ -23,8 +23,8 @@ type staleERunConfig struct {
 	CloudProviders []staleCloudProviderConfig `yaml:"cloudproviders,omitempty"`
 }
 
-// TestMarshalConfigPreservingUnknownFieldsSurvivesNestedUnknownBlock
-// reproduces #1075: a component whose struct type has no ERun field must not
+// TestMarshalConfigPreservingUnknownFieldsSurvivesNestedUnknownBlock checks
+// that a component whose struct type has no ERun field does not
 // delete config.yaml's "erun:" sub-block when it saves the same document.
 func TestMarshalConfigPreservingUnknownFieldsSurvivesNestedUnknownBlock(t *testing.T) {
 	existing, err := yaml.Marshal(ERunConfig{

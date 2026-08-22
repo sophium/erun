@@ -185,7 +185,7 @@ func TestInit(t *testing.T) {
 		golden.Equal(t, "init/remote_with_runtime_image_override", normalize.Apply(result.Combined))
 	})
 
-	// #1072: a tagged --runtime-image is persisted tagless, so the deploy this
+	// A tagged --runtime-image is persisted tagless, so the deploy this
 	// same init performs (and every later redeploy) pins the image to the env's
 	// own runtime version instead of sticking to the tag the operator happened
 	// to type at init time.
@@ -1053,7 +1053,7 @@ func TestInit(t *testing.T) {
 	})
 
 	t.Run("reinit_sets_saved_deploy_components", func(t *testing.T) {
-		// #1074: erun init gained --components so a saved deploy default can be
+		// erun init gained --components so a saved deploy default can be
 		// set without hand-editing the env's config.yaml.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -1075,7 +1075,7 @@ func TestInit(t *testing.T) {
 	})
 
 	t.Run("reinit_clears_saved_deploy_components_returns_env_to_plan", func(t *testing.T) {
-		// #1074's way back: an env stuck on a saved selection that shadows the
+		// The way back: an env stuck on a saved selection that shadows the
 		// repo's k8s.deployments plan had no command to return to the plan short
 		// of hand-editing erun's config store. `--components ''` is that command:
 		// it clears the saved set outright rather than being read as "nothing

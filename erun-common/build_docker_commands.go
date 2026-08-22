@@ -194,7 +194,7 @@ func platformShortSuffix(platform string) string {
 // than streamed live, so a successful build stays as quiet as --quiet used to
 // make it; on failure the capture is flushed to stderr before the error
 // returns, so "exit code: N" is never the whole story for a step that just
-// spent minutes running (#1069). At debug verbosity the caller already wants
+// spent minutes running. At debug verbosity the caller already wants
 // everything live, so it streams as it always has.
 func runDockerBuildOnce(args []string, dir, authContextTag string, push bool, verbosity int, stdout, stderr io.Writer) error {
 	cmd := Command("docker", args...)

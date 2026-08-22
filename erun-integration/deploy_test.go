@@ -709,7 +709,7 @@ func TestDeploy(t *testing.T) {
 	t.Run("dry_run_max_cpu_memory_storage_flags_apply_namespace_quota", func(t *testing.T) {
 		// All three of --max-cpu/--max-memory/--max-storage together trace the
 		// kubectl apply that would create the namespace's ResourceQuota +
-		// LimitRange (#605), alongside the existing namespace-ensure trace.
+		// LimitRange, alongside the existing namespace-ensure trace.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -1048,7 +1048,7 @@ func TestDeploy(t *testing.T) {
 	})
 
 	t.Run("dry_run_remote_env_umbrella_ignores_stale_tenant_runtimeimage_tag", func(t *testing.T) {
-		// #1072: the staleness guard used to fire only for a leftover pin naming
+		// The staleness guard used to fire only for a leftover pin naming
 		// the STOCK erun-devops image. A pin naming the tenant's OWN team-devops
 		// image at an older tag was honoured unconditionally forever, even though
 		// this deploy's own line already resolves the same image correctly with
@@ -1152,7 +1152,7 @@ func TestDeploy(t *testing.T) {
 	})
 
 	t.Run("dry_run_remote_env_component_threads_resolved_oidc_issuer", func(t *testing.T) {
-		// Regression for sophium#1039: an empty computed api.oidcAllowedIssuers used
+		// Regression: an empty computed api.oidcAllowedIssuers used
 		// to be passed as `--set-string api.oidcAllowedIssuers=` regardless, and
 		// helm's --set always beats -f, so it silently clobbered whatever the
 		// operator configured under that key in the published chart's
@@ -1793,7 +1793,7 @@ func TestDeploy(t *testing.T) {
 	})
 
 	t.Run("saved_deploy_components_shadowing_plan_reports_what_was_lost", func(t *testing.T) {
-		// #1074: when a saved deploy.components set wins over a repo
+		// When a saved deploy.components set wins over a repo
 		// k8s.deployments plan that names more, the divergence from the reviewed
 		// plan must be visible at normal (non -vv) verbosity, naming exactly what
 		// the plan asked for beyond the saved set.
@@ -3184,7 +3184,7 @@ const crashLoopPodJSON = `{
 
 // unschedulablePodJSON has no containerStatuses at all: the pod was never
 // admitted to a node, so the only place its failure reason lives is
-// status.conditions (#1082).
+// status.conditions.
 const unschedulablePodJSON = `{
   "items": [
     {

@@ -122,8 +122,8 @@ type BootstrapInitParams struct {
 	// what `erun deploy` rolls out when no --components flag is passed. nil
 	// means the invocation named nothing and the saved selection (if any) is
 	// left untouched; a non-nil, empty slice is the explicit way to clear a
-	// saved selection and return the env to its repo k8s.deployments plan
-	// (#1074) — the ambiguity plain-string flags have between "omitted" and
+	// saved selection and return the env to its repo k8s.deployments plan —
+	// the ambiguity plain-string flags have between "omitted" and
 	// "explicitly emptied" does not apply here because the pointer itself
 	// carries that distinction.
 	Components *[]string
@@ -869,7 +869,7 @@ func initDeployConfig(params BootstrapInitParams) EnvironmentDeployConfig {
 // Components pointer means the invocation named nothing; a non-nil pointer
 // (even to an empty slice) is an explicit request. That distinction is what
 // lets an explicitly empty --components clear a saved selection instead of
-// being indistinguishable from not passing the flag at all (#1074).
+// being indistinguishable from not passing the flag at all.
 func initComponentsOverride(params BootstrapInitParams) ([]string, bool) {
 	if params.Components == nil {
 		return nil, false
@@ -1059,8 +1059,8 @@ func (s *bootstrapRunState) applyEnvRuntimePod() {
 
 // applyEnvDeployComponents honours --components on an existing env: given, it
 // overwrites the saved selection outright — including with an empty list,
-// which clears it and returns the env to its repo k8s.deployments plan
-// (#1074); not given, the saved selection (if any) is left exactly as it was.
+// which clears it and returns the env to its repo k8s.deployments plan;
+// not given, the saved selection (if any) is left exactly as it was.
 func (s *bootstrapRunState) applyEnvDeployComponents() {
 	components, given := initComponentsOverride(s.params)
 	if !given {

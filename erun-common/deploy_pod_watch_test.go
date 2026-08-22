@@ -33,7 +33,7 @@ func scheduledPod(name string) podStatusItem {
 
 // fakeClock lets a test move time forward in arbitrary jumps instead of
 // sleeping real wall-clock time, so the grace period's boundary is exercised
-// deterministically (#1082).
+// deterministically.
 type fakeClock struct{ t time.Time }
 
 func (c *fakeClock) now() time.Time { return c.t }

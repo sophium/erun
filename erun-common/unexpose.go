@@ -6,7 +6,7 @@ import (
 )
 
 // UnexposeParams are the inputs to removing an environment's per-env wildcard
-// DNS record — the counterpart `erun expose` never had (#1094). Removing the
+// DNS record — the counterpart `erun expose` never had. Removing the
 // record is the only teardown action needed here: the Ingress that referenced
 // it lives in the env's own namespace and is torn down with it.
 type UnexposeParams struct {
@@ -41,7 +41,7 @@ type UnexposeResult struct {
 // RunUnexposeService resolves and (unless dry-run) removes the per-env
 // wildcard A record `erun expose` created, so records don't accumulate for
 // environments that no longer exist and a later environment reusing the same
-// name doesn't inherit a stale one (#1094). Every action and decision is
+// name doesn't inherit a stale one. Every action and decision is
 // traced before execution so a dry-run is a complete, side-effect-free plan.
 func RunUnexposeService(ctx Context, params UnexposeParams, store ExposeStore, deleteDNSRecord DNSRecordDeleterFunc) (UnexposeResult, error) {
 	if store == nil {

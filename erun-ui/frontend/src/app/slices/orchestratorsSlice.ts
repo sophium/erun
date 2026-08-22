@@ -11,7 +11,7 @@ export interface OrchestratorEnvRef {
 // in a host directory) and, when running, exposes the terminal
 // SessionID the pane attaches to. Transient ones (Investigate) are not persisted.
 //
-// `busy` is the snapshot half of the #1087 fix: the sidebar spinner used to be
+// `busy` is the snapshot half of the fix: the sidebar spinner used to be
 // lit only by the ai-activity event, so a fetch that lands after the event (a
 // fresh mount, a window reopen) had no way to know the true state. loadOrchestrators
 // seeds aiBusyBySession from this field on every fetch — see planOrchestratorBusySeed

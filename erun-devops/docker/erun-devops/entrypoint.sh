@@ -371,7 +371,7 @@ initialize_erun_config() {
         env_managed_cloud_line="managedcloud: true"
     fi
 
-    # In-pod config injection (#548): the build/deploy-relevant fields the pod
+    # In-pod config injection: the build/deploy-relevant fields the pod
     # acts on, written only when the chart injected them so an older chart
     # produces a valid (thinner) config.
     env_runtime_registry_line=""

@@ -11,7 +11,7 @@ import (
 // resolves without every dry-run scenario in the suite needing a kubectl stub it
 // otherwise has no reason to declare, so it states the create as conditional
 // instead of asserting it: asserting it unconditionally is exactly the defect
-// (#1100) where a dry run showed a create the real run, finding the namespace
+// where a dry run showed a create the real run, finding the namespace
 // already there, never performed. The real run does have a cluster to ask, so it
 // resolves the same question live and traces only the branch that will execute —
 // mirroring announceWorktreeVolumeChange's real/dry-run split for the same class

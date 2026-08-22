@@ -117,7 +117,7 @@ func TestProvisionWithNewClusterComposesFullPlan(t *testing.T) {
 }
 
 // TestProvisionRejectsCrossClusterPlacementForRuntime: the v1 single-cluster
-// placement decision (#605) applies identically here and on the executing
+// placement decision applies identically here and on the executing
 // POST /v1/environments (TestCreateEnvironmentRejectsCrossClusterPlacement)
 // — both call resolveDeployPlacement, so a preview can never promise a
 // placement the real create/deploy path would then refuse.

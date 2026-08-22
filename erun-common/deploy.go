@@ -1076,7 +1076,7 @@ func traceDeployComponentSelection(ctx Context, selected []string, source string
 
 // traceSavedSelectionShadowingPlan reports when a saved deploy.components
 // selection wins the precedence over a repo k8s.deployments plan that names
-// more than the saved selection does — the divergence #1074 found silent
+// more than the saved selection does — a divergence that used to be silent
 // (visible only under -vv, and even then without naming what the plan asked
 // for beyond the saved set). Selection tiers still never merge; this only
 // makes the gap between what deploys and what the reviewed plan declares
@@ -1113,7 +1113,7 @@ func resolvePublishedDeploySpecs(ctx Context, store DeployStore, resolvedTarget 
 	// but the divergence it would reveal still matters: a host machine running
 	// this deploy against a remote/runtime env is very often sitting inside the
 	// same tenant repo checkout, so a best-effort read is worth attempting
-	// purely to warn on a shadowed plan (#1074). A missing or unreadable repo is
+	// purely to warn on a shadowed plan. A missing or unreadable repo is
 	// silently treated as "no plan to compare against", exactly as it already is
 	// for the local path.
 	shadowPlan, _ := loadProjectK8sPlanForRepo(resolvedTarget.RepoPath, resolvedTarget.Environment)

@@ -523,7 +523,7 @@ esac
 	})
 
 	t.Run("real_run_refuses_when_the_docker_root_is_nearly_full", func(t *testing.T) {
-		// #1051: the release that fills the node's disk is the one most likely
+		// The release that fills the node's disk is the one most likely
 		// to get evicted by it, so low headroom at the docker root refuses the
 		// release before the build spends anything — the same "known failure
 		// caught up front" shape as the registry-permission preflight. docker
@@ -587,7 +587,7 @@ esac
 	})
 
 	t.Run("real_run_unpushed_unreachable_stale_tag_names_the_leftover_and_its_remedy", func(t *testing.T) {
-		// #1051: a previous release run tagged a commit and was interrupted
+		// A previous release run tagged a commit and was interrupted
 		// before it pushed anything (e.g. the pod holding the worktree was
 		// replaced) — this run's own worktree has since moved past that
 		// commit, so origin/main never saw it either. That is a safely
@@ -849,7 +849,7 @@ func releaseEnv(t *testing.T, setup env.Setup) []string {
 // stubDockerWithManifestTracking declares a docker stub that succeeds on
 // everything except `manifest inspect`, which it answers from real
 // (marker-file-backed) state rather than a blanket yes: it backs both the
-// #1051 pre-publish "already published?" probe and the post-publish verify
+// pre-publish "already published?" probe and the post-publish verify
 // step, so a stub that always answered yes would make a first-ever-release
 // scenario falsely report the image as already published before publishing
 // anything. Reporting false until `manifest push` actually runs, then true,

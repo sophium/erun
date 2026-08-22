@@ -80,7 +80,7 @@ func ensureAPIPortForward(ctx common.Context, result common.OpenResult) (int, er
 // forward is stated as conditional on the presence check already traced by
 // the caller, rather than asserted outright — the same split
 // TraceEnsureKubernetesNamespace uses for the analogous namespace-create
-// decision (#1100).
+// decision.
 func ensureAPIPortForwardDryRun(ctx common.Context, result common.OpenResult, localPort int) (int, error) {
 	args := kubectlAPIPortForwardArgs(result, localPort)
 	if previewed, port := previewAdoptOrConflict(ctx, "api", localPort, args, canReachLocalAPIEndpoint); previewed {
