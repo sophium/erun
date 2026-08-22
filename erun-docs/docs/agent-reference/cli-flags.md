@@ -604,6 +604,23 @@ A file streams as base64; a folder streams as a `tar.gz` archive (saved as `<nam
 
 ---
 
+## `erun inputs`
+
+`erun inputs upload` is the inverse of `erun outputs download`: it streams a file from this host into an environment's runtime pod over `kubectl exec -i` (stdin), never through argv or a base64 blob in a tool argument. It has no in-pod MCP counterpart — the edge runs in the pod and has no path back to the operator's filesystem — but an MCP-connected orchestrator reaches the same transfer through the `inputs_upload` local tool `erun mcp proxy` serves (see [MCP overview § Host-served](/mcp/overview#host-served)).
+
+### `erun inputs upload`
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `<local-path>` (arg) | path | **required** | File on this host to upload; must exist and not be a directory. |
+| `<remote-path>` (arg) | absolute path | **required, never defaulted** | Full destination inside the pod, including the file name. Must be absolute and free of `..`. Not defaulted deliberately: a transfer can never silently land somewhere a background process (e.g. the workspace-sync mirror) reconciles away. |
+| `--tenant <t>` | string | current scope | Target tenant. |
+| `--environment <e>` | string | current scope | Target environment; requires `--tenant`. |
+
+The remote script creates the destination directory if missing, writes to a same-directory temp file, and renames into place — so a killed transfer never leaves a partial file visible at the final path — then reports the written size and SHA-256. The command errors if that checksum (or size) disagrees with what was sent. `--output json` emits `{remotePath, bytes, sha256}`. `--dry-run` traces the `kubectl exec` argv and the upload script without sending anything (the local file must still exist to resolve its size).
+
+---
+
 ## `erun cloud refresh`
 
 `erun cloud refresh TENANT ENVIRONMENT` re-injects the operator's short-lived AWS credentials into an environment's runtime pod. It is the non-leaking counterpart to the `cloud_inject_aws_credentials` MCP tool: the credential values are never inputs, so an Agent or a script can call it without writing a secret into a transcript.
