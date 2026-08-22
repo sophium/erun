@@ -1,0 +1,28 @@
+Report pods, ResourceQuota/LimitRange usage, Ingress hosts and TLS secret
+names, and Certificate readiness for the environment's namespace.
+
+When a Certificate is not Ready, its CertificateRequest -> Order -> Challenge
+chain is walked automatically, so the reason issuance is stuck (for example a
+webhook solver's RBAC denial) comes back in this one call instead of three more.
+
+Every call is a kubectl get: nothing here can mutate the cluster, which is what
+makes this safe to grant an orchestrator that must never reach for `exec raw`.
+
+Usage:
+  erun observe [flags]
+
+Examples:
+  erun observe --tenant team --environment dev
+  erun observe --tenant team --environment dev --secret db-credentials=password --output json
+
+Flags:
+      --dry-run              Resolve and trace mutating actions without executing them.
+      --environment string   Target a specific environment; requires --tenant
+  -h, --help                 help for observe
+      --secret stringArray   Check a Secret for a key's presence, as name=key (repeatable); the value is never read
+      --tenant string        Target a specific tenant (default: the current scope)
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

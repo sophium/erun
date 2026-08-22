@@ -576,6 +576,74 @@ Both actions are also exposed on the [MCP `doctor` tool](/mcp/overview#doctor) v
 
 ---
 
+## `erun observe` {#erun-observe}
+
+Reports an environment's Kubernetes state, read-only: every underlying call is `kubectl [--context <ctx>] --namespace <ns> get <resource> [name] -o json`, never anything that mutates. Same operation as the MCP `observe` tool (see [MCP overview § `observe`](/mcp/overview#observe)).
+
+### Flags
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--tenant <t>` | string | current scope | Target tenant. |
+| `--environment <e>` | string | current scope | Target environment; requires `--tenant`. |
+| `--secret <name>=<key>` | string, repeatable | none | Check Secret `<name>` for key `<key>`'s presence. Malformed (missing `=`, empty name, or empty key) aborts with `--secret must be name=key, got "<value>"` (exit 1) before any `kubectl` call. |
+
+### Resolution and output shape
+
+Resolves tenant/environment/namespace the same way every other typed command does (`ResolveOpen`), then issues, in order: `get pods`, `get resourcequota`, `get limitrange`, `get ingress`, `get certificates.cert-manager.io`, then one `get secret <name>` per `--secret` check. `--output json` emits:
+
+```jsonc
+{
+  "tenant": "myapp", "environment": "prod", "namespace": "myapp-prod",
+  "pods": [ { "name": "web-0", "phase": "Running", "ready": true, "restartCount": 0, "reason": "" } ],
+  "resourceQuotas": [ { "name": "erun-quota", "hard": { "limits.cpu": "4" }, "used": { "limits.cpu": "1" } } ],
+  "limitRanges": [ { "name": "erun-limits", "limits": [
+    { "type": "Container", "max": {}, "min": {}, "default": { "cpu": "1" }, "defaultRequest": { "cpu": "100m" } }
+  ] } ],
+  "ingresses": [ { "name": "web", "hosts": ["prod.example.com"],
+    "tls": [ { "hosts": ["prod.example.com"], "secretName": "web-tls" } ] } ],
+  "certificates": [ { "name": "wildcard", "ready": false, "reason": "Issuing", "message": "…",
+    "secretName": "wildcard-tls", "dnsNames": ["*.prod.example.com"], "orders": [ /* see below */ ] } ],
+  "secrets": [ { "name": "db-credentials", "key": "password", "exists": true, "hasKey": true, "error": "" } ]
+}
+```
+
+`reason` on a pod is the container's `waiting`/`terminated` reason if present, else the `PodScheduled=False` reason (a pod never admitted to a node has no container status to read a reason from), else the `Ready=False` condition's reason. `secrets` is omitted entirely when no `--secret` was given.
+
+### The Certificate → CertificateRequest → Order → Challenge walk {#certificate-failure-chain}
+
+`certificates[].orders` is populated only when that Certificate's `status.conditions[type=Ready]` is not `True`. The walk, run once against a fresh listing of each resource kind in the namespace (not once per certificate):
+
+1. List `certificaterequests.cert-manager.io`; filter to the ones labelled `cert-manager.io/certificate-name=<certificate>`; take the one with the latest `metadata.creationTimestamp` (a Certificate can be reissued, leaving stale requests behind — only the newest one's chain is live). None matching → `orders` is empty.
+2. List `orders.acme.cert-manager.io`; keep the ones whose `ownerReferences` include `{kind: CertificateRequest, name: <request from step 1>}`.
+3. For each such Order, list `challenges.acme.cert-manager.io` and keep the ones owned (`ownerReferences`) by that Order.
+4. Each reported order carries `state`/`reason` from `status`; each challenge carries `type`/`dnsName` from `spec` and `state`/`reason` from `status` — `reason` is the field that explains a stuck issuance (e.g. a webhook solver's RBAC denial), which is otherwise three separate `kubectl get` calls away.
+
+A cluster with no cert-manager CRDs installed (`kubectl` reports "the server doesn't have a resource type" / "no matches for kind") reports `certificates: []` rather than erroring — a cluster simply has no certificates to walk.
+
+### Secret presence checks
+
+Each `--secret <name>=<key>` becomes one `kubectl get secret <name> -o json`, read only for its key names (`data`/`stringData`), never a value:
+
+| Outcome | `exists` | `hasKey` | `error` |
+|---|---|---|---|
+| Secret and key both present. | `true` | `true` | `""` |
+| Secret present, key absent. | `true` | `false` | `""` |
+| Secret not found. | `false` | `false` | `""` |
+| Any other failure (e.g. RBAC denial reading the Secret). | `false` | `false` | the kubectl error, so a permission problem is never reported indistinguishably from "does not exist" |
+
+### Error behaviour
+
+| Failure | Behaviour |
+|---|---|
+| Tenant/environment can't be resolved. | Errors before any `kubectl` call. |
+| `--secret` isn't `name=key`. | Errors before any `kubectl` call, naming the malformed value. |
+| `get pods` / `resourcequota` / `limitrange` / `ingress` fails (namespace or cluster unreachable). | Errors naming the failed call; nothing is reported. |
+| `get certificates.cert-manager.io` fails because the CRD isn't installed. | `certificates: []`; not an error. |
+| `get certificates.cert-manager.io` fails for another reason. | Errors naming the failed call. |
+
+---
+
 ## `erun outputs`
 
 `erun outputs` lists and downloads files an agent produced in an environment's runtime pod outputs directory (`$ERUN_OUTPUTS_DIR`, default `/home/erun/.erun/outputs`). Both subcommands resolve the pod from tenant/environment scope and read it over `kubectl exec`; the MCP `outputs_list`/`outputs_download` tools cover the same operations for in-pod callers (which read the filesystem directly).

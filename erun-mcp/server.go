@@ -405,6 +405,10 @@ func registerDeliveryTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Description: "Diagnose and repair the resolved environment: report why a deploy may have failed (helm release status and runtime pods, read-only); recover a failing runtime release by clearing a stuck pending helm lock or rolling back to the last successful revision; prune unused Docker images, build cache, or stopped containers; and optionally restore or repair the root erun config from a backup or by re-initializing orphaned cloud provider aliases",
 	}, doctorTool(runtime))
 	addTool(reg, &mcp.Tool{
+		Name:        "observe",
+		Description: "Report the resolved environment's Kubernetes state, read-only: pods, ResourceQuota/LimitRange usage, Ingress hosts and TLS secret names, and Certificate readiness. When a Certificate is not Ready, its CertificateRequest -> Order -> Challenge chain is walked automatically for the failure reason, so a stuck issuance (for example a webhook solver's RBAC denial) surfaces in this one call. Optionally check named Secrets for a key's presence without reading their values. Every call is a kubectl get; nothing here can mutate the cluster.",
+	}, observeTool(runtime))
+	addTool(reg, &mcp.Tool{
 		Name:        "delete",
 		Description: "Delete an environment from ERun configuration and remove its remote runtime namespace after explicit tenant-environment confirmation",
 	}, deleteTool(runtime))

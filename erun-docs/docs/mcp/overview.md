@@ -125,6 +125,7 @@ Four categories. The protocol treats them all as MCP tools; the categorisation i
 | Tool | Purpose |
 |---|---|
 | `idle` | Resolved idle policy, managed-cloud flag, stop eligibility, current activity snapshot, and the activity leases currently holding the env busy. |
+| `observe` | The env's Kubernetes state: pods, `ResourceQuota`/`LimitRange` usage, `Ingress` hosts + TLS secret names, and `Certificate` readiness — walking `CertificateRequest` → `Order` → `Challenge` for the failure reason when a certificate isn't Ready. Optionally checks named Secrets for a key's presence without reading their values. Every call is a `kubectl get`; nothing here can mutate the cluster. |
 | `doctor` | In-pod health checks (config files, git checkout, SSH keys, docker daemon, workspace PVC). |
 | `list` | Same data as the CLI `erun list`, structured. |
 | `version` | Build version and commit of the MCP server. |
@@ -263,6 +264,50 @@ Resolves the env's idle policy and reports its current activity. Useful for an A
   ]
 }
 ```
+
+### `observe`
+
+Reads pods, quota/limit usage, ingress routing, and certificate readiness for the env's namespace — read-only, every underlying call is a `kubectl get`. Optional `secrets` input checks named Secret/key pairs for presence without reading their values.
+
+```jsonc
+// observe {"secrets": [{"name": "db-credentials", "key": "password"}]}
+{
+  "tenant": "myapp",
+  "environment": "prod",
+  "namespace": "myapp-prod",
+  "pods": [
+    { "name": "web-0", "phase": "Running", "ready": true, "restartCount": 0 }
+  ],
+  "resourceQuotas": [
+    { "name": "erun-quota", "hard": { "limits.cpu": "4" }, "used": { "limits.cpu": "1" } }
+  ],
+  "limitRanges": [
+    { "name": "erun-limits", "limits": [
+      { "type": "Container", "default": { "cpu": "1" }, "defaultRequest": { "cpu": "100m" } }
+    ] }
+  ],
+  "ingresses": [
+    { "name": "web", "hosts": ["prod.example.com"],
+      "tls": [{ "hosts": ["prod.example.com"], "secretName": "web-tls" }] }
+  ],
+  "certificates": [
+    { "name": "wildcard", "ready": false, "reason": "Issuing", "message": "waiting for order to complete",
+      "secretName": "wildcard-tls", "dnsNames": ["*.prod.example.com"],
+      "orders": [
+        { "name": "wildcard-order-1", "state": "pending",
+          "challenges": [
+            { "name": "wildcard-challenge-1", "type": "DNS-01", "dnsName": "*.prod.example.com",
+              "state": "invalid", "reason": "RBAC denied: solvers.acme.cert-manager.io is forbidden: cannot create resource challenges" }
+          ] }
+      ] }
+  ],
+  "secrets": [
+    { "name": "db-credentials", "key": "password", "exists": true, "hasKey": true }
+  ]
+}
+```
+
+`orders` is populated only for a Certificate that isn't `ready` — a healthy certificate reports no chain to walk. A `secrets` entry always reports `exists`/`hasKey`; a missing Secret reports `exists: false` rather than erroring, and a non-"not found" failure (e.g. an RBAC denial reading the Secret itself) is carried in an `error` field instead of being reported as absence.
 
 ### `doctor`
 

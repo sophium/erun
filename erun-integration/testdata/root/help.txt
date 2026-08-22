@@ -41,6 +41,7 @@ Available Commands:
   job         Start long work in the environment and observe it by handle
   list        List configured tenants and environments
   mcp         Run ERun as an MCP server over HTTP
+  observe     Report an environment's Kubernetes state, read-only
   open        Open a shell in the tenant environment
   outputs     List and download files an agent produced in the runtime pod
   pin         Re-pin every erun version reference for an environment
