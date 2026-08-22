@@ -22,3 +22,8 @@ output "namespace" {
   description = "Namespace holding cert-manager, the Cloudflare token Secret, and the wildcard Certificate."
   value       = kubernetes_namespace.cert_manager.metadata[0].name
 }
+
+output "dns01_webhook_installed" {
+  description = "Whether this apply installed the per-cluster DNS-01 webhook shim (the resolved value of install_dns01_webhook, after applying its dns01_provider-based default). A per-tenant Issuer selecting the webhook solver (e.g. one erun expose provisions) can only reach Ready when this is true."
+  value       = local.install_dns01_webhook
+}

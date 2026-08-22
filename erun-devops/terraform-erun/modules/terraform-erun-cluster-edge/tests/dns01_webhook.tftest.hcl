@@ -1,0 +1,90 @@
+# Locks the fix for the coupling between the platform Issuer's own DNS-01
+# solver (dns01_provider) and whether the per-cluster webhook shim installs.
+# Runs entirely against mocked providers: no real cluster is touched.
+
+mock_provider "helm" {}
+mock_provider "kubernetes" {}
+
+variables {
+  services_zone = "services.example.com"
+  acme_email    = "ops@example.com"
+}
+
+# The exact shape frs-prod needs: platform Issuer stays on rfc2136, but the
+# webhook shim still installs so erun-expose's per-tenant brokered Issuers can
+# solve.
+run "webhook_shim_installs_while_platform_issuer_stays_on_rfc2136" {
+  command = plan
+
+  variables {
+    dns01_provider          = "powerdns-rfc2136"
+    install_dns01_webhook   = true
+    powerdns_nameserver     = "erun-powerdns.frs-prod.svc.cluster.local:53"
+    rfc2136_tsig_key_name   = "erun-tsig"
+    rfc2136_tsig_secret     = "c2VjcmV0"
+    broker_url              = "https://api.frs-prod.services.example.com/v1/dns01"
+    dns01_webhook_image     = "ghcr.io/sophium/erun-dns01-webhook:1.0.0"
+    dns01_token_secret_name = "operations-probej-dns01-token"
+  }
+
+  assert {
+    condition     = length(helm_release.dns01_webhook) == 1
+    error_message = "the webhook shim must install when install_dns01_webhook = true, even though the platform Issuer's own solver is powerdns-rfc2136"
+  }
+
+  assert {
+    condition     = [for s in helm_release.issuer.set : s.value if s.name == "dns01Provider"][0] == "powerdns-rfc2136"
+    error_message = "the platform Issuer must keep solving via rfc2136 when dns01_provider is powerdns-rfc2136, regardless of the webhook shim being installed"
+  }
+}
+
+# Back-compat: dns01_provider alone still drives the shim when the new
+# variable is left unset.
+run "webhook_shim_defaults_off_for_plain_rfc2136" {
+  command = plan
+
+  variables {
+    dns01_provider        = "powerdns-rfc2136"
+    powerdns_nameserver   = "erun-powerdns.frs-prod.svc.cluster.local:53"
+    rfc2136_tsig_key_name = "erun-tsig"
+    rfc2136_tsig_secret   = "c2VjcmV0"
+  }
+
+  assert {
+    condition     = length(helm_release.dns01_webhook) == 0
+    error_message = "install_dns01_webhook must default to false when dns01_provider is not powerdns-broker (back-compat)"
+  }
+}
+
+run "webhook_shim_defaults_on_for_broker_provider_back_compat" {
+  command = plan
+
+  variables {
+    dns01_provider          = "powerdns-broker"
+    broker_url              = "https://api.example.com/v1/dns01"
+    dns01_webhook_image     = "ghcr.io/sophium/erun-dns01-webhook:1.0.0"
+    dns01_token_secret_name = "some-env-dns01-token"
+  }
+
+  assert {
+    condition     = length(helm_release.dns01_webhook) == 1
+    error_message = "install_dns01_webhook must default to true when dns01_provider is powerdns-broker (back-compat)"
+  }
+}
+
+# The combination that produced the undeletable namespace: the platform
+# Issuer's own solver is the webhook, but the shim that would serve it is
+# explicitly turned off. Must be rejected at plan time, not at challenge time.
+run "broker_platform_issuer_without_webhook_shim_is_rejected" {
+  command = plan
+
+  variables {
+    dns01_provider          = "powerdns-broker"
+    install_dns01_webhook   = false
+    broker_url              = "https://api.example.com/v1/dns01"
+    dns01_webhook_image     = "ghcr.io/sophium/erun-dns01-webhook:1.0.0"
+    dns01_token_secret_name = "some-env-dns01-token"
+  }
+
+  expect_failures = [helm_release.issuer]
+}
