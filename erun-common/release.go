@@ -179,13 +179,14 @@ type ReleasePackagingSyncerFunc func(Context, ReleasePackagingSyncSpec) ([]Relea
 
 // traceReleaseUmbrella brackets a standalone `erun release` with the
 // `==> Releasing`/`==> Released`/`==> Release failed` lines the desktop
-// activity-queue parser keys off to light the sidebar spinner. `erun build
-// --release` runs the same work under its own `==> Building` umbrella instead
-// of opening a second entry; dry-run omits the markers so the release goldens
-// stay stable.
-func traceReleaseUmbrella(ctx Context, version string) func(*error) {
+// activity-queue parser keys off to light the sidebar spinner, and starts the
+// step-timing root reported (as a duration-ordered table plus a JSON record)
+// when the bracket closes. `erun build --release` runs the same work under
+// its own `==> Building` umbrella instead of opening a second entry; dry-run
+// omits the markers and the timing so the release goldens stay stable.
+func traceReleaseUmbrella(ctx Context, version string) (Context, func(*error)) {
 	if ctx.DryRun {
-		return func(*error) {}
+		return ctx, func(*error) {}
 	}
 	releasing, released := "==> Releasing", "==> Released"
 	if target := strings.TrimSpace(version); target != "" {
@@ -194,13 +195,21 @@ func traceReleaseUmbrella(ctx Context, version string) func(*error) {
 	}
 	started := time.Now()
 	ctx.Info(releasing)
-	return func(errp *error) {
-		elapsed := time.Since(started).Round(time.Second)
-		if errp != nil && *errp != nil {
-			ctx.Info("==> Release failed after " + elapsed.String())
-			return
+	root := newStepTiming("release", nil)
+	ctx.timing = root
+	return ctx, func(errp *error) {
+		var err error
+		if errp != nil {
+			err = *errp
 		}
-		ctx.Info(released + " in " + elapsed.String())
+		root.finish(err)
+		elapsed := time.Since(started).Round(time.Second)
+		if err != nil {
+			ctx.Info("==> Release failed after " + elapsed.String())
+		} else {
+			ctx.Info(released + " in " + elapsed.String())
+		}
+		reportStepTiming(ctx, "release", root)
 	}
 }
 
@@ -252,7 +261,10 @@ func ensureReleaseReadyToPublish(ctx Context, spec ReleaseSpec, runGit GitComman
 
 func runReleaseStages(ctx Context, spec ReleaseSpec, stages []ReleaseStage, runGit GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc) error {
 	for _, stage := range stages {
-		if err := runReleaseStage(ctx, spec, stage, runGit, syncPackagingChecksums); err != nil {
+		stepCtx, finish := ctx.startTimingStep(stage.Name)
+		err := runReleaseStage(stepCtx, spec, stage, runGit, syncPackagingChecksums)
+		finish(err)
+		if err != nil {
 			return err
 		}
 	}

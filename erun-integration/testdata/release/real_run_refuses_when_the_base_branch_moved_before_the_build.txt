@@ -20,6 +20,16 @@ release: worktree clean = true
 stage: sync-remote
 stage: release
 ==> Release failed after <ELAPSED>
+step timing (ordered by duration):
+  release (failed) [<ELAPSED>] — origin/main has moved since this release rebased onto it: it carries 3 commit(s) this release is not built on.
+Building now would publish <VERSION> and push its tag, and only then fail at the final push with everything already public.
+Nothing is published yet, so absorb the move and re-run:
+  git -C <TMP> pull --rebase origin main
+  erun release --force
+(--force recreates the local <VERSION> tag this run already made, which the rebase leaves behind.)
+    release [<ELAPSED>]
+    sync-remote [<ELAPSED>]
+timing record written to <TMP>
 origin/main has moved since this release rebased onto it: it carries 3 commit(s) this release is not built on.
 Building now would publish <VERSION> and push its tag, and only then fail at the final push with everything already public.
 Nothing is published yet, so absorb the move and re-run:

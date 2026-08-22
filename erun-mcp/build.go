@@ -65,7 +65,7 @@ func pushTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 			if err != nil {
 				return err
 			}
-			return eruncommon.RunPushCommand(runCtx, func() error {
+			return eruncommon.RunPushCommand(runCtx, func(runCtx eruncommon.Context) error {
 				return eruncommon.RunDockerPushExecution(runCtx, execution, runtime.BuildDockerImage, runtimePushFunc(runtime))
 			})
 		})

@@ -73,14 +73,20 @@ func runReleasePublication(ctx Context, publisher ReleasePublisher) error {
 	}
 	reportAlreadyPublishedReleaseArtifacts(ctx, publisher.Tags)
 	ctx.Trace("stage: publish")
-	if err := publisher.Publish(ctx); err != nil {
+	publishCtx, finishPublish := ctx.startTimingStep("publish")
+	err := publisher.Publish(publishCtx)
+	finishPublish(err)
+	if err != nil {
 		return err
 	}
 	if publisher.Verify == nil {
 		return nil
 	}
 	ctx.Trace("stage: verify-publication")
-	return publisher.Verify(ctx)
+	verifyCtx, finishVerify := ctx.startTimingStep("verify-publication")
+	err = publisher.Verify(verifyCtx)
+	finishVerify(err)
+	return err
 }
 
 // reportAlreadyPublishedReleaseArtifacts probes the registry for each image

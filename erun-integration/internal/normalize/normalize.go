@@ -78,6 +78,11 @@ var defaultRules = []Replacement{
 	// stable in goldens instead of being swept up as elapsed time.
 	{regexp.MustCompile(` (in|after) \d+(?:[hm]\d+)*s\b`), " $1 <ELAPSED>"},
 	{regexp.MustCompile(`elapsed: \d+(?:\.\d+)?[a-zµμ]+(?:\d+(?:\.\d+)?[a-zµμ]+)*\b`), "elapsed: <ELAPSED>"},
+	// The step-timing table (timing.go) wraps every duration in brackets —
+	// `<label> [<duration>]` — specifically so this rule can redact real,
+	// sub-second wall-clock measurements without also sweeping up an unrelated
+	// bare "5m" in help text or a --rollout-timeout example.
+	{regexp.MustCompile(`\[\d+(?:\.\d+)?(?:ms|µs|us|ns|h|m|s)(?:\d+(?:\.\d+)?(?:ms|µs|us|ns|h|m|s))*\]`), "[<ELAPSED>]"},
 	// Anchored to `--token ` so a base64url-shaped run elsewhere in the output
 	// is not swept up.
 	{regexp.MustCompile(`--token [A-Za-z0-9_-]{30,}`), "--token <TOKEN>"},

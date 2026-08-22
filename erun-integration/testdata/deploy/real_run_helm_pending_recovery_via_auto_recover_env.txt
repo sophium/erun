@@ -11,3 +11,7 @@ dedup: claim (release=test-context-team-dev-team-devops, hash=<HASH>, pid=<PID>)
     waiting for helm rollout (timeout 5m0s)...
 clearing pending helm metadata: kubectl --context test-context --namespace team-dev delete 'secrets,configmaps' -l 'owner=helm,name=team-devops,status in (pending-install,pending-upgrade,pending-rollback)' --ignore-not-found
 ==> Deployed team/dev <VERSION> in <ELAPSED>
+step timing (ordered by duration):
+  deploy [<ELAPSED>]
+    team/dev <VERSION> [<ELAPSED>]
+timing record written to <TMP>

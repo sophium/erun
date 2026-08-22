@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 )
 
 const fingerprintTagPrefix = "fp-"
@@ -26,19 +27,24 @@ func runMultiPlatformBuild(buildInput DockerBuildSpec, stdout, stderr io.Writer)
 	}
 	perPlatformTags := make([]string, 0, len(buildInput.Platforms))
 	for _, platform := range buildInput.Platforms {
+		started := time.Now()
 		platformTag := platformSuffixedTag(buildInput.Image.Tag, platform)
 		perPlatformTags = append(perPlatformTags, platformTag)
 		args := dockerBuildArgs(buildInput, platform)
-		if err := runDockerBuildOnce(args, buildInput.ContextDir, buildInput.Image.Tag, false, buildInput.Verbosity, stdout, stderr); err != nil {
-			return err
+		err := runDockerBuildOnce(args, buildInput.ContextDir, buildInput.Image.Tag, false, buildInput.Verbosity, stdout, stderr)
+		if err == nil {
+			err = tagFingerprintAfterBuild(buildInput, platform, stdout, stderr)
 		}
-		if err := tagFingerprintAfterBuild(buildInput, platform, stdout, stderr); err != nil {
-			return err
+		if err == nil {
+			err = tagStableBaseVersionAfterBuild(buildInput, platform, stdout, stderr)
 		}
-		if err := tagStableBaseVersionAfterBuild(buildInput, platform, stdout, stderr); err != nil {
-			return err
+		if err == nil {
+			err = pushPlatformImage(buildInput, platformTag, stdout, stderr)
 		}
-		if err := pushPlatformImage(buildInput, platformTag, stdout, stderr); err != nil {
+		if buildInput.PlatformObserver != nil {
+			buildInput.PlatformObserver(platform, time.Since(started), err)
+		}
+		if err != nil {
 			return err
 		}
 	}
@@ -51,16 +57,21 @@ func runMultiPlatformBuild(buildInput DockerBuildSpec, stdout, stderr io.Writer)
 func promoteDockerImage(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
 	perPlatformTags := make([]string, 0, len(buildInput.Platforms))
 	for _, platform := range buildInput.Platforms {
+		started := time.Now()
 		fpTag := fingerprintTag(buildInput.Image, buildInput.Fingerprint, platform)
 		platformTag := platformSuffixedTag(buildInput.Image.Tag, platform)
 		perPlatformTags = append(perPlatformTags, platformTag)
-		if err := runDockerTag(fpTag, platformTag, stdout, stderr); err != nil {
-			return err
+		err := runDockerTag(fpTag, platformTag, stdout, stderr)
+		if err == nil {
+			err = tagStableBaseVersionAfterBuild(buildInput, platform, stdout, stderr)
 		}
-		if err := tagStableBaseVersionAfterBuild(buildInput, platform, stdout, stderr); err != nil {
-			return err
+		if err == nil {
+			err = pushPlatformImage(buildInput, platformTag, stdout, stderr)
 		}
-		if err := pushPlatformImage(buildInput, platformTag, stdout, stderr); err != nil {
+		if buildInput.PlatformObserver != nil {
+			buildInput.PlatformObserver(platform, time.Since(started), err)
+		}
+		if err != nil {
 			return err
 		}
 	}

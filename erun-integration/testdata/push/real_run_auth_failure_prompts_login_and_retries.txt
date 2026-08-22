@@ -15,3 +15,15 @@ rebuilding ghcr.io/sophium/base:<VERSION> because fingerprint image is missing f
 ==> Publishing base <VERSION> to oci://ghcr.io/sophium/charts
 ==> Verified published chart base <VERSION>
 ==> Pushed in <ELAPSED>
+step timing (ordered by duration):
+  push [<ELAPSED>]
+    api (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
+      linux/amd64 (failed) (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>] — unauthorized: authentication required
+      linux/amd64 (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
+      linux/arm64 (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
+    base (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
+      linux/amd64 (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
+      linux/arm64 (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
+    chart api [<ELAPSED>]
+    chart base [<ELAPSED>]
+timing record written to <TMP>

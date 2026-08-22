@@ -565,10 +565,28 @@ func specDeploysRuntimeChart(spec DeploySpec) bool {
 	return tenant != "" && strings.TrimSpace(spec.Deploy.ReleaseName) == RuntimeReleaseName(tenant)
 }
 
+// RunDeploySpecs starts the step-timing root for the whole `erun deploy`
+// invocation (reported as a duration-ordered table plus a JSON record when it
+// finishes, on success and on failure), then runs every resolved spec. It is
+// always the outermost deploy entrypoint the CLI/MCP transports call, so it
+// owns the root outright — `build --deploy` reaches RunDeploySpec per spec
+// directly instead, attaching under the build root that already exists.
 func RunDeploySpecs(ctx Context, executions []DeploySpec, deploy HelmChartDeployerFunc) error {
 	if len(executions) == 0 {
 		return nil
 	}
+	if !ctx.DryRun {
+		ctx.timing = newStepTiming("deploy", nil)
+	}
+	err := runDeploySpecsPlan(ctx, executions, deploy)
+	if root := ctx.timing; root != nil {
+		root.finish(err)
+		reportStepTiming(ctx, "deploy", root)
+	}
+	return err
+}
+
+func runDeploySpecsPlan(ctx Context, executions []DeploySpec, deploy HelmChartDeployerFunc) error {
 	plan, err := loadProjectK8sPlanForDeploy(executions)
 	if err != nil {
 		return err
@@ -889,7 +907,10 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 	if ctx.DryRun {
 		return nil
 	}
-	return runHelmDeployExecute(ctx, deployInput, valuesPull, depBuild, deploy, target)
+	stepCtx, finish := ctx.startTimingStep(target)
+	err = runHelmDeployExecute(stepCtx, deployInput, valuesPull, depBuild, deploy, target)
+	finish(err)
+	return err
 }
 
 // runHelmDeployExecute performs the real-run pre-rollout steps and the rollout:
