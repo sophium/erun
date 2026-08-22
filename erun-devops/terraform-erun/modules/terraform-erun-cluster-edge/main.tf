@@ -146,8 +146,8 @@ resource "helm_release" "dns01_webhook" {
 
   lifecycle {
     precondition {
-      condition     = var.broker_url != "" && var.dns01_webhook_image != "" && var.dns01_token_secret_name != ""
-      error_message = "install_dns01_webhook requires broker_url, dns01_webhook_image, and dns01_token_secret_name."
+      condition     = var.broker_url != "" && var.dns01_webhook_image != ""
+      error_message = "install_dns01_webhook requires broker_url and dns01_webhook_image."
     }
   }
 
@@ -263,6 +263,15 @@ resource "helm_release" "issuer" {
     precondition {
       condition     = !local.use_broker || local.install_dns01_webhook
       error_message = "dns01_provider \"powerdns-broker\" makes the platform's own Issuer solve through the DNS-01 webhook shim, but install_dns01_webhook resolved to false. Rendering that Certificate without the shim's APIService/RBAC leaves cert-manager denied at admission and the resulting namespace undeletable — leave install_dns01_webhook unset (it defaults to true here) or set it to true."
+    }
+
+    # Only the platform's own Issuer reads these, and only in broker mode. A
+    # platform that installs the shim purely so tenant Issuers can solve names
+    # no token secret of its own: those are per-env and land beside each
+    # environment, not here.
+    precondition {
+      condition     = !local.use_broker || (var.broker_url != "" && var.dns01_token_secret_name != "")
+      error_message = "dns01_provider \"powerdns-broker\" solves the platform's own Issuer through the broker, so broker_url and dns01_token_secret_name are both required."
     }
   }
 
