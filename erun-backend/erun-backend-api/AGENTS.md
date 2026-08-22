@@ -172,3 +172,4 @@ Module-specific guidance for `erun-backend-api`. Follow the repository root and 
 
 - Run `go test ./...` from this module after Go changes.
 - The queue and executor gates are opt-in and live in this module's root package. `ERUN_E2E_RELEASE_DATABASE_URL` alone runs the queue's SQL contracts against a migrated PostgreSQL; `ERUN_E2E_RELEASE_QUEUE=1` plus a cluster runs the whole pipeline. The cluster gate refuses to run unless the release target is a dry run, because cutting a real version moves public refs.
+- The environment delete state machine has the same shape of opt-in gate: `ERUN_E2E_ENVIRONMENT_DATABASE_URL` runs `ClaimDelete`/`MarkDeleteBlocked`/`Count`/`ListByStatuses`'s SQL contracts against a migrated PostgreSQL (`environment_delete_e2e_test.go`).

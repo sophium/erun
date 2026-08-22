@@ -16,14 +16,22 @@ const (
 
 // EnvironmentStatus is the provisioning lifecycle of a hosted environment
 // (#605): a row is `registered` when created, then the server-side deploy
-// executor moves it `provisioning` → `running`/`failed`.
+// executor moves it `provisioning` → `running`/`failed`. A running or failed
+// environment moves to `deleting` when a teardown is requested, then either
+// disappears (the row is hard-deleted once the namespace is confirmed torn
+// down) or moves to `deletion-blocked` naming why it did not. `running` must
+// never survive a delete attempt: a namespace that is merely being asked to
+// tear down is not "up and serving" anymore, and a blocked one has stopped
+// being trustworthy state for a caller to act on.
 type EnvironmentStatus string
 
 const (
-	EnvironmentStatusRegistered   EnvironmentStatus = "registered"
-	EnvironmentStatusProvisioning EnvironmentStatus = "provisioning"
-	EnvironmentStatusRunning      EnvironmentStatus = "running"
-	EnvironmentStatusFailed       EnvironmentStatus = "failed"
+	EnvironmentStatusRegistered      EnvironmentStatus = "registered"
+	EnvironmentStatusProvisioning    EnvironmentStatus = "provisioning"
+	EnvironmentStatusRunning         EnvironmentStatus = "running"
+	EnvironmentStatusFailed          EnvironmentStatus = "failed"
+	EnvironmentStatusDeleting        EnvironmentStatus = "deleting"
+	EnvironmentStatusDeletionBlocked EnvironmentStatus = "deletion-blocked"
 )
 
 // Environment is the per-tenant system of record for an erun environment, the
@@ -55,7 +63,12 @@ type Environment struct {
 	// the deployed workload is unhealthy (#1086). Owned by the deploy executor,
 	// so scan-only; empty means exposure succeeded, was never attempted, or the
 	// environment predates chaining an expose at all.
-	ExposeError string    `json:"exposeError,omitempty" bun:"expose_error,scanonly,nullzero"`
+	ExposeError string `json:"exposeError,omitempty" bun:"expose_error,scanonly,nullzero"`
+	// DeleteError carries why a delete attempt did not tear the namespace down
+	// (the namespace's own conditions, verbatim, when it's stuck on an
+	// unsatisfiable finalizer) when Status is `deletion-blocked`. Owned by the
+	// delete executor, so scan-only; cleared on a fresh delete attempt.
+	DeleteError string    `json:"deleteError,omitempty" bun:"delete_error,scanonly,nullzero"`
 	CreatedAt   time.Time `json:"createdAt" bun:"created_at,scanonly"`
 	UpdatedAt   time.Time `json:"updatedAt" bun:"updated_at,scanonly"`
 }

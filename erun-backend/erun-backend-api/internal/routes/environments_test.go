@@ -822,7 +822,6 @@ func TestCreateEnvironmentPreviewStillEnforcesPlacement(t *testing.T) {
 
 type stubEnvironmentLifecycle struct {
 	stopped []provision.EnvLifecycleInput
-	deleted []provision.EnvLifecycleInput
 	err     error
 }
 
@@ -831,8 +830,13 @@ func (s *stubEnvironmentLifecycle) Stop(_ context.Context, in provision.EnvLifec
 	return s.err
 }
 
-func (s *stubEnvironmentLifecycle) Delete(_ context.Context, in provision.EnvLifecycleInput) error {
-	s.deleted = append(s.deleted, in)
+type stubEnvironmentDeleter struct {
+	started []provision.EnvDeleteInput
+	err     error
+}
+
+func (s *stubEnvironmentDeleter) Start(in provision.EnvDeleteInput) error {
+	s.started = append(s.started, in)
 	return s.err
 }
 
@@ -856,7 +860,7 @@ func postStopEnvironment(t *testing.T, environments *stubEnvironmentRepository, 
 	return rec
 }
 
-func deleteEnvironmentRequest(t *testing.T, environments *stubEnvironmentRepository, lifecycle EnvironmentLifecycle) *httptest.ResponseRecorder {
+func deleteEnvironmentRequest(t *testing.T, environments *stubEnvironmentRepository, deleter EnvironmentDeleter) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodDelete, "/v1/environments/env-1", nil)
 	req.SetPathValue("environment_id", "env-1")
@@ -871,7 +875,7 @@ func deleteEnvironmentRequest(t *testing.T, environments *stubEnvironmentReposit
 		contexts:     &stubContextRepository{},
 		quotas:       underCapQuota,
 		tenants:      stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
-		lifecycle:    lifecycle,
+		deleter:      deleter,
 	}.deleteEnvironment(rec, req)
 	return rec
 }
@@ -922,41 +926,80 @@ func TestStopEnvironmentSurfacesLifecycleFailure(t *testing.T) {
 	}
 }
 
-func TestDeleteEnvironmentRunsLifecycleDelete(t *testing.T) {
-	lifecycle := &stubEnvironmentLifecycle{}
-	rec := deleteEnvironmentRequest(t, runtimeEnvironment(), lifecycle)
+// TestDeleteEnvironmentStartsDeleteAsynchronously pins #1140's bounded-delete
+// contract: the handler claims the delete (moving the row to `deleting`) and
+// starts the durable workflow, then returns 202 immediately rather than
+// waiting on the teardown itself — which could run long or wedge entirely.
+func TestDeleteEnvironmentStartsDeleteAsynchronously(t *testing.T) {
+	environments := runtimeEnvironment()
+	deleter := &stubEnvironmentDeleter{}
+	rec := deleteEnvironmentRequest(t, environments, deleter)
 
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("status = %d (body %s), want 204", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d (body %s), want 202 Accepted", rec.Code, rec.Body.String())
 	}
-	if len(lifecycle.deleted) != 1 {
-		t.Fatalf("Delete called %d times, want 1", len(lifecycle.deleted))
+	if environments.claimDeleteCalls != 1 {
+		t.Fatalf("ClaimDelete called %d times, want 1", environments.claimDeleteCalls)
 	}
-	got := lifecycle.deleted[0]
-	if got.Tenant != "acme" || got.Environment != "prod" || got.EnvironmentID != "env-1" || got.RunningVersion != "1.2.3" {
-		t.Fatalf("delete input = %+v", got)
+	if len(deleter.started) != 1 {
+		t.Fatalf("Start called %d times, want 1", len(deleter.started))
+	}
+
+	var response model.Environment
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Status != model.EnvironmentStatusDeleting {
+		t.Fatalf("response status = %q, want %q — `running` must not survive a delete attempt", response.Status, model.EnvironmentStatusDeleting)
+	}
+}
+
+// TestDeleteEnvironmentResolvesTheDeleteInput checks the resolved
+// provision.EnvDeleteInput's fields separately from the response-shape
+// assertions above, so each assertion failure names exactly what went wrong.
+func TestDeleteEnvironmentResolvesTheDeleteInput(t *testing.T) {
+	deleter := &stubEnvironmentDeleter{}
+	deleteEnvironmentRequest(t, runtimeEnvironment(), deleter)
+
+	if len(deleter.started) != 1 {
+		t.Fatalf("Start called %d times, want 1", len(deleter.started))
+	}
+	got := deleter.started[0]
+	assertEqual(t, "Tenant", got.Tenant, "acme")
+	assertEqual(t, "Environment", got.Environment, "prod")
+	assertEqual(t, "EnvironmentID", got.EnvironmentID, "env-1")
+	assertEqual(t, "RunningVersion", got.RunningVersion, "1.2.3")
+	if got.DeleteID == "" {
+		t.Fatal("a fresh delete attempt must get its own delete id, or a retry would replay this attempt's cached result")
+	}
+}
+
+func assertEqual(t *testing.T, field, got, want string) {
+	t.Helper()
+	if got != want {
+		t.Fatalf("%s = %q, want %q", field, got, want)
 	}
 }
 
 // TestDeleteEnvironmentAllowsNonRuntime: a remote-agent/local-agent row was
 // never server-side deployed, so deleting it is a plain row removal — still
-// routed through the lifecycle, which skips the Job when RunningVersion is
-// empty.
+// routed through the durable workflow, which skips the Job when
+// RunningVersion is empty.
 func TestDeleteEnvironmentAllowsNonRuntime(t *testing.T) {
 	environments := &stubEnvironmentRepository{environment: model.Environment{
 		EnvironmentID: "env-1", Name: "agents", Type: model.EnvironmentTypeRemoteAgent,
 	}}
-	lifecycle := &stubEnvironmentLifecycle{}
-	rec := deleteEnvironmentRequest(t, environments, lifecycle)
+	deleter := &stubEnvironmentDeleter{}
+	rec := deleteEnvironmentRequest(t, environments, deleter)
 
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("status = %d (body %s), want 204", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d (body %s), want 202 Accepted", rec.Code, rec.Body.String())
 	}
-	if len(lifecycle.deleted) != 1 {
-		t.Fatalf("Delete called %d times, want 1", len(lifecycle.deleted))
+	if len(deleter.started) != 1 {
+		t.Fatalf("Start called %d times, want 1", len(deleter.started))
 	}
-	if lifecycle.deleted[0].RunningVersion != "" {
-		t.Fatalf("running version = %q, want empty for a never-deployed environment", lifecycle.deleted[0].RunningVersion)
+	if deleter.started[0].RunningVersion != "" {
+		t.Fatalf("running version = %q, want empty for a never-deployed environment", deleter.started[0].RunningVersion)
 	}
 }
 
@@ -967,10 +1010,39 @@ func TestDeleteEnvironmentReportsUnconfiguredExecutor(t *testing.T) {
 	}
 }
 
-func TestDeleteEnvironmentSurfacesLifecycleFailure(t *testing.T) {
-	lifecycle := &stubEnvironmentLifecycle{err: errForeignKey{}}
-	rec := deleteEnvironmentRequest(t, runtimeEnvironment(), lifecycle)
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("status = %d, want 502 Bad Gateway", rec.Code)
+// TestDeleteEnvironmentRejectsConcurrentDelete mirrors
+// TestDeployEnvironmentRejectsConcurrentDeploy: a double-submit must not
+// start two delete Jobs against the same namespace.
+func TestDeleteEnvironmentRejectsConcurrentDelete(t *testing.T) {
+	environments := runtimeEnvironment()
+	environments.claimDeleteTaken = true
+	deleter := &stubEnvironmentDeleter{}
+	rec := deleteEnvironmentRequest(t, environments, deleter)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d (body %s), want 409 Conflict", rec.Code, rec.Body.String())
+	}
+	if len(deleter.started) != 0 {
+		t.Fatal("a delete already in progress must not start a second attempt")
+	}
+}
+
+// TestDeleteEnvironmentStartFailureMarksBlocked mirrors
+// TestDeployEnvironmentStartFailureMarksFailed: ClaimDelete already moved the
+// row to `deleting` before Start ran, so a failure to even enqueue the
+// durable workflow must not strand it there — it moves to deletion-blocked.
+func TestDeleteEnvironmentStartFailureMarksBlocked(t *testing.T) {
+	environments := runtimeEnvironment()
+	deleter := &stubEnvironmentDeleter{err: errForeignKey{}}
+	rec := deleteEnvironmentRequest(t, environments, deleter)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d (body %s), want 500", rec.Code, rec.Body.String())
+	}
+	if environments.markDeleteBlockedCalls != 1 {
+		t.Fatalf("MarkDeleteBlocked called %d times, want 1", environments.markDeleteBlockedCalls)
+	}
+	if environments.markDeleteBlockedReason == "" {
+		t.Fatal("MarkDeleteBlocked must record why the workflow could not be started")
 	}
 }

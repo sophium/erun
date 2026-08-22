@@ -24,19 +24,30 @@ stateDiagram-v2
     running --> provisioning: POST .../deploy (re-deploy)
     failed --> provisioning: POST .../deploy (retry)
 
+    registered --> deleting: DELETE /v1/environments/{id}
+    running --> deleting: DELETE /v1/environments/{id}
+    failed --> deleting: DELETE /v1/environments/{id}
+    deleting --> [*]: namespace confirmed gone (row removed)
+    deleting --> deletionblocked: teardown did not complete
+    deletionblocked --> deleting: retry (operator, or the reconciler)
+
     class registered step
     class provisioning step
     class running step
     class failed endpoint
+    class deleting step
+    class deletionblocked endpoint
 ```
 
 `registered` is a plain config row with no live infrastructure yet. Registering a runtime environment with a `runtimeVersion` set — or calling `POST .../deploy` on an already-registered one — starts a Kubernetes Job that runs `erun deploy` at that version, and the row moves to `provisioning` while it runs. A `remote-agent`/`local-agent` environment never leaves `registered`: the platform only server-side deploys `runtime` environments.
+
+A delete request moves a `registered`/`running`/`failed` row to `deleting` and returns immediately; the row is hard-deleted once the namespace is confirmed torn down, or moves to `deletion-blocked` with `deleteError` naming why it is not. `deletion-blocked` is not terminal — a retry, or the control plane's own periodic reconciler, re-attempts it.
 
 **Bootstrapping a tenant with no published image.** The Job normally runs inside the tenant's own `<tenant>-devops` runtime image, deploying that same image's chart by reference. Before starting it, the control plane checks whether that image is actually published at the requested version; a tenant that has never run `erun push` — the common case for a brand-new tenant signing in for the first time — has no image to run. Rather than starting a Job that can only `ImagePullBackOff`, the control plane instead runs the Job on the canonical published `erun-devops` image and passes `erun deploy --runtime-image <canonical image>`, the same flag an operator's own machine uses to bootstrap an environment before its project exists ([`erun deploy`](/cli/deploy)). The environment still lands on `<tenant>-<env>` with the release named `<tenant>-devops`; only the underlying image and chart differ. A tenant that publishes its own image and plan keeps getting exactly that — this check never overrides an image that actually exists.
 
 The check runs **with the registry credential the deploy Job itself pulls with** (the platform namespace's image-pull secret, named to the control plane by the `erun-backend-api` chart). That is what makes it decisive rather than advisory: a private registry namespace — the normal case for a tenant's own runtime image — answers an anonymous caller identically whether the image is absent or merely invisible, so an unauthenticated probe can never confirm absence. The credential is proven in the same pass by probing the canonical `erun-devops` image at the same version, which this deploy already depends on resolving; only a credential that reads *that* makes a "not found" for the tenant image meaningful. Every other outcome — no credential configured, an unreachable registry, a non-GHCR host — is treated as inconclusive and leaves the deploy on the tenant's own image, so an inconclusive probe never diverts a deploy.
 
-`stop` (`POST .../stop`) and `delete` (`DELETE`) run the same way — a short-lived Job running `erun stop`/`erun delete` — but neither is a `status` transition: a stopped environment stays `running` (scaled to zero, not torn down), and a successful delete removes the row entirely rather than moving it to a terminal status.
+`stop` (`POST .../stop`) and `delete` (`DELETE`) both run a short-lived Job running `erun stop`/`erun delete`, but they differ in how they show up in `status`. `stop` is not a transition at all: a stopped environment stays `running` (scaled to zero, not torn down). `delete` **is** one — the request moves the row to `deleting` and returns without waiting, and the teardown runs behind a durable workflow, because a namespace stuck on an unsatisfiable finalizer can sit in `Terminating` indefinitely. A confirmed teardown removes the row entirely; anything else lands on `deletion-blocked` with `deleteError` naming why.
 
 ## Placement {#single-cluster-placement}
 
@@ -63,7 +74,7 @@ The control plane's own ServiceAccount (`<tenant>-api`) is separate and narrower
 
 ## Quotas {#quotas}
 
-`tenant_quotas` carries three kinds of cap, all defaulted when a tenant has no row: `max_environments` (default `10`) is an **aggregate** cap on how many environments a tenant may register — `POST /v1/environments` refuses a create at the cap (`409`), and `POST /v1/provision` reports `quotaOk: false` in the same preview rather than failing the call. `max_cpu_millicores`/`max_memory_mb`/`max_storage_gb` (default `8000`/`17832`/`72`, sized to the `erun-devops` chart's own default runtime pod summed across **both** its containers — `erun-devops` and the `erun-dind` sidecar — plus its three default PVCs) are a **per-environment namespace ceiling** — every `runtime` environment this tenant provisions gets its own cap, not a budget split across all of them.
+`tenant_quotas` carries three kinds of cap, all defaulted when a tenant has no row: `max_environments` (default `10`) is an **aggregate** cap on how many environments a tenant may register — `POST /v1/environments` refuses a create at the cap (`409`), and `POST /v1/provision` reports `quotaOk: false` in the same preview rather than failing the call. Environments mid-teardown (`deleting`, `deletion-blocked`) are **excluded from that count**: the delete that would free the slot is the same call that is stuck, so a wedged teardown must not lock a tenant out of its own allowance. The aggregate resource budget below counts differently — it reads the tenant's runtime-environment count without that exclusion. `max_cpu_millicores`/`max_memory_mb`/`max_storage_gb` (default `8000`/`17832`/`72`, sized to the `erun-devops` chart's own default runtime pod summed across **both** its containers — `erun-devops` and the `erun-dind` sidecar — plus its three default PVCs) are a **per-environment namespace ceiling** — every `runtime` environment this tenant provisions gets its own cap, not a budget split across all of them.
 
 **`max_total_cpu_millicores`/`max_total_memory_mb`/`max_total_storage_gb`** (default `80000`/`178320`/`720` — `max_environments` × the per-environment defaults) is the separate **aggregate tenant-wide budget** (#1113): since every runtime environment gets the identical per-environment cap, the projected total is exact, not an estimate — `(existing runtime environment count + 1) × the per-environment cap` for a new environment, or the count as-is for a redeploy (which does not add one). `POST /v1/environments` and `POST .../deploy` both refuse with a `409` naming which resource and by how much the projection would exceed the budget; `POST /v1/provision` and `POST /v1/environments {"preview": true}` report the same projection as a plan line rather than failing the preview. This closes the gap the per-environment ceiling alone left open: raising `max_environments` used to let a tenant multiply its total cluster footprint with no ceiling on the sum.
 
@@ -93,7 +104,7 @@ A newly-created runtime environment is reachable at `mcp.<tenant>-<env>.<service
 
 **Idempotent by construction.** Re-running the deploy Job — an explicit re-deploy, or a workflow resuming after a control-plane restart — re-runs the same `erun expose` call. The underlying writes already converge rather than duplicate: the DNS record is a `replace-rrset`, and the Ingress is a `kubectl apply`.
 
-**Torn down on delete.** The DNS record `erun expose` writes has no owner once the environment row that would tell you whether it is still live is gone, so a successful `erun delete` Job chains a best-effort `erun unexpose` (#1094) that removes it, symmetric with the deploy Job chaining `erun expose` itself. A cleanup failure does not fail the delete — the namespace already tore down successfully by that point — it is logged on the control plane instead, since there is no environment row left to record it against once delete returns.
+**Torn down on delete.** The DNS record `erun expose` writes has no owner once the environment row that would tell you whether it is still live is gone, so a successful `erun delete` Job chains a best-effort `erun unexpose` (#1094) that removes it, symmetric with the deploy Job chaining `erun expose` itself. A cleanup failure does not fail the delete — the namespace already tore down successfully by that point — it is logged on the control plane instead, since the row is removed in the same workflow step that ran the cleanup.
 
 ## Per-env TLS certificate provisioning {#per-env-tls}
 

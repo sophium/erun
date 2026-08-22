@@ -100,18 +100,22 @@ type PlatformUser struct {
 
 // PlatformEnvironment mirrors model.Environment's JSON shape.
 type PlatformEnvironment struct {
-	EnvironmentID     string    `json:"environmentId"`
-	TenantID          string    `json:"tenantId"`
-	Name              string    `json:"name"`
-	Type              string    `json:"type"`
-	KubernetesContext string    `json:"kubernetesContext,omitempty"`
-	ContextID         string    `json:"contextId,omitempty"`
-	RuntimeVersion    string    `json:"runtimeVersion,omitempty"`
-	Status            string    `json:"status"`
-	ProvisionError    string    `json:"provisionError,omitempty"`
-	DeployedVersion   string    `json:"deployedVersion,omitempty"`
-	CreatedAt         time.Time `json:"createdAt"`
-	UpdatedAt         time.Time `json:"updatedAt"`
+	EnvironmentID     string `json:"environmentId"`
+	TenantID          string `json:"tenantId"`
+	Name              string `json:"name"`
+	Type              string `json:"type"`
+	KubernetesContext string `json:"kubernetesContext,omitempty"`
+	ContextID         string `json:"contextId,omitempty"`
+	RuntimeVersion    string `json:"runtimeVersion,omitempty"`
+	Status            string `json:"status"`
+	ProvisionError    string `json:"provisionError,omitempty"`
+	DeployedVersion   string `json:"deployedVersion,omitempty"`
+	// DeleteError names why a delete attempt did not tear the namespace down
+	// (the namespace's own conditions, verbatim, when it is stuck on an
+	// unsatisfiable finalizer) when Status is "deletion-blocked" (#1140).
+	DeleteError string    `json:"deleteError,omitempty"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 // PlatformContext mirrors model.Context's JSON shape.
@@ -283,12 +287,21 @@ func (c *PlatformClient) StopEnvironment(ctx context.Context, environmentID stri
 	return environment, err
 }
 
-// DeleteEnvironment tears down a runtime environment's namespace and removes
-// its row, the server-side equivalent of `erun delete`. Errors
-// ErrPlatformNotImplemented when the platform has no deploy executor
-// configured.
-func (c *PlatformClient) DeleteEnvironment(ctx context.Context, environmentID string) error {
-	return c.do(ctx, http.MethodDelete, "/v1/environments/"+url.PathEscape(environmentID), nil, true, nil)
+// DeleteEnvironment starts tearing down a runtime environment's namespace and
+// its row, the server-side equivalent of `erun delete`. The teardown itself
+// runs asynchronously (#1140): this call returns as soon as the delete is
+// claimed and the durable workflow behind it starts, not once the namespace
+// is actually gone, since a stuck namespace finalizer can otherwise wedge for
+// as long as Kubernetes is willing to sit in Terminating. The returned
+// environment reflects the claim (Status "deleting"); poll GetEnvironment to
+// watch it converge to gone (ErrPlatformNotFound) or "deletion-blocked"
+// (DeleteError names why). Errors ErrPlatformConflict when a delete is
+// already in progress, and ErrPlatformNotImplemented when the platform has no
+// deploy executor configured.
+func (c *PlatformClient) DeleteEnvironment(ctx context.Context, environmentID string) (PlatformEnvironment, error) {
+	var environment PlatformEnvironment
+	err := c.do(ctx, http.MethodDelete, "/v1/environments/"+url.PathEscape(environmentID), nil, true, &environment)
+	return environment, err
 }
 
 // ListContexts lists the caller's tenant's cloud contexts (managed clusters).

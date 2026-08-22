@@ -2,6 +2,7 @@ package deployexec
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -59,7 +60,7 @@ func TestBuildDeleteJobSpec(t *testing.T) {
 	pod := job.Spec.Template.Spec
 	// -y skips the CLI's interactive confirmation: the Job has no terminal to
 	// answer a prompt on.
-	assertLifecycleBootstrapScript(t, "delete", pod.Containers[0].Command, "'erun' 'delete' 'acme' 'prod' '-y'")
+	assertLifecycleBootstrapScript(t, "delete", pod.Containers[0].Command, "'erun' 'delete' 'acme' 'prod' '-y' '--output' 'json'")
 	if strings.Contains(pod.Containers[0].Command[2], "unexpose") {
 		t.Fatalf("script %q should not chain unexpose without platform coordinates", pod.Containers[0].Command[2])
 	}
@@ -74,7 +75,7 @@ func TestBuildDeleteJobSpecWithUnexpose(t *testing.T) {
 	params.ExposeServicesZone = "services.erunpaas.com"
 	params.ExposePlatformNamespace = "frs-prod"
 	script := buildDeleteCommand(params)[2]
-	wantDelete := "'erun' 'delete' 'acme' 'prod' '-y'"
+	wantDelete := "'erun' 'delete' 'acme' 'prod' '-y' '--output' 'json'"
 	wantUnexpose := "'erun' 'unexpose' 'acme' 'prod' '--skip-if-unconfigured' '--services-zone' 'services.erunpaas.com' '--platform-namespace' 'frs-prod'"
 	if !strings.Contains(script, wantDelete) {
 		t.Fatalf("script %q missing delete stage %q", script, wantDelete)
@@ -123,6 +124,42 @@ func TestUnexposeFailureFromOutput(t *testing.T) {
 	}
 	if got := UnexposeFailureFromOutput("==> Deleted acme/prod\n"); got != "" {
 		t.Fatalf("UnexposeFailureFromOutput = %q, want empty when no marker is present", got)
+	}
+}
+
+// TestNamespaceDeleteFailureFromOutput pins the interaction #1140 is about:
+// `erun delete` exits 0 (and prints "deleted") even when the remote namespace
+// teardown itself failed, so the API cannot trust the Job's own exit code —
+// it has to read the --output json result back out of the captured output.
+// eruncommon.Context.WriteResult pretty-prints (json.MarshalIndent), and the
+// Job's combined stdout+stderr log carries the plain-text audit/trace lines
+// around it, so the fixture mirrors both: multi-line JSON, not a single line.
+func TestNamespaceDeleteFailureFromOutput(t *testing.T) {
+	blocked := `namespace "acme-prod" did not finish terminating within 20m0s:` + "\n" +
+		"NamespaceContentRemaining=True     challenges.acme.cert-manager.io has 1 resource instances\n" +
+		"NamespaceFinalizersRemaining=True  acme.cert-manager.io/finalizer in 1 resource instances"
+	encoded, err := json.MarshalIndent(struct {
+		Tenant               string `json:"tenant"`
+		Environment          string `json:"environment"`
+		Namespace            string `json:"namespace"`
+		NamespaceDeleteError string `json:"namespaceDeleteError"`
+	}{Tenant: "acme", Environment: "prod", Namespace: "acme-prod", NamespaceDeleteError: blocked}, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal fixture: %v", err)
+	}
+	output := "audit: erun delete acme prod -y --output json\n" + string(encoded) + "\n"
+
+	if got := NamespaceDeleteFailureFromOutput(output); got != blocked {
+		t.Fatalf("NamespaceDeleteFailureFromOutput = %q, want %q", got, blocked)
+	}
+
+	succeeded := `{"tenant":"acme","environment":"prod","namespace":"acme-prod"}` + "\n"
+	if got := NamespaceDeleteFailureFromOutput(succeeded); got != "" {
+		t.Fatalf("NamespaceDeleteFailureFromOutput = %q, want empty when the namespace was torn down", got)
+	}
+
+	if got := NamespaceDeleteFailureFromOutput("not json at all\n"); got != "" {
+		t.Fatalf("NamespaceDeleteFailureFromOutput = %q, want empty when the Job predates --output json", got)
 	}
 }
 

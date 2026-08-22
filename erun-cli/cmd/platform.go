@@ -302,6 +302,9 @@ func writePlatformEnvironmentLine(ctx common.Context, environment common.Platfor
 	if strings.TrimSpace(environment.ProvisionError) != "" {
 		line += " provision-error=" + quotedValueOrNone(environment.ProvisionError)
 	}
+	if strings.TrimSpace(environment.DeleteError) != "" {
+		line += " delete-error=" + quotedValueOrNone(environment.DeleteError)
+	}
 	_, err := fmt.Fprintln(ctx.Stdout, line)
 	return err
 }
@@ -446,11 +449,16 @@ func newPlatformEnvDeleteCmd(store common.CloudReadStore, alias *string, promptR
 	var yes bool
 	cmd := &cobra.Command{
 		Use:   "delete ENVIRONMENT_ID",
-		Short: "Delete a hosted environment and tear down its remote namespace",
-		Long: "Delete a hosted environment and tear down its remote namespace.\n\n" +
-			"The server-side equivalent of `erun delete`: the platform deletes the environment's " +
-			"namespace and its data, then removes the row. Not recoverable. Asks for confirmation; " +
-			"-y skips the prompt for non-interactive callers.",
+		Short: "Start deleting a hosted environment and tearing down its remote namespace",
+		Long: "Start deleting a hosted environment and tearing down its remote namespace.\n\n" +
+			"The server-side equivalent of `erun delete`: the platform starts tearing down the " +
+			"environment's namespace and its data, then removes the row. Not recoverable. The " +
+			"teardown itself runs in the background — a namespace stuck on an unsatisfiable " +
+			"finalizer can take a while, so this returns as soon as the delete is accepted, with " +
+			"status \"deleting\". Run `erun platform env get` to watch it converge to gone (not " +
+			"found) or \"deletion-blocked\" (naming why); a delete command against a blocked or " +
+			"still-deleting environment retries it. Asks for confirmation; -y skips the prompt for " +
+			"non-interactive callers.",
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		Example:      "  erun platform env delete 018f...\n  erun platform env delete 018f... -y",
@@ -465,15 +473,20 @@ func newPlatformEnvDeleteCmd(store common.CloudReadStore, alias *string, promptR
 					return fmt.Errorf("delete cancelled")
 				}
 			}
-			if err := common.RunPlatformDeleteEnvironment(ctx, store, *alias, args[0], deps); err != nil {
+			environment, err := common.RunPlatformDeleteEnvironment(ctx, store, *alias, args[0], deps)
+			if err != nil {
 				return err
 			}
 			if ctx.DryRun {
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform environment deletion planned.")
 				return err
 			}
-			_, err := fmt.Fprintf(ctx.Stdout, "deleted environment %s\n", args[0])
-			return err
+			if ctx.Output != common.OutputJSON {
+				if err := writePlatformEnvironmentLine(ctx, environment); err != nil {
+					return err
+				}
+			}
+			return ctx.WriteResult(environment)
 		},
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip the confirmation prompt (for non-interactive callers)")

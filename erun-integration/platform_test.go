@@ -162,7 +162,10 @@ func platformAPIStubServer(t testing.TB) *httptest.Server {
 		if !requireBearer(w, r) {
 			return
 		}
-		w.WriteHeader(http.StatusNoContent)
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"environmentId": r.PathValue("environment_id"), "tenantId": "tenant-1", "name": "prod", "type": "runtime", "status": "deleting", "createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-01T00:00:00Z",
+		})
 	})
 	mux.HandleFunc("GET /v1/contexts", func(w http.ResponseWriter, r *http.Request) {
 		if !requireBearer(w, r) {
@@ -363,7 +366,7 @@ func TestPlatform(t *testing.T) {
 		}
 
 		deleteResult := erun.Run(t, []string{"platform", "env", "delete", "env-1", "-y"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if deleteResult.ExitCode != 0 || !strings.Contains(deleteResult.Combined, "deleted environment env-1") {
+		if deleteResult.ExitCode != 0 || !strings.Contains(deleteResult.Combined, "status=deleting") {
 			t.Fatalf("delete exit %d: %s", deleteResult.ExitCode, deleteResult.Combined)
 		}
 	})

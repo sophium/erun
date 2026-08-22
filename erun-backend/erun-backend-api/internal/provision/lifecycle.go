@@ -2,6 +2,7 @@ package provision
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -24,9 +25,13 @@ type EnvLifecycleRunner interface {
 }
 
 // EnvironmentRowDeleter hard-deletes an environment's row once its namespace
-// (if any) is confirmed torn down.
+// (if any) is confirmed torn down, or records why a delete attempt did not
+// reach that point (#1140). `running` must never survive a call to Delete:
+// every path through it ends in either the row being gone or MarkDeleteBlocked
+// naming the blocker.
 type EnvironmentRowDeleter interface {
 	Delete(ctx context.Context, environmentID string) error
+	MarkDeleteBlocked(ctx context.Context, environmentID, reason string) error
 }
 
 // EnvLifecycleInput is the non-secret placement a stop or delete Job needs:
@@ -51,12 +56,13 @@ type EnvLifecycleInput struct {
 	PlacementServerURL         string
 }
 
-// EnvLifecycle runs a hosted env's stop/delete synchronously, unlike
-// EnvProvisioner's durable DBOS workflow: the underlying Jobs are short
-// kubectl operations (scale to zero, delete namespace), not a multi-minute
-// helm rollout, so a blocking HTTP handler with a bounded request context is
-// an acceptable v1 shape. Revisit if a tenant's teardown routinely runs long
-// (stuck namespace finalizers, for example).
+// EnvLifecycle runs a hosted env's stop/delete Job to a terminal outcome and
+// persists the environment row accordingly. Stop still runs synchronously
+// from the HTTP handler that calls it — a scale-to-zero is a short kubectl
+// operation. Delete does not: EnvDeleter wraps it in a durable DBOS workflow
+// (#1140) precisely because a namespace teardown can run long or wedge
+// entirely (a DNS-01 solver that stops answering, for example), so the HTTP
+// handler that starts one must not be the thing waiting on it.
 type EnvLifecycle struct {
 	runner       EnvLifecycleRunner
 	rows         EnvironmentRowDeleter
@@ -143,13 +149,16 @@ func (l *EnvLifecycle) Stop(ctx context.Context, input EnvLifecycleInput) error 
 
 // Delete tears down the environment's namespace (skipped when it never
 // deployed, since there is nothing to tear down) and, only once that
-// succeeds, removes its row. A failed teardown must not silently forget an
-// environment whose namespace may still exist.
+// succeeds, removes its row. Every other outcome — the Job itself could not
+// be launched, it ran but did not finish, or it finished but the namespace
+// teardown inside it did not (#1140, a namespace stuck on an unsatisfiable
+// finalizer) — moves the row to deletion-blocked naming why, rather than
+// silently leaving a caller unable to tell "still there" from "gone".
 func (l *EnvLifecycle) Delete(ctx context.Context, input EnvLifecycleInput) error {
 	if strings.TrimSpace(input.RunningVersion) != "" {
 		placement, err := l.placement(ctx, input)
 		if err != nil {
-			return err
+			return l.blockDelete(ctx, input.EnvironmentID, err)
 		}
 		result, err := l.runner.RunDelete(ctx, deployexec.DeleteJobParams{
 			Tenant:                  input.Tenant,
@@ -162,10 +171,18 @@ func (l *EnvLifecycle) Delete(ctx context.Context, input EnvLifecycleInput) erro
 			Placement:               placement,
 		})
 		if err != nil {
-			return err
+			return l.blockDelete(ctx, input.EnvironmentID, err)
 		}
 		if result.Outcome != deployexec.OutcomeSucceeded {
-			return fmt.Errorf("delete job %s: %s", result.Outcome, lifecycleFailureDetail(result))
+			return l.blockDelete(ctx, input.EnvironmentID, fmt.Errorf("delete job %s: %s", result.Outcome, lifecycleFailureDetail(result)))
+		}
+		// The Job's own exit code is not the whole story: `erun delete` treats
+		// a namespace-teardown failure as non-fatal for itself (its local
+		// config cleanup still runs), so a Job the runner reports as
+		// succeeded can still have left the namespace stuck. This is the only
+		// place that failure is visible.
+		if blocker := deployexec.NamespaceDeleteFailureFromOutput(result.Output); blocker != "" {
+			return l.blockDelete(ctx, input.EnvironmentID, errors.New(blocker))
 		}
 		// The environment row is about to be removed, so a failed best-effort
 		// DNS cleanup has nowhere to be recorded once this returns —
@@ -176,6 +193,17 @@ func (l *EnvLifecycle) Delete(ctx context.Context, input EnvLifecycleInput) erro
 	}
 	l.recordUsage(ctx, input.EnvironmentID, model.UsageEventEnvironmentDeleted)
 	return l.rows.Delete(ctx, input.EnvironmentID)
+}
+
+// blockDelete records why a delete attempt did not tear the namespace down
+// and returns the same error to the caller. A failure to even record it
+// (best-effort: the environment row still exists to retry against) is
+// logged rather than compounding the original error.
+func (l *EnvLifecycle) blockDelete(ctx context.Context, environmentID string, cause error) error {
+	if err := l.rows.MarkDeleteBlocked(ctx, environmentID, cause.Error()); err != nil {
+		log.Printf("erun api env lifecycle: recording delete-blocked for environment=%q did not persist: %v", environmentID, err)
+	}
+	return cause
 }
 
 func lifecycleFailureDetail(result deployexec.Result) string {
