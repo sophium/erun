@@ -27,3 +27,8 @@ output "dns01_webhook_installed" {
   description = "Whether this apply installed the per-cluster DNS-01 webhook shim (the resolved value of install_dns01_webhook, after applying its dns01_provider-based default). A per-tenant Issuer selecting the webhook solver (e.g. one erun expose provisions) can only reach Ready when this is true."
   value       = local.install_dns01_webhook
 }
+
+output "coredns_forward_installed" {
+  description = "Whether this apply installed the CoreDNS custom forward zone for base_domain_name (the resolved value of install_coredns_forward). True means in-cluster resolution of the platform's own published names no longer depends on the node's resolver chain."
+  value       = var.install_coredns_forward
+}

@@ -22,6 +22,56 @@ locals {
   # its issuer); it falls back to the cert-manager namespace for an apex-only
   # edge with no env.
   issuer_namespace = local.env_namespace != "" ? local.env_namespace : var.namespace
+
+  # CoreDNS custom server block for base_domain_name. File name is derived from
+  # the domain (dots to dashes) rather than fixed, so it can't collide with an
+  # unrelated *.server file someone else drops in the same ConfigMap.
+  coredns_forward_key   = "${replace(var.base_domain_name, ".", "-")}.server"
+  coredns_forward_block = <<-EOT
+    ${var.base_domain_name}:53 {
+        errors
+        cache 30
+        forward . ${join(" ", var.coredns_forward_upstreams)}
+    }
+  EOT
+}
+
+# k3s's bundled CoreDNS ends its default Corefile in `forward . /etc/resolv.conf`,
+# so every name outside cluster.local resolves through whatever DNS the node
+# happens to use — including the platform's own published names, which makes
+# cert-manager's HTTP-01 self-check (and every unattended renewal after it)
+# hostage to a resolver outside the platform's control. k3s's CoreDNS already
+# mounts coredns-custom at /etc/coredns/custom (optional) and imports every
+# *.server file from it, so this needs no change to the CoreDNS Deployment.
+#
+# Owns the whole coredns-custom object rather than merging into it (e.g. via
+# kubernetes_config_map_v1_data): that resource requires the ConfigMap to
+# already exist, which a cluster that has never hand-created one — the normal
+# case — does not have, so it can't be the thing that creates it either.
+# Nothing else in this platform writes to coredns-custom; if that changes,
+# extend this resource's data map from the caller rather than adding a second
+# resource that would race it for ownership of the same object. A cluster
+# already carrying a hand-applied coredns-custom must be reconciled once
+# (terraform import, or delete the hand-applied copy) before the first apply
+# with install_coredns_forward = true.
+resource "kubernetes_config_map" "coredns_forward" {
+  count = var.install_coredns_forward ? 1 : 0
+
+  metadata {
+    name      = "coredns-custom"
+    namespace = "kube-system"
+  }
+
+  data = {
+    (local.coredns_forward_key) = local.coredns_forward_block
+  }
+
+  lifecycle {
+    precondition {
+      condition     = var.base_domain_name != ""
+      error_message = "install_coredns_forward requires base_domain_name (the platform's own apex domain, e.g. \"example.com\")."
+    }
+  }
 }
 
 # Namespace cert-manager itself runs in. The Issuer, its DNS-01 credential

@@ -92,6 +92,20 @@ Let's Encrypt production rate limits, then re-apply without it for real certs. O
 cluster that already runs Traefik or cert-manager, add
 `-var install_ingress_controller=false` and/or `-var install_cert_manager=false`.
 
+**In-cluster resolution of the platform's own names.** k3s's bundled CoreDNS ends
+its default Corefile in `forward . /etc/resolv.conf`, so every name outside
+`cluster.local` — including the platform's own published hostnames — resolves
+through whatever DNS the node happens to use. If that resolver ever serves a stale
+or wrong answer for one of those names, cert-manager's HTTP-01 self-check fails the
+same way at issuance and at every unattended renewal, with the cause buried in a
+Challenge's status. Add `-var install_coredns_forward=true -var
+"base_domain_name=<base-domain>"` (the platform config's `basedomain`, e.g.
+`example.com`) to declare a CoreDNS custom server block that forwards it to public
+resolvers directly, independent of the node. This is opt-in and defaults to false
+so an existing cluster's DNS behavior does not change on a module upgrade; add
+`-var 'coredns_forward_upstreams=["<resolver>", ...]'` on an air-gapped or
+policy-constrained cluster that must not reach public resolvers.
+
 **Delegated services zone (PowerDNS DNS-01).** Once the services zone is delegated
 off Cloudflare to the platform's own PowerDNS, the Cloudflare DNS-01 solver can no
 longer prove control of it — switch the solver to RFC2136 (DNS UPDATE + TSIG) and
@@ -193,6 +207,23 @@ kubectl get certificate -n "$NS"
 kubectl wait --for=condition=Ready certificate/erun-cloudflare-wildcard -n "$NS" --timeout=600s
 ```
 
+When `install_coredns_forward` is set, confirm the cluster can actually resolve the
+base domain before trusting issuance to it — this is exactly the check that catches
+a resolver problem before a Certificate sits pending with the cause buried in a
+Challenge's status. Terraform has no reliable way to run this from inside the
+module itself (it would need to schedule a Job/Pod as a side effect of `apply`,
+adding image-pull and RBAC requirements to a declarative-only module for what is
+fundamentally a smoke test), so it's a manual step here instead:
+
+```sh
+kubectl run coredns-forward-check --rm -i --restart=Never --image=busybox:1.36 \
+  -- nslookup "<base-domain>"
+```
+
+A `NXDOMAIN` or timeout here means the forward zone isn't resolving yet — CoreDNS
+reloads `coredns-custom` automatically, but allow ~80 seconds after the apply
+before treating a failure here as real.
+
 A `Ready` Issuer + a `Ready` wildcard Certificate means the edge can
 terminate TLS. Route an env's service through it with `erun expose` — it writes the
 PowerDNS record and applies a Host-routing Ingress that serves `https` by default,
@@ -233,3 +264,12 @@ re-running *is* the maintenance path, not an error.
 e.g. frs-prod) show the ACME order/challenge state. The usual causes: the Cloudflare
 token lacks `Zone:Read` + `DNS:Edit` on the zone, or the services zone isn't actually
 delegated to Cloudflare yet (`dig NS <services-zone>` should return Cloudflare name servers).
+
+A self-check failure specifically (`describe challenge` in the issuer namespace shows
+`failed to perform self check GET request ... dial tcp: lookup <host> ... no such
+host`) while the same name resolves fine from outside the cluster points at the
+node's resolver, not Cloudflare or the zone: confirm with
+`kubectl run dns-check --rm -i --restart=Never --image=busybox:1.36 -- nslookup
+<host>` from inside the cluster, and if that fails while a public resolver succeeds,
+apply `install_coredns_forward=true` (see **Apply** above) rather than waiting for
+the node's resolver to recover on its own.
