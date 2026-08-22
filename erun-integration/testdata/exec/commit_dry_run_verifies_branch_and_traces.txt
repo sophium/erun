@@ -1,0 +1,4 @@
+audit: erun exec commit --dry-run main
+git -C <TMP> rev-parse --abbrev-ref HEAD
+cd <TMP> && git add -A
+cd <TMP> && git commit -m '<message>'

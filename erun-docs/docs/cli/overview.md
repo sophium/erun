@@ -44,7 +44,7 @@ The `build → release → push → deploy` commands form ERun's delivery pipeli
 | [`erun mcp`](/cli/mcp) | Run the MCP server for Agents (launches `emcp`); `call` / `tools` / `token` reach an env's MCP edge. |
 | [`erun api`](/cli/api) | Run the backend API server (launches `eapi`). |
 | [`erun app`](/cli/app) | Launch the desktop app. |
-| [`erun exec`](/cli/exec) | Run repository helpers — `diff`, `raw`. |
+| [`erun exec`](/cli/exec) | Run repository helpers — `diff`, `raw`, `write`, `commit`. |
 | [`erun contribute`](/cli/contribute) | Contribute-mode helpers — clone the ERun repo locally. |
 
 ## Dry-run and verbosity

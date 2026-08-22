@@ -1,0 +1,2 @@
+audit: erun exec commit not-main
+refusing to commit: working tree is on branch "main", not the declared "not-main"

@@ -37,6 +37,13 @@ func captureGit(t testing.TB, dir string, args ...string) string {
 	return string(out)
 }
 
+// execDangerousContent carries the constructs a shell would reinterpret —
+// backticks, command substitution, embedded quotes, a trailing newline — so a
+// round trip through `exec write` / `exec commit` demonstrates the property
+// that justifies bypassing raw for these two operations: content and message
+// travel as data and are never shell-parsed.
+const execDangerousContent = "line one\n`echo pwned` $(echo pwned) \"quoted\" 'quoted'\ntrailing\n\n"
+
 func TestExec(t *testing.T) {
 	t.Run("help", func(t *testing.T) {
 		setup := env.New(t)
@@ -360,5 +367,155 @@ func TestExec(t *testing.T) {
 			t.Fatalf("expected non-zero exit (no git project), got 0:\n%s", result.Combined)
 		}
 		golden.Equal(t, "exec/dry_run_with_time_flag_prints_elapsed_on_error", normalize.Apply(result.Combined))
+	})
+
+	t.Run("write_help", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"exec", "write", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/write_help", normalize.Apply(result.Combined))
+	})
+
+	t.Run("write_dry_run_traces_resolved_path", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		result := erun.Run(t, []string{"exec", "write", "config/values.yaml", "--dry-run"}, erun.RunOptions{
+			Cwd:   setup.Cwd,
+			Env:   setup.Env(),
+			Stdin: "hello\n",
+		})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/write_dry_run_traces_resolved_path", normalize.Apply(result.Combined))
+		if _, err := os.Stat(filepath.Join(setup.Cwd, "config", "values.yaml")); !os.IsNotExist(err) {
+			t.Fatalf("dry-run must not write anything")
+		}
+	})
+
+	t.Run("write_dry_run_errors_outside_git_project", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"exec", "write", "foo.txt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "x"})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit outside a git project, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/write_dry_run_errors_outside_git_project", normalize.Apply(result.Combined))
+	})
+
+	t.Run("write_refuses_path_outside_project_root", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		result := erun.Run(t, []string{"exec", "write", "../escape.txt"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "x"})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a path outside the project root, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/write_refuses_path_outside_project_root", normalize.Apply(result.Combined))
+		if _, err := os.Stat(filepath.Join(filepath.Dir(setup.Cwd), "escape.txt")); !os.IsNotExist(err) {
+			t.Fatalf("expected no file to land outside the project root")
+		}
+	})
+
+	t.Run("write_content_round_trips_byte_identical_with_dangerous_shell_constructs", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		result := erun.Run(t, []string{"exec", "write", "notes/todo.txt"}, erun.RunOptions{
+			Cwd:   setup.Cwd,
+			Env:   setup.Env(),
+			Stdin: execDangerousContent,
+		})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		got, err := os.ReadFile(filepath.Join(setup.Cwd, "notes", "todo.txt"))
+		if err != nil {
+			t.Fatalf("read written file: %v", err)
+		}
+		if string(got) != execDangerousContent {
+			t.Fatalf("written content = %q, want byte-identical %q", got, execDangerousContent)
+		}
+	})
+
+	t.Run("commit_help", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"exec", "commit", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/commit_help", normalize.Apply(result.Combined))
+	})
+
+	t.Run("commit_dry_run_verifies_branch_and_traces", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		result := erun.Run(t, []string{"exec", "commit", "main", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "fix the values typo\n"})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/commit_dry_run_verifies_branch_and_traces", normalize.Apply(result.Combined))
+		if log := captureGit(t, setup.Cwd, "log", "--oneline"); strings.Count(strings.TrimSpace(log), "\n") != 0 {
+			t.Fatalf("dry-run must not commit anything, got log: %q", log)
+		}
+	})
+
+	t.Run("commit_dry_run_refuses_branch_mismatch", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		result := erun.Run(t, []string{"exec", "commit", "not-main", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "message\n"})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a branch mismatch under --dry-run, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/commit_dry_run_refuses_branch_mismatch", normalize.Apply(result.Combined))
+	})
+
+	t.Run("commit_refuses_branch_mismatch", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		result := erun.Run(t, []string{"exec", "commit", "not-main"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "message\n"})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a branch mismatch, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/commit_refuses_branch_mismatch", normalize.Apply(result.Combined))
+		if log := captureGit(t, setup.Cwd, "log", "--oneline"); strings.Count(strings.TrimSpace(log), "\n") != 0 {
+			t.Fatalf("expected no new commit after refusal, got log: %q", log)
+		}
+	})
+
+	t.Run("commit_commits_dangerous_message_and_reports_result", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		mustWriteFile(t, filepath.Join(setup.Cwd, "values.yaml"), "typo: fixed\n")
+		result := erun.Run(t, []string{"exec", "commit", "main", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: execDangerousContent})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		var parsed common.CommitWorkingTreeResult
+		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
+			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
+		}
+		if parsed.Branch != "main" || parsed.Commit == "" {
+			t.Fatalf("unexpected result: %+v", parsed)
+		}
+		if len(parsed.Files) != 1 || parsed.Files[0] != "values.yaml" {
+			t.Fatalf("expected committed files [values.yaml], got %+v", parsed.Files)
+		}
+		message := captureGit(t, setup.Cwd, "log", "-1", "--format=%B")
+		if !strings.Contains(message, "`echo pwned` $(echo pwned) \"quoted\" 'quoted'") {
+			t.Fatalf("commit message lost dangerous content verbatim: %q", message)
+		}
+		if status := captureGit(t, setup.Cwd, "status", "--porcelain"); strings.TrimSpace(status) != "" {
+			t.Fatalf("expected clean tree after commit, got: %q", status)
+		}
+	})
+
+	t.Run("commit_refuses_when_nothing_to_commit", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		result := erun.Run(t, []string{"exec", "commit", "main"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "message\n"})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for nothing to commit, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/commit_refuses_when_nothing_to_commit", normalize.Apply(result.Combined))
 	})
 }

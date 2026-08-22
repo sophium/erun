@@ -52,6 +52,10 @@ type CommandOutput struct {
 	// Pin carries the resolved re-pin plan so a caller sees every reference that
 	// moved without diffing the tree afterwards.
 	Pin *PinOutput `json:"pin,omitempty"`
+	// Write carries what a `write` call actually wrote.
+	Write *eruncommon.WriteWorkingTreeFileResult `json:"write,omitempty"`
+	// Commit carries what a `commit` call actually committed.
+	Commit *eruncommon.CommitWorkingTreeResult `json:"commit,omitempty"`
 }
 
 var ansiRegexp = regexp.MustCompile(`\x1b\[[0-9;]*m`)
