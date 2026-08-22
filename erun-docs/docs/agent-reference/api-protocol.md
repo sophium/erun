@@ -262,11 +262,13 @@ A newly-registered environment is `registered` — the row exists but nothing is
 
 **Per-environment resource-cap floor.** For a `runtime` environment, the endpoint also checks the tenant's `maxCpuMillicores`/`maxMemoryMb`/`maxStorageGb` caps against the `erun-devops` chart's own minimum requirement — cpu `8000m`, memory `17832Mi`, storage `72Gi`, the pod's `erun-devops` and `erun-dind` containers summed together, since a Kubernetes `ResourceQuota` counts every container in the pod — and rejects with `409` if the tenant's cap is configured below it, naming the shortfall. This catches a knowable failure before it happens: a namespace `ResourceQuota` sized under the stock runtime pod's own footprint would otherwise let the create call succeed and only fail later, when Kubernetes refuses to admit the pod. [`POST /v1/environments/{id}/deploy`](#deploy-endpoint) re-checks the same floor, since an operator can lower a tenant's quota after the environment already exists. See [Quotas](/concepts/hosted-platform#quotas) for how the caps are enforced and derived.
 
+**Aggregate resource budget (#1113).** For a `runtime` environment, the endpoint also projects the tenant's total CPU/memory/storage if this environment is admitted — `(existing runtime environment count + 1) × the per-environment cap` — against `maxTotalCpuMillicores`/`maxTotalMemoryMb`/`maxTotalStorageGb`, and rejects with `409` naming which resource and by how much the projection would exceed the budget. This is the separate tenant-wide ceiling the per-environment floor above does not cover: raising `maxEnvironments` alone lets a tenant multiply its total footprint with nothing capping the sum. [`POST /v1/environments/{id}/deploy`](#deploy-endpoint) re-checks it too, using the count as-is (a redeploy does not add a new environment). See [Quotas](/concepts/hosted-platform#quotas) for the full budget model.
+
 **Published runtime image precondition.** Also for a `runtime` environment with a pinned `runtimeVersion` (or an explicit [`POST .../deploy`](#deploy-endpoint)), the endpoint best-effort checks that `<registry>/<tenant>-devops:<runtimeVersion>` — the exact image the deploy Job pulls — resolves in the registry, and rejects with `409` when it is **confirmed** absent (a `ghcr.io` `404` on an anonymous-pull-token manifest request). This is deliberately conservative: a private image, an unreachable registry, or any other inconclusive outcome never blocks the call, so the check only ever catches the one case it can prove — a tenant that has never published a runtime image at all — instead of gating every deploy on a registry probe succeeding. Registries other than `ghcr.io` are not checked and always pass.
 
 **Server-side deploy executor.** When configured, the backend deploys the runtime chart itself: it runs the deploy as a Kubernetes `Job` in the tenant's `<tenant>-devops` runtime image (which carries `erun` + `helm` + `kubectl`) under a curated `<tenant>-env-provisioner` ClusterRole ServiceAccount (see [Provisioner RBAC](/concepts/hosted-platform#provisioner-rbac) — not `cluster-admin`), invoking `erun deploy <tenant> <env> --version <runtimeVersion>` (plus `--max-cpu`/`--max-memory`/`--max-storage` when the tenant's quota resolves — see [Quotas](/concepts/hosted-platform#quotas)) and, when the platform is configured for it, chaining `erun expose <tenant> <env> mcp --ip <ip> --skip-if-unconfigured` (see [Automatic exposure](/concepts/hosted-platform#automatic-exposure)) — and watches the Job to completion — succeeded → `running`, failed → `failed` with the reason on `provisionError` (a failed expose fails the whole Job, so the environment is never recorded `running` while unreachable). `stop`/`delete` run the same way with `erun stop`/`erun delete -y` (see [`POST .../stop`](#stop-endpoint) and [`DELETE`](#delete-endpoint) below). A durable workflow (DBOS) wraps deploy, keyed by environment id, so a control-plane restart resumes an in-flight deploy rather than double-deploying; `stop`/`delete` run synchronously within the request instead (their Jobs are short kubectl operations, not a multi-minute helm rollout). The deploy image is `<registry>/<tenant>-devops:<runtimeVersion>`.
 
-**Bootstrapping the Job's own environment.** The Job's `command` replaces the image's entrypoint, so none of the entrypoint's usual setup runs — no in-cluster kubeconfig, and no `~/.config/erun/<tenant>/<env>/config.yaml` for `erun deploy` to resolve (a freshly-registered environment was never baked into any image). The Job's command therefore seeds both explicitly before running `erun deploy`: an in-cluster kubeconfig context built from the pod's own mounted ServiceAccount token (mirroring the runtime image's own entrypoint script), and a minimal `type: runtime` config for the tenant and environment. This keeps `erun deploy` itself an unchanged pure primitive — the Job is the caller supplying the environment's shape explicitly, the primitive still only ever consumes on-disk config exactly as it always has.
+**Bootstrapping the Job's own environment.** The Job's `command` replaces the image's entrypoint, so none of the entrypoint's usual setup runs — no kubeconfig, and no `~/.config/erun/<tenant>/<env>/config.yaml` for `erun deploy` to resolve (a freshly-registered environment was never baked into any image). The Job's command therefore seeds both explicitly before running `erun deploy`: a minimal `type: runtime` config for the tenant and environment, and a kubeconfig context — built from the pod's own mounted ServiceAccount token when the environment placed into the platform's own cluster, or (see [Placement](/concepts/hosted-platform#single-cluster-placement)) `kubectl config` commands authenticating against the placed context's own admin token when it named one. This keeps `erun deploy` itself an unchanged pure primitive — the Job is the caller supplying the environment's shape explicitly, the primitive still only ever consumes on-disk config exactly as it always has.
 
 **What `provisionError` carries on a failed deploy.** The failure happens inside the Job, so the executor reads it back before the Job's TTL reaps the pod and records it verbatim under a `deploy job failed for version <version>:` prefix. Three sources, in order — the first that yields anything wins:
 
@@ -288,6 +290,7 @@ Registration deploys an environment **once**. To deploy it again — retrying a 
 | `401` / `403` | Standard auth failures (see [Errors](#errors)). The `WriteAll` permission covers `POST /v1/environments`. | Send a valid token whose roles permit the write. |
 | `409` | The tenant is at its environment-count cap (default `10` unless a `tenant_quotas` row overrides it); the body is `environment quota reached: this tenant already has N of N environments`. Not raised when `preview` is `true`. | Delete an unused environment, or raise the tenant's cap via [`PUT /v1/tenants/{tenant_id}/quota`](#put-v1tenantstenant_idquota) (operations-only). |
 | `409` | The tenant's resource caps are below the runtime pod's minimum (see "Per-environment resource-cap floor" above); the body names which cap (`maxCpuMillicores`/`maxMemoryMb`/`maxStorageGb`), the required floor, and the shortfall. | Raise the named cap via `PUT /v1/tenants/{tenant_id}/quota`. |
+| `409` | Admitting this environment would exceed the tenant's aggregate resource budget (see "Aggregate resource budget (#1113)" above); the body names which resource (`maxTotalCpuMillicores`/`maxTotalMemoryMb`/`maxTotalStorageGb`) and the projected total. | Raise the named budget, lower the per-environment cap, or delete an unused environment via `PUT /v1/tenants/{tenant_id}/quota`. |
 | `409` | Placement (see [Placement](/concepts/hosted-platform#single-cluster-placement)) has no room: an explicit `contextId` is already at its `maxEnvironments`, or — once the tenant has registered at least one context — every registered context is full or not yet `running`. | Raise the named context's `maxEnvironments`, register another context, or delete an unused environment on that context. |
 | `409` | The tenant's `<tenant>-devops:<runtimeVersion>` runtime image is confirmed absent from `ghcr.io` (see "Published runtime image precondition" above); the body is `runtime image … is not published: …`. Only raised once the row is already created and the deploy would otherwise start — the row stays `registered`, nothing to unwind. | Publish the image (`erun push` at that version) and retry via [`POST .../deploy`](#deploy-endpoint). |
 | `500` | Persistence failed for a `remote-agent`/`local-agent` environment — e.g. `contextId` references a context that is not the caller's (the composite `(tenant_id, context_id)` foreign key is violated; a `runtime` environment's `contextId` is already validated synchronously into a `400` above) — or the request-scoped security context is missing (an internal wiring error). The row is persisted **before** the deploy is started, so a `failed to start provisioning` `500` (the deploy executor could not enqueue the durable workflow) leaves the environment registered — re-create is a no-op conflict; poll `GET /v1/environments/{id}` to confirm the row exists. | Reference a context owned by the caller's tenant; if it persists with a valid context, it is a server bug. |
@@ -311,7 +314,7 @@ A body-less request (no body at all, or `{}`) deploys the environment's own `run
 
 **Every deploy is a real re-run.** The deploy Job and its durable workflow are keyed by *attempt*, not by environment: each request mints an attempt id that names the Job (`erun-deploy-<tenant>-<env>-<version>-<attempt>`) and the workflow. Keying by environment would make both terminal after the first deploy, so a retry would silently replay the old outcome instead of running. The attempt id is part of the checkpointed workflow input, so a control-plane restart still resumes by re-watching the Job that attempt already created rather than starting a second one.
 
-**Per-environment resource-cap floor, re-checked.** Before claiming, the endpoint re-runs the same check [`POST /v1/environments`](#post-v1environments) does at create — the tenant's `maxCpuMillicores`/`maxMemoryMb`/`maxStorageGb` caps against the runtime pod's minimum (see [Quotas](/concepts/hosted-platform#quotas)) — and rejects with `409` if it is now insufficient. This catches an operator lowering the tenant's quota (`PUT /v1/tenants/{tenant_id}/quota`) after the environment was already created: without the re-check, the next deploy would only discover the shortfall as a five-minute rollout timeout.
+**Resource quota, re-checked.** Before claiming, the endpoint re-runs the same two checks [`POST /v1/environments`](#post-v1environments) does at create — the tenant's `maxCpuMillicores`/`maxMemoryMb`/`maxStorageGb` caps against the runtime pod's minimum, and the aggregate `maxTotalCpuMillicores`/`maxTotalMemoryMb`/`maxTotalStorageGb` budget projection (using the environment's own existing runtime count, not +1, since a redeploy adds nothing new) — and rejects with `409` if either is now insufficient (see [Quotas](/concepts/hosted-platform#quotas)). This catches an operator lowering the tenant's quota (`PUT /v1/tenants/{tenant_id}/quota`) after the environment was already created: without the re-check, the next deploy would only discover the shortfall as a five-minute rollout timeout.
 
 **Error behaviour.** Bare HTTP status with a plain-text body (no JSON envelope):
 
@@ -320,7 +323,7 @@ A body-less request (no body at all, or `{}`) deploys the environment's own `run
 | `400` | The environment is not a `runtime` env (`only a runtime environment can be deployed`); no version resolves — the body omitted one and the environment has no pinned `runtimeVersion` (`version is required: …`); or the body is present but not valid JSON (`invalid request body`). | Deploy a runtime env, and name a published `version` when the environment has no pin. |
 | `401` / `403` | Standard auth failures (see [Errors](#errors)). The `WriteAll` permission covers this write. | Send a valid token whose roles permit the write. |
 | `404` | No environment with `{environment_id}` in the caller's tenant (row-level security returns not-found for another tenant's env, never leaking its existence). | Deploy an environment id the caller's tenant owns. |
-| `409` | The tenant's resource caps are now below the runtime pod's minimum (see "Per-environment resource-cap floor, re-checked" above); the body names which cap and the shortfall. Checked before the claim, so nothing is left in `provisioning`. | Raise the named cap via `PUT /v1/tenants/{tenant_id}/quota`. |
+| `409` | The tenant's resource caps are now below the runtime pod's minimum, or admitting this redeploy would exceed the tenant's aggregate resource budget (see "Resource quota, re-checked" above); the body names which cap/budget and the shortfall. Checked before the claim, so nothing is left in `provisioning`. | Raise the named cap/budget via `PUT /v1/tenants/{tenant_id}/quota`. |
 | `409` | A deploy is already in flight for this environment (`a deploy is already in progress for this environment`); the claim is held. | Poll `GET /v1/environments/{id}` until it leaves `provisioning`, or wait out the 45-minute stale window if the holder crashed. |
 | `409` | The tenant's `<tenant>-devops:<version>` runtime image is confirmed absent from `ghcr.io` (see [`POST /v1/environments`](#post-v1environments)'s "Published runtime image precondition"). Unlike the create path, the claim already moved the row to `provisioning`, so this endpoint also marks it `failed` with the reason before responding — otherwise the environment would be stranded in `provisioning` with no workflow left to ever move it out. | Publish the image and retry. |
 | `501` | The deploy executor is not configured (`the deploy executor is not configured`) — the backend has no durable-workflow database, kube client, or deployer ServiceAccount. | Enable `api.envDeployer.enabled` on the backend chart. |
@@ -538,7 +541,7 @@ Provide **either** a `context` block (provision a new cluster — its bootstrap 
 **The ordered `plan`.** The response is `{ "plan": [ … ], "quotaOk": <bool> }`. `plan` is the human-readable, audit-style ordered list of every action the live provision would take, in this exact order:
 
 1. **authz/tenant** — `provision: tenant <tenant> (resolved from token)`.
-2. **quota** — `quota: tenant has <count> of <cap> environments` followed by ` — within quota` or ` — WOULD EXCEED, provisioning blocked`. The cap is the tenant's `tenant_quotas.max_environments` (default `10`); both reads are row-level-security-scoped to the caller's tenant.
+2. **quota** — `quota: tenant has <count> of <cap> environments` followed by ` — within quota` or ` — WOULD EXCEED, provisioning blocked`. The cap is the tenant's `tenant_quotas.max_environments` (default `10`); both reads are row-level-security-scoped to the caller's tenant. For a `runtime` environment, two more quota lines follow: `quota: namespace capped at <cpu>m CPU / <mem>Mi memory / <storage>Gi storage` (the per-environment ceiling), then `quota: <n> runtime environment(s) at that cap project to <cpu>m CPU / <mem>Mi memory / <storage>Gi storage against a tenant budget of <totalCpu>m / <totalMem>Mi / <totalStorage>Gi` followed by ` — within budget` or ` — WOULD EXCEED, provisioning blocked` (the aggregate tenant-wide budget, #1113; see [Quotas](/concepts/hosted-platform#quotas)).
 3. **placement** — one of three lines, depending on the request: `context: bootstrap cluster <name> via alias <alias>` (a `context` block was given — non-runtime only) followed by the full `InitCloudContext` dry-run argv, exactly the plan [`POST /v1/contexts`](#post-v1contexts) returns; `context: reuse existing kubernetes context <kubernetesContext>` (non-runtime only); or, for a `runtime` environment with neither set, `context: deploys into this platform's own cluster (v1 single-cluster placement)`. A non-runtime environment with neither set gets `context: none (not server-side deployed)`.
 4. **namespace** — `namespace: would create <tenant>-<env>`.
 5. **register** — `register: would persist environment <name> (<type>) in tenant <tenant> referencing context <ref>` (`<ref>` is empty for the platform's-own-cluster and none cases above).
@@ -547,7 +550,7 @@ Provide **either** a `context` block (provision a new cluster — its bootstrap 
 8. **expose** — `expose: would wire mcp.<tenant>-<env>.<services zone> via a per-env wildcard DNS record and Host-routing Ingress (skipped when the platform has no services zone configured)`. Present only alongside the deploy line; see [Automatic exposure](/concepts/hosted-platform#automatic-exposure) for when the live deploy actually performs this and when it safely skips it.
 9. **tls** — `tls: would provision a per-env wildcard certificate through the DNS-01 broker (skipped when the platform has no ACME email or DNS-01 broker configured)`. Present only alongside the deploy line; see [Per-env TLS certificate provisioning](/concepts/hosted-platform#per-env-tls).
 
-**`quotaOk`.** `true` when the provision fits under the tenant's environment-count cap, `false` when it would exceed it. When `quotaOk` is `false` the endpoint **still returns the full plan** with HTTP `200` (it is a preview, not a write), and the quota line names the block — surfacing the blocking decision the way a dry-run does, rather than rejecting with a `409`. A caller gating on the quota should check `quotaOk`, not the status code.
+**`quotaOk`.** `true` when the provision fits under the tenant's environment-count cap **and** (for a `runtime` environment) its aggregate resource budget, `false` when either would be exceeded. When `quotaOk` is `false` the endpoint **still returns the full plan** with HTTP `200` (it is a preview, not a write), and the relevant quota line names the block — surfacing the blocking decision the way a dry-run does, rather than rejecting with a `409`. A caller gating on the quota should check `quotaOk`, not the status code.
 
 ```jsonc
 // 200 response — runtime environment, no context (the only valid shape for runtime in v1), within quota
@@ -555,6 +558,8 @@ Provide **either** a `context` block (provision a new cluster — its bootstrap 
   "plan": [
     "provision: tenant acme (resolved from token)",
     "quota: tenant has 2 of 10 environments — within quota",
+    "quota: namespace capped at 8000m CPU / 17832Mi memory / 72Gi storage",
+    "quota: 2 runtime environment(s) at that cap project to 16000m CPU / 35664Mi memory / 144Gi storage against a tenant budget of 80000m / 178320Mi / 720Gi — within budget",
     "context: deploys into this platform's own cluster (v1 single-cluster placement)",
     "namespace: would create acme-prod",
     "register: would persist environment prod (runtime) in tenant acme referencing context ",
@@ -690,15 +695,18 @@ Omitting `issuer`/`subject` enrolls a username with **no external identity yet**
 
 ### `PUT /v1/tenants/{tenant_id}/quota` {#put-v1tenantstenant_idquota}
 
-Sets a tenant's full quota row — the environment-count cap the [`POST /v1/environments`](#post-v1environments) quota guardrail enforces, plus the per-environment CPU/memory/storage namespace ceiling. **Operations-only**, like tenant registration: the caller's resolved tenant must be `OPERATIONS`, because it writes another tenant's `tenant_quotas` row (the operations role's RLS policy permits cross-tenant writes; the row's `tenant_id` is set explicitly to the path's `{tenant_id}`, not the operations caller's own tenant). The write **fully replaces** the row — it is not a merge, so every field is required on every call.
+Sets a tenant's full quota row — the environment-count cap the [`POST /v1/environments`](#post-v1environments) quota guardrail enforces, the per-environment CPU/memory/storage namespace ceiling, and the aggregate tenant-wide CPU/memory/storage budget (#1113). **Operations-only**, like tenant registration: the caller's resolved tenant must be `OPERATIONS`, because it writes another tenant's `tenant_quotas` row (the operations role's RLS policy permits cross-tenant writes; the row's `tenant_id` is set explicitly to the path's `{tenant_id}`, not the operations caller's own tenant). The write **fully replaces** the row — it is not a merge, so every field is required on every call.
 
 ```jsonc
 // PUT /v1/tenants/019a7fa5-…/quota body
 {
-  "maxEnvironments": 50,      // required — the env-count cap (>= 0); 0 blocks all new environments
-  "maxCpuMillicores": 8000,   // required — per-environment namespace CPU ceiling in millicores (> 0)
-  "maxMemoryMb": 17832,       // required — per-environment namespace memory ceiling in MiB (> 0)
-  "maxStorageGb": 72          // required — per-environment namespace storage ceiling in GiB (> 0)
+  "maxEnvironments": 50,          // required — the env-count cap (>= 0); 0 blocks all new environments
+  "maxCpuMillicores": 8000,       // required — per-environment namespace CPU ceiling in millicores (> 0)
+  "maxMemoryMb": 17832,           // required — per-environment namespace memory ceiling in MiB (> 0)
+  "maxStorageGb": 72,             // required — per-environment namespace storage ceiling in GiB (> 0)
+  "maxTotalCpuMillicores": 80000, // required — aggregate tenant-wide CPU budget in millicores (> 0)
+  "maxTotalMemoryMb": 178320,     // required — aggregate tenant-wide memory budget in MiB (> 0)
+  "maxTotalStorageGb": 720        // required — aggregate tenant-wide storage budget in GiB (> 0)
 }
 
 // 200 response
@@ -708,19 +716,44 @@ Sets a tenant's full quota row — the environment-count cap the [`POST /v1/envi
   "maxCpuMillicores": 8000,
   "maxMemoryMb": 17832,
   "maxStorageGb": 72,
+  "maxTotalCpuMillicores": 80000,
+  "maxTotalMemoryMb": 178320,
+  "maxTotalStorageGb": 720,
   "createdAt": "2026-06-24T10:00:00Z",
   "updatedAt": "2026-06-24T10:05:00Z"
 }
 ```
 
-**What the resource caps mean.** `maxCpuMillicores`/`maxMemoryMb`/`maxStorageGb` are a **per-environment namespace ceiling**, not an aggregate tenant budget: every `runtime` environment this tenant provisions gets its own Kubernetes `ResourceQuota` + `LimitRange` capped at these same values (see [Quotas](/concepts/hosted-platform#quotas)), so a tenant with ten environments can use up to this cap in *each* of the ten namespaces, not this cap split across all ten. Absent a `tenant_quotas` row, a tenant gets the default cap: `maxEnvironments: 10`, `maxCpuMillicores: 8000`, `maxMemoryMb: 17832`, `maxStorageGb: 72` — sized to fit the `erun-devops` chart's own default runtime pod summed across **both** its containers (`erun-devops` cpu limit `4` + memory limit `8916Mi`, plus the `erun-dind` sidecar at the same limits) plus its three default PVCs (`2Gi + 50Gi + 20Gi = 72Gi`). Setting either resource cap below this floor is accepted here (an operator may deliberately want a tenant that cannot provision runtime environments yet), but the next [`POST /v1/environments`](#post-v1environments) or [`POST .../deploy`](#deploy-endpoint) for that tenant then refuses with `409` rather than letting the create/deploy proceed toward a pod Kubernetes will never admit.
+**What the resource caps mean.** `maxCpuMillicores`/`maxMemoryMb`/`maxStorageGb` are a **per-environment namespace ceiling**, not an aggregate tenant budget: every `runtime` environment this tenant provisions gets its own Kubernetes `ResourceQuota` + `LimitRange` capped at these same values (see [Quotas](/concepts/hosted-platform#quotas)), so a tenant with ten environments can use up to this cap in *each* of the ten namespaces, not this cap split across all ten. `maxTotalCpuMillicores`/`maxTotalMemoryMb`/`maxTotalStorageGb` are the separate **aggregate tenant-wide budget**: since every environment gets the identical per-environment cap, admission projects `(existing runtime environment count + 1) × the per-environment cap` against this budget and refuses a create that would exceed it (a redeploy uses the count as-is, since it does not add one). Absent a `tenant_quotas` row, a tenant gets the default cap: `maxEnvironments: 10`, `maxCpuMillicores: 8000`, `maxMemoryMb: 17832`, `maxStorageGb: 72` — sized to fit the `erun-devops` chart's own default runtime pod summed across **both** its containers (`erun-devops` cpu limit `4` + memory limit `8916Mi`, plus the `erun-dind` sidecar at the same limits) plus its three default PVCs (`2Gi + 50Gi + 20Gi = 72Gi`) — and `maxTotalCpuMillicores: 80000`, `maxTotalMemoryMb: 178320`, `maxTotalStorageGb: 720` (`maxEnvironments` × the per-environment defaults, so the default budget accommodates the default environment-count cap at the default per-environment size). Setting either resource cap below this floor is accepted here (an operator may deliberately want a tenant that cannot provision runtime environments yet), but the next [`POST /v1/environments`](#post-v1environments) or [`POST .../deploy`](#deploy-endpoint) for that tenant then refuses with `409` rather than letting the create/deploy proceed toward a pod Kubernetes will never admit.
 
 **Error behaviour.** Today the API returns a bare HTTP status with a plain-text body (no JSON envelope):
 
 | Status | Condition | Recovery |
 |---|---|---|
-| `400` | `tenant_id` is empty, `maxEnvironments` is negative, any of `maxCpuMillicores`/`maxMemoryMb`/`maxStorageGb` is `<= 0` (a PUT replaces the whole row, so these must be sent explicitly on every call), or the body is not valid JSON. | Send a non-negative `maxEnvironments` and positive resource caps. |
+| `400` | `tenant_id` is empty, `maxEnvironments` is negative, any of `maxCpuMillicores`/`maxMemoryMb`/`maxStorageGb`/`maxTotalCpuMillicores`/`maxTotalMemoryMb`/`maxTotalStorageGb` is `<= 0` (a PUT replaces the whole row, so these must be sent explicitly on every call), or the body is not valid JSON. | Send a non-negative `maxEnvironments` and positive resource caps. |
 | `403` | The caller's resolved tenant is not an `OPERATIONS` tenant (the explicit operations gate). | Call from an operations-tenant token. |
+
+### `GET /v1/quota` {#get-v1quota}
+
+Returns the caller's own tenant's full quota row — the identical shape and defaulting [`PUT /v1/tenants/{tenant_id}/quota`](#put-v1tenantstenant_idquota) writes and [`POST /v1/environments`](#post-v1environments) admission itself reads. **Tenant-self-service**: no operations role required, RLS scopes the read to the caller's own tenant. This is how an Operator inspects their own limits without an operations-scoped token (#605, #1113).
+
+```jsonc
+// 200 response — identical shape to the PUT response above
+{
+  "tenantId": "019a7fa5-c2c0-7c55-bc70-714873a71f50",
+  "maxEnvironments": 10,
+  "maxCpuMillicores": 8000,
+  "maxMemoryMb": 17832,
+  "maxStorageGb": 72,
+  "maxTotalCpuMillicores": 80000,
+  "maxTotalMemoryMb": 178320,
+  "maxTotalStorageGb": 720,
+  "createdAt": "2026-06-24T10:00:00Z",
+  "updatedAt": "2026-06-24T10:05:00Z"
+}
+```
+
+**Error behaviour.** Standard auth failures only (see [Errors](#errors)); `ReadAll` covers `GET /v1/quota`. There is no `404` — an absent `tenant_quotas` row resolves to the same defaulted values `PUT`/admission would use.
 
 ### `GET /v1/usage-events` {#get-v1usage-events}
 

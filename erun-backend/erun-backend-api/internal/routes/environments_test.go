@@ -391,6 +391,104 @@ func TestCreateEnvironmentRejectsQuotaBelowRuntimeFloor(t *testing.T) {
 	}
 }
 
+// TestCreateEnvironmentRejectsAggregateBudgetExceeded: a tenant already
+// running one runtime environment at the per-environment cap, whose
+// aggregate budget has no room for a second, is refused clearly (409) rather
+// than persisting a row that would push the tenant over its contracted
+// total (#1113).
+func TestCreateEnvironmentRejectsAggregateBudgetExceeded(t *testing.T) {
+	environments := &stubEnvironmentRepository{
+		created:            model.Environment{EnvironmentID: "env-2", Name: "staging", Type: model.EnvironmentTypeRuntime, RuntimeVersion: "1.2.3"},
+		countByRuntimeType: 1,
+	}
+	prov := &stubEnvironmentProvisioner{}
+	req := httptest.NewRequest(http.MethodPost, "/v1/environments", bytes.NewBufferString(`{"name":"staging","type":"runtime","runtimeVersion":"1.2.3"}`))
+	req = req.WithContext(security.WithContext(req.Context(), security.Context{TenantID: "t1", TenantType: string(model.TenantTypeCompany), ErunUserID: "u1"}))
+	rec := httptest.NewRecorder()
+	EnvironmentRoutes{
+		environments: environments,
+		contexts:     &stubContextRepository{},
+		quotas: stubTenantQuotaRepository{
+			maxEnvironments: 10, maxCPUMillicores: 8000, maxMemoryMB: 17832, maxStorageGB: 72,
+			maxTotalCPUMillicores: 8000, maxTotalMemoryMB: 17832, maxTotalStorageGB: 72,
+		},
+		tenants:     stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
+		provisioner: prov,
+	}.createEnvironment(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d (body %s), want 409", rec.Code, rec.Body.String())
+	}
+	if environments.createCalls != 0 || len(prov.started) != 0 {
+		t.Fatalf("createCalls=%d Start calls=%d, want 0/0: an exceeded aggregate budget must refuse before creating anything", environments.createCalls, len(prov.started))
+	}
+}
+
+// TestCreateEnvironmentAllowsWithinAggregateBudget: the mirror of the above —
+// a second runtime environment that fits within the tenant's aggregate
+// budget is admitted normally.
+func TestCreateEnvironmentAllowsWithinAggregateBudget(t *testing.T) {
+	environments := &stubEnvironmentRepository{
+		created:            model.Environment{EnvironmentID: "env-2", Name: "staging", Type: model.EnvironmentTypeRuntime, RuntimeVersion: "1.2.3"},
+		countByRuntimeType: 1,
+	}
+	prov := &stubEnvironmentProvisioner{}
+	req := httptest.NewRequest(http.MethodPost, "/v1/environments", bytes.NewBufferString(`{"name":"staging","type":"runtime","runtimeVersion":"1.2.3"}`))
+	req = req.WithContext(security.WithContext(req.Context(), security.Context{TenantID: "t1", TenantType: string(model.TenantTypeCompany), ErunUserID: "u1"}))
+	rec := httptest.NewRecorder()
+	EnvironmentRoutes{
+		environments: environments,
+		contexts:     &stubContextRepository{},
+		quotas: stubTenantQuotaRepository{
+			maxEnvironments: 10, maxCPUMillicores: 8000, maxMemoryMB: 17832, maxStorageGB: 72,
+			maxTotalCPUMillicores: 16000, maxTotalMemoryMB: 35664, maxTotalStorageGB: 144,
+		},
+		tenants:     stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
+		provisioner: prov,
+	}.createEnvironment(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d (body %s), want 202 Accepted", rec.Code, rec.Body.String())
+	}
+	if environments.createCalls != 1 {
+		t.Fatalf("createCalls = %d, want 1", environments.createCalls)
+	}
+}
+
+// TestDeployEnvironmentRejectsAggregateBudgetExceeded: a redeploy re-checks
+// the aggregate budget too, using the runtime count as-is (the environment
+// being redeployed is already counted, unlike create's +1).
+func TestDeployEnvironmentRejectsAggregateBudgetExceeded(t *testing.T) {
+	environments := runtimeEnvironment()
+	environments.countByRuntimeType = 1
+	prov := &stubEnvironmentProvisioner{}
+	req := httptest.NewRequest(http.MethodPost, "/v1/environments/env-1/deploy", bytes.NewBufferString(""))
+	req.SetPathValue("environment_id", "env-1")
+	req = req.WithContext(security.WithContext(req.Context(), security.Context{
+		TenantID:   "t1",
+		TenantType: string(model.TenantTypeCompany),
+		ErunUserID: "u1",
+	}))
+	rec := httptest.NewRecorder()
+	EnvironmentRoutes{
+		environments: environments,
+		contexts:     &stubContextRepository{},
+		quotas: stubTenantQuotaRepository{
+			maxEnvironments: 10, maxCPUMillicores: 8000, maxMemoryMB: 17832, maxStorageGB: 72,
+			maxTotalCPUMillicores: 4000, maxTotalMemoryMB: 17832, maxTotalStorageGB: 72,
+		},
+		tenants:     stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
+		provisioner: prov,
+	}.deployEnvironment(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d (body %s), want 409", rec.Code, rec.Body.String())
+	}
+	if len(prov.deployed) != 0 {
+		t.Fatalf("StartDeploy calls = %d, want 0: an exceeded aggregate budget must refuse before claiming", len(prov.deployed))
+	}
+}
+
 // TestCreateEnvironmentStartFailureLeavesRowRegistered locks
 // writeStartProvisioningError: any failure to enqueue the durable workflow
 // answers 500, and the row created just before stays registered

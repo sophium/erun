@@ -27,6 +27,9 @@ type EnvironmentRepository interface {
 	// CountByContext reports how many environments already occupy a placement
 	// candidate, for the capacity check (#1112).
 	CountByContext(ctx context.Context, contextID string) (int, error)
+	// CountByType reports how many of the caller's tenant's environments are
+	// of the given type, for the aggregate resource-budget check (#1113).
+	CountByType(ctx context.Context, envType model.EnvironmentType) (int, error)
 	ClaimDeploy(ctx context.Context, environmentID string, staleAfter time.Duration) (bool, error)
 	// MarkDeployFailed records a deploy claim that never reached the durable
 	// workflow (see writeStartProvisioningError), so the environment does not
@@ -244,15 +247,15 @@ func (r EnvironmentRoutes) deployEnvironment(w http.ResponseWriter, req *http.Re
 	// Re-checked here, not just at create: an operator can lower a tenant's
 	// quota (TenantQuotaRepository.Set) after the environment already exists,
 	// and a redeploy is the next thing that would hit the now-insufficient
-	// floor. Failing here is a clear 409 instead of the Job's Deployment
-	// sitting at 0/1 until the rollout times out (#1061).
-	quota, err := r.quotas.Get(ctx)
-	if err != nil {
+	// floor or budget. Failing here is a clear 409 instead of the Job's
+	// Deployment sitting at 0/1 until the rollout times out (#1061).
+	if err := r.revalidateResourceQuota(ctx); err != nil {
+		var exceeded *resourceQuotaExceededError
+		if errors.As(err, &exceeded) {
+			writeError(w, http.StatusConflict, exceeded.Error())
+			return
+		}
 		writeRepositoryError(w, err)
-		return
-	}
-	if err := validateNamespaceQuotaFloor(quota); err != nil {
-		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
 	// Claiming before starting the workflow is what keeps a double-submit from
@@ -438,6 +441,36 @@ func writePlacementError(w http.ResponseWriter, err error) {
 	}
 }
 
+// resourceQuotaExceededError marks a resourceQuota re-check failure as a
+// caller-facing 409 (naming which cap/budget is short), distinct from a
+// repository failure while resolving the inputs, which is a 500.
+type resourceQuotaExceededError struct{ detail string }
+
+func (e *resourceQuotaExceededError) Error() string { return e.detail }
+
+// revalidateResourceQuota re-runs the two resource-quota checks a redeploy
+// must still satisfy: the per-environment floor and the tenant's aggregate
+// budget (#1113). A redeploy does not add a new environment — it is already
+// counted — so the aggregate projection uses the runtime count as-is, not
+// +1 the way a create does.
+func (r EnvironmentRoutes) revalidateResourceQuota(ctx context.Context) error {
+	quota, err := r.quotas.Get(ctx)
+	if err != nil {
+		return err
+	}
+	if err := validateNamespaceQuotaFloor(quota); err != nil {
+		return &resourceQuotaExceededError{detail: err.Error()}
+	}
+	runtimeCount, err := r.environments.CountByType(ctx, model.EnvironmentTypeRuntime)
+	if err != nil {
+		return err
+	}
+	if err := validateAggregateResourceBudget(runtimeCount, quota); err != nil {
+		return &resourceQuotaExceededError{detail: err.Error()}
+	}
+	return nil
+}
+
 // resolveDeployVersion picks the version to deploy and rejects the requests that
 // have nothing deployable. Its error message is the operator-facing 400 reason.
 // Placement is a create-time decision (resolvePlacement), not re-run here: a
@@ -531,6 +564,27 @@ func validateNamespaceQuotaFloor(quota model.TenantQuota) error {
 	return nil
 }
 
+// validateAggregateResourceBudget refuses admitting a runtime environment
+// that would push the tenant's projected total CPU/memory/storage past its
+// aggregate budget (#1113). Every runtime environment gets the SAME
+// per-environment cap (quota.MaxCPUMillicores etc.), so the projection is
+// exact, not an estimate: projectedRuntimeCount * the per-environment cap.
+// The caller computes the count: existingCount+1 for a new environment not
+// yet persisted, or existingCount as-is for a redeploy of one already
+// counted. This is a tenant-wide ceiling distinct from the per-environment
+// floor validateNamespaceQuotaFloor checks above.
+func validateAggregateResourceBudget(projected int, quota model.TenantQuota) error {
+	switch {
+	case projected*quota.MaxCPUMillicores > quota.MaxTotalCPUMillicores:
+		return fmt.Errorf("tenant CPU budget (%dm) would be exceeded: %d runtime environment(s) at %dm each project to %dm; raise maxTotalCpuMillicores or lower maxCpuMillicores", quota.MaxTotalCPUMillicores, projected, quota.MaxCPUMillicores, projected*quota.MaxCPUMillicores)
+	case projected*quota.MaxMemoryMB > quota.MaxTotalMemoryMB:
+		return fmt.Errorf("tenant memory budget (%dMi) would be exceeded: %d runtime environment(s) at %dMi each project to %dMi; raise maxTotalMemoryMb or lower maxMemoryMb", quota.MaxTotalMemoryMB, projected, quota.MaxMemoryMB, projected*quota.MaxMemoryMB)
+	case projected*quota.MaxStorageGB > quota.MaxTotalStorageGB:
+		return fmt.Errorf("tenant storage budget (%dGi) would be exceeded: %d runtime environment(s) at %dGi each project to %dGi; raise maxTotalStorageGb or lower maxStorageGb", quota.MaxTotalStorageGB, projected, quota.MaxStorageGB, projected*quota.MaxStorageGB)
+	}
+	return nil
+}
+
 // environmentQuotaUsage reports how many environments the caller's tenant has
 // and its full quota row. Creation enforces the env-count cap; the provision
 // preview reports it; the deploy path threads the resource caps to the Job.
@@ -617,6 +671,15 @@ func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Re
 			writeError(w, http.StatusConflict, err.Error())
 			return
 		}
+		runtimeCount, err := r.environments.CountByType(req.Context(), model.EnvironmentTypeRuntime)
+		if err != nil {
+			writeRepositoryError(w, err)
+			return
+		}
+		if err := validateAggregateResourceBudget(runtimeCount+1, quota); err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
 	}
 	r.persistAndMaybeProvision(w, req, environment, placement)
 }
@@ -681,12 +744,18 @@ func (r EnvironmentRoutes) previewCreateEnvironment(w http.ResponseWriter, req *
 		writeRepositoryError(w, err)
 		return
 	}
+	runtimeCount, err := r.environments.CountByType(req.Context(), model.EnvironmentTypeRuntime)
+	if err != nil {
+		writeRepositoryError(w, err)
+		return
+	}
 	plan := provisionPlanInput{
 		tenantName:        strings.TrimSpace(tenant.Name),
 		envName:           environment.Name,
 		envType:           environment.Type,
 		kubernetesContext: environment.ContextID,
 		count:             count,
+		runtimeCount:      runtimeCount,
 		quota:             quota,
 	}
 	writeJSON(w, http.StatusOK, provisionResponse{Plan: provisionPlan(plan), QuotaOk: plan.quotaOk()})

@@ -33,7 +33,24 @@ func init() {
 	DefaultMaxCPUMillicores = int(cpu)
 	DefaultMaxMemoryMB = int(memory)
 	DefaultMaxStorageGB = int(storage)
+	// The aggregate default (#1113) is derived from the other two defaults
+	// rather than restated as an independent literal: it is exactly the
+	// budget needed to run DefaultMaxEnvironments environments at the
+	// default per-environment size, so a tenant with no quota row set can
+	// still reach its default environment-count cap without also hitting
+	// this ceiling first.
+	DefaultMaxTotalCPUMillicores = DefaultMaxEnvironments * DefaultMaxCPUMillicores
+	DefaultMaxTotalMemoryMB = DefaultMaxEnvironments * DefaultMaxMemoryMB
+	DefaultMaxTotalStorageGB = DefaultMaxEnvironments * DefaultMaxStorageGB
 }
+
+// DefaultMaxTotalCPUMillicores/MemoryMB/StorageGB are the aggregate tenant-wide
+// caps (#1113) for a tenant that has no tenant_quotas row yet.
+var (
+	DefaultMaxTotalCPUMillicores int
+	DefaultMaxTotalMemoryMB      int
+	DefaultMaxTotalStorageGB     int
+)
 
 type TenantQuotaRepository struct {
 	txs *TxManager
@@ -45,22 +62,28 @@ func NewTenantQuotaRepository(txs *TxManager) *TenantQuotaRepository {
 
 func defaultTenantQuota() model.TenantQuota {
 	return model.TenantQuota{
-		MaxEnvironments:  DefaultMaxEnvironments,
-		MaxCPUMillicores: DefaultMaxCPUMillicores,
-		MaxMemoryMB:      DefaultMaxMemoryMB,
-		MaxStorageGB:     DefaultMaxStorageGB,
+		MaxEnvironments:       DefaultMaxEnvironments,
+		MaxCPUMillicores:      DefaultMaxCPUMillicores,
+		MaxMemoryMB:           DefaultMaxMemoryMB,
+		MaxStorageGB:          DefaultMaxStorageGB,
+		MaxTotalCPUMillicores: DefaultMaxTotalCPUMillicores,
+		MaxTotalMemoryMB:      DefaultMaxTotalMemoryMB,
+		MaxTotalStorageGB:     DefaultMaxTotalStorageGB,
 	}
 }
 
-// Get returns the caller's full quota row (env count plus the per-environment
-// CPU/memory/storage namespace ceiling), defaulted when the tenant has no row
-// yet. The unfiltered read returns only the caller's row because RLS scopes it
-// to the caller's tenant.
+const tenantQuotaColumns = `tenant_id, max_environments, max_cpu_millicores, max_memory_mb, max_storage_gb, ` +
+	`max_total_cpu_millicores, max_total_memory_mb, max_total_storage_gb, created_at, updated_at`
+
+// Get returns the caller's full quota row (env count, the per-environment
+// CPU/memory/storage namespace ceiling, and the aggregate tenant-wide
+// ceiling), defaulted when the tenant has no row yet. The unfiltered read
+// returns only the caller's row because RLS scopes it to the caller's tenant.
 func (r *TenantQuotaRepository) Get(ctx context.Context) (model.TenantQuota, error) {
 	var quota model.TenantQuota
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		err := tx.NewRaw(`
-			SELECT tenant_id, max_environments, max_cpu_millicores, max_memory_mb, max_storage_gb, created_at, updated_at
+			SELECT `+tenantQuotaColumns+`
 			  FROM tenant_quotas
 		`).Scan(ctx, &quota)
 		return normalizeNoRows(err)
@@ -91,15 +114,20 @@ func (r *TenantQuotaRepository) Set(ctx context.Context, tenantID string, quota 
 	var result model.TenantQuota
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		return tx.NewRaw(`
-			INSERT INTO tenant_quotas (tenant_id, max_environments, max_cpu_millicores, max_memory_mb, max_storage_gb)
-			VALUES (?, ?, ?, ?, ?)
+			INSERT INTO tenant_quotas (tenant_id, max_environments, max_cpu_millicores, max_memory_mb, max_storage_gb,
+				max_total_cpu_millicores, max_total_memory_mb, max_total_storage_gb)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (tenant_id) DO UPDATE SET
 				max_environments = EXCLUDED.max_environments,
 				max_cpu_millicores = EXCLUDED.max_cpu_millicores,
 				max_memory_mb = EXCLUDED.max_memory_mb,
-				max_storage_gb = EXCLUDED.max_storage_gb
-			RETURNING tenant_id, max_environments, max_cpu_millicores, max_memory_mb, max_storage_gb, created_at, updated_at
-		`, tenantID, quota.MaxEnvironments, quota.MaxCPUMillicores, quota.MaxMemoryMB, quota.MaxStorageGB).Scan(ctx, &result)
+				max_storage_gb = EXCLUDED.max_storage_gb,
+				max_total_cpu_millicores = EXCLUDED.max_total_cpu_millicores,
+				max_total_memory_mb = EXCLUDED.max_total_memory_mb,
+				max_total_storage_gb = EXCLUDED.max_total_storage_gb
+			RETURNING `+tenantQuotaColumns+`
+		`, tenantID, quota.MaxEnvironments, quota.MaxCPUMillicores, quota.MaxMemoryMB, quota.MaxStorageGB,
+			quota.MaxTotalCPUMillicores, quota.MaxTotalMemoryMB, quota.MaxTotalStorageGB).Scan(ctx, &result)
 	})
 	if err != nil {
 		return model.TenantQuota{}, err

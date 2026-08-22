@@ -111,6 +111,11 @@ func (r ProvisionRoutes) provision(w http.ResponseWriter, req *http.Request) {
 		writeRepositoryError(w, err)
 		return
 	}
+	runtimeCount, err := r.environments.CountByType(req.Context(), model.EnvironmentTypeRuntime)
+	if err != nil {
+		writeRepositoryError(w, err)
+		return
+	}
 
 	// TODO(live): execute this plan (cluster bootstrap → namespace → runtime
 	// deploy → exposure + auth edge); needs a live AWS account + cluster. Do not
@@ -125,6 +130,7 @@ func (r ProvisionRoutes) provision(w http.ResponseWriter, req *http.Request) {
 		contextPlan:       contextPlan,
 		kubernetesContext: strings.TrimSpace(body.KubernetesContext),
 		count:             count,
+		runtimeCount:      runtimeCount,
 		quota:             quota,
 	}
 	writeJSON(w, http.StatusOK, provisionResponse{Plan: provisionPlan(preview), QuotaOk: preview.quotaOk()})
@@ -196,11 +202,21 @@ type provisionPlanInput struct {
 	contextPlan       []string
 	kubernetesContext string
 	count             int
-	quota             model.TenantQuota
+	// runtimeCount is the tenant's existing runtime-environment count, for
+	// the aggregate resource-budget projection (#1113); unused for a
+	// non-runtime environment.
+	runtimeCount int
+	quota        model.TenantQuota
 }
 
 func (in provisionPlanInput) quotaOk() bool {
-	return in.count < in.quota.MaxEnvironments
+	if in.count >= in.quota.MaxEnvironments {
+		return false
+	}
+	if in.envType == model.EnvironmentTypeRuntime && validateAggregateResourceBudget(in.runtimeCount+1, in.quota) != nil {
+		return false
+	}
+	return true
 }
 
 // provisionPlan renders the ordered preview: authz (the resolved tenant),
@@ -216,7 +232,7 @@ func provisionPlan(in provisionPlanInput) []string {
 	plan = append(plan, fmt.Sprintf("provision: tenant %s (resolved from token)", in.tenantName))
 
 	quotaLine := fmt.Sprintf("quota: tenant has %d of %d environments", in.count, in.quota.MaxEnvironments)
-	if in.quotaOk() {
+	if in.count < in.quota.MaxEnvironments {
 		quotaLine += " — within quota"
 	} else {
 		quotaLine += " — WOULD EXCEED, provisioning blocked"
@@ -224,6 +240,16 @@ func provisionPlan(in provisionPlanInput) []string {
 	plan = append(plan, quotaLine)
 	if in.envType == model.EnvironmentTypeRuntime {
 		plan = append(plan, fmt.Sprintf("quota: namespace capped at %dm CPU / %dMi memory / %dGi storage", in.quota.MaxCPUMillicores, in.quota.MaxMemoryMB, in.quota.MaxStorageGB))
+		projected := in.runtimeCount + 1
+		budgetLine := fmt.Sprintf("quota: %d runtime environment(s) at that cap project to %dm CPU / %dMi memory / %dGi storage against a tenant budget of %dm / %dMi / %dGi",
+			projected, projected*in.quota.MaxCPUMillicores, projected*in.quota.MaxMemoryMB, projected*in.quota.MaxStorageGB,
+			in.quota.MaxTotalCPUMillicores, in.quota.MaxTotalMemoryMB, in.quota.MaxTotalStorageGB)
+		if validateAggregateResourceBudget(projected, in.quota) != nil {
+			budgetLine += " — WOULD EXCEED, provisioning blocked"
+		} else {
+			budgetLine += " — within budget"
+		}
+		plan = append(plan, budgetLine)
 	}
 
 	contextRef, contextLine := contextPlanLine(in)

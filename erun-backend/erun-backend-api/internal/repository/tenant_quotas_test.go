@@ -54,3 +54,31 @@ func TestDefaultTenantQuotaAdmitsTheStockRuntimePod(t *testing.T) {
 		t.Fatalf("default tenant quota = %v, want [8000 17832 72]", got)
 	}
 }
+
+// TestDefaultTenantQuotaAggregateBudgetAccommodatesTheDefaultEnvironmentCount
+// pins #1113's derivation: a tenant with no quota row set can still reach its
+// default environment-count cap (DefaultMaxEnvironments) at the default
+// per-environment size without also hitting the aggregate ceiling first —
+// the aggregate defaults are DefaultMaxEnvironments * the per-environment
+// defaults, not an independently chosen number that could drift out of sync.
+func TestDefaultTenantQuotaAggregateBudgetAccommodatesTheDefaultEnvironmentCount(t *testing.T) {
+	cases := []struct {
+		name        string
+		got         int
+		perEnv      int
+		description string
+	}{
+		{"DefaultMaxTotalCPUMillicores", DefaultMaxTotalCPUMillicores, DefaultMaxCPUMillicores, "CPU"},
+		{"DefaultMaxTotalMemoryMB", DefaultMaxTotalMemoryMB, DefaultMaxMemoryMB, "memory"},
+		{"DefaultMaxTotalStorageGB", DefaultMaxTotalStorageGB, DefaultMaxStorageGB, "storage"},
+	}
+	for _, tc := range cases {
+		want := DefaultMaxEnvironments * tc.perEnv
+		if tc.got != want {
+			t.Fatalf("%s = %d, want %d (DefaultMaxEnvironments=%d * the default per-environment %s cap %d)", tc.name, tc.got, want, DefaultMaxEnvironments, tc.description, tc.perEnv)
+		}
+		if tc.got < tc.perEnv {
+			t.Fatalf("%s = %d is below a single environment's own cap %d; the default budget could not even admit one", tc.name, tc.got, tc.perEnv)
+		}
+	}
+}

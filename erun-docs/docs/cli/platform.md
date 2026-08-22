@@ -125,4 +125,4 @@ erun platform tenant list --output json
 | `env get`/`env deploy`/`env stop`/`env delete` on an unknown environment id. | `404 Not Found`. |
 | `env stop`/`env delete`/`context create`/`env register` (with a version) when the platform has no deploy/lifecycle executor configured. | `501 Not Implemented`. |
 | `env delete` without `-y`/`--yes` and not `--dry-run`. | Interactive confirmation prompt; declining aborts with no request sent. |
-| Environment/tenant quota reached. | `409 Conflict` on a real `env register`; a preview (`platform provision`) instead returns the full plan with `quotaOk: false`. |
+| Environment/tenant quota reached, or admitting/redeploying a runtime environment would exceed the tenant's aggregate CPU/memory/storage budget. | `409 Conflict` on a real `env register`/`env deploy`; a preview (`platform provision`) instead returns the full plan with `quotaOk: false`. |

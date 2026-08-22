@@ -70,6 +70,20 @@ func (r *EnvironmentRepository) CountByContext(ctx context.Context, contextID st
 	return count, err
 }
 
+// CountByType returns how many of the caller's tenant's environments are of
+// the given type, for the aggregate resource-budget check (#1113): only
+// runtime environments ever get a namespace ResourceQuota, so the projected
+// tenant-wide total is (runtime count + 1) * the per-environment cap.
+func (r *EnvironmentRepository) CountByType(ctx context.Context, envType model.EnvironmentType) (int, error) {
+	var count int
+	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		var err error
+		count, err = tx.NewSelect().Model((*model.Environment)(nil)).Where("type = ?", string(envType)).Count(ctx)
+		return err
+	})
+	return count, err
+}
+
 // EnvironmentStatusUpdate is one deploy-lifecycle write: the new status, the
 // failure reason (cleared on any non-failed state), and the version that
 // actually deployed. An empty DeployedVersion leaves the recorded one alone, so

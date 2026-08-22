@@ -227,7 +227,7 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	}
 	routes.RegisterContextRoutes(register, contexts, contextProvisioner)
 	routes.RegisterTenantRoutes(register, tenants)
-	routes.RegisterTenantQuotaRoute(register, tenantQuotas)
+	routes.RegisterTenantQuotaRoute(register, tenantQuotas, tenantQuotas)
 	routes.RegisterConfigRoute(register, tenants, environments, contexts)
 	routes.RegisterProvisionRoute(register, tenants, environments, tenantQuotas)
 	routes.RegisterUserRoutes(register, repository.NewUserRepository(txManager))

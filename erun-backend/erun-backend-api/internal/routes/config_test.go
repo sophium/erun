@@ -33,7 +33,11 @@ type stubEnvironmentRepository struct {
 	// CountByContext reports for it; an unlisted id reports 0.
 	countByContext    map[string]int
 	countByContextErr error
-	err               error
+	// countByRuntimeType is what CountByType reports for
+	// model.EnvironmentTypeRuntime (#1113's aggregate resource-budget check).
+	countByRuntimeType int
+	countByTypeErr     error
+	err                error
 	// claimTaken makes ClaimDeploy report the deploy slot as already held, the
 	// shape a concurrent deploy produces.
 	claimTaken       bool
@@ -72,17 +76,33 @@ func (r *stubEnvironmentRepository) CountByContext(_ context.Context, contextID 
 	return r.countByContext[contextID], nil
 }
 
+// CountByType reports countByRuntimeType for model.EnvironmentTypeRuntime and
+// 0 otherwise; the aggregate resource-budget check (#1113) is the only
+// caller, and it only ever asks about runtime environments.
+func (r *stubEnvironmentRepository) CountByType(_ context.Context, envType model.EnvironmentType) (int, error) {
+	if r.countByTypeErr != nil {
+		return 0, r.countByTypeErr
+	}
+	if envType == model.EnvironmentTypeRuntime {
+		return r.countByRuntimeType, nil
+	}
+	return 0, nil
+}
+
 // stubTenantQuotaRepository reports a fixed quota row for the quota guardrail.
 // Resource caps left at their zero value default to the same values an absent
 // tenant_quotas row would (repository.DefaultMax*), so existing test
 // constructions that only set maxEnvironments keep passing the resource-cap
 // floor check added for #605.
 type stubTenantQuotaRepository struct {
-	maxEnvironments  int
-	maxCPUMillicores int
-	maxMemoryMB      int
-	maxStorageGB     int
-	err              error
+	maxEnvironments       int
+	maxCPUMillicores      int
+	maxMemoryMB           int
+	maxStorageGB          int
+	maxTotalCPUMillicores int
+	maxTotalMemoryMB      int
+	maxTotalStorageGB     int
+	err                   error
 }
 
 func (r stubTenantQuotaRepository) Get(context.Context) (model.TenantQuota, error) {
@@ -90,10 +110,13 @@ func (r stubTenantQuotaRepository) Get(context.Context) (model.TenantQuota, erro
 		return model.TenantQuota{}, r.err
 	}
 	quota := model.TenantQuota{
-		MaxEnvironments:  r.maxEnvironments,
-		MaxCPUMillicores: r.maxCPUMillicores,
-		MaxMemoryMB:      r.maxMemoryMB,
-		MaxStorageGB:     r.maxStorageGB,
+		MaxEnvironments:       r.maxEnvironments,
+		MaxCPUMillicores:      r.maxCPUMillicores,
+		MaxMemoryMB:           r.maxMemoryMB,
+		MaxStorageGB:          r.maxStorageGB,
+		MaxTotalCPUMillicores: r.maxTotalCPUMillicores,
+		MaxTotalMemoryMB:      r.maxTotalMemoryMB,
+		MaxTotalStorageGB:     r.maxTotalStorageGB,
 	}
 	if quota.MaxCPUMillicores == 0 {
 		quota.MaxCPUMillicores = repository.DefaultMaxCPUMillicores
@@ -103,6 +126,15 @@ func (r stubTenantQuotaRepository) Get(context.Context) (model.TenantQuota, erro
 	}
 	if quota.MaxStorageGB == 0 {
 		quota.MaxStorageGB = repository.DefaultMaxStorageGB
+	}
+	if quota.MaxTotalCPUMillicores == 0 {
+		quota.MaxTotalCPUMillicores = repository.DefaultMaxTotalCPUMillicores
+	}
+	if quota.MaxTotalMemoryMB == 0 {
+		quota.MaxTotalMemoryMB = repository.DefaultMaxTotalMemoryMB
+	}
+	if quota.MaxTotalStorageGB == 0 {
+		quota.MaxTotalStorageGB = repository.DefaultMaxTotalStorageGB
 	}
 	return quota, nil
 }
