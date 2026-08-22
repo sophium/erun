@@ -1129,6 +1129,48 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_remote_env_deploys_published_components", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_runtime_env_unreachable_repo_path_falls_back_to_local_plan", func(t *testing.T) {
+		// #1116: a runtime env's configured repo path names an in-pod checkout
+		// (e.g. /home/erun/git/frs) that does not exist on the host running this
+		// deploy — the normal case for a runtime env driven from an operator's
+		// laptop. Clearing (or never setting) deploy.components used to silently
+		// drop selection to the runtime chart alone instead of following the repo
+		// plan, because the plan read depended solely on that unreachable
+		// configured path. Deploy now also tries the project rooted at its own
+		// working directory (which here is exactly where the plan lives, the
+		// normal case for a host sitting inside the tenant checkout), so the
+		// plan's four components are selected without --components. No saved
+		// deploy.components on the env, so this exercises the plan selection
+		// tier specifically, not just a fallback trace.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectK8sConfig(t, setup, "environments:\n  dev:\n    k8s:\n      deployments:\n        - team-devops\n        - [erun-backend-postgres, erun-backend-db]\n        - erun-backend-api\n")
+		root := filepath.Join(setup.ConfigHome, "erun")
+		tenantDir := filepath.Join(root, "team")
+		envDir := filepath.Join(tenantDir, "dev")
+		for _, dir := range []string{root, tenantDir, envDir} {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", dir, err)
+			}
+		}
+		mustWriteFile(t, filepath.Join(root, "config.yaml"), "defaulttenant: team\n")
+		mustWriteFile(t, filepath.Join(tenantDir, "config.yaml"), "projectroot: "+setup.Cwd+"\nname: team\ndefaultenvironment: dev\n")
+		mustWriteFile(t, filepath.Join(envDir, "config.yaml"),
+			"name: dev\nrepopath: /nonexistent-remote/team\nkubernetescontext: test-context\n"+
+				"containerregistry: registry.example/test\nruntimeversion: 1.0.0\ntype: runtime\n")
+		envVars := append(setup.Env(),
+			"ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-devops:1.0.0,erun-backend-postgres:1.0.0,erun-backend-db:1.0.0,erun-backend-api:1.0.0")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.0",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_runtime_env_unreachable_repo_path_falls_back_to_local_plan", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_remote_env_deploys_tenant_component_charts_by_reference", func(t *testing.T) {
 		// A tenant publishes its own component charts (team-backend-api) beyond the
 		// fixed erun-* platform set. On a sourceless remote env --components selects

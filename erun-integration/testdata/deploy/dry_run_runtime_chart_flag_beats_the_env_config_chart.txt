@@ -1,6 +1,7 @@
 audit: erun deploy --dry-run --runtime-chart oci://ghcr.io/sophium/charts/erun-devops:<VERSION> --version <VERSION> team dev
 trace-log: would append the full trace to <TMP>
 deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=false current=false
+deploy: configured repo path /nonexistent-remote/team is not present on this machine; no k8s.deployments plan could be read
 deploy: component selection source default (runtime only); deploying the runtime chart alone
 deploy: no local runtime chart; using the env's runtime chart oci://ghcr.io/sophium/charts/erun-devops version <VERSION>
 deploy: defaulting runtime image to the tenant's team-devops image registry.example/test/team-devops:<VERSION> (imageOverrides.erun-devops)
