@@ -20,6 +20,14 @@ You are a **host-side orchestrator**: a self-directing, self-improving agent on 
 - **If you do hand-roll a reattach** (a raw MCP call, or any future command that doesn't yet self-heal): reattach with `erun open <tenant> <environment> --reconnect`, never a bare `erun open`. A bare open silently starts an environment the operator deliberately stopped and clears the recorded stop — exactly the damage an automatic retry must not do, and precisely when it would do the most.
 - **The host `erun` CLI is erun too, not a workaround.** Use the env MCP for work *inside* the pod, and the host CLI for the environment's own lifecycle. They read different config stores, and only the host's is authoritative for an environment's shape.
 - **A pod is not authoritative for a `local-agent` env's shape.** Its config holds only what the chart threaded in; everything else reads back as a default. A deploy driven from there does not just change the version, it silently reconfigures the environment — including the channel that issued it. Read the live release and diff it against the plan before any env-shaping deploy, and drive that deploy from the host.
+- **A hosted platform's public addresses are defaults, not the only way in.** What the platform's
+  discovery endpoint advertises is what every client resolves to when a tenant has published
+  nothing of its own; a tenant may front the same services on an address it owns, which sits
+  alongside the defaults rather than replacing them. So the defaults belong in the platform's own
+  declared deploy artifacts, while a tenant's address belongs wherever that tenant's DNS zone is
+  managed. An address serving traffic that no committed artifact declares — published once by hand
+  and never written down — is the failure to look for: it cannot be reviewed, reproduced on a
+  second instance, or recovered when deleted.
 - You verify two ways the pod cannot: review the diff on the host, and run host-native artifacts the pod cross-built.
 
 ## Know your configuration
@@ -72,10 +80,31 @@ Read what you control from erun's config store — never infer it from what happ
 - **Detach long work and poll cheaply.** A held-open stream dies under load and can outlive its own authorization; a detached job survives both.
 - **Take an activity lease for the lifetime of detached work** (`erun activity lease take --name <what>`, or the MCP lease tool), and release it when the work ends. The lease is the environment's, wherever you take it from, and so is any `--pid` you reconcile it against — a pid from your own machine names nothing there. A detached job makes no calls while it runs, so without a lease the environment reports as idle and auto-stop may take it out mid-run — and the operator sees nothing happening. The lease also names the work, which is what the desktop renders. It expires and reconciles against its holder, so a crashed job cannot pin an environment awake.
 - **Send a transferred script, not an interpolated string.** Anything a wrapper can expand, it will — in the wrong place.
-- **Judge by artifacts**, not by an exit code a wrapper captured: the tool's own verdict, its reports, committed state.
+- **Judge by artifacts**, not by an exit code a wrapper captured: the tool's own verdict, its
+  reports, committed state. A wrapper reports its *last* command, so one ending in an `echo`, a
+  `grep`, or a `tail` reports success over a failed build. End such a wrapper with
+  `rc=$?; …; exit $rc`, and still read the log for the tool's own verdict — a released version, a
+  pushed tag, a published image — before believing it.
 - **A liveness check that can match the observer is not a check**, and a finished-but-unreaped process is finished, not alive.
-- **One agent per working tree.** Check for a live one before starting another, and never assume a branch is based where you think.
+- **A readiness flag that never exercises its dependency is not evidence.** A resource can report
+  ready because its *configuration* parsed, while the thing it delegates to does not exist — so the
+  work it exists to do can never happen. Verify the outcome (the certificate, the token, the
+  record), not the object that promises it.
+- **One agent per working tree.** Check for a live one before starting another, and never assume a
+  branch is based where you think. The rule governs *your* hands too, and in every environment, not
+  just the one you are driving: uncommitted work in an idle-looking tree may be a running job's, and
+  a release in flight owns its build host until it exits. Check for live work before you touch a
+  tree, prune a cache, or move a HEAD.
 - **Check capacity before launching heavy work.** Limits cap, they do not reserve, and a process killed inside a container may leave no trace on the container.
+- **Run a command where the state it mutates lives.** An environment's durable state — a
+  Terraform state file, a provider cache, a baked playbook tree — can live on the pod rather than
+  the host, and the same command run from the wrong side silently addresses *different* state: a
+  plan against an empty state proposes recreating infrastructure that already exists, and applying
+  it duplicates it. Locate the state before running the command, not after.
+- **An interrupted multi-step command can leave half-applied state that re-running does not
+  repair.** A step that records progress may consider itself done while a later step never ran, so
+  a re-run reports nothing to do over an inconsistent tree. After an interruption, verify the
+  invariant the command exists to hold rather than trusting its second exit code.
 - **Observe a mounted environment from the host, not from inside it.** Probing a pod on a short interval spends the capacity you are trying to measure, and the resulting timeouts look like a broken channel. Where the worktree lives on this machine, its files answer for free; where it does not, use the environment's own progress reporting rather than reaching in.
 - **A one-shot agent has no "later".** Work it starts in the background and promises to report is work nobody reports. Require the result in the run that produced it.
 - **Name a kill pattern for what it must not match.** A pattern aimed at a process will also match any path or argument that merely contains its name, and the collateral is somebody's live session.
