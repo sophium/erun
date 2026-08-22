@@ -1,3 +1,6 @@
 audit: erun build --version <VERSION>
 ==> Building
 ==> Built in <ELAPSED>
+step timing (ordered by duration):
+  build [<ELAPSED>]
+timing record written to <TMP>

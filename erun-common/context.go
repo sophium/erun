@@ -31,6 +31,10 @@ type Context struct {
 	// Nil when no command-level forward lifecycle has been established (tests,
 	// pure resolution) — concretization then forwards on demand into a throwaway.
 	RegistryForwards *ClusterRegistryForwards
+	// timing is the active step-timing root for a long command (build, release,
+	// push, deploy), set by that command's umbrella and nil everywhere else —
+	// see timing.go. Unexported: only erun-common's own umbrellas start one.
+	timing *stepTiming
 }
 
 // WriteResult emits v as the command's structured result; callers invoke it on

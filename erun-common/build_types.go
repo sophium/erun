@@ -89,6 +89,14 @@ type DockerBuildSpec struct {
 	// ERUN_VERSION build arg must name the arch being built or the plain version
 	// reference resolves nowhere.
 	LocalBaseTag string
+	// PlatformObserver, when set, is called after each platform's build (or
+	// promote+push) finishes, reporting that platform's elapsed time and error.
+	// It lets a caller attach per-architecture timing (see Context.
+	// timingPlatformObserver in timing.go) without DockerImageBuilderFunc
+	// needing a signature change, since executeDockerBuild sets this field on
+	// the same buildInput value it hands to the builder — exactly how it already
+	// threads Verbosity through. Never marshaled: a func value has no JSON form.
+	PlatformObserver func(platform string, elapsed time.Duration, err error) `json:"-"`
 }
 
 type DockerPushSpec struct {

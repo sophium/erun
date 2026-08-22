@@ -10,3 +10,6 @@ deploy: watching pods in team-dev on context test-context for early container fa
 kubectl --context test-context --namespace team-dev get pods -o json
 dedup: skip (release=test-context-team-dev-team-devops, hash=<HASH>, pid=<PID> already running identical deploy)
 ==> Skipping team/dev <VERSION> (identical deploy already in progress)
+step timing (ordered by duration):
+  deploy [<ELAPSED>]
+timing record written to <TMP>

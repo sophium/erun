@@ -121,7 +121,7 @@ func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFu
 				return err
 			}
 			buildWithRetry := pushBuildWithRetry(ctx, buildDockerImage, loginToDockerRegistry, selectRunner)
-			return common.RunPushCommand(ctx, func() error {
+			return common.RunPushCommand(ctx, func(ctx common.Context) error {
 				return common.RunDockerPushSpec(ctx, pushInput, buildInput, buildWithRetry, push)
 			})
 		},
@@ -197,7 +197,7 @@ func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFind
 				if err != nil {
 					return err
 				}
-				return common.RunPushCommand(ctx, func() error {
+				return common.RunPushCommand(ctx, func(ctx common.Context) error {
 					return common.RunDockerPushSpec(ctx, pushInput, buildInput, buildWithRetry, push)
 				})
 			}
@@ -205,7 +205,7 @@ func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFind
 			if err != nil {
 				return err
 			}
-			return common.RunPushCommand(ctx, func() error {
+			return common.RunPushCommand(ctx, func(ctx common.Context) error {
 				return common.RunDockerPushExecution(ctx, execution, buildWithRetry, push)
 			})
 		},

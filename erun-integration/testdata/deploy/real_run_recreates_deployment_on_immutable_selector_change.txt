@@ -18,3 +18,7 @@ dedup: claim (release=test-context-team-dev-team-devops, hash=<HASH>, pid=<PID>)
     waiting for helm rollout (timeout 5m0s)...
 deploy: Deployment team-devops selector is immutable and changed; deleting it (PVCs preserved) and retrying the upgrade
 ==> Deployed team/dev <VERSION> in <ELAPSED>
+step timing (ordered by duration):
+  deploy [<ELAPSED>]
+    team/dev <VERSION> [<ELAPSED>]
+timing record written to <TMP>

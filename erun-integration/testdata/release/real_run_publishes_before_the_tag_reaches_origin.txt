@@ -46,3 +46,20 @@ To <TMP>
  * [new tag]         <VERSION> -> <VERSION>
 release version: <VERSION>
 ==> Released <VERSION> in <ELAPSED>
+step timing (ordered by duration):
+  release [<ELAPSED>]
+    post-release-version-bump [<ELAPSED>]
+    publish [<ELAPSED>]
+      api (cache hit) [<ELAPSED>]
+        linux/amd64 (cache hit) [<ELAPSED>]
+        linux/arm64 (cache hit) [<ELAPSED>]
+      base (cache hit) [<ELAPSED>]
+        linux/amd64 (cache hit) [<ELAPSED>]
+        linux/arm64 (cache hit) [<ELAPSED>]
+      chart api [<ELAPSED>]
+      chart base [<ELAPSED>]
+    push [<ELAPSED>]
+    release [<ELAPSED>]
+    sync-remote [<ELAPSED>]
+    verify-publication [<ELAPSED>]
+timing record written to <TMP>

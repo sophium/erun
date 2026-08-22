@@ -12,5 +12,9 @@ dedup: claim (release=test-context-team-dev-team-devops, hash=<HASH>, pid=<PID>)
     namespace team-dev on context test-context
     waiting for helm rollout (timeout 5m0s)...
 ==> Deploy of team-devops failed after <ELAPSED>
+step timing (ordered by duration):
+  deploy (failed) [<ELAPSED>] — exit status 1
+    team/dev <VERSION> (failed) [<ELAPSED>] — exit status 1
+timing record written to <TMP>
 ==> Deploy failed team/dev: exit status 1
 exit status 1

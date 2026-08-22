@@ -17,4 +17,7 @@ release: branch=develop mode=candidate version=<VERSION>
 publishing image: ghcr.io/sophium/api:<VERSION>
 release: worktree clean = false
 ==> Release failed after <ELAPSED>
+step timing (ordered by duration):
+  release (failed) [<ELAPSED>] — release requires a clean git worktree; commit or stash changes first
+timing record written to <TMP>
 release requires a clean git worktree; commit or stash changes first

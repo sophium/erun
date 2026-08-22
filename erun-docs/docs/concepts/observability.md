@@ -75,6 +75,24 @@ For distributed traces across the env's services, deploy an OpenTelemetry Collec
 
 The runtime pod itself does not emit traces. The audit log + MCP tool counts are the closest equivalent — they capture every Operator and Agent action with timestamps.
 
+## Step timing
+
+`erun build`, `release`, `push`, and `deploy` each print a duration-ordered table on completion — success or failure — breaking their single elapsed time down into every image build (per architecture), chart publish, release stage, and deploy target, so a slow or failed run points at what actually took the time instead of leaving you to guess:
+
+```
+==> Pushed in 6m54s
+step timing (ordered by duration):
+  push [6m54s]
+    frs-docs (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [6m20s]
+      linux/amd64 [3m20s]
+      linux/arm64 [3m0s]
+    chart frs-docs [30s]
+```
+
+Each command also writes the same breakdown as a JSON file under `~/.erun/timing/`, so a slow run and a normal one can be diffed instead of compared by eye across terminal scrollback.
+
+For the full JSON shape and the cache-hit/miss annotations, see [Agent reference · Step timing](/reference/config-locations#step-timing).
+
 ## The audit trail
 
 Distinct from logs / metrics / traces, the [audit trail](/collaboration/operator-in-the-loop#the-audit-trail) is ERun's primary record of *who did what when*. Three storage layers:
@@ -97,6 +115,7 @@ When a service incident needs an "actor and intent" reconstruction, the audit tr
 | A merge happened — who advanced the queue | Security events: `mergequeue.advance` |
 | The runtime pod restarted | `kubectl describe pod -n <tenant>-<env> <pod>` (Kubernetes events) |
 | Trace request across services | OpenTelemetry collector you installed; ERun adds nothing here |
+| A build/release/push/deploy took too long | The step-timing table it prints on completion, or its JSON record under `~/.erun/timing/` |
 
 ## What ERun doesn't ship
 

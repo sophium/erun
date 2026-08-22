@@ -190,6 +190,7 @@ Each piece of detail lives in exactly one page. Other pages reference it.
 - Fingerprint cache: in `agent-reference/conventions-spec`. Referenced from `release-flow`, `cli/build`.
 - Idle-stop predicate: in `agent-reference/idle-policy`. Referenced from `cloud-contexts`, `concepts/cloud-contexts`.
 - OIDC error codes: in `agent-reference/api-protocol`. Referenced from `collaboration/overview`.
+- Step timing (the `build`/`release`/`push`/`deploy` table + JSON record): in `reference/config-locations#step-timing`. Referenced from `concepts/observability`.
 
 When you find duplication, pick the canonical home and turn the others into pointers.
 

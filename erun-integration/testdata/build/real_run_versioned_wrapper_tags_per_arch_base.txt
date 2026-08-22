@@ -13,3 +13,15 @@ rebuilding ghcr.io/sophium/wrapper:<VERSION> because fingerprint image is missin
 ==> Packaging api <VERSION>
 ==> Packaging base <VERSION>
 ==> Built in <ELAPSED>
+step timing (ordered by duration):
+  build [<ELAPSED>]
+    api (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
+      linux/amd64 (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
+      linux/arm64 (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
+    base (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
+      linux/amd64 (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
+      linux/arm64 (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
+    wrapper (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
+      linux/amd64 (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
+      linux/arm64 (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
+timing record written to <TMP>

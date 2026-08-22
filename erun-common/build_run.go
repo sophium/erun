@@ -31,12 +31,26 @@ func traceDockerBuild(ctx Context, buildInput DockerBuildSpec) {
 // executeDockerBuild runs one build against the given streams. The streams are
 // a parameter rather than ctx's own so a concurrent wave can buffer each image
 // separately and replay them in a fixed order.
+//
+// It also starts this image's step-timing child (a no-op when no timing root
+// is active — see startTimingStep) and wires PlatformObserver so the builder
+// reports each architecture's duration into it, tagged with the same cache
+// decision the trace already names.
 func executeDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBuilderFunc, stdout, stderr io.Writer) error {
 	if build == nil {
 		build = DockerImageBuilder
 	}
 	buildInput.Verbosity = ctx.Verbosity
-	return build(buildInput, stdout, stderr)
+	stepCtx, finish := ctx.startTimingStep(dockerBuildStepName(buildInput))
+	var cache *cacheDecision
+	if hit, applicable, reason := incrementalCacheDecision(buildInput); applicable {
+		cache = &cacheDecision{hit: hit, missReason: reason}
+		stepCtx.recordTimingCache(hit, reason)
+	}
+	buildInput.PlatformObserver = stepCtx.timingPlatformObserver(cache)
+	err := build(buildInput, stdout, stderr)
+	finish(err)
+	return err
 }
 
 // traceIncrementalDecision re-emits the fingerprint inspect already run during
@@ -147,32 +161,43 @@ func runDockerBuildsSequentially(ctx Context, builds []DockerBuildSpec, build Do
 }
 
 // traceBuildUmbrella brackets a build with the `==> Building` / `==> Built`
-// markers the desktop's activity-queue parser keys off to drive its spinner.
-// Skipped in dry-run, which does no work and must keep the integration goldens
-// stable.
-func traceBuildUmbrella(ctx Context) func(*error) {
+// markers the desktop's activity-queue parser keys off to drive its spinner,
+// and starts the step-timing root reported (as a duration-ordered table plus
+// a JSON record) when the bracket closes. Skipped in dry-run, which does no
+// work and must keep the integration goldens stable.
+func traceBuildUmbrella(ctx Context) (Context, func(*error)) {
 	if ctx.DryRun {
-		return func(*error) {}
+		return ctx, func(*error) {}
 	}
 	started := time.Now()
 	ctx.Info("==> Building")
-	return func(errp *error) {
-		elapsed := time.Since(started).Round(time.Second)
-		if errp != nil && *errp != nil {
-			ctx.Info("==> Build failed after " + elapsed.String())
-			return
+	root := newStepTiming("build", nil)
+	ctx.timing = root
+	return ctx, func(errp *error) {
+		var err error
+		if errp != nil {
+			err = *errp
 		}
-		ctx.Info("==> Built in " + elapsed.String())
+		root.finish(err)
+		elapsed := time.Since(started).Round(time.Second)
+		if err != nil {
+			ctx.Info("==> Build failed after " + elapsed.String())
+		} else {
+			ctx.Info("==> Built in " + elapsed.String())
+		}
+		reportStepTiming(ctx, "build", root)
 	}
 }
 
 func RunBuildExecution(ctx Context, execution BuildExecutionSpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc) (err error) {
-	defer traceBuildUmbrella(ctx)(&err)
+	ctx, finish := traceBuildUmbrella(ctx)
+	defer finish(&err)
 	return runBuildExecution(ctx, execution, nil, nil, runScript, build, push, nil)
 }
 
 func RunBuildExecutionAndDeploy(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) (err error) {
-	defer traceBuildUmbrella(ctx)(&err)
+	ctx, finish := traceBuildUmbrella(ctx)
+	defer finish(&err)
 	return runBuildExecution(ctx, execution, deploySpecs, nil, runScript, build, push, deploy)
 }
 
@@ -182,7 +207,8 @@ func RunBuildExecutionAndDeploy(ctx Context, execution BuildExecutionSpec, deplo
 // `==> Building` one. Both entrypoints share one execution so the flow cannot
 // drift between them.
 func RunReleaseExecution(ctx Context, execution BuildExecutionSpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc) (err error) {
-	defer traceReleaseUmbrella(ctx, releaseExecutionVersion(execution))(&err)
+	ctx, finish := traceReleaseUmbrella(ctx, releaseExecutionVersion(execution))
+	defer finish(&err)
 	return runBuildExecution(ctx, execution, nil, runGit, runScript, build, push, nil)
 }
 
@@ -311,26 +337,33 @@ func deployedVersionForSpecs(specs []DeploySpec) string {
 }
 
 // RunPushCommand brackets a standalone `erun push` with the `==> Pushing` /
-// `==> Pushed` markers the desktop's activity-queue parser keys off. Only the
+// `==> Pushed` markers the desktop's activity-queue parser keys off, and
+// starts the step-timing root reported when the bracket closes. Only the
 // standalone push entrypoints route through here: pushes inside `erun build`
 // already sit under the `==> Building` umbrella, and the per-image push
 // executors would fire a marker per image and double-count if bracketed here.
-// Dry-run does no work.
-func RunPushCommand(ctx Context, op func() error) (err error) {
+// op receives the timing-scoped context so the images and charts it pushes
+// attach their own step-timing children; dry-run does no work and skips
+// timing, same as the other three umbrellas.
+func RunPushCommand(ctx Context, op func(Context) error) (err error) {
 	if ctx.DryRun {
-		return op()
+		return op(ctx)
 	}
 	started := time.Now()
 	ctx.Info("==> Pushing")
+	root := newStepTiming("push", nil)
+	ctx.timing = root
 	defer func() {
+		root.finish(err)
 		elapsed := time.Since(started).Round(time.Second)
 		if err != nil {
 			ctx.Info("==> Push failed after " + elapsed.String())
-			return
+		} else {
+			ctx.Info("==> Pushed in " + elapsed.String())
 		}
-		ctx.Info("==> Pushed in " + elapsed.String())
+		reportStepTiming(ctx, "push", root)
 	}()
-	return op()
+	return op(ctx)
 }
 
 func RunDockerPush(ctx Context, pushInput DockerPushSpec, push DockerImagePusherFunc) error {
@@ -489,15 +522,22 @@ func publishComponentCharts(ctx Context, specs []HelmChartPublishSpec) error {
 	published := make([]string, 0, len(specs))
 	for i, spec := range specs {
 		spec.Verbosity = ctx.Verbosity
-		if err := RunHelmChartPublish(ctx, spec); err != nil {
-			return newPartialChartPublishError(spec, published, specs[i+1:], err)
-		}
-		if err := VerifyPublishedHelmChart(ctx, spec.OCIRepo, spec.ChartName, spec.Version); err != nil {
+		stepCtx, finish := ctx.startTimingStep("chart " + spec.ChartName)
+		err := publishAndVerifyHelmChart(stepCtx, spec)
+		finish(err)
+		if err != nil {
 			return newPartialChartPublishError(spec, published, specs[i+1:], err)
 		}
 		published = append(published, spec.ChartName)
 	}
 	return nil
+}
+
+func publishAndVerifyHelmChart(ctx Context, spec HelmChartPublishSpec) error {
+	if err := RunHelmChartPublish(ctx, spec); err != nil {
+		return err
+	}
+	return VerifyPublishedHelmChart(ctx, spec.OCIRepo, spec.ChartName, spec.Version)
 }
 
 // newPartialChartPublishError reports a chart publish that stopped mid-set. By

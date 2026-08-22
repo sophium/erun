@@ -5,5 +5,8 @@ deploy: component selection source default (runtime only); deploying the runtime
 deploy: version <VERSION> pinned; installing the published image by reference (deploy never builds)
 deploy: resolved 1 spec(s)
 deploy: watching pods in team-dev on context test-context for early container failure (release team-devops)
+step timing (ordered by duration):
+  deploy (failed) [<ELAPSED>] — another erun deploy is in progress for team/dev <VERSION> (release "team-devops", namespace "team-dev", context "test-context", pid=<PID>, started <TS>); refusing to run a conflicting helm upgrade
+timing record written to <TMP>
 ==> Deploy failed team/dev: another erun deploy is in progress for team/dev <VERSION> (release "team-devops", namespace "team-dev", context "test-context", pid=<PID>, started <TS>); refusing to run a conflicting helm upgrade
 another erun deploy is in progress for team/dev <VERSION> (release "team-devops", namespace "team-dev", context "test-context", pid=<PID>, started <TS>); refusing to run a conflicting helm upgrade

@@ -10,5 +10,9 @@ dedup: claim (release=test-context-team-dev-team-devops, hash=<HASH>, pid=<PID>)
     namespace team-dev on context test-context
     waiting for helm rollout (timeout 5m0s)...
 ==> Deployed team/dev <VERSION> in <ELAPSED>
+step timing (ordered by duration):
+  deploy [<ELAPSED>]
+    team/dev <VERSION> [<ELAPSED>]
+timing record written to <TMP>
 warning: the local port-forwards for team/dev still point at the replaced runtime pod
     re-establish them with: erun open --tenant team --environment dev --no-shell --no-alias-prompt
