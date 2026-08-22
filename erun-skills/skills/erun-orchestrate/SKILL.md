@@ -131,6 +131,19 @@ Read what you control from erun's config store — never infer it from what happ
   orchestrator inheriting the capability and re-deriving your shell from scratch.
   Add it in both transports over shared logic, the way the repo requires of any new command, and
   state the exception explicitly if one transport genuinely cannot host it.
+- **When a typed tool fails, make the tool work and retry through it.** A failure is not a signal
+  to reach for the hatch; the hatch is what stops the tool from ever getting fixed. A fallback that
+  succeeds is worse than a failure that gets repaired, because it removes the reason to repair it,
+  and the next orchestrator inherits the same dead tool plus your workaround. Read the error for
+  the remedy it names — a tool that fails on missing setup usually says which setup, and that step
+  is often itself a typed command, one call away. Then follow the failure down: the second error is
+  usually more informative than the first, and frequently is not about the tool at all but about
+  something underneath it that nothing else was going to reveal. Distinguish what you are actually
+  looking at — no tool exists (build it), the tool is misconfigured (configure it), the tool is
+  broken (fix it), or the operation genuinely does not belong in a tool, because it needs a
+  credential a pod is deliberately denied. Only the last is a standing exception, and it is one you
+  state with the evidence that establishes it — what was reachable, what was denied, what is
+  missing — not one you assume the moment something red appears.
 - **The same rule applies to waiting.** A hand-written poll loop around a job is a shell
   reimplementation of a bounded wait that already exists, and it will be worse: it re-derives
   "finished" from whatever it can scrape, so it reads a dropped channel as an outcome and a
