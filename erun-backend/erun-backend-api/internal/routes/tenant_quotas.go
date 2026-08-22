@@ -17,26 +17,59 @@ type TenantQuotaWriter interface {
 	Set(ctx context.Context, tenantID string, quota model.TenantQuota) (model.TenantQuota, error)
 }
 
+// TenantQuotaReader reads the caller's own tenant's quota row (RLS-scoped),
+// defaulted when the tenant has no row yet — the same read admission itself
+// uses. Tenant-self-service, unlike TenantQuotaWriter's Set: a quota nobody
+// can see is a support ticket (#605, #1113).
+type TenantQuotaReader interface {
+	Get(ctx context.Context) (model.TenantQuota, error)
+}
+
 type TenantQuotaRoutes struct {
 	quotas TenantQuotaWriter
+	reader TenantQuotaReader
 }
 
 // setTenantQuotaRequest carries every cap explicitly: a PUT always fully
 // replaces the row, never merges. maxEnvironments may be 0 (a real "no
-// environments" cap, matching its pre-existing validation); the three
-// resource caps must be positive — 0 has no sane operational meaning for a
-// namespace ResourceQuota and almost always means the caller omitted the
-// field rather than intending to allow nothing.
+// environments" cap, matching its pre-existing validation); the six resource
+// caps must be positive — 0 has no sane operational meaning for a namespace
+// ResourceQuota or a tenant-wide budget and almost always means the caller
+// omitted the field rather than intending to allow nothing. maxTotal* is the
+// aggregate tenant-wide ceiling (#1113), distinct from the per-environment
+// ceiling above.
 type setTenantQuotaRequest struct {
-	MaxEnvironments  int `json:"maxEnvironments"`
-	MaxCPUMillicores int `json:"maxCpuMillicores"`
-	MaxMemoryMB      int `json:"maxMemoryMb"`
-	MaxStorageGB     int `json:"maxStorageGb"`
+	MaxEnvironments       int `json:"maxEnvironments"`
+	MaxCPUMillicores      int `json:"maxCpuMillicores"`
+	MaxMemoryMB           int `json:"maxMemoryMb"`
+	MaxStorageGB          int `json:"maxStorageGb"`
+	MaxTotalCPUMillicores int `json:"maxTotalCpuMillicores"`
+	MaxTotalMemoryMB      int `json:"maxTotalMemoryMb"`
+	MaxTotalStorageGB     int `json:"maxTotalStorageGb"`
 }
 
-func RegisterTenantQuotaRoute(register ProtectedRouteRegistrar, quotas TenantQuotaWriter) {
-	routes := TenantQuotaRoutes{quotas: quotas}
+// RegisterTenantQuotaRoute registers both the operations-only write
+// (PUT .../quota) and the tenant-self-service read (GET /v1/quota) — reader
+// and writer are separate interfaces because they carry different
+// authorization, but both are usually backed by the same
+// repository.TenantQuotaRepository.
+func RegisterTenantQuotaRoute(register ProtectedRouteRegistrar, quotas TenantQuotaWriter, reader TenantQuotaReader) {
+	routes := TenantQuotaRoutes{quotas: quotas, reader: reader}
 	register(http.MethodPut, "/v1/tenants/{tenant_id}/quota", http.HandlerFunc(routes.setQuota))
+	register(http.MethodGet, "/v1/quota", http.HandlerFunc(routes.getQuota))
+}
+
+// getQuota returns the caller's own tenant's quota row — every cap admission
+// itself reads, so an Operator can see exactly what they are working within
+// (env count, the per-environment resource ceiling, and the aggregate
+// tenant-wide budget) without an operations-scoped token.
+func (r TenantQuotaRoutes) getQuota(w http.ResponseWriter, req *http.Request) {
+	quota, err := r.reader.Get(req.Context())
+	if err != nil {
+		writeRepositoryError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, quota)
 }
 
 // Operations-only: setting another tenant's quota is a cross-tenant write that
@@ -66,10 +99,13 @@ func (r TenantQuotaRoutes) setQuota(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	quota, err := r.quotas.Set(req.Context(), tenantID, model.TenantQuota{
-		MaxEnvironments:  body.MaxEnvironments,
-		MaxCPUMillicores: body.MaxCPUMillicores,
-		MaxMemoryMB:      body.MaxMemoryMB,
-		MaxStorageGB:     body.MaxStorageGB,
+		MaxEnvironments:       body.MaxEnvironments,
+		MaxCPUMillicores:      body.MaxCPUMillicores,
+		MaxMemoryMB:           body.MaxMemoryMB,
+		MaxStorageGB:          body.MaxStorageGB,
+		MaxTotalCPUMillicores: body.MaxTotalCPUMillicores,
+		MaxTotalMemoryMB:      body.MaxTotalMemoryMB,
+		MaxTotalStorageGB:     body.MaxTotalStorageGB,
 	})
 	if err != nil {
 		writeRepositoryError(w, err)
@@ -88,6 +124,12 @@ func validateSetTenantQuotaRequest(body setTenantQuotaRequest) error {
 		return errors.New("maxMemoryMb must be > 0: a PUT fully replaces the quota row, so it must be sent explicitly on every request")
 	case body.MaxStorageGB <= 0:
 		return errors.New("maxStorageGb must be > 0: a PUT fully replaces the quota row, so it must be sent explicitly on every request")
+	case body.MaxTotalCPUMillicores <= 0:
+		return errors.New("maxTotalCpuMillicores must be > 0: a PUT fully replaces the quota row, so it must be sent explicitly on every request")
+	case body.MaxTotalMemoryMB <= 0:
+		return errors.New("maxTotalMemoryMb must be > 0: a PUT fully replaces the quota row, so it must be sent explicitly on every request")
+	case body.MaxTotalStorageGB <= 0:
+		return errors.New("maxTotalStorageGb must be > 0: a PUT fully replaces the quota row, so it must be sent explicitly on every request")
 	}
 	return nil
 }

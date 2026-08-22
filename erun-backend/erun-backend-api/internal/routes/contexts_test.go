@@ -42,6 +42,69 @@ func TestCreateContextRejectsMissingRequiredFields(t *testing.T) {
 	}
 }
 
+// TestCreateContextRejectsInvalidName: the name becomes both a Kubernetes
+// label value and a kubeconfig context name a placed Job's `erun` command
+// composes via shellJoin argv (#1112), so it must be a DNS-1123 label like
+// an environment name — not free text.
+func TestCreateContextRejectsInvalidName(t *testing.T) {
+	cases := map[string]string{
+		"uppercase":           `{"name":"Primary","cloudProviderAlias":"aws-acme","region":"eu-west-2"}`,
+		"space":               `{"name":"my cluster","cloudProviderAlias":"aws-acme","region":"eu-west-2"}`,
+		"hyphen-bounded":      `{"name":"-primary","cloudProviderAlias":"aws-acme","region":"eu-west-2"}`,
+		"shell metacharacter": `{"name":"primary$(rm)","cloudProviderAlias":"aws-acme","region":"eu-west-2"}`,
+	}
+	for label, body := range cases {
+		t.Run(label, func(t *testing.T) {
+			contexts := &stubContextRepository{}
+			rec := postCreateContext(t, contexts, body)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("unexpected status: %d", rec.Code)
+			}
+			if contexts.createCalls != 0 {
+				t.Fatalf("Create should not run on an invalid name, got %d calls", contexts.createCalls)
+			}
+		})
+	}
+}
+
+// TestCreateContextThreadsMaxEnvironments: an explicit maxEnvironments
+// reaches the repository create call unchanged; omitted defaults via
+// repository.DefaultContextMaxEnvironments (asserted in the repository's own
+// test), not this route.
+func TestCreateContextThreadsMaxEnvironments(t *testing.T) {
+	contexts := &stubContextRepository{created: model.Context{ContextID: "ctx-1", Name: "primary"}}
+	rec := postCreateContext(t, contexts, `{
+		"name": "primary",
+		"cloudProviderAlias": "aws-acme",
+		"region": "eu-west-2",
+		"maxEnvironments": 8
+	}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("unexpected status: %d", rec.Code)
+	}
+	if contexts.createInput.MaxEnvironments != 8 {
+		t.Fatalf("createInput.MaxEnvironments = %d, want 8", contexts.createInput.MaxEnvironments)
+	}
+}
+
+// TestCreateContextRejectsNegativeMaxEnvironments guards the one value a
+// capacity ceiling cannot sensibly take.
+func TestCreateContextRejectsNegativeMaxEnvironments(t *testing.T) {
+	contexts := &stubContextRepository{}
+	rec := postCreateContext(t, contexts, `{
+		"name": "primary",
+		"cloudProviderAlias": "aws-acme",
+		"region": "eu-west-2",
+		"maxEnvironments": -1
+	}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("unexpected status: %d", rec.Code)
+	}
+	if contexts.createCalls != 0 {
+		t.Fatal("Create should not run on a negative maxEnvironments")
+	}
+}
+
 func TestCreateContextPreviewReturnsPlanWithoutPersisting(t *testing.T) {
 	contexts := &stubContextRepository{}
 	rec := postCreateContext(t, contexts, `{

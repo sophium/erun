@@ -623,6 +623,71 @@ func loadProjectK8sPlanForRepo(repoPath, environment string) (ProjectK8sConfig, 
 	return config.K8sForEnvironment(environment), nil
 }
 
+// resolvePublishedDeployPlan resolves the k8s.deployments plan for a
+// sourceless (remote-repo) deploy target. The environment's configured repo
+// path names where its *own* pod finds the project (e.g. a runtime env's
+// in-pod checkout), which is not necessarily reachable from wherever this
+// deploy is actually running — the normal case for a runtime environment
+// driven from an operator's host. Falling back to the project rooted at the
+// invocation's own working directory covers that case: an operator running
+// `erun deploy` from inside the tenant's own checkout gets the plan read from
+// underneath them, the same as a local-repo deploy would. Every branch traces
+// its decision so "the plan is genuinely absent" and "the plan could not be
+// reached" are never the same silent outcome (#1116).
+func resolvePublishedDeployPlan(ctx Context, findProjectRoot ProjectFinderFunc, resolvedTarget OpenResult) (ProjectK8sConfig, error) {
+	configuredPath := strings.TrimSpace(resolvedTarget.RepoPath)
+	plan, err := loadProjectK8sPlanForRepo(configuredPath, resolvedTarget.Environment)
+	if err != nil {
+		return ProjectK8sConfig{}, err
+	}
+	if !plan.IsZero() {
+		return plan, nil
+	}
+	if configuredPath == "" || projectDirReachable(configuredPath) {
+		// A reachable configured path with no plan is a legitimate empty plan —
+		// no reason to go hunting through an unrelated cwd project for one.
+		return ProjectK8sConfig{}, nil
+	}
+
+	unreachableNotice := "deploy: configured repo path " + configuredPath + " is not present on this machine; "
+	fallbackPath := resolveDeployPlanFallbackPath(findProjectRoot, configuredPath)
+	if fallbackPath == "" {
+		ctx.Trace(unreachableNotice + "no k8s.deployments plan could be read")
+		return ProjectK8sConfig{}, nil
+	}
+	fallbackPlan, err := loadProjectK8sPlanForRepo(fallbackPath, resolvedTarget.Environment)
+	if err != nil {
+		return ProjectK8sConfig{}, err
+	}
+	if fallbackPlan.IsZero() {
+		ctx.Trace(unreachableNotice + "no k8s.deployments plan could be read")
+		return ProjectK8sConfig{}, nil
+	}
+	ctx.Trace(unreachableNotice + "using the k8s.deployments plan from " + fallbackPath + " instead")
+	return fallbackPlan, nil
+}
+
+// resolveDeployPlanFallbackPath returns the project root rooted at this
+// invocation's own working directory, or "" when none was found or it is the
+// same path already tried.
+func resolveDeployPlanFallbackPath(findProjectRoot ProjectFinderFunc, configuredPath string) string {
+	_, fallbackPath, err := findProjectRoot()
+	fallbackPath = strings.TrimSpace(fallbackPath)
+	if err != nil || fallbackPath == "" || filepath.Clean(fallbackPath) == filepath.Clean(configuredPath) {
+		return ""
+	}
+	return fallbackPath
+}
+
+// projectDirReachable reports whether path names a real directory on this
+// machine, distinguishing "the configured repo path does not exist here" (a
+// misconfiguration for this deploy's vantage point) from "it exists but has
+// no k8s.deployments plan for this environment" (a legitimate empty plan).
+func projectDirReachable(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
 // runDeployStep runs every spec in the group. Single-spec steps and dry-run
 // invocations execute serially so traces stay deterministic; a real multi-spec
 // step runs them in parallel and joins their errors.
@@ -1011,7 +1076,7 @@ func resolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 
 func resolveDeploySpecsForResolvedTarget(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, resolvedTarget OpenResult, target DeployTarget, buildOrchestration bool, runtimeImageOverride string) ([]DeploySpec, error) {
 	if resolvedTarget.RemoteRepo() {
-		return resolvePublishedDeploySpecs(ctx, store, resolvedTarget, target)
+		return resolvePublishedDeploySpecs(ctx, store, findProjectRoot, resolvedTarget, target)
 	}
 	return resolveSelectedLocalDeploySpecs(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, resolvedTarget, target, buildOrchestration, runtimeImageOverride)
 }
@@ -1102,24 +1167,20 @@ func traceSavedSelectionShadowingPlan(ctx Context, selected []string, source str
 // installed by reference from the published registry — each platform component
 // via its published erun-<component> chart (top-level, no local umbrella) and
 // the runtime via the published erun-devops chart. Selection comes from
-// --components or the env's saved deploy.components; the repo k8s.deployments
-// plan needs local source, so ordering falls back to the default component
-// rank. An empty selection deploys the runtime alone (bootstrap/heal), matching
-// the prior published-runtime-only behaviour.
-func resolvePublishedDeploySpecs(ctx Context, store DeployStore, resolvedTarget OpenResult, target DeployTarget) ([]DeploySpec, error) {
-	selected, selectionSource := resolveSelectedDeployComponents(target.Components, resolvedTarget.EnvConfig.Deploy.Components, ProjectK8sConfig{})
+// --components, then the env's saved deploy.components, then the repo
+// k8s.deployments plan (see resolvePublishedDeployPlan for how that plan is
+// located on this machine). An empty selection deploys the runtime alone
+// (bootstrap/heal), matching the prior published-runtime-only behaviour.
+func resolvePublishedDeploySpecs(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolvedTarget OpenResult, target DeployTarget) ([]DeploySpec, error) {
+	plan, err := resolvePublishedDeployPlan(ctx, findProjectRoot, resolvedTarget)
+	if err != nil {
+		return nil, err
+	}
+	selected, selectionSource := resolveSelectedDeployComponents(target.Components, resolvedTarget.EnvConfig.Deploy.Components, plan)
 	traceDeployComponentSelection(ctx, selected, selectionSource)
-	// Ordering does not use the repo plan here (no local source to order by),
-	// but the divergence it would reveal still matters: a host machine running
-	// this deploy against a remote/runtime env is very often sitting inside the
-	// same tenant repo checkout, so a best-effort read is worth attempting
-	// purely to warn on a shadowed plan. A missing or unreadable repo is
-	// silently treated as "no plan to compare against", exactly as it already is
-	// for the local path.
-	shadowPlan, _ := loadProjectK8sPlanForRepo(resolvedTarget.RepoPath, resolvedTarget.Environment)
-	traceSavedSelectionShadowingPlan(ctx, selected, selectionSource, shadowPlan)
+	traceSavedSelectionShadowingPlan(ctx, selected, selectionSource, plan)
 
-	tenantComponents := selectedPublishableComponents(selected, resolvedTarget.Tenant)
+	tenantComponents := selectedPublishableComponents(selected, resolvedTarget.Tenant, plan)
 	runtimeSelected := deploySelectionIncludesRuntime(selected, resolvedTarget.Tenant)
 
 	// Deploying the tenant's own component charts binds the whole deploy to the

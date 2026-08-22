@@ -1,6 +1,7 @@
 audit: erun deploy --dry-run --version <VERSION> team dev
 trace-log: would append the full trace to <TMP>
 deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=false current=false
+deploy: configured repo path /nonexistent-remote/team is not present on this machine; no k8s.deployments plan could be read
 deploy: component selection source default (runtime only); deploying the runtime chart alone
 deploy: runtime chart team-devops <VERSION> not found in ghcr.io/petios (the tenant's own umbrella)
 deploy: runtime chart erun-devops <VERSION> not found in ghcr.io/petios (the shared platform chart)

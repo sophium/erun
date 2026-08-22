@@ -13,6 +13,17 @@ CREATE TABLE tenant_quotas (
   max_cpu_millicores INT NOT NULL DEFAULT 8000 CHECK (max_cpu_millicores >= 0),
   max_memory_mb INT NOT NULL DEFAULT 17832 CHECK (max_memory_mb >= 0),
   max_storage_gb INT NOT NULL DEFAULT 72 CHECK (max_storage_gb >= 0),
+  -- Aggregate tenant-wide ceiling (#1113), distinct from the per-environment
+  -- ceiling above: every runtime environment gets the SAME per-environment
+  -- cap, so admission projects (existing runtime environment count + 1) *
+  -- the per-environment cap and refuses a create that would push the
+  -- projected total past this budget. Defaults to max_environments (10) *
+  -- the per-environment defaults above, so a tenant with no quota row set
+  -- can still provision up to its default environment-count cap at the
+  -- default per-environment size without also hitting this ceiling.
+  max_total_cpu_millicores INT NOT NULL DEFAULT 80000 CHECK (max_total_cpu_millicores >= 0),
+  max_total_memory_mb INT NOT NULL DEFAULT 178320 CHECK (max_total_memory_mb >= 0),
+  max_total_storage_gb INT NOT NULL DEFAULT 720 CHECK (max_total_storage_gb >= 0),
   created_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ,
   FOREIGN KEY (tenant_id) REFERENCES tenants (tenant_id)

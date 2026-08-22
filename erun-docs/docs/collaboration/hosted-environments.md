@@ -56,13 +56,15 @@ erun platform env delete <environment-id>   # tear down the namespace; irreversi
 
 ## Where an environment lands
 
-Today every hosted runtime environment deploys into the platform's own cluster — there is no way yet to point one at a cloud context you've bootstrapped yourself. See [Single-cluster placement](/concepts/hosted-platform#single-cluster-placement) for why, and what a request to do otherwise looks like (a clear, immediate error rather than a silently-wrong deploy).
+Name a cloud context you've already registered with `contextId` and a hosted runtime environment deploys there instead of the platform's own cluster; leave it unset and the platform auto-selects one of your own registered contexts with room, or falls back to its own cluster if you haven't registered any. See [Placement](/concepts/hosted-platform#single-cluster-placement) for the full decision and what an unresolvable request looks like (a clear, immediate error rather than a silently-wrong deploy).
 
 ## Quotas
 
 Your tenant has a cap on how many environments it may register at once. `erun platform env register` reports a clear conflict at the cap; `erun platform provision` shows you the same quota decision in its preview before you commit.
 
-Each of your environments also runs inside a namespace capped on CPU, memory, and storage — enforced by Kubernetes itself, not just recorded. If your platform operator has set your tenant's cap unusually low, registering a new runtime environment is refused with a clear conflict naming the cap, rather than succeeding and failing to actually come up. Both caps are set by your platform operator (operations-only); reach out to them to raise either one. See [Hosted platform · Quotas](/concepts/hosted-platform#quotas) for the full spec.
+Each of your environments also runs inside a namespace capped on CPU, memory, and storage — enforced by Kubernetes itself, not just recorded. On top of that, your tenant has an aggregate CPU/memory/storage budget across all of your runtime environments combined: registering (or redeploying) one that would push your total past that budget is refused the same way, naming which resource and by how much. If your platform operator has set either cap unusually low, registering a new runtime environment is refused with a clear conflict naming the cap, rather than succeeding and failing to actually come up.
+
+You can see your own tenant's full quota — the environment-count cap, the per-environment ceiling, and the aggregate budget — at any time via the API's `GET /v1/quota` (no operator role required); there is no CLI command for it yet. All caps are set by your platform operator (operations-only); reach out to them to raise any of them. See [Hosted platform · Quotas](/concepts/hosted-platform#quotas) for the full spec.
 
 ## Where next
 

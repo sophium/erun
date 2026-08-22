@@ -12,6 +12,7 @@ import (
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/provision"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
@@ -19,7 +20,7 @@ func postCreateEnvironment(t *testing.T, environments *stubEnvironmentRepository
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/v1/environments", bytes.NewBufferString(body))
 	rec := httptest.NewRecorder()
-	EnvironmentRoutes{environments: environments, quotas: quotas}.createEnvironment(rec, req)
+	EnvironmentRoutes{environments: environments, quotas: quotas, contexts: &stubContextRepository{}}.createEnvironment(rec, req)
 	return rec
 }
 
@@ -53,6 +54,7 @@ func postCreateEnvironmentWired(t *testing.T, environments *stubEnvironmentRepos
 	rec := httptest.NewRecorder()
 	EnvironmentRoutes{
 		environments: environments,
+		contexts:     &stubContextRepository{},
 		quotas:       underCapQuota,
 		tenants:      stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
 		provisioner:  prov,
@@ -125,28 +127,144 @@ func TestCreateEnvironmentPersistsAndReturnsRow(t *testing.T) {
 	}
 }
 
-// TestCreateEnvironmentRejectsCrossClusterPlacement: the v1 single-cluster
-// placement decision (#605) — the deploy Job has no mechanism to target any
-// cluster but the control plane's own, so a runtime environment naming a
-// context or kubernetes context must be refused explicitly rather than
-// silently accepted and ignored.
-func TestCreateEnvironmentRejectsCrossClusterPlacement(t *testing.T) {
-	cases := map[string]string{
-		"contextId":         `{"name":"prod","type":"runtime","contextId":"ctx-1","runtimeVersion":"1.2.3"}`,
-		"kubernetesContext": `{"name":"prod","type":"runtime","kubernetesContext":"primary","runtimeVersion":"1.2.3"}`,
-	}
-	for label, body := range cases {
-		t.Run(label, func(t *testing.T) {
-			environments := &stubEnvironmentRepository{created: model.Environment{EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime}}
-			rec := postCreateEnvironment(t, environments, underCapQuota, body)
+// TestCreateEnvironmentRejectsRawKubernetesContext: naming an existing
+// cluster is by contextId (#1112) — a bare kubernetesContext string has no
+// known credential to authenticate with, so it stays refused for a runtime
+// environment even after contextId placement exists.
+func TestCreateEnvironmentRejectsRawKubernetesContext(t *testing.T) {
+	environments := &stubEnvironmentRepository{created: model.Environment{EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime}}
+	rec := postCreateEnvironment(t, environments, underCapQuota, `{"name":"prod","type":"runtime","kubernetesContext":"primary","runtimeVersion":"1.2.3"}`)
 
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d (body %s), want 400 Bad Request", rec.Code, rec.Body.String())
-			}
-			if environments.createCalls != 0 {
-				t.Fatal("a rejected placement must not persist a row that can never deploy")
-			}
-		})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d (body %s), want 400 Bad Request", rec.Code, rec.Body.String())
+	}
+	if environments.createCalls != 0 {
+		t.Fatal("a rejected placement must not persist a row that can never deploy")
+	}
+}
+
+// TestCreateEnvironmentPlacesOnExplicitContext: a runtime environment naming
+// a registered, running contextId with room is placed there (#1112) — the
+// v1 refusal (TestCreateEnvironmentRejectsRawKubernetesContext) only ever
+// covered a bare kubernetesContext string, not a real contextId reference.
+func TestCreateEnvironmentPlacesOnExplicitContext(t *testing.T) {
+	environments := &stubEnvironmentRepository{created: model.Environment{EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime, ContextID: "ctx-1"}}
+	contexts := &stubContextRepository{cloudContext: model.Context{
+		ContextID: "ctx-1", Name: "prod-cluster", Status: "running",
+		PublicIP: "203.0.113.10", KubernetesContext: "prod-cluster", MaxEnvironments: 5,
+	}}
+	req := httptest.NewRequest(http.MethodPost, "/v1/environments", bytes.NewBufferString(`{"name":"prod","type":"runtime","contextId":"ctx-1","runtimeVersion":"1.2.3"}`))
+	rec := httptest.NewRecorder()
+	EnvironmentRoutes{environments: environments, quotas: underCapQuota, contexts: contexts}.createEnvironment(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d (body %s), want 201 Created", rec.Code, rec.Body.String())
+	}
+	if environments.createInput.ContextID != "ctx-1" {
+		t.Fatalf("createInput.ContextID = %q, want ctx-1", environments.createInput.ContextID)
+	}
+}
+
+// TestCreateEnvironmentRejectsUnknownContext: a contextId that does not
+// resolve for the caller's tenant (unregistered, or belonging to another
+// tenant — PlacementContextRepository's reads are RLS-scoped) is a caller
+// mistake, not a server fault.
+func TestCreateEnvironmentRejectsUnknownContext(t *testing.T) {
+	environments := &stubEnvironmentRepository{created: model.Environment{EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime}}
+	contexts := &stubContextRepository{err: repository.ErrNotFound}
+	req := httptest.NewRequest(http.MethodPost, "/v1/environments", bytes.NewBufferString(`{"name":"prod","type":"runtime","contextId":"ctx-missing","runtimeVersion":"1.2.3"}`))
+	rec := httptest.NewRecorder()
+	EnvironmentRoutes{environments: environments, quotas: underCapQuota, contexts: contexts}.createEnvironment(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d (body %s), want 400 Bad Request", rec.Code, rec.Body.String())
+	}
+	if environments.createCalls != 0 {
+		t.Fatal("an unknown context must not persist a row")
+	}
+}
+
+// TestCreateEnvironmentRejectsContextAtCapacity: an explicit contextId with
+// no room fails clearly (409, naming the context and its ceiling) rather
+// than persisting a row and failing inside the Job (#1112).
+func TestCreateEnvironmentRejectsContextAtCapacity(t *testing.T) {
+	environments := &stubEnvironmentRepository{
+		created:        model.Environment{EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime},
+		countByContext: map[string]int{"ctx-1": 5},
+	}
+	contexts := &stubContextRepository{cloudContext: model.Context{
+		ContextID: "ctx-1", Name: "prod-cluster", Status: "running",
+		PublicIP: "203.0.113.10", KubernetesContext: "prod-cluster", MaxEnvironments: 5,
+	}}
+	req := httptest.NewRequest(http.MethodPost, "/v1/environments", bytes.NewBufferString(`{"name":"prod","type":"runtime","contextId":"ctx-1","runtimeVersion":"1.2.3"}`))
+	rec := httptest.NewRecorder()
+	EnvironmentRoutes{environments: environments, quotas: underCapQuota, contexts: contexts}.createEnvironment(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d (body %s), want 409 Conflict", rec.Code, rec.Body.String())
+	}
+	if environments.createCalls != 0 {
+		t.Fatal("a context at capacity must not persist a row")
+	}
+}
+
+// TestCreateEnvironmentAutoSelectsRunningContextWithRoom: a runtime
+// environment naming no context auto-selects the tenant's own registered
+// context when one is running and has room (#1112).
+func TestCreateEnvironmentAutoSelectsRunningContextWithRoom(t *testing.T) {
+	environments := &stubEnvironmentRepository{created: model.Environment{EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime, ContextID: "ctx-1"}}
+	contexts := &stubContextRepository{contexts: []model.Context{
+		{ContextID: "ctx-1", Name: "prod-cluster", Status: "running", PublicIP: "203.0.113.10", KubernetesContext: "prod-cluster", MaxEnvironments: 5},
+	}}
+	req := httptest.NewRequest(http.MethodPost, "/v1/environments", bytes.NewBufferString(`{"name":"prod","type":"runtime","runtimeVersion":"1.2.3"}`))
+	rec := httptest.NewRecorder()
+	EnvironmentRoutes{environments: environments, quotas: underCapQuota, contexts: contexts}.createEnvironment(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d (body %s), want 201 Created", rec.Code, rec.Body.String())
+	}
+	if environments.createInput.ContextID != "ctx-1" {
+		t.Fatalf("createInput.ContextID = %q, want auto-selected ctx-1", environments.createInput.ContextID)
+	}
+}
+
+// TestCreateEnvironmentWithNoRegisteredContextsPlacesOnThePlatformCluster: a
+// tenant with no registered contexts keeps the pre-#1112 default — the
+// platform's own cluster (empty contextId) — rather than being refused.
+func TestCreateEnvironmentWithNoRegisteredContextsPlacesOnThePlatformCluster(t *testing.T) {
+	environments := &stubEnvironmentRepository{created: model.Environment{EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime}}
+	rec := postCreateEnvironment(t, environments, underCapQuota, `{"name":"prod","type":"runtime","runtimeVersion":"1.2.3"}`)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d (body %s), want 201 Created", rec.Code, rec.Body.String())
+	}
+	if environments.createInput.ContextID != "" {
+		t.Fatalf("createInput.ContextID = %q, want empty (the platform's own cluster)", environments.createInput.ContextID)
+	}
+}
+
+// TestCreateEnvironmentRefusesWhenAllRegisteredContextsAreFull: once a
+// tenant has registered contexts, exhausting all of them fails clearly
+// (#1112's "or fail clearly when none qualifies") rather than silently
+// falling back to the platform's own cluster, which the caller never asked
+// for.
+func TestCreateEnvironmentRefusesWhenAllRegisteredContextsAreFull(t *testing.T) {
+	environments := &stubEnvironmentRepository{
+		created:        model.Environment{EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime},
+		countByContext: map[string]int{"ctx-1": 5},
+	}
+	contexts := &stubContextRepository{contexts: []model.Context{
+		{ContextID: "ctx-1", Name: "prod-cluster", Status: "running", PublicIP: "203.0.113.10", KubernetesContext: "prod-cluster", MaxEnvironments: 5},
+	}}
+	req := httptest.NewRequest(http.MethodPost, "/v1/environments", bytes.NewBufferString(`{"name":"prod","type":"runtime","runtimeVersion":"1.2.3"}`))
+	rec := httptest.NewRecorder()
+	EnvironmentRoutes{environments: environments, quotas: underCapQuota, contexts: contexts}.createEnvironment(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d (body %s), want 409 Conflict", rec.Code, rec.Body.String())
+	}
+	if environments.createCalls != 0 {
+		t.Fatal("an exhausted inventory must not persist a row")
 	}
 }
 
@@ -227,6 +345,7 @@ func TestCreateEnvironmentStartsDeployWithResourceCaps(t *testing.T) {
 	rec := httptest.NewRecorder()
 	EnvironmentRoutes{
 		environments: environments,
+		contexts:     &stubContextRepository{},
 		quotas:       stubTenantQuotaRepository{maxEnvironments: 10, maxCPUMillicores: 9000, maxMemoryMB: 20000, maxStorageGB: 100},
 		tenants:      stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
 		provisioner:  prov,
@@ -258,6 +377,7 @@ func TestCreateEnvironmentRejectsQuotaBelowRuntimeFloor(t *testing.T) {
 	rec := httptest.NewRecorder()
 	EnvironmentRoutes{
 		environments: environments,
+		contexts:     &stubContextRepository{},
 		quotas:       stubTenantQuotaRepository{maxEnvironments: 10, maxCPUMillicores: 500, maxMemoryMB: 9216, maxStorageGB: 80},
 		tenants:      stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
 		provisioner:  prov,
@@ -268,6 +388,104 @@ func TestCreateEnvironmentRejectsQuotaBelowRuntimeFloor(t *testing.T) {
 	}
 	if environments.createCalls != 0 || len(prov.started) != 0 {
 		t.Fatalf("createCalls=%d Start calls=%d, want 0/0: a quota below the floor must refuse before creating anything", environments.createCalls, len(prov.started))
+	}
+}
+
+// TestCreateEnvironmentRejectsAggregateBudgetExceeded: a tenant already
+// running one runtime environment at the per-environment cap, whose
+// aggregate budget has no room for a second, is refused clearly (409) rather
+// than persisting a row that would push the tenant over its contracted
+// total (#1113).
+func TestCreateEnvironmentRejectsAggregateBudgetExceeded(t *testing.T) {
+	environments := &stubEnvironmentRepository{
+		created:            model.Environment{EnvironmentID: "env-2", Name: "staging", Type: model.EnvironmentTypeRuntime, RuntimeVersion: "1.2.3"},
+		countByRuntimeType: 1,
+	}
+	prov := &stubEnvironmentProvisioner{}
+	req := httptest.NewRequest(http.MethodPost, "/v1/environments", bytes.NewBufferString(`{"name":"staging","type":"runtime","runtimeVersion":"1.2.3"}`))
+	req = req.WithContext(security.WithContext(req.Context(), security.Context{TenantID: "t1", TenantType: string(model.TenantTypeCompany), ErunUserID: "u1"}))
+	rec := httptest.NewRecorder()
+	EnvironmentRoutes{
+		environments: environments,
+		contexts:     &stubContextRepository{},
+		quotas: stubTenantQuotaRepository{
+			maxEnvironments: 10, maxCPUMillicores: 8000, maxMemoryMB: 17832, maxStorageGB: 72,
+			maxTotalCPUMillicores: 8000, maxTotalMemoryMB: 17832, maxTotalStorageGB: 72,
+		},
+		tenants:     stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
+		provisioner: prov,
+	}.createEnvironment(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d (body %s), want 409", rec.Code, rec.Body.String())
+	}
+	if environments.createCalls != 0 || len(prov.started) != 0 {
+		t.Fatalf("createCalls=%d Start calls=%d, want 0/0: an exceeded aggregate budget must refuse before creating anything", environments.createCalls, len(prov.started))
+	}
+}
+
+// TestCreateEnvironmentAllowsWithinAggregateBudget: the mirror of the above —
+// a second runtime environment that fits within the tenant's aggregate
+// budget is admitted normally.
+func TestCreateEnvironmentAllowsWithinAggregateBudget(t *testing.T) {
+	environments := &stubEnvironmentRepository{
+		created:            model.Environment{EnvironmentID: "env-2", Name: "staging", Type: model.EnvironmentTypeRuntime, RuntimeVersion: "1.2.3"},
+		countByRuntimeType: 1,
+	}
+	prov := &stubEnvironmentProvisioner{}
+	req := httptest.NewRequest(http.MethodPost, "/v1/environments", bytes.NewBufferString(`{"name":"staging","type":"runtime","runtimeVersion":"1.2.3"}`))
+	req = req.WithContext(security.WithContext(req.Context(), security.Context{TenantID: "t1", TenantType: string(model.TenantTypeCompany), ErunUserID: "u1"}))
+	rec := httptest.NewRecorder()
+	EnvironmentRoutes{
+		environments: environments,
+		contexts:     &stubContextRepository{},
+		quotas: stubTenantQuotaRepository{
+			maxEnvironments: 10, maxCPUMillicores: 8000, maxMemoryMB: 17832, maxStorageGB: 72,
+			maxTotalCPUMillicores: 16000, maxTotalMemoryMB: 35664, maxTotalStorageGB: 144,
+		},
+		tenants:     stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
+		provisioner: prov,
+	}.createEnvironment(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d (body %s), want 202 Accepted", rec.Code, rec.Body.String())
+	}
+	if environments.createCalls != 1 {
+		t.Fatalf("createCalls = %d, want 1", environments.createCalls)
+	}
+}
+
+// TestDeployEnvironmentRejectsAggregateBudgetExceeded: a redeploy re-checks
+// the aggregate budget too, using the runtime count as-is (the environment
+// being redeployed is already counted, unlike create's +1).
+func TestDeployEnvironmentRejectsAggregateBudgetExceeded(t *testing.T) {
+	environments := runtimeEnvironment()
+	environments.countByRuntimeType = 1
+	prov := &stubEnvironmentProvisioner{}
+	req := httptest.NewRequest(http.MethodPost, "/v1/environments/env-1/deploy", bytes.NewBufferString(""))
+	req.SetPathValue("environment_id", "env-1")
+	req = req.WithContext(security.WithContext(req.Context(), security.Context{
+		TenantID:   "t1",
+		TenantType: string(model.TenantTypeCompany),
+		ErunUserID: "u1",
+	}))
+	rec := httptest.NewRecorder()
+	EnvironmentRoutes{
+		environments: environments,
+		contexts:     &stubContextRepository{},
+		quotas: stubTenantQuotaRepository{
+			maxEnvironments: 10, maxCPUMillicores: 8000, maxMemoryMB: 17832, maxStorageGB: 72,
+			maxTotalCPUMillicores: 4000, maxTotalMemoryMB: 17832, maxTotalStorageGB: 72,
+		},
+		tenants:     stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
+		provisioner: prov,
+	}.deployEnvironment(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d (body %s), want 409", rec.Code, rec.Body.String())
+	}
+	if len(prov.deployed) != 0 {
+		t.Fatalf("StartDeploy calls = %d, want 0: an exceeded aggregate budget must refuse before claiming", len(prov.deployed))
 	}
 }
 
@@ -338,6 +556,7 @@ func postDeployEnvironment(t *testing.T, environments *stubEnvironmentRepository
 	rec := httptest.NewRecorder()
 	routes := EnvironmentRoutes{
 		environments: environments,
+		contexts:     &stubContextRepository{},
 		quotas:       underCapQuota,
 		tenants:      stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
 	}
@@ -438,6 +657,7 @@ func TestDeployEnvironmentRejectsQuotaBelowRuntimeFloor(t *testing.T) {
 	rec := httptest.NewRecorder()
 	EnvironmentRoutes{
 		environments: environments,
+		contexts:     &stubContextRepository{},
 		quotas:       stubTenantQuotaRepository{maxEnvironments: 10, maxCPUMillicores: 500, maxMemoryMB: 9216, maxStorageGB: 80},
 		tenants:      stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
 		provisioner:  prov,
@@ -552,6 +772,7 @@ func postCreateEnvironmentPreview(t *testing.T, environments *stubEnvironmentRep
 	rec := httptest.NewRecorder()
 	EnvironmentRoutes{
 		environments: environments,
+		contexts:     &stubContextRepository{},
 		quotas:       quotas,
 		tenants:      stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
 	}.createEnvironment(rec, req)
@@ -587,11 +808,12 @@ func TestCreateEnvironmentPreviewRendersProvisionPlanWithoutPersisting(t *testin
 }
 
 // TestCreateEnvironmentPreviewStillEnforcesPlacement: preview must apply the
-// same v1 single-cluster placement check as a real create, not a laxer one.
+// same placement check as a real create, not a laxer one — a raw
+// kubernetesContext stays refused everywhere (#1112).
 func TestCreateEnvironmentPreviewStillEnforcesPlacement(t *testing.T) {
 	environments := &stubEnvironmentRepository{}
 	rec := postCreateEnvironmentPreview(t, environments, underCapQuota, `{
-		"name": "prod", "type": "runtime", "contextId": "ctx-1", "preview": true
+		"name": "prod", "type": "runtime", "kubernetesContext": "primary", "preview": true
 	}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 Bad Request", rec.Code)
@@ -626,6 +848,7 @@ func postStopEnvironment(t *testing.T, environments *stubEnvironmentRepository, 
 	rec := httptest.NewRecorder()
 	EnvironmentRoutes{
 		environments: environments,
+		contexts:     &stubContextRepository{},
 		quotas:       underCapQuota,
 		tenants:      stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
 		lifecycle:    lifecycle,
@@ -645,6 +868,7 @@ func deleteEnvironmentRequest(t *testing.T, environments *stubEnvironmentReposit
 	rec := httptest.NewRecorder()
 	EnvironmentRoutes{
 		environments: environments,
+		contexts:     &stubContextRepository{},
 		quotas:       underCapQuota,
 		tenants:      stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
 		lifecycle:    lifecycle,

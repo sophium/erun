@@ -402,3 +402,50 @@ func TestRunWatchesTheDeployJob(t *testing.T) {
 		t.Fatalf("outcome = %q, want succeeded", result.Outcome)
 	}
 }
+
+// TestRunProvisionsThePlacementSecretBeforeTheJob locks #1112's ordering: a
+// deploy targeting a remote context must have its credential Secret in place
+// before the Job that reads it via secretKeyRef is created, or the Job's
+// container fails to start on a missing Secret. The pre-seeded Job here
+// (mirroring TestRunWatchesTheDeployJob) lets the runner's create-tolerant-
+// of-AlreadyExists path just watch it; the Job's own container/env wiring is
+// covered directly by TestBuildDeployJobSpecWithPlacement, which builds the
+// Job object without going through a fake watch.
+func TestRunProvisionsThePlacementSecretBeforeTheJob(t *testing.T) {
+	p := testParams()
+	p.Placement = PlacementParams{ContextID: "ctx-1", KubernetesContext: "prod-cluster", ServerURL: "https://203.0.113.10:6443", AdminToken: "the-token"}
+	kube := fake.NewSimpleClientset(&batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      DeployJobName(p.Tenant, p.Environment, p.Version, p.DeployID),
+			Namespace: p.Namespace,
+		},
+		Status: batchv1.JobStatus{Succeeded: 1},
+	})
+	launcher := NewLauncher(kube)
+	launcher.PollEvery(0)
+	if _, err := launcher.Run(context.Background(), p); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	secret, err := kube.CoreV1().Secrets(p.Namespace).Get(context.Background(), PlacementSecretName("ctx-1"), metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("the placement secret must exist after Run: %v", err)
+	}
+	if secret.StringData[placementAdminTokenKey] != "the-token" {
+		t.Fatalf("secret token = %q, want the-token", secret.StringData[placementAdminTokenKey])
+	}
+}
+
+// TestBuildDeployJobSpecWithPlacement locks that a remote placement's Job
+// carries the env var sourcing its admin token from the placement Secret.
+func TestBuildDeployJobSpecWithPlacement(t *testing.T) {
+	p := testParams()
+	p.Placement = PlacementParams{ContextID: "ctx-1", KubernetesContext: "prod-cluster", ServerURL: "https://203.0.113.10:6443"}
+	job := buildDeployJob(p)
+	envVars := job.Spec.Template.Spec.Containers[0].Env
+	if len(envVars) != 1 || envVars[0].ValueFrom == nil || envVars[0].ValueFrom.SecretKeyRef == nil {
+		t.Fatalf("job container env = %+v, want it to source the token from the placement secret", envVars)
+	}
+	if envVars[0].ValueFrom.SecretKeyRef.Name != PlacementSecretName("ctx-1") {
+		t.Fatalf("secret ref = %q, want %q", envVars[0].ValueFrom.SecretKeyRef.Name, PlacementSecretName("ctx-1"))
+	}
+}

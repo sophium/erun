@@ -143,8 +143,13 @@ rendered=$(render --set-string api.envDeployer.enabled=true)
 container "${rendered}" | grep -q 'ERUN_ENV_DEPLOY_IMAGE_PULL_SECRETS' &&
     fail "no pull-secret env var should render when none are configured"
 role "${rendered}" team-api-env-deployer >"${deployer_role}"
-grep -q 'secrets' "${deployer_role}" &&
-    fail "no secrets grant should render when no pull secrets are configured"
+# The Role still grants secrets create/get/update unconditionally (#1112,
+# placement credentials) even with no pull secret configured; what must NOT
+# render without one is the resourceNames-scoped pull-secret sub-rule.
+grep -q 'resourceNames' "${deployer_role}" &&
+    fail "no resourceNames-scoped secrets grant should render when no pull secrets are configured"
+grep -q 'resources: \["secrets"\]' "${deployer_role}" ||
+    fail "the placement-credential secrets grant (#1112) must render regardless of pull-secret configuration"
 
 # --- 8. Pin each Role the API's own Kubernetes client can run under against
 #        what erun-backend-api's production Go source actually calls
@@ -176,6 +181,16 @@ require_role_resource '.BatchV1().Jobs(' jobs "${deployer_role}"
 require_role_resource '.CoreV1().Pods(' pods "${deployer_role}"
 require_role_resource '.GetLogs(' 'pods/log' "${deployer_role}"
 require_role_resource '.CoreV1().Secrets(' secrets "${deployer_role}"
+
+# --- 8b. Pin the placement-credential secrets grant's verbs precisely
+#         (#1112): deployexec.ensurePlacementSecret (called by this SA's own
+#         process, not the deploy Job) creates then updates one
+#         erun-ctx-cred-<contextId> Secret per remote-context deploy, and
+#         reads its own write back on the AlreadyExists retry path -- never
+#         list/watch/delete, which would let this identity enumerate or erase
+#         secrets it has no reason to touch.
+grep -q 'verbs: \["create", "get", "update"\]' "${deployer_role}" ||
+    fail "the placement-credential secrets grant must be exactly create/get/update, no more and no less"
 
 rendered=$(render --set-string api.releaseQueue.enabled=true --set-string api.releaseQueue.namespace=team-ux)
 queue_role="${work_root}/queue-role.yaml"

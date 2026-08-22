@@ -60,7 +60,7 @@ func provision(t *testing.T, runner DeployRunner, status *recordingStatusWriter)
 // bounded-retry path costs no wall-clock in tests.
 func provisionVersion(t *testing.T, runner DeployRunner, status *recordingStatusWriter, version string) error {
 	t.Helper()
-	provisioner := NewEnvironmentProvisioner(runner, status, nil)
+	provisioner := NewEnvironmentProvisioner(runner, status, nil, nil)
 	provisioner.backoff = 0
 	return provisioner.Provision(context.Background(), "env-1", deployexec.DeployJobParams{Version: version})
 }
@@ -124,7 +124,7 @@ func TestProvisionRecordsTheDeploysOwnFailure(t *testing.T) {
 // still be actionable, so it names the Job an operator can read for themselves.
 func TestProvisionSaysWhereToLookWhenTheJobLeftNothing(t *testing.T) {
 	status := &recordingStatusWriter{}
-	provisioner := NewEnvironmentProvisioner(fakeRunner{outcome: deployexec.OutcomeFailed}, status, nil)
+	provisioner := NewEnvironmentProvisioner(fakeRunner{outcome: deployexec.OutcomeFailed}, status, nil, nil)
 	provisioner.backoff = 0
 	params := deployexec.DeployJobParams{Tenant: "acme", Environment: "prod", Version: "1.2.3", Namespace: "acme-platform"}
 	if err := provisioner.Provision(context.Background(), "env-1", params); err == nil {
@@ -231,7 +231,7 @@ func TestProvisionFailsWhenStatusWriteNeverSucceeds(t *testing.T) {
 func TestProvisionRecordsUsageEventOnSuccess(t *testing.T) {
 	status := &recordingStatusWriter{}
 	usage := &recordingUsageRecorder{}
-	provisioner := NewEnvironmentProvisioner(fakeRunner{outcome: deployexec.OutcomeSucceeded}, status, usage)
+	provisioner := NewEnvironmentProvisioner(fakeRunner{outcome: deployexec.OutcomeSucceeded}, status, usage, nil)
 	provisioner.backoff = 0
 	params := deployexec.DeployJobParams{Version: "1.2.3", MaxCPUMillicores: 4000, MaxMemoryMB: 9216, MaxStorageGB: 80}
 	if err := provisioner.Provision(context.Background(), "env-1", params); err != nil {
@@ -252,7 +252,7 @@ func TestProvisionRecordsUsageEventOnSuccess(t *testing.T) {
 func TestProvisionRecordsNoUsageEventOnFailure(t *testing.T) {
 	status := &recordingStatusWriter{}
 	usage := &recordingUsageRecorder{}
-	provisioner := NewEnvironmentProvisioner(fakeRunner{outcome: deployexec.OutcomeFailed}, status, usage)
+	provisioner := NewEnvironmentProvisioner(fakeRunner{outcome: deployexec.OutcomeFailed}, status, usage, nil)
 	provisioner.backoff = 0
 	if err := provisioner.Provision(context.Background(), "env-1", deployexec.DeployJobParams{Version: "1.2.3"}); err == nil {
 		t.Fatal("expected an error when the deploy job fails")
@@ -267,11 +267,70 @@ func TestProvisionRecordsNoUsageEventOnFailure(t *testing.T) {
 func TestProvisionSurvivesUsageRecordFailure(t *testing.T) {
 	status := &recordingStatusWriter{}
 	usage := &recordingUsageRecorder{err: errors.New("usage store unavailable")}
-	provisioner := NewEnvironmentProvisioner(fakeRunner{outcome: deployexec.OutcomeSucceeded}, status, usage)
+	provisioner := NewEnvironmentProvisioner(fakeRunner{outcome: deployexec.OutcomeSucceeded}, status, usage, nil)
 	provisioner.backoff = 0
 	if err := provisioner.Provision(context.Background(), "env-1", deployexec.DeployJobParams{Version: "1.2.3"}); err != nil {
 		t.Fatalf("provision should survive a usage-record failure: %v", err)
 	}
+}
+
+// TestProvisionRefusesWhenPlacementCredentialUnavailable: an environment
+// naming a context but no resolver configured (e.g. no cipher) must fail
+// clearly rather than silently running the deploy Job unauthenticated
+// against a cluster it cannot reach (#1112).
+func TestProvisionRefusesWhenPlacementCredentialUnavailable(t *testing.T) {
+	status := &recordingStatusWriter{}
+	runner := fakeRunner{outcome: deployexec.OutcomeSucceeded}
+	provisioner := NewEnvironmentProvisioner(runner, status, nil, nil)
+	provisioner.backoff = 0
+	params := deployexec.DeployJobParams{Version: "1.2.3", Placement: deployexec.PlacementParams{ContextID: "ctx-1"}}
+	err := provisioner.Provision(context.Background(), "env-1", params)
+	if err == nil {
+		t.Fatal("expected an error when no placement credential resolver is configured")
+	}
+	if status.transitions[len(status.transitions)-1][:7] != "failed:" {
+		t.Fatalf("last transition = %q, want failed:*", status.transitions[len(status.transitions)-1])
+	}
+}
+
+// TestProvisionResolvesThePlacementTokenFreshOnEveryRun: the admin token is
+// resolved from the credential resolver and threaded onto the Job params —
+// never carried in the caller's params — so a rotated token reaches the very
+// next deploy with no separate sync step.
+func TestProvisionResolvesThePlacementTokenFreshOnEveryRun(t *testing.T) {
+	status := &recordingStatusWriter{}
+	var seenToken string
+	runner := recordingPlacementRunner{fn: func(p deployexec.DeployJobParams) {
+		seenToken = p.Placement.AdminToken
+	}}
+	credentials := stubPlacementCredentials{token: "live-token"}
+	provisioner := NewEnvironmentProvisioner(runner, status, nil, credentials)
+	provisioner.backoff = 0
+	params := deployexec.DeployJobParams{Version: "1.2.3", Placement: deployexec.PlacementParams{ContextID: "ctx-1"}}
+	if err := provisioner.Provision(context.Background(), "env-1", params); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	if seenToken != "live-token" {
+		t.Fatalf("token seen by the runner = %q, want live-token", seenToken)
+	}
+}
+
+type stubPlacementCredentials struct {
+	token string
+	err   error
+}
+
+func (s stubPlacementCredentials) Get(context.Context, string) (string, error) {
+	return s.token, s.err
+}
+
+type recordingPlacementRunner struct {
+	fn func(deployexec.DeployJobParams)
+}
+
+func (r recordingPlacementRunner) Run(_ context.Context, params deployexec.DeployJobParams) (deployexec.Result, error) {
+	r.fn(params)
+	return deployexec.Result{Outcome: deployexec.OutcomeSucceeded}, nil
 }
 
 func assertTransitions(t *testing.T, got, want []string) {

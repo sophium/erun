@@ -57,7 +57,7 @@ func testLifecycleConfig() EnvDeployConfig {
 
 func TestEnvLifecycleStopRunsJobWithRunningVersion(t *testing.T) {
 	runner := &stubLifecycleRunner{stopResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
-	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, nil)
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, nil, nil)
 
 	err := lifecycle.Stop(context.Background(), EnvLifecycleInput{
 		Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3",
@@ -76,7 +76,7 @@ func TestEnvLifecycleStopRunsJobWithRunningVersion(t *testing.T) {
 
 func TestEnvLifecycleStopRejectsNeverDeployed(t *testing.T) {
 	runner := &stubLifecycleRunner{}
-	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, nil)
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, nil, nil)
 
 	err := lifecycle.Stop(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "prod", EnvironmentID: "env-1"})
 	if err == nil {
@@ -89,7 +89,7 @@ func TestEnvLifecycleStopRejectsNeverDeployed(t *testing.T) {
 
 func TestEnvLifecycleStopSurfacesJobFailure(t *testing.T) {
 	runner := &stubLifecycleRunner{stopResult: deployexec.Result{Outcome: deployexec.OutcomeFailed, Failure: "namespace not found"}}
-	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, nil)
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, nil, nil)
 
 	err := lifecycle.Stop(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3"})
 	if err == nil {
@@ -107,7 +107,7 @@ func TestEnvLifecycleStopSurfacesJobFailure(t *testing.T) {
 func TestEnvLifecycleStopFallsBackToCanonicalImage(t *testing.T) {
 	runner := &stubLifecycleRunner{stopResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
 	checker := &stubImageChecker{missing: true}
-	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, checker)
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, checker, nil)
 
 	err := lifecycle.Stop(context.Background(), EnvLifecycleInput{
 		Tenant: "operations", Environment: "probe7", EnvironmentID: "env-1", RunningVersion: "1.0.185",
@@ -124,7 +124,7 @@ func TestEnvLifecycleStopFallsBackToCanonicalImage(t *testing.T) {
 func TestEnvLifecycleDeleteFallsBackToCanonicalImage(t *testing.T) {
 	runner := &stubLifecycleRunner{deleteResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
 	checker := &stubImageChecker{missing: true}
-	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, checker)
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, checker, nil)
 
 	err := lifecycle.Delete(context.Background(), EnvLifecycleInput{
 		Tenant: "operations", Environment: "probe7", EnvironmentID: "env-1", RunningVersion: "1.0.185",
@@ -141,7 +141,7 @@ func TestEnvLifecycleDeleteFallsBackToCanonicalImage(t *testing.T) {
 func TestEnvLifecycleDeleteRunsJobThenDeletesRow(t *testing.T) {
 	runner := &stubLifecycleRunner{deleteResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
 	rows := &stubRowDeleter{}
-	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil, nil)
+	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil, nil, nil)
 
 	err := lifecycle.Delete(context.Background(), EnvLifecycleInput{
 		Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3",
@@ -163,7 +163,7 @@ func TestEnvLifecycleDeleteRunsJobThenDeletesRow(t *testing.T) {
 func TestEnvLifecycleDeleteSkipsJobWhenNeverDeployed(t *testing.T) {
 	runner := &stubLifecycleRunner{}
 	rows := &stubRowDeleter{}
-	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil, nil)
+	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil, nil, nil)
 
 	err := lifecycle.Delete(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "agents", EnvironmentID: "env-2"})
 	if err != nil {
@@ -182,7 +182,7 @@ func TestEnvLifecycleDeleteSkipsJobWhenNeverDeployed(t *testing.T) {
 func TestEnvLifecycleDeleteDoesNotDropRowOnJobFailure(t *testing.T) {
 	runner := &stubLifecycleRunner{deleteResult: deployexec.Result{Outcome: deployexec.OutcomeFailed, Failure: "namespace stuck terminating"}}
 	rows := &stubRowDeleter{}
-	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil, nil)
+	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil, nil, nil)
 
 	err := lifecycle.Delete(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3"})
 	if err == nil {
@@ -199,7 +199,7 @@ func TestEnvLifecycleDeleteDoesNotDropRowOnJobFailure(t *testing.T) {
 func TestEnvLifecycleStopRecordsUsageEvent(t *testing.T) {
 	runner := &stubLifecycleRunner{stopResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
 	usage := &recordingUsageRecorder{}
-	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), usage, nil)
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), usage, nil, nil)
 
 	if err := lifecycle.Stop(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3"}); err != nil {
 		t.Fatalf("stop: %v", err)
@@ -212,7 +212,7 @@ func TestEnvLifecycleStopRecordsUsageEvent(t *testing.T) {
 func TestEnvLifecycleStopRecordsNoUsageEventOnFailure(t *testing.T) {
 	runner := &stubLifecycleRunner{stopResult: deployexec.Result{Outcome: deployexec.OutcomeFailed}}
 	usage := &recordingUsageRecorder{}
-	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), usage, nil)
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), usage, nil, nil)
 
 	_ = lifecycle.Stop(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3"})
 	if len(usage.events) != 0 {
@@ -223,7 +223,7 @@ func TestEnvLifecycleStopRecordsNoUsageEventOnFailure(t *testing.T) {
 func TestEnvLifecycleDeleteRecordsUsageEvent(t *testing.T) {
 	runner := &stubLifecycleRunner{deleteResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
 	usage := &recordingUsageRecorder{}
-	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), usage, nil)
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), usage, nil, nil)
 
 	if err := lifecycle.Delete(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3"}); err != nil {
 		t.Fatalf("delete: %v", err)
@@ -231,4 +231,73 @@ func TestEnvLifecycleDeleteRecordsUsageEvent(t *testing.T) {
 	if len(usage.events) != 1 || usage.events[0].EnvironmentID != "env-1" || usage.events[0].EventType != string(model.UsageEventEnvironmentDeleted) {
 		t.Fatalf("usage events = %+v", usage.events)
 	}
+}
+
+// TestEnvLifecycleStopRefusesWhenPlacementCredentialUnavailable: an
+// environment placed on a context but no resolver configured must fail
+// clearly rather than running the stop Job unauthenticated (#1112).
+func TestEnvLifecycleStopRefusesWhenPlacementCredentialUnavailable(t *testing.T) {
+	runner := &stubLifecycleRunner{stopResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, nil, nil)
+
+	err := lifecycle.Stop(context.Background(), EnvLifecycleInput{
+		Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3", ContextID: "ctx-1",
+	})
+	if err == nil {
+		t.Fatal("expected an error when no placement credential resolver is configured")
+	}
+	if len(runner.stopCalls) != 0 {
+		t.Fatal("a stop with no resolvable credential must not launch a job")
+	}
+}
+
+// TestEnvLifecycleStopThreadsThePlacementCredential: the stop Job's placement
+// carries the live-resolved token, the target cluster's kubernetes context
+// name, and its server URL.
+func TestEnvLifecycleStopThreadsThePlacementCredential(t *testing.T) {
+	runner := &stubLifecycleRunner{stopResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
+	credentials := stubLifecycleCredentials{token: "live-token"}
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, nil, credentials)
+
+	err := lifecycle.Stop(context.Background(), EnvLifecycleInput{
+		Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3",
+		ContextID: "ctx-1", PlacementKubernetesContext: "prod-cluster", PlacementServerURL: "https://203.0.113.10:6443",
+	})
+	if err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	got := runner.stopCalls[0].Placement
+	if got.AdminToken != "live-token" || got.KubernetesContext != "prod-cluster" || got.ServerURL != "https://203.0.113.10:6443" {
+		t.Fatalf("stop job placement = %+v", got)
+	}
+}
+
+// TestEnvLifecycleDeleteRefusesWhenPlacementCredentialUnavailable mirrors the
+// stop case for delete.
+func TestEnvLifecycleDeleteRefusesWhenPlacementCredentialUnavailable(t *testing.T) {
+	runner := &stubLifecycleRunner{deleteResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
+	rows := &stubRowDeleter{}
+	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil, nil, nil)
+
+	err := lifecycle.Delete(context.Background(), EnvLifecycleInput{
+		Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3", ContextID: "ctx-1",
+	})
+	if err == nil {
+		t.Fatal("expected an error when no placement credential resolver is configured")
+	}
+	if len(runner.deleteCalls) != 0 {
+		t.Fatal("a delete with no resolvable credential must not launch a job")
+	}
+	if len(rows.deleted) != 0 {
+		t.Fatal("a delete that never ran its job must not remove the row")
+	}
+}
+
+type stubLifecycleCredentials struct {
+	token string
+	err   error
+}
+
+func (s stubLifecycleCredentials) Get(context.Context, string) (string, error) {
+	return s.token, s.err
 }

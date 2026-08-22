@@ -1,6 +1,7 @@
 audit: erun deploy --components [team-backend-api,team-powerdns] --dry-run --version <VERSION> team dev
 trace-log: would append the full trace to <TMP>
 deploy: tenant=team environment=dev version-override=<VERSION> components=[team-backend-api team-powerdns] force=false current=false
+deploy: configured repo path /nonexistent-remote/team is not present on this machine; no k8s.deployments plan could be read
 deploy: component selection source --components flag; components team-backend-api, team-powerdns
 deploy: deploying tenant artifacts; verifying charts published at <VERSION> in registry.example/test: team-backend-api, team-powerdns
 deploy: spec resolution failed: deploy rolls out the tenant's own artifacts, which run on the tenant's version line, but these charts are not published at version <VERSION> in registry.example/test: team-powerdns; `erun push --version <VERSION>` (or `erun release`) publishes the tenant's runtime and component charts together, so publish the missing chart(s) then deploy

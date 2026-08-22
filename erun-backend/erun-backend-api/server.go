@@ -184,6 +184,19 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	tenantQuotas := repository.NewTenantQuotaRepository(txManager)
 	usageEvents := repository.NewUsageEventRepository(txManager)
 	releases := repository.NewReleaseRepository(txManager)
+	// contextCredentials resolves a placed environment's live admin token
+	// (#1112). nil without a cipher (the same precondition context
+	// bootstrapping itself already requires), which leaves every context
+	// reference refused at deploy time rather than silently unauthenticated —
+	// see deployexec.ResolvePlacementToken.
+	var contextCredentials *repository.ContextCredentialRepository
+	if options.Cipher != nil {
+		contextCredentials = repository.NewContextCredentialRepository(txManager, options.Cipher)
+	}
+	var placementCredentials deployexec.PlacementCredentialResolver
+	if contextCredentials != nil {
+		placementCredentials = contextCredentials
+	}
 	reviewService := service.NewReviewService(reviews, builds)
 	buildService := service.NewBuildService(builds, reviewService)
 	commentService := service.NewCommentService(comments)
@@ -193,7 +206,7 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	routes.RegisterReviewRoutes(register, reviews, reviewService, builds, releaseRoutes)
 	routes.RegisterBuildRoutes(register, builds, buildService)
 	routes.RegisterCommentRoutes(register, comments, commentService)
-	routes.RegisterEnvironmentRoutes(register, environments, tenantQuotas, tenants, newEnvironmentProvisioner(options, environments, usageEvents), newEnvironmentLifecycle(options, environments, usageEvents))
+	routes.RegisterEnvironmentRoutes(register, environments, tenantQuotas, tenants, contexts, newEnvironmentProvisioner(options, environments, usageEvents, placementCredentials), newEnvironmentLifecycle(options, environments, usageEvents, placementCredentials))
 	routes.RegisterUsageEventRoutes(register, usageEvents)
 	routes.RegisterMCPTokenRoutes(register, environments, tenants, options.MCPSigner)
 	routes.RegisterDNS01TokenRoutes(register, environments, tenants, options.MCPSigner)
@@ -205,7 +218,7 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 			contextProvisioner = provision.NewProvisioner(
 				options.DBOSContext,
 				contexts,
-				repository.NewContextCredentialRepository(txManager, options.Cipher),
+				contextCredentials,
 				aliases,
 				options.Cipher,
 				options.AWSEndpoint,
@@ -214,7 +227,7 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	}
 	routes.RegisterContextRoutes(register, contexts, contextProvisioner)
 	routes.RegisterTenantRoutes(register, tenants)
-	routes.RegisterTenantQuotaRoute(register, tenantQuotas)
+	routes.RegisterTenantQuotaRoute(register, tenantQuotas, tenantQuotas)
 	routes.RegisterConfigRoute(register, tenants, environments, contexts)
 	routes.RegisterProvisionRoute(register, tenants, environments, tenantQuotas)
 	routes.RegisterUserRoutes(register, repository.NewUserRepository(txManager))
@@ -225,13 +238,13 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 // missing leaves it nil, so env creation only registers the row. Without a
 // startup log naming which precondition failed, an operator sees only a 501
 // at call time with no way to tell which of the five is unmet.
-func newEnvironmentProvisioner(options HandlerOptions, environments *repository.EnvironmentRepository, usage *repository.UsageEventRepository) routes.EnvironmentProvisioner {
+func newEnvironmentProvisioner(options HandlerOptions, environments *repository.EnvironmentRepository, usage *repository.UsageEventRepository, credentials deployexec.PlacementCredentialResolver) routes.EnvironmentProvisioner {
 	deploy := options.EnvDeploy
 	if reasons := missingEnvProvisionerConfig(options, deploy); len(reasons) > 0 {
 		log.Printf("erun api live env provisioning disabled: %s", strings.Join(reasons, "; "))
 		return nil
 	}
-	coordinator := service.NewEnvironmentProvisioner(deployexec.NewLauncher(options.KubeClient), environments, usage)
+	coordinator := service.NewEnvironmentProvisioner(deployexec.NewLauncher(options.KubeClient), environments, usage, credentials)
 	return provision.NewEnvProvisioner(options.DBOSContext, coordinator, deploy, newRuntimeImageChecker(options))
 }
 
@@ -278,13 +291,13 @@ func missingEnvProvisionerConfig(options HandlerOptions, deploy provision.EnvDep
 // client and the full deploy placement but no durable workflow (see
 // provision.EnvLifecycle). Anything missing leaves it nil, so stop/delete
 // report the executor as unconfigured rather than acting on partial config.
-func newEnvironmentLifecycle(options HandlerOptions, environments *repository.EnvironmentRepository, usage *repository.UsageEventRepository) routes.EnvironmentLifecycle {
+func newEnvironmentLifecycle(options HandlerOptions, environments *repository.EnvironmentRepository, usage *repository.UsageEventRepository, credentials deployexec.PlacementCredentialResolver) routes.EnvironmentLifecycle {
 	deploy := options.EnvDeploy
 	if options.KubeClient == nil ||
 		deploy.DeployerServiceAccount == "" || deploy.PlatformNamespace == "" || deploy.Registry == "" {
 		return nil
 	}
-	return provision.NewEnvLifecycle(deployexec.NewLauncher(options.KubeClient), environments, deploy, usage, newRuntimeImageChecker(options))
+	return provision.NewEnvLifecycle(deployexec.NewLauncher(options.KubeClient), environments, deploy, usage, newRuntimeImageChecker(options), credentials)
 }
 
 // newReleaseRunner wires the release Job launcher. Without an in-cluster client

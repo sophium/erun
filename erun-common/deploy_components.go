@@ -61,10 +61,11 @@ func componentBaseName(name string) string {
 	return strings.TrimSpace(name)
 }
 
-// selectedPublishableComponents returns the selected non-runtime components in
-// default-rank order (postgres → db → api → powerdns → docs) for the sourceless
-// by-reference deploy path; the runtime is resolved separately.
-func selectedPublishableComponents(selected []string, tenant string) []string {
+// selectedPublishableComponents returns the selected non-runtime components,
+// ordered by plan when one was resolved (see resolvePublishedDeployPlan) or
+// else by the default rank (postgres → db → api → powerdns → docs), for the
+// sourceless by-reference deploy path; the runtime is resolved separately.
+func selectedPublishableComponents(selected []string, tenant string, plan ProjectK8sConfig) []string {
 	runtimeAliases := runtimeComponentNames(tenant)
 	out := make([]string, 0, len(selected))
 	for _, name := range selected {
@@ -73,7 +74,7 @@ func selectedPublishableComponents(selected []string, tenant string) []string {
 		}
 		out = append(out, name)
 	}
-	rank := componentRankByPlan(ProjectK8sConfig{})
+	rank := componentRankByPlan(plan)
 	sort.SliceStable(out, func(i, j int) bool {
 		return rank(out[i]) < rank(out[j])
 	})
