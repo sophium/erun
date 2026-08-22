@@ -1,0 +1,15 @@
+audit: erun inputs upload --dry-run <TMP> <HOME>/.erun/outputs/evidence.bin
+inputs: uploading <TMP> (5 bytes) to <HOME>/.erun/outputs/evidence.bin
+kubectl --context test-context --namespace team-dev exec -i deployment/team-devops -- /bin/sh -c '<remote-script>'
+inputs upload script:
+  set -e
+  dir='<HOME>/.erun/outputs'
+  name='evidence.bin'
+  mkdir -p "$dir" 2>/dev/null || true
+  if [ ! -d "$dir" ] || [ ! -w "$dir" ]; then echo "erun-inputs: destination directory is not writable: $dir" >&2; exit 3; fi
+  tmp="$dir/.$name.erun-upload-tmp"
+  cat > "$tmp"
+  mv "$tmp" "$dir/$name"
+  size=$(stat -c %s "$dir/$name" 2>/dev/null || echo 0)
+  sha=$(sha256sum "$dir/$name" 2>/dev/null | awk '{print $1}')
+  printf '%s\t%s\n' "$size" "$sha"

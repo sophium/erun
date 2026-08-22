@@ -1,0 +1,20 @@
+Place a file from this machine inside the environment's runtime pod, byte-identical, without shell-encoding it and without the bytes passing through an agent's context.
+
+<remote-path> is the full absolute destination inside the pod, including the file name — there is no default location, so a transfer can never silently land somewhere a background process (such as the workspace-sync mirror) reconciles away. The destination directory is created if missing; the command refuses clearly, naming why, if it is not writable or the MCP-adjacent channel to the pod is down. After the transfer, the local and remote sha256 are compared and a mismatch fails the command.
+
+Usage:
+  erun inputs upload <local-path> <remote-path> [flags]
+
+Examples:
+  erun inputs upload ./evidence.xlsx <HOME>/.erun/outputs/evidence.xlsx
+
+Flags:
+      --dry-run              Resolve and trace mutating actions without executing them.
+      --environment string   Target a specific environment; requires --tenant
+  -h, --help                 help for upload
+      --tenant string        Target a specific tenant (default: the current scope)
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.
