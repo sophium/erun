@@ -46,9 +46,17 @@ lint:
 # erun-ui's own Go tests. See the LINT_MODULES comment above for why this is
 # a separate step rather than folded into integration-test or a contributor's
 # ordinary `go test ./...`.
+#
+# -count=1 is load-bearing, not belt-and-braces. The build-stamp guard here
+# reads build.sh, build.ps1 and the package-manager formulae with os.ReadFile at
+# run time, and Go's test cache keys on compiled inputs only -- it does not
+# track a file a test opens itself. So editing one of those scripts leaves a
+# recorded PASS that is no longer true, and the gate reports `(cached)` while
+# the thing it guards is broken. That is exactly how a release-breaking
+# regression reached main once.
 test-erun-ui:
 	@echo ">> go test erun-ui"
-	@(cd erun-ui && go test ./...)
+	@(cd erun-ui && go test -count=1 ./...)
 
 # Build, run, and coverage-gate the erun integration suite.
 # The coverage threshold defaults to the value pinned in
