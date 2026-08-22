@@ -26,9 +26,17 @@ COPY erun-common /src/erun-common
 COPY erun-mcp /src/erun-mcp
 COPY erun-integration /src/erun-integration
 # Every module in the Makefile's LINT_MODULES must land here or `make check`
-# cannot cd into it.
+# cannot cd into it -- and so must every path those modules' tests read at run
+# time, which is not the same set. erun-ui's build-stamp guard deliberately
+# checks the package-manager formulae as well as the module's own scripts,
+# because a stamp corrected only in build.sh still leaves every installed
+# desktop unstamped; it reads them with os.ReadFile and treats a missing file as
+# fatal, so omitting them here fails the gate inside the build while a full
+# checkout passes.
 COPY erun-backend/erun-backend-api /src/erun-backend/erun-backend-api
 COPY erun-ui /src/erun-ui
+COPY Formula /src/Formula
+COPY bucket /src/bucket
 
 # `make check` runs golangci-lint across the Go modules then the integration
 # suite + coverage gate. A failing lint or test fails the build, the builder
