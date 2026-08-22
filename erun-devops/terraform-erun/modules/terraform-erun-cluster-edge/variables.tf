@@ -168,3 +168,31 @@ variable "env_namespace" {
   type        = string
   default     = ""
 }
+
+variable "install_coredns_forward" {
+  description = "Install a CoreDNS custom server block that forwards base_domain_name to coredns_forward_upstreams, so in-cluster resolution of the platform's own published names does not depend on the node's resolver chain. k3s's bundled CoreDNS otherwise ends in \"forward . /etc/resolv.conf\", so a stale or wrong answer from the node's own resolver fails cert-manager's HTTP-01 self-check the same way at issuance and at every unattended renewal. Left false by default so an existing cluster's DNS behavior does not change on a module upgrade; enable it explicitly per cluster."
+  type        = bool
+  default     = false
+}
+
+variable "base_domain_name" {
+  description = "The platform's own apex domain (the platform config's basedomain, e.g. \"example.com\"), whose published names — including the delegated services_zone subdomain — must resolve in-cluster independently of the node's resolver. Required when install_coredns_forward is true."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.base_domain_name == "" || can(regex("^([a-z0-9]([a-z0-9-]*[a-z0-9])?\\.)+[a-z]{2,}$", var.base_domain_name))
+    error_message = "base_domain_name must be a valid DNS domain such as \"example.com\"."
+  }
+}
+
+variable "coredns_forward_upstreams" {
+  description = "Upstream DNS resolvers CoreDNS forwards base_domain_name queries to, in CoreDNS forward-plugin argument order. Defaults to public recursive resolvers (Cloudflare + Google), matching the documented workaround; a cluster on an air-gapped or policy-constrained network should point this at its own resolvers instead. Only used when install_coredns_forward is true."
+  type        = list(string)
+  default     = ["1.1.1.1", "1.0.0.1", "8.8.8.8"]
+
+  validation {
+    condition     = length(var.coredns_forward_upstreams) > 0
+    error_message = "coredns_forward_upstreams must list at least one resolver."
+  }
+}
