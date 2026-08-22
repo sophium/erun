@@ -140,7 +140,13 @@ func runtimeInputUploadScript(dir, name string) string {
 		"dir=" + quotedDir,
 		"name=" + quotedName,
 		"mkdir -p \"$dir\" 2>/dev/null || true",
-		"if [ ! -d \"$dir\" ] || [ ! -w \"$dir\" ]; then echo \"erun-inputs: destination directory is not writable: $dir\" >&2; exit 3; fi",
+		// A refusal must still drain stdin before exiting: kubectl exec -i keeps
+		// writing the local file to this process's stdin regardless of whether
+		// anything is reading it, and a remote exit that leaves bytes unread
+		// hangs the client until every last byte is accepted rather than failing
+		// fast (confirmed live: a 256KB payload against an unwritable directory
+		// hung past a 20s timeout before this drain was added).
+		"if [ ! -d \"$dir\" ] || [ ! -w \"$dir\" ]; then cat >/dev/null; echo \"erun-inputs: destination directory is not writable: $dir\" >&2; exit 3; fi",
 		"tmp=\"$dir/.$name.erun-upload-tmp\"",
 		"cat > \"$tmp\"",
 		"mv \"$tmp\" \"$dir/$name\"",
