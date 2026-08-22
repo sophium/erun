@@ -12,7 +12,7 @@ Repository helpers that run from the project root. Four subcommands: `diff` (a s
 erun exec diff [flags]
 erun exec raw COMMAND [ARG...] [flags]
 erun exec write PATH [flags]
-erun exec commit BRANCH [flags]
+erun exec commit BRANCH [PATH...] [flags]
 ```
 
 ## Subcommands
@@ -37,7 +37,11 @@ Writes stdin to PATH inside the project working tree, byte-for-byte, creating pa
 
 ### `exec commit`
 
-Stages every change in the project working tree (`git add -A`) and commits it with a message read verbatim from stdin — same shell-avoidance property as `write`. BRANCH must match the working tree's actual current branch: the commit is **refused, loudly**, when it does not, rather than landing on whatever branch HEAD happens to be on. `--dry-run` verifies the branch and traces what would run without staging or committing. Reports the branch, commit id, and files committed; add `--output json` for a structured result.
+Stages every change in the project working tree (`git add -A`) and commits it with a message read verbatim from stdin — same shell-avoidance property as `write`. BRANCH must match the working tree's actual current branch: the commit is **refused, loudly**, when it does not, rather than landing on whatever branch HEAD happens to be on.
+
+Pass one or more PATH arguments to stage and commit only those paths instead of every change — the common case right after `exec write`. A scoped commit is also refused, loudly, if the tree has changes outside the declared paths, so an unrelated writer's edits (a half-finished job, a stray earlier edit) can never be absorbed into a commit that did not ask for them.
+
+`--dry-run` verifies the branch and traces the files that would be committed, without staging or committing. Reports the branch, commit id, and files committed; add `--output json` for a structured result.
 
 ## Examples
 
@@ -47,6 +51,7 @@ erun exec raw go test ./...
 erun exec raw --dry-run -- kubectl get pods --all-namespaces
 erun exec write values.yaml < new-values.yaml
 echo 'fix the values typo' | erun exec commit main
+echo 'fix the values typo' | erun exec commit main values.yaml
 ```
 
 ## Error behaviour
@@ -59,3 +64,4 @@ echo 'fix the values typo' | erun exec commit main
 | PATH resolves outside the project root (`write`). | Refuses with `path "..." is outside the working tree "..."`; nothing is written. |
 | BRANCH does not match the current branch (`commit`). | Refuses with `refusing to commit: working tree is on branch "X", not the declared "Y"`; nothing is staged. |
 | Nothing changed to commit (`commit`). | Refuses with `nothing to commit: the working tree has no changes`. |
+| Tree has changes outside the declared PATHs (`commit`). | Refuses with `refusing to commit: the working tree has changes outside the declared paths: ...`; nothing is staged. |
