@@ -180,6 +180,7 @@ var wantRegisteredTools = []string{
 	"job_start",
 	"job_status",
 	"list",
+	"observe",
 	"outputs_download",
 	"outputs_list",
 	"pin",

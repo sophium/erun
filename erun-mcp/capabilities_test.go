@@ -69,7 +69,7 @@ func TestReadCapabilitySeesOnlyTheReadTools(t *testing.T) {
 	want := []string{
 		"activity_lease_list", "cloud_list", "context_list", "diff", "idle",
 		"idle_stop_history",
-		"job_await", "job_output", "job_status", "list",
+		"job_await", "job_output", "job_status", "list", "observe",
 		"outputs_download", "outputs_list", "version",
 	}
 	if !slices.Equal(got, want) {

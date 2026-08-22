@@ -1,0 +1,85 @@
+{
+  "tenant": "team",
+  "environment": "dev",
+  "namespace": "team-dev",
+  "pods": [
+    {
+      "name": "web-0",
+      "phase": "Running",
+      "ready": true,
+      "restartCount": 0
+    }
+  ],
+  "resourceQuotas": [
+    {
+      "name": "erun-quota",
+      "hard": {
+        "limits.cpu": "4"
+      },
+      "used": {
+        "limits.cpu": "1"
+      }
+    }
+  ],
+  "limitRanges": [
+    {
+      "name": "erun-limits",
+      "limits": [
+        {
+          "type": "Container",
+          "default": {
+            "cpu": "1"
+          },
+          "defaultRequest": {
+            "cpu": "100m"
+          }
+        }
+      ]
+    }
+  ],
+  "ingresses": [
+    {
+      "name": "web",
+      "hosts": [
+        "dev.example.test"
+      ],
+      "tls": [
+        {
+          "hosts": [
+            "dev.example.test"
+          ],
+          "secretName": "web-tls"
+        }
+      ]
+    }
+  ],
+  "certificates": [
+    {
+      "name": "wildcard",
+      "ready": false,
+      "reason": "Issuing",
+      "message": "waiting for order to complete",
+      "secretName": "wildcard-tls",
+      "dnsNames": [
+        "*.dev.example.test"
+      ],
+      "orders": [
+        {
+          "name": "wildcard-order-1",
+          "state": "pending",
+          "challenges": [
+            {
+              "name": "wildcard-challenge-1",
+              "type": "DNS-01",
+              "dnsName": "*.dev.example.test",
+              "state": "invalid",
+              "reason": "RBAC denied: solvers.acme.cert-manager.io is forbidden: cannot create resource challenges"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+audit: erun observe --output json
+observe: when a certificate is not Ready, its CertificateRequest -> Order -> Challenge chain is read for the failure reason

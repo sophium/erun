@@ -62,7 +62,7 @@ Every tool requires one of two capabilities:
 
 | Capability | Tools |
 | --- | --- |
-| `erun:read` | Observation that cannot change anything: `version`, `list`, `idle`, `idle_stop_history`, `context_list`, `cloud_list`, `diff`, `outputs_list`, `outputs_download`, `job_status`, `job_output`, `job_await` |
+| `erun:read` | Observation that cannot change anything: `version`, `list`, `idle`, `idle_stop_history`, `context_list`, `cloud_list`, `diff`, `observe`, `outputs_list`, `outputs_download`, `job_status`, `job_output`, `job_await` |
 | `erun:admin` | Everything else, including remote execution and every mutating tool |
 
 `erun:admin` implies `erun:read`, so an admin token never carries both.

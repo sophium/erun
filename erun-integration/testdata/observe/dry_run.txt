@@ -1,0 +1,7 @@
+audit: erun observe --dry-run
+kubectl --context test-context --namespace team-dev get pods -o json
+kubectl --context test-context --namespace team-dev get resourcequota -o json
+kubectl --context test-context --namespace team-dev get limitrange -o json
+kubectl --context test-context --namespace team-dev get ingress -o json
+kubectl --context test-context --namespace team-dev get certificates.cert-manager.io -o json
+observe: when a certificate is not Ready, its CertificateRequest -> Order -> Challenge chain is read for the failure reason

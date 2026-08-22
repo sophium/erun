@@ -12,6 +12,7 @@ import (
 	osexec "os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1324,6 +1325,38 @@ func StubBinaryWithScript(t testing.TB, dir, name, scriptBody string) string {
 		body += "\n"
 	}
 	return writeStub(t, dir, name, body)
+}
+
+// StubKubectlGetJSON writes a kubectl stub that dispatches on the resource
+// named right after "get" (e.g. "pods", "certificates.cert-manager.io",
+// "secret my-secret") to return canned JSON, for a command like `observe`
+// that issues several distinct `kubectl get <resource> -o json` calls in one
+// run. Matching on "get <resource>" as a substring of the full argv (rather
+// than parsing --context/--namespace positionally) keeps this reusable across
+// scenarios with different context/namespace flags. A call whose resource
+// isn't in responses exits 1 naming the unstubbed argv, so a scenario that
+// forgets to stub a call fails loudly instead of asserting on empty data.
+func StubKubectlGetJSON(t testing.TB, dir string, responses map[string]string) string {
+	t.Helper()
+	keys := make([]string, 0, len(responses))
+	for key := range responses {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	var body strings.Builder
+	body.WriteString("args=\"$*\"\n")
+	body.WriteString("case \"$args\" in\n")
+	for _, key := range keys {
+		body.WriteString("  *" + shellSingleQuote("get "+key) + "*)\n")
+		body.WriteString("    cat <<'ERUN_STUB_KUBECTL_JSON'\n")
+		body.WriteString(strings.TrimRight(responses[key], "\n"))
+		body.WriteString("\nERUN_STUB_KUBECTL_JSON\n")
+		body.WriteString("    ;;\n")
+	}
+	body.WriteString("  *) echo \"unstubbed kubectl call: $args\" >&2; exit 1 ;;\n")
+	body.WriteString("esac\n")
+	return StubBinaryWithScript(t, dir, "kubectl", body.String())
 }
 
 // StubBinaryMergingIntoRemoteOnce writes a stub for name that, on its first
