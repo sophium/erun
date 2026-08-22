@@ -22,6 +22,7 @@ const (
 	environmentDeployedEvent    = "environment-deployed"
 	environmentsChangedEvent    = "environments-changed"
 	aiActivityEvent             = "ai-activity"
+	orchestratorShellEvent      = "orchestrator-shell-activity"
 	envStatusEvent              = "env-status"
 	envActivityEvent            = "env-activity"
 	appSessionEnvVar            = "ERUN_UI_SESSION"
@@ -280,9 +281,7 @@ func withDefaultCoreDeps(deps erunUIDeps) erunUIDeps {
 // directory), so Cloudflare token operations fail unless it is wired here.
 func withDefaultCloudDeps(deps erunUIDeps) erunUIDeps {
 	if deps.cloudDeps.CloudSecretStore == nil {
-		if store, err := eruncommon.DefaultCloudSecretStore(); err == nil {
-			deps.cloudDeps.CloudSecretStore = store
-		}
+		deps.cloudDeps.CloudSecretStore = eruncommon.DefaultCloudDependencies().CloudSecretStore
 	}
 	return deps
 }

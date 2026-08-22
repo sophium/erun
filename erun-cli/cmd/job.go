@@ -65,6 +65,7 @@ func newJobStartCmd(resolveOpen OpenResolver) *cobra.Command {
 	var id string
 	var dir string
 	var agent string
+	var env []string
 	var maxOutputBytes int64
 	var leaseTTL time.Duration
 	cmd := &cobra.Command{
@@ -82,21 +83,35 @@ func newJobStartCmd(resolveOpen OpenResolver) *cobra.Command {
 			"the prompt. erun invokes the tool in its streaming mode, which is what makes\n" +
 			"an agent run observable at all: left to its default the tool prints nothing\n" +
 			"until it exits, so a multi-hour run reports no output while it is actively\n" +
-			"editing files. status then reports the current activity, not only \"running\".",
+			"editing files. status then reports the current activity, not only \"running\".\n\n" +
+			"--env sets additional environment for the job's own process, on top of what\n" +
+			"it inherits from the environment's runtime pod — for example raising\n" +
+			"CLAUDE_CODE_MAX_OUTPUT_TOKENS for one agent run. Values land in the job\n" +
+			"supervisor's argv, visible to anything that can list processes in this\n" +
+			"environment, so this is not where secrets belong; PATH, LD_PRELOAD, and a\n" +
+			"few other names that could redirect what the job executes are refused.",
 		Example: "  # Start a test suite and come back for the result.\n" +
 			"  erun job start --tenant team --environment dev --name suite -- ./gradlew test\n" +
 			"  erun job await --tenant team --environment dev --id suite --timeout 5m\n\n" +
 			"  # Start an agent and watch what it is doing.\n" +
 			"  erun job start --tenant team --environment dev --name sweep --agent claude -- 'fix the failing tests'\n" +
-			"  erun job status --tenant team --environment dev --id sweep",
+			"  erun job status --tenant team --environment dev --id sweep\n\n" +
+			"  # Raise an agent's output-token cap for this run only.\n" +
+			"  erun job start --tenant team --environment dev --name sweep --agent claude \\\n" +
+			"    --env CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000 -- 'rewrite the module'",
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			envMap, err := parseJobEnvFlags(env)
+			if err != nil {
+				return err
+			}
 			params := common.StartEnvironmentJobParams{
 				Tenant:         tenant,
 				Environment:    environment,
 				Name:           name,
 				ID:             id,
 				Dir:            dir,
+				Env:            envMap,
 				MaxOutputBytes: maxOutputBytes,
 				LeaseTTL:       leaseTTL,
 			}
@@ -114,10 +129,29 @@ func newJobStartCmd(resolveOpen OpenResolver) *cobra.Command {
 	cmd.Flags().StringVar(&id, "id", "", "Handle to address the job by (defaults to the name)")
 	cmd.Flags().StringVar(&dir, "dir", "", "Working directory in the environment to run the command from")
 	cmd.Flags().StringVar(&agent, "agent", "", "Run an AI tool ("+strings.Join(common.AgentJobTools, " or ")+") in streaming mode, taking the trailing arguments as its prompt")
+	cmd.Flags().StringArrayVar(&env, "env", nil, "Additional KEY=VALUE environment for the job's process; repeat for several. Not for secrets: values are visible in the job supervisor's argv")
 	cmd.Flags().Int64Var(&maxOutputBytes, "max-output-bytes", common.DefaultEnvironmentJobOutputLimitBytes, "Cap on captured output; past it output is dropped and the job says so")
 	cmd.Flags().DurationVar(&leaseTTL, "lease-ttl", common.DefaultEnvironmentActivityLeaseTTL, "Activity lease TTL the job renews inside while it runs")
 	addDryRunFlag(cmd)
 	return cmd
+}
+
+// parseJobEnvFlags turns repeated --env KEY=VALUE flag values into a map. It
+// only splits the flag's own shape; StartEnvironmentJobParams.normalize (and,
+// server-side, the supervisor itself) is what actually validates each name.
+func parseJobEnvFlags(pairs []string) (map[string]string, error) {
+	if len(pairs) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]string, len(pairs))
+	for _, pair := range pairs {
+		key, value, ok := strings.Cut(pair, "=")
+		if !ok || strings.TrimSpace(key) == "" {
+			return nil, fmt.Errorf("--env %q must be in KEY=VALUE form", pair)
+		}
+		out[key] = value
+	}
+	return out, nil
 }
 
 func runJobStart(cmd *cobra.Command, resolveOpen OpenResolver, params common.StartEnvironmentJobParams) error {
@@ -651,6 +685,7 @@ func newJobSuperviseCmd() *cobra.Command {
 	var id string
 	var dir string
 	var agent string
+	var env []string
 	var maxOutputBytes int64
 	var leaseTTL time.Duration
 	cmd := &cobra.Command{
@@ -659,6 +694,10 @@ func newJobSuperviseCmd() *cobra.Command {
 		Hidden: true,
 		Args:   cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			envMap, err := parseJobEnvFlags(env)
+			if err != nil {
+				return err
+			}
 			return common.RunEnvironmentJobSupervisor(common.EnvironmentJobSupervisorParams{
 				Tenant:         tenant,
 				Environment:    environment,
@@ -667,6 +706,7 @@ func newJobSuperviseCmd() *cobra.Command {
 				Dir:            dir,
 				Agent:          agent,
 				Command:        args,
+				Env:            envMap,
 				MaxOutputBytes: maxOutputBytes,
 				LeaseTTL:       leaseTTL,
 			})
@@ -677,6 +717,7 @@ func newJobSuperviseCmd() *cobra.Command {
 	cmd.Flags().StringVar(&id, "id", "", "Job id")
 	cmd.Flags().StringVar(&dir, "dir", "", "Working directory for the work")
 	cmd.Flags().StringVar(&agent, "agent", "", "AI tool the command runs, so its event stream is folded into progress")
+	cmd.Flags().StringArrayVar(&env, "env", nil, "Additional KEY=VALUE environment for the job's process; repeat for several")
 	cmd.Flags().Int64Var(&maxOutputBytes, "max-output-bytes", common.DefaultEnvironmentJobOutputLimitBytes, "Cap on captured output")
 	cmd.Flags().DurationVar(&leaseTTL, "lease-ttl", common.DefaultEnvironmentActivityLeaseTTL, "Activity lease TTL")
 	return cmd

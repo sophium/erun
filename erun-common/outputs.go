@@ -96,12 +96,19 @@ func resolveOutputsDir(dir string) (string, error) {
 	if dir == "" {
 		return DefaultRuntimeOutputsDir, nil
 	}
-	if !strings.HasPrefix(dir, "/") {
-		return "", fmt.Errorf("outputs path must be absolute: %q", dir)
+	return validateAbsolutePodPath(dir, "outputs path")
+}
+
+// validateAbsolutePodPath is shared by outputs and inputs: both name a path
+// inside the runtime pod's filesystem and must be absolute with no `..`
+// traversal segment.
+func validateAbsolutePodPath(value, label string) (string, error) {
+	if !strings.HasPrefix(value, "/") {
+		return "", fmt.Errorf("%s must be absolute: %q", label, value)
 	}
-	cleaned := path.Clean(dir)
+	cleaned := path.Clean(value)
 	if cleaned == ".." || strings.HasPrefix(cleaned, "../") || strings.Contains(cleaned, "/../") {
-		return "", fmt.Errorf("outputs path must not contain '..': %q", dir)
+		return "", fmt.Errorf("%s must not contain '..': %q", label, value)
 	}
 	return cleaned, nil
 }

@@ -28,6 +28,7 @@ If `TENANT` and/or `ENVIRONMENT` are omitted, ERun resolves them from the curren
 | `--image-pull-secret <name>` | Kubernetes `dockerconfigjson` secret the runtime pod pulls its image with, persisted to the env config's `imagepullsecrets` field. Repeat or comma-separate for several. Required when `--runtime-image` names a **private** registry, since the pod cannot start without a pull credential. |
 | `--set-default-tenant` | Set the initialized tenant as the default for this user. |
 | `-y, --yes` | Auto-approve all initialization prompts. |
+| `--components <a,b,…>` | Save this as the environment's default deploy component selection — what [`erun deploy`](/cli/deploy) rolls out with no `--components` of its own. Pass an empty string (`--components ''`) to clear a saved selection and return the environment to its repo deployment plan. |
 
 Advanced flags (`--project-root`, `--no-git`, `--version`, `--runtime-cpu`, `--runtime-memory`, `--codecommit-ssh-key-id`, `--confirm-environment`) and the full lifecycle algorithm are on [Agent reference · CLI flag spec](/agent-reference/cli-flags#erun-init). `--remote` is a deprecated alias for `--type=remote-agent`. `--bootstrap` is deprecated and ignored — `init` no longer scaffolds a `<tenant>-devops/` module; environments deploy the published `erun-devops` chart directly, and passing the flag only prints a deprecation warning. Common root flags (`--dry-run`, `-v`/`-vv`, `--time`) apply.
 
@@ -45,6 +46,11 @@ erun init my-tenant rihards-dev --runtime-registry ghcr.io/sophium
 
 # Make a runtime env an agent env, so the desktop can orchestrate work in it.
 erun init my-tenant rihards-dev --type=remote-agent
+
+# Return an environment to its repo deployment plan after a saved selection
+# has been shadowing it (an empty value clears the saved selection; omitting
+# the flag entirely would leave it untouched).
+erun init my-tenant rihards-dev --components ''
 ```
 
 Two rules make this safe to reach for:

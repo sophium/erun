@@ -29,7 +29,7 @@ func runMultiPlatformBuild(buildInput DockerBuildSpec, stdout, stderr io.Writer)
 		platformTag := platformSuffixedTag(buildInput.Image.Tag, platform)
 		perPlatformTags = append(perPlatformTags, platformTag)
 		args := dockerBuildArgs(buildInput, platform)
-		if err := runDockerBuildOnce(args, buildInput.ContextDir, buildInput.Image.Tag, false, stdout, stderr); err != nil {
+		if err := runDockerBuildOnce(args, buildInput.ContextDir, buildInput.Image.Tag, false, buildInput.Verbosity, stdout, stderr); err != nil {
 			return err
 		}
 		if err := tagFingerprintAfterBuild(buildInput, platform, stdout, stderr); err != nil {
@@ -187,18 +187,35 @@ func platformShortSuffix(platform string) string {
 	return strings.ReplaceAll(platform, "/", "-")
 }
 
-func runDockerBuildOnce(args []string, dir, authContextTag string, push bool, stdout, stderr io.Writer) error {
+// runDockerBuildOnce always builds with --progress=plain (see
+// dockerVerbosityBuildFlags) so BuildKit emits every step's own output,
+// including a failing RUN's — the in-Dockerfile `make check` test stage is
+// exactly such a step. Below debug verbosity that output is captured rather
+// than streamed live, so a successful build stays as quiet as --quiet used to
+// make it; on failure the capture is flushed to stderr before the error
+// returns, so "exit code: N" is never the whole story for a step that just
+// spent minutes running. At debug verbosity the caller already wants
+// everything live, so it streams as it always has.
+func runDockerBuildOnce(args []string, dir, authContextTag string, push bool, verbosity int, stdout, stderr io.Writer) error {
 	cmd := Command("docker", args...)
 	cmd.Dir = dir
 	output := new(bytes.Buffer)
-	cmd.Stdout = commandOutputWriter(stdout, output)
-	cmd.Stderr = commandOutputWriter(stderr, output)
+	if verbosity >= VerbosityDebug {
+		cmd.Stdout = commandOutputWriter(stdout, output)
+		cmd.Stderr = commandOutputWriter(stderr, output)
+	} else {
+		cmd.Stdout = output
+		cmd.Stderr = output
+	}
 	err := cmd.Run()
 	if err == nil {
 		return nil
 	}
 
 	message := output.String()
+	if verbosity < VerbosityDebug && stderr != nil {
+		_, _ = io.WriteString(stderr, message)
+	}
 	if push && IsDockerPushAuthorizationError(message) {
 		return DockerRegistryAuthError{
 			Tag:      authContextTag,
@@ -363,7 +380,12 @@ func dockerBuildArgs(buildInput DockerBuildSpec, platform string) []string {
 	// ("<tag> is a manifest list"). Off, each tag stays a plain image manifest
 	// the assembly step can consume.
 	args := []string{"build", "--platform", platform, "--provenance=false"}
-	args = append(args, dockerVerbosityBuildFlags(buildInput.Verbosity)...)
+	// Always plain progress, never --quiet: --quiet suppresses a failing step's
+	// own output at the source (BuildKit, not erun), so no amount of
+	// capture-and-replay in runDockerBuildOnce could recover what --quiet never
+	// produced. runDockerBuildOnce is what keeps a successful build quiet below
+	// debug verbosity; this flag only has to make the output exist to capture.
+	args = append(args, "--progress=plain")
 	args = append(args, "-t", tag)
 	buildArgVersion := dockerBuildArgVersion(buildInput)
 	// A base this run keeps local — a snapshot base, or a pinned-version base built
@@ -393,13 +415,6 @@ func dockerBuildArgVersion(buildInput DockerBuildSpec) string {
 		return base
 	}
 	return dockerImageTagVersion(strings.TrimSpace(buildInput.Image.Tag))
-}
-
-func dockerVerbosityBuildFlags(verbosity int) []string {
-	if verbosity >= VerbosityDebug {
-		return []string{"--progress=plain"}
-	}
-	return []string{"--quiet"}
 }
 
 func dockerPushArgs(tag string, verbosity int) []string {

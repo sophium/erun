@@ -118,6 +118,15 @@ type BootstrapInitParams struct {
 	ResolveTenant           bool
 	DisableBuildScript      bool
 	PlatformAccount         bool
+	// Components sets the env's saved deploy.components default selection —
+	// what `erun deploy` rolls out when no --components flag is passed. nil
+	// means the invocation named nothing and the saved selection (if any) is
+	// left untouched; a non-nil, empty slice is the explicit way to clear a
+	// saved selection and return the env to its repo k8s.deployments plan —
+	// the ambiguity plain-string flags have between "omitted" and
+	// "explicitly emptied" does not apply here because the pointer itself
+	// carries that distinction.
+	Components *[]string
 }
 
 // ResolvedType returns the type a *new* env is created with: an explicit Type
@@ -817,7 +826,7 @@ func (s *bootstrapRunState) createEnvConfig() error {
 		CloudProviderAlias: cloudProviderAlias,
 		ManagedCloud:       managedCloud,
 		RuntimeVersion:     s.params.resolvedRuntimeVersion(),
-		RuntimeImage:       strings.TrimSpace(s.params.RuntimeImage),
+		RuntimeImage:       stripRuntimeImageTag(s.params.RuntimeImage),
 		RuntimeRegistry:    strings.TrimSpace(s.params.RuntimeRegistry),
 		// Record the key init's runtime deploy trusted, so the next redeploy
 		// rethreads it instead of dropping the env's MCP edge to unauthenticated.
@@ -828,6 +837,7 @@ func (s *bootstrapRunState) createEnvConfig() error {
 		RuntimePod:         NormalizeRuntimePodResources(s.params.RuntimePod),
 		DisableBuildScript: s.params.DisableBuildScript,
 		PlatformAccount:    s.params.PlatformAccount,
+		Deploy:             initDeployConfig(s.params),
 		// Seed the registries into the FIRST persisted config. The init-time deploy
 		// (ensureDevopsAssets) reads the env config from disk before
 		// saveEnvConfigIfChanged runs, so registries set only in-memory here were
@@ -841,6 +851,40 @@ func (s *bootstrapRunState) createEnvConfig() error {
 	}
 	s.result.CreatedEnvConfig = true
 	return nil
+}
+
+// initDeployConfig resolves the Deploy block a new env is created with: a
+// saved components selection when --components named one, else the zero value
+// (no saved selection, so deploy falls back to the repo plan).
+func initDeployConfig(params BootstrapInitParams) EnvironmentDeployConfig {
+	components, given := initComponentsOverride(params)
+	if !given {
+		return EnvironmentDeployConfig{}
+	}
+	return EnvironmentDeployConfig{Components: components}
+}
+
+// initComponentsOverride resolves the deploy.components override an init
+// invocation named via --components, and whether one was named at all. A nil
+// Components pointer means the invocation named nothing; a non-nil pointer
+// (even to an empty slice) is an explicit request. That distinction is what
+// lets an explicitly empty --components clear a saved selection instead of
+// being indistinguishable from not passing the flag at all.
+func initComponentsOverride(params BootstrapInitParams) ([]string, bool) {
+	if params.Components == nil {
+		return nil, false
+	}
+	return normalizeComponentNames(*params.Components), true
+}
+
+// describeComponentsSetting renders a resolved components list for a trace
+// line, naming explicitly when the list is an intentional clear rather than
+// looking like nothing happened.
+func describeComponentsSetting(components []string) string {
+	if len(components) == 0 {
+		return "(cleared — deploy now follows the repo k8s.deployments plan)"
+	}
+	return strings.Join(components, ",")
 }
 
 // seedInitContainerRegistries returns the marked list a new env is created with:
@@ -920,12 +964,13 @@ func (s *bootstrapRunState) updateExistingEnvSettings() error {
 		return nil
 	}
 	s.applyEnvRuntimeVersion()
-	s.applyEnvSetting("runtime image", s.params.RuntimeImage, &s.envConfig.RuntimeImage)
+	s.applyEnvSetting("runtime image", stripRuntimeImageTag(s.params.RuntimeImage), &s.envConfig.RuntimeImage)
 	// Re-running init is how an env deadlocked on chart resolution gets out: the
 	// registry lands on the config before this run's own deploy resolves a chart.
 	s.applyEnvSetting("runtime registry", s.params.RuntimeRegistry, &s.envConfig.RuntimeRegistry)
 	s.applyEnvImagePullSecrets()
 	s.applyEnvRuntimePod()
+	s.applyEnvDeployComponents()
 	return s.applyEnvType()
 }
 
@@ -1010,6 +1055,25 @@ func (s *bootstrapRunState) applyEnvRuntimePod() {
 	s.envConfig.RuntimePod = NormalizeRuntimePodResources(desired)
 	s.envConfigChanged = true
 	s.runner.Context.Trace("init: runtime pod resources set to " + formatRuntimePodResources(s.envConfig.RuntimePod))
+}
+
+// applyEnvDeployComponents honours --components on an existing env: given, it
+// overwrites the saved selection outright — including with an empty list,
+// which clears it and returns the env to its repo k8s.deployments plan;
+// not given, the saved selection (if any) is left exactly as it was.
+func (s *bootstrapRunState) applyEnvDeployComponents() {
+	components, given := initComponentsOverride(s.params)
+	if !given {
+		s.traceEnvSettingKept("deploy components", strings.Join(s.envConfig.Deploy.Components, ","))
+		return
+	}
+	if slices.Equal(components, s.envConfig.Deploy.Components) {
+		s.runner.Context.Trace("init: deploy components already " + describeComponentsSetting(components))
+		return
+	}
+	s.envConfig.Deploy.Components = components
+	s.envConfigChanged = true
+	s.runner.Context.Trace("init: deploy components set to " + describeComponentsSetting(components))
 }
 
 // applyEnvType moves an existing env between types, in either direction and

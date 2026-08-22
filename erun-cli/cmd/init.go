@@ -22,6 +22,7 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 	confirmEnvironment := false
 	clusterRegistry := false
 	var envType string
+	var components []string
 
 	cmd := &cobra.Command{
 		Use:          "init [TENANT] [ENVIRONMENT]",
@@ -29,7 +30,7 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 		Args:         cobra.MaximumNArgs(2),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			runParams, err := initRunParams(cmd, args, params, setDefaultTenant, confirmEnvironment, clusterRegistry, envType)
+			runParams, err := initRunParams(cmd, args, params, setDefaultTenant, confirmEnvironment, clusterRegistry, envType, components)
 			if err != nil {
 				return err
 			}
@@ -40,7 +41,7 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 	cmd.Flags().StringVar(&params.Tenant, "tenant", "", "Tenant name to initialize")
 	cmd.Flags().StringVar(&params.ProjectRoot, "project-root", "", "Project root to bind to the tenant")
 	cmd.Flags().StringVar(&params.Environment, "environment", "", "Environment name")
-	cmd.Flags().StringVar(&params.RuntimeVersion, "version", "", "Runtime image version to initialize and deploy; omitted, a new env takes this erun's version and an existing env keeps the one it runs")
+	cmd.Flags().StringVar(&params.RuntimeVersion, "version", "", "Runtime image version to record; omitted, a new env takes this erun's version and an existing env keeps the one it runs. A brand-new remote-worktree env (--type remote-agent or runtime) deploys at this version immediately; on an existing env this only re-pins the version in config — run a separate erun deploy to actually roll it out")
 	cmd.Flags().StringVar(&params.RuntimeImage, "runtime-image", "", "Runtime image repository to initialize and deploy")
 	cmd.Flags().StringVar(&params.RuntimeRegistry, "runtime-registry", "", "Registry the environment resolves erun's own artifacts from — the runtime chart and the platform images the pod pulls (e.g. ghcr.io/sophium). Set it when the environment's deploy registry holds only this project's images, so erun's chart is not there to pull; persisted as the env's runtimeregistry")
 	cmd.Flags().StringSliceVar(&params.ImagePullSecrets, "image-pull-secret", nil, "Kubernetes dockerconfigjson secret the runtime pod pulls its image with; repeat or comma-separate for several. Required when the runtime image is in a private registry")
@@ -61,11 +62,12 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 	cmd.Flags().BoolVar(&params.DisableBuildScript, "disable-build-script", false, "Ignore any project build.sh for this env; erun build resolves docker/release contexts directly")
 	cmd.Flags().BoolVar(&params.PlatformAccount, "platform-account", false, "Make this env a cluster platform account: deploy binds its runtime ServiceAccount to cluster-admin so in-pod platform terraform (cluster edge) and component installs can manage cluster-scoped resources")
 	cmd.Flags().StringVar(&params.MCPAuthPublicKeyPath, "mcp-auth-public-key", "", "Require the env's MCP edge to authenticate bearer tokens signed by this PEM public key; empty leaves the edge loopback-only. Folds MCP auth into init's single runtime deploy.")
+	cmd.Flags().StringSliceVar(&components, "components", nil, "Save this as the env's default deploy component selection — what a later erun deploy rolls out with no --components flag of its own. Pass an empty string to clear a saved selection and return the env to its repo k8s.deployments plan")
 	addDryRunFlag(cmd)
 	return cmd
 }
 
-func initRunParams(cmd *cobra.Command, args []string, params common.BootstrapInitParams, setDefaultTenant, confirmEnvironment, clusterRegistry bool, envType string) (common.BootstrapInitParams, error) {
+func initRunParams(cmd *cobra.Command, args []string, params common.BootstrapInitParams, setDefaultTenant, confirmEnvironment, clusterRegistry bool, envType string, components []string) (common.BootstrapInitParams, error) {
 	runParams := params
 	applyPositionalInitArgs(&runParams, args)
 	if err := applyClusterRegistryFlag(&runParams, clusterRegistry); err != nil {
@@ -82,6 +84,9 @@ func initRunParams(cmd *cobra.Command, args []string, params common.BootstrapIni
 	}
 	if cmd.Flags().Changed("confirm-environment") {
 		runParams.ConfirmEnvironment = &confirmEnvironment
+	}
+	if cmd.Flags().Changed("components") {
+		runParams.Components = &components
 	}
 	return runParams, nil
 }

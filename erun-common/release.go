@@ -223,7 +223,7 @@ func runReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, 
 	if err := runReleaseStages(ctx, spec, spec.Stages, runGit, syncPackagingChecksums); err != nil {
 		return err
 	}
-	if err := ensureReleaseBaseBranchUnmoved(ctx, spec, runGit); err != nil {
+	if err := ensureReleaseReadyToPublish(ctx, spec, runGit); err != nil {
 		return err
 	}
 	if err := runReleasePublication(ctx, publisher); err != nil {
@@ -237,6 +237,17 @@ func runReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, 
 	}
 
 	return runScriptSpecs(ctx, spec.LinuxReleases, runScript)
+}
+
+// ensureReleaseReadyToPublish runs the checks that must pass immediately
+// before the build spends anything: the base branch has not moved since
+// sync-remote re-established it, and the node has room for the build that is
+// about to start.
+func ensureReleaseReadyToPublish(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc) error {
+	if err := ensureReleaseBaseBranchUnmoved(ctx, spec, runGit); err != nil {
+		return err
+	}
+	return ensureReleaseDiskHeadroom(ctx)
 }
 
 func runReleaseStages(ctx Context, spec ReleaseSpec, stages []ReleaseStage, runGit GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc) error {
@@ -366,10 +377,10 @@ func prepareReleaseTag(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFun
 		}
 		return false, nil
 	}
-	return canSkipExistingReleaseTag(ctx, command.Dir, tag)
+	return canSkipExistingReleaseTag(ctx, spec, command.Dir, tag, runGit)
 }
 
-func canSkipExistingReleaseTag(ctx Context, projectRoot, tag string) (bool, error) {
+func canSkipExistingReleaseTag(ctx Context, spec ReleaseSpec, projectRoot, tag string, runGit GitCommandRunnerFunc) (bool, error) {
 	tag = strings.TrimSpace(tag)
 	if tag == "" {
 		return false, nil
@@ -391,10 +402,57 @@ func canSkipExistingReleaseTag(ctx Context, projectRoot, tag string) (bool, erro
 		return false, fmt.Errorf("could not resolve HEAD for release tag check")
 	}
 	if tagCommit != headCommit {
-		return false, fmt.Errorf("release tag %q already exists at %s, expected current HEAD %s", tag, tagCommit, headCommit)
+		return false, releaseTagMismatchError(ctx, spec, projectRoot, tag, tagCommit, headCommit, runGit)
 	}
 
 	return true, nil
+}
+
+// releaseTagMismatchError diagnoses a tag that exists but not at HEAD. When it
+// is unpushed and the release branch's remote history has never incorporated
+// it, that is not a real collision — it is a leftover local tag+commit from a
+// release that was interrupted before it published anything (e.g. the
+// pod holding the worktree was replaced mid-release). Reclaiming it
+// automatically is judged too aggressive for a git tag inside a release flow,
+// so the refusal instead names the diagnosis and the exact remedy, rather than
+// leaving the operator to work out both by hand.
+func releaseTagMismatchError(ctx Context, spec ReleaseSpec, projectRoot, tag, tagCommit, headCommit string, runGit GitCommandRunnerFunc) error {
+	base := fmt.Errorf("release tag %q already exists at %s, expected current HEAD %s", tag, tagCommit, headCommit)
+	pushed, err := gitRemoteTagExists(ctx, projectRoot, "origin", tag)
+	if err != nil || pushed {
+		return base
+	}
+	reachable, known := releaseBaseBranchIncorporates(projectRoot, spec.Branch, tagCommit, runGit)
+	if !known || reachable {
+		return base
+	}
+	return fmt.Errorf("%w\na previous run left an unpushed local tag %q at %s that origin/%s has never incorporated — most likely a release interrupted before it published anything; delete it with `git tag -d %s` to retry",
+		base, tag, tagCommit, spec.Branch, tag)
+}
+
+// releaseBaseBranchIncorporates reports whether commit is already part of the
+// release branch's remote history, fetching it fresh the same way
+// releaseBaseBranchAhead does. known is false when the read was inconclusive
+// (no remote, no network, unresolved ref) — an unknown answer is never
+// treated as "reachable" or "unreachable", since either would risk offering
+// the reclaim message, or withholding it, on a guess.
+func releaseBaseBranchIncorporates(projectRoot, branch, commit string, runGit GitCommandRunnerFunc) (reachable bool, known bool) {
+	branch = strings.TrimSpace(branch)
+	if branch == "" || commit == "" {
+		return false, false
+	}
+	if err := runGit(projectRoot, io.Discard, io.Discard, "fetch", "origin", branch); err != nil {
+		return false, false
+	}
+	err := Command("git", "-C", projectRoot, "merge-base", "--is-ancestor", commit, "FETCH_HEAD").Run()
+	if err == nil {
+		return true, true
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, true
+	}
+	return false, false
 }
 
 func deleteExistingReleaseTag(ctx Context, projectRoot, tag string, runGit GitCommandRunnerFunc) error {

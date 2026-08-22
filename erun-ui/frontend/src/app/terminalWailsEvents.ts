@@ -9,6 +9,7 @@ import type {
   EnvActivityPayload,
   EnvironmentInitializedPayload,
   EnvStatusPayload,
+  OrchestratorShellActivityPayload,
 } from './model';
 import { store } from './store';
 import {
@@ -20,6 +21,7 @@ import {
   handleEnvironmentInitFailed,
   handleEnvironmentInitialized,
   handleEnvStatus,
+  handleOrchestratorShellActivity,
   handleReconnectLine,
   handleTerminalExit,
 } from './wailsEventThunks';
@@ -50,6 +52,9 @@ export class TerminalWailsEvents {
       }),
       EventsOn('ai-activity', (payload: AIActivityPayload) => {
         store.dispatch(handleAIActivity(payload));
+      }),
+      EventsOn('orchestrator-shell-activity', (payload: OrchestratorShellActivityPayload) => {
+        store.dispatch(handleOrchestratorShellActivity(payload));
       }),
       EventsOn('env-status', (payload: EnvStatusPayload) => {
         store.dispatch(handleEnvStatus(payload));

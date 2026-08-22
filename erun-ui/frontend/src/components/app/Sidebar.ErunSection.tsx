@@ -12,6 +12,7 @@ import * as React from 'react';
 import { openGlobalConfigDialog } from '@/app/globalConfigThunks';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { startManageDoctor } from '@/app/manageEnvironmentThunks';
+import { orchestratorShellLabel } from '@/app/orchestratorShellLabel';
 import {
   loadOrchestrators,
   openOrchestrator,
@@ -19,6 +20,7 @@ import {
   startOrchestrator,
 } from '@/app/orchestratorThunks';
 import { openOutputs } from '@/app/outputsThunks';
+import type { OrchestratorShellActivity } from '@/app/slices/orchestratorShellActivitySlice';
 import type { OrchestratorInfo } from '@/app/slices/orchestratorsSlice';
 import { openOrchestratorDialog } from '@/app/slices/orchestratorsSlice';
 import { EmptyState } from '@/components/app/EmptyState';
@@ -183,6 +185,16 @@ function OrchestratorRow({
       orchestrator.sessionId > 0 &&
       state.aiActivity.aiBusyBySession[orchestrator.sessionId] === true,
   );
+  // A background shell is independent of the turn's own busy state —
+  // it can keep running after the turn that started it goes idle, which is
+  // exactly the case that had no affordance at all before this. Shown only
+  // when the turn itself is not already spinning, so the row never carries
+  // two motion cues fighting for the same attention.
+  const shellActivity = useAppSelector((state) =>
+    orchestrator.sessionId > 0
+      ? state.orchestratorShellActivity.bySession[orchestrator.sessionId]
+      : undefined,
+  );
   return (
     <li
       className={cn(
@@ -209,8 +221,33 @@ function OrchestratorRow({
         <span className="min-w-0 truncate">{orchestrator.name}</span>
       </button>
       {busy && <BusyRowSpinner label={`${orchestrator.name} is working`} />}
+      {!busy && shellActivity?.running && (
+        <OrchestratorShellIndicator name={orchestrator.name} activity={shellActivity} />
+      )}
       <OrchestratorRowActions orchestrator={orchestrator} running={running} active={active} />
     </li>
+  );
+}
+
+// OrchestratorShellIndicator is BusyRowSpinner's own icon, reused rather than
+// a one-off, so a running shell reports activity identically to a working
+// turn or a busy environment (Nielsen #4, consistency). The aria-label — and
+// the hover tooltip, since elapsed time and the command are worth seeing at a
+// glance, not just to a screen reader — name what is running and for how
+// long, which is the whole point of this indicator: "1 shell" alone cannot
+// tell the operator whether it is doing something or just spinning its wheels.
+function OrchestratorShellIndicator({
+  name,
+  activity,
+}: {
+  name: string;
+  activity: OrchestratorShellActivity;
+}): React.ReactElement {
+  const label = orchestratorShellLabel(name, activity.command, activity.startedAtUnix, Date.now());
+  return (
+    <IconTooltip label={label}>
+      <BusyRowSpinner label={label} />
+    </IconTooltip>
   );
 }
 

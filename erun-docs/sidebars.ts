@@ -50,6 +50,7 @@ const sidebars: SidebarsConfig = {
         'cli/sshd',
         'cli/list',
         'cli/outputs',
+        'cli/inputs',
         'cli/idle',
         'cli/doctor',
         'cli/version',

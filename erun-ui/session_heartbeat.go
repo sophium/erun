@@ -70,7 +70,7 @@ func (a *App) runSessionHeartbeatPoller(stop <-chan struct{}) {
 // sidebar's spinner.
 //
 // It re-emits every tick, busy or not, rather than only when the state
-// changes (#1087). The spinner used to be lit exclusively by the one
+// changes. The spinner used to be lit exclusively by the one
 // false→true transition, and orchestratorInfo — the snapshot the frontend
 // boots and re-renders from — carried no busy flag at all, so anything that
 // lost that single event (a remount after the transition, a window reopen, a
@@ -122,13 +122,37 @@ func (a *App) reconcileOrchestratorActivity() {
 	for _, r := range rows {
 		activity, ok := readOrchestratorActivity(r.id, now, r.alive)
 		busy := ok && activity.Busy
+		// A background shell is a fact independent of the turn's own busy/idle
+		// state — it can keep running after the turn that started it ends — so
+		// it gets the same re-emit-every-tick treatment on its own, not folded
+		// into the busy report above.
+		shell, shellOK := readOrchestratorShellActivity(r.id, now, r.alive)
+		shellRunning := shellOK && shell.Running
 		a.mu.Lock()
 		if session := a.orchestrators[r.id]; session != nil {
 			session.aiBusy = busy
+			session.shellRunning = shellRunning
+			session.shellCommand = shell.Command
+			session.shellStartedAtUnix = shell.AtUnix
 		}
 		a.mu.Unlock()
 		a.emitAIActivity(r.serial, uiSelection{}, busy)
+		a.emitOrchestratorShellActivity(r.serial, shellRunning, shell.Command, shell.AtUnix)
 	}
+}
+
+// emitOrchestratorShellActivity publishes what an orchestrator's background
+// shell report says. startedAtUnix is only meaningful while running is true;
+// the caller (reconcileOrchestratorActivity) always passes the report's own
+// AtUnix, which is the report's write time either way and harmless to send
+// when not running since the frontend only reads it alongside Running.
+func (a *App) emitOrchestratorShellActivity(sessionID int, running bool, command string, startedAtUnix int64) {
+	a.emitEvent(orchestratorShellEvent, orchestratorShellActivityPayload{
+		SessionID:     sessionID,
+		Running:       running,
+		Command:       command,
+		StartedAtUnix: startedAtUnix,
+	})
 }
 
 // reconcileSessionHeartbeatsOnce probes every environment with a live pod

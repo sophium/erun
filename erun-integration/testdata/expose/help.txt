@@ -1,6 +1,6 @@
 Expose an in-namespace Service at a stable public hostname under the platform's services zone.
 
-SERVICE is the logical service name: it becomes the hostname label and routes to the tenant-scoped in-namespace Service <tenant>-<service> (the name its component chart renders, e.g. `api` -> `frs-api`), so the public host stays a clean label (api.frs-prod.services.erunpaas.com) while the Ingress targets the real Service. Ensures the per-environment wildcard DNS record points at the env's ingress IP and applies a Host-routing Ingress for the Service. TLS is on by default: the Ingress references the env's per-env wildcard cert Secret (<tenant>-<env>-wildcard-tls, issued by the cluster edge), so the host serves https with no per-service cert step. Pass --no-tls for http. Requires a platform block in .erun/config.yaml unless --services-zone and --platform-namespace are both set; it mutates the platform DNS zone and applies to the env's cluster. Use --dry-run to preview the actions.
+SERVICE is the logical service name: it becomes the hostname label and routes to the tenant-scoped in-namespace Service <tenant>-<service> (the name its component chart renders, e.g. `api` -> `frs-api`), so the public host stays a clean label (api.frs-prod.services.erunpaas.com) while the Ingress targets the real Service. Ensures the per-environment wildcard DNS record points at the env's ingress IP and applies a Host-routing Ingress for the Service. TLS is requested by default, but only takes effect when --dns01-token-file, --dns01-broker-url, and --acme-email are all set: expose then also provisions a namespaced cert-manager Issuer + Certificate through erun's DNS-01 broker so the Ingress's TLS Secret (<tenant>-<env>-wildcard-tls) actually gets populated, and the Ingress references it for https. Omitting any of the three resolves to the same http-only Ingress --no-tls asks for explicitly, since nothing would ever populate that Secret otherwise. Pass --no-tls for http. Requires a platform block in .erun/config.yaml unless --services-zone and --platform-namespace are both set; it mutates the platform DNS zone and applies to the env's cluster. Use --dry-run to preview the actions.
 
 Usage:
   erun expose TENANT ENVIRONMENT SERVICE [flags]
@@ -10,18 +10,24 @@ Examples:
   erun expose team prod api --ip <VERSION>.10 --port 8080
   erun expose team dev api --ip <LOOPBACK> --no-tls
   erun expose team dev api --ip <LOOPBACK> --services-zone services.example.com --platform-namespace frs-prod
+  erun expose team dev api --ip <LOOPBACK> --dns01-token-file token.txt --dns01-broker-url https://api.example.com/v1/dns01 --acme-email admin@example.com
 
 Flags:
-      --dry-run                     Resolve and trace mutating actions without executing them.
-  -h, --help                        help for expose
-      --ingress-class string        Ingress controller class (default traefik)
-      --ip string                   Ingress IP the per-env wildcard record points at (e.g. <LOOPBACK> for a local cluster, the public LB IP for remote)
-      --no-tls                      Serve http instead of https (skip the tls block on the Ingress)
-      --platform-namespace string   Override the namespace running the platform's PowerDNS singleton, so expose needs no project checkout (requires --services-zone too)
-      --port int                    Service port to route to (default 80)
-      --services-zone string        Override the platform services zone tenant hostnames live under, so expose needs no project checkout (requires --platform-namespace too)
-      --skip-if-unconfigured        Succeed as a no-op instead of failing when the project declares no platform block (for scripted callers composing expose after another command)
-      --tls-secret string           Override the per-env wildcard cert Secret name (default <tenant>-<env>-wildcard-tls)
+      --acme-email string                 ACME account contact email for the provisioned per-env certificate (requires --dns01-token-file and --dns01-broker-url)
+      --acme-server string                ACME directory URL for the provisioned per-env certificate (default Let's Encrypt production)
+      --dns01-broker-url string           Base URL of the DNS-01 broker the cluster's cert-manager webhook shim forwards challenges to (requires --dns01-token-file and --acme-email)
+      --dns01-token-file string           Path to a file holding the per-env DNS-01 broker token; with --dns01-broker-url and --acme-email, provisions a namespaced cert-manager Issuer + Certificate so the wildcard TLS Secret actually gets populated
+      --dns01-webhook-group-name string   API group the cluster's cert-manager DNS-01 webhook shim registers under (default acme.erun.io)
+      --dry-run                           Resolve and trace mutating actions without executing them.
+  -h, --help                              help for expose
+      --ingress-class string              Ingress controller class (default traefik)
+      --ip string                         Ingress IP the per-env wildcard record points at (e.g. <LOOPBACK> for a local cluster, the public LB IP for remote)
+      --no-tls                            Serve http instead of https (skip the tls block on the Ingress)
+      --platform-namespace string         Override the namespace running the platform's PowerDNS singleton, so expose needs no project checkout (requires --services-zone too)
+      --port int                          Service port to route to (default 80)
+      --services-zone string              Override the platform services zone tenant hostnames live under, so expose needs no project checkout (requires --platform-namespace too)
+      --skip-if-unconfigured              Succeed as a no-op instead of failing when the project declares no platform block (for scripted callers composing expose after another command)
+      --tls-secret string                 Override the per-env wildcard cert Secret name (default <tenant>-<env>-wildcard-tls)
 
 Global Flags:
       --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")

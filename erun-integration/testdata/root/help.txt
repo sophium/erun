@@ -37,6 +37,7 @@ Available Commands:
   help        Help about any command
   idle        Show environment idle stop status
   init        Initialize configuration for the current project
+  inputs      Place a host file inside the runtime pod
   job         Start long work in the environment and observe it by handle
   list        List configured tenants and environments
   mcp         Run ERun as an MCP server over HTTP
@@ -49,6 +50,7 @@ Available Commands:
   sshd        Remote SSH utilities
   stop        Stop an environment's runtime and return its capacity to the node
   terraform   Run a platform's per-env Terraform from the right folder automatically
+  unexpose    Remove an environment's per-env wildcard DNS record
   upgrade     Redeploy opted-in environments to the latest version for their channel
   version     Print build information
 

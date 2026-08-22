@@ -241,7 +241,7 @@ type HelmDeploySpec struct {
 	MCPAuthSecretName   string
 	// MCPAuthPublicKeyPath is the key's on-host location, recorded on the env
 	// after the deploy so a later redeploy rethreads the same key instead of
-	// dropping the edge back to unauthenticated. Empty on the OIDC-issuer path.
+	// dropping the edge back to unauthenticated.
 	MCPAuthPublicKeyPath string
 }
 
@@ -1030,6 +1030,7 @@ func resolveSelectedLocalDeploySpecs(ctx Context, store DeployStore, findProject
 	}
 	selected, selectionSource := resolveSelectedDeployComponents(target.Components, resolvedTarget.EnvConfig.Deploy.Components, plan)
 	traceDeployComponentSelection(ctx, selected, selectionSource)
+	traceSavedSelectionShadowingPlan(ctx, selected, selectionSource, plan)
 	traceConfiguredDeployPaths(ctx, resolvedTarget.RepoPath)
 
 	deployContexts, err := resolveCurrentLocalDeployContexts(findProjectRoot, resolveKubernetesDeployContext, resolvedTarget, selected, plan)
@@ -1073,6 +1074,29 @@ func traceDeployComponentSelection(ctx Context, selected []string, source string
 	ctx.Trace("deploy: component selection source " + source + "; components " + strings.Join(selected, ", "))
 }
 
+// traceSavedSelectionShadowingPlan reports when a saved deploy.components
+// selection wins the precedence over a repo k8s.deployments plan that names
+// more than the saved selection does — a divergence that used to be silent
+// (visible only under -vv, and even then without naming what the plan asked
+// for beyond the saved set). Selection tiers still never merge; this only
+// makes the gap between what deploys and what the reviewed plan declares
+// visible at normal verbosity, every time it exists.
+func traceSavedSelectionShadowingPlan(ctx Context, selected []string, source string, plan ProjectK8sConfig) {
+	if source != deploySelectionSourceSaved {
+		return
+	}
+	var missing []string
+	for _, name := range planComponentNameList(plan) {
+		if !slices.Contains(selected, name) {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) == 0 {
+		return
+	}
+	ctx.Trace("deploy: saved components shadow the repo plan; plan also names " + strings.Join(missing, ", "))
+}
+
 // resolvePublishedDeploySpecs resolves a sourceless deploy for a target whose
 // repo is not local (a runtime or remote-agent env): every selected chart is
 // installed by reference from the published registry — each platform component
@@ -1085,6 +1109,15 @@ func traceDeployComponentSelection(ctx Context, selected []string, source string
 func resolvePublishedDeploySpecs(ctx Context, store DeployStore, resolvedTarget OpenResult, target DeployTarget) ([]DeploySpec, error) {
 	selected, selectionSource := resolveSelectedDeployComponents(target.Components, resolvedTarget.EnvConfig.Deploy.Components, ProjectK8sConfig{})
 	traceDeployComponentSelection(ctx, selected, selectionSource)
+	// Ordering does not use the repo plan here (no local source to order by),
+	// but the divergence it would reveal still matters: a host machine running
+	// this deploy against a remote/runtime env is very often sitting inside the
+	// same tenant repo checkout, so a best-effort read is worth attempting
+	// purely to warn on a shadowed plan. A missing or unreadable repo is
+	// silently treated as "no plan to compare against", exactly as it already is
+	// for the local path.
+	shadowPlan, _ := loadProjectK8sPlanForRepo(resolvedTarget.RepoPath, resolvedTarget.Environment)
+	traceSavedSelectionShadowingPlan(ctx, selected, selectionSource, shadowPlan)
 
 	tenantComponents := selectedPublishableComponents(selected, resolvedTarget.Tenant)
 	runtimeSelected := deploySelectionIncludesRuntime(selected, resolvedTarget.Tenant)

@@ -60,6 +60,10 @@ type PinPlan struct {
 	Previous    string    `json:"previous,omitempty"`
 	ProjectRoot string    `json:"projectRoot"`
 	Sites       []PinSite `json:"sites"`
+	// Skipped explains, in order, why something that looked like a version
+	// reference was deliberately left out of Sites, so a caller reading the
+	// plan is not left assuming it was covered.
+	Skipped []string `json:"skipped,omitempty"`
 }
 
 // Changes is the sites that would actually move. A plan whose changes are empty
@@ -117,12 +121,20 @@ func ResolvePinPlan(projectRoot, tenant, environment string, env EnvConfig, targ
 	})
 	if image := strings.TrimSpace(env.RuntimeImage); image != "" {
 		if _, version, ok := splitImageTag(image); ok {
-			plan.Sites = append(plan.Sites, PinSite{
-				Kind:    PinSiteRuntimeImage,
-				Detail:  image,
-				Current: version,
-				Target:  target,
-			})
+			// Only the stock erun-devops image's tag is an erun version; a
+			// tenant's own <tenant>-devops image rides the tenant's own release
+			// line, and rewriting its tag to an erun version would name a tag
+			// that line never publishes.
+			if runtimeImageIsStockDevops(image) {
+				plan.Sites = append(plan.Sites, PinSite{
+					Kind:    PinSiteRuntimeImage,
+					Detail:  image,
+					Current: version,
+					Target:  target,
+				})
+			} else {
+				plan.Skipped = append(plan.Skipped, "runtimeimage "+image+" is not the stock erun-devops image; its tag rides the tenant's own release line, not erun's, so pin leaves it alone")
+			}
 		}
 	}
 

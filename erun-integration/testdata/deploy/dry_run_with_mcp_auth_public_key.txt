@@ -5,7 +5,7 @@ deploy: component selection source default (runtime only); deploying the runtime
 deploy: version <VERSION> pinned; installing the published image by reference (deploy never builds)
 deploy: resolved 1 spec(s)
 kubectl --context test-context get namespace team-dev -o name
-kubectl --context test-context create namespace team-dev
+deploy: namespace team-dev is created if the check above reports it missing
 apply mcp auth public key secret team-devops-mcp-auth
 kubectl --context test-context -n team-dev apply -f -
 deploy: mcp auth: recording the public key <TMP> on team/dev

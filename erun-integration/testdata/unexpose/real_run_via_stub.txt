@@ -1,0 +1,4 @@
+removed wildcard DNS record *.team-dev.services.erunpaas.com for team/dev
+audit: erun unexpose team dev
+unexpose: per-env wildcard *.team-dev.services.erunpaas.com (zone services.erunpaas.com)
+unexpose: platform powerdns namespace frs-prod

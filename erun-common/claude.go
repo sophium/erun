@@ -6,9 +6,16 @@ import (
 )
 
 const (
-	DefaultClaudeUseMantle       = false
-	DefaultClaudeUseBedrock      = false
-	DefaultClaudeMaxOutputTokens = 4096
+	DefaultClaudeUseMantle  = false
+	DefaultClaudeUseBedrock = false
+	// DefaultClaudeMaxOutputTokens is the shipped default for an agent's output
+	// cap. 4096 (roughly a 200-line source file) made agent mode unable to write
+	// the files it exists to write — a job died mid-turn the moment it authored
+	// anything non-trivial. 32000 clears a large source file with headroom while
+	// staying well under the ceiling below. The runtime chart's own default
+	// (erun-devops/k8s/erun-devops/templates/service.yaml, `$claudeMaxOutputTokens`)
+	// mirrors this value; a change here must move there too.
+	DefaultClaudeMaxOutputTokens = 32000
 	defaultClaudeAvailableModels = "opus,sonnet,haiku"
 	claudeMaxOutputTokensCeiling = 200000
 	claudeMaxOutputTokensFloor   = 1

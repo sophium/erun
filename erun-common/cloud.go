@@ -148,6 +148,22 @@ type CloudDependencies struct {
 	RefreshERunTokens            func(Context, OIDCDiscovery, string, string) (ERunTokens, error)
 }
 
+// DefaultCloudDependencies returns a CloudDependencies with CloudSecretStore
+// set to the default file-backed store when one can be constructed there,
+// left nil otherwise. Every transport needs this same tolerant-nil
+// construction (the store's directory may not exist, or may be otherwise
+// unavailable) — call this from each rather than open-coding it again, which
+// is how the listing path went a full release without it.
+// Cloudflare/erun operations that need the store fail clearly downstream when
+// it stays nil, rather than here.
+func DefaultCloudDependencies() CloudDependencies {
+	deps := CloudDependencies{}
+	if store, err := DefaultCloudSecretStore(); err == nil {
+		deps.CloudSecretStore = store
+	}
+	return deps
+}
+
 // CloudProviderCredentials is a snapshot of temporary AWS credentials derived
 // from a configured host profile, for injecting into a remote runtime so it
 // acts as the host's IAM identity. AWS hands out roughly 1h windows, so

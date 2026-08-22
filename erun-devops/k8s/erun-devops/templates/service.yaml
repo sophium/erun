@@ -91,7 +91,7 @@ emitted; type is the single source of truth.
        the namespace LimitRange's default: an unsized container in a quota'd
        namespace is defaulted to the *entire* configured quota width, so an
        unsized dind silently doubled the pod's real ResourceQuota consumption
-       (#1061). Defaults mirror eruncommon.DefaultRuntimeDindCPU/Memory in
+       Defaults mirror eruncommon.DefaultRuntimeDindCPU/Memory in
        erun-common/runtime_resources.go — keep the two in sync. */ -}}
 {{- $dind := default dict $runtime.dind -}}
 {{- $dindResources := default dict $dind.resources -}}
@@ -106,7 +106,7 @@ emitted; type is the single source of truth.
        relying on the namespace LimitRange's default: Kubernetes admits a pod
        on max(max(init container requests), sum(container requests)), so one
        unsized init container's inherited request can become the pod's entire
-       effective request (#1076 — this is what #1061 already fixed for the
+       effective request (this is the same shape already fixed for the
        dind sidecar above). Each does a few seconds of chown, file copy, or
        qemu binary registration, so one shared budget covers all three.
        Defaults mirror eruncommon.DefaultRuntimeInitContainerCPU/Memory in
@@ -140,7 +140,7 @@ emitted; type is the single source of truth.
 {{- $cloudflareEnabled := default false $cloudflare.enabled -}}
 {{- $cloudflareAccountId := default "" $cloudflare.accountId -}}
 {{- $cloudflareSecretName := default "" $cloudflare.secretName -}}
-{{- /* MCP auth edge (#655): when enabled, mount the desktop public key and
+{{- /* MCP auth edge: when enabled, mount the desktop public key and
        configure the per-env MCP server to require a bearer token signed by it.
        Absent/disabled renders byte-for-byte unchanged (legacy loopback-only). */ -}}
 {{- $mcpAuth := default dict .Values.mcpAuth -}}
@@ -168,7 +168,8 @@ emitted; type is the single source of truth.
 {{- $claudeSkipMantleAuth := default "" $claude.skipMantleAuth -}}
 {{- $claudeDisablePromptCaching := default "" $claude.disablePromptCaching -}}
 {{- $claudeEnablePromptCaching1H := default "" $claude.enablePromptCaching1H -}}
-{{- $claudeMaxOutputTokens := default "4096" $claude.maxOutputTokens -}}
+{{- /* Mirrors eruncommon.DefaultClaudeMaxOutputTokens (erun-common/claude.go); move both together. */ -}}
+{{- $claudeMaxOutputTokens := default "32000" $claude.maxOutputTokens -}}
 {{- $claudeMaxThinkingTokens := default "1024" $claude.maxThinkingTokens -}}
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -598,6 +599,13 @@ spec:
             {{- end }}
             - name: ERUN_DISABLE_BUILD_SCRIPT
               value: {{ default false .Values.disableBuildScript | quote }}
+            {{- /* These two are plain Claude Code tuning knobs, not AWS/Bedrock/Mantle
+                   routing, so they render for every env regardless of cloud provider
+                   unlike the block below them, which is genuinely AWS-only. */}}
+            - name: CLAUDE_CODE_MAX_OUTPUT_TOKENS
+              value: {{ $claudeMaxOutputTokens | quote }}
+            - name: MAX_THINKING_TOKENS
+              value: {{ $claudeMaxThinkingTokens | quote }}
             {{ if eq $cloudProvider "aws" }}
             {{ if $useHostCredentials }}
             - name: AWS_PROFILE
@@ -626,10 +634,6 @@ spec:
             {{- end }}
             - name: ERUN_CLAUDE_AVAILABLE_MODELS
               value: {{ $claudeAvailableModels | quote }}
-            - name: CLAUDE_CODE_MAX_OUTPUT_TOKENS
-              value: {{ $claudeMaxOutputTokens | quote }}
-            - name: MAX_THINKING_TOKENS
-              value: {{ $claudeMaxThinkingTokens | quote }}
             {{ if $claudeModel }}
             - name: ANTHROPIC_MODEL
               value: {{ $claudeModel | quote }}

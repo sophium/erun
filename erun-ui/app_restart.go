@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	eruncommon "github.com/sophium/erun/erun-common"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -72,17 +73,26 @@ type orchestratorRestoreState struct {
 // relaunchTarget is the JSON-safe view the frontend reads on boot. OrchestratorID
 // is the one this launch resumes and that OWNS THE TERMINAL PANE — the pane is
 // single, so exactly one orchestrator gets it. AlsoReopen lists every other
-// orchestrator that was open and comes back too, started idle alongside it with
-// no conversation named and no prompt: only the pane-owning orchestrator can
-// carry a resume prompt, by construction, because ConversationID/ResumePrompt
-// are fields of this one target, not of each id in AlsoReopen. Notice explains,
+// orchestrator that was open and comes back too, started idle alongside it.
+// Only the pane-owning orchestrator can carry a resume PROMPT, by construction,
+// because ResumePrompt is a field of this one target, not of each entry in
+// AlsoReopen — but every entry, owner included, carries the conversation id it
+// should resume: see resolveReopenSessionID for how that id is decided, which
+// is never a re-derivation from the orchestrator id. Notice explains,
 // when non-empty, why the pane owner is not continuing a task it asked to.
 type relaunchTarget struct {
-	OrchestratorID string   `json:"orchestratorId"`
-	ConversationID string   `json:"conversationId"`
-	ResumePrompt   string   `json:"resumePrompt"`
-	AlsoReopen     []string `json:"alsoReopen,omitempty"`
-	Notice         string   `json:"notice"`
+	OrchestratorID string                  `json:"orchestratorId"`
+	ConversationID string                  `json:"conversationId"`
+	ResumePrompt   string                  `json:"resumePrompt"`
+	AlsoReopen     []orchestratorReopenRef `json:"alsoReopen,omitempty"`
+	Notice         string                  `json:"notice"`
+}
+
+// orchestratorReopenRef is one orchestrator in AlsoReopen: its id and the
+// conversation it resumes, resolved the same way the pane owner's is.
+type orchestratorReopenRef struct {
+	OrchestratorID string `json:"orchestratorId"`
+	ConversationID string `json:"conversationId,omitempty"`
 }
 
 // defaultOrchestratorRestoreDir is the directory beside window-state.json under
@@ -205,11 +215,12 @@ func readAndClearOrchestratorRestoreTarget(path string) (orchestratorRestoreStat
 // ResolveOrchestratorToReopen returns every orchestrator this launch should
 // reopen: one that OWNS THE TERMINAL PANE (OrchestratorID), plus any others that
 // were open too (AlsoReopen). The frontend calls it on boot (after loading the
-// orchestrator list); for each id that still resolves to a persisted
-// orchestrator it starts a session, resuming that orchestrator's own pinned
-// conversation — except the pane owner, which resumes the named conversation
-// when the hand-off supplies one — so the operator lands back where they were,
-// with everything else they had open still running behind it.
+// orchestrator list); for each entry it starts a session resuming the exact
+// conversation this method names for it — the pane owner resumes the hand-off's
+// named conversation when one is delivered, otherwise every entry (owner and
+// AlsoReopen alike) resumes what resolveReopenSessionID resolves — so the
+// operator lands back where they were, with everything else they had open still
+// running behind it.
 //
 // Which orchestrator owns the pane is answered in one of two ways:
 //
@@ -234,45 +245,153 @@ func readAndClearOrchestratorRestoreTarget(path string) (orchestratorRestoreStat
 func (a *App) ResolveOrchestratorToReopen() relaunchTarget {
 	state, notReopened := consumeOrchestratorRestoreTargets(a.deps.orchestratorRestoreDir, time.Now())
 	notice := orchestratorHandoffsNotReopenedNotice(notReopened)
-	openIDs := readOpenOrchestrators(a.deps.orchestratorOpenPath)
+	openEntries := readOpenOrchestrators(a.deps.orchestratorOpenPath)
 
 	if state.OrchestratorID == "" {
-		if len(openIDs) == 0 {
+		if len(openEntries) == 0 {
 			return relaunchTarget{Notice: notice}
 		}
-		owner := openIDs[len(openIDs)-1]
-		return relaunchTarget{OrchestratorID: owner, AlsoReopen: removeOrchestratorID(openIDs, owner), Notice: notice}
+		owner := openEntries[len(openEntries)-1]
+		alsoRefs, alsoNotices := a.reopenRefs(removeOrchestratorEntry(openEntries, owner.OrchestratorID))
+		notices := append([]string{orchestratorScopeChangedNoticeIfAny(owner, a.currentOrchestratorScope(owner.OrchestratorID))}, alsoNotices...)
+		notices = append(notices, notice)
+		return relaunchTarget{
+			OrchestratorID: owner.OrchestratorID,
+			ConversationID: resolveReopenSessionID(owner),
+			AlsoReopen:     alsoRefs,
+			Notice:         joinOrchestratorNotices(notices...),
+		}
 	}
 
+	alsoRefs, alsoNotices := a.reopenRefs(removeOrchestratorEntry(openEntries, state.OrchestratorID))
 	target := relaunchTarget{
 		OrchestratorID: state.OrchestratorID,
-		AlsoReopen:     removeOrchestratorID(openIDs, state.OrchestratorID),
-		Notice:         notice,
+		AlsoReopen:     alsoRefs,
+		Notice:         joinOrchestratorNotices(append(alsoNotices, notice)...),
 	}
-	if state.ResumePrompt == "" {
-		return target
+	entry := orchestratorEntryOrEmpty(openEntries, state.OrchestratorID)
+	if state.ResumePrompt != "" {
+		refusal := a.resumeRefusal(state)
+		if refusal == "" {
+			target.ConversationID = state.ConversationID
+			target.ResumePrompt = state.ResumePrompt
+			return target
+		}
+		// The refusal above already covers a scope mismatch (it compares the
+		// hand-off's own recorded scope against the orchestrator's current one),
+		// so the durable-record scope check below is skipped here to avoid saying
+		// the same thing twice.
+		target.Notice = joinOrchestratorNotices(refusal, target.Notice)
+	} else if n := orchestratorScopeChangedNoticeIfAny(entry, a.currentOrchestratorScope(state.OrchestratorID)); n != "" {
+		target.Notice = joinOrchestratorNotices(n, target.Notice)
 	}
-	if refusal := a.resumeRefusal(state); refusal != "" {
-		target.Notice = joinOrchestratorNotices(refusal, notice)
-		return target
-	}
-	target.ConversationID = state.ConversationID
-	target.ResumePrompt = state.ResumePrompt
+	// No prompt to deliver, or the hand-off was refused: still resume the exact
+	// conversation the durable record last saw running for this orchestrator,
+	// rather than leaving it for a re-derivation that can land on a different,
+	// older one.
+	target.ConversationID = resolveReopenSessionID(entry)
 	return target
 }
 
-// removeOrchestratorID returns ids without id, preserving order.
-func removeOrchestratorID(ids []string, id string) []string {
-	if len(ids) == 0 {
+// resolveReopenSessionID decides which conversation a reopened orchestrator
+// resumes: the one durably recorded as live for it, but only when that
+// conversation still exists on disk — never a re-derivation from the
+// orchestrator id, which can land on a different, older conversation that
+// happens to share the derived id. Absent or stale, it mints a fresh
+// id instead of guessing: resuming nothing is safer than resuming the wrong
+// conversation, and the fresh session gets recorded correctly the moment it
+// spawns.
+func resolveReopenSessionID(entry orchestratorOpenEntry) string {
+	if entry.SessionID != "" && orchestratorSessionExists(entry.SessionID) {
+		return entry.SessionID
+	}
+	return uuid.NewString()
+}
+
+// orchestratorEntryOrEmpty finds id's entry in entries, or a zero-value entry
+// (no recorded session) when it is not there.
+func orchestratorEntryOrEmpty(entries []orchestratorOpenEntry, id string) orchestratorOpenEntry {
+	for _, entry := range entries {
+		if entry.OrchestratorID == id {
+			return entry
+		}
+	}
+	return orchestratorOpenEntry{OrchestratorID: id}
+}
+
+// removeOrchestratorEntry returns entries without id, preserving order.
+func removeOrchestratorEntry(entries []orchestratorOpenEntry, id string) []orchestratorOpenEntry {
+	if len(entries) == 0 {
 		return nil
 	}
-	out := make([]string, 0, len(ids))
-	for _, existing := range ids {
-		if existing != id {
-			out = append(out, existing)
+	out := make([]orchestratorOpenEntry, 0, len(entries))
+	for _, entry := range entries {
+		if entry.OrchestratorID != id {
+			out = append(out, entry)
 		}
 	}
 	return out
+}
+
+// reopenRefs resolves each entry's conversation the same way the pane owner's
+// is, so every orchestrator AlsoReopen names arrives at the exact conversation
+// that was really running for it rather than one the frontend would otherwise
+// have to derive. It also collects a scope-changed notice for any entry whose
+// recorded environments no longer match: restoring every open orchestrator
+// means an AlsoReopen entry is exactly the no-note, no-task case a re-scoped
+// id can silently resume into, so it gets the same scope check as the pane
+// owner rather than a silent pass.
+func (a *App) reopenRefs(entries []orchestratorOpenEntry) ([]orchestratorReopenRef, []string) {
+	if len(entries) == 0 {
+		return nil, nil
+	}
+	out := make([]orchestratorReopenRef, 0, len(entries))
+	var notices []string
+	for _, entry := range entries {
+		out = append(out, orchestratorReopenRef{
+			OrchestratorID: entry.OrchestratorID,
+			ConversationID: resolveReopenSessionID(entry),
+		})
+		if n := orchestratorScopeChangedNoticeIfAny(entry, a.currentOrchestratorScope(entry.OrchestratorID)); n != "" {
+			notices = append(notices, n)
+		}
+	}
+	return out, notices
+}
+
+// currentOrchestratorScope reads an orchestrator's scope as configured right
+// now. An error (deleted, unreadable config) reads as an empty scope, which is
+// a mismatch against any entry that recorded a non-empty one — the same
+// conservative default resolveReopenSessionID already applies to a stale or
+// absent session id.
+func (a *App) currentOrchestratorScope(id string) []string {
+	scope, err := a.orchestratorScope(id)
+	if err != nil {
+		return nil
+	}
+	return scope
+}
+
+// orchestratorScopeChangedNoticeIfAny reports, for one reopened entry, that its
+// recorded scope no longer matches the orchestrator's current one — or "" when
+// it does, or when the entry predates scope recording (Environments empty,
+// read as unknown rather than a guaranteed match).
+func orchestratorScopeChangedNoticeIfAny(entry orchestratorOpenEntry, currentScope []string) string {
+	if len(entry.Environments) == 0 || equalOrchestratorScope(entry.Environments, currentScope) {
+		return ""
+	}
+	return orchestratorScopeChangedNotice(entry.OrchestratorID, entry.Environments, currentScope)
+}
+
+// orchestratorScopeChangedNotice explains that a reopened orchestrator's
+// recorded conversation carries context for a scope it is no longer wired to.
+// It still resumes that conversation idle — see resolveReopenSessionID — so
+// this is the only thing that will tell the operator the environments
+// underneath it moved before they treat it as current.
+func orchestratorScopeChangedNotice(id string, was, now []string) string {
+	return fmt.Sprintf("Reopened %s: its environments changed since its last session (was %s, now %s). "+
+		"Its conversation may hold context for environments it is no longer wired to; check %s before treating it as current.",
+		id, describeOrchestratorScope(was), describeOrchestratorScope(now), orchestratorReturnNoteName(id))
 }
 
 // orchestratorHandoffsNotReopenedNotice names the orchestrators that restarted

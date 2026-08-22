@@ -39,15 +39,9 @@ func callEnvironmentTool[T any](ctx context.Context, commandCtx common.Context, 
 	if commandCtx.DryRun {
 		return decoded, false, nil
 	}
-	result, err := common.CallMCPTool(ctx, common.MCPToolCallParams{
-		Endpoint:      target.endpoint,
-		MintToken:     mcpEdgeTokenMinter(target),
-		ClientVersion: currentBuildInfo().Version,
-		Tool:          tool,
-		Arguments:     arguments,
-	})
+	result, err := callMCPToolWithReattach(ctx, commandCtx, target, tool, arguments)
 	if err != nil {
-		return decoded, false, mcpEdgeError(target, err)
+		return decoded, false, mcpEdgeErrorWithExitCode(target, err)
 	}
 	// An edge that answered without a payload is not an empty answer about the
 	// environment; treating it as one is the failure these verbs exist to close.
@@ -64,25 +58,29 @@ func callEnvironmentTool[T any](ctx context.Context, commandCtx common.Context, 
 // environment applies its own default rather than receiving a zero that means
 // something else.
 func putEnvironmentToolArgument(arguments map[string]any, name string, value any) {
-	switch typed := value.(type) {
-	case string:
-		if typed == "" {
-			return
-		}
-	case int:
-		if typed == 0 {
-			return
-		}
-	case int64:
-		if typed == 0 {
-			return
-		}
-	case []string:
-		if len(typed) == 0 {
-			return
-		}
+	if isZeroToolArgument(value) {
+		return
 	}
 	arguments[name] = value
+}
+
+// isZeroToolArgument reports whether value is the zero form of one of the
+// tool-argument types put on the wire — the form that means "unset" rather
+// than a value the environment should receive.
+func isZeroToolArgument(value any) bool {
+	switch typed := value.(type) {
+	case string:
+		return typed == ""
+	case int:
+		return typed == 0
+	case int64:
+		return typed == 0
+	case []string:
+		return len(typed) == 0
+	case map[string]string:
+		return len(typed) == 0
+	}
+	return false
 }
 
 // leaseTTLSeconds converts a flag's duration to the seconds the environment's

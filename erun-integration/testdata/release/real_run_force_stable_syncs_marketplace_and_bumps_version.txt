@@ -20,6 +20,7 @@ release: worktree clean = true
 stage: sync-remote
 stage: release
 release: origin/main could not be read; the moved-branch check is left to the push
+release: docker root free disk space is not observable from this process; skipping the headroom check
 stage: publish
 fingerprint image present locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
 fingerprint image present locally: ghcr.io/sophium/api:fp-<HEX16>-arm64

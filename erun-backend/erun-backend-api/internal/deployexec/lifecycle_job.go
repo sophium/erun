@@ -40,6 +40,14 @@ type DeleteJobParams struct {
 	Namespace      string
 	Image          string
 	ServiceAccount string
+	// ExposeServicesZone/ExposePlatformNamespace thread the same platform
+	// coordinates as DeployJobParams' fields of the same name, so the delete
+	// Job can chain `erun unexpose` — removing the per-env wildcard
+	// DNS record `erun expose` created, symmetric with the deploy Job chaining
+	// `erun expose` itself. Either left empty skips the chain entirely: the
+	// delete Job stays exactly the plain `erun delete` it always ran.
+	ExposeServicesZone      string
+	ExposePlatformNamespace string
 }
 
 // StopJobName is deterministic in its inputs, so a retried stop watches the
@@ -115,7 +123,10 @@ func buildStopJob(params StopJobParams) *batchv1.Job {
 
 // buildDeleteJob's container runs a non-interactive `erun delete <tenant>
 // <env> -y`, skipping the CLI's interactive confirmation the same way the
-// deploy Job's command is already non-interactive.
+// deploy Job's command is already non-interactive, then — when platform
+// coordinates are configured — chains a best-effort `erun unexpose` so
+// the per-env wildcard DNS record `erun expose` created does not outlive the
+// namespace it pointed at.
 func buildDeleteJob(params DeleteJobParams) *batchv1.Job {
 	return &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
@@ -126,9 +137,49 @@ func buildDeleteJob(params DeleteJobParams) *batchv1.Job {
 		Spec: lifecycleJobSpec(corev1.Container{
 			Name:    deleteContainerName,
 			Image:   params.Image,
-			Command: buildLifecycleCommand(params.Tenant, params.Environment, []string{"erun", "delete", params.Tenant, params.Environment, "-y"}),
+			Command: buildDeleteCommand(params),
 		}, params.ServiceAccount),
 	}
+}
+
+// buildDeleteCommand composes the delete Job's argv: the plain `erun delete`
+// (identical to buildLifecycleCommand's shape), then — when both platform
+// coordinates are set — a best-effort chained `erun unexpose` so a leftover
+// DNS record doesn't outlive the namespace it pointed at.
+func buildDeleteCommand(params DeleteJobParams) []string {
+	deleteArgv := []string{"erun", "delete", params.Tenant, params.Environment, "-y"}
+	script := bootstrapEnvironmentScript(params.Tenant, params.Environment) + shellJoin(deleteArgv)
+	if zone, ns := strings.TrimSpace(params.ExposeServicesZone), strings.TrimSpace(params.ExposePlatformNamespace); zone != "" && ns != "" {
+		unexpose := []string{"erun", "unexpose", params.Tenant, params.Environment, "--skip-if-unconfigured", "--services-zone", zone, "--platform-namespace", ns}
+		script += unexposeChainScript(unexpose)
+	}
+	return []string{"sh", "-c", script}
+}
+
+// unexposeFailureMarker mirrors exposeFailureMarker: the chained
+// `erun unexpose` step is best-effort, so a DNS cleanup failure must not fail
+// the delete Job — the namespace already tore down successfully — but its
+// reason is still worth capturing for an operator reading the Job's logs,
+// since the environment row is gone by the time the Job finishes and there is
+// nowhere else to record it.
+const unexposeFailureMarker = "ERUN_UNEXPOSE_FAILED"
+
+func unexposeChainScript(unexpose []string) string {
+	return " && { unexpose_out=$(" + shellJoin(unexpose) + " 2>&1) || printf '" + unexposeFailureMarker + ": %s\\n' \"$unexpose_out\"; }"
+}
+
+// UnexposeFailureFromOutput extracts the chained unexpose step's failure
+// detail from the delete Job's captured stdout, mirroring
+// ExposeFailureFromOutput. "" means unexpose succeeded, was never attempted
+// (no platform coordinates configured), or the Job predates chaining it at
+// all.
+func UnexposeFailureFromOutput(output string) string {
+	marker := unexposeFailureMarker + ": "
+	idx := strings.Index(output, marker)
+	if idx < 0 {
+		return ""
+	}
+	return strings.TrimSpace(output[idx+len(marker):])
 }
 
 // RunStop creates the stop Job and blocks until it reaches a terminal state.

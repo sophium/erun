@@ -1,15 +1,36 @@
-.PHONY: integration-test lint check
+.PHONY: integration-test lint test-erun-ui check
 
-# Go modules linted by the in-build gate: erun-cli, erun-common, erun-mcp,
-# erun-integration, and erun-backend/erun-backend-api. Every entry must also be
-# COPYd into the erun-devops image test stage's context
+# Go modules linted by the in-build gate: erun-common, erun-cli, erun-mcp,
+# erun-integration, erun-backend/erun-backend-api, and erun-ui. Every entry
+# must also be COPYd into the erun-devops image test stage's context
 # (erun-devops/docker/erun-devops/Dockerfile) — a module the stage does not COPY
-# makes `cd $m` fail and breaks every build (this happened with
-# erun-backend-api, #599), so add the COPY in the same change as the entry.
-# erun-ui and erun-backend-db are not gated here: erun-ui's lint lives in
-# erun-ui/build.sh, and the .githooks pre-commit hook lints every module
-# locally, where the full toolchain is present.
-LINT_MODULES := erun-common erun-cli erun-mcp erun-integration erun-backend/erun-backend-api
+# makes `cd $m` fail and breaks every build (this already happened once with
+# erun-backend-api), so add the COPY in the same change as the entry.
+#
+# erun-ui was excluded on the assumption that its Wails/CGO/webkit toolchain
+# cannot build in the test stage's bare `golang` image. Checked empirically
+# rather than assumed: Wails' native webview bindings sit behind the
+# `desktop,production,webkit2_41` build tags erun-ui/build.sh passes only when
+# building the real app binary, and neither `go build ./...` nor
+# `golangci-lint run ./...` request those tags, so both run clean with no
+# CGO/webkit headers installed. The result: 9 erun-ui tests sat red on `main`
+# across multiple releases (a real-`ConfigStore` regression from the
+# environmentIsConfigured guard, invisible to every gate because nothing here
+# ran them) and were fixed only incidentally by someone who happened to run
+# them for an unrelated reason. `go test ./...` is gated the same way lint is,
+# via test-erun-ui below rather than folded into `integration-test`: erun-ui's
+# own go.work only unions itself with erun-common (deliberately — it must not
+# import erun-cli), so its tests are never reachable from erun-integration's
+# `go test ./...`, and a contributor's habitual "run the tests" from erun-cli
+# or erun-common misses erun-ui for the same reason. The frontend
+# (`yarn typecheck && yarn lint && yarn test`) still runs only in
+# erun-ui/build.sh: it needs node/yarn, which the test stage does not carry,
+# and the Playwright suite (needs a built app) stays out of the per-commit
+# gate entirely, run on its own schedule instead.
+#
+# erun-backend-db has no Go module at all (Atlas migrations + SQL only), so
+# there is nothing here for golangci-lint to run against.
+LINT_MODULES := erun-common erun-cli erun-mcp erun-integration erun-backend/erun-backend-api erun-ui
 
 # Run golangci-lint across the gated modules, each against its own
 # .golangci.yml (erun-integration has none, so it uses the default linters).
@@ -22,6 +43,13 @@ lint:
 		(cd $$m && golangci-lint run ./...) || exit 1; \
 	done
 
+# erun-ui's own Go tests. See the LINT_MODULES comment above for why this is
+# a separate step rather than folded into integration-test or a contributor's
+# ordinary `go test ./...`.
+test-erun-ui:
+	@echo ">> go test erun-ui"
+	@(cd erun-ui && go test ./...)
+
 # Build, run, and coverage-gate the erun integration suite.
 # The coverage threshold defaults to the value pinned in
 # erun-integration/scripts/integration-test.sh; override with
@@ -30,6 +58,7 @@ lint:
 integration-test:
 	./erun-integration/scripts/integration-test.sh
 
-# The full in-build gate: golangci-lint, then the integration suite + coverage.
-# The erun-devops image test stage runs this; a failure tags no image.
-check: lint integration-test
+# The full in-build gate: golangci-lint, erun-ui's own Go tests, then the
+# integration suite + coverage. The erun-devops image test stage runs this;
+# a failure tags no image.
+check: lint test-erun-ui integration-test

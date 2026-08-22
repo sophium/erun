@@ -5,6 +5,17 @@ import (
 	"strings"
 )
 
+// TraceEnsureKubernetesNamespace traces the namespace check EnsureKubernetesNamespace
+// performs and, only when the create that would follow is actually going to run,
+// traces that too. A dry run cannot read the cluster to know which way the check
+// resolves without every dry-run scenario in the suite needing a kubectl stub it
+// otherwise has no reason to declare, so it states the create as conditional
+// instead of asserting it: asserting it unconditionally is exactly the defect
+// where a dry run showed a create the real run, finding the namespace
+// already there, never performed. The real run does have a cluster to ask, so it
+// resolves the same question live and traces only the branch that will execute —
+// mirroring announceWorktreeVolumeChange's real/dry-run split for the same class
+// of decision.
 func TraceEnsureKubernetesNamespace(ctx Context, contextName, namespace string) {
 	contextName = strings.TrimSpace(contextName)
 	namespace = strings.TrimSpace(namespace)
@@ -12,14 +23,28 @@ func TraceEnsureKubernetesNamespace(ctx Context, contextName, namespace string) 
 		return
 	}
 
-	if contextName != "" {
-		ctx.TraceCommand("", "kubectl", "--context", contextName, "get", "namespace", namespace, "-o", "name")
-		ctx.TraceCommand("", "kubectl", "--context", contextName, "create", "namespace", namespace)
+	args := kubernetesContextArgs(contextName)
+	ctx.TraceCommand("", "kubectl", append(append([]string{}, args...), "get", "namespace", namespace, "-o", "name")...)
+
+	if ctx.DryRun {
+		ctx.Trace("deploy: namespace " + namespace + " is created if the check above reports it missing")
 		return
 	}
 
-	ctx.TraceCommand("", "kubectl", "get", "namespace", namespace, "-o", "name")
-	ctx.TraceCommand("", "kubectl", "create", "namespace", namespace)
+	if exists, err := kubernetesNamespaceExists(contextName, namespace); err == nil && exists {
+		return
+	}
+	ctx.TraceCommand("", "kubectl", append(append([]string{}, args...), "create", "namespace", namespace)...)
+}
+
+// kubernetesContextArgs is the shared --context prefix every kubectl invocation
+// in this file carries when the caller names one.
+func kubernetesContextArgs(contextName string) []string {
+	contextName = strings.TrimSpace(contextName)
+	if contextName == "" {
+		return nil
+	}
+	return []string{"--context", contextName}
 }
 
 func EnsureKubernetesNamespace(contextName, namespace string) error {

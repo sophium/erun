@@ -70,7 +70,7 @@ The same pass is reachable three ways, and all three resolve the environment thr
 |---|---|
 | Desktop | A poller per enabled env, one pass every 2 seconds, started for every configured env at launch and on `erun open`. |
 | CLI | [`erun sshd sync [TENANT] [ENVIRONMENT]`](/cli/sshd) — one pass. |
-| MCP | The `workspace_sync` tool, served by `erun mcp proxy` on the host rather than by the in-pod edge, because the mirror is on the host. See [MCP · Host-served](/mcp/overview#host-served--the-review-mirror). |
+| MCP | The `workspace_sync` tool, served by `erun mcp proxy` on the host rather than by the in-pod edge, because the mirror is on the host. See [MCP · Host-served](/mcp/overview#host-served). |
 
 ## Refusals
 

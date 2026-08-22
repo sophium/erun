@@ -23,7 +23,11 @@ For `erun expose <tenant> <env> <service>`, `<service>` is the **logical service
 
 The DNS write targets the **platform** environment's cluster (where PowerDNS runs); the Ingress is applied to the **target** env's cluster. These can be different clusters — `expose` resolves each context independently.
 
-The exposed URL is **HTTPS** by default: the Ingress references the env's per-env wildcard cert Secret (`<tenant>-<env>-wildcard-tls`, issued once per env by the cluster edge) and sets `ingressClassName`, so the host serves `https://` with no per-service cert step. Pass `--no-tls` for http, `--ingress-class` / `--tls-secret` to override. The cert is issued via the edge's namespaced DNS-01 `Issuer` (Cloudflare, or PowerDNS RFC2136 once the services zone is delegated) — see [Networking spec · Platform service exposure](/agent-reference/networking-spec#platform-service-exposure).
+HTTPS is requested by default, but it only takes effect when something will actually populate the env's per-env wildcard cert Secret (`<tenant>-<env>-wildcard-tls`): the Ingress carries a `tls:` block referencing it and sets `ingressClassName` only once `--dns01-token-file`, `--dns01-broker-url`, and `--acme-email` are all set, provisioning that Secret through erun's DNS-01 broker — see [Networking spec · Platform service exposure](/agent-reference/networking-spec#platform-service-exposure) for the exact mechanism. On a hosted platform these three flags are supplied automatically as part of the environment's server-side deploy; running `expose` by hand for it needs nothing extra. Without them, `expose` resolves to the same plain `http://` Ingress `--no-tls` asks for explicitly, rather than referencing a Secret nothing will ever populate. Pass `--ingress-class` / `--tls-secret` to override the defaults.
+
+## Removing exposure
+
+[`erun unexpose <tenant> <env>`](/agent-reference/networking-spec#unexposing) removes the per-env wildcard DNS record `expose` created. A hosted platform's environment deletion already runs this for you — see [Hosted platform · Automatic exposure](/concepts/hosted-platform#automatic-exposure). Run it by hand only if you exposed an environment manually and are tearing it down outside the normal delete flow.
 
 ## Flags
 
@@ -38,9 +42,9 @@ The exposed URL is **HTTPS** by default: the Ingress references the env's per-en
 
 | Condition | What happens | Recover |
 |---|---|---|
-| No `platform:` block (or no base domain) in `.erun/config.yaml` | Aborts: `expose requires a platform block with a base domain in .erun/config.yaml`; exit 1. | Add a [`platform:` block](/reference/configuration#platform-block). |
+| No `platform:` block (or no base domain) in `.erun/config.yaml` | Aborts: `a platform block with a base domain is required in .erun/config.yaml`; exit 1. | Add a [`platform:` block](/reference/configuration#platform-block). |
 | Malformed `platform:` block | Aborts with the specific validation error (bad base domain, services zone not under it, unparseable authoritative IP, …); exit 1. | Fix the offending field. |
-| `platform:` block has no `env` | Aborts: `expose requires platform.env in .erun/config.yaml …`; exit 1. `expose` derives the PowerDNS pod's namespace from `platform.env`, so it cannot run without it. | Set `platform.env` to the platform environment that runs PowerDNS. |
+| `platform:` block has no `env` | Aborts: `platform.env is required in .erun/config.yaml …`; exit 1. `expose` derives the PowerDNS pod's namespace from `platform.env`, so it cannot run without it. | Set `platform.env` to the platform environment that runs PowerDNS. |
 | `--ip` omitted | Aborts: `a target IP is required …`; exit 1. | Pass `--ip <env ingress IP>`. |
 | Service name is not a DNS-1035 label | Aborts before any DNS write: `service name "…" must be a DNS-1035 label …`; exit 1. | Use a lowercase letters/digits/hyphen name. |
 | `pdnsutil` exec or Ingress apply fails (live run) | Surfaces the underlying `kubectl` error; the wildcard record and the Ingress are applied in that order, so a later failure can leave the DNS record written. | Re-run once the cluster issue is resolved — both operations are idempotent (record replace, Ingress apply). |

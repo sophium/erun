@@ -2,7 +2,7 @@
 {{- $apiPort := default 17033 .Values.apiPort -}}
 {{- $api := default dict .Values.api -}}
 {{- $oidcAllowedIssuers := default "" $api.oidcAllowedIssuers -}}
-{{- /* GET /v1/platform discovery (#605): served unauthenticated so a client can
+{{- /* GET /v1/platform discovery: served unauthenticated so a client can
        discover this instance before it has a token. issuer derives from the
        env's platform.authHost (the hosted IdP host every platform deploy
        already threads in) rather than a separate value to keep in sync.
@@ -43,7 +43,7 @@
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
 {{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
 {{- $backendAPIImage := default (printf "%s/erun-backend-api:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-backend-api") -}}
-{{- /* Opt-in backend MCP-signing identity (#686/#818): a mounted Ed25519 key the
+{{- /* Opt-in backend MCP-signing identity: a mounted Ed25519 key the
        API signs per-env MCP and DNS-01 broker tokens with. Off by default — the
        mint endpoints report 501 and the DNS-01 broker is unregistered — so
        existing deploys are byte-for-byte unchanged. */ -}}
@@ -51,7 +51,7 @@
 {{- $mcpSigningSecretName := default "" $mcpSigning.secretName -}}
 {{- $mcpSigningSecretKey := default "signing.key" $mcpSigning.secretKey -}}
 {{- $mcpSigningMountDir := "/etc/erun/mcp-signing" -}}
-{{- /* Opt-in DNS-01 broker write path (#818): the services zone + the PowerDNS
+{{- /* Opt-in DNS-01 broker write path: the services zone + the PowerDNS
        :53 endpoint and its TSIG key. TSIG defaults match the erun-powerdns
        chart, so enabling the broker only needs enabled + servicesZone. */ -}}
 {{- $dns01 := default dict $api.dns01 -}}
@@ -63,7 +63,14 @@
 {{- $dns01TsigSecretKey := default "tsig-secret" $dns01Tsig.secretKey -}}
 {{- $dns01TsigKeyName := default (printf "%s-dnsupdate" $tenant) $dns01Tsig.keyName -}}
 {{- $dns01TsigAlgorithm := default "hmac-sha256" $dns01Tsig.algorithm -}}
-{{- /* Opt-in server-side env-deploy executor (#605): the API launches an
+{{- /* Opt-in per-env TLS certificate provisioning: riding the same
+       DNS-01 broker, so it only needs the ACME account email on top of the
+       broker config above. acmeServer/webhookGroupName default to Let's
+       Encrypt production and the webhook shim's own default group name. */ -}}
+{{- $acmeEmail := default "" $dns01.acmeEmail -}}
+{{- $acmeServer := default "" $dns01.acmeServer -}}
+{{- $dns01WebhookGroupName := default "" $dns01.webhookGroupName -}}
+{{- /* Opt-in server-side env-deploy executor: the API launches an
        `erun deploy` Job per hosted env. Off by default — the API pod keeps the
        namespace `default` SA and env creation only registers the row, so
        existing deploys are byte-for-byte unchanged. Enabling it grants the API
@@ -225,20 +232,20 @@ roleRef:
   kind: Role
   name: {{ $tenant }}-api-env-deployer
 ---
-{{/* The env-deployer ran as cluster-admin (#605 acceptance criterion: replace
-     with a curated, isolated, audited provisioner role carrying exactly the
-     verbs provisioning needs). Its Job runs one thing — erun deploy/stop/
+{{/* The env-deployer used to run as cluster-admin; this is the curated,
+     isolated, audited provisioner role carrying exactly the
+     verbs provisioning needs. Its Job runs one thing — erun deploy/stop/
      delete for one tenant's runtime chart — never a component chart, so the
      verb list is scoped to what that install actually touches: namespace
      lifecycle, the ResourceQuota/LimitRange a provisioned namespace gets
-     (tenant_quotas, #605), the runtime chart's own resources (Deployment,
+     (tenant_quotas), the runtime chart's own resources (Deployment,
      PVCs, ServiceAccount, Service, its Secrets/ConfigMaps, and Helm's own
      release-state Secrets), RoleBindings, scaling the runtime Deployment to
-     0/1 (erun stop/erun platform env wake, #1080 -- RBAC treats
+     0/1 (erun stop/erun platform env wake -- RBAC treats
      deployments/scale as a distinct resource from deployments, so patch on
      the parent does not carry it), and reading pods/events so erun deploy's
      early-failure pod watch and erun stop's desktop-session listing are not
-     silently inert (#1080). Binding the runtime SA to the built-in admin
+     silently inert. Binding the runtime SA to the built-in admin
      ClusterRole is what the chart renders for every env (see
      erun-devops/AGENTS.md "Runtime SA RBAC is namespaced by default");
      granting only bind on that one named ClusterRole (not the verbs admin
@@ -254,8 +261,8 @@ roleRef:
      that ReplicaSet's ready count, because a Deployment has no direct
      pod/ready signal of its own. Without list/watch on ReplicaSets, `helm
      --wait` can never observe a rollout finishing and rides out its full
-     timeout on an otherwise healthy release. This is what #1080's
-     deployments/pods/events grants missed: they cover the parent object,
+     timeout on an otherwise healthy release. This is what the
+     deployments/pods/events grants above missed: they cover the parent object,
      the failure-diagnostics pods/events, and the scale subresource, but not
      the one object in the middle of helm's own walk.
 
@@ -298,6 +305,15 @@ rules:
     verbs: ["get", "list", "watch"]
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingresses"]
+    verbs: ["create", "get", "update", "patch"]
+  {{- /* The deploy Job's post-deploy `erun expose` also provisions the env's own
+         namespaced cert-manager Issuer + Certificate through the DNS-01 broker
+         so the Ingress's wildcard TLS secretName actually gets
+         populated. Namespaced resources in the provisioned env's own namespace,
+         like everything else on this ClusterRole; update/patch ride alongside
+         create for the same idempotent-reapply reason as the Ingress above. */}}
+  - apiGroups: ["cert-manager.io"]
+    resources: ["issuers", "certificates"]
     verbs: ["create", "get", "update", "patch"]
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["rolebindings"]
@@ -516,6 +532,18 @@ spec:
                 secretKeyRef:
                   name: {{ $dns01TsigSecretName }}
                   key: {{ $dns01TsigSecretKey }}
+            {{- if $acmeEmail }}
+            - name: ERUN_ACME_EMAIL
+              value: {{ $acmeEmail | quote }}
+            {{- end }}
+            {{- if $acmeServer }}
+            - name: ERUN_ACME_SERVER
+              value: {{ $acmeServer | quote }}
+            {{- end }}
+            {{- if $dns01WebhookGroupName }}
+            - name: ERUN_DNS01_WEBHOOK_GROUP_NAME
+              value: {{ $dns01WebhookGroupName | quote }}
+            {{- end }}
             {{- end }}
           {{- if $mcpSigningSecretName }}
           volumeMounts:

@@ -247,6 +247,9 @@ func tracePinPlan(cmdCtx common.Context, plan common.PinPlan) {
 		}
 		cmdCtx.Trace(fmt.Sprintf("  %s %s %s: %s -> %s", state, site.Kind, pinSiteLabel(site), orNone(site.Current), site.Target))
 	}
+	for _, note := range plan.Skipped {
+		cmdCtx.Trace("  skipped: " + note)
+	}
 }
 
 func pinSiteLabel(site common.PinSite) string {

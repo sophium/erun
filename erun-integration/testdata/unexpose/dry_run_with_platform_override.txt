@@ -1,0 +1,4 @@
+audit: erun unexpose --dry-run --platform-namespace frs-prod --services-zone services.erunpaas.com team dev
+unexpose: per-env wildcard *.team-dev.services.erunpaas.com (zone services.erunpaas.com)
+unexpose: platform powerdns namespace frs-prod
+kubectl -n frs-prod exec deploy/frs-powerdns -- pdnsutil --config-dir=/etc/pdns-shared delete-rrset services.erunpaas.com '*.team-dev' A

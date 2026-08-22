@@ -26,12 +26,14 @@ const tokenTTL = time.Hour
 // which the backend both signs and checks with its own public half.
 type Signer struct {
 	privatePEM []byte
+	publicPEM  []byte
 	publicKey  ed25519.PublicKey
 }
 
 // NewSigner validates the PEM parses as an Ed25519 private key so a misconfigured
 // key fails at construction, not on the first mint, and caches the public half
-// for self-verifying tokens the backend both signs and checks (DNS-01).
+// for self-verifying tokens the backend both signs and checks (DNS-01), and for
+// handing to a hosted deploy so the runtime's MCP edge trusts it.
 func NewSigner(privatePEM []byte) (*Signer, error) {
 	publicPEM, err := eruncommon.DesktopPublicKeyPEM(privatePEM)
 	if err != nil {
@@ -41,7 +43,15 @@ func NewSigner(privatePEM []byte) (*Signer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("mcp signing key: %w", err)
 	}
-	return &Signer{privatePEM: privatePEM, publicKey: publicKey}, nil
+	return &Signer{privatePEM: privatePEM, publicPEM: publicPEM, publicKey: publicKey}, nil
+}
+
+// PublicKeyPEM returns the backend's own MCP-signing public key, PEM-encoded —
+// the value a hosted deploy injects into the runtime chart (the same mechanism
+// the desktop uses with its own key) so the environment's MCP edge trusts
+// tokens this signer mints.
+func (s *Signer) PublicKeyPEM() string {
+	return string(s.publicPEM)
 }
 
 func parseEd25519PublicKey(publicPEM []byte) (ed25519.PublicKey, error) {

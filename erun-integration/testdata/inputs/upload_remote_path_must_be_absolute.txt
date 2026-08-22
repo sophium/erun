@@ -1,0 +1,2 @@
+audit: erun inputs upload --dry-run <TMP> relative/path.bin
+remote path must be absolute: "relative/path.bin"

@@ -10,34 +10,35 @@ import (
 )
 
 type InitInput struct {
-	Tenant                   string   `json:"tenant,omitempty" jsonschema:"optional tenant name to initialize"`
-	SelectedTenant           string   `json:"selectedTenant,omitempty" jsonschema:"selected tenant name returned by a prior init interaction event"`
-	InitializeCurrentProject bool     `json:"initializeCurrentProject,omitempty" jsonschema:"when true, answer the tenant selection interaction by choosing the current project"`
-	ProjectRoot              string   `json:"projectRoot,omitempty" jsonschema:"optional project root to bind to the tenant"`
-	Environment              string   `json:"environment,omitempty" jsonschema:"optional environment name to initialize"`
-	Version                  string   `json:"version,omitempty" jsonschema:"optional runtime image version to initialize and deploy; omitted, a new environment takes erun's own version and an existing environment keeps the one it runs"`
-	RuntimeImage             string   `json:"runtimeImage,omitempty" jsonschema:"optional runtime image repository the environment runs; a bare name resolves against the environment registry and its runtime version, a full reference is used verbatim"`
-	RuntimeRegistry          string   `json:"runtimeRegistry,omitempty" jsonschema:"optional registry the environment resolves erun's own artifacts from — the runtime chart and the platform images the pod pulls; set it when the environment's deploy registry holds only this project's images, so erun's chart is not published there"`
-	ImagePullSecrets         []string `json:"imagePullSecrets,omitempty" jsonschema:"names of Kubernetes dockerconfigjson secrets the runtime pod pulls its image with; required when the runtime image lives in a private registry, since the pod cannot start without one"`
-	RuntimeCPU               string   `json:"runtimeCpu,omitempty" jsonschema:"optional runtime pod CPU limit; omitted, an existing environment keeps its recorded limit"`
-	RuntimeMemory            string   `json:"runtimeMemory,omitempty" jsonschema:"optional runtime pod memory limit; omitted, an existing environment keeps its recorded limit"`
-	KubernetesContext        string   `json:"kubernetesContext,omitempty" jsonschema:"optional kubernetes context to associate with the environment"`
-	ContainerRegistry        string   `json:"containerRegistry,omitempty" jsonschema:"optional container registry; seeds the project's registry list with this host marked build and deploy"`
-	Type                     string   `json:"type,omitempty" jsonschema:"optional environment type (local-agent, remote-agent, runtime); takes precedence over remote. On an existing environment this changes the type; omitted, the environment keeps the type it has"`
-	Remote                   bool     `json:"remote,omitempty" jsonschema:"deprecated alias for type=remote-agent; prefer type instead"`
-	NoGit                    bool     `json:"noGit,omitempty" jsonschema:"when true with remote initialization, create the remote worktree directory without configuring a Git checkout"`
-	RemoteRepositoryURL      string   `json:"remoteRepositoryURL,omitempty" jsonschema:"optional SSH repository URL used when creating the remote checkout"`
-	CodeCommitSSHKeyID       string   `json:"codeCommitSSHKeyID,omitempty" jsonschema:"optional AWS CodeCommit SSH public key ID used when the remote repository URL is a CodeCommit SSH URL"`
-	Bootstrap                bool     `json:"bootstrap,omitempty" jsonschema:"deprecated and ignored; remote runtimes deploy the published erun-devops chart"`
-	ConfirmTenant            *bool    `json:"confirmTenant,omitempty" jsonschema:"response to a prior tenant confirmation interaction"`
-	ConfirmEnvironment       *bool    `json:"confirmEnvironment,omitempty" jsonschema:"response to a prior environment confirmation interaction"`
-	ConfirmRemoteHostConfig  *bool    `json:"confirmRemoteHostConfig,omitempty" jsonschema:"response to a prior existing remote SSH host config confirmation interaction"`
-	ConfirmRemoteKeyImport   *bool    `json:"confirmRemoteKeyImport,omitempty" jsonschema:"response to a prior remote SSH key import confirmation interaction"`
-	AutoApprove              bool     `json:"autoApprove,omitempty" jsonschema:"when true, automatically approve initialization prompts"`
-	DisableBuildScript       bool     `json:"disableBuildScript,omitempty" jsonschema:"when true, ignore any project build.sh for this env; erun build resolves docker/release contexts directly"`
-	PlatformAccount          bool     `json:"platformAccount,omitempty" jsonschema:"when true, make this env a cluster platform account: deploy binds its runtime ServiceAccount to cluster-admin so in-pod platform terraform (cluster edge) and component installs can manage cluster-scoped resources"`
-	Preview                  bool     `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
-	Verbosity                int      `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+	Tenant                   string    `json:"tenant,omitempty" jsonschema:"optional tenant name to initialize"`
+	SelectedTenant           string    `json:"selectedTenant,omitempty" jsonschema:"selected tenant name returned by a prior init interaction event"`
+	InitializeCurrentProject bool      `json:"initializeCurrentProject,omitempty" jsonschema:"when true, answer the tenant selection interaction by choosing the current project"`
+	ProjectRoot              string    `json:"projectRoot,omitempty" jsonschema:"optional project root to bind to the tenant"`
+	Environment              string    `json:"environment,omitempty" jsonschema:"optional environment name to initialize"`
+	Version                  string    `json:"version,omitempty" jsonschema:"optional runtime image version to record; omitted, a new environment takes erun's own version and an existing environment keeps the one it runs. A brand-new remote-worktree environment (type remote-agent or runtime) deploys at this version immediately; on an existing environment this only re-pins the version in config, it does not redeploy — call the deploy tool separately to roll it out"`
+	RuntimeImage             string    `json:"runtimeImage,omitempty" jsonschema:"optional runtime image repository the environment runs; a bare name resolves against the environment registry and its runtime version, a full reference is used verbatim"`
+	RuntimeRegistry          string    `json:"runtimeRegistry,omitempty" jsonschema:"optional registry the environment resolves erun's own artifacts from — the runtime chart and the platform images the pod pulls; set it when the environment's deploy registry holds only this project's images, so erun's chart is not published there"`
+	ImagePullSecrets         []string  `json:"imagePullSecrets,omitempty" jsonschema:"names of Kubernetes dockerconfigjson secrets the runtime pod pulls its image with; required when the runtime image lives in a private registry, since the pod cannot start without one"`
+	RuntimeCPU               string    `json:"runtimeCpu,omitempty" jsonschema:"optional runtime pod CPU limit; omitted, an existing environment keeps its recorded limit"`
+	RuntimeMemory            string    `json:"runtimeMemory,omitempty" jsonschema:"optional runtime pod memory limit; omitted, an existing environment keeps its recorded limit"`
+	KubernetesContext        string    `json:"kubernetesContext,omitempty" jsonschema:"optional kubernetes context to associate with the environment"`
+	ContainerRegistry        string    `json:"containerRegistry,omitempty" jsonschema:"optional container registry; seeds the project's registry list with this host marked build and deploy"`
+	Type                     string    `json:"type,omitempty" jsonschema:"optional environment type (local-agent, remote-agent, runtime); takes precedence over remote. On an existing environment this changes the type; omitted, the environment keeps the type it has"`
+	Remote                   bool      `json:"remote,omitempty" jsonschema:"deprecated alias for type=remote-agent; prefer type instead"`
+	NoGit                    bool      `json:"noGit,omitempty" jsonschema:"when true with remote initialization, create the remote worktree directory without configuring a Git checkout"`
+	RemoteRepositoryURL      string    `json:"remoteRepositoryURL,omitempty" jsonschema:"optional SSH repository URL used when creating the remote checkout"`
+	CodeCommitSSHKeyID       string    `json:"codeCommitSSHKeyID,omitempty" jsonschema:"optional AWS CodeCommit SSH public key ID used when the remote repository URL is a CodeCommit SSH URL"`
+	Bootstrap                bool      `json:"bootstrap,omitempty" jsonschema:"deprecated and ignored; remote runtimes deploy the published erun-devops chart"`
+	ConfirmTenant            *bool     `json:"confirmTenant,omitempty" jsonschema:"response to a prior tenant confirmation interaction"`
+	ConfirmEnvironment       *bool     `json:"confirmEnvironment,omitempty" jsonschema:"response to a prior environment confirmation interaction"`
+	ConfirmRemoteHostConfig  *bool     `json:"confirmRemoteHostConfig,omitempty" jsonschema:"response to a prior existing remote SSH host config confirmation interaction"`
+	ConfirmRemoteKeyImport   *bool     `json:"confirmRemoteKeyImport,omitempty" jsonschema:"response to a prior remote SSH key import confirmation interaction"`
+	AutoApprove              bool      `json:"autoApprove,omitempty" jsonschema:"when true, automatically approve initialization prompts"`
+	DisableBuildScript       bool      `json:"disableBuildScript,omitempty" jsonschema:"when true, ignore any project build.sh for this env; erun build resolves docker/release contexts directly"`
+	PlatformAccount          bool      `json:"platformAccount,omitempty" jsonschema:"when true, make this env a cluster platform account: deploy binds its runtime ServiceAccount to cluster-admin so in-pod platform terraform (cluster edge) and component installs can manage cluster-scoped resources"`
+	Components               *[]string `json:"components,omitempty" jsonschema:"optional saved default deploy component selection for this environment — what the deploy tool rolls out with no components override of its own. Omit to leave a saved selection untouched; pass an empty array to clear one and return the environment to its repo k8s.deployments plan"`
+	Preview                  bool      `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
+	Verbosity                int       `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
 
 type InitOutput struct {
@@ -85,6 +86,7 @@ func initTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 			ImagePullSecrets:        input.ImagePullSecrets,
 			DisableBuildScript:      input.DisableBuildScript,
 			PlatformAccount:         input.PlatformAccount,
+			Components:              input.Components,
 		}
 
 		if envType := eruncommon.EnvironmentType(strings.TrimSpace(input.Type)); envType.IsValid() {

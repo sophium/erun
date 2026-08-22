@@ -22,11 +22,7 @@ type cloudCommandStoreInterface interface {
 // the store stays nil, and Cloudflare operations that need the scoped token then
 // fail clearly rather than crashing.
 func cloudDependencies() common.CloudDependencies {
-	deps := common.CloudDependencies{}
-	if store, err := common.DefaultCloudSecretStore(); err == nil {
-		deps.CloudSecretStore = store
-	}
-	return deps
+	return common.DefaultCloudDependencies()
 }
 
 // refreshEnvironmentHostCredentials re-injects the operator's short-lived AWS

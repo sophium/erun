@@ -9,6 +9,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -704,15 +706,21 @@ exit 3`)
 	t.Run("call_real_run_unreachable_edge_points_at_open", func(t *testing.T) {
 		// Nothing listening on the env's local MCP port means the port-forward is
 		// missing; the fix is `erun open`, and the error must say that instead of
-		// leaking a raw dial error.
+		// leaking a raw dial error. A one-shot reattach is attempted first (there
+		// is no kubectl on this scrubbed PATH, so it fails fast rather than
+		// hanging); the unreachable channel must still exit on the exit code
+		// distinct from a plain error (mcpChannelUnreachableExitCode, 126 —
+		// erun-cli/cmd/environment_call.go), never a job/tool outcome's own code,
+		// so a caller looping on this command cannot misread "channel down" as
+		// "finished".
 		skipIfPortsBusy(t, mcpEdgeLocalPort)
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
 		fixture.SeedDesktopIdentity(t, setup)
 
 		result := erun.Run(t, []string{"mcp", "call", "--tool", "version"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode == 0 {
-			t.Fatalf("expected non-zero exit for an unreachable edge, got 0:\n%s", result.Combined)
+		if result.ExitCode != 126 {
+			t.Fatalf("expected exit 126 (channel unreachable) for an unreachable edge, got %d:\n%s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "mcp/call_real_run_unreachable_edge_points_at_open", normalize.Apply(result.Combined))
 	})
@@ -732,8 +740,8 @@ exit 3`)
 		startSilentPortForward(t, mcpEdgeLocalPort)
 
 		result := erun.Run(t, []string{"mcp", "call", "--tool", "version"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode == 0 {
-			t.Fatalf("expected non-zero exit for a stale port-forward, got 0:\n%s", result.Combined)
+		if result.ExitCode != 126 {
+			t.Fatalf("expected exit 126 (channel unreachable) for a stale port-forward, got %d:\n%s", result.ExitCode, result.Combined)
 		}
 		if !strings.Contains(result.Combined, "held but the edge never answers") {
 			t.Fatalf("expected the stale forward to be named as such, distinct from a missing one, got:\n%s", result.Combined)
@@ -1030,6 +1038,96 @@ exit 3`)
 		replies := requireJSONRPCLines(t, result.Stdout, 1)
 		if message := jsonRPCErrorMessage(t, replies[0]); !strings.Contains(message, "returned no reply") {
 			t.Fatalf("reply does not say the edge answered without one: %q", message)
+		}
+	})
+
+	t.Run("proxy_real_run_serves_inputs_upload_locally", func(t *testing.T) {
+		// inputs_upload is host-served like workspace_sync: it must never touch
+		// the edge at all, which is why no fake edge is started here — a message
+		// reaching the network would fail this scenario outright.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		local := filepath.Join(setup.Cwd, "evidence.bin")
+		if err := os.WriteFile(local, []byte("hello"), 0o644); err != nil {
+			t.Fatalf("seed local file: %v", err)
+		}
+		stubs := setup.Cwd + "/stubs"
+		stubKubectlUploadAccepts(t, stubs, 5, "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+
+		localJSON, err := json.Marshal(local)
+		if err != nil {
+			t.Fatalf("marshal local path: %v", err)
+		}
+		stdin := proxyStdin(fmt.Sprintf(
+			`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"inputs_upload","arguments":{"localPath":%s,"remotePath":"/home/erun/.erun/outputs/evidence.bin"}}}`,
+			string(localJSON)))
+		result := erun.Run(t, []string{"mcp", "proxy", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars, Stdin: stdin})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+
+		replies := requireJSONRPCLines(t, result.Stdout, 1)
+		resultField, ok := replies[0]["result"].(map[string]any)
+		if !ok {
+			t.Fatalf("reply carries no result: %v", replies[0])
+		}
+		content, ok := resultField["content"].([]any)
+		if !ok || len(content) == 0 {
+			t.Fatalf("reply result carries no content: %v", resultField)
+		}
+		first, ok := content[0].(map[string]any)
+		if !ok {
+			t.Fatalf("reply content[0] is not an object: %v", content[0])
+		}
+		text, _ := first["text"].(string)
+		if !strings.Contains(text, "sha256 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824") {
+			t.Fatalf("reply text does not report the verified checksum: %q", text)
+		}
+		if !strings.Contains(text, "/home/erun/.erun/outputs/evidence.bin") {
+			t.Fatalf("reply text does not name the remote destination: %q", text)
+		}
+	})
+
+	t.Run("proxy_real_run_previews_inputs_upload_without_sending", func(t *testing.T) {
+		// preview must resolve and describe the transfer without ever invoking
+		// kubectl — no stub is declared, so a real call here would fail on a
+		// missing binary rather than silently pass.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		local := filepath.Join(setup.Cwd, "evidence.bin")
+		if err := os.WriteFile(local, []byte("hello"), 0o644); err != nil {
+			t.Fatalf("seed local file: %v", err)
+		}
+
+		localJSON, err := json.Marshal(local)
+		if err != nil {
+			t.Fatalf("marshal local path: %v", err)
+		}
+		stdin := proxyStdin(fmt.Sprintf(
+			`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"inputs_upload","arguments":{"localPath":%s,"remotePath":"/home/erun/.erun/outputs/evidence.bin","preview":true}}}`,
+			string(localJSON)))
+		result := erun.Run(t, []string{"mcp", "proxy", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: stdin})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+
+		replies := requireJSONRPCLines(t, result.Stdout, 1)
+		resultField, ok := replies[0]["result"].(map[string]any)
+		if !ok {
+			t.Fatalf("reply carries no result: %v", replies[0])
+		}
+		content, _ := resultField["content"].([]any)
+		if len(content) == 0 {
+			t.Fatalf("reply result carries no content: %v", resultField)
+		}
+		first, _ := content[0].(map[string]any)
+		text, _ := first["text"].(string)
+		if !strings.Contains(text, "inputs: uploading") {
+			t.Fatalf("preview text does not describe the resolved transfer: %q", text)
+		}
+		if !strings.Contains(text, "kubectl") {
+			t.Fatalf("preview text does not trace the kubectl command that would run: %q", text)
 		}
 	})
 

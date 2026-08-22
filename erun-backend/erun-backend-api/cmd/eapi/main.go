@@ -71,13 +71,19 @@ func run(args []string) error {
 			DeployerServiceAccount: cfg.EnvDeployerServiceAccount,
 			ExposeTargetIP:         cfg.EnvExposeTargetIP,
 			// The deploy Job's chained `erun expose` has no git checkout to resolve
-			// these from (#1086), so the control plane threads what it already
+			// these from, so the control plane threads what it already
 			// knows for its own purposes: DNS01ServicesZone is the same services
 			// zone its DNS-01 cert issuance uses, and PlatformNamespace is where its
 			// own Jobs (and, in a self-hosted platform, the PowerDNS singleton) run.
 			ExposeServicesZone:      cfg.DNS01ServicesZone,
 			ExposePlatformNamespace: cfg.PlatformNamespace,
 			ImagePullSecrets:        splitCSV(cfg.EnvDeployImagePullSecrets),
+			MCPAuthPublicKeyPEM:     mcpAuthPublicKeyPEM(optional.mcpSigner),
+			TLSCertSigner:           dns01TokenSigner(optional.mcpSigner),
+			TLSBrokerURL:            dns01BrokerURL(cfg, optional.dns01Broker),
+			TLSWebhookGroup:         cfg.DNS01WebhookGroupName,
+			ACMEEmail:               cfg.ACMEEmail,
+			ACMEServer:              cfg.ACMEServer,
 		},
 		Release: provision.ReleaseConfig{
 			Registry:       cfg.EnvDeployRegistry,
@@ -138,6 +144,9 @@ func resolveConfig(args []string) (apiConfig, error) {
 	flags.StringVar(&cfg.PlatformConsoleClientID, "platform-console-client-id", cfg.PlatformConsoleClientID, "The OIDC client id the hosted console authenticates with, served unauthenticated at GET /v1/platform")
 	flags.StringVar(&cfg.PlatformCLIClientID, "platform-cli-client-id", cfg.PlatformCLIClientID, "The OIDC client id an erun CLI/agent authenticates with, served unauthenticated at GET /v1/platform")
 	flags.StringVar(&cfg.PlatformBrand, "platform-brand", cfg.PlatformBrand, "This instance's display name, served unauthenticated at GET /v1/platform")
+	flags.StringVar(&cfg.ACMEEmail, "acme-email", cfg.ACMEEmail, "Contact email for the ACME account a deploy Job uses to provision a hosted env's per-env TLS certificate through the DNS-01 broker; unset skips TLS cert provisioning")
+	flags.StringVar(&cfg.ACMEServer, "acme-server", cfg.ACMEServer, "ACME directory URL for per-env TLS certificate provisioning")
+	flags.StringVar(&cfg.DNS01WebhookGroupName, "dns01-webhook-group-name", cfg.DNS01WebhookGroupName, "API group the cluster's cert-manager DNS-01 webhook shim registers under; must match the shim actually installed in this cluster")
 	if err := flags.Parse(args); err != nil {
 		return apiConfig{}, err
 	}
@@ -230,6 +239,17 @@ type apiConfig struct {
 	DNS01TSIGKeyName   string
 	DNS01TSIGAlgorithm string
 	DNS01TSIGSecret    string
+	// ACMEEmail/ACMEServer/DNS01WebhookGroupName configure the per-env TLS
+	// certificate a deploy Job provisions through the DNS-01 broker: the
+	// same ACME account and per-cluster webhook shim
+	// (terraform-erun-cluster-edge's chart-dns01-webhook) the platform's own
+	// per-env certificate already uses. ACMEEmail is required for a deploy Job
+	// to attempt TLS provisioning at all; ACMEServer and DNS01WebhookGroupName
+	// default to Let's Encrypt production and the webhook shim's own default
+	// group name, matching that module's defaults.
+	ACMEEmail             string
+	ACMEServer            string
+	DNS01WebhookGroupName string
 	// These enable optional live context provisioning; it stays disabled unless
 	// SecretsKey and DBOSDatabaseURL are both set. DBOSDatabaseURL is a separate
 	// database from ERUN_DATABASE_URL. AWSEndpoint targets a local emulator for
@@ -237,7 +257,7 @@ type apiConfig struct {
 	SecretsKey      string
 	DBOSDatabaseURL string
 	AWSEndpoint     string
-	// Server-side env-deploy executor (#605). EnvDeployerServiceAccount is the
+	// Server-side env-deploy executor. EnvDeployerServiceAccount is the
 	// cluster-admin SA the deploy Job runs as; setting it enables live env
 	// provisioning (which then also needs an in-cluster kube client and
 	// DBOSContext). PlatformNamespace is the namespace the Jobs run in (the
@@ -296,20 +316,23 @@ type apiConfig struct {
 
 func configFromEnv() apiConfig {
 	return apiConfig{
-		Host:                 envOrDefault("ERUN_API_HOST", "127.0.0.1"),
-		Port:                 intEnvOrDefault("ERUN_API_PORT", 17033),
-		DatabaseURL:          strings.TrimSpace(os.Getenv("ERUN_DATABASE_URL")),
-		AllowedIssuers:       strings.TrimSpace(os.Getenv("ERUN_OIDC_ALLOWED_ISSUERS")),
-		DesktopPublicKeyPath: strings.TrimSpace(os.Getenv("ERUN_API_DESKTOP_PUBLIC_KEY_PATH")),
-		MCPSigningKeyPath:    strings.TrimSpace(os.Getenv("ERUN_API_MCP_SIGNING_KEY_PATH")),
-		SecretsKey:           strings.TrimSpace(os.Getenv("ERUN_SECRETS_KEY")),
-		DBOSDatabaseURL:      strings.TrimSpace(os.Getenv("DBOS_SYSTEM_DATABASE_URL")),
-		AWSEndpoint:          strings.TrimSpace(os.Getenv("ERUN_AWS_ENDPOINT_URL")),
-		DNS01ServicesZone:    strings.TrimSpace(os.Getenv("ERUN_DNS01_SERVICES_ZONE")),
-		DNS01Nameserver:      strings.TrimSpace(os.Getenv("ERUN_DNS01_POWERDNS_NAMESERVER")),
-		DNS01TSIGKeyName:     strings.TrimSpace(os.Getenv("ERUN_DNS01_TSIG_KEY_NAME")),
-		DNS01TSIGAlgorithm:   strings.TrimSpace(os.Getenv("ERUN_DNS01_TSIG_ALGORITHM")),
-		DNS01TSIGSecret:      strings.TrimSpace(os.Getenv("ERUN_DNS01_TSIG_SECRET")),
+		Host:                  envOrDefault("ERUN_API_HOST", "127.0.0.1"),
+		Port:                  intEnvOrDefault("ERUN_API_PORT", 17033),
+		DatabaseURL:           strings.TrimSpace(os.Getenv("ERUN_DATABASE_URL")),
+		AllowedIssuers:        strings.TrimSpace(os.Getenv("ERUN_OIDC_ALLOWED_ISSUERS")),
+		DesktopPublicKeyPath:  strings.TrimSpace(os.Getenv("ERUN_API_DESKTOP_PUBLIC_KEY_PATH")),
+		MCPSigningKeyPath:     strings.TrimSpace(os.Getenv("ERUN_API_MCP_SIGNING_KEY_PATH")),
+		SecretsKey:            strings.TrimSpace(os.Getenv("ERUN_SECRETS_KEY")),
+		DBOSDatabaseURL:       strings.TrimSpace(os.Getenv("DBOS_SYSTEM_DATABASE_URL")),
+		AWSEndpoint:           strings.TrimSpace(os.Getenv("ERUN_AWS_ENDPOINT_URL")),
+		DNS01ServicesZone:     strings.TrimSpace(os.Getenv("ERUN_DNS01_SERVICES_ZONE")),
+		DNS01Nameserver:       strings.TrimSpace(os.Getenv("ERUN_DNS01_POWERDNS_NAMESERVER")),
+		DNS01TSIGKeyName:      strings.TrimSpace(os.Getenv("ERUN_DNS01_TSIG_KEY_NAME")),
+		DNS01TSIGAlgorithm:    strings.TrimSpace(os.Getenv("ERUN_DNS01_TSIG_ALGORITHM")),
+		DNS01TSIGSecret:       strings.TrimSpace(os.Getenv("ERUN_DNS01_TSIG_SECRET")),
+		ACMEEmail:             strings.TrimSpace(os.Getenv("ERUN_ACME_EMAIL")),
+		ACMEServer:            envOrDefault("ERUN_ACME_SERVER", "https://acme-v02.api.letsencrypt.org/directory"),
+		DNS01WebhookGroupName: envOrDefault("ERUN_DNS01_WEBHOOK_GROUP_NAME", "acme.erun.io"),
 
 		EnvDeployerServiceAccount: strings.TrimSpace(os.Getenv("ERUN_ENV_DEPLOYER_SERVICE_ACCOUNT")),
 		PlatformNamespace:         strings.TrimSpace(os.Getenv("POD_NAMESPACE")),
@@ -372,6 +395,41 @@ func optionalMCPSigner(path string) (*mcptoken.Signer, error) {
 		return nil, fmt.Errorf("read mcp signing key %s: %w", path, err)
 	}
 	return mcptoken.NewSigner(privatePEM)
+}
+
+// mcpAuthPublicKeyPEM returns the backend's own MCP-signing public key when a
+// signer is configured, empty otherwise — threaded into every deploy Job so
+// the runtime's MCP edge trusts backend-minted tokens.
+func mcpAuthPublicKeyPEM(signer *mcptoken.Signer) string {
+	if signer == nil {
+		return ""
+	}
+	return signer.PublicKeyPEM()
+}
+
+// dns01TokenSigner adapts the backend's MCP signer to provision.DNS01TokenSigner
+// for per-env TLS cert provisioning, returning a genuinely nil
+// interface when no signer is configured. Assigning a nil *mcptoken.Signer
+// directly to the interface field would produce a non-nil interface wrapping a
+// nil pointer, which applyTLSCertParams's nil check would miss.
+func dns01TokenSigner(signer *mcptoken.Signer) provision.DNS01TokenSigner {
+	if signer == nil {
+		return nil
+	}
+	return signer
+}
+
+// dns01BrokerURL derives the DNS-01 broker's base URL from this instance's own
+// public API URL: the broker's present/cleanup endpoints are served on this
+// same backend (dns01broker.Broker.Register), so a per-env Issuer's webhook
+// solver reaches it exactly as any other client would. Empty unless both the
+// platform API URL and the broker itself are configured, since a per-env
+// Issuer pointed at an unconfigured broker would never solve.
+func dns01BrokerURL(cfg apiConfig, broker *dns01broker.Broker) string {
+	if broker == nil || cfg.PlatformAPIURL == "" {
+		return ""
+	}
+	return strings.TrimRight(cfg.PlatformAPIURL, "/") + "/v1/dns01"
 }
 
 // optionalDNS01Broker builds the DNS-01 broker when both the signing key (to

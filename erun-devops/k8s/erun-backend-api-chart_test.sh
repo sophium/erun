@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Locks the DBOS system-database wiring for erun-backend-api (#1047): live env
+# Locks the DBOS system-database wiring for erun-backend-api: live env
 # provisioning and the server-side release queue both require a non-nil
 # DBOSContext (server.go's newEnvironmentProvisioner/newReleaseQueue), and
 # DBOSContext is built only from the DBOS_SYSTEM_DATABASE_URL env var. Before
@@ -57,12 +57,12 @@ service_account() {
 }
 
 # --- 1. Neither envDeployer nor the release queue is on: no DBOS wiring at all,
-#        byte-for-byte unchanged from before #1047 ---
+#        byte-for-byte unchanged from before this wiring existed ---
 rendered=$(render)
 container "${rendered}" | grep -q 'DBOS_SYSTEM_DATABASE_URL' &&
     fail "DBOS_SYSTEM_DATABASE_URL must not render when nothing needs DBOSContext"
 
-# --- 2. api.envDeployer.enabled must actually enable live deploys (#1047) ---
+# --- 2. api.envDeployer.enabled must actually enable live deploys ---
 rendered=$(render --set-string api.envDeployer.enabled=true)
 core="${work_root}/api.yaml"
 container "${rendered}" >"${core}"
@@ -117,7 +117,7 @@ grep -q '^imagePullSecrets:$' "${sa}" ||
 # --- 7. The API also needs to *read* those secrets, not just pull with them:
 #        its published-image probe interrogates the registry with the same
 #        credential, which is the only way it can tell a tenant image that was
-#        never published from one in a private namespace it may not read (#1055) ---
+#        never published from one in a private namespace it may not read ---
 container "${rendered}" >"${core}"
 grep -q 'name: ERUN_ENV_DEPLOY_IMAGE_PULL_SECRETS' "${core}" ||
     fail "a configured image pull secret must be named to the API, or its published-image probe stays unauthenticated and the bootstrap path is unreachable"
@@ -150,8 +150,8 @@ grep -q 'secrets' "${deployer_role}" &&
 #        what erun-backend-api's production Go source actually calls
 #        (internal/jobexec, internal/provision), so a future call to a new
 #        resource fails this local gate instead of surfacing as a live RBAC
-#        denial only discovered by deploying (#1058's recurrence: this is the
-#        third time a chart's Role fell out of step with the identity it
+#        denial only discovered by deploying (this is not the first
+#        time a chart's Role fell out of step with the identity it
 #        backs -- see erun-devops/AGENTS.md "Runtime Chart Rules") ---
 go_internal="${script_dir}/../../erun-backend/erun-backend-api/internal"
 
@@ -195,14 +195,14 @@ cluster_role() {
 #        deploy/stop/delete Jobs run the `erun` binary as -- a different
 #        identity from api.envDeployer's own Role above, and one that this
 #        chart test previously never asserted anything about. That gap is
-#        exactly how #1080 shipped: erun stop's `kubectl scale
+#        exactly how one such gap shipped before: erun stop's `kubectl scale
 #        deployment/... --replicas=0` (erun-common/stop.go) and erun deploy's
 #        early-failure pod watch (erun-common/deploy_pod_watch.go) both shell
 #        out to kubectl rather than calling client-go, so the require_role_
 #        resource pattern above (grep a literal client-go call in
 #        erun-backend-api's own Go source) does not apply here -- kubectl argv
 #        text has no comparably stable literal to grep for without inventing a
-#        brittle mapping. Pin the three grants #1080 asks for directly instead. ---
+#        brittle mapping. Pin the three grants directly instead. ---
 rendered=$(render --set-string api.envDeployer.enabled=true)
 provisioner_role="${work_root}/provisioner-role.yaml"
 cluster_role "${rendered}" team-env-provisioner >"${provisioner_role}"
@@ -221,13 +221,13 @@ grep -A1 'resources: \["pods"\]' "${provisioner_role}" | grep -q '"watch"' ||
 grep -q 'resources: \["events"\]' "${provisioner_role}" ||
     fail "the env-provisioner ClusterRole must grant events read, or a stuck pod's reason never reaches the recorded provision error (#1080)"
 
-# --- 10. #1083: apps/replicasets read, separate from the deployments grant
-#         above. Adding only pods/events/deployments-scale (#1080/#1081) left
+# --- 10. apps/replicasets read, separate from the deployments grant
+#         above. Adding only pods/events/deployments-scale left
 #         provisioning completely broken: helm's own readiness wait for a
 #         Deployment walks Deployment -> its ReplicaSet -> that ReplicaSet's
 #         ready count, so without list/watch on ReplicaSets `helm --wait`
 #         never observes a healthy rollout finishing and rides out its full
-#         timeout. This grant is necessary but -- like the #1081 grants before
+#         timeout. This grant is necessary but -- like the grants before
 #         it -- pinning it here only confirms a rule somebody already thought
 #         of; it does not prove helm's wait actually succeeds against it. See
 #         env_provisioner_rbac_e2e_test.go for a test that exercises the real
@@ -255,6 +255,17 @@ grep -A1 'resources: \["ingresses"\]' "${provisioner_role}" | grep -q '"update"'
 grep -A1 'resources: \["ingresses"\]' "${provisioner_role}" | grep -q '"patch"' ||
     fail "the ingresses grant must include patch, or re-exposing an already-exposed env fails"
 
+# --- 11b. the deploy Job's post-deploy `erun expose` also provisions the
+#          env's own namespaced cert-manager Issuer + Certificate through the
+#          DNS-01 broker, so the Ingress's wildcard TLS secretName
+#          actually gets populated ---
+grep -q 'resources: \["issuers", "certificates"\]' "${provisioner_role}" ||
+    fail "the env-provisioner ClusterRole must grant cert-manager.io/issuers+certificates, or the per-env TLS Issuer/Certificate apply is forbidden in every provisioned env namespace (#1093)"
+grep -A1 'resources: \["issuers", "certificates"\]' "${provisioner_role}" | grep -q '"create"' ||
+    fail "the issuers/certificates grant must include create"
+grep -A1 'resources: \["issuers", "certificates"\]' "${provisioner_role}" | grep -q '"update"' ||
+    fail "the issuers/certificates grant must include update, or re-exposing an already-exposed env fails"
+
 # --- 12. pods/exec for the PowerDNS DNS write is scoped to a
 #         namespaced Role bound in this chart's own release namespace (the
 #         platform namespace), not the cluster-wide ClusterRole above -- a
@@ -278,5 +289,28 @@ awk -v want="  name: team-env-provisioner-platform" '
 [ -s "${platform_binding}" ] || fail "the env-provisioner-platform RoleBinding must render when envDeployer is enabled"
 grep -q 'name: team-env-deployer' "${platform_binding}" ||
     fail "the env-provisioner-platform RoleBinding must bind the env-deployer ServiceAccount that the deploy Job -- and its chained erun expose -- runs as"
+
+# --- 13. per-env TLS certificate provisioning rides the dns01 broker
+#         values block: acmeEmail/acmeServer/webhookGroupName render as env
+#         vars only when the broker itself is enabled, since the webhook shim
+#         has nothing to call without it ---
+rendered=$(render \
+    --set-string api.dns01.enabled=true \
+    --set-string api.dns01.servicesZone=services.example.com \
+    --set-string api.dns01.acmeEmail=admin@example.com \
+    --set-string api.dns01.acmeServer=https://acme-staging-v02.api.letsencrypt.org/directory \
+    --set-string api.dns01.webhookGroupName=acme.example.io)
+container "${rendered}" >"${core}"
+grep -A1 'name: ERUN_ACME_EMAIL' "${core}" | grep -q 'value: "admin@example.com"' ||
+    fail "api.dns01.acmeEmail must render as ERUN_ACME_EMAIL, or the deploy Job never mints a per-env TLS certificate (#1093)"
+grep -A1 'name: ERUN_ACME_SERVER' "${core}" | grep -q 'value: "https://acme-staging-v02.api.letsencrypt.org/directory"' ||
+    fail "api.dns01.acmeServer must render as ERUN_ACME_SERVER"
+grep -A1 'name: ERUN_DNS01_WEBHOOK_GROUP_NAME' "${core}" | grep -q 'value: "acme.example.io"' ||
+    fail "api.dns01.webhookGroupName must render as ERUN_DNS01_WEBHOOK_GROUP_NAME"
+
+rendered=$(render --set-string api.dns01.acmeEmail=admin@example.com)
+container "${rendered}" >"${core}"
+grep -q 'ERUN_ACME_EMAIL' "${core}" &&
+    fail "acmeEmail must not render when the dns01 broker itself is disabled -- there is no broker for the webhook shim to call"
 
 echo "PASS: erun-backend-api DBOS wiring"

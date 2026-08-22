@@ -12,7 +12,7 @@ open: team-devops is not deployed, so there is nothing to wake
 mcp: would stop the stale kubectl port-forward on <LOOPBACK>:26100 (PID <PID>) and start a fresh one — it holds the port but its edge never answers
 kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address <LOOPBACK>
 kubectl --context test-context --namespace team-dev get deployment team-api -o name
-kubectl --context test-context --namespace team-dev port-forward service/team-api 26133:17033 --address <LOOPBACK>
+open: port-forwarding service/team-api if the check above finds the deployment present
 open: --no-shell selected, emitting setup commands instead of launching shell
 kubectl config use-context test-context
 kubectl config set-context --current --namespace=team-dev

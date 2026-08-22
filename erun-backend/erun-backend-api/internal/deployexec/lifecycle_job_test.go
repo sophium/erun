@@ -60,12 +60,76 @@ func TestBuildDeleteJobSpec(t *testing.T) {
 	// -y skips the CLI's interactive confirmation: the Job has no terminal to
 	// answer a prompt on.
 	assertLifecycleBootstrapScript(t, "delete", pod.Containers[0].Command, "'erun' 'delete' 'acme' 'prod' '-y'")
+	if strings.Contains(pod.Containers[0].Command[2], "unexpose") {
+		t.Fatalf("script %q should not chain unexpose without platform coordinates", pod.Containers[0].Command[2])
+	}
+}
+
+// TestBuildDeleteJobSpecWithUnexpose: when the control plane supplies the
+// platform coordinates it already knows, the delete Job chains a best-effort
+// `erun unexpose` after a successful delete, so the per-env wildcard DNS
+// record `erun expose` created does not outlive the namespace it pointed at.
+func TestBuildDeleteJobSpecWithUnexpose(t *testing.T) {
+	params := testDeleteParams()
+	params.ExposeServicesZone = "services.erunpaas.com"
+	params.ExposePlatformNamespace = "frs-prod"
+	script := buildDeleteCommand(params)[2]
+	wantDelete := "'erun' 'delete' 'acme' 'prod' '-y'"
+	wantUnexpose := "'erun' 'unexpose' 'acme' 'prod' '--skip-if-unconfigured' '--services-zone' 'services.erunpaas.com' '--platform-namespace' 'frs-prod'"
+	if !strings.Contains(script, wantDelete) {
+		t.Fatalf("script %q missing delete stage %q", script, wantDelete)
+	}
+	if !strings.Contains(script, wantUnexpose) {
+		t.Fatalf("script %q missing unexpose stage %q", script, wantUnexpose)
+	}
+	deleteIdx := strings.Index(script, wantDelete)
+	unexposeIdx := strings.Index(script, wantUnexpose)
+	if deleteIdx < 0 || unexposeIdx < 0 || deleteIdx > unexposeIdx {
+		t.Fatalf("script %q must run delete before unexpose", script)
+	}
+	if !strings.Contains(script, " && ") {
+		t.Fatalf("script %q must short-circuit unexpose on a failed delete", script)
+	}
+
+	// Half the pair configured is the same as neither.
+	partial := testDeleteParams()
+	partial.ExposeServicesZone = "services.erunpaas.com"
+	partialScript := buildDeleteCommand(partial)[2]
+	if strings.Contains(partialScript, "unexpose") {
+		t.Fatalf("script %q should not chain unexpose from a partial platform-coordinates override", partialScript)
+	}
+}
+
+// TestUnexposeChainScriptIsBestEffort mirrors TestExposeChainScriptIsBestEffort:
+// the chained unexpose step must never fail the delete Job it rides on — the
+// namespace already tore down successfully — and on failure prints a marker
+// line UnexposeFailureFromOutput reads back out of the Job's captured output.
+func TestUnexposeChainScriptIsBestEffort(t *testing.T) {
+	params := testDeleteParams()
+	params.ExposeServicesZone = "services.erunpaas.com"
+	params.ExposePlatformNamespace = "frs-prod"
+	script := buildDeleteCommand(params)[2]
+	if !strings.Contains(script, "|| printf '"+unexposeFailureMarker+": %s\\n' \"$unexpose_out\"") {
+		t.Fatalf("script %q must swallow a failing unexpose behind the marker", script)
+	}
+}
+
+func TestUnexposeFailureFromOutput(t *testing.T) {
+	output := "==> Deleted acme/prod\n" +
+		"audit: erun unexpose --skip-if-unconfigured --services-zone services.erunpaas.com --platform-namespace frs-prod acme prod\n" +
+		unexposeFailureMarker + ": zone services.erunpaas.com does not exist\n"
+	if got := UnexposeFailureFromOutput(output); got != "zone services.erunpaas.com does not exist" {
+		t.Fatalf("UnexposeFailureFromOutput = %q, want %q", got, "zone services.erunpaas.com does not exist")
+	}
+	if got := UnexposeFailureFromOutput("==> Deleted acme/prod\n"); got != "" {
+		t.Fatalf("UnexposeFailureFromOutput = %q, want empty when no marker is present", got)
+	}
 }
 
 // assertLifecycleBootstrapScript checks a lifecycle Job's command seeds the
 // in-cluster kubeconfig and the environment's config before running the real
 // command — the same prelude assertDeployBootstrapScript checks for deploy,
-// since #1077 was exactly this prelude missing from stop and delete.
+// since a missing prelude on stop and delete was exactly this kind of gap.
 func assertLifecycleBootstrapScript(t *testing.T, name string, command []string, wantCommand string) {
 	t.Helper()
 	assertCommand(t, command[:2], []string{"sh", "-c"})
@@ -88,7 +152,7 @@ func assertLifecycleBootstrapScript(t *testing.T, name string, command []string,
 }
 
 // TestAllLifecycleJobsShareTheBootstrapPrelude is the structural regression
-// test for #1077: every Job builder's command must be `sh -c` carrying the
+// test ensuring every Job builder's command is `sh -c` carrying the
 // bootstrap prelude, checked generically over the builders rather than one
 // hand-written assertion per Job, so a lifecycle Job added later cannot ship
 // without it.

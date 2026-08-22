@@ -44,6 +44,28 @@ const (
 	// that cannot tell this from success would act on a result nobody produced.
 	EnvironmentJobStateUnknown = "unknown"
 
+	// UnknownReasonKind values are what an orchestrator branches on instead of
+	// pattern-matching the free-text Reason. Each names a distinct,
+	// attributable cause for a job that ended in EnvironmentJobStateUnknown.
+	//
+	// UnknownReasonPodReplaced is certain, not a guess: the job recorded the
+	// hostname of the pod that started it (a Kubernetes pod's hostname is its
+	// pod name, unique per pod instance), and the hostname reading this record
+	// back does not match. The runtime pod was recreated out from under the
+	// work — most often eviction (e.g. a release filling the node's disk) or an
+	// operator-triggered redeploy/restart — and the work is gone with it.
+	UnknownReasonPodReplaced = "pod-replaced"
+	// UnknownReasonSupervisorGone means the same pod is still running, but the
+	// supervisor process the job recorded is not (e.g. OOM-killed, or killed
+	// directly) without recording an outcome. Distinct from a pod replacement:
+	// the environment survived, only the one process did not.
+	UnknownReasonSupervisorGone = "supervisor-gone"
+	// UnknownReasonAttachedProcessGone means the job was never started by
+	// erun — it tracks a pid the caller named — so there was never a
+	// supervisor in a position to observe an exit status, pod replacement or
+	// not.
+	UnknownReasonAttachedProcessGone = "attached-process-gone"
+
 	// DefaultEnvironmentJobOutputLimitBytes bounds one job's captured output so a
 	// chatty run cannot fill the environment's home volume. The outcome never
 	// comes from the log, so hitting the cap costs detail, never the result. A
@@ -116,9 +138,19 @@ type EnvironmentJob struct {
 	// Reason explains a non-obvious state: why the outcome is unknown, or how the
 	// work ended when it was not a plain exit.
 	Reason string `json:"reason,omitempty"`
+	// UnknownReasonKind is Reason's machine-readable twin, set only when State is
+	// unknown: one of UnknownReasonPodReplaced, UnknownReasonSupervisorGone, or
+	// UnknownReasonAttachedProcessGone. A caller branches on this rather than
+	// pattern-matching Reason's free text.
+	UnknownReasonKind string `json:"unknownReasonKind,omitempty"`
 	// Attached marks work erun did not start. Its outcome is never captured,
 	// because nothing erun ran was in a position to observe it.
 	Attached bool `json:"attached,omitempty"`
+	// Hostname is the pod hostname the supervisor observed at start (empty for
+	// an attached job). A Kubernetes pod's hostname is its pod name, unique per
+	// pod instance, so a later read from a different hostname is definitive
+	// proof the runtime pod was replaced — not a guess.
+	Hostname string `json:"hostname,omitempty"`
 
 	LogPath          string `json:"logPath,omitempty"`
 	OutputBytes      int64  `json:"outputBytes"`
@@ -161,16 +193,16 @@ func LoadEnvironmentJob(tenant, environment, id string, now time.Time) (Environm
 		}
 		return EnvironmentJob{}, err
 	}
-	return reconcileEnvironmentJob(dir, job, normalizeJobNow(now), processAlive), nil
+	return reconcileEnvironmentJob(dir, job, normalizeJobNow(now), processAlive, currentJobHostname()), nil
 }
 
 // LoadEnvironmentJobs returns every retained job, newest first, pruning records
 // that aged out as it reads.
 func LoadEnvironmentJobs(tenant, environment string, now time.Time) ([]EnvironmentJob, error) {
-	return loadEnvironmentJobs(tenant, environment, normalizeJobNow(now), processAlive)
+	return loadEnvironmentJobs(tenant, environment, normalizeJobNow(now), processAlive, currentJobHostname())
 }
 
-func loadEnvironmentJobs(tenant, environment string, now time.Time, alive func(int) bool) ([]EnvironmentJob, error) {
+func loadEnvironmentJobs(tenant, environment string, now time.Time, alive func(int) bool, hostname string) ([]EnvironmentJob, error) {
 	dir, err := environmentJobDir(tenant, environment)
 	if err != nil {
 		return nil, err
@@ -194,7 +226,7 @@ func loadEnvironmentJobs(tenant, environment string, now time.Time, alive func(i
 			removeEnvironmentJobFiles(dir, strings.TrimSuffix(entry.Name(), ".json"))
 			continue
 		}
-		jobs = append(jobs, reconcileEnvironmentJob(dir, job, now, alive))
+		jobs = append(jobs, reconcileEnvironmentJob(dir, job, now, alive, hostname))
 	}
 	jobs = pruneEnvironmentJobs(dir, jobs, now)
 	sort.Slice(jobs, func(i, j int) bool {
@@ -210,7 +242,7 @@ func loadEnvironmentJobs(tenant, environment string, now time.Time, alive func(i
 // to be running is only believed while the process it named is alive; otherwise
 // the job is demoted to unknown and that demotion is persisted, so every later
 // read gives the same definite answer.
-func reconcileEnvironmentJob(dir string, job EnvironmentJob, now time.Time, alive func(int) bool) EnvironmentJob {
+func reconcileEnvironmentJob(dir string, job EnvironmentJob, now time.Time, alive func(int) bool, hostname string) EnvironmentJob {
 	if job.State != EnvironmentJobStateRunning {
 		return job
 	}
@@ -221,14 +253,37 @@ func reconcileEnvironmentJob(dir string, job EnvironmentJob, now time.Time, aliv
 	job.State = EnvironmentJobStateUnknown
 	job.EndedAt = now
 	job.ExitCode = nil
-	if job.Attached {
+	switch {
+	case job.Attached:
+		job.UnknownReasonKind = UnknownReasonAttachedProcessGone
 		job.Reason = fmt.Sprintf("attached process %d is gone; erun did not run this work, so no exit status was recorded", job.PID)
-	} else {
+	case job.Hostname != "" && job.Hostname != hostname:
+		job.UnknownReasonKind = UnknownReasonPodReplaced
+		job.Reason = fmt.Sprintf("job supervisor %d is gone without recording an exit status; the runtime pod was replaced (started on %q, this is %q)", job.PID, job.Hostname, hostname)
+	default:
+		// Either the hostname matches (same pod, the supervisor process itself
+		// is gone) or this job predates hostname tracking and there is nothing
+		// to compare against — either way, pod replacement is a guess rather
+		// than the certainty the hostname comparison above gives.
+		job.UnknownReasonKind = UnknownReasonSupervisorGone
 		job.Reason = fmt.Sprintf("job supervisor %d is gone without recording an exit status; the runtime pod was most likely replaced", job.PID)
 	}
 	job.OutputBytes = environmentJobOutputSize(job.LogPath, job.OutputBytes)
 	_ = writeEnvironmentJob(dir, job)
 	return job
+}
+
+// currentJobHostname is the pod hostname a job supervisor stamps at start and
+// compares against at reconcile. Empty on error rather than failing the
+// caller: a job record's Hostname is then left unset, and reconciliation
+// falls back to the older "most likely replaced" guess instead of
+// hard-failing on it.
+func currentJobHostname() string {
+	name, err := os.Hostname()
+	if err != nil {
+		return ""
+	}
+	return name
 }
 
 // pruneEnvironmentJobs enforces retention: a finished job stays readable for

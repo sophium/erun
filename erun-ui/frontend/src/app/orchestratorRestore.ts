@@ -1,18 +1,29 @@
 import type { OrchestratorInfo } from './slices/orchestratorsSlice';
 
+// One orchestrator in alsoReopen: its id and the conversation it resumes. The
+// backend resolves conversationId the same way for every entry, owner
+// included — the exact conversation last known to be running for that
+// orchestrator, never a re-derivation from its id, which can land on a
+// different, older conversation. Empty only when the backend found
+// nothing safe to resume, in which case the orchestrator starts fresh.
+export interface OrchestratorReopenRef {
+  orchestratorId: string;
+  conversationId?: string;
+}
+
 // What the backend answers when boot asks which orchestrators to reopen:
 // orchestratorId is the one that OWNS THE TERMINAL PANE — the pane is single,
 // so exactly one orchestrator gets it — and alsoReopen lists every other
 // orchestrator that was open too, restored alongside it but idle. Only the
-// pane owner can carry a conversation/prompt to resume; that is why those
-// fields live on the target itself rather than per id in alsoReopen. A notice
-// means a hand-off was refused: the pane owner still reopens, idle, and the
-// notice says why nothing is being continued.
+// pane owner can carry a resume PROMPT; that is why resumePrompt lives on the
+// target itself rather than per id in alsoReopen. A notice means a hand-off
+// was refused: the pane owner still reopens, idle, and the notice says why
+// nothing is being continued.
 export interface OrchestratorReopenTarget {
   orchestratorId?: string;
   conversationId?: string;
   resumePrompt?: string;
-  alsoReopen?: string[];
+  alsoReopen?: OrchestratorReopenRef[];
   notice?: string;
 }
 
@@ -26,10 +37,11 @@ export interface OrchestratorRestorePlan {
 
 // OrchestratorRestoreOutcome is what a launch actually restores: the
 // orchestrator that ends up owning the pane (or null if there is nothing valid
-// to reopen), and every other orchestrator that comes back idle beside it.
+// to reopen), and every other orchestrator that comes back idle beside it,
+// each with the conversation it resumes.
 export interface OrchestratorRestoreOutcome {
   primary: OrchestratorRestorePlan | null;
-  alsoReopen: string[];
+  alsoReopen: OrchestratorReopenRef[];
 }
 
 const trimmed = (value: string | undefined): string => value?.trim() ?? '';
@@ -66,13 +78,13 @@ export function planOrchestratorRestore(
 
   const primaryID = trimmed(source.orchestratorId);
   const seen = new Set<string>();
-  const survivingAlso = (source.alsoReopen ?? []).reduce<string[]>((kept, raw) => {
-    const id = trimmed(raw);
+  const survivingAlso = (source.alsoReopen ?? []).reduce<OrchestratorReopenRef[]>((kept, raw) => {
+    const id = trimmed(raw.orchestratorId);
     if (id === '' || id === primaryID || seen.has(id) || !exists(id)) {
       return kept;
     }
     seen.add(id);
-    kept.push(id);
+    kept.push({ orchestratorId: id, conversationId: trimmed(raw.conversationId) });
     return kept;
   }, []);
 
@@ -92,7 +104,14 @@ export function planOrchestratorRestore(
     return { primary: null, alsoReopen: [] };
   }
   return {
-    primary: { id: promoted, conversationId: '', resumePrompt: '' },
+    // The promoted survivor carries the conversation the backend already
+    // resolved for it as an alsoReopen entry — it must not be dropped just
+    // because this orchestrator is now taking the pane instead.
+    primary: {
+      id: promoted.orchestratorId,
+      conversationId: promoted.conversationId ?? '',
+      resumePrompt: '',
+    },
     alsoReopen: rest,
   };
 }

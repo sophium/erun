@@ -72,12 +72,22 @@ func ensureAPIPortForward(ctx common.Context, result common.OpenResult) (int, er
 	return startAPIPortForward(statePath, expectedState, args, localPort)
 }
 
+// ensureAPIPortForwardDryRun previews the port-forward without a live cluster
+// read: the real path (checkAPIDeploymentPresent, above) skips the whole
+// forward when the tenant's <tenant>-api deployment is not present, but
+// resolving that here would need every open dry-run scenario in the suite to
+// declare a kubectl stub for a check it otherwise has no reason to. So the
+// forward is stated as conditional on the presence check already traced by
+// the caller, rather than asserted outright — the same split
+// TraceEnsureKubernetesNamespace uses for the analogous namespace-create
+// decision.
 func ensureAPIPortForwardDryRun(ctx common.Context, result common.OpenResult, localPort int) (int, error) {
 	args := kubectlAPIPortForwardArgs(result, localPort)
 	if previewed, port := previewAdoptOrConflict(ctx, "api", localPort, args, canReachLocalAPIEndpoint); previewed {
 		return port, nil
 	}
-	ctx.TraceCommand("", "kubectl", args...)
+	apiDeployment := common.TenantResourcePrefix(result.Tenant) + "-api"
+	ctx.Trace(fmt.Sprintf("open: port-forwarding service/%s if the check above finds the deployment present", apiDeployment))
 	return localPort, nil
 }
 

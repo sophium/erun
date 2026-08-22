@@ -115,30 +115,6 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_with_mcp_auth_public_key", normalize.Apply(result.Combined))
 	})
 
-	t.Run("dry_run_mcp_auth_oidc_issuer", func(t *testing.T) {
-		// A hosted env with mcpauthissuer set (the tenant's OIDC issuer) threads
-		// mcpAuth.{enabled,issuer,audience} onto the runtime (team-devops) chart
-		// so its erun-mcp edge trusts bearer tokens from that issuer with the
-		// per-env audience erun-mcp:team/dev. Distinct from the desktop
-		// --mcp-auth-public-key path: no local key, so no <release>-mcp-auth
-		// Secret is applied and secretName stays empty (the chart mounts the
-		// desktop key only when secretName is set).
-		setup := env.New(t)
-		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		fixture.SeedDevopsRepo(t, setup, "team", "dev")
-		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
-		existing, err := os.ReadFile(envConfigPath)
-		if err != nil {
-			t.Fatalf("read env config: %v", err)
-		}
-		mustWriteFile(t, envConfigPath, string(existing)+"mcpauthissuer: https://auth.example.com/oidc\n")
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		golden.Equal(t, "deploy/dry_run_mcp_auth_oidc_issuer", normalize.Apply(result.Combined))
-	})
-
 	t.Run("dry_run_copies_images_from_to_before_deploy", func(t *testing.T) {
 		// When the project registry list marks a FROM source and a TO
 		// destination, deploy mirrors every image the cluster pulls (the
@@ -733,7 +709,7 @@ func TestDeploy(t *testing.T) {
 	t.Run("dry_run_max_cpu_memory_storage_flags_apply_namespace_quota", func(t *testing.T) {
 		// All three of --max-cpu/--max-memory/--max-storage together trace the
 		// kubectl apply that would create the namespace's ResourceQuota +
-		// LimitRange (#605), alongside the existing namespace-ensure trace.
+		// LimitRange, alongside the existing namespace-ensure trace.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -1071,6 +1047,31 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_remote_env_umbrella_ignores_stale_stock_runtimeimage", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_remote_env_umbrella_ignores_stale_tenant_runtimeimage_tag", func(t *testing.T) {
+		// The staleness guard used to fire only for a leftover pin naming
+		// the STOCK erun-devops image. A pin naming the tenant's OWN team-devops
+		// image at an older tag was honoured unconditionally forever, even though
+		// this deploy's own line already resolves the same image correctly with
+		// no override at all. The saved pin is provably redundant — it names
+		// exactly the image defaultDeployRuntimeImage would have picked, just at
+		// a stale tag — so it must be ignored and traced the same as the stock
+		// case, and the deploy must roll out the current version's tag.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"runtimeimage: registry.example/test/team-devops:old-tag\n")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-devops:1.0.51")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.51", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_umbrella_ignores_stale_tenant_runtimeimage_tag", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_remote_env_stated_chart_ignores_stale_stock_runtimeimage", func(t *testing.T) {
 		// The shared-chart half of the stale-pin migration. An env that states its
 		// runtime chart at the chart's own version is deploying a version from another
@@ -1151,7 +1152,7 @@ func TestDeploy(t *testing.T) {
 	})
 
 	t.Run("dry_run_remote_env_component_threads_resolved_oidc_issuer", func(t *testing.T) {
-		// Regression for sophium#1039: an empty computed api.oidcAllowedIssuers used
+		// Regression: an empty computed api.oidcAllowedIssuers used
 		// to be passed as `--set-string api.oidcAllowedIssuers=` regardless, and
 		// helm's --set always beats -f, so it silently clobbered whatever the
 		// operator configured under that key in the published chart's
@@ -1791,6 +1792,20 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/saved_deploy_components_drive_selection_without_flag", normalize.Apply(result.Combined))
 	})
 
+	t.Run("saved_deploy_components_shadowing_plan_reports_what_was_lost", func(t *testing.T) {
+		// When a saved deploy.components set wins over a repo
+		// k8s.deployments plan that names more, the divergence from the reviewed
+		// plan must be visible at normal (non -vv) verbosity, naming exactly what
+		// the plan asked for beyond the saved set.
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithDeployComponents(t, setup, "team", "dev", []string{"erun-backend-postgres"})
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsBackendCharts(t, setup, "team", "dev")
+		fixture.SeedProjectK8sConfig(t, setup, "environments:\n  dev:\n    k8s:\n      deployments:\n        - [team-devops, erun-backend-postgres]\n        - erun-backend-db\n        - erun-backend-api\n")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "deploy/saved_deploy_components_shadowing_plan_reports_what_was_lost", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_via_stubs", func(t *testing.T) {
 		// Drive the non-dry-run helm/kubectl runners via stub binaries so
 		// the deploy execution path (deploy.go's run* helpers, post-helm
@@ -2155,6 +2170,39 @@ func TestDeploy(t *testing.T) {
 		}
 		if !strings.Contains(out, "exited with code 137") {
 			t.Fatalf("missing last-terminated message in output:\n%s", out)
+		}
+	})
+
+	t.Run("real_run_pod_watch_waits_out_the_unschedulable_grace_period", func(t *testing.T) {
+		// kubectl stub reports a pod stuck PodScheduled=False/Unschedulable on
+		// every poll. A brief unschedulable window is normal (the scheduler
+		// re-evaluates on cluster changes), so the watcher must not abort on the
+		// first observation — only once the grace period elapses. The grace is
+		// shrunk via ERUN_DEPLOY_POD_WATCH_UNSCHEDULED_GRACE (the production
+		// default is 30s, too slow for a test) rather than asserting a wall-clock
+		// sleep tied to that default; see resolveUnscheduledGracePeriod.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryAdvanced(t, stubs, "kubectl", fixture.StubBinarySpec{Stdout: unschedulablePodJSON})
+		fixture.StubBinaryWithScript(t, stubs, "helm", "exec sleep 30\n")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		envVars = append(envVars, "ERUN_DEPLOY_POD_WATCH_INTERVAL=50ms", "ERUN_DEPLOY_POD_WATCH_UNSCHEDULED_GRACE=150ms")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit once the grace period elapses, got 0:\n%s", result.Combined)
+		}
+		out := normalize.Apply(result.Combined)
+		if !strings.Contains(out, "deploy failed early: pod team-devops-pending Unschedulable") {
+			t.Fatalf("missing structured early-fail error naming the pod-level (no container) reason, got:\n%s", out)
+		}
+		if !strings.Contains(out, "0/1 nodes are available: 1 Insufficient cpu, 1 Insufficient memory") {
+			t.Fatalf("missing the scheduler's own message verbatim, got:\n%s", out)
+		}
+		if !strings.Contains(out, "    pod team-devops-pending: Pending (Unschedulable: 0/1 nodes are available: 1 Insufficient cpu, 1 Insufficient memory)") {
+			t.Fatalf("missing the pod-status summary line surfacing the reason during the grace period, got:\n%s", out)
 		}
 	})
 
@@ -3128,6 +3176,26 @@ const crashLoopPodJSON = `{
             "state": {"waiting": {"reason": "CrashLoopBackOff", "message": "back-off 5m restarting failed container"}},
             "lastState": {"terminated": {"reason": "Error", "exitCode": 137, "message": "exited with code 137"}}
           }
+        ]
+      }
+    }
+  ]
+}`
+
+// unschedulablePodJSON has no containerStatuses at all: the pod was never
+// admitted to a node, so the only place its failure reason lives is
+// status.conditions.
+const unschedulablePodJSON = `{
+  "items": [
+    {
+      "metadata": {
+        "name": "team-devops-pending",
+        "annotations": {"meta.helm.sh/release-name": "team-devops"}
+      },
+      "status": {
+        "phase": "Pending",
+        "conditions": [
+          {"type": "PodScheduled", "status": "False", "reason": "Unschedulable", "message": "0/1 nodes are available: 1 Insufficient cpu, 1 Insufficient memory"}
         ]
       }
     }

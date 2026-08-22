@@ -25,6 +25,19 @@ cd "$SCRIPT_DIR"
 
 mkdir -p "$BIN_DIR"
 
+# --no-shell is the eval-friendly mode (`eval "$(erun open ... --no-shell)"`);
+# the binary keeps stderr silent there, so the dev wrapper's rebuild progress
+# lines (and the staleness warning below) would be the only thing leaking into
+# the wrapping terminal. Suppress them here while keeping `go build`'s own
+# output so compile errors still surface.
+QUIET_REBUILD=0
+for arg in "$@"; do
+	case "$arg" in
+	--no-shell ) QUIET_REBUILD=1; break ;;
+	-- ) break ;;
+	esac
+done
+
 BUILD_VERSION=dev
 if [ -f "$VERSION_FILE" ]; then
 	BUILD_VERSION=$(tr -d '\n' < "$VERSION_FILE")
@@ -40,24 +53,34 @@ fi
 # as the wrong binary.
 BUILD_COMMIT=
 BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+IN_GIT_TREE=0
 if git -C "$SCRIPT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+	IN_GIT_TREE=1
 	BUILD_COMMIT=$(git -C "$SCRIPT_DIR" rev-parse --short=12 HEAD)
 	if [ -n "$(git -C "$SCRIPT_DIR" status --porcelain 2>/dev/null)" ]; then
 		BUILD_COMMIT="${BUILD_COMMIT}-dirty"
 	fi
 fi
 
-# --no-shell is the eval-friendly mode (`eval "$(erun open ... --no-shell)"`);
-# the binary keeps stderr silent there, so the dev wrapper's rebuild progress
-# lines would be the only thing leaking into the wrapping terminal. Suppress
-# them here while keeping `go build`'s own output so compile errors still surface.
-QUIET_REBUILD=0
-for arg in "$@"; do
-	case "$arg" in
-	--no-shell ) QUIET_REBUILD=1; break ;;
-	-- ) break ;;
-	esac
-done
+# The gap between this checkout and its remote is read from refs already on
+# disk, never a new fetch: this wrapper runs on every `erun` invocation, and a
+# network round-trip per call would make the whole CLI slow and break offline
+# use. A build sitting behind its own upstream stamps a version that looks
+# exactly as plausible as a current one — only the commit tells the two apart —
+# so a real gap is reported loudly rather than left for the version string to
+# quietly misrepresent. This never blocks the build: building behind is fine
+# when it is a deliberate choice, and the point of the warning is to make sure
+# it is one.
+if [ "$IN_GIT_TREE" -eq 1 ] && [ "$QUIET_REBUILD" -eq 0 ]; then
+	UPSTREAM_REF=$(git -C "$SCRIPT_DIR" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)
+	if [ -n "$UPSTREAM_REF" ]; then
+		BEHIND_COUNT=$(git -C "$SCRIPT_DIR" rev-list --count 'HEAD..@{upstream}' 2>/dev/null || echo 0)
+		if [ "$BEHIND_COUNT" -gt 0 ]; then
+			printf '>> WARNING: build source is %s commit(s) behind %s (as of the last fetch) -- rebuilding now will NOT include what moved upstream. Run git fetch/pull in %s to catch up.\n' \
+				"$BEHIND_COUNT" "$UPSTREAM_REF" "$SCRIPT_DIR" >&2
+		fi
+	fi
+fi
 
 if [ "$QUIET_REBUILD" -eq 0 ]; then
 	printf '>> rebuilding erun CLI (%s)... ' "$BUILD_VERSION" >&2

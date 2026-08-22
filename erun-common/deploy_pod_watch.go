@@ -30,9 +30,15 @@ func (e *HelmReleaseContainerFailureError) Error() string {
 	if e == nil {
 		return ""
 	}
-	parts := []string{
-		fmt.Sprintf("deploy failed early: pod %s container %s %s", e.Pod, e.Container, e.Reason),
+	var head string
+	if strings.TrimSpace(e.Container) == "" {
+		// A pod-level failure (e.g. Unschedulable) precedes any container even
+		// existing, so there is no container name to report.
+		head = fmt.Sprintf("deploy failed early: pod %s %s", e.Pod, e.Reason)
+	} else {
+		head = fmt.Sprintf("deploy failed early: pod %s container %s %s", e.Pod, e.Container, e.Reason)
 	}
+	parts := []string{head}
 	if msg := strings.TrimSpace(e.Message); msg != "" {
 		parts = append(parts, msg)
 	}
@@ -51,6 +57,17 @@ type podWatchParams struct {
 	Namespace         string
 	KubernetesContext string
 	StatusOut         io.Writer
+	// Now returns the current time; nil defaults to time.Now. Tests inject a
+	// fake clock here rather than sleeping real wall-clock time to exercise the
+	// unschedulable grace period (see defaultUnscheduledGracePeriod).
+	Now func() time.Time
+}
+
+func (p podWatchParams) now() time.Time {
+	if p.Now != nil {
+		return p.Now()
+	}
+	return time.Now()
 }
 
 // podWatchOutcome is the watcher's terminal observation. Failure is non-nil
@@ -73,9 +90,21 @@ type podStatusItem struct {
 	} `json:"metadata"`
 	Status struct {
 		Phase                 string                 `json:"phase"`
+		Conditions            []podConditionEntry    `json:"conditions"`
 		ContainerStatuses     []containerStatusEntry `json:"containerStatuses"`
 		InitContainerStatuses []containerStatusEntry `json:"initContainerStatuses"`
 	} `json:"status"`
+}
+
+// podConditionEntry is a `status.conditions[]` entry. A pod that never gets
+// admitted to a node has no container statuses at all to report a waiting
+// reason from — the scheduler's own verdict lives only here, as
+// PodScheduled=False with reason Unschedulable.
+type podConditionEntry struct {
+	Type    string `json:"type"`
+	Status  string `json:"status"`
+	Reason  string `json:"reason"`
+	Message string `json:"message"`
 }
 
 type containerStatusEntry struct {
@@ -171,6 +200,19 @@ func permanentImagePullFailure(message string) bool {
 // crash can be normal, so only repeated restarts mark a container terminal.
 const crashLoopRestartThreshold = 2
 
+// unscheduledGracePeriod is how long a pod may report PodScheduled=False
+// before the watcher treats it as terminal. A pod is briefly unscheduled on
+// the way to being scheduled — the scheduler re-evaluates on every relevant
+// cluster change, and a node that is about to free up or finish autoscaling
+// can easily take longer than one poll tick — so acting on the very first
+// unschedulable observation would abort deploys that were only ever waiting
+// normally. 30s is long enough to absorb that normal churn (roughly ten poll
+// ticks at the default 2s interval) while staying well under the 5-minute
+// helm rollout timeout it exists to beat: a genuine capacity/quota problem
+// (e.g. "Insufficient cpu") does not resolve itself in 30s, so the grace only
+// ever delays the honest failure, never turns it into a false positive.
+const defaultUnscheduledGracePeriod = 30 * time.Second
+
 const (
 	defaultPodWatchPollInterval   = 2 * time.Second
 	defaultPodWatchKubectlTimeout = 10 * time.Second
@@ -192,6 +234,24 @@ func resolvePodWatchPollInterval() time.Duration {
 	return d
 }
 
+// resolveUnscheduledGracePeriod honors ERUN_DEPLOY_POD_WATCH_UNSCHEDULED_GRACE,
+// the test-only twin of ERUN_DEPLOY_POD_WATCH_INTERVAL: a real-run integration
+// scenario cannot wait out defaultUnscheduledGracePeriod's 30s and stay fast,
+// so it shrinks the grace instead of asserting on a wall-clock sleep tied to
+// the production value. Not a production knob — the reasoning for the default
+// lives on defaultUnscheduledGracePeriod, not on this override.
+func resolveUnscheduledGracePeriod() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("ERUN_DEPLOY_POD_WATCH_UNSCHEDULED_GRACE"))
+	if raw == "" {
+		return defaultUnscheduledGracePeriod
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d < 0 {
+		return defaultUnscheduledGracePeriod
+	}
+	return d
+}
+
 // watchReleasePods is best-effort: transient kubectl errors are ignored so a
 // flaky `get pods` never aborts a deploy that helm would otherwise drive to
 // success.
@@ -205,8 +265,12 @@ func watchReleasePods(ctx context.Context, params podWatchParams) podWatchOutcom
 	defer ticker.Stop()
 
 	lastSummary := map[string]string{}
+	// unscheduledSince tracks, per pod name, the first poll that observed
+	// PodScheduled=False so classifyTerminalFailure can apply the grace period
+	// across polls rather than deciding on a single snapshot.
+	unscheduledSince := map[string]time.Time{}
 	for {
-		failure, summaries := pollOnce(ctx, params)
+		failure, summaries := pollOnce(ctx, params, unscheduledSince)
 		renderPodSummaries(params.StatusOut, summaries, lastSummary)
 		if failure != nil {
 			return podWatchOutcome{Failure: failure}
@@ -219,7 +283,7 @@ func watchReleasePods(ctx context.Context, params podWatchParams) podWatchOutcom
 	}
 }
 
-func pollOnce(ctx context.Context, params podWatchParams) (*HelmReleaseContainerFailureError, []podSummary) {
+func pollOnce(ctx context.Context, params podWatchParams, unscheduledSince map[string]time.Time) (*HelmReleaseContainerFailureError, []podSummary) {
 	output, err := runKubectlGetPods(ctx, params)
 	if err != nil {
 		return nil, nil
@@ -229,7 +293,7 @@ func pollOnce(ctx context.Context, params podWatchParams) (*HelmReleaseContainer
 		return nil, nil
 	}
 	releasePods := filterReleasePods(pods, params.ReleaseName)
-	failure := classifyTerminalFailure(releasePods, params)
+	failure := classifyTerminalFailure(releasePods, params, unscheduledSince)
 	return failure, summarizePods(releasePods)
 }
 
@@ -308,12 +372,13 @@ func filterReleasePods(list podStatusList, releaseName string) []podStatusItem {
 	return out
 }
 
-func classifyTerminalFailure(pods []podStatusItem, params podWatchParams) *HelmReleaseContainerFailureError {
+func classifyTerminalFailure(pods []podStatusItem, params podWatchParams, unscheduledSince map[string]time.Time) *HelmReleaseContainerFailureError {
 	for _, pod := range pods {
 		all := append([]containerStatusEntry{}, pod.Status.InitContainerStatuses...)
 		all = append(all, pod.Status.ContainerStatuses...)
 		for _, container := range all {
 			if reason, message, ok := containerTerminalFailure(container); ok {
+				delete(unscheduledSince, pod.Metadata.Name)
 				return &HelmReleaseContainerFailureError{
 					ReleaseName: params.ReleaseName,
 					Namespace:   params.Namespace,
@@ -325,7 +390,49 @@ func classifyTerminalFailure(pods []podStatusItem, params podWatchParams) *HelmR
 			}
 		}
 	}
+	// A pod that never got admitted to a node has no container statuses at all
+	// to report a waiting reason from — the only place that carries why is
+	// status.conditions. Checked second, after container-level failures, so a
+	// pod that both failed to schedule once and later ran into a real
+	// container problem reports the more specific container failure.
+	for _, pod := range pods {
+		message, unschedulable := podUnschedulableMessage(pod)
+		if !unschedulable {
+			delete(unscheduledSince, pod.Metadata.Name)
+			continue
+		}
+		since, seen := unscheduledSince[pod.Metadata.Name]
+		if !seen {
+			unscheduledSince[pod.Metadata.Name] = params.now()
+			continue
+		}
+		if params.now().Sub(since) < resolveUnscheduledGracePeriod() {
+			continue
+		}
+		return &HelmReleaseContainerFailureError{
+			ReleaseName: params.ReleaseName,
+			Namespace:   params.Namespace,
+			Pod:         pod.Metadata.Name,
+			Container:   "",
+			Reason:      "Unschedulable",
+			Message:     message,
+		}
+	}
 	return nil
+}
+
+// podUnschedulableMessage returns the scheduler's own message when a pod
+// carries PodScheduled=False with reason Unschedulable, verbatim — so the
+// abort reaches both the deploy output and the recorded provision-error with
+// exactly what the scheduler said (e.g. "0/1 nodes are available: 1
+// Insufficient cpu, 1 Insufficient memory") rather than a generic timeout.
+func podUnschedulableMessage(pod podStatusItem) (string, bool) {
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == "PodScheduled" && condition.Status == "False" && condition.Reason == "Unschedulable" {
+			return condition.Message, true
+		}
+	}
+	return "", false
 }
 
 func containerTerminalFailure(c containerStatusEntry) (reason, message string, ok bool) {
@@ -394,6 +501,13 @@ func formatPodStatusLine(pod podStatusItem) string {
 		phase := strings.TrimSpace(pod.Status.Phase)
 		if phase == "" {
 			phase = "Pending"
+		}
+		// A pod with no container statuses at all was never admitted to a node,
+		// so the scheduler's own reason (if any) is the only thing worth showing
+		// — visible immediately, even while still inside the grace period that
+		// classifyTerminalFailure applies before treating it as terminal.
+		if message, unschedulable := podUnschedulableMessage(pod); unschedulable {
+			return fmt.Sprintf("pod %s: %s (Unschedulable: %s)", pod.Metadata.Name, phase, message)
 		}
 		return fmt.Sprintf("pod %s: %s", pod.Metadata.Name, phase)
 	}

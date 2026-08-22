@@ -17,6 +17,7 @@ publishing image: ghcr.io/sophium/api:<VERSION>
 release: worktree clean = true
 stage: release
 release tag already exists at HEAD; skipping <VERSION>
+release: docker root free disk space is not observable from this process; skipping the headroom check
 stage: publish
 fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
 fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-arm64

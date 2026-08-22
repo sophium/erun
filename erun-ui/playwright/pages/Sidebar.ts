@@ -240,9 +240,21 @@ export class Sidebar {
   // The row's busy spinner (BusyRowSpinner), rendered whenever the store's
   // aiBusyBySession has this orchestrator's session flagged — whether that
   // came from the ai-activity event or from the list snapshot's own busy
-  // field (#1087).
+  // field.
   orchestratorBusySpinner(name: string): Locator {
     return this.erunSection().getByRole('status', { name: `${name} is working` });
+  }
+
+  // The row's background-shell indicator, rendered whenever the store's
+  // orchestratorShellActivity.bySession has this orchestrator's session
+  // flagged running — from the orchestrator-shell-activity event or from the
+  // list snapshot's own shellRunning field, the same treatment
+  // orchestratorBusySpinner gets. Matched by prefix since the label carries a
+  // live elapsed time.
+  orchestratorShellSpinner(name: string): Locator {
+    return this.erunSection().getByRole('status', {
+      name: new RegExp(`^${name} has a shell running`),
+    });
   }
 
   // Open the orchestrator's management dialog via its "…" button. Like the env

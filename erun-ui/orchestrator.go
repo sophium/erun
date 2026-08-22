@@ -55,6 +55,15 @@ type orchestratorSession struct {
 	// on having witnessed the ai-activity event that last changed it. See
 	// reconcileOrchestratorActivity in session_heartbeat.go.
 	aiBusy bool
+	// shellRunning, shellCommand and shellStartedAtUnix are the last background
+	// shell report the poller observed — a fact independent of aiBusy,
+	// since a shell can keep running after the turn that started it ends. Same
+	// snapshot treatment as aiBusy and for the same reason: orchestratorInfoFor
+	// reads these directly so a fresh mount or reconnect renders the true state
+	// without depending on the orchestrator-shell-activity event.
+	shellRunning       bool
+	shellCommand       string
+	shellStartedAtUnix int64
 }
 
 // orchestratorEnvInput is the frontend's env selection for create/update.
@@ -88,16 +97,27 @@ type orchestratorEnvInfo struct {
 // state without having had to witness that event. The frontend seeds its
 // event-keyed store from this field on every fetch (loadOrchestrators) rather
 // than keeping a second source of truth; see aiActivitySlice.ts.
+//
+// ShellRunning/ShellCommand/ShellStartedAtUnix are the same treatment for a
+// background shell: independent of Busy, since a shell can outlive the
+// turn that started it, and carried directly rather than left to the
+// orchestrator-shell-activity event alone. ShellStartedAtUnix is when the
+// running shell was reported started, unix seconds, 0 when ShellRunning is
+// false — the frontend derives elapsed time from it rather than the desktop
+// formatting a string that immediately goes stale.
 type orchestratorInfo struct {
-	ID           string                `json:"id"`
-	Name         string                `json:"name"`
-	Environments []orchestratorEnvInfo `json:"environments"`
-	Tenants      []string              `json:"tenants"`
-	Directories  []string              `json:"directories"`
-	SessionID    int                   `json:"sessionId"`
-	Status       string                `json:"status"`
-	Busy         bool                  `json:"busy"`
-	Transient    bool                  `json:"transient"`
+	ID                 string                `json:"id"`
+	Name               string                `json:"name"`
+	Environments       []orchestratorEnvInfo `json:"environments"`
+	Tenants            []string              `json:"tenants"`
+	Directories        []string              `json:"directories"`
+	SessionID          int                   `json:"sessionId"`
+	Status             string                `json:"status"`
+	Busy               bool                  `json:"busy"`
+	Transient          bool                  `json:"transient"`
+	ShellRunning       bool                  `json:"shellRunning"`
+	ShellCommand       string                `json:"shellCommand,omitempty"`
+	ShellStartedAtUnix int64                 `json:"shellStartedAtUnix,omitempty"`
 }
 
 func orchestratorSessionKey(id string) string {
@@ -573,6 +593,12 @@ func ensureOrchestratorSessionStartHook(dir string) error {
 	}
 	stop := mergeOrchestratorHookBlocks(hooks["Stop"], idleHook, isOrchestratorActivityHookBlock)
 	hooks["Stop"] = mergeOrchestratorHookBlocks(stop, orchestratorNoAskStopGuardBlock(), isOrchestratorNoAskStopGuardBlock)
+	// A background shell's start and its completion are both only visible in a
+	// tool call's own result, which PreToolUse never carries — so unlike the
+	// turn-boundary busy report above, this one lives on PostToolUse alone.
+	// See orchestrator_shell_activity.go.
+	hooks["PostToolUse"] = mergeOrchestratorHookBlocks(
+		hooks["PostToolUse"], orchestratorShellActivityHookBlocks(), isOrchestratorShellActivityHookBlock)
 	settings["hooks"] = hooks
 	out, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
@@ -714,17 +740,30 @@ func directoriesFromEnvs(envs []eruncommon.OrchestratorEnvConfig) []string {
 	return out
 }
 
-func orchestratorInfoFor(id, name string, envs []eruncommon.OrchestratorEnvConfig, status string, sessionID int, busy, transient bool) orchestratorInfo {
+// orchestratorShellSnapshot is the background-shell half of orchestratorInfo,
+// grouped into one value so orchestratorInfoFor's call sites read as "this
+// session's shell state" rather than three more positional bools and strings
+// indistinguishable from the ones beside them.
+type orchestratorShellSnapshot struct {
+	Running       bool
+	Command       string
+	StartedAtUnix int64
+}
+
+func orchestratorInfoFor(id, name string, envs []eruncommon.OrchestratorEnvConfig, status string, sessionID int, busy, transient bool, shell orchestratorShellSnapshot) orchestratorInfo {
 	return orchestratorInfo{
-		ID:           id,
-		Name:         name,
-		Environments: envInfos(envs),
-		Tenants:      tenantsFromEnvs(envs),
-		Directories:  directoriesFromEnvs(envs),
-		SessionID:    sessionID,
-		Status:       status,
-		Busy:         busy,
-		Transient:    transient,
+		ID:                 id,
+		Name:               name,
+		Environments:       envInfos(envs),
+		Tenants:            tenantsFromEnvs(envs),
+		Directories:        directoriesFromEnvs(envs),
+		SessionID:          sessionID,
+		Status:             status,
+		Busy:               busy,
+		ShellRunning:       shell.Running,
+		ShellCommand:       shell.Command,
+		ShellStartedAtUnix: shell.StartedAtUnix,
+		Transient:          transient,
 	}
 }
 
@@ -1047,7 +1086,7 @@ func (a *App) CreateOrchestrator(name string, envs []orchestratorEnvInput) (orch
 	if err := a.saveOrchestratorConfigs(append(configs, def)); err != nil {
 		return orchestratorInfo{}, err
 	}
-	return orchestratorInfoFor(id, displayName, refs, "stopped", 0, false, false), nil
+	return orchestratorInfoFor(id, displayName, refs, "stopped", 0, false, false, orchestratorShellSnapshot{}), nil
 }
 
 // UpdateOrchestrator edits an existing orchestrator's linked environments and
@@ -1085,12 +1124,14 @@ func (a *App) UpdateOrchestrator(id, name string, envs []orchestratorEnvInput) (
 	status := "stopped"
 	sessionID := 0
 	busy := false
+	shell := orchestratorShellSnapshot{}
 	if info, ok := a.runningOrchestratorInfo(id); ok {
 		status = "running"
 		sessionID = info.SessionID
 		busy = info.Busy
+		shell = orchestratorShellSnapshot{Running: info.ShellRunning, Command: info.ShellCommand, StartedAtUnix: info.ShellStartedAtUnix}
 	}
-	return orchestratorInfoFor(id, displayName, refs, status, sessionID, busy, false), nil
+	return orchestratorInfoFor(id, displayName, refs, status, sessionID, busy, false, shell), nil
 }
 
 // StartOrchestrator spawns the session for a persisted orchestrator definition,
@@ -1178,7 +1219,8 @@ func (a *App) runningOrchestratorInfo(id string) (orchestratorInfo, bool) {
 	if session == nil || managed == nil || managed.closed {
 		return orchestratorInfo{}, false
 	}
-	return orchestratorInfoFor(session.id, session.name, session.envs, "running", session.serial, session.aiBusy, session.transient), true
+	shell := orchestratorShellSnapshot{Running: session.shellRunning, Command: session.shellCommand, StartedAtUnix: session.shellStartedAtUnix}
+	return orchestratorInfoFor(session.id, session.name, session.envs, "running", session.serial, session.aiBusy, session.transient, shell), true
 }
 
 // runningOrchestratorConversation returns the conversation a live session is
@@ -1328,11 +1370,11 @@ func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInf
 	// written here survives that. A transient (Investigate) session has no
 	// persisted definition to reopen, so it is deliberately not recorded.
 	if !transient {
-		if err := recordOpenOrchestrator(a.deps.orchestratorOpenPath, id); err != nil {
+		if err := recordOpenOrchestrator(a.deps.orchestratorOpenPath, id, conversationID, orchestratorScopeOf(envs)); err != nil {
 			log.Printf("erun-app: record open orchestrator %s: %v", id, err)
 		}
 	}
-	return orchestratorInfoFor(id, name, envs, "running", serial, false, transient), nil
+	return orchestratorInfoFor(id, name, envs, "running", serial, false, transient, orchestratorShellSnapshot{}), nil
 }
 
 // ListOrchestrators merges the persisted definitions (each tagged running or
@@ -1350,14 +1392,16 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 		status := "stopped"
 		sessionID := 0
 		busy := false
+		shell := orchestratorShellSnapshot{}
 		if session := a.orchestrators[config.ID]; session != nil {
 			if managed := a.sessions[orchestratorSessionKey(config.ID)]; managed != nil && !managed.closed {
 				status = "running"
 				sessionID = session.serial
 				busy = session.aiBusy
+				shell = orchestratorShellSnapshot{Running: session.shellRunning, Command: session.shellCommand, StartedAtUnix: session.shellStartedAtUnix}
 			}
 		}
-		out = append(out, orchestratorInfoFor(config.ID, config.Name, config.Environments, status, sessionID, busy, false))
+		out = append(out, orchestratorInfoFor(config.ID, config.Name, config.Environments, status, sessionID, busy, false, shell))
 		seen[config.ID] = struct{}{}
 	}
 	for id, session := range a.orchestrators {
@@ -1368,7 +1412,8 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 		if managed == nil || managed.closed {
 			continue
 		}
-		out = append(out, orchestratorInfoFor(id, session.name, session.envs, "running", session.serial, session.aiBusy, true))
+		shell := orchestratorShellSnapshot{Running: session.shellRunning, Command: session.shellCommand, StartedAtUnix: session.shellStartedAtUnix}
+		out = append(out, orchestratorInfoFor(id, session.name, session.envs, "running", session.serial, session.aiBusy, true, shell))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out

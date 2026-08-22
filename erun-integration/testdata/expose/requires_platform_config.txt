@@ -1,2 +1,2 @@
 audit: erun expose --dry-run --ip <LOOPBACK> team dev api
-expose requires a platform block with a base domain in .erun/config.yaml (the services zone tenant hostnames live under)
+a platform block with a base domain is required in .erun/config.yaml (the services zone tenant hostnames live under)

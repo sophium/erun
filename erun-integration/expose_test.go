@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/sophium/erun/erun-integration/internal/env"
@@ -21,7 +22,11 @@ func TestExpose(t *testing.T) {
 	})
 
 	t.Run("dry_run", func(t *testing.T) {
-		// Happy path: a platform block plus an env yields a complete expose plan with no side effects.
+		// Happy path: a platform block plus an env yields a complete expose plan
+		// with no side effects. TLS is requested by default (no --no-tls) but no
+		// DNS-01 broker flags are set, so the plan resolves to http-only and says
+		// why, rather than the Ingress claiming https with nothing to ever
+		// populate the certificate Secret.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedGitRepo(t, setup.Cwd)
@@ -39,6 +44,28 @@ func TestExpose(t *testing.T) {
 		fixture.SeedProjectK8sConfig(t, setup, "platform:\n  basedomain: erunpaas.com\n  env: frs-prod\n  authoritativeip: 203.0.113.10\n")
 		result := erun.Run(t, []string{"expose", "team", "dev", "api", "--ip", "203.0.113.10", "--no-tls", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		golden.Equal(t, "expose/dry_run_no_tls", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_with_tls_provisioning", func(t *testing.T) {
+		// --dns01-token-file + --dns01-broker-url + --acme-email together
+		// provision a per-env cert-manager Issuer + Certificate through the
+		// DNS-01 broker, so the wildcard TLS Secret the Ingress references
+		// actually gets populated. The token file's content never
+		// appears in the trace -- only its path.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectK8sConfig(t, setup, "platform:\n  basedomain: erunpaas.com\n  env: frs-prod\n  authoritativeip: 203.0.113.10\n")
+		tokenPath := filepath.Join(setup.Cwd, "dns01-token")
+		mustWriteFile(t, tokenPath, "test-dns01-broker-token\n")
+		result := erun.Run(t, []string{
+			"expose", "team", "dev", "api", "--ip", "203.0.113.10",
+			"--dns01-token-file", tokenPath,
+			"--dns01-broker-url", "https://api.frs-prod.services.erunpaas.com/v1/dns01",
+			"--acme-email", "admin@example.com",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "expose/dry_run_with_tls_provisioning", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_cross_cluster", func(t *testing.T) {
@@ -137,7 +164,7 @@ func TestExpose(t *testing.T) {
 		// --services-zone/--platform-namespace supply what a project checkout
 		// would otherwise resolve, so expose runs from a directory with no git
 		// repo at all -- the shape a hosted deploy Job runs in, which has no
-		// checkout to read .erun/config.yaml from (#1086).
+		// checkout to read .erun/config.yaml from.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"expose", "team", "dev", "api", "--ip", "203.0.113.10",
@@ -165,7 +192,7 @@ func TestExpose(t *testing.T) {
 
 	t.Run("skip_if_unconfigured_no_project", func(t *testing.T) {
 		// --skip-if-unconfigured must cover "no project at all", not just "a
-		// project with no platform block" -- the hole #1086 reported: the deploy
+		// project with no platform block" -- a gap that used to mean the deploy
 		// Job's --skip-if-unconfigured could not save it because project
 		// resolution itself failed outright with "cannot find git project"
 		// before the skip decision ever ran.

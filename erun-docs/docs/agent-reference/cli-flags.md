@@ -59,6 +59,7 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 | `--codecommit-ssh-key-id <id>` | string (`APKA…` shape) | unset | Must start with `APKA`; must be a valid IAM key id (length 21). | Stored in the in-pod bootstrap marker (`bootstrap.yaml` → `codecommitSshKeyId`). |
 | `--confirm-environment` | bool | `false` | — | Equivalent to `-y` for the env-overwrite confirmation only. |
 | `--platform-account` | bool | `false` | — | Makes the env a **cluster platform account**: `EnvConfig.platformaccount = true`, which threads `--set platformAccount=true` at deploy so the runtime chart binds the env's ServiceAccount to the built-in `cluster-admin` (a `<release>-platform` `ClusterRoleBinding`). Lets in-pod platform Terraform (the [cluster edge](/agent-reference/skills-spec#erun-enable-hosting-edge)) and component installs manage cluster-scoped resources. The first deploy that adds the binding must run from an admin-capable context (the API server's escalation check). |
+| `--components <a,b,…>` | list of strings | unset — nothing changes. | Any string; not validated against a chart universe at init time (that check happens at deploy time). | `EnvConfig.deploy.components`, the [saved deploy selection](/reference/configuration#envconfig) — the same field `erun deploy --components` overrides per run but never persists. An explicit empty value (`--components ''`), distinct from omitting the flag, clears a saved selection and returns the env to its repo [`k8s.deployments`](#components-value-set) plan; there is no other command that resets it. |
 
 ### Re-initializing an existing environment {#init-existing-env}
 
@@ -69,11 +70,12 @@ A setting is applied because it was supplied, not because of the type the invoca
 | Input | Supplied | Omitted |
 |---|---|---|
 | `--version` | Sets `EnvConfig.runtimeversion`. Trace: `init: runtime version set to <v>` (or `… already <v>`). | Keeps it. Trace: `init: runtime version not given; keeping <v>`. The transport's built-in version fills in **only** when the env records none, tracing `init: env records no runtime version; adopting <v>`. |
-| `--runtime-image` | Sets `EnvConfig.runtimeimage`. | Keeps it. Trace: `init: runtime image not given; keeping <ref>`. |
+| `--runtime-image` | Sets `EnvConfig.runtimeimage` — **tagless**, even when the flag value carries a tag (a trailing `:<tag>`/digest is stripped before persisting). [Deploy resolution](/reference/configuration#advanced-image-overrides) already pins a tagless reference to the env's own runtime version on every deploy; persisting the tag is what leaves a stale pin behind after the env's version moves on, so init never records one. | Keeps it. Trace: `init: runtime image not given; keeping <ref>`. |
 | `--runtime-registry` | Sets `EnvConfig.runtimeregistry`. | Keeps it. |
 | `--image-pull-secret` | Replaces `EnvConfig.imagepullsecrets` with the trimmed, de-duplicated list. | Keeps the recorded list. |
 | `--runtime-cpu` / `--runtime-memory` | Merges onto `EnvConfig.runtimepod`: the limit named is set, the other is kept. Trace: `init: runtime pod resources set to cpu=<c> memory=<m>`. | Keeps both. Trace: `init: runtime pod resources not given; keeping cpu=<c> memory=<m>`. |
 | `--type` / `--remote` | Retypes the env — see below. | **Never** retypes. Trace: `init: --type not given; keeping env type "<t>"`. |
+| `--components` | Replaces `EnvConfig.deploy.components` outright, including with an empty list when the value is explicitly empty (`--components ''`) — that clears a saved selection and returns deploy to the repo plan. Trace: `init: deploy components set to <a,b,…>` (or `… (cleared — deploy now follows the repo k8s.deployments plan)`). | Keeps the recorded selection. Trace: `init: deploy components not given; keeping <a,b,…>` (silent when there was none). |
 
 The `--type` default is the asymmetry that matters: a new env with no `--type` resolves to `local-agent`, but that fallback is a default, not a request, so an existing env is not moved by it.
 
@@ -400,11 +402,13 @@ helm upgrade --install … oci://ghcr.io/sophium/charts/erun-devops --version 1.
 The selection resolves by **precedence** — the first non-empty tier wins entirely; tiers do not merge:
 
 1. `--components <a,b,…>` — the explicit one-shot selection for this run.
-2. `EnvConfig.deploy.components` — the environment's saved per-machine default (the desktop app's Runtime-tab checklist writes it; see [Configuration · `deploy.components`](/reference/configuration#envconfig)).
+2. `EnvConfig.deploy.components` — the environment's saved per-machine default (`erun init --components <a,b,…>`, or the desktop app's Runtime-tab checklist; see [Configuration · `deploy.components`](/reference/configuration#envconfig)).
 3. `ProjectConfig.environments.<env>.k8s.deployments[]` — the repo deployment plan.
 4. Empty (none of the above name anything) → the runtime chart alone, which bootstraps or heals the environment.
 
 A chart deploys **iff** its component name is in the resolved selection. The runtime deploys only when the selection names a runtime alias, or when the selection is empty (tier 4) — an explicit selection that omits the runtime deploys the named components without it. `erun-powerdns` is the platform's authoritative DNS singleton; it runs the gpgsql backend against `erun-backend-postgres`, so sequence it after postgres in the plan. `erun-zitadel` is the platform's hosted IdP singleton, sequenced after postgres for the same reason (its own `zitadel` database on the shared instance); it renders one pod carrying both Zitadel core and the separate Login V2 container, a Service, and one Ingress routing `/ui/v2/login` to login and everything else to core, and it refuses to render without `zitadel.masterkeySecretName` naming an existing Secret and an auth host resolvable from the [`platform:` block](/reference/configuration#platform-block). The dry-run trace names the tier: `deploy: component selection source <tier>; deploying the runtime chart alone` (empty selection) or `deploy: component selection source <tier>; components <a, b, …>`.
+
+Tiers never merge, so a saved tier-2 selection permanently shadows a richer tier-3 plan — the same divergence a `--components` flag run once and never cleared can leave behind. Whenever the resolved source is tier 2 and the repo plan (tier 3) names components the saved set omits, a second trace line says so at normal verbosity: `deploy: saved components shadow the repo plan; plan also names <a, b, …>`. `erun init --components ''` (an explicit empty value, not an omitted flag) clears the saved selection outright and returns the environment to the plan; nothing else exists today that resets it.
 
 ### MCP-auth stickiness and the downgrade guard {#deploy-mcp-auth}
 
@@ -414,12 +418,13 @@ A chart deploys **iff** its component name is in the resolved selection. The run
 |---|---|
 | `--mcp-auth-public-key <path>` (MCP `deploy` `mcp_auth_public_key` input) | Trust that key. The path is persisted to `EnvConfig.mcpauthpublickeypath` at the point the deploy applies the key — after the `<release>-mcp-auth` Secret apply, before the `helm upgrade` — so a rollout that fails afterwards still leaves the environment naming the key its release trusts. Trace: `deploy: mcp auth: recording the public key <path> on <tenant>/<environment>`, emitted only when the recorded value would change. |
 | Neither flag, `EnvConfig.mcpauthpublickeypath` set | Rethread the recorded key. Trace: `deploy: mcp auth: rethreading the env's recorded public key <path>`. |
-| Neither flag, no recorded key, `EnvConfig.mcpauthissuer` set | The `https://` OIDC-issuer path (unchanged; already an env setting). |
-| `--no-mcp-auth` (MCP `deploy` `no_mcp_auth` input) | Resolve **no** authentication and clear `mcpauthpublickeypath` — the clear is written after the unauthenticated release has rolled out, since only then has the edge actually stopped trusting the key. Suppresses the OIDC-issuer path for this deploy without erasing `mcpauthissuer`. Trace: `deploy: mcp auth disabled by request; …`. |
+| `--no-mcp-auth` (MCP `deploy` `no_mcp_auth` input) | Resolve **no** authentication and clear `mcpauthpublickeypath` — the clear is written after the unauthenticated release has rolled out, since only then has the edge actually stopped trusting the key. Trace: `deploy: mcp auth disabled by request; …`. |
+
+There is one signing mechanism — a `file://`-issued key — used by two callers: the desktop passes its own key via `--mcp-auth-public-key`, and a hosted environment's server-side deploy Job passes the backend's own MCP-signing public key (`mcptoken.Signer`) the same way, automatically, so the console's minted tokens verify with no Operator action. Both write the same `mcpAuth.*` chart values; only the key's origin differs.
 
 **Downgrade guard.** When the resolved plan has authentication off and `--no-mcp-auth` was not given, deploy reads the live release's values (`helm get values <release> -o json`) and fails at resolution if `mcpAuth.enabled` is true — the case of an environment that enabled authentication before the key was recorded. Error code `MCP_AUTH_DOWNGRADE_REFUSED`; the message names what the release trusts, resolved from the same read plus the release's own Secret:
 
-1. `mcpAuth.issuer` is an OIDC (`https://`) issuer → the message names that issuer and points at the environment's `mcpauthissuer`, **not** at `--mcp-auth-public-key`: this arm has no local key, so asking for one would send the Operator after a file that should not exist. Trace: `deploy: mcp auth: release <release> authenticates against the OIDC issuer <issuer>; no local key is involved`.
+1. `mcpAuth.issuer` is an OIDC (`https://`) issuer — only possible on a legacy or hand-configured release, since erun has no supported way to write one — the message names that issuer and says so, pointing at `--mcp-auth-public-key` to switch the release onto the key-based path instead. Trace: `deploy: mcp auth: release <release> authenticates against the OIDC issuer <issuer>; no local key is involved`.
 2. Otherwise the release trusts a desktop key, so deploy reads it out of `mcpAuth.secretName` (defaulting to `<release>-mcp-auth`) with `kubectl get secret <name> -o jsonpath={.data.desktopid\.pub}` and compares it byte-for-byte with this host's desktop identity public key (`<user config dir>/ERun/desktopid.pub`):
    - **Match** → the message names that path, and its `sha256`, as the key to pass to `--mcp-auth-public-key` — the match is also what says re-supplying it keeps the edge's existing trust rather than rotating it. Trace: `deploy: mcp auth: release <release> trusts this host's desktop identity key <path>`.
    - **No match** → the message names the Secret and the key's `sha256`, and says it is not this host's desktop identity key.
@@ -596,6 +601,23 @@ Lists one directory one level deep over `kubectl exec … find <dir> -maxdepth 1
 | `--force` | bool | `false` | Overwrite an existing local destination. |
 
 A file streams as base64; a folder streams as a `tar.gz` archive (saved as `<name>.tar.gz`). The payload is SHA-256'd and capped at 100 MB (`MaxRuntimeOutputBytes`) — a larger file errors before transfer. `--output json` emits `{name, dest, size, sha256, isArchive, archiveFormat}`. Both subcommands support `--dry-run` (traces the `kubectl exec` argv + script and the planned destination; no I/O).
+
+---
+
+## `erun inputs`
+
+`erun inputs upload` is the inverse of `erun outputs download`: it streams a file from this host into an environment's runtime pod over `kubectl exec -i` (stdin), never through argv or a base64 blob in a tool argument. It has no in-pod MCP counterpart — the edge runs in the pod and has no path back to the operator's filesystem — but an MCP-connected orchestrator reaches the same transfer through the `inputs_upload` local tool `erun mcp proxy` serves (see [MCP overview § Host-served](/mcp/overview#host-served)).
+
+### `erun inputs upload`
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `<local-path>` (arg) | path | **required** | File on this host to upload; must exist and not be a directory. |
+| `<remote-path>` (arg) | absolute path | **required, never defaulted** | Full destination inside the pod, including the file name. Must be absolute and free of `..`. Not defaulted deliberately: a transfer can never silently land somewhere a background process (e.g. the workspace-sync mirror) reconciles away. |
+| `--tenant <t>` | string | current scope | Target tenant. |
+| `--environment <e>` | string | current scope | Target environment; requires `--tenant`. |
+
+The remote script creates the destination directory if missing, writes to a same-directory temp file, and renames into place — so a killed transfer never leaves a partial file visible at the final path — then reports the written size and SHA-256. The command errors if that checksum (or size) disagrees with what was sent. `--output json` emits `{remotePath, bytes, sha256}`. `--dry-run` traces the `kubectl exec` argv and the upload script without sending anything (the local file must still exist to resolve its size).
 
 ---
 

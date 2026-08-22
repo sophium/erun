@@ -185,6 +185,28 @@ func TestInit(t *testing.T) {
 		golden.Equal(t, "init/remote_with_runtime_image_override", normalize.Apply(result.Combined))
 	})
 
+	// A tagged --runtime-image is persisted tagless, so the deploy this
+	// same init performs (and every later redeploy) pins the image to the env's
+	// own runtime version instead of sticking to the tag the operator happened
+	// to type at init time.
+	t.Run("remote_with_tagged_runtime_image_persists_tagless", func(t *testing.T) {
+		setup := env.New(t)
+		args := []string{
+			"init", "team", "dev",
+			"--remote",
+			"--version", "1.0.0",
+			"--runtime-image", "custom-devops:stale-tag",
+			"--kubernetes-context", "test-context",
+			"--container-registry", "registry.example/test",
+			"--no-git",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "init/remote_with_tagged_runtime_image_persists_tagless", normalize.Apply(result.Combined))
+	})
+
 	t.Run("remote_with_runtime_resources", func(t *testing.T) {
 		setup := env.New(t)
 		args := []string{
@@ -1028,6 +1050,53 @@ func TestInit(t *testing.T) {
 		}
 		golden.Equal(t, "init/reinit_records_an_image_pull_secret_without_restating_the_type", normalize.Apply(result.Combined))
 		assertEnvConfigContains(t, setup, "team", "dev", "imagepullsecrets:", "- ecr-pull", "type: remote-agent", "runtimeversion: 1.0.0")
+	})
+
+	t.Run("reinit_sets_saved_deploy_components", func(t *testing.T) {
+		// erun init gained --components so a saved deploy default can be
+		// set without hand-editing the env's config.yaml.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		args := []string{
+			"init", "team", "dev",
+			"--components", "erun-backend-api,erun-backend-db",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/reinit_sets_saved_deploy_components", normalize.Apply(result.Combined))
+		assertEnvConfigContains(t, setup, "team", "dev", "components:", "- erun-backend-api", "- erun-backend-db")
+	})
+
+	t.Run("reinit_clears_saved_deploy_components_returns_env_to_plan", func(t *testing.T) {
+		// The way back: an env stuck on a saved selection that shadows the
+		// repo's k8s.deployments plan had no command to return to the plan short
+		// of hand-editing erun's config store. `--components ''` is that command:
+		// it clears the saved set outright rather than being read as "nothing
+		// passed, leave it alone".
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithDeployComponents(t, setup, "team", "dev", []string{"erun-backend-postgres"})
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		args := []string{
+			"init", "team", "dev",
+			"--components", "",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/reinit_clears_saved_deploy_components_returns_env_to_plan", normalize.Apply(result.Combined))
+		assertEnvConfigLacks(t, setup, "team", "dev", "erun-backend-postgres", "components:")
 	})
 
 	t.Run("reinit_runtime_env_records_a_registry_and_keeps_its_type", func(t *testing.T) {

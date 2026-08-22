@@ -80,7 +80,7 @@ func (r ProvisionRoutes) provision(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// The v1 single-cluster placement decision (#605): reuse the exact check
+	// The v1 single-cluster placement decision: reuse the exact check
 	// the executing POST /v1/environments applies, so this preview can never
 	// promise a placement the real create/deploy path would then refuse.
 	placementContext := strings.TrimSpace(body.KubernetesContext)
@@ -221,8 +221,9 @@ func provisionPlan(in provisionPlanInput) []string {
 		return plan
 	}
 	plan = append(plan, fmt.Sprintf("deploy: would helm install the erun-devops runtime chart (release %s) into %s", eruncommon.RuntimeReleaseName(in.tenantName), namespace))
-	plan = append(plan, "auth: would wire the runtime's OIDC auth edge (issuer, client id) via the erun-devops chart values")
-	return append(plan, fmt.Sprintf("expose: would wire mcp.%s.<services zone> via a per-env wildcard DNS record and Host-routing Ingress (skipped when the platform has no services zone configured)", namespace))
+	plan = append(plan, "auth: would inject this backend's MCP-signing public key so the runtime's MCP edge trusts tokens minted for the console (skipped when the backend has no MCP signing key configured)")
+	plan = append(plan, fmt.Sprintf("expose: would wire mcp.%s.<services zone> via a per-env wildcard DNS record and Host-routing Ingress (skipped when the platform has no services zone configured)", namespace))
+	return append(plan, "tls: would provision a per-env wildcard certificate through the DNS-01 broker (skipped when the platform has no ACME email or DNS-01 broker configured)")
 }
 
 // contextPlanLine describes where the environment lands and the reference

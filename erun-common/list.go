@@ -125,7 +125,7 @@ func ResolveListResult(store ListStore, findProjectRoot ProjectFinderFunc, param
 	if err != nil {
 		return ListResult{}, err
 	}
-	cloudProviders, err := ListCloudProviderStatuses(store, CloudDependencies{})
+	cloudProviders, err := ListCloudProviderStatuses(store, DefaultCloudDependencies())
 	if err != nil {
 		return ListResult{}, err
 	}

@@ -1,0 +1,2 @@
+audit: erun inputs upload --dry-run <TMP> <HOME>/.erun/outputs/evidence.bin
+local file "<TMP>": stat <TMP> no such file or directory

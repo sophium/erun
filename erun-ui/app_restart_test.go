@@ -341,7 +341,10 @@ func TestRestoreSlotRejectsAnIDThatIsNotAPlainFileName(t *testing.T) {
 
 // The bug: an orchestrator id is mutable and reusable, so a hand-off recorded
 // under one scope must not wake a conversation into another. The refusal is
-// visible — the orchestrator still reopens, idle, carrying the reason.
+// visible — the orchestrator still reopens, idle, carrying the reason. It still
+// resumes its own last-recorded conversation rather than nothing: the refusal
+// is about not auto-running a task into the wrong scope, not about whether the
+// conversation itself is safe to reopen idle.
 func TestResumeIsRefusedWhenTheScopeChanged(t *testing.T) {
 	app, restoreDir := restartTestApp(t)
 	id := createAndStartOrchestrator(t, app)
@@ -349,7 +352,8 @@ func TestResumeIsRefusedWhenTheScopeChanged(t *testing.T) {
 	if err := app.RestartApp(id); err != nil {
 		t.Fatalf("RestartApp failed: %v", err)
 	}
-	stageOrchestratorConversation(t, readRestoreState(t, restoreDir, id).ConversationID)
+	liveConversation := readRestoreState(t, restoreDir, id).ConversationID
+	stageOrchestratorConversation(t, liveConversation)
 	if _, err := app.UpdateOrchestrator(id, "agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "laptop"}}); err != nil {
 		t.Fatalf("UpdateOrchestrator failed: %v", err)
 	}
@@ -358,8 +362,11 @@ func TestResumeIsRefusedWhenTheScopeChanged(t *testing.T) {
 	if target.OrchestratorID != id {
 		t.Fatalf("expected the orchestrator to still be reopened, got %+v", target)
 	}
-	if target.ResumePrompt != "" || target.ConversationID != "" {
+	if target.ResumePrompt != "" {
 		t.Fatalf("expected no task to be delivered into a changed scope, got %+v", target)
+	}
+	if target.ConversationID != liveConversation {
+		t.Fatalf("expected the orchestrator's own conversation to still be resumed idle, got %+v", target)
 	}
 	if !strings.Contains(target.Notice, "frs/dev") || !strings.Contains(target.Notice, "frs/laptop") {
 		t.Fatalf("expected the notice to name both scopes, got %q", target.Notice)
