@@ -38,11 +38,22 @@ The check runs **with the registry credential the deploy Job itself pulls with**
 
 `stop` (`POST .../stop`) and `delete` (`DELETE`) run the same way — a short-lived Job running `erun stop`/`erun delete` — but neither is a `status` transition: a stopped environment stays `running` (scaled to zero, not torn down), and a successful delete removes the row entirely rather than moving it to a terminal status.
 
-## Single-cluster placement (v1) {#single-cluster-placement}
+## Placement {#single-cluster-placement}
 
-Every deploy/stop/delete Job runs **in the same cluster the control plane's own pod runs in** — it has no mechanism to reach any other cluster, because it authenticates in-cluster via its own ServiceAccount rather than a per-Job kubeconfig. A `runtime` environment therefore cannot name a [cloud context](/cli/context) or kubernetes context to deploy into: `POST /v1/environments` and `POST /v1/provision` both refuse a `runtime` environment that sets `contextId` or `kubernetesContext`, with an actionable `400` naming the constraint, rather than silently accepting and ignoring the field. `remote-agent`/`local-agent` environments — never server-side deployed — are unaffected.
+A deploy/stop/delete Job always runs **in the control plane's own cluster** — that never changes — but the `erun` command it runs can now authenticate against a **different** cluster: its own bootstrapped [cloud context](/concepts/cloud-contexts). The Job seeds a kubeconfig pointing at the placed context's cluster (its public API server, over the context's own custodied k3s admin-token credential) instead of the in-cluster ServiceAccount token it uses for the platform's own cluster, and every subsequent `erun deploy`/`stop`/`delete` call inside the Job runs against that cluster.
 
-This is a deliberate v1 scope decision, not an oversight: multi-cluster placement (deploying a tenant's runtime environments into their own bootstrapped [cloud context](/concepts/cloud-contexts) instead of the platform's cluster) needs a per-Job credential path that does not exist yet. Tracked as [erun#1112](https://github.com/sophium/erun/issues/1112). `(Planned.)`
+**Where an environment lands.** A `runtime` environment names its target with `contextId` (a context this tenant has already registered via [`POST /v1/contexts`](/agent-reference/api-protocol#post-v1contexts)):
+
+- **An explicit `contextId`** is validated to belong to the caller's tenant and to have room, then placed there. An unknown or cross-tenant id is a `400`; a full context is a `409` naming the context and its ceiling.
+- **No `contextId`** auto-selects the first of the tenant's own registered, `running` contexts with room. A tenant that has registered no context at all keeps the original default — the platform's own cluster — so this is fully backward compatible for every tenant that has never bootstrapped one.
+- **Once a tenant has registered at least one context**, exhausting all of them (none running, or all full) is a `409` naming why, rather than silently falling back to the platform's own cluster — a placement the caller never asked for.
+- A raw `kubernetesContext` string (as opposed to a registered `contextId`) is still refused with `400`: it names no known credential to authenticate with.
+
+`remote-agent`/`local-agent` environments — never server-side deployed — are unaffected by any of this.
+
+**Capacity.** Each context names its own placement ceiling, `maxEnvironments` (default `20`, operator-settable per context at creation) — the per-instance inventory this feature reads from; adding a cluster to the inventory is a `POST /v1/contexts` call, not a code change.
+
+**Credential custody.** The context's k3s admin token is decrypted from `context_credentials` immediately before each Job run — never persisted in the durable provisioning workflow's own checkpoint — and handed to the Job through a Kubernetes `Secret` the control plane's own identity creates in its own namespace, referenced by the Job container via `secretKeyRef`. The token itself never appears in the Job's spec, command line, or logs.
 
 ## Provisioner RBAC
 

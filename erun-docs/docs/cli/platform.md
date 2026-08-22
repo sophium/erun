@@ -64,7 +64,7 @@ Registers a hosted environment. For a `runtime` environment with `--runtime-vers
 |---|---|
 | `--name` | Environment name (DNS-1123 label; forms the `<tenant>-<env>` namespace). |
 | `--type` | `runtime`, `remote-agent`, or `local-agent`. |
-| `--context-id` / `--kubernetes-context` | **Not supported for a `runtime` environment in v1** — see [single-cluster placement](/concepts/hosted-platform#single-cluster-placement). |
+| `--context-id` / `--kubernetes-context` | For a `runtime` environment, `--context-id` places the deploy on that registered [cloud context](/concepts/hosted-platform#single-cluster-placement) (validated to belong to your tenant, with room); omit both to auto-select one of your own registered contexts, falling back to the platform's own cluster if you have none. `--kubernetes-context` (a raw name, not a registered context) is **not supported for a `runtime` environment** — it names no known credential to authenticate with. |
 | `--runtime-version` | Published erun runtime version to deploy (runtime environments only). |
 
 ### `platform env deploy`
@@ -92,7 +92,7 @@ Manages the platform's own cloud contexts — the tenant's bootstrapped clusters
 
 ### `platform provision`
 
-Previews the full ordered plan for provisioning a hosted environment — tenant, quota, context, namespace, registration, and (for a runtime environment) deploy — without executing any of it or writing to the database. Pass either `--kubernetes-context` to reuse an existing context, or `--context-name`/`--context-alias`/`--context-region` to bootstrap a new one. See [single-cluster placement](/concepts/hosted-platform#single-cluster-placement) for why a `runtime` environment can only ever preview the platform's own cluster today.
+Previews the full ordered plan for provisioning a hosted environment — tenant, quota, context, namespace, registration, and (for a runtime environment) deploy — without executing any of it or writing to the database. Pass either `--kubernetes-context` to reuse an existing context by raw name, or `--context-name`/`--context-alias`/`--context-region` to bootstrap a new one; either is refused for a `runtime` environment, which can only ever preview the platform's own cluster here. This preview does not yet cover placing a `runtime` environment onto an already-registered `--context-id` — that decision is made live by `env register` (no CLI preview surface for it yet); see [Placement](/concepts/hosted-platform#single-cluster-placement) for the full decision it makes.
 
 ## Examples
 
@@ -118,7 +118,9 @@ erun platform tenant list --output json
 | No erun-type cloud alias configured. | Aborts before any network call, naming `erun cloud init erun --api-url <url>`. |
 | More than one erun-type alias configured, `--erun-alias` omitted. | Aborts asking for an explicit `--erun-alias`. |
 | `tenant create`/`user enroll --tenant-id <other>`/`user list --tenant-id <other>` by a non-operations caller. | `403 Forbidden`. |
-| `env register`/`env deploy` names a context or kubernetes context for a `runtime` environment. | `400 Bad Request` — v1 single-cluster placement; see [Hosted platform](/concepts/hosted-platform#single-cluster-placement). |
+| `env register` names `--kubernetes-context` (a raw name, not a registered context) for a `runtime` environment, or `--context-id` that does not resolve for your tenant. | `400 Bad Request`; see [Placement](/concepts/hosted-platform#single-cluster-placement). |
+| `env register` names a `--context-id` that is already at its `maxEnvironments`, or names none while every one of your tenant's own registered contexts is full or not yet running. | `409 Conflict`. |
+| `platform provision` names `--kubernetes-context` or a bootstrap `--context-*` set for a `runtime` environment. | `400 Bad Request` — this preview does not support `runtime` placement onto a context; see [Placement](/concepts/hosted-platform#single-cluster-placement). |
 | `env deploy` while a deploy is already in progress. | `409 Conflict`. |
 | `env get`/`env deploy`/`env stop`/`env delete` on an unknown environment id. | `404 Not Found`. |
 | `env stop`/`env delete`/`context create`/`env register` (with a version) when the platform has no deploy/lifecycle executor configured. | `501 Not Implemented`. |

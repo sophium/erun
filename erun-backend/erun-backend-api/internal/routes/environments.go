@@ -15,6 +15,7 @@ import (
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/provision"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
@@ -23,11 +24,22 @@ type EnvironmentRepository interface {
 	Get(ctx context.Context, environmentID string) (model.Environment, error)
 	Create(ctx context.Context, environment model.Environment) (model.Environment, error)
 	Count(ctx context.Context) (int, error)
+	// CountByContext reports how many environments already occupy a placement
+	// candidate, for the capacity check (#1112).
+	CountByContext(ctx context.Context, contextID string) (int, error)
 	ClaimDeploy(ctx context.Context, environmentID string, staleAfter time.Duration) (bool, error)
 	// MarkDeployFailed records a deploy claim that never reached the durable
 	// workflow (see writeStartProvisioningError), so the environment does not
 	// stay stranded in provisioning.
 	MarkDeployFailed(ctx context.Context, environmentID, reason string) error
+}
+
+// PlacementContextRepository is the read access placement (#1112) needs: list
+// the tenant's own registered contexts (RLS-scoped) for auto-selection, and
+// fetch one by id to validate an explicit request and read its coordinates.
+type PlacementContextRepository interface {
+	List(ctx context.Context) ([]model.Context, error)
+	Get(ctx context.Context, contextID string) (model.Context, error)
 }
 
 // EnvironmentProvisioner starts the durable server-side deploy of an
@@ -66,6 +78,9 @@ type EnvironmentRoutes struct {
 	// tenants resolves the caller's tenant name (not UUID) for the deploy, which
 	// forms the <tenant>-<env> namespace and runtime release name.
 	tenants ConfigTenantRepository
+	// contexts resolves placement candidates (#1112): the tenant's own
+	// registered clusters, read-only from this route's point of view.
+	contexts PlacementContextRepository
 	// provisioner is nil when live env provisioning is not wired; then create
 	// only registers the row.
 	provisioner EnvironmentProvisioner
@@ -88,8 +103,8 @@ type createEnvironmentRequest struct {
 	Preview           bool   `json:"preview"`
 }
 
-func RegisterEnvironmentRoutes(register ProtectedRouteRegistrar, environments EnvironmentRepository, quotas TenantQuotaRepository, tenants ConfigTenantRepository, provisioner EnvironmentProvisioner, lifecycle EnvironmentLifecycle) {
-	routes := EnvironmentRoutes{environments: environments, quotas: quotas, tenants: tenants, provisioner: provisioner, lifecycle: lifecycle}
+func RegisterEnvironmentRoutes(register ProtectedRouteRegistrar, environments EnvironmentRepository, quotas TenantQuotaRepository, tenants ConfigTenantRepository, contexts PlacementContextRepository, provisioner EnvironmentProvisioner, lifecycle EnvironmentLifecycle) {
+	routes := EnvironmentRoutes{environments: environments, quotas: quotas, tenants: tenants, contexts: contexts, provisioner: provisioner, lifecycle: lifecycle}
 	register(http.MethodGet, "/v1/environments", http.HandlerFunc(routes.listEnvironments))
 	register(http.MethodPost, "/v1/environments", http.HandlerFunc(routes.createEnvironment))
 	register(http.MethodGet, "/v1/environments/{environment_id}", http.HandlerFunc(routes.getEnvironment))
@@ -153,10 +168,16 @@ func (r EnvironmentRoutes) deleteEnvironment(w http.ResponseWriter, req *http.Re
 }
 
 // lifecycleInput resolves the placement a stop/delete Job needs: the tenant
-// name (RLS-scoped to the caller) and the version the environment last
-// actually deployed, mirroring deployInput's tenant resolution.
+// name (RLS-scoped to the caller), the version the environment last actually
+// deployed, and the cluster it was placed on at create time (#1112) —
+// stop/delete always target that same cluster, never a freshly auto-selected
+// one, mirroring deployInput's tenant resolution.
 func (r EnvironmentRoutes) lifecycleInput(ctx context.Context, environment model.Environment) (provision.EnvLifecycleInput, error) {
 	tenant, err := r.tenants.Current(ctx)
+	if err != nil {
+		return provision.EnvLifecycleInput{}, err
+	}
+	placement, err := r.resolvePlacementCoordinates(ctx, environment.ContextID)
 	if err != nil {
 		return provision.EnvLifecycleInput{}, err
 	}
@@ -165,11 +186,32 @@ func (r EnvironmentRoutes) lifecycleInput(ctx context.Context, environment model
 		version = environment.RuntimeVersion
 	}
 	return provision.EnvLifecycleInput{
-		Tenant:         strings.TrimSpace(tenant.Name),
-		Environment:    environment.Name,
-		EnvironmentID:  environment.EnvironmentID,
-		RunningVersion: version,
+		Tenant:                     strings.TrimSpace(tenant.Name),
+		Environment:                environment.Name,
+		EnvironmentID:              environment.EnvironmentID,
+		RunningVersion:             version,
+		ContextID:                  placement.ContextID,
+		PlacementKubernetesContext: placement.KubernetesContext,
+		PlacementServerURL:         placement.ServerURL,
 	}, nil
+}
+
+// resolvePlacementCoordinates reads back an already-placed environment's
+// target-cluster coordinates: no capacity check, no auto-select. Placement is
+// decided once, at create time (resolvePlacement); a redeploy, stop, or
+// delete always targets the cluster the environment was already placed on.
+// Empty contextID (the platform's own cluster) resolves to the zero
+// resolvedPlacement with no repository read.
+func (r EnvironmentRoutes) resolvePlacementCoordinates(ctx context.Context, contextID string) (resolvedPlacement, error) {
+	contextID = strings.TrimSpace(contextID)
+	if contextID == "" {
+		return resolvedPlacement{}, nil
+	}
+	cloudContext, err := r.contexts.Get(ctx, contextID)
+	if err != nil {
+		return resolvedPlacement{}, err
+	}
+	return placementFromContext(cloudContext), nil
 }
 
 // deployEnvironmentRequest re-deploys at an explicit version; omitted, the
@@ -231,41 +273,179 @@ func (r EnvironmentRoutes) deployEnvironment(w http.ResponseWriter, req *http.Re
 	writeJSON(w, http.StatusAccepted, environment)
 }
 
-// errCrossClusterPlacementUnsupported is the actionable v1 refusal for a
-// runtime environment that names a cluster context: the deploy Job has no
-// mechanism to target any cluster but the one the control plane itself runs
-// in (see deployexec.Launcher and provision.deployJobParams, which never
-// reference a context at all), so honoring a different one would silently
-// deploy to the wrong place instead. Refusing at request time — rather than
-// accepting the field and failing the async deploy later — gives the caller
-// the answer synchronously instead of a poll loop's eventual "failed" status.
+// errCrossClusterPlacementUnsupported is the actionable refusal for a runtime
+// environment that names a raw kubernetesContext string rather than a
+// registered contextId: this platform's placement machinery (#1112) resolves
+// a cluster's server URL and admin-token credential from a `contexts` row —
+// a bare context name has neither, so honoring it would still silently
+// deploy to the wrong place (or nowhere real). Register the cluster with
+// POST /v1/contexts first, then reference it by contextId.
 var errCrossClusterPlacementUnsupported = errors.New(
-	"deploying into a specific cluster context is not supported yet: this platform can only deploy runtime environments into its own cluster (v1 single-cluster placement); leave context/kubernetesContext unset",
+	"deploying into a raw kubernetesContext name is not supported: register the cluster with POST /v1/contexts and reference it by contextId, or leave both unset to place into the platform's own cluster",
 )
 
-// resolveDeployPlacement is the explicit v1 single-cluster placement decision
-// (#605): a runtime environment that names a context or kubernetes context is
-// refused, rather than the field being silently accepted and ignored. Only
-// applies to runtime environments — the only type this platform ever
-// server-side deploys.
-func resolveDeployPlacement(environment model.Environment) error {
-	if environment.Type != model.EnvironmentTypeRuntime {
-		return nil
+// errPlacementContextNotFound is the request-time refusal for a contextId
+// that does not resolve for the caller's tenant. PlacementContextRepository's
+// reads are RLS-scoped, so a context belonging to another tenant already
+// reads as not-found here — the same enforcement environments.context_id's
+// composite FK gives Create, surfaced synchronously instead of as an insert
+// error.
+var errPlacementContextNotFound = errors.New("named context was not found for this tenant")
+
+// placementCapacityError names a placement candidate that has no room, so a
+// caller can tell "this context is full" (409, actionable: raise its
+// capacity or pick another) apart from every other placement failure.
+type placementCapacityError struct{ detail string }
+
+func (e *placementCapacityError) Error() string { return e.detail }
+
+// resolvedPlacement is the target cluster a runtime environment's deploy/
+// stop/delete Job authenticates against. The zero value places into the
+// platform's own cluster — the only option before #1112, and still the
+// default for a tenant that has registered no context of its own.
+type resolvedPlacement struct {
+	ContextID         string
+	KubernetesContext string
+	ServerURL         string
+}
+
+// contextStatusRunning is the only status a placement candidate may be in;
+// a context still provisioning or one that failed to bootstrap has no live
+// cluster or custodied credential to place into.
+const contextStatusRunning = "running"
+
+// placementServerURL is the k3s API server a bootstrapped context answers on
+// (eruncommon.configureCloudKubeContext targets every cloud context the same
+// way).
+func placementServerURL(publicIP string) string {
+	return "https://" + strings.TrimSpace(publicIP) + ":6443"
+}
+
+func placementFromContext(cloudContext model.Context) resolvedPlacement {
+	kubernetesContext := strings.TrimSpace(cloudContext.KubernetesContext)
+	if kubernetesContext == "" {
+		kubernetesContext = cloudContext.Name
 	}
-	if strings.TrimSpace(environment.ContextID) != "" || strings.TrimSpace(environment.KubernetesContext) != "" {
-		return errCrossClusterPlacementUnsupported
+	return resolvedPlacement{
+		ContextID:         cloudContext.ContextID,
+		KubernetesContext: kubernetesContext,
+		ServerURL:         placementServerURL(cloudContext.PublicIP),
+	}
+}
+
+// resolvePlacement decides which cluster (if any) a runtime environment's
+// deploy targets (#1112). Only runtime environments are ever server-side
+// deployed, so a non-runtime environment's context/kubernetesContext are
+// opaque references with no placement decision to make — passed through
+// exactly as the caller sent them, unchanged from before #1112 existed. A
+// runtime environment naming a raw kubernetesContext is refused outright
+// (see errCrossClusterPlacementUnsupported); one naming a contextId
+// validates it resolves for the caller's tenant and has room. A runtime
+// environment naming neither auto-selects the tenant's own registered
+// contexts, preserving the pre-#1112 default (the platform's own cluster)
+// for the common case of a tenant that has registered none.
+func (r EnvironmentRoutes) resolvePlacement(ctx context.Context, environment model.Environment) (resolvedPlacement, error) {
+	if environment.Type != model.EnvironmentTypeRuntime {
+		return resolvedPlacement{ContextID: strings.TrimSpace(environment.ContextID)}, nil
+	}
+	if strings.TrimSpace(environment.KubernetesContext) != "" {
+		return resolvedPlacement{}, errCrossClusterPlacementUnsupported
+	}
+	contextID := strings.TrimSpace(environment.ContextID)
+	if contextID == "" {
+		return r.autoSelectPlacement(ctx)
+	}
+	cloudContext, err := r.contexts.Get(ctx, contextID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return resolvedPlacement{}, errPlacementContextNotFound
+		}
+		return resolvedPlacement{}, err
+	}
+	if err := r.validatePlacementCapacity(ctx, cloudContext); err != nil {
+		return resolvedPlacement{}, err
+	}
+	return placementFromContext(cloudContext), nil
+}
+
+// autoSelectPlacement picks the first of the tenant's own running contexts
+// with room, in PlacementContextRepository.List's own deterministic order.
+// A tenant with no registered contexts places into the platform's own
+// cluster — a real, working placement, not a failure. A tenant that HAS
+// registered contexts but none currently qualify (none running, or all at
+// capacity) fails clearly instead of silently falling back, matching #1112's
+// "or fail clearly (naming why) when none qualifies": once a tenant has
+// opted into multi-cluster placement, a request that cannot honor it must
+// say so rather than land somewhere the caller did not ask for.
+func (r EnvironmentRoutes) autoSelectPlacement(ctx context.Context) (resolvedPlacement, error) {
+	contexts, err := r.contexts.List(ctx)
+	if err != nil {
+		return resolvedPlacement{}, err
+	}
+	if len(contexts) == 0 {
+		return resolvedPlacement{}, nil
+	}
+	running := 0
+	for _, cloudContext := range contexts {
+		if cloudContext.Status != contextStatusRunning {
+			continue
+		}
+		running++
+		if err := r.validatePlacementCapacity(ctx, cloudContext); err != nil {
+			var capacityErr *placementCapacityError
+			if errors.As(err, &capacityErr) {
+				continue
+			}
+			return resolvedPlacement{}, err
+		}
+		return placementFromContext(cloudContext), nil
+	}
+	if running == 0 {
+		return resolvedPlacement{}, &placementCapacityError{detail: fmt.Sprintf("no registered context is running yet; %d registered but still provisioning or failed", len(contexts))}
+	}
+	return resolvedPlacement{}, &placementCapacityError{detail: fmt.Sprintf("no registered context has room for a new environment: all %d running context(s) are at capacity", running)}
+}
+
+// validatePlacementCapacity fails clearly, naming the context and its
+// ceiling, when a placement candidate has no room — the "or fail clearly"
+// half of #1112's ask, rather than accepting the request and failing inside
+// the Job.
+func (r EnvironmentRoutes) validatePlacementCapacity(ctx context.Context, cloudContext model.Context) error {
+	count, err := r.environments.CountByContext(ctx, cloudContext.ContextID)
+	if err != nil {
+		return err
+	}
+	if count >= cloudContext.MaxEnvironments {
+		return &placementCapacityError{detail: fmt.Sprintf("context %q is at capacity: %d of %d environments already placed; raise its maxEnvironments or choose another context", cloudContext.Name, count, cloudContext.MaxEnvironments)}
 	}
 	return nil
 }
 
+// writePlacementError maps a resolvePlacement failure to its HTTP status: a
+// caller mistake (unknown context, a raw kubernetesContext) is a 400; no
+// candidate having room (an explicit context at capacity, or the whole
+// auto-select inventory exhausted) is a 409, matching the existing
+// quota-exceeded shape; anything else is a repository-layer failure.
+func writePlacementError(w http.ResponseWriter, err error) {
+	var capacityErr *placementCapacityError
+	switch {
+	case errors.As(err, &capacityErr):
+		writeError(w, http.StatusConflict, capacityErr.Error())
+	case errors.Is(err, errPlacementContextNotFound), errors.Is(err, errCrossClusterPlacementUnsupported):
+		writeError(w, http.StatusBadRequest, err.Error())
+	default:
+		writeRepositoryError(w, err)
+	}
+}
+
 // resolveDeployVersion picks the version to deploy and rejects the requests that
 // have nothing deployable. Its error message is the operator-facing 400 reason.
+// Placement is a create-time decision (resolvePlacement), not re-run here: a
+// redeploy targets the cluster the environment was already placed on, never
+// a freshly auto-selected one.
 func resolveDeployVersion(req *http.Request, environment model.Environment) (string, error) {
 	if environment.Type != model.EnvironmentTypeRuntime {
 		return "", errors.New("only a runtime environment can be deployed")
-	}
-	if err := resolveDeployPlacement(environment); err != nil {
-		return "", err
 	}
 	var body deployEnvironmentRequest
 	// A body-less deploy is the common case (deploy what the env is pinned to),
@@ -406,10 +586,18 @@ func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Re
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := resolveDeployPlacement(environment); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+	// Placement (#1112) is decided once, here, and persisted: an explicit
+	// contextId is validated and capacity-checked, an unset one is
+	// auto-selected from the tenant's own registered contexts (or resolves to
+	// the platform's own cluster when the tenant has none), and a raw
+	// kubernetesContext is refused. The resolved contextId — not necessarily
+	// what the caller sent — is what gets persisted and deployed.
+	placement, err := r.resolvePlacement(req.Context(), environment)
+	if err != nil {
+		writePlacementError(w, err)
 		return
 	}
+	environment.ContextID = placement.ContextID
 
 	count, quota, err := environmentQuotaUsage(req.Context(), r.environments, r.quotas)
 	if err != nil {
@@ -430,17 +618,18 @@ func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Re
 			return
 		}
 	}
-	r.persistAndMaybeProvision(w, req, environment)
+	r.persistAndMaybeProvision(w, req, environment, placement)
 }
 
 // persistAndMaybeProvision creates the row and, for a runtime env with a
 // pinned version and a wired provisioner, starts the durable server-side
-// deploy — the non-preview tail of createEnvironment.
-func (r EnvironmentRoutes) persistAndMaybeProvision(w http.ResponseWriter, req *http.Request, environment model.Environment) {
+// deploy — the non-preview tail of createEnvironment. placement is the
+// decision resolvePlacement already made; created.ContextID (an FK, so a
+// context belonging to another tenant is rejected here too, the enforcement
+// point for tenant isolation on the reference) should always echo it back.
+func (r EnvironmentRoutes) persistAndMaybeProvision(w http.ResponseWriter, req *http.Request, environment model.Environment, placement resolvedPlacement) {
 	created, err := r.environments.Create(req.Context(), environment)
 	if err != nil {
-		// A context belonging to another tenant is rejected here — the
-		// enforcement point for tenant isolation on the context reference.
 		writeRepositoryError(w, err)
 		return
 	}
@@ -454,7 +643,7 @@ func (r EnvironmentRoutes) persistAndMaybeProvision(w http.ResponseWriter, req *
 		writeJSON(w, http.StatusCreated, created)
 		return
 	}
-	if err := r.startProvisioning(req.Context(), created); err != nil {
+	if err := r.startProvisioning(req.Context(), created, placement); err != nil {
 		writeStartProvisioningError(w, err)
 		return
 	}
@@ -481,25 +670,22 @@ func (r EnvironmentRoutes) writeStartDeployError(w http.ResponseWriter, ctx cont
 
 // previewCreateEnvironment resolves and returns the same ordered plan
 // POST /v1/provision renders for this environment, without creating the row.
-// Since resolveDeployPlacement already ran before this is reached, the only
-// way this diverges from what a non-preview call would do is the quota
-// check, which — like /v1/provision — reports rather than 409s so the full
-// intended plan is still visible.
+// Since resolvePlacement already ran before this is reached, environment.ContextID
+// is already the resolved placement decision, and the only way this diverges
+// from what a non-preview call would do is the quota check, which — like
+// /v1/provision — reports rather than 409s so the full intended plan is
+// still visible.
 func (r EnvironmentRoutes) previewCreateEnvironment(w http.ResponseWriter, req *http.Request, environment model.Environment, count int, quota model.TenantQuota) {
 	tenant, err := r.tenants.Current(req.Context())
 	if err != nil {
 		writeRepositoryError(w, err)
 		return
 	}
-	contextRef := environment.KubernetesContext
-	if contextRef == "" {
-		contextRef = environment.ContextID
-	}
 	plan := provisionPlanInput{
 		tenantName:        strings.TrimSpace(tenant.Name),
 		envName:           environment.Name,
 		envType:           environment.Type,
-		kubernetesContext: contextRef,
+		kubernetesContext: environment.ContextID,
 		count:             count,
 		quota:             quota,
 	}
@@ -508,8 +694,9 @@ func (r EnvironmentRoutes) previewCreateEnvironment(w http.ResponseWriter, req *
 
 // startProvisioning kicks off the durable deploy workflow for a newly-created
 // runtime env, keyed by the environment so a retried create never double-deploys.
-func (r EnvironmentRoutes) startProvisioning(ctx context.Context, created model.Environment) error {
-	input, err := r.deployInput(ctx, created, created.RuntimeVersion)
+// placement is the decision createEnvironment's resolvePlacement already made.
+func (r EnvironmentRoutes) startProvisioning(ctx context.Context, created model.Environment, placement resolvedPlacement) error {
+	input, err := r.deployInput(ctx, created, created.RuntimeVersion, placement)
 	if err != nil {
 		return err
 	}
@@ -518,9 +705,15 @@ func (r EnvironmentRoutes) startProvisioning(ctx context.Context, created model.
 
 // startDeploy kicks off the durable deploy workflow for an explicit deploy,
 // tagged with a fresh attempt id so it is a real re-run rather than a replay of
-// the environment's first deploy.
+// the environment's first deploy. It targets the cluster the environment was
+// already placed on at create time (resolvePlacementCoordinates), never a
+// freshly auto-selected one.
 func (r EnvironmentRoutes) startDeploy(ctx context.Context, environment model.Environment, version string) error {
-	input, err := r.deployInput(ctx, environment, version)
+	placement, err := r.resolvePlacementCoordinates(ctx, environment.ContextID)
+	if err != nil {
+		return err
+	}
+	input, err := r.deployInput(ctx, environment, version, placement)
 	if err != nil {
 		return err
 	}
@@ -531,8 +724,10 @@ func (r EnvironmentRoutes) startDeploy(ctx context.Context, environment model.En
 // deployInput assembles the durable workflow input. The deploy needs the tenant
 // name (RLS-scoped to the caller, so always the caller's own) plus the
 // request-scoped identity so the workflow's status writes rebind to the right
-// tenant.
-func (r EnvironmentRoutes) deployInput(ctx context.Context, environment model.Environment, version string) (provision.EnvProvisionInput, error) {
+// tenant. placement carries the target cluster's non-secret coordinates
+// (#1112); the credential itself is resolved fresh at Job-build time, never
+// checkpointed in this durable-workflow input.
+func (r EnvironmentRoutes) deployInput(ctx context.Context, environment model.Environment, version string, placement resolvedPlacement) (provision.EnvProvisionInput, error) {
 	tenant, err := r.tenants.Current(ctx)
 	if err != nil {
 		return provision.EnvProvisionInput{}, err
@@ -546,15 +741,18 @@ func (r EnvironmentRoutes) deployInput(ctx context.Context, environment model.En
 		return provision.EnvProvisionInput{}, err
 	}
 	return provision.EnvProvisionInput{
-		TenantID:         securityContext.TenantID,
-		TenantType:       securityContext.TenantType,
-		ErunUserID:       securityContext.ErunUserID,
-		EnvironmentID:    environment.EnvironmentID,
-		Tenant:           strings.TrimSpace(tenant.Name),
-		Environment:      environment.Name,
-		Version:          version,
-		MaxCPUMillicores: quota.MaxCPUMillicores,
-		MaxMemoryMB:      quota.MaxMemoryMB,
-		MaxStorageGB:     quota.MaxStorageGB,
+		TenantID:                   securityContext.TenantID,
+		TenantType:                 securityContext.TenantType,
+		ErunUserID:                 securityContext.ErunUserID,
+		EnvironmentID:              environment.EnvironmentID,
+		Tenant:                     strings.TrimSpace(tenant.Name),
+		Environment:                environment.Name,
+		Version:                    version,
+		ContextID:                  placement.ContextID,
+		PlacementKubernetesContext: placement.KubernetesContext,
+		PlacementServerURL:         placement.ServerURL,
+		MaxCPUMillicores:           quota.MaxCPUMillicores,
+		MaxMemoryMB:                quota.MaxMemoryMB,
+		MaxStorageGB:               quota.MaxStorageGB,
 	}, nil
 }

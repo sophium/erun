@@ -29,7 +29,11 @@ type stubEnvironmentRepository struct {
 	createInput  model.Environment
 	count        int
 	countErr     error
-	err          error
+	// countByContext maps a contextID to the environment count
+	// CountByContext reports for it; an unlisted id reports 0.
+	countByContext    map[string]int
+	countByContextErr error
+	err               error
 	// claimTaken makes ClaimDeploy report the deploy slot as already held, the
 	// shape a concurrent deploy produces.
 	claimTaken       bool
@@ -59,6 +63,13 @@ func (r *stubEnvironmentRepository) List(context.Context) ([]model.Environment, 
 
 func (r *stubEnvironmentRepository) Count(context.Context) (int, error) {
 	return r.count, r.countErr
+}
+
+func (r *stubEnvironmentRepository) CountByContext(_ context.Context, contextID string) (int, error) {
+	if r.countByContextErr != nil {
+		return 0, r.countByContextErr
+	}
+	return r.countByContext[contextID], nil
 }
 
 // stubTenantQuotaRepository reports a fixed quota row for the quota guardrail.
@@ -119,6 +130,7 @@ type stubContextRepository struct {
 	cloudContext model.Context
 	created      model.Context
 	createCalls  int
+	createInput  model.Context
 	err          error
 }
 
@@ -132,6 +144,7 @@ func (r *stubContextRepository) Get(context.Context, string) (model.Context, err
 
 func (r *stubContextRepository) Create(_ context.Context, cloudContext model.Context) (model.Context, error) {
 	r.createCalls++
+	r.createInput = cloudContext
 	if r.err != nil {
 		return model.Context{}, r.err
 	}

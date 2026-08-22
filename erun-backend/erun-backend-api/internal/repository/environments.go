@@ -57,6 +57,19 @@ func (r *EnvironmentRepository) Count(ctx context.Context) (int, error) {
 	return count, err
 }
 
+// CountByContext returns how many environments are already placed on the
+// given context, for the placement capacity check (#1112): a context's
+// contexts.max_environments names how many it can host.
+func (r *EnvironmentRepository) CountByContext(ctx context.Context, contextID string) (int, error) {
+	var count int
+	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		var err error
+		count, err = tx.NewSelect().Model((*model.Environment)(nil)).Where("context_id = ?", contextID).Count(ctx)
+		return err
+	})
+	return count, err
+}
+
 // EnvironmentStatusUpdate is one deploy-lifecycle write: the new status, the
 // failure reason (cleared on any non-failed state), and the version that
 // actually deployed. An empty DeployedVersion leaves the recorded one alone, so

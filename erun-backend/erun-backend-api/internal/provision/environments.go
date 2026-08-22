@@ -32,6 +32,16 @@ type EnvProvisionInput struct {
 	Tenant        string `json:"tenant"`
 	Environment   string `json:"environment"`
 	Version       string `json:"version"`
+	// ContextID/PlacementKubernetesContext/PlacementServerURL name the target
+	// cluster (#1112) this environment was placed on at create time: empty
+	// means the platform's own cluster, exactly as every environment placed
+	// before this existed. Non-secret coordinates only — the admin-token
+	// credential is resolved fresh from ContextCredentialRepository at
+	// Job-build time (EnvironmentProvisioner.Provision), never checkpointed
+	// here.
+	ContextID                  string `json:"contextId,omitempty"`
+	PlacementKubernetesContext string `json:"placementKubernetesContext,omitempty"`
+	PlacementServerURL         string `json:"placementServerUrl,omitempty"`
 	// DeployID identifies one explicit deploy attempt. Being part of the
 	// checkpointed input is what lets a resumed workflow rebuild the same Job
 	// name and re-watch its own run. Empty on the create path, which deploys an
@@ -187,12 +197,21 @@ func deployJobParams(config EnvDeployConfig, input EnvProvisionInput) deployexec
 		runtimeImageOverride = image
 	}
 	params := deployexec.DeployJobParams{
-		Tenant:                  input.Tenant,
-		Environment:             input.Environment,
-		Version:                 input.Version,
-		DeployID:                input.DeployID,
-		Namespace:               config.PlatformNamespace,
-		Image:                   image,
+		Tenant:      input.Tenant,
+		Environment: input.Environment,
+		Version:     input.Version,
+		DeployID:    input.DeployID,
+		Namespace:   config.PlatformNamespace,
+		Image:       image,
+		// AdminToken is deliberately absent here: deployJobParams is a pure
+		// function with no DB access, called before the durable step runs.
+		// EnvironmentProvisioner.Provision resolves the live credential and
+		// sets it on this Placement immediately before the Job runs.
+		Placement: deployexec.PlacementParams{
+			ContextID:         input.ContextID,
+			KubernetesContext: input.PlacementKubernetesContext,
+			ServerURL:         input.PlacementServerURL,
+		},
 		RuntimeImageOverride:    runtimeImageOverride,
 		ServiceAccount:          config.DeployerServiceAccount,
 		ExposeTargetIP:          config.ExposeTargetIP,

@@ -8,6 +8,7 @@ package deployexec
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -31,6 +32,9 @@ type StopJobParams struct {
 	Namespace      string
 	Image          string
 	ServiceAccount string
+	// Placement names the cluster this stop targets (#1112); see
+	// DeployJobParams.Placement.
+	Placement PlacementParams
 }
 
 // DeleteJobParams is the input to one hosted-env delete Job.
@@ -40,6 +44,9 @@ type DeleteJobParams struct {
 	Namespace      string
 	Image          string
 	ServiceAccount string
+	// Placement names the cluster this delete targets (#1112); see
+	// DeployJobParams.Placement.
+	Placement PlacementParams
 	// ExposeServicesZone/ExposePlatformNamespace thread the same platform
 	// coordinates as DeployJobParams' fields of the same name, so the delete
 	// Job can chain `erun unexpose` — removing the per-env wildcard
@@ -97,12 +104,13 @@ func lifecycleJobLabels(tenant, environment string) map[string]string {
 }
 
 // buildLifecycleCommand wraps a non-interactive erun verb the same way
-// buildDeployCommand wraps `erun deploy`: seed the in-cluster kubeconfig and
-// on-disk env config first, then run the real command. Deploy composes extra
-// flags and an optional chained `erun expose`, so it builds its own `sh -c`
-// string; stop and delete need nothing beyond one command and share this.
-func buildLifecycleCommand(tenant, environment string, argv []string) []string {
-	return []string{"sh", "-c", bootstrapEnvironmentScript(tenant, environment) + shellJoin(argv)}
+// buildDeployCommand wraps `erun deploy`: seed the kubeconfig and on-disk env
+// config for the placed cluster first, then run the real command. Deploy
+// composes extra flags and an optional chained `erun expose`, so it builds
+// its own `sh -c` string; stop and delete need nothing beyond one command and
+// share this.
+func buildLifecycleCommand(tenant, environment string, placement PlacementParams, argv []string) []string {
+	return []string{"sh", "-c", bootstrapEnvironmentScript(tenant, environment, placement) + shellJoin(argv)}
 }
 
 // buildStopJob's container runs a non-interactive `erun stop <tenant> <env>`.
@@ -116,7 +124,8 @@ func buildStopJob(params StopJobParams) *batchv1.Job {
 		Spec: lifecycleJobSpec(corev1.Container{
 			Name:    stopContainerName,
 			Image:   params.Image,
-			Command: buildLifecycleCommand(params.Tenant, params.Environment, []string{"erun", "stop", params.Tenant, params.Environment}),
+			Command: buildLifecycleCommand(params.Tenant, params.Environment, params.Placement, []string{"erun", "stop", params.Tenant, params.Environment}),
+			Env:     placementEnvVars(params.Placement),
 		}, params.ServiceAccount),
 	}
 }
@@ -138,6 +147,7 @@ func buildDeleteJob(params DeleteJobParams) *batchv1.Job {
 			Name:    deleteContainerName,
 			Image:   params.Image,
 			Command: buildDeleteCommand(params),
+			Env:     placementEnvVars(params.Placement),
 		}, params.ServiceAccount),
 	}
 }
@@ -148,7 +158,7 @@ func buildDeleteJob(params DeleteJobParams) *batchv1.Job {
 // DNS record doesn't outlive the namespace it pointed at.
 func buildDeleteCommand(params DeleteJobParams) []string {
 	deleteArgv := []string{"erun", "delete", params.Tenant, params.Environment, "-y"}
-	script := bootstrapEnvironmentScript(params.Tenant, params.Environment) + shellJoin(deleteArgv)
+	script := bootstrapEnvironmentScript(params.Tenant, params.Environment, params.Placement) + shellJoin(deleteArgv)
 	if zone, ns := strings.TrimSpace(params.ExposeServicesZone), strings.TrimSpace(params.ExposePlatformNamespace); zone != "" && ns != "" {
 		unexpose := []string{"erun", "unexpose", params.Tenant, params.Environment, "--skip-if-unconfigured", "--services-zone", zone, "--platform-namespace", ns}
 		script += unexposeChainScript(unexpose)
@@ -183,11 +193,21 @@ func UnexposeFailureFromOutput(output string) string {
 }
 
 // RunStop creates the stop Job and blocks until it reaches a terminal state.
+// When params.Placement targets a remote cluster (#1112), it first upserts
+// the Secret the Job's container reads its admin token from.
 func (l *Launcher) RunStop(ctx context.Context, params StopJobParams) (Result, error) {
+	if err := ensurePlacementSecret(ctx, l.kube, params.Namespace, params.Placement); err != nil {
+		return Result{}, fmt.Errorf("provision placement credential: %w", err)
+	}
 	return l.stopRunner.Run(ctx, buildStopJob(params))
 }
 
-// RunDelete creates the delete Job and blocks until it reaches a terminal state.
+// RunDelete creates the delete Job and blocks until it reaches a terminal
+// state. When params.Placement targets a remote cluster (#1112), it first
+// upserts the Secret the Job's container reads its admin token from.
 func (l *Launcher) RunDelete(ctx context.Context, params DeleteJobParams) (Result, error) {
+	if err := ensurePlacementSecret(ctx, l.kube, params.Namespace, params.Placement); err != nil {
+		return Result{}, fmt.Errorf("provision placement credential: %w", err)
+	}
 	return l.deleteRunner.Run(ctx, buildDeleteJob(params))
 }

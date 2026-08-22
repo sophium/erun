@@ -40,6 +40,15 @@ type EnvLifecycleInput struct {
 	// version this environment actually deployed. Empty means the environment
 	// never successfully deployed, so there is no namespace to touch.
 	RunningVersion string
+	// ContextID/PlacementKubernetesContext/PlacementServerURL name the cluster
+	// this environment was placed on (#1112), read back from its persisted
+	// context_id — never a fresh placement decision. Empty ContextID means the
+	// platform's own cluster, exactly as every environment before this
+	// existed. The admin-token credential is resolved fresh from
+	// PlacementCredentialResolver at Job-build time, never carried here.
+	ContextID                  string
+	PlacementKubernetesContext string
+	PlacementServerURL         string
 }
 
 // EnvLifecycle runs a hosted env's stop/delete synchronously, unlike
@@ -54,13 +63,33 @@ type EnvLifecycle struct {
 	config       EnvDeployConfig
 	usage        UsageRecorder
 	imageChecker RuntimeImageChecker
+	credentials  deployexec.PlacementCredentialResolver
 }
 
 // NewEnvLifecycle wires stop/delete. usage may be nil, which records no
 // metering event. imageChecker may be nil, which skips the published-image
-// fallback and always names the tenant's own image.
-func NewEnvLifecycle(runner EnvLifecycleRunner, rows EnvironmentRowDeleter, config EnvDeployConfig, usage UsageRecorder, imageChecker RuntimeImageChecker) *EnvLifecycle {
-	return &EnvLifecycle{runner: runner, rows: rows, config: config, usage: usage, imageChecker: imageChecker}
+// fallback and always names the tenant's own image. credentials may be nil,
+// which refuses (rather than silently deploying unauthenticated) any
+// environment that names a context (#1112); every environment placed into
+// the platform's own cluster is unaffected either way.
+func NewEnvLifecycle(runner EnvLifecycleRunner, rows EnvironmentRowDeleter, config EnvDeployConfig, usage UsageRecorder, imageChecker RuntimeImageChecker, credentials deployexec.PlacementCredentialResolver) *EnvLifecycle {
+	return &EnvLifecycle{runner: runner, rows: rows, config: config, usage: usage, imageChecker: imageChecker, credentials: credentials}
+}
+
+// placement resolves the live admin-token credential for input's target
+// cluster (empty ContextID resolves to the zero PlacementParams, the
+// platform's own cluster).
+func (l *EnvLifecycle) placement(ctx context.Context, input EnvLifecycleInput) (deployexec.PlacementParams, error) {
+	token, err := deployexec.ResolvePlacementToken(ctx, l.credentials, input.ContextID)
+	if err != nil {
+		return deployexec.PlacementParams{}, err
+	}
+	return deployexec.PlacementParams{
+		ContextID:         input.ContextID,
+		KubernetesContext: input.PlacementKubernetesContext,
+		ServerURL:         input.PlacementServerURL,
+		AdminToken:        token,
+	}, nil
 }
 
 func (l *EnvLifecycle) recordUsage(ctx context.Context, environmentID string, eventType model.UsageEventType) {
@@ -90,12 +119,17 @@ func (l *EnvLifecycle) Stop(ctx context.Context, input EnvLifecycleInput) error 
 	if strings.TrimSpace(input.RunningVersion) == "" {
 		return fmt.Errorf("environment has never been deployed; nothing to stop")
 	}
+	placement, err := l.placement(ctx, input)
+	if err != nil {
+		return err
+	}
 	result, err := l.runner.RunStop(ctx, deployexec.StopJobParams{
 		Tenant:         input.Tenant,
 		Environment:    input.Environment,
 		Namespace:      l.config.PlatformNamespace,
 		Image:          l.image(ctx, input.Tenant, input.RunningVersion),
 		ServiceAccount: l.config.DeployerServiceAccount,
+		Placement:      placement,
 	})
 	if err != nil {
 		return err
@@ -113,6 +147,10 @@ func (l *EnvLifecycle) Stop(ctx context.Context, input EnvLifecycleInput) error 
 // environment whose namespace may still exist.
 func (l *EnvLifecycle) Delete(ctx context.Context, input EnvLifecycleInput) error {
 	if strings.TrimSpace(input.RunningVersion) != "" {
+		placement, err := l.placement(ctx, input)
+		if err != nil {
+			return err
+		}
 		result, err := l.runner.RunDelete(ctx, deployexec.DeleteJobParams{
 			Tenant:                  input.Tenant,
 			Environment:             input.Environment,
@@ -121,6 +159,7 @@ func (l *EnvLifecycle) Delete(ctx context.Context, input EnvLifecycleInput) erro
 			ServiceAccount:          l.config.DeployerServiceAccount,
 			ExposeServicesZone:      l.config.ExposeServicesZone,
 			ExposePlatformNamespace: l.config.ExposePlatformNamespace,
+			Placement:               placement,
 		})
 		if err != nil {
 			return err

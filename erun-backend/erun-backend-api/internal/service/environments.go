@@ -43,17 +43,21 @@ const (
 // terminal running/failed status. The durable DBOS workflow wraps this; keeping
 // the state transitions here makes them unit-testable without a cluster.
 type EnvironmentProvisioner struct {
-	runner  DeployRunner
-	status  EnvironmentStatusWriter
-	usage   UsageRecorder
-	backoff time.Duration
+	runner      DeployRunner
+	status      EnvironmentStatusWriter
+	usage       UsageRecorder
+	credentials deployexec.PlacementCredentialResolver
+	backoff     time.Duration
 }
 
 // NewEnvironmentProvisioner wires the provisioner. usage may be nil, which
 // records no metering event (Provision behaves exactly as before metering
-// existed).
-func NewEnvironmentProvisioner(runner DeployRunner, status EnvironmentStatusWriter, usage UsageRecorder) *EnvironmentProvisioner {
-	return &EnvironmentProvisioner{runner: runner, status: status, usage: usage, backoff: statusWriteBackoff}
+// existed). credentials may be nil, which refuses (rather than silently
+// deploying unauthenticated) any environment that names a context (#1112);
+// every environment placed into the platform's own cluster is unaffected
+// either way.
+func NewEnvironmentProvisioner(runner DeployRunner, status EnvironmentStatusWriter, usage UsageRecorder, credentials deployexec.PlacementCredentialResolver) *EnvironmentProvisioner {
+	return &EnvironmentProvisioner{runner: runner, status: status, usage: usage, credentials: credentials, backoff: statusWriteBackoff}
 }
 
 // Provision moves the env → provisioning → running/failed. A run error or a
@@ -65,6 +69,11 @@ func (p *EnvironmentProvisioner) Provision(ctx context.Context, environmentID st
 	}); err != nil {
 		return fmt.Errorf("mark provisioning: %w", err)
 	}
+	token, err := deployexec.ResolvePlacementToken(ctx, p.credentials, params.Placement.ContextID)
+	if err != nil {
+		return p.fail(ctx, environmentID, err.Error(), err)
+	}
+	params.Placement.AdminToken = token
 	result, runErr := p.runner.Run(ctx, params)
 	if runErr != nil {
 		return p.fail(ctx, environmentID, runErr.Error(), runErr)

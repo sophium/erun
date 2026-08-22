@@ -80,14 +80,19 @@ func (r ProvisionRoutes) provision(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// The v1 single-cluster placement decision: reuse the exact check
-	// the executing POST /v1/environments applies, so this preview can never
-	// promise a placement the real create/deploy path would then refuse.
+	// Reuses the one placement decision that still applies identically to both
+	// this preview and the executing POST /v1/environments (#1112): a raw
+	// kubernetesContext name has no known credential to authenticate with, so
+	// it stays refused everywhere. This preview has no contextId field of its
+	// own (it composes a fresh context bootstrap inline via the context
+	// block, or names nothing), so the capacity-aware placement decision
+	// EnvironmentRoutes.resolvePlacement makes has nothing further to preview
+	// here.
 	placementContext := strings.TrimSpace(body.KubernetesContext)
 	if newCluster != nil {
 		placementContext = newCluster.name
 	}
-	if err := resolveDeployPlacement(model.Environment{Type: envType, KubernetesContext: placementContext}); err != nil {
+	if err := validateProvisionPlacement(envType, placementContext); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -140,6 +145,21 @@ func validateProvisionEnvironment(environment provisionEnvironment) (string, mod
 		return "", "", errors.New("environment.type must be one of runtime, remote-agent, local-agent")
 	}
 	return envName, envType, nil
+}
+
+// validateProvisionPlacement mirrors the "a raw kubernetesContext name is
+// refused" half of EnvironmentRoutes.resolvePlacement (#1112): naming an
+// existing cluster is by contextId (POST /v1/environments), never a bare
+// kubernetesContext string, which has no known credential to authenticate
+// with. Only runtime environments are ever server-side deployed.
+func validateProvisionPlacement(envType model.EnvironmentType, kubernetesContext string) error {
+	if envType != model.EnvironmentTypeRuntime {
+		return nil
+	}
+	if strings.TrimSpace(kubernetesContext) != "" {
+		return errCrossClusterPlacementUnsupported
+	}
+	return nil
 }
 
 // resolveProvisionContext plans the new cluster a context block asks for. Both

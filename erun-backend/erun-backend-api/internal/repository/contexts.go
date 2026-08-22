@@ -11,20 +11,27 @@ type ContextRepository struct {
 	txs *TxManager
 }
 
-const contextColumns = `context_id, tenant_id, name, provider, cloud_provider_alias, region, instance_id, public_ip, instance_type, disk_type, disk_size_gb, kubernetes_context, status, provision_error, created_at, updated_at`
+const contextColumns = `context_id, tenant_id, name, provider, cloud_provider_alias, region, instance_id, public_ip, instance_type, disk_type, disk_size_gb, kubernetes_context, max_environments, status, provision_error, created_at, updated_at`
 
 func NewContextRepository(txs *TxManager) *ContextRepository {
 	return &ContextRepository{txs: txs}
 }
 
+// DefaultContextMaxEnvironments mirrors the contexts.max_environments column
+// default, applied when a create request names no explicit capacity.
+const DefaultContextMaxEnvironments = 20
+
 // Create persists a new cloud context; the database owns the identifiers and
 // timestamps and binds the row to the caller's tenant.
 func (r *ContextRepository) Create(ctx context.Context, cloudContext model.Context) (model.Context, error) {
 	created := cloudContext
+	if created.MaxEnvironments <= 0 {
+		created.MaxEnvironments = DefaultContextMaxEnvironments
+	}
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		return tx.NewInsert().
 			Model(&created).
-			Column("name", "provider", "cloud_provider_alias", "region", "instance_type", "disk_type", "disk_size_gb", "kubernetes_context").
+			Column("name", "provider", "cloud_provider_alias", "region", "instance_type", "disk_type", "disk_size_gb", "kubernetes_context", "max_environments").
 			Returning("*").
 			Scan(ctx)
 	})

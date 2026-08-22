@@ -217,6 +217,18 @@ rules:
       {{- end }}
     verbs: ["get"]
   {{- end }}
+  {{- /* Placement credential secrets (#1112): deployexec.ensurePlacementSecret,
+         called by this SA's own process (the launcher that creates the deploy/
+         stop/delete Jobs above, not the Job itself) upserts one erun-ctx-cred-<id>
+         Secret per remote-context deploy so the Job can read its target
+         cluster's admin token via secretKeyRef. The name is a per-context UUID
+         minted at context-provisioning time, not knowable at chart render, so
+         this cannot be scoped by resourceNames the way the pull-secret grant
+         above is; create/update/get is kept off list/watch/delete so this SA
+         still cannot enumerate what other secrets exist in the namespace. */}}
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "get", "update"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

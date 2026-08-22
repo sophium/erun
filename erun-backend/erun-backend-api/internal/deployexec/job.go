@@ -54,6 +54,10 @@ type DeployJobParams struct {
 	Tenant      string
 	Environment string
 	Version     string
+	// Placement names the cluster this deploy targets (#1112). The zero value
+	// keeps the Job targeting its own cluster via its ServiceAccount token,
+	// unchanged from before multi-cluster placement existed.
+	Placement PlacementParams
 	// DeployID scopes the Job to one deploy attempt. It is carried in the durable
 	// workflow input, so a resumed workflow rebuilds the same Job name and
 	// re-watches its in-flight Job, while a fresh attempt gets its own Job rather
@@ -175,6 +179,7 @@ func buildDeployJob(params DeployJobParams) *batchv1.Job {
 						Name:    deployContainerName,
 						Image:   params.Image,
 						Command: buildDeployCommand(params),
+						Env:     placementEnvVars(params.Placement),
 					}},
 				},
 			},
@@ -197,7 +202,7 @@ func buildDeployCommand(params DeployJobParams) []string {
 		deploy = append(deploy, "--runtime-image", override)
 	}
 	deploy = append(deploy, namespaceQuotaFlags(params)...)
-	script := bootstrapEnvironmentScript(params.Tenant, params.Environment)
+	script := bootstrapEnvironmentScript(params.Tenant, params.Environment, params.Placement)
 	if pem := strings.TrimSpace(params.MCPAuthPublicKeyPEM); pem != "" {
 		script += writeMCPAuthPublicKeyScript(pem)
 		deploy = append(deploy, "--mcp-auth-public-key", mcpAuthPublicKeyJobPath)
@@ -321,21 +326,38 @@ func writeMCPAuthPublicKeyScript(pem string) string {
 
 // bootstrapEnvironmentScript seeds the in-cluster kubeconfig context
 // (mirroring entrypoint.sh's write_kubeconfig, from the ServiceAccount token
-// Kubernetes auto-mounts into every pod) and a minimal tenant/env config for
-// erun's CLI verbs to resolve, then chains the real command with `&&`. Every
-// lifecycle Job — deploy, stop, delete — sets `command`, which replaces the
-// image's entrypoint, so none of the entrypoint's usual setup runs; this is
-// the one seeding path all three share, so a Job that skips it is a caller
-// bug, not a second copy that can drift out of sync. It deliberately does not
-// carry a runtime version: nothing this seeds it for reads it back (deploy
-// gets its version from the explicit `--version` this seeds a command line
-// for, never from the config it writes), so a version here would just be a
-// second, unused place to keep in sync. Tenant and environment are
-// DNS-1123-label-shaped values already validated upstream
-// (routes.decodeCreateEnvironmentInput et al.), so they are safe to
-// interpolate directly into the generated YAML.
-func bootstrapEnvironmentScript(tenant, environment string) string {
-	return fmt.Sprintf(`set -e
+// Kubernetes auto-mounts into every pod, or — when Placement names a remote
+// cluster (#1112) — that cluster's own admin-token credential instead) and a
+// minimal tenant/env config for erun's CLI verbs to resolve, then chains the
+// real command with `&&`. Every lifecycle Job — deploy, stop, delete — sets
+// `command`, which replaces the image's entrypoint, so none of the
+// entrypoint's usual setup runs; this is the one seeding path all three
+// share, so a Job that skips it is a caller bug, not a second copy that can
+// drift out of sync. It deliberately does not carry a runtime version:
+// nothing this seeds it for reads it back (deploy gets its version from the
+// explicit `--version` this seeds a command line for, never from the config
+// it writes), so a version here would just be a second, unused place to keep
+// in sync. Tenant and environment are DNS-1123-label-shaped values already
+// validated upstream (routes.decodeCreateEnvironmentInput et al.), so they
+// are safe to interpolate directly into the generated YAML.
+func bootstrapEnvironmentScript(tenant, environment string, placement PlacementParams) string {
+	return kubeconfigScript(placement) + fmt.Sprintf(`mkdir -p "$HOME/.config/erun/%[1]s/%[2]s"
+cat > "$HOME/.config/erun/%[1]s/config.yaml" <<TENANT_EOF
+name: %[1]s
+defaultenvironment: %[2]s
+TENANT_EOF
+cat > "$HOME/.config/erun/%[1]s/%[2]s/config.yaml" <<ENV_EOF
+name: %[2]s
+type: runtime
+kubernetescontext: %[3]s
+ENV_EOF
+`, tenant, environment, placement.kubernetesContextOrInCluster())
+}
+
+// inClusterKubeconfigScript is the pre-#1112 behavior, byte-for-byte: the
+// Job's own mounted ServiceAccount token authenticates against the cluster
+// the Job itself runs in.
+const inClusterKubeconfigScript = `set -e
 mkdir -p "$HOME/.kube"
 erun_deploy_ns="$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)"
 cat > "$HOME/.kube/config" <<KUBECONFIG_EOF
@@ -358,17 +380,31 @@ users:
     user:
       tokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
 KUBECONFIG_EOF
-mkdir -p "$HOME/.config/erun/%[1]s/%[2]s"
-cat > "$HOME/.config/erun/%[1]s/config.yaml" <<TENANT_EOF
-name: %[1]s
-defaultenvironment: %[2]s
-TENANT_EOF
-cat > "$HOME/.config/erun/%[1]s/%[2]s/config.yaml" <<ENV_EOF
-name: %[2]s
-type: runtime
-kubernetescontext: in-cluster
-ENV_EOF
-`, tenant, environment)
+`
+
+// kubeconfigScript seeds $HOME/.kube/config for either target. A remote
+// placement uses kubectl's own config subcommands rather than a hand-rolled
+// YAML heredoc, because the context name and server URL are operator-
+// authored strings (a context's name, its instance's public IP) that must
+// never be interpreted as shell syntax: shellJoin single-quotes each one as
+// its own argv element, the same treatment every other untrusted value in
+// this package gets. The admin-token credential is read back from the env
+// var a Kubernetes Secret populates (see PlacementSecretName) — double-quoted
+// so it always reaches kubectl as one argument, whatever characters it
+// contains — never written into the Job spec itself.
+func kubeconfigScript(placement PlacementParams) string {
+	if !placement.remote() {
+		return inClusterKubeconfigScript
+	}
+	name := placement.KubernetesContext
+	lines := []string{
+		"set -e",
+		shellJoin([]string{"kubectl", "config", "set-cluster", name, "--server", placement.ServerURL, "--insecure-skip-tls-verify=true"}),
+		shellJoin([]string{"kubectl", "config", "set-credentials", name, "--token"}) + ` "$` + placementAdminTokenEnvVar + `"`,
+		shellJoin([]string{"kubectl", "config", "set-context", name, "--cluster", name, "--user", name}),
+		shellJoin([]string{"kubectl", "config", "use-context", name}),
+	}
+	return strings.Join(lines, "\n") + "\n"
 }
 
 // shellJoin renders argv as a POSIX shell command line, single-quoting every
@@ -408,6 +444,7 @@ const jobNamePrefix = "erun-deploy-"
 // covers all three lifecycle actions; each gets its own jobexec.Runner only
 // because Kind/Container differ, not a second launcher.
 type Launcher struct {
+	kube         kubernetes.Interface
 	runner       *jobexec.Runner
 	stopRunner   *jobexec.Runner
 	deleteRunner *jobexec.Runner
@@ -415,6 +452,7 @@ type Launcher struct {
 
 func NewLauncher(kube kubernetes.Interface) *Launcher {
 	return &Launcher{
+		kube: kube,
 		// CaptureOutput: a successful deploy Job's own log is where
 		// ExposeFailureFromOutput finds the chained expose step's marker, since a
 		// best-effort expose failure never turns the Job itself into a failure.
@@ -435,7 +473,12 @@ func (l *Launcher) PollEvery(every time.Duration) {
 }
 
 // Run creates the deploy Job and blocks until it reaches a terminal state,
-// returning the result.
+// returning the result. When params.Placement targets a remote cluster
+// (#1112), it first upserts the Secret the Job's container reads its admin
+// token from.
 func (l *Launcher) Run(ctx context.Context, params DeployJobParams) (Result, error) {
+	if err := ensurePlacementSecret(ctx, l.kube, params.Namespace, params.Placement); err != nil {
+		return Result{}, fmt.Errorf("provision placement credential: %w", err)
+	}
 	return l.runner.Run(ctx, buildDeployJob(params))
 }

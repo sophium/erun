@@ -56,7 +56,7 @@ erun platform env delete <environment-id>   # tear down the namespace; irreversi
 
 ## Where an environment lands
 
-Today every hosted runtime environment deploys into the platform's own cluster — there is no way yet to point one at a cloud context you've bootstrapped yourself. See [Single-cluster placement](/concepts/hosted-platform#single-cluster-placement) for why, and what a request to do otherwise looks like (a clear, immediate error rather than a silently-wrong deploy).
+Name a cloud context you've already registered with `contextId` and a hosted runtime environment deploys there instead of the platform's own cluster; leave it unset and the platform auto-selects one of your own registered contexts with room, or falls back to its own cluster if you haven't registered any. See [Placement](/concepts/hosted-platform#single-cluster-placement) for the full decision and what an unresolvable request looks like (a clear, immediate error rather than a silently-wrong deploy).
 
 ## Quotas
 
