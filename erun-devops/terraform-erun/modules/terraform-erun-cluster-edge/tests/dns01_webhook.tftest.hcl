@@ -12,19 +12,22 @@ variables {
 
 # The exact shape frs-prod needs: platform Issuer stays on rfc2136, but the
 # webhook shim still installs so erun-expose's per-tenant brokered Issuers can
-# solve.
+# solve. Deliberately omits dns01_token_secret_name: the shim never reads one,
+# and a platform installing it for its tenants has none of its own to name --
+# per-env token Secrets land beside each environment. This mirrors the
+# documented apply in erun-enable-hosting-edge exactly, so the two cannot
+# drift apart again.
 run "webhook_shim_installs_while_platform_issuer_stays_on_rfc2136" {
   command = plan
 
   variables {
-    dns01_provider          = "powerdns-rfc2136"
-    install_dns01_webhook   = true
-    powerdns_nameserver     = "erun-powerdns.frs-prod.svc.cluster.local:53"
-    rfc2136_tsig_key_name   = "erun-tsig"
-    rfc2136_tsig_secret     = "c2VjcmV0"
-    broker_url              = "https://api.frs-prod.services.example.com/v1/dns01"
-    dns01_webhook_image     = "ghcr.io/sophium/erun-dns01-webhook:1.0.0"
-    dns01_token_secret_name = "operations-probej-dns01-token"
+    dns01_provider        = "powerdns-rfc2136"
+    install_dns01_webhook = true
+    powerdns_nameserver   = "erun-powerdns.frs-prod.svc.cluster.local:53"
+    rfc2136_tsig_key_name = "erun-tsig"
+    rfc2136_tsig_secret   = "c2VjcmV0"
+    broker_url            = "https://api.frs-prod.services.example.com/v1/dns01"
+    dns01_webhook_image   = "ghcr.io/sophium/erun-dns01-webhook:1.0.0"
   }
 
   assert {
@@ -84,6 +87,21 @@ run "broker_platform_issuer_without_webhook_shim_is_rejected" {
     broker_url              = "https://api.example.com/v1/dns01"
     dns01_webhook_image     = "ghcr.io/sophium/erun-dns01-webhook:1.0.0"
     dns01_token_secret_name = "some-env-dns01-token"
+  }
+
+  expect_failures = [helm_release.issuer]
+}
+
+# The token secret is required where it is actually read: the platform's own
+# Issuer, in broker mode. Guarding it there rather than on the shim is what
+# lets the case above omit it.
+run "broker_mode_without_a_token_secret_is_rejected" {
+  command = plan
+
+  variables {
+    dns01_provider      = "powerdns-broker"
+    broker_url          = "https://api.frs-prod.services.example.com/v1/dns01"
+    dns01_webhook_image = "ghcr.io/sophium/erun-dns01-webhook:1.0.0"
   }
 
   expect_failures = [helm_release.issuer]
