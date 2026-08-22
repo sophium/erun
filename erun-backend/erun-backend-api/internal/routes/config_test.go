@@ -45,6 +45,13 @@ type stubEnvironmentRepository struct {
 	claimCalls       int
 	markFailedCalls  int
 	markFailedReason string
+	// claimDeleteTaken makes ClaimDelete report the delete slot as already
+	// held, the shape a concurrent or still-in-flight delete produces.
+	claimDeleteTaken        bool
+	claimDeleteErr          error
+	claimDeleteCalls        int
+	markDeleteBlockedCalls  int
+	markDeleteBlockedReason string
 }
 
 func (r *stubEnvironmentRepository) ClaimDeploy(context.Context, string, time.Duration) (bool, error) {
@@ -58,6 +65,20 @@ func (r *stubEnvironmentRepository) ClaimDeploy(context.Context, string, time.Du
 func (r *stubEnvironmentRepository) MarkDeployFailed(_ context.Context, _ string, reason string) error {
 	r.markFailedCalls++
 	r.markFailedReason = reason
+	return nil
+}
+
+func (r *stubEnvironmentRepository) ClaimDelete(context.Context, string, time.Duration) (bool, error) {
+	r.claimDeleteCalls++
+	if r.claimDeleteErr != nil {
+		return false, r.claimDeleteErr
+	}
+	return !r.claimDeleteTaken, nil
+}
+
+func (r *stubEnvironmentRepository) MarkDeleteBlocked(_ context.Context, _ string, reason string) error {
+	r.markDeleteBlockedCalls++
+	r.markDeleteBlockedReason = reason
 	return nil
 }
 

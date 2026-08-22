@@ -12,7 +12,14 @@ type EnvironmentRepository struct {
 	txs *TxManager
 }
 
-const environmentColumns = `environment_id, tenant_id, name, type, kubernetes_context, context_id, runtime_version, status, provision_error, deployed_version, expose_error, created_at, updated_at`
+const environmentColumns = `environment_id, tenant_id, name, type, kubernetes_context, context_id, runtime_version, status, provision_error, deployed_version, expose_error, delete_error, created_at, updated_at`
+
+// environmentsMidTeardownStatuses are the statuses Count excludes: a delete
+// has been requested for these rows, so they must not lock a tenant out of
+// its own environment allowance through a teardown it cannot complete (#1140)
+// — the same "requested a delete" boundary ClaimDelete and MarkDeleteBlocked
+// use.
+var environmentsMidTeardownStatuses = []string{string(model.EnvironmentStatusDeleting), string(model.EnvironmentStatusDeletionBlocked)}
 
 func NewEnvironmentRepository(txs *TxManager) *EnvironmentRepository {
 	return &EnvironmentRepository{txs: txs}
@@ -46,12 +53,17 @@ func (r *EnvironmentRepository) List(ctx context.Context) ([]model.Environment, 
 }
 
 // Count returns how many environments the caller's tenant has, for enforcing
-// the tenant's environment-count quota cap.
+// the tenant's environment-count quota cap. Environments mid-teardown
+// (deleting, deletion-blocked) are excluded: a delete that cannot complete
+// must not lock the tenant out of its own allowance (#1140) — the delete that
+// would free the slot is the same call that is stuck.
 func (r *EnvironmentRepository) Count(ctx context.Context) (int, error) {
 	var count int
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		var err error
-		count, err = tx.NewSelect().Model((*model.Environment)(nil)).Count(ctx)
+		count, err = tx.NewSelect().Model((*model.Environment)(nil)).
+			Where("status NOT IN (?)", bun.List(environmentsMidTeardownStatuses)).
+			Count(ctx)
 		return err
 	})
 	return count, err
@@ -166,6 +178,76 @@ func (r *EnvironmentRepository) Delete(ctx context.Context, environmentID string
 		_, err := tx.NewRaw(`DELETE FROM environments WHERE environment_id = ?`, environmentID).Exec(ctx)
 		return err
 	})
+}
+
+// ClaimDelete takes exclusive ownership of an environment's delete attempt,
+// returning false when another delete already holds it. Mirrors ClaimDeploy:
+// a claim that went stale past staleAfter (a control plane that crashed
+// mid-delete, or a Job that ran past its own deadline) is re-claimable, so a
+// wedged teardown is never locked out permanently — the same property a
+// reconciler re-attempting a blocked delete depends on. A row already
+// `deletion-blocked` is always reclaimable (not gated by staleAfter): that
+// status means the previous attempt already reached a terminal outcome, so
+// there is nothing in flight to race with.
+func (r *EnvironmentRepository) ClaimDelete(ctx context.Context, environmentID string, staleAfter time.Duration) (bool, error) {
+	claimed := false
+	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		result, err := tx.NewRaw(`
+			UPDATE environments
+			   SET status = ?,
+			       delete_error = NULL
+			 WHERE environment_id = ?
+			   AND (status <> ? OR updated_at < NOW() - MAKE_INTERVAL(secs => ?))
+		`, string(model.EnvironmentStatusDeleting), environmentID, string(model.EnvironmentStatusDeleting), staleAfter.Seconds()).Exec(ctx)
+		if err != nil {
+			return err
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		claimed = affected > 0
+		return nil
+	})
+	return claimed, err
+}
+
+// MarkDeleteBlocked records a delete attempt that did not tear the namespace
+// down, naming why. `running` must not survive a delete attempt (#1140): this
+// is the write that keeps a failed or blocked teardown from leaving the row
+// exactly where it was, silently claiming to still be up.
+func (r *EnvironmentRepository) MarkDeleteBlocked(ctx context.Context, environmentID, reason string) error {
+	return r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		_, err := tx.NewRaw(`
+			UPDATE environments
+			   SET status = ?,
+			       delete_error = NULLIF(?, '')
+			 WHERE environment_id = ?
+		`, string(model.EnvironmentStatusDeletionBlocked), reason, environmentID).Exec(ctx)
+		return err
+	})
+}
+
+// ListByStatuses returns every environment (across tenants, when run under
+// the erun_operations RLS role) whose status is one of the given values. The
+// delete reconciler (#1140) uses this, scoped to `deleting`/`deletion-blocked`,
+// to find environments whose teardown needs re-attempting without an operator
+// noticing and re-issuing the delete.
+func (r *EnvironmentRepository) ListByStatuses(ctx context.Context, statuses []model.EnvironmentStatus) ([]model.Environment, error) {
+	raw := make([]string, len(statuses))
+	for i, status := range statuses {
+		raw[i] = string(status)
+	}
+	var environments []model.Environment
+	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		return tx.NewRaw(`
+			SELECT `+environmentColumns+`
+			  FROM environments
+			 WHERE status IN (?)
+			 ORDER BY tenant_id ASC, environment_id ASC
+		`, bun.List(raw)).Scan(ctx, &environments)
+	})
+	return environments, err
 }
 
 func (r *EnvironmentRepository) Get(ctx context.Context, environmentID string) (model.Environment, error) {

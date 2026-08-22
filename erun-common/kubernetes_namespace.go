@@ -3,7 +3,31 @@ package eruncommon
 import (
 	"fmt"
 	"strings"
+	"time"
 )
+
+// NamespaceDeleteTimeout bounds how long DeleteKubernetesNamespace waits for
+// Kubernetes to finish tearing a namespace down before giving up and naming
+// why. Without a ceiling, a namespace stuck on an unsatisfiable finalizer (a
+// DNS-01 solver that stopped answering, for example) blocks the caller for as
+// long as Kubernetes is willing to sit in Terminating.
+const NamespaceDeleteTimeout = 20 * time.Minute
+
+// NamespaceTerminationBlockedError names a namespace that did not finish
+// terminating within NamespaceDeleteTimeout, carrying its own conditions
+// verbatim -- the same detail `kubectl describe namespace` shows, which turns
+// a bare timeout into an actionable diagnosis.
+type NamespaceTerminationBlockedError struct {
+	Namespace string
+	Detail    string
+}
+
+func (e *NamespaceTerminationBlockedError) Error() string {
+	if e.Detail == "" {
+		return fmt.Sprintf("namespace %q did not finish terminating within %s", e.Namespace, NamespaceDeleteTimeout)
+	}
+	return fmt.Sprintf("namespace %q did not finish terminating within %s:\n%s", e.Namespace, NamespaceDeleteTimeout, e.Detail)
+}
 
 // TraceEnsureKubernetesNamespace traces the namespace check EnsureKubernetesNamespace
 // performs and, only when the create that would follow is actually going to run,
@@ -88,10 +112,18 @@ func TraceDeleteKubernetesNamespace(ctx Context, contextName, namespace string) 
 	if contextName != "" {
 		args = append(args, "--context", contextName)
 	}
-	args = append(args, "delete", "namespace", namespace, "--ignore-not-found")
+	args = append(args, "delete", "namespace", namespace, "--ignore-not-found", "--timeout", NamespaceDeleteTimeout.String())
 	ctx.TraceCommand("", "kubectl", args...)
 }
 
+// DeleteKubernetesNamespace deletes a namespace and waits up to
+// NamespaceDeleteTimeout for Kubernetes to finish tearing it down. A
+// namespace still present after the timeout returns
+// *NamespaceTerminationBlockedError naming its own conditions, so a caller can
+// tell "still terminating, here is why" apart from every other kubectl
+// failure. A namespace that has actually disappeared by the time the timeout
+// is checked (a benign race between the wait and the finalizer clearing)
+// still reports success.
 func DeleteKubernetesNamespace(contextName, namespace string) error {
 	contextName = strings.TrimSpace(contextName)
 	namespace = strings.TrimSpace(namespace)
@@ -103,17 +135,75 @@ func DeleteKubernetesNamespace(contextName, namespace string) error {
 	if contextName != "" {
 		args = append(args, "--context", contextName)
 	}
-	args = append(args, "delete", "namespace", namespace, "--ignore-not-found")
+	args = append(args, "delete", "namespace", namespace, "--ignore-not-found", "--timeout", NamespaceDeleteTimeout.String())
+
+	output, err := Command("kubectl", args...).CombinedOutput()
+	if err == nil {
+		return nil
+	}
+
+	message := strings.TrimSpace(string(output))
+	if exists, existErr := kubernetesNamespaceExists(contextName, namespace); existErr == nil {
+		if !exists {
+			return nil
+		}
+		return &NamespaceTerminationBlockedError{Namespace: namespace, Detail: namespaceTerminationConditions(contextName, namespace)}
+	}
+	if message == "" {
+		return fmt.Errorf("failed to delete kubernetes namespace %q in context %q: %w", namespace, contextName, err)
+	}
+	return fmt.Errorf("failed to delete kubernetes namespace %q in context %q: %w: %s", namespace, contextName, err, message)
+}
+
+// namespaceTerminationConditions reads back a namespace's own status
+// conditions, so a blocked delete can name its blocker instead of leaving the
+// caller with only "timed out". "" (a read failure, or no conditions
+// reported) leaves the caller with the bare timeout message.
+func namespaceTerminationConditions(contextName, namespace string) string {
+	args := []string{}
+	if contextName != "" {
+		args = append(args, "--context", contextName)
+	}
+	args = append(args, "get", "namespace", namespace, "-o",
+		`jsonpath={range .status.conditions[*]}{.type}={.status}{"\t"}{.message}{"\n"}{end}`)
 
 	output, err := Command("kubectl", args...).CombinedOutput()
 	if err != nil {
-		message := strings.TrimSpace(string(output))
-		if message == "" {
-			return fmt.Errorf("failed to delete kubernetes namespace %q in context %q: %w", namespace, contextName, err)
-		}
-		return fmt.Errorf("failed to delete kubernetes namespace %q in context %q: %w: %s", namespace, contextName, err, message)
+		return ""
 	}
-	return nil
+	return formatNamespaceConditions(string(output))
+}
+
+// formatNamespaceConditions turns kubectl's raw "type=status<TAB>message"
+// lines into the aligned "Type=Status  Message" shape `kubectl describe
+// namespace` shows, so a blocked delete's own diagnosis reads the same way an
+// operator would find it by hand.
+func formatNamespaceConditions(raw string) string {
+	type condition struct{ key, message string }
+	var conditions []condition
+	maxKey := 0
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 2)
+		key := strings.TrimSpace(parts[0])
+		message := ""
+		if len(parts) > 1 {
+			message = strings.TrimSpace(parts[1])
+		}
+		if len(key) > maxKey {
+			maxKey = len(key)
+		}
+		conditions = append(conditions, condition{key: key, message: message})
+	}
+
+	lines := make([]string, 0, len(conditions))
+	for _, c := range conditions {
+		lines = append(lines, fmt.Sprintf("%-*s  %s", maxKey, c.key, c.message))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func WrapHelmChartDeployerWithNamespaceEnsure(ensure NamespaceEnsurerFunc, deploy HelmChartDeployerFunc) HelmChartDeployerFunc {

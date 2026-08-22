@@ -2,6 +2,8 @@ package provision
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/deployexec"
@@ -41,14 +43,25 @@ func (s *stubLifecycleRunner) RunDelete(_ context.Context, params deployexec.Del
 	return s.deleteResult, nil
 }
 
+type blockedDeleteCall struct {
+	environmentID string
+	reason        string
+}
+
 type stubRowDeleter struct {
 	deleted []string
+	blocked []blockedDeleteCall
 	err     error
 }
 
 func (s *stubRowDeleter) Delete(_ context.Context, environmentID string) error {
 	s.deleted = append(s.deleted, environmentID)
 	return s.err
+}
+
+func (s *stubRowDeleter) MarkDeleteBlocked(_ context.Context, environmentID, reason string) error {
+	s.blocked = append(s.blocked, blockedDeleteCall{environmentID: environmentID, reason: reason})
+	return nil
 }
 
 func testLifecycleConfig() EnvDeployConfig {
@@ -177,9 +190,10 @@ func TestEnvLifecycleDeleteSkipsJobWhenNeverDeployed(t *testing.T) {
 	}
 }
 
-// TestEnvLifecycleDeleteDoesNotDropRowOnJobFailure: a failed teardown must not
-// silently forget an environment whose namespace may still exist.
-func TestEnvLifecycleDeleteDoesNotDropRowOnJobFailure(t *testing.T) {
+// TestEnvLifecycleDeleteMarksBlockedOnJobFailure: a failed teardown must not
+// silently forget an environment whose namespace may still exist, or leave it
+// claiming `running` (#1140) — it moves to deletion-blocked naming why.
+func TestEnvLifecycleDeleteMarksBlockedOnJobFailure(t *testing.T) {
 	runner := &stubLifecycleRunner{deleteResult: deployexec.Result{Outcome: deployexec.OutcomeFailed, Failure: "namespace stuck terminating"}}
 	rows := &stubRowDeleter{}
 	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil, nil, nil)
@@ -191,6 +205,61 @@ func TestEnvLifecycleDeleteDoesNotDropRowOnJobFailure(t *testing.T) {
 	if len(rows.deleted) != 0 {
 		t.Fatal("the row must survive a failed teardown so the environment is not silently forgotten")
 	}
+	if len(rows.blocked) != 1 || rows.blocked[0].environmentID != "env-1" || rows.blocked[0].reason == "" {
+		t.Fatalf("blocked calls = %+v, want one naming env-1 with a non-empty reason", rows.blocked)
+	}
+}
+
+// TestEnvLifecycleDeleteMarksBlockedOnNamespaceStuckDespiteJobSuccess pins the
+// interaction #1140 is about: `erun delete` exits 0 (and the Job reports
+// succeeded) even when the remote namespace teardown itself failed, so a
+// clean Job outcome alone must not be trusted to hard-delete the row.
+func TestEnvLifecycleDeleteMarksBlockedOnNamespaceStuckDespiteJobSuccess(t *testing.T) {
+	blocker := `namespace "acme-prod" did not finish terminating within 20m0s:` + "\n" +
+		"NamespaceContentRemaining=True     challenges.acme.cert-manager.io has 1 resource instances"
+	output := `{"tenant":"acme","environment":"prod","namespaceDeleteError":` + jsonQuote(blocker) + `}`
+	runner := &stubLifecycleRunner{deleteResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded, Output: output}}
+	rows := &stubRowDeleter{}
+	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil, nil, nil)
+
+	err := lifecycle.Delete(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3"})
+	if err == nil {
+		t.Fatal("expected an error when the namespace is stuck despite the job succeeding")
+	}
+	if len(rows.deleted) != 0 {
+		t.Fatal("a stuck namespace must not hard-delete the row even though the job succeeded")
+	}
+	if len(rows.blocked) != 1 || rows.blocked[0].environmentID != "env-1" || rows.blocked[0].reason != blocker {
+		t.Fatalf("blocked calls = %+v, want one naming env-1 with reason %q", rows.blocked, blocker)
+	}
+}
+
+// TestEnvLifecycleDeleteMarksBlockedWhenJobCannotBeLaunched: a failure before
+// the Job even runs (e.g. a transient Kubernetes API error creating it) must
+// not leave the row claiming `running` either.
+func TestEnvLifecycleDeleteMarksBlockedWhenJobCannotBeLaunched(t *testing.T) {
+	runner := &stubLifecycleRunner{err: errors.New("create job: connection refused")}
+	rows := &stubRowDeleter{}
+	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil, nil, nil)
+
+	err := lifecycle.Delete(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3"})
+	if err == nil {
+		t.Fatal("expected an error when the job cannot be launched")
+	}
+	if len(rows.blocked) != 1 || rows.blocked[0].environmentID != "env-1" {
+		t.Fatalf("blocked calls = %+v, want one naming env-1", rows.blocked)
+	}
+}
+
+// jsonQuote renders s as a JSON string literal, so blocker-detail fixtures
+// with embedded newlines/quotes stay valid JSON without importing
+// encoding/json into a table of ad hoc test fixtures.
+func jsonQuote(s string) string {
+	encoded, err := json.Marshal(s)
+	if err != nil {
+		panic(err)
+	}
+	return string(encoded)
 }
 
 // TestEnvLifecycleStopRecordsUsageEvent and TestEnvLifecycleDeleteRecordsUsageEvent
@@ -290,6 +359,9 @@ func TestEnvLifecycleDeleteRefusesWhenPlacementCredentialUnavailable(t *testing.
 	}
 	if len(rows.deleted) != 0 {
 		t.Fatal("a delete that never ran its job must not remove the row")
+	}
+	if len(rows.blocked) != 1 || rows.blocked[0].environmentID != "env-1" {
+		t.Fatalf("blocked calls = %+v, want one naming env-1", rows.blocked)
 	}
 }
 

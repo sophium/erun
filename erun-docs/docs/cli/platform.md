@@ -77,7 +77,15 @@ Scales the environment's runtime Deployment to zero — the server-side equivale
 
 ### `platform env delete`
 
-Tears down the environment's namespace (if it has one) and removes it — the server-side equivalent of [`erun delete`](/cli/delete). Not recoverable. Prompts for confirmation unless `-y`/`--yes` is set or `--dry-run` is used.
+Starts tearing down the environment's namespace (if it has one) and removing it — the server-side equivalent of [`erun delete`](/cli/delete). Not recoverable. Prompts for confirmation unless `-y`/`--yes` is set or `--dry-run` is used.
+
+The teardown runs in the background: the command returns as soon as the platform accepts the delete and prints the resulting environment line, at status `deleting`:
+
+```
+  - prod (018f4b2a-...) type=runtime status=deleting
+```
+
+Poll `platform env get` to watch it converge — either to not-found (gone) or to `deletion-blocked`, in which case the same line carries a `delete-error="..."` field naming the stuck namespace's own conditions. Re-running `platform env delete` against a `deleting` or `deletion-blocked` environment retries it; the platform also re-attempts a stuck delete on its own every few minutes. `--output json` returns the environment as a structured object instead.
 
 ### `platform context create` / `platform context list` / `platform context get`
 
@@ -106,6 +114,7 @@ erun platform env get 018f4b2a-...
 erun platform env deploy 018f4b2a-... --version 1.5.0
 erun platform env stop 018f4b2a-...
 erun platform env delete 018f4b2a-... -y
+erun platform env get 018f4b2a-...            # watch the delete converge
 
 erun platform provision --env-name staging --env-type runtime --dry-run
 erun platform tenant list --output json
@@ -122,7 +131,8 @@ erun platform tenant list --output json
 | `env register` names a `--context-id` that is already at its `maxEnvironments`, or names none while every one of your tenant's own registered contexts is full or not yet running. | `409 Conflict`. |
 | `platform provision` names `--kubernetes-context` or a bootstrap `--context-*` set for a `runtime` environment. | `400 Bad Request` — this preview does not support `runtime` placement onto a context; see [Placement](/concepts/hosted-platform#single-cluster-placement). |
 | `env deploy` while a deploy is already in progress. | `409 Conflict`. |
+| `env delete` while a delete is already in progress for that environment. | `409 Conflict`. A `deletion-blocked` environment is always retryable and never conflicts. |
 | `env get`/`env deploy`/`env stop`/`env delete` on an unknown environment id. | `404 Not Found`. |
 | `env stop`/`env delete`/`context create`/`env register` (with a version) when the platform has no deploy/lifecycle executor configured. | `501 Not Implemented`. |
 | `env delete` without `-y`/`--yes` and not `--dry-run`. | Interactive confirmation prompt; declining aborts with no request sent. |
-| Environment/tenant quota reached, or admitting/redeploying a runtime environment would exceed the tenant's aggregate CPU/memory/storage budget. | `409 Conflict` on a real `env register`/`env deploy`; a preview (`platform provision`) instead returns the full plan with `quotaOk: false`. |
+| Environment/tenant quota reached, or admitting/redeploying a runtime environment would exceed the tenant's aggregate CPU/memory/storage budget. | `409 Conflict` on a real `env register`/`env deploy`; a preview (`platform provision`) instead returns the full plan with `quotaOk: false`. An environment you have already asked to delete does not count toward the environment-count cap. |

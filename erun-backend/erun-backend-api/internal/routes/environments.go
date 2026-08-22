@@ -35,6 +35,13 @@ type EnvironmentRepository interface {
 	// workflow (see writeStartProvisioningError), so the environment does not
 	// stay stranded in provisioning.
 	MarkDeployFailed(ctx context.Context, environmentID, reason string) error
+	// ClaimDelete takes exclusive ownership of a delete attempt (#1140),
+	// mirroring ClaimDeploy: false means another delete already holds it.
+	ClaimDelete(ctx context.Context, environmentID string, staleAfter time.Duration) (bool, error)
+	// MarkDeleteBlocked records a delete claim that never reached the durable
+	// workflow (see writeStartDeleteError), so the environment does not stay
+	// stranded in `deleting`.
+	MarkDeleteBlocked(ctx context.Context, environmentID, reason string) error
 }
 
 // PlacementContextRepository is the read access placement (#1112) needs: list
@@ -54,12 +61,21 @@ type EnvironmentProvisioner interface {
 	StartDeploy(provision.EnvProvisionInput) error
 }
 
-// EnvironmentLifecycle stops or deletes an already-registered runtime
-// environment. Optional: when nil, the stop/delete routes report 501, the
-// same "executor not configured" shape as a nil EnvironmentProvisioner.
+// EnvironmentLifecycle stops an already-registered runtime environment.
+// Optional: when nil, the stop route reports 501, the same "executor not
+// configured" shape as a nil EnvironmentProvisioner.
 type EnvironmentLifecycle interface {
 	Stop(ctx context.Context, input provision.EnvLifecycleInput) error
-	Delete(ctx context.Context, input provision.EnvLifecycleInput) error
+}
+
+// EnvironmentDeleter starts an already-registered runtime environment's
+// delete attempt asynchronously (#1140): the durable workflow behind it may
+// run long or wedge entirely (a stuck namespace finalizer), so the route that
+// starts one must not be the thing waiting on it. Optional: when nil, the
+// delete route reports 501, the same "executor not configured" shape as a nil
+// EnvironmentProvisioner.
+type EnvironmentDeleter interface {
+	Start(input provision.EnvDeleteInput) error
 }
 
 // deployClaimStaleAfter bounds how long a deploy may hold its environment's
@@ -87,9 +103,12 @@ type EnvironmentRoutes struct {
 	// provisioner is nil when live env provisioning is not wired; then create
 	// only registers the row.
 	provisioner EnvironmentProvisioner
-	// lifecycle is nil when live env provisioning is not wired; then stop and
-	// delete are unavailable rather than acting on config no Job can realize.
+	// lifecycle is nil when live env provisioning is not wired; then stop is
+	// unavailable rather than acting on config no Job can realize.
 	lifecycle EnvironmentLifecycle
+	// deleter is nil when live env provisioning is not wired; then delete is
+	// unavailable rather than acting on config no Job can realize.
+	deleter EnvironmentDeleter
 }
 
 // createEnvironmentRequest carries only operator-authored fields; the tenant is
@@ -106,8 +125,8 @@ type createEnvironmentRequest struct {
 	Preview           bool   `json:"preview"`
 }
 
-func RegisterEnvironmentRoutes(register ProtectedRouteRegistrar, environments EnvironmentRepository, quotas TenantQuotaRepository, tenants ConfigTenantRepository, contexts PlacementContextRepository, provisioner EnvironmentProvisioner, lifecycle EnvironmentLifecycle) {
-	routes := EnvironmentRoutes{environments: environments, quotas: quotas, tenants: tenants, contexts: contexts, provisioner: provisioner, lifecycle: lifecycle}
+func RegisterEnvironmentRoutes(register ProtectedRouteRegistrar, environments EnvironmentRepository, quotas TenantQuotaRepository, tenants ConfigTenantRepository, contexts PlacementContextRepository, provisioner EnvironmentProvisioner, lifecycle EnvironmentLifecycle, deleter EnvironmentDeleter) {
+	routes := EnvironmentRoutes{environments: environments, quotas: quotas, tenants: tenants, contexts: contexts, provisioner: provisioner, lifecycle: lifecycle, deleter: deleter}
 	register(http.MethodGet, "/v1/environments", http.HandlerFunc(routes.listEnvironments))
 	register(http.MethodPost, "/v1/environments", http.HandlerFunc(routes.createEnvironment))
 	register(http.MethodGet, "/v1/environments/{environment_id}", http.HandlerFunc(routes.getEnvironment))
@@ -145,10 +164,22 @@ func (r EnvironmentRoutes) stopEnvironment(w http.ResponseWriter, req *http.Requ
 	writeJSON(w, http.StatusOK, environment)
 }
 
-// deleteEnvironment tears down a runtime environment's namespace (when it has
-// one) and removes its row, the server-side equivalent of `erun delete`.
+// deleteClaimStaleAfter is provision.DeleteClaimStaleAfter under its
+// routes-local name, matching deployClaimStaleAfter's naming here.
+const deleteClaimStaleAfter = provision.DeleteClaimStaleAfter
+
+// deleteEnvironment starts tearing down a runtime environment's namespace
+// (when it has one) and its row, the server-side equivalent of `erun
+// delete`. The teardown itself runs asynchronously (#1140): a namespace stuck
+// on an unsatisfiable finalizer can wedge for as long as Kubernetes is
+// willing to sit in Terminating, so this handler claims the delete and starts
+// the durable workflow behind it, then returns without waiting on it — the
+// same 202-then-poll shape createEnvironment/deployEnvironment already use
+// for a durable workflow's own start. A caller polls GET
+// /v1/environments/{id} to watch status converge to gone (204 from a later
+// GET) or deletion-blocked.
 func (r EnvironmentRoutes) deleteEnvironment(w http.ResponseWriter, req *http.Request) {
-	if r.lifecycle == nil {
+	if r.deleter == nil {
 		writeError(w, http.StatusNotImplemented, "the deploy executor is not configured")
 		return
 	}
@@ -158,16 +189,72 @@ func (r EnvironmentRoutes) deleteEnvironment(w http.ResponseWriter, req *http.Re
 		writeRepositoryError(w, err)
 		return
 	}
-	input, err := r.lifecycleInput(ctx, environment)
+	// Claiming before starting the workflow is what keeps a double-submit
+	// from launching two delete Jobs against the same namespace, and reclaims
+	// a stale or already-blocked attempt so a retry never needs an operator
+	// to notice and wait it out by hand.
+	claimed, err := r.environments.ClaimDelete(ctx, environment.EnvironmentID, deleteClaimStaleAfter)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to resolve environment placement")
+		writeRepositoryError(w, err)
 		return
 	}
-	if err := r.lifecycle.Delete(ctx, input); err != nil {
-		writeError(w, http.StatusBadGateway, "failed to delete environment: "+err.Error())
+	if !claimed {
+		writeError(w, http.StatusConflict, "a delete is already in progress for this environment")
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	if err := r.startDelete(ctx, environment); err != nil {
+		r.writeStartDeleteError(w, ctx, environment.EnvironmentID, err)
+		return
+	}
+	environment.Status = model.EnvironmentStatusDeleting
+	writeJSON(w, http.StatusAccepted, environment)
+}
+
+// startDelete kicks off the durable delete workflow, tagged with a fresh
+// attempt id so a retry (an operator's or the reconciler's) never replays a
+// previous attempt's cached (e.g. deletion-blocked) result instead of
+// actually running again. It targets the cluster the environment was already
+// placed on at create time (resolvePlacementCoordinates), never a freshly
+// auto-selected one, mirroring startDeploy.
+func (r EnvironmentRoutes) startDelete(ctx context.Context, environment model.Environment) error {
+	tenant, err := r.tenants.Current(ctx)
+	if err != nil {
+		return err
+	}
+	placement, err := r.resolvePlacementCoordinates(ctx, environment.ContextID)
+	if err != nil {
+		return err
+	}
+	securityContext, ok := security.FromContext(ctx)
+	if !ok {
+		return fmt.Errorf("missing security context")
+	}
+	version := environment.DeployedVersion
+	if version == "" {
+		version = environment.RuntimeVersion
+	}
+	return r.deleter.Start(provision.EnvDeleteInput{
+		TenantID:                   securityContext.TenantID,
+		TenantType:                 securityContext.TenantType,
+		ErunUserID:                 securityContext.ErunUserID,
+		EnvironmentID:              environment.EnvironmentID,
+		Tenant:                     strings.TrimSpace(tenant.Name),
+		Environment:                environment.Name,
+		RunningVersion:             version,
+		ContextID:                  placement.ContextID,
+		PlacementKubernetesContext: placement.KubernetesContext,
+		PlacementServerURL:         placement.ServerURL,
+		DeleteID:                   uuid.NewString(),
+	})
+}
+
+// writeStartDeleteError marks the environment deletion-blocked and answers
+// 500: ClaimDelete already moved the row to `deleting` before startDelete
+// ran, so any failure to even enqueue the durable workflow would otherwise
+// strand the environment there with no workflow run left to move it out.
+func (r EnvironmentRoutes) writeStartDeleteError(w http.ResponseWriter, ctx context.Context, environmentID string, err error) {
+	_ = r.environments.MarkDeleteBlocked(ctx, environmentID, err.Error())
+	writeError(w, http.StatusInternalServerError, "failed to start delete")
 }
 
 // lifecycleInput resolves the placement a stop/delete Job needs: the tenant

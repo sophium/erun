@@ -206,7 +206,9 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	routes.RegisterReviewRoutes(register, reviews, reviewService, builds, releaseRoutes)
 	routes.RegisterBuildRoutes(register, builds, buildService)
 	routes.RegisterCommentRoutes(register, comments, commentService)
-	routes.RegisterEnvironmentRoutes(register, environments, tenantQuotas, tenants, contexts, newEnvironmentProvisioner(options, environments, usageEvents, placementCredentials), newEnvironmentLifecycle(options, environments, usageEvents, placementCredentials))
+	deleter := newEnvironmentDeleter(options, environments, usageEvents, placementCredentials)
+	routes.RegisterEnvironmentRoutes(register, environments, tenantQuotas, tenants, contexts, newEnvironmentProvisioner(options, environments, usageEvents, placementCredentials), newEnvironmentLifecycle(options, environments, usageEvents, placementCredentials), deleter)
+	newEnvironmentDeleteReconciler(options, environments, tenants, contexts, deleter)
 	routes.RegisterUsageEventRoutes(register, usageEvents)
 	routes.RegisterMCPTokenRoutes(register, environments, tenants, options.MCPSigner)
 	routes.RegisterDNS01TokenRoutes(register, environments, tenants, options.MCPSigner)
@@ -287,17 +289,61 @@ func missingEnvProvisionerConfig(options HandlerOptions, deploy provision.EnvDep
 	return reasons
 }
 
-// newEnvironmentLifecycle wires live stop/delete, which needs an in-cluster
-// client and the full deploy placement but no durable workflow (see
-// provision.EnvLifecycle). Anything missing leaves it nil, so stop/delete
-// report the executor as unconfigured rather than acting on partial config.
-func newEnvironmentLifecycle(options HandlerOptions, environments *repository.EnvironmentRepository, usage *repository.UsageEventRepository, credentials deployexec.PlacementCredentialResolver) routes.EnvironmentLifecycle {
+// newEnvLifecycleExecutor builds the shared stop/delete executor both
+// newEnvironmentLifecycle (stop) and newEnvironmentDeleter (delete) wrap, so
+// the two never drift onto different image or credential resolution. Needs an
+// in-cluster client and the full deploy placement; nil (a concrete, not yet
+// interface-wrapped nil — callers must check before returning it as an
+// interface) when either is missing.
+func newEnvLifecycleExecutor(options HandlerOptions, environments *repository.EnvironmentRepository, usage *repository.UsageEventRepository, credentials deployexec.PlacementCredentialResolver) *provision.EnvLifecycle {
 	deploy := options.EnvDeploy
 	if options.KubeClient == nil ||
 		deploy.DeployerServiceAccount == "" || deploy.PlatformNamespace == "" || deploy.Registry == "" {
 		return nil
 	}
 	return provision.NewEnvLifecycle(deployexec.NewLauncher(options.KubeClient), environments, deploy, usage, newRuntimeImageChecker(options), credentials)
+}
+
+// newEnvironmentLifecycle wires live stop, which needs an in-cluster client
+// and the full deploy placement but no durable workflow. Anything missing
+// leaves it nil, so stop reports the executor as unconfigured rather than
+// acting on partial config.
+func newEnvironmentLifecycle(options HandlerOptions, environments *repository.EnvironmentRepository, usage *repository.UsageEventRepository, credentials deployexec.PlacementCredentialResolver) routes.EnvironmentLifecycle {
+	lifecycle := newEnvLifecycleExecutor(options, environments, usage, credentials)
+	if lifecycle == nil {
+		return nil
+	}
+	return lifecycle
+}
+
+// newEnvironmentDeleter wires live delete (#1140): the same stop/delete
+// executor newEnvironmentLifecycle wraps, but run inside a durable DBOS
+// workflow so a control-plane restart resumes an in-flight delete rather than
+// leaving the environment stranded in `deleting`. nil under the same
+// preconditions as newEnvironmentLifecycle, plus a configured DBOSContext —
+// without one there is nowhere durable to run the workflow.
+func newEnvironmentDeleter(options HandlerOptions, environments *repository.EnvironmentRepository, usage *repository.UsageEventRepository, credentials deployexec.PlacementCredentialResolver) routes.EnvironmentDeleter {
+	if options.DBOSContext == nil {
+		return nil
+	}
+	lifecycle := newEnvLifecycleExecutor(options, environments, usage, credentials)
+	if lifecycle == nil {
+		return nil
+	}
+	return provision.NewEnvDeleter(options.DBOSContext, lifecycle)
+}
+
+// newEnvironmentDeleteReconciler schedules the periodic re-attempt of every
+// environment mid-teardown (#1140), so a namespace that finishes terminating
+// — or a solver that starts answering again — converges the row without an
+// operator noticing and re-issuing the delete. Registered only when delete
+// itself is wired: with no live executor there is nothing for a reconciled
+// attempt to run.
+func newEnvironmentDeleteReconciler(options HandlerOptions, environments *repository.EnvironmentRepository, tenants *repository.TenantRepository, contexts *repository.ContextRepository, deleter routes.EnvironmentDeleter) {
+	if deleter == nil {
+		return
+	}
+	provision.NewEnvDeleteReconciler(options.DBOSContext, environments, tenants, contexts, deleter, provision.DefaultDeleteReconcileSchedule)
 }
 
 // newReleaseRunner wires the release Job launcher. Without an in-cluster client

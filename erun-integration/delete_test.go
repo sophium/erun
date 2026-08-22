@@ -211,6 +211,25 @@ func TestDelete(t *testing.T) {
 		}
 	})
 
+	t.Run("real_run_with_output_json_reports_namespace_delete_failure", func(t *testing.T) {
+		// The hosted delete Job (#1140) reads this exact shape back out of its
+		// own captured output to tell a blocked namespace teardown apart from
+		// a clean one, since the command's own exit code stays 0 either way.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryAdvanced(t, stubs, "kubectl", fixture.StubBinarySpec{
+			Stderr:   `Error from server (Forbidden): namespaces "team-dev" is forbidden`,
+			ExitCode: 1,
+		})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		result := erun.Run(t, []string{"delete", "team", "dev", "--yes", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "delete/real_run_with_output_json_reports_namespace_delete_failure", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_with_yes_flag_skips_confirmation_and_removes_config", func(t *testing.T) {
 		// --yes bypasses the confirmation prompt and really removes the env
 		// config tree.

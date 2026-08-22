@@ -228,16 +228,19 @@ func RunPlatformStopEnvironment(ctx Context, store CloudReadStore, alias, enviro
 	return client.StopEnvironment(context.Background(), environmentID)
 }
 
-// RunPlatformDeleteEnvironment tears down a runtime environment's namespace
-// and removes its row, the server-side equivalent of `erun delete`.
-func RunPlatformDeleteEnvironment(ctx Context, store CloudReadStore, alias, environmentID string, deps CloudDependencies) error {
+// RunPlatformDeleteEnvironment starts tearing down a runtime environment's
+// namespace and its row, the server-side equivalent of `erun delete`. See
+// PlatformClient.DeleteEnvironment: the teardown itself runs asynchronously
+// (#1140), so the returned environment reflects the claim (status
+// "deleting"), not a completed removal.
+func RunPlatformDeleteEnvironment(ctx Context, store CloudReadStore, alias, environmentID string, deps CloudDependencies) (PlatformEnvironment, error) {
 	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return err
+		return PlatformEnvironment{}, err
 	}
 	tracePlatformCall(ctx, provider, "DELETE", "/v1/environments/"+environmentID)
 	if ctx.DryRun {
-		return nil
+		return PlatformEnvironment{}, nil
 	}
 	return client.DeleteEnvironment(context.Background(), environmentID)
 }

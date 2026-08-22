@@ -355,7 +355,7 @@ func registerPlatformTools(reg toolRegistrar, runtime RuntimeConfig) {
 	}, platformEnvStopTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "platform_env_delete",
-		Description: "Delete a hosted environment and tear down its remote namespace on the erun platform, the server-side equivalent of `erun delete`. Not recoverable. This call never prompts: pass confirm=true to actually delete. Supports preview (confirm is ignored when preview is true).",
+		Description: "Start deleting a hosted environment and tearing down its remote namespace on the erun platform, the server-side equivalent of `erun delete`. Not recoverable. The teardown itself runs in the background — a namespace stuck on an unsatisfiable finalizer can take a while, so this returns as soon as the delete is accepted, with the environment's status \"deleting\". Call platform_env_get to watch it converge to gone (not found) or \"deletion-blocked\" (its deleteError names why); calling delete again against a blocked or still-deleting environment retries it. This call never prompts: pass confirm=true to actually delete. Supports preview (confirm is ignored when preview is true).",
 	}, platformEnvDeleteTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "platform_context_list",

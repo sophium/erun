@@ -285,26 +285,29 @@ type PlatformEnvDeleteInput struct {
 	Confirm bool `json:"confirm" jsonschema:"must be true to actually delete; required because this call never prompts. Ignored when preview is true."`
 }
 
-type PlatformEnvDeleteResult struct {
-	Preview bool     `json:"preview"`
-	Deleted bool     `json:"deleted"`
-	Trace   []string `json:"trace,omitempty"`
-}
-
-func platformEnvDeleteTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PlatformEnvDeleteInput) (*mcp.CallToolResult, PlatformEnvDeleteResult, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input PlatformEnvDeleteInput) (*mcp.CallToolResult, PlatformEnvDeleteResult, error) {
+// platformEnvDeleteTool starts an environment's delete and returns
+// immediately rather than waiting for the namespace to actually disappear
+// (#1140): a namespace stuck on an unsatisfiable finalizer can otherwise wedge
+// for as long as Kubernetes is willing to sit in Terminating. The returned
+// Environment reflects the claim (status "deleting"); call platform_env_get
+// to watch it converge to gone (not found) or "deletion-blocked" (its
+// deleteError names why). Calling delete again against a blocked or
+// still-deleting environment retries it.
+func platformEnvDeleteTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PlatformEnvDeleteInput) (*mcp.CallToolResult, PlatformEnvResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input PlatformEnvDeleteInput) (*mcp.CallToolResult, PlatformEnvResult, error) {
 		if strings.TrimSpace(input.EnvironmentID) == "" {
-			return nil, PlatformEnvDeleteResult{}, fmt.Errorf("environmentId is required")
+			return nil, PlatformEnvResult{}, fmt.Errorf("environmentId is required")
 		}
 		if !input.Preview && !input.Confirm {
-			return nil, PlatformEnvDeleteResult{}, fmt.Errorf("confirm must be true to delete environment %s; this call never prompts", input.EnvironmentID)
+			return nil, PlatformEnvResult{}, fmt.Errorf("confirm must be true to delete environment %s; this call never prompts", input.EnvironmentID)
 		}
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
-		if err := eruncommon.RunPlatformDeleteEnvironment(ctx, runtime.Store, input.Alias, input.EnvironmentID, cloudDependencies()); err != nil {
-			return nil, PlatformEnvDeleteResult{}, err
+		environment, err := eruncommon.RunPlatformDeleteEnvironment(ctx, runtime.Store, input.Alias, input.EnvironmentID, cloudDependencies())
+		if err != nil {
+			return nil, PlatformEnvResult{}, err
 		}
-		return nil, PlatformEnvDeleteResult{Preview: input.Preview, Deleted: !input.Preview, Trace: normalizeTraceLines(traceOutput.String())}, nil
+		return nil, PlatformEnvResult{Preview: input.Preview, Environment: environment, Trace: normalizeTraceLines(traceOutput.String())}, nil
 	}
 }
 

@@ -8,6 +8,7 @@ package deployexec
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -152,12 +153,15 @@ func buildDeleteJob(params DeleteJobParams) *batchv1.Job {
 	}
 }
 
-// buildDeleteCommand composes the delete Job's argv: the plain `erun delete`
-// (identical to buildLifecycleCommand's shape), then — when both platform
-// coordinates are set — a best-effort chained `erun unexpose` so a leftover
-// DNS record doesn't outlive the namespace it pointed at.
+// buildDeleteCommand composes the delete Job's argv: `erun delete --output
+// json` (identical to buildLifecycleCommand's shape, plus --output json so
+// NamespaceDeleteFailureFromOutput can read back whether the namespace
+// teardown itself completed — `erun delete`'s local semantics keep going, and
+// exit 0, even when that fails), then — when both platform coordinates are
+// set — a best-effort chained `erun unexpose` so a leftover DNS record
+// doesn't outlive the namespace it pointed at.
 func buildDeleteCommand(params DeleteJobParams) []string {
-	deleteArgv := []string{"erun", "delete", params.Tenant, params.Environment, "-y"}
+	deleteArgv := []string{"erun", "delete", params.Tenant, params.Environment, "-y", "--output", "json"}
 	script := bootstrapEnvironmentScript(params.Tenant, params.Environment, params.Placement) + shellJoin(deleteArgv)
 	if zone, ns := strings.TrimSpace(params.ExposeServicesZone), strings.TrimSpace(params.ExposePlatformNamespace); zone != "" && ns != "" {
 		unexpose := []string{"erun", "unexpose", params.Tenant, params.Environment, "--skip-if-unconfigured", "--services-zone", zone, "--platform-namespace", ns}
@@ -190,6 +194,35 @@ func UnexposeFailureFromOutput(output string) string {
 		return ""
 	}
 	return strings.TrimSpace(output[idx+len(marker):])
+}
+
+// deleteJobResult is the one field of eruncommon.DeleteEnvironmentResult the
+// delete Job's --json output carries that the API needs back.
+type deleteJobResult struct {
+	NamespaceDeleteError string `json:"namespaceDeleteError"`
+}
+
+// NamespaceDeleteFailureFromOutput extracts the delete Job's own namespace
+// teardown failure from its captured `erun delete --output json` result (see
+// buildDeleteCommand). "" means the namespace was confirmed torn down (or the
+// Job predates --output json). Checked regardless of the Job's own exit code:
+// `erun delete` treats a namespace-teardown failure as non-fatal for itself
+// (its own local config cleanup still runs and it still exits 0), so a Job
+// the jobexec runner reports as succeeded can still have left the namespace
+// stuck — this is the only place that failure is visible. The result is
+// pretty-printed JSON (eruncommon.Context.WriteResult), so this decodes from
+// the first '{' rather than scanning single lines, and ignores whatever
+// non-JSON audit/trace text or chained unexpose output surrounds it.
+func NamespaceDeleteFailureFromOutput(output string) string {
+	idx := strings.IndexByte(output, '{')
+	if idx < 0 {
+		return ""
+	}
+	var result deleteJobResult
+	if err := json.NewDecoder(strings.NewReader(output[idx:])).Decode(&result); err != nil {
+		return ""
+	}
+	return result.NamespaceDeleteError
 }
 
 // RunStop creates the stop Job and blocks until it reaches a terminal state.

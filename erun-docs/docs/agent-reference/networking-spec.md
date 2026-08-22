@@ -175,7 +175,7 @@ Either way, `expose` **references** the pre-issued Secret and sets **no** `cert-
 
 **Execution.** One side effect: `kubectl [--context <platform-ctx>] -n <platform-namespace> exec deploy/<platform-tenant>-powerdns -- pdnsutil --config-dir=/etc/pdns-shared delete-rrset <zone> <rel-name> A` — the delete-side counterpart to `expose`'s `replace-rrset`, sharing the same argv-building helper so the `--config-dir` flag (required for `pdnsutil` to find the shared PowerDNS config; its absence reads as a missing zone rather than a misconfigured tool) can never drift between the two.
 
-**Env teardown.** `erun platform env delete`'s delete Job chains a best-effort `erun unexpose --skip-if-unconfigured` after a successful `erun delete`, symmetric with the deploy Job chaining `erun expose` itself (#1094). A cleanup failure does not fail the delete — the namespace already tore down — it is logged on the control plane, since the environment row that would otherwise carry the failure reason is removed in the same request.
+**Env teardown.** `erun platform env delete`'s delete Job chains a best-effort `erun unexpose --skip-if-unconfigured` after a successful `erun delete`, symmetric with the deploy Job chaining `erun expose` itself (#1094). A cleanup failure does not fail the delete — the namespace already tore down — it is logged on the control plane, since the environment row that would otherwise carry the failure reason is removed in the same workflow step (see [`DELETE /v1/environments/{environment_id}`](/agent-reference/api-protocol#delete-endpoint) for the asynchronous delete lifecycle this runs inside).
 
 ## Cross-namespace traffic semantics
 

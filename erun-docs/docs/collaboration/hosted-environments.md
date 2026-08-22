@@ -51,8 +51,16 @@ erun platform provision --env-name staging --env-type runtime
 
 ```bash
 erun platform env stop <environment-id>     # scale to zero; state survives
-erun platform env delete <environment-id>   # tear down the namespace; irreversible
+erun platform env delete <environment-id>   # start tearing down the namespace; irreversible
 ```
+
+`delete` is irreversible, and it returns as soon as the platform has accepted it — the teardown itself runs in the background, because a namespace stuck on an unsatisfiable finalizer can sit in `Terminating` for a long time. The command prints the environment at status `deleting`; poll it the same way you polled the deploy:
+
+```bash
+erun platform env get <environment-id>
+```
+
+It converges one of two ways: the environment is gone (`env get` reports it as not found), or it lands on `deletion-blocked` with the reason — the stuck namespace's own conditions — printed on the same line. The platform re-attempts a blocked delete on its own every few minutes, so a namespace that finishes terminating converges without you doing anything; re-running `erun platform env delete` retries it immediately.
 
 ## Where an environment lands
 
@@ -60,7 +68,7 @@ Name a cloud context you've already registered with `contextId` and a hosted run
 
 ## Quotas
 
-Your tenant has a cap on how many environments it may register at once. `erun platform env register` reports a clear conflict at the cap; `erun platform provision` shows you the same quota decision in its preview before you commit.
+Your tenant has a cap on how many environments it may register at once. `erun platform env register` reports a clear conflict at the cap; `erun platform provision` shows you the same quota decision in its preview before you commit. An environment you have asked to delete stops counting against that cap as soon as the delete is accepted — a teardown that gets stuck can't lock you out of your own allowance.
 
 Each of your environments also runs inside a namespace capped on CPU, memory, and storage — enforced by Kubernetes itself, not just recorded. On top of that, your tenant has an aggregate CPU/memory/storage budget across all of your runtime environments combined: registering (or redeploying) one that would push your total past that budget is refused the same way, naming which resource and by how much. If your platform operator has set either cap unusually low, registering a new runtime environment is refused with a clear conflict naming the cap, rather than succeeding and failing to actually come up.
 
