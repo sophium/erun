@@ -1279,6 +1279,33 @@ type orchestratorSpawn struct {
 	rows           int
 }
 
+// wireOrchestratorMCP writes the per-orchestrator MCP config and tells the
+// operator about anything that did not wire, returning the config path ("" when
+// there is none). Split out of spawnOrchestratorSession to keep that function
+// inside the module's complexity budget.
+//
+// Both failure shapes are non-fatal: the orchestrator still launches. What it
+// must not do is launch quietly. A session with linked environments and none of
+// their tools looks working and is not, and a session missing just ONE
+// environment's tools is worse -- it works, right up to the first call into the
+// environment that is not there, which an agent reads as "not linked" rather
+// than "failed to wire" (#1185).
+func (a *App) wireOrchestratorMCP(id, name string, envs []eruncommon.OrchestratorEnvConfig) string {
+	path, skipped, err := a.writeOrchestratorMCPConfig(id, envs)
+	for _, skip := range skipped {
+		log.Printf("erun-app: orchestrator %s: no MCP tools for %s: %s", id, skip.Label, skip.Reason)
+	}
+	if err != nil {
+		log.Printf("erun-app: write orchestrator MCP config for %s: %v", id, err)
+		a.emitAppNotification("warning", orchestratorMCPUnwiredNotice(name, err))
+		return ""
+	}
+	if len(skipped) > 0 {
+		a.emitAppNotification("warning", orchestratorMCPPartialNotice(name, len(envs)-len(skipped), skipped))
+	}
+	return path
+}
+
 // spawnOrchestratorSession launches the host AI harness in the shared
 // orchestrators root and tracks the live session.
 func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInfo, error) {
@@ -1290,11 +1317,7 @@ func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInf
 	// Non-fatal: the orchestrator still launches without the env MCP, but an
 	// agent with linked envs and none of their tools looks working and is not,
 	// so the operator is told why instead of discovering it tool by tool.
-	mcpConfigPath, mcpErr := a.writeOrchestratorMCPConfig(id, envs)
-	if mcpErr != nil {
-		log.Printf("erun-app: write orchestrator MCP config for %s: %v", id, mcpErr)
-		a.emitAppNotification("warning", orchestratorMCPUnwiredNotice(name, mcpErr))
-	}
+	mcpConfigPath := a.wireOrchestratorMCP(id, name, envs)
 	// A restart hand-off names the conversation that asked for it; every other
 	// launch falls back to this orchestrator's own pinned one.
 	conversationID := strings.TrimSpace(spawn.conversationID)
