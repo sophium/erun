@@ -59,8 +59,26 @@ func runMCPProxyCommand(ctx context.Context, commandCtx common.Context, resolveO
 		Out:           commandCtx.Stdout,
 		Diagnostics:   commandCtx.Stderr,
 		DescribeError: func(err error) string { return mcpEdgeError(target, err).Error() },
-		LocalTools:    []common.MCPLocalTool{workspaceSyncLocalTool(resolveOpen, params), inputsUploadLocalTool(resolveOpen, params)},
+		LocalTools: []common.MCPLocalTool{
+			sshdSyncLocalTool(resolveOpen, params),
+			// Deprecated alias for one release (#1186), so an upgrade does not
+			// break a client pinned to the old name. Same handler; only the name
+			// and the description differ.
+			deprecatedAlias(sshdSyncLocalTool(resolveOpen, params), "workspace_sync", "sshd_sync"),
+			inputsUploadLocalTool(resolveOpen, params),
+		},
 	})
+}
+
+// deprecatedAlias returns tool under a retired name, with a description that
+// says so. The rule on this surface is that a tool's name equals its CLI path
+// with "_" for spaces, and this one drifted from `erun sshd sync` (#1186); the
+// alias keeps the retired name callable for one release rather than breaking a
+// pinned client on an upgrade.
+func deprecatedAlias(tool common.MCPLocalTool, retired, replacement string) common.MCPLocalTool {
+	tool.Name = retired
+	tool.Description = "Deprecated: use " + replacement + ". Retained for one release; this name will be removed."
+	return tool
 }
 
 // inputsUploadLocalTool exposes erun inputs upload over the same MCP an
@@ -72,7 +90,7 @@ func inputsUploadLocalTool(resolveOpen OpenResolver, params common.OpenParams) c
 	return common.MCPLocalTool{
 		Name: "inputs_upload",
 		Description: "Stream a local file on this host into the environment's runtime pod at an explicit destination, byte-identical, without the bytes passing through this call's arguments or your context. " +
-			"Runs on the host, where the source file lives. remotePath is the full absolute destination inside the pod, including the file name — there is no default, so it can never silently land somewhere a background process (such as workspace_sync's mirror) reconciles away. Set preview to resolve the transfer and trace what would happen without sending anything. Refuses clearly, naming why, when the local file is missing, remotePath is not absolute, the channel to the pod is down, or the destination directory is not writable.",
+			"Runs on the host, where the source file lives. remotePath is the full absolute destination inside the pod, including the file name — there is no default, so it can never silently land somewhere a background process (such as sshd_sync's mirror) reconciles away. Set preview to resolve the transfer and trace what would happen without sending anything. Refuses clearly, naming why, when the local file is missing, remotePath is not absolute, the channel to the pod is down, or the destination directory is not writable.",
 		InputSchema: json.RawMessage(`{"type":"object","required":["localPath","remotePath"],"properties":{"localPath":{"type":"string","description":"path to the file on this host"},"remotePath":{"type":"string","description":"absolute destination path inside the pod, including the file name"},"preview":{"type":"boolean","description":"when true, resolve and describe the transfer without sending anything"}}}`),
 		Call: func(_ context.Context, arguments json.RawMessage) (string, error) {
 			var call struct {
@@ -108,14 +126,14 @@ func inputsUploadLocalTool(resolveOpen OpenResolver, params common.OpenParams) c
 	}
 }
 
-// workspaceSyncLocalTool exposes the host mirror's refresh over the same MCP an
+// sshdSyncLocalTool exposes the host mirror's refresh over the same MCP an
 // orchestrator already drives the environment through. It is served here rather
 // than by the edge because the mirror is on this host: the edge runs in the pod
 // and has nothing to write to. The environment is resolved per call, so a mirror
 // enabled mid-session is picked up without restarting the session.
-func workspaceSyncLocalTool(resolveOpen OpenResolver, params common.OpenParams) common.MCPLocalTool {
+func sshdSyncLocalTool(resolveOpen OpenResolver, params common.OpenParams) common.MCPLocalTool {
 	return common.MCPLocalTool{
-		Name: "workspace_sync",
+		Name: "sshd_sync",
 		Description: "Run one workspace-sync pass for this environment: mirror the pod's git-visible worktree into the host review directory, delete what the pod no longer has, and deliver the pod's cross-built artifacts. " +
 			"Runs on the host, where the mirror lives. Set preview to report what a pass would change without touching the mirror. Refuses, naming which, when the environment is not a remote-agent env, has workspace sync disabled, has no configured local path, or its SSH channel is down.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"preview":{"type":"boolean","description":"when true, report what one pass would change without changing it"}}}`),
