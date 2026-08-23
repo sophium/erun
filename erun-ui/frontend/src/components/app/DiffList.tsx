@@ -5,57 +5,110 @@ import { compactDiffError, diffLineMark, visibleDiffFilePaths } from '@/app/diff
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { reconnectCopy } from '@/app/reconnectCopy';
 import { loadReviewDiff, requestReconnect } from '@/app/reviewThunks';
+import { type ReviewEnvTarget, selectReviewEnvTargets } from '@/app/selectors';
+import { diffPathKey } from '@/app/slices/reviewSlice';
+import { useEnvDiffSlot } from '@/app/useEnvDiffSlot';
 import { copyToClipboard } from '@/components/app/ActivityQueueDrawer.helpers';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { DiffFile, DiffHunk } from '@/types';
 
 export function DiffList(): React.ReactElement {
-  const dispatch = useAppDispatch();
-  const review = useAppSelector((state) => state.review);
-  if (review.diffLoading) {
-    return <ReviewStatus>Loading diff...</ReviewStatus>;
+  const targets = useAppSelector(selectReviewEnvTargets);
+  if (targets.length === 0) {
+    return <ReviewStatus>No environment selected</ReviewStatus>;
   }
-  if (review.diffError) {
-    return (
-      <DiffErrorAlert
-        message={compactDiffError(review.diffError)}
-        loading={review.diffLoading}
-        reconnectable={review.diffErrorReconnectable}
-        onRetry={() => {
-          void dispatch(loadReviewDiff());
-        }}
-        onReconnect={() => {
-          dispatch(requestReconnect());
-        }}
-      />
-    );
-  }
-  const allFiles = review.diff?.files ?? [];
-  if (allFiles.length === 0) {
-    return <ReviewStatus>No changes</ReviewStatus>;
-  }
-  // Keep the diff panel's files and their order matching the changed-files
-  // tree's visible subset; diff.files is already ordered to match the tree.
-  const visiblePaths = visibleDiffFilePaths(
-    review.diff?.tree ?? [],
-    review.diffFilter,
-    new Set(review.collapsedDiffDirs),
-  );
-  const files = allFiles.filter((file) => visiblePaths.has(file.path));
-  if (files.length === 0) {
-    return <ReviewStatus>No matching files</ReviewStatus>;
-  }
+  // One section per environment, in the orchestrator's configured order. A
+  // single environment renders exactly as before -- no header, no chrome -- so
+  // the env-tab case is visually unchanged (#1178).
+  const multi = targets.length > 1;
   return (
     <>
-      {files.map((file) => (
-        <DiffFileView
-          key={file.path}
-          file={file}
-          selected={file.path === review.selectedDiffPath}
-        />
+      {targets.map((target) => (
+        <DiffEnvSection key={target.envKey} target={target} showHeader={multi} />
       ))}
-      <span className="sr-only">{review.selectedDiffPath}</span>
+    </>
+  );
+}
+
+// DiffEnvSection renders one environment's diff, owning its own loading, error
+// and empty states. That containment is the load-bearing part: the single-slot
+// panel cleared one shared diff on any failure, so one stopped environment
+// blanked every other linked env's diff -- and an orchestrator's environments
+// are rarely all running at once, so that was the everyday state (#1178).
+function DiffEnvSection({
+  target,
+  showHeader,
+}: {
+  target: ReviewEnvTarget;
+  showHeader: boolean;
+}): React.ReactElement {
+  const dispatch = useAppDispatch();
+  const slot = useEnvDiffSlot(target.envKey);
+  const diffFilter = useAppSelector((state) => state.review.diffFilter);
+  const collapsedDiffDirs = useAppSelector((state) => state.review.collapsedDiffDirs);
+  const selectedDiffPath = useAppSelector((state) => state.review.selectedDiffPath);
+
+  const header = showHeader ? (
+    <div className="sticky top-0 z-10 border-b border-border bg-background px-3 py-1 text-xs font-medium text-muted-foreground">
+      {target.envKey}
+    </div>
+  ) : null;
+
+  const body = ((): React.ReactElement => {
+    if (slot.loading) {
+      return <ReviewStatus>Loading diff...</ReviewStatus>;
+    }
+    if (slot.error) {
+      return (
+        <DiffErrorAlert
+          message={compactDiffError(slot.error)}
+          loading={slot.loading}
+          reconnectable={slot.errorReconnectable}
+          onRetry={() => {
+            void dispatch(loadReviewDiff());
+          }}
+          onReconnect={() => {
+            dispatch(requestReconnect());
+          }}
+        />
+      );
+    }
+    const allFiles = slot.diff?.files ?? [];
+    if (allFiles.length === 0) {
+      return <ReviewStatus>No changes</ReviewStatus>;
+    }
+    // Keep the diff panel's files and their order matching the changed-files
+    // tree's visible subset; diff.files is already ordered to match the tree.
+    // Collapsed dirs are env-keyed, so one env's collapsed directory cannot
+    // hide a same-named directory in another.
+    const collapsedForEnv = new Set(
+      collapsedDiffDirs
+        .filter((entry) => entry.startsWith(`${target.envKey}:`))
+        .map((entry) => entry.slice(target.envKey.length + 1)),
+    );
+    const visiblePaths = visibleDiffFilePaths(slot.diff?.tree ?? [], diffFilter, collapsedForEnv);
+    const files = allFiles.filter((file) => visiblePaths.has(file.path));
+    if (files.length === 0) {
+      return <ReviewStatus>No matching files</ReviewStatus>;
+    }
+    return (
+      <>
+        {files.map((file) => (
+          <DiffFileView
+            key={file.path}
+            file={file}
+            selected={diffPathKey(target.envKey, file.path) === selectedDiffPath}
+          />
+        ))}
+      </>
+    );
+  })();
+
+  return (
+    <>
+      {header}
+      {body}
     </>
   );
 }

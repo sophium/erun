@@ -3,6 +3,7 @@ import * as React from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { openOrchestrator, stopOrchestrator } from '@/app/orchestratorThunks';
+import { selectIsOrchestratorSession } from '@/app/selectors';
 import { addTerminalTab, closeTerminalTab, selectTerminalTab } from '@/app/sessionThunks';
 import { selectionKey } from '@/app/versionSuggestions';
 import { IconTooltip } from '@/components/app/IconTooltip';
@@ -72,7 +73,10 @@ export function TerminalTabStrip(): React.ReactElement {
   // orchestrators (they are cross-env, so the selected env's tabs would misalign
   // with what the pane actually renders). Selecting an environment row switches
   // the active session back to an env tab and the strip returns to env mode.
-  const orchestratorMode = activeId > 0 && orchestrators.some((o) => o.sessionId === activeId);
+  //
+  // Shared with the titlebar rather than re-derived: one definition of "the
+  // active session is an orchestrator" (#1178).
+  const orchestratorMode = useAppSelector(selectIsOrchestratorSession);
 
   let tabs: StripTab[];
   let showNewTerminal = false;

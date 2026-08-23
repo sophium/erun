@@ -13,6 +13,7 @@ import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { openIDE } from '@/app/ideOpenThunks';
 import { setFilesOpen, toggleReview, toggleSidebar } from '@/app/layoutThunks';
 import { isMacPlatform } from '@/app/platform';
+import { selectIsOrchestratorSession } from '@/app/selectors';
 import { IconTooltip } from '@/components/app/IconTooltip';
 import { ContributeToggle } from '@/components/app/Titlebar.ContributeToggle';
 import {
@@ -66,18 +67,19 @@ export function TitlebarLeftControls(): React.ReactElement {
   );
 }
 
-// TitlebarRightControls renders the right titlebar cluster of IDE and panel controls.
-export function TitlebarRightControls(): React.ReactElement {
+// TitlebarEnvControls renders the controls that act on the SIDEBAR's selected
+// environment: the two IDE buttons and the contribute toggle.
+//
+// Rendered only when the active session is an environment tab. They are hidden
+// rather than disabled in orchestrator mode, following the tab strip's
+// precedent of swapping content: disabling would leave dead icons whose
+// tooltips describe an environment the operator is not working in (#1178).
+function TitlebarEnvControls(): React.ReactElement {
   const dispatch = useAppDispatch();
-  const reviewOpen = useAppSelector((state) => state.layout.reviewOpen);
-  const filesOpen = useAppSelector((state) => state.layout.filesOpen);
   const selected = useAppSelector((state) => state.selection.selected);
   const tenants = useAppSelector((state) => state.tenants.tenants);
   const idleStatus = useAppSelector((state) => state.idle.idleStatus);
-  const ReviewIcon = reviewOpen ? PanelRightClose : PanelRightOpen;
   const envRunning = isEnvOpenedAndRunning(selected, idleStatus, tenants);
-  // Diff/files toggles stay enabled even while the env is down, so the user
-  // can still hide a stale panel.
   const ideDisabled = isIdeDisabled(selected, tenants) || !envRunning;
   const vscodeTooltip = ideTooltipLabel('VS Code', selected, ideDisabled, !envRunning);
   const intellijTooltip = ideTooltipLabel('IntelliJ IDEA', selected, ideDisabled, !envRunning);
@@ -101,6 +103,30 @@ export function TitlebarRightControls(): React.ReactElement {
         dispatch={dispatch}
       />
       <ContributeToggle envRunning={envRunning} />
+    </>
+  );
+}
+
+// TitlebarRightControls renders the right titlebar cluster. In orchestrator mode
+// it keeps only the diff panel toggle: that is the one control meaningful for a
+// cross-env session, and the three env-scoped ones acted on whichever
+// environment the sidebar happened to have selected — independent of which
+// terminal tab was active, so with an orchestrator focused they targeted an
+// environment it may not even be linked to (#1178).
+//
+// The changed-files sub-toggle stays: it renders only when the diff panel is
+// open and toggles that panel's own file tree, so it is diff-panel chrome
+// rather than a fourth control.
+export function TitlebarRightControls(): React.ReactElement {
+  const dispatch = useAppDispatch();
+  const reviewOpen = useAppSelector((state) => state.layout.reviewOpen);
+  const filesOpen = useAppSelector((state) => state.layout.filesOpen);
+  const orchestratorMode = useAppSelector(selectIsOrchestratorSession);
+  const ReviewIcon = reviewOpen ? PanelRightClose : PanelRightOpen;
+
+  return (
+    <>
+      {!orchestratorMode && <TitlebarEnvControls />}
       <IconTooltip label="Toggle diff panel">
         <Button
           className={cn(titlebarButtonClassName, reviewOpen && activeTitlebarButtonClassName)}

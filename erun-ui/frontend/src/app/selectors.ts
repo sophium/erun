@@ -1,5 +1,6 @@
 import type { UISelection } from '@/types';
 
+import type { OrchestratorInfo } from './slices/orchestratorsSlice';
 import type { RootState } from './store';
 import { findVersionSuggestion, normalizeDialogValue, selectionKey } from './versionSuggestions';
 
@@ -105,4 +106,62 @@ export const selectDialogKubernetesContext = (state: RootState, contexts: string
     return current;
   }
   return '';
+};
+
+// selectActiveSessionOrchestrator returns the orchestrator whose terminal
+// session is currently active, or null when the active session is an
+// environment tab.
+//
+// This derivation used to live inline in TerminalTabStrip, which was the only
+// component that had it. The titlebar never got it, so its right-hand cluster
+// went on acting on state.selection.selected -- the SIDEBAR's environment
+// selection, which is independent of which terminal tab is active. With an
+// orchestrator tab focused, "Open in VS Code" opened an IDE against an
+// environment the orchestrator may not even be linked to (#1178).
+//
+// It returns the orchestrator rather than a boolean because a cross-env surface
+// needs its `environments` list, not just the knowledge that one is active.
+export const selectActiveSessionOrchestrator = (state: RootState): OrchestratorInfo | null => {
+  const activeId = state.terminal.sessionId;
+  if (activeId <= 0) {
+    return null;
+  }
+  return state.orchestrators.items.find((item) => item.sessionId === activeId) ?? null;
+};
+
+// selectIsOrchestratorSession is the boolean form, for a caller that only needs
+// to know whether env-scoped chrome applies.
+export const selectIsOrchestratorSession = (state: RootState): boolean =>
+  selectActiveSessionOrchestrator(state) !== null;
+
+export interface ReviewEnvTarget {
+  envKey: string;
+  tenant: string;
+  environment: string;
+}
+
+// selectReviewEnvTargets resolves which environments the diff panel shows: an
+// orchestrator session's linked environments in its configured order, else the
+// single selected environment. A single environment is the one-entry case, so
+// the panel has one code path rather than two (#1178).
+export const selectReviewEnvTargets = (state: RootState): ReviewEnvTarget[] => {
+  const orchestrator = selectActiveSessionOrchestrator(state);
+  if (orchestrator) {
+    return orchestrator.environments.map((env) => ({
+      envKey: `${env.tenant}/${env.environment}`,
+      tenant: env.tenant,
+      environment: env.environment,
+    }));
+  }
+  const selection = state.selection.selected;
+  if (!selection) {
+    return [];
+  }
+  return [
+    {
+      envKey: `${selection.tenant}/${selection.environment}`,
+      tenant: selection.tenant,
+      environment: selection.environment,
+    },
+  ];
 };
