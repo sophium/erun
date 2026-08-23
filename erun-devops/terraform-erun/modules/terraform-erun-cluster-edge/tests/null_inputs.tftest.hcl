@@ -6,7 +6,26 @@
 # branch of a guard. Runs entirely against mocked providers: no real cluster.
 
 mock_provider "helm" {}
-mock_provider "kubernetes" {}
+mock_provider "kubernetes" {
+  # install_coredns_forward = true below reads CoreDNS's Corefile back, so the
+  # mock has to look like a cluster that imports the custom directory.
+  mock_data "kubernetes_config_map" {
+    defaults = {
+      data = {
+        Corefile = <<-EOT
+    .:53 {
+        errors
+        health
+        kubernetes cluster.local in-addr.arpa ip6.arpa
+        forward . /etc/resolv.conf
+        cache 30
+        import /etc/coredns/custom/*.server
+    }
+        EOT
+      }
+    }
+  }
+}
 
 variables {
   services_zone        = "services.example.com"
@@ -46,11 +65,13 @@ run "null_for_every_optional_input_resolves_the_documented_defaults" {
     install_ingress_controller       = null
     install_cert_manager             = null
     wildcard_certificate_enabled     = null
+    coredns_configmap_name           = null
+    manage_coredns_custom_configmap  = null
   }
 
   # The originally-reported abort: length(null) on the upstreams list.
   assert {
-    condition     = can(regex("forward \\. 1\\.1\\.1\\.1 1\\.0\\.0\\.1 8\\.8\\.8\\.8", kubernetes_config_map.coredns_forward[0].data["erunpaas-com.server"]))
+    condition     = can(regex("forward \\. 1\\.1\\.1\\.1 1\\.0\\.0\\.1 8\\.8\\.8\\.8", kubernetes_config_map_v1_data.coredns_forward[0].data["erunpaas-com.server"]))
     error_message = "coredns_forward_upstreams = null must resolve to the module's documented default resolvers, not abort on length(null)"
   }
 
