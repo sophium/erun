@@ -199,7 +199,7 @@ func (r EnvironmentRoutes) deleteEnvironment(w http.ResponseWriter, req *http.Re
 		return
 	}
 	if !claimed {
-		writeError(w, http.StatusConflict, "a delete is already in progress for this environment")
+		writeError(w, http.StatusConflict, deleteClaimRefusal(environment.Status))
 		return
 	}
 	if err := r.startDelete(ctx, environment); err != nil {
@@ -246,6 +246,32 @@ func (r EnvironmentRoutes) startDelete(ctx context.Context, environment model.En
 		PlacementServerURL:         placement.ServerURL,
 		DeleteID:                   uuid.NewString(),
 	})
+}
+
+// deployClaimRefusal names why ClaimDeploy refused, so a caller mid-teardown
+// is told that rather than the misleading "a deploy is already in progress".
+// It reads the status fetched before the claim attempt: the claim itself is
+// the authority on the outcome, so a row that changed in between yields a
+// slightly stale explanation but never a wrong decision.
+func deployClaimRefusal(status model.EnvironmentStatus) string {
+	switch status {
+	case model.EnvironmentStatusDeleting:
+		return "this environment is being deleted; it cannot be deployed until the teardown finishes"
+	case model.EnvironmentStatusDeletionBlocked:
+		return "this environment's delete is blocked and still outstanding; resolve the teardown before deploying it again"
+	default:
+		return "a deploy is already in progress for this environment"
+	}
+}
+
+// deleteClaimRefusal is deployClaimRefusal's counterpart: a delete refused
+// because a deploy holds the row is told so, since the actionable step is to
+// wait for that deploy rather than to retry immediately.
+func deleteClaimRefusal(status model.EnvironmentStatus) string {
+	if status == model.EnvironmentStatusProvisioning {
+		return "a deploy is in progress for this environment; retry the delete once it finishes"
+	}
+	return "a delete is already in progress for this environment"
 }
 
 // writeStartDeleteError marks the environment deletion-blocked and answers
@@ -353,7 +379,7 @@ func (r EnvironmentRoutes) deployEnvironment(w http.ResponseWriter, req *http.Re
 		return
 	}
 	if !claimed {
-		writeError(w, http.StatusConflict, "a deploy is already in progress for this environment")
+		writeError(w, http.StatusConflict, deployClaimRefusal(environment.Status))
 		return
 	}
 	if err := r.startDeploy(ctx, environment, version); err != nil {

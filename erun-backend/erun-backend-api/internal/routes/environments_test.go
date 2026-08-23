@@ -1027,6 +1027,85 @@ func TestDeleteEnvironmentRejectsConcurrentDelete(t *testing.T) {
 	}
 }
 
+// The three tests below cover the refusal *messages* for #1163. The guard that
+// produces the refusal lives in ClaimDeploy/ClaimDelete's SQL, which this
+// package's stub repository cannot exercise and which no Postgres-backed
+// harness exists for here — that half is verified against a live control plane
+// instead. What these hold is the half that is testable in Go: that a refusal
+// caused by an outstanding teardown is reported as such, rather than as the
+// misleading "a deploy is already in progress" a caller used to get.
+
+// TestDeployEnvironmentRefusalNamesAnOutstandingDelete: a deploy refused
+// because the environment is mid-teardown must say so. The old message sent
+// the caller looking for a concurrent deploy that does not exist.
+func TestDeployEnvironmentRefusalNamesAnOutstandingDelete(t *testing.T) {
+	for _, tc := range []struct {
+		status model.EnvironmentStatus
+		want   string
+	}{
+		{model.EnvironmentStatusDeleting, "being deleted"},
+		{model.EnvironmentStatusDeletionBlocked, "delete is blocked"},
+	} {
+		environments := runtimeEnvironment()
+		environments.environment.Status = tc.status
+		environments.claimTaken = true
+		prov := &stubEnvironmentProvisioner{}
+		rec := postDeployEnvironment(t, environments, prov, "")
+
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("status %q: code = %d, want 409 Conflict", tc.status, rec.Code)
+		}
+		if body := rec.Body.String(); !strings.Contains(body, tc.want) {
+			t.Fatalf("status %q: body %s does not mention %q", tc.status, body, tc.want)
+		}
+		if len(prov.deployed) != 0 {
+			t.Fatalf("status %q: StartDeploy ran %d times, want 0", tc.status, len(prov.deployed))
+		}
+	}
+}
+
+// TestDeleteEnvironmentRefusalNamesAnInFlightDeploy is the mirror: a delete
+// refused because a deploy holds the row should point at the deploy, since
+// waiting for it is the actionable step.
+func TestDeleteEnvironmentRefusalNamesAnInFlightDeploy(t *testing.T) {
+	environments := runtimeEnvironment()
+	environments.environment.Status = model.EnvironmentStatusProvisioning
+	environments.claimDeleteTaken = true
+	deleter := &stubEnvironmentDeleter{}
+	rec := deleteEnvironmentRequest(t, environments, deleter)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("code = %d, want 409 Conflict", rec.Code)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "a deploy is in progress") {
+		t.Fatalf("body %s does not name the in-flight deploy", body)
+	}
+	if len(deleter.started) != 0 {
+		t.Fatalf("Start ran %d times, want 0", len(deleter.started))
+	}
+}
+
+// TestClaimRefusalMessages pins each mapping directly, including that an
+// ordinary status still yields the original concurrent-lifecycle wording — the
+// teardown cases must not swallow the common one.
+func TestClaimRefusalMessages(t *testing.T) {
+	if got := deployClaimRefusal(model.EnvironmentStatusRunning); got != "a deploy is already in progress for this environment" {
+		t.Fatalf("running deploy refusal = %q, want the concurrent-deploy message", got)
+	}
+	if got := deployClaimRefusal(model.EnvironmentStatusDeleting); !strings.Contains(got, "being deleted") {
+		t.Fatalf("deleting deploy refusal = %q", got)
+	}
+	if got := deployClaimRefusal(model.EnvironmentStatusDeletionBlocked); !strings.Contains(got, "delete is blocked") {
+		t.Fatalf("deletion-blocked deploy refusal = %q", got)
+	}
+	if got := deleteClaimRefusal(model.EnvironmentStatusRunning); got != "a delete is already in progress for this environment" {
+		t.Fatalf("running delete refusal = %q, want the concurrent-delete message", got)
+	}
+	if got := deleteClaimRefusal(model.EnvironmentStatusProvisioning); !strings.Contains(got, "a deploy is in progress") {
+		t.Fatalf("provisioning delete refusal = %q", got)
+	}
+}
+
 // TestDeleteEnvironmentStartFailureMarksBlocked mirrors
 // TestDeployEnvironmentStartFailureMarksFailed: ClaimDelete already moved the
 // row to `deleting` before Start ran, so a failure to even enqueue the
