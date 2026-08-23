@@ -21,6 +21,17 @@ const environmentColumns = `environment_id, tenant_id, name, type, kubernetes_co
 // use.
 var environmentsMidTeardownStatuses = []string{string(model.EnvironmentStatusDeleting), string(model.EnvironmentStatusDeletionBlocked)}
 
+// maxExcludedMidTeardownEnvironments bounds how many mid-teardown rows Count
+// will discount at once. The exclusion exists so one stuck teardown cannot
+// lock a tenant out of its own allowance (#1140), but left unbounded it is the
+// opposite failure: every wedged environment still holds a live namespace and
+// real cluster capacity, so a tenant that accumulates them consumes unlimited
+// resource while its quota reports room to spare (#1163). Bounding the
+// discount keeps the #1140 property for the case it was written for — a
+// handful of stuck deletes — and restores accounting beyond that, where
+// "stuck" has become "abandoned".
+const maxExcludedMidTeardownEnvironments = 3
+
 func NewEnvironmentRepository(txs *TxManager) *EnvironmentRepository {
 	return &EnvironmentRepository{txs: txs}
 }
@@ -54,17 +65,22 @@ func (r *EnvironmentRepository) List(ctx context.Context) ([]model.Environment, 
 
 // Count returns how many environments the caller's tenant has, for enforcing
 // the tenant's environment-count quota cap. Environments mid-teardown
-// (deleting, deletion-blocked) are excluded: a delete that cannot complete
-// must not lock the tenant out of its own allowance (#1140) — the delete that
-// would free the slot is the same call that is stuck.
+// (deleting, deletion-blocked) are discounted, but only up to
+// maxExcludedMidTeardownEnvironments: a delete that cannot complete must not
+// lock the tenant out of its own allowance (#1140), while an unbounded
+// discount would let a tenant hold unlimited live namespaces that its quota
+// never sees (#1163). Both subqueries run under the caller's RLS scope, so
+// each counts only this tenant's rows.
 func (r *EnvironmentRepository) Count(ctx context.Context) (int, error) {
 	var count int
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
-		var err error
-		count, err = tx.NewSelect().Model((*model.Environment)(nil)).
-			Where("status NOT IN (?)", bun.List(environmentsMidTeardownStatuses)).
-			Count(ctx)
-		return err
+		return tx.NewRaw(`
+			SELECT (SELECT COUNT(*) FROM environments)
+			     - LEAST(
+			         (SELECT COUNT(*) FROM environments WHERE status IN (?)),
+			         ?
+			       )
+		`, bun.List(environmentsMidTeardownStatuses), maxExcludedMidTeardownEnvironments).Scan(ctx, &count)
 	})
 	return count, err
 }
@@ -148,6 +164,14 @@ func (r *EnvironmentRepository) MarkDeployFailed(ctx context.Context, environmen
 // the winner's. A claim that went stale past staleAfter -- a control plane that
 // crashed mid-deploy -- is re-claimable, so a wedged env is never locked out
 // permanently.
+//
+// A row mid-teardown is refused outright, and unlike the in-flight guard this
+// refusal is not relaxed by staleAfter: a delete has been requested, so
+// adopting the row into a deploy would abandon that request (#1163). Left
+// unguarded a deploy claims a `deleting` or `deletion-blocked` row, runs
+// against a namespace Kubernetes is already terminating, and writes its own
+// `failed` over the teardown state — losing the outstanding delete and
+// stranding a row that no longer matches any namespace.
 func (r *EnvironmentRepository) ClaimDeploy(ctx context.Context, environmentID string, staleAfter time.Duration) (bool, error) {
 	claimed := false
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
@@ -156,8 +180,9 @@ func (r *EnvironmentRepository) ClaimDeploy(ctx context.Context, environmentID s
 			   SET status = ?,
 			       provision_error = NULL
 			 WHERE environment_id = ?
+			   AND status NOT IN (?)
 			   AND (status <> ? OR updated_at < NOW() - MAKE_INTERVAL(secs => ?))
-		`, string(model.EnvironmentStatusProvisioning), environmentID, string(model.EnvironmentStatusProvisioning), staleAfter.Seconds()).Exec(ctx)
+		`, string(model.EnvironmentStatusProvisioning), environmentID, bun.List(environmentsMidTeardownStatuses), string(model.EnvironmentStatusProvisioning), staleAfter.Seconds()).Exec(ctx)
 		if err != nil {
 			return err
 		}
@@ -189,6 +214,13 @@ func (r *EnvironmentRepository) Delete(ctx context.Context, environmentID string
 // `deletion-blocked` is always reclaimable (not gated by staleAfter): that
 // status means the previous attempt already reached a terminal outcome, so
 // there is nothing in flight to race with.
+//
+// A fresh `provisioning` claim is refused, making the two lifecycles mutually
+// exclusive in both directions (#1163): claiming a row out from under a
+// running deploy leaves that deploy's terminal write to land on top of
+// `deleting` and resurrect a row whose namespace is being torn down. The guard
+// is relaxed by the same staleAfter as the deploy's own, so a control plane
+// that died mid-deploy still cannot block a teardown permanently.
 func (r *EnvironmentRepository) ClaimDelete(ctx context.Context, environmentID string, staleAfter time.Duration) (bool, error) {
 	claimed := false
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
@@ -198,7 +230,8 @@ func (r *EnvironmentRepository) ClaimDelete(ctx context.Context, environmentID s
 			       delete_error = NULL
 			 WHERE environment_id = ?
 			   AND (status <> ? OR updated_at < NOW() - MAKE_INTERVAL(secs => ?))
-		`, string(model.EnvironmentStatusDeleting), environmentID, string(model.EnvironmentStatusDeleting), staleAfter.Seconds()).Exec(ctx)
+			   AND (status <> ? OR updated_at < NOW() - MAKE_INTERVAL(secs => ?))
+		`, string(model.EnvironmentStatusDeleting), environmentID, string(model.EnvironmentStatusDeleting), staleAfter.Seconds(), string(model.EnvironmentStatusProvisioning), staleAfter.Seconds()).Exec(ctx)
 		if err != nil {
 			return err
 		}
