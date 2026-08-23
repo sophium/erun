@@ -184,6 +184,18 @@ variable "base_domain_name" {
     condition     = var.base_domain_name == null || var.base_domain_name == "" || can(regex("^([a-z0-9]([a-z0-9-]*[a-z0-9])?\\.)+[a-z]{2,}$", var.base_domain_name))
     error_message = "base_domain_name must be a valid DNS domain such as \"example.com\"."
   }
+
+  # A server block for a cluster-internal zone would shadow CoreDNS's own
+  # kubernetes plugin and send every .svc.cluster.local lookup to a public
+  # resolver, killing in-cluster service discovery outright (#1165). The regex
+  # above happily accepts "cluster.local".
+  validation {
+    condition = var.base_domain_name == null || var.base_domain_name == "" || !contains(
+      ["cluster.local", "localhost", "local", "in-addr.arpa", "ip6.arpa"],
+      lower(var.base_domain_name)
+    )
+    error_message = "base_domain_name must not be a cluster-internal or reserved zone: a server block for it would shadow CoreDNS's kubernetes plugin and break .svc.cluster.local resolution for the whole cluster."
+  }
 }
 
 variable "coredns_forward_upstreams" {
@@ -195,4 +207,39 @@ variable "coredns_forward_upstreams" {
     condition     = var.coredns_forward_upstreams == null || length(var.coredns_forward_upstreams) > 0
     error_message = "coredns_forward_upstreams must list at least one resolver."
   }
+
+  # Entries are interpolated straight into a CoreDNS `forward .` directive, so a
+  # malformed one writes a syntactically invalid *.server file. CoreDNS keeps
+  # serving from its already-loaded config, so nothing looks wrong until its next
+  # restart -- a node drain, an eviction, an upgrade -- at which point the
+  # cluster has no DNS at all and the cause is a terraform apply from days
+  # earlier (#1165). Validating here turns that into an apply-time error.
+  validation {
+    condition = var.coredns_forward_upstreams == null || alltrue([
+      for upstream in var.coredns_forward_upstreams :
+      # IPv4, optionally with a port.
+      can(regex("^([0-9]{1,3}\\.){3}[0-9]{1,3}(:[0-9]{1,5})?$", upstream)) ||
+      # IPv6, bracketed when it carries a port.
+      can(regex("^\\[[0-9a-fA-F:]+\\](:[0-9]{1,5})?$", upstream)) ||
+      can(regex("^[0-9a-fA-F]{0,4}(:[0-9a-fA-F]{0,4}){2,7}$", upstream)) ||
+      # A resolvable host, optionally with a port (CoreDNS accepts these, and
+      # tls:// upstreams are named this way).
+      can(regex("^(tls://|dns://)?([a-z0-9]([a-z0-9-]*[a-z0-9])?\\.)+[a-z]{2,}(:[0-9]{1,5})?$", upstream)) ||
+      # A resolv.conf-style file, which is how you say "whatever the node uses".
+      can(regex("^/[^[:space:]]+$", upstream))
+    ])
+    error_message = "Every coredns_forward_upstreams entry must be an IP address (optionally host:port, IPv6 bracketed when ported), a DNS name, or an absolute path such as /etc/resolv.conf. A malformed entry writes an invalid CoreDNS server block that only fails at CoreDNS's next restart, taking cluster DNS down with it."
+  }
+}
+
+variable "coredns_configmap_name" {
+  description = "Name of the ConfigMap in kube-system holding CoreDNS's Corefile. Read (not written) so install_coredns_forward can refuse to apply a forward the Corefile will never import. Defaults to \"coredns\", which is what k3s and upstream kube-dns both use; override only on a distribution that names it something else."
+  type        = string
+  default     = null
+}
+
+variable "manage_coredns_custom_configmap" {
+  description = "Let this module create the kube-system/coredns-custom ConfigMap if it does not exist. Default true. coredns-custom is a shared extension point, not this module's private object: the module always owns only its own key inside it (server-side apply with its own field manager), but it also creates the object when nothing else has. Set false on a cluster where something else owns that object's lifecycle, and the module will manage its key without ever creating or deleting the ConfigMap."
+  type        = bool
+  default     = null
 }

@@ -106,6 +106,17 @@ so an existing cluster's DNS behavior does not change on a module upgrade; add
 `-var 'coredns_forward_upstreams=["<resolver>", ...]'` on an air-gapped or
 policy-constrained cluster that must not reach public resolvers.
 
+Three things are refused at plan time rather than allowed to fail later. A
+malformed upstream (a typo'd address, a stray comma, a hostname where an IP was
+meant) would write a syntactically invalid server block that CoreDNS only chokes
+on at its next restart — a node drain or an upgrade, by which point the cluster
+has no DNS and the cause is an apply from days earlier. A cluster-internal
+`base_domain_name` such as `cluster.local` would shadow CoreDNS's own kubernetes
+plugin and kill `.svc.cluster.local` resolution outright. And a Corefile that
+does not `import /etc/coredns/custom/*.server` means the entry would be written
+and never read, so the apply would report success while in-cluster resolution
+stayed exactly as broken as before.
+
 **Delegated services zone (PowerDNS DNS-01).** Once the services zone is delegated
 off Cloudflare to the platform's own PowerDNS, the Cloudflare DNS-01 solver can no
 longer prove control of it — switch the solver to RFC2136 (DNS UPDATE + TSIG) and
@@ -221,13 +232,26 @@ adding image-pull and RBAC requirements to a declarative-only module for what is
 fundamentally a smoke test), so it's a manual step here instead:
 
 ```sh
+# Look up a name the platform actually publishes under the base domain, NOT the
+# bare apex: an apex commonly has no A record at all, so `nslookup <base-domain>`
+# returns NXDOMAIN on a perfectly healthy forward and reads as a failure.
 kubectl run coredns-forward-check --rm -i --restart=Never --image=busybox:1.36 \
-  -- nslookup "<base-domain>"
+  -- nslookup "api.<base-domain>"
 ```
 
-A `NXDOMAIN` or timeout here means the forward zone isn't resolving yet — CoreDNS
-reloads `coredns-custom` automatically, but allow ~80 seconds after the apply
-before treating a failure here as real.
+If nothing is published under the base domain yet, ask for a record type the zone
+always has instead of an address that may not exist:
+
+```sh
+kubectl run coredns-forward-check --rm -i --restart=Never --image=busybox:1.36 \
+  -- nslookup -type=soa "<base-domain>"
+```
+
+A timeout, or an answer that does not come from the configured upstreams, means
+the forward zone isn't resolving yet — CoreDNS reloads `coredns-custom`
+automatically, but allow ~80 seconds after the apply before treating a failure
+here as real. An `NXDOMAIN` for a name that genuinely has no record is not a
+failure of the forward; that is the trap this wording exists to avoid.
 
 A `Ready` Issuer + a `Ready` wildcard Certificate means the edge can
 terminate TLS. Route an env's service through it with `erun expose` — it writes the

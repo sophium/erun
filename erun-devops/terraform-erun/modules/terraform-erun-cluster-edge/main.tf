@@ -36,6 +36,8 @@ locals {
   arg_env_label                        = var.env_label == null ? "" : var.env_label
   arg_env_namespace                    = var.env_namespace == null ? "" : var.env_namespace
   arg_install_coredns_forward          = var.install_coredns_forward == null ? false : var.install_coredns_forward
+  arg_coredns_configmap_name           = var.coredns_configmap_name == null ? "coredns" : var.coredns_configmap_name
+  arg_manage_coredns_custom_configmap  = var.manage_coredns_custom_configmap == null ? true : var.manage_coredns_custom_configmap
   arg_base_domain_name                 = var.base_domain_name == null ? "" : var.base_domain_name
   arg_coredns_forward_upstreams        = var.coredns_forward_upstreams == null ? ["1.1.1.1", "1.0.0.1", "8.8.8.8"] : var.coredns_forward_upstreams
 }
@@ -95,18 +97,63 @@ locals {
 # hostage to a resolver outside the platform's control. k3s's CoreDNS already
 # mounts coredns-custom at /etc/coredns/custom (optional) and imports every
 # *.server file from it, so this needs no change to the CoreDNS Deployment.
+
+# The CoreDNS Corefile, read back so the forward can refuse to be a silent
+# no-op. The whole mechanism depends on the Corefile importing
+# /etc/coredns/custom/*.server; on a distribution or a hand-edited Corefile
+# without that import, the ConfigMap applies cleanly, this module reports
+# success, and in-cluster resolution is completely unchanged (#1165). Since the
+# failure it prevents only shows up at certificate issuance or renewal, that
+# false success can go unnoticed for weeks.
+data "kubernetes_config_map" "coredns" {
+  count = local.arg_install_coredns_forward ? 1 : 0
+
+  metadata {
+    name      = local.arg_coredns_configmap_name
+    namespace = "kube-system"
+  }
+}
+
+# coredns-custom is k3s's general extension point, not this module's private
+# object, so ownership is split deliberately:
 #
-# Owns the whole coredns-custom object rather than merging into it (e.g. via
-# kubernetes_config_map_v1_data): that resource requires the ConfigMap to
-# already exist, which a cluster that has never hand-created one — the normal
-# case — does not have, so it can't be the thing that creates it either.
-# Nothing else in this platform writes to coredns-custom; if that changes,
-# extend this resource's data map from the caller rather than adding a second
-# resource that would race it for ownership of the same object. A cluster
-# already carrying a hand-applied coredns-custom must be reconciled once
-# (terraform import, or delete the hand-applied copy) before the first apply
-# with install_coredns_forward = true.
-resource "kubernetes_config_map" "coredns_forward" {
+#   * this resource owns the object's EXISTENCE and nothing inside it, and
+#   * kubernetes_config_map_v1_data below owns exactly one key.
+#
+# The previous shape owned the whole object, which made the module's own
+# documented remedy destructive: it told an operator with a hand-applied
+# coredns-custom to `terraform import` it, and the very next apply then pruned
+# every key the module did not know about (#1165). ignore_changes on data is
+# what stops that -- without it this resource's (empty) data map is
+# authoritative and prunes on every apply.
+#
+# Set manage_coredns_custom_configmap = false on a cluster where something else
+# owns the object's lifecycle; the module then manages only its own key and
+# never creates or deletes coredns-custom.
+resource "kubernetes_config_map" "coredns_custom" {
+  count = local.arg_install_coredns_forward && local.arg_manage_coredns_custom_configmap ? 1 : 0
+
+  metadata {
+    name      = "coredns-custom"
+    namespace = "kube-system"
+  }
+
+  lifecycle {
+    # Every key is owned by kubernetes_config_map_v1_data, key by key.
+    ignore_changes = [data]
+
+    precondition {
+      condition     = local.arg_base_domain_name != ""
+      error_message = "install_coredns_forward requires base_domain_name (the platform's own apex domain, e.g. \"example.com\")."
+    }
+  }
+}
+
+# The one key this module owns. Server-side apply with an explicit field
+# manager, so a key another operator or component put in the same ConfigMap is
+# left strictly alone -- and so destroying the edge removes this key rather than
+# the whole shared object.
+resource "kubernetes_config_map_v1_data" "coredns_forward" {
   count = local.arg_install_coredns_forward ? 1 : 0
 
   metadata {
@@ -118,12 +165,34 @@ resource "kubernetes_config_map" "coredns_forward" {
     (local.coredns_forward_key) = local.coredns_forward_block
   }
 
+  field_manager = "erun-cluster-edge"
+  force         = true
+
+  depends_on = [kubernetes_config_map.coredns_custom]
+
   lifecycle {
     precondition {
       condition     = local.arg_base_domain_name != ""
       error_message = "install_coredns_forward requires base_domain_name (the platform's own apex domain, e.g. \"example.com\")."
     }
+
+    # Refuse to apply a forward the Corefile will never read. This is the
+    # difference between a configuration that works and one that merely applies.
+    precondition {
+      condition     = can(regex("import\\s+/etc/coredns/custom/\\*\\.server", data.kubernetes_config_map.coredns[0].data["Corefile"]))
+      error_message = "CoreDNS's Corefile does not import /etc/coredns/custom/*.server, so a coredns-custom entry would be written and never read — in-cluster resolution of ${local.arg_base_domain_name} would be unchanged while this module reported success. Add `import /etc/coredns/custom/*.server` to the Corefile (k3s does this by default), or set install_coredns_forward = false and solve node-resolver dependence another way."
+    }
   }
+}
+
+# The forward used to be one resource owning the whole ConfigMap. Renaming it
+# without this would destroy coredns-custom and recreate it, which on the
+# platform's own cluster is a DNS outage window for every name the forward
+# serves. The moved block carries the existing object into its new address
+# instead, and the v1_data resource then adopts the key it already contains.
+moved {
+  from = kubernetes_config_map.coredns_forward
+  to   = kubernetes_config_map.coredns_custom
 }
 
 # Namespace cert-manager itself runs in. The Issuer, its DNS-01 credential
