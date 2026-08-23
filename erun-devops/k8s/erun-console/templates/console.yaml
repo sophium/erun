@@ -20,7 +20,15 @@
 {{- $ingressClass := default "traefik" $console.ingressClass -}}
 {{- $ingressAnnotations := default dict $console.ingressAnnotations -}}
 {{- $certManagerIssuer := default "" $console.certManagerIssuer -}}
-{{- $tlsSecretName := default (printf "%s-console-tls" $tenant) $console.tlsSecretName -}}
+{{- /* hasKey rather than `default`: Helm's default() treats "" as absent, so an
+       explicitly empty secret name silently came back as the default and the
+       Ingress referenced a Secret that does not exist. Kept identical to
+       erun-backend-api's, since #1141's whole point is that an operator who has
+       configured one knows how to configure the other. */ -}}
+{{- $tlsSecretName := printf "%s-console-tls" $tenant -}}
+{{- if hasKey $console "tlsSecretName" -}}
+{{- $tlsSecretName = $console.tlsSecretName -}}
+{{- end -}}
 {{- $nginxPort := default 8080 $console.port -}}
 {{- $apiServiceName := default (printf "%s-api" $tenant) $console.apiServiceName -}}
 {{- $apiPort := default 17033 .Values.apiPort -}}

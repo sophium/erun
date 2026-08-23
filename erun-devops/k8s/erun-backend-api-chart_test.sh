@@ -328,4 +328,79 @@ container "${rendered}" >"${core}"
 grep -q 'ERUN_ACME_EMAIL' "${core}" &&
     fail "acmeEmail must not render when the dns01 broker itself is disabled -- there is no broker for the webhook shim to call"
 
-echo "PASS: erun-backend-api DBOS wiring"
+# --- 14. The API's own public HTTPS edge (#1141). Every other externally
+#         reachable component declares its own Ingress; the API could not, so
+#         the endpoint every client actually holds a login record against was
+#         the one thing nothing in the repo declared. ---
+
+# The Ingress manifest, as its own block, so an assertion cannot pass by
+# matching a line that belongs to the Service or the Deployment.
+ingress() {
+    awk '
+        BEGIN{RS="\n---\n"}
+        $0 ~ /(^|\n)kind: Ingress(\n|$)/ {print}
+    ' "$1"
+}
+
+# Off by default: an existing deployment must not gain a public endpoint just by
+# upgrading the chart.
+rendered=$(render)
+[ -z "$(ingress "${rendered}")" ] ||
+    fail "the API Ingress must not render unless api.externalDomain is set -- an upgrade must never silently publish the API"
+
+rendered=$(render --set-string api.externalDomain=api.example.com)
+api_ingress="${work_root}/api-ingress.yaml"
+ingress "${rendered}" >"${api_ingress}"
+[ -s "${api_ingress}" ] || fail "api.externalDomain must render an Ingress for the API"
+grep -q 'name: team-api' "${api_ingress}" ||
+    fail "the Ingress must be named for the tenant's API, matching the Service it fronts"
+grep -q 'host: api.example.com' "${api_ingress}" ||
+    fail "api.externalDomain must become the Ingress host"
+grep -q 'ingressClassName: traefik' "${api_ingress}" ||
+    fail "the Ingress class must default to traefik, as erun-console's does"
+grep -q 'secretName: team-api-tls' "${api_ingress}" ||
+    fail "TLS must default to its own per-host secret, mirroring erun-console"
+grep -q 'name: api' "${api_ingress}" ||
+    fail "the Ingress backend must target the API Service's named port"
+grep -q 'cert-manager.io/issuer' "${api_ingress}" &&
+    fail "no issuer annotation must appear unless api.certManagerIssuer is set"
+
+# An issuer annotation is how the certificate actually gets minted.
+rendered=$(render \
+    --set-string api.externalDomain=api.example.com \
+    --set-string api.certManagerIssuer=frs-letsencrypt-http01)
+ingress "${rendered}" >"${api_ingress}"
+grep -q 'cert-manager.io/issuer: "frs-letsencrypt-http01"' "${api_ingress}" ||
+    fail "api.certManagerIssuer must render the cert-manager issuer annotation"
+
+# Reusing a wildcard the edge already issued, rather than minting a second
+# certificate for a name the wildcard already covers.
+rendered=$(render \
+    --set-string api.externalDomain=api.team-prod.services.example.com \
+    --set-string api.tlsSecretName=team-prod-wildcard-tls)
+ingress "${rendered}" >"${api_ingress}"
+grep -q 'secretName: team-prod-wildcard-tls' "${api_ingress}" ||
+    fail "api.tlsSecretName must let an existing wildcard secret be reused"
+grep -q 'cert-manager.io/issuer' "${api_ingress}" &&
+    fail "reusing a wildcard must not also request issuance"
+
+# An operator-supplied annotation (middleware, rate limits, auth) must pass
+# through, like the console's.
+rendered=$(render \
+    --set-string api.externalDomain=api.example.com \
+    --set-string 'api.ingressAnnotations.traefik\.ingress\.kubernetes\.io/router\.entrypoints=websecure')
+ingress "${rendered}" >"${api_ingress}"
+grep -q 'traefik.ingress.kubernetes.io/router.entrypoints: "websecure"' "${api_ingress}" ||
+    fail "api.ingressAnnotations must pass through to the Ingress"
+
+# Explicitly empty TLS secret: plain HTTP, for an edge terminating TLS ahead of
+# the ingress. The Ingress must still render, without a tls block.
+rendered=$(render \
+    --set-string api.externalDomain=api.example.com \
+    --set-string api.tlsSecretName="")
+ingress "${rendered}" >"${api_ingress}"
+[ -s "${api_ingress}" ] || fail "an empty tlsSecretName must still render the Ingress"
+grep -q 'tls:' "${api_ingress}" &&
+    fail "an empty tlsSecretName must render no tls block rather than a dangling secret reference"
+
+echo "PASS: erun-backend-api DBOS wiring + public API edge"
