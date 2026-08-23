@@ -248,6 +248,54 @@ exit 0
 		}
 	})
 
+	t.Run("real_run_reports_a_refused_challenge_read_instead_of_skipping_silently", func(t *testing.T) {
+		// #1183: the retraction shipped inert. Its challenge read was Forbidden
+		// (the delete Job's ServiceAccount had no access to
+		// acme.cert-manager.io), the code folded every error into "no
+		// challenges here", and the whole step was skipped with nothing to say
+		// so -- so the namespace wedged for its full timeout exactly as before.
+		//
+		// A cluster without cert-manager must still skip silently; that is the
+		// next scenario. A cluster that HAS it and refuses the read must say so,
+		// because the namespace is about to wedge and the reason is not in the
+		// namespace's own conditions.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "kubectl",
+			`case "$*" in
+  *"get challenges"*)
+    printf '%s\n' 'Error from server (Forbidden): challenges.acme.cert-manager.io is forbidden: User "system:serviceaccount:team-prod:team-env-deployer" cannot list resource "challenges"' >&2
+    exit 1
+    ;;
+  *"delete namespace"*)
+    # What a wedged namespace actually does: the delete waits out its timeout
+    # and fails. That is the path the retraction note has to surface on.
+    printf '%s\n' 'error: timed out waiting for the condition on namespaces/team-dev' >&2
+    exit 1
+    ;;
+  *"get namespace"*)
+    # Still present afterwards, so the blocked-delete branch runs rather than
+    # the benign "it disappeared during the wait" one.
+    printf '%s\n' 'namespace/team-dev'
+    ;;
+esac
+exit 0
+`)
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		result := erun.Run(t, []string{"delete", "team", "dev", "--yes"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+
+		if !strings.Contains(result.Combined, "retraction could not run") {
+			t.Fatalf("a refused challenge read must be reported, not swallowed; got:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "forbidden") && !strings.Contains(result.Combined, "Forbidden") {
+			t.Fatalf("the report must carry kubectl's own reason so the cause is actionable; got:\n%s", result.Combined)
+		}
+	})
+
 	t.Run("real_run_without_cert_manager_skips_the_retraction", func(t *testing.T) {
 		// The retraction is an optimization, so a cluster with no cert-manager
 		// (the normal case for a local or test cluster, where the CRDs do not
