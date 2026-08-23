@@ -43,6 +43,44 @@
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
 {{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
 {{- $backendAPIImage := default (printf "%s/erun-backend-api:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-backend-api") -}}
+{{- /* Opt-in public HTTPS edge for the API itself, mirroring erun-console's
+       and erun-zitadel's own Ingresses in shape and value naming (#1141). Every
+       other externally-reachable component of a platform declares its own
+       endpoint; the API could not, so the one component a tenant must reach in
+       order to use the platform at all was the only one the platform could not
+       publish. The result was an Ingress nothing declared, which cannot be
+       reviewed, reproduced on a second instance, or recovered if deleted --
+       while CLI login records are keyed to that hostname.
+
+       Off unless api.externalDomain is set, so no existing deployment gains a
+       public endpoint on upgrade. Unlike erun-console's, this one has no
+       default derived from platform.baseDomain: the API's public address is a
+       deployment decision (an instance may deliberately keep it in-cluster
+       only), and silently publishing it on a version bump is exactly what the
+       opt-in exists to prevent.
+
+       This does not make the API browser-callable from another origin -- it
+       still sets no CORS headers by design, and erun-console still reaches it
+       same-origin through its own nginx proxy. What it publishes is the
+       endpoint non-browser clients already use: the CLI, orchestrators, CI. */ -}}
+{{- $externalDomain := default "" $api.externalDomain -}}
+{{- $ingressClass := default "traefik" $api.ingressClass -}}
+{{- $ingressAnnotations := default dict $api.ingressAnnotations -}}
+{{- $certManagerIssuer := default "" $api.certManagerIssuer -}}
+{{- /* Defaults to its own per-host secret, like the console's. Point it at an
+       existing wildcard secret (e.g. <tenant>-<env>-wildcard-tls) to reuse a
+       certificate the edge already issued instead of minting a second one, or
+       set it explicitly empty to render no tls block at all -- which is what an
+       edge terminating TLS ahead of the ingress wants.
+
+       hasKey rather than `default`: Helm's default() treats "" as absent and
+       substitutes, so an explicitly empty secret name would silently come back
+       as the default and the Ingress would reference a Secret that does not
+       exist. Same shape as Terraform's coalesce() skipping empty strings. */ -}}
+{{- $tlsSecretName := printf "%s-api-tls" $tenant -}}
+{{- if hasKey $api "tlsSecretName" -}}
+{{- $tlsSecretName = $api.tlsSecretName -}}
+{{- end -}}
 {{- /* Opt-in backend MCP-signing identity: a mounted Ed25519 key the
        API signs per-env MCP and DNS-01 broker tokens with. Off by default — the
        mint endpoints report 501 and the DNS-01 broker is unregistered — so
@@ -407,6 +445,45 @@ spec:
       port: {{ $apiPort }}
       targetPort: api
 ---
+{{- if $externalDomain }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $tenant }}-api
+  labels:
+    app: {{ $tenant }}-api
+  {{- if or $certManagerIssuer $ingressAnnotations }}
+  annotations:
+    {{- if $certManagerIssuer }}
+    cert-manager.io/issuer: {{ $certManagerIssuer | quote }}
+    {{- end }}
+    {{- range $key, $value := $ingressAnnotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+  {{- end }}
+spec:
+  {{- if $ingressClass }}
+  ingressClassName: {{ $ingressClass }}
+  {{- end }}
+  {{- if $tlsSecretName }}
+  tls:
+    - hosts:
+        - {{ $externalDomain }}
+      secretName: {{ $tlsSecretName }}
+  {{- end }}
+  rules:
+    - host: {{ $externalDomain }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $tenant }}-api
+                port:
+                  name: api
+---
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
