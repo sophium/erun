@@ -45,6 +45,10 @@ type DeleteJobParams struct {
 	Namespace      string
 	Image          string
 	ServiceAccount string
+	// DeleteID identifies one explicit delete attempt, mirroring
+	// DeployJobParams.DeployID: it is what lets DeleteJobName give a retried
+	// delete a new Job instead of watching a prior attempt's terminal one.
+	DeleteID string
 	// Placement names the cluster this delete targets (#1112); see
 	// DeployJobParams.Placement.
 	Placement PlacementParams
@@ -61,21 +65,30 @@ type DeleteJobParams struct {
 // StopJobName is deterministic in its inputs, so a retried stop watches the
 // Job it already created rather than starting a second one.
 func StopJobName(tenant, environment string) string {
-	return lifecycleJobName(stopJobNamePrefix, tenant, environment)
+	return lifecycleJobName(stopJobNamePrefix, tenant, environment, "")
 }
 
-// DeleteJobName is deterministic in its inputs, so a retried delete watches
-// the Job it already created rather than starting a second one.
-func DeleteJobName(tenant, environment string) string {
-	return lifecycleJobName(deleteJobNamePrefix, tenant, environment)
+// DeleteJobName appends a per-attempt suffix, mirroring DeployJobName: a
+// name keyed only on tenant+environment would make a retried delete watch a
+// prior attempt's already-terminal Job and replay its cached outcome instead
+// of actually running again. deleteID empty keeps the bare tenant+environment
+// name.
+func DeleteJobName(tenant, environment, deleteID string) string {
+	return lifecycleJobName(deleteJobNamePrefix, tenant, environment, deleteID)
 }
 
-func lifecycleJobName(prefix, tenant, environment string) string {
+func lifecycleJobName(prefix, tenant, environment, attemptID string) string {
 	name := jobexec.SanitizeName(tenant + "-" + environment)
-	if budget := jobexec.MaxJobNameLength - len(prefix); len(name) > budget {
+	suffix := ""
+	if attemptID != "" {
+		suffix = "-" + jobexec.ShortID(attemptID)
+	}
+	// Kubernetes caps an object name at 63 characters; trim the descriptive
+	// middle rather than the attempt suffix, which is what keeps attempts apart.
+	if budget := jobexec.MaxJobNameLength - len(prefix) - len(suffix); len(name) > budget {
 		name = strings.Trim(name[:budget], "-")
 	}
-	return prefix + name
+	return prefix + name + suffix
 }
 
 func lifecycleJobSpec(container corev1.Container, serviceAccount string) batchv1.JobSpec {
@@ -140,7 +153,7 @@ func buildStopJob(params StopJobParams) *batchv1.Job {
 func buildDeleteJob(params DeleteJobParams) *batchv1.Job {
 	return &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      DeleteJobName(params.Tenant, params.Environment),
+			Name:      DeleteJobName(params.Tenant, params.Environment, params.DeleteID),
 			Namespace: params.Namespace,
 			Labels:    lifecycleJobLabels(params.Tenant, params.Environment),
 		},

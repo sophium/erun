@@ -54,6 +54,11 @@ type EnvLifecycleInput struct {
 	ContextID                  string
 	PlacementKubernetesContext string
 	PlacementServerURL         string
+	// DeleteID identifies one explicit delete attempt (see
+	// EnvDeleteInput.DeleteID) and is threaded only into the delete Job's
+	// name, never into stop's — a stop request carries no attempt id and
+	// stays keyed on tenant+environment.
+	DeleteID string
 }
 
 // EnvLifecycle runs a hosted env's stop/delete Job to a terminal outcome and
@@ -166,6 +171,7 @@ func (l *EnvLifecycle) Delete(ctx context.Context, input EnvLifecycleInput) erro
 			Namespace:               l.config.PlatformNamespace,
 			Image:                   l.image(ctx, input.Tenant, input.RunningVersion),
 			ServiceAccount:          l.config.DeployerServiceAccount,
+			DeleteID:                input.DeleteID,
 			ExposeServicesZone:      l.config.ExposeServicesZone,
 			ExposePlatformNamespace: l.config.ExposePlatformNamespace,
 			Placement:               placement,
