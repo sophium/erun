@@ -12,7 +12,7 @@ type EnvironmentRepository struct {
 	txs *TxManager
 }
 
-const environmentColumns = `environment_id, tenant_id, name, type, kubernetes_context, context_id, runtime_version, status, provision_error, deployed_version, expose_error, delete_error, created_at, updated_at`
+const environmentColumns = `environment_id, tenant_id, name, type, kubernetes_context, context_id, runtime_version, status, provision_error, deployed_version, expose_error, delete_error, delete_attempts, created_at, updated_at`
 
 // environmentsMidTeardownStatuses are the statuses Count excludes: a delete
 // has been requested for these rows, so they must not lock a tenant out of
@@ -178,7 +178,8 @@ func (r *EnvironmentRepository) ClaimDeploy(ctx context.Context, environmentID s
 		result, err := tx.NewRaw(`
 			UPDATE environments
 			   SET status = ?,
-			       provision_error = NULL
+			       provision_error = NULL,
+			       delete_error = NULL
 			 WHERE environment_id = ?
 			   AND status NOT IN (?)
 			   AND (status <> ? OR updated_at < NOW() - MAKE_INTERVAL(secs => ?))
@@ -221,13 +222,25 @@ func (r *EnvironmentRepository) Delete(ctx context.Context, environmentID string
 // `deleting` and resurrect a row whose namespace is being torn down. The guard
 // is relaxed by the same staleAfter as the deploy's own, so a control plane
 // that died mid-deploy still cannot block a teardown permanently.
+//
+// The claim does NOT clear delete_error (#1166). Clearing it on claim meant the
+// recorded blocker vanished for as long as the new attempt took to reach the
+// same conclusion -- up to NamespaceDeleteTimeout, on a five-minute reconcile
+// cycle -- so an operator, the console, or an orchestrator polling during that
+// window saw `deleting` with no reason at all for an environment that had been
+// stuck for hours. The attempt's own outcome overwrites it instead, so the row
+// is never less informative after a tick than it was before.
+//
+// It does increment delete_attempts, which is what lets the reconciler back off
+// per attempt and eventually stop, rather than re-attempting a teardown that
+// cannot succeed for as long as the row exists.
 func (r *EnvironmentRepository) ClaimDelete(ctx context.Context, environmentID string, staleAfter time.Duration) (bool, error) {
 	claimed := false
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		result, err := tx.NewRaw(`
 			UPDATE environments
 			   SET status = ?,
-			       delete_error = NULL
+			       delete_attempts = delete_attempts + 1
 			 WHERE environment_id = ?
 			   AND (status <> ? OR updated_at < NOW() - MAKE_INTERVAL(secs => ?))
 			   AND (status <> ? OR updated_at < NOW() - MAKE_INTERVAL(secs => ?))

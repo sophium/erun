@@ -198,7 +198,16 @@ func (l *EnvLifecycle) Delete(ctx context.Context, input EnvLifecycleInput) erro
 		}
 	}
 	l.recordUsage(ctx, input.EnvironmentID, model.UsageEventEnvironmentDeleted)
-	return l.rows.Delete(ctx, input.EnvironmentID)
+	// The namespace is gone but the row is not yet: a failure here would leave
+	// the row in `deleting` with no reason, contradicting this method's own
+	// contract that every non-success outcome names why (#1166). Record it, so
+	// a retry has something to act on -- the namespace teardown is already
+	// done, so the retry's own delete is a no-op and only the row removal is
+	// re-attempted.
+	if err := l.rows.Delete(ctx, input.EnvironmentID); err != nil {
+		return l.blockDelete(ctx, input.EnvironmentID, fmt.Errorf("namespace torn down but removing the environment row failed: %w", err))
+	}
+	return nil
 }
 
 // blockDelete records why a delete attempt did not tear the namespace down
