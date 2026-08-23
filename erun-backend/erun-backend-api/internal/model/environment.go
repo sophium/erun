@@ -67,8 +67,17 @@ type Environment struct {
 	// DeleteError carries why a delete attempt did not tear the namespace down
 	// (the namespace's own conditions, verbatim, when it's stuck on an
 	// unsatisfiable finalizer) when Status is `deletion-blocked`. Owned by the
-	// delete executor, so scan-only; cleared on a fresh delete attempt.
-	DeleteError string    `json:"deleteError,omitempty" bun:"delete_error,scanonly,nullzero"`
-	CreatedAt   time.Time `json:"createdAt" bun:"created_at,scanonly"`
-	UpdatedAt   time.Time `json:"updatedAt" bun:"updated_at,scanonly"`
+	// delete executor, so scan-only. It is NOT cleared when a retry claims the
+	// row: an attempt's outcome overwrites it, so the recorded blocker stays
+	// readable for the whole time a teardown is stuck rather than blinking out
+	// on every reconciler tick (#1166).
+	DeleteError string `json:"deleteError,omitempty" bun:"delete_error,scanonly,nullzero"`
+	// DeleteAttempts counts how many delete attempts have claimed this row.
+	// Incremented by the claim, so it survives an attempt that dies without
+	// reporting. It is what bounds the reconciler's retries: past a cap the
+	// environment needs intervention, and re-attempting it forever only hides
+	// that. Owned by the claim, so scan-only.
+	DeleteAttempts int       `json:"deleteAttempts,omitempty" bun:"delete_attempts,scanonly"`
+	CreatedAt      time.Time `json:"createdAt" bun:"created_at,scanonly"`
+	UpdatedAt      time.Time `json:"updatedAt" bun:"updated_at,scanonly"`
 }

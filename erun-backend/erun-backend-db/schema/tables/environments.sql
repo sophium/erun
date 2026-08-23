@@ -11,6 +11,7 @@ CREATE TABLE environments (
   deployed_version TEXT,
   expose_error TEXT,
   delete_error TEXT,
+  delete_attempts INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ,
   FOREIGN KEY (tenant_id) REFERENCES tenants (tenant_id),
