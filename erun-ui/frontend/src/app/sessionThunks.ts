@@ -19,11 +19,7 @@ import { selectActiveSlotForSelection, selectEnvironmentExists } from './selecto
 import { isNewSessionSelection } from './sessionSelection';
 import { setAutoStartPrompt } from './slices/autoStartPromptSlice';
 import { setIdleStatus } from './slices/idleSlice';
-import {
-  setSelectedDiffPath,
-  setSelectedReviewCommit,
-  setSelectedReviewScope,
-} from './slices/reviewSlice';
+import { setEnvReviewCommit, setEnvReviewScope, setSelectedDiffPath } from './slices/reviewSlice';
 import { setSelected } from './slices/selectionSlice';
 import {
   clearEnvOpening,
@@ -197,8 +193,12 @@ const prepareOpenSelection =
     const previousKey = state.selection.selected ? selectionKey(state.selection.selected) : '';
     const newKey = selectionKey(selection);
     if (newKey !== previousKey) {
-      dispatch(setSelectedReviewScope('current'));
-      dispatch(setSelectedReviewCommit(''));
+      // Reset the range for the environment being opened. Scope and commit are
+      // per-env now, so resetting them globally would clear an unrelated
+      // section's selection (#1178).
+      const envKey = `${selection.tenant}/${selection.environment}`;
+      dispatch(setEnvReviewScope({ envKey, scope: 'current' }));
+      dispatch(setEnvReviewCommit({ envKey, commit: '' }));
       dispatch(setSelectedDiffPath(''));
     }
     // setSelected is observed by selectionSyncMiddleware, which reconciles

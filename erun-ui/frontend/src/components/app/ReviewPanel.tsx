@@ -1,6 +1,5 @@
 import {
   ChevronDown,
-  ChevronRight,
   FileDiff,
   GitBranch,
   GitCommitHorizontal,
@@ -10,31 +9,29 @@ import {
 import * as React from 'react';
 
 import { switchDiffSource } from '@/app/contributeThunks';
-import { compactDiffError, filterDiffTree, visibleDiffTreeNodes } from '@/app/diffUtils';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { startFilesResize } from '@/app/layoutThunks';
 import {
   loadReviewDiff,
   refreshReviewDiff,
-  requestReconnect,
-  selectDiffPath,
   selectReviewRange,
   setDiffFilter,
   toggleChangedFiles,
-  toggleDiffDirectory,
 } from '@/app/reviewThunks';
+import { selectReviewEnvTargets } from '@/app/selectors';
 import { contributeEnvKey, type DiffSource } from '@/app/slices/contributeSlice';
 import { useController } from '@/app/useController';
+import { useEnvDiffSlot } from '@/app/useEnvDiffSlot';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
-import type { DiffCommit, DiffTreeNode } from '@/types';
+import type { DiffCommit } from '@/types';
 
-import { DiffErrorAlert, DiffList, ReviewStatus } from './DiffList';
-import { FileIcon } from './FileIcon';
+import { DiffList } from './DiffList';
 import { IconTooltip } from './IconTooltip';
 import { ResizeHandle } from './ResizeHandle';
+import { ChangedFileTree } from './ReviewPanel.ChangedFiles';
 
 const filesSplitterClassName =
   'relative cursor-col-resize border-l bg-background before:absolute before:top-0 before:bottom-0 before:left-1 before:w-px before:bg-transparent before:transition-colors hover:before:bg-border [.is-resizing-files_&]:before:bg-border';
@@ -129,7 +126,7 @@ function ChangedFilesAside({ visible }: { visible: boolean }): React.ReactElemen
     >
       <ChangedFilesHeader />
       <DiffSourceControl />
-      <ReviewRangeControl />
+      <ReviewRangeControls />
       {changedFilesOpen ? (
         <>
           <Label className="box-border flex h-[38px] items-center gap-2 rounded-[var(--radius)] border border-input bg-background px-3 text-muted-foreground [&_svg]:size-[18px] [&_svg]:flex-none">
@@ -249,11 +246,13 @@ function ReviewBoundaryTrack({
   selectedReviewScope,
   diffLoading,
   dispatch,
+  envKey,
 }: {
   commits: DiffCommit[];
   selectedReviewScope: 'current' | 'commit' | 'all';
   diffLoading: boolean;
   dispatch: ReturnType<typeof useAppDispatch>;
+  envKey: string;
 }): React.ReactElement {
   return (
     <div className="relative flex min-h-0 flex-col gap-1 before:absolute before:top-4 before:bottom-4 before:left-[15px] before:w-px before:bg-border">
@@ -263,13 +262,13 @@ function ReviewBoundaryTrack({
         selected={selectedReviewScope === 'current'}
         disabled={diffLoading}
         onClick={() => {
-          dispatch(selectReviewRange('current'));
+          dispatch(selectReviewRange(envKey, 'current'));
         }}
       />
       {commits.length > 0 ? (
         <div className="flex max-h-[220px] min-h-0 flex-col gap-1 overflow-auto pr-1">
           {commits.map((commit) => (
-            <ReviewCommitButton key={commit.hash} commit={commit} />
+            <ReviewCommitButton key={commit.hash} envKey={envKey} commit={commit} />
           ))}
         </div>
       ) : null}
@@ -279,18 +278,21 @@ function ReviewBoundaryTrack({
         selected={selectedReviewScope === 'all'}
         disabled={diffLoading}
         onClick={() => {
-          dispatch(selectReviewRange('all'));
+          dispatch(selectReviewRange(envKey, 'all'));
         }}
       />
     </div>
   );
 }
 
-function ReviewRangeControl(): React.ReactElement | null {
+// ReviewRangeControl is per-environment: ReviewBase, ReviewCommits, Scope and
+// SelectedCommit are all per-repository, so a commit list or a base commit
+// shared across two unrelated checkouts would be a value that means nothing
+// (#1178).
+function ReviewRangeControl({ envKey }: { envKey: string }): React.ReactElement | null {
   const dispatch = useAppDispatch();
-  const diff = useAppSelector((state) => state.review.diff);
-  const selectedReviewScope = useAppSelector((state) => state.review.selectedReviewScope);
-  const diffLoading = useAppSelector((state) => state.review.diffLoading);
+  const slot = useEnvDiffSlot(envKey);
+  const diff = slot.diff;
   const commits = [...(diff?.reviewCommits ?? [])].reverse();
   const base = diff?.reviewBase;
   if (!base?.commit && commits.length === 0) {
@@ -307,20 +309,28 @@ function ReviewRangeControl(): React.ReactElement | null {
       </div>
       <ReviewMergeTargetRow base={base} />
       <ReviewBoundaryTrack
+        envKey={envKey}
         commits={commits}
-        selectedReviewScope={selectedReviewScope}
-        diffLoading={diffLoading}
+        selectedReviewScope={slot.scope}
+        diffLoading={slot.loading}
         dispatch={dispatch}
       />
     </div>
   );
 }
 
-function ReviewCommitButton({ commit }: { commit: DiffCommit }): React.ReactElement {
+function ReviewCommitButton({
+  envKey,
+  commit,
+}: {
+  envKey: string;
+  commit: DiffCommit;
+}): React.ReactElement {
   const dispatch = useAppDispatch();
-  const selectedReviewScope = useAppSelector((state) => state.review.selectedReviewScope);
-  const selectedReviewCommit = useAppSelector((state) => state.review.selectedReviewCommit);
-  const diffLoading = useAppSelector((state) => state.review.diffLoading);
+  const slot = useEnvDiffSlot(envKey);
+  const selectedReviewScope = slot.scope;
+  const selectedReviewCommit = slot.commit;
+  const diffLoading = slot.loading;
   return (
     <ReviewBoundaryButton
       label={commit.subject || commit.shortHash}
@@ -328,7 +338,7 @@ function ReviewCommitButton({ commit }: { commit: DiffCommit }): React.ReactElem
       selected={selectedReviewScope === 'commit' && selectedReviewCommit === commit.hash}
       disabled={diffLoading}
       onClick={() => {
-        dispatch(selectReviewRange('commit', commit.hash));
+        dispatch(selectReviewRange(envKey, 'commit', commit.hash));
       }}
     />
   );
@@ -372,11 +382,33 @@ function ReviewBoundaryButton({
   );
 }
 
+// ChangedFilesHeader is the panel's single header, so its counts are the total
+// across every environment shown. Summed rather than taken from one env: with a
+// cross-env session the header describes the whole panel (#1178).
+// ReviewRangeControls renders one range control per environment shown, since
+// each has its own commit list.
+function ReviewRangeControls(): React.ReactElement {
+  const targets = useAppSelector(selectReviewEnvTargets);
+  return (
+    <>
+      {targets.map((target) => (
+        <ReviewRangeControl key={target.envKey} envKey={target.envKey} />
+      ))}
+    </>
+  );
+}
+
 function ChangedFilesHeader(): React.ReactElement {
   const dispatch = useAppDispatch();
   const changedFilesOpen = useAppSelector((state) => state.layout.changedFilesOpen);
-  const diff = useAppSelector((state) => state.review.diff);
-  const diffLoading = useAppSelector((state) => state.review.diffLoading);
+  const diffByEnv = useAppSelector((state) => state.review.diffByEnv);
+  const slots = Object.values(diffByEnv).filter((slot) => slot !== undefined);
+  const diffLoading = slots.some((slot) => slot.loading);
+  const summary = {
+    fileCount: slots.reduce((sum, slot) => sum + (slot.diff?.summary.fileCount ?? 0), 0),
+    additions: slots.reduce((sum, slot) => sum + (slot.diff?.summary.additions ?? 0), 0),
+    deletions: slots.reduce((sum, slot) => sum + (slot.diff?.summary.deletions ?? 0), 0),
+  };
   return (
     <div className="mb-3.5 flex min-w-0 items-center justify-between gap-3">
       <button
@@ -388,8 +420,7 @@ function ChangedFilesHeader(): React.ReactElement {
         }}
       >
         <FileDiff aria-hidden="true" />
-        Changed files{' '}
-        <span className="flex-none text-muted-foreground">{diff?.summary.fileCount ?? 0}</span>
+        Changed files <span className="flex-none text-muted-foreground">{summary.fileCount}</span>
         <ChevronDown
           className={cn('transition-transform', !changedFilesOpen && '-rotate-90')}
           aria-hidden="true"
@@ -412,102 +443,10 @@ function ChangedFilesHeader(): React.ReactElement {
           </Button>
         </IconTooltip>
         <div className="flex gap-1.5 text-sm font-semibold whitespace-nowrap">
-          <span className="text-diff-add-foreground">+{diff?.summary.additions ?? 0}</span>
-          <span className="text-diff-delete-foreground">-{diff?.summary.deletions ?? 0}</span>
+          <span className="text-diff-add-foreground">+{summary.additions}</span>
+          <span className="text-diff-delete-foreground">-{summary.deletions}</span>
         </div>
       </div>
-    </div>
-  );
-}
-
-function ChangedFileTree(): React.ReactElement {
-  const dispatch = useAppDispatch();
-  const review = useAppSelector((state) => state.review);
-  if (review.diffLoading) {
-    return <ReviewStatus>Loading...</ReviewStatus>;
-  }
-  if (review.diffError) {
-    return (
-      <DiffErrorAlert
-        message={compactDiffError(review.diffError)}
-        loading={review.diffLoading}
-        reconnectable={review.diffErrorReconnectable}
-        onRetry={() => {
-          void dispatch(loadReviewDiff());
-        }}
-        onReconnect={() => {
-          dispatch(requestReconnect());
-        }}
-      />
-    );
-  }
-
-  const tree = visibleDiffTreeNodes(
-    filterDiffTree(review.diff?.tree ?? [], review.diffFilter),
-    new Set(review.collapsedDiffDirs),
-  );
-  if (tree.length === 0) {
-    return <ReviewStatus>{review.diff ? 'No matching files' : 'No changes'}</ReviewStatus>;
-  }
-
-  return (
-    <>
-      {tree.map((node) => (
-        <ChangedFileNode key={node.path} node={node} />
-      ))}
-    </>
-  );
-}
-
-function ChangedFileNode({ node }: { node: DiffTreeNode }): React.ReactElement {
-  const dispatch = useAppDispatch();
-  const collapsedDiffDirs = useAppSelector((state) => state.review.collapsedDiffDirs);
-  const selectedDiffPath = useAppSelector((state) => state.review.selectedDiffPath);
-  const style = { '--depth': String(node.depth) } as React.CSSProperties;
-
-  if (node.type === 'directory') {
-    const collapsed = collapsedDiffDirs.includes(node.path);
-    return (
-      <div className="flex flex-col">
-        <button
-          type="button"
-          className="flex h-[34px] w-full cursor-pointer items-center gap-2 rounded-[var(--radius)] border-0 bg-transparent py-0 pr-2.5 pl-[calc(8px+(var(--depth)*18px))] text-left text-sm leading-[1.2] font-medium text-foreground hover:bg-accent"
-          style={style}
-          aria-expanded={!collapsed}
-          aria-label={`${node.name} directory`}
-          onClick={() => {
-            dispatch(toggleDiffDirectory(node.path));
-          }}
-        >
-          <ChevronRight
-            className={cn('size-4 flex-none text-current', !collapsed && 'rotate-90')}
-            aria-hidden="true"
-          />
-          <span className="min-w-0 truncate">{node.name}</span>
-        </button>
-      </div>
-    );
-  }
-
-  const selected = node.path === selectedDiffPath;
-  return (
-    <div className="flex flex-col">
-      <button
-        type="button"
-        className={cn(
-          'flex h-[34px] w-full cursor-pointer items-center gap-2 rounded-[var(--radius)] border-0 bg-transparent py-0 pr-2.5 pl-[calc(8px+(var(--depth)*18px))] text-left text-sm leading-[1.2] text-foreground hover:bg-accent',
-          selected && 'bg-primary text-primary-foreground hover:bg-primary',
-        )}
-        style={style}
-        data-path={node.path}
-        aria-current={selected ? 'true' : undefined}
-        onClick={() => {
-          dispatch(selectDiffPath(node.path));
-        }}
-      >
-        <FileIcon filePath={node.path} />
-        <span className="min-w-0 truncate">{node.name}</span>
-      </button>
     </div>
   );
 }
