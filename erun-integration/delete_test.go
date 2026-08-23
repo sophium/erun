@@ -189,6 +189,104 @@ func TestDelete(t *testing.T) {
 		}
 	})
 
+	t.Run("real_run_retracts_challenges_before_deleting_the_namespace", func(t *testing.T) {
+		// #1174: namespace teardown removes the env's DNS-01 token Secret as
+		// ordinary content, and Kubernetes gives no ordering guarantee against
+		// cert-manager finalizing a still-pending Challenge in the same
+		// namespace. The Challenge's cleanup needs that Secret to retract its
+		// record, so if the namespace goes first the finalizer never clears and
+		// the namespace sits in Terminating for the full 20-minute timeout.
+		// The delete must therefore retract challenges FIRST, while the
+		// credential still exists. This asserts that ordering directly.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		callLog := filepath.Join(setup.Cwd, "kubectl-calls.log")
+		counter := filepath.Join(setup.Cwd, "challenge-gets")
+		fixture.StubBinaryWithScript(t, stubs, "kubectl",
+			`printf '%s\n' "$*" >> '`+filepath.ToSlash(callLog)+`'
+case "$*" in
+  *"get challenges"*)
+    # Present on the first look, gone once the Certificate delete has been
+    # processed -- the real asynchronous shape, so the wait loop is exercised
+    # rather than short-circuited.
+    if [ -f '`+filepath.ToSlash(counter)+`' ]; then
+      exit 0
+    fi
+    printf '%s\n' 'challenge.acme.cert-manager.io/team-dev-wildcard-1-x'
+    ;;
+  *"delete certificates.cert-manager.io"*)
+    : > '`+filepath.ToSlash(counter)+`'
+    ;;
+esac
+exit 0
+`)
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		result := erun.Run(t, []string{"delete", "team", "dev", "--yes"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+
+		logged, err := os.ReadFile(callLog)
+		if err != nil {
+			t.Fatalf("read kubectl call log: %v", err)
+		}
+		calls := string(logged)
+		certDelete := strings.Index(calls, "delete certificates.cert-manager.io")
+		nsDelete := strings.Index(calls, "delete namespace team-dev")
+		if certDelete < 0 {
+			t.Fatalf("no certificate delete was issued; challenges would never be retracted:\n%s", calls)
+		}
+		if nsDelete < 0 {
+			t.Fatalf("the namespace was never deleted:\n%s", calls)
+		}
+		if certDelete > nsDelete {
+			t.Fatalf("certificates were deleted AFTER the namespace, which is the bug:\n%s", calls)
+		}
+		if !strings.Contains(calls, "get challenges.acme.cert-manager.io") {
+			t.Fatalf("the retraction never waited for the challenges to finalize:\n%s", calls)
+		}
+	})
+
+	t.Run("real_run_without_cert_manager_skips_the_retraction", func(t *testing.T) {
+		// The retraction is an optimization, so a cluster with no cert-manager
+		// (the normal case for a local or test cluster, where the CRDs do not
+		// exist and kubectl reports an unknown resource type) must pay nothing
+		// for it: no certificate delete, no waiting, and the namespace delete
+		// unaffected.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		callLog := filepath.Join(setup.Cwd, "kubectl-calls.log")
+		fixture.StubBinaryWithScript(t, stubs, "kubectl",
+			`printf '%s\n' "$*" >> '`+filepath.ToSlash(callLog)+`'
+case "$*" in
+  *"get challenges"*)
+    printf '%s\n' 'error: the server doesn'"'"'t have a resource type "challenges"' >&2
+    exit 1
+    ;;
+esac
+exit 0
+`)
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		result := erun.Run(t, []string{"delete", "team", "dev", "--yes"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+
+		logged, err := os.ReadFile(callLog)
+		if err != nil {
+			t.Fatalf("read kubectl call log: %v", err)
+		}
+		calls := string(logged)
+		if strings.Contains(calls, "delete certificates.cert-manager.io") {
+			t.Fatalf("a cluster without cert-manager must not be asked to delete certificates:\n%s", calls)
+		}
+		if !strings.Contains(calls, "delete namespace team-dev") {
+			t.Fatalf("the namespace delete must still happen:\n%s", calls)
+		}
+	})
+
 	t.Run("real_run_namespace_delete_failure_warns_and_continues", func(t *testing.T) {
 		// A failed namespace delete is non-fatal: kubectl's error is surfaced
 		// as a warning on stderr and the local config delete still proceeds.

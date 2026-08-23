@@ -112,8 +112,20 @@ func TraceDeleteKubernetesNamespace(ctx Context, contextName, namespace string) 
 	if contextName != "" {
 		args = append(args, "--context", contextName)
 	}
+	traceRetractACMEChallenges(ctx, contextName, namespace)
+
 	args = append(args, "delete", "namespace", namespace, "--ignore-not-found", "--timeout", NamespaceDeleteTimeout.String())
 	ctx.TraceCommand("", "kubectl", args...)
+}
+
+// traceRetractACMEChallenges mirrors retractACMEChallenges for a dry run, so
+// the traced sequence is the one a real delete runs.
+func traceRetractACMEChallenges(ctx Context, contextName, namespace string) {
+	ctx.TraceCommand("", "kubectl", append(kubernetesContextArgs(contextName),
+		"-n", namespace, "delete", "certificates.cert-manager.io", "--all",
+		"--ignore-not-found", "--timeout", acmeRetractTimeout.String())...)
+	ctx.TraceCommand("", "kubectl", append(kubernetesContextArgs(contextName),
+		"-n", namespace, "get", "challenges.acme.cert-manager.io", "-o", "name")...)
 }
 
 // DeleteKubernetesNamespace deletes a namespace and waits up to
@@ -135,6 +147,18 @@ func DeleteKubernetesNamespace(contextName, namespace string) error {
 	if contextName != "" {
 		args = append(args, "--context", contextName)
 	}
+	// Retract any in-flight ACME challenge before the namespace teardown that
+	// would remove the credential its cleanup needs (#1174). Deleting the
+	// namespace first removes the env's DNS-01 token Secret as ordinary
+	// content, and Kubernetes gives no ordering guarantee against cert-manager
+	// finalizing a still-pending Challenge in the same namespace -- so the
+	// finalizer would never clear and the namespace would sit in Terminating
+	// for the full NamespaceDeleteTimeout. Best-effort by design: a cluster
+	// with no cert-manager, or a challenge that will not finalize, must not
+	// block the delete. If a challenge does survive this, the namespace's own
+	// conditions still name it in NamespaceTerminationBlockedError below.
+	retractACMEChallenges(contextName, namespace)
+
 	args = append(args, "delete", "namespace", namespace, "--ignore-not-found", "--timeout", NamespaceDeleteTimeout.String())
 
 	output, err := Command("kubectl", args...).CombinedOutput()
@@ -153,6 +177,59 @@ func DeleteKubernetesNamespace(contextName, namespace string) error {
 		return fmt.Errorf("failed to delete kubernetes namespace %q in context %q: %w", namespace, contextName, err)
 	}
 	return fmt.Errorf("failed to delete kubernetes namespace %q in context %q: %w: %s", namespace, contextName, err, message)
+}
+
+// acmeRetractTimeout bounds the pre-teardown challenge retraction. Short on
+// purpose: it is an optimization that avoids a 20-minute wedge, so it must
+// never itself become a long wait. A challenge that has not finalized by then
+// is left to the namespace delete, where the webhook shim's own tolerance for
+// an already-deleted token Secret clears the finalizer instead.
+const acmeRetractTimeout = 90 * time.Second
+
+// retractACMEChallenges deletes the namespace's cert-manager Certificates and
+// waits for its ACME Challenges to finalize, so a challenge's cleanup runs
+// while the DNS-01 token Secret it authenticates with still exists.
+//
+// Every failure here is deliberately swallowed. On a cluster without
+// cert-manager the CRDs do not exist and kubectl reports an unknown resource
+// type, which is the common case for a local or test cluster and is not an
+// error in any meaningful sense. The caller's contract is "delete this
+// namespace", and this function only ever makes that faster.
+func retractACMEChallenges(contextName, namespace string) {
+	if !acmeChallengesPresent(contextName, namespace) {
+		return
+	}
+
+	args := append(kubernetesContextArgs(contextName),
+		"-n", namespace, "delete", "certificates.cert-manager.io", "--all",
+		"--ignore-not-found", "--timeout", acmeRetractTimeout.String())
+	_, _ = Command("kubectl", args...).CombinedOutput()
+
+	// Wait for the challenges to actually go, rather than assuming the
+	// Certificate delete cascaded synchronously -- cert-manager removes the
+	// Order and its Challenges asynchronously, and it is the Challenge's
+	// finalizer, not the Certificate's, that blocks the namespace.
+	deadline := time.Now().Add(acmeRetractTimeout)
+	for time.Now().Before(deadline) {
+		if !acmeChallengesPresent(contextName, namespace) {
+			return
+		}
+		time.Sleep(2 * time.Second)
+	}
+}
+
+// acmeChallengesPresent reports whether the namespace currently has any ACME
+// Challenge. A read that fails for any reason -- no cert-manager CRDs, no
+// permission, apiserver unavailable -- reports false, so the caller skips the
+// retraction rather than looping on a question it cannot answer.
+func acmeChallengesPresent(contextName, namespace string) bool {
+	args := append(kubernetesContextArgs(contextName),
+		"-n", namespace, "get", "challenges.acme.cert-manager.io", "-o", "name")
+	output, err := Command("kubectl", args...).Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(output)) != ""
 }
 
 // namespaceTerminationConditions reads back a namespace's own status
