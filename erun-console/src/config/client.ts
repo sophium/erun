@@ -53,7 +53,9 @@ function asEnvironmentStatus(value: unknown): EnvironmentStatus | undefined {
   return value === 'registered' ||
     value === 'provisioning' ||
     value === 'running' ||
-    value === 'failed'
+    value === 'failed' ||
+    value === 'deleting' ||
+    value === 'deletion-blocked'
     ? value
     : undefined;
 }
@@ -69,6 +71,7 @@ function parseEnvironment(raw: Record<string, unknown>): Environment {
     status: asEnvironmentStatus(raw.status),
     provisionError: asOptionalString(raw.provisionError),
     deployedVersion: asOptionalString(raw.deployedVersion),
+    deleteError: asOptionalString(raw.deleteError),
   };
 }
 
@@ -303,7 +306,10 @@ export async function createEnvironment(
 // getEnvironment fetches one environment by id; the deploy controller polls it
 // after deployEnvironment until `status` reaches running/failed.
 export async function getEnvironment(token: string, environmentId: string): Promise<Environment> {
-  const response = await authedFetch(`/v1/environments/${encodeURIComponent(environmentId)}`, token);
+  const response = await authedFetch(
+    `/v1/environments/${encodeURIComponent(environmentId)}`,
+    token,
+  );
   if (!response.ok) {
     throw new ConfigFetchError(
       `environment request failed (${String(response.status)})`,
