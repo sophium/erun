@@ -37,7 +37,7 @@ var mcpReadOnlyTools = map[string]struct{}{
 	"idle_stop_history":   {},
 	"context_list":        {},
 	"cloud_list":          {},
-	"diff":                {},
+	"exec_diff":           {},
 	"observe":             {},
 	"outputs_list":        {},
 	"outputs_download":    {},
@@ -51,7 +51,10 @@ var mcpReadOnlyTools = map[string]struct{}{
 // about its blast radius is unreachable to a read-only caller rather than
 // silently reachable.
 func MCPToolCapability(tool string) MCPCapability {
-	if _, ok := mcpReadOnlyTools[strings.TrimSpace(tool)]; ok {
+	// Resolve a retired name first, so a caller still using `diff` authorizes
+	// exactly as one using `exec_diff` -- otherwise the rename would silently
+	// promote a read-only tool to requiring admin (#1186).
+	if _, ok := mcpReadOnlyTools[MCPToolCurrentName(tool)]; ok {
 		return MCPCapabilityRead
 	}
 	return MCPCapabilityAdmin

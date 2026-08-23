@@ -62,7 +62,49 @@ func addTool[In, Out any](reg toolRegistrar, tool *mcp.Tool, handler mcp.ToolHan
 	if !reg.identity.Capabilities.AllowsTool(tool.Name) {
 		return
 	}
+	describeTool(tool)
 	mcp.AddTool(reg.server, tool, guardTool(reg.identity, tool.Name, handler))
+}
+
+// describeTool attaches the tool's family, CLI path, title and annotations from
+// erun-common's descriptor table.
+//
+// It panics on a tool with no descriptor, deliberately. The alternative is
+// shipping it on the MCP spec defaults -- readOnlyHint false, destructiveHint
+// true, openWorldHint true -- which is how `version` came to be advertised as a
+// destructive open-world tool (#1186). A missing descriptor is a programming
+// error in a binary that is built and tested together, so failing at
+// registration is loud and immediate; a silent conservative default would be
+// the same invisible-wrong-answer this table exists to remove.
+func describeTool(tool *mcp.Tool) {
+	descriptor, ok := eruncommon.MCPToolDescriptorFor(tool.Name)
+	if !ok {
+		panic(fmt.Sprintf("erun-mcp: tool %q has no descriptor in erun-common's MCPToolDescriptor table; add one so it does not ship on the MCP spec defaults", tool.Name))
+	}
+
+	tool.Title = descriptor.Title
+	// destructiveHint and openWorldHint are *bool in the SDK and default to
+	// TRUE when nil, so both must be set explicitly on every tool -- including
+	// to false. That nil-means-true is the whole reason the surface was
+	// uniformly destructive before this.
+	destructive, openWorld := descriptor.Destructive, descriptor.OpenWorld
+	tool.Annotations = &mcp.ToolAnnotations{
+		Title:           descriptor.Title,
+		ReadOnlyHint:    descriptor.ReadOnly,
+		DestructiveHint: &destructive,
+		IdempotentHint:  descriptor.Idempotent,
+		OpenWorldHint:   &openWorld,
+	}
+
+	meta := mcp.Meta{"family": descriptor.Family}
+	if descriptor.CLIPath == nil {
+		// No command behind it. Reporting mcpOnly is more useful than inventing
+		// a path, which is how workspace_sync drifted from `erun sshd sync`.
+		meta["mcpOnly"] = true
+	} else {
+		meta["cliPath"] = descriptor.CLIPath
+	}
+	tool.Meta = meta
 }
 
 // guardTool re-checks at call time. Registration already filtered, so this only

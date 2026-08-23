@@ -66,9 +66,12 @@ func listToolNames(t *testing.T, session *mcp.ClientSession) []string {
 func TestReadCapabilitySeesOnlyTheReadTools(t *testing.T) {
 	got := listToolNames(t, connectWithCapabilities(t, string(eruncommon.MCPCapabilityRead)))
 
+	// diff and exec_diff both appear during the rename's one-release alias
+	// window (#1186); the retired name authorizes as its replacement, so a
+	// read-only caller keeps it.
 	want := []string{
-		"activity_lease_list", "cloud_list", "context_list", "diff", "idle",
-		"idle_stop_history",
+		"activity_lease_list", "cloud_list", "context_list", "diff", "exec_diff",
+		"idle", "idle_stop_history",
 		"job_await", "job_output", "job_status", "list", "observe",
 		"outputs_download", "outputs_list", "version",
 	}

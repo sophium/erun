@@ -434,20 +434,45 @@ func registerDeliveryTools(reg toolRegistrar, runtime RuntimeConfig) {
 
 func registerInspectionTools(reg toolRegistrar, runtime RuntimeConfig) {
 	addTool(reg, &mcp.Tool{
-		Name:        "diff",
+		Name:        "exec_diff",
 		Description: "Return the current git diff from the runtime repo root as raw text plus structured file, hunk, line, and tree data",
 	}, diffTool(runtime))
 	addTool(reg, &mcp.Tool{
-		Name:        "raw",
+		Name:        "exec_raw",
 		Description: "Run an arbitrary command from the runtime repo root and return captured stdout, stderr, and trace output",
 	}, rawTool(runtime))
 	addTool(reg, &mcp.Tool{
-		Name:        "write",
+		Name:        "exec_write",
 		Description: "Write content to a path in the runtime repo's working tree, taking the content as data — never through a shell, so nothing in it is reinterpreted. Refuses if the resolved path would land outside the repo root. Reports the resolved path and byte count written. Set preview to trace the write without performing it.",
 	}, writeTool(runtime))
 	addTool(reg, &mcp.Tool{
-		Name:        "commit",
+		Name:        "exec_commit",
 		Description: "Stage every change (or, with paths set, only those paths) in the runtime repo's working tree and commit it with a message taken as data — never through a shell. branch must match the tree's actual current branch; the commit is refused, loudly, when it does not, rather than landing on whichever branch HEAD happens to be on. When paths is set, the commit is refused just as loudly if the tree has changes outside the declared paths, so an unrelated writer's edits can never be absorbed into it. Reports the branch, commit id, and files committed. Set preview to verify the branch and trace the files that would be committed without committing.",
+	}, commitTool(runtime))
+
+	// Deprecated aliases for the four exec tools, kept callable for one release
+	// (#1186). `erun exec` was the only command group on the surface whose tools
+	// dropped their prefix, and it is the group whose members differ most in
+	// blast radius -- exec_diff only reads, exec_raw runs arbitrary argv -- so
+	// the rename is worth the alias window rather than a hard break. Each alias
+	// shares its replacement's handler and resolves to the same descriptor and
+	// capability, so nothing about authorization or auditing changes with the
+	// name a caller happens to use.
+	addTool(reg, &mcp.Tool{
+		Name:        "diff",
+		Description: "Deprecated: use exec_diff. Retained for one release; this name will be removed.",
+	}, diffTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "raw",
+		Description: "Deprecated: use exec_raw. Retained for one release; this name will be removed.",
+	}, rawTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "write",
+		Description: "Deprecated: use exec_write. Retained for one release; this name will be removed.",
+	}, writeTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "commit",
+		Description: "Deprecated: use exec_commit. Retained for one release; this name will be removed.",
 	}, commitTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "outputs_list",
