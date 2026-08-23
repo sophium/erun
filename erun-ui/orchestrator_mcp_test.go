@@ -38,7 +38,7 @@ func orchestratorTestEnvs() []eruncommon.OrchestratorEnvConfig {
 }
 
 func TestBuildOrchestratorMCPConfig(t *testing.T) {
-	config := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "/opt/erun/bin/erun", orchestratorTestPort)
+	config, _ := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "/opt/erun/bin/erun", orchestratorTestPort)
 
 	if len(config.MCPServers) != 2 {
 		t.Fatalf("expected 2 servers, got %d: %v", len(config.MCPServers), config.MCPServers)
@@ -68,7 +68,7 @@ func TestBuildOrchestratorMCPConfig(t *testing.T) {
 // place a bearer can leak from: an MCP client cannot refresh a header it was
 // configured with, so the fix for the expiry was to stop writing one at all.
 func TestBuildOrchestratorMCPConfigCarriesNoCredential(t *testing.T) {
-	config := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "/opt/erun/bin/erun", orchestratorTestPort)
+	config, _ := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "/opt/erun/bin/erun", orchestratorTestPort)
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		t.Fatalf("marshal config: %v", err)
@@ -84,7 +84,7 @@ func TestBuildOrchestratorMCPConfigCarriesNoCredential(t *testing.T) {
 // and the caller skips --mcp-config rather than writing entries that fail on
 // first use.
 func TestBuildOrchestratorMCPConfigSkipsEveryEnvWithoutAnExecutable(t *testing.T) {
-	config := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "  ", orchestratorTestPort)
+	config, _ := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "  ", orchestratorTestPort)
 	if len(config.MCPServers) != 0 {
 		t.Fatalf("expected no servers without an executable, got %v", config.MCPServers)
 	}
@@ -153,7 +153,7 @@ func writeBundledDesktopMCPConfig(t *testing.T, output string) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
 
-	path, err := app.writeOrchestratorMCPConfig("petios", []eruncommon.OrchestratorEnvConfig{
+	path, _, err := app.writeOrchestratorMCPConfig("petios", []eruncommon.OrchestratorEnvConfig{
 		{Tenant: "frs", Environment: "dev"},
 	})
 	if err != nil {
@@ -305,6 +305,99 @@ func TestSanitizeOrchestratorFileID(t *testing.T) {
 	} {
 		if got := sanitizeOrchestratorFileID(in); got != want {
 			t.Fatalf("sanitizeOrchestratorFileID(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestBuildOrchestratorMCPConfigReportsEverySkip is the regression test for
+// #1185. The builder skipped an environment whose MCP port did not resolve and
+// dropped the fact on the floor, so a PARTIAL skip was silent on every channel:
+// no notification, no log line, and nothing the session itself could see. An
+// orchestrator is told by its own contract to know which environments are its
+// own, and an absent tool reads as "not linked" rather than "failed to wire" --
+// so it cannot detect this from the inside.
+//
+// The pre-existing test above asserted the skip happened and said nothing about
+// it being reported, which is exactly why nothing caught this.
+func TestBuildOrchestratorMCPConfigReportsEverySkip(t *testing.T) {
+	config, skipped := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "/opt/erun/bin/erun", orchestratorTestPort)
+
+	if len(config.MCPServers) != 2 {
+		t.Fatalf("wired %d servers, want 2", len(config.MCPServers))
+	}
+	if len(skipped) != 2 {
+		t.Fatalf("reported %d skips, want 2 (the unresolved port and the blank entry): %+v", len(skipped), skipped)
+	}
+
+	byLabel := map[string]string{}
+	for _, skip := range skipped {
+		byLabel[skip.Label] = skip.Reason
+	}
+	reason, ok := byLabel["noport/x"]
+	if !ok {
+		t.Fatalf("no skip reported for the environment that resolved no port: %+v", skipped)
+	}
+	if !strings.Contains(reason, "MCP port") {
+		t.Errorf("skip reason %q does not name the cause", reason)
+	}
+	// The fixture's malformed entry names an environment but no tenant, so it
+	// labels as "?/z" -- the placeholder marks which half is missing rather than
+	// hiding the entry entirely.
+	if reason, ok := byLabel["?/z"]; !ok {
+		t.Errorf("a malformed linked entry must still be reported, not silently dropped: %+v", skipped)
+	} else if !strings.Contains(reason, "no tenant or environment") {
+		t.Errorf("skip reason %q does not name the cause", reason)
+	}
+}
+
+// TestOrchestratorMCPPartialNoticeNamesWhatIsMissing: the notice is the only
+// thing that tells an operator a usable-looking session is missing an
+// environment, so it has to name which one and why -- "some tools are missing"
+// is not actionable.
+func TestOrchestratorMCPPartialNoticeNamesWhatIsMissing(t *testing.T) {
+	notice := orchestratorMCPPartialNotice("erun-issues", 1, []orchestratorMCPSkip{
+		{Label: "petios/rihards-review", Reason: "it resolved no MCP port"},
+	})
+
+	for _, want := range []string{"erun-issues", "1 of 2", "petios/rihards-review", "resolved no MCP port", "restart"} {
+		if !strings.Contains(notice, want) {
+			t.Errorf("notice does not mention %q:\n%s", want, notice)
+		}
+	}
+}
+
+// TestWriteOrchestratorMCPConfigCarriesSkipsEvenWhenNothingWired: the total
+// failure already had a signal (errOrchestratorMCPNoPort), but it could not say
+// WHICH environments failed or why. Returning the skips alongside the error
+// means the unwired notice can name them too, not just the partial one.
+//
+// Deterministic on purpose: a test app's store resolves no ports, so every
+// environment is skipped. Asserting the partial case at this level would depend
+// on ambient store state and be flaky, which is worse than not testing it here
+// -- the builder tests above cover the partial split with an injected resolver.
+func TestWriteOrchestratorMCPConfigCarriesSkipsEvenWhenNothingWired(t *testing.T) {
+	app := orchestratorTestApp(t)
+	defer app.shutdown(context.Background())
+
+	path, skipped, err := app.writeOrchestratorMCPConfig("nothing-wirable", []eruncommon.OrchestratorEnvConfig{
+		{Tenant: "ghost", Environment: "one"},
+		{Tenant: "ghost", Environment: "two"},
+	})
+	if !errors.Is(err, errOrchestratorMCPNoPort) {
+		t.Fatalf("err = %v, want errOrchestratorMCPNoPort", err)
+	}
+	if strings.TrimSpace(path) != "" {
+		t.Errorf("path = %q, want empty when nothing wired", path)
+	}
+	if len(skipped) != 2 {
+		t.Fatalf("reported %d skips, want 2 so the notice can name them: %+v", len(skipped), skipped)
+	}
+	for _, skip := range skipped {
+		if !strings.HasPrefix(skip.Label, "ghost/") {
+			t.Errorf("skip label %q does not name the environment", skip.Label)
+		}
+		if strings.TrimSpace(skip.Reason) == "" {
+			t.Errorf("skip for %s carries no reason", skip.Label)
 		}
 	}
 }
