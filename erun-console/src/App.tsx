@@ -1,6 +1,7 @@
 import * as React from 'react';
 
 import { beginLogin, type OidcConfig, resolveOidcConfig, resolveToken, signOut } from './auth/auth';
+import { readTokenIdentity } from './auth/identity';
 import { ConfigFetchError, fetchConfig } from './config/client';
 import { ConfigView } from './config/ConfigView';
 import type { TenantConfigView } from './config/types';
@@ -12,6 +13,11 @@ type LoadState =
   | { status: 'loading' }
   | { status: 'ready'; config: TenantConfigView }
   | { status: 'signed-out' }
+  // Signed in with the identity provider, but the API does not recognise the
+  // identity — it belongs to no tenant yet. Distinct from signed-out because
+  // the recovery is completely different: signing in again just repeats the
+  // same successful sign-in and lands here once more (#1167).
+  | { status: 'not-enrolled'; token: string }
   | { status: 'error'; message: string };
 
 // The signed-out view. With OIDC configured it offers a real Sign in button
@@ -60,6 +66,34 @@ function SignOutButton({ onSignedOut }: { onSignedOut: () => void }): React.Reac
   );
 }
 
+// The dead end a self-signed-up user hits: OIDC succeeded, so a token is held,
+// but the API rejects the identity because it is enrolled in no tenant. Showing
+// the signed-out prompt here was the bug — it offered Sign in, which succeeds
+// and returns to this same screen forever, while a Sign out button sat beside
+// it because a token did exist. This says what actually has to happen, and
+// names the identity an operator needs in order to do it.
+function NotEnrolledPrompt({ token }: { token: string }): React.ReactElement {
+  const identity = readTokenIdentity(token);
+  return (
+    <div className="message" role="status">
+      <p>You are signed in, but your account is not yet part of a tenant on this platform.</p>
+      <p>
+        An operator has to enrol you before you can see any environments. Signing in again will not
+        change this.
+      </p>
+      {(identity.email !== undefined || identity.subject !== undefined) && (
+        <p className="identity-detail">
+          Give them this identity: {identity.email ?? identity.subject}
+          {identity.email !== undefined && identity.subject !== undefined
+            ? ` (subject ${identity.subject})`
+            : ''}
+          {identity.issuer !== undefined ? ` from ${identity.issuer}` : ''}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function ErrorMessage({ message }: { message: string }): React.ReactElement {
   return (
     <div className="message" role="alert">
@@ -95,12 +129,47 @@ function ActionPanels({
   );
 }
 
-function loadStateFromError(error: unknown): LoadState {
+// A 401 means two completely different things depending on whether a token was
+// held. With no token the caller is simply signed out. With a token, the
+// identity provider authenticated them and the API still said no — so the
+// identity is not enrolled, and telling them to sign in is a loop (#1167).
+function loadStateFromError(error: unknown, token: string | undefined): LoadState {
   if (error instanceof ConfigFetchError && error.status === 401) {
-    return { status: 'signed-out' };
+    return token === undefined ? { status: 'signed-out' } : { status: 'not-enrolled', token };
   }
   const message = error instanceof Error ? error.message : 'unexpected error';
   return { status: 'error', message };
+}
+
+// LoadStateView renders whichever of the load states is current. Split out of
+// App purely so App stays inside the module's max-lines-per-function budget;
+// the exhaustive switch also means a new LoadState variant is a type error here
+// rather than a silently blank screen.
+function LoadStateView({
+  state,
+  oidc,
+  fallbackReason,
+}: {
+  state: LoadState;
+  oidc: OidcConfig | undefined;
+  fallbackReason: string | undefined;
+}): React.ReactElement {
+  switch (state.status) {
+    case 'loading':
+      return (
+        <div className="message" role="status">
+          <p>Loading your environments…</p>
+        </div>
+      );
+    case 'signed-out':
+      return <SignInPrompt oidc={oidc} fallbackReason={fallbackReason} />;
+    case 'not-enrolled':
+      return <NotEnrolledPrompt token={state.token} />;
+    case 'error':
+      return <ErrorMessage message={state.message} />;
+    case 'ready':
+      return <ConfigView config={state.config} />;
+  }
 }
 
 export function App(): React.ReactElement {
@@ -160,7 +229,9 @@ export function App(): React.ReactElement {
       })
       .catch((error: unknown) => {
         if (mountedRef.current) {
-          setState(loadStateFromError(error));
+          // No token has been resolved yet on this path, so a 401 here is a
+          // genuine signed-out.
+          setState(loadStateFromError(error, undefined));
         }
       });
   }, [oidcResolved, oidc]);
@@ -177,7 +248,7 @@ export function App(): React.ReactElement {
       })
       .catch((error: unknown) => {
         if (mountedRef.current) {
-          setState(loadStateFromError(error));
+          setState(loadStateFromError(error, forToken));
         }
       });
   }, []);
@@ -190,16 +261,7 @@ export function App(): React.ReactElement {
 
   return (
     <main className="app">
-      {state.status === 'loading' && (
-        <div className="message" role="status">
-          <p>Loading your environments…</p>
-        </div>
-      )}
-      {state.status === 'signed-out' && (
-        <SignInPrompt oidc={oidc} fallbackReason={oidcFallbackReason} />
-      )}
-      {state.status === 'error' && <ErrorMessage message={state.message} />}
-      {state.status === 'ready' && <ConfigView config={state.config} />}
+      <LoadStateView state={state} oidc={oidc} fallbackReason={oidcFallbackReason} />
       {state.status === 'ready' && token !== undefined && (
         <ActionPanels
           token={token}

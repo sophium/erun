@@ -155,7 +155,10 @@ describe('resolveOidcConfig', () => {
       'fetch',
       vi.fn(() =>
         Promise.resolve(
-          jsonResponse({ issuer: 'https://auth.platform.example', consoleClientId: 'platform-client' }),
+          jsonResponse({
+            issuer: 'https://auth.platform.example',
+            consoleClientId: 'platform-client',
+          }),
         ),
       ),
     );

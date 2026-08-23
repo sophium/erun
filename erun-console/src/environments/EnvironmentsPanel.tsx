@@ -1,6 +1,6 @@
 import * as React from 'react';
 
-import type { CloudContext, Environment } from '../config/types';
+import { type CloudContext, type Environment, isTearingDown } from '../config/types';
 import type { DeployState, RegisterState } from './controller';
 import { useDeployController, useRegisterEnvironmentController } from './controller';
 
@@ -74,9 +74,22 @@ function RegisterForm({
     <form className="provision-form" onSubmit={submit} aria-labelledby="register-env-heading">
       <h3 id="register-env-heading">Register an environment</h3>
       <label htmlFor="env-name">Name</label>
-      <input id="env-name" value={name} onChange={(e) => { setName(e.target.value); }} required />
+      <input
+        id="env-name"
+        value={name}
+        onChange={(e) => {
+          setName(e.target.value);
+        }}
+        required
+      />
       <label htmlFor="env-type">Type</label>
-      <select id="env-type" value={type} onChange={(e) => { setType(e.target.value); }}>
+      <select
+        id="env-type"
+        value={type}
+        onChange={(e) => {
+          setType(e.target.value);
+        }}
+      >
         {ENV_TYPES.map((option) => (
           <option key={option} value={option}>
             {option}
@@ -87,7 +100,9 @@ function RegisterForm({
       <select
         id="env-context"
         value={contextId}
-        onChange={(e) => { setContextId(e.target.value); }}
+        onChange={(e) => {
+          setContextId(e.target.value);
+        }}
       >
         <option value="">— none —</option>
         <ContextOptions contexts={contexts} />
@@ -96,13 +111,17 @@ function RegisterForm({
       <input
         id="env-kubernetes-context"
         value={kubernetesContext}
-        onChange={(e) => { setKubernetesContext(e.target.value); }}
+        onChange={(e) => {
+          setKubernetesContext(e.target.value);
+        }}
       />
       <label htmlFor="env-runtime-version">Runtime version (optional)</label>
       <input
         id="env-runtime-version"
         value={runtimeVersion}
-        onChange={(e) => { setRuntimeVersion(e.target.value); }}
+        onChange={(e) => {
+          setRuntimeVersion(e.target.value);
+        }}
         placeholder="1.2.3"
       />
       <button type="submit" disabled={busy}>
@@ -179,6 +198,32 @@ function DeployStatus({
   );
 }
 
+// TeardownRow replaces the whole deploy control for an environment whose delete
+// is outstanding. The API refuses a deploy on these with 409, so offering the
+// button meant an operator clicked it and got a raw Kubernetes admission error
+// back (#1170) — and before the API guard existed, the deploy was accepted and
+// overwrote the teardown state. Showing the recorded blocker instead is the
+// thing an operator can actually act on: it names the finalizer holding the
+// namespace.
+function TeardownRow({ environment }: { environment: Environment }): React.ReactElement {
+  const deleting = environment.status === 'deleting';
+  return (
+    <li className="deploy-row deploy-row--tearing-down">
+      <span className="deploy-env-name">{environment.name}</span>
+      <div className="deploy-status" role="status" aria-live="polite">
+        <p>
+          {deleting
+            ? `${environment.name} is being deleted, so it cannot be deployed.`
+            : `${environment.name}'s delete is blocked and still outstanding, so it cannot be deployed. Resolve the teardown first.`}
+        </p>
+        {environment.deleteError !== undefined && (
+          <p className="context-error">{environment.deleteError}</p>
+        )}
+      </div>
+    </li>
+  );
+}
+
 function EnvironmentDeployRow({
   environment,
   state,
@@ -191,6 +236,9 @@ function EnvironmentDeployRow({
   const [version, setVersion] = React.useState('');
   const busy = state?.status === 'starting' || state?.status === 'deploying';
   const versionInputId = `deploy-version-${environment.environmentId}`;
+  if (isTearingDown(environment)) {
+    return <TeardownRow environment={environment} />;
+  }
   return (
     <li className="deploy-row">
       <span className="deploy-env-name">{environment.name}</span>
@@ -198,13 +246,17 @@ function EnvironmentDeployRow({
       <input
         id={versionInputId}
         value={version}
-        onChange={(e) => { setVersion(e.target.value); }}
+        onChange={(e) => {
+          setVersion(e.target.value);
+        }}
         placeholder={environment.runtimeVersion ?? 'pinned version'}
       />
       <button
         type="button"
         disabled={busy}
-        onClick={() => { onDeploy(environment.environmentId, version.trim()); }}
+        onClick={() => {
+          onDeploy(environment.environmentId, version.trim());
+        }}
       >
         {busy ? 'Deploying…' : 'Deploy'}
       </button>

@@ -102,6 +102,10 @@ const ENV_STATUS_LABELS: Record<EnvironmentStatus, string> = {
   provisioning: 'Provisioning',
   running: 'Running',
   failed: 'Failed',
+  // Without these two the lenient status parse rendered no badge at all for an
+  // environment mid-teardown, so it read as an ordinary one (#1170).
+  deleting: 'Deleting',
+  'deletion-blocked': 'Delete blocked',
 };
 
 // The badge pairs color with a text label so it reads for color-blind and

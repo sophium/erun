@@ -134,11 +134,24 @@ describe('ConfigView via App', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Acme' })).toBeInTheDocument();
   });
 
-  it('renders the sign-in prompt on a 401', async () => {
+  // A 401 *with* a token held is not a signed-out caller: the identity provider
+  // authenticated them and the API still refused, which means the identity is
+  // enrolled in no tenant. This test previously asserted the sign-in prompt,
+  // which encoded the dead end -- Sign in succeeds and lands right back here
+  // (#1167). The signed-out case is covered by the test below, which has no
+  // token at all.
+  it('tells a signed-in but unenrolled caller they need enrolling, not to sign in again', async () => {
     mockFetch(jsonResponse('invalid bearer token', 401));
     render(<App />);
 
-    expect(await screen.findByText('Sign in to view your environments.')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        'You are signed in, but your account is not yet part of a tenant on this platform.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/An operator has to enrol you/)).toBeInTheDocument();
+    // Offering Sign in here is the loop this fix removes.
+    expect(screen.queryByText('Sign in to view your environments.')).not.toBeInTheDocument();
   });
 
   it('renders the sign-in prompt when there is no dev token', async () => {

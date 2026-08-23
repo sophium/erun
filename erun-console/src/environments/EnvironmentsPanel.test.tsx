@@ -59,7 +59,10 @@ const RUNTIME_ENV: Environment = {
 describe('EnvironmentsPanel register form', () => {
   it('POSTs the create request with only operator-authored fields (no tenant)', async () => {
     const calls = mockFetch(() =>
-      jsonResponse({ environmentId: 'env-2', name: 'staging', type: 'runtime', status: 'registered' }, 201),
+      jsonResponse(
+        { environmentId: 'env-2', name: 'staging', type: 'runtime', status: 'registered' },
+        201,
+      ),
     );
     render(
       <EnvironmentsPanel token="dev-token" contexts={[]} environments={[]} onChanged={vi.fn()} />,
@@ -82,7 +85,9 @@ describe('EnvironmentsPanel register form', () => {
   });
 
   it('calls onChanged after a successful register so the parent refreshes the read model', async () => {
-    mockFetch(() => jsonResponse({ environmentId: 'env-2', name: 'staging', type: 'runtime' }, 201));
+    mockFetch(() =>
+      jsonResponse({ environmentId: 'env-2', name: 'staging', type: 'runtime' }, 201),
+    );
     const onChanged = vi.fn();
     render(
       <EnvironmentsPanel token="dev-token" contexts={[]} environments={[]} onChanged={onChanged} />,
@@ -105,7 +110,9 @@ describe('EnvironmentsPanel register form', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Register environment' }));
 
     expect(
-      await screen.findByText('Could not register environment: register environment request failed (400)'),
+      await screen.findByText(
+        'Could not register environment: register environment request failed (400)',
+      ),
     ).toBeInTheDocument();
   });
 });
@@ -214,5 +221,63 @@ describe('EnvironmentsPanel deploy flow', () => {
       <EnvironmentsPanel token="dev-token" contexts={[]} environments={[]} onChanged={vi.fn()} />,
     );
     expect(screen.getByText('No runtime environments to deploy.')).toBeInTheDocument();
+  });
+
+  // #1170: the API refuses a deploy on a row whose delete is outstanding, so
+  // offering the button meant an operator clicked it and got a raw Kubernetes
+  // admission error back. Before the API guard existed it was worse: the deploy
+  // was accepted and overwrote the teardown state.
+  it('offers no Deploy control for an environment that is being deleted', () => {
+    render(
+      <EnvironmentsPanel
+        token="dev-token"
+        contexts={[]}
+        environments={[{ ...RUNTIME_ENV, status: 'deleting' }]}
+        onChanged={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Deploy' })).not.toBeInTheDocument();
+    expect(
+      screen.getByText('prod is being deleted, so it cannot be deployed.'),
+    ).toBeInTheDocument();
+  });
+
+  it('surfaces the recorded blocker for a deletion-blocked environment instead of a Deploy button', () => {
+    const blocker =
+      'namespace "operations-prod" did not finish terminating within 20m0s:\nNamespaceFinalizersRemaining=True  acme.cert-manager.io/finalizer in 1 resource instances';
+    render(
+      <EnvironmentsPanel
+        token="dev-token"
+        contexts={[]}
+        environments={[{ ...RUNTIME_ENV, status: 'deletion-blocked', deleteError: blocker }]}
+        onChanged={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Deploy' })).not.toBeInTheDocument();
+    expect(screen.getByText(/delete is blocked and still outstanding/)).toBeInTheDocument();
+    // The blocker is what an operator can act on -- it names the finalizer
+    // actually holding the namespace -- so it is shown whole, not summarised.
+    // Matched by substring because Testing Library collapses the newlines.
+    expect(screen.getByText(/did not finish terminating within 20m0s/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/acme\.cert-manager\.io\/finalizer in 1 resource instances/),
+    ).toBeInTheDocument();
+  });
+
+  it('still offers Deploy for every non-teardown status', () => {
+    for (const status of ['registered', 'running', 'failed'] as const) {
+      cleanup();
+      render(
+        <EnvironmentsPanel
+          token="dev-token"
+          contexts={[]}
+          environments={[{ ...RUNTIME_ENV, status }]}
+          onChanged={vi.fn()}
+        />,
+      );
+      expect(screen.getByRole('button', { name: 'Deploy' })).toBeInTheDocument();
+    }
   });
 });
