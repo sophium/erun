@@ -1,6 +1,7 @@
 package eruncommon
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -22,7 +23,11 @@ type CommitWorkingTreeParams struct {
 	// commit stages only these paths and is refused if the tree has any
 	// other changes outside them — an unrelated writer's edits can then
 	// never be absorbed into a commit the caller did not ask for. Empty
-	// keeps the unscoped `git add -A` behavior.
+	// keeps the unscoped `git add -A` behavior. A blank entry is refused
+	// rather than dropped, since a caller-declared scope that resolves to
+	// nothing is far more likely a bug upstream than an intentional no-op,
+	// and silently falling back to "commit everything" is exactly the
+	// failure this scoping exists to prevent.
 	Paths []string
 }
 
@@ -105,7 +110,7 @@ func CommitWorkingTree(ctx Context, root string, params CommitWorkingTreeParams,
 		return CommitWorkingTreeResult{Branch: branch, Files: preview}, nil
 	}
 
-	return stageAndCommitWorkingTree(ctx, root, branch, params.Message, addArgs, deps)
+	return stageAndCommitWorkingTree(ctx, root, params.Message, addArgs, deps)
 }
 
 // resolveCommitPreview reports the files a commit would include, and — when
@@ -132,12 +137,23 @@ func resolveCommitPreview(ctx Context, root string, scopedPaths []string, deps C
 }
 
 // commitAddArgs is the `git add` argv for the resolved scope: every change,
-// or only the declared paths.
+// or only the declared paths. Each scoped path is prefixed with "./" so a
+// path that happens to start with ":" is never reinterpreted as git pathspec
+// magic (":/foo" means "foo relative to the top of the working tree",
+// regardless of what filesystem path the string otherwise looks like) — the
+// filesystem-level containment check in normalizeCommitWorkingTreePaths would
+// otherwise be silently bypassed by git resolving the very same string
+// against a different, unbounded root.
 func commitAddArgs(scopedPaths []string) []string {
 	if len(scopedPaths) == 0 {
 		return []string{"-A"}
 	}
-	return append([]string{"--"}, scopedPaths...)
+	args := make([]string, 0, len(scopedPaths)+1)
+	args = append(args, "--")
+	for _, path := range scopedPaths {
+		args = append(args, "./"+path)
+	}
+	return args
 }
 
 // traceCommitPreview names, in a dry run, exactly what a real run would
@@ -153,9 +169,10 @@ func traceCommitPreview(ctx Context, preview []string) {
 // stageAndCommitWorkingTree runs the mutating half of CommitWorkingTree,
 // isolated so the branch-verification and dry-run branching above it don't
 // inflate that function's complexity.
-func stageAndCommitWorkingTree(ctx Context, root, branch, message string, addArgs []string, deps CommitWorkingTreeDependencies) (CommitWorkingTreeResult, error) {
-	if err := deps.RunGit(root, io.Discard, io.Discard, append([]string{"add"}, addArgs...)...); err != nil {
-		return CommitWorkingTreeResult{}, fmt.Errorf("git add: %w", err)
+func stageAndCommitWorkingTree(ctx Context, root, message string, addArgs []string, deps CommitWorkingTreeDependencies) (CommitWorkingTreeResult, error) {
+	var addStderr bytes.Buffer
+	if err := deps.RunGit(root, io.Discard, &addStderr, append([]string{"add"}, addArgs...)...); err != nil {
+		return CommitWorkingTreeResult{}, fmt.Errorf("git add: %w: %s", err, strings.TrimSpace(addStderr.String()))
 	}
 
 	files, err := deps.StagedFiles(ctx, root)
@@ -166,16 +183,25 @@ func stageAndCommitWorkingTree(ctx Context, root, branch, message string, addArg
 		return CommitWorkingTreeResult{}, fmt.Errorf("nothing to commit: the working tree has no changes")
 	}
 
-	if err := deps.RunGit(root, io.Discard, io.Discard, "commit", "-m", message); err != nil {
-		return CommitWorkingTreeResult{}, fmt.Errorf("git commit: %w", err)
+	var commitStderr bytes.Buffer
+	if err := deps.RunGit(root, io.Discard, &commitStderr, "commit", "-m", message); err != nil {
+		return CommitWorkingTreeResult{}, fmt.Errorf("git commit: %w: %s", err, strings.TrimSpace(commitStderr.String()))
 	}
 
 	commit, err := deps.CurrentCommit(ctx, root)
 	if err != nil {
 		return CommitWorkingTreeResult{}, fmt.Errorf("resolve new commit: %w", err)
 	}
+	// Read back the branch the commit actually landed on rather than trusting
+	// the declared one: the pre-stage check already refused a mismatch, but
+	// reporting what git verified up front instead of what git has now is the
+	// same read-after-write discipline the commit id and Files already follow.
+	landedBranch, err := deps.CurrentBranch(ctx, root)
+	if err != nil {
+		return CommitWorkingTreeResult{}, fmt.Errorf("resolve committed branch: %w", err)
+	}
 
-	return CommitWorkingTreeResult{Branch: branch, Commit: commit, Files: files}, nil
+	return CommitWorkingTreeResult{Branch: landedBranch, Commit: commit, Files: files}, nil
 }
 
 // normalizeCommitWorkingTreePaths validates and canonicalizes caller-declared
@@ -192,13 +218,13 @@ func normalizeCommitWorkingTreePaths(root string, paths []string) ([]string, err
 	for _, raw := range paths {
 		trimmed := strings.TrimSpace(raw)
 		if trimmed == "" {
-			continue
+			return nil, fmt.Errorf("path entries must not be blank")
 		}
-		resolved, err := resolveWorkingTreePath(root, trimmed)
+		resolved, canonicalRoot, err := resolveWorkingTreePath(root, trimmed)
 		if err != nil {
 			return nil, err
 		}
-		relative, err := filepath.Rel(filepath.Clean(root), resolved)
+		relative, err := filepath.Rel(canonicalRoot, resolved)
 		if err != nil {
 			return nil, fmt.Errorf("path %q is outside the working tree %q", trimmed, root)
 		}
@@ -213,41 +239,57 @@ func normalizeCommitWorkingTreePaths(root string, paths []string) ([]string, err
 	return normalized, nil
 }
 
-// filesOutsideScope returns the entries of changed that are not present in
-// scoped, sorted as changed already is.
+// filesOutsideScope returns the entries of changed that are not present in,
+// or nested under, any of scoped — so a caller can scope a commit to a
+// directory and not have every file inside it reported as "outside" the very
+// scope that names their parent.
 func filesOutsideScope(changed, scoped []string) []string {
-	allowed := make(map[string]struct{}, len(scoped))
-	for _, path := range scoped {
-		allowed[path] = struct{}{}
-	}
 	var extra []string
 	for _, path := range changed {
-		if _, ok := allowed[path]; !ok {
+		if !pathWithinScope(path, scoped) {
 			extra = append(extra, path)
 		}
 	}
 	return extra
 }
 
+// pathWithinScope reports whether path is exactly one of scoped, or lives
+// underneath a directory named in scoped.
+func pathWithinScope(path string, scoped []string) bool {
+	for _, candidate := range scoped {
+		if path == candidate || strings.HasPrefix(path, candidate+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 // gitStagedFiles lists what is about to be committed, read back after staging
 // rather than assumed, so Files always reflects what git actually staged.
+// NUL-separated output (-z) sidesteps git's default quoting of non-ASCII and
+// otherwise-special path bytes, and --relative reports paths relative to root
+// rather than the top of the enclosing repository, matching the basis Paths
+// is declared and compared in.
 func gitStagedFiles(ctx Context, root string) ([]string, error) {
-	ctx.TraceCommand("", "git", "-C", root, "diff", "--cached", "--name-only")
-	output, err := Command("git", "-C", root, "diff", "--cached", "--name-only").Output()
+	args := []string{"-C", root, "diff", "--cached", "--relative", "--name-only", "-z"}
+	ctx.TraceCommand("", "git", args...)
+	output, err := Command("git", args...).Output()
 	if err != nil {
 		return nil, err
 	}
-	trimmed := strings.TrimSpace(string(output))
-	if trimmed == "" {
-		return nil, nil
-	}
-	return strings.Split(trimmed, "\n"), nil
+	return splitNULSeparatedPaths(output), nil
 }
 
 // gitChangedWorkingTreeFiles lists every path with an uncommitted change —
 // staged, unstaged, or untracked — so a scoped commit can be checked against
 // the caller's declared paths, and an unscoped dry-run can name what would be
-// committed, before anything is staged.
+// committed, before anything is staged. All three reads are scoped to root
+// via --relative (ls-files is already root-relative by default) so a runtime
+// repo root that is not the git top-level still gets a guard that reasons
+// about root's own subtree, in the same basis Paths is declared in — without
+// it, changes elsewhere in the enclosing repository either never surface (the
+// guard is blind to them) or never match the declared paths (every scoped
+// commit is refused).
 func gitChangedWorkingTreeFiles(ctx Context, root string) ([]string, error) {
 	changed := make(map[string]struct{})
 	collect := func(args ...string) error {
@@ -257,25 +299,19 @@ func gitChangedWorkingTreeFiles(ctx Context, root string) ([]string, error) {
 		if err != nil {
 			return err
 		}
-		trimmed := strings.TrimSpace(string(output))
-		if trimmed == "" {
-			return nil
-		}
-		for _, path := range strings.Split(trimmed, "\n") {
-			if path = strings.TrimSpace(path); path != "" {
-				changed[path] = struct{}{}
-			}
+		for _, path := range splitNULSeparatedPaths(output) {
+			changed[path] = struct{}{}
 		}
 		return nil
 	}
 
-	if err := collect("diff", "--name-only"); err != nil {
+	if err := collect("diff", "--relative", "--name-only", "-z"); err != nil {
 		return nil, err
 	}
-	if err := collect("diff", "--cached", "--name-only"); err != nil {
+	if err := collect("diff", "--cached", "--relative", "--name-only", "-z"); err != nil {
 		return nil, err
 	}
-	if err := collect("ls-files", "--others", "--exclude-standard"); err != nil {
+	if err := collect("ls-files", "--others", "--exclude-standard", "-z"); err != nil {
 		return nil, err
 	}
 
@@ -285,4 +321,24 @@ func gitChangedWorkingTreeFiles(ctx Context, root string) ([]string, error) {
 	}
 	sort.Strings(result)
 	return result, nil
+}
+
+// splitNULSeparatedPaths parses the output of a git invocation run with -z,
+// which separates entries with NUL and never quotes them — unlike the
+// newline-separated default, which C-quotes non-ASCII and other special path
+// bytes and so cannot round-trip every valid filename.
+func splitNULSeparatedPaths(output []byte) []string {
+	trimmed := bytes.Trim(output, "\x00")
+	if len(trimmed) == 0 {
+		return nil
+	}
+	parts := bytes.Split(trimmed, []byte{0})
+	paths := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if len(part) == 0 {
+			continue
+		}
+		paths = append(paths, string(part))
+	}
+	return paths
 }

@@ -484,6 +484,31 @@ func TestWriteToolWritesContentByteIdenticallyAndRefusesOutsideRoot(t *testing.T
 	}
 }
 
+// TestWriteToolRefusesWriteThroughInTreeSymlink proves the write tool cannot
+// be pointed outside the repo root through a symlink planted inside it — a
+// lexical containment check alone does not follow symlinks, so this asserts
+// on the actual filesystem outcome, not just the handler's error, since the
+// whole defect is that a lexical check reports success incorrectly.
+func TestWriteToolRefusesWriteThroughInTreeSymlink(t *testing.T) {
+	projectRoot := t.TempDir()
+	outside := t.TempDir()
+	escapeTarget := filepath.Join(outside, "pwned.txt")
+	if err := os.Symlink(outside, filepath.Join(projectRoot, "escape")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	handler := writeTool(normalizeRuntimeConfig(RuntimeConfig{
+		Context: RuntimeContext{RepoPath: projectRoot},
+	}))
+	_, _, err := handler(context.Background(), nil, WriteInput{Path: "escape/pwned.txt", Content: "pwned"})
+	if err == nil {
+		t.Fatalf("expected refusal writing through a symlinked directory component")
+	}
+	if _, statErr := os.Stat(escapeTarget); !os.IsNotExist(statErr) {
+		t.Fatalf("expected no file to land outside the repo root through the symlink")
+	}
+}
+
 func TestCommitToolCommitsAndRefusesBranchMismatch(t *testing.T) {
 	projectRoot := t.TempDir()
 	runGitTestCommand(t, projectRoot, "init", "-b", "main")
@@ -605,6 +630,26 @@ func TestCommitToolScopedPathsCommitsOnlyTheDeclaredFile(t *testing.T) {
 	}
 	if got := output.Commit.Files; len(got) != 1 || got[0] != "values.yaml" {
 		t.Fatalf("unexpected committed files: %+v", got)
+	}
+}
+
+// TestCommitToolRejectsBlankPathEntries proves a Paths list of only blank
+// strings is refused rather than silently degrading to the unscoped
+// "commit everything" behavior — the exact failure path scoping (#1155)
+// exists to prevent, reintroduced through a caller passing blanks instead of
+// omitting Paths entirely.
+func TestCommitToolRejectsBlankPathEntries(t *testing.T) {
+	projectRoot := seedCommitToolScopedPathsRepo(t)
+	handler := commitTool(normalizeRuntimeConfig(RuntimeConfig{
+		Context: RuntimeContext{RepoPath: projectRoot},
+	}))
+
+	_, _, err := handler(context.Background(), nil, CommitInput{Branch: "main", Message: "fix the values typo", Paths: []string{"", ""}})
+	if err == nil {
+		t.Fatalf("expected refusal for a paths list of blank entries")
+	}
+	if strings.TrimSpace(gitStatusPorcelain(t, projectRoot)) == "" {
+		t.Fatalf("expected both files to remain uncommitted after refusal")
 	}
 }
 
