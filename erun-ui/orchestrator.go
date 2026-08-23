@@ -303,6 +303,27 @@ func (a *App) ensureOrchestratorWorkspace() (string, error) {
 	return dir, nil
 }
 
+// ensureOrchestratorWorkspaceFor is ensureOrchestratorWorkspace plus this
+// orchestrator's own role file. Separate from it rather than an extra parameter
+// on it: the workspace itself is id-independent, and the shared root is ensured
+// from a dozen places that have no id to give.
+//
+// Seeding here rather than at creation means an orchestrator that already
+// existed gets a role file on its next launch too, not only newly created ones.
+func (a *App) ensureOrchestratorWorkspaceFor(id string) (string, error) {
+	dir, err := a.ensureOrchestratorWorkspace()
+	if err != nil {
+		return "", err
+	}
+	// Best-effort, like the skills install and the SessionStart hook: a role
+	// file that could not be seeded must not stop the orchestrator launching,
+	// but it is reported rather than passed over in silence.
+	if roleErr := ensureOrchestratorRoleFile(dir, id); roleErr != nil {
+		fmt.Fprintf(os.Stderr, "erun: could not seed orchestrator role file for %s: %v\n", id, roleErr)
+	}
+	return dir, nil
+}
+
 // buildSkillsSource is the erun-skills/skills directory of the checkout this
 // binary was built from, stamped in by the desktop build scripts. It is what
 // lets a desktop that runs from outside its checkout still install the skills
@@ -554,7 +575,67 @@ const orchestratorContractFallback = "You are a host-side erun orchestrator. Rea
 // fallback if the file is ever missing.
 func orchestratorSkillHookCommand(dir string) string {
 	claudeMd := filepath.ToSlash(filepath.Join(dir, "CLAUDE.md"))
-	return `cat "` + claudeMd + `" 2>/dev/null || echo '` + orchestratorContractFallback + `'`
+	// The per-orchestrator layer, injected AFTER the shared contract so the
+	// ordering is the precedence rule: a role file can add to the common
+	// contract or override a line of it, and a reader can see which won (#1175).
+	//
+	// $ERUN_ORCHESTRATOR_ID is set at launch and is already proven visible to
+	// SessionStart hook commands on both host OSes -- the activity hook in this
+	// same block interpolates it into a path one line down. A transient
+	// (Investigate) session has an empty id by design, so the guard skips it and
+	// it gets the shared contract only.
+	//
+	// Absent file is a silent no-op: most orchestrators will not have one, and a
+	// missing file must neither fail the hook nor write to stderr. Same quoting
+	// discipline as above -- forward-slashed, double-quoted path, and no file
+	// body ever passes through the shell -- so sh and Git Bash both work.
+	roleMd := filepath.ToSlash(filepath.Join(dir, "CLAUDE.$ERUN_ORCHESTRATOR_ID.md"))
+	return `cat "` + claudeMd + `" 2>/dev/null || echo '` + orchestratorContractFallback + `'` + "\n" +
+		`[ -n "$ERUN_ORCHESTRATOR_ID" ] && cat "` + roleMd + `" 2>/dev/null || true`
+}
+
+// orchestratorRoleFileSeed is written once into CLAUDE.<id>.md and never
+// rewritten. Deliberately the inverse of the shared CLAUDE.md, which erun
+// overwrites on every launch: one layer is erun's and always current, the other
+// is the operator's and always preserved. That asymmetry is the feature.
+const orchestratorRoleFileSeed = `<!--
+This file is yours. erun creates it once and never overwrites it, unlike the
+shared CLAUDE.md in this directory, which erun rewrites on every launch.
+
+It is injected on every session start and resume, immediately AFTER the shared
+contract -- so anything here can add to that contract or override a line of it.
+
+Put this orchestrator's standing role here: what it owns, what it must not do,
+how it should report. A role is standing, so it belongs here rather than in
+RESUME-NOTE.<id>.md, which is a task hand-off that is read once and superseded.
+
+Do NOT list this orchestrator's environments here. The shared contract requires
+knowing scope from erun's config and never from disk; a list baked in here would
+contradict it and go stale the next time the orchestrator's links change.
+-->
+`
+
+// ensureOrchestratorRoleFile creates the per-orchestrator role file if it is
+// absent and leaves it strictly alone otherwise. Called on every launch rather
+// than only at creation, so an orchestrator that already existed gets one too.
+// An empty id (a transient session) seeds nothing.
+//
+// The id is slugified to [a-z0-9-] by orchestratorIDStem, so for any id erun
+// mints the filename is safe by construction; it is still resolved with an exact
+// filepath.Join and never a glob, so a hand-edited config.yaml id cannot widen
+// what gets read.
+func ensureOrchestratorRoleFile(dir, id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil
+	}
+	path := filepath.Join(dir, "CLAUDE."+id+".md")
+	if _, err := os.Stat(path); err == nil {
+		return nil // the operator's file; never rewritten
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	return os.WriteFile(path, []byte(orchestratorRoleFileSeed), 0o644)
 }
 
 // ensureOrchestratorSessionStartHook writes a SessionStart hook into the shared
@@ -1330,7 +1411,7 @@ func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInf
 	}
 	// Every orchestrator launches in the shared $HOME/orchestrators root, which
 	// carries the one CLAUDE.md and the `<tenant>-<env>` mirror subdirectories.
-	dir, err := a.ensureOrchestratorWorkspace()
+	dir, err := a.ensureOrchestratorWorkspaceFor(id)
 	if err != nil {
 		return orchestratorInfo{}, err
 	}
