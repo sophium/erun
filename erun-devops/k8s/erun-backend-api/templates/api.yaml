@@ -364,7 +364,24 @@ rules:
          create for the same idempotent-reapply reason as the Ingress above. */}}
   - apiGroups: ["cert-manager.io"]
     resources: ["issuers", "certificates"]
-    verbs: ["create", "get", "update", "patch"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  {{- /* list + delete on certificates, and read on the ACME chain, are what the
+         delete Job's pre-teardown challenge retraction needs (#1174/#1183).
+         Namespace teardown removes the env's DNS-01 token Secret as ordinary
+         content, but a still-pending Challenge's cleanup authenticates to the
+         broker with exactly that Secret -- so if the Certificate is not deleted
+         and its Challenges not waited out first, the finalizer never clears and
+         the namespace sits in Terminating for its full timeout.
+
+         Without these verbs the retraction's own reads are Forbidden and it
+         does nothing at all, which is how #1174 shipped inert: `kubectl get
+         challenges` returned Forbidden, that was read as "no challenges here",
+         and the whole step was skipped. Orders and Challenges are read-only --
+         deleting the Certificate is what cascades to them; the reads only exist
+         to wait for the cascade to finish. */}}
+  - apiGroups: ["acme.cert-manager.io"]
+    resources: ["challenges", "orders"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["rolebindings"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]

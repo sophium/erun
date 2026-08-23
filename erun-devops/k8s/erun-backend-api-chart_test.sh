@@ -403,4 +403,26 @@ ingress "${rendered}" >"${api_ingress}"
 grep -q 'tls:' "${api_ingress}" &&
     fail "an empty tlsSecretName must render no tls block rather than a dangling secret reference"
 
-echo "PASS: erun-backend-api DBOS wiring + public API edge"
+# --- 15. The delete Job's pre-teardown challenge retraction needs read access
+#         to cert-manager's ACME chain and delete on certificates (#1183). It
+#         shipped without them, so its own reads were Forbidden, that was read
+#         as "no challenges here", and the retraction did nothing at all while
+#         reporting success. ---
+rendered=$(render --set-string api.envDeployer.enabled=true)
+provisioner="${work_root}/env-provisioner.yaml"
+awk -v want="  name: team-env-provisioner" '
+    BEGIN{RS="\n---\n"}
+    $0 ~ /(^|\n)kind: ClusterRole(\n|$)/ && $0 ~ ("(^|\n)" want "(\n|$)") {print}
+' "${rendered}" >"${provisioner}"
+[ -s "${provisioner}" ] || fail "the env-provisioner ClusterRole must render when envDeployer is enabled"
+
+grep -q 'apiGroups: \["acme.cert-manager.io"\]' "${provisioner}" ||
+    fail "the env-provisioner must be able to read acme.cert-manager.io, or the delete Job cannot see a challenge holding the namespace and the retraction is silently inert (#1183)"
+grep -A2 'apiGroups: \["acme.cert-manager.io"\]' "${provisioner}" | grep -q 'challenges' ||
+    fail "the acme.cert-manager.io grant must cover challenges -- the Challenge finalizer is what blocks the namespace"
+grep -A2 'apiGroups: \["cert-manager.io"\]' "${provisioner}" | grep -q '"delete"' ||
+    fail "the env-provisioner must be able to delete certificates, or the retraction cannot cascade to the Challenge that holds the namespace"
+grep -A2 'apiGroups: \["cert-manager.io"\]' "${provisioner}" | grep -q '"list"' ||
+    fail "the env-provisioner must be able to list certificates, since the retraction deletes them with --all"
+
+echo "PASS: erun-backend-api DBOS wiring + public API edge + retraction RBAC"

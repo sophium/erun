@@ -157,7 +157,7 @@ func DeleteKubernetesNamespace(contextName, namespace string) error {
 	// with no cert-manager, or a challenge that will not finalize, must not
 	// block the delete. If a challenge does survive this, the namespace's own
 	// conditions still name it in NamespaceTerminationBlockedError below.
-	retractACMEChallenges(contextName, namespace)
+	retractionNote := retractACMEChallenges(contextName, namespace)
 
 	args = append(args, "delete", "namespace", namespace, "--ignore-not-found", "--timeout", NamespaceDeleteTimeout.String())
 
@@ -171,7 +171,14 @@ func DeleteKubernetesNamespace(contextName, namespace string) error {
 		if !exists {
 			return nil
 		}
-		return &NamespaceTerminationBlockedError{Namespace: namespace, Detail: namespaceTerminationConditions(contextName, namespace)}
+		return &NamespaceTerminationBlockedError{
+			Namespace: namespace,
+			// The retraction note rides along here rather than being logged: if
+			// the namespace wedged AND the retraction could not run, those two
+			// facts belong together, in the one string an operator reads off
+			// the environment row.
+			Detail: joinTerminationDetail(namespaceTerminationConditions(contextName, namespace), retractionNote),
+		}
 	}
 	if message == "" {
 		return fmt.Errorf("failed to delete kubernetes namespace %q in context %q: %w", namespace, contextName, err)
@@ -190,20 +197,40 @@ const acmeRetractTimeout = 90 * time.Second
 // waits for its ACME Challenges to finalize, so a challenge's cleanup runs
 // while the DNS-01 token Secret it authenticates with still exists.
 //
-// Every failure here is deliberately swallowed. On a cluster without
-// cert-manager the CRDs do not exist and kubectl reports an unknown resource
-// type, which is the common case for a local or test cluster and is not an
-// error in any meaningful sense. The caller's contract is "delete this
-// namespace", and this function only ever makes that faster.
-func retractACMEChallenges(contextName, namespace string) {
-	if !acmeChallengesPresent(contextName, namespace) {
-		return
+// Returns a note describing why the retraction could not run, or "" when it ran
+// (or was legitimately unnecessary). The note is folded into the blocked-delete
+// error if the namespace then wedges, which is the one place an operator is
+// already looking. It is deliberately not logged: this is a library used by the
+// CLI, and writing to the CLI's own output would be both noise and a golden
+// change for every delete.
+//
+// The distinction matters. A cluster with no cert-manager has no CRDs, the read
+// fails with "the server doesn't have a resource type", and skipping is exactly
+// right at zero cost. A cluster that HAS cert-manager but refuses the read is
+// the opposite: the retraction cannot work, the namespace will wedge, and
+// treating that as "nothing to retract" is how this shipped inert the first
+// time (#1183) -- the read was Forbidden, that was read as "no challenges", and
+// the whole step was skipped with nothing to say so.
+func retractACMEChallenges(contextName, namespace string) string {
+	present, err := acmeChallengesPresent(contextName, namespace)
+	if err != nil {
+		if acmeCRDsAbsent(err.Error()) {
+			// No cert-manager on this cluster: nothing to retract, and nothing
+			// to report. The normal case for a local or test cluster.
+			return ""
+		}
+		return fmt.Sprintf("the pre-teardown ACME challenge retraction could not run (%s); if a challenge is still finalizing it will hold this namespace until the namespace delete times out", strings.TrimSpace(err.Error()))
+	}
+	if !present {
+		return ""
 	}
 
 	args := append(kubernetesContextArgs(contextName),
 		"-n", namespace, "delete", "certificates.cert-manager.io", "--all",
 		"--ignore-not-found", "--timeout", acmeRetractTimeout.String())
-	_, _ = Command("kubectl", args...).CombinedOutput()
+	if output, deleteErr := Command("kubectl", args...).CombinedOutput(); deleteErr != nil {
+		return fmt.Sprintf("deleting this namespace's cert-manager Certificates before teardown did not succeed (%s: %s); a challenge still finalizing will hold the namespace until the delete times out", deleteErr, strings.TrimSpace(string(output)))
+	}
 
 	// Wait for the challenges to actually go, rather than assuming the
 	// Certificate delete cascaded synchronously -- cert-manager removes the
@@ -211,25 +238,51 @@ func retractACMEChallenges(contextName, namespace string) {
 	// finalizer, not the Certificate's, that blocks the namespace.
 	deadline := time.Now().Add(acmeRetractTimeout)
 	for time.Now().Before(deadline) {
-		if !acmeChallengesPresent(contextName, namespace) {
-			return
+		stillPresent, waitErr := acmeChallengesPresent(contextName, namespace)
+		if waitErr != nil || !stillPresent {
+			return ""
 		}
 		time.Sleep(2 * time.Second)
 	}
+	return fmt.Sprintf("this namespace's ACME challenges had not finalized %s after its Certificates were deleted; the namespace delete may wait on their finalizer", acmeRetractTimeout)
+}
+
+// acmeCRDsAbsent reports whether a kubectl failure means cert-manager's ACME
+// CRDs are not installed, as opposed to any other failure. Matched on kubectl's
+// own wording for an unknown resource type; anything else -- Forbidden above
+// all -- is a real problem and must not be mistaken for an absent CRD.
+func acmeCRDsAbsent(message string) bool {
+	lowered := strings.ToLower(message)
+	return strings.Contains(lowered, "the server doesn't have a resource type") ||
+		strings.Contains(lowered, "server could not find the requested resource") ||
+		strings.Contains(lowered, "no matches for kind")
 }
 
 // acmeChallengesPresent reports whether the namespace currently has any ACME
-// Challenge. A read that fails for any reason -- no cert-manager CRDs, no
-// permission, apiserver unavailable -- reports false, so the caller skips the
-// retraction rather than looping on a question it cannot answer.
-func acmeChallengesPresent(contextName, namespace string) bool {
+// Challenge. The error is returned rather than folded into false, so the caller
+// can tell "cert-manager is not installed" from "the read was refused".
+func acmeChallengesPresent(contextName, namespace string) (bool, error) {
 	args := append(kubernetesContextArgs(contextName),
 		"-n", namespace, "get", "challenges.acme.cert-manager.io", "-o", "name")
-	output, err := Command("kubectl", args...).Output()
+	output, err := Command("kubectl", args...).CombinedOutput()
 	if err != nil {
-		return false
+		return false, fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
 	}
-	return strings.TrimSpace(string(output)) != ""
+	return strings.TrimSpace(string(output)) != "", nil
+}
+
+// joinTerminationDetail combines the namespace's own conditions with a note
+// about the pre-teardown retraction, keeping either alone readable when the
+// other is empty.
+func joinTerminationDetail(conditions, note string) string {
+	switch {
+	case note == "":
+		return conditions
+	case conditions == "":
+		return note
+	default:
+		return conditions + "\n" + note
+	}
 }
 
 // namespaceTerminationConditions reads back a namespace's own status
