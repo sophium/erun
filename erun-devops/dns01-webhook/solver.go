@@ -10,13 +10,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/cert-manager/cert-manager/pkg/acme/webhook/apis/acme/v1alpha1"
 	extapi "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -57,8 +60,28 @@ func (s *brokerSolver) Present(ch *v1alpha1.ChallengeRequest) error {
 	return s.forward(ch, "present")
 }
 
+// CleanUp retracts the challenge record. A token Secret that no longer exists
+// is treated as nothing left to retract rather than an error, because that is
+// exactly what an environment delete produces: namespace teardown removes the
+// env's DNS-01 token Secret as ordinary content, and Kubernetes gives no
+// ordering guarantee against cert-manager finalizing a still-pending Challenge
+// in the same namespace. Returning an error there is unrecoverable -- nothing
+// will ever recreate the Secret, so every retry fails identically, the
+// acme.cert-manager.io finalizer never clears, and the namespace sits in
+// Terminating until its 20-minute timeout (#1174).
+//
+// Present deliberately does not tolerate this: a missing token when presenting
+// is a real misconfiguration and must surface.
 func (s *brokerSolver) CleanUp(ch *v1alpha1.ChallengeRequest) error {
-	return s.forward(ch, "cleanup")
+	err := s.forward(ch, "cleanup")
+	if errors.Is(err, errTokenSecretGone) {
+		// The record may be left behind in the zone; that is the lesser
+		// failure, and the delete path retracts challenges before tearing the
+		// namespace down precisely so this branch stays rare.
+		log.Printf("dns01 webhook: cleanup for %s: %v; treating as nothing left to retract", ch.ResolvedFQDN, err)
+		return nil
+	}
+	return err
 }
 
 func (s *brokerSolver) forward(ch *v1alpha1.ChallengeRequest, action string) error {
@@ -92,9 +115,19 @@ func (s *brokerSolver) forward(ch *v1alpha1.ChallengeRequest, action string) err
 	return nil
 }
 
+// errTokenSecretGone marks the one token-read failure a cleanup may ignore:
+// the Secret is absent, so there is no credential to retract with and never
+// will be. Every other read failure (RBAC, apiserver unavailable, a Secret
+// present but missing its key) is transient or a real misconfiguration and
+// must keep failing so cert-manager retries.
+var errTokenSecretGone = errors.New("dns01 token secret does not exist")
+
 func (s *brokerSolver) readToken(namespace string, cfg solverConfig) (string, error) {
 	secret, err := s.kube.CoreV1().Secrets(namespace).Get(context.Background(), cfg.TokenSecretRef.Name, metav1.GetOptions{})
 	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return "", fmt.Errorf("read dns01 token secret %s/%s: %w", namespace, cfg.TokenSecretRef.Name, errTokenSecretGone)
+		}
 		return "", fmt.Errorf("read dns01 token secret %s/%s: %w", namespace, cfg.TokenSecretRef.Name, err)
 	}
 	key := cfg.TokenSecretRef.Key
