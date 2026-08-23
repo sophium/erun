@@ -1,6 +1,6 @@
 output "issuer_name" {
   description = "Name of the namespaced cert-manager Issuer (in issuer_namespace) that issues TLS certs via the DNS-01 challenge. Reference it from a same-namespace Certificate as `issuerRef: {kind: Issuer, name: <this>}` (or the `cert-manager.io/issuer` annotation)."
-  value       = var.issuer_name
+  value       = local.arg_issuer_name
 }
 
 output "issuer_namespace" {
@@ -9,13 +9,13 @@ output "issuer_namespace" {
 }
 
 output "wildcard_certificate_secret" {
-  description = "Name of the Secret the wildcard *.<services_zone> certificate is stored in (in var.namespace), or null when wildcard_certificate_enabled is false. Mount/reference it for TLS termination."
-  value       = var.wildcard_certificate_enabled ? local.wildcard_secret_name : null
+  description = "Name of the Secret the wildcard *.<services_zone> certificate is stored in (in local.arg_namespace), or null when wildcard_certificate_enabled is false. Mount/reference it for TLS termination."
+  value       = local.arg_wildcard_certificate_enabled ? local.wildcard_secret_name : null
 }
 
 output "ingress_class" {
   description = "Ingress class to put on Ingress objects routed through this edge (\"traefik\" when this module installed it; otherwise the cluster's existing class)."
-  value       = var.install_ingress_controller ? "traefik" : null
+  value       = local.arg_install_ingress_controller ? "traefik" : null
 }
 
 output "namespace" {
@@ -30,5 +30,5 @@ output "dns01_webhook_installed" {
 
 output "coredns_forward_installed" {
   description = "Whether this apply installed the CoreDNS custom forward zone for base_domain_name (the resolved value of install_coredns_forward). True means in-cluster resolution of the platform's own published names no longer depends on the node's resolver chain."
-  value       = var.install_coredns_forward
+  value       = local.arg_install_coredns_forward
 }
