@@ -47,6 +47,7 @@ func (input EnvDeleteInput) lifecycleInput() EnvLifecycleInput {
 		ContextID:                  input.ContextID,
 		PlacementKubernetesContext: input.PlacementKubernetesContext,
 		PlacementServerURL:         input.PlacementServerURL,
+		DeleteID:                   input.DeleteID,
 	}
 }
 

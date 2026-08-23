@@ -222,17 +222,21 @@ func TestAllLifecycleJobsShareTheBootstrapPrelude(t *testing.T) {
 
 // TestLauncherRunsStopAndDelete holds the launcher to creating and watching
 // each lifecycle Job under its own Kind/Container; the watch and
-// failure-read-back machinery itself is jobexec's, covered there.
+// failure-read-back machinery itself is jobexec's, covered there. The delete
+// side is given an explicit attempt id (as every real caller supplies one),
+// so this exercises the same DeleteJobName path a live delete takes rather
+// than the bare tenant+environment name.
 func TestLauncherRunsStopAndDelete(t *testing.T) {
 	stopParams := testStopParams()
 	deleteParams := testDeleteParams()
+	deleteParams.DeleteID = "3f2a91cc-1111-2222-3333-444455556666"
 	kube := fake.NewSimpleClientset(
 		&batchv1.Job{
 			ObjectMeta: metav1.ObjectMeta{Name: StopJobName(stopParams.Tenant, stopParams.Environment), Namespace: stopParams.Namespace},
 			Status:     batchv1.JobStatus{Succeeded: 1},
 		},
 		&batchv1.Job{
-			ObjectMeta: metav1.ObjectMeta{Name: DeleteJobName(deleteParams.Tenant, deleteParams.Environment), Namespace: deleteParams.Namespace},
+			ObjectMeta: metav1.ObjectMeta{Name: DeleteJobName(deleteParams.Tenant, deleteParams.Environment, deleteParams.DeleteID), Namespace: deleteParams.Namespace},
 			Status:     batchv1.JobStatus{Succeeded: 1},
 		},
 	)
@@ -256,13 +260,109 @@ func TestLauncherRunsStopAndDelete(t *testing.T) {
 	}
 }
 
+// TestLauncherDeleteAttemptsGetDistinctJobs is the regression test for the
+// replay this Job name once had: two delete attempts against the same
+// environment must land on two distinct Jobs, and the second attempt must
+// surface its own outcome rather than a still-live prior attempt's cached
+// terminal result. Each attempt's Job is seeded with a different outcome
+// specifically so a wrongly-shared name would be caught by the assertion on
+// the second result, not just by the name comparison.
+func TestLauncherDeleteAttemptsGetDistinctJobs(t *testing.T) {
+	params := testDeleteParams()
+	firstID := "3f2a91cc-1111-2222-3333-444455556666"
+	secondID := "9b7d40aa-1111-2222-3333-444455556666"
+
+	firstName := DeleteJobName(params.Tenant, params.Environment, firstID)
+	secondName := DeleteJobName(params.Tenant, params.Environment, secondID)
+	if firstName == secondName {
+		t.Fatalf("two delete attempts share the job name %q", firstName)
+	}
+
+	kube := fake.NewSimpleClientset(
+		&batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{Name: firstName, Namespace: params.Namespace},
+			Status:     batchv1.JobStatus{Failed: 1},
+		},
+		&batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{Name: secondName, Namespace: params.Namespace},
+			Status:     batchv1.JobStatus{Succeeded: 1},
+		},
+	)
+	launcher := NewLauncher(kube)
+	launcher.PollEvery(0)
+
+	first := params
+	first.DeleteID = firstID
+	firstResult, err := launcher.RunDelete(context.Background(), first)
+	if err != nil {
+		t.Fatalf("run first delete: %v", err)
+	}
+	if firstResult.Outcome != OutcomeFailed {
+		t.Fatalf("first delete outcome = %q, want failed", firstResult.Outcome)
+	}
+
+	second := params
+	second.DeleteID = secondID
+	secondResult, err := launcher.RunDelete(context.Background(), second)
+	if err != nil {
+		t.Fatalf("run second delete: %v", err)
+	}
+	if secondResult.Outcome != OutcomeSucceeded {
+		t.Fatalf("second delete outcome = %q, want succeeded — got the first attempt's cached outcome instead of running its own Job", secondResult.Outcome)
+	}
+
+	jobs, err := kube.BatchV1().Jobs(params.Namespace).List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatalf("list jobs: %v", err)
+	}
+	if len(jobs.Items) != 2 {
+		t.Fatalf("jobs in namespace = %d, want 2 (one per attempt)", len(jobs.Items))
+	}
+}
+
+// TestDeleteJobNameSeparatesAttempts mirrors TestDeployJobNameSeparatesAttempts:
+// a retried delete must be a new Job, otherwise it would re-read the previous
+// attempt's terminal outcome instead of running.
+func TestDeleteJobNameSeparatesAttempts(t *testing.T) {
+	first := DeleteJobName("acme", "prod", "3f2a91cc-1111-2222-3333-444455556666")
+	second := DeleteJobName("acme", "prod", "9b7d40aa-1111-2222-3333-444455556666")
+	if first == second {
+		t.Fatalf("two attempts share the job name %q", first)
+	}
+	// The create path passes no attempt id and keeps its stable name, so a
+	// resumed workflow still re-watches the Job it already created.
+	if got := DeleteJobName("acme", "prod", ""); got != "erun-delete-acme-prod" {
+		t.Fatalf("name without an attempt id = %q", got)
+	}
+	if !strings.HasPrefix(first, "erun-delete-acme-prod-") {
+		t.Fatalf("attempt name %q lost its readable prefix", first)
+	}
+}
+
+// TestDeleteJobNameFitsKubernetesLimit mirrors TestDeployJobNameFitsKubernetesLimit:
+// names are trimmed in the descriptive middle, never in the attempt suffix
+// that keeps two deletes apart.
+func TestDeleteJobNameFitsKubernetesLimit(t *testing.T) {
+	longEnv := strings.Repeat("e", 63)
+	first := DeleteJobName("verylongtenantname", longEnv, "3f2a91cc-aaaa")
+	second := DeleteJobName("verylongtenantname", longEnv, "9b7d40aa-bbbb")
+	for _, name := range []string{first, second} {
+		if len(name) > 63 {
+			t.Fatalf("job name %q is %d characters, over the 63 Kubernetes allows", name, len(name))
+		}
+	}
+	if first == second {
+		t.Fatal("truncation collapsed two attempts onto one job name")
+	}
+}
+
 func TestLifecycleJobNameSanitizesAndTruncates(t *testing.T) {
 	long := "a-very-long-tenant-name-that-pushes-past-the-kubernetes-object-name-limit"
 	name := StopJobName(long, "prod")
 	if len(name) > 63 {
 		t.Fatalf("job name length = %d, want <= 63", len(name))
 	}
-	deleteName := DeleteJobName(long, "prod")
+	deleteName := DeleteJobName(long, "prod", "3f2a91cc-1111-2222-3333-444455556666")
 	if len(deleteName) > 63 {
 		t.Fatalf("job name length = %d, want <= 63", len(deleteName))
 	}
