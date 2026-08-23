@@ -1,8 +1,8 @@
 audit: erun exec commit --dry-run main
 git -C <TMP> rev-parse --abbrev-ref HEAD
-git -C <TMP> diff --name-only
-git -C <TMP> diff --cached --name-only
-git -C <TMP> ls-files --others --exclude-standard
+git -C <TMP> diff --relative --name-only -z
+git -C <TMP> diff --cached --relative --name-only -z
+git -C <TMP> ls-files --others --exclude-standard -z
 cd <TMP> && git add -A
 cd <TMP> && git commit -m '<message>'
 commit: no changes to commit

@@ -62,6 +62,8 @@ echo 'fix the values typo' | erun exec commit main values.yaml
 | `--selected-commit` without `--scope=commit`. | Errors before running git. |
 | Wrapped command exits non-zero (`raw`). | Its exit code and stderr propagate; `erun` adds nothing. |
 | PATH resolves outside the project root (`write`). | Refuses with `path "..." is outside the working tree "..."`; nothing is written. |
+| PATH traverses a symlink between the project root and the target (`write`). | Refuses with `path "..." traverses "...", which is a symlink; writing through a symlink is refused`; nothing is written, even if the symlink's target is itself outside the project root. |
 | BRANCH does not match the current branch (`commit`). | Refuses with `refusing to commit: working tree is on branch "X", not the declared "Y"`; nothing is staged. |
 | Nothing changed to commit (`commit`). | Refuses with `nothing to commit: the working tree has no changes`. |
 | Tree has changes outside the declared PATHs (`commit`). | Refuses with `refusing to commit: the working tree has changes outside the declared paths: ...`; nothing is staged. |
+| A PATH argument is blank (`commit`). | Refuses with `path entries must not be blank` rather than falling back to committing everything. |
