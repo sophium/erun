@@ -64,6 +64,19 @@ export class OrchestratorDialog {
     await this.locator().getByRole('button', { name: 'Cancel' }).click();
   }
 
+  nameInput(): Locator {
+    return this.locator().getByLabel('Name');
+  }
+
+  createButton(): Locator {
+    return this.locator().getByRole('button', { name: 'Create' });
+  }
+
+  async create(name: string): Promise<void> {
+    await this.nameInput().fill(name);
+    await this.createButton().click();
+  }
+
   // The two guidance layers (#1231): "role" is this orchestrator's own
   // CLAUDE.<id>.md, "shared" is the one CLAUDE.md every orchestrator obeys.
   // Each renders its resolved host path as secondary text and a reveal

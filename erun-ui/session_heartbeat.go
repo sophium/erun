@@ -61,6 +61,9 @@ func (a *App) runSessionHeartbeatPoller(stop <-chan struct{}) {
 			// no-op once every linked env is syncing.
 			a.reconcileWorkspaceSyncForConfiguredEnvs()
 			a.reconcileOrchestratorActivity()
+			// Runs after reconcileOrchestratorActivity so session.shellRunning is
+			// this tick's fresh report before the pacing decision reads it.
+			a.reconcileOrchestratorPacing()
 		}
 	}
 }

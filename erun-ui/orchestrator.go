@@ -64,6 +64,14 @@ type orchestratorSession struct {
 	shellRunning       bool
 	shellCommand       string
 	shellStartedAtUnix int64
+	// pacingNudgeCount / pacingCapped / pacingLastNudgeAtUnix track the pacing
+	// nudge bound (orchestrator_pacing.go): how many consecutive un-answered
+	// nudges this orchestrator has been sent, whether the cap notice already
+	// fired, and when the last one went out, so a fresh busy report or real
+	// operator input can tell a rearm from a repeat.
+	pacingNudgeCount      int
+	pacingCapped          bool
+	pacingLastNudgeAtUnix int64
 }
 
 // orchestratorEnvInput is the frontend's env selection for create/update.
@@ -122,6 +130,18 @@ type orchestratorInfo struct {
 
 func orchestratorSessionKey(id string) string {
 	return "orchestrator\x00" + id
+}
+
+// orchestratorIDFromSessionKey reverses orchestratorSessionKey, for the paths
+// that hold a managed terminal but need the orchestrator id it belongs to
+// (the pacing nudge rearm on real operator input, the respawn refusal check).
+// ok is false for any key this function did not itself produce.
+func orchestratorIDFromSessionKey(key string) (string, bool) {
+	const prefix = "orchestrator\x00"
+	if !strings.HasPrefix(key, prefix) {
+		return "", false
+	}
+	return strings.TrimPrefix(key, prefix), true
 }
 
 // orchestratorsRoot is the single host workspace every orchestrator shares
@@ -995,8 +1015,17 @@ func orchestratorSessionExists(sessionID string) bool {
 // isolated; without one (transient/Investigate, or a legacy caller) it keeps the
 // old "continue, else fresh". The resume is expressed per shell so it survives a
 // first run: PowerShell tests $LASTEXITCODE, POSIX chains with ||. A resumePrompt
-// is appended to both the resume and the fresh-fallback branch so an auto-resume
+// is appended to both the resume and the fallback branch so an auto-resume
 // runs the task even on the first launch.
+//
+// The fallback never drops a pinned sessionID down to plain `fresh`: an
+// unpinned session is what the live-session hook then records as this
+// orchestrator's conversation (orchestrator_live_session.go), so a crash the
+// shell recovers from would silently swap this orchestrator onto an amnesiac
+// conversation instead of surfacing the failure. A pinned launch falls back to
+// retrying the same resume instead — still nothing to fall back to but the
+// conversation it already has. Only a transient/Investigate launch (no
+// sessionID) has nothing to pin and keeps falling back to fresh.
 func buildOrchestratorLaunch(goos, sessionID string, sessionExists bool, initialPrompt, resumePrompt, mcpConfigPath string) (string, []string) {
 	quote := shellQuote
 	if goos == "windows" {
@@ -1009,20 +1038,13 @@ func buildOrchestratorLaunch(goos, sessionID string, sessionExists bool, initial
 	fresh := defaultAITool + flags
 	shell, shellArgs := resolveLocalShellCommand(goos)
 
-	resume := defaultAITool + " --continue" + flags
-	if strings.TrimSpace(sessionID) != "" {
-		if sessionExists {
-			resume = defaultAITool + " --resume " + sessionID + flags
-		} else {
-			resume = defaultAITool + " --session-id " + sessionID + flags
-		}
-	}
+	resume, fallback := orchestratorResumeAndFallback(sessionID, sessionExists, fresh, flags)
 
-	chain := func(primary, fallback string) string {
+	chain := func(primary, secondary string) string {
 		if goos == "windows" {
-			return primary + "; if ($LASTEXITCODE -ne 0) { " + fallback + " }"
+			return primary + "; if ($LASTEXITCODE -ne 0) { " + secondary + " }"
 		}
-		return primary + " || " + fallback
+		return primary + " || " + secondary
 	}
 
 	var command string
@@ -1031,9 +1053,9 @@ func buildOrchestratorLaunch(goos, sessionID string, sessionExists bool, initial
 		command = fresh + " " + orchestratorPromptArg(goos, initialPrompt)
 	case strings.TrimSpace(resumePrompt) != "":
 		arg := orchestratorPromptArg(goos, resumePrompt)
-		command = chain(resume+" "+arg, fresh+" "+arg)
+		command = chain(resume+" "+arg, fallback+" "+arg)
 	default:
-		command = chain(resume, fresh)
+		command = chain(resume, fallback)
 	}
 
 	flag := "-lc"
@@ -1041,6 +1063,23 @@ func buildOrchestratorLaunch(goos, sessionID string, sessionExists bool, initial
 		flag = "-Command"
 	}
 	return shell, append(shellArgs, flag, command)
+}
+
+// orchestratorResumeAndFallback resolves the primary resume/create invocation
+// for a pinned sessionID and what a failed primary should fall back to. The
+// fallback for a pinned sessionID is the exact same invocation, never unpinned
+// fresh — see buildOrchestratorLaunch's comment for why. A transient/legacy
+// launch (no sessionID) has nothing to pin and keeps falling back to fresh.
+func orchestratorResumeAndFallback(sessionID string, sessionExists bool, fresh, flags string) (resume, fallback string) {
+	if strings.TrimSpace(sessionID) == "" {
+		return defaultAITool + " --continue" + flags, fresh
+	}
+	if sessionExists {
+		resume = defaultAITool + " --resume " + sessionID + flags
+	} else {
+		resume = defaultAITool + " --session-id " + sessionID + flags
+	}
+	return resume, resume
 }
 
 // orchestratorPromptArg renders a prompt as the one argument the harness reads
@@ -1527,6 +1566,13 @@ func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInf
 		kind:      sessionKindOrchestrator,
 		startedAt: time.Now(),
 	}
+	if !transient {
+		// A transient (Investigate) session is not restartable at all
+		// (RestartOrchestrator's comment above), and its bounded lifecycle is
+		// investigation_bounds.go's to manage, not tryReconnect's — so it gets
+		// no respawn closure and a crash simply ends it.
+		managed.respawn = a.orchestratorRespawnFunc(id, conversationID, mcpConfigPath, dir, sessionEnv, cols, rows)
+	}
 	a.sessions[key] = managed
 	a.orchestrators[id] = &orchestratorSession{
 		id:             id,
@@ -1550,6 +1596,45 @@ func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInf
 		}
 	}
 	return orchestratorInfoFor(id, name, envs, "running", serial, false, transient, orchestratorShellSnapshot{}), nil
+}
+
+// orchestratorRespawnFunc builds the closure tryReconnect calls when this
+// orchestrator's session exits: the same launch path a fresh start uses,
+// preferring whichever conversation id this orchestrator's own hooks last saw
+// live over the one it was spawned with, since a compaction can fork the
+// transcript mid-session (see preferLiveOrchestratorSessionID). It carries the
+// crash-resume prompt so the relaunched session carries its task forward
+// without waiting to be asked, matching the goal of this recovery: an
+// orchestrator that died comes back on its own.
+//
+// tryReconnect only ever calls this after orchestratorReconnectRefused has
+// already refused a clean exit and an operator Stop, so every call here is a
+// real crash being recovered from.
+func (a *App) orchestratorRespawnFunc(id, conversationID, mcpConfigPath, dir string, sessionEnv []string, cols, rows int) func() (terminalSession, error) {
+	return func() (terminalSession, error) {
+		resumeID := preferLiveOrchestratorSessionID(id, conversationID)
+		executable, args, err := a.deps.resolveOrchestratorLaunch(resumeID, "", orchestratorCrashResumePrompt(), mcpConfigPath)
+		if err != nil {
+			return nil, err
+		}
+		return a.deps.startTerminal(startTerminalSessionParams{
+			Dir:        resolveTerminalStartDir(dir),
+			Executable: executable,
+			Args:       args,
+			Env:        sessionEnv,
+			Cols:       cols,
+			Rows:       rows,
+		})
+	}
+}
+
+// orchestratorCrashResumePrompt is handed to a session tryReconnect just
+// relaunched after its process exited non-zero. Unlike
+// orchestratorRestartResumePrompt it names no return note: nothing wrote one
+// for this event, since the orchestrator did not choose to end its turn.
+func orchestratorCrashResumePrompt() string {
+	return "This session's process just exited unexpectedly and was relaunched automatically. " +
+		"Resume the conversation exactly where it left off and carry any in-progress task through to its verified end without waiting to be asked."
 }
 
 // ListOrchestrators merges the persisted definitions (each tagged running or
