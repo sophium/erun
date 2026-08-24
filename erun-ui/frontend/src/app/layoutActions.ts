@@ -75,6 +75,21 @@ export function startSidebarResize(
   window.addEventListener('mouseup', stop);
 }
 
+export function stepSidebarWidth(
+  dispatch: AppDispatch,
+  getState: () => RootState,
+  delta: number,
+  applyLayoutVars: () => void,
+): void {
+  if (getState().layout.sidebarHidden) {
+    return;
+  }
+  const next = clamp(getState().layout.sidebarWidth + delta, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH);
+  dispatch(setSidebarWidth(next));
+  applyLayoutVars();
+  saveNumber(SIDEBAR_WIDTH_STORAGE_KEY, next);
+}
+
 export function startReviewResize(
   dispatch: AppDispatch,
   getState: () => RootState,
@@ -111,6 +126,25 @@ export function startReviewResize(
   window.addEventListener('mouseup', stop);
 }
 
+export function stepReviewWidth(
+  dispatch: AppDispatch,
+  getState: () => RootState,
+  delta: number,
+  callbacks: Pick<LayoutCallbacks, 'applyLayoutVars' | 'queueTerminalResize'>,
+): void {
+  const layout = getState().layout;
+  if (!layout.reviewOpen) {
+    return;
+  }
+  const effectiveSidebar = layout.sidebarHidden ? 0 : layout.sidebarWidth;
+  const maxWidth = computeMaxReviewWidth(window.innerWidth, effectiveSidebar);
+  const next = clamp(layout.reviewWidth + delta, MIN_REVIEW_WIDTH, maxWidth);
+  dispatch(setReviewWidth(next));
+  callbacks.applyLayoutVars();
+  callbacks.queueTerminalResize();
+  saveNumber(REVIEW_WIDTH_STORAGE_KEY, next);
+}
+
 export function startFilesResize(
   dispatch: AppDispatch,
   getState: () => RootState,
@@ -143,6 +177,21 @@ export function startFilesResize(
 
   window.addEventListener('mousemove', move);
   window.addEventListener('mouseup', stop);
+}
+
+export function stepFilesWidth(
+  dispatch: AppDispatch,
+  getState: () => RootState,
+  delta: number,
+  applyLayoutVars: () => void,
+): void {
+  if (!getState().layout.reviewOpen) {
+    return;
+  }
+  const next = clamp(getState().layout.filesWidth + delta, MIN_FILES_WIDTH, MAX_FILES_WIDTH);
+  dispatch(setFilesWidth(next));
+  applyLayoutVars();
+  saveNumber(FILES_WIDTH_STORAGE_KEY, next);
 }
 
 export function startDebugResize(
@@ -182,6 +231,27 @@ export function startDebugResize(
 
   window.addEventListener('mousemove', move);
   window.addEventListener('mouseup', stop);
+}
+
+export function stepDebugHeight(
+  dispatch: AppDispatch,
+  getState: () => RootState,
+  delta: number,
+  terminalPane: HTMLElement | null,
+  callbacks: Pick<LayoutCallbacks, 'applyLayoutVars' | 'queueTerminalResize'>,
+): void {
+  if (!getState().layout.debugOpen) {
+    return;
+  }
+  const paneRect = terminalPane?.getBoundingClientRect();
+  const maxForPane = paneRect
+    ? Math.max(MIN_DEBUG_HEIGHT, Math.min(MAX_DEBUG_HEIGHT, paneRect.height - 120))
+    : MAX_DEBUG_HEIGHT;
+  const next = clamp(getState().layout.debugHeight + delta, MIN_DEBUG_HEIGHT, maxForPane);
+  dispatch(setDebugHeight(next));
+  callbacks.applyLayoutVars();
+  callbacks.queueTerminalResize();
+  saveNumber(DEBUG_HEIGHT_STORAGE_KEY, next);
 }
 
 export function toggleReview(

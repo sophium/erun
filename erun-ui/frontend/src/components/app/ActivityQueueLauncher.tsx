@@ -5,8 +5,6 @@ import * as React from 'react';
 import { useActivityQueue } from '@/app/activityQueueState';
 import { ActivityQueueDrawer } from '@/components/app/ActivityQueueDrawer';
 
-// The drawer stays mounted even while closed so its open/close CSS
-// transition can slide it in and out.
 export function ActivityQueueLauncher({
   open,
   onOpen,
@@ -18,11 +16,18 @@ export function ActivityQueueLauncher({
 }): React.ReactElement {
   const { entries } = useActivityQueue();
   const activeCount = entries.filter((entry) => entry.status === 'running').length;
+  // Radix's own "restore focus to whatever was focused before open" can't be
+  // trusted here: the trigger sits inside a Tooltip, whose own pointer/focus
+  // handling can leave document.activeElement on the trigger's ancestor by
+  // the time the dialog's FocusScope captures it. Hand the button down
+  // explicitly so the drawer can always return focus to it on close.
+  const launcherRef = React.useRef<HTMLButtonElement>(null);
   return (
     <>
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
+            ref={launcherRef}
             type="button"
             variant="outline"
             size="icon"
@@ -48,7 +53,7 @@ export function ActivityQueueLauncher({
             : 'Activities'}
         </TooltipContent>
       </Tooltip>
-      <ActivityQueueDrawer open={open} onClose={onClose} />
+      <ActivityQueueDrawer open={open} onClose={onClose} restoreFocusRef={launcherRef} />
     </>
   );
 }

@@ -11,7 +11,7 @@ import * as React from 'react';
 
 import { switchDiffSource } from '@/app/contributeThunks';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { startFilesResize } from '@/app/layoutThunks';
+import { startFilesResize, stepFilesResize } from '@/app/layoutThunks';
 import {
   loadReviewDiff,
   refreshReviewDiff,
@@ -21,6 +21,7 @@ import {
 } from '@/app/reviewThunks';
 import { selectReviewEnvTargets } from '@/app/selectors';
 import { contributeEnvKey, type DiffSource } from '@/app/slices/contributeSlice';
+import { MAX_FILES_WIDTH, MIN_FILES_WIDTH } from '@/app/state';
 import { useController } from '@/app/useController';
 import { useEnvDiffSlot } from '@/app/useEnvDiffSlot';
 import type { DiffCommit } from '@/types';
@@ -44,12 +45,16 @@ export function ReviewPanel({
   const dispatch = useAppDispatch();
   const filesOpen = useAppSelector((state) => state.layout.filesOpen);
   const reviewOpen = useAppSelector((state) => state.layout.reviewOpen);
+  const filesWidth = useAppSelector((state) => state.layout.filesWidth);
   const filesVisible = filesOpen && reviewOpen;
   return (
     <section ref={reviewViewRef} className={reviewPanelClassName(reviewOpen, filesOpen)}>
       <div
         ref={reviewMainRef}
-        className="h-full min-h-0 min-w-0 overflow-auto overscroll-contain bg-background"
+        tabIndex={0}
+        role="region"
+        aria-label="Diff content"
+        className="h-full min-h-0 min-w-0 overflow-auto overscroll-contain bg-background outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         onScroll={() => {
           controller.queueVisibleDiffSelectionUpdate();
         }}
@@ -62,6 +67,10 @@ export function ReviewPanel({
         visible={filesVisible}
         onMouseDown={(event) => {
           dispatch(startFilesResize(event));
+        }}
+        value={{ now: filesWidth, min: MIN_FILES_WIDTH, max: MAX_FILES_WIDTH }}
+        onStep={(delta) => {
+          dispatch(stepFilesResize(delta));
         }}
       />
       <ChangedFilesAside visible={filesVisible} />
@@ -83,9 +92,13 @@ function reviewPanelClassName(reviewOpen: boolean, filesOpen: boolean): string {
 function ChangedFilesSplitter({
   visible,
   onMouseDown,
+  value,
+  onStep,
 }: {
   visible: boolean;
-  onMouseDown: React.MouseEventHandler<HTMLButtonElement>;
+  onMouseDown: React.MouseEventHandler<HTMLDivElement>;
+  value: { now: number; min: number; max: number };
+  onStep: (delta: number) => void;
 }): React.ReactElement {
   return (
     <ResizeHandle
@@ -94,6 +107,8 @@ function ChangedFilesSplitter({
       label="Resize changed files list"
       hidden={!visible}
       onMouseDown={onMouseDown}
+      value={value}
+      onStep={onStep}
     />
   );
 }
@@ -124,7 +139,7 @@ function ChangedFilesAside({ visible }: { visible: boolean }): React.ReactElemen
       <ReviewRangeControls />
       {changedFilesOpen ? (
         <>
-          <Label className="box-border flex h-[38px] items-center gap-2 rounded-[var(--radius)] border border-input bg-background px-3 text-muted-foreground [&_svg]:size-[18px] [&_svg]:flex-none">
+          <Label className="box-border flex h-[38px] items-center gap-2 rounded-[var(--radius)] border border-input bg-background px-3 text-muted-foreground [&_svg]:size-[18px] [&_svg]:flex-none has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring">
             <Search aria-hidden="true" />
             <Input
               className="h-auto min-w-0 flex-1 border-0 bg-transparent p-0 text-sm text-foreground shadow-none outline-none placeholder:text-muted-foreground focus-visible:border-0 focus-visible:ring-0"

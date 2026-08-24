@@ -63,6 +63,18 @@ export class TerminalPane {
     return this.page.locator('.xterm-rows');
   }
 
+  // The host div xterm mounts into; must carry a role/label so a screen-reader
+  // user landing on it (e.g. via Tab or landmark navigation) knows what it is.
+  host(): Locator {
+    return this.page.getByRole('group', { name: 'Terminal' });
+  }
+
+  // xterm only builds this live-region tree when `screenReaderMode: true`, so
+  // its presence is the observable proof the option is actually wired up.
+  accessibilityTree(): Locator {
+    return this.page.locator('.xterm-accessibility');
+  }
+
   // Writes raw bytes to a session as if its PTY had emitted them. btoa is safe
   // only because every byte written through here is < 256.
   async emitOutput(sessionId: number, raw: string): Promise<void> {

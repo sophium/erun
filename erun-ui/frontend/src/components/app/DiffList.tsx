@@ -309,13 +309,21 @@ function DiffFileView({
       {file.binary ? (
         <ReviewStatus>Binary file changed</ReviewStatus>
       ) : (
-        (file.hunks ?? []).map((hunk) => <DiffHunkView key={hunk.header} hunk={hunk} />)
+        (file.hunks ?? []).map((hunk) => (
+          <DiffHunkView key={hunk.header} hunk={hunk} filePath={file.path} />
+        ))
       )}
     </section>
   );
 }
 
-function DiffHunkView({ hunk }: { hunk: DiffHunk }): React.ReactElement {
+function DiffHunkView({
+  hunk,
+  filePath,
+}: {
+  hunk: DiffHunk;
+  filePath: string;
+}): React.ReactElement {
   const contentWidth = Math.max(1, ...(hunk.lines ?? []).map((line) => line.content.length));
   const style = { '--diff-content-width': `${String(contentWidth + 2)}ch` } as React.CSSProperties;
 
@@ -324,7 +332,13 @@ function DiffHunkView({ hunk }: { hunk: DiffHunk }): React.ReactElement {
       <div className="overflow-hidden bg-muted px-2.5 py-1.5 font-mono text-[11px] leading-[1.35] text-ellipsis whitespace-pre text-muted-foreground">
         {hunk.header}
       </div>
-      <div className="relative max-w-full overflow-x-auto overflow-y-hidden" style={style}>
+      <div
+        tabIndex={0}
+        role="region"
+        aria-label={`Diff for ${filePath} at ${hunk.header}`}
+        className="relative max-w-full overflow-x-auto overflow-y-hidden outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        style={style}
+      >
         {(hunk.lines ?? []).map((line, index) => (
           <div
             key={`${String(line.oldLine ?? '')}:${String(line.newLine ?? '')}:${String(index)}`}

@@ -3,8 +3,9 @@ import { ChevronDown, ChevronUp } from 'lucide-react';
 import * as React from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { setDebugOpen, startDebugResize } from '@/app/layoutThunks';
+import { setDebugOpen, startDebugResize, stepDebugResize } from '@/app/layoutThunks';
 import { type DiagnosticsContext, selectDiagnosticsContext } from '@/app/selectors';
+import { MAX_DEBUG_HEIGHT, MIN_DEBUG_HEIGHT } from '@/app/state';
 
 import { AppLogPane, OrchestratorPane } from './DebugPanel.AppLog';
 import { ErunTracePane } from './DebugPanel.ErunTrace';
@@ -54,6 +55,7 @@ export function DebugPanel({ open }: { open: boolean }): React.ReactElement {
   const [tab, setTab] = React.useState<DiagnosticsTab>('primary');
   const context = useAppSelector(selectDiagnosticsContext);
   const primaryLabel = primaryTabLabel(context);
+  const debugHeight = useAppSelector((state) => state.layout.debugHeight);
 
   return (
     <section
@@ -69,6 +71,10 @@ export function DebugPanel({ open }: { open: boolean }): React.ReactElement {
           label="Resize diagnostics panel"
           onMouseDown={(event) => {
             dispatch(startDebugResize(event));
+          }}
+          value={{ now: debugHeight, min: MIN_DEBUG_HEIGHT, max: MAX_DEBUG_HEIGHT }}
+          onStep={(delta) => {
+            dispatch(stepDebugResize(delta));
           }}
         />
       )}

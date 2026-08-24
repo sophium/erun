@@ -5,7 +5,7 @@ export class DebugPanel {
   constructor(public readonly page: Page) {}
 
   resizeHandle(): Locator {
-    return this.page.getByRole('button', { name: 'Resize diagnostics panel' });
+    return this.page.getByRole('slider', { name: 'Resize diagnostics panel' });
   }
 
   toggleButton(): Locator {

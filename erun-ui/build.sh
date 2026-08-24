@@ -45,12 +45,13 @@ else
 fi
 
 if [ -d frontend ]; then
+	# Installed from the repo-root workspace lockfile, not frontend/yarn.lock:
+	# erun-ui/frontend is a Yarn workspace member, and a plain `cd frontend &&
+	# yarn install` resolves against frontend's own stale, pre-workspaces
+	# lockfile instead, silently dropping deps the root lockfile hoists
+	# (e.g. radix-ui) from node_modules.
+	(cd "$SCRIPT_DIR/.." && "$YARN_BIN" install --frozen-lockfile)
 	cd frontend
-	if [ -f yarn.lock ]; then
-		"$YARN_BIN" install --frozen-lockfile
-	else
-		"$YARN_BIN" install
-	fi
 	# Gate the bundle on the same checks CI would run. `ERUN_SKIP_LINT=1`
 	# escapes the gates locally when iterating; CI never sets it.
 	if [ "${ERUN_SKIP_LINT:-0}" != "1" ]; then

@@ -1,5 +1,6 @@
 import { Button, cn, Tooltip, TooltipContent, TooltipTrigger } from 'erun-kit';
 import { X } from 'lucide-react';
+import { Dialog as DialogPrimitive } from 'radix-ui';
 import * as React from 'react';
 
 import {
@@ -8,19 +9,45 @@ import {
   useActivityQueue,
 } from '@/app/activityQueueState';
 import { ActivityCard } from '@/components/app/ActivityCard';
-import { isHistoryStatus } from '@/components/app/ActivityQueueDrawer.helpers';
+import {
+  activityStatusLabel,
+  activityTargetLabel,
+  isHistoryStatus,
+} from '@/components/app/ActivityQueueDrawer.helpers';
 
 interface ActivityQueueDrawerProps {
   open: boolean;
   onClose: () => void;
+  restoreFocusRef: React.RefObject<HTMLElement | null>;
 }
 
 const drawerSurfaceClassName =
-  'fixed top-[52px] right-0 bottom-0 z-30 flex w-[420px] flex-col border-l bg-background shadow-2xl transition-transform duration-150 ease-out';
+  'fixed top-[52px] right-0 bottom-0 z-30 flex w-[420px] flex-col border-l bg-background shadow-2xl outline-none data-[state=open]:animate-in data-[state=open]:slide-in-from-right data-[state=open]:duration-150 data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right data-[state=closed]:duration-150';
 
-const drawerHiddenClassName = 'translate-x-full';
-
-const drawerVisibleClassName = 'translate-x-0';
+// Announces a status transition once per entry, not the per-second ticking
+// clock a card renders locally -- an aria-live region wrapping the whole card
+// list re-announced that clock every second (WCAG 2.2.2).
+function useActivityStatusAnnouncement(entries: ActivityQueueEntry[]): string {
+  const previousStatuses = React.useRef<Map<string, ActivityQueueEntry['status']>>(new Map());
+  const [announcement, setAnnouncement] = React.useState('');
+  React.useEffect(() => {
+    const previous = previousStatuses.current;
+    const next = new Map<string, ActivityQueueEntry['status']>();
+    const changed: string[] = [];
+    for (const entry of entries) {
+      next.set(entry.id, entry.status);
+      const previousStatus = previous.get(entry.id);
+      if (previousStatus && previousStatus !== entry.status) {
+        changed.push(`${activityTargetLabel(entry)} ${activityStatusLabel(entry.status)}`);
+      }
+    }
+    previousStatuses.current = next;
+    if (changed.length > 0) {
+      setAnnouncement(changed.join('. '));
+    }
+  }, [entries]);
+  return announcement;
+}
 
 // ActivityQueueDrawer is the slide-in activity queue drawer. The queue is
 // rebuilt from live cluster and host state on every launch and never persists
@@ -28,6 +55,7 @@ const drawerVisibleClassName = 'translate-x-0';
 export function ActivityQueueDrawer({
   open,
   onClose,
+  restoreFocusRef,
 }: ActivityQueueDrawerProps): React.ReactElement {
   const { entries, dismiss, forceDismiss, recoverPendingHelm, killSession, cancelWaiting } =
     useActivityQueue();
@@ -37,6 +65,7 @@ export function ActivityQueueDrawer({
   const [recoveryFeedback, setRecoveryFeedback] = React.useState<ActivityRecoveryResult | null>(
     null,
   );
+  const statusAnnouncement = useActivityStatusAnnouncement(entries);
 
   const dismissAllNow = React.useCallback(async () => {
     await Promise.all(nowEntries.map((entry) => forceDismiss(entry.id)));
@@ -56,45 +85,53 @@ export function ActivityQueueDrawer({
   );
 
   return (
-    <>
-      {open && (
-        <div
-          role="presentation"
-          className="fixed inset-0 top-[52px] z-20 bg-foreground/10"
-          onClick={onClose}
-        />
-      )}
-      <aside
-        className={cn(
-          drawerSurfaceClassName,
-          open ? drawerVisibleClassName : drawerHiddenClassName,
-        )}
-        role="dialog"
-        aria-label="Activity queue"
-        aria-hidden={!open}
-      >
-        <ActivityQueueHeader
-          nowCount={nowEntries.length}
-          nextCount={nextEntries.length}
-          onClose={onClose}
-        />
-        <ActivityQueueSections
-          nowEntries={nowEntries}
-          nextEntries={nextEntries}
-          historyEntries={historyEntries}
-          recoveryFeedback={recoveryFeedback}
-          setRecoveryFeedback={setRecoveryFeedback}
-          dismiss={dismiss}
-          forceDismiss={forceDismiss}
-          cancelWaiting={cancelWaiting}
-          killSession={killSession}
-          onRecoverPendingHelm={onRecoverPendingHelm}
-          dismissAllNow={dismissAllNow}
-          cancelAllNext={cancelAllNext}
-          dismissAllHistory={dismissAllHistory}
-        />
-      </aside>
-    </>
+    <DialogPrimitive.Root
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+    >
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="fixed inset-0 top-[52px] z-20 bg-foreground/10 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0" />
+        <DialogPrimitive.Content
+          aria-label="Activity queue"
+          className={drawerSurfaceClassName}
+          onCloseAutoFocus={(event) => {
+            if (restoreFocusRef.current) {
+              event.preventDefault();
+              restoreFocusRef.current.focus();
+            }
+          }}
+        >
+          <DialogPrimitive.Description className="sr-only">
+            Running, queued, and recent deploy and shell activity.
+          </DialogPrimitive.Description>
+          <ActivityQueueHeader
+            nowCount={nowEntries.length}
+            nextCount={nextEntries.length}
+            onClose={onClose}
+          />
+          <div role="status" aria-live="polite" className="sr-only">
+            {statusAnnouncement}
+          </div>
+          <ActivityQueueSections
+            nowEntries={nowEntries}
+            nextEntries={nextEntries}
+            historyEntries={historyEntries}
+            recoveryFeedback={recoveryFeedback}
+            setRecoveryFeedback={setRecoveryFeedback}
+            dismiss={dismiss}
+            forceDismiss={forceDismiss}
+            cancelWaiting={cancelWaiting}
+            killSession={killSession}
+            onRecoverPendingHelm={onRecoverPendingHelm}
+            dismissAllNow={dismissAllNow}
+            cancelAllNext={cancelAllNext}
+            dismissAllHistory={dismissAllHistory}
+          />
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   );
 }
 
@@ -149,7 +186,7 @@ interface ActivityQueueSectionsProps {
 
 function ActivityQueueSections(props: ActivityQueueSectionsProps): React.ReactElement {
   return (
-    <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-3" aria-live="polite">
+    <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-3">
       {props.recoveryFeedback && (
         <RecoveryFeedback
           result={props.recoveryFeedback}

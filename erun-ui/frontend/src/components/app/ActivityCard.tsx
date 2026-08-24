@@ -21,6 +21,7 @@ import { startDoctorSelection, startForceDeploySelection } from '@/app/recoveryT
 import { ContainerStatusList } from '@/components/app/ActivityCard.ContainerStatus';
 import {
   activityElapsedLabel,
+  activityStatusLabel,
   activityTargetLabel,
   buildFailureReport,
   cardBorderClassName,
@@ -96,7 +97,7 @@ export const ActivityCard = React.memo(function ActivityCard({
       <header className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-sm font-medium">
-            <ActivityStatusIcon status={entry.status} />
+            <ActivityStatusIndicator status={entry.status} />
             <CommandBadge command={entry.command} />
             <span className="truncate">{activityTargetLabel(entry)}</span>
           </div>
@@ -378,4 +379,22 @@ function ActivityStatusIcon({
     case 'cancelled':
       return <Ban aria-hidden="true" className="size-3.5 text-muted-foreground" />;
   }
+}
+
+// The icon alone is aria-hidden and its color is the only other signal, so
+// screen-reader and low-vision users saw nothing distinguishing a card's
+// status (WCAG 1.4.1). This adds the same text visibly for everyone.
+function ActivityStatusIndicator({
+  status,
+}: {
+  status: ActivityQueueEntry['status'];
+}): React.ReactElement {
+  return (
+    <span className="inline-flex flex-none items-center gap-1">
+      <ActivityStatusIcon status={status} />
+      <span className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+        {activityStatusLabel(status)}
+      </span>
+    </span>
+  );
 }
