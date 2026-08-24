@@ -502,4 +502,29 @@ for storage_args in \
     assert_every_container_sized "${rendered}" "storage(${storage_args})"
 done
 
+# --- 25. registryCredentialSecretName mounts the Secret `erun init` mints
+# read-only on the runtime container, and renders nothing without a name --
+# an env init never provisioned a credential for stays byte-for-byte
+# unchanged. ---
+rendered=$(render)
+grep -q 'name: registry-credential' "${rendered}" &&
+    fail "no registry-credential volume or mount should render without a secret name"
+
+rendered=$(render --set-string registryCredentialSecretName=team-devops-registry-credential)
+runtime_block="${work_root}/registry-credential-runtime.yaml"
+runtime_container "${rendered}" >"${runtime_block}"
+grep -A2 '^            - name: registry-credential$' "${runtime_block}" | grep -q 'mountPath: "/etc/erun/registry-credential"' ||
+    fail "the registry credential mount belongs on the runtime container at /etc/erun/registry-credential"
+grep -A2 '^            - name: registry-credential$' "${runtime_block}" | grep -q 'readOnly: true' ||
+    fail "the registry credential mount should be read-only"
+
+volume_block="${work_root}/registry-credential-volume.yaml"
+awk '/^      volumes:/{f=1} f{print}' "${rendered}" >"${volume_block}"
+grep -A5 '^        - name: registry-credential$' "${volume_block}" | grep -q 'secretName: "team-devops-registry-credential"' ||
+    fail "the registry credential volume should name the secret erun init minted"
+grep -A5 '^        - name: registry-credential$' "${volume_block}" | grep -q '^            optional: true$' ||
+    fail "the registry credential volume should be optional, so a deploy that races ahead of the secret's own apply still starts"
+grep -A5 '^        - name: registry-credential$' "${volume_block}" | grep -q 'key: ".dockerconfigjson"' ||
+    fail "the registry credential volume should project the .dockerconfigjson key"
+
 echo "PASS: erun-devops chart pod shape"

@@ -29,7 +29,7 @@ var codeCommitHostPattern = regexp.MustCompile(`^git-codecommit\.[a-z0-9-]+\.ama
 // The env it takes is the one this run just reconciled, so init's own deploy sees
 // the settings this invocation supplied rather than the params they arrived in —
 // the two diverge whenever a flag was omitted and the stored value stands.
-func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tenant, envName, projectRoot string, env EnvConfig) (ShellLaunchParams, remoteRepositorySpec, error) {
+func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tenant, envName, projectRoot string, env EnvConfig) (ShellLaunchParams, remoteRepositorySpec, string, error) {
 	target := s.remoteRepositoryOpenResult(tenant, envName, env.KubernetesContext, projectRoot, params.ResolvedType())
 	target.EnvConfig.RuntimePod = NormalizeRuntimePodResources(env.RuntimePod)
 	// The runtime registry is the one field that redirects chart resolution, so
@@ -48,31 +48,53 @@ func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tena
 	// target's minimal EnvConfig had no registries and the deploy fell back to the
 	// default, so an in-pod build would target the wrong registry until a redeploy.
 	target.EnvConfig.ContainerRegistries = env.ContainerRegistries
+
+	// Provision a registry credential from the host BEFORE the runtime deploy, so
+	// the pod it creates can mount it from first boot rather than needing a
+	// redeploy once init's own in-pod check (below) discovers it is still
+	// missing. Resolves to "" when the host has nothing to give.
+	registryCredentialSecretName, err := s.resolveRegistryCredentialSecret(target)
+	if err != nil {
+		return ShellLaunchParams{}, remoteRepositorySpec{}, "", err
+	}
+	target.EnvConfig.RegistryCredentialSecretName = registryCredentialSecretName
+
 	req := ShellLaunchParamsFromResult(target)
 
 	if err := s.ensureRemoteRuntime(target, req, env.RuntimeVersion, env.RuntimeImage, params.MCPAuthPublicKeyPath); err != nil {
-		return ShellLaunchParams{}, remoteRepositorySpec{}, err
+		return ShellLaunchParams{}, remoteRepositorySpec{}, "", err
 	}
 	if err := s.ensureRemoteRegistryCredentials(target, req); err != nil {
-		return ShellLaunchParams{}, remoteRepositorySpec{}, err
+		return ShellLaunchParams{}, remoteRepositorySpec{}, "", err
 	}
 	if params.NoGit {
-		return req, remoteRepositorySpec{}, s.ensureRemoteWorktree(req, projectRoot)
+		return req, remoteRepositorySpec{}, registryCredentialSecretName, s.ensureRemoteWorktree(req, projectRoot)
 	}
 
 	state, err := s.remoteRepositoryState(req, projectRoot)
 	if err != nil {
-		return ShellLaunchParams{}, remoteRepositorySpec{}, err
+		return ShellLaunchParams{}, remoteRepositorySpec{}, "", err
 	}
 	if state.Exists {
-		return req, remoteRepositorySpec{}, s.pullRemoteRepository(req, projectRoot)
+		return req, remoteRepositorySpec{}, registryCredentialSecretName, s.pullRemoteRepository(req, projectRoot)
 	}
 
 	repository, err := s.remoteRepositorySpecForClone(params, tenant, envName, req, state)
 	if err != nil {
-		return ShellLaunchParams{}, remoteRepositorySpec{}, err
+		return ShellLaunchParams{}, remoteRepositorySpec{}, "", err
 	}
-	return req, repository, s.cloneRemoteRepository(req, projectRoot, repository)
+	return req, repository, registryCredentialSecretName, s.cloneRemoteRepository(req, projectRoot, repository)
+}
+
+// resolveRegistryCredentialSecret resolves the ghcr.io registries this env's
+// build/deploy roles require a credential for and, when the host has one to
+// give, mints the dockerconfigjson Secret the runtime chart mounts. It is the
+// host side of ensureRemoteRegistryCredentials' in-pod check: that check can
+// only fail loudly; this is what gives it something to find.
+func (s bootstrapRunner) resolveRegistryCredentialSecret(target OpenResult) (string, error) {
+	registries := ghcrRegistriesRequiringCredential(EffectiveEnvironmentContainerRegistries(target.EnvConfig))
+	namespace := KubernetesNamespaceName(target.Tenant, target.Environment)
+	return provisionRegistryCredentialSecret(s.Context, target.Tenant, namespace, target.EnvConfig.KubernetesContext, registries)
 }
 
 func (s bootstrapRunner) writeRemoteInitMarker(req ShellLaunchParams, marker RemoteInitMarker) error {

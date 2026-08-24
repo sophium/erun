@@ -153,6 +153,16 @@ emitted; type is the single source of truth.
        references and the MCP server loads the trusted key from. */ -}}
 {{- $mcpAuthMountDir := "/etc/erun/mcp-auth" -}}
 {{- $mcpAuthKeyFile := "desktopid.pub" -}}
+{{- /* Registry credential: `erun init` mints this Secret from the operator's
+       own resolved ghcr.io credential so a pod that has never authenticated
+       to its registry on its own still can. Mounted read-only;
+       the entrypoint merges it into ~/.docker/config.json at boot, seeding
+       only host entries the pod doesn't already carry. Absent (no secret
+       minted) renders byte-for-byte unchanged. `optional: true` so a deploy
+       that races ahead of the secret's own apply still starts. */ -}}
+{{- $registryCredentialSecretName := default "" .Values.registryCredentialSecretName -}}
+{{- $registryCredentialMountDir := "/etc/erun/registry-credential" -}}
+{{- $registryCredentialKeyFile := ".dockerconfigjson" -}}
 {{- $claude := default dict .Values.claude -}}
 {{- $claudeUseBedrock := default "0" $claude.useBedrock -}}
 {{- $claudeUseMantle := default "0" $claude.useMantle -}}
@@ -756,6 +766,11 @@ spec:
               mountPath: {{ $mcpAuthMountDir | quote }}
               readOnly: true
             {{- end }}
+            {{- if $registryCredentialSecretName }}
+            - name: registry-credential
+              mountPath: {{ $registryCredentialMountDir | quote }}
+              readOnly: true
+            {{- end }}
             {{- with .Values.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -853,6 +868,15 @@ spec:
             items:
               - key: {{ $mcpAuthKeyFile | quote }}
                 path: {{ $mcpAuthKeyFile | quote }}
+        {{- end }}
+        {{- if $registryCredentialSecretName }}
+        - name: registry-credential
+          secret:
+            secretName: {{ $registryCredentialSecretName | quote }}
+            optional: true
+            items:
+              - key: {{ $registryCredentialKeyFile | quote }}
+                path: {{ $registryCredentialKeyFile | quote }}
         {{- end }}
         {{- if $dindEnabled }}
         - name: docker-state

@@ -1,6 +1,8 @@
 package integration
 
 import (
+	"encoding/base64"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -812,6 +814,46 @@ func TestInit(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "init/remote_dry_run_traces_registry_credential_check", normalize.Apply(result.Combined))
+	})
+
+	t.Run("remote_dry_run_provisions_registry_credential_from_host", func(t *testing.T) {
+		// When the host running `erun init` already has a ghcr.io credential
+		// (docker config, gh session, or GH_TOKEN), init mints the
+		// dockerconfigjson Secret the runtime chart mounts, rather than leaving
+		// the pod to hand-carry one. DOCKER_CONFIG points the host resolver at
+		// this isolated dir instead of the developer's real ~/.docker, the same
+		// seam TestVersion's docker-config scenarios use.
+		setup := env.New(t)
+		dockerCfgDir := filepath.Join(setup.Cwd, "docker-inline")
+		if err := os.MkdirAll(dockerCfgDir, 0o755); err != nil {
+			t.Fatalf("mkdir docker config dir: %v", err)
+		}
+		encoded := base64.StdEncoding.EncodeToString([]byte("sophium:s3cret-token"))
+		dockerCfg := fmt.Sprintf(`{"auths":{"ghcr.io":{"auth":%q}}}`, encoded)
+		if err := os.WriteFile(filepath.Join(dockerCfgDir, "config.json"), []byte(dockerCfg), 0o644); err != nil {
+			t.Fatalf("write docker config: %v", err)
+		}
+
+		args := []string{
+			"init", "team", "dev",
+			"--remote",
+			"--version", "1.0.0",
+			"--kubernetes-context", "test-context",
+			"--container-registry", "ghcr.io/sophium",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+			"--no-git",
+			"--dry-run",
+		}
+		envVars := append(setup.Env(), "DOCKER_CONFIG="+dockerCfgDir)
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "s3cret-token") || strings.Contains(result.Combined, encoded) {
+			t.Fatalf("the resolved credential must never appear in trace output: %s", result.Combined)
+		}
+		golden.Equal(t, "init/remote_dry_run_provisions_registry_credential_from_host", normalize.Apply(result.Combined))
 	})
 
 	t.Run("remote_real_run_codecommit_key_import_retry", func(t *testing.T) {

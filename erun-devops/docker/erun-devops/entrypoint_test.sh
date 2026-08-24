@@ -173,4 +173,73 @@ wait_for 'grep -q "^activity sample --tenant team --environment dev$" "${run_dir
     fail "the environment monitor should sample resident work at boot: $(cat "${run_dir}/erun-argv" 2>/dev/null)"
 stop_run
 
-echo "PASS: entrypoint MCP supervision, session reconciliation, and activity sampling"
+# --- 7. Registry credential sync merges the mounted Secret into
+# ~/.docker/config.json at boot, seeding a missing host but leaving an
+# unrelated existing host untouched ---
+prepare_run registry_credential_merge
+credential_src="${run_dir}/registry-credential.json"
+cat >"${credential_src}" <<'JSON'
+{"auths":{"ghcr.io":{"auth":"aGVsbG86d29ybGQ="}}}
+JSON
+mkdir -p "${run_dir}/home/.docker"
+cat >"${run_dir}/home/.docker/config.json" <<'JSON'
+{"auths":{"docker.io":{"auth":"ZXhpc3Rpbmc6dG9rZW4="}}}
+JSON
+env -i \
+    HOME="${run_dir}/home" \
+    PATH="${run_dir}/bin:/usr/local/bin:/usr/bin:/bin" \
+    ERUN_TENANT=team \
+    ERUN_ENVIRONMENT=dev \
+    ERUN_MCP_PORT=17000 \
+    ERUN_MCP_ENABLED=true \
+    ERUN_REGISTRY_CREDENTIAL_SRC_OVERRIDE="${credential_src}" \
+    setsid sh "${entrypoint}" devops >"${run_dir}/log" 2>&1 &
+run_pid=$!
+wait_for 'grep -q ghcr.io "${run_dir}/home/.docker/config.json" 2>/dev/null' ||
+    fail "the mounted registry credential should be merged into ~/.docker/config.json"
+config=$(cat "${run_dir}/home/.docker/config.json")
+case "${config}" in
+    *'"docker.io"'*'"ZXhpc3Rpbmc6dG9rZW4="'*) ;;
+    *) fail "an unrelated existing docker config entry must survive the merge: ${config}" ;;
+esac
+case "${config}" in
+    *'"ghcr.io"'*'"aGVsbG86d29ybGQ="'*) ;;
+    *) fail "the provisioned ghcr.io credential should be merged in: ${config}" ;;
+esac
+stop_run
+
+# --- 8. Registry credential sync never overwrites a host entry the pod
+# already has -- an operator's own docker login (or gh-driven push-recovery)
+# is more current than what erun resolved on the host at init time ---
+prepare_run registry_credential_preserve
+credential_src="${run_dir}/registry-credential.json"
+cat >"${credential_src}" <<'JSON'
+{"auths":{"ghcr.io":{"auth":"cHJvdmlzaW9uZWQ6dG9rZW4="}}}
+JSON
+mkdir -p "${run_dir}/home/.docker"
+cat >"${run_dir}/home/.docker/config.json" <<'JSON'
+{"auths":{"ghcr.io":{"auth":"b3BlcmF0b3I6dG9rZW4="}}}
+JSON
+env -i \
+    HOME="${run_dir}/home" \
+    PATH="${run_dir}/bin:/usr/local/bin:/usr/bin:/bin" \
+    ERUN_TENANT=team \
+    ERUN_ENVIRONMENT=dev \
+    ERUN_MCP_PORT=17000 \
+    ERUN_MCP_ENABLED=true \
+    ERUN_REGISTRY_CREDENTIAL_SRC_OVERRIDE="${credential_src}" \
+    setsid sh "${entrypoint}" devops >"${run_dir}/log" 2>&1 &
+run_pid=$!
+wait_for booted || fail "the devops path should reach its idle foreground"
+config=$(cat "${run_dir}/home/.docker/config.json")
+case "${config}" in
+    *'"ghcr.io"'*'"b3BlcmF0b3I6dG9rZW4="'*) ;;
+    *) fail "the pod's own existing credential must not be overwritten by the provisioned one: ${config}" ;;
+esac
+case "${config}" in
+    *cHJvdmlzaW9uZWQ6dG9rZW4=*) fail "the provisioned credential must not replace an existing host entry: ${config}" ;;
+    *) ;;
+esac
+stop_run
+
+echo "PASS: entrypoint MCP supervision, session reconciliation, activity sampling, and registry credential sync"
