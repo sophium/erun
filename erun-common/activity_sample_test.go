@@ -67,8 +67,10 @@ func TestResidentActivityNeedsCPUToAdvance(t *testing.T) {
 		t.Error("the sampler must exclude its own process from the accounting")
 	}
 
-	// Second tick: the build advanced, the parked agent did not.
-	writeProcEntry(t, root, 101, "java", 640, 900)
+	// Second tick: the build advanced by 1500 ticks (50% of one core over the
+	// 30s interval) — well clear of the rate floor — while the parked agent
+	// did not advance at all.
+	writeProcEntry(t, root, 101, "java", 2000, 900)
 	second, err := ScanResidentActivity(root, 103, first.Sample, now.Add(30*time.Second))
 	if err != nil {
 		t.Fatalf("second scan: %v", err)
@@ -87,6 +89,48 @@ func TestResidentActivityNeedsCPUToAdvance(t *testing.T) {
 	}
 	if third.Busy {
 		t.Errorf("a quiet tick must read as idle, got %+v", third)
+	}
+}
+
+// TestResidentActivityIgnoresNoiseBelowTheCPURateFloor pins the fix: a parked
+// session's CPU delta is never exactly zero — scheduler and terminal-repaint
+// noise advances it by a tick or two every sample — so a bare "advanced at
+// all" test clears on every single tick and pins the environment busy
+// forever. The numbers here are the ones measured against a real parked
+// `claude-real` on frs/local: 21 ticks (210ms) over a 30s sample, ~0.7% of one
+// core.
+func TestResidentActivityIgnoresNoiseBelowTheCPURateFloor(t *testing.T) {
+	root := t.TempDir()
+	writeProcEntry(t, root, 201, "claude-real", 21529+3884, 900)
+	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+
+	first, err := ScanResidentActivity(root, 1, ResidentActivitySample{}, now)
+	if err != nil {
+		t.Fatalf("first scan: %v", err)
+	}
+
+	// The parked session's ticks advance by 21 over the 30s sample — noise,
+	// not work.
+	writeProcEntry(t, root, 201, "claude-real", 21529+3884+21, 900)
+	second, err := ScanResidentActivity(root, 1, first.Sample, now.Add(30*time.Second))
+	if err != nil {
+		t.Fatalf("second scan: %v", err)
+	}
+	if second.Busy {
+		t.Errorf("a parked session's tick-level noise must not read as work, got %+v", second)
+	}
+
+	// A zero elapsed interval (two samples stamped at the same instant) must
+	// not divide by zero or read busy, even with the same delta that would
+	// otherwise clear the floor over a real interval.
+	writeProcEntry(t, root, 201, "claude-real", 21529+3884+2100, 900)
+	sampledAt := now.Add(30 * time.Second)
+	third, err := ScanResidentActivity(root, 1, ResidentActivitySample{SampledAt: sampledAt, CPU: second.Sample.CPU}, sampledAt)
+	if err != nil {
+		t.Fatalf("third scan: %v", err)
+	}
+	if third.Busy {
+		t.Errorf("an unmeasurable (zero) interval must not read as work, got %+v", third)
 	}
 }
 
