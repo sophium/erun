@@ -1,18 +1,13 @@
 import { ChevronRight } from 'lucide-react';
 import * as React from 'react';
 
-import { compactDiffError, filterDiffTree, visibleDiffTreeNodes } from '@/app/diffUtils';
+import { filterDiffTree, visibleDiffTreeNodes } from '@/app/diffUtils';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import {
-  loadReviewDiff,
-  requestReconnect,
-  selectDiffPath,
-  toggleDiffDirectory,
-} from '@/app/reviewThunks';
+import { selectDiffPath, toggleDiffDirectory } from '@/app/reviewThunks';
 import { selectReviewEnvTargets } from '@/app/selectors';
 import { diffPathKey } from '@/app/slices/reviewSlice';
 import { useEnvDiffSlot } from '@/app/useEnvDiffSlot';
-import { DiffErrorAlert, ReviewStatus } from '@/components/app/DiffList';
+import { ReviewStatus } from '@/components/app/DiffList';
 import { FileIcon } from '@/components/app/FileIcon';
 import { cn } from '@/lib/utils';
 import type { DiffTreeNode } from '@/types';
@@ -32,10 +27,17 @@ export function ChangedFileTree(): React.ReactElement {
   );
 }
 
-// ChangedFileTreeSection owns one environment's tree, loading state and error.
-// A stopped environment renders its error in its own section while every other
-// environment keeps rendering -- the single-slot version cleared the one shared
-// diff, so one unreachable env blanked them all (#1178).
+// ChangedFileTreeSection owns one environment's tree and loading state. A
+// stopped environment renders its own empty state in its own section while
+// every other environment keeps rendering -- the single-slot version cleared
+// the one shared diff, so one unreachable env blanked them all (#1178).
+//
+// It deliberately does NOT duplicate DiffList's actionable DiffErrorAlert: the
+// two surfaces render the same env slot, and rendering the full alert (with
+// its own Retry/Reconnect/Open buttons) in both the tree aside and the main
+// diff panel at once read as two unrelated reports of the same outage
+// (#1230). The tree shows a short status line instead and points at the diff
+// panel, which keeps the one actionable report.
 function ChangedFileTreeSection({
   envKey,
   showHeader,
@@ -43,7 +45,6 @@ function ChangedFileTreeSection({
   envKey: string;
   showHeader: boolean;
 }): React.ReactElement {
-  const dispatch = useAppDispatch();
   const slot = useEnvDiffSlot(envKey);
   const diffFilter = useAppSelector((state) => state.review.diffFilter);
   const collapsedDiffDirs = useAppSelector((state) => state.review.collapsedDiffDirs);
@@ -57,18 +58,13 @@ function ChangedFileTreeSection({
       return <ReviewStatus>Loading...</ReviewStatus>;
     }
     if (slot.error) {
+      const notRunning = slot.errorReconnectable && slot.errorKind === 'not-open';
       return (
-        <DiffErrorAlert
-          message={compactDiffError(slot.error)}
-          loading={slot.loading}
-          reconnectable={slot.errorReconnectable}
-          onRetry={() => {
-            void dispatch(loadReviewDiff());
-          }}
-          onReconnect={() => {
-            dispatch(requestReconnect());
-          }}
-        />
+        <ReviewStatus>
+          {notRunning
+            ? 'Environment not running — open it from the diff panel.'
+            : 'Diff unavailable — see the diff panel for details.'}
+        </ReviewStatus>
       );
     }
     // Collapsed directories are env-keyed, so a collapsed "app/" in one

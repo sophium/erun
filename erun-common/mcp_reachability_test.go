@@ -66,6 +66,32 @@ func TestCanReachLocalMCPEndpointAcceptsAnyAnswer(t *testing.T) {
 	}
 }
 
+// ClassifyLocalMCPUnreachable is what DescribeLocalMCPUnreachable's own branch
+// reduces to; pinning it directly means a caller that needs the kind on its
+// own (to pick a UI treatment, say) does not have to parse the sentence for it.
+func TestClassifyLocalMCPUnreachableNamesTheKind(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	boundPort := listener.Addr().(*net.TCPAddr).Port
+	defer func() { _ = listener.Close() }()
+
+	freeListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	freePort := freeListener.Addr().(*net.TCPAddr).Port
+	_ = freeListener.Close()
+
+	if got := ClassifyLocalMCPUnreachable(boundPort); got != LocalMCPStaleForward {
+		t.Fatalf("a held port must classify as stale-forward, got %q", got)
+	}
+	if got := ClassifyLocalMCPUnreachable(freePort); got != LocalMCPNotOpen {
+		t.Fatalf("a free port must classify as not-open, got %q", got)
+	}
+}
+
 // Nothing listening is a different problem from a forward that has gone stale,
 // and the operator's next move differs, so the two must not share wording.
 func TestDescribeLocalMCPUnreachableSeparatesMissingFromStale(t *testing.T) {

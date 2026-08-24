@@ -19,6 +19,8 @@ import type {
 import type { UIClusterRegistryStatus, UIEnvironmentHealth } from '@/uiDiagnosticsTypes';
 import type { UIRuntimeChartPlan } from '@/uiRuntimeChartTypes';
 
+import type { ReachabilityKind } from './reconnectCopy';
+
 export const MIN_SIDEBAR_WIDTH = 248;
 export const MAX_SIDEBAR_WIDTH = 520;
 export const DEFAULT_SIDEBAR_WIDTH = 338;
@@ -203,6 +205,10 @@ export interface ReconnectState {
   // interactive while this one is running. Empty when status === 'idle'.
   tenant: string;
   environment: string;
+  // Which reachability shape triggered this reconnect, so the dialog and
+  // status panel can say "Open" for a stopped environment and "Reconnect" for
+  // a stale forward instead of one fixed script for both (#1230).
+  kind: ReachabilityKind;
   // Rolling buffer of the latest reconnect output lines, not the full transcript.
   lines: string[];
   error: string;

@@ -59,12 +59,37 @@ func LocalPortIsBound(port int) bool {
 	return true
 }
 
+// LocalMCPUnreachableKind names which of the two locally observable failure
+// shapes explains why an environment's MCP edge cannot be reached, so a caller
+// can act on the distinction directly instead of re-deriving it by
+// pattern-matching DescribeLocalMCPUnreachable's prose (#1230).
+type LocalMCPUnreachableKind string
+
+const (
+	// LocalMCPNotOpen means nothing holds the local port — the ordinary shape
+	// of an environment nobody has opened, or one that was stopped.
+	LocalMCPNotOpen LocalMCPUnreachableKind = "not-open"
+	// LocalMCPStaleForward means the local port is held but the edge behind it
+	// never answers — a forward that needs re-establishing, not starting.
+	LocalMCPStaleForward LocalMCPUnreachableKind = "stale-forward"
+)
+
+// ClassifyLocalMCPUnreachable reports which of the two locally observable
+// failure shapes applies for a port that CanReachLocalMCPEndpoint has already
+// reported unreachable.
+func ClassifyLocalMCPUnreachable(port int) LocalMCPUnreachableKind {
+	if LocalPortIsBound(port) {
+		return LocalMCPStaleForward
+	}
+	return LocalMCPNotOpen
+}
+
 // DescribeLocalMCPUnreachable names which of the two failures happened, so the
 // reader is not left weighing a busy pod against a dead tunnel. A stale forward
 // presents as a timeout with a live listener, which reads exactly like an
 // overloaded environment and has cost real debugging time.
 func DescribeLocalMCPUnreachable(tenant, environment string, port int) string {
-	if LocalPortIsBound(port) {
+	if ClassifyLocalMCPUnreachable(port) == LocalMCPStaleForward {
 		return fmt.Sprintf("the port-forward for %s/%s on 127.0.0.1:%d is not carrying traffic (the local port is held but the edge never answers) — re-establishing it", tenant, environment, port)
 	}
 	return fmt.Sprintf("no port-forward is listening for %s/%s on 127.0.0.1:%d", tenant, environment, port)

@@ -2,6 +2,7 @@ import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 
 import type { DiffResult } from '@/types';
 
+import type { ReachabilityKind } from '../reconnectCopy';
 import { RECONNECT_LINE_BUFFER_LIMIT, type ReconnectState } from '../state';
 
 export type ReviewScope = 'current' | 'commit' | 'all';
@@ -23,6 +24,12 @@ export interface EnvDiffState {
   loading: boolean;
   error: string;
   errorReconnectable: boolean;
+  // Only meaningful while errorReconnectable is true: which of the two
+  // reachability shapes this is, so the panel can render a stopped
+  // environment as informational rather than a fault (#1230). Defaults to
+  // 'stale-forward', the always-a-fault behavior every caller had before the
+  // kind existed.
+  errorKind: ReachabilityKind;
   scope: ReviewScope;
   commit: string;
 }
@@ -32,6 +39,7 @@ export const emptyEnvDiffState: EnvDiffState = {
   loading: false,
   error: '',
   errorReconnectable: false,
+  errorKind: 'stale-forward',
   scope: 'current',
   commit: '',
 };
@@ -57,7 +65,14 @@ export interface ReviewState {
 
 const initialState: ReviewState = {
   diffByEnv: {},
-  reconnect: { status: 'idle', tenant: '', environment: '', lines: [], error: '' },
+  reconnect: {
+    status: 'idle',
+    tenant: '',
+    environment: '',
+    kind: 'stale-forward',
+    lines: [],
+    error: '',
+  },
   selectedDiffPath: '',
   diffFilter: '',
   collapsedDiffDirs: [],
@@ -87,11 +102,17 @@ export const reviewSlice = createSlice({
     },
     setEnvDiffError(
       state,
-      action: PayloadAction<{ envKey: string; error: string; reconnectable: boolean }>,
+      action: PayloadAction<{
+        envKey: string;
+        error: string;
+        reconnectable: boolean;
+        kind?: ReachabilityKind;
+      }>,
     ) {
       const slot = envSlot(state, action.payload.envKey);
       slot.error = action.payload.error;
       slot.errorReconnectable = action.payload.reconnectable;
+      slot.errorKind = action.payload.kind ?? 'stale-forward';
     },
     // Drop the environments no longer in scope, so switching from a two-env
     // orchestrator to a single env tab does not leave stale sections rendering.

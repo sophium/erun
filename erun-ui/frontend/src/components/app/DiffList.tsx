@@ -1,9 +1,9 @@
-import { AlertCircle, CheckCircle2, Copy, PlugZap, RefreshCw } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Copy, Info, Play, PlugZap, RefreshCw } from 'lucide-react';
 import * as React from 'react';
 
 import { compactDiffError, diffLineMark, visibleDiffFilePaths } from '@/app/diffUtils';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { reconnectCopy } from '@/app/reconnectCopy';
+import { reachabilityCopy, type ReachabilityKind, reconnectCopy } from '@/app/reconnectCopy';
 import { loadReviewDiff, requestReconnect } from '@/app/reviewThunks';
 import { type ReviewEnvTarget, selectReviewEnvTargets } from '@/app/selectors';
 import { diffPathKey } from '@/app/slices/reviewSlice';
@@ -65,11 +65,12 @@ function DiffEnvSection({
           message={compactDiffError(slot.error)}
           loading={slot.loading}
           reconnectable={slot.errorReconnectable}
+          kind={slot.errorKind}
           onRetry={() => {
             void dispatch(loadReviewDiff());
           }}
           onReconnect={() => {
-            dispatch(requestReconnect());
+            dispatch(requestReconnect(target.tenant, target.environment, slot.errorKind));
           }}
         />
       );
@@ -113,57 +114,144 @@ function DiffEnvSection({
   );
 }
 
+// diffErrorCopy resolves the title/body/technical-detail text and whether this
+// is the informational not-running case, as one pure step so DiffErrorAlert
+// itself only has layout branching left (#1230 pushed the complexity here).
+function diffErrorCopy(
+  message: string,
+  reconnectable: boolean | undefined,
+  kind: ReachabilityKind | undefined,
+): { notRunning: boolean; title: string; body: string; technicalMessage: string; action: string } {
+  const notRunning = Boolean(reconnectable) && kind === 'not-open';
+  const copy = reachabilityCopy[kind ?? 'stale-forward'];
+  const title = reconnectable ? copy.errorTitle : 'Could not load diff';
+  const body = reconnectable ? copy.errorBody : message;
+  const technicalMessage = reconnectable && message && message !== body ? message : '';
+  return { notRunning, title, body, technicalMessage, action: copy.action };
+}
+
 export function DiffErrorAlert({
   message,
   loading,
   reconnectable,
+  kind,
   onRetry,
   onReconnect,
 }: {
   message: string;
   loading: boolean;
   reconnectable?: boolean;
+  kind?: ReachabilityKind;
   onRetry: () => void;
   onReconnect?: () => void;
 }): React.ReactElement {
-  const title = reconnectable ? reconnectCopy.errorTitle : 'Could not load diff';
-  const body = reconnectable ? reconnectCopy.errorBody : message;
-  const technicalMessage = reconnectable && message && message !== body ? message : '';
-  const clipboardText = [title, body, technicalMessage].filter(Boolean).join('\n');
+  // A stopped/never-opened environment is the ordinary resting state, not a
+  // fault -- it renders as an informational status, not a red alert, with
+  // "Open" as the primary action instead of "Reconnect…" (#1230).
+  const { notRunning, title, body, technicalMessage, action } = diffErrorCopy(
+    message,
+    reconnectable,
+    kind,
+  );
   return (
     <div
-      role="alert"
-      className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 rounded-[var(--radius)] border border-destructive/40 bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] px-3 py-2.5 text-[13px] leading-[1.4]"
+      role={notRunning ? 'status' : 'alert'}
+      className={cn(
+        'grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 rounded-[var(--radius)] border px-3 py-2.5 text-[13px] leading-[1.4]',
+        notRunning
+          ? 'border-border bg-muted/40'
+          : 'border-destructive/40 bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)]',
+      )}
     >
-      <AlertCircle className="mt-px size-[18px] flex-none text-destructive" aria-hidden="true" />
-      <div className="min-w-0 [overflow-wrap:anywhere] text-foreground">
-        <div className="font-semibold text-destructive">{title}</div>
-        <div className="text-muted-foreground">{body}</div>
-        {technicalMessage && (
-          <div className="mt-1 font-mono text-[12px] break-words whitespace-pre-wrap text-muted-foreground select-text">
-            {technicalMessage}
-          </div>
-        )}
+      <DiffErrorIcon notRunning={notRunning} />
+      <DiffErrorBody
+        notRunning={notRunning}
+        title={title}
+        body={body}
+        technical={technicalMessage}
+      />
+      <DiffErrorActions
+        notRunning={notRunning}
+        reconnectable={reconnectable}
+        loading={loading}
+        actionLabel={action}
+        onRetry={onRetry}
+        onReconnect={onReconnect}
+        clipboardText={[title, body, technicalMessage].filter(Boolean).join('\n')}
+      />
+    </div>
+  );
+}
+
+function DiffErrorIcon({ notRunning }: { notRunning: boolean }): React.ReactElement {
+  if (notRunning) {
+    return (
+      <Info className="mt-px size-[18px] flex-none text-muted-foreground" aria-hidden="true" />
+    );
+  }
+  return (
+    <AlertCircle className="mt-px size-[18px] flex-none text-destructive" aria-hidden="true" />
+  );
+}
+
+function DiffErrorBody({
+  notRunning,
+  title,
+  body,
+  technical,
+}: {
+  notRunning: boolean;
+  title: string;
+  body: string;
+  technical: string;
+}): React.ReactElement {
+  return (
+    <div className="min-w-0 [overflow-wrap:anywhere] text-foreground">
+      <div className={cn('font-semibold', notRunning ? 'text-foreground' : 'text-destructive')}>
+        {title}
       </div>
-      <div className="flex flex-col items-end gap-1.5">
+      <div className="text-muted-foreground">{body}</div>
+      {technical && (
+        <div className="mt-1 font-mono text-[12px] break-words whitespace-pre-wrap text-muted-foreground select-text">
+          {technical}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DiffErrorActions({
+  notRunning,
+  reconnectable,
+  loading,
+  actionLabel,
+  onRetry,
+  onReconnect,
+  clipboardText,
+}: {
+  notRunning: boolean;
+  reconnectable?: boolean;
+  loading: boolean;
+  actionLabel: string;
+  onRetry: () => void;
+  onReconnect?: () => void;
+  clipboardText: string;
+}): React.ReactElement {
+  return (
+    <div className="flex flex-col items-end gap-1.5">
+      {!notRunning && (
         <Button type="button" variant="outline" size="sm" disabled={loading} onClick={onRetry}>
           <RefreshCw aria-hidden="true" />
           {reconnectCopy.retryAction}
         </Button>
-        {reconnectable && onReconnect && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={loading}
-            onClick={onReconnect}
-          >
-            <PlugZap aria-hidden="true" />
-            {reconnectCopy.reconnectAction}
-          </Button>
-        )}
-        <CopyErrorButton text={clipboardText} />
-      </div>
+      )}
+      {reconnectable && onReconnect && (
+        <Button type="button" variant="outline" size="sm" disabled={loading} onClick={onReconnect}>
+          {notRunning ? <Play aria-hidden="true" /> : <PlugZap aria-hidden="true" />}
+          {actionLabel}
+        </Button>
+      )}
+      {!notRunning && <CopyErrorButton text={clipboardText} />}
     </div>
   );
 }

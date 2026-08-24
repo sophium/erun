@@ -1,34 +1,94 @@
 // Shared copy for the runtime-reconnect flow, reused across the review panel
 // and manage dialog so recovery reads as one consistent action.
 //
-// The marker mirrors the opaque prefix the Go backend puts on MCP-unreachable
-// errors; it is a machine token and must never be shown to users.
-export const MCP_UNREACHABLE_MARKER = 'ERUN_MCP_UNREACHABLE: ';
+// ReachabilityKind mirrors eruncommon.LocalMCPUnreachableKind: a stopped/
+// never-opened environment (informational, "Open") is a different situation
+// from a stale port-forward (a fault, "Reconnect…"), and the backend already
+// tells the two apart -- the review panel used to flatten them into one
+// "connection is down" error regardless (#1230).
+export type ReachabilityKind = 'not-open' | 'stale-forward';
 
-export const reconnectCopy = {
+// The markers mirror the opaque prefixes the Go backend puts on
+// MCP-unreachable errors (mcpUnreachableKindMarkers in erun-ui/mcp_errors.go);
+// they are machine tokens and must never be shown to users.
+const MCP_UNREACHABLE_MARKERS: Record<ReachabilityKind, string> = {
+  'not-open': 'ERUN_MCP_UNREACHABLE_NOT_OPEN: ',
+  'stale-forward': 'ERUN_MCP_UNREACHABLE_STALE: ',
+};
+
+interface ReachabilityCopy {
+  // DiffErrorAlert / ChangedFilesAside status card.
+  errorTitle: string;
+  errorBody: string;
+  action: string;
+  // ReconnectDialog confirmation.
+  dialogTitle: string;
+  dialogBody: string;
+  dialogConfirm: string;
+  // ReconnectStatusPanel while the action runs / after it fails.
+  runningStatus: string;
+  errorStatusTitle: string;
+}
+
+// staleForward keeps the original #1178 copy verbatim: this is the genuine
+// fault case, and "Cannot reach the environment runtime" / "Reconnect…" was
+// never wrong for it.
+const STALE_FORWARD_COPY: ReachabilityCopy = {
   errorTitle: 'Cannot reach the environment runtime',
   errorBody: 'The diff could not be loaded because the connection to your environment is down.',
-  retryAction: 'Retry',
-  reconnectAction: 'Reconnect…',
+  action: 'Reconnect…',
   dialogTitle: 'Reconnect to environment?',
   dialogBody:
     'This runs `erun open` to restore the connection. If the environment runtime is not currently running, it will be redeployed.',
-  dialogCancel: 'Cancel',
   dialogConfirm: 'Reconnect',
   runningStatus: 'Reconnecting…',
-  runningHint: 'Latest output will appear below.',
   errorStatusTitle: 'Reconnect failed',
+};
+
+// notOpen is the ordinary resting state of an environment nobody has started
+// (or that was stopped) -- not a fault, so the copy neither claims a
+// connection existed to lose nor promises a redeploy for a runtime the local
+// probe never actually checked (#1230).
+const NOT_OPEN_COPY: ReachabilityCopy = {
+  errorTitle: 'Environment not running',
+  errorBody: 'This environment is stopped — start it to review this diff.',
+  action: 'Open',
+  dialogTitle: 'Open environment?',
+  dialogBody: 'This runs `erun open` to start the environment.',
+  dialogConfirm: 'Open',
+  runningStatus: 'Opening…',
+  errorStatusTitle: 'Open failed',
+};
+
+export const reachabilityCopy: Record<ReachabilityKind, ReachabilityCopy> = {
+  'stale-forward': STALE_FORWARD_COPY,
+  'not-open': NOT_OPEN_COPY,
+};
+
+export const reconnectCopy = {
+  retryAction: 'Retry',
+  dialogCancel: 'Cancel',
+  runningHint: 'Latest output will appear below.',
   retry: 'Retry',
   dismiss: 'Dismiss',
 } as const;
 
 export function stripMcpUnreachableMarker(message: string): string {
-  if (message.startsWith(MCP_UNREACHABLE_MARKER)) {
-    return message.slice(MCP_UNREACHABLE_MARKER.length);
+  const kind = mcpUnreachableKind(message);
+  if (!kind) {
+    return message;
   }
-  return message;
+  return message.slice(MCP_UNREACHABLE_MARKERS[kind].length);
 }
 
-export function isMcpUnreachableMessage(message: string): boolean {
-  return message.startsWith(MCP_UNREACHABLE_MARKER);
+// mcpUnreachableKind reports which reachability shape the message names, or
+// null when the message is not one of the MCP-unreachable markers at all
+// (an ordinary diff-loading error, unrelated to reachability).
+export function mcpUnreachableKind(message: string): ReachabilityKind | null {
+  for (const kind of Object.keys(MCP_UNREACHABLE_MARKERS) as ReachabilityKind[]) {
+    if (message.startsWith(MCP_UNREACHABLE_MARKERS[kind])) {
+      return kind;
+    }
+  }
+  return null;
 }
