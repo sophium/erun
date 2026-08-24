@@ -1,4 +1,4 @@
-import { Folder, FolderOpen, MoreHorizontal } from 'lucide-react';
+import { Folder, FolderOpen, LayoutDashboard, MoreHorizontal } from 'lucide-react';
 import * as React from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
@@ -117,6 +117,7 @@ function TenantSelectButton({
             dispatch(openTenantDashboard(tenantName));
           }}
         >
+          <LayoutDashboard aria-hidden="true" className="mr-1.5 size-3.5 shrink-0 opacity-70" />
           <span className="truncate">{tenantName}</span>
         </button>
       </TooltipTrigger>

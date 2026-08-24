@@ -1,6 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 
-export type ManageTab = 'General' | 'Runtime' | 'AI' | 'Ports' | 'SSH' | 'History';
+export type ManageTab = 'General' | 'Runtime' | 'AI' | 'Ports' | 'Access' | 'History';
 
 // ManageDialog POM. The dialog title is "<tenant>-<environment>".
 export class ManageDialog {

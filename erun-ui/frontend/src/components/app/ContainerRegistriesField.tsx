@@ -2,6 +2,7 @@ import { Boxes, Plus, Trash2 } from 'lucide-react';
 import * as React from 'react';
 
 import { EditableComboField } from '@/components/app/EditableComboField';
+import { IconTooltip } from '@/components/app/IconTooltip';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
@@ -178,23 +179,23 @@ function RegistryRoleCheckboxes({
       {REGISTRY_ROLES.map((role) => {
         const checkboxId = `environment-config-registry-${String(index)}-role-${role}`;
         return (
-          <label
-            key={role}
-            htmlFor={checkboxId}
-            className="flex items-center gap-1.5 text-xs text-muted-foreground"
-            title={ROLE_HINT[role]}
-          >
-            <Checkbox
-              id={checkboxId}
-              checked={entry.roles.includes(role)}
-              disabled={disabled}
-              aria-label={`${role} role for registry ${String(index + 1)}`}
-              onCheckedChange={(checked) => {
-                onToggle(role, checked === true);
-              }}
-            />
-            {role}
-          </label>
+          <IconTooltip key={role} label={ROLE_HINT[role]}>
+            <label
+              htmlFor={checkboxId}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground"
+            >
+              <Checkbox
+                id={checkboxId}
+                checked={entry.roles.includes(role)}
+                disabled={disabled}
+                aria-label={`${role} role for registry ${String(index + 1)}`}
+                onCheckedChange={(checked) => {
+                  onToggle(role, checked === true);
+                }}
+              />
+              {role}
+            </label>
+          </IconTooltip>
         );
       })}
     </div>
