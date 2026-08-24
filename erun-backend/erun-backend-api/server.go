@@ -14,6 +14,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/mcptoken"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/mergeexec"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/provision"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/registrytoken"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/releaseexec"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/routes"
@@ -112,6 +113,17 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 	// user-auth/authorize/audit middleware the protected routes use.
 	if options.DNS01Broker != nil {
 		options.DNS01Broker.Register(mux)
+	}
+	// The hosted registry's token service authenticates its own HTTP Basic
+	// credential (the tenant's erun-api bearer token as the password, not a
+	// standard Authorization: Bearer header), so like the DNS-01 broker it is
+	// registered directly on the mux, outside registerProtectedRoutes' catalog.
+	// It reuses the MCP signing key (distinct audience per mint, same key — see
+	// mcptoken.Signer.SignRegistry) and the same tenant resolver the primary
+	// auth path uses, so a registry token can only ever be minted for the
+	// tenant the caller's own token resolves to.
+	if resolvers := resolveIdentityResolvers(options); options.MCPSigner != nil && options.TokenVerifier != nil && resolvers.tenant != nil {
+		registrytoken.NewHandler(options.TokenVerifier, resolvers.tenant, options.MCPSigner).Register(mux)
 	}
 	registerProtectedRoutes(mux, auth, options, txManager, authorizer)
 	return mux, nil

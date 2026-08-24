@@ -455,6 +455,35 @@ A request succeeds (`204`) only when:
 
 `present` adds the challenge TXT; `cleanup` removes it. The broker is only registered when the platform env configures the PowerDNS write path (`ERUN_DNS01_*`); otherwise the endpoints are absent. On a hosted deploy those are set (opt-in) by the `erun-backend-api` chart's `api.dns01.{enabled,servicesZone}` values — the TSIG key, algorithm, and PowerDNS `:53` endpoint default to the co-located `erun-powerdns` chart's conventions, so enabling the broker needs only `enabled` + the services zone. Driving this against a **live** two-tenant cluster (staging then production ACME, with the negative cross-tenant test) is the issue's end-to-end acceptance — `(Planned.)` until a second tenant is stood up on the platform cluster.
 
+### Registry token service: `GET /v2/token` {#registry-token-endpoint}
+
+Mints the short-lived, scope-limited access token erun's hosted container registry (`registry.erunpaas.com`, zot) challenges a `docker`/OCI client for — the registry v2 [Bearer token](https://distribution.github.io/distribution/spec/auth/token/) flow. A push or pull gets `401` with `WWW-Authenticate: Bearer realm="…/v2/token",service="registry.erunpaas.com",scope="repository:<name>:<actions>"`; the client then calls `realm` with **HTTP Basic** credentials — a fixed, documented username (`erun`; never inspected, so trusting it would let a caller claim any tenant by naming it) and the tenant's own erun-api bearer token as the password — and gets this endpoint's token back.
+
+```jsonc
+// 200 response
+{
+  "token": "<eddsa-jwt>",
+  "access_token": "<eddsa-jwt>",   // duplicates token; some clients read one field name, some the other
+  "expires_in": 300,
+  "issued_at": "2026-08-24T00:00:00Z"
+}
+```
+
+**Scope clamping is the security boundary of this endpoint.** The tenant is resolved only from the Basic password's verified issuer — never from the username or the requested scope. Every requested `repository:<name>:<actions>` scope is granted only when `<name>` is the resolved tenant's own namespace (`<tenant>` or `<tenant>/…`); anything else — another tenant's namespace, a name that merely starts with the tenant's (`frs` must not match `frsking`), a non-`repository` resource type — is **dropped entirely**. A request naming no in-scope repository still authenticates (`200`) with an empty `access` grant inside the token, per the token spec's own "grant less than requested, down to nothing" contract — this is deliberate: a distinguishable error here would let a caller probe which tenant namespaces exist.
+
+Same signing key as the [mcp-token](#mcp-token-endpoint) and [dns01-token](#dns01-token-endpoint) endpoints, again with a **distinct audience**: the minted token's `aud` is the registry's own `service` value from the challenge (`registry.erunpaas.com`), never `erun-api` or an `erun-mcp:<tenant>/<env>` value, so it cannot be replayed against the platform API or an env's MCP edge. `iss` is the fixed `erun-registry-token-service` value. Enabled by the same `ERUN_API_MCP_SIGNING_KEY_PATH` as the other two; unset, or no tenant resolver configured (no database), leaves the route **unregistered** (`404`), matching the [DNS-01 broker](#dns01-broker)'s absent-when-unconfigured behaviour rather than the mcp-token endpoint's `501`.
+
+**Error behaviour.** Bare HTTP status, plain-text body:
+
+| Status | Condition | Recovery |
+|---|---|---|
+| `401` | Missing/malformed Basic credentials, or the password does not verify as a valid, unexpired, correctly-audienced (`erun-api`) bearer token from a trusted issuer. | Send `docker login registry.erunpaas.com` (or an equivalent Basic-auth client) with a current tenant API token as the password. |
+| `400` | Missing `service` query parameter. | The registry's own challenge always sets it; a hand-built request must too. |
+| `404` | The route is not registered on this instance (no signing key configured, or no database/tenant resolver). | Configure `ERUN_API_MCP_SIGNING_KEY_PATH` and a database on the instance fronting the registry. |
+| `500` | Signing failed (internal wiring error, never a client fault). | Retry; if it persists, it is a server bug. |
+
+**`(Planned.)` end to end.** The endpoint, its scope clamping, and its signing are implemented and unit-tested (`erun-backend-api/internal/registrytoken`) against the real verifier and signer, but no deployed zot instance points its bearer `realm`/`cert` at this endpoint yet — `registry.erunpaas.com`'s DNS, TLS certificate, and the platform's `erun-oci-registry` chart deployment are not yet live (see [Container registries · Hosted registry](/deployment/registries#hosted-registry)).
+
 ### `POST /v1/contexts`
 
 Registers a **cloud context** (a managed cluster) for the caller's tenant and returns the cluster-**bootstrap plan**. The model is **BYO-cloud**: the context bootstraps onto the tenant's own AWS account via a registered cloud-provider alias (`cloudProviderAlias`), provisioning an EC2 instance running k3s. The endpoint is tenant-scoped by row-level security — the registered row is bound to the caller's tenant automatically.
@@ -908,3 +937,4 @@ Pass the token back as `?pageToken=<token>` on the next call. When `nextPageToke
 - [Builds](/collaboration/builds) — resource schema + append-only semantics.
 - [Audit log event format](/agent-reference/audit-log#event-shape).
 - [Security events](/agent-reference/audit-log#security-events).
+- [Container registries · Hosted registry](/deployment/registries#hosted-registry) — the Operator-facing summary of the hosted registry this endpoint authenticates.

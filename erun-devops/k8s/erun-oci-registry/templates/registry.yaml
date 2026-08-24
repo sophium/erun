@@ -1,0 +1,157 @@
+{{- $tenant := default "erun" .Values.tenant -}}
+{{- $registry := default dict .Values.registry -}}
+{{- $storage := default "50Gi" $registry.storage -}}
+{{- $retentionDays := default 30 $registry.retentionDays -}}
+{{- $tokenService := default "registry.erunpaas.com" $registry.tokenService -}}
+{{- $tokenRealm := required "erun-oci-registry: registry.tokenRealm is required — the full URL of erun-backend-api's GET /v2/token endpoint this registry challenges clients to" (default "" $registry.tokenRealm) -}}
+{{- $signingKeySecretName := required "erun-oci-registry: registry.signingKeySecretName is required — create a Secret out of band holding erun-backend-api's registry-signing public key (key \"public.pem\", PEM-encoded) and name it here; the chart never generates or fetches one" (default "" $registry.signingKeySecretName) -}}
+{{- $imageOverrides := default dict .Values.imageOverrides -}}
+{{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
+{{- $registryImage := default (printf "%s/erun-oci-registry:v2.1.20" $containerRegistry) (index $imageOverrides "erun-oci-registry") -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $tenant }}-oci-registry-config
+  labels:
+    app: {{ $tenant }}-oci-registry
+data:
+  # zot config: https://zotregistry.dev — bearer auth delegates to erun-backend-api's
+  # /v2/token, which is the only thing that ever mints a token this registry accepts;
+  # retention prunes images untouched for retentionDays, the destructive default an
+  # operator must be able to see and change (root AGENTS.md "Working Rules").
+  config.json: |
+    {
+      "distSpecVersion": "1.1.0",
+      "storage": {
+        "rootDirectory": "/var/lib/registry",
+        "gc": true,
+        "gcInterval": "6h",
+        "retention": {
+          "dryRun": false,
+          "delay": "24h",
+          "policies": [
+            {
+              "repositories": ["**"],
+              "keepTags": [
+                {
+                  "patterns": [".*"],
+                  "pulledWithin": "{{ mul $retentionDays 24 }}h"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "http": {
+        "address": "0.0.0.0",
+        "port": "5000",
+        "auth": {
+          "bearer": {
+            "realm": {{ $tokenRealm | quote }},
+            "service": {{ $tokenService | quote }},
+            "cert": "/etc/erun/oci-registry/signing-key/public.pem"
+          }
+        }
+      },
+      "log": {
+        "level": "info"
+      }
+    }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $tenant }}-oci-registry-data
+  labels:
+    app: {{ $tenant }}-oci-registry
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ $storage | quote }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $tenant }}-oci-registry
+  labels:
+    app: {{ $tenant }}-oci-registry
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ $tenant }}-oci-registry
+  ports:
+    - name: registry
+      port: 5000
+      targetPort: registry
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $tenant }}-oci-registry
+  labels:
+    app: {{ $tenant }}-oci-registry
+spec:
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: {{ $tenant }}-oci-registry
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: {{ $tenant }}-oci-registry
+    spec:
+      # zot's published image runs as a non-root uid; fsGroup makes the data
+      # PVC writable by it. This mirrors erun-backend-postgres's own fsGroup
+      # (999) rather than the runtime pod's deliberate no-fsGroup rule, which
+      # is specific to the docker-state volume (see erun-devops/AGENTS.md) and
+      # does not apply to a plain data volume like this one. Confirm the exact
+      # uid/gid zot's image runs as against the pinned VERSION before rollout.
+      securityContext:
+        fsGroup: 10000
+      containers:
+        - image: {{ $registryImage }}
+          name: erun-oci-registry
+          imagePullPolicy: IfNotPresent
+          args:
+            - serve
+            - /etc/zot/config.json
+          ports:
+            - containerPort: 5000
+              name: registry
+          readinessProbe:
+            httpGet:
+              path: /v2/
+              port: registry
+            periodSeconds: 5
+            timeoutSeconds: 2
+          startupProbe:
+            httpGet:
+              path: /v2/
+              port: registry
+            periodSeconds: 2
+            timeoutSeconds: 2
+            failureThreshold: 60
+          volumeMounts:
+            - name: config
+              mountPath: /etc/zot
+              readOnly: true
+            - name: signing-key
+              mountPath: /etc/erun/oci-registry/signing-key
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/registry
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $tenant }}-oci-registry-config
+        - name: signing-key
+          secret:
+            secretName: {{ $signingKeySecretName }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ $tenant }}-oci-registry-data
+      restartPolicy: Always
