@@ -44,6 +44,9 @@ var mcpReadOnlyTools = map[string]struct{}{
 	"job_status":          {},
 	"job_output":          {},
 	"job_await":           {},
+	"review_list":         {},
+	"review_show":         {},
+	"review_queue_list":   {},
 }
 
 // MCPToolCapability returns the capability a tool requires. An unknown tool

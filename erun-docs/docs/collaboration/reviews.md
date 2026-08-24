@@ -4,6 +4,8 @@ title: Reviews
 
 # Reviews
 
+> For the Operator view, see [`erun review`](/cli/review).
+
 A **review** is the unit of work-to-be-merged. It binds a source branch to a target branch and tracks the state of that pairing through to merge.
 
 ## Resource shape

@@ -1,0 +1,3 @@
+audit: erun exec push --dry-run main
+git -C <TMP> rev-parse --abbrev-ref HEAD
+cd <TMP> && git push origin main:main

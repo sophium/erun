@@ -154,6 +154,7 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig, identity authId
 	registerCloudTools(reg, runtime)
 	registerContextTools(reg, runtime)
 	registerPlatformTools(reg, runtime)
+	registerReviewTools(reg, runtime)
 	registerDeliveryTools(reg, runtime)
 	registerInspectionTools(reg, runtime)
 
@@ -375,6 +376,37 @@ func registerPlatformTools(reg toolRegistrar, runtime RuntimeConfig) {
 	}, platformProvisionTool(runtime))
 }
 
+func registerReviewTools(reg toolRegistrar, runtime RuntimeConfig) {
+	addTool(reg, &mcp.Tool{
+		Name:        "review_list",
+		Description: "List reviews on the erun platform, narrowed by any combination of targetBranch, sourceBranch, status, authorUserId, and reviewerUserId. mine and waitingOnMe resolve to the caller's own user id via whoami and cannot be combined with the equivalent explicit id filter. Supports preview.",
+	}, reviewListTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "review_show",
+		Description: "Fetch one review on the erun platform together with its comment threads and recorded builds. Supports preview.",
+	}, reviewShowTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "review_create",
+		Description: "Open a review on the erun platform. name is the eventual squash-merge message and must be unique per tenant; a colliding name fails with a conflict. sourceBranch must already exist on the remote (push it first with exec_push), since the review references it by name and the platform can only ever fetch what has actually landed there. A real, immediate write, not a preview, unless preview is set.",
+	}, reviewCreateTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "review_comment",
+		Description: "Comment on a line of a review on the erun platform, or reply to an existing comment with parentCommentId. A real, immediate write, not a preview, unless preview is set.",
+	}, reviewCommentTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "review_close",
+		Description: "Close a review on the erun platform without merging it. A real, immediate write, not a preview, unless preview is set.",
+	}, reviewCloseTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "review_queue_list",
+		Description: "List a target branch's merge queue on the erun platform, in queue order. Supports preview.",
+	}, reviewMergeQueueListTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "review_queue_advance",
+		Description: "Advance a target branch's merge queue head to MERGED on the erun platform. A real, immediate mutation of shared control-plane state: fails if the queue is empty or its head is not READY. Until the merge queue executor lands, MERGED is a status only — nothing yet performs the actual git merge. A real, immediate write, not a preview, unless preview is set.",
+	}, reviewMergeQueueAdvanceTool(runtime))
+}
+
 func registerDeliveryTools(reg toolRegistrar, runtime RuntimeConfig) {
 	addTool(reg, &mcp.Tool{
 		Name:        "init",
@@ -449,6 +481,10 @@ func registerInspectionTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Name:        "exec_commit",
 		Description: "Stage every change (or, with paths set, only those paths) in the runtime repo's working tree and commit it with a message taken as data — never through a shell. branch must match the tree's actual current branch; the commit is refused, loudly, when it does not, rather than landing on whichever branch HEAD happens to be on. When paths is set, the commit is refused just as loudly if the tree has changes outside the declared paths, so an unrelated writer's edits can never be absorbed into it. Reports the branch, commit id, and files committed. Set preview to verify the branch and trace the files that would be committed without committing.",
 	}, commitTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "exec_push",
+		Description: "Push the runtime repo's working tree's current branch to a remote. branch must match the tree's actual current branch; the push is refused, loudly, when it does not, rather than pushing whichever branch HEAD happens to be on. A real, immediate mutation of shared remote state — a branch a hosted review or another reviewer can only ever fetch once it has actually landed there. Set preview to verify the branch and trace the push without running it.",
+	}, execPushTool(runtime))
 
 	// Deprecated aliases for the four exec tools, kept callable for one release
 	// (#1186). `erun exec` was the only command group on the surface whose tools

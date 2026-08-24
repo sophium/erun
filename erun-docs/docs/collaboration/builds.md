@@ -4,6 +4,8 @@ title: Builds
 
 # Builds
 
+> For the Operator view, see [`erun review show`](/cli/review#review-show).
+
 A **build** records the outcome of building a specific commit on a specific review. Builds drive review status transitions — a `READY` review is one with a successful latest build.
 
 ## Resource shape

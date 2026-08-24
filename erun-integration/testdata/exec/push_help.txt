@@ -1,0 +1,22 @@
+Push the project working tree's current branch to a remote.
+
+BRANCH must match the working tree's actual current branch; the push is refused, loudly, when it does not, rather than pushing whatever branch HEAD happens to be on. A real, immediate mutation of shared remote state: a branch a hosted review or another reviewer can only ever fetch once it has actually landed there.
+
+--dry-run traces the push without running it.
+
+Usage:
+  erun exec push BRANCH [flags]
+
+Examples:
+  erun exec push feature/add-widget
+  erun exec push feature/add-widget --remote upstream
+
+Flags:
+      --dry-run         Resolve and trace mutating actions without executing them.
+  -h, --help            help for push
+      --remote string   Git remote to push to (defaults to origin)
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

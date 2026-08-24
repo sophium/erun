@@ -1,0 +1,23 @@
+Review code changes on the erun platform
+
+Usage:
+  erun review [command]
+
+Available Commands:
+  close       Close a review without merging it
+  comment     Comment on a line of a review, or reply to an existing comment
+  create      Open a review on the erun platform
+  list        List reviews on the erun platform
+  queue       Inspect and advance a target branch's merge queue
+  show        Show a review, its comment threads, and its recorded builds
+
+Flags:
+      --erun-alias string   erun platform cloud alias to target (defaults to the sole configured erun-type alias)
+  -h, --help                help for review
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.
+
+Use "erun review [command] --help" for more information about a command.
