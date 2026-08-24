@@ -23,10 +23,7 @@ import { cn } from '@/lib/utils';
 type ManageDialog = AppState['manageDialog'];
 
 export function SSHAccessSection({ dialog }: { dialog: ManageDialog }): React.ReactElement {
-  const dispatch = useAppDispatch();
   const config = dialog.config;
-  const syncPathRequired =
-    config.sshd.workspaceSyncEnabled && !(config.sshd.workspaceSyncLocalPath ?? '').trim();
   return (
     <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
       <SSHAccessHeader dialog={dialog} />
@@ -35,24 +32,6 @@ export function SSHAccessSection({ dialog }: { dialog: ManageDialog }): React.Re
         label="SSHD"
         value={config.sshd.enabled ? 'Enabled' : 'Disabled'}
       />
-      <CheckboxField
-        id="environment-config-sshd-sync-enabled"
-        label="Enable workspace sync"
-        checked={config.sshd.workspaceSyncEnabled}
-        disabled={dialog.busy || dialog.configLoading || !config.sshd.enabled}
-        onChange={(workspaceSyncEnabled) => {
-          dispatch(updateManageSSHDConfig({ workspaceSyncEnabled }));
-        }}
-      />
-      {config.sshd.workspaceSyncEnabled && (
-        <>
-          <WorkspaceSyncStatus sshd={config.sshd} />
-          <LocalSyncFolderField
-            dialog={dialog}
-            error={syncPathRequired ? 'Choose a local Git folder before saving.' : ''}
-          />
-        </>
-      )}
       <ReadonlyField
         id="environment-config-sshd-localport"
         label="Local port"
@@ -63,6 +42,47 @@ export function SSHAccessSection({ dialog }: { dialog: ManageDialog }): React.Re
         label="Public key"
         value={config.sshd.publicKeyPath}
       />
+    </div>
+  );
+}
+
+// Workspace sync rides over the SSH connection, but it is a distinct user
+// concept (mirroring a local Git folder into the pod's worktree) from SSH
+// shell access itself, so it gets its own titled section rather than sitting
+// as an unlabeled checkbox inside "SSH access" (recognition over recall).
+export function WorkspaceSyncSection({ dialog }: { dialog: ManageDialog }): React.ReactElement {
+  const dispatch = useAppDispatch();
+  const config = dialog.config;
+  const syncPathRequired =
+    config.sshd.workspaceSyncEnabled && !(config.sshd.workspaceSyncLocalPath ?? '').trim();
+  return (
+    <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
+      <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">
+        Workspace sync
+      </div>
+      <CheckboxField
+        id="environment-config-sshd-sync-enabled"
+        label="Enable workspace sync"
+        checked={config.sshd.workspaceSyncEnabled}
+        disabled={dialog.busy || dialog.configLoading || !config.sshd.enabled}
+        onChange={(workspaceSyncEnabled) => {
+          dispatch(updateManageSSHDConfig({ workspaceSyncEnabled }));
+        }}
+      />
+      {!config.sshd.enabled && (
+        <div className="text-[13px] leading-[1.35] text-muted-foreground">
+          Requires SSH access to be enabled.
+        </div>
+      )}
+      {config.sshd.workspaceSyncEnabled && (
+        <>
+          <WorkspaceSyncStatus sshd={config.sshd} />
+          <LocalSyncFolderField
+            dialog={dialog}
+            error={syncPathRequired ? 'Choose a local Git folder before saving.' : ''}
+          />
+        </>
+      )}
     </div>
   );
 }

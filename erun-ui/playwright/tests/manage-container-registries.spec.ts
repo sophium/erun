@@ -12,6 +12,11 @@ test.describe('manage dialog container registries', () => {
     await expect(app.manageDialog.registryRoleCheckbox(0, 'deploy')).toBeChecked();
     await expect(app.manageDialog.registryRoleCheckbox(0, 'from')).not.toBeChecked();
 
+    // The role meaning (e.g. "erun build/push target") rides the IconTooltip
+    // primitive, not a native `title` (AGENTS.md bans `title` for meaningful UI).
+    const buildRoleLabel = app.manageDialog.registryRoleCheckbox(0, 'build').locator('xpath=..');
+    await expect(buildRoleLabel).not.toHaveAttribute('title', /.*/);
+
     // A new row defaults to build+deploy, so a second registry with a host makes two build-marked registries — invalid.
     await app.manageDialog.addRegistryButton().click();
     await app.manageDialog.registryInput(1).fill('registry.internal/pw');

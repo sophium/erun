@@ -32,7 +32,9 @@ export function activityElapsedLabel(entry: ActivityQueueEntry, now: number): st
   const isRunning = entry.status === 'running';
   const isWaiting = entry.status === 'waiting';
   if (isRunning || isWaiting) {
-    const elapsedAnchor = isWaiting && entry.enqueuedAt ? entry.enqueuedAt : entry.startedAt;
+    const elapsedAnchor = isWaiting
+      ? (entry.enqueuedAt ?? entry.startedAt)
+      : (entry.startedRunningAt ?? entry.startedAt);
     return formatElapsed(elapsedAnchor, now);
   }
   if (entry.endedAt) {
