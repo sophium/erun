@@ -3,19 +3,18 @@ import * as React from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import type { AppState } from '@/app/state';
+import {
+  activeTenantDashboardTab,
+  restrictedTenantDashboardReads,
+  visibleTenantDashboardTabs,
+} from '@/app/tenantDashboardPanels';
 import { refreshTenantDashboard, setTenantDashboardTab } from '@/app/tenantDialogThunks';
 import { Button } from '@/components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import type {
-  UITenant,
-  UITenantDashboardAudit,
-  UITenantDashboardBuild,
-  UITenantDashboardReview,
-  UITenantDashboardUser,
-} from '@/types';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import type { UITenant } from '@/types';
 
-import { EmptyState } from './EmptyState';
-import { StatusBadge } from './StatusBadge';
+import { DashboardMessage } from './TenantDashboardMessage';
+import { TenantDashboardPanels } from './TenantDashboardPanels';
 
 export function TenantDashboardView(): React.ReactElement | null {
   const dispatch = useAppDispatch();
@@ -26,6 +25,7 @@ export function TenantDashboardView(): React.ReactElement | null {
   }
   const tenant = tenants.find((candidate) => candidate.name === dashboard.tenant);
   const environmentName = tenantDashboardEnvironmentName(tenant, dashboard.data?.environment);
+  const visibleTabs = visibleTenantDashboardTabs(dashboard.data);
   return (
     <section className="grid h-full min-h-0 bg-background text-foreground">
       <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)]">
@@ -56,19 +56,22 @@ export function TenantDashboardView(): React.ReactElement | null {
           </Button>
         </header>
         <Tabs
-          value={dashboard.tab}
+          value={activeTenantDashboardTab(dashboard.data, dashboard.tab)}
           onValueChange={(value) => {
             dispatch(setTenantDashboardTab(value as AppState['tenantDashboard']['tab']));
           }}
           className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] px-5 py-4"
         >
-          <TabsList className="w-fit">
-            <TabsTrigger value="users">Users</TabsTrigger>
-            <TabsTrigger value="queue">Merge queue</TabsTrigger>
-            <TabsTrigger value="builds">Builds</TabsTrigger>
-            <TabsTrigger value="audit">Audit log</TabsTrigger>
-            <TabsTrigger value="api-log">API log</TabsTrigger>
-          </TabsList>
+          <div className="grid gap-2">
+            <TabsList className="w-fit">
+              {visibleTabs.map((descriptor) => (
+                <TabsTrigger key={descriptor.tab} value={descriptor.tab}>
+                  {descriptor.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+            <RestrictedAccessNote missing={restrictedTenantDashboardReads(dashboard.data)} />
+          </div>
           <TenantDashboardBody dashboard={dashboard} />
         </Tabs>
       </div>
@@ -92,304 +95,25 @@ function TenantDashboardBody({
   if (dashboard.error) {
     return <DashboardMessage message={dashboard.error} destructive />;
   }
-  return <TenantDashboardTabContent data={dashboard.data} />;
-}
-
-function TenantDashboardTabContent({
-  data,
-}: {
-  data: AppState['tenantDashboard']['data'];
-}): React.ReactElement {
-  const view = tenantDashboardViewData(data);
-  return (
-    <>
-      <TabsContent value="users" className="min-h-0 overflow-auto">
-        <UsersTable users={view.users} apiError={view.apiError} />
-      </TabsContent>
-      <TabsContent value="queue" className="min-h-0 overflow-auto">
-        <ReviewsTable
-          reviews={view.mergeQueue}
-          empty={view.apiError || 'No reviews are waiting in the merge queue'}
-          destructive={view.hasAPIError}
-        />
-      </TabsContent>
-      <TabsContent value="builds" className="min-h-0 overflow-auto">
-        <BuildsTable builds={view.builds} apiError={view.apiError} />
-      </TabsContent>
-      <TabsContent value="audit" className="min-h-0 overflow-auto">
-        <AuditEventsTable events={view.auditEvents} apiError={view.apiError} />
-      </TabsContent>
-      <TabsContent value="api-log" className="min-h-0 overflow-auto">
-        <APILogPanel log={view.apiLog} error={view.apiLogError} apiError={view.apiError} />
-      </TabsContent>
-    </>
-  );
-}
-
-interface TenantDashboardViewData {
-  users: UITenantDashboardUser[];
-  apiError: string;
-  hasAPIError: boolean;
-  mergeQueue: UITenantDashboardReview[];
-  builds: UITenantDashboardBuild[];
-  auditEvents: UITenantDashboardAudit[];
-  apiLog: string;
-  apiLogError: string;
-}
-
-const emptyTenantDashboardViewData: TenantDashboardViewData = {
-  users: [],
-  apiError: '',
-  hasAPIError: false,
-  mergeQueue: [],
-  builds: [],
-  auditEvents: [],
-  apiLog: '',
-  apiLogError: '',
-};
-
-function tenantDashboardViewData(
-  data: AppState['tenantDashboard']['data'],
-): TenantDashboardViewData {
-  if (!data) {
-    return emptyTenantDashboardViewData;
+  const apiError = dashboard.data?.apiError ?? '';
+  if (apiError) {
+    return <DashboardMessage message={apiError} destructive />;
   }
-  const apiError = data.apiError ?? '';
-  return {
-    users: data.user ? [data.user] : [],
-    apiError,
-    hasAPIError: apiError.length > 0,
-    mergeQueue: data.mergeQueue ?? [],
-    builds: data.builds ?? [],
-    auditEvents: data.auditEvents ?? [],
-    apiLog: data.apiLog ?? '',
-    apiLogError: data.apiLogError ?? '',
-  };
+  return <TenantDashboardPanels data={dashboard.data} />;
 }
 
-function UsersTable({
-  users,
-  apiError,
-}: {
-  users: UITenantDashboardUser[];
-  apiError: string;
-}): React.ReactElement {
-  if (users.length === 0) {
-    return (
-      <DashboardMessage message={apiError || 'No users found'} destructive={Boolean(apiError)} />
-    );
+// RestrictedAccessNote is why a short tab strip is not an empty tenant. Hiding
+// the tabs alone would leave the user to infer that the panels do not exist, so
+// the access they are missing is named where they are looking (Nielsen #1).
+function RestrictedAccessNote({ missing }: { missing: string[] }): React.ReactElement | null {
+  if (missing.length === 0) {
+    return null;
   }
   return (
-    <DataTable headers={['Username', 'Roles']}>
-      {users.map((user) => (
-        <tr key={user.userId || (user.username ?? '') || (user.subject ?? '')}>
-          <DataCell strong>{displayUsername(user)}</DataCell>
-          <DataCell>{formatRoles(user.roles)}</DataCell>
-        </tr>
-      ))}
-    </DataTable>
+    <p className="text-[13px] leading-[1.4] text-muted-foreground" role="status">
+      {`Some panels are hidden because you do not have access to ${missing.join(', ')}. Ask an administrator for access.`}
+    </p>
   );
-}
-
-function ReviewsTable({
-  reviews,
-  empty,
-  destructive,
-}: {
-  reviews: UITenantDashboardReview[];
-  empty: string;
-  destructive?: boolean;
-}): React.ReactElement {
-  if (reviews.length === 0) {
-    return <DashboardMessage message={empty} destructive={destructive} />;
-  }
-  return (
-    <DataTable headers={['Review', 'Status', 'Target', 'Source', 'Updated']}>
-      {reviews.map((review) => (
-        <tr key={review.reviewId}>
-          <DataCell strong>{review.name || review.reviewId}</DataCell>
-          <DataCell>{review.status}</DataCell>
-          <DataCell>{review.targetBranch}</DataCell>
-          <DataCell>{review.sourceBranch}</DataCell>
-          <DataCell>{formatDate(review.updatedAt)}</DataCell>
-        </tr>
-      ))}
-    </DataTable>
-  );
-}
-
-function BuildsTable({
-  builds,
-  apiError,
-}: {
-  builds: UITenantDashboardBuild[];
-  apiError: string;
-}): React.ReactElement {
-  if (builds.length === 0) {
-    return (
-      <DashboardMessage
-        message={apiError || 'No review builds found'}
-        destructive={Boolean(apiError)}
-      />
-    );
-  }
-  return (
-    <DataTable headers={['Build', 'Review', 'Result', 'Commit', 'Version', 'Created']}>
-      {builds.map((build) => (
-        <tr key={build.buildId}>
-          <DataCell strong>{build.buildId}</DataCell>
-          <DataCell>{build.reviewName?.trim() ? build.reviewName : build.reviewId}</DataCell>
-          <DataCell>
-            <StatusBadge
-              tone={build.successful ? 'success' : 'destructive'}
-              label={build.successful ? 'Successful' : 'Failed'}
-            />
-          </DataCell>
-          <DataCell>{build.commitId}</DataCell>
-          <DataCell>{build.version}</DataCell>
-          <DataCell>{formatDate(build.createdAt)}</DataCell>
-        </tr>
-      ))}
-    </DataTable>
-  );
-}
-
-function AuditEventsTable({
-  events,
-  apiError,
-}: {
-  events: UITenantDashboardAudit[];
-  apiError: string;
-}): React.ReactElement {
-  if (events.length === 0) {
-    if (apiError) {
-      return <DashboardMessage message={apiError} destructive />;
-    }
-    return (
-      <div className="mt-4">
-        <EmptyState
-          heading="No audit events"
-          body="Tenant activity will appear here as API, CLI, and MCP calls are made."
-        />
-      </div>
-    );
-  }
-  return (
-    <DataTable headers={['Time', 'Type', 'Actor', 'Action']}>
-      {events.map((event, index) => (
-        <tr key={`${event.createdAt ?? ''}-${String(index)}`}>
-          <DataCell>{formatDate(event.createdAt)}</DataCell>
-          <DataCell>{event.type}</DataCell>
-          <DataCell>{event.actor}</DataCell>
-          <DataCell strong>{event.action}</DataCell>
-        </tr>
-      ))}
-    </DataTable>
-  );
-}
-
-function APILogPanel({
-  log,
-  error,
-  apiError,
-}: {
-  log: string;
-  error: string;
-  apiError: string;
-}): React.ReactElement {
-  if (error) {
-    return <DashboardMessage message={error} destructive />;
-  }
-  if (!log.trim()) {
-    return (
-      <DashboardMessage
-        message={apiError || 'No API log returned'}
-        destructive={Boolean(apiError)}
-      />
-    );
-  }
-  return (
-    <>
-      {apiError && <DashboardMessage message={apiError} destructive />}
-      <pre className="mt-4 max-h-full overflow-auto rounded-[var(--radius)] border border-border bg-muted/30 px-3 py-2.5 font-mono text-xs leading-relaxed text-foreground whitespace-pre-wrap">
-        {log}
-      </pre>
-    </>
-  );
-}
-
-function DataTable({
-  headers,
-  children,
-}: {
-  headers: string[];
-  children: React.ReactNode;
-}): React.ReactElement {
-  return (
-    <table className="mt-4 w-full table-fixed border-collapse text-sm">
-      <thead>
-        <tr className="border-b border-border text-left text-xs font-medium uppercase text-muted-foreground">
-          {headers.map((header) => (
-            <th key={header} className="px-2 py-2">
-              {header}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody className="divide-y divide-border">{children}</tbody>
-    </table>
-  );
-}
-
-function DataCell({
-  children,
-  strong,
-}: {
-  children: React.ReactNode;
-  strong?: boolean;
-}): React.ReactElement {
-  const isEmpty =
-    children === null || children === undefined || children === false || children === '';
-  return (
-    <td className={`truncate px-2 py-2.5 ${strong ? 'font-medium' : 'text-muted-foreground'}`}>
-      {isEmpty ? '-' : children}
-    </td>
-  );
-}
-
-function DashboardMessage({
-  message,
-  icon,
-  destructive,
-}: {
-  message: string;
-  icon?: React.ReactElement;
-  destructive?: boolean;
-}): React.ReactElement {
-  return (
-    <div
-      className={`mt-4 flex items-center gap-2 rounded-[var(--radius)] border px-3 py-2.5 text-sm ${destructive ? 'border-destructive/35 text-destructive' : 'border-border text-muted-foreground'}`}
-    >
-      {icon}
-      <span>{message}</span>
-    </div>
-  );
-}
-
-function displayUsername(user: UITenantDashboardUser): string {
-  const candidates = [user.username, user.subject, user.userId];
-  for (const candidate of candidates) {
-    const trimmed = candidate?.trim() ?? '';
-    if (trimmed !== '') {
-      return trimmed;
-    }
-  }
-  return 'Unknown user';
-}
-
-function formatRoles(roles: string[] | undefined): string {
-  const names = roles?.map((role) => role.trim()).filter(Boolean) ?? [];
-  return names.length > 0 ? names.join(', ') : 'No roles assigned';
 }
 
 function tenantDashboardSubtitle(tenant: UITenant | undefined, environmentName: string): string {
@@ -423,15 +147,4 @@ function tenantDashboardEnvironmentName(
       (candidate) => candidate.name === defaultEnvironment && candidate.apiUrl,
     ) ?? tenant.environments.find((candidate) => candidate.apiUrl);
   return environment?.name.trim() ?? '';
-}
-
-function formatDate(value: string | undefined): string {
-  if (!value) {
-    return '-';
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return date.toLocaleString();
 }

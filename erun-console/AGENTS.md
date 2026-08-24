@@ -31,6 +31,12 @@ When you implement it, replace the placeholder with the real flow and add the ve
 - `src/App.tsx` — wires the token source → `fetchConfig` → `ConfigView`, with loading / signed-out (401) / error states, and renders `ProvisionPanel` below the read view when a token is present.
 - `src/test/setup.ts` — Testing Library jest-dom matchers for vitest.
 
+## Permission degradation
+
+- **Degrade by permission, and never by role name.** `GET /v1/whoami` reports the caller's effective permission set (`capabilities`: canonical `{method, path}` pairs, specced in `erun-docs/docs/agent-reference/api-protocol.md#capability-set`). That set is the only input a surface may gate on: a role's name says nothing about what a tenant granted it, so a control shown because a role is literally called `WriteAll` is wrong for every custom role a tenant defines.
+- The rules are the same ones `erun-ui/AGENTS.md` states for the desktop, because a permission-shaped empty state should read identically in both clients: a list the caller may not read is not an empty list, a read they may not make is not attempted, a control they may not use does not render (with the missing access still named somewhere visible), partial access degrades partially rather than blanking the whole view, and "nothing exists yet" / "nothing matches the filter" / "you may not see this" stay three distinguishable states.
+- Express "may I?" through the shared capability shape rather than a console-local predicate. Until the shared frontend kit lands (#1211) the console has no capability-gated surface yet; the first one to need it adds the shape to the shared kit, not to a component.
+
 ## Toolchain
 
 - Vite + React 19 + strict TypeScript, **Yarn** (`yarn@1.22.22`), matching `erun-ui/frontend`'s style. Do not introduce `npm`/`pnpm` lockfiles.

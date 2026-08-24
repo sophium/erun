@@ -37,9 +37,10 @@ var (
 
 // PlatformClient talks to one erun-backend-api instance.
 type PlatformClient struct {
-	baseURL string
-	mint    PlatformTokenMinter
-	http    *http.Client
+	baseURL      string
+	mint         PlatformTokenMinter
+	usernameHint string
+	http         *http.Client
 }
 
 // NewPlatformClient builds a client against baseURL (an erun-backend-api base,
@@ -55,6 +56,16 @@ func NewPlatformClient(baseURL string, mint PlatformTokenMinter) *PlatformClient
 	}
 }
 
+// WithUsernameHint returns a copy of c that sends username as the
+// X-ERun-Username hint. erun-backend-api names a user it enrols (or renames)
+// from that header, which is how a caller whose token carries no username
+// claim — an AWS STS bearer, for one — still gets a readable identity.
+func (c *PlatformClient) WithUsernameHint(username string) *PlatformClient {
+	hinted := *c
+	hinted.usernameHint = strings.TrimSpace(username)
+	return &hinted
+}
+
 // PlatformInfo mirrors GET /v1/platform's response. Duplicated here (rather
 // than shared with erun-backend-api/internal/routes.PlatformInfo) because that
 // package is internal and erun-backend-api depends on erun-common, not the
@@ -68,14 +79,19 @@ type PlatformInfo struct {
 	Brand           string `json:"brand"`
 }
 
-// PlatformWhoami mirrors GET /v1/whoami's response.
+// PlatformWhoami mirrors GET /v1/whoami's response. Capabilities is what a
+// client gates its surfaces on; Roles is descriptive only.
 type PlatformWhoami struct {
 	TenantID string   `json:"tenantId"`
 	UserID   string   `json:"userId"`
 	Username string   `json:"username,omitempty"`
 	Roles    []string `json:"roles,omitempty"`
-	Issuer   string   `json:"issuer"`
-	Subject  string   `json:"subject"`
+	// Capabilities is nil when the platform did not answer with one, and
+	// non-nil but empty when the caller may do nothing. Do not conflate them —
+	// see PlatformCapabilities.Known.
+	Capabilities PlatformCapabilities `json:"capabilities"`
+	Issuer       string               `json:"issuer"`
+	Subject      string               `json:"subject"`
 }
 
 // PlatformTenant mirrors model.Tenant's JSON shape.
@@ -427,6 +443,9 @@ func (c *PlatformClient) buildRequest(ctx context.Context, method string, path s
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Accept", "application/json")
+	if c.usernameHint != "" {
+		req.Header.Set("X-ERun-Username", c.usernameHint)
+	}
 	if !authenticate {
 		return req, nil
 	}

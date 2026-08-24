@@ -140,9 +140,13 @@ func (c *PlatformClient) UpdateReviewStatus(ctx context.Context, reviewID string
 }
 
 // ListMergeQueue lists the reviews queued (or already READY) to merge into
-// targetBranch, in queue order.
+// targetBranch, in queue order. An empty targetBranch lists every queued
+// review, across target branches.
 func (c *PlatformClient) ListMergeQueue(ctx context.Context, targetBranch string) ([]PlatformReview, error) {
-	path := "/v1/reviews/merge-queue?targetBranch=" + url.QueryEscape(targetBranch)
+	path := "/v1/reviews/merge-queue"
+	if strings.TrimSpace(targetBranch) != "" {
+		path += "?targetBranch=" + url.QueryEscape(targetBranch)
+	}
 	var reviews []PlatformReview
 	err := c.do(ctx, http.MethodGet, path, nil, true, &reviews)
 	return reviews, err

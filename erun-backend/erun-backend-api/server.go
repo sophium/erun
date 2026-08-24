@@ -30,8 +30,14 @@ type HandlerOptions struct {
 	IdentityCache    *IdentityResolutionCache
 	AuditLogger      AuditLogger
 	Authorizer       Authorizer
-	DB               *sql.DB
-	DBDialect        repository.Dialect
+	// Capabilities answers GET /v1/whoami's capability set. Unset defaults to
+	// the configured Authorizer when it can resolve one — the database-backed
+	// authorizer does — so the capability answer and enforcement come from one
+	// place. An Authorizer that cannot leaves whoami without a capability set
+	// rather than claiming an empty one.
+	Capabilities routes.WhoamiCapabilityResolver
+	DB           *sql.DB
+	DBDialect    repository.Dialect
 	// With both set (and DB), context creation runs the real provisioning
 	// bootstrap; without them it only registers the context row.
 	DBOSContext dbos.DBOSContext
@@ -82,7 +88,8 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 	if options.DB != nil {
 		txManager = repository.NewTxManager(options.DB, options.DBDialect)
 	}
-	auth, err := newAuthMiddlewareFor(options, txManager)
+	authorizer := resolveAuthorizer(options)
+	auth, err := newAuthMiddlewareFor(options, txManager, authorizer)
 	if err != nil {
 		return nil, err
 	}
@@ -99,14 +106,51 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 	if options.DNS01Broker != nil {
 		options.DNS01Broker.Register(mux)
 	}
-	register := protectedRouteRegistrar(mux, auth)
+	registerProtectedRoutes(mux, auth, options, txManager, authorizer)
+	return mux, nil
+}
+
+// registerProtectedRoutes registers every authenticated route and returns the
+// catalog of their canonical (method, path) pairs — the candidate set the
+// capability answer is resolved over.
+func registerProtectedRoutes(mux *http.ServeMux, auth *AuthMiddleware, options HandlerOptions, txManager *repository.TxManager, authorizer Authorizer) *routeCatalog {
+	catalog := &routeCatalog{}
+	register := protectedRouteRegistrar(mux, auth, catalog)
 	var users routes.WhoamiUserRepository
 	if txManager != nil {
 		users = repository.NewUserRepository(txManager)
 		registerDatabaseRoutes(register, options, txManager)
 	}
-	routes.RegisterWhoamiRoute(register, users)
-	return mux, nil
+	// Whoami registers last, and reads the catalog per request, so its own route
+	// and every route above it are in the capability answer.
+	routes.RegisterWhoamiRoute(register, users, resolveCapabilities(options, authorizer), catalog.sorted)
+	return catalog
+}
+
+// resolveAuthorizer reports the endpoint authorizer, defaulting to the
+// database-backed one.
+func resolveAuthorizer(options HandlerOptions) Authorizer {
+	if options.Authorizer != nil {
+		return options.Authorizer
+	}
+	if options.DB == nil {
+		return nil
+	}
+	return repository.NewPermissionAuthorizerForDialect(options.DB, options.DBDialect)
+}
+
+// resolveCapabilities reports what answers whoami's capability set. It prefers
+// the authorizer that enforces access, because a second implementation would
+// be a second place for the answer to be wrong.
+func resolveCapabilities(options HandlerOptions, authorizer Authorizer) routes.WhoamiCapabilityResolver {
+	if options.Capabilities != nil {
+		return options.Capabilities
+	}
+	resolver, ok := authorizer.(routes.WhoamiCapabilityResolver)
+	if !ok {
+		return nil
+	}
+	return resolver
 }
 
 // identityResolvers is the auth resolver set. Whichever ones the caller did not
@@ -156,15 +200,11 @@ func (r *identityResolvers) defaultTo(identities *repository.IdentityRepository)
 
 // newAuthMiddlewareFor assembles the authentication middleware, defaulting every
 // database-backed dependency the caller did not inject.
-func newAuthMiddlewareFor(options HandlerOptions, txManager *repository.TxManager) (*AuthMiddleware, error) {
+func newAuthMiddlewareFor(options HandlerOptions, txManager *repository.TxManager, authorizer Authorizer) (*AuthMiddleware, error) {
 	resolvers := resolveIdentityResolvers(options)
 	audit := options.AuditLogger
 	if audit == nil && txManager != nil {
 		audit = repository.NewAuditEventRepository(txManager)
-	}
-	authorizer := options.Authorizer
-	if authorizer == nil && options.DB != nil {
-		authorizer = repository.NewPermissionAuthorizerForDialect(options.DB, options.DBDialect)
 	}
 	return NewAuthMiddleware(AuthMiddlewareOptions{
 		TokenVerifier:    options.TokenVerifier,
@@ -421,8 +461,9 @@ func registerProtectedRoute(mux *http.ServeMux, auth *AuthMiddleware, method str
 	mux.Handle(method+" "+apiPath, withAPIPath(apiPath, auth.Wrap(handler)))
 }
 
-func protectedRouteRegistrar(mux *http.ServeMux, auth *AuthMiddleware) routes.ProtectedRouteRegistrar {
+func protectedRouteRegistrar(mux *http.ServeMux, auth *AuthMiddleware, catalog *routeCatalog) routes.ProtectedRouteRegistrar {
 	return func(method string, apiPath string, handler http.Handler) {
+		catalog.add(method, apiPath)
 		registerProtectedRoute(mux, auth, method, apiPath, handler)
 	}
 }
