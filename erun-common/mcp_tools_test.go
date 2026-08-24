@@ -24,10 +24,11 @@ func TestToolNameEqualsItsCLIPath(t *testing.T) {
 }
 
 // TestMCPOnlyToolsAreTheKnownSet pins the tools with no erun command behind
-// them. #1186 assumed there were none beyond the five renames; there are ten,
-// and they are wire-level primitives the CLI deliberately expresses differently
-// for a human. Pinning the set makes adding an eleventh a decision rather than
-// an accident.
+// them. #1186 assumed there were none beyond the five renames; there are
+// eleven now (ten wire-level primitives the CLI deliberately expresses
+// differently for a human, plus exec_agent, whose capability the CLI already
+// covers via `erun exec job start --agent`). Pinning the set makes adding a
+// twelfth a decision rather than an accident.
 func TestMCPOnlyToolsAreTheKnownSet(t *testing.T) {
 	want := map[string]struct{}{
 		"activity_lease_list":          {},
@@ -40,6 +41,7 @@ func TestMCPOnlyToolsAreTheKnownSet(t *testing.T) {
 		"cloud_inject_aws_credentials": {},
 		"cloud_clear_aws_credentials":  {},
 		"terraform":                    {},
+		"exec_agent":                   {},
 	}
 	for _, name := range MCPToolNames() {
 		_, expected := want[name]

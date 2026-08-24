@@ -25,7 +25,7 @@ type MCPToolDescriptor struct {
 	// activity_lease_* and idle_stop_* carry two-segment prefixes.
 	Family string
 	// CLIPath is the erun command behind the tool, as path segments. Nil when
-	// there is no command: ten tools are wire-only. An absent cliPath is more
+	// there is no command: eleven tools are wire-only. An absent cliPath is more
 	// informative than a fabricated one -- a client learns the tool is wire-only
 	// rather than being handed a command that does not exist.
 	CLIPath []string
@@ -56,12 +56,19 @@ type MCPToolDescriptor struct {
 // letting it ship on the spec defaults -- which is exactly how the surface
 // reached the state #1186 describes.
 var mcpToolDescriptors = map[string]MCPToolDescriptor{
-	"exec_diff":                    {Family: "exec", CLIPath: []string{"exec", "diff"}, Title: "Show repository diff", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
-	"exec_raw":                     {Family: "exec", CLIPath: []string{"exec", "raw"}, Title: "Run a raw command in the environment", ReadOnly: false, Destructive: true, Idempotent: false, OpenWorld: true},
-	"exec_write":                   {Family: "exec", CLIPath: []string{"exec", "write"}, Title: "Write a file in the working tree", ReadOnly: false, Destructive: true, Idempotent: false, OpenWorld: false},
-	"exec_commit":                  {Family: "exec", CLIPath: []string{"exec", "commit"}, Title: "Commit working-tree changes", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: false},
-	"exec_push":                    {Family: "exec", CLIPath: []string{"exec", "push"}, Title: "Push a working-tree branch to a remote", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
-	"exec_agent":                   {Family: "exec", CLIPath: []string{"exec", "agent"}, Title: "Run an AI tool as a detached job", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
+	"exec_diff":   {Family: "exec", CLIPath: []string{"exec", "diff"}, Title: "Show repository diff", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
+	"exec_raw":    {Family: "exec", CLIPath: []string{"exec", "raw"}, Title: "Run a raw command in the environment", ReadOnly: false, Destructive: true, Idempotent: false, OpenWorld: true},
+	"exec_write":  {Family: "exec", CLIPath: []string{"exec", "write"}, Title: "Write a file in the working tree", ReadOnly: false, Destructive: true, Idempotent: false, OpenWorld: false},
+	"exec_commit": {Family: "exec", CLIPath: []string{"exec", "commit"}, Title: "Commit working-tree changes", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: false},
+	"exec_push":   {Family: "exec", CLIPath: []string{"exec", "push"}, Title: "Push a working-tree branch to a remote", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
+	// exec_agent has no CLI path: the CLI already offers this exact
+	// capability as `erun exec job start --agent`, one command covering both
+	// modes via a flag. MCP cannot do the same because each tool has one
+	// fixed schema, which is the whole reason exec_agent exists as a
+	// separate tool from exec_raw in the first place -- adding a CLI command
+	// that only re-exposes an existing flag would be a wrapper, not new
+	// capability.
+	"exec_agent":                   {Family: "exec", CLIPath: nil, Title: "Run an AI tool as a detached job", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
 	"exec_job_attach":              {Family: "exec", CLIPath: []string{"exec", "job", "attach"}, Title: "Attach to a running job", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: false},
 	"exec_job_status":              {Family: "exec", CLIPath: []string{"exec", "job", "status"}, Title: "Report a job's state and outcome", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
 	"exec_job_await":               {Family: "exec", CLIPath: []string{"exec", "job", "await"}, Title: "Wait for a job to reach a terminal state", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
@@ -141,10 +148,12 @@ func MCPToolDescriptorFor(tool string) (MCPToolDescriptor, bool) {
 	return descriptor, ok
 }
 
-// MCPToolIsMCPOnly reports whether a tool has no erun command behind it. Ten
-// do: the activity_lease_*, idle_stop_* and three cloud tools are wire-level
-// primitives the CLI expresses differently for a human, and `terraform` is a
-// command group rather than a leaf. Surfaced as _meta.mcpOnly.
+// MCPToolIsMCPOnly reports whether a tool has no erun command behind it.
+// Eleven do: the activity_lease_*, idle_stop_* and three cloud tools are
+// wire-level primitives the CLI expresses differently for a human,
+// `terraform` is a command group rather than a leaf, and `exec_agent`'s
+// capability is already covered by an existing CLI flag (`erun exec job
+// start --agent`) rather than a dedicated command. Surfaced as _meta.mcpOnly.
 func MCPToolIsMCPOnly(tool string) bool {
 	descriptor, ok := MCPToolDescriptorFor(tool)
 	return ok && descriptor.CLIPath == nil
